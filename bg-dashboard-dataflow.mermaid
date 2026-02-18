@@ -1,0 +1,40 @@
+```mermaid
+sequenceDiagram
+    participant User as 팀원
+    participant App as Electron 앱
+    participant API as Google Sheets API
+    participant Sheet as Google Sheets
+
+    Note over User,Sheet: 앱 시작 시 전체 데이터 로드
+    App->>API: 시트 목록 조회 (EP01_A, EP01_B...)
+    API->>Sheet: spreadsheets.get()
+    Sheet-->>API: 시트 이름 목록
+    API-->>App: 에피소드/파트 자동 감지
+
+    loop 각 EP 시트
+        App->>API: values.get(EP01_A!A:K)
+        API->>Sheet: 데이터 읽기
+        Sheet-->>API: 씬 데이터 배열
+        API-->>App: Scene[] 반환
+    end
+
+    App->>App: 통계 계산 (진행률, 담당자별 등)
+    App->>User: 대시보드 표시
+
+    Note over User,Sheet: 체크박스 토글 시 (양방향 동기화)
+    User->>App: "a001 검수" 체크 ✓
+    App->>App: 낙관적 업데이트 (UI 즉시 반영)
+    App->>API: values.update(EP01_A!I2, TRUE)
+    API->>Sheet: 셀 업데이트
+    Sheet-->>API: OK
+    API-->>App: 성공 확인
+
+    Note over User,Sheet: 30초 간격 폴링 (다른 사용자 변경 감지)
+    loop 매 30초
+        App->>API: values.get(변경된 시트)
+        API->>Sheet: 데이터 읽기
+        Sheet-->>API: 최신 데이터
+        API-->>App: 변경사항 반영
+        App->>User: UI 업데이트
+    end
+```

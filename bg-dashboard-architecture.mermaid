@@ -1,0 +1,47 @@
+```mermaid
+graph TB
+    subgraph "사용자"
+        A[팀원 - 체크하는 사람]
+        B[AD - 현황 보는 사람]
+    end
+
+    subgraph "Electron 앱"
+        C[대시보드 UI]
+        D[씬 목록 + 체크박스]
+        E[위젯 커스터마이징]
+        F[이미지 뷰어]
+    end
+
+    subgraph "Google Sheets"
+        G[EP01_A]
+        H[EP01_B]
+        I[EP01_C]
+        J[EP02_A]
+        K[...]
+        L[담당자 시트]
+    end
+
+    subgraph "Slack 캔버스 - 열람 전용"
+        M[고해상도 이미지]
+        N[상세 메모]
+    end
+
+    A -->|체크| D
+    B -->|확인| C
+    D <-->|Sheets API 읽기/쓰기| G
+    D <-->|Sheets API 읽기/쓰기| H
+    D <-->|Sheets API 읽기/쓰기| I
+    D <-->|Sheets API 읽기/쓰기| J
+    C -->|통계 집계| G
+    C -->|통계 집계| H
+    E -->|레이아웃 저장| C
+    F -->|이미지 URL 참조| G
+    M -.->|링크로 연결| D
+
+    style C fill:#6C5CE7,color:#fff
+    style D fill:#00B894,color:#fff
+    style G fill:#74B9FF,color:#000
+    style H fill:#A29BFE,color:#000
+    style I fill:#FDCB6E,color:#000
+    style J fill:#00B894,color:#fff
+```
