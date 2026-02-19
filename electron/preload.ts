@@ -1,6 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
-// 렌더러에 노출할 API
 contextBridge.exposeInMainWorld('electronAPI', {
   // 앱 모드
   getMode: () => ipcRenderer.invoke('settings:get-mode'),
@@ -12,7 +11,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('settings:write', fileName, data),
 
   // 테스트 모드 로컬 시트 데이터
+  testGetSheetPath: () => ipcRenderer.invoke('test:get-sheet-path'),
   testReadSheet: (filePath: string) => ipcRenderer.invoke('test:read-sheet', filePath),
   testWriteSheet: (filePath: string, data: unknown) =>
     ipcRenderer.invoke('test:write-sheet', filePath, data),
+
+  // 실시간 동기화: 다른 사용자가 시트 파일을 변경했을 때 알림
+  onSheetChanged: (callback: () => void) => {
+    ipcRenderer.on('sheet:changed', callback);
+    // cleanup 함수 반환
+    return () => ipcRenderer.removeListener('sheet:changed', callback);
+  },
 });

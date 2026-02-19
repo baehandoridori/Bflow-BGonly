@@ -11,35 +11,11 @@ export default function App() {
   const { currentView, setTestMode, setWidgetLayout } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError } = useDataStore();
 
-  // 초기 로드
-  useEffect(() => {
-    async function init() {
-      try {
-        // 모드 확인
-        const { isTestMode } = await window.electronAPI.getMode();
-        setTestMode(isTestMode);
-
-        // 개인 레이아웃 로드
-        const savedLayout = await loadLayout();
-        if (savedLayout) {
-          setWidgetLayout(savedLayout);
-        }
-
-        // 데이터 로드
-        await loadData();
-      } catch (err) {
-        console.error('[초기화 실패]', err);
-      }
-    }
-    init();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // 데이터 로드 함수
   const loadData = useCallback(async () => {
     setSyncing(true);
     setSyncError(null);
     try {
-      // 현재는 테스트 모드만 지원
       const episodes = await readTestSheet();
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
@@ -51,10 +27,33 @@ export default function App() {
     }
   }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError]);
 
-  // 주기적 폴링 (30초)
+  // 초기 로드
   useEffect(() => {
-    const interval = setInterval(loadData, 30_000);
-    return () => clearInterval(interval);
+    async function init() {
+      try {
+        const { isTestMode } = await window.electronAPI.getMode();
+        setTestMode(isTestMode);
+
+        const savedLayout = await loadLayout();
+        if (savedLayout) {
+          setWidgetLayout(savedLayout);
+        }
+
+        await loadData();
+      } catch (err) {
+        console.error('[초기화 실패]', err);
+      }
+    }
+    init();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 실시간 동기화: 다른 사용자가 시트를 변경하면 즉시 리로드
+  useEffect(() => {
+    const cleanup = window.electronAPI.onSheetChanged(() => {
+      console.log('[동기화] 다른 사용자의 변경 감지 → 데이터 리로드');
+      loadData();
+    });
+    return cleanup;
   }, [loadData]);
 
   // 뷰 렌더링

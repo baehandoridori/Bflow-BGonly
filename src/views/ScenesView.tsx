@@ -3,6 +3,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
 import type { Scene, Stage } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
+import { toggleTestSceneStage } from '@/services/testSheetService';
 import { cn } from '@/utils/cn';
 
 interface SceneCardProps {
@@ -115,10 +116,14 @@ export function ScenesView() {
   );
   const overallPct = totalChecks > 0 ? Math.round((doneChecks / totalChecks) * 100) : 0;
 
-  const handleToggle = (sceneId: string, stage: Stage) => {
+  const handleToggle = async (sceneId: string, stage: Stage) => {
     if (!currentEp || !currentPart) return;
+    // 1. 낙관적 업데이트 (UI 즉시 반영)
     toggleSceneStage(currentEp.episodeNumber, currentPart.partId, sceneId, stage);
-    // TODO: 테스트 모드에서 파일에도 저장
+    // 2. 파일에 저장 → fs.watch가 다른 사용자에게 알림
+    await toggleTestSceneStage(
+      episodes, currentEp.episodeNumber, currentPart.partId, sceneId, stage
+    );
   };
 
   return (

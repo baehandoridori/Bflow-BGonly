@@ -7,14 +7,21 @@
 
 import type { Episode, Scene, Part } from '@/types';
 
-// 앱 실행 경로 기준 test-data 폴더
-const TEST_DATA_DIR = 'test-data';
-const TEST_SHEET_FILE = `${TEST_DATA_DIR}/sheets.json`;
+// 시트 파일 경로 — 메인 프로세스에서 resolve
+let sheetFilePath: string | null = null;
+
+async function getSheetPath(): Promise<string> {
+  if (!sheetFilePath) {
+    sheetFilePath = await window.electronAPI.testGetSheetPath();
+  }
+  return sheetFilePath;
+}
 
 /** 테스트 시트에서 전체 데이터 읽기 */
 export async function readTestSheet(): Promise<Episode[]> {
+  const filePath = await getSheetPath();
   try {
-    const data = await window.electronAPI.testReadSheet(TEST_SHEET_FILE);
+    const data = await window.electronAPI.testReadSheet(filePath);
     if (data && Array.isArray(data)) {
       return data as Episode[];
     }
@@ -29,8 +36,9 @@ export async function readTestSheet(): Promise<Episode[]> {
 
 /** 테스트 시트에 전체 데이터 쓰기 */
 export async function writeTestSheet(episodes: Episode[]): Promise<void> {
+  const filePath = await getSheetPath();
   try {
-    await window.electronAPI.testWriteSheet(TEST_SHEET_FILE, episodes);
+    await window.electronAPI.testWriteSheet(filePath, episodes);
   } catch (err) {
     console.error('[테스트] 시트 쓰기 실패:', err);
   }

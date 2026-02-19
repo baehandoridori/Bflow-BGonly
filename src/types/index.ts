@@ -111,12 +111,14 @@ export interface DashboardStats {
 // ─── Electron API (preload에서 노출) ─────────
 
 export interface ElectronAPI {
-  getMode: () => Promise<{ isTestMode: boolean }>;
+  getMode: () => Promise<{ isTestMode: boolean; appRoot: string }>;
   getDataPath: () => Promise<string>;
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
+  testGetSheetPath: () => Promise<string>;
   testReadSheet: (filePath: string) => Promise<unknown | null>;
   testWriteSheet: (filePath: string, data: unknown) => Promise<boolean>;
+  onSheetChanged: (callback: () => void) => () => void;
 }
 
 declare global {
