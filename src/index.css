@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 스크롤바 스타일 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0F1117;
+}
+::-webkit-scrollbar-thumb {
+  background: #2D3041;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3D4051;
+}
+
+/* react-grid-layout 커스텀 */
+.react-grid-item.react-grid-placeholder {
+  background: #6C5CE7 !important;
+  opacity: 0.15;
+  border-radius: 12px;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+  border-color: #6C5CE7 !important;
+}
