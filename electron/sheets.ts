@@ -1,5 +1,8 @@
 /**
- * Google Sheets API 래퍼 — Electron 메인 프로세스에서 실행
+ * Google Sheets 프록시 — Apps Script 웹 앱을 통한 연동
+ *
+ * 서비스 계정 키 없이 Apps Script 웹 앱 URL만으로 시트 데이터를 읽고 쓴다.
+ * Google Apps Script가 스프레드시트에 바인딩되어 있으므로 spreadsheetId 불필요.
  *
  * 시트 구조:
  *   A: No | B: 씬번호 | C: 메모 | D: 스토리보드URL | E: 가이드URL
@@ -8,136 +11,70 @@
  * 시트 탭 이름: EP01_A, EP01_B, EP02_A, ... (자동 감지)
  */
 
-import { google, type sheets_v4 } from 'googleapis';
-import fs from 'fs';
+let webAppUrl: string | null = null;
 
-let sheetsClient: sheets_v4.Sheets | null = null;
+// ─── Google Apps Script fetch 헬퍼 ──────────────────────────
+// GAS 웹 앱은 302 리다이렉트를 사용하는데, Node.js fetch는 302에서
+// POST→GET으로 변환하여 body를 잃는다. 수동으로 리다이렉트를 따라가서
+// POST 메서드와 body를 유지한다.
 
-// ─── 인증 ─────────────────────────────────────────────────────
+async function gasFetch(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  let targetUrl = url;
 
-export async function initSheets(credentialsPath: string): Promise<boolean> {
-  try {
-    const content = fs.readFileSync(credentialsPath, { encoding: 'utf-8' });
-    const credentials = JSON.parse(content);
-
-    const auth = new google.auth.GoogleAuth({
-      credentials,
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  for (let i = 0; i < 5; i++) {
+    const res = await fetch(targetUrl, {
+      ...options,
+      redirect: 'manual',
     });
 
-    sheetsClient = google.sheets({ version: 'v4', auth });
-    console.log('[Sheets] 인증 성공');
+    // 리다이렉트 → 같은 메서드로 다시 요청
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const location = res.headers.get('location');
+      if (!location) throw new Error('리다이렉트 location 헤더 없음');
+      targetUrl = location;
+      continue;
+    }
+
+    return res;
+  }
+
+  throw new Error('리다이렉트 횟수 초과');
+}
+
+// ─── 연결 ─────────────────────────────────────────────────────
+
+export async function initSheets(url: string): Promise<boolean> {
+  try {
+    const res = await gasFetch(`${url}?action=ping`);
+    if (!res.ok) {
+      console.error('[Sheets] 핑 실패:', res.status);
+      return false;
+    }
+
+    const json = await res.json();
+    if (!json.ok) {
+      console.error('[Sheets] 핑 응답 오류:', json.error);
+      return false;
+    }
+
+    webAppUrl = url;
+    console.log('[Sheets] 연결 성공');
     return true;
   } catch (err) {
-    console.error('[Sheets] 인증 실패:', err);
-    sheetsClient = null;
+    console.error('[Sheets] 연결 실패:', err);
+    webAppUrl = null;
     return false;
   }
 }
 
 export function isConnected(): boolean {
-  return sheetsClient !== null;
+  return webAppUrl !== null;
 }
 
-// ─── 시트 탭 목록 (EP 자동 감지) ──────────────────────────────
-
-interface SheetTab {
-  title: string;
-  episodeNumber: number;
-  partId: string;
-}
-
-const EP_PATTERN = /^EP(\d+)_([A-Z])$/;
-
-export async function getEpisodeTabs(spreadsheetId: string): Promise<SheetTab[]> {
-  if (!sheetsClient) throw new Error('Sheets 미연결');
-
-  const res = await sheetsClient.spreadsheets.get({
-    spreadsheetId,
-    fields: 'sheets.properties.title',
-  });
-
-  const tabs: SheetTab[] = [];
-  for (const sheet of res.data.sheets ?? []) {
-    const title = sheet.properties?.title ?? '';
-    const match = title.match(EP_PATTERN);
-    if (match) {
-      tabs.push({
-        title,
-        episodeNumber: parseInt(match[1], 10),
-        partId: match[2],
-      });
-    }
-  }
-
-  return tabs.sort((a, b) =>
-    a.episodeNumber !== b.episodeNumber
-      ? a.episodeNumber - b.episodeNumber
-      : a.partId.localeCompare(b.partId)
-  );
-}
-
-// ─── 시트 데이터 읽기 ─────────────────────────────────────────
-
-interface RawScene {
-  no: number;
-  sceneId: string;
-  memo: string;
-  storyboardUrl: string;
-  guideUrl: string;
-  assignee: string;
-  lo: boolean;
-  done: boolean;
-  review: boolean;
-  png: boolean;
-}
-
-function parseBoolean(val: unknown): boolean {
-  if (typeof val === 'boolean') return val;
-  if (typeof val === 'string') {
-    const v = val.trim().toUpperCase();
-    return v === 'TRUE' || v === '1' || v === 'O' || v === '○';
-  }
-  return false;
-}
-
-export async function readSheetData(
-  spreadsheetId: string,
-  sheetName: string
-): Promise<RawScene[]> {
-  if (!sheetsClient) throw new Error('Sheets 미연결');
-
-  const res = await sheetsClient.spreadsheets.values.get({
-    spreadsheetId,
-    range: `${sheetName}!A:J`,
-  });
-
-  const rows = res.data.values ?? [];
-  const scenes: RawScene[] = [];
-
-  // 첫 번째 행은 헤더 → 스킵
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row || !row[0]) continue; // 빈 행 스킵
-
-    scenes.push({
-      no: parseInt(row[0], 10) || i,
-      sceneId: String(row[1] ?? ''),
-      memo: String(row[2] ?? ''),
-      storyboardUrl: String(row[3] ?? ''),
-      guideUrl: String(row[4] ?? ''),
-      assignee: String(row[5] ?? ''),
-      lo: parseBoolean(row[6]),
-      done: parseBoolean(row[7]),
-      review: parseBoolean(row[8]),
-      png: parseBoolean(row[9]),
-    });
-  }
-
-  return scenes;
-}
-
-// ─── 전체 에피소드 데이터 읽기 ────────────────────────────────
+// ─── 데이터 타입 ──────────────────────────────────────────────
 
 export interface EpisodeData {
   episodeNumber: number;
@@ -145,66 +82,57 @@ export interface EpisodeData {
   parts: {
     partId: string;
     sheetName: string;
-    scenes: RawScene[];
+    scenes: {
+      no: number;
+      sceneId: string;
+      memo: string;
+      storyboardUrl: string;
+      guideUrl: string;
+      assignee: string;
+      lo: boolean;
+      done: boolean;
+      review: boolean;
+      png: boolean;
+    }[];
   }[];
 }
 
-export async function readAllEpisodes(spreadsheetId: string): Promise<EpisodeData[]> {
-  const tabs = await getEpisodeTabs(spreadsheetId);
+// ─── 전체 에피소드 데이터 읽기 ────────────────────────────────
 
-  // 에피소드별로 그룹핑
-  const epMap = new Map<number, EpisodeData>();
+export async function readAllEpisodes(): Promise<EpisodeData[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
 
-  for (const tab of tabs) {
-    if (!epMap.has(tab.episodeNumber)) {
-      epMap.set(tab.episodeNumber, {
-        episodeNumber: tab.episodeNumber,
-        title: `EP.${String(tab.episodeNumber).padStart(2, '0')}`,
-        parts: [],
-      });
-    }
+  const res = await gasFetch(`${webAppUrl}?action=readAll`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const scenes = await readSheetData(spreadsheetId, tab.title);
-    epMap.get(tab.episodeNumber)!.parts.push({
-      partId: tab.partId,
-      sheetName: tab.title,
-      scenes,
-    });
-  }
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error ?? '시트 읽기 실패');
 
-  return Array.from(epMap.values()).sort((a, b) => a.episodeNumber - b.episodeNumber);
+  return json.data ?? [];
 }
 
 // ─── 셀 업데이트 (체크박스 토글) ──────────────────────────────
 
-const STAGE_COLUMNS: Record<string, string> = {
-  lo: 'G',
-  done: 'H',
-  review: 'I',
-  png: 'J',
-};
-
 export async function updateSceneStage(
-  spreadsheetId: string,
   sheetName: string,
-  rowIndex: number, // 0-based (씬 배열 인덱스)
+  rowIndex: number,
   stage: string,
   value: boolean
 ): Promise<void> {
-  if (!sheetsClient) throw new Error('Sheets 미연결');
+  if (!webAppUrl) throw new Error('Sheets 미연결');
 
-  const column = STAGE_COLUMNS[stage];
-  if (!column) throw new Error(`잘못된 단계: ${stage}`);
-
-  // +2: 헤더(1행) + 0-based → 1-based
-  const cellRange = `${sheetName}!${column}${rowIndex + 2}`;
-
-  await sheetsClient.spreadsheets.values.update({
-    spreadsheetId,
-    range: cellRange,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: {
-      values: [[value]],
-    },
+  // GET으로 업데이트 (GAS 리다이렉트 이슈 회피, 내부용이라 보안 무관)
+  const params = new URLSearchParams({
+    action: 'updateCell',
+    sheetName,
+    rowIndex: String(rowIndex),
+    stage,
+    value: String(value),
   });
+
+  const res = await gasFetch(`${webAppUrl}?${params}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error ?? '셀 업데이트 실패');
 }

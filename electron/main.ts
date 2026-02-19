@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import {
@@ -176,17 +176,12 @@ ipcMain.handle('test:write-sheet', async (_event, filePath: string, data: unknow
   return true;
 });
 
-// ─── IPC 핸들러: Google Sheets 연동 ──────────────────────────
+// ─── IPC 핸들러: Google Sheets 연동 (Apps Script 웹 앱) ─────
 
-ipcMain.handle('sheets:connect', async (_event, credentialsPath: string) => {
+ipcMain.handle('sheets:connect', async (_event, webAppUrl: string) => {
   try {
-    // 상대 경로면 앱 루트 기준으로 resolve
-    const absPath = path.isAbsolute(credentialsPath)
-      ? credentialsPath
-      : path.join(getAppRoot(), credentialsPath);
-
-    const ok = await initSheets(absPath);
-    return { ok, error: ok ? null : '인증 실패' };
+    const ok = await initSheets(webAppUrl);
+    return { ok, error: ok ? null : '연결 실패 — URL을 확인해주세요' };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg };
@@ -197,9 +192,9 @@ ipcMain.handle('sheets:is-connected', () => {
   return isConnected();
 });
 
-ipcMain.handle('sheets:read-all', async (_event, spreadsheetId: string) => {
+ipcMain.handle('sheets:read-all', async () => {
   try {
-    const episodes = await readAllEpisodes(spreadsheetId);
+    const episodes = await readAllEpisodes();
     return { ok: true, data: episodes };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -211,14 +206,13 @@ ipcMain.handle(
   'sheets:update-cell',
   async (
     _event,
-    spreadsheetId: string,
     sheetName: string,
     rowIndex: number,
     stage: string,
     value: boolean
   ) => {
     try {
-      await updateSceneStage(spreadsheetId, sheetName, rowIndex, stage, value);
+      await updateSceneStage(sheetName, rowIndex, stage, value);
       return { ok: true };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -226,16 +220,6 @@ ipcMain.handle(
     }
   }
 );
-
-ipcMain.handle('sheets:pick-credentials', async () => {
-  const result = await dialog.showOpenDialog({
-    title: '서비스 계정 키 파일 선택',
-    filters: [{ name: 'JSON', extensions: ['json'] }],
-    properties: ['openFile'],
-  });
-  if (result.canceled || result.filePaths.length === 0) return null;
-  return result.filePaths[0];
-});
 
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
 

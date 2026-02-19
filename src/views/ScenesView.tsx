@@ -76,7 +76,7 @@ function SceneCard({ scene, episodeNumber, partId, onToggle }: SceneCardProps) {
 export function ScenesView() {
   const episodes = useDataStore((s) => s.episodes);
   const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
-  const { isTestMode, sheetsConnected, sheetsConfig } = useAppStore();
+  const { isTestMode, sheetsConnected } = useAppStore();
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery } = useAppStore();
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery } = useAppStore();
 
@@ -133,10 +133,9 @@ export function ScenesView() {
 
     // 2. 실제 저장 — 모드에 따라 분기
     try {
-      if (!isTestMode && sheetsConnected && sheetsConfig?.spreadsheetId) {
-        // 라이브 모드: Google Sheets에 셀 업데이트
+      if (!isTestMode && sheetsConnected) {
+        // 라이브 모드: Apps Script 웹 앱을 통해 셀 업데이트
         await updateSheetCell(
-          sheetsConfig.spreadsheetId,
           currentPart.sheetName,
           sceneIndex,
           stage,

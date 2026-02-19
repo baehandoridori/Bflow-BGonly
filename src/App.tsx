@@ -13,15 +13,15 @@ export default function App() {
   const { currentView, isTestMode, setTestMode, setWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError } = useDataStore();
 
-  // 데이터 로드 함수 — 모드에 따라 테스트 시트 또는 Google Sheets 사용
+  // 데이터 로드 함수 — 모드에 따라 테스트 시트 또는 Apps Script 웹 앱 사용
   const loadData = useCallback(async () => {
     setSyncing(true);
     setSyncError(null);
     try {
       let episodes;
-      if (!isTestMode && sheetsConnected && sheetsConfig?.spreadsheetId) {
-        // 라이브 모드: Google Sheets에서 읽기
-        episodes = await readAllFromSheets(sheetsConfig.spreadsheetId);
+      if (!isTestMode && sheetsConnected) {
+        // 라이브 모드: Apps Script 웹 앱에서 읽기
+        episodes = await readAllFromSheets();
       } else {
         // 테스트 모드: 로컬 JSON 파일
         episodes = await readTestSheet();
@@ -34,7 +34,7 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }, [isTestMode, sheetsConnected, sheetsConfig, setEpisodes, setSyncing, setLastSyncTime, setSyncError]);
+  }, [isTestMode, sheetsConnected, setEpisodes, setSyncing, setLastSyncTime, setSyncError]);
 
   // 초기 로드
   useEffect(() => {
@@ -57,9 +57,9 @@ export default function App() {
         // 라이브 모드: 저장된 Sheets 설정이 있으면 자동 연결 시도
         if (!testMode) {
           const config = await loadSheetsConfig();
-          if (config?.credentialsPath && config?.spreadsheetId) {
+          if (config?.webAppUrl) {
             setSheetsConfig(config);
-            const result = await connectSheets(config.credentialsPath);
+            const result = await connectSheets(config.webAppUrl);
             if (result.ok) {
               setSheetsConnected(true);
               console.log('[Sheets] 자동 연결 성공');

@@ -5,14 +5,12 @@ import {
   saveSheetsConfig,
   connectSheets,
   checkConnection,
-  pickCredentialsFile,
 } from '@/services/sheetsService';
 
 export function SettingsView() {
   const { isTestMode, sheetsConnected, sheetsConfig, setSheetsConnected, setSheetsConfig } = useAppStore();
 
-  const [spreadsheetId, setSpreadsheetId] = useState(sheetsConfig?.spreadsheetId ?? '');
-  const [credentialsPath, setCredentialsPath] = useState(sheetsConfig?.credentialsPath ?? '');
+  const [webAppUrl, setWebAppUrl] = useState(sheetsConfig?.webAppUrl ?? '');
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -22,8 +20,7 @@ export function SettingsView() {
     async function load() {
       const config = await loadSheetsConfig();
       if (config) {
-        setSpreadsheetId(config.spreadsheetId);
-        setCredentialsPath(config.credentialsPath);
+        setWebAppUrl(config.webAppUrl);
       }
       // 현재 연결 상태 확인
       const connected = await checkConnection();
@@ -32,25 +29,16 @@ export function SettingsView() {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 인증 파일 선택
-  const handlePickCredentials = async () => {
-    const path = await pickCredentialsFile();
-    if (path) {
-      setCredentialsPath(path);
-      setConnectError(null);
-    }
-  };
-
   // 연결 테스트
   const handleConnect = async () => {
-    if (!credentialsPath) {
-      setConnectError('인증 키 파일을 먼저 선택해주세요.');
+    if (!webAppUrl) {
+      setConnectError('Apps Script 웹 앱 URL을 입력해주세요.');
       return;
     }
     setIsConnecting(true);
     setConnectError(null);
     try {
-      const result = await connectSheets(credentialsPath);
+      const result = await connectSheets(webAppUrl);
       if (result.ok) {
         setSheetsConnected(true);
         setConnectError(null);
@@ -68,7 +56,7 @@ export function SettingsView() {
 
   // 설정 저장
   const handleSave = async () => {
-    const config = { spreadsheetId, credentialsPath };
+    const config = { webAppUrl };
     await saveSheetsConfig(config);
     setSheetsConfig(config);
     setSaveMessage('저장 완료');
@@ -95,7 +83,7 @@ export function SettingsView() {
           <span className="text-xs text-text-secondary">
             {isTestMode
               ? '로컬 JSON 파일을 사용합니다. (start-dev.bat으로 실행)'
-              : 'Google Sheets API와 연동합니다.'}
+              : 'Apps Script 웹 앱을 통해 Google Sheets와 연동합니다.'}
           </span>
         </div>
       </div>
@@ -115,43 +103,21 @@ export function SettingsView() {
           </span>
         </div>
 
-        {/* 스프레드시트 ID */}
+        {/* Apps Script 웹 앱 URL */}
         <div className="mb-4">
           <label className="block text-xs text-text-secondary mb-1.5">
-            스프레드시트 ID
+            Apps Script 웹 앱 URL
           </label>
           <input
             type="text"
-            value={spreadsheetId}
-            onChange={(e) => setSpreadsheetId(e.target.value)}
-            placeholder="예: 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+            value={webAppUrl}
+            onChange={(e) => setWebAppUrl(e.target.value)}
+            placeholder="https://script.google.com/macros/s/.../exec"
             className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/40 focus:outline-none focus:border-accent"
           />
           <p className="text-[11px] text-text-secondary/60 mt-1">
-            Google Sheets URL에서 /d/ 뒤의 문자열
+            스프레드시트의 Apps Script를 배포한 후 받은 URL을 입력하세요
           </p>
-        </div>
-
-        {/* 서비스 계정 키 파일 */}
-        <div className="mb-4">
-          <label className="block text-xs text-text-secondary mb-1.5">
-            서비스 계정 키 파일 (.json)
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={credentialsPath}
-              onChange={(e) => setCredentialsPath(e.target.value)}
-              placeholder="경로를 입력하거나 파일 선택..."
-              className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/40 focus:outline-none focus:border-accent"
-            />
-            <button
-              onClick={handlePickCredentials}
-              className="px-4 py-2 bg-bg-border hover:bg-bg-border/80 rounded-lg text-sm text-text-primary transition-colors whitespace-nowrap"
-            >
-              파일 선택
-            </button>
-          </div>
         </div>
 
         {/* 에러 메시지 */}
@@ -165,14 +131,14 @@ export function SettingsView() {
         <div className="flex gap-2">
           <button
             onClick={handleConnect}
-            disabled={isConnecting || !credentialsPath}
+            disabled={isConnecting || !webAppUrl}
             className="px-4 py-2 bg-accent hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm text-white font-medium transition-colors"
           >
             {isConnecting ? '연결 중...' : '연결 테스트'}
           </button>
           <button
             onClick={handleSave}
-            disabled={!spreadsheetId || !credentialsPath}
+            disabled={!webAppUrl}
             className="px-4 py-2 bg-stage-png hover:bg-stage-png/80 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm text-bg-primary font-medium transition-colors"
           >
             설정 저장
@@ -187,10 +153,12 @@ export function SettingsView() {
       <div className="bg-bg-card border border-bg-border rounded-xl p-5">
         <h3 className="text-sm font-semibold text-text-secondary mb-3">사용 안내</h3>
         <ol className="text-xs text-text-secondary space-y-2 list-decimal list-inside">
-          <li>Google Cloud Console에서 서비스 계정을 생성하고 JSON 키 파일을 다운로드합니다.</li>
-          <li>Google Sheets API를 활성화합니다.</li>
-          <li>대상 스프레드시트에서 서비스 계정 이메일을 편집자로 공유합니다.</li>
-          <li>위에서 스프레드시트 ID와 키 파일 경로를 입력하고 연결 테스트를 클릭합니다.</li>
+          <li>대상 Google 스프레드시트를 엽니다.</li>
+          <li>메뉴 → <strong>확장 프로그램</strong> → <strong>Apps Script</strong>를 클릭합니다.</li>
+          <li>프로젝트 관리자가 제공한 스크립트 코드를 붙여넣고 저장합니다.</li>
+          <li><strong>배포</strong> → <strong>새 배포</strong> → 유형: <strong>웹 앱</strong>을 선택합니다.</li>
+          <li>실행 주체: <strong>본인</strong>, 액세스 권한: <strong>모든 사용자</strong>로 설정합니다.</li>
+          <li>배포 후 나오는 URL을 복사해서 위에 입력하고 연결 테스트를 클릭합니다.</li>
           <li>연결 성공 후 설정을 저장하면 다음 실행부터 자동으로 연결됩니다.</li>
         </ol>
         <div className="mt-3 p-3 bg-bg-primary rounded-lg">

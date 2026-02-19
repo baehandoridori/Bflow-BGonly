@@ -13,9 +13,6 @@ export default defineConfig({
         vite: {
           build: {
             outDir: 'dist-electron',
-            rollupOptions: {
-              external: ['googleapis'],
-            },
           },
         },
       },

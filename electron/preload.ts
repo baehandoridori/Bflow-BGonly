@@ -23,19 +23,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('sheet:changed', callback);
   },
 
-  // Google Sheets 연동
-  sheetsConnect: (credentialsPath: string) =>
-    ipcRenderer.invoke('sheets:connect', credentialsPath),
+  // Google Sheets 연동 (Apps Script 웹 앱)
+  sheetsConnect: (webAppUrl: string) =>
+    ipcRenderer.invoke('sheets:connect', webAppUrl),
   sheetsIsConnected: () => ipcRenderer.invoke('sheets:is-connected'),
-  sheetsReadAll: (spreadsheetId: string) =>
-    ipcRenderer.invoke('sheets:read-all', spreadsheetId),
+  sheetsReadAll: () => ipcRenderer.invoke('sheets:read-all'),
   sheetsUpdateCell: (
-    spreadsheetId: string,
     sheetName: string,
     rowIndex: number,
     stage: string,
     value: boolean
   ) =>
-    ipcRenderer.invoke('sheets:update-cell', spreadsheetId, sheetName, rowIndex, stage, value),
-  sheetsPickCredentials: () => ipcRenderer.invoke('sheets:pick-credentials'),
+    ipcRenderer.invoke('sheets:update-cell', sheetName, rowIndex, stage, value),
 });

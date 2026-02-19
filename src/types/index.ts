@@ -127,8 +127,7 @@ export interface SheetsUpdateResult {
 }
 
 export interface SheetsConfig {
-  spreadsheetId: string;
-  credentialsPath: string;
+  webAppUrl: string;
 }
 
 // ─── Electron API (preload에서 노출) ─────────
@@ -142,18 +141,16 @@ export interface ElectronAPI {
   testReadSheet: (filePath: string) => Promise<unknown | null>;
   testWriteSheet: (filePath: string, data: unknown) => Promise<boolean>;
   onSheetChanged: (callback: () => void) => () => void;
-  // Google Sheets 연동
-  sheetsConnect: (credentialsPath: string) => Promise<SheetsConnectResult>;
+  // Google Sheets 연동 (Apps Script 웹 앱)
+  sheetsConnect: (webAppUrl: string) => Promise<SheetsConnectResult>;
   sheetsIsConnected: () => Promise<boolean>;
-  sheetsReadAll: (spreadsheetId: string) => Promise<SheetsReadResult>;
+  sheetsReadAll: () => Promise<SheetsReadResult>;
   sheetsUpdateCell: (
-    spreadsheetId: string,
     sheetName: string,
     rowIndex: number,
     stage: string,
     value: boolean
   ) => Promise<SheetsUpdateResult>;
-  sheetsPickCredentials: () => Promise<string | null>;
 }
 
 declare global {
