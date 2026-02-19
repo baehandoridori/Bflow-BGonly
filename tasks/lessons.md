@@ -30,6 +30,21 @@
   - 위젯 시스템 참고: `react-grid-layout`, `ResponsiveGridLayout`
   - 상태 관리 참고: Zustand persist 패턴 (localStorage → AppData 파일로 교체)
 
+### 2026-02-19: Electron + Vite 빌드 이슈
+
+- **package.json에 `"type": "module"` 쓰지 말 것**
+  - Electron은 CJS가 기본. ESM으로 하면 `__dirname` 미정의, preload 로딩 실패
+  - `vite-plugin-electron`이 CJS로 빌드해야 `__dirname`이 자동으로 동작함
+  - postcss.config.js, tailwind.config.js 모두 `module.exports` 사용 (ESM `export default` 아님)
+
+- **빈 창 디버깅**: index.html에 로딩 표시 + 전역 에러 핸들러 유지
+  - React 마운트 실패 시 하단 빨간 바에 에러 메시지 표시
+  - `window.electronAPI` 없으면 방어적으로 처리 (preload 실패 대비)
+
+- **실시간 동기화**: 폴링 대신 `fs.watch` 사용
+  - 다른 사용자 변경 → 200ms debounce → IPC `sheet:changed` → 렌더러 리로드
+  - 자기 쓰기 시 `ignoreNextChange` 플래그로 자기 반영 방지
+
 ---
 
 ## 규칙
@@ -49,4 +64,4 @@
 - [ ] Google Sheets API 호출 시 에러 핸들링 있는가?
 - [ ] 네트워크 실패 시 오프라인 큐잉 동작하는가?
 - [ ] 낙관적 업데이트 실패 시 롤백 로직이 있는가?
-- [ ] 폴링 간격이 적절한가? (30초~1분)
+- [ ] package.json에 `"type": "module"` 넣지 않았는가? (Electron CJS 필수)
