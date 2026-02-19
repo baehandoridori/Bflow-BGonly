@@ -67,3 +67,34 @@ export async function updateSheetCell(
     throw new Error(result.error ?? '셀 업데이트 실패');
   }
 }
+
+// ─── CRUD ────────────────────────────────────
+
+async function assertOk(promise: Promise<{ ok: boolean; error?: string }>, fallback: string) {
+  const result = await promise;
+  if (!result.ok) throw new Error(result.error ?? fallback);
+}
+
+export async function addEpisodeToSheets(episodeNumber: number): Promise<void> {
+  await assertOk(window.electronAPI.sheetsAddEpisode(episodeNumber), '에피소드 추가 실패');
+}
+
+export async function addPartToSheets(episodeNumber: number, partId: string): Promise<void> {
+  await assertOk(window.electronAPI.sheetsAddPart(episodeNumber, partId), '파트 추가 실패');
+}
+
+export async function addSceneToSheets(
+  sheetName: string, sceneId: string, assignee: string, memo: string
+): Promise<void> {
+  await assertOk(window.electronAPI.sheetsAddScene(sheetName, sceneId, assignee, memo), '씬 추가 실패');
+}
+
+export async function deleteSceneFromSheets(sheetName: string, rowIndex: number): Promise<void> {
+  await assertOk(window.electronAPI.sheetsDeleteScene(sheetName, rowIndex), '씬 삭제 실패');
+}
+
+export async function updateSceneFieldInSheets(
+  sheetName: string, rowIndex: number, field: string, value: string
+): Promise<void> {
+  await assertOk(window.electronAPI.sheetsUpdateSceneField(sheetName, rowIndex, field, value), '씬 수정 실패');
+}

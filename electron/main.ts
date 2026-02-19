@@ -6,6 +6,11 @@ import {
   isConnected,
   readAllEpisodes,
   updateSceneStage,
+  addEpisode,
+  addPart,
+  addScene,
+  deleteScene,
+  updateSceneField,
 } from './sheets';
 
 // 앱 이름 설정 — AppData 경로에 영향
@@ -213,6 +218,62 @@ ipcMain.handle(
   ) => {
     try {
       await updateSceneStage(sheetName, rowIndex, stage, value);
+      return { ok: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: msg };
+    }
+  }
+);
+
+ipcMain.handle('sheets:add-episode', async (_event, episodeNumber: number) => {
+  try {
+    await addEpisode(episodeNumber);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:add-part', async (_event, episodeNumber: number, partId: string) => {
+  try {
+    await addPart(episodeNumber, partId);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle(
+  'sheets:add-scene',
+  async (_event, sheetName: string, sceneId: string, assignee: string, memo: string) => {
+    try {
+      await addScene(sheetName, sceneId, assignee, memo);
+      return { ok: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: msg };
+    }
+  }
+);
+
+ipcMain.handle('sheets:delete-scene', async (_event, sheetName: string, rowIndex: number) => {
+  try {
+    await deleteScene(sheetName, rowIndex);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle(
+  'sheets:update-scene-field',
+  async (_event, sheetName: string, rowIndex: number, field: string, value: string) => {
+    try {
+      await updateSceneField(sheetName, rowIndex, field, value);
       return { ok: true };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

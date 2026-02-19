@@ -35,4 +35,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     value: boolean
   ) =>
     ipcRenderer.invoke('sheets:update-cell', sheetName, rowIndex, stage, value),
+  sheetsAddEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('sheets:add-episode', episodeNumber),
+  sheetsAddPart: (episodeNumber: number, partId: string) =>
+    ipcRenderer.invoke('sheets:add-part', episodeNumber, partId),
+  sheetsAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) =>
+    ipcRenderer.invoke('sheets:add-scene', sheetName, sceneId, assignee, memo),
+  sheetsDeleteScene: (sheetName: string, rowIndex: number) =>
+    ipcRenderer.invoke('sheets:delete-scene', sheetName, rowIndex),
+  sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) =>
+    ipcRenderer.invoke('sheets:update-scene-field', sheetName, rowIndex, field, value),
 });
