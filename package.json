@@ -2,7 +2,6 @@
   "name": "bflow-bgonly",
   "version": "0.1.0",
   "description": "BG 진행 현황판 - Studio JBBJ 배경 레이아웃 대시보드",
-  "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",

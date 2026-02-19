@@ -5,8 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BG 진행 현황판</title>
   </head>
-  <body class="bg-bg-primary text-text-primary">
-    <div id="root"></div>
+  <body style="margin:0; background:#0F1117; color:#E8E8EE; font-family:system-ui,sans-serif;">
+    <div id="root">
+      <!-- React 마운트 전 로딩 표시 — 마운트 성공 시 React가 교체함 -->
+      <div style="display:flex; align-items:center; justify-content:center; height:100vh; flex-direction:column; gap:12px;">
+        <div style="font-size:24px; font-weight:bold;">BG 진행 현황판</div>
+        <div style="color:#8B8DA3; font-size:14px;">로딩 중...</div>
+      </div>
+    </div>
+    <div id="error-display" style="display:none; position:fixed; bottom:20px; left:20px; right:20px; background:#FF6B6B; color:#fff; padding:16px; border-radius:8px; font-size:13px; z-index:9999; white-space:pre-wrap;"></div>
+    <script>
+      // 전역 에러 캐치 — React 마운트 실패 시 화면에 표시
+      window.onerror = function(msg, src, line) {
+        var el = document.getElementById('error-display');
+        if (el) { el.style.display = 'block'; el.textContent = '[오류] ' + msg + '\n' + (src||'') + ':' + line; }
+      };
+      window.addEventListener('unhandledrejection', function(e) {
+        var el = document.getElementById('error-display');
+        if (el) { el.style.display = 'block'; el.textContent = '[Promise 오류] ' + (e.reason && e.reason.message || e.reason || ''); }
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

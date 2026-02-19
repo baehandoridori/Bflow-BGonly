@@ -31,6 +31,12 @@ export default function App() {
   useEffect(() => {
     async function init() {
       try {
+        // electronAPI 존재 확인
+        if (!window.electronAPI) {
+          console.warn('[경고] electronAPI 없음 — preload 스크립트 확인 필요');
+          return;
+        }
+
         const { isTestMode } = await window.electronAPI.getMode();
         setTestMode(isTestMode);
 
@@ -49,6 +55,7 @@ export default function App() {
 
   // 실시간 동기화: 다른 사용자가 시트를 변경하면 즉시 리로드
   useEffect(() => {
+    if (!window.electronAPI?.onSheetChanged) return;
     const cleanup = window.electronAPI.onSheetChanged(() => {
       console.log('[동기화] 다른 사용자의 변경 감지 → 데이터 리로드');
       loadData();
