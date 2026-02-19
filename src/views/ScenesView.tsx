@@ -4,7 +4,14 @@ import { useAppStore } from '@/stores/useAppStore';
 import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
 import type { Scene, Stage } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
-import { toggleTestSceneStage } from '@/services/testSheetService';
+import {
+  toggleTestSceneStage,
+  addTestEpisode,
+  addTestPart,
+  addTestScene,
+  deleteTestScene,
+  updateTestSceneField,
+} from '@/services/testSheetService';
 import {
   updateSheetCell,
   addEpisodeToSheets,
@@ -21,19 +28,17 @@ interface SceneCardProps {
   scene: Scene;
   sceneIndex: number;
   sheetName: string;
-  sheetsConnected: boolean;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
 }
 
-function SceneCard({ scene, sceneIndex, sheetName, sheetsConnected, onToggle, onDelete, onFieldUpdate }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, sheetName, onToggle, onDelete, onFieldUpdate }: SceneCardProps) {
   const pct = sceneProgress(scene);
   const [editing, setEditing] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
   const startEdit = (field: string, currentValue: string) => {
-    if (!sheetsConnected) return;
     setEditing(field);
     setEditValue(currentValue);
   };
@@ -72,7 +77,7 @@ function SceneCard({ scene, sceneIndex, sheetName, sheetsConnected, onToggle, on
             />
           ) : (
             <span
-              className={cn('text-sm text-text-primary', sheetsConnected && 'cursor-pointer hover:text-accent')}
+              className="text-sm text-text-primary cursor-pointer hover:text-accent"
               onClick={() => startEdit('sceneId', scene.sceneId)}
             >
               {scene.sceneId || '(씬번호 없음)'}
@@ -91,21 +96,19 @@ function SceneCard({ scene, sceneIndex, sheetName, sheetsConnected, onToggle, on
             />
           ) : (
             <span
-              className={cn('text-xs text-text-secondary', sheetsConnected && 'cursor-pointer hover:text-accent')}
+              className="text-xs text-text-secondary cursor-pointer hover:text-accent"
               onClick={() => startEdit('assignee', scene.assignee)}
             >
               {scene.assignee || '(담당자)'}
             </span>
           )}
-          {sheetsConnected && (
-            <button
-              onClick={() => onDelete(sceneIndex)}
-              className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400 transition-opacity"
-              title="씬 삭제"
-            >
-              ×
-            </button>
-          )}
+          <button
+            onClick={() => onDelete(sceneIndex)}
+            className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400 transition-opacity"
+            title="씬 삭제"
+          >
+            ×
+          </button>
         </div>
       </div>
 
@@ -121,10 +124,10 @@ function SceneCard({ scene, sceneIndex, sheetName, sheetsConnected, onToggle, on
         />
       ) : (
         <p
-          className={cn('text-xs text-text-secondary min-h-[1rem]', sheetsConnected && 'cursor-pointer hover:text-accent')}
+          className="text-xs text-text-secondary min-h-[1rem] cursor-pointer hover:text-accent"
           onClick={() => startEdit('memo', scene.memo)}
         >
-          {scene.memo || (sheetsConnected ? '(메모 클릭하여 편집)' : '')}
+          {scene.memo || '(메모 클릭하여 편집)'}
         </p>
       )}
 
@@ -332,56 +335,86 @@ export function ScenesView() {
   };
 
   const handleAddEpisode = async () => {
-    if (!sheetsConnected) return;
     setIsAdding(true);
     try {
-      await addEpisodeToSheets(nextEpisodeNumber);
+      if (sheetsConnected) {
+        await addEpisodeToSheets(nextEpisodeNumber);
+      } else {
+        await addTestEpisode(episodes, nextEpisodeNumber);
+      }
       await reloadData();
       setSelectedEpisode(nextEpisodeNumber);
     } catch (err) {
-      alert(`에피소드 추가 실패: ${err}`);
+      const msg = String(err);
+      if (msg.includes('Unknown action')) {
+        alert(`에피소드 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
+      } else {
+        alert(`에피소드 추가 실패: ${err}`);
+      }
     } finally {
       setIsAdding(false);
     }
   };
 
   const handleAddPart = async () => {
-    if (!sheetsConnected || !currentEp) return;
+    if (!currentEp) return;
     if (nextPartId > 'Z') {
       alert('파트는 Z까지만 가능합니다');
       return;
     }
     setIsAdding(true);
     try {
-      await addPartToSheets(currentEp.episodeNumber, nextPartId);
+      if (sheetsConnected) {
+        await addPartToSheets(currentEp.episodeNumber, nextPartId);
+      } else {
+        await addTestPart(episodes, currentEp.episodeNumber, nextPartId);
+      }
       await reloadData();
       setSelectedPart(nextPartId);
     } catch (err) {
-      alert(`파트 추가 실패: ${err}`);
+      const msg = String(err);
+      if (msg.includes('Unknown action')) {
+        alert(`파트 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
+      } else {
+        alert(`파트 추가 실패: ${err}`);
+      }
     } finally {
       setIsAdding(false);
     }
   };
 
   const handleAddScene = async (sceneId: string, assignee: string, memo: string) => {
-    if (!sheetsConnected || !currentPart) return;
+    if (!currentPart) return;
     setIsAdding(true);
     try {
-      await addSceneToSheets(currentPart.sheetName, sceneId, assignee, memo);
+      if (sheetsConnected) {
+        await addSceneToSheets(currentPart.sheetName, sceneId, assignee, memo);
+      } else {
+        await addTestScene(episodes, currentPart.sheetName, sceneId, assignee, memo);
+      }
       await reloadData();
       setShowAddScene(false);
     } catch (err) {
-      alert(`씬 추가 실패: ${err}`);
+      const msg = String(err);
+      if (msg.includes('Unknown action')) {
+        alert(`씬 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
+      } else {
+        alert(`씬 추가 실패: ${err}`);
+      }
     } finally {
       setIsAdding(false);
     }
   };
 
   const handleDeleteScene = async (sceneIndex: number) => {
-    if (!sheetsConnected || !currentPart) return;
+    if (!currentPart) return;
     if (!confirm('이 씬을 삭제하시겠습니까?')) return;
     try {
-      await deleteSceneFromSheets(currentPart.sheetName, sceneIndex);
+      if (sheetsConnected) {
+        await deleteSceneFromSheets(currentPart.sheetName, sceneIndex);
+      } else {
+        await deleteTestScene(episodes, currentPart.sheetName, sceneIndex);
+      }
       await reloadData();
     } catch (err) {
       alert(`씬 삭제 실패: ${err}`);
@@ -389,9 +422,13 @@ export function ScenesView() {
   };
 
   const handleFieldUpdate = async (sceneIndex: number, field: string, value: string) => {
-    if (!sheetsConnected || !currentPart) return;
+    if (!currentPart) return;
     try {
-      await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, field, value);
+      if (sheetsConnected) {
+        await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, field, value);
+      } else {
+        await updateTestSceneField(episodes, currentPart.sheetName, sceneIndex, field, value);
+      }
       await reloadData();
     } catch (err) {
       alert(`수정 실패: ${err}`);
@@ -416,16 +453,14 @@ export function ScenesView() {
         </select>
 
         {/* 에피소드 추가 */}
-        {sheetsConnected && (
-          <button
-            onClick={handleAddEpisode}
-            disabled={isAdding}
-            className="px-2.5 py-1.5 bg-accent/20 text-accent text-xs rounded-lg hover:bg-accent/30 disabled:opacity-50 transition-colors"
-            title={`EP.${String(nextEpisodeNumber).padStart(2, '0')} 추가`}
-          >
-            + EP
-          </button>
-        )}
+        <button
+          onClick={handleAddEpisode}
+          disabled={isAdding}
+          className="px-2.5 py-1.5 bg-accent/20 text-accent text-xs rounded-lg hover:bg-accent/30 disabled:opacity-50 transition-colors"
+          title={`EP.${String(nextEpisodeNumber).padStart(2, '0')} 추가`}
+        >
+          + EP
+        </button>
 
         {/* 파트 탭 */}
         <div className="flex gap-1">
@@ -444,7 +479,7 @@ export function ScenesView() {
             </button>
           ))}
           {/* 파트 추가 */}
-          {sheetsConnected && currentEp && (
+          {currentEp && (
             <button
               onClick={handleAddPart}
               disabled={isAdding}
@@ -508,7 +543,7 @@ export function ScenesView() {
         </div>
         <span className="text-sm font-bold text-accent">{overallPct}%</span>
         {/* 씬 추가 버튼 */}
-        {sheetsConnected && currentPart && (
+        {currentPart && (
           <button
             onClick={() => setShowAddScene(true)}
             disabled={isAdding}
@@ -535,7 +570,6 @@ export function ScenesView() {
             scene={scene}
             sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
             sheetName={currentPart?.sheetName ?? ''}
-            sheetsConnected={sheetsConnected}
             onToggle={handleToggle}
             onDelete={handleDeleteScene}
             onFieldUpdate={handleFieldUpdate}
@@ -543,9 +577,7 @@ export function ScenesView() {
         ))}
         {scenes.length === 0 && !showAddScene && (
           <div className="col-span-full text-center text-text-secondary py-12">
-            {sheetsConnected
-              ? '표시할 씬이 없습니다. "씬 추가" 버튼으로 새 씬을 추가하세요.'
-              : '표시할 씬이 없습니다'}
+            표시할 씬이 없습니다. &quot;씬 추가&quot; 버튼으로 새 씬을 추가하세요.
           </div>
         )}
       </div>

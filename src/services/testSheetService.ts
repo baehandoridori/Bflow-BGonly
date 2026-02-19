@@ -44,6 +44,125 @@ export async function writeTestSheet(episodes: Episode[]): Promise<void> {
   }
 }
 
+/** 에피소드 추가 (테스트) */
+export async function addTestEpisode(
+  episodes: Episode[],
+  episodeNumber: number
+): Promise<Episode[]> {
+  const tabName = `EP${String(episodeNumber).padStart(2, '0')}_A`;
+  const newEp: Episode = {
+    episodeNumber,
+    title: `EP.${String(episodeNumber).padStart(2, '0')}`,
+    parts: [{ partId: 'A', sheetName: tabName, scenes: [] }],
+  };
+  const updated = [...episodes, newEp];
+  await writeTestSheet(updated);
+  return updated;
+}
+
+/** 파트 추가 (테스트) */
+export async function addTestPart(
+  episodes: Episode[],
+  episodeNumber: number,
+  partId: string
+): Promise<Episode[]> {
+  const tabName = `EP${String(episodeNumber).padStart(2, '0')}_${partId}`;
+  const updated = episodes.map((ep) => {
+    if (ep.episodeNumber !== episodeNumber) return ep;
+    return {
+      ...ep,
+      parts: [...ep.parts, { partId, sheetName: tabName, scenes: [] }],
+    };
+  });
+  await writeTestSheet(updated);
+  return updated;
+}
+
+/** 씬 추가 (테스트) */
+export async function addTestScene(
+  episodes: Episode[],
+  sheetName: string,
+  sceneId: string,
+  assignee: string,
+  memo: string
+): Promise<Episode[]> {
+  const updated = episodes.map((ep) => ({
+    ...ep,
+    parts: ep.parts.map((part) => {
+      if (part.sheetName !== sheetName) return part;
+      const nextNo = part.scenes.length > 0
+        ? Math.max(...part.scenes.map((s) => s.no)) + 1
+        : 1;
+      const newScene: Scene = {
+        no: nextNo,
+        sceneId: sceneId || '',
+        memo: memo || '',
+        storyboardUrl: '',
+        guideUrl: '',
+        assignee: assignee || '',
+        lo: false,
+        done: false,
+        review: false,
+        png: false,
+      };
+      return { ...part, scenes: [...part.scenes, newScene] };
+    }),
+  }));
+  await writeTestSheet(updated);
+  return updated;
+}
+
+/** 씬 삭제 (테스트) */
+export async function deleteTestScene(
+  episodes: Episode[],
+  sheetName: string,
+  rowIndex: number
+): Promise<Episode[]> {
+  const updated = episodes.map((ep) => ({
+    ...ep,
+    parts: ep.parts.map((part) => {
+      if (part.sheetName !== sheetName) return part;
+      return {
+        ...part,
+        scenes: part.scenes.filter((_, i) => i !== rowIndex),
+      };
+    }),
+  }));
+  await writeTestSheet(updated);
+  return updated;
+}
+
+/** 씬 필드 업데이트 (테스트) */
+export async function updateTestSceneField(
+  episodes: Episode[],
+  sheetName: string,
+  rowIndex: number,
+  field: string,
+  value: string
+): Promise<Episode[]> {
+  const updated = episodes.map((ep) => ({
+    ...ep,
+    parts: ep.parts.map((part) => {
+      if (part.sheetName !== sheetName) return part;
+      return {
+        ...part,
+        scenes: part.scenes.map((scene, i) => {
+          if (i !== rowIndex) return scene;
+          if (field === 'lo' || field === 'done' || field === 'review' || field === 'png') {
+            return { ...scene, [field]: value === 'true' };
+          }
+          if (field === 'no') {
+            return { ...scene, no: parseInt(value, 10) || 0 };
+          }
+          return { ...scene, [field]: value };
+        }),
+      };
+    }),
+  }));
+  await writeTestSheet(updated);
+  return updated;
+}
+
 /** 씬 체크박스 토글 → 테스트 시트에 반영 */
 export async function toggleTestSceneStage(
   episodes: Episode[],
