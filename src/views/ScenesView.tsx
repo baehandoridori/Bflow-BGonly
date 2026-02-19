@@ -4,6 +4,7 @@ import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
 import type { Scene, Stage } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
 import { toggleTestSceneStage } from '@/services/testSheetService';
+import { updateSheetCell } from '@/services/sheetsService';
 import { cn } from '@/utils/cn';
 
 interface SceneCardProps {
@@ -75,6 +76,7 @@ function SceneCard({ scene, episodeNumber, partId, onToggle }: SceneCardProps) {
 export function ScenesView() {
   const episodes = useDataStore((s) => s.episodes);
   const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
+  const { isTestMode, sheetsConnected, sheetsConfig } = useAppStore();
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery } = useAppStore();
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery } = useAppStore();
 
@@ -118,12 +120,39 @@ export function ScenesView() {
 
   const handleToggle = async (sceneId: string, stage: Stage) => {
     if (!currentEp || !currentPart) return;
+
+    // 현재 씬 찾기 (토글 전 값 필요)
+    const scene = currentPart.scenes.find((s) => s.sceneId === sceneId);
+    if (!scene) return;
+
+    const newValue = !scene[stage];
+    const sceneIndex = currentPart.scenes.findIndex((s) => s.sceneId === sceneId);
+
     // 1. 낙관적 업데이트 (UI 즉시 반영)
     toggleSceneStage(currentEp.episodeNumber, currentPart.partId, sceneId, stage);
-    // 2. 파일에 저장 → fs.watch가 다른 사용자에게 알림
-    await toggleTestSceneStage(
-      episodes, currentEp.episodeNumber, currentPart.partId, sceneId, stage
-    );
+
+    // 2. 실제 저장 — 모드에 따라 분기
+    try {
+      if (!isTestMode && sheetsConnected && sheetsConfig?.spreadsheetId) {
+        // 라이브 모드: Google Sheets에 셀 업데이트
+        await updateSheetCell(
+          sheetsConfig.spreadsheetId,
+          currentPart.sheetName,
+          sceneIndex,
+          stage,
+          newValue
+        );
+      } else {
+        // 테스트 모드: 로컬 JSON 파일에 저장
+        await toggleTestSceneStage(
+          episodes, currentEp.episodeNumber, currentPart.partId, sceneId, stage
+        );
+      }
+    } catch (err) {
+      console.error('[토글 실패]', err);
+      // 실패 시 롤백 (다시 토글)
+      toggleSceneStage(currentEp.episodeNumber, currentPart.partId, sceneId, stage);
+    }
   };
 
   return (

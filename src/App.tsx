@@ -4,19 +4,28 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { Dashboard } from '@/views/Dashboard';
 import { ScenesView } from '@/views/ScenesView';
+import { SettingsView } from '@/views/SettingsView';
 import { readTestSheet } from '@/services/testSheetService';
+import { loadSheetsConfig, connectSheets, readAllFromSheets } from '@/services/sheetsService';
 import { loadLayout } from '@/services/settingsService';
 
 export default function App() {
-  const { currentView, setTestMode, setWidgetLayout } = useAppStore();
+  const { currentView, isTestMode, setTestMode, setWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError } = useDataStore();
 
-  // 데이터 로드 함수
+  // 데이터 로드 함수 — 모드에 따라 테스트 시트 또는 Google Sheets 사용
   const loadData = useCallback(async () => {
     setSyncing(true);
     setSyncError(null);
     try {
-      const episodes = await readTestSheet();
+      let episodes;
+      if (!isTestMode && sheetsConnected && sheetsConfig?.spreadsheetId) {
+        // 라이브 모드: Google Sheets에서 읽기
+        episodes = await readAllFromSheets(sheetsConfig.spreadsheetId);
+      } else {
+        // 테스트 모드: 로컬 JSON 파일
+        episodes = await readTestSheet();
+      }
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
     } catch (err) {
@@ -25,7 +34,7 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError]);
+  }, [isTestMode, sheetsConnected, sheetsConfig, setEpisodes, setSyncing, setLastSyncTime, setSyncError]);
 
   // 초기 로드
   useEffect(() => {
@@ -37,21 +46,37 @@ export default function App() {
           return;
         }
 
-        const { isTestMode } = await window.electronAPI.getMode();
-        setTestMode(isTestMode);
+        const { isTestMode: testMode } = await window.electronAPI.getMode();
+        setTestMode(testMode);
 
         const savedLayout = await loadLayout();
         if (savedLayout) {
           setWidgetLayout(savedLayout);
         }
 
-        await loadData();
+        // 라이브 모드: 저장된 Sheets 설정이 있으면 자동 연결 시도
+        if (!testMode) {
+          const config = await loadSheetsConfig();
+          if (config?.credentialsPath && config?.spreadsheetId) {
+            setSheetsConfig(config);
+            const result = await connectSheets(config.credentialsPath);
+            if (result.ok) {
+              setSheetsConnected(true);
+              console.log('[Sheets] 자동 연결 성공');
+            }
+          }
+        }
       } catch (err) {
         console.error('[초기화 실패]', err);
       }
     }
     init();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 초기화 완료 후 데이터 로드 (sheetsConnected/isTestMode 변경 시)
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   // 실시간 동기화: 다른 사용자가 시트를 변경하면 즉시 리로드
   useEffect(() => {
@@ -77,11 +102,7 @@ export default function App() {
           </div>
         );
       case 'settings':
-        return (
-          <div className="flex items-center justify-center h-full text-text-secondary">
-            설정 (구현 예정)
-          </div>
-        );
+        return <SettingsView />;
       default:
         return <Dashboard />;
     }

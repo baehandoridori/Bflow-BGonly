@@ -22,4 +22,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // cleanup 함수 반환
     return () => ipcRenderer.removeListener('sheet:changed', callback);
   },
+
+  // Google Sheets 연동
+  sheetsConnect: (credentialsPath: string) =>
+    ipcRenderer.invoke('sheets:connect', credentialsPath),
+  sheetsIsConnected: () => ipcRenderer.invoke('sheets:is-connected'),
+  sheetsReadAll: (spreadsheetId: string) =>
+    ipcRenderer.invoke('sheets:read-all', spreadsheetId),
+  sheetsUpdateCell: (
+    spreadsheetId: string,
+    sheetName: string,
+    rowIndex: number,
+    stage: string,
+    value: boolean
+  ) =>
+    ipcRenderer.invoke('sheets:update-cell', spreadsheetId, sheetName, rowIndex, stage, value),
+  sheetsPickCredentials: () => ipcRenderer.invoke('sheets:pick-credentials'),
 });

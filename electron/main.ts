@@ -1,6 +1,12 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import {
+  initSheets,
+  isConnected,
+  readAllEpisodes,
+  updateSceneStage,
+} from './sheets';
 
 // 앱 이름 설정 — AppData 경로에 영향
 app.name = 'Bflow-BGonly';
@@ -168,6 +174,67 @@ ipcMain.handle('test:write-sheet', async (_event, filePath: string, data: unknow
   }
 
   return true;
+});
+
+// ─── IPC 핸들러: Google Sheets 연동 ──────────────────────────
+
+ipcMain.handle('sheets:connect', async (_event, credentialsPath: string) => {
+  try {
+    // 상대 경로면 앱 루트 기준으로 resolve
+    const absPath = path.isAbsolute(credentialsPath)
+      ? credentialsPath
+      : path.join(getAppRoot(), credentialsPath);
+
+    const ok = await initSheets(absPath);
+    return { ok, error: ok ? null : '인증 실패' };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:is-connected', () => {
+  return isConnected();
+});
+
+ipcMain.handle('sheets:read-all', async (_event, spreadsheetId: string) => {
+  try {
+    const episodes = await readAllEpisodes(spreadsheetId);
+    return { ok: true, data: episodes };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: null };
+  }
+});
+
+ipcMain.handle(
+  'sheets:update-cell',
+  async (
+    _event,
+    spreadsheetId: string,
+    sheetName: string,
+    rowIndex: number,
+    stage: string,
+    value: boolean
+  ) => {
+    try {
+      await updateSceneStage(spreadsheetId, sheetName, rowIndex, stage, value);
+      return { ok: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: msg };
+    }
+  }
+);
+
+ipcMain.handle('sheets:pick-credentials', async () => {
+  const result = await dialog.showOpenDialog({
+    title: '서비스 계정 키 파일 선택',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile'],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
 });
 
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
