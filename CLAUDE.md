@@ -13,12 +13,24 @@ BG 진행 현황판은 Studio JBBJ 팀(~20명)이 에피소드별 배경 레이�
 실시간으로 추적하는 Electron 대시보드 앱이다. Google Sheets를 데이터 원본으로 사용하며,
 추후 Bflow PWA에 위젯으로 통합할 예정이다.
 
-### 핵심 동작
+### 핵심 콘셉트: "띄워놓고 작업"
+
+슬랙 캔버스처럼 **항상 띄워놓고 실시간으로 협업**하는 도구.
+- 여러 사용자가 동시에 앱을 열어두고 체크박스를 편집
+- 한 사용자가 체크하면 → Google Sheets에 즉시 저장 → 다른 사용자가 새로고침/폴링 시 반영
+- Google Sheets가 **단일 진실의 원천(Single Source of Truth)**
 
 ```
-Electron 앱 ◄══ Google Sheets API ══► Google Sheets (데이터 원본)
-     │
-     └──► 추후 Bflow PWA 위젯으로 통합
+┌─ 사용자 A (PC) ─┐     ┌─ 사용자 B (PC) ─┐     ┌─ 사용자 C (PC) ─┐
+│  Electron 앱     │     │  Electron 앱     │     │  Electron 앱     │
+│  체크 → 저장     │     │  폴링 → 반영     │     │  체크 → 저장     │
+└────────┬─────────┘     └────────┬─────────┘     └────────┬─────────┘
+         │                        │                        │
+         ▼                        ▼                        ▼
+    ╔══════════════════════════════════════════════════════════╗
+    ║            Google Sheets (단일 진실의 원천)               ║
+    ║  EP01_A | EP01_B | EP02_A | ... | 담당자                 ║
+    ╚══════════════════════════════════════════════════════════╝
 ```
 
 ---
@@ -34,46 +46,56 @@ C:\Bflow-BGonly
 ```
 G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\
 ├── BG진행현황판.exe          ← 팀원들이 바로가기로 실행
-├── resources/               ← Electron 패키지 리소스
-├── data/                    ← 공유 데이터 (전체 설정, 공통 리소스)
-│   ├── config.json          ← 앱 전역 설정 (시트 ID, API 키 경로 등)
-│   └── cache/               ← 이미지 캐시 등
-└── users/                   ← 사용자별 개인 데이터
-    ├── {USERNAME}/           ← Windows %USERNAME% 기반 자동 생성
-    │   ├── layout.json       ← 개인 위젯 레이아웃
-    │   ├── preferences.json  ← 개인 설정 (테마, 필터 기본값 등)
-    │   └── state.json        ← 마지막 보던 에피소드, 탭 상태 등
-    ├── 원동우/
-    ├── 김하늘/
-    └── ...
+└── resources/               ← Electron 패키지 리소스
+```
+
+> 배포 폴더는 **exe + 리소스만** 둔다. 데이터/설정은 여기에 저장하지 않는다.
+
+### 개인 설정 경로 (각 사용자 PC)
+```
+%APPDATA%\Bflow-BGonly\                ← Electron: app.getPath('userData')
+├── layout.json                        ← 개인 위젯 레이아웃 (react-grid-layout)
+├── preferences.json                   ← 테마, 필터 기본값, 마지막 본 에피소드
+└── cache/                             ← 이미지 캐시 (선택)
 ```
 
 ### 데이터 저장 전략
 
 | 데이터 | 저장 위치 | 이유 |
 |--------|----------|------|
-| 씬/에피소드/진행률 | Google Sheets | 원본 데이터, 양방향 동기화 |
-| 앱 전역 설정 | `data/config.json` | 모든 사용자 공유 |
-| 위젯 레이아웃 | `users/{USERNAME}/layout.json` | 사용자별 맞춤 |
-| 개인 설정 | `users/{USERNAME}/preferences.json` | 사용자별 맞춤 |
-| 이미지 캐시 | `data/cache/` | 성능 최적화, 공유 가능 |
+| 씬/에피소드/진행률/체크박스 | **Google Sheets** | 단일 진실의 원천, 다중 사용자 실시간 공유 |
+| 담당자 목록 | **Google Sheets** | 공유 데이터 |
+| 앱 전역 설정 (시트 ID 등) | **앱 내 빌트인** 또는 **환경변수** | 빌드 시 포함 |
+| 위젯 레이아웃 | **%APPDATA%/layout.json** | PC별 개인화, 충돌 없음 |
+| 개인 설정 (테마 등) | **%APPDATA%/preferences.json** | PC별 개인화 |
 
-> **중요**: localStorage는 사용하지 않는다. 앱이 공유 드라이브에서 실행되므로
-> 모든 영속 데이터는 파일 기반으로 공유 드라이브 내에 저장한다.
-> 사용자 식별은 `process.env.USERNAME` (Windows) 또는 `os.userInfo().username`으로 한다.
+### 동기화 모델
+
+```
+체크박스 토글 시:
+  1. 로컬 상태 즉시 업데이트 (낙관적 업데이트, UI 즉시 반영)
+  2. Google Sheets API 호출 (백그라운드)
+  3. 실패 시 롤백 + 재시도 큐
+
+다른 사용자 변경 감지:
+  1. 주기적 폴링 (30초~1분 간격)
+  2. Sheets 데이터 가져오기 → 로컬 상태와 diff
+  3. 변경분만 UI에 반영 (깜빡임 없이 부드럽게)
+```
 
 ### 제약 사항 및 주의점
 
-1. **파일 잠금**: 여러 사용자가 동시에 같은 파일을 쓰면 충돌 가능
-   - 사용자별 파일은 개인 폴더에 분리하여 충돌 방지
-   - 공유 설정 파일은 읽기 전용으로 취급하거나 잠금 메커니즘 적용
-2. **Google Drive 동기화 지연**: 공유 드라이브 파일 변경이 다른 사용자에게 반영되기까지 지연 가능
-   - 개인 데이터는 각 사용자 폴더에 있으므로 충돌 없음
-   - 공유 데이터는 Google Sheets API로 직접 통신하여 Drive 동기화에 의존하지 않음
-3. **네트워크 의존성**: 공유 드라이브 접근 + Google Sheets API 모두 네트워크 필요
-   - 오프라인 큐잉 구현 필요 (체크박스 변경 등)
-4. **경로 인코딩**: 한글 경로(`공유 드라이브`, `한솔이의 두근두근 실험실`) 처리에 주의
-   - Node.js의 `path` 모듈 사용, 하드코딩된 경로 문자열 피하기
+1. **네트워크 의존성**: Google Sheets API 통신이 핵심 — 네트워크 필수
+   - 체크박스 변경 시 오프라인이면 큐에 쌓았다가 복구 후 전송
+   - 폴링 실패 시 재시도 (지수 백오프)
+2. **경로 인코딩**: 배포 경로에 한글 포함 (`공유 드라이브`, `한솔이의 두근두근 실험실`)
+   - Node.js `path` 모듈 사용, 하드코딩 피하기
+3. **동시 편집 충돌**: 같은 셀을 두 사용자가 동시에 토글할 가능성
+   - Last-Write-Wins 전략 (Google Sheets 기본 동작)
+   - 폴링 주기를 적절히 설정하여 충돌 창(window) 최소화
+4. **AppData 경로**: Electron의 `app.getPath('userData')` 사용
+   - Windows: `C:\Users\{사용자}\AppData\Roaming\Bflow-BGonly\`
+   - 앱 이름 설정 필요: `app.name = 'Bflow-BGonly'`
 
 ---
 
@@ -87,16 +109,17 @@ Bflow 원본(`/home/user/Bflow`)의 위젯 시스템 구조:
 - **레이아웃 형식**: `{ i: string, x: number, y: number, w: number, h: number, minW, minH }`
 - **그리드**: 4열 기반, 반응형 (lg/md/sm/xs/xxs 브레이크포인트)
 - **편집 모드**: 드래그 핸들 + 리사이즈 핸들 + 편집/리셋 토글
-- **저장**: Zustand persist → localStorage (우리는 파일 기반으로 대체)
+- **저장**: Zustand persist → localStorage (우리는 AppData 파일 기반으로 대체)
 
 ### BGonly에서의 구현 방향
 
 ```
-Bflow 방식 (localStorage)  →  BGonly 방식 (파일 기반)
-─────────────────────────────────────────────────────
-Zustand persist middleware  →  Zustand + 파일 읽기/쓰기 미들웨어
-브라우저 localStorage       →  users/{USERNAME}/layout.json
-단일 사용자                 →  다중 사용자 (Windows USERNAME 기반)
+Bflow 방식 (localStorage)  →  BGonly 방식 (AppData 파일 기반)
+─────────────────────────────────────────────────────────────
+Zustand persist middleware  →  Zustand + Electron IPC 파일 persist
+브라우저 localStorage       →  %APPDATA%/Bflow-BGonly/layout.json
+PWA 단일 사용자             →  각 PC의 Windows 사용자별 자동 분리
+작업 데이터 로컬 저장        →  Google Sheets가 싱글 소스 (폴링)
 ```
 
 ### 위젯 목록
@@ -235,7 +258,7 @@ Zustand persist middleware  →  Zustand + 파일 읽기/쓰기 미들웨어
 ### Phase 1: 기반 구축
 - Electron + React + TypeScript + Tailwind 프로젝트 세팅
 - Google Sheets API 인증 모듈 (서비스 계정)
-- 파일 기반 사용자 데이터 읽기/쓰기 모듈
+- AppData 기반 개인 설정 읽기/쓰기 모듈 (Electron IPC)
 
 ### Phase 2: 핵심 UI
 - 전체 현황 대시보드 (진행률, 바 차트, 담당자 카드)
@@ -249,7 +272,7 @@ Zustand persist middleware  →  Zustand + 파일 읽기/쓰기 미들웨어
 
 ### Phase 4: 위젯 커스터마이징
 - react-grid-layout 기반 드래그 & 리사이즈
-- 사용자별 레이아웃 저장 (`users/{USERNAME}/layout.json`)
+- 사용자별 레이아웃 저장 (`%APPDATA%/Bflow-BGonly/layout.json`)
 - Bflow 레이아웃 편집 UI 참고
 
 ### Phase 5: 배포
