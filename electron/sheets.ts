@@ -111,6 +111,19 @@ export async function readAllEpisodes(): Promise<EpisodeData[]> {
   return json.data ?? [];
 }
 
+// ─── GAS GET 호출 헬퍼 ────────────────────────────────────────
+
+async function gasGet(params: Record<string, string>): Promise<void> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+
+  const qs = new URLSearchParams(params);
+  const res = await gasFetch(`${webAppUrl}?${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json() as { ok: boolean; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '요청 실패');
+}
+
 // ─── 셀 업데이트 (체크박스 토글) ──────────────────────────────
 
 export async function updateSceneStage(
@@ -119,20 +132,45 @@ export async function updateSceneStage(
   stage: string,
   value: boolean
 ): Promise<void> {
-  if (!webAppUrl) throw new Error('Sheets 미연결');
-
-  // GET으로 업데이트 (GAS 리다이렉트 이슈 회피, 내부용이라 보안 무관)
-  const params = new URLSearchParams({
+  await gasGet({
     action: 'updateCell',
     sheetName,
     rowIndex: String(rowIndex),
     stage,
     value: String(value),
   });
+}
 
-  const res = await gasFetch(`${webAppUrl}?${params}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+// ─── 에피소드 추가 ────────────────────────────────────────────
 
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error ?? '셀 업데이트 실패');
+export async function addEpisode(episodeNumber: number): Promise<void> {
+  await gasGet({ action: 'addEpisode', episodeNumber: String(episodeNumber) });
+}
+
+// ─── 파트 추가 ────────────────────────────────────────────────
+
+export async function addPart(episodeNumber: number, partId: string): Promise<void> {
+  await gasGet({ action: 'addPart', episodeNumber: String(episodeNumber), partId });
+}
+
+// ─── 씬 추가 ──────────────────────────────────────────────────
+
+export async function addScene(
+  sheetName: string, sceneId: string, assignee: string, memo: string
+): Promise<void> {
+  await gasGet({ action: 'addScene', sheetName, sceneId, assignee, memo });
+}
+
+// ─── 씬 삭제 ──────────────────────────────────────────────────
+
+export async function deleteScene(sheetName: string, rowIndex: number): Promise<void> {
+  await gasGet({ action: 'deleteScene', sheetName, rowIndex: String(rowIndex) });
+}
+
+// ─── 씬 필드 업데이트 ─────────────────────────────────────────
+
+export async function updateSceneField(
+  sheetName: string, rowIndex: number, field: string, value: string
+): Promise<void> {
+  await gasGet({ action: 'updateSceneField', sheetName, rowIndex: String(rowIndex), field, value });
 }

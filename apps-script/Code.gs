@@ -25,8 +25,17 @@
 
 var EP_PATTERN = /^EP(\d+)_([A-Z])$/;
 
+// 헤더 행 (새 탭 생성 시 자동 삽입)
+var HEADERS = ['No', '씬번호', '메모', '스토리보드URL', '가이드URL', '담당자', 'LO', '완료', '검수', 'PNG'];
+
 // 단계별 열 번호 (1-indexed: G=7, H=8, I=9, J=10)
 var STAGE_COLUMNS = { lo: 7, done: 8, review: 9, png: 10 };
+
+// 씬 편집 가능한 필드 → 열 번호
+var FIELD_COLUMNS = {
+  no: 1, sceneId: 2, memo: 3, storyboardUrl: 4,
+  guideUrl: 5, assignee: 6, lo: 7, done: 8, review: 9, png: 10
+};
 
 // ─── 요청 핸들러 ─────────────────────────────────────────────
 
@@ -47,6 +56,42 @@ function doGet(e) {
           parseInt(e.parameter.rowIndex, 10),
           e.parameter.stage,
           e.parameter.value === 'true'
+        );
+        return jsonResponse({ ok: true });
+
+      case 'addEpisode':
+        var result = addEpisode(parseInt(e.parameter.episodeNumber, 10));
+        return jsonResponse({ ok: true, data: result });
+
+      case 'addPart':
+        var result2 = addPart(
+          parseInt(e.parameter.episodeNumber, 10),
+          e.parameter.partId
+        );
+        return jsonResponse({ ok: true, data: result2 });
+
+      case 'addScene':
+        addScene(
+          e.parameter.sheetName,
+          e.parameter.sceneId || '',
+          e.parameter.assignee || '',
+          e.parameter.memo || ''
+        );
+        return jsonResponse({ ok: true });
+
+      case 'deleteScene':
+        deleteScene(
+          e.parameter.sheetName,
+          parseInt(e.parameter.rowIndex, 10)
+        );
+        return jsonResponse({ ok: true });
+
+      case 'updateSceneField':
+        updateSceneField(
+          e.parameter.sheetName,
+          parseInt(e.parameter.rowIndex, 10),
+          e.parameter.field,
+          e.parameter.value
         );
         return jsonResponse({ ok: true });
 
@@ -201,4 +246,130 @@ function updateSceneStage(sheetName, rowIndex, stage, value) {
 
   // rowIndex: 0-based 씬 인덱스 → +2 (헤더 1행 + 1-based)
   sheet.getRange(rowIndex + 2, column).setValue(value);
+}
+
+// ─── 헤더가 있는 새 시트 탭 생성 ─────────────────────────────
+
+function createSheetTab(tabName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 이미 존재하면 에러
+  if (ss.getSheetByName(tabName)) {
+    throw new Error('이미 존재하는 탭: ' + tabName);
+  }
+
+  var sheet = ss.insertSheet(tabName);
+
+  // 헤더 행 설정
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+
+  // 헤더 스타일
+  var headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground('#E8EAF6');
+
+  // 열 너비 조정
+  sheet.setColumnWidth(1, 40);   // No
+  sheet.setColumnWidth(2, 80);   // 씬번호
+  sheet.setColumnWidth(3, 150);  // 메모
+  sheet.setColumnWidth(4, 120);  // 스토리보드URL
+  sheet.setColumnWidth(5, 120);  // 가이드URL
+  sheet.setColumnWidth(6, 80);   // 담당자
+  sheet.setColumnWidth(7, 50);   // LO
+  sheet.setColumnWidth(8, 50);   // 완료
+  sheet.setColumnWidth(9, 50);   // 검수
+  sheet.setColumnWidth(10, 50);  // PNG
+
+  return sheet;
+}
+
+// ─── 에피소드 추가 ───────────────────────────────────────────
+
+function addEpisode(episodeNumber) {
+  if (!episodeNumber || episodeNumber < 1) {
+    throw new Error('유효하지 않은 에피소드 번호');
+  }
+
+  var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_A';
+  createSheetTab(tabName);
+
+  return { sheetName: tabName, episodeNumber: episodeNumber, partId: 'A' };
+}
+
+// ─── 파트 추가 ───────────────────────────────────────────────
+
+function addPart(episodeNumber, partId) {
+  if (!episodeNumber || !partId) {
+    throw new Error('에피소드 번호와 파트 ID 필요');
+  }
+
+  // partId 유효성 (A-Z)
+  if (!/^[A-Z]$/.test(partId)) {
+    throw new Error('파트 ID는 A-Z 대문자 1글자여야 합니다');
+  }
+
+  var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_' + partId;
+  createSheetTab(tabName);
+
+  return { sheetName: tabName, episodeNumber: episodeNumber, partId: partId };
+}
+
+// ─── 씬 추가 ─────────────────────────────────────────────────
+
+function addScene(sheetName, sceneId, assignee, memo) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('Sheet not found: ' + sheetName);
+
+  // 다음 No 계산 (마지막 행의 No + 1)
+  var lastRow = sheet.getLastRow();
+  var nextNo = 1;
+  if (lastRow >= 2) {
+    var lastNo = sheet.getRange(lastRow, 1).getValue();
+    nextNo = (parseInt(lastNo, 10) || lastRow - 1) + 1;
+  }
+
+  // 새 행 추가
+  var newRow = [nextNo, sceneId || '', memo || '', '', '', assignee || '', false, false, false, false];
+  sheet.appendRow(newRow);
+}
+
+// ─── 씬 삭제 ─────────────────────────────────────────────────
+
+function deleteScene(sheetName, rowIndex) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('Sheet not found: ' + sheetName);
+
+  // rowIndex: 0-based 씬 인덱스 → +2 (헤더 + 1-based)
+  var sheetRow = rowIndex + 2;
+
+  if (sheetRow < 2 || sheetRow > sheet.getLastRow()) {
+    throw new Error('유효하지 않은 행 인덱스: ' + rowIndex);
+  }
+
+  sheet.deleteRow(sheetRow);
+}
+
+// ─── 씬 필드 업데이트 ────────────────────────────────────────
+
+function updateSceneField(sheetName, rowIndex, field, value) {
+  var column = FIELD_COLUMNS[field];
+  if (!column) throw new Error('Invalid field: ' + field);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('Sheet not found: ' + sheetName);
+
+  var sheetRow = rowIndex + 2;
+
+  // 불리언 필드는 boolean으로 변환
+  var actualValue = value;
+  if (field === 'lo' || field === 'done' || field === 'review' || field === 'png') {
+    actualValue = (value === 'true' || value === true);
+  } else if (field === 'no') {
+    actualValue = parseInt(value, 10) || 0;
+  }
+
+  sheet.getRange(sheetRow, column).setValue(actualValue);
 }
