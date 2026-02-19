@@ -103,6 +103,7 @@ export const useDataStore = create<DataState>((set, get) => ({
           storyboardUrl: '',
           guideUrl: '',
           assignee: assignee || '',
+          layoutId: '',
           lo: false, done: false, review: false, png: false,
         };
         return { ...part, scenes: [...part.scenes, newScene] };

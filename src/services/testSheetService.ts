@@ -100,6 +100,7 @@ export async function addTestScene(
         storyboardUrl: '',
         guideUrl: '',
         assignee: assignee || '',
+        layoutId: '',
         lo: false,
         done: false,
         review: false,
@@ -200,6 +201,8 @@ function makeScene(no: number, partPrefix: string, assigneeIdx: number): Scene {
   const assignee = SAMPLE_ASSIGNEES[assigneeIdx % SAMPLE_ASSIGNEES.length];
   // 랜덤 진행도
   const progress = Math.random();
+  // 레이아웃 그룹 시뮬레이션: 3~4씬마다 같은 레이아웃
+  const layoutGroup = Math.ceil(no / 3);
   return {
     no,
     sceneId: id,
@@ -207,6 +210,7 @@ function makeScene(no: number, partPrefix: string, assigneeIdx: number): Scene {
     storyboardUrl: '',
     guideUrl: '',
     assignee,
+    layoutId: String(layoutGroup),
     lo: progress > 0.2,
     done: progress > 0.4,
     review: progress > 0.6,

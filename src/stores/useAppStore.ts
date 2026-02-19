@@ -2,6 +2,11 @@ import { create } from 'zustand';
 import type { WidgetLayoutItem, SheetsConfig } from '@/types';
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'settings';
+export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
+export type SortDir = 'asc' | 'desc';
+export type StatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';
+export type SceneViewMode = 'card' | 'table';
+export type SceneGroupMode = 'flat' | 'layout';
 
 interface AppState {
   // 앱 모드
@@ -24,15 +29,25 @@ interface AppState {
   setWidgetLayout: (layout: WidgetLayoutItem[]) => void;
   setEditMode: (v: boolean) => void;
 
-  // 필터 상태
+  // 필터/정렬 상태
   selectedEpisode: number | null;
   selectedPart: string | null;
   selectedAssignee: string | null;
   searchQuery: string;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  statusFilter: StatusFilter;
+  sceneViewMode: SceneViewMode;
+  sceneGroupMode: SceneGroupMode;
   setSelectedEpisode: (ep: number | null) => void;
   setSelectedPart: (part: string | null) => void;
   setSelectedAssignee: (name: string | null) => void;
   setSearchQuery: (q: string) => void;
+  setSortKey: (key: SortKey) => void;
+  setSortDir: (dir: SortDir) => void;
+  setStatusFilter: (f: StatusFilter) => void;
+  setSceneViewMode: (mode: SceneViewMode) => void;
+  setSceneGroupMode: (mode: SceneGroupMode) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -56,8 +71,18 @@ export const useAppStore = create<AppState>((set) => ({
   selectedPart: null,
   selectedAssignee: null,
   searchQuery: '',
+  sortKey: 'no',
+  sortDir: 'asc',
+  statusFilter: 'all',
+  sceneViewMode: 'card',
+  sceneGroupMode: 'flat',
   setSelectedEpisode: (ep) => set({ selectedEpisode: ep }),
   setSelectedPart: (part) => set({ selectedPart: part }),
   setSelectedAssignee: (name) => set({ selectedAssignee: name }),
   setSearchQuery: (q) => set({ searchQuery: q }),
+  setSortKey: (key) => set({ sortKey: key }),
+  setSortDir: (dir) => set({ sortDir: dir }),
+  setStatusFilter: (f) => set({ statusFilter: f }),
+  setSceneViewMode: (mode) => set({ sceneViewMode: mode }),
+  setSceneGroupMode: (mode) => set({ sceneGroupMode: mode }),
 }));

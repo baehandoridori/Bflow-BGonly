@@ -27,6 +27,7 @@ export interface Scene {
   storyboardUrl: string;
   guideUrl: string;
   assignee: string;
+  layoutId: string;
   lo: boolean;
   done: boolean;
   review: boolean;

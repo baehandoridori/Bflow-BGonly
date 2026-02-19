@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import type { SortKey, StatusFilter } from '@/stores/useAppStore';
 import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
 import type { Scene, Stage } from '@/types';
-import { sceneProgress } from '@/utils/calcStats';
+import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List } from 'lucide-react';
 import {
   toggleTestSceneStage,
   addTestEpisode,
@@ -58,8 +60,13 @@ function SceneCard({ scene, sceneIndex, sheetName, onToggle, onDelete, onFieldUp
     if (e.key === 'Escape') setEditing(null);
   };
 
+  const borderColor = pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct > 0 ? '#E17055' : '#2D3041';
+
   return (
-    <div className="bg-bg-card border border-bg-border rounded-lg p-4 flex flex-col gap-2 group">
+    <div
+      className="bg-bg-card border border-bg-border rounded-lg p-4 flex flex-col gap-2 group"
+      style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
+    >
       {/* 상단: 씬 정보 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -110,6 +117,29 @@ function SceneCard({ scene, sceneIndex, sheetName, onToggle, onDelete, onFieldUp
             ×
           </button>
         </div>
+      </div>
+
+      {/* 레이아웃 ID */}
+      <div className="flex items-center gap-1">
+        <Layers size={10} className="text-text-secondary/50" />
+        {editing === 'layoutId' ? (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={handleKeyDown}
+            placeholder="레이아웃 번호"
+            className="text-xs bg-bg-primary border border-accent rounded px-1 py-0.5 text-text-primary flex-1"
+          />
+        ) : (
+          <span
+            className="text-[10px] text-text-secondary/60 cursor-pointer hover:text-accent font-mono"
+            onClick={() => startEdit('layoutId', scene.layoutId || '')}
+          >
+            {scene.layoutId ? `L#${scene.layoutId}` : '(레이아웃)'}
+          </span>
+        )}
       </div>
 
       {/* 메모 */}
@@ -169,38 +199,184 @@ function SceneCard({ scene, sceneIndex, sheetName, onToggle, onDelete, onFieldUp
   );
 }
 
-// ─── 씬 추가 폼 ──────────────────────────────────────────────
+// ─── 테이블 뷰 ──────────────────────────────────────────────────
+
+interface SceneTableProps {
+  scenes: Scene[];
+  allScenes: Scene[];
+  onToggle: (sceneId: string, stage: Stage) => void;
+  onDelete: (sceneIndex: number) => void;
+  onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
+}
+
+function SceneTable({ scenes, allScenes, onToggle, onDelete, onFieldUpdate }: SceneTableProps) {
+  return (
+    <div className="overflow-auto rounded-lg border border-bg-border">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-bg-card border-b border-bg-border text-text-secondary text-xs">
+            <th className="px-3 py-2 text-left font-medium">No</th>
+            <th className="px-3 py-2 text-left font-medium">씬번호</th>
+            <th className="px-3 py-2 text-left font-medium">담당자</th>
+            <th className="px-3 py-2 text-left font-medium">레이아웃</th>
+            <th className="px-3 py-2 text-left font-medium">메모</th>
+            {STAGES.map((s) => (
+              <th key={s} className="px-2 py-2 text-center font-medium">{STAGE_LABELS[s]}</th>
+            ))}
+            <th className="px-3 py-2 text-center font-medium">진행</th>
+            <th className="px-2 py-2" />
+          </tr>
+        </thead>
+        <tbody>
+          {scenes.map((scene) => {
+            const pct = sceneProgress(scene);
+            const idx = allScenes.indexOf(scene);
+            return (
+              <tr key={`${scene.sceneId}-${idx}`} className="border-b border-bg-border/50 hover:bg-bg-card/50 group">
+                <td className="px-3 py-2 font-mono text-accent text-xs">#{scene.no}</td>
+                <td className="px-3 py-2 text-text-primary">{scene.sceneId || '-'}</td>
+                <td className="px-3 py-2 text-text-secondary">{scene.assignee || '-'}</td>
+                <td className="px-3 py-2 text-text-secondary font-mono text-xs">{scene.layoutId ? `#${scene.layoutId}` : '-'}</td>
+                <td className="px-3 py-2 text-text-secondary max-w-[150px] truncate">{scene.memo || '-'}</td>
+                {STAGES.map((stage) => (
+                  <td key={stage} className="px-2 py-2 text-center">
+                    <button
+                      onClick={() => onToggle(scene.sceneId, stage)}
+                      className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all"
+                      style={
+                        scene[stage]
+                          ? { backgroundColor: STAGE_COLORS[stage], color: '#0F1117' }
+                          : { border: '1px solid #2D3041' }
+                      }
+                    >
+                      {scene[stage] ? '✓' : ''}
+                    </button>
+                  </td>
+                ))}
+                <td className="px-3 py-2 text-center">
+                  <span className={cn(
+                    'text-xs font-mono',
+                    pct >= 100 ? 'text-green-400' : pct >= 50 ? 'text-yellow-400' : 'text-text-secondary'
+                  )}>
+                    {Math.round(pct)}%
+                  </span>
+                </td>
+                <td className="px-2 py-2">
+                  <button
+                    onClick={() => onDelete(idx)}
+                    className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400"
+                  >
+                    ×
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── 씬 추가 폼 (P1-3: 접두사 드롭다운 + 자동 번호) ────────────
+
+const SCENE_PREFIXES = ['a', 'b', 'c', 'd', 'sc'];
+
+function suggestNextNumber(prefix: string, existingIds: string[]): string {
+  // prefix에 해당하는 기존 번호 추출
+  const nums = existingIds
+    .filter((id) => id.startsWith(prefix))
+    .map((id) => parseInt(id.slice(prefix.length), 10))
+    .filter((n) => !isNaN(n))
+    .sort((a, b) => a - b);
+
+  if (nums.length === 0) return '001';
+
+  // 빈 번호 찾기 (1부터 시작)
+  for (let i = 0; i < nums.length; i++) {
+    if (nums[i] !== i + 1) {
+      return String(i + 1).padStart(3, '0');
+    }
+  }
+  // 빈 번호 없으면 다음 번호
+  return String(nums[nums.length - 1] + 1).padStart(3, '0');
+}
 
 interface AddSceneFormProps {
+  existingSceneIds: string[];
   onSubmit: (sceneId: string, assignee: string, memo: string) => void;
   onCancel: () => void;
 }
 
-function AddSceneForm({ onSubmit, onCancel }: AddSceneFormProps) {
-  const [sceneId, setSceneId] = useState('');
+function AddSceneForm({ existingSceneIds, onSubmit, onCancel }: AddSceneFormProps) {
+  const [prefix, setPrefix] = useState(SCENE_PREFIXES[0]);
+  const [number, setNumber] = useState(() => suggestNextNumber(SCENE_PREFIXES[0], existingSceneIds));
   const [assignee, setAssignee] = useState('');
   const [memo, setMemo] = useState('');
 
+  const sceneId = `${prefix}${number}`;
+  const isDuplicate = existingSceneIds.includes(sceneId);
+
+  const handlePrefixChange = (newPrefix: string) => {
+    setPrefix(newPrefix);
+    setNumber(suggestNextNumber(newPrefix, existingSceneIds));
+  };
+
   const handleSubmit = () => {
+    if (isDuplicate) return;
     onSubmit(sceneId, assignee, memo);
-    setSceneId('');
+    // 다음 번호로 자동 전진
+    const updatedIds = [...existingSceneIds, sceneId];
+    setNumber(suggestNextNumber(prefix, updatedIds));
     setAssignee('');
     setMemo('');
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !isDuplicate) handleSubmit();
+    if (e.key === 'Escape') onCancel();
   };
 
   return (
     <div className="bg-bg-card border-2 border-accent/50 rounded-lg p-4 flex flex-col gap-2">
       <div className="flex gap-2">
-        <input
-          autoFocus
-          value={sceneId}
-          onChange={(e) => setSceneId(e.target.value)}
-          placeholder="씬번호"
-          className="flex-1 bg-bg-primary border border-bg-border rounded px-2 py-1 text-sm text-text-primary placeholder:text-text-secondary/40"
-        />
+        {/* 접두사 드롭다운 */}
+        <select
+          value={prefix}
+          onChange={(e) => handlePrefixChange(e.target.value)}
+          className="bg-bg-primary border border-bg-border rounded px-2 py-1 text-sm text-text-primary w-16"
+        >
+          {SCENE_PREFIXES.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+        {/* 번호 입력 */}
+        <div className="relative flex-1">
+          <input
+            autoFocus
+            value={number}
+            onChange={(e) => setNumber(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="001"
+            className={cn(
+              'w-full bg-bg-primary border rounded px-2 py-1 text-sm text-text-primary placeholder:text-text-secondary/40',
+              isDuplicate ? 'border-red-500' : 'border-bg-border'
+            )}
+          />
+          {isDuplicate && (
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-red-400">
+              중복
+            </span>
+          )}
+        </div>
+        {/* 미리보기 */}
+        <span className="flex items-center text-xs text-text-secondary font-mono min-w-[60px]">
+          → {sceneId}
+        </span>
         <input
           value={assignee}
           onChange={(e) => setAssignee(e.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="담당자"
           className="w-20 bg-bg-primary border border-bg-border rounded px-2 py-1 text-sm text-text-primary placeholder:text-text-secondary/40"
         />
@@ -208,10 +384,14 @@ function AddSceneForm({ onSubmit, onCancel }: AddSceneFormProps) {
       <input
         value={memo}
         onChange={(e) => setMemo(e.target.value)}
+        onKeyDown={handleKeyDown}
         placeholder="메모 (선택)"
         className="bg-bg-primary border border-bg-border rounded px-2 py-1 text-sm text-text-primary placeholder:text-text-secondary/40"
       />
-      <div className="flex gap-2 justify-end">
+      <div className="flex gap-2 justify-end items-center">
+        <span className="text-[10px] text-text-secondary/50 mr-auto">
+          Enter로 추가 · Esc로 취소
+        </span>
         <button
           onClick={onCancel}
           className="px-3 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
@@ -220,7 +400,11 @@ function AddSceneForm({ onSubmit, onCancel }: AddSceneFormProps) {
         </button>
         <button
           onClick={handleSubmit}
-          className="px-3 py-1 bg-accent text-white text-xs rounded-md hover:bg-accent/80 transition-colors"
+          disabled={isDuplicate}
+          className={cn(
+            'px-3 py-1 text-white text-xs rounded-md transition-colors',
+            isDuplicate ? 'bg-gray-500 cursor-not-allowed' : 'bg-accent hover:bg-accent/80'
+          )}
         >
           추가
         </button>
@@ -242,7 +426,9 @@ export function ScenesView() {
   const setEpisodes = useDataStore((s) => s.setEpisodes);
   const { sheetsConnected } = useAppStore();
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery } = useAppStore();
+  const { sortKey, sortDir, statusFilter, sceneViewMode, sceneGroupMode } = useAppStore();
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery } = useAppStore();
+  const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
 
   const [showAddScene, setShowAddScene] = useState(false);
 
@@ -284,6 +470,49 @@ export function ScenesView() {
         s.memo.toLowerCase().includes(q)
     );
   }
+  // 상태 필터
+  if (statusFilter === 'done') {
+    scenes = scenes.filter(isFullyDone);
+  } else if (statusFilter === 'not-started') {
+    scenes = scenes.filter(isNotStarted);
+  } else if (statusFilter === 'in-progress') {
+    scenes = scenes.filter((s) => !isFullyDone(s) && !isNotStarted(s));
+  }
+  // 정렬
+  scenes = [...scenes].sort((a, b) => {
+    let cmp = 0;
+    switch (sortKey) {
+      case 'no': cmp = a.no - b.no; break;
+      case 'assignee': cmp = (a.assignee || '').localeCompare(b.assignee || ''); break;
+      case 'progress': cmp = sceneProgress(a) - sceneProgress(b); break;
+      case 'incomplete': {
+        const aLeft = 4 - [a.lo, a.done, a.review, a.png].filter(Boolean).length;
+        const bLeft = 4 - [b.lo, b.done, b.review, b.png].filter(Boolean).length;
+        cmp = bLeft - aLeft; // 미완료 많은 것 먼저
+        break;
+      }
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  // 레이아웃별 그룹핑 (P1-4)
+  const layoutGroups = (() => {
+    if (sceneGroupMode !== 'layout') return null;
+    const groups = new Map<string, Scene[]>();
+    for (const scene of scenes) {
+      const lid = (scene.layoutId || '').trim();
+      const key = lid || '미분류';
+      const arr = groups.get(key) || [];
+      arr.push(scene);
+      groups.set(key, arr);
+    }
+    // 정렬: 미분류를 맨 뒤로, 나머지는 번호순
+    return Array.from(groups.entries()).sort((a, b) => {
+      if (a[0] === '미분류') return 1;
+      if (b[0] === '미분류') return -1;
+      return a[0].localeCompare(b[0], undefined, { numeric: true });
+    });
+  })();
 
   // 담당자 목록 (현재 파트 기준)
   const assignees = Array.from(
@@ -393,9 +622,8 @@ export function ScenesView() {
   const handleAddScene = async (sceneId: string, assignee: string, memo: string) => {
     if (!currentPart) return;
 
-    // 낙관적 업데이트
+    // 낙관적 업데이트 (폼은 닫지 않음 — 연속 입력 지원)
     addSceneOptimistic(currentPart.sheetName, sceneId, assignee, memo);
-    setShowAddScene(false);
 
     try {
       if (sheetsConnected) {
@@ -539,14 +767,114 @@ export function ScenesView() {
           ))}
         </div>
 
-        {/* 검색 */}
-        <input
-          type="text"
-          placeholder="씬번호, 메모 검색..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 ml-auto w-48"
-        />
+        {/* 구분선 */}
+        <div className="w-px h-6 bg-bg-border" />
+
+        {/* 상태 필터 */}
+        {(['all', 'not-started', 'in-progress', 'done'] as StatusFilter[]).map((f) => {
+          const labels: Record<StatusFilter, string> = {
+            all: '전체', 'not-started': '미착수', 'in-progress': '진행중', done: '완료',
+          };
+          return (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              className={cn(
+                'px-2 py-1 rounded-md text-xs transition-colors',
+                statusFilter === f
+                  ? f === 'done' ? 'bg-green-500/20 text-green-400'
+                    : f === 'not-started' ? 'bg-red-500/20 text-red-400'
+                    : f === 'in-progress' ? 'bg-yellow-500/20 text-yellow-400'
+                    : 'bg-accent/20 text-accent'
+                  : 'text-text-secondary hover:text-text-primary'
+              )}
+            >
+              {labels[f]}
+            </button>
+          );
+        })}
+
+        {/* 오른쪽 그룹: 정렬 + 뷰모드 + 검색 */}
+        <div className="flex items-center gap-2 ml-auto">
+          {/* 정렬 */}
+          <div className="flex items-center gap-1">
+            <ArrowUpDown size={14} className="text-text-secondary" />
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="bg-bg-primary border border-bg-border rounded px-2 py-1 text-xs text-text-primary"
+            >
+              <option value="no">번호순</option>
+              <option value="assignee">담당자순</option>
+              <option value="progress">진행률순</option>
+              <option value="incomplete">미완료 우선</option>
+            </select>
+            <button
+              onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
+              className="px-1.5 py-1 text-xs text-text-secondary hover:text-text-primary rounded hover:bg-bg-border/50"
+              title={sortDir === 'asc' ? '오름차순' : '내림차순'}
+            >
+              {sortDir === 'asc' ? '↑' : '↓'}
+            </button>
+          </div>
+
+          {/* 그룹 모드 토글 */}
+          <div className="flex border border-bg-border rounded-lg overflow-hidden">
+            <button
+              onClick={() => setSceneGroupMode('flat')}
+              className={cn(
+                'p-1.5 transition-colors',
+                sceneGroupMode === 'flat' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
+              )}
+              title="씬번호별"
+            >
+              <List size={14} />
+            </button>
+            <button
+              onClick={() => setSceneGroupMode('layout')}
+              className={cn(
+                'p-1.5 transition-colors',
+                sceneGroupMode === 'layout' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
+              )}
+              title="레이아웃별"
+            >
+              <Layers size={14} />
+            </button>
+          </div>
+
+          {/* 뷰 모드 토글 */}
+          <div className="flex border border-bg-border rounded-lg overflow-hidden">
+            <button
+              onClick={() => setSceneViewMode('card')}
+              className={cn(
+                'p-1.5 transition-colors',
+                sceneViewMode === 'card' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
+              )}
+              title="카드 뷰"
+            >
+              <LayoutGrid size={14} />
+            </button>
+            <button
+              onClick={() => setSceneViewMode('table')}
+              className={cn(
+                'p-1.5 transition-colors',
+                sceneViewMode === 'table' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
+              )}
+              title="테이블 뷰"
+            >
+              <Table2 size={14} />
+            </button>
+          </div>
+
+          {/* 검색 */}
+          <input
+            type="text"
+            placeholder="검색..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 w-36"
+          />
+        </div>
       </div>
 
       {/* 상단 고정 진행도 */}
@@ -573,33 +901,109 @@ export function ScenesView() {
         )}
       </div>
 
-      {/* 씬 카드 목록 */}
-      <div className="flex-1 overflow-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 content-start">
-        {/* 씬 추가 폼 */}
-        {showAddScene && (
-          <AddSceneForm
-            onSubmit={handleAddScene}
-            onCancel={() => setShowAddScene(false)}
-          />
-        )}
+      {/* 씬 추가 폼 */}
+      {showAddScene && (
+        <AddSceneForm
+          existingSceneIds={(currentPart?.scenes ?? []).map((s) => s.sceneId)}
+          onSubmit={handleAddScene}
+          onCancel={() => setShowAddScene(false)}
+        />
+      )}
 
-        {scenes.map((scene, idx) => (
-          <SceneCard
-            key={`${scene.sceneId}-${idx}`}
-            scene={scene}
-            sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
-            sheetName={currentPart?.sheetName ?? ''}
+      {/* 씬 목록 */}
+      {scenes.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-text-secondary">
+          표시할 씬이 없습니다.
+        </div>
+      ) : sceneGroupMode === 'layout' && layoutGroups ? (
+        /* ── 레이아웃별 그룹 뷰 (P1-4) ── */
+        <div className="flex-1 overflow-auto flex flex-col gap-4">
+          {layoutGroups.map(([layoutKey, groupScenes]) => {
+            const groupTotal = groupScenes.length * 4;
+            const groupDone = groupScenes.reduce(
+              (sum, s) => sum + [s.lo, s.done, s.review, s.png].filter(Boolean).length, 0
+            );
+            const groupPct = groupTotal > 0 ? Math.round((groupDone / groupTotal) * 100) : 0;
+            const sceneIds = groupScenes.map((s) => s.sceneId).join(', ');
+
+            return (
+              <div key={layoutKey} className="flex flex-col gap-2">
+                {/* 레이아웃 그룹 헤더 */}
+                <div className="flex items-center gap-3 bg-bg-card/50 border border-bg-border rounded-lg px-4 py-2">
+                  <Layers size={14} className="text-accent" />
+                  <span className="text-sm font-bold text-text-primary">
+                    레이아웃 #{layoutKey}
+                  </span>
+                  <span className="text-xs text-text-secondary">
+                    {sceneIds}
+                  </span>
+                  <div className="flex-1 h-1.5 bg-bg-primary rounded-full overflow-hidden ml-2">
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${groupPct}%`,
+                        backgroundColor: groupPct >= 100 ? '#00B894' : groupPct >= 50 ? '#FDCB6E' : '#E17055',
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs font-mono text-text-secondary">{groupPct}%</span>
+                </div>
+
+                {/* 그룹 내 씬들 */}
+                {sceneViewMode === 'table' ? (
+                  <SceneTable
+                    scenes={groupScenes}
+                    allScenes={currentPart?.scenes ?? []}
+                    onToggle={handleToggle}
+                    onDelete={handleDeleteScene}
+                    onFieldUpdate={handleFieldUpdate}
+                  />
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {groupScenes.map((scene, idx) => (
+                      <SceneCard
+                        key={`${scene.sceneId}-${idx}`}
+                        scene={scene}
+                        sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
+                        sheetName={currentPart?.sheetName ?? ''}
+                        onToggle={handleToggle}
+                        onDelete={handleDeleteScene}
+                        onFieldUpdate={handleFieldUpdate}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : sceneViewMode === 'table' ? (
+        /* ── 테이블 뷰 (플랫) ── */
+        <div className="flex-1 overflow-auto">
+          <SceneTable
+            scenes={scenes}
+            allScenes={currentPart?.scenes ?? []}
             onToggle={handleToggle}
             onDelete={handleDeleteScene}
             onFieldUpdate={handleFieldUpdate}
           />
-        ))}
-        {scenes.length === 0 && !showAddScene && (
-          <div className="col-span-full text-center text-text-secondary py-12">
-            표시할 씬이 없습니다. &quot;씬 추가&quot; 버튼으로 새 씬을 추가하세요.
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        /* ── 카드 뷰 (플랫) ── */
+        <div className="flex-1 overflow-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 content-start">
+          {scenes.map((scene, idx) => (
+            <SceneCard
+              key={`${scene.sceneId}-${idx}`}
+              scene={scene}
+              sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
+              sheetName={currentPart?.sheetName ?? ''}
+              onToggle={handleToggle}
+              onDelete={handleDeleteScene}
+              onFieldUpdate={handleFieldUpdate}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
