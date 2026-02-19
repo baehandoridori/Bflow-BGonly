@@ -284,10 +284,21 @@ PWA 단일 사용자             →  각 PC의 Windows 사용자별 자동 분�
 
 ## 참조 문서
 
+- **`ROADMAP.md`** — 향후 개발 로드맵 (Phase 1~5, 기능별 상세 스펙)
 - `BG_DASHBOARD_PLAN.md` — 전체 구현 계획서 (565줄 상세 스펙)
 - `bg-dashboard-architecture.mermaid` — 아키텍처 다이어그램
 - `bg-dashboard-dataflow.mermaid` — 데이터 플로우 시퀀스 다이어그램
 - Bflow 원본 (`/home/user/Bflow`) — 위젯 레이아웃 참고 (읽기 전용)
+
+---
+
+## 문서 갱신 규칙
+
+**새 작업 또는 ROADMAP 항목 착수 시 반드시 이 문서들을 갱신할 것:**
+
+1. **ROADMAP.md**: 해당 항목의 체크박스를 `[진행]` / `[완료]`로 변경
+2. **CLAUDE.md**: 구현 로드맵 요약 섹션을 현재 상태에 맞게 업데이트
+3. **package.json**: 기능 추가 시 마이너 버전, 버그 수정 시 패치 버전 증가
 
 ---
 

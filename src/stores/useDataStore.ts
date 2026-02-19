@@ -18,24 +18,29 @@ interface DataState {
   setLastSyncTime: (t: number) => void;
   setSyncError: (err: string | null) => void;
 
-  // 씬 체크박스 토글 (낙관적 업데이트)
+  // 낙관적 업데이트 — UI 즉시 반영
   toggleSceneStage: (
     episodeNumber: number,
     partId: string,
     sceneId: string,
     stage: keyof Pick<Scene, 'lo' | 'done' | 'review' | 'png'>
   ) => void;
+  addEpisodeOptimistic: (episodeNumber: number) => void;
+  addPartOptimistic: (episodeNumber: number, partId: string) => void;
+  addSceneOptimistic: (sheetName: string, sceneId: string, assignee: string, memo: string) => void;
+  deleteSceneOptimistic: (sheetName: string, rowIndex: number) => void;
+  updateSceneFieldOptimistic: (sheetName: string, rowIndex: number, field: string, value: string) => void;
+}
+
+function applyUpdate(get: () => DataState, episodes: Episode[]) {
+  return { episodes, stats: calcDashboardStats(episodes) };
 }
 
 export const useDataStore = create<DataState>((set, get) => ({
   episodes: [],
   stats: calcDashboardStats([]),
 
-  setEpisodes: (episodes) =>
-    set({
-      episodes,
-      stats: calcDashboardStats(episodes),
-    }),
+  setEpisodes: (episodes) => set(applyUpdate(get, episodes)),
 
   isSyncing: false,
   lastSyncTime: null,
@@ -61,9 +66,80 @@ export const useDataStore = create<DataState>((set, get) => ({
         }),
       };
     });
-    set({
-      episodes,
-      stats: calcDashboardStats(episodes),
+    set(applyUpdate(get, episodes));
+  },
+
+  addEpisodeOptimistic: (episodeNumber) => {
+    const tabName = `EP${String(episodeNumber).padStart(2, '0')}_A`;
+    const newEp: Episode = {
+      episodeNumber,
+      title: `EP.${String(episodeNumber).padStart(2, '0')}`,
+      parts: [{ partId: 'A', sheetName: tabName, scenes: [] }],
+    };
+    set(applyUpdate(get, [...get().episodes, newEp]));
+  },
+
+  addPartOptimistic: (episodeNumber, partId) => {
+    const tabName = `EP${String(episodeNumber).padStart(2, '0')}_${partId}`;
+    const episodes = get().episodes.map((ep) => {
+      if (ep.episodeNumber !== episodeNumber) return ep;
+      return { ...ep, parts: [...ep.parts, { partId, sheetName: tabName, scenes: [] }] };
     });
+    set(applyUpdate(get, episodes));
+  },
+
+  addSceneOptimistic: (sheetName, sceneId, assignee, memo) => {
+    const episodes = get().episodes.map((ep) => ({
+      ...ep,
+      parts: ep.parts.map((part) => {
+        if (part.sheetName !== sheetName) return part;
+        const nextNo = part.scenes.length > 0
+          ? Math.max(...part.scenes.map((s) => s.no)) + 1
+          : 1;
+        const newScene: Scene = {
+          no: nextNo,
+          sceneId: sceneId || '',
+          memo: memo || '',
+          storyboardUrl: '',
+          guideUrl: '',
+          assignee: assignee || '',
+          lo: false, done: false, review: false, png: false,
+        };
+        return { ...part, scenes: [...part.scenes, newScene] };
+      }),
+    }));
+    set(applyUpdate(get, episodes));
+  },
+
+  deleteSceneOptimistic: (sheetName, rowIndex) => {
+    const episodes = get().episodes.map((ep) => ({
+      ...ep,
+      parts: ep.parts.map((part) => {
+        if (part.sheetName !== sheetName) return part;
+        return { ...part, scenes: part.scenes.filter((_, i) => i !== rowIndex) };
+      }),
+    }));
+    set(applyUpdate(get, episodes));
+  },
+
+  updateSceneFieldOptimistic: (sheetName, rowIndex, field, value) => {
+    const episodes = get().episodes.map((ep) => ({
+      ...ep,
+      parts: ep.parts.map((part) => {
+        if (part.sheetName !== sheetName) return part;
+        return {
+          ...part,
+          scenes: part.scenes.map((scene, i) => {
+            if (i !== rowIndex) return scene;
+            if (field === 'lo' || field === 'done' || field === 'review' || field === 'png') {
+              return { ...scene, [field]: value === 'true' };
+            }
+            if (field === 'no') return { ...scene, no: parseInt(value, 10) || 0 };
+            return { ...scene, [field]: value };
+          }),
+        };
+      }),
+    }));
+    set(applyUpdate(get, episodes));
   },
 }));

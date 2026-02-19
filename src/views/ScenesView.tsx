@@ -234,26 +234,29 @@ function AddSceneForm({ onSubmit, onCancel }: AddSceneFormProps) {
 export function ScenesView() {
   const episodes = useDataStore((s) => s.episodes);
   const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
+  const addEpisodeOptimistic = useDataStore((s) => s.addEpisodeOptimistic);
+  const addPartOptimistic = useDataStore((s) => s.addPartOptimistic);
+  const addSceneOptimistic = useDataStore((s) => s.addSceneOptimistic);
+  const deleteSceneOptimistic = useDataStore((s) => s.deleteSceneOptimistic);
+  const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
+  const setEpisodes = useDataStore((s) => s.setEpisodes);
   const { sheetsConnected } = useAppStore();
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery } = useAppStore();
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery } = useAppStore();
 
   const [showAddScene, setShowAddScene] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
 
-  // 데이터 리로드 (App.tsx의 loadData를 트리거하기 위해 sheetsConnected를 재설정)
-  const reloadData = async () => {
-    // MainLayout의 onRefresh를 직접 호출할 수 없으므로
-    // 강제 리로드: sheetsConnected를 false→true로 토글하여 useEffect 재실행
-    // 대신 간단하게: 직접 readAllFromSheets 호출
-    const { readAllFromSheets } = await import('@/services/sheetsService');
-    const { readTestSheet } = await import('@/services/testSheetService');
-    const setEpisodes = useDataStore.getState().setEpisodes;
+  // 백그라운드 동기화: 낙관적 업데이트 후 서버/파일과 싱크
+  const syncInBackground = async () => {
     try {
-      const eps = sheetsConnected ? await readAllFromSheets() : await readTestSheet();
-      setEpisodes(eps);
+      if (sheetsConnected) {
+        const { readAllFromSheets } = await import('@/services/sheetsService');
+        const eps = await readAllFromSheets();
+        setEpisodes(eps);
+      }
+      // 테스트 모드: 파일 쓰기는 이미 test 함수에서 처리됨
     } catch (err) {
-      console.error('[리로드 실패]', err);
+      console.error('[백그라운드 동기화 실패]', err);
     }
   };
 
@@ -335,15 +338,18 @@ export function ScenesView() {
   };
 
   const handleAddEpisode = async () => {
-    setIsAdding(true);
+    // 낙관적 업데이트: UI 즉시 반영
+    addEpisodeOptimistic(nextEpisodeNumber);
+    setSelectedEpisode(nextEpisodeNumber);
+
+    // 백그라운드에서 서버/파일에 저장
     try {
       if (sheetsConnected) {
         await addEpisodeToSheets(nextEpisodeNumber);
+        syncInBackground();
       } else {
         await addTestEpisode(episodes, nextEpisodeNumber);
       }
-      await reloadData();
-      setSelectedEpisode(nextEpisodeNumber);
     } catch (err) {
       const msg = String(err);
       if (msg.includes('Unknown action')) {
@@ -351,8 +357,7 @@ export function ScenesView() {
       } else {
         alert(`에피소드 추가 실패: ${err}`);
       }
-    } finally {
-      setIsAdding(false);
+      syncInBackground();
     }
   };
 
@@ -362,15 +367,18 @@ export function ScenesView() {
       alert('파트는 Z까지만 가능합니다');
       return;
     }
-    setIsAdding(true);
+
+    // 낙관적 업데이트
+    addPartOptimistic(currentEp.episodeNumber, nextPartId);
+    setSelectedPart(nextPartId);
+
     try {
       if (sheetsConnected) {
         await addPartToSheets(currentEp.episodeNumber, nextPartId);
+        syncInBackground();
       } else {
         await addTestPart(episodes, currentEp.episodeNumber, nextPartId);
       }
-      await reloadData();
-      setSelectedPart(nextPartId);
     } catch (err) {
       const msg = String(err);
       if (msg.includes('Unknown action')) {
@@ -378,22 +386,24 @@ export function ScenesView() {
       } else {
         alert(`파트 추가 실패: ${err}`);
       }
-    } finally {
-      setIsAdding(false);
+      syncInBackground();
     }
   };
 
   const handleAddScene = async (sceneId: string, assignee: string, memo: string) => {
     if (!currentPart) return;
-    setIsAdding(true);
+
+    // 낙관적 업데이트
+    addSceneOptimistic(currentPart.sheetName, sceneId, assignee, memo);
+    setShowAddScene(false);
+
     try {
       if (sheetsConnected) {
         await addSceneToSheets(currentPart.sheetName, sceneId, assignee, memo);
+        syncInBackground();
       } else {
         await addTestScene(episodes, currentPart.sheetName, sceneId, assignee, memo);
       }
-      await reloadData();
-      setShowAddScene(false);
     } catch (err) {
       const msg = String(err);
       if (msg.includes('Unknown action')) {
@@ -401,37 +411,46 @@ export function ScenesView() {
       } else {
         alert(`씬 추가 실패: ${err}`);
       }
-    } finally {
-      setIsAdding(false);
+      syncInBackground();
     }
   };
 
   const handleDeleteScene = async (sceneIndex: number) => {
     if (!currentPart) return;
     if (!confirm('이 씬을 삭제하시겠습니까?')) return;
+
+    // 낙관적 업데이트
+    deleteSceneOptimistic(currentPart.sheetName, sceneIndex);
+
     try {
       if (sheetsConnected) {
         await deleteSceneFromSheets(currentPart.sheetName, sceneIndex);
+        syncInBackground();
       } else {
         await deleteTestScene(episodes, currentPart.sheetName, sceneIndex);
       }
-      await reloadData();
     } catch (err) {
       alert(`씬 삭제 실패: ${err}`);
+      syncInBackground();
     }
   };
 
   const handleFieldUpdate = async (sceneIndex: number, field: string, value: string) => {
     if (!currentPart) return;
+
+    // 낙관적 업데이트
+    updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, field, value);
+
     try {
       if (sheetsConnected) {
         await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, field, value);
+        syncInBackground();
       } else {
         await updateTestSceneField(episodes, currentPart.sheetName, sceneIndex, field, value);
       }
-      await reloadData();
     } catch (err) {
       alert(`수정 실패: ${err}`);
+      syncInBackground();
     }
   };
 
@@ -455,8 +474,8 @@ export function ScenesView() {
         {/* 에피소드 추가 */}
         <button
           onClick={handleAddEpisode}
-          disabled={isAdding}
-          className="px-2.5 py-1.5 bg-accent/20 text-accent text-xs rounded-lg hover:bg-accent/30 disabled:opacity-50 transition-colors"
+
+          className="px-2.5 py-1.5 bg-accent/20 text-accent text-xs rounded-lg hover:bg-accent/30 transition-colors"
           title={`EP.${String(nextEpisodeNumber).padStart(2, '0')} 추가`}
         >
           + EP
@@ -482,8 +501,8 @@ export function ScenesView() {
           {currentEp && (
             <button
               onClick={handleAddPart}
-              disabled={isAdding}
-              className="px-2.5 py-1.5 bg-bg-primary text-text-secondary text-sm rounded-lg hover:text-accent hover:border-accent border border-bg-border disabled:opacity-50 transition-colors"
+    
+              className="px-2.5 py-1.5 bg-bg-primary text-text-secondary text-sm rounded-lg hover:text-accent hover:border-accent border border-bg-border transition-colors"
               title={`${nextPartId}파트 추가`}
             >
               +
@@ -546,8 +565,8 @@ export function ScenesView() {
         {currentPart && (
           <button
             onClick={() => setShowAddScene(true)}
-            disabled={isAdding}
-            className="px-3 py-1 bg-accent text-white text-xs rounded-md hover:bg-accent/80 disabled:opacity-50 transition-colors"
+  
+            className="px-3 py-1 bg-accent text-white text-xs rounded-md hover:bg-accent/80 transition-colors"
           >
             + 씬 추가
           </button>
