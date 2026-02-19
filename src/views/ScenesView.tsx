@@ -76,7 +76,7 @@ function SceneCard({ scene, episodeNumber, partId, onToggle }: SceneCardProps) {
 export function ScenesView() {
   const episodes = useDataStore((s) => s.episodes);
   const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
-  const { isTestMode, sheetsConnected } = useAppStore();
+  const { sheetsConnected } = useAppStore();
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery } = useAppStore();
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery } = useAppStore();
 
@@ -133,8 +133,8 @@ export function ScenesView() {
 
     // 2. 실제 저장 — 모드에 따라 분기
     try {
-      if (!isTestMode && sheetsConnected) {
-        // 라이브 모드: Apps Script 웹 앱을 통해 셀 업데이트
+      if (sheetsConnected) {
+        // 시트 연결됨: Apps Script 웹 앱을 통해 셀 업데이트
         await updateSheetCell(
           currentPart.sheetName,
           sceneIndex,
@@ -142,7 +142,7 @@ export function ScenesView() {
           newValue
         );
       } else {
-        // 테스트 모드: 로컬 JSON 파일에 저장
+        // 시트 미연결: 로컬 JSON 파일에 저장
         await toggleTestSceneStage(
           episodes, currentEp.episodeNumber, currentPart.partId, sceneId, stage
         );
