@@ -19,11 +19,11 @@ export default function App() {
     setSyncError(null);
     try {
       let episodes;
-      if (!isTestMode && sheetsConnected) {
-        // 라이브 모드: Apps Script 웹 앱에서 읽기
+      if (sheetsConnected) {
+        // 시트 연결됨: Apps Script 웹 앱에서 읽기
         episodes = await readAllFromSheets();
       } else {
-        // 테스트 모드: 로컬 JSON 파일
+        // 시트 미연결: 로컬 JSON 파일 (테스트용)
         episodes = await readTestSheet();
       }
       setEpisodes(episodes);
@@ -34,7 +34,7 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }, [isTestMode, sheetsConnected, setEpisodes, setSyncing, setLastSyncTime, setSyncError]);
+  }, [sheetsConnected, setEpisodes, setSyncing, setLastSyncTime, setSyncError]);
 
   // 초기 로드
   useEffect(() => {
@@ -54,16 +54,14 @@ export default function App() {
           setWidgetLayout(savedLayout);
         }
 
-        // 라이브 모드: 저장된 Sheets 설정이 있으면 자동 연결 시도
-        if (!testMode) {
-          const config = await loadSheetsConfig();
-          if (config?.webAppUrl) {
-            setSheetsConfig(config);
-            const result = await connectSheets(config.webAppUrl);
-            if (result.ok) {
-              setSheetsConnected(true);
-              console.log('[Sheets] 자동 연결 성공');
-            }
+        // 저장된 Sheets 설정이 있으면 자동 연결 시도 (모드 무관)
+        const config = await loadSheetsConfig();
+        if (config?.webAppUrl) {
+          setSheetsConfig(config);
+          const result = await connectSheets(config.webAppUrl);
+          if (result.ok) {
+            setSheetsConnected(true);
+            console.log('[Sheets] 자동 연결 성공');
           }
         }
       } catch (err) {
