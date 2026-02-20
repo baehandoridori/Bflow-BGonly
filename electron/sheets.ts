@@ -6,7 +6,7 @@
  *
  * 시트 구조:
  *   A: No | B: 씬번호 | C: 메모 | D: 스토리보드URL | E: 가이드URL
- *   F: 담당자 | G: LO | H: 완료 | I: 검수 | J: PNG | K: 진행률(수식)
+ *   F: 담당자 | G: LO | H: 완료 | I: 검수 | J: PNG | K: 레이아웃
  *
  * 시트 탭 이름: EP01_A, EP01_B, EP02_A, ... (자동 감지)
  */
@@ -89,6 +89,7 @@ export interface EpisodeData {
       storyboardUrl: string;
       guideUrl: string;
       assignee: string;
+      layoutId: string;
       lo: boolean;
       done: boolean;
       review: boolean;

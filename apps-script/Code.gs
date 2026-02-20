@@ -20,13 +20,13 @@
  *   (기존 배포 URL은 이전 코드를 계속 실행합니다)
  * - 시트 탭 이름은 EP01_A, EP01_B, EP02_A 형식이어야 합니다
  * - 열 구조: A(No) B(씬번호) C(메모) D(스토리보드URL) E(가이드URL)
- *            F(담당자) G(LO) H(완료) I(검수) J(PNG)
+ *            F(담당자) G(LO) H(완료) I(검수) J(PNG) K(레이아웃)
  */
 
 var EP_PATTERN = /^EP(\d+)_([A-Z])$/;
 
 // 헤더 행 (새 탭 생성 시 자동 삽입)
-var HEADERS = ['No', '씬번호', '메모', '스토리보드URL', '가이드URL', '담당자', 'LO', '완료', '검수', 'PNG'];
+var HEADERS = ['No', '씬번호', '메모', '스토리보드URL', '가이드URL', '담당자', 'LO', '완료', '검수', 'PNG', '레이아웃'];
 
 // 단계별 열 번호 (1-indexed: G=7, H=8, I=9, J=10)
 var STAGE_COLUMNS = { lo: 7, done: 8, review: 9, png: 10 };
@@ -34,7 +34,7 @@ var STAGE_COLUMNS = { lo: 7, done: 8, review: 9, png: 10 };
 // 씬 편집 가능한 필드 → 열 번호
 var FIELD_COLUMNS = {
   no: 1, sceneId: 2, memo: 3, storyboardUrl: 4,
-  guideUrl: 5, assignee: 6, lo: 7, done: 8, review: 9, png: 10
+  guideUrl: 5, assignee: 6, lo: 7, done: 8, review: 9, png: 10, layoutId: 11
 };
 
 // ─── 요청 핸들러 ─────────────────────────────────────────────
@@ -176,7 +176,7 @@ function readSheetData(sheetName) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
-  var data = sheet.getRange(2, 1, lastRow - 1, 10).getValues();
+  var data = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
   var scenes = [];
 
   for (var i = 0; i < data.length; i++) {
@@ -193,7 +193,8 @@ function readSheetData(sheetName) {
       lo: parseBoolean(row[6]),
       done: parseBoolean(row[7]),
       review: parseBoolean(row[8]),
-      png: parseBoolean(row[9])
+      png: parseBoolean(row[9]),
+      layoutId: String(row[10] || '')
     });
   }
 
@@ -279,6 +280,7 @@ function createSheetTab(tabName) {
   sheet.setColumnWidth(8, 50);   // 완료
   sheet.setColumnWidth(9, 50);   // 검수
   sheet.setColumnWidth(10, 50);  // PNG
+  sheet.setColumnWidth(11, 80);  // 레이아웃
 
   return sheet;
 }
@@ -329,8 +331,8 @@ function addScene(sheetName, sceneId, assignee, memo) {
     nextNo = (parseInt(lastNo, 10) || lastRow - 1) + 1;
   }
 
-  // 새 행 추가
-  var newRow = [nextNo, sceneId || '', memo || '', '', '', assignee || '', false, false, false, false];
+  // 새 행 추가 (K열: 레이아웃 — 빈 값)
+  var newRow = [nextNo, sceneId || '', memo || '', '', '', assignee || '', false, false, false, false, ''];
   sheet.appendRow(newRow);
 }
 
