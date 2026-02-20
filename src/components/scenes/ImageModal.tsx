@@ -1,9 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Columns2, Layers, ZoomIn, ZoomOut } from 'lucide-react';
+import { X, Columns2, Layers, ZoomIn, ZoomOut, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
-type CompareMode = 'single' | 'side-by-side' | 'overlay';
+/**
+ * 뷰 상태:
+ *   single-storyboard  ←(Left)→  side-by-side  ←(Right)→  single-guide
+ *   overlay 는 별도 (방향키 무관)
+ */
+type ViewState = 'single-storyboard' | 'side-by-side' | 'single-guide' | 'overlay';
+
+/** 툴바에서 보여줄 고수준 모드 */
+type ToolbarMode = 'single' | 'side-by-side' | 'overlay';
 
 interface ImageModalProps {
   storyboardUrl: string;
@@ -12,16 +20,87 @@ interface ImageModalProps {
   onClose: () => void;
 }
 
+/* ────────────────────────────────────────────────────────────── */
+
 export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageModalProps) {
   const hasBoth = !!storyboardUrl && !!guideUrl;
-  const [mode, setMode] = useState<CompareMode>(hasBoth ? 'side-by-side' : 'single');
+
+  const [view, setView] = useState<ViewState>(
+    hasBoth ? 'side-by-side' : storyboardUrl ? 'single-storyboard' : 'single-guide',
+  );
   const [overlayOpacity, setOverlayOpacity] = useState(0.5);
   const [zoom, setZoom] = useState(1);
+  const [direction, setDirection] = useState(0); // -1 left · 0 fade · 1 right
 
+  /* ── 뷰 순서 (오버레이 제외) ── */
+  const viewOrder: ViewState[] = ['single-storyboard', 'side-by-side', 'single-guide'];
+
+  /* ── 방향키 / 화살표 네비게이션 ── */
+  const navigate = useCallback(
+    (dir: -1 | 1) => {
+      if (view === 'overlay' || !hasBoth) return;
+      const idx = viewOrder.indexOf(view);
+      const next = idx + dir;
+      if (next >= 0 && next < viewOrder.length) {
+        setDirection(dir);
+        setView(viewOrder[next]);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view, hasBoth],
+  );
+
+  /* ── 키보드 핸들러 ── */
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); navigate(-1); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); navigate(1); }
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [navigate, onClose]);
+
+  /* ── 배경 클릭 → 닫기 ── */
   const handleBackdrop = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose();
   };
 
+  /* ── 나란히 이미지 클릭 → 단일 ── */
+  const handleImageClick = (which: 'storyboard' | 'guide') => {
+    if (view !== 'side-by-side') return;
+    setDirection(which === 'storyboard' ? -1 : 1);
+    setView(which === 'storyboard' ? 'single-storyboard' : 'single-guide');
+  };
+
+  /* ── 툴바 활성 모드 ── */
+  const toolbarMode: ToolbarMode =
+    view === 'overlay' ? 'overlay' : view === 'side-by-side' ? 'side-by-side' : 'single';
+
+  /* ── 네비게이션 가능 여부 ── */
+  const canGoLeft  = hasBoth && view !== 'overlay' && viewOrder.indexOf(view) > 0;
+  const canGoRight = hasBoth && view !== 'overlay' && viewOrder.indexOf(view) < viewOrder.length - 1;
+
+  /* ── 스와이프 애니메이션 variants ── */
+  const slideVariants = {
+    enter: (d: number) => ({
+      x: d > 0 ? 500 : d < 0 ? -500 : 0,
+      opacity: 0,
+      scale: 0.92,
+    }),
+    center: {
+      x: 0,
+      opacity: 1,
+      scale: 1,
+    },
+    exit: (d: number) => ({
+      x: d > 0 ? -500 : d < 0 ? 500 : 0,
+      opacity: 0,
+      scale: 0.92,
+    }),
+  };
+
+  /* ────────────────────── 렌더 ────────────────────── */
   return (
     <AnimatePresence>
       <motion.div
@@ -31,20 +110,20 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
         className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm"
         onClick={handleBackdrop}
       >
-        {/* 툴바 */}
+        {/* ─── 상단 툴바 ─── */}
         <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-bg-card/90 border border-bg-border rounded-xl px-4 py-2 z-10">
           <span className="text-sm text-text-primary font-mono mr-2">{sceneId}</span>
 
           {hasBoth && (
             <>
               <div className="w-px h-5 bg-bg-border" />
-              {(['single', 'side-by-side', 'overlay'] as CompareMode[]).map((m) => {
-                const labels: Record<CompareMode, string> = {
+              {(['single', 'side-by-side', 'overlay'] as ToolbarMode[]).map((m) => {
+                const labels: Record<ToolbarMode, string> = {
                   single: '단일',
                   'side-by-side': '나란히',
                   overlay: '오버레이',
                 };
-                const icons: Record<CompareMode, React.ReactNode> = {
+                const icons: Record<ToolbarMode, React.ReactNode> = {
                   single: null,
                   'side-by-side': <Columns2 size={14} />,
                   overlay: <Layers size={14} />,
@@ -52,10 +131,22 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                 return (
                   <button
                     key={m}
-                    onClick={() => setMode(m)}
+                    onClick={() => {
+                      if (m === 'single') {
+                        setDirection(-1);
+                        setView('single-storyboard');
+                      } else if (m === 'side-by-side') {
+                        setDirection(0);
+                        setView('side-by-side');
+                      } else {
+                        setView('overlay');
+                      }
+                    }}
                     className={cn(
                       'flex items-center gap-1 px-2 py-1 text-xs rounded-md transition-colors',
-                      mode === m ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
+                      toolbarMode === m
+                        ? 'bg-accent/20 text-accent'
+                        : 'text-text-secondary hover:text-text-primary',
                     )}
                   >
                     {icons[m]}
@@ -69,11 +160,19 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
           <div className="w-px h-5 bg-bg-border" />
 
           {/* 줌 */}
-          <button onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))} className="p-1 text-text-secondary hover:text-text-primary">
+          <button
+            onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}
+            className="p-1 text-text-secondary hover:text-text-primary"
+          >
             <ZoomOut size={14} />
           </button>
-          <span className="text-xs text-text-secondary w-10 text-center">{Math.round(zoom * 100)}%</span>
-          <button onClick={() => setZoom((z) => Math.min(4, z + 0.25))} className="p-1 text-text-secondary hover:text-text-primary">
+          <span className="text-xs text-text-secondary w-10 text-center">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            onClick={() => setZoom((z) => Math.min(4, z + 0.25))}
+            className="p-1 text-text-secondary hover:text-text-primary"
+          >
             <ZoomIn size={14} />
           </button>
 
@@ -83,8 +182,8 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
           </button>
         </div>
 
-        {/* 오버레이 슬라이더 */}
-        {mode === 'overlay' && (
+        {/* ─── 오버레이 슬라이더 ─── */}
+        {view === 'overlay' && (
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-bg-card/90 border border-bg-border rounded-xl px-4 py-2 z-10">
             <span className="text-[10px] text-text-secondary">스토리보드</span>
             <input
@@ -100,56 +199,51 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
           </div>
         )}
 
-        {/* 이미지 영역 */}
-        <div className="flex items-center justify-center gap-4 max-w-[90vw] max-h-[80vh] mt-16 overflow-auto">
-          {mode === 'single' && (
-            <img
-              src={storyboardUrl || guideUrl}
-              alt={sceneId}
-              className="rounded-lg shadow-2xl object-contain"
-              style={{ transform: `scale(${zoom})`, transformOrigin: 'center', maxHeight: '75vh' }}
-              draggable={false}
-            />
-          )}
+        {/* ─── 좌 화살표 버튼 ─── */}
+        {canGoLeft && (
+          <button
+            onClick={() => navigate(-1)}
+            className="absolute left-6 top-1/2 -translate-y-1/2 z-10 p-3 rounded-full
+                       bg-white/5 text-white/40 hover:text-white hover:bg-white/15
+                       backdrop-blur transition-all duration-200"
+          >
+            <ChevronLeft size={28} />
+          </button>
+        )}
 
-          {mode === 'side-by-side' && (
-            <>
-              <div className="flex flex-col items-center gap-2">
-                <span className="text-xs text-text-secondary">스토리보드</span>
-                {storyboardUrl ? (
-                  <img
-                    src={storyboardUrl}
-                    alt="스토리보드"
-                    className="rounded-lg shadow-2xl object-contain"
-                    style={{ transform: `scale(${zoom})`, transformOrigin: 'center', maxHeight: '70vh', maxWidth: '42vw' }}
-                    draggable={false}
-                  />
-                ) : (
-                  <div className="w-64 h-48 rounded-lg bg-bg-card border border-bg-border flex items-center justify-center text-text-secondary text-sm">
-                    이미지 없음
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-col items-center gap-2">
-                <span className="text-xs text-text-secondary">가이드</span>
-                {guideUrl ? (
-                  <img
-                    src={guideUrl}
-                    alt="가이드"
-                    className="rounded-lg shadow-2xl object-contain"
-                    style={{ transform: `scale(${zoom})`, transformOrigin: 'center', maxHeight: '70vh', maxWidth: '42vw' }}
-                    draggable={false}
-                  />
-                ) : (
-                  <div className="w-64 h-48 rounded-lg bg-bg-card border border-bg-border flex items-center justify-center text-text-secondary text-sm">
-                    이미지 없음
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+        {/* ─── 우 화살표 버튼 ─── */}
+        {canGoRight && (
+          <button
+            onClick={() => navigate(1)}
+            className="absolute right-6 top-1/2 -translate-y-1/2 z-10 p-3 rounded-full
+                       bg-white/5 text-white/40 hover:text-white hover:bg-white/15
+                       backdrop-blur transition-all duration-200"
+          >
+            <ChevronRight size={28} />
+          </button>
+        )}
 
-          {mode === 'overlay' && (
+        {/* ─── 하단 인디케이터 (도트) ─── */}
+        {hasBoth && view !== 'overlay' && (
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 z-10">
+            {viewOrder.map((v) => (
+              <div
+                key={v}
+                className={cn(
+                  'rounded-full transition-all duration-300',
+                  v === view
+                    ? 'w-6 h-2 bg-accent'
+                    : 'w-2 h-2 bg-white/30 hover:bg-white/50',
+                )}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* ─── 이미지 영역 ─── */}
+        <div className="relative w-full h-full flex items-center justify-center pt-20 pb-16 overflow-hidden">
+          {view === 'overlay' ? (
+            /* 오버레이 모드 — 스와이프 없음 */
             <div className="relative">
               {storyboardUrl && (
                 <img
@@ -180,9 +274,159 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                 />
               )}
             </div>
+          ) : (
+            /* 단일 / 나란히 — 스와이프 애니메이션 */
+            <AnimatePresence mode="wait" custom={direction}>
+              <motion.div
+                key={view}
+                custom={direction}
+                variants={slideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+                className="flex items-center justify-center gap-6"
+              >
+                {/* ── 단일: 스토리보드 ── */}
+                {view === 'single-storyboard' && (
+                  <div className="flex flex-col items-center gap-3">
+                    <span className="text-xs text-accent font-medium tracking-wide">스토리보드</span>
+                    <img
+                      src={storyboardUrl}
+                      alt="스토리보드"
+                      className="rounded-lg shadow-2xl object-contain"
+                      style={{
+                        transform: `scale(${zoom})`,
+                        transformOrigin: 'center',
+                        maxHeight: '75vh',
+                      }}
+                      draggable={false}
+                    />
+                  </div>
+                )}
+
+                {/* ── 단일: 가이드 ── */}
+                {view === 'single-guide' && (
+                  <div className="flex flex-col items-center gap-3">
+                    <span className="text-xs text-accent font-medium tracking-wide">가이드</span>
+                    <img
+                      src={guideUrl}
+                      alt="가이드"
+                      className="rounded-lg shadow-2xl object-contain"
+                      style={{
+                        transform: `scale(${zoom})`,
+                        transformOrigin: 'center',
+                        maxHeight: '75vh',
+                      }}
+                      draggable={false}
+                    />
+                  </div>
+                )}
+
+                {/* ── 나란히 (3D 호버 + 클릭) ── */}
+                {view === 'side-by-side' && (
+                  <>
+                    {/* 스토리보드 (왼쪽) */}
+                    <div
+                      className="flex flex-col items-center gap-2 cursor-pointer"
+                      style={{ perspective: 800 }}
+                      onClick={() => handleImageClick('storyboard')}
+                    >
+                      <span className="text-xs text-text-secondary transition-colors duration-200 group-sb-hover:text-accent">
+                        스토리보드
+                      </span>
+                      {storyboardUrl ? (
+                        <HoverCard3D direction="left">
+                          <img
+                            src={storyboardUrl}
+                            alt="스토리보드"
+                            className="rounded-lg shadow-2xl object-contain"
+                            style={{
+                              transform: `scale(${zoom})`,
+                              transformOrigin: 'center',
+                              maxHeight: '70vh',
+                              maxWidth: '42vw',
+                            }}
+                            draggable={false}
+                          />
+                        </HoverCard3D>
+                      ) : (
+                        <EmptySlot />
+                      )}
+                    </div>
+
+                    {/* 가이드 (오른쪽) */}
+                    <div
+                      className="flex flex-col items-center gap-2 cursor-pointer"
+                      style={{ perspective: 800 }}
+                      onClick={() => handleImageClick('guide')}
+                    >
+                      <span className="text-xs text-text-secondary">가이드</span>
+                      {guideUrl ? (
+                        <HoverCard3D direction="right">
+                          <img
+                            src={guideUrl}
+                            alt="가이드"
+                            className="rounded-lg shadow-2xl object-contain"
+                            style={{
+                              transform: `scale(${zoom})`,
+                              transformOrigin: 'center',
+                              maxHeight: '70vh',
+                              maxWidth: '42vw',
+                            }}
+                            draggable={false}
+                          />
+                        </HoverCard3D>
+                      ) : (
+                        <EmptySlot />
+                      )}
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            </AnimatePresence>
           )}
         </div>
       </motion.div>
     </AnimatePresence>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   서브 컴포넌트
+   ══════════════════════════════════════════════════════════════ */
+
+/** 3D 호버 카드 래퍼 — direction 에 따라 회전 방향이 다름 */
+function HoverCard3D({
+  direction,
+  children,
+}: {
+  direction: 'left' | 'right';
+  children: React.ReactNode;
+}) {
+  const rotateY = direction === 'left' ? 6 : -6;
+
+  return (
+    <motion.div
+      className="rounded-lg"
+      whileHover={{
+        rotateY,
+        scale: 1.04,
+        boxShadow: '0 25px 60px -12px rgba(99, 102, 241, 0.25)',
+      }}
+      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+      style={{ transformStyle: 'preserve-3d' }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** 이미지 없음 슬롯 */
+function EmptySlot() {
+  return (
+    <div className="w-64 h-48 rounded-lg bg-bg-card border border-bg-border flex items-center justify-center text-text-secondary text-sm">
+      이미지 없음
+    </div>
   );
 }
