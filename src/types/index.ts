@@ -146,6 +146,7 @@ export interface ElectronAPI {
   imageSave: (fileName: string, base64Data: string) => Promise<string>;
   imageDelete: (fileName: string) => Promise<boolean>;
   imageGetDir: () => Promise<string>;
+  clipboardReadImage: () => Promise<string | null>;
   // Google Sheets 연동 (Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) => Promise<SheetsConnectResult>;
   sheetsIsConnected: () => Promise<boolean>;

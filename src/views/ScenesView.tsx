@@ -5,7 +5,7 @@ import type { SortKey, StatusFilter } from '@/stores/useAppStore';
 import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
 import type { Scene, Stage } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ImagePlus, Eye } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ImagePlus, Eye, ClipboardPaste } from 'lucide-react';
 import {
   toggleTestSceneStage,
   addTestEpisode,
@@ -131,7 +131,20 @@ function SceneCard({ scene, sceneIndex, celebrating, sheetName, isLiveMode, onTo
     input.click();
   };
 
-  // 클립보드 붙여넣기 (Ctrl+V)
+  // 클립보드에서 이미지 읽기 (Electron 네이티브 API)
+  const handleClipboardPaste = async (imageType: 'storyboard' | 'guide') => {
+    try {
+      const dataUrl = await window.electronAPI.clipboardReadImage();
+      if (!dataUrl) return;
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      await embedImage(blob, imageType);
+    } catch (err) {
+      console.error('[클립보드 붙여넣기 실패]', err);
+    }
+  };
+
+  // 키보드 Ctrl+V 붙여넣기
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -317,57 +330,86 @@ function SceneCard({ scene, sceneIndex, celebrating, sheetName, isLiveMode, onTo
       </div>
 
       {/* 이미지 영역 */}
-      <div className="flex gap-2 items-center">
+      <div className="flex flex-col gap-1.5">
         {imageLoading ? (
           <div className="flex items-center gap-2 text-xs text-text-secondary/60 py-1">
             <div className="w-3 h-3 border-2 border-accent/40 border-t-accent rounded-full animate-spin" />
             이미지 저장 중...
           </div>
-        ) : hasImages ? (
-          <>
-            {scene.storyboardUrl && (
-              <img
-                src={scene.storyboardUrl}
-                alt="SB"
-                className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
-                onClick={() => setShowModal(true)}
-                draggable={false}
-              />
-            )}
-            {scene.guideUrl && (
-              <img
-                src={scene.guideUrl}
-                alt="Guide"
-                className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
-                onClick={() => setShowModal(true)}
-                draggable={false}
-              />
-            )}
-            <button
-              onClick={() => setShowModal(true)}
-              className="ml-auto p-1 text-text-secondary/40 hover:text-accent transition-colors"
-              title="이미지 확대"
-            >
-              <Eye size={14} />
-            </button>
-          </>
         ) : (
-          <div className="flex gap-1">
-            <button
-              onClick={() => handlePickImage('storyboard')}
-              className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-accent border border-dashed border-bg-border hover:border-accent rounded transition-colors"
-              title="스토리보드 이미지 (클릭 또는 Ctrl+V/드래그)"
-            >
-              <ImagePlus size={10} /> SB
-            </button>
-            <button
-              onClick={() => handlePickImage('guide')}
-              className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-accent border border-dashed border-bg-border hover:border-accent rounded transition-colors"
-              title="가이드 이미지"
-            >
-              <ImagePlus size={10} /> 가이드
-            </button>
-          </div>
+          <>
+            {/* 이미지 썸네일 */}
+            {hasImages && (
+              <div className="flex gap-2 items-center">
+                {scene.storyboardUrl && (
+                  <img
+                    src={scene.storyboardUrl}
+                    alt="SB"
+                    className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
+                    onClick={() => setShowModal(true)}
+                    draggable={false}
+                  />
+                )}
+                {scene.guideUrl && (
+                  <img
+                    src={scene.guideUrl}
+                    alt="Guide"
+                    className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
+                    onClick={() => setShowModal(true)}
+                    draggable={false}
+                  />
+                )}
+                <button
+                  onClick={() => setShowModal(true)}
+                  className="ml-auto p-1 text-text-secondary/40 hover:text-accent transition-colors"
+                  title="이미지 확대"
+                >
+                  <Eye size={14} />
+                </button>
+              </div>
+            )}
+            {/* 이미지 추가 버튼 (SB 또는 가이드가 비어있을 때) */}
+            {(!scene.storyboardUrl || !scene.guideUrl) && (
+              <div className="flex gap-1 flex-wrap">
+                {!scene.storyboardUrl && (
+                  <>
+                    <button
+                      onClick={() => handlePickImage('storyboard')}
+                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-accent border border-dashed border-bg-border hover:border-accent rounded transition-colors"
+                      title="파일에서 SB 이미지 선택"
+                    >
+                      <ImagePlus size={10} /> SB
+                    </button>
+                    <button
+                      onClick={() => handleClipboardPaste('storyboard')}
+                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-purple-400 border border-dashed border-bg-border hover:border-purple-400 rounded transition-colors"
+                      title="클립보드에서 SB 이미지 붙여넣기"
+                    >
+                      <ClipboardPaste size={10} /> SB
+                    </button>
+                  </>
+                )}
+                {!scene.guideUrl && (
+                  <>
+                    <button
+                      onClick={() => handlePickImage('guide')}
+                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-accent border border-dashed border-bg-border hover:border-accent rounded transition-colors"
+                      title="파일에서 가이드 이미지 선택"
+                    >
+                      <ImagePlus size={10} /> 가이드
+                    </button>
+                    <button
+                      onClick={() => handleClipboardPaste('guide')}
+                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-purple-400 border border-dashed border-bg-border hover:border-purple-400 rounded transition-colors"
+                      title="클립보드에서 가이드 이미지 붙여넣기"
+                    >
+                      <ClipboardPaste size={10} /> 가이드
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
 

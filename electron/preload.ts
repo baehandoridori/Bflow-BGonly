@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   imageDelete: (fileName: string) =>
     ipcRenderer.invoke('image:delete', fileName) as Promise<boolean>,
   imageGetDir: () => ipcRenderer.invoke('image:get-dir') as Promise<string>,
+  clipboardReadImage: () =>
+    ipcRenderer.invoke('clipboard:read-image') as Promise<string | null>,
 
   // Google Sheets 연동 (Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) =>

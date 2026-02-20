@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net } from 'electron';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
@@ -339,6 +339,15 @@ ipcMain.handle('image:delete', async (_event, fileName: string) => {
 
 ipcMain.handle('image:get-dir', () => {
   return path.join(getDataPath(), 'images');
+});
+
+// ─── IPC 핸들러: 클립보드 이미지 읽기 ────────────────────────
+
+ipcMain.handle('clipboard:read-image', () => {
+  const image = clipboard.readImage();
+  if (image.isEmpty()) return null;
+  const buffer = image.toJPEG(80);
+  return `data:image/jpeg;base64,${buffer.toString('base64')}`;
 });
 
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
