@@ -116,6 +116,9 @@ function doGet(e) {
         );
         return jsonResponse({ ok: true });
 
+      case 'debugImages':
+        return jsonResponse({ ok: true, data: debugImageCells() });
+
       default:
         return jsonResponse({ ok: false, error: 'Unknown action: ' + action });
     }
@@ -284,6 +287,25 @@ function readSheetData(sheetName) {
   if (lastRow < 2) return [];
 
   var data = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
+
+  // 오버레이 이미지 수집 (Ctrl+V로 시트에 직접 붙여넣은 이미지)
+  var overlayMap = {};
+  try {
+    var images = sheet.getImages();
+    for (var img = 0; img < images.length; img++) {
+      var image = images[img];
+      var anchor = image.getAnchorCell();
+      var anchorRow = anchor.getRow();   // 1-based
+      var anchorCol = anchor.getColumn(); // 1-based
+      // D열(4)=스토리보드, E열(5)=가이드 위에 있는 이미지만
+      if ((anchorCol === 4 || anchorCol === 5) && anchorRow >= 2) {
+        overlayMap[anchorRow + '_' + anchorCol] = image;
+      }
+    }
+  } catch (e) {
+    Logger.log('오버레이 이미지 감지 실패: ' + e.toString());
+  }
+
   var scenes = [];
 
   for (var i = 0; i < data.length; i++) {
@@ -291,12 +313,26 @@ function readSheetData(sheetName) {
     // No와 씬번호가 모두 비어있는 행만 건너뜀 (No=0인 행도 씬번호가 있으면 포함)
     if (!row[0] && !row[1]) continue;
 
+    var rowNum = i + 2;
+    var sceneId = String(row[1] || '');
+
+    var sbUrl = extractImageUrl(row[3], sheet, rowNum, 4, sheetName, sceneId, 'storyboard');
+    var guideUrl = extractImageUrl(row[4], sheet, rowNum, 5, sheetName, sceneId, 'guide');
+
+    // 오버레이 이미지 처리: 셀 값이 비어있고 오버레이가 있으면 Drive로 업로드
+    if (!sbUrl) {
+      sbUrl = tryUploadOverlayImage(overlayMap[rowNum + '_4'], sheetName, sceneId, 'storyboard', sheet, rowNum, 4);
+    }
+    if (!guideUrl) {
+      guideUrl = tryUploadOverlayImage(overlayMap[rowNum + '_5'], sheetName, sceneId, 'guide', sheet, rowNum, 5);
+    }
+
     scenes.push({
       no: parseInt(row[0], 10) || (i + 1),
-      sceneId: String(row[1] || ''),
+      sceneId: sceneId,
       memo: String(row[2] || ''),
-      storyboardUrl: extractImageUrl(row[3], sheet, i + 2, 4, sheetName, String(row[1] || ''), 'storyboard'),
-      guideUrl: extractImageUrl(row[4], sheet, i + 2, 5, sheetName, String(row[1] || ''), 'guide'),
+      storyboardUrl: sbUrl,
+      guideUrl: guideUrl,
       assignee: String(row[5] || ''),
       lo: parseBoolean(row[6]),
       done: parseBoolean(row[7]),
@@ -307,6 +343,122 @@ function readSheetData(sheetName) {
   }
 
   return scenes;
+}
+
+/**
+ * 오버레이 이미지(시트에 Ctrl+V로 붙여넣은 이미지)를 Drive에 업로드한다.
+ * OverGridImage에는 getBlob()이 없으므로 getUrl()이 있는 경우만 처리 가능.
+ * 직접 붙여넣은 이미지(getUrl()=null)는 처리 불가 → 빈 문자열 반환.
+ */
+function tryUploadOverlayImage(image, sheetName, sceneId, imageType, sheet, rowNum, colNum) {
+  if (!image) return '';
+
+  try {
+    var url = image.getUrl();
+    if (url) {
+      // URL 기반 오버레이 이미지 → 그 URL을 셀에 기록
+      sheet.getRange(rowNum, colNum).setValue(url);
+      return url;
+    }
+
+    // 직접 붙여넣기 이미지: UrlFetchApp으로 접근 시도
+    // (일부 환경에서 내부 URL을 통해 가능할 수 있음)
+    Logger.log('오버레이 이미지 URL 없음 (' + sheetName + ' ' + sceneId + ' ' + imageType + ') — 앱의 이미지 업로드 기능을 사용해주세요');
+  } catch (e) {
+    Logger.log('오버레이 이미지 처리 실패: ' + e.toString());
+  }
+
+  return '';
+}
+
+// ─── 이미지 진단 (디버그용) ─────────────────────────────────
+
+/**
+ * 이미지 셀 진단 — Apps Script 에디터에서 직접 실행하거나
+ * ?action=debugImages 로 호출 가능.
+ * 각 이미지 셀의 데이터 타입과 값을 반환한다.
+ */
+function debugImageCells() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tabs = getEpisodeTabs();
+  var results = [];
+
+  for (var t = 0; t < tabs.length; t++) {
+    var sheet = ss.getSheetByName(tabs[t].title);
+    if (!sheet) continue;
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) continue;
+
+    var data = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
+
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      if (!row[0] && !row[1]) continue;
+
+      var sbInfo = analyzeValue(row[3]);
+      var guideInfo = analyzeValue(row[4]);
+
+      if (sbInfo.type !== 'empty' || guideInfo.type !== 'empty') {
+        results.push({
+          sheet: tabs[t].title,
+          scene: String(row[1] || ''),
+          row: i + 2,
+          sb: sbInfo,
+          guide: guideInfo
+        });
+      }
+    }
+
+    // 오버레이 이미지 확인
+    try {
+      var images = sheet.getImages();
+      for (var j = 0; j < images.length; j++) {
+        var img = images[j];
+        var anchor = img.getAnchorCell();
+        results.push({
+          sheet: tabs[t].title,
+          overlayImage: true,
+          anchorRow: anchor.getRow(),
+          anchorCol: anchor.getColumn(),
+          url: img.getUrl(),
+          width: img.getWidth(),
+          height: img.getHeight()
+        });
+      }
+    } catch (e) {
+      results.push({ sheet: tabs[t].title, overlayError: e.toString() });
+    }
+  }
+
+  Logger.log(JSON.stringify(results, null, 2));
+  return results;
+}
+
+function analyzeValue(val) {
+  if (val === '' || val === null || val === undefined) {
+    return { type: 'empty' };
+  }
+  if (typeof val === 'string') {
+    return { type: 'string', value: val.substring(0, 200), length: val.length };
+  }
+  if (typeof val === 'object') {
+    var info = { type: 'object' };
+    try { info.stringified = String(val).substring(0, 100); } catch (e) { info.stringifyError = e.toString(); }
+    try { info.hasGetUrl = typeof val.getUrl === 'function'; } catch (e) {}
+    try { info.hasGetContentUrl = typeof val.getContentUrl === 'function'; } catch (e) {}
+    if (info.hasGetUrl) {
+      try { info.getUrlResult = val.getUrl(); } catch (e) { info.getUrlError = e.toString(); }
+    }
+    if (info.hasGetContentUrl) {
+      try {
+        var cu = val.getContentUrl();
+        info.getContentUrlResult = cu ? String(cu).substring(0, 100) : null;
+      } catch (e) { info.getContentUrlError = e.toString(); }
+    }
+    return info;
+  }
+  return { type: typeof val, value: String(val).substring(0, 100) };
 }
 
 // ─── 전체 에피소드 데이터 읽기 ───────────────────────────────
