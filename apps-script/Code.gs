@@ -7,17 +7,38 @@
  * 2. 메뉴: 확장 프로그램 → Apps Script
  * 3. 열린 에디터에서 기존 코드를 지우고 이 파일의 내용 전체를 붙여넣기
  * 4. 저장 (Ctrl+S)
- * 5. 배포 → 새 배포
- *    - 유형 선택: "웹 앱"
- *    - 실행 주체: "본인 (나)"
- *    - 액세스 권한: "모든 사용자"
- * 6. "배포" 클릭 → 권한 승인 → 배포 URL 복사
- * 7. 복사한 URL을 Electron 앱 설정 화면에 붙여넣기
+ *
+ * ── appsscript.json 매니페스트 설정 (Drive 권한) ──
+ * 5. 왼쪽 사이드바 ⚙ "프로젝트 설정" 클릭
+ * 6. "에디터에서 'appsscript.json' 매니페스트 파일 표시" 체크
+ * 7. 왼쪽 사이드바에서 appsscript.json 파일 열기
+ * 8. 내용을 아래로 교체:
+ *    {
+ *      "timeZone": "Asia/Seoul",
+ *      "dependencies": {},
+ *      "webapp": { "access": "ANYONE_ANONYMOUS", "executeAs": "USER_DEPLOYING" },
+ *      "exceptionLogging": "STACKDRIVER",
+ *      "runtimeVersion": "V8",
+ *      "oauthScopes": [
+ *        "https://www.googleapis.com/auth/spreadsheets",
+ *        "https://www.googleapis.com/auth/drive"
+ *      ]
+ *    }
+ * 9. 저장 (Ctrl+S)
+ *
+ * ── 배포 ──
+ * 10. 배포 → 새 배포
+ *     - 유형 선택: "웹 앱"
+ *     - 실행 주체: "본인 (나)"
+ *     - 액세스 권한: "모든 사용자"
+ * 11. "배포" 클릭 → 권한 승인 (Drive 접근 포함) → 배포 URL 복사
+ * 12. 복사한 URL을 Electron 앱 설정 화면에 붙여넣기
  *
  * ========== 주의 ==========
  *
  * - 코드를 수정한 후에는 반드시 "새 배포"를 다시 해야 반영됩니다
  *   (기존 배포 URL은 이전 코드를 계속 실행합니다)
+ * - 이미지 업로드를 위해 반드시 Drive 스코프가 포함된 appsscript.json 필요
  * - 시트 탭 이름은 EP01_A, EP01_B, EP02_A 형식이어야 합니다
  * - 열 구조: A(No) B(씬번호) C(메모) D(스토리보드URL) E(가이드URL)
  *            F(담당자) G(LO) H(완료) I(검수) J(PNG) K(레이아웃)
