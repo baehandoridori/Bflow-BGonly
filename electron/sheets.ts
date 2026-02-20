@@ -14,27 +14,36 @@
 let webAppUrl: string | null = null;
 
 // ─── Google Apps Script fetch 헬퍼 ──────────────────────────
-// GAS 웹 앱은 302 리다이렉트를 사용하는데, Node.js fetch는 302에서
-// POST→GET으로 변환하여 body를 잃는다. 수동으로 리다이렉트를 따라가서
-// POST 메서드와 body를 유지한다.
+// GAS 웹 앱은 302 리다이렉트로 응답을 전달한다.
+// POST 요청: script.google.com에서 doPost 실행 → 302 → 응답 URL (GET으로 조회)
+// GET 요청: script.google.com에서 doGet 실행 → 302 → 응답 URL (GET으로 조회)
 
 async function gasFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
   let targetUrl = url;
+  let currentOptions = { ...options };
 
   for (let i = 0; i < 5; i++) {
     const res = await fetch(targetUrl, {
-      ...options,
+      ...currentOptions,
       redirect: 'manual',
     });
 
-    // 리다이렉트 → 같은 메서드로 다시 요청
+    // 리다이렉트 → 다음 URL로 이동
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       const location = res.headers.get('location');
       if (!location) throw new Error('리다이렉트 location 헤더 없음');
       targetUrl = location;
+
+      // 301/302/303: POST→GET 변환 (RFC 7231, GAS 응답 리다이렉트는 GET으로 조회)
+      // 307/308: 메서드 유지
+      if ([301, 302, 303].includes(res.status) && currentOptions.method === 'POST') {
+        const { method: _, body: __, ...rest } = currentOptions;
+        currentOptions = { ...rest, method: 'GET' };
+      }
+
       continue;
     }
 
