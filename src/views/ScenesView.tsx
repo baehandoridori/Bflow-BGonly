@@ -50,8 +50,37 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
       style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
       onClick={onOpenDetail}
     >
-      {/* 이미지 썸네일 (큰 사이즈) */}
-      {hasImages && (
+      {/* ── 상단: 씬 정보 ── */}
+      <div className="px-2.5 pt-2 pb-1 flex items-center justify-between">
+        <div className="flex items-center gap-1 min-w-0">
+          <span className="text-xs font-mono font-bold text-accent shrink-0">
+            #{scene.no}
+          </span>
+          <span className="text-xs text-text-primary truncate">
+            {scene.sceneId || '(씬번호 없음)'}
+          </span>
+          {scene.layoutId && (
+            <span className="text-[10px] italic text-text-secondary/70 shrink-0">
+              - L#{scene.layoutId}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-xs font-medium text-text-primary truncate max-w-[80px]">
+            {scene.assignee || ''}
+          </span>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(sceneIndex); }}
+            className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400 transition-opacity"
+            title="씬 삭제"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+
+      {/* ── 가운데: 이미지 썸네일 ── */}
+      {hasImages ? (
         <div className="flex gap-px bg-bg-border">
           {scene.storyboardUrl && (
             <img
@@ -72,39 +101,12 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
             />
           )}
         </div>
+      ) : (
+        <div className="flex-1" />
       )}
 
-      <div className="p-2.5 flex flex-col gap-1.5">
-        {/* 상단: 씬 정보 */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1 min-w-0">
-            <span className="text-xs font-mono font-bold text-accent shrink-0">
-              #{scene.no}
-            </span>
-            <span className="text-xs text-text-primary truncate">
-              {scene.sceneId || '(씬번호 없음)'}
-            </span>
-            {scene.layoutId && (
-              <span className="text-[10px] italic text-text-secondary/70 truncate shrink-0">
-                - L#{scene.layoutId}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-xs font-medium text-text-primary truncate max-w-[80px]">
-              {scene.assignee || ''}
-            </span>
-            <button
-              onClick={(e) => { e.stopPropagation(); onDelete(sceneIndex); }}
-              className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400 transition-opacity"
-              title="씬 삭제"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-
-        {/* 체크박스 칩들 (소형) */}
+      {/* ── 하단: 체크박스 + 진행 바 ── */}
+      <div className="px-2.5 pt-1.5 pb-2 flex flex-col gap-1.5 mt-auto">
         <div className="flex gap-1">
           {STAGES.map((stage) => (
             <button
@@ -127,7 +129,6 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
           ))}
         </div>
 
-        {/* 진행 바 */}
         <div className="relative h-1 bg-bg-primary rounded-full overflow-visible">
           <div
             className="h-full rounded-full transition-all duration-300"
