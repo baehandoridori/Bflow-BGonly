@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter } from '@/stores/useAppStore';
 import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
 import type { Scene, Stage } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ImagePlus, Eye } from 'lucide-react';
 import {
   toggleTestSceneStage,
   addTestEpisode,
@@ -23,6 +23,8 @@ import {
   updateSceneFieldInSheets,
 } from '@/services/sheetsService';
 import { cn } from '@/utils/cn';
+import { Confetti } from '@/components/ui/Confetti';
+import { ImageModal } from '@/components/scenes/ImageModal';
 
 // ─── 씬 카드 ──────────────────────────────────────────────────
 
@@ -30,15 +32,74 @@ interface SceneCardProps {
   scene: Scene;
   sceneIndex: number;
   sheetName: string;
+  celebrating: boolean;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
+  onCelebrationEnd: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, sheetName, onToggle, onDelete, onFieldUpdate }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, sheetName, celebrating, onToggle, onDelete, onFieldUpdate, onCelebrationEnd }: SceneCardProps) {
   const pct = sceneProgress(scene);
   const [editing, setEditing] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
+
+  // 이미지 저장 → URL 필드 업데이트
+  const saveImageData = async (data: Uint8Array, imageType: 'storyboard' | 'guide') => {
+    try {
+      const filePath = await window.electronAPI.imageSave(data, sheetName, scene.sceneId, imageType);
+      const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+      onFieldUpdate(sceneIndex, field, filePath);
+    } catch (err) {
+      console.error('[이미지 저장 실패]', err);
+    }
+  };
+
+  // 파일 다이얼로그
+  const handlePickImage = async (imageType: 'storyboard' | 'guide') => {
+    try {
+      const filePath = await window.electronAPI.imagePickAndSave(sheetName, scene.sceneId, imageType);
+      if (filePath) {
+        const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+        onFieldUpdate(sceneIndex, field, filePath);
+      }
+    } catch (err) {
+      console.error('[이미지 선택 실패]', err);
+    }
+  };
+
+  // 클립보드 붙여넣기 (Ctrl+V)
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        const buffer = new Uint8Array(await blob.arrayBuffer());
+        // 스토리보드가 없으면 스토리보드, 있으면 가이드
+        const type = scene.storyboardUrl ? 'guide' : 'storyboard';
+        await saveImageData(buffer, type);
+        return;
+      }
+    }
+  };
+
+  // 드래그 앤 드롭
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    const buffer = new Uint8Array(await file.arrayBuffer());
+    const type = scene.storyboardUrl ? 'guide' : 'storyboard';
+    await saveImageData(buffer, type);
+  };
 
   const startEdit = (field: string, currentValue: string) => {
     setEditing(field);
@@ -62,11 +123,32 @@ function SceneCard({ scene, sceneIndex, sheetName, onToggle, onDelete, onFieldUp
 
   const borderColor = pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct > 0 ? '#E17055' : '#2D3041';
 
+  const toSrc = (url: string) => {
+    if (!url) return '';
+    if (url.startsWith('http') || url.startsWith('data:')) return url;
+    return `local-image://${encodeURIComponent(url)}`;
+  };
+
   return (
     <div
-      className="bg-bg-card border border-bg-border rounded-lg p-4 flex flex-col gap-2 group"
+      className={cn(
+        'bg-bg-card border rounded-lg p-4 flex flex-col gap-2 group relative',
+        dragOver ? 'border-accent border-2' : 'border-bg-border'
+      )}
       style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
+      onPaste={handlePaste}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+      tabIndex={0}
     >
+      {/* 드래그 오버레이 */}
+      {dragOver && (
+        <div className="absolute inset-0 bg-accent/10 rounded-lg flex items-center justify-center z-10 pointer-events-none">
+          <span className="text-accent text-sm font-medium">이미지 놓기</span>
+        </div>
+      )}
+
       {/* 상단: 씬 정보 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -184,8 +266,68 @@ function SceneCard({ scene, sceneIndex, sheetName, onToggle, onDelete, onFieldUp
         ))}
       </div>
 
+      {/* 이미지 영역 */}
+      <div className="flex gap-2 items-center">
+        {hasImages ? (
+          <>
+            {scene.storyboardUrl && (
+              <img
+                src={toSrc(scene.storyboardUrl)}
+                alt="SB"
+                className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
+                onClick={() => setShowModal(true)}
+                draggable={false}
+              />
+            )}
+            {scene.guideUrl && (
+              <img
+                src={toSrc(scene.guideUrl)}
+                alt="Guide"
+                className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
+                onClick={() => setShowModal(true)}
+                draggable={false}
+              />
+            )}
+            <button
+              onClick={() => setShowModal(true)}
+              className="ml-auto p-1 text-text-secondary/40 hover:text-accent transition-colors"
+              title="이미지 확대"
+            >
+              <Eye size={14} />
+            </button>
+          </>
+        ) : (
+          <div className="flex gap-1">
+            <button
+              onClick={() => handlePickImage('storyboard')}
+              className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-accent border border-dashed border-bg-border hover:border-accent rounded transition-colors"
+              title="스토리보드 이미지 (클릭 또는 Ctrl+V/드래그)"
+            >
+              <ImagePlus size={10} /> SB
+            </button>
+            <button
+              onClick={() => handlePickImage('guide')}
+              className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-accent border border-dashed border-bg-border hover:border-accent rounded transition-colors"
+              title="가이드 이미지"
+            >
+              <ImagePlus size={10} /> 가이드
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 이미지 모달 */}
+      {showModal && (
+        <ImageModal
+          storyboardUrl={scene.storyboardUrl}
+          guideUrl={scene.guideUrl}
+          sceneId={scene.sceneId}
+          onClose={() => setShowModal(false)}
+        />
+      )}
+
       {/* 진행 바 */}
-      <div className="h-1 bg-bg-primary rounded-full overflow-hidden">
+      <div className="relative h-1 bg-bg-primary rounded-full overflow-visible">
         <div
           className="h-full rounded-full transition-all duration-300"
           style={{
@@ -194,6 +336,7 @@ function SceneCard({ scene, sceneIndex, sheetName, onToggle, onDelete, onFieldUp
               pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct >= 25 ? '#E17055' : '#FF6B6B',
           }}
         />
+        <Confetti active={celebrating} onComplete={onCelebrationEnd} />
       </div>
     </div>
   );
@@ -431,6 +574,8 @@ export function ScenesView() {
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
 
   const [showAddScene, setShowAddScene] = useState(false);
+  const [celebratingId, setCelebratingId] = useState<string | null>(null);
+  const clearCelebration = useCallback(() => setCelebratingId(null), []);
 
   // 백그라운드 동기화: 낙관적 업데이트 후 서버/파일과 싱크
   const syncInBackground = async () => {
@@ -551,6 +696,14 @@ export function ScenesView() {
     const sceneIndex = currentPart.scenes.findIndex((s) => s.sceneId === sceneId);
 
     toggleSceneStage(currentEp.episodeNumber, currentPart.partId, sceneId, stage);
+
+    // 완료 축하 애니메이션: 방금 토글로 4단계 모두 완료 시
+    if (newValue) {
+      const afterToggle = { ...scene, [stage]: true };
+      if (afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png) {
+        setCelebratingId(sceneId);
+      }
+    }
 
     try {
       if (sheetsConnected) {
@@ -966,9 +1119,11 @@ export function ScenesView() {
                         scene={scene}
                         sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
                         sheetName={currentPart?.sheetName ?? ''}
+                        celebrating={celebratingId === scene.sceneId}
                         onToggle={handleToggle}
                         onDelete={handleDeleteScene}
                         onFieldUpdate={handleFieldUpdate}
+                        onCelebrationEnd={clearCelebration}
                       />
                     ))}
                   </div>
@@ -997,9 +1152,11 @@ export function ScenesView() {
               scene={scene}
               sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
               sheetName={currentPart?.sheetName ?? ''}
+              celebrating={celebratingId === scene.sceneId}
               onToggle={handleToggle}
               onDelete={handleDeleteScene}
               onFieldUpdate={handleFieldUpdate}
+              onCelebrationEnd={clearCelebration}
             />
           ))}
         </div>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, protocol, net } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import {
@@ -282,9 +282,63 @@ ipcMain.handle(
   }
 );
 
+// ─── IPC 핸들러: 이미지 저장/로드 (P2-1) ───────────────────────
+
+function getImagesDir(): string {
+  return path.join(getDataPath(), 'images');
+}
+
+ipcMain.handle(
+  'image:save',
+  async (_event, data: Uint8Array, sheetName: string, sceneId: string, imageType: string) => {
+    const dir = path.join(getImagesDir(), sheetName);
+    ensureDir(dir);
+    const filename = `${sceneId}_${imageType}_${Date.now()}.png`;
+    const filePath = path.join(dir, filename);
+    fs.writeFileSync(filePath, Buffer.from(data));
+    return filePath;
+  }
+);
+
+ipcMain.handle(
+  'image:pick-and-save',
+  async (_event, sheetName: string, sceneId: string, imageType: string) => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+
+    const srcPath = result.filePaths[0];
+    const ext = path.extname(srcPath);
+    const dir = path.join(getImagesDir(), sheetName);
+    ensureDir(dir);
+    const filename = `${sceneId}_${imageType}_${Date.now()}${ext}`;
+    const destPath = path.join(dir, filename);
+    fs.copyFileSync(srcPath, destPath);
+    return destPath;
+  }
+);
+
+ipcMain.handle('image:delete', async (_event, filePath: string) => {
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
 
 app.whenReady().then(() => {
+  // 로컬 이미지 프로토콜 등록 (img src에서 local-image://path 사용)
+  protocol.handle('local-image', (request) => {
+    const filePath = decodeURIComponent(request.url.slice('local-image://'.length));
+    return net.fetch(`file://${filePath}`);
+  });
+
   createWindow();
 
   app.on('activate', () => {
