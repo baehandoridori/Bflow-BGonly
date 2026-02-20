@@ -32,14 +32,16 @@ interface SceneCardProps {
   scene: Scene;
   sceneIndex: number;
   celebrating: boolean;
+  sheetName: string;
+  isLiveMode: boolean;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
   onCelebrationEnd: () => void;
 }
 
-/** 이미지 File/Blob → base64 data URL 변환 (최대 1200px 리사이즈) */
-function fileToDataUrl(file: File | Blob, maxSize = 1200): Promise<string> {
+/** 이미지 File/Blob → 리사이즈 후 JPEG base64 data URL (최대 800px, 80% 품질) */
+function resizeImage(file: File | Blob, maxSize = 800, quality = 0.8): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -55,7 +57,7 @@ function fileToDataUrl(file: File | Blob, maxSize = 1200): Promise<string> {
         canvas.width = width;
         canvas.height = height;
         canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/png'));
+        resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject;
       img.src = reader.result as string;
@@ -65,23 +67,55 @@ function fileToDataUrl(file: File | Blob, maxSize = 1200): Promise<string> {
   });
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onFieldUpdate, onCelebrationEnd }: SceneCardProps) {
+/** 이미지를 저장하고 URL을 반환 (테스트: 로컬 파일, 라이브: Drive 업로드) */
+async function saveImage(
+  base64: string,
+  sheetName: string,
+  sceneId: string,
+  imageType: 'storyboard' | 'guide',
+  isLiveMode: boolean,
+): Promise<string> {
+  const typeSuffix = imageType === 'storyboard' ? 'sb' : 'guide';
+  const safeId = (sceneId || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `${sheetName}_${safeId}_${typeSuffix}.jpg`;
+
+  if (isLiveMode) {
+    // 라이브 모드: GAS를 통해 Drive에 업로드
+    const result = await window.electronAPI.sheetsUploadImage(
+      sheetName, sceneId, imageType, base64,
+    );
+    if (!result.ok || !result.url) {
+      throw new Error(result.error ?? '이미지 업로드 실패');
+    }
+    return result.url;
+  }
+
+  // 테스트 모드: 로컬 파일로 저장 → bflow-img:// URL 반환
+  return window.electronAPI.imageSave(fileName, base64);
+}
+
+function SceneCard({ scene, sceneIndex, celebrating, sheetName, isLiveMode, onToggle, onDelete, onFieldUpdate, onCelebrationEnd }: SceneCardProps) {
   const pct = sceneProgress(scene);
   const [editing, setEditing] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [imageLoading, setImageLoading] = useState(false);
 
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
 
-  // 이미지 → base64 data URL → 씬 필드에 직접 저장
+  // 이미지 리사이즈 → 로컬 저장 또는 Drive 업로드 → URL 저장
   const embedImage = async (file: File | Blob, imageType: 'storyboard' | 'guide') => {
     try {
-      const dataUrl = await fileToDataUrl(file);
+      setImageLoading(true);
+      const base64 = await resizeImage(file);
+      const imageUrl = await saveImage(base64, sheetName, scene.sceneId || String(scene.no), imageType, isLiveMode);
       const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-      onFieldUpdate(sceneIndex, field, dataUrl);
+      onFieldUpdate(sceneIndex, field, imageUrl);
     } catch (err) {
       console.error('[이미지 삽입 실패]', err);
+    } finally {
+      setImageLoading(false);
     }
   };
 
@@ -284,7 +318,12 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onField
 
       {/* 이미지 영역 */}
       <div className="flex gap-2 items-center">
-        {hasImages ? (
+        {imageLoading ? (
+          <div className="flex items-center gap-2 text-xs text-text-secondary/60 py-1">
+            <div className="w-3 h-3 border-2 border-accent/40 border-t-accent rounded-full animate-spin" />
+            이미지 저장 중...
+          </div>
+        ) : hasImages ? (
           <>
             {scene.storyboardUrl && (
               <img
@@ -1135,6 +1174,8 @@ export function ScenesView() {
                         scene={scene}
                         sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
                         celebrating={celebratingId === scene.sceneId}
+                        sheetName={currentPart?.sheetName ?? ''}
+                        isLiveMode={sheetsConnected}
                         onToggle={handleToggle}
                         onDelete={handleDeleteScene}
                         onFieldUpdate={handleFieldUpdate}
@@ -1167,6 +1208,8 @@ export function ScenesView() {
               scene={scene}
               sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
               celebrating={celebratingId === scene.sceneId}
+              sheetName={currentPart?.sheetName ?? ''}
+              isLiveMode={sheetsConnected}
               onToggle={handleToggle}
               onDelete={handleDeleteScene}
               onFieldUpdate={handleFieldUpdate}

@@ -23,6 +23,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('sheet:changed', callback);
   },
 
+  // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
+  imageSave: (fileName: string, base64Data: string) =>
+    ipcRenderer.invoke('image:save', fileName, base64Data) as Promise<string>,
+  imageDelete: (fileName: string) =>
+    ipcRenderer.invoke('image:delete', fileName) as Promise<boolean>,
+  imageGetDir: () => ipcRenderer.invoke('image:get-dir') as Promise<string>,
+
   // Google Sheets 연동 (Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) =>
     ipcRenderer.invoke('sheets:connect', webAppUrl),
@@ -45,4 +52,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('sheets:delete-scene', sheetName, rowIndex),
   sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) =>
     ipcRenderer.invoke('sheets:update-scene-field', sheetName, rowIndex, field, value),
+  sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) =>
+    ipcRenderer.invoke('sheets:upload-image', sheetName, sceneId, imageType, base64Data),
 });

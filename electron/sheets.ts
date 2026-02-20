@@ -175,3 +175,42 @@ export async function updateSceneField(
 ): Promise<void> {
   await gasGet({ action: 'updateSceneField', sheetName, rowIndex: String(rowIndex), field, value });
 }
+
+// ─── 이미지 업로드 (Drive에 저장 → URL 반환) ──────────────────
+
+export async function uploadImage(
+  sheetName: string,
+  sceneId: string,
+  imageType: string,
+  base64Data: string
+): Promise<{ url: string }> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+
+  // base64 data URL에서 순수 데이터와 MIME 타입 추출
+  const match = base64Data.match(/^data:(image\/\w+);base64,(.+)$/);
+  if (!match) throw new Error('Invalid base64 image data');
+
+  const mimeType = match[1];
+  const rawBase64 = match[2];
+
+  // POST로 이미지 데이터 전송 (URL 길이 제한 회피)
+  const res = await gasFetch(webAppUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'uploadImage',
+      sheetName,
+      sceneId,
+      imageType,
+      mimeType,
+      base64: rawBase64,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json() as { ok: boolean; url?: string; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '이미지 업로드 실패');
+
+  return { url: json.url! };
+}

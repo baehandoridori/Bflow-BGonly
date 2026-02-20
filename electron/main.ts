@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net } from 'electron';
+import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
 import {
@@ -11,10 +12,19 @@ import {
   addScene,
   deleteScene,
   updateSceneField,
+  uploadImage,
 } from './sheets';
 
 // 앱 이름 설정 — AppData 경로에 영향
 app.name = 'Bflow-BGonly';
+
+// ─── 이미지 커스텀 프로토콜 등록 (app.ready 전에 호출 필수) ──
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'bflow-img',
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
+]);
 
 // 테스트 모드 감지
 const isTestMode = process.argv.includes('--test-mode') || process.env.TEST_MODE === '1';
@@ -282,9 +292,66 @@ ipcMain.handle(
   }
 );
 
+ipcMain.handle(
+  'sheets:upload-image',
+  async (_event, sheetName: string, sceneId: string, imageType: string, base64Data: string) => {
+    try {
+      const result = await uploadImage(sheetName, sceneId, imageType, base64Data);
+      return { ok: true, url: result.url };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: msg };
+    }
+  }
+);
+
+// ─── IPC 핸들러: 이미지 파일 저장 ────────────────────────────
+
+ipcMain.handle(
+  'image:save',
+  async (_event, fileName: string, base64Data: string) => {
+    const imagesDir = path.join(getDataPath(), 'images');
+    ensureDir(imagesDir);
+
+    // "data:image/jpeg;base64,/9j/..." → raw base64 추출
+    const match = base64Data.match(/^data:image\/\w+;base64,(.+)$/);
+    if (!match) throw new Error('Invalid base64 image data');
+
+    const buffer = Buffer.from(match[1], 'base64');
+    const filePath = path.join(imagesDir, fileName);
+    fs.writeFileSync(filePath, buffer);
+
+    return `bflow-img://${encodeURIComponent(fileName)}`;
+  }
+);
+
+ipcMain.handle('image:delete', async (_event, fileName: string) => {
+  const filePath = path.join(getDataPath(), 'images', fileName);
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle('image:get-dir', () => {
+  return path.join(getDataPath(), 'images');
+});
+
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
 
 app.whenReady().then(() => {
+  // bflow-img:// 프로토콜 핸들러: userData/images/ 폴더에서 이미지 서빙
+  protocol.handle('bflow-img', (request) => {
+    const encoded = request.url.slice('bflow-img://'.length);
+    const fileName = decodeURIComponent(encoded);
+    const fullPath = path.join(getDataPath(), 'images', fileName);
+    return net.fetch(pathToFileURL(fullPath).toString());
+  });
+
   createWindow();
 
   app.on('activate', () => {

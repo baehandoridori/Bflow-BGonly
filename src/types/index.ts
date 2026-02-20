@@ -142,6 +142,10 @@ export interface ElectronAPI {
   testReadSheet: (filePath: string) => Promise<unknown | null>;
   testWriteSheet: (filePath: string, data: unknown) => Promise<boolean>;
   onSheetChanged: (callback: () => void) => () => void;
+  // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
+  imageSave: (fileName: string, base64Data: string) => Promise<string>;
+  imageDelete: (fileName: string) => Promise<boolean>;
+  imageGetDir: () => Promise<string>;
   // Google Sheets 연동 (Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) => Promise<SheetsConnectResult>;
   sheetsIsConnected: () => Promise<boolean>;
@@ -158,6 +162,7 @@ export interface ElectronAPI {
   sheetsAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<SheetsUpdateResult>;
   sheetsDeleteScene: (sheetName: string, rowIndex: number) => Promise<SheetsUpdateResult>;
   sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) => Promise<SheetsUpdateResult>;
+  sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
 }
 
 declare global {

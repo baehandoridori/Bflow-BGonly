@@ -98,3 +98,18 @@ export async function updateSceneFieldInSheets(
 ): Promise<void> {
   await assertOk(window.electronAPI.sheetsUpdateSceneField(sheetName, rowIndex, field, value), '씬 수정 실패');
 }
+
+// ─── 이미지 업로드 (Drive) ───────────────────
+
+export async function uploadImageToSheets(
+  sheetName: string,
+  sceneId: string,
+  imageType: string,
+  base64Data: string
+): Promise<string> {
+  const result = await window.electronAPI.sheetsUploadImage(sheetName, sceneId, imageType, base64Data);
+  if (!result.ok || !result.url) {
+    throw new Error(result.error ?? '이미지 업로드 실패');
+  }
+  return result.url;
+}

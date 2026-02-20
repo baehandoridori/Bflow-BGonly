@@ -113,6 +113,16 @@ function doPost(e) {
         updateSceneStage(body.sheetName, body.rowIndex, body.stage, body.value);
         return jsonResponse({ ok: true });
 
+      case 'uploadImage':
+        var url = uploadImageToDrive(
+          body.base64,
+          body.sheetName,
+          body.sceneId,
+          body.imageType,
+          body.mimeType || 'image/jpeg'
+        );
+        return jsonResponse({ ok: true, url: url });
+
       default:
         return jsonResponse({ ok: false, error: 'Unknown action: ' + action });
     }
@@ -374,4 +384,46 @@ function updateSceneField(sheetName, rowIndex, field, value) {
   }
 
   sheet.getRange(sheetRow, column).setValue(actualValue);
+}
+
+// ─── 이미지 Drive 업로드 ────────────────────────────────────
+
+var IMAGE_FOLDER_NAME = 'Bflow-BGonly Images';
+
+/**
+ * base64 이미지 데이터를 Google Drive에 저장하고 공개 URL을 반환
+ *
+ * @param {string} base64Data  순수 base64 문자열 (data: prefix 없이)
+ * @param {string} sheetName   시트 이름 (EP01_A 등)
+ * @param {string} sceneId     씬 ID (a001 등)
+ * @param {string} imageType   'storyboard' 또는 'guide'
+ * @param {string} mimeType    'image/jpeg' 등
+ * @return {string} 공개 접근 가능한 이미지 URL
+ */
+function uploadImageToDrive(base64Data, sheetName, sceneId, imageType, mimeType) {
+  // 이미지 폴더 가져오기 (없으면 생성)
+  var folders = DriveApp.getFoldersByName(IMAGE_FOLDER_NAME);
+  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(IMAGE_FOLDER_NAME);
+
+  // 파일명 생성
+  var typeSuffix = imageType === 'storyboard' ? 'sb' : 'guide';
+  var ext = mimeType === 'image/png' ? '.png' : '.jpg';
+  var fileName = sheetName + '_' + (sceneId || 'unknown') + '_' + typeSuffix + ext;
+
+  // base64 디코딩 → Blob
+  var decoded = Utilities.base64Decode(base64Data);
+  var blob = Utilities.newBlob(decoded, mimeType, fileName);
+
+  // 기존 동일 파일명 삭제 (덮어쓰기 시뮬레이션)
+  var existing = folder.getFilesByName(fileName);
+  while (existing.hasNext()) {
+    existing.next().setTrashed(true);
+  }
+
+  // 파일 생성 & 공유 설정
+  var file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  // 뷰어 URL 반환 (이미지 직접 표시 가능)
+  return 'https://drive.google.com/uc?export=view&id=' + file.getId();
 }
