@@ -5,7 +5,7 @@ import type { SortKey, StatusFilter } from '@/stores/useAppStore';
 import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
 import type { Scene, Stage } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, Eye } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List } from 'lucide-react';
 import {
   toggleTestSceneStage,
   addTestEpisode,
@@ -46,79 +46,18 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
 
   return (
     <div
-      className="bg-bg-card border border-bg-border rounded-lg p-4 flex flex-col gap-2 group relative cursor-pointer hover:border-text-secondary/30 transition-colors"
+      className="bg-bg-card border border-bg-border rounded-lg flex flex-col group relative cursor-pointer hover:border-text-secondary/30 transition-colors overflow-hidden"
       style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
       onClick={onOpenDetail}
     >
-      {/* 상단: 씬 정보 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-mono font-bold text-accent">
-            #{scene.no}
-          </span>
-          <span className="text-sm text-text-primary">
-            {scene.sceneId || '(씬번호 없음)'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-text-secondary">
-            {scene.assignee || '(담당자)'}
-          </span>
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete(sceneIndex); }}
-            className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400 transition-opacity"
-            title="씬 삭제"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-
-      {/* 레이아웃 + 메모 */}
-      <div className="flex items-center gap-2">
-        {scene.layoutId && (
-          <span className="text-[10px] text-text-secondary/60 font-mono">
-            L#{scene.layoutId}
-          </span>
-        )}
-        {scene.memo && (
-          <p className="text-xs text-text-secondary truncate">
-            {scene.memo}
-          </p>
-        )}
-      </div>
-
-      {/* 체크박스 칩들 */}
-      <div className="flex gap-2">
-        {STAGES.map((stage) => (
-          <button
-            key={stage}
-            onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
-            className={cn(
-              'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
-              scene[stage]
-                ? 'text-bg-primary'
-                : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary'
-            )}
-            style={
-              scene[stage]
-                ? { backgroundColor: STAGE_COLORS[stage] }
-                : undefined
-            }
-          >
-            {scene[stage] ? '✓ ' : ''}{STAGE_LABELS[stage]}
-          </button>
-        ))}
-      </div>
-
-      {/* 이미지 썸네일 (있을 때만) */}
+      {/* 이미지 썸네일 (큰 사이즈) */}
       {hasImages && (
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-px bg-bg-border">
           {scene.storyboardUrl && (
             <img
               src={scene.storyboardUrl}
               alt="SB"
-              className="h-10 rounded border border-bg-border object-cover"
+              className="flex-1 h-28 object-cover bg-bg-primary"
               draggable={false}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
@@ -127,26 +66,74 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
             <img
               src={scene.guideUrl}
               alt="Guide"
-              className="h-10 rounded border border-bg-border object-cover"
+              className="flex-1 h-28 object-cover bg-bg-primary"
               draggable={false}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
           )}
-          <Eye size={12} className="ml-auto text-text-secondary/30" />
         </div>
       )}
 
-      {/* 진행 바 */}
-      <div className="relative h-1 bg-bg-primary rounded-full overflow-visible">
-        <div
-          className="h-full rounded-full transition-all duration-300"
-          style={{
-            width: `${pct}%`,
-            backgroundColor:
-              pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct >= 25 ? '#E17055' : '#FF6B6B',
-          }}
-        />
-        <Confetti active={celebrating} onComplete={onCelebrationEnd} />
+      <div className="p-2.5 flex flex-col gap-1.5">
+        {/* 상단: 씬 정보 */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-mono font-bold text-accent">
+              #{scene.no}
+            </span>
+            <span className="text-xs text-text-primary truncate">
+              {scene.sceneId || '(씬번호 없음)'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-text-secondary truncate max-w-[60px]">
+              {scene.assignee || ''}
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(sceneIndex); }}
+              className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400 transition-opacity"
+              title="씬 삭제"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        {/* 체크박스 칩들 (소형) */}
+        <div className="flex gap-1">
+          {STAGES.map((stage) => (
+            <button
+              key={stage}
+              onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
+              className={cn(
+                'flex-1 py-0.5 rounded text-[10px] font-medium transition-all text-center',
+                scene[stage]
+                  ? 'text-bg-primary'
+                  : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary'
+              )}
+              style={
+                scene[stage]
+                  ? { backgroundColor: STAGE_COLORS[stage] }
+                  : undefined
+              }
+            >
+              {scene[stage] ? '✓' : ''}{STAGE_LABELS[stage]}
+            </button>
+          ))}
+        </div>
+
+        {/* 진행 바 */}
+        <div className="relative h-1 bg-bg-primary rounded-full overflow-visible">
+          <div
+            className="h-full rounded-full transition-all duration-300"
+            style={{
+              width: `${pct}%`,
+              backgroundColor:
+                pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct >= 25 ? '#E17055' : '#FF6B6B',
+            }}
+          />
+          <Confetti active={celebrating} onComplete={onCelebrationEnd} />
+        </div>
       </div>
     </div>
   );
@@ -928,7 +915,7 @@ export function ScenesView() {
                     onOpenDetail={(idx) => setDetailSceneIndex(idx)}
                   />
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
                     {groupScenes.map((scene, idx) => {
                       const sIdx = currentPart?.scenes.indexOf(scene) ?? idx;
                       return (
@@ -963,7 +950,7 @@ export function ScenesView() {
         </div>
       ) : (
         /* ── 카드 뷰 (플랫) ── */
-        <div className="flex-1 overflow-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 content-start">
+        <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 content-start">
           {scenes.map((scene, idx) => {
             const sIdx = currentPart?.scenes.indexOf(scene) ?? idx;
             return (

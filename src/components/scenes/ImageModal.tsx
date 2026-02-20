@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Columns2, Layers, ZoomIn, ZoomOut, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Columns2, Layers, ZoomIn, ZoomOut, Maximize, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 /**
@@ -31,9 +31,15 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
   const [overlayOpacity, setOverlayOpacity] = useState(0.5);
   const [zoom, setZoom] = useState(1);
   const [direction, setDirection] = useState(0); // -1 left · 0 fade · 1 right
+  const imageAreaRef = useRef<HTMLDivElement>(null);
 
   /* ── 뷰 순서 (오버레이 제외) ── */
   const viewOrder: ViewState[] = ['single-storyboard', 'side-by-side', 'single-guide'];
+
+  /* ── 부드러운 줌 (0.05 단위) ── */
+  const zoomBy = useCallback((delta: number) => {
+    setZoom((z) => Math.round(Math.min(4, Math.max(0.1, z + delta)) * 100) / 100);
+  }, []);
 
   /* ── 방향키 / 화살표 네비게이션 ── */
   const navigate = useCallback(
@@ -61,6 +67,19 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
     return () => window.removeEventListener('keydown', handleKey);
   }, [navigate, onClose]);
 
+  /* ── 마우스 휠 줌 ── */
+  useEffect(() => {
+    const el = imageAreaRef.current;
+    if (!el) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.08 : 0.08;
+      zoomBy(delta);
+    };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [zoomBy]);
+
   /* ── 배경 클릭 → 닫기 ── */
   const handleBackdrop = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose();
@@ -81,22 +100,19 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
   const canGoLeft  = hasBoth && view !== 'overlay' && viewOrder.indexOf(view) > 0;
   const canGoRight = hasBoth && view !== 'overlay' && viewOrder.indexOf(view) < viewOrder.length - 1;
 
-  /* ── 스와이프 애니메이션 variants ── */
+  /* ── 스와이프 애니메이션 variants (빠른 tween) ── */
   const slideVariants = {
     enter: (d: number) => ({
-      x: d > 0 ? 500 : d < 0 ? -500 : 0,
+      x: d > 0 ? 300 : d < 0 ? -300 : 0,
       opacity: 0,
-      scale: 0.92,
     }),
     center: {
       x: 0,
       opacity: 1,
-      scale: 1,
     },
     exit: (d: number) => ({
-      x: d > 0 ? -500 : d < 0 ? 500 : 0,
+      x: d > 0 ? -300 : d < 0 ? 300 : 0,
       opacity: 0,
-      scale: 0.92,
     }),
   };
 
@@ -159,21 +175,39 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
 
           <div className="w-px h-5 bg-bg-border" />
 
-          {/* 줌 */}
+          {/* 줌 컨트롤 */}
           <button
-            onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}
+            onClick={() => zoomBy(-0.25)}
             className="p-1 text-text-secondary hover:text-text-primary"
+            title="축소"
           >
             <ZoomOut size={14} />
           </button>
-          <span className="text-xs text-text-secondary w-10 text-center">
-            {Math.round(zoom * 100)}%
-          </span>
           <button
-            onClick={() => setZoom((z) => Math.min(4, z + 0.25))}
+            onClick={() => setZoom(1)}
+            className={cn(
+              'text-xs w-12 text-center rounded px-1 py-0.5 transition-colors',
+              zoom === 1
+                ? 'text-accent bg-accent/10'
+                : 'text-text-secondary hover:text-accent hover:bg-accent/10 cursor-pointer',
+            )}
+            title="원본 크기 (100%)"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            onClick={() => zoomBy(0.25)}
             className="p-1 text-text-secondary hover:text-text-primary"
+            title="확대"
           >
             <ZoomIn size={14} />
+          </button>
+          <button
+            onClick={() => setZoom(1)}
+            className="p-1 text-text-secondary hover:text-text-primary"
+            title="원본 크기로"
+          >
+            <Maximize size={14} />
           </button>
 
           <div className="w-px h-5 bg-bg-border" />
@@ -241,7 +275,10 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
         )}
 
         {/* ─── 이미지 영역 ─── */}
-        <div className="relative w-full h-full flex items-center justify-center pt-20 pb-16 overflow-hidden">
+        <div
+          ref={imageAreaRef}
+          className="relative w-full h-full flex items-center justify-center pt-20 pb-16 overflow-hidden"
+        >
           {view === 'overlay' ? (
             /* 오버레이 모드 — 스와이프 없음 */
             <div className="relative">
@@ -249,7 +286,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                 <img
                   src={storyboardUrl}
                   alt="스토리보드"
-                  className="rounded-lg shadow-2xl object-contain"
+                  className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                   style={{
                     transform: `scale(${zoom})`,
                     transformOrigin: 'center',
@@ -263,7 +300,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                 <img
                   src={guideUrl}
                   alt="가이드"
-                  className="absolute inset-0 rounded-lg object-contain"
+                  className="absolute inset-0 rounded-lg object-contain transition-transform duration-150 ease-out"
                   style={{
                     transform: `scale(${zoom})`,
                     transformOrigin: 'center',
@@ -284,7 +321,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                 initial="enter"
                 animate="center"
                 exit="exit"
-                transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+                transition={{ type: 'tween', ease: 'easeOut', duration: 0.2 }}
                 className="flex items-center justify-center gap-6"
               >
                 {/* ── 단일: 스토리보드 ── */}
@@ -294,7 +331,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                     <img
                       src={storyboardUrl}
                       alt="스토리보드"
-                      className="rounded-lg shadow-2xl object-contain"
+                      className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                       style={{
                         transform: `scale(${zoom})`,
                         transformOrigin: 'center',
@@ -312,7 +349,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                     <img
                       src={guideUrl}
                       alt="가이드"
-                      className="rounded-lg shadow-2xl object-contain"
+                      className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                       style={{
                         transform: `scale(${zoom})`,
                         transformOrigin: 'center',
@@ -332,15 +369,13 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                       style={{ perspective: 800 }}
                       onClick={() => handleImageClick('storyboard')}
                     >
-                      <span className="text-xs text-text-secondary transition-colors duration-200 group-sb-hover:text-accent">
-                        스토리보드
-                      </span>
+                      <span className="text-xs text-text-secondary">스토리보드</span>
                       {storyboardUrl ? (
                         <HoverCard3D direction="left">
                           <img
                             src={storyboardUrl}
                             alt="스토리보드"
-                            className="rounded-lg shadow-2xl object-contain"
+                            className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                             style={{
                               transform: `scale(${zoom})`,
                               transformOrigin: 'center',
@@ -367,7 +402,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                           <img
                             src={guideUrl}
                             alt="가이드"
-                            className="rounded-lg shadow-2xl object-contain"
+                            className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                             style={{
                               transform: `scale(${zoom})`,
                               transformOrigin: 'center',
