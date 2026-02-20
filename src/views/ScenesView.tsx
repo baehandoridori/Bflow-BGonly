@@ -1,11 +1,11 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter } from '@/stores/useAppStore';
 import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
 import type { Scene, Stage } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus } from 'lucide-react';
 import {
   toggleTestSceneStage,
   addTestEpisode,
@@ -77,16 +77,21 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
       <div className="p-2.5 flex flex-col gap-1.5">
         {/* 상단: 씬 정보 */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-mono font-bold text-accent">
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="text-xs font-mono font-bold text-accent shrink-0">
               #{scene.no}
             </span>
             <span className="text-xs text-text-primary truncate">
               {scene.sceneId || '(씬번호 없음)'}
             </span>
+            {scene.layoutId && (
+              <span className="text-[10px] italic text-text-secondary/70 truncate shrink-0">
+                - L#{scene.layoutId}
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-text-secondary truncate max-w-[60px]">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-xs font-medium text-text-primary truncate max-w-[80px]">
               {scene.assignee || ''}
             </span>
             <button
@@ -152,19 +157,19 @@ interface SceneTableProps {
 function SceneTable({ scenes, allScenes, onToggle, onDelete, onOpenDetail }: SceneTableProps) {
   return (
     <div className="overflow-auto rounded-lg border border-bg-border">
-      <table className="w-full text-sm">
+      <table className="w-full text-sm table-fixed">
         <thead>
           <tr className="bg-bg-card border-b border-bg-border text-text-secondary text-xs">
-            <th className="px-3 py-2 text-left font-medium">No</th>
-            <th className="px-3 py-2 text-left font-medium">씬번호</th>
-            <th className="px-3 py-2 text-left font-medium">담당자</th>
-            <th className="px-3 py-2 text-left font-medium">레이아웃</th>
-            <th className="px-3 py-2 text-left font-medium">메모</th>
+            <th className="w-14 px-2 py-2 text-left font-medium">No</th>
+            <th className="w-24 px-2 py-2 text-left font-medium">씬번호</th>
+            <th className="w-20 px-2 py-2 text-left font-medium">담당자</th>
+            <th className="w-20 px-2 py-2 text-left font-medium">레이아웃</th>
+            <th className="px-2 py-2 text-left font-medium">메모</th>
             {STAGES.map((s) => (
-              <th key={s} className="px-2 py-2 text-center font-medium">{STAGE_LABELS[s]}</th>
+              <th key={s} className="w-14 px-1 py-2 text-center font-medium">{STAGE_LABELS[s]}</th>
             ))}
-            <th className="px-3 py-2 text-center font-medium">진행</th>
-            <th className="px-2 py-2" />
+            <th className="w-14 px-2 py-2 text-center font-medium">진행</th>
+            <th className="w-8 px-1 py-2" />
           </tr>
         </thead>
         <tbody>
@@ -173,16 +178,16 @@ function SceneTable({ scenes, allScenes, onToggle, onDelete, onOpenDetail }: Sce
             const idx = allScenes.indexOf(scene);
             return (
               <tr key={`${scene.sceneId}-${idx}`} className="border-b border-bg-border/50 hover:bg-bg-card/50 group cursor-pointer" onClick={() => onOpenDetail(idx)}>
-                <td className="px-3 py-2 font-mono text-accent text-xs">#{scene.no}</td>
-                <td className="px-3 py-2 text-text-primary">{scene.sceneId || '-'}</td>
-                <td className="px-3 py-2 text-text-secondary">{scene.assignee || '-'}</td>
-                <td className="px-3 py-2 text-text-secondary font-mono text-xs">{scene.layoutId ? `#${scene.layoutId}` : '-'}</td>
-                <td className="px-3 py-2 text-text-secondary max-w-[150px] truncate">{scene.memo || '-'}</td>
+                <td className="px-2 py-2 font-mono text-accent text-xs">#{scene.no}</td>
+                <td className="px-2 py-2 text-text-primary text-xs truncate">{scene.sceneId || '-'}</td>
+                <td className="px-2 py-2 text-text-secondary text-xs truncate">{scene.assignee || '-'}</td>
+                <td className="px-2 py-2 text-text-secondary font-mono text-xs truncate">{scene.layoutId ? `#${scene.layoutId}` : '-'}</td>
+                <td className="px-2 py-2 text-text-secondary text-xs truncate">{scene.memo || '-'}</td>
                 {STAGES.map((stage) => (
-                  <td key={stage} className="px-2 py-2 text-center">
+                  <td key={stage} className="px-1 py-2 text-center">
                     <button
-                      onClick={() => onToggle(scene.sceneId, stage)}
-                      className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all"
+                      onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
+                      className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto"
                       style={
                         scene[stage]
                           ? { backgroundColor: STAGE_COLORS[stage], color: '#0F1117' }
@@ -193,7 +198,7 @@ function SceneTable({ scenes, allScenes, onToggle, onDelete, onOpenDetail }: Sce
                     </button>
                   </td>
                 ))}
-                <td className="px-3 py-2 text-center">
+                <td className="px-2 py-2 text-center">
                   <span className={cn(
                     'text-xs font-mono',
                     pct >= 100 ? 'text-green-400' : pct >= 50 ? 'text-yellow-400' : 'text-text-secondary'
@@ -201,9 +206,9 @@ function SceneTable({ scenes, allScenes, onToggle, onDelete, onOpenDetail }: Sce
                     {Math.round(pct)}%
                   </span>
                 </td>
-                <td className="px-2 py-2">
+                <td className="px-1 py-2">
                   <button
-                    onClick={() => onDelete(idx)}
+                    onClick={(e) => { e.stopPropagation(); onDelete(idx); }}
                     className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400"
                   >
                     ×
@@ -218,58 +223,210 @@ function SceneTable({ scenes, allScenes, onToggle, onDelete, onOpenDetail }: Sce
   );
 }
 
-// ─── 씬 추가 폼 (P1-3: 접두사 드롭다운 + 자동 번호) ────────────
+// ─── 씬 추가 폼 ────────────────────────────────────────────────
 
-const SCENE_PREFIXES = ['a', 'b', 'c', 'd', 'sc'];
+const ALPHABET_PREFIXES = 'abcdefghijklmnopqrstuvwx'.split('');
+
+type PrefixMode = 'alphabet' | 'sc' | 'custom';
 
 function suggestNextNumber(prefix: string, existingIds: string[]): string {
-  // prefix에 해당하는 기존 번호 추출
+  const lp = prefix.toLowerCase();
   const nums = existingIds
-    .filter((id) => id.startsWith(prefix))
-    .map((id) => parseInt(id.slice(prefix.length), 10))
+    .filter((id) => id.toLowerCase().startsWith(lp))
+    .map((id) => parseInt(id.slice(lp.length), 10))
     .filter((n) => !isNaN(n))
     .sort((a, b) => a - b);
 
   if (nums.length === 0) return '001';
 
-  // 빈 번호 찾기 (1부터 시작)
   for (let i = 0; i < nums.length; i++) {
-    if (nums[i] !== i + 1) {
-      return String(i + 1).padStart(3, '0');
-    }
+    if (nums[i] !== i + 1) return String(i + 1).padStart(3, '0');
   }
-  // 빈 번호 없으면 다음 번호
   return String(nums[nums.length - 1] + 1).padStart(3, '0');
+}
+
+/** 이미지 붙여넣기/파일선택 슬롯 (씬 추가 폼용) */
+function AddFormImageSlot({
+  label,
+  base64,
+  onSetBase64,
+}: {
+  label: string;
+  base64: string;
+  onSetBase64: (v: string) => void;
+}) {
+  const [phase, setPhase] = useState<'idle' | 'paste-hint'>('idle');
+  const slotRef = useRef<HTMLDivElement>(null);
+
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        const { resizeBlob: rb } = await import('@/utils/imageUtils');
+        const b64 = await rb(blob);
+        onSetBase64(b64);
+        setPhase('idle');
+        return;
+      }
+    }
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const { pasteImageFromClipboard: pic } = await import('@/utils/imageUtils');
+      // 로컬 붙여넣기 (base64만 가져오기)
+      const w = window as unknown as { electronAPI?: { readClipboardImage?: () => Promise<string> } };
+      if (w.electronAPI?.readClipboardImage) {
+        const raw = await w.electronAPI.readClipboardImage();
+        if (raw) {
+          const { resizeBlob: rb } = await import('@/utils/imageUtils');
+          // raw is data URL
+          const res = await fetch(raw);
+          const blob = await res.blob();
+          const b64 = await rb(blob);
+          onSetBase64(b64);
+          setPhase('idle');
+          return;
+        }
+      }
+      alert('클립보드에 이미지가 없습니다.');
+    } catch {
+      alert('클립보드 읽기 실패');
+    }
+  };
+
+  const handleClick = () => {
+    if (base64) return; // 이미 있으면 무시
+    if (phase === 'idle') {
+      setPhase('paste-hint');
+      slotRef.current?.focus();
+    } else {
+      // 두번째 클릭 → 파일 선택
+      setPhase('idle');
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const { resizeBlob: rb } = await import('@/utils/imageUtils');
+        const b64 = await rb(file);
+        onSetBase64(b64);
+      };
+      input.click();
+    }
+  };
+
+  if (base64) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] text-text-secondary">{label}</span>
+        <div className="relative group">
+          <img src={base64} alt={label} className="h-20 rounded border border-bg-border object-cover" draggable={false} />
+          <button
+            onClick={() => onSetBase64('')}
+            className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/60 text-white rounded-full text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] text-text-secondary">{label}</span>
+      <div
+        ref={slotRef}
+        tabIndex={0}
+        onClick={handleClick}
+        onPaste={handlePaste}
+        onBlur={() => setPhase('idle')}
+        className={cn(
+          'flex flex-col items-center justify-center gap-1 h-20 w-28 rounded-lg border-2 border-dashed cursor-pointer outline-none transition-all text-center',
+          phase === 'paste-hint'
+            ? 'border-accent bg-accent/10'
+            : 'border-bg-border hover:border-text-secondary/30',
+        )}
+      >
+        {phase === 'paste-hint' ? (
+          <>
+            <ClipboardPaste size={16} className="text-accent" />
+            <p className="text-[9px] text-accent leading-tight">Ctrl+V 붙여넣기</p>
+            <button
+              onClick={(e) => { e.stopPropagation(); handlePasteFromClipboard(); }}
+              className="text-[9px] text-accent/70 underline hover:text-accent"
+            >
+              붙여넣기
+            </button>
+            <p className="text-[8px] text-text-secondary/40">한번 더 클릭 → 파일선택</p>
+          </>
+        ) : (
+          <>
+            <ImagePlus size={14} className="text-text-secondary/30" />
+            <p className="text-[9px] text-text-secondary/40">클릭하여 추가</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 interface AddSceneFormProps {
   existingSceneIds: string[];
-  onSubmit: (sceneId: string, assignee: string, memo: string) => void;
+  sheetName: string;
+  isLiveMode: boolean;
+  onSubmit: (sceneId: string, assignee: string, memo: string, images?: { storyboard?: string; guide?: string }) => void;
   onCancel: () => void;
 }
 
-function AddSceneForm({ existingSceneIds, onSubmit, onCancel }: AddSceneFormProps) {
-  const [prefix, setPrefix] = useState(SCENE_PREFIXES[0]);
-  const [number, setNumber] = useState(() => suggestNextNumber(SCENE_PREFIXES[0], existingSceneIds));
+function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCancel }: AddSceneFormProps) {
+  const [prefixMode, setPrefixMode] = useState<PrefixMode>('alphabet');
+  const [alphaPrefix, setAlphaPrefix] = useState('a');
+  const [customPrefix, setCustomPrefix] = useState('');
+  const [number, setNumber] = useState(() => suggestNextNumber('a', existingSceneIds));
   const [assignee, setAssignee] = useState('');
   const [memo, setMemo] = useState('');
+  const [sbImage, setSbImage] = useState('');
+  const [guideImage, setGuideImage] = useState('');
 
+  const prefix = prefixMode === 'alphabet' ? alphaPrefix : prefixMode === 'sc' ? 'sc' : customPrefix;
   const sceneId = `${prefix}${number}`;
   const isDuplicate = existingSceneIds.includes(sceneId);
 
-  const handlePrefixChange = (newPrefix: string) => {
-    setPrefix(newPrefix);
-    setNumber(suggestNextNumber(newPrefix, existingSceneIds));
+  const updatePrefix = (mode: PrefixMode, value?: string) => {
+    setPrefixMode(mode);
+    let newP = prefix;
+    if (mode === 'alphabet') { newP = value ?? alphaPrefix; if (value) setAlphaPrefix(value); }
+    else if (mode === 'sc') newP = 'sc';
+    else if (mode === 'custom') newP = value ?? customPrefix;
+    setNumber(suggestNextNumber(newP, existingSceneIds));
+  };
+
+  const stepNumber = (dir: 1 | -1) => {
+    const n = parseInt(number, 10);
+    if (isNaN(n)) return;
+    const next = Math.max(1, n + dir);
+    setNumber(String(next).padStart(3, '0'));
   };
 
   const handleSubmit = () => {
-    if (isDuplicate) return;
-    onSubmit(sceneId, assignee, memo);
-    // 다음 번호로 자동 전진
+    if (isDuplicate || !prefix) return;
+    const imgs = (sbImage || guideImage)
+      ? { storyboard: sbImage || undefined, guide: guideImage || undefined }
+      : undefined;
+    onSubmit(sceneId, assignee, memo, imgs);
     const updatedIds = [...existingSceneIds, sceneId];
     setNumber(suggestNextNumber(prefix, updatedIds));
     setAssignee('');
     setMemo('');
+    setSbImage('');
+    setGuideImage('');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -278,41 +435,87 @@ function AddSceneForm({ existingSceneIds, onSubmit, onCancel }: AddSceneFormProp
   };
 
   return (
-    <div className="bg-bg-card border-2 border-accent/50 rounded-lg p-4 flex flex-col gap-2">
-      <div className="flex gap-2">
-        {/* 접두사 드롭다운 */}
-        <select
-          value={prefix}
-          onChange={(e) => handlePrefixChange(e.target.value)}
-          className="bg-bg-primary border border-bg-border rounded px-2 py-1 text-sm text-text-primary w-16"
-        >
-          {SCENE_PREFIXES.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
-        {/* 번호 입력 */}
-        <div className="relative flex-1">
+    <div className="bg-bg-card border-2 border-accent/50 rounded-lg p-4 flex flex-col gap-3">
+      {/* 접두사 라디오 + 선택 */}
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-text-secondary w-12 shrink-0">접두사</span>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* 알파벳 */}
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" checked={prefixMode === 'alphabet'} onChange={() => updatePrefix('alphabet')}
+              className="accent-accent w-3 h-3" />
+            <span className="text-xs text-text-primary">알파벳</span>
+            {prefixMode === 'alphabet' && (
+              <select
+                value={alphaPrefix}
+                onChange={(e) => { setAlphaPrefix(e.target.value); setNumber(suggestNextNumber(e.target.value, existingSceneIds)); }}
+                className="bg-bg-primary border border-bg-border rounded px-1.5 py-0.5 text-xs text-text-primary w-12 ml-1"
+              >
+                {ALPHABET_PREFIXES.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            )}
+          </label>
+          {/* SC */}
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" checked={prefixMode === 'sc'} onChange={() => updatePrefix('sc')}
+              className="accent-accent w-3 h-3" />
+            <span className="text-xs text-text-primary">SC</span>
+            {prefixMode === 'sc' && (
+              <span className="text-xs text-accent font-mono ml-1">sc</span>
+            )}
+          </label>
+          {/* 커스텀 */}
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" checked={prefixMode === 'custom'} onChange={() => updatePrefix('custom')}
+              className="accent-accent w-3 h-3" />
+            <span className="text-xs text-text-primary">커스텀</span>
+            {prefixMode === 'custom' && (
+              <input
+                autoFocus
+                value={customPrefix}
+                onChange={(e) => { setCustomPrefix(e.target.value); setNumber(suggestNextNumber(e.target.value, existingSceneIds)); }}
+                onKeyDown={handleKeyDown}
+                placeholder="접두사"
+                className="w-16 bg-bg-primary border border-bg-border rounded px-1.5 py-0.5 text-xs text-text-primary placeholder:text-text-secondary/40 ml-1"
+              />
+            )}
+          </label>
+        </div>
+      </div>
+
+      {/* 번호 + 미리보기 + 담당자 */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-text-secondary w-12 shrink-0">번호</span>
+        <div className="relative flex items-center">
           <input
-            autoFocus
             value={number}
             onChange={(e) => setNumber(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="001"
             className={cn(
-              'w-full bg-bg-primary border rounded px-2 py-1 text-sm text-text-primary placeholder:text-text-secondary/40',
+              'w-20 bg-bg-primary border rounded px-2 py-1 text-sm text-text-primary font-mono placeholder:text-text-secondary/40 pr-7',
               isDuplicate ? 'border-red-500' : 'border-bg-border'
             )}
           />
+          {/* 상하 스텝 버튼 */}
+          <div className="absolute right-0.5 top-0.5 bottom-0.5 flex flex-col">
+            <button onClick={() => stepNumber(1)} className="flex-1 px-0.5 text-text-secondary/50 hover:text-accent transition-colors" tabIndex={-1}>
+              <ChevronUp size={10} />
+            </button>
+            <button onClick={() => stepNumber(-1)} className="flex-1 px-0.5 text-text-secondary/50 hover:text-accent transition-colors" tabIndex={-1}>
+              <ChevronDown size={10} />
+            </button>
+          </div>
           {isDuplicate && (
-            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-red-400">
-              중복
-            </span>
+            <span className="ml-1 text-[10px] text-red-400">중복</span>
           )}
         </div>
-        {/* 미리보기 */}
-        <span className="flex items-center text-xs text-text-secondary font-mono min-w-[60px]">
+        <span className="text-xs text-accent font-mono font-bold min-w-[60px]">
           → {sceneId}
         </span>
+        <div className="w-px h-5 bg-bg-border" />
         <input
           value={assignee}
           onChange={(e) => setAssignee(e.target.value)}
@@ -320,34 +523,41 @@ function AddSceneForm({ existingSceneIds, onSubmit, onCancel }: AddSceneFormProp
           placeholder="담당자"
           className="w-20 bg-bg-primary border border-bg-border rounded px-2 py-1 text-sm text-text-primary placeholder:text-text-secondary/40"
         />
+        <input
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="메모 (선택)"
+          className="flex-1 bg-bg-primary border border-bg-border rounded px-2 py-1 text-sm text-text-primary placeholder:text-text-secondary/40"
+        />
       </div>
-      <input
-        value={memo}
-        onChange={(e) => setMemo(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="메모 (선택)"
-        className="bg-bg-primary border border-bg-border rounded px-2 py-1 text-sm text-text-primary placeholder:text-text-secondary/40"
-      />
-      <div className="flex gap-2 justify-end items-center">
-        <span className="text-[10px] text-text-secondary/50 mr-auto">
-          Enter로 추가 · Esc로 취소
-        </span>
-        <button
-          onClick={onCancel}
-          className="px-3 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
-        >
-          취소
-        </button>
-        <button
-          onClick={handleSubmit}
-          disabled={isDuplicate}
-          className={cn(
-            'px-3 py-1 text-white text-xs rounded-md transition-colors',
-            isDuplicate ? 'bg-gray-500 cursor-not-allowed' : 'bg-accent hover:bg-accent/80'
-          )}
-        >
-          추가
-        </button>
+
+      {/* 이미지 슬롯 + 하단 버튼 */}
+      <div className="flex items-end gap-3">
+        <AddFormImageSlot label="스토리보드" base64={sbImage} onSetBase64={setSbImage} />
+        <AddFormImageSlot label="가이드" base64={guideImage} onSetBase64={setGuideImage} />
+
+        <div className="flex gap-2 ml-auto items-center">
+          <span className="text-[10px] text-text-secondary/50">
+            Enter로 추가 · Esc로 취소
+          </span>
+          <button
+            onClick={onCancel}
+            className="px-3 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
+          >
+            취소
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isDuplicate || !prefix}
+            className={cn(
+              'px-4 py-1.5 text-white text-xs rounded-md transition-colors',
+              isDuplicate || !prefix ? 'bg-gray-500 cursor-not-allowed' : 'bg-accent hover:bg-accent/80'
+            )}
+          >
+            추가
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -575,8 +785,10 @@ export function ScenesView() {
     }
   };
 
-  const handleAddScene = async (sceneId: string, assignee: string, memo: string) => {
+  const handleAddScene = async (sceneId: string, assignee: string, memo: string, images?: { storyboard?: string; guide?: string }) => {
     if (!currentPart) return;
+
+    const sceneIndex = currentPart.scenes.length; // 새 씬의 인덱스
 
     // 낙관적 업데이트 (폼은 닫지 않음 — 연속 입력 지원)
     addSceneOptimistic(currentPart.sheetName, sceneId, assignee, memo);
@@ -596,6 +808,25 @@ export function ScenesView() {
         alert(`씬 추가 실패: ${err}`);
       }
       syncInBackground();
+    }
+
+    // 이미지가 있으면 백그라운드에서 업로드
+    if (images?.storyboard || images?.guide) {
+      (async () => {
+        try {
+          const { saveImage } = await import('@/utils/imageUtils');
+          if (images.storyboard) {
+            const url = await saveImage(images.storyboard, currentPart.sheetName, sceneId, 'storyboard', sheetsConnected);
+            handleFieldUpdate(sceneIndex, 'storyboardUrl', url);
+          }
+          if (images.guide) {
+            const url = await saveImage(images.guide, currentPart.sheetName, sceneId, 'guide', sheetsConnected);
+            handleFieldUpdate(sceneIndex, 'guideUrl', url);
+          }
+        } catch (err) {
+          console.error('[씬 추가 이미지 업로드 실패]', err);
+        }
+      })();
     }
   };
 
@@ -861,6 +1092,8 @@ export function ScenesView() {
       {showAddScene && (
         <AddSceneForm
           existingSceneIds={(currentPart?.scenes ?? []).map((s) => s.sceneId)}
+          sheetName={currentPart?.sheetName ?? ''}
+          isLiveMode={sheetsConnected}
           onSubmit={handleAddScene}
           onCancel={() => setShowAddScene(false)}
         />

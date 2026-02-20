@@ -131,7 +131,17 @@ function ImageSlot({
   onDrop,
 }: ImageSlotProps) {
   const [dragOver, setDragOver] = useState(false);
-  const [focused, setFocused] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'paste-hint'>('idle');
+
+  const handleEmptyClick = () => {
+    if (phase === 'idle') {
+      setPhase('paste-hint');
+    } else {
+      // 두번째 클릭 → 파일 선택
+      setPhase('idle');
+      onPickFile();
+    }
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -152,14 +162,12 @@ function ImageSlot({
           <div
             tabIndex={0}
             onPaste={onPasteEvent}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={(e) => { e.preventDefault(); setDragOver(false); onDrop(e); }}
             className={cn(
               'rounded-xl overflow-hidden border-2 transition-colors cursor-pointer outline-none',
-              dragOver ? 'border-accent' : focused ? 'border-accent/50' : 'border-transparent',
+              dragOver ? 'border-accent' : 'border-transparent',
             )}
           >
             <img
@@ -196,6 +204,13 @@ function ImageSlot({
                 <ClipboardPaste size={18} />
               </button>
               <button
+                onClick={onPickFile}
+                className="p-2 bg-white/20 hover:bg-white/30 rounded-lg backdrop-blur-sm text-white transition-colors"
+                title="파일로 교체"
+              >
+                <ImagePlus size={18} />
+              </button>
+              <button
                 onClick={onRemove}
                 className="p-2 bg-white/20 hover:bg-red-500/60 rounded-lg backdrop-blur-sm text-white transition-colors"
                 title="이미지 삭제"
@@ -204,74 +219,56 @@ function ImageSlot({
               </button>
             </div>
           </div>
-          {focused && (
-            <p className="text-[10px] text-accent/60 mt-1">
-              Ctrl+V 로 이미지 교체 가능
-            </p>
-          )}
         </div>
       ) : (
-        /* 이미지가 없을 때 — 빈 슬롯 */
+        /* 이미지가 없을 때 — 2단계 클릭 */
         <div
           tabIndex={0}
-          onPaste={onPasteEvent}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onPaste={(e) => { onPasteEvent(e); setPhase('idle'); }}
+          onBlur={() => setPhase('idle')}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => { e.preventDefault(); setDragOver(false); onDrop(e); }}
           className={cn(
-            'flex flex-col items-center justify-center gap-3 h-40 rounded-xl border-2 border-dashed transition-all cursor-pointer outline-none',
+            'flex flex-col items-center justify-center gap-2 h-40 rounded-xl border-2 border-dashed transition-all cursor-pointer outline-none',
             dragOver
               ? 'border-accent bg-accent/10'
-              : focused
-                ? 'border-accent/50 bg-accent/5'
+              : phase === 'paste-hint'
+                ? 'border-accent bg-accent/5'
                 : 'border-bg-border hover:border-text-secondary/30',
           )}
-          onClick={onPickFile}
+          onClick={handleEmptyClick}
         >
-          <ImagePlus
-            size={28}
-            className={cn(
-              'transition-colors',
-              focused ? 'text-accent' : 'text-text-secondary/30',
-            )}
-          />
-          <div className="text-center">
-            <p className="text-xs text-text-secondary/50">
-              클릭하여 파일 선택
-            </p>
-            <p className="text-[10px] text-text-secondary/30 mt-0.5">
-              또는 이 영역을 클릭 후 Ctrl+V 로 붙여넣기
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* 하단 액션 버튼 */}
-      {!loading && (
-        <div className="flex gap-2">
-          <button
-            onClick={onPickFile}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-text-secondary hover:text-accent border border-bg-border hover:border-accent rounded-lg transition-colors"
-          >
-            <ImagePlus size={12} />
-            파일 선택
-          </button>
-          <button
-            onClick={onPasteClipboard}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-text-secondary hover:text-purple-400 border border-bg-border hover:border-purple-400 rounded-lg transition-colors"
-          >
-            <ClipboardPaste size={12} />
-            붙여넣기
-          </button>
-          {url && (
-            <button
-              onClick={onRemove}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-text-secondary hover:text-red-400 border border-bg-border hover:border-red-400 rounded-lg transition-colors ml-auto"
-            >
-              <Trash2 size={12} />
-            </button>
+          {phase === 'paste-hint' ? (
+            <>
+              <ClipboardPaste size={28} className="text-accent" />
+              <div className="text-center">
+                <p className="text-xs text-accent font-medium">
+                  Ctrl+V 로 이미지 붙여넣기
+                </p>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onPasteClipboard(); setPhase('idle'); }}
+                  className="text-xs text-accent/70 underline hover:text-accent mt-1"
+                >
+                  붙여넣기 버튼
+                </button>
+                <p className="text-[10px] text-text-secondary/40 mt-1.5">
+                  한번 더 클릭하면 파일 탐색기 열기
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <ImagePlus size={28} className="text-text-secondary/30" />
+              <div className="text-center">
+                <p className="text-xs text-text-secondary/50">
+                  클릭하여 이미지 추가
+                </p>
+                <p className="text-[10px] text-text-secondary/30 mt-0.5">
+                  드래그 앤 드롭도 가능
+                </p>
+              </div>
+            </>
           )}
         </div>
       )}
