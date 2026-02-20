@@ -31,7 +31,6 @@ import { ImageModal } from '@/components/scenes/ImageModal';
 interface SceneCardProps {
   scene: Scene;
   sceneIndex: number;
-  sheetName: string;
   celebrating: boolean;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
@@ -39,7 +38,34 @@ interface SceneCardProps {
   onCelebrationEnd: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, sheetName, celebrating, onToggle, onDelete, onFieldUpdate, onCelebrationEnd }: SceneCardProps) {
+/** 이미지 File/Blob → base64 data URL 변환 (최대 1200px 리사이즈) */
+function fileToDataUrl(file: File | Blob, maxSize = 1200): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxSize || height > maxSize) {
+          const ratio = Math.min(maxSize / width, maxSize / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = reject;
+      img.src = reader.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onFieldUpdate, onCelebrationEnd }: SceneCardProps) {
   const pct = sceneProgress(scene);
   const [editing, setEditing] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -48,28 +74,27 @@ function SceneCard({ scene, sceneIndex, sheetName, celebrating, onToggle, onDele
 
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
 
-  // 이미지 저장 → URL 필드 업데이트
-  const saveImageData = async (data: Uint8Array, imageType: 'storyboard' | 'guide') => {
+  // 이미지 → base64 data URL → 씬 필드에 직접 저장
+  const embedImage = async (file: File | Blob, imageType: 'storyboard' | 'guide') => {
     try {
-      const filePath = await window.electronAPI.imageSave(data, sheetName, scene.sceneId, imageType);
+      const dataUrl = await fileToDataUrl(file);
       const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-      onFieldUpdate(sceneIndex, field, filePath);
+      onFieldUpdate(sceneIndex, field, dataUrl);
     } catch (err) {
-      console.error('[이미지 저장 실패]', err);
+      console.error('[이미지 삽입 실패]', err);
     }
   };
 
-  // 파일 다이얼로그
-  const handlePickImage = async (imageType: 'storyboard' | 'guide') => {
-    try {
-      const filePath = await window.electronAPI.imagePickAndSave(sheetName, scene.sceneId, imageType);
-      if (filePath) {
-        const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-        onFieldUpdate(sceneIndex, field, filePath);
-      }
-    } catch (err) {
-      console.error('[이미지 선택 실패]', err);
-    }
+  // 파일 선택 (<input type="file">)
+  const handlePickImage = (imageType: 'storyboard' | 'guide') => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (file) embedImage(file, imageType);
+    };
+    input.click();
   };
 
   // 클립보드 붙여넣기 (Ctrl+V)
@@ -81,10 +106,8 @@ function SceneCard({ scene, sceneIndex, sheetName, celebrating, onToggle, onDele
         e.preventDefault();
         const blob = item.getAsFile();
         if (!blob) continue;
-        const buffer = new Uint8Array(await blob.arrayBuffer());
-        // 스토리보드가 없으면 스토리보드, 있으면 가이드
         const type = scene.storyboardUrl ? 'guide' : 'storyboard';
-        await saveImageData(buffer, type);
+        await embedImage(blob, type);
         return;
       }
     }
@@ -96,9 +119,8 @@ function SceneCard({ scene, sceneIndex, sheetName, celebrating, onToggle, onDele
     setDragOver(false);
     const file = e.dataTransfer?.files?.[0];
     if (!file || !file.type.startsWith('image/')) return;
-    const buffer = new Uint8Array(await file.arrayBuffer());
     const type = scene.storyboardUrl ? 'guide' : 'storyboard';
-    await saveImageData(buffer, type);
+    await embedImage(file, type);
   };
 
   const startEdit = (field: string, currentValue: string) => {
@@ -122,12 +144,6 @@ function SceneCard({ scene, sceneIndex, sheetName, celebrating, onToggle, onDele
   };
 
   const borderColor = pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct > 0 ? '#E17055' : '#2D3041';
-
-  const toSrc = (url: string) => {
-    if (!url) return '';
-    if (url.startsWith('http') || url.startsWith('data:')) return url;
-    return `local-image://${encodeURIComponent(url)}`;
-  };
 
   return (
     <div
@@ -272,7 +288,7 @@ function SceneCard({ scene, sceneIndex, sheetName, celebrating, onToggle, onDele
           <>
             {scene.storyboardUrl && (
               <img
-                src={toSrc(scene.storyboardUrl)}
+                src={scene.storyboardUrl}
                 alt="SB"
                 className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
                 onClick={() => setShowModal(true)}
@@ -281,7 +297,7 @@ function SceneCard({ scene, sceneIndex, sheetName, celebrating, onToggle, onDele
             )}
             {scene.guideUrl && (
               <img
-                src={toSrc(scene.guideUrl)}
+                src={scene.guideUrl}
                 alt="Guide"
                 className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
                 onClick={() => setShowModal(true)}
@@ -1118,7 +1134,6 @@ export function ScenesView() {
                         key={`${scene.sceneId}-${idx}`}
                         scene={scene}
                         sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
-                        sheetName={currentPart?.sheetName ?? ''}
                         celebrating={celebratingId === scene.sceneId}
                         onToggle={handleToggle}
                         onDelete={handleDeleteScene}
@@ -1151,7 +1166,6 @@ export function ScenesView() {
               key={`${scene.sceneId}-${idx}`}
               scene={scene}
               sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
-              sheetName={currentPart?.sheetName ?? ''}
               celebrating={celebratingId === scene.sceneId}
               onToggle={handleToggle}
               onDelete={handleDeleteScene}

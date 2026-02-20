@@ -45,12 +45,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('sheets:delete-scene', sheetName, rowIndex),
   sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) =>
     ipcRenderer.invoke('sheets:update-scene-field', sheetName, rowIndex, field, value),
-
-  // 이미지 관리 (P2-1)
-  imageSave: (data: Uint8Array, sheetName: string, sceneId: string, imageType: string) =>
-    ipcRenderer.invoke('image:save', data, sheetName, sceneId, imageType),
-  imagePickAndSave: (sheetName: string, sceneId: string, imageType: string) =>
-    ipcRenderer.invoke('image:pick-and-save', sheetName, sceneId, imageType),
-  imageDelete: (filePath: string) =>
-    ipcRenderer.invoke('image:delete', filePath),
 });

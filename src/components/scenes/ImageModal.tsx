@@ -12,12 +12,6 @@ interface ImageModalProps {
   onClose: () => void;
 }
 
-function toSrc(filePath: string): string {
-  if (!filePath) return '';
-  if (filePath.startsWith('http') || filePath.startsWith('data:')) return filePath;
-  return `local-image://${encodeURIComponent(filePath)}`;
-}
-
 export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageModalProps) {
   const hasBoth = !!storyboardUrl && !!guideUrl;
   const [mode, setMode] = useState<CompareMode>(hasBoth ? 'side-by-side' : 'single');
@@ -110,7 +104,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
         <div className="flex items-center justify-center gap-4 max-w-[90vw] max-h-[80vh] mt-16 overflow-auto">
           {mode === 'single' && (
             <img
-              src={toSrc(storyboardUrl || guideUrl)}
+              src={storyboardUrl || guideUrl}
               alt={sceneId}
               className="rounded-lg shadow-2xl object-contain"
               style={{ transform: `scale(${zoom})`, transformOrigin: 'center', maxHeight: '75vh' }}
@@ -124,7 +118,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                 <span className="text-xs text-text-secondary">스토리보드</span>
                 {storyboardUrl ? (
                   <img
-                    src={toSrc(storyboardUrl)}
+                    src={storyboardUrl}
                     alt="스토리보드"
                     className="rounded-lg shadow-2xl object-contain"
                     style={{ transform: `scale(${zoom})`, transformOrigin: 'center', maxHeight: '70vh', maxWidth: '42vw' }}
@@ -140,7 +134,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
                 <span className="text-xs text-text-secondary">가이드</span>
                 {guideUrl ? (
                   <img
-                    src={toSrc(guideUrl)}
+                    src={guideUrl}
                     alt="가이드"
                     className="rounded-lg shadow-2xl object-contain"
                     style={{ transform: `scale(${zoom})`, transformOrigin: 'center', maxHeight: '70vh', maxWidth: '42vw' }}
@@ -159,7 +153,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
             <div className="relative">
               {storyboardUrl && (
                 <img
-                  src={toSrc(storyboardUrl)}
+                  src={storyboardUrl}
                   alt="스토리보드"
                   className="rounded-lg shadow-2xl object-contain"
                   style={{
@@ -173,7 +167,7 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
               )}
               {guideUrl && (
                 <img
-                  src={toSrc(guideUrl)}
+                  src={guideUrl}
                   alt="가이드"
                   className="absolute inset-0 rounded-lg object-contain"
                   style={{

@@ -158,10 +158,6 @@ export interface ElectronAPI {
   sheetsAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<SheetsUpdateResult>;
   sheetsDeleteScene: (sheetName: string, rowIndex: number) => Promise<SheetsUpdateResult>;
   sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) => Promise<SheetsUpdateResult>;
-  // 이미지 관리
-  imageSave: (data: Uint8Array, sheetName: string, sceneId: string, imageType: string) => Promise<string>;
-  imagePickAndSave: (sheetName: string, sceneId: string, imageType: string) => Promise<string | null>;
-  imageDelete: (filePath: string) => Promise<boolean>;
 }
 
 declare global {
