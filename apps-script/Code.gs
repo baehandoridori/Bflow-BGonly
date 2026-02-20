@@ -212,7 +212,8 @@ function readSheetData(sheetName) {
 
   for (var i = 0; i < data.length; i++) {
     var row = data[i];
-    if (!row[0]) continue;
+    // No와 씬번호가 모두 비어있는 행만 건너뜀 (No=0인 행도 씬번호가 있으면 포함)
+    if (!row[0] && !row[1]) continue;
 
     scenes.push({
       no: parseInt(row[0], 10) || (i + 1),
@@ -412,6 +413,24 @@ function updateSceneField(sheetName, rowIndex, field, value) {
 var IMAGE_FOLDER_NAME = 'Bflow-BGonly Images';
 
 /**
+ * 이미지 폴더를 가져온다 (없으면 생성 시도).
+ * testDrivePermission()을 먼저 실행했다면 폴더가 이미 존재한다.
+ */
+function getOrCreateImageFolder() {
+  var folders = DriveApp.getFoldersByName(IMAGE_FOLDER_NAME);
+  if (folders.hasNext()) return folders.next();
+
+  // 폴더 생성 시도 (권한 없으면 상세 안내 포함 오류)
+  try {
+    return DriveApp.createFolder(IMAGE_FOLDER_NAME);
+  } catch (e) {
+    throw new Error(
+      'Drive 폴더 생성 권한 없음. Apps Script 에디터에서 testDrivePermission 함수를 실행하여 권한을 승인한 뒤 "새 배포"를 다시 해주세요. (' + e.message + ')'
+    );
+  }
+}
+
+/**
  * base64 이미지 데이터를 Google Drive에 저장하고 공개 URL을 반환
  *
  * @param {string} base64Data  순수 base64 문자열 (data: prefix 없이)
@@ -423,8 +442,7 @@ var IMAGE_FOLDER_NAME = 'Bflow-BGonly Images';
  */
 function uploadImageToDrive(base64Data, sheetName, sceneId, imageType, mimeType) {
   // 이미지 폴더 가져오기 (없으면 생성)
-  var folders = DriveApp.getFoldersByName(IMAGE_FOLDER_NAME);
-  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(IMAGE_FOLDER_NAME);
+  var folder = getOrCreateImageFolder();
 
   // 파일명 생성
   var typeSuffix = imageType === 'storyboard' ? 'sb' : 'guide';
@@ -447,4 +465,30 @@ function uploadImageToDrive(base64Data, sheetName, sceneId, imageType, mimeType)
 
   // 뷰어 URL 반환 (이미지 직접 표시 가능)
   return 'https://drive.google.com/uc?export=view&id=' + file.getId();
+}
+
+// ─── 권한 테스트 (에디터에서 실행) ────────────────────────────
+
+/**
+ * Apps Script 에디터에서 이 함수를 실행하면:
+ * 1. Drive 접근 권한 승인 대화상자 표시
+ * 2. 이미지 저장용 폴더가 없으면 미리 생성
+ *
+ * 실행 후 반드시 "배포 → 새 배포"를 해야 웹 앱에도 반영됩니다.
+ */
+function testDrivePermission() {
+  // 1) Drive 접근 확인
+  var root = DriveApp.getRootFolder();
+  Logger.log('Drive 루트 접근 OK: ' + root.getName());
+
+  // 2) 이미지 폴더 미리 생성 (이후 uploadImage에서 createFolder 불필요)
+  var folders = DriveApp.getFoldersByName(IMAGE_FOLDER_NAME);
+  if (folders.hasNext()) {
+    Logger.log('이미지 폴더 이미 존재: ' + IMAGE_FOLDER_NAME);
+  } else {
+    var newFolder = DriveApp.createFolder(IMAGE_FOLDER_NAME);
+    Logger.log('이미지 폴더 생성 완료: ' + newFolder.getName() + ' (ID: ' + newFolder.getId() + ')');
+  }
+
+  Logger.log('=== 모든 Drive 권한 OK — 이제 "새 배포"를 해주세요 ===');
 }
