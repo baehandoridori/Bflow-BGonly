@@ -107,6 +107,23 @@ export interface EpisodeData {
   }[];
 }
 
+// ─── 이미지 URL 검증 ─────────────────────────────────────────
+// CellImage 객체가 String()으로 변환되면 유효하지 않은 값이 전달될 수 있음
+
+function sanitizeImageUrl(val: unknown): string {
+  if (typeof val !== 'string') return '';
+  const trimmed = val.trim();
+  if (!trimmed) return '';
+  if (
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('bflow-img://')
+  ) {
+    return trimmed;
+  }
+  return '';
+}
+
 // ─── 전체 에피소드 데이터 읽기 ────────────────────────────────
 
 export async function readAllEpisodes(): Promise<EpisodeData[]> {
@@ -118,7 +135,19 @@ export async function readAllEpisodes(): Promise<EpisodeData[]> {
   const json = await res.json();
   if (!json.ok) throw new Error(json.error ?? '시트 읽기 실패');
 
-  return json.data ?? [];
+  const episodes: EpisodeData[] = json.data ?? [];
+
+  // 이미지 URL 검증 — CellImage 쓰레기 값 필터링
+  for (const ep of episodes) {
+    for (const part of ep.parts) {
+      for (const scene of part.scenes) {
+        scene.storyboardUrl = sanitizeImageUrl(scene.storyboardUrl);
+        scene.guideUrl = sanitizeImageUrl(scene.guideUrl);
+      }
+    }
+  }
+
+  return episodes;
 }
 
 // ─── GAS GET 호출 헬퍼 ────────────────────────────────────────
