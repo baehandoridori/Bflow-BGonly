@@ -5,7 +5,7 @@ import type { SortKey, StatusFilter } from '@/stores/useAppStore';
 import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
 import type { Scene, Stage } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ImagePlus, Eye, ClipboardPaste } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, Eye } from 'lucide-react';
 import {
   toggleTestSceneStage,
   addTestEpisode,
@@ -24,238 +24,48 @@ import {
 } from '@/services/sheetsService';
 import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
-import { ImageModal } from '@/components/scenes/ImageModal';
+import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
 
-// ─── 씬 카드 ──────────────────────────────────────────────────
+// ─── 씬 카드 (요약 카드 — 클릭으로 상세 모달 열기) ──────────────
 
 interface SceneCardProps {
   scene: Scene;
   sceneIndex: number;
   celebrating: boolean;
-  sheetName: string;
-  isLiveMode: boolean;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
-  onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
+  onOpenDetail: () => void;
   onCelebrationEnd: () => void;
 }
 
-/** 이미지 File/Blob → 리사이즈 후 JPEG base64 data URL (최대 800px, 80% 품질) */
-function resizeImage(file: File | Blob, maxSize = 800, quality = 0.8): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > maxSize || height > maxSize) {
-          const ratio = Math.min(maxSize / width, maxSize / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = reject;
-      img.src = reader.result as string;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-/** 이미지를 저장하고 URL을 반환 (테스트: 로컬 파일, 라이브: Drive 업로드) */
-async function saveImage(
-  base64: string,
-  sheetName: string,
-  sceneId: string,
-  imageType: 'storyboard' | 'guide',
-  isLiveMode: boolean,
-): Promise<string> {
-  const typeSuffix = imageType === 'storyboard' ? 'sb' : 'guide';
-  const safeId = (sceneId || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const fileName = `${sheetName}_${safeId}_${typeSuffix}.jpg`;
-
-  if (isLiveMode) {
-    // 라이브 모드: GAS를 통해 Drive에 업로드
-    const result = await window.electronAPI.sheetsUploadImage(
-      sheetName, sceneId, imageType, base64,
-    );
-    if (!result.ok || !result.url) {
-      throw new Error(result.error ?? '이미지 업로드 실패');
-    }
-    return result.url;
-  }
-
-  // 테스트 모드: 로컬 파일로 저장 → bflow-img:// URL 반환
-  return window.electronAPI.imageSave(fileName, base64);
-}
-
-function SceneCard({ scene, sceneIndex, celebrating, sheetName, isLiveMode, onToggle, onDelete, onFieldUpdate, onCelebrationEnd }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenDetail, onCelebrationEnd }: SceneCardProps) {
   const pct = sceneProgress(scene);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const [showModal, setShowModal] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const [imageLoading, setImageLoading] = useState(false);
-
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
-
-  // 이미지 리사이즈 → 로컬 저장 또는 Drive 업로드 → URL 저장
-  const embedImage = async (file: File | Blob, imageType: 'storyboard' | 'guide') => {
-    try {
-      setImageLoading(true);
-      const base64 = await resizeImage(file);
-      const imageUrl = await saveImage(base64, sheetName, scene.sceneId || String(scene.no), imageType, isLiveMode);
-      const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-      onFieldUpdate(sceneIndex, field, imageUrl);
-    } catch (err) {
-      console.error('[이미지 삽입 실패]', err);
-    } finally {
-      setImageLoading(false);
-    }
-  };
-
-  // 파일 선택 (<input type="file">)
-  const handlePickImage = (imageType: 'storyboard' | 'guide') => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (file) embedImage(file, imageType);
-    };
-    input.click();
-  };
-
-  // 클립보드에서 이미지 읽기 (Electron 네이티브 API)
-  const handleClipboardPaste = async (imageType: 'storyboard' | 'guide') => {
-    try {
-      const dataUrl = await window.electronAPI.clipboardReadImage();
-      if (!dataUrl) return;
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      await embedImage(blob, imageType);
-    } catch (err) {
-      console.error('[클립보드 붙여넣기 실패]', err);
-    }
-  };
-
-  // 키보드 Ctrl+V 붙여넣기
-  const handlePaste = async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        e.preventDefault();
-        const blob = item.getAsFile();
-        if (!blob) continue;
-        const type = scene.storyboardUrl ? 'guide' : 'storyboard';
-        await embedImage(blob, type);
-        return;
-      }
-    }
-  };
-
-  // 드래그 앤 드롭
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer?.files?.[0];
-    if (!file || !file.type.startsWith('image/')) return;
-    const type = scene.storyboardUrl ? 'guide' : 'storyboard';
-    await embedImage(file, type);
-  };
-
-  const startEdit = (field: string, currentValue: string) => {
-    setEditing(field);
-    setEditValue(currentValue);
-  };
-
-  const commitEdit = () => {
-    if (editing && editValue !== undefined) {
-      const original = scene[editing as keyof Scene];
-      if (String(original) !== editValue) {
-        onFieldUpdate(sceneIndex, editing, editValue);
-      }
-    }
-    setEditing(null);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') commitEdit();
-    if (e.key === 'Escape') setEditing(null);
-  };
 
   const borderColor = pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct > 0 ? '#E17055' : '#2D3041';
 
   return (
     <div
-      className={cn(
-        'bg-bg-card border rounded-lg p-4 flex flex-col gap-2 group relative',
-        dragOver ? 'border-accent border-2' : 'border-bg-border'
-      )}
+      className="bg-bg-card border border-bg-border rounded-lg p-4 flex flex-col gap-2 group relative cursor-pointer hover:border-text-secondary/30 transition-colors"
       style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
-      onPaste={handlePaste}
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={handleDrop}
-      tabIndex={0}
+      onClick={onOpenDetail}
     >
-      {/* 드래그 오버레이 */}
-      {dragOver && (
-        <div className="absolute inset-0 bg-accent/10 rounded-lg flex items-center justify-center z-10 pointer-events-none">
-          <span className="text-accent text-sm font-medium">이미지 놓기</span>
-        </div>
-      )}
-
       {/* 상단: 씬 정보 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-mono font-bold text-accent">
             #{scene.no}
           </span>
-          {editing === 'sceneId' ? (
-            <input
-              autoFocus
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={commitEdit}
-              onKeyDown={handleKeyDown}
-              className="text-sm bg-bg-primary border border-accent rounded px-1 py-0.5 text-text-primary w-24"
-            />
-          ) : (
-            <span
-              className="text-sm text-text-primary cursor-pointer hover:text-accent"
-              onClick={() => startEdit('sceneId', scene.sceneId)}
-            >
-              {scene.sceneId || '(씬번호 없음)'}
-            </span>
-          )}
+          <span className="text-sm text-text-primary">
+            {scene.sceneId || '(씬번호 없음)'}
+          </span>
         </div>
         <div className="flex items-center gap-2">
-          {editing === 'assignee' ? (
-            <input
-              autoFocus
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={commitEdit}
-              onKeyDown={handleKeyDown}
-              className="text-xs bg-bg-primary border border-accent rounded px-1 py-0.5 text-text-primary w-16"
-            />
-          ) : (
-            <span
-              className="text-xs text-text-secondary cursor-pointer hover:text-accent"
-              onClick={() => startEdit('assignee', scene.assignee)}
-            >
-              {scene.assignee || '(담당자)'}
-            </span>
-          )}
+          <span className="text-xs text-text-secondary">
+            {scene.assignee || '(담당자)'}
+          </span>
           <button
-            onClick={() => onDelete(sceneIndex)}
+            onClick={(e) => { e.stopPropagation(); onDelete(sceneIndex); }}
             className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400 transition-opacity"
             title="씬 삭제"
           >
@@ -264,54 +74,26 @@ function SceneCard({ scene, sceneIndex, celebrating, sheetName, isLiveMode, onTo
         </div>
       </div>
 
-      {/* 레이아웃 ID */}
-      <div className="flex items-center gap-1">
-        <Layers size={10} className="text-text-secondary/50" />
-        {editing === 'layoutId' ? (
-          <input
-            autoFocus
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={commitEdit}
-            onKeyDown={handleKeyDown}
-            placeholder="레이아웃 번호"
-            className="text-xs bg-bg-primary border border-accent rounded px-1 py-0.5 text-text-primary flex-1"
-          />
-        ) : (
-          <span
-            className="text-[10px] text-text-secondary/60 cursor-pointer hover:text-accent font-mono"
-            onClick={() => startEdit('layoutId', scene.layoutId || '')}
-          >
-            {scene.layoutId ? `L#${scene.layoutId}` : '(레이아웃)'}
+      {/* 레이아웃 + 메모 */}
+      <div className="flex items-center gap-2">
+        {scene.layoutId && (
+          <span className="text-[10px] text-text-secondary/60 font-mono">
+            L#{scene.layoutId}
           </span>
         )}
+        {scene.memo && (
+          <p className="text-xs text-text-secondary truncate">
+            {scene.memo}
+          </p>
+        )}
       </div>
-
-      {/* 메모 */}
-      {editing === 'memo' ? (
-        <input
-          autoFocus
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onBlur={commitEdit}
-          onKeyDown={handleKeyDown}
-          className="text-xs bg-bg-primary border border-accent rounded px-2 py-1 text-text-primary"
-        />
-      ) : (
-        <p
-          className="text-xs text-text-secondary min-h-[1rem] cursor-pointer hover:text-accent"
-          onClick={() => startEdit('memo', scene.memo)}
-        >
-          {scene.memo || '(메모 클릭하여 편집)'}
-        </p>
-      )}
 
       {/* 체크박스 칩들 */}
       <div className="flex gap-2">
         {STAGES.map((stage) => (
           <button
             key={stage}
-            onClick={() => onToggle(scene.sceneId, stage)}
+            onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
             className={cn(
               'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
               scene[stage]
@@ -329,98 +111,27 @@ function SceneCard({ scene, sceneIndex, celebrating, sheetName, isLiveMode, onTo
         ))}
       </div>
 
-      {/* 이미지 영역 */}
-      <div className="flex flex-col gap-1.5">
-        {imageLoading ? (
-          <div className="flex items-center gap-2 text-xs text-text-secondary/60 py-1">
-            <div className="w-3 h-3 border-2 border-accent/40 border-t-accent rounded-full animate-spin" />
-            이미지 저장 중...
-          </div>
-        ) : (
-          <>
-            {/* 이미지 썸네일 */}
-            {hasImages && (
-              <div className="flex gap-2 items-center">
-                {scene.storyboardUrl && (
-                  <img
-                    src={scene.storyboardUrl}
-                    alt="SB"
-                    className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
-                    onClick={() => setShowModal(true)}
-                    draggable={false}
-                  />
-                )}
-                {scene.guideUrl && (
-                  <img
-                    src={scene.guideUrl}
-                    alt="Guide"
-                    className="h-10 rounded border border-bg-border object-cover cursor-pointer hover:border-accent transition-colors"
-                    onClick={() => setShowModal(true)}
-                    draggable={false}
-                  />
-                )}
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="ml-auto p-1 text-text-secondary/40 hover:text-accent transition-colors"
-                  title="이미지 확대"
-                >
-                  <Eye size={14} />
-                </button>
-              </div>
-            )}
-            {/* 이미지 추가 버튼 (SB 또는 가이드가 비어있을 때) */}
-            {(!scene.storyboardUrl || !scene.guideUrl) && (
-              <div className="flex gap-1 flex-wrap">
-                {!scene.storyboardUrl && (
-                  <>
-                    <button
-                      onClick={() => handlePickImage('storyboard')}
-                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-accent border border-dashed border-bg-border hover:border-accent rounded transition-colors"
-                      title="파일에서 SB 이미지 선택"
-                    >
-                      <ImagePlus size={10} /> SB
-                    </button>
-                    <button
-                      onClick={() => handleClipboardPaste('storyboard')}
-                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-purple-400 border border-dashed border-bg-border hover:border-purple-400 rounded transition-colors"
-                      title="클립보드에서 SB 이미지 붙여넣기"
-                    >
-                      <ClipboardPaste size={10} /> SB
-                    </button>
-                  </>
-                )}
-                {!scene.guideUrl && (
-                  <>
-                    <button
-                      onClick={() => handlePickImage('guide')}
-                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-accent border border-dashed border-bg-border hover:border-accent rounded transition-colors"
-                      title="파일에서 가이드 이미지 선택"
-                    >
-                      <ImagePlus size={10} /> 가이드
-                    </button>
-                    <button
-                      onClick={() => handleClipboardPaste('guide')}
-                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-text-secondary/40 hover:text-purple-400 border border-dashed border-bg-border hover:border-purple-400 rounded transition-colors"
-                      title="클립보드에서 가이드 이미지 붙여넣기"
-                    >
-                      <ClipboardPaste size={10} /> 가이드
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* 이미지 모달 */}
-      {showModal && (
-        <ImageModal
-          storyboardUrl={scene.storyboardUrl}
-          guideUrl={scene.guideUrl}
-          sceneId={scene.sceneId}
-          onClose={() => setShowModal(false)}
-        />
+      {/* 이미지 썸네일 (있을 때만) */}
+      {hasImages && (
+        <div className="flex gap-2 items-center">
+          {scene.storyboardUrl && (
+            <img
+              src={scene.storyboardUrl}
+              alt="SB"
+              className="h-10 rounded border border-bg-border object-cover"
+              draggable={false}
+            />
+          )}
+          {scene.guideUrl && (
+            <img
+              src={scene.guideUrl}
+              alt="Guide"
+              className="h-10 rounded border border-bg-border object-cover"
+              draggable={false}
+            />
+          )}
+          <Eye size={12} className="ml-auto text-text-secondary/30" />
+        </div>
       )}
 
       {/* 진행 바 */}
@@ -446,10 +157,10 @@ interface SceneTableProps {
   allScenes: Scene[];
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
-  onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
+  onOpenDetail: (sceneIndex: number) => void;
 }
 
-function SceneTable({ scenes, allScenes, onToggle, onDelete, onFieldUpdate }: SceneTableProps) {
+function SceneTable({ scenes, allScenes, onToggle, onDelete, onOpenDetail }: SceneTableProps) {
   return (
     <div className="overflow-auto rounded-lg border border-bg-border">
       <table className="w-full text-sm">
@@ -472,7 +183,7 @@ function SceneTable({ scenes, allScenes, onToggle, onDelete, onFieldUpdate }: Sc
             const pct = sceneProgress(scene);
             const idx = allScenes.indexOf(scene);
             return (
-              <tr key={`${scene.sceneId}-${idx}`} className="border-b border-bg-border/50 hover:bg-bg-card/50 group">
+              <tr key={`${scene.sceneId}-${idx}`} className="border-b border-bg-border/50 hover:bg-bg-card/50 group cursor-pointer" onClick={() => onOpenDetail(idx)}>
                 <td className="px-3 py-2 font-mono text-accent text-xs">#{scene.no}</td>
                 <td className="px-3 py-2 text-text-primary">{scene.sceneId || '-'}</td>
                 <td className="px-3 py-2 text-text-secondary">{scene.assignee || '-'}</td>
@@ -673,6 +384,7 @@ export function ScenesView() {
   const [showAddScene, setShowAddScene] = useState(false);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
+  const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
 
   // 백그라운드 동기화: 낙관적 업데이트 후 서버/파일과 싱크
   const syncInBackground = async () => {
@@ -698,6 +410,11 @@ export function ScenesView() {
   const currentEp = episodes.find((ep) => ep.episodeNumber === selectedEpisode) ?? episodes[0];
   const parts = currentEp?.parts ?? [];
   const currentPart = parts.find((p) => p.partId === selectedPart) ?? parts[0];
+
+  // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
+  const detailScene = detailSceneIndex !== null
+    ? (currentPart?.scenes[detailSceneIndex] ?? null)
+    : null;
 
   // 필터링
   let scenes = currentPart?.scenes ?? [];
@@ -1206,24 +923,25 @@ export function ScenesView() {
                     allScenes={currentPart?.scenes ?? []}
                     onToggle={handleToggle}
                     onDelete={handleDeleteScene}
-                    onFieldUpdate={handleFieldUpdate}
+                    onOpenDetail={(idx) => setDetailSceneIndex(idx)}
                   />
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {groupScenes.map((scene, idx) => (
-                      <SceneCard
-                        key={`${scene.sceneId}-${idx}`}
-                        scene={scene}
-                        sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
-                        celebrating={celebratingId === scene.sceneId}
-                        sheetName={currentPart?.sheetName ?? ''}
-                        isLiveMode={sheetsConnected}
-                        onToggle={handleToggle}
-                        onDelete={handleDeleteScene}
-                        onFieldUpdate={handleFieldUpdate}
-                        onCelebrationEnd={clearCelebration}
-                      />
-                    ))}
+                    {groupScenes.map((scene, idx) => {
+                      const sIdx = currentPart?.scenes.indexOf(scene) ?? idx;
+                      return (
+                        <SceneCard
+                          key={`${scene.sceneId}-${idx}`}
+                          scene={scene}
+                          sceneIndex={sIdx}
+                          celebrating={celebratingId === scene.sceneId}
+                          onToggle={handleToggle}
+                          onDelete={handleDeleteScene}
+                          onOpenDetail={() => setDetailSceneIndex(sIdx)}
+                          onCelebrationEnd={clearCelebration}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1238,27 +956,41 @@ export function ScenesView() {
             allScenes={currentPart?.scenes ?? []}
             onToggle={handleToggle}
             onDelete={handleDeleteScene}
-            onFieldUpdate={handleFieldUpdate}
+            onOpenDetail={(idx) => setDetailSceneIndex(idx)}
           />
         </div>
       ) : (
         /* ── 카드 뷰 (플랫) ── */
         <div className="flex-1 overflow-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 content-start">
-          {scenes.map((scene, idx) => (
-            <SceneCard
-              key={`${scene.sceneId}-${idx}`}
-              scene={scene}
-              sceneIndex={currentPart?.scenes.indexOf(scene) ?? idx}
-              celebrating={celebratingId === scene.sceneId}
-              sheetName={currentPart?.sheetName ?? ''}
-              isLiveMode={sheetsConnected}
-              onToggle={handleToggle}
-              onDelete={handleDeleteScene}
-              onFieldUpdate={handleFieldUpdate}
-              onCelebrationEnd={clearCelebration}
-            />
-          ))}
+          {scenes.map((scene, idx) => {
+            const sIdx = currentPart?.scenes.indexOf(scene) ?? idx;
+            return (
+              <SceneCard
+                key={`${scene.sceneId}-${idx}`}
+                scene={scene}
+                sceneIndex={sIdx}
+                celebrating={celebratingId === scene.sceneId}
+                onToggle={handleToggle}
+                onDelete={handleDeleteScene}
+                onOpenDetail={() => setDetailSceneIndex(sIdx)}
+                onCelebrationEnd={clearCelebration}
+              />
+            );
+          })}
         </div>
+      )}
+
+      {/* 씬 상세 모달 */}
+      {detailScene && detailSceneIndex !== null && (
+        <SceneDetailModal
+          scene={detailScene}
+          sceneIndex={detailSceneIndex}
+          sheetName={currentPart?.sheetName ?? ''}
+          isLiveMode={sheetsConnected}
+          onFieldUpdate={handleFieldUpdate}
+          onToggle={handleToggle}
+          onClose={() => setDetailSceneIndex(null)}
+        />
       )}
     </div>
   );
