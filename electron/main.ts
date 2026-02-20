@@ -24,6 +24,10 @@ protocol.registerSchemesAsPrivileged([
     scheme: 'bflow-img',
     privileges: { standard: true, secure: true, supportFetchAPI: true },
   },
+  {
+    scheme: 'drive-img',
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
 ]);
 
 // 테스트 모드 감지
@@ -360,6 +364,34 @@ app.whenReady().then(() => {
     const fileName = decodeURIComponent(url.pathname.replace(/^\//, ''));
     const fullPath = path.join(getDataPath(), 'images', fileName);
     return net.fetch(pathToFileURL(fullPath).toString());
+  });
+
+  // drive-img:// 프로토콜 핸들러: Google Drive 이미지 프록시
+  // uc?export=view URL은 Electron 렌더러에서 403 차단됨 → 메인 프로세스에서 대신 fetch
+  protocol.handle('drive-img', async (request) => {
+    const url = new URL(request.url);
+    const fileId = url.pathname.replace(/^\/+/, '');
+
+    // 1차: thumbnail 엔드포인트 (가장 안정적)
+    const endpoints = [
+      `https://drive.google.com/thumbnail?id=${fileId}&sz=w800`,
+      `https://lh3.googleusercontent.com/d/${fileId}=s800`,
+      `https://drive.google.com/uc?export=view&id=${fileId}`,
+    ];
+
+    for (const endpoint of endpoints) {
+      try {
+        const resp = await net.fetch(endpoint, { redirect: 'follow' });
+        const ct = resp.headers.get('content-type') || '';
+        if (resp.ok && ct.startsWith('image/')) {
+          return resp;
+        }
+      } catch {
+        // 다음 엔드포인트 시도
+      }
+    }
+
+    return new Response('Drive image not found', { status: 404 });
   });
 
   createWindow();

@@ -107,17 +107,28 @@ export interface EpisodeData {
   }[];
 }
 
-// ─── 이미지 URL 검증 ─────────────────────────────────────────
-// CellImage 객체가 String()으로 변환되면 유효하지 않은 값이 전달될 수 있음
+// ─── 이미지 URL 검증 & Google Drive 프록시 변환 ──────────────
+// 1. CellImage 쓰레기 값 필터링
+// 2. Google Drive uc?export=view URL → drive-img:// 프록시로 변환 (403 방지)
 
 function sanitizeImageUrl(val: unknown): string {
   if (typeof val !== 'string') return '';
   const trimmed = val.trim();
   if (!trimmed) return '';
+
+  // Google Drive URL → drive-img:// 프로토콜로 변환 (렌더러에서 403 차단 우회)
+  const driveMatch = trimmed.match(
+    /drive\.google\.com\/uc\?export=view&id=([a-zA-Z0-9_-]+)/
+  );
+  if (driveMatch) {
+    return `drive-img://file/${driveMatch[1]}`;
+  }
+
   if (
     trimmed.startsWith('https://') ||
     trimmed.startsWith('http://') ||
-    trimmed.startsWith('bflow-img://')
+    trimmed.startsWith('bflow-img://') ||
+    trimmed.startsWith('drive-img://')
   ) {
     return trimmed;
   }
