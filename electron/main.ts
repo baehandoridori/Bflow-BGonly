@@ -321,7 +321,7 @@ ipcMain.handle(
     const filePath = path.join(imagesDir, fileName);
     fs.writeFileSync(filePath, buffer);
 
-    return `bflow-img://${encodeURIComponent(fileName)}`;
+    return `bflow-img://local/${encodeURIComponent(fileName)}`;
   }
 );
 
@@ -354,9 +354,10 @@ ipcMain.handle('clipboard:read-image', () => {
 
 app.whenReady().then(() => {
   // bflow-img:// 프로토콜 핸들러: userData/images/ 폴더에서 이미지 서빙
+  // standard URL이므로 hostname은 소문자로 변환됨 → pathname에 파일명 보관
   protocol.handle('bflow-img', (request) => {
-    const encoded = request.url.slice('bflow-img://'.length);
-    const fileName = decodeURIComponent(encoded);
+    const url = new URL(request.url);
+    const fileName = decodeURIComponent(url.pathname.replace(/^\//, ''));
     const fullPath = path.join(getDataPath(), 'images', fileName);
     return net.fetch(pathToFileURL(fullPath).toString());
   });
