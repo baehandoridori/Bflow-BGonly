@@ -261,5 +261,6 @@ export async function uploadImage(
   const json = await res.json() as { ok: boolean; url?: string; error?: string };
   if (!json.ok) throw new Error(json.error ?? '이미지 업로드 실패');
 
-  return { url: json.url! };
+  // Drive URL → drive-img:// 프록시로 변환하여 즉시 표시 가능하도록
+  return { url: sanitizeImageUrl(json.url!) || json.url! };
 }
