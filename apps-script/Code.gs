@@ -188,6 +188,82 @@ function getEpisodeTabs() {
   return tabs;
 }
 
+// ─── 셀 이미지 추출 ─────────────────────────────────────────
+
+/**
+ * 셀 값에서 이미지 URL을 추출한다.
+ *
+ * - 문자열(URL): 그대로 반환
+ * - CellImage 객체 (시트에 직접 붙여넣은 이미지):
+ *   1. getUrl()로 원본 URL 확인
+ *   2. 없으면 getContentUrl()로 이미지 데이터를 가져와 Drive에 업로드
+ *   3. 셀을 Drive URL로 갱신 후 반환
+ *
+ * @param {*} val          getValues()가 반환한 셀 값
+ * @param {Sheet} sheet    현재 시트
+ * @param {number} rowNum  시트 행 번호 (1-based)
+ * @param {number} colNum  시트 열 번호 (1-based)
+ * @param {string} sheetName  시트 이름
+ * @param {string} sceneId    씬 ID
+ * @param {string} imageType  'storyboard' 또는 'guide'
+ * @return {string} 이미지 URL 또는 빈 문자열
+ */
+function extractImageUrl(val, sheet, rowNum, colNum, sheetName, sceneId, imageType) {
+  // 문자열이면 그대로 반환
+  if (typeof val === 'string') return val;
+
+  // falsy 값
+  if (!val) return '';
+
+  // CellImage 객체 처리
+  if (typeof val === 'object') {
+    try {
+      // 1. 원본 URL이 있으면 (URL 기반 이미지) 그대로 사용
+      if (typeof val.getUrl === 'function') {
+        var sourceUrl = val.getUrl();
+        if (sourceUrl) {
+          sheet.getRange(rowNum, colNum).setValue(sourceUrl);
+          return sourceUrl;
+        }
+      }
+
+      // 2. 붙여넣기 이미지: contentUrl로 이미지 데이터를 가져와 Drive에 업로드
+      if (typeof val.getContentUrl === 'function') {
+        var contentUrl = val.getContentUrl();
+        if (contentUrl) {
+          var response = UrlFetchApp.fetch(contentUrl);
+          var blob = response.getBlob();
+
+          var folder = getOrCreateImageFolder();
+          var typeSuffix = imageType === 'storyboard' ? 'sb' : 'guide';
+          var fileName = sheetName + '_' + (sceneId || 'unknown') + '_' + typeSuffix + '.jpg';
+
+          // 기존 동일 파일명 삭제 (덮어쓰기)
+          var existing = folder.getFilesByName(fileName);
+          while (existing.hasNext()) {
+            existing.next().setTrashed(true);
+          }
+
+          blob.setName(fileName);
+          var file = folder.createFile(blob);
+          file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+          var driveUrl = 'https://drive.google.com/uc?export=view&id=' + file.getId();
+
+          // 셀을 영구 Drive URL로 갱신
+          sheet.getRange(rowNum, colNum).setValue(driveUrl);
+
+          return driveUrl;
+        }
+      }
+    } catch (e) {
+      Logger.log('CellImage 처리 실패 (' + sheetName + ' ' + sceneId + ' ' + imageType + '): ' + e.toString());
+    }
+  }
+
+  return '';
+}
+
 // ─── 시트 데이터 읽기 ────────────────────────────────────────
 
 function parseBoolean(val) {
@@ -219,8 +295,8 @@ function readSheetData(sheetName) {
       no: parseInt(row[0], 10) || (i + 1),
       sceneId: String(row[1] || ''),
       memo: String(row[2] || ''),
-      storyboardUrl: String(row[3] || ''),
-      guideUrl: String(row[4] || ''),
+      storyboardUrl: extractImageUrl(row[3], sheet, i + 2, 4, sheetName, String(row[1] || ''), 'storyboard'),
+      guideUrl: extractImageUrl(row[4], sheet, i + 2, 5, sheetName, String(row[1] || ''), 'guide'),
       assignee: String(row[5] || ''),
       lo: parseBoolean(row[6]),
       done: parseBoolean(row[7]),

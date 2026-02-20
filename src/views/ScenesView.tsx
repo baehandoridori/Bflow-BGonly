@@ -120,6 +120,7 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
               alt="SB"
               className="h-10 rounded border border-bg-border object-cover"
               draggable={false}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
           )}
           {scene.guideUrl && (
@@ -128,6 +129,7 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
               alt="Guide"
               className="h-10 rounded border border-bg-border object-cover"
               draggable={false}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
           )}
           <Eye size={12} className="ml-auto text-text-secondary/30" />

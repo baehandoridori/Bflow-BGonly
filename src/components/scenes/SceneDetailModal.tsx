@@ -167,6 +167,17 @@ function ImageSlot({
               alt={label}
               className="w-full max-h-60 object-contain bg-bg-primary rounded-xl"
               draggable={false}
+              onError={(e) => {
+                const img = e.target as HTMLImageElement;
+                img.style.display = 'none';
+                const parent = img.parentElement;
+                if (parent && !parent.querySelector('.img-error-msg')) {
+                  const msg = document.createElement('div');
+                  msg.className = 'img-error-msg flex items-center justify-center h-40 text-xs text-text-secondary/50';
+                  msg.textContent = '이미지를 불러올 수 없습니다';
+                  parent.prepend(msg);
+                }
+              }}
             />
             {/* 호버 오버레이 */}
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors rounded-xl flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100">
