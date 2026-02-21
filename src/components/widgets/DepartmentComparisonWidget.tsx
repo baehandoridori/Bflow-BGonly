@@ -1,12 +1,26 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useRef, useCallback } from 'react';
 import { GitCompareArrows } from 'lucide-react';
 import { Widget } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
 import { calcDashboardStats } from '@/utils/calcStats';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
+import type { Stage } from '@/types';
+
+interface TooltipInfo {
+  x: number;
+  y: number;
+  label: string;
+  stageLabel: string;
+  done: number;
+  total: number;
+  pct: number;
+  color: string;
+}
 
 export function DepartmentComparisonWidget() {
   const episodes = useDataStore((s) => s.episodes);
+  const [tooltip, setTooltip] = useState<TooltipInfo | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const deptStats = useMemo(
     () =>
@@ -18,6 +32,21 @@ export function DepartmentComparisonWidget() {
     [episodes]
   );
 
+  const handleBarEnter = useCallback(
+    (e: React.MouseEvent, info: Omit<TooltipInfo, 'x' | 'y'>) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      setTooltip({
+        ...info,
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top - 8,
+      });
+    },
+    []
+  );
+
+  const handleBarLeave = useCallback(() => setTooltip(null), []);
+
   // 통합 진행률 (부서별 평균)
   const combinedPct = useMemo(() => {
     const withScenes = deptStats.filter((d) => d.stats.totalScenes > 0);
@@ -27,7 +56,7 @@ export function DepartmentComparisonWidget() {
 
   return (
     <Widget title="부서별 비교" icon={<GitCompareArrows size={16} />}>
-      <div className="flex flex-col gap-4 justify-center h-full">
+      <div ref={containerRef} className="relative flex flex-col gap-4 justify-center h-full">
         {/* 통합 진행률 */}
         <div className="flex items-center gap-3 pb-3 border-b border-bg-border/50">
           <span className="text-xs font-medium text-text-secondary w-10 text-right">통합</span>
@@ -88,22 +117,34 @@ export function DepartmentComparisonWidget() {
 
         {/* 단계별 비교 미니 차트 */}
         <div className="grid grid-cols-4 gap-2 pt-2 border-t border-bg-border/50">
-          {(['lo', 'done', 'review', 'png'] as const).map((stage) => {
+          {(['lo', 'done', 'review', 'png'] as const).map((stage: Stage) => {
             return (
               <div key={stage} className="flex flex-col items-center gap-1">
                 <div className="flex gap-0.5 items-end h-10">
                   {deptStats.map((d) => {
                     const stageStat = d.stats.stageStats.find((s) => s.stage === stage);
                     const pct = stageStat?.pct ?? 0;
+                    const done = stageStat?.done ?? 0;
+                    const total = stageStat?.total ?? 0;
                     return (
                       <div
                         key={d.dept}
-                        className="w-3 rounded-t transition-all duration-500"
+                        className="w-3 rounded-t transition-all duration-500 cursor-pointer"
                         style={{
                           height: `${Math.max(pct * 0.4, 2)}px`,
                           backgroundColor: d.config.stageColors[stage],
                         }}
-                        title={`${d.config.label} ${d.config.stageLabels[stage]}: ${pct.toFixed(0)}%`}
+                        onMouseEnter={(e) =>
+                          handleBarEnter(e, {
+                            label: d.config.label,
+                            stageLabel: d.config.stageLabels[stage],
+                            done,
+                            total,
+                            pct,
+                            color: d.config.stageColors[stage],
+                          })
+                        }
+                        onMouseLeave={handleBarLeave}
                       />
                     );
                   })}
@@ -115,6 +156,33 @@ export function DepartmentComparisonWidget() {
             );
           })}
         </div>
+
+        {/* 커스텀 툴팁 */}
+        {tooltip && (
+          <div
+            className="absolute z-50 pointer-events-none px-3 py-2 rounded-lg shadow-lg border border-bg-border/60 text-xs whitespace-nowrap"
+            style={{
+              left: tooltip.x,
+              top: tooltip.y,
+              transform: 'translate(-50%, -100%)',
+              backgroundColor: 'rgba(26, 29, 39, 0.95)',
+              backdropFilter: 'blur(8px)',
+            }}
+          >
+            <div className="flex items-center gap-1.5 font-semibold mb-1">
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: tooltip.color }}
+              />
+              <span>{tooltip.label}</span>
+              <span className="text-text-secondary">·</span>
+              <span style={{ color: tooltip.color }}>{tooltip.stageLabel}</span>
+            </div>
+            <div className="text-text-secondary">
+              {tooltip.total}씬 중 <span className="text-text-primary font-medium">{tooltip.done}씬</span> 완료 ({tooltip.pct.toFixed(1)}%)
+            </div>
+          </div>
+        )}
       </div>
     </Widget>
   );
