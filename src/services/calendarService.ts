@@ -30,25 +30,38 @@ export async function getEvents(): Promise<CalendarEvent[]> {
 
 export async function addEvent(event: CalendarEvent): Promise<void> {
   const all = await loadAllEvents();
-  all.push(event);
-  cache = all;
-  await window.electronAPI.writeSettings(FILE_NAME, all);
+  const next = [...all, event];
+  try {
+    await window.electronAPI.writeSettings(FILE_NAME, next);
+    cache = next;
+  } catch (err) {
+    console.error('[calendarService] addEvent 저장 실패:', err);
+    throw err;
+  }
 }
 
 export async function updateEvent(eventId: string, updates: Partial<CalendarEvent>): Promise<void> {
   const all = await loadAllEvents();
-  const idx = all.findIndex((e) => e.id === eventId);
-  if (idx >= 0) {
-    all[idx] = { ...all[idx], ...updates };
+  const next = all.map((e) => (e.id === eventId ? { ...e, ...updates } : e));
+  try {
+    await window.electronAPI.writeSettings(FILE_NAME, next);
+    cache = next;
+  } catch (err) {
+    console.error('[calendarService] updateEvent 저장 실패:', err);
+    throw err;
   }
-  cache = all;
-  await window.electronAPI.writeSettings(FILE_NAME, all);
 }
 
 export async function deleteEvent(eventId: string): Promise<void> {
   const all = await loadAllEvents();
-  cache = all.filter((e) => e.id !== eventId);
-  await window.electronAPI.writeSettings(FILE_NAME, cache);
+  const next = all.filter((e) => e.id !== eventId);
+  try {
+    await window.electronAPI.writeSettings(FILE_NAME, next);
+    cache = next;
+  } catch (err) {
+    console.error('[calendarService] deleteEvent 저장 실패:', err);
+    throw err;
+  }
 }
 
 /** 날짜 범위 내 이벤트 필터 */

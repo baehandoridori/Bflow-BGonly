@@ -275,7 +275,7 @@ function MonthlyCalendar({ episodes }: { episodes: Episode[] }) {
   const [month, setMonth] = useState(() => new Date().getMonth()); // 0-based
 
   const today = new Date();
-  const todayStr = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+  const todayStr = `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`;
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(year, month, 1);
@@ -293,7 +293,7 @@ function MonthlyCalendar({ episodes }: { episodes: Episode[] }) {
     }
 
     for (let d = 1; d <= totalDays; d++) {
-      const isToday = `${year}-${month}-${d}` === todayStr;
+      const isToday = `${year}-${month + 1}-${d}` === todayStr;
       days.push({ date: d, month, year, isCurrentMonth: true, isToday, dow: days.length % 7 });
     }
 
