@@ -152,7 +152,6 @@ function EventBarChip({
           'h-full flex items-center px-1.5 text-[10px] font-medium truncate',
           bar.isStart ? 'rounded-l-md' : '',
           bar.isEnd ? 'rounded-r-md' : '',
-          !bar.isStart && !bar.isEnd ? '' : '',
         )}
         style={{
           background: `linear-gradient(135deg, ${hex}40 0%, ${hex}25 100%)`,
@@ -166,7 +165,9 @@ function EventBarChip({
           textShadow: `0 0 12px ${hex}40`,
         }}
       >
-        {bar.isStart && <span className="truncate">{ev.title}</span>}
+        {!bar.isStart && <span className="text-[9px] mr-0.5 opacity-60">◂</span>}
+        <span className="truncate">{ev.title}</span>
+        {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
       </div>
     </button>
   );
@@ -207,19 +208,31 @@ function OverflowPopup({
         </button>
       </div>
       <div className="flex flex-col gap-1">
-        {events.map((ev) => (
-          <button
-            key={ev.id}
-            onClick={() => { onEventClick(ev); onClose(); }}
-            className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-primary/50 transition-colors text-left cursor-pointer"
-          >
-            <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
-            <span className="text-xs text-text-primary truncate">{ev.title}</span>
-            <span className="text-[10px] text-text-secondary/50 ml-auto shrink-0">
-              {ev.type !== 'custom' ? ev.type.toUpperCase() : ''}
-            </span>
-          </button>
-        ))}
+        {events.map((ev) => {
+          const isSingle = ev.startDate === ev.endDate;
+          const evS = parseDate(ev.startDate);
+          const evE = parseDate(ev.endDate);
+          const dateRange = isSingle
+            ? `${evS.getMonth() + 1}/${evS.getDate()}`
+            : `${evS.getMonth() + 1}/${evS.getDate()} → ${evE.getMonth() + 1}/${evE.getDate()}`;
+          return (
+            <button
+              key={ev.id}
+              onClick={() => { onEventClick(ev); onClose(); }}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-primary/50 transition-colors text-left cursor-pointer"
+            >
+              <div className="w-2 h-2 rounded-full shrink-0 mt-0.5" style={{ backgroundColor: ev.color }} />
+              <div className="flex-1 min-w-0">
+                <span className="text-xs text-text-primary truncate block">{ev.title}</span>
+                <span className="text-[10px] text-text-secondary/50 block">{dateRange}</span>
+                {ev.memo && <span className="text-[10px] text-text-secondary/40 truncate block">{ev.memo.length > 40 ? ev.memo.slice(0, 40) + '…' : ev.memo}</span>}
+              </div>
+              <span className="text-[10px] text-text-secondary/50 ml-auto shrink-0">
+                {ev.type !== 'custom' ? ev.type.toUpperCase() : ''}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </motion.div>
   );
@@ -284,7 +297,11 @@ function EventDetailModal({
                   {typeLabels[event.type]}
                 </span>
                 {event.linkedEpisode != null && (
-                  <span className="text-[10px] text-text-secondary">EP.{String(event.linkedEpisode).padStart(2, '0')}</span>
+                  <span className="text-[10px] text-text-secondary">
+                    EP.{String(event.linkedEpisode).padStart(2, '0')}
+                    {event.linkedPart && ` ${event.linkedPart}파트`}
+                    {event.linkedSceneId && ` #${event.linkedSceneId}`}
+                  </span>
                 )}
               </div>
             </div>
@@ -672,7 +689,7 @@ function CalendarGrid({
               {/* 이벤트 바 (오버레이) */}
               {bars.filter((b) => b.row < maxVisibleBars).map((bar) => (
                 <EventBarChip
-                  key={`${bar.event.id}-${wi}`}
+                  key={`${bar.event.id}-w${wi}-c${bar.startCol}`}
                   bar={bar}
                   onClick={onEventClick}
                 />
@@ -780,7 +797,7 @@ function TodayView({
 
 export function ScheduleView() {
   const episodes = useDataStore((s) => s.episodes);
-  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment } = useAppStore();
+  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId } = useAppStore();
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
@@ -884,16 +901,23 @@ export function ScheduleView() {
   };
 
   // 이벤트 CRUD
+  const isAddingRef = useRef(false);
   const handleAddEvent = useCallback(async (data: Omit<CalendarEvent, 'id' | 'createdAt'>) => {
-    const ev: CalendarEvent = {
-      ...data,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-    };
-    await addEvent(ev);
-    setEvents((prev) => [...prev, ev]);
-    setShowCreate(false);
-    setCreateDate(undefined);
+    if (isAddingRef.current) return;
+    isAddingRef.current = true;
+    try {
+      const ev: CalendarEvent = {
+        ...data,
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+      };
+      await addEvent(ev);
+      setEvents((prev) => [...prev, ev]);
+      setShowCreate(false);
+      setCreateDate(undefined);
+    } finally {
+      isAddingRef.current = false;
+    }
   }, []);
 
   const handleDeleteEvent = useCallback(async (id: string) => {
@@ -920,10 +944,14 @@ export function ScheduleView() {
     if (ev.linkedDepartment) {
       setSelectedDepartment(ev.linkedDepartment);
     }
+    // 링크된 씬이 있으면 하이라이트 (자동 스크롤 + 글로우)
+    if (ev.linkedSceneId) {
+      setHighlightSceneId(ev.linkedSceneId);
+    }
     // 씬 뷰로 이동
     setView('scenes');
     setDetailEvent(null);
-  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment]);
+  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId]);
 
   // 헤더 라벨
   const headerLabel = useMemo(() => {
