@@ -70,6 +70,10 @@ interface AppState {
   setSelectedScenes: (ids: Set<string>) => void;
   clearSelectedScenes: () => void;
 
+  // 글로벌 토스트
+  toast: string | null;
+  setToast: (msg: string | null) => void;
+
   // 테마
   themeId: string;
   customThemeColors: ThemeColors | null;
@@ -131,6 +135,9 @@ export const useAppStore = create<AppState>((set) => ({
   }),
   setSelectedScenes: (ids) => set({ selectedSceneIds: ids }),
   clearSelectedScenes: () => set({ selectedSceneIds: new Set<string>() }),
+
+  toast: null,
+  setToast: (msg) => set({ toast: msg }),
 
   themeId: 'violet',
   customThemeColors: null,

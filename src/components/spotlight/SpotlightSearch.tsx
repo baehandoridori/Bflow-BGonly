@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Film, User, FileText, Zap, Hash } from 'lucide-react';
+import { Search, Film, User, FileText, Zap, Hash, Layers } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress } from '@/utils/calcStats';
@@ -10,7 +10,7 @@ import { cn } from '@/utils/cn';
 /* ────────────────────────────────────────────────
    타입
    ──────────────────────────────────────────────── */
-type ResultCategory = 'scene' | 'assignee' | 'episode' | 'memo' | 'action';
+type ResultCategory = 'scene' | 'assignee' | 'episode' | 'part' | 'memo' | 'action';
 
 interface SearchResult {
   id: string;
@@ -57,11 +57,12 @@ const CATEGORY_LABELS: Record<ResultCategory, string> = {
   scene: '씬',
   assignee: '담당자',
   episode: '에피소드',
+  part: '파트',
   memo: '메모',
   action: '빠른 액션',
 };
 
-const CATEGORY_ORDER: ResultCategory[] = ['action', 'scene', 'assignee', 'episode', 'memo'];
+const CATEGORY_ORDER: ResultCategory[] = ['action', 'scene', 'part', 'assignee', 'episode', 'memo'];
 
 /* ────────────────────────────────────────────────
    미니 프로그레스 바
@@ -106,6 +107,9 @@ export function SpotlightSearch() {
     setSelectedAssignee,
     setSelectedDepartment,
     setHighlightSceneId,
+    setSearchQuery,
+    setStatusFilter,
+    setToast,
   } = useAppStore();
 
   /* ── 글로벌 단축키: Ctrl+Space ── */
@@ -132,6 +136,30 @@ export function SpotlightSearch() {
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [isOpen]);
+
+  /* ── 필터 리셋 후 네비게이션 헬퍼 ── */
+  const resetAndNavigate = useCallback((opts: {
+    episode?: number;
+    part?: string;
+    department?: 'bg' | 'acting';
+    assignee?: string;
+    sceneId?: string;
+    toastMsg?: string;
+  }) => {
+    // 필터 리셋
+    setSearchQuery('');
+    setStatusFilter('all');
+    if (!opts.assignee) setSelectedAssignee(null);
+
+    // 네비게이션
+    setView('scenes');
+    if (opts.episode !== undefined) setSelectedEpisode(opts.episode);
+    if (opts.part !== undefined) setSelectedPart(opts.part);
+    if (opts.department !== undefined) setSelectedDepartment(opts.department);
+    if (opts.assignee) setSelectedAssignee(opts.assignee);
+    if (opts.sceneId) setHighlightSceneId(opts.sceneId);
+    if (opts.toastMsg) setToast(opts.toastMsg);
+  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSelectedDepartment, setHighlightSceneId, setSearchQuery, setStatusFilter, setToast]);
 
   /* ── 검색 결과 빌드 ── */
   const results = useMemo<SearchResult[]>(() => {
@@ -181,11 +209,44 @@ export function SpotlightSearch() {
     // ── 씬 & 메모 검색 ──
     for (const ep of episodes) {
       for (const part of ep.parts) {
+        // ── 파트 검색 ──
+        const deptLabel = DEPARTMENT_CONFIGS[part.department].shortLabel;
+        const partLabel = `${part.partId}파트`;
+        const partFullLabel = `${ep.title} ${partLabel} (${deptLabel})`;
+        const partScore = Math.max(
+          fuzzyScore(q, partLabel),
+          fuzzyScore(q, `${part.partId}`),
+          fuzzyScore(q, partFullLabel),
+        );
+        if (partScore > 0) {
+          const totalScenes = part.scenes.length;
+          const progressSum = part.scenes.reduce((s, sc) => s + sceneProgress(sc), 0);
+          const avgPct = totalScenes > 0 ? Math.round(progressSum / totalScenes) : 0;
+          items.push({
+            id: `part-${part.sheetName}`,
+            category: 'part',
+            title: `${partLabel} (${deptLabel})`,
+            subtitle: `${ep.title} · ${totalScenes}개 씬`,
+            meta: `${avgPct}%`,
+            pct: avgPct,
+            icon: <Layers size={16} />,
+            score: partScore,
+            action: () => {
+              resetAndNavigate({
+                episode: ep.episodeNumber,
+                part: part.partId,
+                department: part.department,
+                toastMsg: `${ep.title} ${partLabel}(${deptLabel})로 이동합니다`,
+              });
+              close();
+            },
+          });
+        }
+
         for (const scene of part.scenes) {
           const sceneScore = fuzzyScore(q, scene.sceneId);
           if (sceneScore > 0) {
             const pct = Math.round(sceneProgress(scene));
-            const deptLabel = DEPARTMENT_CONFIGS[part.department].shortLabel;
             items.push({
               id: `scene-${part.sheetName}-${scene.sceneId}`,
               category: 'scene',
@@ -196,11 +257,12 @@ export function SpotlightSearch() {
               icon: <Hash size={16} />,
               score: sceneScore,
               action: () => {
-                setView('scenes');
-                setSelectedEpisode(ep.episodeNumber);
-                setSelectedPart(part.partId);
-                setSelectedDepartment(part.department);
-                setHighlightSceneId(scene.sceneId);
+                resetAndNavigate({
+                  episode: ep.episodeNumber,
+                  part: part.partId,
+                  department: part.department,
+                  sceneId: scene.sceneId,
+                });
                 close();
               },
             });
@@ -214,11 +276,12 @@ export function SpotlightSearch() {
               icon: <FileText size={16} />,
               score: fuzzyScore(q, scene.memo),
               action: () => {
-                setView('scenes');
-                setSelectedEpisode(ep.episodeNumber);
-                setSelectedPart(part.partId);
-                setSelectedDepartment(part.department);
-                setHighlightSceneId(scene.sceneId);
+                resetAndNavigate({
+                  episode: ep.episodeNumber,
+                  part: part.partId,
+                  department: part.department,
+                  sceneId: scene.sceneId,
+                });
                 close();
               },
             });
@@ -254,8 +317,7 @@ export function SpotlightSearch() {
           icon: <User size={16} />,
           score,
           action: () => {
-            setView('scenes');
-            setSelectedAssignee(name);
+            resetAndNavigate({ assignee: name, toastMsg: `${name}님의 씬을 표시합니다` });
             close();
           },
         });
@@ -286,8 +348,7 @@ export function SpotlightSearch() {
           icon: <Film size={16} />,
           score: epScore,
           action: () => {
-            setView('scenes');
-            setSelectedEpisode(ep.episodeNumber);
+            resetAndNavigate({ episode: ep.episodeNumber, toastMsg: `${ep.title}로 이동합니다` });
             close();
           },
         });
@@ -297,7 +358,7 @@ export function SpotlightSearch() {
     // 점수 내림차순 정렬, 상위 20개
     items.sort((a, b) => b.score - a.score);
     return items.slice(0, 20);
-  }, [query, episodes, setView, setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSelectedDepartment]);
+  }, [query, episodes, resetAndNavigate]);
 
   /* ── 카테고리별 그룹핑 ── */
   const grouped = useMemo(() => {

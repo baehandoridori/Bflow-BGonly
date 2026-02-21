@@ -31,8 +31,22 @@ export default function App() {
     showPasswordChange, showUserManager, setShowUserManager,
   } = useAuthStore();
 
-  // 토스트 상태 (초기 비밀번호 알림 등)
-  const [toast, setToast] = useState<string | null>(null);
+  // 토스트 상태 (글로벌 스토어 기반)
+  const storeToast = useAppStore((s) => s.toast);
+  const setStoreToast = useAppStore((s) => s.setToast);
+  const [localToast, setLocalToast] = useState<string | null>(null);
+  const toast = storeToast || localToast;
+  const setToast = useCallback((msg: string | null) => {
+    setLocalToast(msg);
+    if (msg) setStoreToast(null); // 로컬 우선
+  }, [setStoreToast]);
+
+  // 글로벌 스토어 토스트 자동 제거
+  useEffect(() => {
+    if (!storeToast) return;
+    const timer = setTimeout(() => setStoreToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [storeToast, setStoreToast]);
 
   // 스플래시: 이미 로그인 상태여도 앱 시작 시 랜딩 표시
   const [showSplash, setShowSplash] = useState(true);
@@ -237,9 +251,12 @@ export default function App() {
       {/* 관리자: 사용자 관리 모달 */}
       {showUserManager && <UserManagerModal />}
 
-      {/* 토스트 알림 */}
+      {/* 토스트 알림 (로컬 + 글로벌 스토어) */}
       {toast && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[10000] bg-bg-card border border-bg-border rounded-xl px-5 py-3 shadow-2xl text-sm text-text-primary animate-slide-down">
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-[10000] bg-bg-card border border-bg-border rounded-xl px-5 py-3 shadow-2xl text-sm text-text-primary animate-slide-down"
+          onClick={() => { setLocalToast(null); setStoreToast(null); }}
+        >
           {toast}
         </div>
       )}
