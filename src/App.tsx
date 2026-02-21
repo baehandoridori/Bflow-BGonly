@@ -4,7 +4,11 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { Dashboard } from '@/views/Dashboard';
 import { ScenesView } from '@/views/ScenesView';
+import { EpisodeView } from '@/views/EpisodeView';
+import { AssigneeView } from '@/views/AssigneeView';
+import { CalendarView } from '@/views/CalendarView';
 import { SettingsView } from '@/views/SettingsView';
+import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { readTestSheet } from '@/services/testSheetService';
 import { loadSheetsConfig, connectSheets, readAllFromSheets } from '@/services/sheetsService';
 import { loadLayout } from '@/services/settingsService';
@@ -94,11 +98,11 @@ export default function App() {
       case 'scenes':
         return <ScenesView />;
       case 'episode':
-        return (
-          <div className="flex items-center justify-center h-full text-text-secondary">
-            에피소드별 현황 (구현 예정)
-          </div>
-        );
+        return <EpisodeView />;
+      case 'assignee':
+        return <AssigneeView />;
+      case 'calendar':
+        return <CalendarView />;
       case 'settings':
         return <SettingsView />;
       default:
@@ -106,5 +110,10 @@ export default function App() {
     }
   };
 
-  return <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>;
+  return (
+    <>
+      <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
+      <SpotlightSearch />
+    </>
+  );
 }

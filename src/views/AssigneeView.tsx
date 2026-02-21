@@ -1,0 +1,357 @@
+import { useMemo, useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Users, ChevronDown, ChevronUp } from 'lucide-react';
+import { useDataStore } from '@/stores/useDataStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
+import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
+import type { Scene, Episode, Department, Stage } from '@/types';
+import { cn } from '@/utils/cn';
+
+/* ────────────────────────────────────────────────
+   담당자별 통계
+   ──────────────────────────────────────────────── */
+interface SceneRef {
+  scene: Scene;
+  episodeTitle: string;
+  episodeNumber: number;
+  partId: string;
+  department: Department;
+  sheetName: string;
+}
+
+interface AssigneeData {
+  name: string;
+  scenes: SceneRef[];
+  totalScenes: number;
+  fullyDone: number;
+  notStarted: number;
+  avgPct: number;
+  stageStats: { stage: Stage; label: string; color: string; count: number; total: number }[];
+  deptBreakdown: { dept: Department; count: number }[];
+}
+
+function buildAssigneeData(episodes: Episode[]): AssigneeData[] {
+  const map = new Map<string, SceneRef[]>();
+
+  for (const ep of episodes) {
+    for (const part of ep.parts) {
+      for (const scene of part.scenes) {
+        const name = scene.assignee || '미배정';
+        const refs = map.get(name) || [];
+        refs.push({
+          scene,
+          episodeTitle: ep.title,
+          episodeNumber: ep.episodeNumber,
+          partId: part.partId,
+          department: part.department,
+          sheetName: part.sheetName,
+        });
+        map.set(name, refs);
+      }
+    }
+  }
+
+  return Array.from(map.entries()).map(([name, scenes]) => {
+    const totalScenes = scenes.length;
+    const fullyDone = scenes.filter((r) => isFullyDone(r.scene)).length;
+    const notStarted = scenes.filter((r) => isNotStarted(r.scene)).length;
+    const avgPct = totalScenes > 0
+      ? scenes.reduce((sum, r) => sum + sceneProgress(r.scene), 0) / totalScenes
+      : 0;
+
+    // 단계별 통계 (BG 기준 라벨)
+    const stageStats = STAGES.map((stage) => ({
+      stage,
+      label: DEPARTMENT_CONFIGS.bg.stageLabels[stage],
+      color: DEPARTMENT_CONFIGS.bg.stageColors[stage],
+      count: scenes.filter((r) => r.scene[stage]).length,
+      total: totalScenes,
+    }));
+
+    // 부서별 분포
+    const deptMap = new Map<Department, number>();
+    for (const r of scenes) {
+      deptMap.set(r.department, (deptMap.get(r.department) || 0) + 1);
+    }
+    const deptBreakdown = Array.from(deptMap.entries()).map(([dept, count]) => ({ dept, count }));
+
+    return { name, scenes, totalScenes, fullyDone, notStarted, avgPct, stageStats, deptBreakdown };
+  });
+}
+
+/* ────────────────────────────────────────────────
+   프로그레스 링 (원형)
+   ──────────────────────────────────────────────── */
+function ProgressRing({ pct, size = 56, stroke = 4 }: { pct: number; size?: number; stroke?: number }) {
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (Math.min(pct, 100) / 100) * circ;
+  const color = pct >= 100 ? '#00B894' : pct >= 75 ? '#FDCB6E' : pct >= 50 ? '#E17055' : '#FF6B6B';
+
+  return (
+    <svg width={size} height={size} className="shrink-0 -rotate-90">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(45,48,65,0.4)" strokeWidth={stroke} />
+      <motion.circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeDasharray={circ}
+        initial={{ strokeDashoffset: circ }}
+        animate={{ strokeDashoffset: offset }}
+        transition={{ duration: 0.8, ease: 'easeOut' }}
+      />
+      <text
+        x={size / 2}
+        y={size / 2}
+        textAnchor="middle"
+        dominantBaseline="central"
+        className="fill-text-primary text-[11px] font-bold tabular-nums"
+        transform={`rotate(90, ${size / 2}, ${size / 2})`}
+      >
+        {Math.round(pct)}%
+      </text>
+    </svg>
+  );
+}
+
+/* ────────────────────────────────────────────────
+   담당자 카드
+   ──────────────────────────────────────────────── */
+function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene: (ref: SceneRef) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const pct = Math.round(data.avgPct);
+
+  return (
+    <div
+      className={cn(
+        'rounded-xl border border-bg-border/50 bg-bg-card overflow-hidden',
+        'transition-shadow transition-border duration-200 ease-out',
+        'hover:shadow-md hover:shadow-black/15 hover:border-bg-border/80',
+      )}
+    >
+      {/* 헤더 */}
+      <div className="flex items-center gap-4 p-4">
+        <ProgressRing pct={data.avgPct} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-sm font-semibold text-text-primary truncate">{data.name}</h3>
+            {data.deptBreakdown.map(({ dept, count }) => (
+              <span
+                key={dept}
+                className="text-[9px] px-1.5 py-0.5 rounded font-medium"
+                style={{
+                  color: DEPARTMENT_CONFIGS[dept].color,
+                  backgroundColor: `${DEPARTMENT_CONFIGS[dept].color}15`,
+                }}
+              >
+                {DEPARTMENT_CONFIGS[dept].shortLabel} {count}
+              </span>
+            ))}
+          </div>
+          <div className="text-xs text-text-secondary/50 mb-2">
+            {data.totalScenes}개 씬 · {data.fullyDone} 완료 · {data.notStarted} 미착수
+          </div>
+
+          {/* 단계별 바 */}
+          <div className="flex gap-1">
+            {data.stageStats.map((ss) => {
+              const sPct = ss.total > 0 ? (ss.count / ss.total) * 100 : 0;
+              return (
+                <div key={ss.stage} className="flex-1" title={`${ss.label}: ${ss.count}/${ss.total}`}>
+                  <div className="h-1.5 rounded-full bg-bg-border/30 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-[width] duration-700 ease-out"
+                      style={{ width: `${sPct}%`, backgroundColor: ss.color }}
+                    />
+                  </div>
+                  <div className="text-[9px] text-text-secondary/40 mt-0.5 text-center">{ss.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* 씬 목록 토글 */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className={cn(
+          'w-full flex items-center justify-center gap-1 py-1.5 text-[11px] text-text-secondary/40 cursor-pointer',
+          'border-t border-bg-border/20 hover:text-text-secondary/60 hover:bg-bg-border/10',
+          'transition-colors duration-100',
+        )}
+      >
+        <span>{expanded ? '씬 목록 닫기' : `씬 목록 (${data.totalScenes})`}</span>
+        {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+      </button>
+
+      {/* 씬 목록 */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="max-h-48 overflow-y-auto border-t border-bg-border/15" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,141,163,0.2) transparent' }}>
+              {data.scenes
+                .sort((a, b) => sceneProgress(a.scene) - sceneProgress(b.scene))
+                .map((ref) => {
+                  const sp = Math.round(sceneProgress(ref.scene));
+                  return (
+                    <button
+                      key={`${ref.sheetName}-${ref.scene.sceneId}`}
+                      onClick={() => onClickScene(ref)}
+                      className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-bg-border/10 cursor-pointer transition-colors duration-75"
+                    >
+                      <span className="text-xs font-mono text-text-primary/70 w-12">{ref.scene.sceneId}</span>
+                      <span className="text-[11px] text-text-secondary/40 flex-1 truncate">
+                        {ref.episodeTitle} {ref.partId}파트
+                      </span>
+                      <div className="w-16 h-1 rounded-full bg-bg-border/30 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${sp}%`,
+                            backgroundColor: sp >= 100 ? '#00B894' : sp >= 50 ? '#FDCB6E' : '#FF6B6B',
+                          }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-text-secondary/40 tabular-nums w-7 text-right">{sp}%</span>
+                    </button>
+                  );
+                })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────
+   정렬 옵션
+   ──────────────────────────────────────────────── */
+type SortOption = 'name' | 'scenes' | 'progress';
+
+/* ────────────────────────────────────────────────
+   메인 뷰
+   ──────────────────────────────────────────────── */
+export function AssigneeView() {
+  const episodes = useDataStore((s) => s.episodes);
+  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setSelectedAssignee } = useAppStore();
+  const [sortBy, setSortBy] = useState<SortOption>('scenes');
+  const [sortAsc, setSortAsc] = useState(false);
+
+  const assignees = useMemo(() => {
+    const data = buildAssigneeData(episodes);
+    const sorted = [...data].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'name': cmp = a.name.localeCompare(b.name, 'ko'); break;
+        case 'scenes': cmp = a.totalScenes - b.totalScenes; break;
+        case 'progress': cmp = a.avgPct - b.avgPct; break;
+      }
+      return sortAsc ? cmp : -cmp;
+    });
+    return sorted;
+  }, [episodes, sortBy, sortAsc]);
+
+  const summary = useMemo(() => {
+    const totalAssignees = assignees.filter((a) => a.name !== '미배정').length;
+    const totalScenes = assignees.reduce((sum, a) => sum + a.totalScenes, 0);
+    const progressSum = assignees.reduce((sum, a) => sum + a.avgPct * a.totalScenes, 0);
+    const avgPct = totalScenes > 0 ? progressSum / totalScenes : 0;
+    return { totalAssignees, totalScenes, avgPct };
+  }, [assignees]);
+
+  const handleClickScene = useCallback((ref: SceneRef) => {
+    setSelectedEpisode(ref.episodeNumber);
+    setSelectedPart(ref.partId);
+    setSelectedDepartment(ref.department);
+    setView('scenes');
+  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment]);
+
+  const handleSort = useCallback((option: SortOption) => {
+    if (sortBy === option) {
+      setSortAsc((prev) => !prev);
+    } else {
+      setSortBy(option);
+      setSortAsc(false);
+    }
+  }, [sortBy]);
+
+  return (
+    <div className="flex flex-col gap-4 h-full">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-bold text-text-primary">인원별 현황</h1>
+          <div className="flex items-center gap-2 text-xs text-text-secondary/50">
+            <span>{summary.totalAssignees}명</span>
+            <span className="text-bg-border/50">·</span>
+            <span>{summary.totalScenes}개 씬</span>
+            <span className="text-bg-border/50">·</span>
+            <span className="tabular-nums">평균 {Math.round(summary.avgPct)}%</span>
+          </div>
+        </div>
+
+        {/* 정렬 */}
+        <div className="flex items-center gap-1">
+          {([
+            { key: 'name' as SortOption, label: '이름' },
+            { key: 'scenes' as SortOption, label: '씬 수' },
+            { key: 'progress' as SortOption, label: '진행률' },
+          ]).map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => handleSort(key)}
+              className={cn(
+                'px-2.5 py-1 text-[11px] rounded-md font-medium cursor-pointer',
+                'transition-colors duration-150',
+                sortBy === key
+                  ? 'bg-accent/15 text-accent'
+                  : 'text-text-secondary/50 hover:text-text-secondary',
+              )}
+            >
+              {label}
+              {sortBy === key && (
+                <span className="ml-0.5 text-[9px]">{sortAsc ? '↑' : '↓'}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 카드 그리드 */}
+      <div className="flex-1 overflow-auto">
+        {assignees.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-64 text-text-secondary/40">
+            <Users size={40} className="mb-3 opacity-30" />
+            <p className="text-sm">담당자 데이터가 없습니다</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+            {assignees.map((data, i) => (
+              <motion.div
+                key={data.name}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: i * 0.03 }}
+              >
+                <AssigneeCard data={data} onClickScene={handleClickScene} />
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

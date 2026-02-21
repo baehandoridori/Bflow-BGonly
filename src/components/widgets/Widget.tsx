@@ -18,7 +18,7 @@ export function Widget({ title, icon, children, className }: WidgetProps) {
         'bg-bg-card border border-bg-border rounded-xl flex flex-col h-full overflow-hidden',
         'shadow-sm shadow-black/10',
         'hover:shadow-md hover:shadow-black/20 hover:border-bg-border/80',
-        'transition-all duration-200 ease-out',
+        'transition-shadow transition-border duration-200 ease-out',
         isEditMode && 'ring-1 ring-accent/30',
         className
       )}
