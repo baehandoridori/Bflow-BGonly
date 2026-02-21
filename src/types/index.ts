@@ -229,6 +229,11 @@ export interface ElectronAPI {
   sheetsDeleteScene: (sheetName: string, rowIndex: number) => Promise<SheetsUpdateResult>;
   sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) => Promise<SheetsUpdateResult>;
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  // METADATA 시트
+  sheetsReadMetadata: (type: string, key: string) => Promise<{ ok: boolean; data?: { type: string; key: string; value: string; updatedAt: string } | null; error?: string }>;
+  sheetsWriteMetadata: (type: string, key: string, value: string) => Promise<SheetsUpdateResult>;
+  sheetsSoftDeletePart: (sheetName: string) => Promise<SheetsUpdateResult>;
+  sheetsSoftDeleteEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
 }
 
 declare global {

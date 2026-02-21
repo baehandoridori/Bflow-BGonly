@@ -121,6 +121,21 @@ function doGet(e) {
         );
         return jsonResponse({ ok: true });
 
+      case 'readMetadata':
+        return jsonResponse({ ok: true, data: readMetadata(e.parameter.type, e.parameter.key) });
+
+      case 'writeMetadata':
+        writeMetadata(e.parameter.type, e.parameter.key, e.parameter.value || '');
+        return jsonResponse({ ok: true });
+
+      case 'softDeletePart':
+        softDeletePart(e.parameter.sheetName);
+        return jsonResponse({ ok: true });
+
+      case 'softDeleteEpisode':
+        softDeleteEpisode(parseInt(e.parameter.episodeNumber, 10));
+        return jsonResponse({ ok: true });
+
       case 'debugImages':
         return jsonResponse({ ok: true, data: debugImageCells() });
 
@@ -474,10 +489,14 @@ function analyzeValue(val) {
 
 function readAllEpisodes() {
   var tabs = getEpisodeTabs();
+  var deletedItems = getDeletedItems();
   var epMap = {};
 
   for (var i = 0; i < tabs.length; i++) {
     var tab = tabs[i];
+
+    // 소프트 삭제된 파트 건너뛰기
+    if (deletedItems[tab.title]) continue;
 
     if (!epMap[tab.episodeNumber]) {
       epMap[tab.episodeNumber] = {
@@ -499,7 +518,10 @@ function readAllEpisodes() {
   var episodes = [];
   var keys = Object.keys(epMap).sort(function(a, b) { return Number(a) - Number(b); });
   for (var j = 0; j < keys.length; j++) {
-    episodes.push(epMap[keys[j]]);
+    // 파트가 모두 삭제된 에피소드도 건너뛰기
+    if (epMap[keys[j]].parts.length > 0) {
+      episodes.push(epMap[keys[j]]);
+    }
   }
 
   return episodes;
@@ -731,4 +753,123 @@ function testDrivePermission() {
   }
 
   Logger.log('=== 모든 Drive 권한 OK — 이제 "새 배포"를 해주세요 ===');
+}
+
+// ─── _METADATA 시트 관리 ──────────────────────────────────────
+
+var METADATA_SHEET_NAME = '_METADATA';
+var METADATA_HEADERS = ['type', 'key', 'value', 'updatedAt'];
+
+/**
+ * _METADATA 시트를 가져온다 (없으면 생성).
+ */
+function ensureMetadataSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(METADATA_SHEET_NAME);
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet(METADATA_SHEET_NAME);
+  sheet.getRange(1, 1, 1, METADATA_HEADERS.length).setValues([METADATA_HEADERS]);
+  sheet.getRange(1, 1, 1, METADATA_HEADERS.length).setFontWeight('bold').setBackground('#F3E5F5');
+  sheet.hideSheet();
+  return sheet;
+}
+
+/**
+ * 메타데이터를 읽는다.
+ * @param {string} type  메타데이터 유형 (예: 'part-memo', 'deleted', 'episode-memo')
+ * @param {string} key   키 (예: sheetName 또는 episodeNumber)
+ * @return {{ type: string, key: string, value: string, updatedAt: string } | null}
+ */
+function readMetadata(type, key) {
+  var sheet = ensureMetadataSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === type && String(data[i][1]) === key) {
+      return { type: String(data[i][0]), key: String(data[i][1]), value: String(data[i][2]), updatedAt: String(data[i][3]) };
+    }
+  }
+  return null;
+}
+
+/**
+ * 메타데이터를 쓴다 (기존 값이 있으면 업서트).
+ * @param {string} type  메타데이터 유형
+ * @param {string} key   키
+ * @param {string} value 값
+ */
+function writeMetadata(type, key, value) {
+  var sheet = ensureMetadataSheet();
+  var lastRow = sheet.getLastRow();
+  var now = new Date().toISOString();
+
+  // 기존 행 찾기
+  if (lastRow >= 2) {
+    var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i][0]) === type && String(data[i][1]) === key) {
+        // 업서트: 기존 행 갱신
+        sheet.getRange(i + 2, 3).setValue(value);
+        sheet.getRange(i + 2, 4).setValue(now);
+        return;
+      }
+    }
+  }
+
+  // 새 행 추가
+  sheet.appendRow([type, key, value, now]);
+}
+
+/**
+ * 파트를 소프트 삭제한다 (_METADATA에 기록).
+ * @param {string} sheetName 시트 이름
+ */
+function softDeletePart(sheetName) {
+  writeMetadata('deleted', sheetName, 'true');
+}
+
+/**
+ * 에피소드를 소프트 삭제한다 (해당 에피소드의 모든 파트를 삭제 마킹).
+ * @param {number} episodeNumber 에피소드 번호
+ */
+function softDeleteEpisode(episodeNumber) {
+  var tabs = getEpisodeTabs();
+  for (var i = 0; i < tabs.length; i++) {
+    if (tabs[i].episodeNumber === episodeNumber) {
+      softDeletePart(tabs[i].title);
+    }
+  }
+  // 에피소드 자체도 삭제 마킹
+  writeMetadata('deleted-episode', String(episodeNumber), 'true');
+}
+
+/**
+ * 삭제된 항목 목록을 가져온다.
+ * @return {Set<string>} 삭제된 sheetName 세트
+ */
+function getDeletedItems() {
+  var sheet;
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    sheet = ss.getSheetByName(METADATA_SHEET_NAME);
+  } catch (e) {
+    return {};
+  }
+
+  if (!sheet) return {};
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return {};
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+  var deleted = {};
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === 'deleted' && String(data[i][2]) === 'true') {
+      deleted[String(data[i][1])] = true;
+    }
+  }
+  return deleted;
 }

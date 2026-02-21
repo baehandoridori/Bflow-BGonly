@@ -60,4 +60,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('sheets:update-scene-field', sheetName, rowIndex, field, value),
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) =>
     ipcRenderer.invoke('sheets:upload-image', sheetName, sceneId, imageType, base64Data),
+
+  // METADATA 시트 관련
+  sheetsReadMetadata: (type: string, key: string) =>
+    ipcRenderer.invoke('sheets:read-metadata', type, key),
+  sheetsWriteMetadata: (type: string, key: string, value: string) =>
+    ipcRenderer.invoke('sheets:write-metadata', type, key, value),
+  sheetsSoftDeletePart: (sheetName: string) =>
+    ipcRenderer.invoke('sheets:soft-delete-part', sheetName),
+  sheetsSoftDeleteEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('sheets:soft-delete-episode', episodeNumber),
 });

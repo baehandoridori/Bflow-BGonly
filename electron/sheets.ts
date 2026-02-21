@@ -242,6 +242,32 @@ export async function updateSceneField(
   await gasGet({ action: 'updateSceneField', sheetName, rowIndex: String(rowIndex), field, value });
 }
 
+// ─── 메타데이터 CRUD ─────────────────────────────────────────
+
+export async function readMetadata(type: string, key: string): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+
+  const qs = new URLSearchParams({ action: 'readMetadata', type, key });
+  const res = await gasFetch(`${webAppUrl}?${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json() as { ok: boolean; data?: any; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '메타데이터 읽기 실패');
+  return json.data ?? null;
+}
+
+export async function writeMetadata(type: string, key: string, value: string): Promise<void> {
+  await gasGet({ action: 'writeMetadata', type, key, value });
+}
+
+export async function softDeletePart(sheetName: string): Promise<void> {
+  await gasGet({ action: 'softDeletePart', sheetName });
+}
+
+export async function softDeleteEpisode(episodeNumber: number): Promise<void> {
+  await gasGet({ action: 'softDeleteEpisode', episodeNumber: String(episodeNumber) });
+}
+
 // ─── 이미지 업로드 (Drive에 저장 → URL 반환) ──────────────────
 
 export async function uploadImage(

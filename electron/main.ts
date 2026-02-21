@@ -13,6 +13,10 @@ import {
   deleteScene,
   updateSceneField,
   uploadImage,
+  readMetadata,
+  writeMetadata,
+  softDeletePart,
+  softDeleteEpisode,
 } from './sheets';
 
 // 앱 이름 설정 — AppData 경로에 영향
@@ -340,6 +344,48 @@ ipcMain.handle(
     }
   }
 );
+
+// ─── IPC 핸들러: METADATA ───────────────────────────────────
+
+ipcMain.handle('sheets:read-metadata', async (_event, type: string, key: string) => {
+  try {
+    const data = await readMetadata(type, key);
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:write-metadata', async (_event, type: string, key: string, value: string) => {
+  try {
+    await writeMetadata(type, key, value);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:soft-delete-part', async (_event, sheetName: string) => {
+  try {
+    await softDeletePart(sheetName);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:soft-delete-episode', async (_event, episodeNumber: number) => {
+  try {
+    await softDeleteEpisode(episodeNumber);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
 
 // ─── IPC 핸들러: 이미지 파일 저장 ────────────────────────────
 
