@@ -11,7 +11,8 @@ export function OverallProgressWidget() {
   const selectedDepartment = useAppStore((s) => s.selectedDepartment);
   const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
   const stats = useMemo(() => calcDashboardStats(episodes, selectedDepartment), [episodes, selectedDepartment]);
-  const pct = Math.round(stats.overallPct);
+  const pctRaw = stats.overallPct;
+  const pct = Number(pctRaw.toFixed(1));
 
   // SVG 원형 진행률
   const radius = 60;

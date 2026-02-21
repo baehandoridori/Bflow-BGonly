@@ -61,7 +61,9 @@ export function calcDashboardStats(episodes: Episode[], department?: Department)
 
   const fullyDone = allScenes.filter(isFullyDone).length;
   const notStarted = allScenes.filter(isNotStarted).length;
-  const overallPct = (fullyDone / totalScenes) * 100;
+  // 단계별 부분 진행률 반영: 각 씬의 4단계 완료 비율 평균
+  const overallPct =
+    allScenes.reduce((sum, s) => sum + sceneProgress(s), 0) / totalScenes;
 
   // 단계별 통계 (부서별 라벨 적용)
   const labels = department ? DEPARTMENT_CONFIGS[department].stageLabels : STAGE_LABELS;
@@ -76,13 +78,14 @@ export function calcDashboardStats(episodes: Episode[], department?: Department)
     };
   });
 
-  // 담당자별 통계
-  const assigneeMap = new Map<string, { total: number; completed: number }>();
+  // 담당자별 통계 (부분 진행률 반영)
+  const assigneeMap = new Map<string, { total: number; completed: number; progressSum: number }>();
   for (const scene of allScenes) {
     const name = scene.assignee || '미배정';
-    const entry = assigneeMap.get(name) || { total: 0, completed: 0 };
+    const entry = assigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
     entry.total++;
     if (isFullyDone(scene)) entry.completed++;
+    entry.progressSum += sceneProgress(scene);
     assigneeMap.set(name, entry);
   }
 
@@ -91,27 +94,27 @@ export function calcDashboardStats(episodes: Episode[], department?: Department)
       name,
       totalScenes: data.total,
       completedScenes: data.completed,
-      pct: (data.completed / data.total) * 100,
+      pct: data.progressSum / data.total,
     })
   );
 
-  // 에피소드별 통계
+  // 에피소드별 통계 (부분 진행률 반영)
   const episodeStats: EpisodeStats[] = filteredEpisodes.map((ep) => {
     const epScenes = ep.parts.flatMap((p) => p.scenes);
-    const epDone = epScenes.filter(isFullyDone).length;
+    const epProgressSum = epScenes.reduce((sum, s) => sum + sceneProgress(s), 0);
     return {
       episodeNumber: ep.episodeNumber,
       title: ep.title,
       parts: ep.parts.map((part) => {
-        const partDone = part.scenes.filter(isFullyDone).length;
+        const partProgressSum = part.scenes.reduce((sum, s) => sum + sceneProgress(s), 0);
         return {
           part: part.partId,
           department: part.department,
-          pct: part.scenes.length > 0 ? (partDone / part.scenes.length) * 100 : 0,
+          pct: part.scenes.length > 0 ? partProgressSum / part.scenes.length : 0,
           totalScenes: part.scenes.length,
         };
       }),
-      overallPct: epScenes.length > 0 ? (epDone / epScenes.length) * 100 : 0,
+      overallPct: epScenes.length > 0 ? epProgressSum / epScenes.length : 0,
     };
   });
 

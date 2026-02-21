@@ -37,7 +37,7 @@ export function StageBarsWidget() {
             </div>
             {/* 수치 */}
             <span className="text-xs text-text-secondary w-20 text-right">
-              {stat.done}/{stat.total} ({Math.round(stat.pct)}%)
+              {stat.done}/{stat.total} ({stat.pct.toFixed(1)}%)
             </span>
           </div>
         ))}

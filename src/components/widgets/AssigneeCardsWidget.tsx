@@ -17,7 +17,7 @@ export function AssigneeCardsWidget() {
     <Widget title={`담당자별 현황 (${deptConfig.shortLabel})`} icon={<Users size={16} />}>
       <div className="grid grid-cols-2 gap-2">
         {assigneeStats.map((a) => {
-          const pct = Math.round(a.pct);
+          const pct = Number(a.pct.toFixed(1));
           const color =
             pct >= 80
               ? 'text-status-high'

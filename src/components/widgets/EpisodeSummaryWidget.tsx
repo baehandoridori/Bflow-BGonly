@@ -22,7 +22,7 @@ export function EpisodeSummaryWidget() {
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium">{ep.title}</span>
               <span className="text-xs text-accent font-bold">
-                {Math.round(ep.overallPct)}%
+                {ep.overallPct.toFixed(1)}%
               </span>
             </div>
 
@@ -40,7 +40,7 @@ export function EpisodeSummaryWidget() {
                     />
                   </div>
                   <span className="text-[10px] text-text-secondary w-12 text-right">
-                    {Math.round(part.pct)}% ({part.totalScenes})
+                    {part.pct.toFixed(1)}% ({part.totalScenes})
                   </span>
                 </div>
               ))}
