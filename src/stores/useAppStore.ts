@@ -7,6 +7,7 @@ export type SortDir = 'asc' | 'desc';
 export type StatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';
 export type SceneViewMode = 'card' | 'table';
 export type SceneGroupMode = 'flat' | 'layout';
+export type DashboardDeptFilter = Department | 'all';
 
 interface AppState {
   // 앱 모드
@@ -23,9 +24,13 @@ interface AppState {
   currentView: ViewMode;
   setView: (view: ViewMode) => void;
 
-  // 부서 선택
+  // 부서 선택 (ScenesView — 항상 'bg' | 'acting')
   selectedDepartment: Department;
   setSelectedDepartment: (dept: Department) => void;
+
+  // 대시보드 부서 필터 ('all' = 통합 모드)
+  dashboardDeptFilter: DashboardDeptFilter;
+  setDashboardDeptFilter: (f: DashboardDeptFilter) => void;
 
   // 위젯 레이아웃
   widgetLayout: WidgetLayoutItem[] | null;
@@ -68,6 +73,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   selectedDepartment: 'bg',
   setSelectedDepartment: (dept) => set({ selectedDepartment: dept }),
+
+  dashboardDeptFilter: 'all',
+  setDashboardDeptFilter: (f) => set({ dashboardDeptFilter: f }),
 
   widgetLayout: null,
   isEditMode: false,

@@ -730,7 +730,7 @@ export function ScenesView() {
     const newValue = !scene[stage];
     const sceneIndex = currentPart.scenes.findIndex((s) => s.sceneId === sceneId);
 
-    toggleSceneStage(currentEp.episodeNumber, currentPart.partId, sceneId, stage);
+    toggleSceneStage(currentPart.sheetName, sceneId, stage);
 
     // 완료 축하 애니메이션: 방금 토글로 4단계 모두 완료 시
     if (newValue) {
@@ -745,12 +745,12 @@ export function ScenesView() {
         await updateSheetCell(currentPart.sheetName, sceneIndex, stage, newValue);
       } else {
         await toggleTestSceneStage(
-          episodes, currentEp.episodeNumber, currentPart.partId, sceneId, stage
+          episodes, currentPart.sheetName, sceneId, stage
         );
       }
     } catch (err) {
       console.error('[토글 실패]', err);
-      toggleSceneStage(currentEp.episodeNumber, currentPart.partId, sceneId, stage);
+      toggleSceneStage(currentPart.sheetName, sceneId, stage);
     }
   };
 

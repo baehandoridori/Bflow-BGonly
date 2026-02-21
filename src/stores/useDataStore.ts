@@ -20,8 +20,7 @@ interface DataState {
 
   // 낙관적 업데이트 — UI 즉시 반영
   toggleSceneStage: (
-    episodeNumber: number,
-    partId: string,
+    sheetName: string,
     sceneId: string,
     stage: keyof Pick<Scene, 'lo' | 'done' | 'review' | 'png'>
   ) => void;
@@ -49,23 +48,20 @@ export const useDataStore = create<DataState>((set, get) => ({
   setLastSyncTime: (t) => set({ lastSyncTime: t }),
   setSyncError: (err) => set({ syncError: err }),
 
-  toggleSceneStage: (episodeNumber, partId, sceneId, stage) => {
-    const episodes = get().episodes.map((ep) => {
-      if (ep.episodeNumber !== episodeNumber) return ep;
-      return {
-        ...ep,
-        parts: ep.parts.map((part) => {
-          if (part.partId !== partId) return part;
-          return {
-            ...part,
-            scenes: part.scenes.map((scene) => {
-              if (scene.sceneId !== sceneId) return scene;
-              return { ...scene, [stage]: !scene[stage] };
-            }),
-          };
-        }),
-      };
-    });
+  toggleSceneStage: (sheetName, sceneId, stage) => {
+    const episodes = get().episodes.map((ep) => ({
+      ...ep,
+      parts: ep.parts.map((part) => {
+        if (part.sheetName !== sheetName) return part;
+        return {
+          ...part,
+          scenes: part.scenes.map((scene) => {
+            if (scene.sceneId !== sceneId) return scene;
+            return { ...scene, [stage]: !scene[stage] };
+          }),
+        };
+      }),
+    }));
     set(applyUpdate(get, episodes));
   },
 

@@ -8,13 +8,17 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 
 export function AssigneeCardsWidget() {
   const episodes = useDataStore((s) => s.episodes);
-  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
-  const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
-  const stats = useMemo(() => calcDashboardStats(episodes, selectedDepartment), [episodes, selectedDepartment]);
+  const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
+  const dept = dashboardFilter === 'all' ? undefined : dashboardFilter;
+  const stats = useMemo(() => calcDashboardStats(episodes, dept), [episodes, dept]);
   const assigneeStats = stats.assigneeStats;
 
+  const title = dashboardFilter === 'all'
+    ? '담당자별 현황 (통합)'
+    : `담당자별 현황 (${DEPARTMENT_CONFIGS[dashboardFilter].shortLabel})`;
+
   return (
-    <Widget title={`담당자별 현황 (${deptConfig.shortLabel})`} icon={<Users size={16} />}>
+    <Widget title={title} icon={<Users size={16} />}>
       <div className="grid grid-cols-2 gap-2">
         {assigneeStats.map((a) => {
           const pct = Number(a.pct.toFixed(1));
@@ -39,7 +43,6 @@ export function AssigneeCardsWidget() {
                 </span>
                 <span className={`text-sm font-bold ${color}`}>{pct}%</span>
               </div>
-              {/* 미니 바 */}
               <div className="h-1.5 bg-bg-border rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full transition-all duration-500"

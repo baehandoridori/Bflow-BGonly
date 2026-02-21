@@ -179,30 +179,26 @@ export async function updateTestSceneField(
   return updated;
 }
 
-/** 씬 체크박스 토글 → 테스트 시트에 반영 */
+/** 씬 체크박스 토글 → 테스트 시트에 반영 (sheetName으로 파트 식별) */
 export async function toggleTestSceneStage(
   episodes: Episode[],
-  episodeNumber: number,
-  partId: string,
+  sheetName: string,
   sceneId: string,
   stage: keyof Pick<Scene, 'lo' | 'done' | 'review' | 'png'>
 ): Promise<Episode[]> {
-  const updated = episodes.map((ep) => {
-    if (ep.episodeNumber !== episodeNumber) return ep;
-    return {
-      ...ep,
-      parts: ep.parts.map((part) => {
-        if (part.partId !== partId) return part;
-        return {
-          ...part,
-          scenes: part.scenes.map((scene) => {
-            if (scene.sceneId !== sceneId) return scene;
-            return { ...scene, [stage]: !scene[stage] };
-          }),
-        };
-      }),
-    };
-  });
+  const updated = episodes.map((ep) => ({
+    ...ep,
+    parts: ep.parts.map((part) => {
+      if (part.sheetName !== sheetName) return part;
+      return {
+        ...part,
+        scenes: part.scenes.map((scene) => {
+          if (scene.sceneId !== sceneId) return scene;
+          return { ...scene, [stage]: !scene[stage] };
+        }),
+      };
+    }),
+  }));
   await writeTestSheet(updated);
   return updated;
 }
