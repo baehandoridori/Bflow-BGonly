@@ -16,7 +16,7 @@ export function Sidebar() {
     <aside className="w-16 h-full bg-bg-card border-r border-bg-border flex flex-col items-center py-4 gap-2">
       {/* 로고 */}
       <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center text-white font-bold text-sm mb-4">
-        BG
+        Bf
       </div>
 
       {/* 네비게이션 */}

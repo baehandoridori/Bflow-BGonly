@@ -2,8 +2,8 @@ import { useState, useCallback, useRef } from 'react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter } from '@/stores/useAppStore';
-import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
-import type { Scene, Stage } from '@/types';
+import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
+import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus } from 'lucide-react';
 import {
@@ -32,13 +32,15 @@ interface SceneCardProps {
   scene: Scene;
   sceneIndex: number;
   celebrating: boolean;
+  department: Department;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: () => void;
   onCelebrationEnd: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenDetail, onCelebrationEnd }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, onToggle, onDelete, onOpenDetail, onCelebrationEnd }: SceneCardProps) {
+  const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
 
@@ -120,11 +122,11 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
               )}
               style={
                 scene[stage]
-                  ? { backgroundColor: STAGE_COLORS[stage] }
+                  ? { backgroundColor: deptConfig.stageColors[stage] }
                   : undefined
               }
             >
-              {scene[stage] ? '✓' : ''}{STAGE_LABELS[stage]}
+              {scene[stage] ? '✓' : ''}{deptConfig.stageLabels[stage]}
             </button>
           ))}
         </div>
@@ -150,12 +152,14 @@ function SceneCard({ scene, sceneIndex, celebrating, onToggle, onDelete, onOpenD
 interface SceneTableProps {
   scenes: Scene[];
   allScenes: Scene[];
+  department: Department;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: (sceneIndex: number) => void;
 }
 
-function SceneTable({ scenes, allScenes, onToggle, onDelete, onOpenDetail }: SceneTableProps) {
+function SceneTable({ scenes, allScenes, department, onToggle, onDelete, onOpenDetail }: SceneTableProps) {
+  const deptConfig = DEPARTMENT_CONFIGS[department];
   return (
     <div className="overflow-auto rounded-lg border border-bg-border">
       <table className="w-full text-sm table-fixed">
@@ -167,7 +171,7 @@ function SceneTable({ scenes, allScenes, onToggle, onDelete, onOpenDetail }: Sce
             <th className="w-20 px-2 py-2 text-left font-medium">레이아웃</th>
             <th className="px-2 py-2 text-left font-medium">메모</th>
             {STAGES.map((s) => (
-              <th key={s} className="w-14 px-1 py-2 text-center font-medium">{STAGE_LABELS[s]}</th>
+              <th key={s} className="w-14 px-1 py-2 text-center font-medium">{deptConfig.stageLabels[s]}</th>
             ))}
             <th className="w-14 px-2 py-2 text-center font-medium">진행</th>
             <th className="w-8 px-1 py-2" />
@@ -191,7 +195,7 @@ function SceneTable({ scenes, allScenes, onToggle, onDelete, onOpenDetail }: Sce
                       className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto"
                       style={
                         scene[stage]
-                          ? { backgroundColor: STAGE_COLORS[stage], color: '#0F1117' }
+                          ? { backgroundColor: deptConfig.stageColors[stage], color: '#0F1117' }
                           : { border: '1px solid #2D3041' }
                       }
                     >
@@ -590,10 +594,12 @@ export function ScenesView() {
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const setEpisodes = useDataStore((s) => s.setEpisodes);
   const { sheetsConnected } = useAppStore();
-  const { selectedEpisode, selectedPart, selectedAssignee, searchQuery } = useAppStore();
+  const { selectedEpisode, selectedPart, selectedAssignee, searchQuery, selectedDepartment } = useAppStore();
   const { sortKey, sortDir, statusFilter, sceneViewMode, sceneGroupMode } = useAppStore();
-  const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery } = useAppStore();
+  const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment } = useAppStore();
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
+
+  const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
 
   const [showAddScene, setShowAddScene] = useState(false);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
@@ -620,9 +626,10 @@ export function ScenesView() {
     label: ep.title,
   }));
 
-  // 선택된 에피소드
+  // 선택된 에피소드 + 부서별 파트 필터링
   const currentEp = episodes.find((ep) => ep.episodeNumber === selectedEpisode) ?? episodes[0];
-  const parts = currentEp?.parts ?? [];
+  const allParts = currentEp?.parts ?? [];
+  const parts = allParts.filter((p) => p.department === selectedDepartment);
   const currentPart = parts.find((p) => p.partId === selectedPart) ?? parts[0];
 
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
@@ -705,10 +712,10 @@ export function ScenesView() {
     ? Math.max(...episodes.map((ep) => ep.episodeNumber)) + 1
     : 1;
 
-  // 다음 파트 ID 계산
-  const nextPartId = currentEp
+  // 다음 파트 ID 계산 (현재 부서의 파트 기준)
+  const nextPartId = currentEp && parts.length > 0
     ? String.fromCharCode(
-        Math.max(...currentEp.parts.map((p) => p.partId.charCodeAt(0))) + 1
+        Math.max(...parts.map((p) => p.partId.charCodeAt(0))) + 1
       )
     : 'A';
 
@@ -749,7 +756,7 @@ export function ScenesView() {
 
   const handleAddEpisode = async () => {
     // 낙관적 업데이트: UI 즉시 반영
-    addEpisodeOptimistic(nextEpisodeNumber);
+    addEpisodeOptimistic(nextEpisodeNumber, selectedDepartment);
     setSelectedEpisode(nextEpisodeNumber);
 
     // 백그라운드에서 서버/파일에 저장
@@ -758,7 +765,7 @@ export function ScenesView() {
         await addEpisodeToSheets(nextEpisodeNumber);
         syncInBackground();
       } else {
-        await addTestEpisode(episodes, nextEpisodeNumber);
+        await addTestEpisode(episodes, nextEpisodeNumber, selectedDepartment);
       }
     } catch (err) {
       const msg = String(err);
@@ -779,7 +786,7 @@ export function ScenesView() {
     }
 
     // 낙관적 업데이트
-    addPartOptimistic(currentEp.episodeNumber, nextPartId);
+    addPartOptimistic(currentEp.episodeNumber, nextPartId, selectedDepartment);
     setSelectedPart(nextPartId);
 
     try {
@@ -787,7 +794,7 @@ export function ScenesView() {
         await addPartToSheets(currentEp.episodeNumber, nextPartId);
         syncInBackground();
       } else {
-        await addTestPart(episodes, currentEp.episodeNumber, nextPartId);
+        await addTestPart(episodes, currentEp.episodeNumber, nextPartId, selectedDepartment);
       }
     } catch (err) {
       const msg = String(err);
@@ -888,6 +895,31 @@ export function ScenesView() {
     <div className="flex flex-col gap-4 h-full">
       {/* 필터 바 */}
       <div className="flex flex-wrap items-center gap-3 bg-bg-card border border-bg-border rounded-xl p-3">
+        {/* 부서 탭 */}
+        <div className="flex bg-bg-primary rounded-lg p-0.5 border border-bg-border">
+          {DEPARTMENTS.map((dept) => {
+            const cfg = DEPARTMENT_CONFIGS[dept];
+            const isActive = selectedDepartment === dept;
+            return (
+              <button
+                key={dept}
+                onClick={() => { setSelectedDepartment(dept); setSelectedPart(null); }}
+                className={cn(
+                  'px-3 py-1.5 text-xs rounded-md transition-all duration-200 font-medium',
+                  isActive
+                    ? 'text-white shadow-sm'
+                    : 'text-text-secondary hover:text-text-primary',
+                )}
+                style={isActive ? { backgroundColor: cfg.color } : undefined}
+              >
+                {cfg.shortLabel}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="w-px h-6 bg-bg-border" />
+
         {/* 에피소드 선택 */}
         <select
           value={selectedEpisode ?? currentEp?.episodeNumber ?? ''}
@@ -1158,6 +1190,7 @@ export function ScenesView() {
                   <SceneTable
                     scenes={groupScenes}
                     allScenes={currentPart?.scenes ?? []}
+                    department={selectedDepartment}
                     onToggle={handleToggle}
                     onDelete={handleDeleteScene}
                     onOpenDetail={(idx) => setDetailSceneIndex(idx)}
@@ -1172,6 +1205,7 @@ export function ScenesView() {
                           scene={scene}
                           sceneIndex={sIdx}
                           celebrating={celebratingId === scene.sceneId}
+                          department={selectedDepartment}
                           onToggle={handleToggle}
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -1191,6 +1225,7 @@ export function ScenesView() {
           <SceneTable
             scenes={scenes}
             allScenes={currentPart?.scenes ?? []}
+            department={selectedDepartment}
             onToggle={handleToggle}
             onDelete={handleDeleteScene}
             onOpenDetail={(idx) => setDetailSceneIndex(idx)}
@@ -1207,6 +1242,7 @@ export function ScenesView() {
                 scene={scene}
                 sceneIndex={sIdx}
                 celebrating={celebratingId === scene.sceneId}
+                department={selectedDepartment}
                 onToggle={handleToggle}
                 onDelete={handleDeleteScene}
                 onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -1224,6 +1260,7 @@ export function ScenesView() {
           sceneIndex={detailSceneIndex}
           sheetName={currentPart?.sheetName ?? ''}
           isLiveMode={sheetsConnected}
+          department={selectedDepartment}
           onFieldUpdate={handleFieldUpdate}
           onToggle={handleToggle}
           onClose={() => setDetailSceneIndex(null)}

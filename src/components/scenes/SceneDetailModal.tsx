@@ -10,8 +10,8 @@ import {
   Eye,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { STAGE_LABELS, STAGE_COLORS, STAGES } from '@/types';
-import type { Scene, Stage } from '@/types';
+import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
+import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
@@ -23,6 +23,7 @@ interface SceneDetailModalProps {
   sceneIndex: number;
   sheetName: string;
   isLiveMode: boolean;
+  department: Department;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
   onToggle: (sceneId: string, stage: Stage) => void;
   onClose: () => void;
@@ -283,6 +284,7 @@ export function SceneDetailModal({
   sceneIndex,
   sheetName,
   isLiveMode,
+  department,
   onFieldUpdate,
   onToggle,
   onClose,
@@ -290,6 +292,7 @@ export function SceneDetailModal({
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
 
+  const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
 
   // ESC 닫기
@@ -551,12 +554,12 @@ export function SceneDetailModal({
                     )}
                     style={
                       scene[stage]
-                        ? { backgroundColor: STAGE_COLORS[stage] }
+                        ? { backgroundColor: deptConfig.stageColors[stage] }
                         : undefined
                     }
                   >
                     {scene[stage] ? '✓ ' : ''}
-                    {STAGE_LABELS[stage]}
+                    {deptConfig.stageLabels[stage]}
                   </button>
                 ))}
               </div>

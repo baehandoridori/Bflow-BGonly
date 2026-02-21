@@ -1,9 +1,44 @@
+// ─── 부서 (Department) ──────────────────────
+
+export type Department = 'bg' | 'acting';
+
+export const DEPARTMENTS: Department[] = ['bg', 'acting'];
+
+export interface DepartmentConfig {
+  id: Department;
+  label: string;
+  shortLabel: string;
+  stageLabels: Record<Stage, string>;
+  stageColors: Record<Stage, string>;
+  color: string;
+}
+
+export const DEPARTMENT_CONFIGS: Record<Department, DepartmentConfig> = {
+  bg: {
+    id: 'bg',
+    label: '배경',
+    shortLabel: 'BG',
+    stageLabels: { lo: 'LO', done: '완료', review: '검수', png: 'PNG' },
+    stageColors: { lo: '#74B9FF', done: '#A29BFE', review: '#FDCB6E', png: '#00B894' },
+    color: '#6C5CE7',
+  },
+  acting: {
+    id: 'acting',
+    label: '액팅',
+    shortLabel: 'ACT',
+    stageLabels: { lo: '1원화', done: '2원화', review: '동화', png: '최종' },
+    stageColors: { lo: '#FF6B6B', done: '#FF9FF3', review: '#FECA57', png: '#48DBFB' },
+    color: '#E17055',
+  },
+};
+
 // ─── 진행 단계 ──────────────────────────────
 
 export type Stage = 'lo' | 'done' | 'review' | 'png';
 
 export const STAGES: Stage[] = ['lo', 'done', 'review', 'png'];
 
+/** @deprecated — 부서별 라벨은 DEPARTMENT_CONFIGS[dept].stageLabels 사용 */
 export const STAGE_LABELS: Record<Stage, string> = {
   lo: 'LO',
   done: '완료',
@@ -11,6 +46,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   png: 'PNG',
 };
 
+/** @deprecated — 부서별 컬러는 DEPARTMENT_CONFIGS[dept].stageColors 사용 */
 export const STAGE_COLORS: Record<Stage, string> = {
   lo: '#74B9FF',
   done: '#A29BFE',
@@ -38,7 +74,8 @@ export interface Scene {
 
 export interface Part {
   partId: string; // 'A', 'B', 'C', 'D'
-  sheetName: string; // 'EP01_A'
+  department: Department; // 'bg' | 'acting'
+  sheetName: string; // 'EP01_A_BG' or 'EP01_A' (legacy = bg)
   scenes: Scene[];
 }
 
@@ -88,6 +125,7 @@ export interface AssigneeStats {
 
 export interface EpisodePartStats {
   part: string;
+  department: Department;
   pct: number;
   totalScenes: number;
 }

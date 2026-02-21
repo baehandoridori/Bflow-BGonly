@@ -1,12 +1,20 @@
+import { useMemo } from 'react';
 import { Users } from 'lucide-react';
 import { Widget } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { calcDashboardStats } from '@/utils/calcStats';
+import { DEPARTMENT_CONFIGS } from '@/types';
 
 export function AssigneeCardsWidget() {
-  const assigneeStats = useDataStore((s) => s.stats.assigneeStats);
+  const episodes = useDataStore((s) => s.episodes);
+  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
+  const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
+  const stats = useMemo(() => calcDashboardStats(episodes, selectedDepartment), [episodes, selectedDepartment]);
+  const assigneeStats = stats.assigneeStats;
 
   return (
-    <Widget title="담당자별 현황" icon={<Users size={16} />}>
+    <Widget title={`담당자별 현황 (${deptConfig.shortLabel})`} icon={<Users size={16} />}>
       <div className="grid grid-cols-2 gap-2">
         {assigneeStats.map((a) => {
           const pct = Math.round(a.pct);

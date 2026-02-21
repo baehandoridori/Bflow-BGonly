@@ -5,7 +5,7 @@
  * 읽기/쓰기를 수행한다. 실제 Google Sheets API 대신 사용.
  */
 
-import type { Episode, Scene, Part } from '@/types';
+import type { Episode, Scene, Part, Department } from '@/types';
 
 // 시트 파일 경로 — 메인 프로세스에서 resolve
 let sheetFilePath: string | null = null;
@@ -17,13 +17,24 @@ async function getSheetPath(): Promise<string> {
   return sheetFilePath;
 }
 
+/** 레거시 데이터 마이그레이션: department 없는 Part에 'bg' 기본값 설정 */
+function migrateEpisodes(episodes: Episode[]): Episode[] {
+  return episodes.map((ep) => ({
+    ...ep,
+    parts: ep.parts.map((part) => ({
+      ...part,
+      department: part.department || 'bg' as Department,
+    })),
+  }));
+}
+
 /** 테스트 시트에서 전체 데이터 읽기 */
 export async function readTestSheet(): Promise<Episode[]> {
   const filePath = await getSheetPath();
   try {
     const data = await window.electronAPI.testReadSheet(filePath);
     if (data && Array.isArray(data)) {
-      return data as Episode[];
+      return migrateEpisodes(data as Episode[]);
     }
   } catch (err) {
     console.error('[테스트] 시트 읽기 실패:', err);
@@ -47,13 +58,15 @@ export async function writeTestSheet(episodes: Episode[]): Promise<void> {
 /** 에피소드 추가 (테스트) */
 export async function addTestEpisode(
   episodes: Episode[],
-  episodeNumber: number
+  episodeNumber: number,
+  department: Department = 'bg'
 ): Promise<Episode[]> {
-  const tabName = `EP${String(episodeNumber).padStart(2, '0')}_A`;
+  const deptSuffix = department === 'bg' ? '_BG' : '_ACT';
+  const tabName = `EP${String(episodeNumber).padStart(2, '0')}_A${deptSuffix}`;
   const newEp: Episode = {
     episodeNumber,
     title: `EP.${String(episodeNumber).padStart(2, '0')}`,
-    parts: [{ partId: 'A', sheetName: tabName, scenes: [] }],
+    parts: [{ partId: 'A', department, sheetName: tabName, scenes: [] }],
   };
   const updated = [...episodes, newEp];
   await writeTestSheet(updated);
@@ -64,14 +77,16 @@ export async function addTestEpisode(
 export async function addTestPart(
   episodes: Episode[],
   episodeNumber: number,
-  partId: string
+  partId: string,
+  department: Department = 'bg'
 ): Promise<Episode[]> {
-  const tabName = `EP${String(episodeNumber).padStart(2, '0')}_${partId}`;
+  const deptSuffix = department === 'bg' ? '_BG' : '_ACT';
+  const tabName = `EP${String(episodeNumber).padStart(2, '0')}_${partId}${deptSuffix}`;
   const updated = episodes.map((ep) => {
     if (ep.episodeNumber !== episodeNumber) return ep;
     return {
       ...ep,
-      parts: [...ep.parts, { partId, sheetName: tabName, scenes: [] }],
+      parts: [...ep.parts, { partId, department, sheetName: tabName, scenes: [] }],
     };
   });
   await writeTestSheet(updated);
@@ -218,11 +233,13 @@ function makeScene(no: number, partPrefix: string, assigneeIdx: number): Scene {
   };
 }
 
-function makePart(epNum: number, partId: string, sceneCount: number): Part {
+function makePart(epNum: number, partId: string, sceneCount: number, department: Department = 'bg'): Part {
   const prefix = partId.toLowerCase();
+  const deptSuffix = department === 'bg' ? '_BG' : '_ACT';
   return {
     partId,
-    sheetName: `EP${String(epNum).padStart(2, '0')}_${partId}`,
+    department,
+    sheetName: `EP${String(epNum).padStart(2, '0')}_${partId}${deptSuffix}`,
     scenes: Array.from({ length: sceneCount }, (_, i) =>
       makeScene(i + 1, prefix, i)
     ),
@@ -235,19 +252,30 @@ function generateSampleData(): Episode[] {
       episodeNumber: 1,
       title: 'EP.01',
       parts: [
-        makePart(1, 'A', 12),
-        makePart(1, 'B', 10),
-        makePart(1, 'C', 8),
+        // BG parts
+        makePart(1, 'A', 12, 'bg'),
+        makePart(1, 'B', 10, 'bg'),
+        makePart(1, 'C', 8, 'bg'),
+        // Acting parts
+        makePart(1, 'A', 10, 'acting'),
+        makePart(1, 'B', 8, 'acting'),
+        makePart(1, 'C', 6, 'acting'),
       ],
     },
     {
       episodeNumber: 2,
       title: 'EP.02',
       parts: [
-        makePart(2, 'A', 15),
-        makePart(2, 'B', 11),
-        makePart(2, 'C', 9),
-        makePart(2, 'D', 7),
+        // BG parts
+        makePart(2, 'A', 15, 'bg'),
+        makePart(2, 'B', 11, 'bg'),
+        makePart(2, 'C', 9, 'bg'),
+        makePart(2, 'D', 7, 'bg'),
+        // Acting parts
+        makePart(2, 'A', 12, 'acting'),
+        makePart(2, 'B', 9, 'acting'),
+        makePart(2, 'C', 7, 'acting'),
+        makePart(2, 'D', 5, 'acting'),
       ],
     },
   ];

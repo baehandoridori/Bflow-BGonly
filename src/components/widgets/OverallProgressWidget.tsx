@@ -1,9 +1,16 @@
+import { useMemo } from 'react';
 import { PieChart } from 'lucide-react';
 import { Widget } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { calcDashboardStats } from '@/utils/calcStats';
+import { DEPARTMENT_CONFIGS } from '@/types';
 
 export function OverallProgressWidget() {
-  const stats = useDataStore((s) => s.stats);
+  const episodes = useDataStore((s) => s.episodes);
+  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
+  const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
+  const stats = useMemo(() => calcDashboardStats(episodes, selectedDepartment), [episodes, selectedDepartment]);
   const pct = Math.round(stats.overallPct);
 
   // SVG 원형 진행률
@@ -12,7 +19,7 @@ export function OverallProgressWidget() {
   const offset = circumference - (pct / 100) * circumference;
 
   return (
-    <Widget title="전체 진행률" icon={<PieChart size={16} />}>
+    <Widget title={`전체 진행률 (${deptConfig.shortLabel})`} icon={<PieChart size={16} />}>
       <div className="flex flex-col items-center justify-center h-full gap-3">
         {/* 원형 차트 */}
         <div className="relative">

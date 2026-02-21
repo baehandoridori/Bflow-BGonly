@@ -6,8 +6,9 @@ import type {
   AssigneeStats,
   EpisodeStats,
   Stage,
+  Department,
 } from '@/types';
-import { STAGES, STAGE_LABELS } from '@/types';
+import { STAGES, STAGE_LABELS, DEPARTMENT_CONFIGS } from '@/types';
 
 /** 씬 1개의 진행률 (0~100) */
 export function sceneProgress(scene: Scene): number {
@@ -26,9 +27,16 @@ export function isNotStarted(scene: Scene): boolean {
   return !scene.lo && !scene.done && !scene.review && !scene.png;
 }
 
-/** 에피소드 배열 → 전체 대시보드 통계 */
-export function calcDashboardStats(episodes: Episode[]): DashboardStats {
-  const allScenes: Scene[] = episodes.flatMap((ep) =>
+/** 에피소드 배열 → 전체 대시보드 통계 (department 필터 옵션) */
+export function calcDashboardStats(episodes: Episode[], department?: Department): DashboardStats {
+  const filteredEpisodes = department
+    ? episodes.map((ep) => ({
+        ...ep,
+        parts: ep.parts.filter((p) => p.department === department),
+      }))
+    : episodes;
+
+  const allScenes: Scene[] = filteredEpisodes.flatMap((ep) =>
     ep.parts.flatMap((part) => part.scenes)
   );
 
@@ -55,12 +63,13 @@ export function calcDashboardStats(episodes: Episode[]): DashboardStats {
   const notStarted = allScenes.filter(isNotStarted).length;
   const overallPct = (fullyDone / totalScenes) * 100;
 
-  // 단계별 통계
+  // 단계별 통계 (부서별 라벨 적용)
+  const labels = department ? DEPARTMENT_CONFIGS[department].stageLabels : STAGE_LABELS;
   const stageStats: StageStats[] = STAGES.map((stage: Stage) => {
     const done = allScenes.filter((s) => s[stage]).length;
     return {
       stage,
-      label: STAGE_LABELS[stage],
+      label: labels[stage],
       done,
       total: totalScenes,
       pct: (done / totalScenes) * 100,
@@ -87,7 +96,7 @@ export function calcDashboardStats(episodes: Episode[]): DashboardStats {
   );
 
   // 에피소드별 통계
-  const episodeStats: EpisodeStats[] = episodes.map((ep) => {
+  const episodeStats: EpisodeStats[] = filteredEpisodes.map((ep) => {
     const epScenes = ep.parts.flatMap((p) => p.scenes);
     const epDone = epScenes.filter(isFullyDone).length;
     return {
@@ -97,6 +106,7 @@ export function calcDashboardStats(episodes: Episode[]): DashboardStats {
         const partDone = part.scenes.filter(isFullyDone).length;
         return {
           part: part.partId,
+          department: part.department,
           pct: part.scenes.length > 0 ? (partDone / part.scenes.length) * 100 : 0,
           totalScenes: part.scenes.length,
         };

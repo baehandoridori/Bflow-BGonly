@@ -1,12 +1,20 @@
+import { useMemo } from 'react';
 import { Film } from 'lucide-react';
 import { Widget } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { calcDashboardStats } from '@/utils/calcStats';
+import { DEPARTMENT_CONFIGS } from '@/types';
 
 export function EpisodeSummaryWidget() {
-  const episodeStats = useDataStore((s) => s.stats.episodeStats);
+  const episodes = useDataStore((s) => s.episodes);
+  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
+  const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
+  const stats = useMemo(() => calcDashboardStats(episodes, selectedDepartment), [episodes, selectedDepartment]);
+  const episodeStats = stats.episodeStats;
 
   return (
-    <Widget title="에피소드 요약" icon={<Film size={16} />}>
+    <Widget title={`에피소드 요약 (${deptConfig.shortLabel})`} icon={<Film size={16} />}>
       <div className="flex flex-col gap-3">
         {episodeStats.map((ep) => (
           <div key={ep.episodeNumber} className="bg-bg-primary rounded-lg p-3">

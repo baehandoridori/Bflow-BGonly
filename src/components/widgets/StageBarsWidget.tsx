@@ -1,20 +1,27 @@
+import { useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { Widget } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
-import { STAGE_COLORS } from '@/types';
+import { useAppStore } from '@/stores/useAppStore';
+import { calcDashboardStats } from '@/utils/calcStats';
+import { DEPARTMENT_CONFIGS } from '@/types';
 
 export function StageBarsWidget() {
-  const stageStats = useDataStore((s) => s.stats.stageStats);
+  const episodes = useDataStore((s) => s.episodes);
+  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
+  const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
+  const stats = useMemo(() => calcDashboardStats(episodes, selectedDepartment), [episodes, selectedDepartment]);
+  const stageStats = stats.stageStats;
 
   return (
-    <Widget title="단계별 진행률" icon={<BarChart3 size={16} />}>
+    <Widget title={`단계별 진행률 (${deptConfig.shortLabel})`} icon={<BarChart3 size={16} />}>
       <div className="flex flex-col gap-4 justify-center h-full">
         {stageStats.map((stat) => (
           <div key={stat.stage} className="flex items-center gap-3">
             {/* 라벨 */}
             <span
               className="text-xs font-medium w-10 text-right"
-              style={{ color: STAGE_COLORS[stat.stage] }}
+              style={{ color: deptConfig.stageColors[stat.stage] }}
             >
               {stat.label}
             </span>
@@ -24,7 +31,7 @@ export function StageBarsWidget() {
                 className="h-full rounded-full transition-all duration-500"
                 style={{
                   width: `${stat.pct}%`,
-                  backgroundColor: STAGE_COLORS[stat.stage],
+                  backgroundColor: deptConfig.stageColors[stat.stage],
                 }}
               />
             </div>

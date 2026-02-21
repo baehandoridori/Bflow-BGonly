@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { WidgetLayoutItem, SheetsConfig } from '@/types';
+import type { WidgetLayoutItem, SheetsConfig, Department } from '@/types';
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'settings';
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
@@ -22,6 +22,10 @@ interface AppState {
   // 현재 뷰
   currentView: ViewMode;
   setView: (view: ViewMode) => void;
+
+  // 부서 선택
+  selectedDepartment: Department;
+  setSelectedDepartment: (dept: Department) => void;
 
   // 위젯 레이아웃
   widgetLayout: WidgetLayoutItem[] | null;
@@ -61,6 +65,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   currentView: 'dashboard',
   setView: (view) => set({ currentView: view }),
+
+  selectedDepartment: 'bg',
+  setSelectedDepartment: (dept) => set({ selectedDepartment: dept }),
 
   widgetLayout: null,
   isEditMode: false,
