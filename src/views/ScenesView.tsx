@@ -8,54 +8,70 @@ import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles } from 'lucide-react';
 
-/* ── 진행률 기반 그라데이션 ── */
+/* ── 진행률 기반 그라데이션 (중간값 추가로 밴딩 방지) ── */
 function progressGradient(pct: number): string {
-  if (pct >= 100) return 'linear-gradient(90deg, #00B894 0%, #55efc4 100%)';
-  if (pct >= 75) return 'linear-gradient(90deg, #FDCB6E 0%, #00B894 100%)';
-  if (pct >= 50) return 'linear-gradient(90deg, #E17055 0%, #FDCB6E 100%)';
-  if (pct >= 25) return 'linear-gradient(90deg, #FF6B6B 0%, #E17055 60%, #FDCB6E 100%)';
-  return 'linear-gradient(90deg, #FF6B6B 0%, #E17055 100%)';
+  if (pct >= 100) return 'linear-gradient(90deg, rgba(0,184,148,1) 0%, rgba(46,213,174,1) 40%, rgba(85,239,196,1) 100%)';
+  if (pct >= 75) return 'linear-gradient(90deg, rgba(253,203,110,1) 0%, rgba(129,194,129,1) 50%, rgba(0,184,148,1) 100%)';
+  if (pct >= 50) return 'linear-gradient(90deg, rgba(225,112,85,1) 0%, rgba(239,158,98,1) 50%, rgba(253,203,110,1) 100%)';
+  if (pct >= 25) return 'linear-gradient(90deg, rgba(255,107,107,1) 0%, rgba(240,110,96,1) 35%, rgba(225,112,85,1) 65%, rgba(253,203,110,1) 100%)';
+  return 'linear-gradient(90deg, rgba(255,107,107,1) 0%, rgba(240,110,96,1) 50%, rgba(225,112,85,1) 100%)';
 }
 
-/* ── 레이어드 보케 (카메라 아웃포커스 느낌) ── */
-function BokehLayer({ count, minSize, maxSize, opacity, speed }: {
-  count: number; minSize: number; maxSize: number; opacity: number; speed: number;
+/*
+ * 보케 RGB 팔레트 — rgba() 사용으로 밴딩 방지
+ * UI/UX Pro Max: Dark OLED + Financial Dashboard 팔레트 기반
+ * 성취감 → 초록(#22C55E) + 골드(#CA8A04) + 프로젝트 액센트(#6C5CE7)
+ */
+const BOKEH_PALETTE = [
+  [0, 184, 148],   // emerald
+  [34, 197, 94],    // green-500 (CTA)
+  [108, 92, 231],   // accent (프로젝트)
+  [162, 155, 254],  // lavender
+  [202, 138, 4],    // gold (achievement)
+  [116, 185, 255],  // sky
+  [253, 203, 110],  // amber
+] as const;
+
+/* ── 보케 오브 (rgba 기반, 밴딩 없음) ── */
+function BokehOrbs({ count, minR, maxR, baseAlpha, drift, speed }: {
+  count: number; minR: number; maxR: number; baseAlpha: number; drift: number; speed: number;
 }) {
-  const orbs = useMemo(() => {
-    const palette = ['#00B894', '#55efc4', '#6C5CE7', '#A29BFE', '#FDCB6E', '#74B9FF', '#fd79a8'];
-    return Array.from({ length: count }, (_, i) => {
-      const size = minSize + Math.random() * (maxSize - minSize);
+  const orbs = useMemo(() =>
+    Array.from({ length: count }, (_, i) => {
+      const r = minR + Math.random() * (maxR - minR);
+      const [cr, cg, cb] = BOKEH_PALETTE[i % BOKEH_PALETTE.length];
       return {
-        id: i,
-        x: Math.random() * 110 - 5,
-        y: Math.random() * 110 - 5,
-        size,
-        color: palette[i % palette.length],
-        dur: speed + Math.random() * speed,
-        delay: Math.random() * speed,
-        dx: [(Math.random() - 0.5) * 60, (Math.random() - 0.5) * 50, (Math.random() - 0.5) * 40],
-        dy: [(Math.random() - 0.5) * 50, (Math.random() - 0.5) * 60, (Math.random() - 0.5) * 35],
+        id: i, r, cr, cg, cb,
+        x: Math.random() * 100,
+        y: Math.random() * 100,
+        dur: speed * (0.8 + Math.random() * 0.6),
+        delay: Math.random() * speed * 0.5,
+        path: Array.from({ length: 3 }, () => [(Math.random() - 0.5) * drift, (Math.random() - 0.5) * drift] as const),
       };
-    });
-  }, [count, minSize, maxSize, speed]);
+    }), [count, minR, maxR, baseAlpha, drift, speed]
+  );
 
   return (
     <>
       {orbs.map((o) => (
         <motion.div
           key={o.id}
-          className="absolute rounded-full"
+          className="absolute rounded-full will-change-transform"
           style={{
-            width: o.size, height: o.size,
+            width: o.r, height: o.r,
             left: `${o.x}%`, top: `${o.y}%`,
-            background: `radial-gradient(circle at 35% 35%, ${o.color}${Math.round(opacity * 255).toString(16).padStart(2, '0')} 0%, ${o.color}00 70%)`,
-            filter: o.size > 30 ? `blur(${Math.round(o.size / 8)}px)` : 'none',
+            /* radial-gradient with rgba → 부드러운 8비트 이상 블렌딩 */
+            background: `radial-gradient(circle at 38% 38%,
+              rgba(${o.cr},${o.cg},${o.cb},${baseAlpha}) 0%,
+              rgba(${o.cr},${o.cg},${o.cb},${baseAlpha * 0.5}) 35%,
+              rgba(${o.cr},${o.cg},${o.cb},${baseAlpha * 0.15}) 60%,
+              rgba(${o.cr},${o.cg},${o.cb},0) 80%)`,
+            filter: o.r > 30 ? `blur(${Math.round(o.r / 10)}px)` : 'none',
           }}
           animate={{
-            x: [0, ...o.dx, 0],
-            y: [0, ...o.dy, 0],
-            opacity: [opacity * 0.6, opacity, opacity * 0.7, opacity * 0.5, opacity * 0.6],
-            scale: [1, 1.15, 0.95, 1.1, 1],
+            x: [0, o.path[0][0], o.path[1][0], o.path[2][0], 0],
+            y: [0, o.path[0][1], o.path[1][1], o.path[2][1], 0],
+            scale: [1, 1.08, 0.96, 1.04, 1],
           }}
           transition={{ duration: o.dur, delay: o.delay, repeat: Infinity, ease: 'easeInOut' }}
         />
@@ -64,27 +80,34 @@ function BokehLayer({ count, minSize, maxSize, opacity, speed }: {
   );
 }
 
-/* ── 오로라 웨이브 (흐르는 그라데이션) ── */
-function AuroraWave() {
+/* ── 오로라 메시 (conic-gradient → radial 다중 레이어로 밴딩 제거) ── */
+function AuroraMesh() {
   return (
     <>
+      {/* 부드러운 radial 워시 2개 — conic보다 밴딩 없음 */}
       <motion.div
-        className="absolute -inset-[50%] rounded-full"
+        className="absolute will-change-transform"
         style={{
-          background: 'conic-gradient(from 0deg, #00B89410, #6C5CE710, #55efc410, #FDCB6E10, #A29BFE10, #00B89410)',
-          filter: 'blur(40px)',
+          width: '140%', height: '140%', left: '-20%', top: '-20%',
+          background: `radial-gradient(ellipse at 30% 40%,
+            rgba(0,184,148,0.06) 0%, rgba(108,92,231,0.04) 40%, transparent 70%),
+            radial-gradient(ellipse at 70% 60%,
+            rgba(202,138,4,0.05) 0%, rgba(162,155,254,0.03) 40%, transparent 70%)`,
         }}
-        animate={{ rotate: [0, 360] }}
-        transition={{ duration: 25, repeat: Infinity, ease: 'linear' }}
+        animate={{ x: [0, 30, -20, 0], y: [0, -20, 15, 0] }}
+        transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
-        className="absolute -inset-[30%] rounded-full"
+        className="absolute will-change-transform"
         style={{
-          background: 'conic-gradient(from 180deg, #55efc408, #74B9FF08, #A29BFE08, #00B89408, #55efc408)',
-          filter: 'blur(30px)',
+          width: '120%', height: '120%', left: '-10%', top: '-10%',
+          background: `radial-gradient(ellipse at 60% 30%,
+            rgba(34,197,94,0.05) 0%, rgba(116,185,255,0.03) 40%, transparent 65%),
+            radial-gradient(ellipse at 40% 70%,
+            rgba(253,203,110,0.04) 0%, rgba(0,184,148,0.03) 40%, transparent 65%)`,
         }}
-        animate={{ rotate: [360, 0] }}
-        transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+        animate={{ x: [0, -25, 20, 0], y: [0, 20, -15, 0] }}
+        transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
       />
     </>
   );
@@ -96,55 +119,69 @@ function PartCompleteOverlay() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.8, ease: 'easeOut' }}
+      transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
       className="absolute inset-0 z-10 pointer-events-none overflow-hidden rounded-xl"
     >
-      {/* 레이어 0: 오로라 웨이브 */}
-      <AuroraWave />
+      {/* 레이어 0: 오로라 메시 (부드러운 radial, 밴딩 없음) */}
+      <AuroraMesh />
 
-      {/* 레이어 1: 큰 소프트 보케 (배경 깊이) */}
-      <BokehLayer count={6} minSize={40} maxSize={90} opacity={0.15} speed={8} />
+      {/* 레이어 1: 대형 소프트 보케 — 깊이감 */}
+      <BokehOrbs count={5} minR={50} maxR={100} baseAlpha={0.12} drift={50} speed={10} />
 
-      {/* 레이어 2: 중간 보케 */}
-      <BokehLayer count={10} minSize={12} maxSize={35} opacity={0.25} speed={6} />
+      {/* 레이어 2: 중형 보케 */}
+      <BokehOrbs count={8} minR={15} maxR={40} baseAlpha={0.2} drift={40} speed={7} />
 
-      {/* 레이어 3: 작은 샤프 보케 (전경) */}
-      <BokehLayer count={14} minSize={3} maxSize={10} opacity={0.5} speed={4} />
+      {/* 레이어 3: 소형 샤프 보케 — 전경 */}
+      <BokehOrbs count={12} minR={4} maxR={12} baseAlpha={0.45} drift={25} speed={5} />
 
       {/* 완료 뱃지 */}
       <div className="absolute inset-0 flex items-center justify-center">
         <motion.div
-          initial={{ opacity: 0, scale: 0.5, y: 10 }}
+          initial={{ opacity: 0, scale: 0.6, y: 12 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{ delay: 0.4, type: 'spring', stiffness: 180, damping: 14 }}
+          transition={{ delay: 0.5, type: 'spring', stiffness: 160, damping: 12 }}
           className="relative"
         >
-          {/* 뱃지 글로우 */}
+          {/* 뱃지 글로우 링 */}
           <motion.div
-            className="absolute -inset-3 rounded-2xl"
+            className="absolute -inset-4 rounded-2xl"
             style={{
-              background: 'radial-gradient(ellipse, #00B89425 0%, transparent 70%)',
-              filter: 'blur(8px)',
+              background: 'radial-gradient(ellipse, rgba(0,184,148,0.15) 0%, rgba(0,184,148,0.05) 40%, transparent 70%)',
+              filter: 'blur(10px)',
             }}
-            animate={{ opacity: [0.5, 1, 0.5], scale: [0.95, 1.05, 0.95] }}
-            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            animate={{ opacity: [0.4, 0.8, 0.4], scale: [0.97, 1.03, 0.97] }}
+            transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
           />
           {/* 뱃지 본체 */}
-          <div className="relative flex items-center gap-2.5 px-6 py-3 rounded-xl bg-bg-card/90 backdrop-blur-md border border-green-400/40 shadow-xl shadow-green-500/15">
+          <div
+            className="relative flex items-center gap-3 px-7 py-3.5 rounded-xl backdrop-blur-md"
+            style={{
+              background: 'rgba(26,29,39,0.92)',
+              border: '1px solid rgba(0,184,148,0.35)',
+              boxShadow: '0 8px 32px rgba(0,184,148,0.12), 0 0 1px rgba(0,184,148,0.4)',
+            }}
+          >
             <motion.div
-              animate={{ rotate: [0, 15, -15, 0] }}
-              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
+              animate={{ rotate: [0, 12, -12, 0], scale: [1, 1.1, 1, 1.1, 1] }}
+              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
             >
-              <Sparkles size={18} className="text-green-400 drop-shadow-[0_0_6px_#00B89480]" />
+              <Sparkles size={18} style={{ color: '#22C55E', filter: 'drop-shadow(0 0 4px rgba(34,197,94,0.5))' }} />
             </motion.div>
-            <span className="text-sm font-bold bg-gradient-to-r from-green-300 to-emerald-400 bg-clip-text text-transparent drop-shadow-[0_0_8px_#00B89440]">
+            <span
+              className="text-sm font-bold"
+              style={{
+                background: 'linear-gradient(135deg, rgba(34,197,94,1) 0%, rgba(0,184,148,1) 50%, rgba(202,138,4,1) 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
               이 파트는 완료되었습니다!
             </span>
             <motion.div
-              animate={{ rotate: [0, -15, 15, 0] }}
-              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', delay: 1.5 }}
+              animate={{ rotate: [0, -12, 12, 0], scale: [1, 1.1, 1, 1.1, 1] }}
+              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut', delay: 0.5 }}
             >
-              <Sparkles size={18} className="text-green-400 drop-shadow-[0_0_6px_#00B89480]" />
+              <Sparkles size={18} style={{ color: '#CA8A04', filter: 'drop-shadow(0 0 4px rgba(202,138,4,0.5))' }} />
             </motion.div>
           </div>
         </motion.div>
