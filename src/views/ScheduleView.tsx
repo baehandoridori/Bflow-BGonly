@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, X, Filter,
-  Trash2, ExternalLink, GripVertical, Clock, MapPin, FileText,
+  Trash2, ExternalLink, GripVertical, Clock, MapPin, FileText, Pencil,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
@@ -243,12 +243,13 @@ function OverflowPopup({
    ═══════════════════════════════════════════════════ */
 
 function EventDetailModal({
-  event, onClose, onDelete, onNavigate,
+  event, onClose, onDelete, onNavigate, onEdit,
 }: {
   event: CalendarEvent;
   onClose: () => void;
   onDelete: (id: string) => void;
   onNavigate: (ev: CalendarEvent) => void;
+  onEdit: (ev: CalendarEvent) => void;
 }) {
   const start = parseDate(event.startDate);
   const end = parseDate(event.endDate);
@@ -330,6 +331,13 @@ function EventDetailModal({
 
           {/* 액션 */}
           <div className="flex gap-2 pt-1">
+            <button
+              onClick={() => { onEdit(event); onClose(); }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-bg-border/20 text-text-primary hover:bg-bg-border/30 transition-colors cursor-pointer"
+            >
+              <Pencil size={13} />
+              편집
+            </button>
             {event.type !== 'custom' && (
               <button
                 onClick={() => onNavigate(event)}
@@ -359,29 +367,32 @@ function EventDetailModal({
 
 function EventCreateModal({
   initialDate,
+  editEvent,
   episodes,
   onClose,
   onSave,
 }: {
   initialDate?: string;
+  editEvent?: CalendarEvent;
   episodes: { episodeNumber: number; title: string; parts: { partId: string; sheetName: string; department: string; scenes: { sceneId: string; no: number }[] }[] }[];
   onClose: () => void;
   onSave: (ev: Omit<CalendarEvent, 'id' | 'createdAt'>) => void;
 }) {
   const currentUser = useAuthStore((s) => s.currentUser);
   const today = fmtDate(new Date());
+  const isEditMode = !!editEvent;
 
-  const [title, setTitle] = useState('');
-  const [memo, setMemo] = useState('');
-  const [startDate, setStartDate] = useState(initialDate ?? today);
-  const [endDate, setEndDate] = useState(initialDate ?? today);
-  const [color, setColor] = useState<string>(EVENT_COLORS[0]);
-  const [evType, setEvType] = useState<CalendarEventType>('custom');
+  const [title, setTitle] = useState(editEvent?.title ?? '');
+  const [memo, setMemo] = useState(editEvent?.memo ?? '');
+  const [startDate, setStartDate] = useState(editEvent?.startDate ?? initialDate ?? today);
+  const [endDate, setEndDate] = useState(editEvent?.endDate ?? initialDate ?? today);
+  const [color, setColor] = useState<string>(editEvent?.color ?? EVENT_COLORS[0]);
+  const [evType, setEvType] = useState<CalendarEventType>(editEvent?.type ?? 'custom');
 
   // 연결 항목
-  const [linkedEp, setLinkedEp] = useState<number | ''>('');
-  const [linkedPart, setLinkedPart] = useState('');
-  const [linkedScene, setLinkedScene] = useState('');
+  const [linkedEp, setLinkedEp] = useState<number | ''>(editEvent?.linkedEpisode ?? '');
+  const [linkedPart, setLinkedPart] = useState(editEvent?.linkedSheetName ?? '');
+  const [linkedScene, setLinkedScene] = useState(editEvent?.linkedSceneId ?? '');
 
   const selectedEpParts = useMemo(() => {
     if (linkedEp === '') return [];
@@ -430,7 +441,7 @@ function EventCreateModal({
       >
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">
-          <h3 className="text-sm font-bold text-text-primary">새 이벤트</h3>
+          <h3 className="text-sm font-bold text-text-primary">{isEditMode ? '이벤트 편집' : '새 이벤트'}</h3>
           <button onClick={onClose} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
             <X size={16} />
           </button>
@@ -457,7 +468,7 @@ function EventCreateModal({
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent"
+                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-accent [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
               />
             </div>
             <div className="flex-1">
@@ -466,7 +477,7 @@ function EventCreateModal({
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent"
+                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-accent [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
               />
             </div>
           </div>
@@ -573,7 +584,7 @@ function EventCreateModal({
             disabled={!title.trim()}
             className="w-full py-2.5 rounded-xl text-sm font-medium bg-accent hover:bg-accent/80 text-white disabled:opacity-30 transition-colors cursor-pointer disabled:cursor-not-allowed"
           >
-            이벤트 추가
+            {isEditMode ? '이벤트 저장' : '이벤트 추가'}
           </button>
         </div>
       </motion.div>
@@ -627,7 +638,7 @@ function CalendarGrid({
           const bars = layoutEventBars(events, week[0], 7);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
           const visibleRows = Math.min(maxRow, maxVisibleBars);
-          const rowHeight = Math.max(30 + visibleRows * 24 + 4, 72);
+          const rowHeight = Math.max(36 + visibleRows * 24 + 8, 96);
 
           return (
             <div key={wi} className="relative grid grid-cols-7 gap-px" style={{ minHeight: rowHeight }}>
@@ -802,8 +813,10 @@ export function ScheduleView() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
   const [filter, setFilter] = useState<CalendarFilter>('all');
+  const [deptFilter, setDeptFilter] = useState<'all' | 'bg' | 'acting'>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [createDate, setCreateDate] = useState<string | undefined>();
+  const [editEvent, setEditEvent] = useState<CalendarEvent | null>(null);
   const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null);
 
   // 날짜 상태
@@ -820,9 +833,11 @@ export function ScheduleView() {
 
   // 필터링
   const filteredEvents = useMemo(() => {
-    if (filter === 'all') return events;
-    return events.filter((e) => e.type === filter);
-  }, [events, filter]);
+    let result = events;
+    if (filter !== 'all') result = result.filter((e) => e.type === filter);
+    if (deptFilter !== 'all') result = result.filter((e) => e.linkedDepartment === deptFilter || e.type === 'custom');
+    return result;
+  }, [events, filter, deptFilter]);
 
   // 주 데이터 계산
   const weeks = useMemo(() => {
@@ -920,6 +935,15 @@ export function ScheduleView() {
     }
   }, []);
 
+  const handleUpdateEvent = useCallback(async (data: Omit<CalendarEvent, 'id' | 'createdAt'>) => {
+    if (!editEvent) return;
+    const updates = { ...data };
+    await updateEvent(editEvent.id, updates);
+    setEvents((prev) => prev.map((e) => (e.id === editEvent.id ? { ...e, ...updates } : e)));
+    setEditEvent(null);
+    setShowCreate(false);
+  }, [editEvent]);
+
   const handleDeleteEvent = useCallback(async (id: string) => {
     await deleteEvent(id);
     setEvents((prev) => prev.filter((e) => e.id !== id));
@@ -983,25 +1007,25 @@ export function ScheduleView() {
 
           {/* 네비게이션 */}
           {viewMode !== 'today' && (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={goToPrev}
-                className="p-1.5 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
+                className="p-2 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
               >
-                <ChevronLeft size={16} />
+                <ChevronLeft size={20} />
               </button>
-              <span className="text-sm font-semibold text-text-primary min-w-[120px] text-center">
+              <span className="text-lg font-bold text-text-primary min-w-[160px] text-center">
                 {headerLabel}
               </span>
               <button
                 onClick={goToNext}
-                className="p-1.5 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
+                className="p-2 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
               >
-                <ChevronRight size={16} />
+                <ChevronRight size={20} />
               </button>
               <button
                 onClick={goToToday}
-                className="ml-1 px-2.5 py-1 text-[10px] rounded-md bg-accent/10 text-accent hover:bg-accent/20 transition-colors cursor-pointer font-medium"
+                className="ml-2 px-3 py-1.5 text-xs rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-colors cursor-pointer font-medium"
               >
                 오늘
               </button>
@@ -1019,6 +1043,24 @@ export function ScheduleView() {
                 className={cn(
                   'px-2.5 py-1 text-[10px] rounded-md font-medium cursor-pointer transition-colors',
                   filter === f
+                    ? 'bg-accent/20 text-accent'
+                    : 'text-text-secondary hover:text-text-primary',
+                )}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {/* 부서 필터 */}
+          <div className="flex items-center bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
+            {([['all', '전체'], ['bg', 'BG'], ['acting', 'ACT']] as const).map(([f, l]) => (
+              <button
+                key={f}
+                onClick={() => setDeptFilter(f)}
+                className={cn(
+                  'px-2.5 py-1 text-[10px] rounded-md font-medium cursor-pointer transition-colors',
+                  deptFilter === f
                     ? 'bg-accent/20 text-accent'
                     : 'text-text-secondary hover:text-text-primary',
                 )}
@@ -1092,11 +1134,12 @@ export function ScheduleView() {
       <AnimatePresence>
         {showCreate && (
           <EventCreateModal
-            key="create"
+            key={editEvent ? `edit-${editEvent.id}` : 'create'}
             initialDate={createDate}
+            editEvent={editEvent ?? undefined}
             episodes={episodes}
-            onClose={() => { setShowCreate(false); setCreateDate(undefined); }}
-            onSave={handleAddEvent}
+            onClose={() => { setShowCreate(false); setCreateDate(undefined); setEditEvent(null); }}
+            onSave={editEvent ? handleUpdateEvent : handleAddEvent}
           />
         )}
       </AnimatePresence>
@@ -1109,6 +1152,7 @@ export function ScheduleView() {
             onClose={() => setDetailEvent(null)}
             onDelete={handleDeleteEvent}
             onNavigate={handleNavigate}
+            onEdit={(ev) => { setEditEvent(ev); setShowCreate(true); }}
           />
         )}
       </AnimatePresence>
