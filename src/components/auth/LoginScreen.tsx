@@ -4,190 +4,270 @@ import { LogIn } from 'lucide-react';
 import { login } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
 
-// ─── 성능 최적화된 배경 (DOM 직접 조작, React 상태 없음) ──────
+// ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
-interface OrbData {
-  baseX: number;
-  baseY: number;
+interface Particle {
+  x: number;
+  y: number;
+  z: number; // 0(먼) ~ 1(가까움)
+  vx: number;
+  vy: number;
+  baseSpeed: number;
   size: number;
-  color: string;
-  speed: number;
-  angle: number;
-  opacity: number;
+  color: [number, number, number]; // RGB
 }
 
-const ORB_PALETTE = [
-  [108, 92, 231, 0.30],
-  [162, 155, 254, 0.22],
-  [0, 184, 148, 0.18],
-  [116, 185, 255, 0.18],
-  [108, 92, 231, 0.12],
-  [85, 239, 196, 0.14],
-  [253, 203, 110, 0.10],
+const PLEXUS_COLORS: [number, number, number][] = [
+  [108, 92, 231],   // #6C5CE7 보라
+  [162, 155, 254],   // #A29BFE 연보라
+  [116, 185, 255],   // #74B9FF 파랑
+  [0, 184, 148],     // #00B894 청록
+  [85, 239, 196],    // #55EFC4 민트
 ];
 
-function initOrbs(): OrbData[] {
-  return ORB_PALETTE.map(([r, g, b, a], i) => ({
-    baseX: 10 + Math.random() * 80,
-    baseY: 10 + Math.random() * 80,
-    size: 120 + Math.random() * 280,
-    color: `rgba(${r},${g},${b},${a})`,
-    speed: 0.12 + Math.random() * 0.2,
-    angle: (i / ORB_PALETTE.length) * Math.PI * 2,
-    opacity: 0.5 + Math.random() * 0.5,
-  }));
+const PARTICLE_COUNT = 90;
+const CONNECTION_DIST = 180;
+const MOUSE_RADIUS = 200;
+const MOUSE_FORCE = 0.04;
+
+function createParticle(w: number, h: number): Particle {
+  const z = 0.15 + Math.random() * 0.85;
+  const color = PLEXUS_COLORS[Math.floor(Math.random() * PLEXUS_COLORS.length)];
+  const baseSpeed = 0.15 + Math.random() * 0.3;
+  return {
+    x: Math.random() * w,
+    y: Math.random() * h,
+    z,
+    vx: (Math.random() - 0.5) * baseSpeed * z,
+    vy: (Math.random() - 0.5) * baseSpeed * z,
+    baseSpeed,
+    size: 1.5 + z * 2.5,
+    color,
+  };
 }
 
-// 플렉서블 아트 — 유기적 SVG 커브 (마우스 반응형)
-function FlexArt({ containerRef }: { containerRef: React.RefObject<SVGSVGElement> }) {
-  return (
-    <svg
-      ref={containerRef as React.LegacyRef<SVGSVGElement>}
-      className="absolute inset-0 w-full h-full pointer-events-none"
-      viewBox="0 0 1000 1000"
-      preserveAspectRatio="none"
-      style={{ opacity: 0.6 }}
-    >
-      <defs>
-        <linearGradient id="flex-g1" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#6C5CE7" stopOpacity="0.15" />
-          <stop offset="50%" stopColor="#A29BFE" stopOpacity="0.08" />
-          <stop offset="100%" stopColor="#74B9FF" stopOpacity="0.12" />
-        </linearGradient>
-        <linearGradient id="flex-g2" x1="100%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#00B894" stopOpacity="0.10" />
-          <stop offset="50%" stopColor="#6C5CE7" stopOpacity="0.06" />
-          <stop offset="100%" stopColor="#55EFC4" stopOpacity="0.10" />
-        </linearGradient>
-        <linearGradient id="flex-g3" x1="50%" y1="0%" x2="50%" y2="100%">
-          <stop offset="0%" stopColor="#FDCB6E" stopOpacity="0.06" />
-          <stop offset="100%" stopColor="#E17055" stopOpacity="0.08" />
-        </linearGradient>
-      </defs>
-      {/* 커브 패스 — JS에서 동적 업데이트 */}
-      <path id="flex-path-0" fill="none" stroke="url(#flex-g1)" strokeWidth="1.5" />
-      <path id="flex-path-1" fill="none" stroke="url(#flex-g2)" strokeWidth="1.2" />
-      <path id="flex-path-2" fill="none" stroke="url(#flex-g3)" strokeWidth="1" />
-      {/* 채워진 유기체 */}
-      <path id="flex-blob-0" fill="url(#flex-g1)" />
-      <path id="flex-blob-1" fill="url(#flex-g2)" />
-    </svg>
-  );
-}
-
-function InteractiveBackground() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const orbRefs = useRef<HTMLDivElement[]>([]);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const glowRef = useRef<HTMLDivElement>(null);
-  const orbs = useRef(initOrbs());
-  const mouseRef = useRef({ x: 0.5, y: 0.5 });
-  const timeRef = useRef(0);
+function PlexusBackground() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const particlesRef = useRef<Particle[]>([]);
+  const mouseRef = useRef({ x: -9999, y: -9999 });
   const rafRef = useRef(0);
+  const sizeRef = useRef({ w: 0, h: 0 });
 
-  // 마우스 이벤트는 window 레벨에서 직접 처리
+  // 노이즈 캔버스 (밴딩 제거용 디더링 텍스처 — 한 번만 생성)
+  const noiseRef = useRef<HTMLCanvasElement | null>(null);
+
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      mouseRef.current = { x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight };
-      // 글로우 포인터 즉시 업데이트
-      if (glowRef.current) {
-        glowRef.current.style.left = `${mouseRef.current.x * 100}%`;
-        glowRef.current.style.top = `${mouseRef.current.y * 100}%`;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+
+    // 리사이즈 처리
+    const resize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      sizeRef.current = { w, h };
+
+      // 노이즈 텍스처 생성 (밴딩 제거)
+      if (!noiseRef.current || noiseRef.current.width !== w) {
+        const nc = document.createElement('canvas');
+        nc.width = w;
+        nc.height = h;
+        const nctx = nc.getContext('2d');
+        if (nctx) {
+          const imageData = nctx.createImageData(w, h);
+          const data = imageData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const v = Math.random() * 25;
+            data[i] = v;
+            data[i + 1] = v;
+            data[i + 2] = v;
+            data[i + 3] = 18; // 매우 낮은 opacity
+          }
+          nctx.putImageData(imageData, 0, 0);
+        }
+        noiseRef.current = nc;
+      }
+
+      // 파티클 초기화 또는 리사이즈
+      if (particlesRef.current.length === 0) {
+        particlesRef.current = Array.from({ length: PARTICLE_COUNT }, () => createParticle(w, h));
       }
     };
-    window.addEventListener('mousemove', handler, { passive: true });
-    return () => window.removeEventListener('mousemove', handler);
-  }, []);
 
-  // rAF 루프 — React 상태 업데이트 없이 DOM 직접 조작
-  useEffect(() => {
+    resize();
+    window.addEventListener('resize', resize);
+
+    // 마우스 추적
+    const onMouse = (e: MouseEvent) => {
+      mouseRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener('mousemove', onMouse, { passive: true });
+
+    // 애니메이션 루프
     let running = true;
-
     const animate = () => {
       if (!running) return;
-      timeRef.current += 0.006;
-      const t = timeRef.current;
+      const { w, h } = sizeRef.current;
       const mx = mouseRef.current.x;
       const my = mouseRef.current.y;
+      const particles = particlesRef.current;
 
-      // 오브 위치 업데이트
-      orbs.current.forEach((orb, i) => {
-        const el = orbRefs.current[i];
-        if (!el) return;
+      // 배경 — 다단계 radial gradient (밴딩 최소화)
+      ctx.fillStyle = '#12141C';
+      ctx.fillRect(0, 0, w, h);
 
-        const bx = orb.baseX + Math.sin(t * orb.speed + orb.angle) * 10;
-        const by = orb.baseY + Math.cos(t * orb.speed * 0.7 + orb.angle + 1) * 8;
-        // 마우스 반발
-        const dx = bx - mx * 100;
-        const dy = by - my * 100;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const force = Math.max(0, 1 - dist / 45) * 15;
-        const fx = dist > 0.1 ? (dx / dist) * force : 0;
-        const fy = dist > 0.1 ? (dy / dist) * force : 0;
+      // 미묘한 중앙 글로우
+      const cg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.7);
+      cg.addColorStop(0, 'rgba(108, 92, 231, 0.06)');
+      cg.addColorStop(0.3, 'rgba(108, 92, 231, 0.03)');
+      cg.addColorStop(0.6, 'rgba(116, 185, 255, 0.015)');
+      cg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = cg;
+      ctx.fillRect(0, 0, w, h);
 
-        el.style.transform = `translate(${bx + fx}vw, ${by + fy}vh) translate(-50%, -50%)`;
-      });
+      // 마우스 주변 글로우
+      if (mx > 0 && my > 0) {
+        const mg = ctx.createRadialGradient(mx, my, 0, mx, my, 250);
+        mg.addColorStop(0, 'rgba(108, 92, 231, 0.08)');
+        mg.addColorStop(0.4, 'rgba(108, 92, 231, 0.03)');
+        mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = mg;
+        ctx.fillRect(0, 0, w, h);
+      }
 
-      // 플렉서블 아트 커브 업데이트
-      const svg = svgRef.current;
-      if (svg) {
-        const mxS = mx * 1000;
-        const myS = my * 1000;
+      // 노이즈 디더링 오버레이 (밴딩 제거)
+      if (noiseRef.current) {
+        ctx.drawImage(noiseRef.current, 0, 0);
+      }
 
-        // 커브 0 — 큰 S자
-        const p0 = svg.getElementById('flex-path-0');
-        if (p0) {
-          const cx1 = 200 + Math.sin(t * 0.3) * 150 + (mxS - 500) * 0.08;
-          const cy1 = 300 + Math.cos(t * 0.25) * 100 + (myS - 500) * 0.06;
-          const cx2 = 800 + Math.sin(t * 0.35 + 1) * 120 + (mxS - 500) * 0.05;
-          const cy2 = 700 + Math.cos(t * 0.3 + 2) * 80 + (myS - 500) * 0.07;
-          p0.setAttribute('d', `M -50 ${400 + Math.sin(t * 0.2) * 80} C ${cx1} ${cy1}, ${cx2} ${cy2}, 1050 ${600 + Math.cos(t * 0.25) * 60}`);
+      // 파티클 업데이트
+      for (const p of particles) {
+        // 마우스 인터랙션 — 가까운 파티클(z 높을수록) 더 강하게 반응
+        const dmx = p.x - mx;
+        const dmy = p.y - my;
+        const distMouse = Math.sqrt(dmx * dmx + dmy * dmy);
+        if (distMouse < MOUSE_RADIUS && distMouse > 1) {
+          const force = (1 - distMouse / MOUSE_RADIUS) * MOUSE_FORCE * p.z;
+          p.vx += (dmx / distMouse) * force;
+          p.vy += (dmy / distMouse) * force;
         }
 
-        // 커브 1 — 우아한 호
-        const p1 = svg.getElementById('flex-path-1');
-        if (p1) {
-          const cx1 = 400 + Math.cos(t * 0.4) * 200 + (mxS - 500) * 0.06;
-          const cy1 = 100 + Math.sin(t * 0.35) * 150 + (myS - 500) * 0.05;
-          const cx2 = 600 + Math.cos(t * 0.3 + 3) * 180 + (mxS - 500) * 0.04;
-          const cy2 = 900 + Math.sin(t * 0.28 + 1) * 100 + (myS - 500) * 0.06;
-          p1.setAttribute('d', `M ${-20 + Math.sin(t * 0.15) * 40} 800 C ${cx1} ${cy1}, ${cx2} ${cy2}, ${1020 + Math.cos(t * 0.2) * 30} 200`);
+        // 속도 감쇠 + 이동
+        p.vx *= 0.98;
+        p.vy *= 0.98;
+
+        // 최소 속도 유지 (유기적 흐름)
+        const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+        const minSpeed = p.baseSpeed * p.z * 0.15;
+        if (speed < minSpeed) {
+          const angle = Math.atan2(p.vy, p.vx) || Math.random() * Math.PI * 2;
+          p.vx = Math.cos(angle) * minSpeed;
+          p.vy = Math.sin(angle) * minSpeed;
         }
 
-        // 커브 2 — 가벼운 파동
-        const p2 = svg.getElementById('flex-path-2');
-        if (p2) {
-          let d = `M -50 ${500 + Math.sin(t * 0.18) * 40}`;
-          for (let seg = 1; seg <= 5; seg++) {
-            const sx = seg * 210;
-            const sy = 500 + Math.sin(t * 0.2 + seg * 1.2) * 60 + (myS - 500) * 0.03;
-            d += ` S ${sx - 80} ${sy + (seg % 2 ? 60 : -60)}, ${sx} ${sy}`;
+        p.x += p.vx;
+        p.y += p.vy;
+
+        // 경계 랩핑 (부드러운 진입)
+        const margin = 50;
+        if (p.x < -margin) p.x = w + margin;
+        if (p.x > w + margin) p.x = -margin;
+        if (p.y < -margin) p.y = h + margin;
+        if (p.y > h + margin) p.y = -margin;
+      }
+
+      // Z-depth 기준 정렬 (먼 것부터 그리기)
+      const sorted = [...particles].sort((a, b) => a.z - b.z);
+
+      // 연결선 그리기 (먼 파티클의 연결선은 더 투명하고 얇게)
+      for (let i = 0; i < sorted.length; i++) {
+        for (let j = i + 1; j < sorted.length; j++) {
+          const a = sorted[i];
+          const b = sorted[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          // Z 깊이에 따른 연결 거리 스케일링
+          const avgZ = (a.z + b.z) * 0.5;
+          const scaledDist = CONNECTION_DIST * avgZ;
+
+          if (dist < scaledDist) {
+            const lineAlpha = (1 - dist / scaledDist) * avgZ * 0.35;
+            const lineWidth = avgZ * 1.2;
+
+            // 마우스 근처 연결선은 밝게 글로우
+            const midX = (a.x + b.x) * 0.5;
+            const midY = (a.y + b.y) * 0.5;
+            const dMid = Math.sqrt((midX - mx) ** 2 + (midY - my) ** 2);
+            const glowBoost = dMid < MOUSE_RADIUS ? (1 - dMid / MOUSE_RADIUS) * 0.4 : 0;
+
+            const r = Math.round((a.color[0] + b.color[0]) * 0.5);
+            const g = Math.round((a.color[1] + b.color[1]) * 0.5);
+            const bl = Math.round((a.color[2] + b.color[2]) * 0.5);
+
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${Math.min(lineAlpha + glowBoost, 0.6)})`;
+            ctx.lineWidth = lineWidth;
+            ctx.stroke();
           }
-          p2.setAttribute('d', d);
         }
+      }
 
-        // 블롭 0 — 유기적 형태
-        const b0 = svg.getElementById('flex-blob-0');
-        if (b0) {
-          const cx = 300 + Math.sin(t * 0.2) * 80 + (mxS - 500) * 0.06;
-          const cy = 300 + Math.cos(t * 0.25) * 60 + (myS - 500) * 0.05;
-          const r = 120 + Math.sin(t * 0.3) * 30;
-          const d0 = Math.sin(t * 0.5) * 25;
-          const d1 = Math.cos(t * 0.4 + 1) * 20;
-          const d2 = Math.sin(t * 0.45 + 2) * 22;
-          const d3 = Math.cos(t * 0.5 + 3) * 18;
-          b0.setAttribute('d', `M ${cx} ${cy - r + d0} Q ${cx + r + d1} ${cy - d2}, ${cx + d3} ${cy + r - d0} Q ${cx - r - d1} ${cy + d2}, ${cx - d3} ${cy - r + d0} Z`);
-        }
+      // 파티클(노드) 그리기 — Z 깊이에 따른 크기, 블러, 투명도
+      for (const p of sorted) {
+        const alpha = 0.3 + p.z * 0.6;
+        const [r, g, b] = p.color;
 
-        // 블롭 1 — 하단 우측
-        const b1 = svg.getElementById('flex-blob-1');
-        if (b1) {
-          const cx = 720 + Math.cos(t * 0.22) * 60 + (mxS - 500) * 0.04;
-          const cy = 680 + Math.sin(t * 0.18) * 50 + (myS - 500) * 0.05;
-          const r = 90 + Math.cos(t * 0.35) * 25;
-          const d0 = Math.cos(t * 0.6) * 20;
-          const d1 = Math.sin(t * 0.5 + 2) * 15;
-          b1.setAttribute('d', `M ${cx} ${cy - r + d0} Q ${cx + r + d1} ${cy}, ${cx} ${cy + r - d0} Q ${cx - r - d1} ${cy}, ${cx} ${cy - r + d0} Z`);
+        // 마우스 근처 파티클 글로우
+        const dmx2 = p.x - mx;
+        const dmy2 = p.y - my;
+        const distM = Math.sqrt(dmx2 * dmx2 + dmy2 * dmy2);
+        const nearMouse = distM < MOUSE_RADIUS;
+        const glowSize = nearMouse ? p.size + (1 - distM / MOUSE_RADIUS) * 4 * p.z : p.size;
+
+        // 먼 파티클 — 블러 효과 (큰 그래디언트 원으로 시뮬레이션)
+        if (p.z < 0.4) {
+          const blurSize = glowSize * (3 - p.z * 5);
+          const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, blurSize);
+          grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.5})`);
+          grad.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${alpha * 0.15})`);
+          grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(p.x - blurSize, p.y - blurSize, blurSize * 2, blurSize * 2);
+        } else {
+          // 가까운 파티클 — 선명한 점 + 글로우 후광
+          if (nearMouse) {
+            const haloSize = glowSize * 3;
+            const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, haloSize);
+            halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.3})`);
+            halo.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${alpha * 0.08})`);
+            halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+            ctx.fillStyle = halo;
+            ctx.fillRect(p.x - haloSize, p.y - haloSize, haloSize * 2, haloSize * 2);
+          }
+
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, glowSize, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+          ctx.fill();
+
+          // 밝은 코어
+          if (p.z > 0.7) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, glowSize * 0.4, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.4})`;
+            ctx.fill();
+          }
         }
       }
 
@@ -195,53 +275,21 @@ function InteractiveBackground() {
     };
 
     rafRef.current = requestAnimationFrame(animate);
-    return () => { running = false; cancelAnimationFrame(rafRef.current); };
+
+    return () => {
+      running = false;
+      cancelAnimationFrame(rafRef.current);
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('mousemove', onMouse);
+    };
   }, []);
 
   return (
-    <div ref={containerRef} className="absolute inset-0 overflow-hidden">
-      {/* 오브 — 위치는 CSS transform으로 직접 조작 */}
-      {orbs.current.map((orb, i) => (
-        <div
-          key={i}
-          ref={(el) => { if (el) orbRefs.current[i] = el; }}
-          className="absolute left-0 top-0 rounded-full will-change-transform"
-          style={{
-            width: orb.size,
-            height: orb.size,
-            background: `radial-gradient(circle at 40% 40%, ${orb.color} 0%, ${orb.color.replace(/[\d.]+\)$/, '0)')} 70%)`,
-            filter: `blur(${50 + orb.size * 0.12}px)`,
-            opacity: orb.opacity,
-            transform: `translate(${orb.baseX}vw, ${orb.baseY}vh) translate(-50%, -50%)`,
-          }}
-        />
-      ))}
-
-      {/* 플렉서블 아트 커브 */}
-      <FlexArt containerRef={svgRef} />
-
-      {/* 마우스 글로우 */}
-      <div
-        ref={glowRef}
-        className="absolute pointer-events-none will-change-transform"
-        style={{
-          left: '50%',
-          top: '50%',
-          width: 500,
-          height: 500,
-          transform: 'translate(-50%, -50%)',
-          background: 'radial-gradient(circle, rgba(108,92,231,0.07) 0%, rgba(108,92,231,0.02) 40%, transparent 70%)',
-        }}
-      />
-
-      {/* 디더링 노이즈 — 밴딩 제거 */}
-      <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-[0.04]">
-        <filter id="dither-noise">
-          <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch" />
-        </filter>
-        <rect width="100%" height="100%" filter="url(#dither-noise)" />
-      </svg>
-    </div>
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0"
+      style={{ width: '100%', height: '100%' }}
+    />
   );
 }
 
@@ -416,10 +464,6 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
 
 // ─── 메인 컴포넌트 ───────────────────────────────────────────
 
-/**
- * @param mode 'login' = 로그인 필요, 'splash' = 이미 로그인됨 → 스플래시만
- * @param onComplete 스플래시 완료 콜백 (mode='splash' 전용)
- */
 interface LoginScreenProps {
   mode?: 'login' | 'splash';
   onComplete?: () => void;
@@ -473,12 +517,13 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
 
   return (
     <div
-      className="fixed inset-0 flex flex-col items-center justify-center bg-bg-primary overflow-hidden select-none z-[9998]"
+      className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden select-none z-[9998]"
+      style={{ background: '#12141C' }}
       onClick={skip}
       onKeyDown={skip}
       tabIndex={-1}
     >
-      <InteractiveBackground />
+      <PlexusBackground />
 
       <AnimatePresence mode="wait">
         {(phase === 'landing' || phase === 'transition') && (

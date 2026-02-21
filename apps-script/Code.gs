@@ -1,5 +1,5 @@
 /**
- * BG 진행 현황판 — Google Apps Script 웹 앱
+ * B flow — Google Apps Script 웹 앱
  *
  * ========== 설정 방법 ==========
  *

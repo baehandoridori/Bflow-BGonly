@@ -1,4 +1,4 @@
-# BG 진행 현황판 — Lessons Learned
+# B flow — Lessons Learned
 
 > 작업 중 배운 패턴, 실수, 개선사항을 기록한다.
 > 세션 시작 시 반드시 검토할 것.

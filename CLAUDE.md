@@ -1,4 +1,4 @@
-# CLAUDE.md — BG 진행 현황판 (Bflow-BGonly)
+# CLAUDE.md — B flow (Bflow-BGonly)
 
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
