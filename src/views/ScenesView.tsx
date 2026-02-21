@@ -1663,6 +1663,7 @@ export function ScenesView() {
                 sceneIndex={sIdx}
                 celebrating={celebratingId === scene.sceneId}
                 department={selectedDepartment}
+                isHighlighted={highlightSceneId === scene.sceneId}
                 isSelected={selectedSceneIds.has(scene.sceneId)}
                 onToggle={handleToggle}
                 onDelete={handleDeleteScene}
