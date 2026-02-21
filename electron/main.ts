@@ -137,6 +137,38 @@ function createWindow(): void {
   }
 }
 
+// ─── IPC 핸들러: 사용자 파일 (base64 인코딩 JSON) ────────────
+
+function getUsersFilePath(): string {
+  // 테스트: test-data/users.dat  |  프로덕션: exe 옆 users.dat
+  if (isTestMode) {
+    return path.join(getAppRoot(), 'test-data', 'users.dat');
+  }
+  return path.join(getAppRoot(), 'users.dat');
+}
+
+ipcMain.handle('users:read', () => {
+  const filePath = getUsersFilePath();
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, { encoding: 'utf-8' });
+    const json = Buffer.from(raw, 'base64').toString('utf-8');
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('users:write', (_event, data: unknown) => {
+  const filePath = getUsersFilePath();
+  const dir = path.dirname(filePath);
+  ensureDir(dir);
+  const json = JSON.stringify(data, null, 2);
+  const encoded = Buffer.from(json, 'utf-8').toString('base64');
+  fs.writeFileSync(filePath, encoded, { encoding: 'utf-8' });
+  return true;
+});
+
 // ─── IPC 핸들러: 설정 ────────────────────────────────────────
 
 ipcMain.handle('settings:get-path', () => getDataPath());

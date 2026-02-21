@@ -7,6 +7,8 @@ import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X } from 'lucide-react';
+import { AssigneeSelect } from '@/components/common/AssigneeSelect';
+import { useAuthStore } from '@/stores/useAuthStore';
 
 /* ── 라쏘 드래그 선택 훅 ── */
 interface LassoRect { x: number; y: number; w: number; h: number }
@@ -890,12 +892,11 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
 
         <div className="w-px h-6 bg-bg-border" />
 
-        <input
+        <AssigneeSelect
           value={assignee}
-          onChange={(e) => setAssignee(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onChange={setAssignee}
           placeholder="담당자"
-          className="w-24 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/30 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+          className="w-24"
         />
         <input
           value={memo}
@@ -963,6 +964,7 @@ export function ScenesView() {
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
   const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
+  const currentUser = useAuthStore((s) => s.currentUser);
 
   const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
 
@@ -1122,11 +1124,29 @@ export function ScenesView() {
 
     toggleSceneStage(currentPart.sheetName, sceneId, stage);
 
-    // 완료 축하 애니메이션: 방금 토글로 4단계 모두 완료 시
+    // 완료 축하 애니메이션 + 완료 기록: 방금 토글로 4단계 모두 완료 시
     if (newValue) {
       const afterToggle = { ...scene, [stage]: true };
       if (afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png) {
         setCelebratingId(sceneId);
+        // completedBy / completedAt 기록
+        const completedBy = currentUser?.name ?? '알 수 없음';
+        const completedAt = new Date().toISOString();
+        updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
+        updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
+
+        // 백엔드에도 저장
+        try {
+          if (sheetsConnected) {
+            await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
+            await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
+          } else {
+            await updateTestSceneField(episodes, currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
+            await updateTestSceneField(episodes, currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
+          }
+        } catch (err) {
+          console.error('[완료기록 실패]', err);
+        }
       }
     }
 
@@ -1563,6 +1583,23 @@ export function ScenesView() {
         <AnimatePresence>
           {scenes.length > 0 && overallPct >= 100 && <PartCompleteOverlay />}
         </AnimatePresence>
+
+        {/* 파트 완료 기록 (마지막 완료자 & 시간) */}
+        {scenes.length > 0 && overallPct >= 100 && (() => {
+          const lastCompleted = scenes
+            .filter((s) => s.completedAt)
+            .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0];
+          if (!lastCompleted?.completedBy) return null;
+          const dt = new Date(lastCompleted.completedAt!);
+          const timeStr = `${dt.getMonth() + 1}/${dt.getDate()} ${dt.getHours()}시 ${dt.getMinutes().toString().padStart(2, '0')}분`;
+          return (
+            <div className="absolute bottom-3 left-0 right-0 z-20 flex justify-center pointer-events-none">
+              <span className="text-xs text-text-secondary/70 bg-bg-card/80 backdrop-blur-sm rounded-full px-3 py-1 border border-bg-border/30">
+                {lastCompleted.completedBy}님이 {timeStr}에 완료
+              </span>
+            </div>
+          );
+        })()}
 
       {scenes.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-text-secondary h-full">

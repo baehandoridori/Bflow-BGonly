@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getMode: () => ipcRenderer.invoke('settings:get-mode'),
   getDataPath: () => ipcRenderer.invoke('settings:get-path'),
 
+  // 사용자 파일 (base64 인코딩 JSON — exe 옆 또는 test-data/)
+  usersRead: () => ipcRenderer.invoke('users:read'),
+  usersWrite: (data: unknown) => ipcRenderer.invoke('users:write', data),
+
   // 개인 설정 (AppData)
   readSettings: (fileName: string) => ipcRenderer.invoke('settings:read', fileName),
   writeSettings: (fileName: string, data: unknown) =>

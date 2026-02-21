@@ -2,6 +2,7 @@ import { RefreshCw } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
+import { UserMenu } from '@/components/auth/UserMenu';
 
 interface HeaderProps {
   onRefresh: () => void;
@@ -46,6 +47,12 @@ export function Header({ onRefresh }: HeaderProps) {
         >
           <RefreshCw size={18} />
         </button>
+
+        {/* 구분선 */}
+        <div className="w-px h-6 bg-bg-border" />
+
+        {/* 사용자 메뉴 */}
+        <UserMenu />
       </div>
     </header>
   );

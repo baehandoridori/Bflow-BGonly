@@ -28,6 +28,15 @@ module.exports = {
           none: '#FF6B6B',
         },
       },
+      keyframes: {
+        'slide-down': {
+          '0%': { opacity: '0', transform: 'translate(-50%, -12px)' },
+          '100%': { opacity: '1', transform: 'translate(-50%, 0)' },
+        },
+      },
+      animation: {
+        'slide-down': 'slide-down 0.3s ease-out',
+      },
     },
   },
   plugins: [],

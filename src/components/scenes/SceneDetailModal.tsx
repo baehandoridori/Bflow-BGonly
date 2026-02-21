@@ -13,6 +13,7 @@ import { cn } from '@/utils/cn';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
+import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 
@@ -515,12 +516,16 @@ export function SceneDetailModal({
                   placeholder="예: a001"
                   onSave={(v) => onFieldUpdate(sceneIndex, 'sceneId', v)}
                 />
-                <PropertyRow
-                  label="담당자"
-                  value={scene.assignee}
-                  placeholder="담당자 입력"
-                  onSave={(v) => onFieldUpdate(sceneIndex, 'assignee', v)}
-                />
+                {/* 담당자 — 사용자 목록 드롭다운 */}
+                <div className="flex items-center gap-3 py-2.5 px-4 hover:bg-bg-primary/40 rounded-lg transition-colors">
+                  <span className="text-xs text-text-secondary w-20 shrink-0 font-medium">담당자</span>
+                  <AssigneeSelect
+                    value={scene.assignee}
+                    onChange={(v) => onFieldUpdate(sceneIndex, 'assignee', v)}
+                    placeholder="담당자 입력"
+                    className="flex-1"
+                  />
+                </div>
                 <PropertyRow
                   label="레이아웃"
                   value={scene.layoutId}

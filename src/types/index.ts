@@ -68,6 +68,29 @@ export interface Scene {
   done: boolean;
   review: boolean;
   png: boolean;
+  completedBy?: string;  // 모든 단계 완료한 사용자 이름
+  completedAt?: string;  // 완료 시각 (ISO 8601)
+}
+
+// ─── 사용자 & 인증 ─────────────────────────
+
+export interface AppUser {
+  id: string;          // UUID
+  name: string;
+  slackId: string;
+  password: string;    // base64 인코딩된 JSON 내 평문 (내부 툴)
+  isInitialPassword: boolean;
+  createdAt: string;   // ISO 8601
+}
+
+export interface UsersFile {
+  users: AppUser[];
+}
+
+export interface AuthSession {
+  userId: string;
+  userName: string;
+  loggedInAt: string;  // ISO 8601
 }
 
 // ─── 파트 & 에피소드 ─────────────────────────
@@ -174,6 +197,10 @@ export interface SheetsConfig {
 export interface ElectronAPI {
   getMode: () => Promise<{ isTestMode: boolean; appRoot: string }>;
   getDataPath: () => Promise<string>;
+
+  // 사용자 파일 (exe 옆 또는 test-data/ 옆, base64 인코딩 JSON)
+  usersRead: () => Promise<UsersFile | null>;
+  usersWrite: (data: UsersFile) => Promise<boolean>;
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
   testGetSheetPath: () => Promise<string>;
