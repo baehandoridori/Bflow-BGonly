@@ -6,7 +6,7 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { loadAllComments } from '@/services/commentService';
@@ -530,6 +530,8 @@ interface SceneTableProps {
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: (sceneIndex: number) => void;
   searchQuery?: string;
+  selectedSceneIds?: Set<string>;
+  onCtrlClick?: (sceneId: string) => void;
 }
 
 /** 검색 하이라이트 CSS — 글로우 애니메이션 */
@@ -578,7 +580,7 @@ function HighlightText({ text, query }: { text: string; query?: string }) {
   );
 }
 
-function SceneTable({ scenes, allScenes, department, commentCounts, sheetName, onToggle, onDelete, onOpenDetail, searchQuery }: SceneTableProps) {
+function SceneTable({ scenes, allScenes, department, commentCounts, sheetName, onToggle, onDelete, onOpenDetail, searchQuery, selectedSceneIds, onCtrlClick }: SceneTableProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   return (
     <div className="overflow-auto rounded-lg border border-bg-border">
@@ -607,8 +609,15 @@ function SceneTable({ scenes, allScenes, department, commentCounts, sheetName, o
                 className={cn(
                   'border-b border-bg-border/50 hover:bg-bg-card/50 group cursor-pointer transition-colors',
                   searchQuery && 'bg-accent/10 border-l-2 border-l-accent/60',
+                  selectedSceneIds?.has(scene.sceneId) && 'bg-accent/10',
                 )}
-                onClick={() => onOpenDetail(idx)}
+                onClick={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
+                    onCtrlClick(scene.sceneId);
+                  } else {
+                    onOpenDetail(idx);
+                  }
+                }}
               >
                 <td className="px-2 py-2 font-mono text-accent text-xs">
                   <span className="flex items-center gap-1">
@@ -1052,6 +1061,7 @@ export function ScenesView() {
 
   const [showAddScene, setShowAddScene] = useState(false);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
+  const [batchEditOpen, setBatchEditOpen] = useState(false);
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
 
@@ -1226,17 +1236,14 @@ export function ScenesView() {
         updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
         updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
 
-        // 백엔드에도 저장
-        try {
-          if (sheetsConnected) {
-            await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
-            await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
-          } else {
+        // 백엔드에도 저장 (시트에는 completedBy/At 열이 없으므로 테스트 모드에서만)
+        if (!sheetsConnected) {
+          try {
             await updateTestSceneField(episodes, currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
             await updateTestSceneField(episodes, currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
+          } catch (err) {
+            console.error('[완료기록 실패]', err);
           }
-        } catch (err) {
-          console.error('[완료기록 실패]', err);
         }
       }
     }
@@ -1750,6 +1757,8 @@ export function ScenesView() {
                     onDelete={handleDeleteScene}
                     searchQuery={searchQuery}
                     onOpenDetail={(idx) => setDetailSceneIndex(idx)}
+                    selectedSceneIds={selectedSceneIds}
+                    onCtrlClick={(id) => toggleSelectedScene(id)}
                   />
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
@@ -1794,6 +1803,8 @@ export function ScenesView() {
             onDelete={handleDeleteScene}
             searchQuery={searchQuery}
             onOpenDetail={(idx) => setDetailSceneIndex(idx)}
+            selectedSceneIds={selectedSceneIds}
+            onCtrlClick={(id) => toggleSelectedScene(id)}
           />
         </div>
       ) : (
@@ -1880,6 +1891,15 @@ export function ScenesView() {
 
             <div className="w-px h-6 bg-bg-border" />
 
+            {/* 일괄 편집 */}
+            <button
+              onClick={() => setBatchEditOpen(true)}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20 transition-colors cursor-pointer"
+            >
+              <Pencil size={13} className="inline mr-1" />
+              편집
+            </button>
+
             {/* 일괄 삭제 */}
             <button
               onClick={() => {
@@ -1927,6 +1947,91 @@ export function ScenesView() {
             >
               <X size={16} />
             </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 일괄 편집 모달 */}
+      <AnimatePresence>
+        {batchEditOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => setBatchEditOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.93, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.93, y: 12 }}
+              className="bg-bg-card rounded-2xl shadow-2xl border border-bg-border w-96"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">
+                <h3 className="text-sm font-bold text-text-primary">일괄 편집 ({selectedSceneIds.size}개 씬)</h3>
+                <button onClick={() => setBatchEditOpen(false)} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
+                  <X size={16} />
+                </button>
+              </div>
+              <form
+                className="p-5 flex flex-col gap-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.target as HTMLFormElement;
+                  const assignee = (form.elements.namedItem('batchAssignee') as HTMLInputElement).value.trim();
+                  const memo = (form.elements.namedItem('batchMemo') as HTMLInputElement).value.trim();
+                  const layoutId = (form.elements.namedItem('batchLayout') as HTMLInputElement).value.trim();
+
+                  if (!assignee && !memo && !layoutId) {
+                    setBatchEditOpen(false);
+                    return;
+                  }
+
+                  const allScenes = currentPart?.scenes ?? [];
+                  selectedSceneIds.forEach((id) => {
+                    const idx = allScenes.findIndex((s) => s.sceneId === id);
+                    if (idx < 0 || !currentPart) return;
+                    if (assignee) {
+                      updateSceneFieldOptimistic(currentPart.sheetName, idx, 'assignee', assignee);
+                      if (sheetsConnected) {
+                        updateSceneFieldInSheets(currentPart.sheetName, idx, 'assignee', assignee).catch(() => {});
+                      }
+                    }
+                    if (memo) {
+                      updateSceneFieldOptimistic(currentPart.sheetName, idx, 'memo', memo);
+                      if (sheetsConnected) {
+                        updateSceneFieldInSheets(currentPart.sheetName, idx, 'memo', memo).catch(() => {});
+                      }
+                    }
+                    if (layoutId) {
+                      updateSceneFieldOptimistic(currentPart.sheetName, idx, 'layoutId', layoutId);
+                      if (sheetsConnected) {
+                        updateSceneFieldInSheets(currentPart.sheetName, idx, 'layoutId', layoutId).catch(() => {});
+                      }
+                    }
+                  });
+                  setBatchEditOpen(false);
+                  clearSelectedScenes();
+                }}
+              >
+                <div>
+                  <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">담당자 (비어있으면 건너뜀)</label>
+                  <input name="batchAssignee" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent" placeholder="담당자" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모 (비어있으면 건너뜀)</label>
+                  <input name="batchMemo" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent" placeholder="메모" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">레이아웃 (비어있으면 건너뜀)</label>
+                  <input name="batchLayout" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent" placeholder="레이아웃 ID" />
+                </div>
+                <button type="submit" className="w-full py-2.5 rounded-xl text-sm font-medium bg-accent hover:bg-accent/80 text-white transition-colors cursor-pointer">
+                  일괄 적용
+                </button>
+              </form>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
