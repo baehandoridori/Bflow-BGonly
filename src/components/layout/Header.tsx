@@ -15,6 +15,8 @@ export function Header({ onRefresh }: HeaderProps) {
     dashboard: '전체 현황 대시보드',
     episode: '에피소드별 현황',
     scenes: '씬 목록',
+    assignee: '인원별 현황',
+    calendar: '프로젝트 타임라인',
     settings: '설정',
   };
 
