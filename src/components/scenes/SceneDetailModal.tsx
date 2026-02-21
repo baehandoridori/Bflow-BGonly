@@ -78,7 +78,7 @@ function PropertyRow({ label, value, placeholder, onSave }: PropertyRowProps) {
         ) : (
           <span className="text-sm text-text-primary">
             {value || (
-              <span className="text-text-secondary/40 italic">
+              <span className="text-text-secondary/50 italic">
                 {placeholder ?? '비어 있음'}
               </span>
             )}
@@ -254,19 +254,19 @@ function ImageSlot({
                 >
                   붙여넣기 버튼
                 </button>
-                <p className="text-[10px] text-text-secondary/40 mt-1.5">
+                <p className="text-[10px] text-text-secondary/50 mt-1.5">
                   한번 더 클릭하면 파일 탐색기 열기
                 </p>
               </div>
             </>
           ) : (
             <>
-              <ImagePlus size={28} className="text-text-secondary/30" />
+              <ImagePlus size={28} className="text-text-secondary/45" />
               <div className="text-center">
                 <p className="text-xs text-text-secondary/50">
                   클릭하여 이미지 추가
                 </p>
-                <p className="text-[10px] text-text-secondary/30 mt-0.5">
+                <p className="text-[10px] text-text-secondary/45 mt-0.5">
                   드래그 앤 드롭도 가능
                 </p>
               </div>

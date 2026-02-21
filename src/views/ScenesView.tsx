@@ -721,19 +721,19 @@ function AddFormImageSlot({
         {phase === 'paste-hint' ? (
           <>
             <ClipboardPaste size={16} className="text-accent" />
-            <p className="text-[9px] text-accent leading-tight">Ctrl+V 붙여넣기</p>
+            <p className="text-[10px] text-accent leading-tight">Ctrl+V 붙여넣기</p>
             <button
               onClick={(e) => { e.stopPropagation(); handlePasteFromClipboard(); }}
-              className="text-[9px] text-accent/70 underline hover:text-accent"
+              className="text-[10px] text-accent/70 underline hover:text-accent"
             >
               붙여넣기
             </button>
-            <p className="text-[8px] text-text-secondary/40">한번 더 클릭 → 파일선택</p>
+            <p className="text-[10px] text-text-secondary/50">한번 더 클릭 → 파일선택</p>
           </>
         ) : (
           <>
-            <ImagePlus size={14} className="text-text-secondary/30" />
-            <p className="text-[9px] text-text-secondary/40">클릭하여 추가</p>
+            <ImagePlus size={14} className="text-text-secondary/45" />
+            <p className="text-[10px] text-text-secondary/50">클릭하여 추가</p>
           </>
         )}
       </div>
@@ -838,7 +838,7 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>
-              <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary/40 pointer-events-none" />
+              <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary/50 pointer-events-none" />
             </div>
           )}
           {prefixMode === 'sc' && (
@@ -851,7 +851,7 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
               onChange={(e) => { setCustomPrefix(e.target.value); setNumber(suggestNextNumber(e.target.value, existingSceneIds)); }}
               onKeyDown={handleKeyDown}
               placeholder="접두사 입력"
-              className="w-24 bg-bg-primary border border-bg-border rounded-lg px-3 py-1 text-sm text-text-primary font-mono placeholder:text-text-secondary/30 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+              className="w-24 bg-bg-primary border border-bg-border rounded-lg px-3 py-1 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
             />
           )}
 
@@ -876,15 +876,15 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
             onKeyDown={handleKeyDown}
             placeholder="001"
             className={cn(
-              'w-20 bg-bg-primary border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/30 pr-8 focus:ring-1 focus:ring-accent/20 outline-none transition-all',
+              'w-20 bg-bg-primary border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 pr-8 focus:ring-1 focus:ring-accent/20 outline-none transition-all',
               isDuplicate ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-bg-border focus:border-accent'
             )}
           />
           <div className="absolute right-1 top-1 bottom-1 flex flex-col gap-px">
-            <button onClick={() => stepNumber(1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/40 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
+            <button onClick={() => stepNumber(1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
               <ChevronUp size={10} />
             </button>
-            <button onClick={() => stepNumber(-1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/40 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
+            <button onClick={() => stepNumber(-1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
               <ChevronDown size={10} />
             </button>
           </div>
@@ -903,7 +903,7 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
           onChange={(e) => setMemo(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="메모 (선택)"
-          className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/30 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+          className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
         />
       </div>
 
@@ -913,7 +913,7 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
         <AddFormImageSlot label="가이드" base64={guideImage} onSetBase64={setGuideImage} />
 
         <div className="flex gap-2 ml-auto items-center">
-          <span className="text-[10px] text-text-secondary/40">
+          <span className="text-[10px] text-text-secondary/50">
             Enter 추가 · Esc 취소
           </span>
           <button

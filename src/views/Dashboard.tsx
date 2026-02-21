@@ -96,7 +96,7 @@ function WidgetPicker({
           boxShadow: '0 12px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04) inset',
         }}
       >
-        <div className="px-3 py-1.5 text-[10px] font-medium text-text-secondary/40 uppercase tracking-wider">
+        <div className="px-3 py-1.5 text-[10px] font-medium text-text-secondary/50 uppercase tracking-wider">
           위젯 추가
         </div>
         {hiddenWidgets.map((w) => (
@@ -376,7 +376,7 @@ export function Dashboard() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
             transition={{ duration: 0.15 }}
-            className="flex items-center justify-center py-2 text-xs text-text-secondary/40"
+            className="flex items-center justify-center py-2 text-xs text-text-secondary/50"
           >
             위젯을 드래그하여 재배치하세요. 모서리를 드래그하여 크기를 조절하세요.
           </motion.div>

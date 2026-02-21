@@ -227,8 +227,9 @@ function PlexusBackground() {
 
 // ─── 드라마틱 텍스트 모핑 애니메이션 ───────────────────────────
 // 시퀀스: "Be the flow." → "BAE the flow." → "B the flow." → "Bflow."
-// "B"는 항상 고정, 서픽스("e"→"AE"→"")만 부드럽게 모핑
+// "B"는 항상 고정, 서픽스("e"→"AE"→"")만 크로스페이드 모핑
 // " the "는 연기처럼 사라지며 공간 수축
+// layout 애니메이션 없이 명시적 트랜스폼으로 부드러운 모션 구현
 
 type MorphStage = 0 | 1 | 2 | 3 | 4;
 
@@ -238,7 +239,7 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
   const [stage, setStage] = useState<MorphStage>(0);
   const doneRef = useRef(false);
 
-  // ── 서픽스/the 너비 측정 (부드러운 width 애니메이션용) ──
+  // ── 서픽스/the 너비 측정 ──
   const measureRef = useRef<HTMLSpanElement>(null);
   const theInnerRef = useRef<HTMLSpanElement>(null);
   const [suffixW, setSuffixW] = useState<Record<string, number>>({ e: 0, AE: 0, '': 0 });
@@ -259,16 +260,16 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
     }
   }, []);
 
-  // ── 스테이지 타이머 ──
+  // ── 스테이지 타이머 — 여유로운 간격 ──
   useEffect(() => {
     const timers = [
-      setTimeout(() => setStage(1), 1800),  // Be → BAE
-      setTimeout(() => setStage(2), 2800),  // BAE → B
-      setTimeout(() => setStage(3), 3800),  // "the" 사라짐
+      setTimeout(() => setStage(1), 2000),   // Be → BAE
+      setTimeout(() => setStage(2), 3400),   // BAE → B
+      setTimeout(() => setStage(3), 4600),   // " the " 사라짐 → "Bflow."
       setTimeout(() => {
-        setStage(4);
+        setStage(4);                         // 서브타이틀 등장
         if (!doneRef.current) { doneRef.current = true; onAnimationDone(); }
-      }, 5000),
+      }, 6200),
     ];
     return () => timers.forEach(clearTimeout);
   }, [onAnimationDone]);
@@ -278,98 +279,93 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
   const showSub = stage >= 4;
 
   return (
-    <motion.div layout className="flex flex-col items-center gap-5 z-10 relative">
-      {/* 숨겨진 측정용 스팬 — 실제 텍스트와 동일 폰트 */}
+    <div className="flex flex-col items-center z-10 relative">
+      {/* 숨겨진 측정용 스팬 */}
       <span
         ref={measureRef}
         className="absolute invisible pointer-events-none text-5xl md:text-7xl font-bold tracking-tight"
         aria-hidden="true"
       />
 
-      {/* ── 메인 텍스트 행 ── */}
-      <motion.h1
-        layout="position"
-        transition={{ layout: { type: 'spring', stiffness: 300, damping: 30 } }}
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-baseline text-5xl md:text-7xl font-bold tracking-tight"
-        style={{ transition: 'opacity 0.8s ease 0.3s, transform 0.8s cubic-bezier(0.16,1,0.3,1) 0.3s' }}
+      {/* h1 래퍼 — 서브타이틀 등장 시 위로 부드럽게 이동 (layout 대신 명시적 y) */}
+      <motion.div
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: showSub ? -24 : 0 }}
+        transition={{
+          opacity: { duration: 1.2, ease: [0.16, 1, 0.3, 1] },
+          y: { type: 'spring', stiffness: 100, damping: 18 },
+        }}
       >
-        {/* "B" — 항상 고정, 그래디언트 */}
-        <span className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent">
-          B
-        </span>
+        <h1 className="flex items-baseline text-5xl md:text-7xl font-bold tracking-tight">
+          {/* "B" — 항상 고정, 그래디언트 */}
+          <span className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent">
+            B
+          </span>
 
-        {/* 서픽스 컨테이너 — 측정값 기반 부드러운 너비 전환 */}
-        <motion.span
-          initial={false}
-          animate={{ width: suffixW[suffix] ?? 0 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-          className="inline-block overflow-hidden align-baseline"
-          style={{ height: '1.15em' }}
-        >
-          <AnimatePresence mode="popLayout">
-            {suffix && (
-              <motion.span
-                key={suffix}
-                initial={{ opacity: 0, filter: 'blur(10px)' }}
-                animate={{ opacity: 1, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, filter: 'blur(12px)' }}
-                transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
-                className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent"
-              >
-                {suffix}
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </motion.span>
+          {/* 서픽스 컨테이너 — 스프링 너비 전환 + 크로스페이드 */}
+          <motion.span
+            initial={false}
+            animate={{ width: suffixW[suffix] ?? 0 }}
+            transition={{ type: 'spring', stiffness: 170, damping: 22 }}
+            className="inline-block overflow-hidden align-baseline relative"
+            style={{ height: '1.15em' }}
+          >
+            <AnimatePresence>
+              {suffix && (
+                <motion.span
+                  key={suffix}
+                  initial={{ opacity: 0, filter: 'blur(8px)' }}
+                  animate={{ opacity: 1, filter: 'blur(0px)' }}
+                  exit={{ opacity: 0, filter: 'blur(10px)' }}
+                  transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
+                  className="absolute left-0 bottom-0 inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent whitespace-nowrap"
+                >
+                  {suffix}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.span>
 
-        {/* " the " — 연기처럼 사라지며 공간 수축 */}
-        <motion.span
-          initial={false}
-          animate={{
-            width: showThe ? theW : 0,
-            opacity: showThe ? 1 : 0,
-            filter: showThe ? 'blur(0px)' : 'blur(16px)',
-          }}
-          transition={{
-            width: { type: 'spring', stiffness: 200, damping: 25, delay: showThe ? 0 : 0.15 },
-            opacity: { duration: 0.7, ease: 'easeInOut' },
-            filter: { duration: 0.7, ease: 'easeInOut' },
-          }}
-          className="inline-block overflow-hidden whitespace-nowrap text-text-primary"
-        >
-          <span ref={theInnerRef}>{'\u00A0the\u00A0'}</span>
-        </motion.span>
+          {/* " the " — 연기처럼 사라지며 공간 수축 */}
+          <motion.span
+            initial={false}
+            animate={{
+              width: showThe ? theW : 0,
+              opacity: showThe ? 1 : 0,
+              filter: showThe ? 'blur(0px)' : 'blur(16px)',
+            }}
+            transition={{
+              width: { type: 'spring', stiffness: 130, damping: 20, delay: showThe ? 0 : 0.25 },
+              opacity: { duration: 0.9, ease: [0.4, 0, 0.2, 1] },
+              filter: { duration: 0.9, ease: [0.4, 0, 0.2, 1] },
+            }}
+            className="inline-block overflow-hidden whitespace-nowrap text-text-primary"
+          >
+            <span ref={theInnerRef}>{'\u00A0the\u00A0'}</span>
+          </motion.span>
 
-        {/* "flow." — 항상 고정, 공백 없음 */}
-        <span className="inline-block text-text-primary">flow.</span>
-      </motion.h1>
+          {/* "flow." — 항상 고정, 공백 없음 */}
+          <span className="inline-block text-text-primary">flow.</span>
+        </h1>
+      </motion.div>
 
-      {/* ── 서브타이틀 (등장 시 Bflow가 위로 부드럽게 올라감) ── */}
+      {/* ── 서브타이틀 + 디바이더 — 가운데에서 자연스럽게 등장 ── */}
       <AnimatePresence>
         {showSub && (
-          <motion.p
-            layout
-            initial={{ opacity: 0, y: 20 }}
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, ease: 'easeOut' }}
-            className="text-base md:text-lg text-text-secondary/70 font-light tracking-wide"
+            transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
+            className="flex flex-col items-center gap-4 mt-6"
           >
-            Your workflow, but better. That&apos;s the <span className="text-accent font-medium">B</span>.
-          </motion.p>
+            <p className="text-base md:text-lg text-text-secondary/70 font-light tracking-wide">
+              Your workflow, but better. That&apos;s the <span className="text-accent font-medium">B</span>.
+            </p>
+            <div className="h-px w-24 bg-gradient-to-r from-transparent via-accent to-transparent" />
+          </motion.div>
         )}
       </AnimatePresence>
-
-      {/* 디바이더 */}
-      <motion.div
-        layout
-        initial={{ scaleX: 0 }}
-        animate={{ scaleX: showSub ? 1 : 0 }}
-        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        className="h-px w-24 bg-gradient-to-r from-transparent via-accent to-transparent"
-      />
-    </motion.div>
+    </div>
   );
 }
 
@@ -378,10 +374,10 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
 function ClickPrompt() {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -5 }}
-      transition={{ delay: 0.3, duration: 0.6, ease: 'easeOut' }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ delay: 0.4, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
       className="absolute bottom-20 left-0 right-0 flex justify-center z-10"
     >
       <motion.div
@@ -393,13 +389,13 @@ function ClickPrompt() {
             '0 0 8px rgba(108,92,231,0.4), 0 0 24px rgba(108,92,231,0.15)',
           ],
         }}
-        transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+        transition={{ duration: 3.0, repeat: Infinity, ease: 'easeInOut' }}
         className="flex items-center gap-2 text-sm text-accent tracking-[0.2em] uppercase font-light"
       >
         click anywhere to continue
         <motion.span
-          animate={{ x: [0, 4, 0] }}
-          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+          animate={{ x: [0, 5, 0] }}
+          transition={{ duration: 2.0, repeat: Infinity, ease: 'easeInOut' }}
         >
           <ChevronRight size={14} />
         </motion.span>
@@ -418,7 +414,7 @@ function Footer() {
       transition={{ delay: 1.8, duration: 0.6 }}
       className="absolute bottom-6 left-0 right-0 text-center z-10"
     >
-      <p className="text-[11px] text-text-secondary/30 tracking-[0.2em] uppercase">
+      <p className="text-[11px] text-text-secondary/50 tracking-[0.2em] uppercase">
         Born in JBBJ &middot; Built for every studio
       </p>
     </motion.footer>
@@ -486,7 +482,7 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="사용자 이름"
-          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/30 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
+          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
         />
       </div>
 
@@ -497,9 +493,9 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="비밀번호 입력"
-          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/30 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
+          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
         />
-        <p className="text-[10px] text-text-secondary/30">최초 비밀번호는 1234</p>
+        <p className="text-[10px] text-text-secondary/50">최초 비밀번호는 1234</p>
       </div>
 
       <AnimatePresence>
@@ -585,8 +581,8 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
         {(phase === 'landing' || phase === 'ready' || phase === 'transition') && (
           <motion.div
             key="hero"
-            exit={{ opacity: 0, y: -40, scale: 0.97, filter: 'blur(8px)' }}
-            transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+            exit={{ opacity: 0, y: -30, scale: 0.98, filter: 'blur(6px)' }}
+            transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
             className="flex flex-col items-center"
           >
             <HeroText onAnimationDone={handleAnimationDone} />

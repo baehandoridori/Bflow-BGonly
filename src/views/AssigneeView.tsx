@@ -143,7 +143,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
             {data.deptBreakdown.map(({ dept, count }) => (
               <span
                 key={dept}
-                className="text-[9px] px-1.5 py-0.5 rounded font-medium"
+                className="text-[10px] px-1.5 py-0.5 rounded font-medium"
                 style={{
                   color: DEPARTMENT_CONFIGS[dept].color,
                   backgroundColor: `${DEPARTMENT_CONFIGS[dept].color}15`,
@@ -169,7 +169,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
                       style={{ width: `${sPct}%`, backgroundColor: ss.color }}
                     />
                   </div>
-                  <div className="text-[9px] text-text-secondary/40 mt-0.5 text-center">{ss.label}</div>
+                  <div className="text-[10px] text-text-secondary/50 mt-0.5 text-center">{ss.label}</div>
                 </div>
               );
             })}
@@ -181,7 +181,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
       <button
         onClick={() => setExpanded(!expanded)}
         className={cn(
-          'w-full flex items-center justify-center gap-1 py-1.5 text-[11px] text-text-secondary/40 cursor-pointer',
+          'w-full flex items-center justify-center gap-1 py-1.5 text-[11px] text-text-secondary/50 cursor-pointer',
           'border-t border-bg-border/20 hover:text-text-secondary/60 hover:bg-bg-border/10',
           'transition-colors duration-100',
         )}
@@ -213,7 +213,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
                     >
                       <span className="text-xs font-mono text-text-primary/70 w-12">{ref.scene.sceneId}</span>
                       <span
-                        className="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0"
+                        className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0"
                         style={{
                           color: DEPARTMENT_CONFIGS[ref.department].color,
                           backgroundColor: `${DEPARTMENT_CONFIGS[ref.department].color}15`,
@@ -221,7 +221,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
                       >
                         {DEPARTMENT_CONFIGS[ref.department].shortLabel}
                       </span>
-                      <span className="text-[11px] text-text-secondary/40 flex-1 truncate">
+                      <span className="text-[11px] text-text-secondary/50 flex-1 truncate">
                         {ref.episodeTitle} {ref.partId}파트
                       </span>
                       <div className="w-16 h-1 rounded-full bg-bg-border/30 overflow-hidden">
@@ -233,7 +233,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
                           }}
                         />
                       </div>
-                      <span className="text-[10px] text-text-secondary/40 tabular-nums w-7 text-right">{sp}%</span>
+                      <span className="text-[10px] text-text-secondary/50 tabular-nums w-7 text-right">{sp}%</span>
                     </button>
                   );
                 })}
@@ -333,7 +333,7 @@ export function AssigneeView() {
             >
               {label}
               {sortBy === key && (
-                <span className="ml-0.5 text-[9px]">{sortAsc ? '↑' : '↓'}</span>
+                <span className="ml-0.5 text-[10px]">{sortAsc ? '↑' : '↓'}</span>
               )}
             </button>
           ))}
@@ -343,7 +343,7 @@ export function AssigneeView() {
       {/* 카드 그리드 */}
       <div className="flex-1 overflow-auto">
         {assignees.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-text-secondary/40">
+          <div className="flex flex-col items-center justify-center h-64 text-text-secondary/50">
             <Users size={40} className="mb-3 opacity-30" />
             <p className="text-sm">담당자 데이터가 없습니다</p>
           </div>

@@ -149,7 +149,7 @@ export function DepartmentComparisonWidget() {
                     );
                   })}
                 </div>
-                <span className="text-[9px] text-text-secondary/60">
+                <span className="text-[10px] text-text-secondary/60">
                   {DEPARTMENT_CONFIGS.bg.stageLabels[stage]}
                 </span>
               </div>

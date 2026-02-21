@@ -132,7 +132,7 @@ function GanttChart({ episodes }: { episodes: Episode[] }) {
               {isEp && (
                 <button
                   onClick={() => toggleCollapse(row.id)}
-                  className="w-4 h-4 flex items-center justify-center text-text-secondary/40 hover:text-text-secondary cursor-pointer"
+                  className="w-4 h-4 flex items-center justify-center text-text-secondary/50 hover:text-text-secondary cursor-pointer"
                 >
                   <ChevronRight
                     size={12}
@@ -150,7 +150,7 @@ function GanttChart({ episodes }: { episodes: Episode[] }) {
               </span>
               {row.subLabel && (
                 <span
-                  className="text-[9px] px-1 py-px rounded font-medium"
+                  className="text-[10px] px-1 py-px rounded font-medium"
                   style={{ color: deptColor, backgroundColor: deptColor ? `${deptColor}15` : undefined }}
                 >
                   {row.subLabel}
@@ -176,7 +176,7 @@ function GanttChart({ episodes }: { episodes: Episode[] }) {
               </motion.div>
               {/* 외부 라벨 */}
               {pct < 15 && row.totalScenes > 0 && (
-                <span className="absolute inset-0 flex items-center px-2 text-[10px] text-text-secondary/40">
+                <span className="absolute inset-0 flex items-center px-2 text-[10px] text-text-secondary/50">
                   {row.fullyDone}/{row.totalScenes}
                 </span>
               )}
@@ -250,12 +250,12 @@ function ProgressHeatmap({ episodes }: { episodes: Episode[] }) {
             <div className="text-[10px] font-medium text-text-primary/70 truncate">{cell.epTitle}</div>
             <div className="flex items-center gap-1 mt-0.5">
               <span className="text-[10px] text-text-secondary/50">{cell.partId}</span>
-              <span className="text-[8px]" style={{ color: deptCfg.color }}>{deptCfg.shortLabel}</span>
+              <span className="text-[10px]" style={{ color: deptCfg.color }}>{deptCfg.shortLabel}</span>
             </div>
             <div className="mt-2 text-lg font-bold tabular-nums" style={{ color }}>
               {pct}%
             </div>
-            <div className="text-[9px] text-text-secondary/40 mt-0.5">
+            <div className="text-[10px] text-text-secondary/50 mt-0.5">
               {cell.done}/{cell.scenes} 씬
             </div>
           </motion.div>
@@ -381,7 +381,7 @@ function MonthlyCalendar({ episodes }: { episodes: Episode[] }) {
             key={day}
             className={cn(
               'text-center text-[11px] font-medium py-2',
-              i === 0 ? 'text-red-400/60' : i === 6 ? 'text-blue-400/60' : 'text-text-secondary/40',
+              i === 0 ? 'text-red-400/60' : i === 6 ? 'text-blue-400/60' : 'text-text-secondary/50',
             )}
           >
             {day}
@@ -408,7 +408,7 @@ function MonthlyCalendar({ episodes }: { episodes: Episode[] }) {
                     ? 'bg-accent text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold'
                     : day.dow === 0 ? 'text-red-400/70'
                     : day.dow === 6 ? 'text-blue-400/70'
-                    : day.isCurrentMonth ? 'text-text-primary/60' : 'text-text-secondary/30',
+                    : day.isCurrentMonth ? 'text-text-primary/60' : 'text-text-secondary/45',
                 )}
               >
                 {day.date}
@@ -527,7 +527,7 @@ export function CalendarView() {
       {/* 콘텐츠 */}
       <div className="flex-1 overflow-auto">
         {episodes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-text-secondary/40">
+          <div className="flex flex-col items-center justify-center h-64 text-text-secondary/50">
             <CalendarIcon size={40} className="mb-3 opacity-30" />
             <p className="text-sm">에피소드 데이터가 없습니다</p>
           </div>
@@ -545,7 +545,7 @@ export function CalendarView() {
       </div>
 
       {/* 범례 */}
-      <div className="flex items-center justify-center gap-4 py-2 text-[10px] text-text-secondary/40">
+      <div className="flex items-center justify-center gap-4 py-2 text-[10px] text-text-secondary/50">
         <div className="flex items-center gap-1.5">
           <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: '#FF6B6B' }} />
           <span>0~25%</span>

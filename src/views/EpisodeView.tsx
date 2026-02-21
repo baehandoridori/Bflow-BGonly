@@ -130,7 +130,7 @@ function EpisodeCard({
           )}>
             {pct}%
           </span>
-          <ChevronRight size={16} className="text-text-secondary/30" />
+          <ChevronRight size={16} className="text-text-secondary/45" />
         </div>
       </div>
 
@@ -185,7 +185,7 @@ function EpisodeCard({
               <span className="font-medium text-text-primary/70">
                 {ps.partId}
               </span>
-              <span className="text-[9px] font-medium" style={{ color: deptCfg.color }}>
+              <span className="text-[10px] font-medium" style={{ color: deptCfg.color }}>
                 {deptCfg.shortLabel}
               </span>
               <span className="text-text-secondary/40 tabular-nums">{partPct}%</span>
@@ -224,7 +224,7 @@ function PartMatrix({ episodes }: { episodes: { ep: Episode; stats: EpStats }[] 
               return (
                 <th key={key} className="py-2 px-2 text-center">
                   <span className="text-xs font-medium text-text-secondary/60">{partId}</span>
-                  <span className="text-[9px] ml-0.5" style={{ color: cfg?.color }}>{cfg?.shortLabel}</span>
+                  <span className="text-[10px] ml-0.5" style={{ color: cfg?.color }}>{cfg?.shortLabel}</span>
                 </th>
               );
             })}
@@ -247,7 +247,7 @@ function PartMatrix({ episodes }: { episodes: { ep: Episode; stats: EpStats }[] 
                         pct >= 100 ? 'bg-status-high/15 text-status-high'
                           : pct >= 50 ? 'bg-amber-500/10 text-amber-400'
                           : pct > 0 ? 'bg-red-500/10 text-red-400'
-                          : 'bg-bg-border/20 text-text-secondary/30',
+                          : 'bg-bg-border/20 text-text-secondary/45',
                       )}>
                         {pct}%
                       </span>

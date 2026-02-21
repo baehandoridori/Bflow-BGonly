@@ -170,7 +170,7 @@ export function Sidebar() {
           {isTestMode && (
             <span className="text-[9px] text-status-low font-mono">TEST</span>
           )}
-          <span className="text-[8px] text-text-secondary/50 font-mono">
+          <span className="text-[10px] text-text-secondary/50 font-mono">
             v{__APP_VERSION__}
           </span>
         </div>

@@ -387,11 +387,11 @@ export function SpotlightSearch() {
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="씬번호, 담당자, 에피소드 검색..."
-                    className="flex-1 bg-transparent text-text-primary text-[15px] placeholder:text-text-secondary/40 outline-none"
+                    className="flex-1 bg-transparent text-text-primary text-[15px] placeholder:text-text-secondary/50 outline-none"
                     autoComplete="off"
                     spellCheck={false}
                   />
-                  <kbd className="hidden sm:flex items-center px-1.5 py-0.5 rounded text-[10px] text-text-secondary/40 border border-bg-border/40 font-mono">
+                  <kbd className="hidden sm:flex items-center px-1.5 py-0.5 rounded text-[10px] text-text-secondary/50 border border-bg-border/40 font-mono">
                     ESC
                   </kbd>
                 </div>
@@ -406,14 +406,14 @@ export function SpotlightSearch() {
                   style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,141,163,0.2) transparent' }}
                 >
                   {flatResults.length === 0 && query.trim() && (
-                    <div className="px-5 py-10 text-center text-text-secondary/40 text-sm">
+                    <div className="px-5 py-10 text-center text-text-secondary/50 text-sm">
                       검색 결과가 없습니다
                     </div>
                   )}
 
                   {grouped.map((group) => (
                     <div key={group.category} className="mb-1">
-                      <div className="px-5 pt-2.5 pb-1 text-[11px] font-medium text-text-secondary/40 uppercase tracking-wider">
+                      <div className="px-5 pt-2.5 pb-1 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
                         {group.label}
                       </div>
                       {group.items.map((item) => {
@@ -436,7 +436,7 @@ export function SpotlightSearch() {
                             <span
                               className={cn(
                                 'shrink-0 transition-colors duration-75',
-                                isSelected ? 'text-accent' : 'text-text-secondary/40',
+                                isSelected ? 'text-accent' : 'text-text-secondary/50',
                               )}
                             >
                               {item.icon}
@@ -454,7 +454,7 @@ export function SpotlightSearch() {
                             </div>
                             {item.pct !== undefined && <MiniProgress pct={item.pct} />}
                             {item.meta && (
-                              <span className="text-[11px] text-text-secondary/40 shrink-0 font-mono tabular-nums w-8 text-right">
+                              <span className="text-[11px] text-text-secondary/50 shrink-0 font-mono tabular-nums w-8 text-right">
                                 {item.meta}
                               </span>
                             )}
@@ -466,7 +466,7 @@ export function SpotlightSearch() {
                 </div>
 
                 {/* ── 하단 힌트 ── */}
-                <div className="flex items-center justify-between px-5 py-2 border-t border-bg-border/20 text-[10px] text-text-secondary/30">
+                <div className="flex items-center justify-between px-5 py-2 border-t border-bg-border/20 text-[10px] text-text-secondary/45">
                   <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1">
                       <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/20 font-mono text-[10px]">
