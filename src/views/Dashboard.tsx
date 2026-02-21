@@ -8,6 +8,7 @@ import { StageBarsWidget } from '@/components/widgets/StageBarsWidget';
 import { AssigneeCardsWidget } from '@/components/widgets/AssigneeCardsWidget';
 import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget';
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
+import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
@@ -48,6 +49,7 @@ const ALL_WIDGETS: WidgetMeta[] = [
   { id: 'assignee-cards', label: '담당자별 현황', component: <AssigneeCardsWidget /> },
   { id: 'episode-summary', label: '에피소드 요약', component: <EpisodeSummaryWidget /> },
   { id: 'dept-comparison', label: '부서별 비교', component: <DepartmentComparisonWidget />, allOnly: true },
+  { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
 ];
 
 const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]));
@@ -57,7 +59,8 @@ const DEPT_LAYOUT: Layout[] = [
   { i: 'overall-progress', x: 0, y: 0, w: 1, h: 3, minW: 1, minH: 2 },
   { i: 'stage-bars', x: 1, y: 0, w: 2, h: 3, minW: 2, minH: 2 },
   { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 3, minW: 1, minH: 2 },
-  { i: 'episode-summary', x: 0, y: 3, w: 4, h: 4, minW: 2, minH: 3 },
+  { i: 'episode-summary', x: 0, y: 3, w: 3, h: 4, minW: 2, minH: 3 },
+  { i: 'calendar', x: 3, y: 3, w: 1, h: 4, minW: 1, minH: 3 },
 ];
 
 /* ── 통합 레이아웃 ── */
@@ -65,7 +68,8 @@ const ALL_LAYOUT: Layout[] = [
   { i: 'overall-progress', x: 0, y: 0, w: 1, h: 3, minW: 1, minH: 2 },
   { i: 'dept-comparison', x: 1, y: 0, w: 2, h: 3, minW: 2, minH: 2 },
   { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 3, minW: 1, minH: 2 },
-  { i: 'episode-summary', x: 0, y: 3, w: 4, h: 4, minW: 2, minH: 3 },
+  { i: 'episode-summary', x: 0, y: 3, w: 3, h: 4, minW: 2, minH: 3 },
+  { i: 'calendar', x: 3, y: 3, w: 1, h: 4, minW: 1, minH: 3 },
 ];
 
 /* ── 위젯 추가 팝오버 ── */

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { WidgetLayoutItem, SheetsConfig, Department } from '@/types';
 import type { ThemeColors } from '@/themes';
 
-export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'calendar' | 'settings';
+export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'calendar' | 'schedule' | 'settings';
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
 export type SortDir = 'asc' | 'desc';
 export type StatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';

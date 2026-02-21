@@ -8,6 +8,7 @@ import { ScenesView } from '@/views/ScenesView';
 import { EpisodeView } from '@/views/EpisodeView';
 import { AssigneeView } from '@/views/AssigneeView';
 import { CalendarView } from '@/views/CalendarView';
+import { ScheduleView } from '@/views/ScheduleView';
 import { SettingsView } from '@/views/SettingsView';
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
@@ -197,6 +198,8 @@ export default function App() {
         return <AssigneeView />;
       case 'calendar':
         return <CalendarView />;
+      case 'schedule':
+        return <ScheduleView />;
       case 'settings':
         return <SettingsView />;
       default:
