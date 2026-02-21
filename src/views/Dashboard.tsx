@@ -320,6 +320,7 @@ export function Dashboard() {
             cols={{ lg: 4, md: 4, sm: 2, xs: 2, xxs: 1 }}
             rowHeight={80}
             margin={[14, 14]}
+            compactType="vertical"
             isDraggable={isEditMode}
             isResizable={isEditMode}
             draggableHandle=".widget-drag-handle"

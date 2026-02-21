@@ -1,4 +1,4 @@
-import { LayoutDashboard, Film, List, Users, Calendar, Settings } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, GanttChart, Settings } from 'lucide-react';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 
@@ -7,7 +7,7 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'episode', label: '에피소드', icon: <Film size={20} /> },
   { id: 'scenes', label: '씬 목록', icon: <List size={20} /> },
   { id: 'assignee', label: '인원별', icon: <Users size={20} /> },
-  { id: 'calendar', label: '캘린더', icon: <Calendar size={20} /> },
+  { id: 'calendar', label: '타임라인', icon: <GanttChart size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 

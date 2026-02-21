@@ -1,4 +1,4 @@
-import { RefreshCw, Pencil, RotateCcw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
@@ -8,7 +8,7 @@ interface HeaderProps {
 }
 
 export function Header({ onRefresh }: HeaderProps) {
-  const { currentView, isEditMode, setEditMode } = useAppStore();
+  const { currentView } = useAppStore();
   const { isSyncing, lastSyncTime } = useDataStore();
 
   const VIEW_TITLES: Record<string, string> = {
@@ -16,7 +16,7 @@ export function Header({ onRefresh }: HeaderProps) {
     episode: '에피소드별 현황',
     scenes: '씬 목록',
     assignee: '인원별 현황',
-    calendar: '프로젝트 타임라인',
+    calendar: '타임라인',
     settings: '설정',
   };
 
@@ -46,37 +46,6 @@ export function Header({ onRefresh }: HeaderProps) {
         >
           <RefreshCw size={18} />
         </button>
-
-        {/* 레이아웃 편집 (대시보드에서만) */}
-        {currentView === 'dashboard' && (
-          <>
-            <button
-              onClick={() => setEditMode(!isEditMode)}
-              title={isEditMode ? '편집 완료' : '레이아웃 편집'}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 transition-colors',
-                isEditMode
-                  ? 'bg-accent text-white'
-                  : 'bg-bg-border/50 text-text-secondary hover:text-text-primary'
-              )}
-            >
-              <Pencil size={14} />
-              {isEditMode ? '편집 완료' : '레이아웃 편집'}
-            </button>
-            {isEditMode && (
-              <button
-                onClick={() => {
-                  useAppStore.getState().setWidgetLayout(null as unknown as never);
-                  setEditMode(false);
-                }}
-                title="레이아웃 초기화"
-                className="p-2 rounded-lg hover:bg-bg-border/50 text-text-secondary transition-colors"
-              >
-                <RotateCcw size={16} />
-              </button>
-            )}
-          </>
-        )}
       </div>
     </header>
   );

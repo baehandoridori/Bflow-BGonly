@@ -212,6 +212,15 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
                       className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-bg-border/10 cursor-pointer transition-colors duration-75"
                     >
                       <span className="text-xs font-mono text-text-primary/70 w-12">{ref.scene.sceneId}</span>
+                      <span
+                        className="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0"
+                        style={{
+                          color: DEPARTMENT_CONFIGS[ref.department].color,
+                          backgroundColor: `${DEPARTMENT_CONFIGS[ref.department].color}15`,
+                        }}
+                      >
+                        {DEPARTMENT_CONFIGS[ref.department].shortLabel}
+                      </span>
                       <span className="text-[11px] text-text-secondary/40 flex-1 truncate">
                         {ref.episodeTitle} {ref.partId}파트
                       </span>
@@ -246,7 +255,7 @@ type SortOption = 'name' | 'scenes' | 'progress';
    ──────────────────────────────────────────────── */
 export function AssigneeView() {
   const episodes = useDataStore((s) => s.episodes);
-  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setSelectedAssignee } = useAppStore();
+  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setSelectedAssignee, setHighlightSceneId } = useAppStore();
   const [sortBy, setSortBy] = useState<SortOption>('scenes');
   const [sortAsc, setSortAsc] = useState(false);
 
@@ -276,8 +285,9 @@ export function AssigneeView() {
     setSelectedEpisode(ref.episodeNumber);
     setSelectedPart(ref.partId);
     setSelectedDepartment(ref.department);
+    setHighlightSceneId(ref.scene.sceneId);
     setView('scenes');
-  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment]);
+  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId]);
 
   const handleSort = useCallback((option: SortOption) => {
     if (sortBy === option) {

@@ -1,12 +1,32 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
-import type { SortKey, StatusFilter } from '@/stores/useAppStore';
+import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft } from 'lucide-react';
+
+/* ── 글로우 하이라이트 CSS 주입 (스포트라이트/인원별 뷰에서 이동 시) ── */
+const GLOW_CSS = `
+@keyframes scene-glow {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(108,92,231,0.6), 0 0 16px rgba(108,92,231,0.3); }
+  50% { box-shadow: 0 0 0 3px rgba(108,92,231,0.8), 0 0 24px rgba(108,92,231,0.5); }
+}
+.scene-highlight {
+  animation: scene-glow 1.2s ease-in-out 3;
+  border-color: rgba(108,92,231,0.7) !important;
+}
+`;
+let glowCssInjected = false;
+function ensureGlowCss() {
+  if (glowCssInjected) return;
+  const el = document.createElement('style');
+  el.textContent = GLOW_CSS;
+  document.head.appendChild(el);
+  glowCssInjected = true;
+}
 
 /* ── 진행률 기반 그라데이션 (중간값 추가로 밴딩 방지) ── */
 function progressGradient(pct: number): string {
@@ -216,13 +236,14 @@ interface SceneCardProps {
   sceneIndex: number;
   celebrating: boolean;
   department: Department;
+  isHighlighted?: boolean;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: () => void;
   onCelebrationEnd: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, onToggle, onDelete, onOpenDetail, onCelebrationEnd }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, onToggle, onDelete, onOpenDetail, onCelebrationEnd }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
@@ -231,9 +252,13 @@ function SceneCard({ scene, sceneIndex, celebrating, department, onToggle, onDel
 
   return (
     <div
-      className="bg-bg-card border border-bg-border rounded-lg flex flex-col group relative cursor-pointer hover:border-text-secondary/30 transition-colors overflow-hidden"
+      className={cn(
+        'bg-bg-card border border-bg-border rounded-lg flex flex-col group relative cursor-pointer hover:border-text-secondary/30 transition-colors overflow-hidden',
+        isHighlighted && 'scene-highlight',
+      )}
       style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
       onClick={onOpenDetail}
+      ref={isHighlighted ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
     >
       {/* ── 상단: 씬 정보 ── */}
       <div className="px-2.5 pt-2 pb-1 flex items-center justify-between">
@@ -766,6 +791,12 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
 
 // ─── 메인 뷰 ──────────────────────────────────────────────────
 
+const VIEW_LABELS: Partial<Record<ViewMode, string>> = {
+  dashboard: '대시보드',
+  assignee: '인원별 현황',
+  episode: '에피소드 현황',
+};
+
 export function ScenesView() {
   const episodes = useDataStore((s) => s.episodes);
   const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
@@ -780,8 +811,18 @@ export function ScenesView() {
   const { sortKey, sortDir, statusFilter, sceneViewMode, sceneGroupMode } = useAppStore();
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment } = useAppStore();
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
+  const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
 
   const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
+
+  // 글로우 CSS 주입 + 하이라이트 자동 해제 (3.6초 후)
+  useEffect(() => {
+    if (highlightSceneId) {
+      ensureGlowCss();
+      const timer = setTimeout(() => setHighlightSceneId(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightSceneId, setHighlightSceneId]);
 
   const [showAddScene, setShowAddScene] = useState(false);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
@@ -1073,8 +1114,21 @@ export function ScenesView() {
     }
   };
 
+  const backLabel = previousView && previousView !== 'scenes' ? VIEW_LABELS[previousView] : null;
+
   return (
     <div className="flex flex-col gap-4 h-full">
+      {/* 뒤로가기 (인원별/에피소드 뷰에서 이동해온 경우) */}
+      {backLabel && (
+        <button
+          onClick={() => setView(previousView!)}
+          className="flex items-center gap-1.5 text-xs text-text-secondary/60 hover:text-accent transition-colors w-fit cursor-pointer"
+        >
+          <ArrowLeft size={14} />
+          <span>{backLabel}로 돌아가기</span>
+        </button>
+      )}
+
       {/* 필터 바 */}
       <div className="flex flex-wrap items-center gap-3 bg-bg-card border border-bg-border rounded-xl p-3">
         {/* 부서 탭 */}
@@ -1394,6 +1448,7 @@ export function ScenesView() {
                           sceneIndex={sIdx}
                           celebrating={celebratingId === scene.sceneId}
                           department={selectedDepartment}
+                          isHighlighted={highlightSceneId === scene.sceneId}
                           onToggle={handleToggle}
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}

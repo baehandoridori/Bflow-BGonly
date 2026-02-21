@@ -22,7 +22,12 @@ interface AppState {
 
   // 현재 뷰
   currentView: ViewMode;
+  previousView: ViewMode | null;
   setView: (view: ViewMode) => void;
+
+  // 씬 하이라이트 (스포트라이트/인원별 뷰에서 씬 이동 시 글로우 피드백)
+  highlightSceneId: string | null;
+  setHighlightSceneId: (id: string | null) => void;
 
   // 부서 선택 (ScenesView — 항상 'bg' | 'acting')
   selectedDepartment: Department;
@@ -69,10 +74,14 @@ export const useAppStore = create<AppState>((set) => ({
   setSheetsConfig: (config) => set({ sheetsConfig: config }),
 
   currentView: 'dashboard',
-  setView: (view) => set({ currentView: view }),
+  previousView: null,
+  setView: (view) => set((s) => ({ currentView: view, previousView: s.currentView })),
 
   selectedDepartment: 'bg',
   setSelectedDepartment: (dept) => set({ selectedDepartment: dept }),
+
+  highlightSceneId: null,
+  setHighlightSceneId: (id) => set({ highlightSceneId: id }),
 
   dashboardDeptFilter: 'all',
   setDashboardDeptFilter: (f) => set({ dashboardDeptFilter: f }),

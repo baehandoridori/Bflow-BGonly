@@ -105,6 +105,7 @@ export function SpotlightSearch() {
     setSelectedPart,
     setSelectedAssignee,
     setSelectedDepartment,
+    setHighlightSceneId,
   } = useAppStore();
 
   /* ── 글로벌 단축키: Ctrl+Space ── */
@@ -199,6 +200,7 @@ export function SpotlightSearch() {
                 setSelectedEpisode(ep.episodeNumber);
                 setSelectedPart(part.partId);
                 setSelectedDepartment(part.department);
+                setHighlightSceneId(scene.sceneId);
                 close();
               },
             });
@@ -216,6 +218,7 @@ export function SpotlightSearch() {
                 setSelectedEpisode(ep.episodeNumber);
                 setSelectedPart(part.partId);
                 setSelectedDepartment(part.department);
+                setHighlightSceneId(scene.sceneId);
                 close();
               },
             });
@@ -424,10 +427,10 @@ export function SpotlightSearch() {
                             onMouseEnter={() => setSelectedIndex(idx)}
                             className={cn(
                               'w-full flex items-center gap-3 px-5 py-2.5 text-left cursor-pointer',
-                              'transition-colors duration-75',
+                              'transition-all duration-100',
                               isSelected
-                                ? 'bg-accent/12'
-                                : 'hover:bg-bg-border/15',
+                                ? 'bg-accent/15 border-l-2 border-accent pl-[18px]'
+                                : 'hover:bg-bg-border/15 border-l-2 border-transparent pl-[18px]',
                             )}
                           >
                             <span
