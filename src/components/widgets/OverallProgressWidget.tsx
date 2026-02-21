@@ -11,13 +11,14 @@ export function OverallProgressWidget() {
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
   const isAll = dashboardFilter === 'all';
   const dept = isAll ? undefined : dashboardFilter;
+  const deptConfig = !isAll ? DEPARTMENT_CONFIGS[dashboardFilter] : null;
   const stats = useMemo(() => calcDashboardStats(episodes, dept), [episodes, dept]);
   const pctRaw = stats.overallPct;
   const pct = Number(pctRaw.toFixed(1));
 
-  const title = isAll
-    ? '전체 진행률 (통합)'
-    : `전체 진행률 (${DEPARTMENT_CONFIGS[dashboardFilter].shortLabel})`;
+  const title = deptConfig
+    ? `전체 진행률 (${deptConfig.shortLabel})`
+    : '전체 진행률 (통합)';
 
   // SVG 원형 진행률
   const radius = 60;

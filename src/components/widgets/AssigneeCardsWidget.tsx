@@ -9,13 +9,15 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 export function AssigneeCardsWidget() {
   const episodes = useDataStore((s) => s.episodes);
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
-  const dept = dashboardFilter === 'all' ? undefined : dashboardFilter;
+  const isAll = dashboardFilter === 'all';
+  const dept = isAll ? undefined : dashboardFilter;
+  const deptConfig = !isAll ? DEPARTMENT_CONFIGS[dashboardFilter] : null;
   const stats = useMemo(() => calcDashboardStats(episodes, dept), [episodes, dept]);
   const assigneeStats = stats.assigneeStats;
 
-  const title = dashboardFilter === 'all'
-    ? '담당자별 현황 (통합)'
-    : `담당자별 현황 (${DEPARTMENT_CONFIGS[dashboardFilter].shortLabel})`;
+  const title = deptConfig
+    ? `담당자별 현황 (${deptConfig.shortLabel})`
+    : '담당자별 현황 (통합)';
 
   return (
     <Widget title={title} icon={<Users size={16} />}>

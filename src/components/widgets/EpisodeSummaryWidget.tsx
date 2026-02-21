@@ -24,9 +24,10 @@ export function EpisodeSummaryWidget() {
     }));
   }, [episodes, isAll]);
 
-  const title = isAll
-    ? '에피소드 요약 (통합)'
-    : `에피소드 요약 (${DEPARTMENT_CONFIGS[dashboardFilter].shortLabel})`;
+  const deptConfig = !isAll ? DEPARTMENT_CONFIGS[dashboardFilter] : null;
+  const title = deptConfig
+    ? `에피소드 요약 (${deptConfig.shortLabel})`
+    : '에피소드 요약 (통합)';
 
   return (
     <Widget title={title} icon={<Film size={16} />}>
