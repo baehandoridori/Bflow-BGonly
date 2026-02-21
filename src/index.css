@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── 테마 CSS 변수 (기본값: Violet Dream) ─── */
+:root {
+  --color-bg-primary: 15 17 23;
+  --color-bg-card: 26 29 39;
+  --color-bg-border: 45 48 65;
+  --color-text-primary: 232 232 238;
+  --color-text-secondary: 139 141 163;
+  --color-accent: 108 92 231;
+  --color-accent-sub: 162 155 254;
+}
+
 /* 앱 전체 텍스트 선택 방지 (드래그 시 파란색 하이라이트 제거) */
 *, *::before, *::after {
   -webkit-user-select: none;
@@ -20,32 +31,32 @@ input, textarea, select, [contenteditable="true"] {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0F1117;
+  background: rgb(var(--color-bg-primary));
 }
 ::-webkit-scrollbar-thumb {
-  background: #2D3041;
+  background: rgb(var(--color-bg-border));
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3D4051;
+  background: rgb(var(--color-bg-border) / 0.8);
 }
 
 /* react-grid-layout 커스텀 */
 .react-grid-item.react-grid-placeholder {
-  background: #6C5CE7 !important;
+  background: rgb(var(--color-accent)) !important;
   opacity: 0.15;
   border-radius: 12px;
 }
 
 .react-grid-item > .react-resizable-handle::after {
-  border-color: #6C5CE7 !important;
+  border-color: rgb(var(--color-accent)) !important;
 }
 
 /* 라쏘 선택 박스 */
 .lasso-box {
   position: fixed;
-  border: 1.5px solid rgba(108,92,231,0.7);
-  background: rgba(108,92,231,0.08);
+  border: 1.5px solid rgb(var(--color-accent) / 0.7);
+  background: rgb(var(--color-accent) / 0.08);
   border-radius: 3px;
   pointer-events: none;
   z-index: 9999;
@@ -54,9 +65,9 @@ input, textarea, select, [contenteditable="true"] {
 
 /* 씬 카드 선택 상태 */
 .scene-card-selected {
-  outline: 2px solid rgba(108,92,231,0.8) !important;
+  outline: 2px solid rgb(var(--color-accent) / 0.8) !important;
   outline-offset: -1px;
-  background: rgba(108,92,231,0.06) !important;
+  background: rgb(var(--color-accent) / 0.06) !important;
 }
 
 /* 접근성: 모션 감소 설정 존중 */

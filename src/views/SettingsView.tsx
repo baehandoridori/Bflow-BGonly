@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Palette, Check } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import {
   loadSheetsConfig,
@@ -6,14 +7,27 @@ import {
   connectSheets,
   checkConnection,
 } from '@/services/sheetsService';
+import { THEME_PRESETS, rgbToHex, hexToRgb, getPreset } from '@/themes';
+import type { ThemeColors } from '@/themes';
+import { cn } from '@/utils/cn';
 
 export function SettingsView() {
-  const { isTestMode, sheetsConnected, sheetsConfig, setSheetsConnected, setSheetsConfig } = useAppStore();
+  const {
+    isTestMode, sheetsConnected, sheetsConfig,
+    setSheetsConnected, setSheetsConfig,
+    themeId, customThemeColors,
+    setThemeId, setCustomThemeColors,
+  } = useAppStore();
 
   const [webAppUrl, setWebAppUrl] = useState(sheetsConfig?.webAppUrl ?? '');
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  // 커스텀 테마 편집 상태
+  const [editingCustom, setEditingCustom] = useState(false);
+  const [customAccent, setCustomAccent] = useState('#6C5CE7');
+  const [customSub, setCustomSub] = useState('#A29BFE');
 
   // 설정 로드
   useEffect(() => {
@@ -22,12 +36,19 @@ export function SettingsView() {
       if (config) {
         setWebAppUrl(config.webAppUrl);
       }
-      // 현재 연결 상태 확인
       const connected = await checkConnection();
       setSheetsConnected(connected);
     }
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 커스텀 색상 초기값
+  useEffect(() => {
+    if (customThemeColors) {
+      setCustomAccent(rgbToHex(customThemeColors.accent));
+      setCustomSub(rgbToHex(customThemeColors.accentSub));
+    }
+  }, [customThemeColors]);
 
   // 연결 테스트
   const handleConnect = async () => {
@@ -63,9 +84,150 @@ export function SettingsView() {
     setTimeout(() => setSaveMessage(null), 2000);
   };
 
+  // 프리셋 선택
+  const handlePresetSelect = (presetId: string) => {
+    setEditingCustom(false);
+    setThemeId(presetId);
+    setCustomThemeColors(null);
+  };
+
+  // 커스텀 테마 적용
+  const handleCustomApply = () => {
+    // accent, accentSub만 커스텀. 나머지는 현재 프리셋(또는 violet) 기반
+    const base = getPreset(themeId === 'custom' ? 'violet' : themeId)?.colors
+      ?? THEME_PRESETS[0].colors;
+    const colors: ThemeColors = {
+      ...base,
+      accent: hexToRgb(customAccent),
+      accentSub: hexToRgb(customSub),
+    };
+    setThemeId('custom');
+    setCustomThemeColors(colors);
+    setEditingCustom(false);
+  };
+
   return (
     <div className="flex flex-col gap-6 max-w-2xl mx-auto py-6">
       <h2 className="text-xl font-bold text-text-primary">설정</h2>
+
+      {/* ─── 테마 설정 ─── */}
+      <div className="bg-bg-card border border-bg-border rounded-xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Palette size={18} className="text-accent" />
+          <h3 className="text-sm font-semibold text-text-secondary">색상 테마</h3>
+        </div>
+
+        {/* 프리셋 그리드 */}
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {THEME_PRESETS.map((preset) => {
+            const isActive = themeId === preset.id;
+            const accent = rgbToHex(preset.colors.accent);
+            const sub = rgbToHex(preset.colors.accentSub);
+            const bg = rgbToHex(preset.colors.bgCard);
+            return (
+              <button
+                key={preset.id}
+                onClick={() => handlePresetSelect(preset.id)}
+                className={cn(
+                  'relative flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all cursor-pointer',
+                  isActive
+                    ? 'border-accent bg-accent/10'
+                    : 'border-bg-border hover:border-accent/40 hover:bg-bg-border/30',
+                )}
+              >
+                {/* 컬러 프리뷰 */}
+                <div
+                  className="w-full h-10 rounded-lg"
+                  style={{
+                    background: `linear-gradient(135deg, ${bg} 0%, ${accent} 50%, ${sub} 100%)`,
+                  }}
+                />
+                <span className="text-xs text-text-primary font-medium">{preset.nameKo}</span>
+                <span className="text-[10px] text-text-secondary">{preset.name}</span>
+                {isActive && (
+                  <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent flex items-center justify-center">
+                    <Check size={12} className="text-white" />
+                  </div>
+                )}
+              </button>
+            );
+          })}
+
+          {/* 커스텀 버튼 */}
+          <button
+            onClick={() => setEditingCustom(true)}
+            className={cn(
+              'relative flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all cursor-pointer',
+              themeId === 'custom'
+                ? 'border-accent bg-accent/10'
+                : 'border-bg-border hover:border-accent/40 hover:bg-bg-border/30 border-dashed',
+            )}
+          >
+            <div className="w-full h-10 rounded-lg flex items-center justify-center bg-bg-border/50">
+              <Palette size={20} className="text-text-secondary" />
+            </div>
+            <span className="text-xs text-text-primary font-medium">커스텀</span>
+            <span className="text-[10px] text-text-secondary">Custom</span>
+            {themeId === 'custom' && (
+              <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent flex items-center justify-center">
+                <Check size={12} className="text-white" />
+              </div>
+            )}
+          </button>
+        </div>
+
+        {/* 커스텀 색상 편집 패널 */}
+        {editingCustom && (
+          <div className="border border-bg-border rounded-lg p-4 bg-bg-primary/50 space-y-3">
+            <p className="text-xs text-text-secondary">메인/서브 액센트 컬러를 직접 선택하세요.</p>
+            <div className="flex gap-4">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">메인 액센트</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={customAccent}
+                    onChange={(e) => setCustomAccent(e.target.value)}
+                    className="w-8 h-8 rounded cursor-pointer border-0 p-0"
+                  />
+                  <span className="text-xs font-mono text-text-secondary">{customAccent.toUpperCase()}</span>
+                </div>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">서브 액센트</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={customSub}
+                    onChange={(e) => setCustomSub(e.target.value)}
+                    className="w-8 h-8 rounded cursor-pointer border-0 p-0"
+                  />
+                  <span className="text-xs font-mono text-text-secondary">{customSub.toUpperCase()}</span>
+                </div>
+              </label>
+            </div>
+            {/* 프리뷰 */}
+            <div
+              className="h-8 rounded-lg"
+              style={{ background: `linear-gradient(135deg, ${customAccent}, ${customSub})` }}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleCustomApply}
+                className="px-4 py-1.5 bg-accent hover:bg-accent/80 rounded-lg text-xs text-white font-medium transition-colors cursor-pointer"
+              >
+                적용
+              </button>
+              <button
+                onClick={() => setEditingCustom(false)}
+                className="px-4 py-1.5 bg-bg-border hover:bg-bg-border/80 rounded-lg text-xs text-text-secondary font-medium transition-colors cursor-pointer"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* 모드 표시 */}
       <div className="bg-bg-card border border-bg-border rounded-xl p-5">

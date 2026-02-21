@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { WidgetLayoutItem, SheetsConfig, Department } from '@/types';
+import type { ThemeColors } from '@/themes';
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'calendar' | 'settings';
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
@@ -68,6 +69,12 @@ interface AppState {
   toggleSelectedScene: (id: string) => void;
   setSelectedScenes: (ids: Set<string>) => void;
   clearSelectedScenes: () => void;
+
+  // 테마
+  themeId: string;
+  customThemeColors: ThemeColors | null;
+  setThemeId: (id: string) => void;
+  setCustomThemeColors: (colors: ThemeColors | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -124,4 +131,9 @@ export const useAppStore = create<AppState>((set) => ({
   }),
   setSelectedScenes: (ids) => set({ selectedSceneIds: ids }),
   clearSelectedScenes: () => set({ selectedSceneIds: new Set<string>() }),
+
+  themeId: 'violet',
+  customThemeColors: null,
+  setThemeId: (id) => set({ themeId: id }),
+  setCustomThemeColors: (colors) => set({ customThemeColors: colors }),
 }));

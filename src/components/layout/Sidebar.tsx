@@ -144,7 +144,15 @@ export function Sidebar() {
 
   return (
     <>
-      <aside className="w-16 h-full bg-bg-card border-r border-bg-border flex flex-col items-center py-4 gap-2">
+      <aside
+        className="w-16 h-full border-r border-bg-border flex flex-col items-center py-4 gap-2"
+        style={{
+          background: `
+            linear-gradient(180deg, transparent 55%, rgb(var(--color-accent) / 0.07) 78%, rgb(var(--color-accent-sub) / 0.12) 100%),
+            rgb(var(--color-bg-card))
+          `,
+        }}
+      >
         {/* 리퀴드 글래스 로고 */}
         <LiquidGlassLogo onClick={() => setShowSplash(true)} />
 

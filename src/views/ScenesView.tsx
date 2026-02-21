@@ -106,17 +106,17 @@ function useLassoSelection(
 /* ── 글로우 하이라이트 CSS 주입 (스포트라이트/인원별 뷰에서 이동 시) ── */
 const GLOW_CSS = `
 @keyframes scene-glow-pulse {
-  0%   { box-shadow: 0 0 0 2px rgba(108,92,231,0.8), 0 0 16px 4px rgba(108,92,231,0.5), 0 0 40px 8px rgba(108,92,231,0.2), 0 0 60px 12px rgba(162,155,254,0.08); }
-  50%  { box-shadow: 0 0 0 3px rgba(108,92,231,1), 0 0 24px 6px rgba(108,92,231,0.6), 0 0 50px 12px rgba(108,92,231,0.3), 0 0 80px 16px rgba(162,155,254,0.12); }
-  100% { box-shadow: 0 0 0 2px rgba(108,92,231,0.8), 0 0 16px 4px rgba(108,92,231,0.5), 0 0 40px 8px rgba(108,92,231,0.2), 0 0 60px 12px rgba(162,155,254,0.08); }
+  0%   { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.8), 0 0 16px 4px rgb(var(--color-accent) / 0.5), 0 0 40px 8px rgb(var(--color-accent) / 0.2), 0 0 60px 12px rgb(var(--color-accent-sub) / 0.08); }
+  50%  { box-shadow: 0 0 0 3px rgb(var(--color-accent) / 1), 0 0 24px 6px rgb(var(--color-accent) / 0.6), 0 0 50px 12px rgb(var(--color-accent) / 0.3), 0 0 80px 16px rgb(var(--color-accent-sub) / 0.12); }
+  100% { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.8), 0 0 16px 4px rgb(var(--color-accent) / 0.5), 0 0 40px 8px rgb(var(--color-accent) / 0.2), 0 0 60px 12px rgb(var(--color-accent-sub) / 0.08); }
 }
 @keyframes scene-glow-fade {
-  0%   { box-shadow: 0 0 0 2px rgba(108,92,231,0.8), 0 0 16px 4px rgba(108,92,231,0.5), 0 0 40px 8px rgba(108,92,231,0.2); }
-  100% { box-shadow: 0 0 0 0px rgba(108,92,231,0), 0 0 0px 0px rgba(108,92,231,0), 0 0 0px 0px rgba(108,92,231,0); }
+  0%   { box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.8), 0 0 16px 4px rgb(var(--color-accent) / 0.5), 0 0 40px 8px rgb(var(--color-accent) / 0.2); }
+  100% { box-shadow: 0 0 0 0px rgb(var(--color-accent) / 0), 0 0 0px 0px rgb(var(--color-accent) / 0), 0 0 0px 0px rgb(var(--color-accent) / 0); }
 }
 .scene-highlight {
   animation: scene-glow-pulse 0.9s ease-in-out 3, scene-glow-fade 0.8s ease-out 2.7s forwards;
-  border-color: rgba(108,92,231,0.8) !important;
+  border-color: rgb(var(--color-accent) / 0.8) !important;
   z-index: 10;
 }
 .scene-highlight-bg {
@@ -124,13 +124,13 @@ const GLOW_CSS = `
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: rgba(108,92,231,0.1);
+  background: rgb(var(--color-accent) / 0.1);
   animation: scene-bg-fade 3.5s ease-out forwards;
   z-index: 0;
 }
 @keyframes scene-bg-fade {
-  0%   { background: rgba(108,92,231,0.12); }
-  60%  { background: rgba(108,92,231,0.05); }
+  0%   { background: rgb(var(--color-accent) / 0.12); }
+  60%  { background: rgb(var(--color-accent) / 0.05); }
   100% { background: transparent; }
 }
 `;
@@ -225,9 +225,9 @@ function AuroraMesh() {
         style={{
           width: '140%', height: '140%', left: '-20%', top: '-20%',
           background: `radial-gradient(ellipse at 30% 40%,
-            rgba(0,184,148,0.06) 0%, rgba(108,92,231,0.04) 40%, transparent 70%),
+            rgba(0,184,148,0.06) 0%, rgb(var(--color-accent) / 0.04) 40%, transparent 70%),
             radial-gradient(ellipse at 70% 60%,
-            rgba(202,138,4,0.05) 0%, rgba(162,155,254,0.03) 40%, transparent 70%)`,
+            rgba(202,138,4,0.05) 0%, rgb(var(--color-accent-sub) / 0.03) 40%, transparent 70%)`,
         }}
         animate={{ x: [0, 30, -20, 0], y: [0, -20, 15, 0] }}
         transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
@@ -518,7 +518,7 @@ interface SceneTableProps {
   searchQuery?: string;
 }
 
-/** 검색어 하이라이트 — 매칭 부분을 accent 글로우로 표시 */
+/** 검색어 하이라이트 — 매칭 부분을 accent 배경+글로우로 강조 */
 function HighlightText({ text, query }: { text: string; query?: string }) {
   if (!query || !text) return <>{text}</>;
   const q = query.toLowerCase();
@@ -527,12 +527,9 @@ function HighlightText({ text, query }: { text: string; query?: string }) {
   return (
     <>
       {text.slice(0, idx)}
-      <span
-        className="text-accent font-medium"
-        style={{ textShadow: '0 0 8px rgba(108,92,231,0.6)' }}
-      >
+      <mark className="bg-accent/20 text-accent font-semibold px-0.5 rounded-sm ring-1 ring-accent/30" style={{ boxShadow: '0 0 8px rgb(var(--color-accent) / 0.35)' }}>
         {text.slice(idx, idx + query.length)}
-      </span>
+      </mark>
       {text.slice(idx + query.length)}
     </>
   );
@@ -566,7 +563,7 @@ function SceneTable({ scenes, allScenes, department, onToggle, onDelete, onOpenD
                 key={`${scene.sceneId}-${idx}`}
                 className={cn(
                   'border-b border-bg-border/50 hover:bg-bg-card/50 group cursor-pointer transition-colors',
-                  searchQuery && 'bg-accent/[0.03]',
+                  searchQuery && 'bg-accent/10 border-l-2 border-l-accent/60',
                 )}
                 onClick={() => onOpenDetail(idx)}
               >
@@ -582,7 +579,7 @@ function SceneTable({ scenes, allScenes, department, onToggle, onDelete, onOpenD
                       className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto"
                       style={
                         scene[stage]
-                          ? { backgroundColor: deptConfig.stageColors[stage], color: '#0F1117' }
+                          ? { backgroundColor: deptConfig.stageColors[stage], color: 'rgb(var(--color-bg-primary))' }
                           : { border: '1px solid #2D3041' }
                       }
                     >
@@ -1767,8 +1764,8 @@ export function ScenesView() {
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-2xl shadow-black/40"
             style={{
-              background: 'rgba(26,29,39,0.95)',
-              border: '1px solid rgba(108,92,231,0.3)',
+              background: 'rgb(var(--color-bg-card) / 0.95)',
+              border: '1px solid rgb(var(--color-accent) / 0.3)',
               backdropFilter: 'blur(12px)',
             }}
           >

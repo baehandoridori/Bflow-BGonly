@@ -15,11 +15,12 @@ import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { readTestSheet } from '@/services/testSheetService';
 import { loadSheetsConfig, connectSheets, readAllFromSheets } from '@/services/sheetsService';
-import { loadLayout } from '@/services/settingsService';
+import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
+import { applyTheme, getPreset, DEFAULT_THEME_ID } from '@/themes';
 
 export default function App() {
-  const { currentView, isTestMode, setTestMode, setWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected } = useAppStore();
+  const { currentView, isTestMode, setTestMode, setWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -77,6 +78,19 @@ export default function App() {
           setWidgetLayout(savedLayout);
         }
 
+        // 테마 로드 + 적용
+        const savedTheme = await loadTheme();
+        if (savedTheme) {
+          setThemeId(savedTheme.themeId);
+          if (savedTheme.customColors) {
+            setCustomThemeColors(savedTheme.customColors);
+            applyTheme(savedTheme.customColors);
+          } else {
+            const preset = getPreset(savedTheme.themeId);
+            if (preset) applyTheme(preset.colors);
+          }
+        }
+
         // 사용자 목록 로드
         const users = await loadUsers();
         setUsers(users);
@@ -121,6 +135,20 @@ export default function App() {
       loadUsers().then(setUsers);
     }
   }, [currentUser, setUsers]);
+
+  // 테마 변경 시: CSS 적용 + appdata 저장
+  useEffect(() => {
+    if (themeId === 'custom' && customThemeColors) {
+      applyTheme(customThemeColors);
+      saveTheme({ themeId, customColors: customThemeColors });
+    } else {
+      const preset = getPreset(themeId);
+      if (preset) {
+        applyTheme(preset.colors);
+        saveTheme({ themeId });
+      }
+    }
+  }, [themeId, customThemeColors]);
 
   // 초기화 완료 후 데이터 로드 (sheetsConnected/isTestMode 변경 시)
   useEffect(() => {

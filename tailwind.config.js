@@ -6,15 +6,16 @@ module.exports = {
     extend: {
       colors: {
         bg: {
-          primary: '#0F1117',
-          card: '#1A1D27',
-          border: '#2D3041',
+          primary: 'rgb(var(--color-bg-primary) / <alpha-value>)',
+          card: 'rgb(var(--color-bg-card) / <alpha-value>)',
+          border: 'rgb(var(--color-bg-border) / <alpha-value>)',
         },
         text: {
-          primary: '#E8E8EE',
-          secondary: '#8B8DA3',
+          primary: 'rgb(var(--color-text-primary) / <alpha-value>)',
+          secondary: 'rgb(var(--color-text-secondary) / <alpha-value>)',
         },
-        accent: '#6C5CE7',
+        accent: 'rgb(var(--color-accent) / <alpha-value>)',
+        'accent-sub': 'rgb(var(--color-accent-sub) / <alpha-value>)',
         stage: {
           lo: '#74B9FF',
           done: '#A29BFE',
