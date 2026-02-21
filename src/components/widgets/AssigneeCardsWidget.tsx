@@ -36,7 +36,7 @@ export function AssigneeCardsWidget() {
           return (
             <div
               key={a.name}
-              className="bg-bg-primary rounded-lg p-3 flex flex-col gap-1"
+              className="bg-bg-primary rounded-lg p-3 flex flex-col gap-1 border border-transparent hover:border-bg-border/50 hover:bg-bg-card transition-all duration-200 ease-out cursor-default"
             >
               <span className="text-sm font-medium truncate">{a.name}</span>
               <div className="flex items-center justify-between">
@@ -47,7 +47,7 @@ export function AssigneeCardsWidget() {
               </div>
               <div className="h-1.5 bg-bg-border rounded-full overflow-hidden">
                 <div
-                  className="h-full rounded-full transition-all duration-500"
+                  className="h-full rounded-full transition-all duration-700 ease-out"
                   style={{
                     width: `${pct}%`,
                     backgroundColor:

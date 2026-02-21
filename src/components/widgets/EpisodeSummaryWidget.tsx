@@ -47,7 +47,7 @@ export function EpisodeSummaryWidget() {
           });
 
           return (
-            <div key={ep.episodeNumber} className="bg-bg-primary rounded-lg p-3">
+            <div key={ep.episodeNumber} className="bg-bg-primary rounded-lg p-3 border border-transparent hover:border-bg-border/50 hover:bg-bg-card transition-all duration-200 ease-out">
               {/* 에피소드 헤더 */}
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium">{ep.title}</span>
@@ -69,7 +69,7 @@ export function EpisodeSummaryWidget() {
                       </span>
                       <div className="flex-1 h-2 bg-bg-border rounded-full overflow-hidden">
                         <div
-                          className="h-full rounded-full transition-all duration-500"
+                          className="h-full rounded-full transition-all duration-700 ease-out"
                           style={{
                             width: `${d.pct}%`,
                             backgroundColor: d.config.color,
@@ -92,7 +92,7 @@ export function EpisodeSummaryWidget() {
                       </span>
                       <div className="flex-1 h-2 bg-bg-border rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-accent rounded-full transition-all duration-500"
+                          className="h-full bg-accent rounded-full transition-all duration-700 ease-out"
                           style={{ width: `${part.pct}%` }}
                         />
                       </div>

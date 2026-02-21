@@ -67,7 +67,7 @@ export function DepartmentComparisonWidget() {
               return (
                 <div
                   key={d.dept}
-                  className="h-full transition-all duration-500 first:rounded-l-full last:rounded-r-full"
+                  className="h-full transition-all duration-700 ease-out first:rounded-l-full last:rounded-r-full"
                   style={{
                     width: `${width}%`,
                     backgroundColor: d.config.color,
@@ -96,7 +96,7 @@ export function DepartmentComparisonWidget() {
               </span>
               <div className="flex-1 h-5 bg-bg-primary rounded-full overflow-hidden">
                 <div
-                  className="h-full rounded-full transition-all duration-500"
+                  className="h-full rounded-full transition-all duration-700 ease-out"
                   style={{
                     width: `${pct}%`,
                     backgroundColor: d.config.color,
@@ -129,7 +129,7 @@ export function DepartmentComparisonWidget() {
                     return (
                       <div
                         key={d.dept}
-                        className="w-3 rounded-t transition-all duration-500 cursor-pointer"
+                        className="w-3 rounded-t transition-all duration-700 ease-out cursor-pointer"
                         style={{
                           height: `${Math.max(pct * 0.4, 2)}px`,
                           backgroundColor: d.config.stageColors[stage],
