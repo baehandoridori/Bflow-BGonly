@@ -8,6 +8,8 @@ import {
   ClipboardPaste,
   Trash2,
   Eye,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
@@ -28,6 +30,9 @@ interface SceneDetailModalProps {
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
   onToggle: (sceneId: string, stage: Stage) => void;
   onClose: () => void;
+  onNavigate?: (direction: 'prev' | 'next') => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
 }
 
 // ─── 속성 행 컴포넌트 ──────────────────────────────
@@ -289,6 +294,9 @@ export function SceneDetailModal({
   onFieldUpdate,
   onToggle,
   onClose,
+  onNavigate,
+  hasPrev = false,
+  hasNext = false,
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
@@ -296,14 +304,19 @@ export function SceneDetailModal({
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
 
-  // ESC 닫기
+  // ESC 닫기 + 좌우 화살표 씬 이동
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
+      // 입력 중이면 화살표 무시
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowLeft' && hasPrev) onNavigate?.('prev');
+      if (e.key === 'ArrowRight' && hasNext) onNavigate?.('next');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, onNavigate, hasPrev, hasNext]);
 
   // ── 이미지 핸들러 ──
 
@@ -469,6 +482,37 @@ export function SceneDetailModal({
         >
           {/* ── 헤더 ── */}
           <div className="sticky top-0 z-10 flex items-center gap-3 px-6 py-4 bg-bg-card/95 backdrop-blur-md border-b border-bg-border rounded-t-2xl">
+            {/* 이전/다음 씬 네비게이션 */}
+            {onNavigate && (
+              <div className="flex items-center gap-1 mr-1">
+                <button
+                  onClick={() => onNavigate('prev')}
+                  disabled={!hasPrev}
+                  className={cn(
+                    'p-1.5 rounded-lg transition-all',
+                    hasPrev
+                      ? 'text-text-secondary hover:text-text-primary hover:bg-bg-primary cursor-pointer'
+                      : 'text-bg-border cursor-not-allowed',
+                  )}
+                  title="이전 씬 (←)"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  onClick={() => onNavigate('next')}
+                  disabled={!hasNext}
+                  className={cn(
+                    'p-1.5 rounded-lg transition-all',
+                    hasNext
+                      ? 'text-text-secondary hover:text-text-primary hover:bg-bg-primary cursor-pointer'
+                      : 'text-bg-border cursor-not-allowed',
+                  )}
+                  title="다음 씬 (→)"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            )}
             <span className="text-lg font-mono font-bold text-accent">
               #{scene.no}
             </span>

@@ -297,10 +297,20 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
         }}
       >
         <h1 className="flex items-baseline text-5xl md:text-7xl font-bold tracking-tight">
-          {/* "B" — 항상 고정, 그래디언트 */}
-          <span className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent">
+          {/* "B" — 항상 고정, 그래디언트 + 빛나는 글로우 */}
+          <motion.span
+            animate={{
+              filter: [
+                'drop-shadow(0 0 10px rgba(108,92,231,0.6)) drop-shadow(0 0 25px rgba(108,92,231,0.3)) drop-shadow(0 0 50px rgba(162,155,254,0.15))',
+                'drop-shadow(0 0 16px rgba(108,92,231,0.8)) drop-shadow(0 0 40px rgba(108,92,231,0.45)) drop-shadow(0 0 70px rgba(162,155,254,0.2))',
+                'drop-shadow(0 0 10px rgba(108,92,231,0.6)) drop-shadow(0 0 25px rgba(108,92,231,0.3)) drop-shadow(0 0 50px rgba(162,155,254,0.15))',
+              ],
+            }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent"
+          >
             B
-          </span>
+          </motion.span>
 
           {/* 서픽스 컨테이너 — inline-grid로 baseline 정렬 유지 + 크로스페이드 */}
           <motion.span

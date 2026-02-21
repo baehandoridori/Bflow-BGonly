@@ -106,17 +106,17 @@ function useLassoSelection(
 /* ── 글로우 하이라이트 CSS 주입 (스포트라이트/인원별 뷰에서 이동 시) ── */
 const GLOW_CSS = `
 @keyframes scene-glow-pulse {
-  0%   { box-shadow: 0 0 0 2px rgba(108,92,231,0.7), 0 0 12px 2px rgba(108,92,231,0.4), 0 0 30px 4px rgba(108,92,231,0.15); }
-  50%  { box-shadow: 0 0 0 3px rgba(108,92,231,0.9), 0 0 20px 4px rgba(108,92,231,0.5), 0 0 40px 8px rgba(108,92,231,0.25); }
-  100% { box-shadow: 0 0 0 2px rgba(108,92,231,0.7), 0 0 12px 2px rgba(108,92,231,0.4), 0 0 30px 4px rgba(108,92,231,0.15); }
+  0%   { box-shadow: 0 0 0 2px rgba(108,92,231,0.8), 0 0 16px 4px rgba(108,92,231,0.5), 0 0 40px 8px rgba(108,92,231,0.2), 0 0 60px 12px rgba(162,155,254,0.08); }
+  50%  { box-shadow: 0 0 0 3px rgba(108,92,231,1), 0 0 24px 6px rgba(108,92,231,0.6), 0 0 50px 12px rgba(108,92,231,0.3), 0 0 80px 16px rgba(162,155,254,0.12); }
+  100% { box-shadow: 0 0 0 2px rgba(108,92,231,0.8), 0 0 16px 4px rgba(108,92,231,0.5), 0 0 40px 8px rgba(108,92,231,0.2), 0 0 60px 12px rgba(162,155,254,0.08); }
 }
 @keyframes scene-glow-fade {
-  0%   { box-shadow: 0 0 0 2px rgba(108,92,231,0.7), 0 0 12px 2px rgba(108,92,231,0.4), 0 0 30px 4px rgba(108,92,231,0.15); }
+  0%   { box-shadow: 0 0 0 2px rgba(108,92,231,0.8), 0 0 16px 4px rgba(108,92,231,0.5), 0 0 40px 8px rgba(108,92,231,0.2); }
   100% { box-shadow: 0 0 0 0px rgba(108,92,231,0), 0 0 0px 0px rgba(108,92,231,0), 0 0 0px 0px rgba(108,92,231,0); }
 }
 .scene-highlight {
-  animation: scene-glow-pulse 0.8s ease-in-out 3, scene-glow-fade 0.6s ease-out 2.4s forwards;
-  border-color: rgba(108,92,231,0.7) !important;
+  animation: scene-glow-pulse 0.9s ease-in-out 3, scene-glow-fade 0.8s ease-out 2.7s forwards;
+  border-color: rgba(108,92,231,0.8) !important;
   z-index: 10;
 }
 .scene-highlight-bg {
@@ -124,13 +124,13 @@ const GLOW_CSS = `
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: rgba(108,92,231,0.06);
-  animation: scene-bg-fade 3s ease-out forwards;
+  background: rgba(108,92,231,0.1);
+  animation: scene-bg-fade 3.5s ease-out forwards;
   z-index: 0;
 }
 @keyframes scene-bg-fade {
-  0%   { background: rgba(108,92,231,0.08); }
-  70%  { background: rgba(108,92,231,0.04); }
+  0%   { background: rgba(108,92,231,0.12); }
+  60%  { background: rgba(108,92,231,0.05); }
   100% { background: transparent; }
 }
 `;
@@ -515,9 +515,30 @@ interface SceneTableProps {
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: (sceneIndex: number) => void;
+  searchQuery?: string;
 }
 
-function SceneTable({ scenes, allScenes, department, onToggle, onDelete, onOpenDetail }: SceneTableProps) {
+/** 검색어 하이라이트 — 매칭 부분을 accent 글로우로 표시 */
+function HighlightText({ text, query }: { text: string; query?: string }) {
+  if (!query || !text) return <>{text}</>;
+  const q = query.toLowerCase();
+  const idx = text.toLowerCase().indexOf(q);
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <span
+        className="text-accent font-medium"
+        style={{ textShadow: '0 0 8px rgba(108,92,231,0.6)' }}
+      >
+        {text.slice(idx, idx + query.length)}
+      </span>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
+function SceneTable({ scenes, allScenes, department, onToggle, onDelete, onOpenDetail, searchQuery }: SceneTableProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   return (
     <div className="overflow-auto rounded-lg border border-bg-border">
@@ -541,12 +562,19 @@ function SceneTable({ scenes, allScenes, department, onToggle, onDelete, onOpenD
             const pct = sceneProgress(scene);
             const idx = allScenes.indexOf(scene);
             return (
-              <tr key={`${scene.sceneId}-${idx}`} className="border-b border-bg-border/50 hover:bg-bg-card/50 group cursor-pointer" onClick={() => onOpenDetail(idx)}>
+              <tr
+                key={`${scene.sceneId}-${idx}`}
+                className={cn(
+                  'border-b border-bg-border/50 hover:bg-bg-card/50 group cursor-pointer transition-colors',
+                  searchQuery && 'bg-accent/[0.03]',
+                )}
+                onClick={() => onOpenDetail(idx)}
+              >
                 <td className="px-2 py-2 font-mono text-accent text-xs">#{scene.no}</td>
-                <td className="px-2 py-2 text-text-primary text-xs truncate">{scene.sceneId || '-'}</td>
+                <td className="px-2 py-2 text-text-primary text-xs truncate"><HighlightText text={scene.sceneId || '-'} query={searchQuery} /></td>
                 <td className="px-2 py-2 text-text-secondary text-xs truncate">{scene.assignee || '-'}</td>
                 <td className="px-2 py-2 text-text-secondary font-mono text-xs truncate">{scene.layoutId ? `#${scene.layoutId}` : '-'}</td>
-                <td className="px-2 py-2 text-text-secondary text-xs truncate">{scene.memo || '-'}</td>
+                <td className="px-2 py-2 text-text-secondary text-xs truncate"><HighlightText text={scene.memo || '-'} query={searchQuery} /></td>
                 {STAGES.map((stage) => (
                   <td key={stage} className="px-1 py-2 text-center">
                     <button
@@ -1647,6 +1675,7 @@ export function ScenesView() {
                     department={selectedDepartment}
                     onToggle={handleToggle}
                     onDelete={handleDeleteScene}
+                    searchQuery={searchQuery}
                     onOpenDetail={(idx) => setDetailSceneIndex(idx)}
                   />
                 ) : (
@@ -1685,6 +1714,7 @@ export function ScenesView() {
             department={selectedDepartment}
             onToggle={handleToggle}
             onDelete={handleDeleteScene}
+            searchQuery={searchQuery}
             onOpenDetail={(idx) => setDetailSceneIndex(idx)}
           />
         </div>
@@ -1831,6 +1861,13 @@ export function ScenesView() {
           onFieldUpdate={handleFieldUpdate}
           onToggle={handleToggle}
           onClose={() => setDetailSceneIndex(null)}
+          hasPrev={detailSceneIndex > 0}
+          hasNext={detailSceneIndex < (currentPart?.scenes.length ?? 1) - 1}
+          onNavigate={(dir) => {
+            const next = dir === 'prev' ? detailSceneIndex - 1 : detailSceneIndex + 1;
+            const max = (currentPart?.scenes.length ?? 1) - 1;
+            if (next >= 0 && next <= max) setDetailSceneIndex(next);
+          }}
         />
       )}
     </div>
