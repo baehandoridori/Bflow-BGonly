@@ -11,6 +11,8 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import {
   getEvents, addEvent, updateEvent, deleteEvent, filterEventsByRange,
 } from '@/services/calendarService';
+import { useCalendarDnD } from '@/hooks/useCalendarDnD';
+import type { DragMode, DragPreview } from '@/hooks/useCalendarDnD';
 import type {
   CalendarEvent, CalendarViewMode, CalendarFilter, CalendarEventType,
 } from '@/types/calendar';
@@ -124,19 +126,45 @@ function layoutEventBars(
    ═══════════════════════════════════════════════════ */
 
 function EventBarChip({
-  bar, compact, onClick,
+  bar, compact, onClick, onDragStart, isDragging, isGhost,
 }: {
-  bar: EventBar; compact?: boolean; onClick: (e: CalendarEvent) => void;
+  bar: EventBar;
+  compact?: boolean;
+  onClick: (e: CalendarEvent) => void;
+  onDragStart?: (eventId: string, mode: DragMode, e: React.MouseEvent) => void;
+  isDragging?: boolean;
+  isGhost?: boolean;
 }) {
   const ev = bar.event;
   const hex = ev.color || EVENT_COLORS[0];
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!onDragStart || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // 리사이즈 핸들 영역 (양쪽 6px)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const relX = e.clientX - rect.left;
+    const relRight = rect.width - relX;
+
+    if (bar.isStart && relX <= 6) {
+      onDragStart(ev.id, 'resize-start', e);
+    } else if (bar.isEnd && relRight <= 6) {
+      onDragStart(ev.id, 'resize-end', e);
+    } else {
+      onDragStart(ev.id, 'move', e);
+    }
+  };
+
   return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick(ev); }}
+    <div
+      onMouseDown={handleMouseDown}
+      onClick={(e) => { e.stopPropagation(); if (!isDragging) onClick(ev); }}
       className={cn(
-        'absolute text-left transition-all duration-150 cursor-pointer z-10',
-        'hover:brightness-110 hover:scale-[1.02] hover:z-20',
+        'absolute text-left z-10',
+        isGhost ? 'pointer-events-none opacity-50' : 'transition-all duration-150 hover:brightness-110 hover:scale-[1.02] hover:z-20',
+        isDragging ? 'opacity-40' : '',
         'group/bar',
       )}
       style={{
@@ -144,32 +172,48 @@ function EventBarChip({
         width: `calc(${(bar.span / 7) * 100}% - 4px)`,
         top: `${bar.row * (compact ? 20 : 24) + (compact ? 24 : 30)}px`,
         height: compact ? '18px' : '22px',
+        cursor: isDragging ? 'grabbing' : 'grab',
       }}
       title={`${ev.title}${ev.memo ? ` — ${ev.memo}` : ''}`}
     >
       <div
         className={cn(
-          'h-full flex items-center px-1.5 text-[10px] font-medium truncate',
+          'h-full flex items-center px-1.5 text-[10px] font-medium truncate relative',
           bar.isStart ? 'rounded-l-md' : '',
           bar.isEnd ? 'rounded-r-md' : '',
         )}
         style={{
-          background: `linear-gradient(135deg, ${hex}40 0%, ${hex}25 100%)`,
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
+          background: isGhost
+            ? `${hex}30`
+            : `linear-gradient(135deg, ${hex}40 0%, ${hex}25 100%)`,
+          backdropFilter: isGhost ? undefined : 'blur(8px)',
+          WebkitBackdropFilter: isGhost ? undefined : 'blur(8px)',
           borderTop: `1px solid ${hex}50`,
           borderBottom: `1px solid ${hex}20`,
           borderLeft: bar.isStart ? `3px solid ${hex}` : `1px solid ${hex}30`,
           borderRight: bar.isEnd ? `1px solid ${hex}40` : 'none',
           color: hex,
-          textShadow: `0 0 12px ${hex}40`,
+          textShadow: isGhost ? undefined : `0 0 12px ${hex}40`,
+          border: isGhost ? `1px dashed ${hex}80` : undefined,
         }}
       >
+        {/* 리사이즈 핸들 (왼쪽) */}
+        {bar.isStart && !isGhost && (
+          <div className="absolute left-0 top-0 w-[6px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
+            style={{ backgroundColor: `${hex}40` }}
+          />
+        )}
         {!bar.isStart && <span className="text-[9px] mr-0.5 opacity-60">◂</span>}
         <span className="truncate">{ev.title}</span>
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
+        {/* 리사이즈 핸들 (오른쪽) */}
+        {bar.isEnd && !isGhost && (
+          <div className="absolute right-0 top-0 w-[6px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
+            style={{ backgroundColor: `${hex}40` }}
+          />
+        )}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -604,6 +648,9 @@ function CalendarGrid({
   maxVisibleBars,
   onDateClick,
   onEventClick,
+  onDragStart,
+  dragPreview,
+  isDragging,
 }: {
   weeks: Date[][];
   events: CalendarEvent[];
@@ -612,8 +659,21 @@ function CalendarGrid({
   maxVisibleBars: number;
   onDateClick: (date: string) => void;
   onEventClick: (ev: CalendarEvent) => void;
+  onDragStart?: (eventId: string, mode: DragMode, e: React.MouseEvent) => void;
+  dragPreview?: DragPreview | null;
+  isDragging?: boolean;
 }) {
   const [overflow, setOverflow] = useState<{ date: string; rect: DOMRect } | null>(null);
+
+  // 드래그 중이면 프리뷰 날짜로 이벤트를 대체해서 고스트 바 표시
+  const displayEvents = useMemo(() => {
+    if (!dragPreview) return events;
+    return events.map((e) =>
+      e.id === dragPreview.eventId
+        ? { ...e, startDate: dragPreview.newStartDate, endDate: dragPreview.newEndDate }
+        : e,
+    );
+  }, [events, dragPreview]);
 
   return (
     <>
@@ -635,7 +695,7 @@ function CalendarGrid({
       {/* 주별 행 */}
       <div className="flex flex-col gap-px bg-bg-border/15 rounded-xl overflow-hidden border border-bg-border/30">
         {weeks.map((week, wi) => {
-          const bars = layoutEventBars(events, week[0], 7);
+          const bars = layoutEventBars(displayEvents, week[0], 7);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
           const visibleRows = Math.min(maxRow, maxVisibleBars);
           const rowHeight = Math.max(36 + visibleRows * 24 + 8, 96);
@@ -650,19 +710,26 @@ function CalendarGrid({
                 const dow = day.getDay();
 
                 // 이 날짜에 해당하는 이벤트 수
-                const dayEvents = events.filter((e) => e.startDate <= dateStr && e.endDate >= dateStr);
+                const dayEvents = displayEvents.filter((e) => e.startDate <= dateStr && e.endDate >= dateStr);
                 const overflowCount = dayEvents.length - maxVisibleBars;
+
+                // 드래그 중 hover 하이라이트
+                const isDropTarget = isDragging && dragPreview && (
+                  dragPreview.newStartDate <= dateStr && dragPreview.newEndDate >= dateStr
+                );
 
                 return (
                   <div
                     key={di}
+                    data-date={dateStr}
                     className={cn(
                       'bg-bg-primary/50 transition-colors duration-100 cursor-pointer relative',
                       isCurMonth ? 'hover:bg-bg-border/15' : 'opacity-30',
                       isToday && 'bg-accent/5',
+                      isDropTarget && 'bg-accent/10',
                     )}
                     style={{ minHeight: rowHeight }}
-                    onClick={() => onDateClick(dateStr)}
+                    onClick={() => { if (!isDragging) onDateClick(dateStr); }}
                   >
                     {/* 날짜 번호 */}
                     <div className="p-1.5">
@@ -698,13 +765,19 @@ function CalendarGrid({
               })}
 
               {/* 이벤트 바 (오버레이) */}
-              {bars.filter((b) => b.row < maxVisibleBars).map((bar) => (
-                <EventBarChip
-                  key={`${bar.event.id}-w${wi}-c${bar.startCol}`}
-                  bar={bar}
-                  onClick={onEventClick}
-                />
-              ))}
+              {bars.filter((b) => b.row < maxVisibleBars).map((bar) => {
+                const barIsDragging = isDragging && dragPreview?.eventId === bar.event.id;
+                return (
+                  <EventBarChip
+                    key={`${bar.event.id}-w${wi}-c${bar.startCol}`}
+                    bar={bar}
+                    onClick={onEventClick}
+                    onDragStart={onDragStart}
+                    isDragging={barIsDragging}
+                    isGhost={barIsDragging}
+                  />
+                );
+              })}
             </div>
           );
         })}
@@ -977,6 +1050,31 @@ export function ScheduleView() {
     setDetailEvent(null);
   }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId]);
 
+  // 드래그&드롭
+  const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
+    await updateEvent(eventId, { startDate: newStart, endDate: newEnd });
+    setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, startDate: newStart, endDate: newEnd } : e)));
+  }, []);
+
+  const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
+
+  const handleBarDragStart = useCallback((eventId: string, mode: DragMode, e: React.MouseEvent) => {
+    const ev = events.find((ev) => ev.id === eventId);
+    if (!ev) return;
+    // 드래그 시작 시점의 앵커 날짜를 셀에서 가져온다
+    const target = e.target as HTMLElement;
+    let anchorEl: HTMLElement | null = target;
+    let anchorDate: string | null = null;
+    while (anchorEl) {
+      anchorDate = anchorEl.getAttribute('data-date');
+      if (anchorDate) break;
+      anchorEl = anchorEl.parentElement;
+    }
+    // 셀을 못 찾으면 이벤트 시작일을 앵커로
+    if (!anchorDate) anchorDate = ev.startDate;
+    startDrag(eventId, mode, ev.startDate, ev.endDate, e.clientX, anchorDate);
+  }, [events, startDrag]);
+
   // 헤더 라벨
   const headerLabel = useMemo(() => {
     if (viewMode === 'month') return `${year}년 ${month + 1}월`;
@@ -1126,6 +1224,9 @@ export function ScheduleView() {
             maxVisibleBars={maxBars}
             onDateClick={handleDateClick}
             onEventClick={setDetailEvent}
+            onDragStart={handleBarDragStart}
+            dragPreview={dragPreview}
+            isDragging={isDragging}
           />
         )}
       </div>
