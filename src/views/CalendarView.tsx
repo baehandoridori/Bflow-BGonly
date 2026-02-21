@@ -1,10 +1,13 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Layers, BarChart3 } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Layers, BarChart3, CalendarDays } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { sceneProgress, isFullyDone } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS, DEPARTMENTS } from '@/types';
 import type { Episode, Department } from '@/types';
+import { getEvents } from '@/services/calendarService';
+import type { CalendarEvent } from '@/types/calendar';
+import { EVENT_COLORS } from '@/types/calendar';
 import { cn } from '@/utils/cn';
 
 /* ────────────────────────────────────────────────
@@ -19,9 +22,9 @@ function pctColor(pct: number): string {
 }
 
 /* ────────────────────────────────────────────────
-   간트 바 데이터
+   타임라인 바 데이터 (기존 간트)
    ──────────────────────────────────────────────── */
-interface GanttRow {
+interface TimelineRow {
   id: string;
   label: string;
   subLabel?: string;
@@ -32,8 +35,8 @@ interface GanttRow {
   depth: number; // 0=에피소드, 1=파트
 }
 
-function buildGanttRows(episodes: Episode[]): GanttRow[] {
-  const rows: GanttRow[] = [];
+function buildTimelineRows(episodes: Episode[]): TimelineRow[] {
+  const rows: TimelineRow[] = [];
 
   for (const ep of episodes) {
     const allScenes = ep.parts.flatMap((p) => p.scenes);
@@ -75,10 +78,10 @@ function buildGanttRows(episodes: Episode[]): GanttRow[] {
 }
 
 /* ────────────────────────────────────────────────
-   간트 차트 뷰
+   타임라인 차트 (진행률 바)
    ──────────────────────────────────────────────── */
-function GanttChart({ episodes }: { episodes: Episode[] }) {
-  const rows = useMemo(() => buildGanttRows(episodes), [episodes]);
+function TimelineChart({ episodes }: { episodes: Episode[] }) {
+  const rows = useMemo(() => buildTimelineRows(episodes), [episodes]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const toggleCollapse = useCallback((epId: string) => {
@@ -90,9 +93,8 @@ function GanttChart({ episodes }: { episodes: Episode[] }) {
     });
   }, []);
 
-  // 어떤 에피소드에 속하는 파트인지
   const visibleRows = useMemo(() => {
-    const result: GanttRow[] = [];
+    const result: TimelineRow[] = [];
     let currentEpId = '';
     for (const row of rows) {
       if (row.depth === 0) {
@@ -126,7 +128,7 @@ function GanttChart({ episodes }: { episodes: Episode[] }) {
           >
             {/* 라벨 */}
             <div
-              className={cn('shrink-0 flex items-center gap-1.5', isEp ? 'w-28' : 'w-28')}
+              className="shrink-0 flex items-center gap-1.5 w-28"
               style={{ paddingLeft: row.depth * 16 }}
             >
               {isEp && (
@@ -158,7 +160,7 @@ function GanttChart({ episodes }: { episodes: Episode[] }) {
               )}
             </div>
 
-            {/* 간트 바 */}
+            {/* 바 */}
             <div className="flex-1 h-6 rounded bg-bg-border/20 overflow-hidden relative">
               <motion.div
                 className="absolute inset-y-0 left-0 rounded"
@@ -167,14 +169,12 @@ function GanttChart({ episodes }: { episodes: Episode[] }) {
                 animate={{ width: `${Math.min(pct, 100)}%` }}
                 transition={{ duration: 0.6, ease: 'easeOut', delay: i * 0.02 }}
               >
-                {/* 내부 라벨 */}
                 {pct >= 15 && (
                   <span className="absolute inset-0 flex items-center px-2 text-[10px] font-medium text-white/80 truncate">
                     {row.fullyDone}/{row.totalScenes} 완료
                   </span>
                 )}
               </motion.div>
-              {/* 외부 라벨 */}
               {pct < 15 && row.totalScenes > 0 && (
                 <span className="absolute inset-0 flex items-center px-2 text-[10px] text-text-secondary/50">
                   {row.fullyDone}/{row.totalScenes}
@@ -199,10 +199,9 @@ function GanttChart({ episodes }: { episodes: Episode[] }) {
 }
 
 /* ────────────────────────────────────────────────
-   진행 현황 히트맵 (월간 캘린더 스타일)
+   진행 현황 히트맵
    ──────────────────────────────────────────────── */
 function ProgressHeatmap({ episodes }: { episodes: Episode[] }) {
-  // 에피소드 × 파트 매트릭스를 히트맵 형태로 표시
   const cells = useMemo(() => {
     return episodes.flatMap((ep) =>
       ep.parts.map((part) => {
@@ -266,157 +265,188 @@ function ProgressHeatmap({ episodes }: { episodes: Episode[] }) {
 }
 
 /* ────────────────────────────────────────────────
-   월간 캘린더
+   이벤트 기반 간트 차트
    ──────────────────────────────────────────────── */
-const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
-function MonthlyCalendar({ episodes }: { episodes: Episode[] }) {
-  const [year, setYear] = useState(() => new Date().getFullYear());
-  const [month, setMonth] = useState(() => new Date().getMonth()); // 0-based
+function parseDate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0, 0);
+}
 
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`;
+function fmtDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
 
-  const calendarDays = useMemo(() => {
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const startDow = firstDay.getDay(); // 0=일요일
-    const totalDays = lastDay.getDate();
+function EventGanttChart() {
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
 
-    // 이전 달 채우기
-    const prevMonthLast = new Date(year, month, 0).getDate();
-    const days: { date: number; month: number; year: number; isCurrentMonth: boolean; isToday: boolean; dow: number }[] = [];
+  useEffect(() => {
+    getEvents().then(setEvents);
+  }, []);
 
-    for (let i = startDow - 1; i >= 0; i--) {
-      const d = prevMonthLast - i;
-      days.push({ date: d, month: month - 1, year, isCurrentMonth: false, isToday: false, dow: days.length % 7 });
+  // 날짜 범위 계산: 이번 달 ± 2주
+  const { dateRange, dayLabels, totalDays } = useMemo(() => {
+    const now = new Date();
+    const rangeStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    rangeStart.setDate(rangeStart.getDate() - 14);
+    const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    rangeEnd.setDate(rangeEnd.getDate() + 14);
+
+    const startStr = fmtDate(rangeStart);
+    const endStr = fmtDate(rangeEnd);
+
+    const days: { date: string; label: string; isToday: boolean; isWeekend: boolean; isFirstOfMonth: boolean }[] = [];
+    const cur = new Date(rangeStart);
+    const todayStr = fmtDate(now);
+    while (fmtDate(cur) <= endStr) {
+      const dateStr = fmtDate(cur);
+      days.push({
+        date: dateStr,
+        label: String(cur.getDate()),
+        isToday: dateStr === todayStr,
+        isWeekend: cur.getDay() === 0 || cur.getDay() === 6,
+        isFirstOfMonth: cur.getDate() === 1,
+      });
+      cur.setDate(cur.getDate() + 1);
     }
 
-    for (let d = 1; d <= totalDays; d++) {
-      const isToday = `${year}-${month + 1}-${d}` === todayStr;
-      days.push({ date: d, month, year, isCurrentMonth: true, isToday, dow: days.length % 7 });
-    }
+    return { dateRange: { start: startStr, end: endStr }, dayLabels: days, totalDays: days.length };
+  }, []);
 
-    // 다음 달 채우기 (6행 채우기)
-    const remaining = 42 - days.length;
-    for (let d = 1; d <= remaining; d++) {
-      days.push({ date: d, month: month + 1, year, isCurrentMonth: false, isToday: false, dow: days.length % 7 });
-    }
+  // 범위 내 이벤트만 필터
+  const visibleEvents = useMemo(() => {
+    return events
+      .filter((e) => e.endDate >= dateRange.start && e.startDate <= dateRange.end)
+      .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title));
+  }, [events, dateRange]);
 
-    return days;
-  }, [year, month, todayStr]);
+  // 이벤트별 오프셋 & 폭 계산
+  const rangeStartDate = parseDate(dateRange.start);
 
-  // 전체 통계 (간단한 표시용)
-  const stats = useMemo(() => {
-    const allScenes = episodes.flatMap((ep) => ep.parts.flatMap((p) => p.scenes));
-    const total = allScenes.length;
-    const done = allScenes.filter(isFullyDone).length;
-    const pct = total > 0 ? Math.round(allScenes.reduce((sum, s) => sum + sceneProgress(s), 0) / total) : 0;
-    return { total, done, pct, remaining: total - done };
-  }, [episodes]);
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
 
-  const monthLabel = `${year}년 ${month + 1}월`;
-
-  const goToPrevMonth = () => {
-    if (month === 0) { setYear(year - 1); setMonth(11); }
-    else setMonth(month - 1);
-  };
-  const goToNextMonth = () => {
-    if (month === 11) { setYear(year + 1); setMonth(0); }
-    else setMonth(month + 1);
-  };
-  const goToToday = () => {
-    setYear(today.getFullYear());
-    setMonth(today.getMonth());
-  };
+  if (events.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-text-secondary/50">
+        <CalendarDays size={36} className="mb-2 opacity-30" />
+        <p className="text-sm">이벤트가 없습니다</p>
+        <p className="text-[10px] mt-1">캘린더에서 이벤트를 추가해 보세요</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* 캘린더 헤더 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={goToPrevMonth}
-            className="p-1.5 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <h2 className="text-base font-semibold text-text-primary min-w-[100px] text-center">
-            {monthLabel}
-          </h2>
-          <button
-            onClick={goToNextMonth}
-            className="p-1.5 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
-          >
-            <ChevronRight size={16} />
-          </button>
-          <button
-            onClick={goToToday}
-            className="ml-2 px-2.5 py-1 text-[10px] rounded-md bg-accent/10 text-accent hover:bg-accent/20 transition-colors cursor-pointer font-medium"
-          >
-            오늘
-          </button>
+    <div className="flex flex-col gap-0">
+      {/* 날짜 헤더 */}
+      <div className="flex border-b border-bg-border/30 sticky top-0 bg-bg-card z-10">
+        <div className="shrink-0 w-36 px-3 py-2 text-[10px] font-semibold text-text-secondary/60 border-r border-bg-border/20">
+          이벤트
         </div>
-
-        {/* 간단 통계 */}
-        <div className="flex items-center gap-4 text-xs text-text-secondary/50">
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-status-high" />
-            <span>완료 {stats.done}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-accent" />
-            <span>남은 씬 {stats.remaining}</span>
-          </div>
-          <span className="tabular-nums font-medium" style={{ color: stats.pct >= 100 ? '#00B894' : undefined }}>
-            전체 {stats.pct}%
-          </span>
-        </div>
-      </div>
-
-      {/* 요일 헤더 */}
-      <div className="grid grid-cols-7 gap-px">
-        {WEEKDAYS.map((day, i) => (
-          <div
-            key={day}
-            className={cn(
-              'text-center text-[11px] font-medium py-2',
-              i === 0 ? 'text-red-400/60' : i === 6 ? 'text-blue-400/60' : 'text-text-secondary/50',
-            )}
-          >
-            {day}
-          </div>
-        ))}
-      </div>
-
-      {/* 날짜 그리드 */}
-      <div className="grid grid-cols-7 gap-px bg-bg-border/15 rounded-xl overflow-hidden border border-bg-border/30">
-        {calendarDays.map((day, i) => (
-          <div
-            key={i}
-            className={cn(
-              'min-h-[72px] p-2 bg-bg-primary/50 transition-colors duration-100',
-              day.isCurrentMonth ? 'hover:bg-bg-border/15' : 'opacity-30',
-              day.isToday && 'bg-accent/8',
-            )}
-          >
-            <div className="flex items-center justify-between">
-              <span
-                className={cn(
-                  'text-xs tabular-nums',
-                  day.isToday
-                    ? 'bg-accent text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold'
-                    : day.dow === 0 ? 'text-red-400/70'
-                    : day.dow === 6 ? 'text-blue-400/70'
-                    : day.isCurrentMonth ? 'text-text-primary/60' : 'text-text-secondary/45',
-                )}
-              >
-                {day.date}
-              </span>
+        <div className="flex-1 flex overflow-x-auto">
+          {dayLabels.map((d) => (
+            <div
+              key={d.date}
+              className={cn(
+                'shrink-0 text-center text-[9px] py-1 border-r border-bg-border/10',
+                d.isToday ? 'bg-accent/15 text-accent font-bold' : d.isWeekend ? 'bg-bg-border/8 text-text-secondary/40' : 'text-text-secondary/50',
+                d.isFirstOfMonth && 'border-l-2 border-l-accent/30',
+              )}
+              style={{ width: `${100 / totalDays}%`, minWidth: 20 }}
+              title={d.date}
+            >
+              {d.isFirstOfMonth && (
+                <div className="text-[8px] text-accent font-semibold">
+                  {parseDate(d.date).getMonth() + 1}월
+                </div>
+              )}
+              {d.label}
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
+
+      {/* 이벤트 행 */}
+      <div className="flex flex-col">
+        {visibleEvents.map((ev, i) => {
+          const evStart = parseDate(ev.startDate < dateRange.start ? dateRange.start : ev.startDate);
+          const evEnd = parseDate(ev.endDate > dateRange.end ? dateRange.end : ev.endDate);
+          const offsetDays = Math.round((evStart.getTime() - rangeStartDate.getTime()) / 86400000);
+          const spanDays = Math.round((evEnd.getTime() - evStart.getTime()) / 86400000) + 1;
+          const hex = ev.color || EVENT_COLORS[0];
+
+          return (
+            <motion.div
+              key={ev.id}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.15, delay: i * 0.02 }}
+              className="flex items-center border-b border-bg-border/10 hover:bg-bg-border/5 transition-colors"
+              style={{ minHeight: 32 }}
+            >
+              {/* 라벨 */}
+              <div
+                className="shrink-0 w-36 px-3 py-1 flex items-center gap-1.5 border-r border-bg-border/20 cursor-pointer hover:bg-bg-border/10"
+                onClick={() => setSelectedEvent(selectedEvent?.id === ev.id ? null : ev)}
+              >
+                <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: hex }} />
+                <span className="text-[11px] text-text-primary truncate">{ev.title}</span>
+              </div>
+              {/* 바 영역 */}
+              <div className="flex-1 relative" style={{ height: 28 }}>
+                <div
+                  className="absolute top-1 h-5 rounded-md flex items-center px-1.5 text-[9px] font-medium truncate cursor-pointer hover:brightness-110"
+                  style={{
+                    left: `${(offsetDays / totalDays) * 100}%`,
+                    width: `${(spanDays / totalDays) * 100}%`,
+                    minWidth: 4,
+                    background: `linear-gradient(135deg, ${hex}50 0%, ${hex}30 100%)`,
+                    border: `1px solid ${hex}60`,
+                    color: hex,
+                  }}
+                  onClick={() => setSelectedEvent(selectedEvent?.id === ev.id ? null : ev)}
+                  title={`${ev.title}: ${ev.startDate} → ${ev.endDate}`}
+                >
+                  {spanDays >= 3 && <span className="truncate">{ev.title}</span>}
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+
+      {/* 선택된 이벤트 상세 */}
+      {selectedEvent && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          className="border-t border-bg-border/30 px-4 py-3 bg-bg-primary/30"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-3 h-3 rounded-full shrink-0 mt-0.5" style={{ backgroundColor: selectedEvent.color }} />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-text-primary">{selectedEvent.title}</div>
+              <div className="text-[11px] text-text-secondary/60 mt-0.5">
+                {selectedEvent.startDate} → {selectedEvent.endDate}
+                {selectedEvent.linkedEpisode != null && ` · EP${String(selectedEvent.linkedEpisode).padStart(2, '0')}`}
+                {selectedEvent.linkedPart && ` ${selectedEvent.linkedPart}파트`}
+              </div>
+              {selectedEvent.memo && (
+                <div className="text-[11px] text-text-secondary/50 mt-1">{selectedEvent.memo}</div>
+              )}
+            </div>
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
+              style={{ backgroundColor: `${selectedEvent.color}20`, color: selectedEvent.color }}
+            >
+              {selectedEvent.type === 'custom' ? '일반' : selectedEvent.type.toUpperCase()}
+            </span>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }
@@ -424,11 +454,11 @@ function MonthlyCalendar({ episodes }: { episodes: Episode[] }) {
 /* ────────────────────────────────────────────────
    메인 캘린더 뷰
    ──────────────────────────────────────────────── */
-type CalViewMode = 'gantt' | 'heatmap' | 'calendar';
+type CalViewMode = 'timeline' | 'heatmap' | 'gantt';
 
 export function CalendarView() {
   const episodes = useDataStore((s) => s.episodes);
-  const [viewMode, setViewMode] = useState<CalViewMode>('gantt');
+  const [viewMode, setViewMode] = useState<CalViewMode>('timeline');
 
   const summary = useMemo(() => {
     const allScenes = episodes.flatMap((ep) => ep.parts.flatMap((p) => p.scenes));
@@ -460,17 +490,17 @@ export function CalendarView() {
         {/* 뷰 모드 토글 */}
         <div className="flex bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
           <button
-            onClick={() => setViewMode('gantt')}
+            onClick={() => setViewMode('timeline')}
             className={cn(
               'flex items-center gap-1.5 px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
               'transition-colors duration-150',
-              viewMode === 'gantt'
+              viewMode === 'timeline'
                 ? 'bg-accent/20 text-accent'
                 : 'text-text-secondary hover:text-text-primary',
             )}
           >
             <BarChart3 size={13} />
-            간트
+            타임라인
           </button>
           <button
             onClick={() => setViewMode('heatmap')}
@@ -486,17 +516,17 @@ export function CalendarView() {
             히트맵
           </button>
           <button
-            onClick={() => setViewMode('calendar')}
+            onClick={() => setViewMode('gantt')}
             className={cn(
               'flex items-center gap-1.5 px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
               'transition-colors duration-150',
-              viewMode === 'calendar'
+              viewMode === 'gantt'
                 ? 'bg-accent/20 text-accent'
                 : 'text-text-secondary hover:text-text-primary',
             )}
           >
-            <CalendarIcon size={13} />
-            캘린더
+            <CalendarDays size={13} />
+            간트
           </button>
         </div>
       </div>
@@ -526,20 +556,29 @@ export function CalendarView() {
 
       {/* 콘텐츠 */}
       <div className="flex-1 overflow-auto">
-        {episodes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-text-secondary/50">
-            <CalendarIcon size={40} className="mb-3 opacity-30" />
-            <p className="text-sm">에피소드 데이터가 없습니다</p>
-          </div>
-        ) : viewMode === 'gantt' ? (
-          <div className="bg-bg-card rounded-xl border border-bg-border/40 p-4">
-            <GanttChart episodes={episodes} />
-          </div>
+        {viewMode === 'timeline' ? (
+          episodes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-text-secondary/50">
+              <CalendarIcon size={40} className="mb-3 opacity-30" />
+              <p className="text-sm">에피소드 데이터가 없습니다</p>
+            </div>
+          ) : (
+            <div className="bg-bg-card rounded-xl border border-bg-border/40 p-4">
+              <TimelineChart episodes={episodes} />
+            </div>
+          )
         ) : viewMode === 'heatmap' ? (
-          <ProgressHeatmap episodes={episodes} />
+          episodes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-text-secondary/50">
+              <CalendarIcon size={40} className="mb-3 opacity-30" />
+              <p className="text-sm">에피소드 데이터가 없습니다</p>
+            </div>
+          ) : (
+            <ProgressHeatmap episodes={episodes} />
+          )
         ) : (
-          <div className="bg-bg-card rounded-xl border border-bg-border/40 p-4">
-            <MonthlyCalendar episodes={episodes} />
+          <div className="bg-bg-card rounded-xl border border-bg-border/40 overflow-hidden">
+            <EventGanttChart />
           </div>
         )}
       </div>
