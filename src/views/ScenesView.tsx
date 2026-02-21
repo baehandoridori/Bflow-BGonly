@@ -1,11 +1,92 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles } from 'lucide-react';
+
+/* ── 진행률 기반 그라데이션 ── */
+function progressGradient(pct: number): string {
+  if (pct >= 100) return 'linear-gradient(90deg, #00B894 0%, #55efc4 100%)';
+  if (pct >= 75) return 'linear-gradient(90deg, #FDCB6E 0%, #00B894 100%)';
+  if (pct >= 50) return 'linear-gradient(90deg, #E17055 0%, #FDCB6E 100%)';
+  if (pct >= 25) return 'linear-gradient(90deg, #FF6B6B 0%, #E17055 60%, #FDCB6E 100%)';
+  return 'linear-gradient(90deg, #FF6B6B 0%, #E17055 100%)';
+}
+
+/* ── 보케 파티클 (완료 파트 배경) ── */
+function BokehBackground() {
+  const particles = useMemo(() =>
+    Array.from({ length: 18 }, (_, i) => ({
+      id: i,
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      size: 4 + Math.random() * 12,
+      delay: Math.random() * 6,
+      duration: 5 + Math.random() * 7,
+      color: ['#00B894', '#55efc4', '#6C5CE7', '#A29BFE', '#FDCB6E', '#74B9FF'][Math.floor(Math.random() * 6)],
+    })), []
+  );
+
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {particles.map((p) => (
+        <motion.div
+          key={p.id}
+          className="absolute rounded-full"
+          style={{
+            width: p.size,
+            height: p.size,
+            left: `${p.x}%`,
+            top: `${p.y}%`,
+            background: `radial-gradient(circle, ${p.color}60 0%, ${p.color}00 70%)`,
+            boxShadow: `0 0 ${p.size * 2}px ${p.color}30`,
+          }}
+          animate={{
+            x: [0, (Math.random() - 0.5) * 40, (Math.random() - 0.5) * 30, 0],
+            y: [0, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 40, 0],
+            opacity: [0.3, 0.7, 0.4, 0.3],
+            scale: [1, 1.3, 0.9, 1],
+          }}
+          transition={{
+            duration: p.duration,
+            delay: p.delay,
+            repeat: Infinity,
+            ease: 'easeInOut',
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ── 파트 완료 오버레이 ── */
+function PartCompleteOverlay() {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="absolute inset-0 z-10 pointer-events-none overflow-hidden rounded-xl"
+    >
+      <BokehBackground />
+      <div className="absolute inset-0 flex items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.3, type: 'spring', stiffness: 200, damping: 20 }}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-bg-card/80 backdrop-blur-sm border border-green-500/30 shadow-lg shadow-green-500/10"
+        >
+          <Sparkles size={16} className="text-green-400" />
+          <span className="text-sm font-bold text-green-400">이 파트는 완료되었습니다!</span>
+          <Sparkles size={16} className="text-green-400" />
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+}
 import {
   toggleTestSceneStage,
   addTestEpisode,
@@ -133,11 +214,10 @@ function SceneCard({ scene, sceneIndex, celebrating, department, onToggle, onDel
 
         <div className="relative h-1 bg-bg-primary rounded-full overflow-visible">
           <div
-            className="h-full rounded-full transition-all duration-300"
+            className="h-full rounded-full transition-all duration-700 ease-out"
             style={{
               width: `${pct}%`,
-              backgroundColor:
-                pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct >= 25 ? '#E17055' : '#FF6B6B',
+              background: progressGradient(pct),
             }}
           />
           <Confetti active={celebrating} onComplete={onCelebrationEnd} />
@@ -1118,8 +1198,8 @@ export function ScenesView() {
         </span>
         <div className="flex-1 h-2 bg-bg-primary rounded-full overflow-hidden">
           <div
-            className="h-full bg-accent rounded-full transition-all duration-300"
-            style={{ width: `${overallPct}%` }}
+            className="h-full rounded-full transition-all duration-700 ease-out"
+            style={{ width: `${overallPct}%`, background: progressGradient(overallPct) }}
           />
         </div>
         <span className="text-sm font-bold text-accent">{overallPct}%</span>
@@ -1147,8 +1227,14 @@ export function ScenesView() {
       )}
 
       {/* 씬 목록 */}
+      <div className="relative flex-1">
+        {/* 파트 완료 보케 오버레이 */}
+        <AnimatePresence>
+          {scenes.length > 0 && overallPct >= 100 && <PartCompleteOverlay />}
+        </AnimatePresence>
+
       {scenes.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-text-secondary">
+        <div className="flex-1 flex items-center justify-center text-text-secondary h-full">
           표시할 씬이 없습니다.
         </div>
       ) : sceneGroupMode === 'layout' && layoutGroups ? (
@@ -1175,10 +1261,10 @@ export function ScenesView() {
                   </span>
                   <div className="flex-1 h-1.5 bg-bg-primary rounded-full overflow-hidden ml-2">
                     <div
-                      className="h-full rounded-full transition-all duration-300"
+                      className="h-full rounded-full transition-all duration-700 ease-out"
                       style={{
                         width: `${groupPct}%`,
-                        backgroundColor: groupPct >= 100 ? '#00B894' : groupPct >= 50 ? '#FDCB6E' : '#E17055',
+                        background: progressGradient(groupPct),
                       }}
                     />
                   </div>
@@ -1252,6 +1338,7 @@ export function ScenesView() {
           })}
         </div>
       )}
+      </div>
 
       {/* 씬 상세 모달 */}
       {detailScene && detailSceneIndex !== null && (

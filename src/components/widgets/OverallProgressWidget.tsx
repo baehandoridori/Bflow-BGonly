@@ -164,7 +164,7 @@ export function OverallProgressWidget() {
         </div>
 
         {/* 동기부여 메시지 */}
-        <div className="h-10 flex items-center justify-center w-full overflow-hidden">
+        <div className="min-h-[2.5rem] flex items-center justify-center w-full">
           <AnimatePresence mode="wait">
             <motion.div
               key={`${msgIdx}-${pool[0]?.text}`}
@@ -172,7 +172,7 @@ export function OverallProgressWidget() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.5, ease: 'easeOut' }}
-              className="text-center px-2"
+              className="text-center px-3"
             >
               <p className="text-xs italic text-text-secondary/80 leading-relaxed">
                 &ldquo;{currentMsg.text}&rdquo;
