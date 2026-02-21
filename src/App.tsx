@@ -32,6 +32,9 @@ export default function App() {
   // 토스트 상태 (초기 비밀번호 알림 등)
   const [toast, setToast] = useState<string | null>(null);
 
+  // 스플래시: 이미 로그인 상태여도 앱 시작 시 랜딩 표시
+  const [showSplash, setShowSplash] = useState(true);
+
   // 데이터 로드 함수 — 모드에 따라 테스트 시트 또는 Apps Script 웹 앱 사용
   const loadData = useCallback(async () => {
     setSyncing(true);
@@ -185,6 +188,11 @@ export default function App() {
   // 로그인 화면 (비로그인 상태)
   if (!currentUser) {
     return <LoginScreen />;
+  }
+
+  // 스플래시 랜딩 (로그인 상태에서도 앱 시작 시 표시)
+  if (showSplash) {
+    return <LoginScreen mode="splash" onComplete={() => setShowSplash(false)} />;
   }
 
   return (
