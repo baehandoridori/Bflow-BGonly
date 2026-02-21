@@ -293,7 +293,7 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
         animate={{ opacity: 1, y: showSub ? -24 : 0 }}
         transition={{
           opacity: { duration: 1.2, ease: [0.16, 1, 0.3, 1] },
-          y: { type: 'spring', stiffness: 100, damping: 18 },
+          y: { duration: 0.9, ease: [0.16, 1, 0.3, 1] },
         }}
       >
         <h1 className="flex items-baseline text-5xl md:text-7xl font-bold tracking-tight">
@@ -302,13 +302,12 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
             B
           </span>
 
-          {/* 서픽스 컨테이너 — 스프링 너비 전환 + 크로스페이드 */}
+          {/* 서픽스 컨테이너 — inline-grid로 baseline 정렬 유지 + 크로스페이드 */}
           <motion.span
             initial={false}
             animate={{ width: suffixW[suffix] ?? 0 }}
             transition={{ type: 'spring', stiffness: 170, damping: 22 }}
-            className="inline-block overflow-hidden align-baseline relative"
-            style={{ height: '1.15em' }}
+            className="inline-grid overflow-hidden align-baseline"
           >
             <AnimatePresence>
               {suffix && (
@@ -318,7 +317,8 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
                   animate={{ opacity: 1, filter: 'blur(0px)' }}
                   exit={{ opacity: 0, filter: 'blur(10px)' }}
                   transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
-                  className="absolute left-0 bottom-0 inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent whitespace-nowrap"
+                  className="bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent whitespace-nowrap"
+                  style={{ gridArea: '1 / 1' }}
                 >
                   {suffix}
                 </motion.span>
