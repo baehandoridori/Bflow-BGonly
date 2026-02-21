@@ -1104,10 +1104,14 @@ export function ScenesView() {
   }));
 
   // 선택된 에피소드 + 부서별 파트 필터링
-  const currentEp = episodes.find((ep) => ep.episodeNumber === selectedEpisode) ?? episodes[0];
+  const currentEp = episodes.length > 0
+    ? (episodes.find((ep) => ep.episodeNumber === selectedEpisode) ?? episodes[0])
+    : undefined;
   const allParts = currentEp?.parts ?? [];
   const parts = allParts.filter((p) => p.department === selectedDepartment);
-  const currentPart = parts.find((p) => p.partId === selectedPart) ?? parts[0];
+  const currentPart = parts.length > 0
+    ? (parts.find((p) => p.partId === selectedPart) ?? parts[0])
+    : undefined;
 
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
   const detailScene = detailSceneIndex !== null
@@ -1123,9 +1127,9 @@ export function ScenesView() {
     const q = searchQuery.toLowerCase();
     scenes = scenes.filter(
       (s) =>
-        s.sceneId.toLowerCase().includes(q) ||
-        s.memo.toLowerCase().includes(q) ||
-        s.assignee.toLowerCase().includes(q)
+        (s.sceneId || '').toLowerCase().includes(q) ||
+        (s.memo || '').toLowerCase().includes(q) ||
+        (s.assignee || '').toLowerCase().includes(q)
     );
   }
   // 상태 필터
@@ -1207,6 +1211,7 @@ export function ScenesView() {
 
     const newValue = !scene[stage];
     const sceneIndex = currentPart.scenes.findIndex((s) => s.sceneId === sceneId);
+    if (sceneIndex < 0) return;
 
     toggleSceneStage(currentPart.sheetName, sceneId, stage);
 
@@ -1330,16 +1335,24 @@ export function ScenesView() {
 
     // 이미지가 있으면 백그라운드에서 업로드
     if (images?.storyboard || images?.guide) {
+      const partSheetName = currentPart.sheetName;
       (async () => {
         try {
           const { saveImage } = await import('@/utils/imageUtils');
+          // 현재 스토어에서 최신 인덱스를 조회 (optimistic add 이후 정확한 위치)
+          const latestPart = useDataStore.getState().episodes
+            .flatMap((ep) => ep.parts)
+            .find((p) => p.sheetName === partSheetName);
+          const latestIndex = latestPart?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
+          if (latestIndex < 0) return;
+
           if (images.storyboard) {
-            const url = await saveImage(images.storyboard, currentPart.sheetName, sceneId, 'storyboard', sheetsConnected);
-            handleFieldUpdate(sceneIndex, 'storyboardUrl', url);
+            const url = await saveImage(images.storyboard, partSheetName, sceneId, 'storyboard', sheetsConnected);
+            handleFieldUpdate(latestIndex, 'storyboardUrl', url);
           }
           if (images.guide) {
-            const url = await saveImage(images.guide, currentPart.sheetName, sceneId, 'guide', sheetsConnected);
-            handleFieldUpdate(sceneIndex, 'guideUrl', url);
+            const url = await saveImage(images.guide, partSheetName, sceneId, 'guide', sheetsConnected);
+            handleFieldUpdate(latestIndex, 'guideUrl', url);
           }
         } catch (err) {
           console.error('[씬 추가 이미지 업로드 실패]', err);
@@ -1468,7 +1481,7 @@ export function ScenesView() {
               onClick={() => setSelectedPart(part.partId)}
               className={cn(
                 'px-3 py-1.5 rounded-lg text-sm transition-colors',
-                (selectedPart ?? parts[0]?.partId) === part.partId
+                (selectedPart ?? (parts.length > 0 ? parts[0].partId : '')) === part.partId
                   ? 'bg-accent text-white'
                   : 'bg-bg-primary text-text-secondary hover:text-text-primary'
               )}
@@ -1919,27 +1932,40 @@ export function ScenesView() {
       </AnimatePresence>
 
       {/* 씬 상세 모달 */}
-      {detailScene && detailSceneIndex !== null && (
-        <SceneDetailModal
-          scene={detailScene}
-          sceneIndex={detailSceneIndex}
-          sheetName={currentPart?.sheetName ?? ''}
-          isLiveMode={sheetsConnected}
-          department={selectedDepartment}
-          onFieldUpdate={handleFieldUpdate}
-          onToggle={handleToggle}
-          onClose={() => setDetailSceneIndex(null)}
-          hasPrev={detailSceneIndex > 0}
-          hasNext={detailSceneIndex < (currentPart?.scenes.length ?? 1) - 1}
-          totalScenes={currentPart?.scenes.length ?? 0}
-          currentSceneIndex={detailSceneIndex}
-          onNavigate={(dir) => {
-            const next = dir === 'prev' ? detailSceneIndex - 1 : detailSceneIndex + 1;
-            const max = (currentPart?.scenes.length ?? 1) - 1;
-            if (next >= 0 && next <= max) setDetailSceneIndex(next);
-          }}
-        />
-      )}
+      {detailScene && detailSceneIndex !== null && (() => {
+        // 필터링된 씬 목록에서 현재/이전/다음 씬의 원본 인덱스를 계산
+        const allScenes = currentPart?.scenes ?? [];
+        const filteredIndices = scenes
+          .map((s) => allScenes.indexOf(s))
+          .filter((i) => i >= 0);
+        const posInFiltered = filteredIndices.indexOf(detailSceneIndex);
+        const hasPrev = posInFiltered > 0;
+        const hasNext = posInFiltered >= 0 && posInFiltered < filteredIndices.length - 1;
+
+        return (
+          <SceneDetailModal
+            scene={detailScene}
+            sceneIndex={detailSceneIndex}
+            sheetName={currentPart?.sheetName ?? ''}
+            isLiveMode={sheetsConnected}
+            department={selectedDepartment}
+            onFieldUpdate={handleFieldUpdate}
+            onToggle={handleToggle}
+            onClose={() => setDetailSceneIndex(null)}
+            hasPrev={hasPrev}
+            hasNext={hasNext}
+            totalScenes={filteredIndices.length}
+            currentSceneIndex={posInFiltered >= 0 ? posInFiltered : 0}
+            onNavigate={(dir) => {
+              if (posInFiltered < 0) return;
+              const nextPos = dir === 'prev' ? posInFiltered - 1 : posInFiltered + 1;
+              if (nextPos >= 0 && nextPos < filteredIndices.length) {
+                setDetailSceneIndex(filteredIndices[nextPos]);
+              }
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
