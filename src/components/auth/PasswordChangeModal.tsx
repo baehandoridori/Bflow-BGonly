@@ -91,6 +91,11 @@ export function PasswordChangeModal() {
               <Check size={12} /> 비밀번호 일치
             </span>
           )}
+          {confirmPw.length > 0 && !passwordsMatch && (
+            <span className="text-xs text-status-none mt-0.5">
+              비밀번호가 일치하지 않습니다
+            </span>
+          )}
         </div>
 
         {error && (
