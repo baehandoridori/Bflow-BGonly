@@ -6,7 +6,7 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { loadAllComments } from '@/services/commentService';
@@ -340,7 +340,12 @@ import {
   addSceneToSheets,
   deleteSceneFromSheets,
   updateSceneFieldInSheets,
+  writeMetadataToSheets,
+  readMetadataFromSheets,
+  softDeletePartInSheets,
+  softDeleteEpisodeInSheets,
 } from '@/services/sheetsService';
+import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
 import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
@@ -704,6 +709,29 @@ function AddFormImageSlot({
   const [phase, setPhase] = useState<'idle' | 'paste-hint'>('idle');
   const slotRef = useRef<HTMLDivElement>(null);
 
+  // 전역 paste 이벤트 리스너 (paste-hint 활성 시)
+  useEffect(() => {
+    if (phase !== 'paste-hint') return;
+    const handler = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const blob = item.getAsFile();
+          if (!blob) continue;
+          const { resizeBlob: rb } = await import('@/utils/imageUtils');
+          const b64 = await rb(blob);
+          onSetBase64(b64);
+          setPhase('idle');
+          return;
+        }
+      }
+    };
+    document.addEventListener('paste', handler);
+    return () => document.removeEventListener('paste', handler);
+  }, [phase, onSetBase64]);
+
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -827,7 +855,7 @@ interface AddSceneFormProps {
   existingSceneIds: string[];
   sheetName: string;
   isLiveMode: boolean;
-  onSubmit: (sceneId: string, assignee: string, memo: string, images?: { storyboard?: string; guide?: string }) => void;
+  onSubmit: (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }) => void;
   onCancel: () => void;
 }
 
@@ -838,8 +866,11 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
   const [number, setNumber] = useState(() => suggestNextNumber('a', existingSceneIds));
   const [assignee, setAssignee] = useState('');
   const [memo, setMemo] = useState('');
+  const [layoutId, setLayoutId] = useState('');
   const [sbImage, setSbImage] = useState('');
   const [guideImage, setGuideImage] = useState('');
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkEnd, setBulkEnd] = useState('');
 
   const prefix = prefixMode === 'alphabet' ? alphaPrefix : prefixMode === 'sc' ? 'sc' : customPrefix;
   const sceneId = `${prefix}${number}`;
@@ -863,14 +894,34 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
 
   const handleSubmit = () => {
     if (isDuplicate || !prefix) return;
-    const imgs = (sbImage || guideImage)
-      ? { storyboard: sbImage || undefined, guide: guideImage || undefined }
-      : undefined;
-    onSubmit(sceneId, assignee, memo, imgs);
-    const updatedIds = [...existingSceneIds, sceneId];
-    setNumber(suggestNextNumber(prefix, updatedIds));
+
+    if (bulkMode) {
+      // 일괄 생성: number~bulkEnd 범위
+      const startN = parseInt(number, 10);
+      const endN = parseInt(bulkEnd, 10);
+      if (isNaN(startN) || isNaN(endN) || endN < startN) return;
+      let updatedIds = [...existingSceneIds];
+      for (let n = startN; n <= endN; n++) {
+        const numStr = String(n).padStart(3, '0');
+        const id = `${prefix}${numStr}`;
+        if (updatedIds.includes(id)) continue; // 중복 스킵
+        onSubmit(id, assignee, memo, layoutId);
+        updatedIds.push(id);
+      }
+      setNumber(suggestNextNumber(prefix, updatedIds));
+      setBulkEnd('');
+    } else {
+      const imgs = (sbImage || guideImage)
+        ? { storyboard: sbImage || undefined, guide: guideImage || undefined }
+        : undefined;
+      onSubmit(sceneId, assignee, memo, layoutId, imgs);
+      const updatedIds = [...existingSceneIds, sceneId];
+      setNumber(suggestNextNumber(prefix, updatedIds));
+    }
+
     setAssignee('');
     setMemo('');
+    setLayoutId('');
     setSbImage('');
     setGuideImage('');
   };
@@ -948,74 +999,119 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
         </div>
       </div>
 
-      {/* ── 번호 + 담당자 + 메모 ── */}
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">번호</span>
-        <div className="relative flex items-center">
-          <input
-            value={number}
-            onChange={(e) => setNumber(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="001"
-            className={cn(
-              'w-20 bg-bg-primary border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 pr-8 focus:ring-1 focus:ring-accent/20 outline-none transition-all',
-              isDuplicate ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-bg-border focus:border-accent'
-            )}
-          />
-          <div className="absolute right-1 top-1 bottom-1 flex flex-col gap-px">
-            <button onClick={() => stepNumber(1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
-              <ChevronUp size={10} />
+      {/* ── 2열 레이아웃: 왼쪽 이미지 / 오른쪽 정보 ── */}
+      <div className="grid grid-cols-[auto_1fr] gap-4">
+        {/* 왼쪽: 이미지 슬롯 */}
+        {!bulkMode && (
+          <div className="flex gap-2">
+            <AddFormImageSlot label="스토리보드" base64={sbImage} onSetBase64={setSbImage} />
+            <AddFormImageSlot label="가이드" base64={guideImage} onSetBase64={setGuideImage} />
+          </div>
+        )}
+        {bulkMode && <div />}
+
+        {/* 오른쪽: 번호 + 담당자 + 메모 + 레이아웃 */}
+        <div className="flex flex-col gap-3">
+          {/* 번호 행 */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">번호</span>
+            <div className="relative flex items-center">
+              <input
+                value={number}
+                onChange={(e) => setNumber(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="001"
+                className={cn(
+                  'w-20 bg-bg-primary border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 pr-8 focus:ring-1 focus:ring-accent/20 outline-none transition-all',
+                  isDuplicate ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-bg-border focus:border-accent'
+                )}
+              />
+              <div className="absolute right-1 top-1 bottom-1 flex flex-col gap-px">
+                <button onClick={() => stepNumber(1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
+                  <ChevronUp size={10} />
+                </button>
+                <button onClick={() => stepNumber(-1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
+                  <ChevronDown size={10} />
+                </button>
+              </div>
+            </div>
+
+            {/* 일괄 생성 토글 */}
+            <button
+              onClick={() => setBulkMode(!bulkMode)}
+              className={cn(
+                'px-2 py-1 text-[10px] rounded-md font-medium transition-colors cursor-pointer',
+                bulkMode ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border',
+              )}
+            >
+              일괄
             </button>
-            <button onClick={() => stepNumber(-1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
-              <ChevronDown size={10} />
+            {bulkMode && (
+              <>
+                <span className="text-text-secondary/40 text-xs">~</span>
+                <input
+                  value={bulkEnd}
+                  onChange={(e) => setBulkEnd(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="끝번호"
+                  className="w-20 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                />
+              </>
+            )}
+
+            <div className="w-px h-6 bg-bg-border" />
+
+            <AssigneeSelect
+              value={assignee}
+              onChange={setAssignee}
+              placeholder="담당자"
+              className="w-24"
+            />
+          </div>
+
+          {/* 메모 + 레이아웃 행 */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">정보</span>
+            <input
+              value={memo}
+              onChange={(e) => setMemo(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="메모 (선택)"
+              className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+            />
+            <input
+              value={layoutId}
+              onChange={(e) => setLayoutId(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="레이아웃 ID (선택)"
+              className="w-36 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+            />
+          </div>
+
+          {/* 하단 버튼 */}
+          <div className="flex gap-2 items-center justify-end">
+            <span className="text-[10px] text-text-secondary/50">
+              Enter 추가 · Esc 취소
+            </span>
+            <button
+              onClick={onCancel}
+              className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border hover:border-text-secondary/30 rounded-lg transition-all"
+            >
+              취소
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={isDuplicate || !prefix || (bulkMode && !bulkEnd)}
+              className={cn(
+                'px-5 py-1.5 text-white text-xs font-medium rounded-lg transition-all',
+                isDuplicate || !prefix || (bulkMode && !bulkEnd)
+                  ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                  : 'bg-accent hover:bg-accent/90 shadow-sm shadow-accent/25 hover:shadow-md hover:shadow-accent/30',
+              )}
+            >
+              {bulkMode ? `일괄 추가` : '+ 추가'}
             </button>
           </div>
-        </div>
-
-        <div className="w-px h-6 bg-bg-border" />
-
-        <AssigneeSelect
-          value={assignee}
-          onChange={setAssignee}
-          placeholder="담당자"
-          className="w-24"
-        />
-        <input
-          value={memo}
-          onChange={(e) => setMemo(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="메모 (선택)"
-          className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
-        />
-      </div>
-
-      {/* ── 이미지 슬롯 + 하단 버튼 ── */}
-      <div className="flex items-end gap-3">
-        <AddFormImageSlot label="스토리보드" base64={sbImage} onSetBase64={setSbImage} />
-        <AddFormImageSlot label="가이드" base64={guideImage} onSetBase64={setGuideImage} />
-
-        <div className="flex gap-2 ml-auto items-center">
-          <span className="text-[10px] text-text-secondary/50">
-            Enter 추가 · Esc 취소
-          </span>
-          <button
-            onClick={onCancel}
-            className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border hover:border-text-secondary/30 rounded-lg transition-all"
-          >
-            취소
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={isDuplicate || !prefix}
-            className={cn(
-              'px-5 py-1.5 text-white text-xs font-medium rounded-lg transition-all',
-              isDuplicate || !prefix
-                ? 'bg-gray-600 cursor-not-allowed opacity-50'
-                : 'bg-accent hover:bg-accent/90 shadow-sm shadow-accent/25 hover:shadow-md hover:shadow-accent/30',
-            )}
-          >
-            + 추가
-          </button>
         </div>
       </div>
     </div>
@@ -1059,9 +1155,24 @@ export function ScenesView() {
     }
   }, [highlightSceneId, setHighlightSceneId]);
 
+  const deletePartOptimistic = useDataStore((s) => s.deletePartOptimistic);
+  const deleteEpisodeOptimistic = useDataStore((s) => s.deleteEpisodeOptimistic);
+
   const [showAddScene, setShowAddScene] = useState(false);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
+
+  // 파트 컨텍스트 메뉴
+  const { menuPosition: partMenuPos, openMenu: openPartMenu, closeMenu: closePartMenu } = useContextMenu();
+  const [partMenuTarget, setPartMenuTarget] = useState<string | null>(null);
+  const [partMemos, setPartMemos] = useState<Record<string, string>>({});
+  const [editingPartMemo, setEditingPartMemo] = useState<string | null>(null);
+  const [partMemoInput, setPartMemoInput] = useState('');
+
+  // 에피소드 편집
+  const [epEditOpen, setEpEditOpen] = useState(false);
+  const [epMemo, setEpMemo] = useState('');
+
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
 
@@ -1122,6 +1233,22 @@ export function ScenesView() {
   const currentPart = parts.length > 0
     ? (parts.find((p) => p.partId === selectedPart) ?? parts[0])
     : undefined;
+
+  // 파트 메모 로드
+  useEffect(() => {
+    if (!sheetsConnected) return;
+    const loadPartMemos = async () => {
+      const memos: Record<string, string> = {};
+      for (const part of parts) {
+        try {
+          const data = await readMetadataFromSheets('part-memo', part.sheetName);
+          if (data?.value) memos[part.sheetName] = data.value;
+        } catch { /* 무시 */ }
+      }
+      if (Object.keys(memos).length > 0) setPartMemos(memos);
+    };
+    loadPartMemos();
+  }, [sheetsConnected, currentEp?.episodeNumber, selectedDepartment]);
 
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
   const detailScene = detailSceneIndex !== null
@@ -1315,7 +1442,7 @@ export function ScenesView() {
     }
   };
 
-  const handleAddScene = async (sceneId: string, assignee: string, memo: string, images?: { storyboard?: string; guide?: string }) => {
+  const handleAddScene = async (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }) => {
     if (!currentPart) return;
 
     const sceneIndex = currentPart.scenes.length; // 새 씬의 인덱스
@@ -1340,13 +1467,27 @@ export function ScenesView() {
       syncInBackground();
     }
 
+    // layoutId 가 있으면 씬 생성 후 별도로 설정
+    if (layoutId) {
+      // optimistic add 후 최신 인덱스 조회
+      const latestPart = useDataStore.getState().episodes
+        .flatMap((ep) => ep.parts)
+        .find((p) => p.sheetName === currentPart.sheetName);
+      const latestIndex = latestPart?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
+      if (latestIndex >= 0) {
+        updateSceneFieldOptimistic(currentPart.sheetName, latestIndex, 'layoutId', layoutId);
+        if (sheetsConnected) {
+          updateSceneFieldInSheets(currentPart.sheetName, latestIndex, 'layoutId', layoutId).catch(() => {});
+        }
+      }
+    }
+
     // 이미지가 있으면 백그라운드에서 업로드
     if (images?.storyboard || images?.guide) {
       const partSheetName = currentPart.sheetName;
       (async () => {
         try {
           const { saveImage } = await import('@/utils/imageUtils');
-          // 현재 스토어에서 최신 인덱스를 조회 (optimistic add 이후 정확한 위치)
           const latestPart = useDataStore.getState().episodes
             .flatMap((ep) => ep.parts)
             .find((p) => p.sheetName === partSheetName);
@@ -1407,6 +1548,72 @@ export function ScenesView() {
     }
   };
 
+  // ─── 파트 삭제 ─────────────────────
+  const handleDeletePart = async (sheetName: string) => {
+    const part = parts.find((p) => p.sheetName === sheetName);
+    if (!part) return;
+    if (!confirm(`${part.partId}파트를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
+
+    deletePartOptimistic(sheetName);
+    setSelectedPart(null);
+
+    try {
+      if (sheetsConnected) {
+        await softDeletePartInSheets(sheetName);
+        syncInBackground();
+      }
+    } catch (err) {
+      alert(`파트 삭제 실패: ${err}`);
+      syncInBackground();
+    }
+  };
+
+  // ─── 파트 메모 저장 ─────────────────
+  const handleSavePartMemo = async (sheetName: string, memo: string) => {
+    setPartMemos((prev) => ({ ...prev, [sheetName]: memo }));
+    setEditingPartMemo(null);
+    if (sheetsConnected) {
+      try {
+        await writeMetadataToSheets('part-memo', sheetName, memo);
+      } catch (err) {
+        console.error('[파트 메모 저장 실패]', err);
+      }
+    }
+  };
+
+  // ─── 에피소드 삭제 ────────────────────
+  const handleDeleteEpisode = async () => {
+    if (!currentEp) return;
+    if (!confirm(`EP.${String(currentEp.episodeNumber).padStart(2, '0')}를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
+
+    deleteEpisodeOptimistic(currentEp.episodeNumber);
+    setSelectedEpisode(episodes[0]?.episodeNumber ?? 1);
+    setEpEditOpen(false);
+
+    try {
+      if (sheetsConnected) {
+        await softDeleteEpisodeInSheets(currentEp.episodeNumber);
+        syncInBackground();
+      }
+    } catch (err) {
+      alert(`에피소드 삭제 실패: ${err}`);
+      syncInBackground();
+    }
+  };
+
+  // ─── 에피소드 메모 저장 ──────────────
+  const handleSaveEpMemo = async (memo: string) => {
+    if (!currentEp) return;
+    setEpEditOpen(false);
+    if (sheetsConnected) {
+      try {
+        await writeMetadataToSheets('episode-memo', String(currentEp.episodeNumber), memo);
+      } catch (err) {
+        console.error('[에피소드 메모 저장 실패]', err);
+      }
+    }
+  };
+
   const backLabel = previousView && previousView !== 'scenes' ? VIEW_LABELS[previousView] : null;
 
   return (
@@ -1457,23 +1664,33 @@ export function ScenesView() {
 
         <div className="w-px h-6 bg-bg-border" />
 
-        {/* 에피소드 선택 */}
-        <select
-          value={selectedEpisode ?? currentEp?.episodeNumber ?? ''}
-          onChange={(e) => setSelectedEpisode(Number(e.target.value))}
-          className="bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary"
-        >
-          {episodeOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        {/* 에피소드 선택 + 편집 */}
+        <div className="flex items-center gap-1">
+          <select
+            value={selectedEpisode ?? currentEp?.episodeNumber ?? ''}
+            onChange={(e) => setSelectedEpisode(Number(e.target.value))}
+            className="bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary"
+          >
+            {episodeOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          {currentEp && (
+            <button
+              onClick={() => { setEpMemo(''); setEpEditOpen(!epEditOpen); }}
+              className="p-1.5 text-text-secondary/40 hover:text-text-primary rounded transition-colors"
+              title="에피소드 관리"
+            >
+              <MoreVertical size={14} />
+            </button>
+          )}
+        </div>
 
         {/* 에피소드 추가 */}
         <button
           onClick={handleAddEpisode}
-
           className="px-2.5 py-1.5 bg-accent/20 text-accent text-xs rounded-lg hover:bg-accent/30 transition-colors"
           title={`EP.${String(nextEpisodeNumber).padStart(2, '0')} 추가`}
         >
@@ -1482,25 +1699,34 @@ export function ScenesView() {
 
         {/* 파트 탭 */}
         <div className="flex gap-1">
-          {parts.map((part) => (
-            <button
-              key={part.partId}
-              onClick={() => setSelectedPart(part.partId)}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-sm transition-colors',
-                (selectedPart ?? (parts.length > 0 ? parts[0].partId : '')) === part.partId
-                  ? 'bg-accent text-white'
-                  : 'bg-bg-primary text-text-secondary hover:text-text-primary'
-              )}
-            >
-              {part.partId}파트
-            </button>
-          ))}
+          {parts.map((part) => {
+            const isActive = (selectedPart ?? (parts.length > 0 ? parts[0].partId : '')) === part.partId;
+            const memo = partMemos[part.sheetName];
+            return (
+              <button
+                key={part.partId}
+                onClick={() => setSelectedPart(part.partId)}
+                onContextMenu={(e) => {
+                  setPartMenuTarget(part.sheetName);
+                  openPartMenu(e);
+                }}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-sm transition-colors',
+                  isActive
+                    ? 'bg-accent text-white'
+                    : 'bg-bg-primary text-text-secondary hover:text-text-primary'
+                )}
+                title={memo ? `메모: ${memo}` : undefined}
+              >
+                {part.partId}파트
+                {memo && <span className="ml-1 text-[10px] italic opacity-70">({memo})</span>}
+              </button>
+            );
+          })}
           {/* 파트 추가 */}
           {currentEp && (
             <button
               onClick={handleAddPart}
-    
               className="px-2.5 py-1.5 bg-bg-primary text-text-secondary text-sm rounded-lg hover:text-accent hover:border-accent border border-bg-border transition-colors"
               title={`${nextPartId}파트 추가`}
             >
@@ -2071,6 +2297,124 @@ export function ScenesView() {
           />
         );
       })()}
+
+      {/* 파트 컨텍스트 메뉴 */}
+      {partMenuPos && partMenuTarget && (
+        <ContextMenu
+          position={partMenuPos}
+          onClose={() => { closePartMenu(); setPartMenuTarget(null); }}
+          items={[
+            {
+              label: '메모 편집',
+              icon: <StickyNote size={12} />,
+              onClick: () => {
+                setPartMemoInput(partMemos[partMenuTarget] ?? '');
+                setEditingPartMemo(partMenuTarget);
+              },
+            },
+            {
+              label: '파트 삭제',
+              icon: <Trash2 size={12} />,
+              danger: true,
+              onClick: () => handleDeletePart(partMenuTarget),
+            },
+          ]}
+        />
+      )}
+
+      {/* 파트 메모 인라인 편집 */}
+      {editingPartMemo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setEditingPartMemo(null)}
+        >
+          <div
+            className="bg-bg-card rounded-xl shadow-2xl border border-bg-border w-80 p-4 flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-bold text-text-primary">파트 메모</h3>
+            <input
+              autoFocus
+              value={partMemoInput}
+              onChange={(e) => setPartMemoInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSavePartMemo(editingPartMemo, partMemoInput);
+                if (e.key === 'Escape') setEditingPartMemo(null);
+              }}
+              placeholder="파트 메모를 입력하세요"
+              className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setEditingPartMemo(null)}
+                className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => handleSavePartMemo(editingPartMemo, partMemoInput)}
+                className="px-3 py-1.5 text-xs text-white bg-accent rounded-lg hover:bg-accent/80 transition-colors"
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 에피소드 편집 팝업 */}
+      {epEditOpen && currentEp && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setEpEditOpen(false)}
+        >
+          <div
+            className="bg-bg-card rounded-xl shadow-2xl border border-bg-border w-80 p-4 flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-bold text-text-primary">
+              {currentEp.title} 관리
+            </h3>
+            <div>
+              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모</label>
+              <input
+                autoFocus
+                value={epMemo}
+                onChange={(e) => setEpMemo(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveEpMemo(epMemo);
+                  if (e.key === 'Escape') setEpEditOpen(false);
+                }}
+                placeholder="에피소드 메모"
+                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
+              />
+            </div>
+            <div className="flex gap-2 justify-between">
+              <button
+                onClick={handleDeleteEpisode}
+                className="px-3 py-1.5 text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:bg-red-500/10 rounded-lg transition-colors"
+              >
+                <Trash2 size={12} className="inline mr-1" />
+                삭제
+              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setEpEditOpen(false)}
+                  className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => handleSaveEpMemo(epMemo)}
+                  className="px-3 py-1.5 text-xs text-white bg-accent rounded-lg hover:bg-accent/80 transition-colors"
+                >
+                  저장
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

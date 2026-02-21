@@ -99,6 +99,30 @@ export async function updateSceneFieldInSheets(
   await assertOk(window.electronAPI.sheetsUpdateSceneField(sheetName, rowIndex, field, value), '씬 수정 실패');
 }
 
+// ─── 메타데이터 CRUD ─────────────────────────
+
+export async function readMetadataFromSheets(
+  type: string, key: string
+): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
+  const result = await window.electronAPI.sheetsReadMetadata(type, key);
+  if (!result.ok) throw new Error(result.error ?? '메타데이터 읽기 실패');
+  return result.data ?? null;
+}
+
+export async function writeMetadataToSheets(
+  type: string, key: string, value: string
+): Promise<void> {
+  await assertOk(window.electronAPI.sheetsWriteMetadata(type, key, value), '메타데이터 쓰기 실패');
+}
+
+export async function softDeletePartInSheets(sheetName: string): Promise<void> {
+  await assertOk(window.electronAPI.sheetsSoftDeletePart(sheetName), '파트 삭제 실패');
+}
+
+export async function softDeleteEpisodeInSheets(episodeNumber: number): Promise<void> {
+  await assertOk(window.electronAPI.sheetsSoftDeleteEpisode(episodeNumber), '에피소드 삭제 실패');
+}
+
 // ─── 이미지 업로드 (Drive) ───────────────────
 
 export async function uploadImageToSheets(
