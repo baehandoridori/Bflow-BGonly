@@ -107,7 +107,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: isTestMode ? 'BG 진행 현황판 [테스트]' : 'BG 진행 현황판',
+    title: isTestMode ? 'B flow [테스트]' : 'B flow',
     backgroundColor: '#0F1117',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
