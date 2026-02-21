@@ -240,9 +240,9 @@ ipcMain.handle(
   }
 );
 
-ipcMain.handle('sheets:add-episode', async (_event, episodeNumber: number) => {
+ipcMain.handle('sheets:add-episode', async (_event, episodeNumber: number, department?: string) => {
   try {
-    await addEpisode(episodeNumber);
+    await addEpisode(episodeNumber, (department as 'bg' | 'acting') || 'bg');
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -250,9 +250,9 @@ ipcMain.handle('sheets:add-episode', async (_event, episodeNumber: number) => {
   }
 });
 
-ipcMain.handle('sheets:add-part', async (_event, episodeNumber: number, partId: string) => {
+ipcMain.handle('sheets:add-part', async (_event, episodeNumber: number, partId: string, department?: string) => {
   try {
-    await addPart(episodeNumber, partId);
+    await addPart(episodeNumber, partId, (department as 'bg' | 'acting') || 'bg');
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

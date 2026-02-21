@@ -39,12 +39,13 @@
  * - 코드를 수정한 후에는 반드시 "새 배포"를 다시 해야 반영됩니다
  *   (기존 배포 URL은 이전 코드를 계속 실행합니다)
  * - 이미지 업로드를 위해 반드시 Drive 스코프가 포함된 appsscript.json 필요
- * - 시트 탭 이름은 EP01_A, EP01_B, EP02_A 형식이어야 합니다
+ * - 시트 탭 이름은 EP01_A (레거시=BG), EP01_A_BG, EP01_A_ACT 형식
  * - 열 구조: A(No) B(씬번호) C(메모) D(스토리보드URL) E(가이드URL)
  *            F(담당자) G(LO) H(완료) I(검수) J(PNG) K(레이아웃)
  */
 
-var EP_PATTERN = /^EP(\d+)_([A-Z])$/;
+// EP01_A (레거시=BG), EP01_A_BG, EP01_A_ACT 모두 매칭
+var EP_PATTERN = /^EP(\d+)_([A-Z])(?:_(BG|ACT))?$/;
 
 // 헤더 행 (새 탭 생성 시 자동 삽입)
 var HEADERS = ['No', '씬번호', '메모', '스토리보드URL', '가이드URL', '담당자', 'LO', '완료', '검수', 'PNG', '레이아웃'];
@@ -81,13 +82,17 @@ function doGet(e) {
         return jsonResponse({ ok: true });
 
       case 'addEpisode':
-        var result = addEpisode(parseInt(e.parameter.episodeNumber, 10));
+        var result = addEpisode(
+          parseInt(e.parameter.episodeNumber, 10),
+          e.parameter.department || 'bg'
+        );
         return jsonResponse({ ok: true, data: result });
 
       case 'addPart':
         var result2 = addPart(
           parseInt(e.parameter.episodeNumber, 10),
-          e.parameter.partId
+          e.parameter.partId,
+          e.parameter.department || 'bg'
         );
         return jsonResponse({ ok: true, data: result2 });
 
@@ -174,18 +179,22 @@ function getEpisodeTabs() {
     var title = sheets[i].getName();
     var match = title.match(EP_PATTERN);
     if (match) {
+      // match[3]: 'BG' | 'ACT' | undefined (레거시 = 'bg')
+      var dept = match[3] === 'ACT' ? 'acting' : 'bg';
       tabs.push({
         title: title,
         episodeNumber: parseInt(match[1], 10),
-        partId: match[2]
+        partId: match[2],
+        department: dept
       });
     }
   }
 
   tabs.sort(function(a, b) {
-    return a.episodeNumber !== b.episodeNumber
-      ? a.episodeNumber - b.episodeNumber
-      : a.partId.localeCompare(b.partId);
+    if (a.episodeNumber !== b.episodeNumber) return a.episodeNumber - b.episodeNumber;
+    if (a.partId !== b.partId) return a.partId.localeCompare(b.partId);
+    // 같은 EP+파트면 부서 순 (bg → acting)
+    return a.department.localeCompare(b.department);
   });
 
   return tabs;
@@ -481,6 +490,7 @@ function readAllEpisodes() {
     var scenes = readSheetData(tab.title);
     epMap[tab.episodeNumber].parts.push({
       partId: tab.partId,
+      department: tab.department, // 'bg' | 'acting'
       sheetName: tab.title,
       scenes: scenes
     });
@@ -547,20 +557,21 @@ function createSheetTab(tabName) {
 
 // ─── 에피소드 추가 ───────────────────────────────────────────
 
-function addEpisode(episodeNumber) {
+function addEpisode(episodeNumber, department) {
   if (!episodeNumber || episodeNumber < 1) {
     throw new Error('유효하지 않은 에피소드 번호');
   }
 
-  var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_A';
+  var deptSuffix = department === 'acting' ? '_ACT' : '_BG';
+  var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_A' + deptSuffix;
   createSheetTab(tabName);
 
-  return { sheetName: tabName, episodeNumber: episodeNumber, partId: 'A' };
+  return { sheetName: tabName, episodeNumber: episodeNumber, partId: 'A', department: department || 'bg' };
 }
 
 // ─── 파트 추가 ───────────────────────────────────────────────
 
-function addPart(episodeNumber, partId) {
+function addPart(episodeNumber, partId, department) {
   if (!episodeNumber || !partId) {
     throw new Error('에피소드 번호와 파트 ID 필요');
   }
@@ -570,10 +581,11 @@ function addPart(episodeNumber, partId) {
     throw new Error('파트 ID는 A-Z 대문자 1글자여야 합니다');
   }
 
-  var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_' + partId;
+  var deptSuffix = department === 'acting' ? '_ACT' : '_BG';
+  var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_' + partId + deptSuffix;
   createSheetTab(tabName);
 
-  return { sheetName: tabName, episodeNumber: episodeNumber, partId: partId };
+  return { sheetName: tabName, episodeNumber: episodeNumber, partId: partId, department: department || 'bg' };
 }
 
 // ─── 씬 추가 ─────────────────────────────────────────────────

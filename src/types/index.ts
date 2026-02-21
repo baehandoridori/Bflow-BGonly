@@ -196,8 +196,8 @@ export interface ElectronAPI {
     value: boolean
   ) => Promise<SheetsUpdateResult>;
   // CRUD
-  sheetsAddEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
-  sheetsAddPart: (episodeNumber: number, partId: string) => Promise<SheetsUpdateResult>;
+  sheetsAddEpisode: (episodeNumber: number, department?: string) => Promise<SheetsUpdateResult>;
+  sheetsAddPart: (episodeNumber: number, partId: string, department?: string) => Promise<SheetsUpdateResult>;
   sheetsAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<SheetsUpdateResult>;
   sheetsDeleteScene: (sheetName: string, rowIndex: number) => Promise<SheetsUpdateResult>;
   sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) => Promise<SheetsUpdateResult>;

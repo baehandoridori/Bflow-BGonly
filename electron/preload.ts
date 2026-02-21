@@ -44,10 +44,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     value: boolean
   ) =>
     ipcRenderer.invoke('sheets:update-cell', sheetName, rowIndex, stage, value),
-  sheetsAddEpisode: (episodeNumber: number) =>
-    ipcRenderer.invoke('sheets:add-episode', episodeNumber),
-  sheetsAddPart: (episodeNumber: number, partId: string) =>
-    ipcRenderer.invoke('sheets:add-part', episodeNumber, partId),
+  sheetsAddEpisode: (episodeNumber: number, department?: string) =>
+    ipcRenderer.invoke('sheets:add-episode', episodeNumber, department),
+  sheetsAddPart: (episodeNumber: number, partId: string, department?: string) =>
+    ipcRenderer.invoke('sheets:add-part', episodeNumber, partId, department),
   sheetsAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) =>
     ipcRenderer.invoke('sheets:add-scene', sheetName, sceneId, assignee, memo),
   sheetsDeleteScene: (sheetName: string, rowIndex: number) =>

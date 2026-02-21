@@ -8,7 +8,9 @@
  *   A: No | B: 씬번호 | C: 메모 | D: 스토리보드URL | E: 가이드URL
  *   F: 담당자 | G: LO | H: 완료 | I: 검수 | J: PNG | K: 레이아웃
  *
- * 시트 탭 이름: EP01_A, EP01_B, EP02_A, ... (자동 감지)
+ * 시트 탭 이름:
+ *   기존(BG): EP01_A, EP01_B, EP02_A, ... (department 없으면 'bg' 기본)
+ *   신규:     EP01_A_BG, EP01_A_ACT, ... (_BG | _ACT 접미사로 부서 구분)
  */
 
 let webAppUrl: string | null = null;
@@ -85,11 +87,14 @@ export function isConnected(): boolean {
 
 // ─── 데이터 타입 ──────────────────────────────────────────────
 
+export type Department = 'bg' | 'acting';
+
 export interface EpisodeData {
   episodeNumber: number;
   title: string;
   parts: {
     partId: string;
+    department: Department;
     sheetName: string;
     scenes: {
       no: number;
@@ -135,6 +140,14 @@ function sanitizeImageUrl(val: unknown): string {
   return '';
 }
 
+// ─── 시트 이름에서 department 추출 ───────────────────────────────
+// EP01_A_BG → 'bg', EP01_A_ACT → 'acting', EP01_A (레거시) → 'bg'
+
+function parseDepartmentFromSheetName(sheetName: string): Department {
+  if (sheetName.endsWith('_ACT')) return 'acting';
+  return 'bg'; // _BG 접미사 또는 접미사 없음(레거시) 모두 'bg'
+}
+
 // ─── 전체 에피소드 데이터 읽기 ────────────────────────────────
 
 export async function readAllEpisodes(): Promise<EpisodeData[]> {
@@ -148,9 +161,13 @@ export async function readAllEpisodes(): Promise<EpisodeData[]> {
 
   const episodes: EpisodeData[] = json.data ?? [];
 
-  // 이미지 URL 검증 — CellImage 쓰레기 값 필터링
+  // 후처리: department 기본값 + 이미지 URL 검증
   for (const ep of episodes) {
     for (const part of ep.parts) {
+      // GAS에서 department를 내려주지 않는 레거시 대응 → 'bg' 기본
+      if (!part.department) {
+        part.department = parseDepartmentFromSheetName(part.sheetName);
+      }
       for (const scene of part.scenes) {
         scene.storyboardUrl = sanitizeImageUrl(scene.storyboardUrl);
         scene.guideUrl = sanitizeImageUrl(scene.guideUrl);
@@ -193,14 +210,14 @@ export async function updateSceneStage(
 
 // ─── 에피소드 추가 ────────────────────────────────────────────
 
-export async function addEpisode(episodeNumber: number): Promise<void> {
-  await gasGet({ action: 'addEpisode', episodeNumber: String(episodeNumber) });
+export async function addEpisode(episodeNumber: number, department: Department = 'bg'): Promise<void> {
+  await gasGet({ action: 'addEpisode', episodeNumber: String(episodeNumber), department });
 }
 
 // ─── 파트 추가 ────────────────────────────────────────────────
 
-export async function addPart(episodeNumber: number, partId: string): Promise<void> {
-  await gasGet({ action: 'addPart', episodeNumber: String(episodeNumber), partId });
+export async function addPart(episodeNumber: number, partId: string, department: Department = 'bg'): Promise<void> {
+  await gasGet({ action: 'addPart', episodeNumber: String(episodeNumber), partId, department });
 }
 
 // ─── 씬 추가 ──────────────────────────────────────────────────

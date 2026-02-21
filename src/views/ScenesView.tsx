@@ -762,7 +762,7 @@ export function ScenesView() {
     // 백그라운드에서 서버/파일에 저장
     try {
       if (sheetsConnected) {
-        await addEpisodeToSheets(nextEpisodeNumber);
+        await addEpisodeToSheets(nextEpisodeNumber, selectedDepartment);
         syncInBackground();
       } else {
         await addTestEpisode(episodes, nextEpisodeNumber, selectedDepartment);
@@ -791,7 +791,7 @@ export function ScenesView() {
 
     try {
       if (sheetsConnected) {
-        await addPartToSheets(currentEp.episodeNumber, nextPartId);
+        await addPartToSheets(currentEp.episodeNumber, nextPartId, selectedDepartment);
         syncInBackground();
       } else {
         await addTestPart(episodes, currentEp.episodeNumber, nextPartId, selectedDepartment);

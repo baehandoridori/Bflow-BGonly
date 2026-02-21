@@ -6,7 +6,7 @@
  * App.tsx에서 모드에 따라 이 서비스 또는 testSheetService를 호출한다.
  */
 
-import type { Episode, Stage, SheetsConfig } from '@/types';
+import type { Episode, Stage, SheetsConfig, Department } from '@/types';
 
 const SHEETS_CONFIG_FILE = 'sheets-config.json';
 
@@ -75,12 +75,12 @@ async function assertOk(promise: Promise<{ ok: boolean; error?: string }>, fallb
   if (!result.ok) throw new Error(result.error ?? fallback);
 }
 
-export async function addEpisodeToSheets(episodeNumber: number): Promise<void> {
-  await assertOk(window.electronAPI.sheetsAddEpisode(episodeNumber), '에피소드 추가 실패');
+export async function addEpisodeToSheets(episodeNumber: number, department: Department = 'bg'): Promise<void> {
+  await assertOk(window.electronAPI.sheetsAddEpisode(episodeNumber, department), '에피소드 추가 실패');
 }
 
-export async function addPartToSheets(episodeNumber: number, partId: string): Promise<void> {
-  await assertOk(window.electronAPI.sheetsAddPart(episodeNumber, partId), '파트 추가 실패');
+export async function addPartToSheets(episodeNumber: number, partId: string, department: Department = 'bg'): Promise<void> {
+  await assertOk(window.electronAPI.sheetsAddPart(episodeNumber, partId, department), '파트 추가 실패');
 }
 
 export async function addSceneToSheets(
