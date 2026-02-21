@@ -10,6 +10,7 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
+  MessageCircle,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
@@ -18,6 +19,8 @@ import { sceneProgress } from '@/utils/calcStats';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
+import { CommentPanel } from './CommentPanel';
+import { getComments } from '@/services/commentService';
 
 // ─── 타입 ──────────────────────────────────────────
 
@@ -300,23 +303,33 @@ export function SceneDetailModal({
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [commentCount, setCommentCount] = useState(0);
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
+  const sceneKey = `${sheetName}:${scene.no}`;
 
-  // ESC 닫기 + 좌우 화살표 씬 이동
+  // 댓글 수 로드
+  useEffect(() => {
+    getComments(sceneKey).then((c) => setCommentCount(c.length));
+  }, [sceneKey]);
+
+  // ESC 닫기 + 좌우 화살표 씬 이동 (이미지 뷰어 열려있으면 방향키 양보)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
       // 입력 중이면 화살표 무시
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      // 이미지 모달이 열려있으면 방향키를 이미지 전환에 양보
+      if (showImageModal) return;
       if (e.key === 'ArrowLeft' && hasPrev) onNavigate?.('prev');
       if (e.key === 'ArrowRight' && hasNext) onNavigate?.('next');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, onNavigate, hasPrev, hasNext]);
+  }, [onClose, onNavigate, hasPrev, hasNext, showImageModal]);
 
   // ── 이미지 핸들러 ──
 
@@ -470,182 +483,246 @@ export function SceneDetailModal({
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        {/* 모달 본체 */}
-        <motion.div
-          key="detail-modal"
-          initial={{ opacity: 0, scale: 0.95, y: 16 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 16 }}
-          transition={{ duration: 0.2, ease: 'easeOut' }}
-          className="relative bg-bg-card rounded-2xl shadow-2xl border border-bg-border w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* ── 헤더 ── */}
-          <div className="sticky top-0 z-10 flex items-center gap-3 px-6 py-4 bg-bg-card/95 backdrop-blur-md border-b border-bg-border rounded-t-2xl">
-            {/* 이전/다음 씬 네비게이션 */}
-            {onNavigate && (
-              <div className="flex items-center gap-1 mr-1">
-                <button
-                  onClick={() => onNavigate('prev')}
-                  disabled={!hasPrev}
-                  className={cn(
-                    'p-1.5 rounded-lg transition-all',
-                    hasPrev
-                      ? 'text-text-secondary hover:text-text-primary hover:bg-bg-primary cursor-pointer'
-                      : 'text-bg-border cursor-not-allowed',
-                  )}
-                  title="이전 씬 (←)"
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <button
-                  onClick={() => onNavigate('next')}
-                  disabled={!hasNext}
-                  className={cn(
-                    'p-1.5 rounded-lg transition-all',
-                    hasNext
-                      ? 'text-text-secondary hover:text-text-primary hover:bg-bg-primary cursor-pointer'
-                      : 'text-bg-border cursor-not-allowed',
-                  )}
-                  title="다음 씬 (→)"
-                >
-                  <ChevronRight size={18} />
-                </button>
-              </div>
-            )}
-            <span className="text-lg font-mono font-bold text-accent">
-              #{scene.no}
-            </span>
-            <span className="text-lg font-semibold text-text-primary">
-              {scene.sceneId || '(씬번호 없음)'}
-            </span>
-            {/* 진행률 */}
-            <div className="flex items-center gap-2 ml-auto mr-2">
-              <div className="w-20 h-1.5 bg-bg-primary rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-300"
-                  style={{
-                    width: `${pct}%`,
-                    backgroundColor:
-                      pct >= 100
-                        ? '#00B894'
-                        : pct >= 50
-                          ? '#FDCB6E'
-                          : '#E17055',
-                  }}
-                />
-              </div>
-              <span className="text-xs font-mono text-text-secondary">
-                {Math.round(pct)}%
-              </span>
-            </div>
-            <button
-              onClick={onClose}
-              className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-primary rounded-lg transition-colors"
+        {/* 모달 + 댓글 패널 컨테이너 */}
+        <div className="flex items-start gap-0" onClick={(e) => e.stopPropagation()}>
+          {/* 모달 래퍼 (말풍선 탭 포지셔닝용) */}
+          <div className="relative">
+            {/* 모달 본체 */}
+            <motion.div
+              key="detail-modal"
+              initial={{ opacity: 0, scale: 0.95, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 16 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="bg-bg-card rounded-2xl shadow-2xl border border-bg-border w-[42rem] max-h-[90vh] overflow-y-auto"
             >
-              <X size={18} />
-            </button>
-          </div>
-
-          <div className="px-6 py-5 flex flex-col gap-6">
-            {/* ── 속성 섹션 ── */}
-            <section>
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-secondary/50 mb-2 px-4">
-                속성
-              </h3>
-              <div className="bg-bg-primary/30 rounded-xl border border-bg-border/50 divide-y divide-bg-border/30">
-                <PropertyRow
-                  label="씬번호"
-                  value={scene.sceneId}
-                  placeholder="예: a001"
-                  onSave={(v) => onFieldUpdate(sceneIndex, 'sceneId', v)}
-                />
-                {/* 담당자 — 사용자 목록 드롭다운 */}
-                <div className="flex items-center gap-3 py-2.5 px-4 hover:bg-bg-primary/40 rounded-lg transition-colors">
-                  <span className="text-xs text-text-secondary w-20 shrink-0 font-medium">담당자</span>
-                  <AssigneeSelect
-                    value={scene.assignee}
-                    onChange={(v) => onFieldUpdate(sceneIndex, 'assignee', v)}
-                    placeholder="담당자 입력"
-                    className="flex-1"
-                  />
+              {/* ── 헤더 ── */}
+              <div className="sticky top-0 z-10 flex items-center gap-3 px-6 py-4 bg-bg-card/95 backdrop-blur-md border-b border-bg-border rounded-t-2xl">
+                {/* 이전/다음 씬 네비게이션 */}
+                {onNavigate && (
+                  <div className="flex items-center gap-1 mr-1">
+                    <button
+                      onClick={() => onNavigate('prev')}
+                      disabled={!hasPrev}
+                      className={cn(
+                        'p-1.5 rounded-lg transition-all',
+                        hasPrev
+                          ? 'text-text-secondary hover:text-text-primary hover:bg-bg-primary cursor-pointer'
+                          : 'text-bg-border cursor-not-allowed',
+                      )}
+                      title="이전 씬 (←)"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <button
+                      onClick={() => onNavigate('next')}
+                      disabled={!hasNext}
+                      className={cn(
+                        'p-1.5 rounded-lg transition-all',
+                        hasNext
+                          ? 'text-text-secondary hover:text-text-primary hover:bg-bg-primary cursor-pointer'
+                          : 'text-bg-border cursor-not-allowed',
+                      )}
+                      title="다음 씬 (→)"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+                )}
+                <span className="text-lg font-mono font-bold text-accent">
+                  #{scene.no}
+                </span>
+                <span className="text-lg font-semibold text-text-primary">
+                  {scene.sceneId || '(씬번호 없음)'}
+                </span>
+                {/* 진행률 */}
+                <div className="flex items-center gap-2 ml-auto mr-2">
+                  <div className="w-20 h-1.5 bg-bg-primary rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-300"
+                      style={{
+                        width: `${pct}%`,
+                        backgroundColor:
+                          pct >= 100
+                            ? '#00B894'
+                            : pct >= 50
+                              ? '#FDCB6E'
+                              : '#E17055',
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs font-mono text-text-secondary">
+                    {Math.round(pct)}%
+                  </span>
                 </div>
-                <PropertyRow
-                  label="레이아웃"
-                  value={scene.layoutId}
-                  placeholder="레이아웃 번호"
-                  onSave={(v) => onFieldUpdate(sceneIndex, 'layoutId', v)}
-                />
-                <PropertyRow
-                  label="메모"
-                  value={scene.memo}
-                  placeholder="메모 입력"
-                  onSave={(v) => onFieldUpdate(sceneIndex, 'memo', v)}
-                />
+                <button
+                  onClick={onClose}
+                  className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-primary rounded-lg transition-colors"
+                >
+                  <X size={18} />
+                </button>
               </div>
-            </section>
 
-            {/* ── 진행 단계 ── */}
-            <section>
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
-                진행 단계
-              </h3>
-              <div className="flex gap-3 px-4">
-                {STAGES.map((stage) => (
-                  <button
-                    key={stage}
-                    onClick={() => onToggle(scene.sceneId, stage)}
-                    className={cn(
-                      'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all',
-                      scene[stage]
-                        ? 'text-bg-primary shadow-md'
-                        : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary',
-                    )}
-                    style={
-                      scene[stage]
-                        ? { backgroundColor: deptConfig.stageColors[stage] }
-                        : undefined
-                    }
-                  >
-                    {scene[stage] ? '✓ ' : ''}
-                    {deptConfig.stageLabels[stage]}
-                  </button>
-                ))}
-              </div>
-            </section>
+              <div className="px-6 py-5 flex flex-col gap-6">
+                {/* ── 속성 섹션 ── */}
+                <section>
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-secondary/50 mb-2 px-4">
+                    속성
+                  </h3>
+                  <div className="bg-bg-primary/30 rounded-xl border border-bg-border/50 divide-y divide-bg-border/30">
+                    <PropertyRow
+                      label="씬번호"
+                      value={scene.sceneId}
+                      placeholder="예: a001"
+                      onSave={(v) => onFieldUpdate(sceneIndex, 'sceneId', v)}
+                    />
+                    {/* 담당자 — 사용자 목록 드롭다운 */}
+                    <div className="flex items-center gap-3 py-2.5 px-4 hover:bg-bg-primary/40 rounded-lg transition-colors">
+                      <span className="text-xs text-text-secondary w-20 shrink-0 font-medium">담당자</span>
+                      <AssigneeSelect
+                        value={scene.assignee}
+                        onChange={(v) => onFieldUpdate(sceneIndex, 'assignee', v)}
+                        placeholder="담당자 입력"
+                        className="flex-1"
+                      />
+                    </div>
+                    <PropertyRow
+                      label="레이아웃"
+                      value={scene.layoutId}
+                      placeholder="레이아웃 번호"
+                      onSave={(v) => onFieldUpdate(sceneIndex, 'layoutId', v)}
+                    />
+                    <PropertyRow
+                      label="메모"
+                      value={scene.memo}
+                      placeholder="메모 입력"
+                      onSave={(v) => onFieldUpdate(sceneIndex, 'memo', v)}
+                    />
+                  </div>
+                </section>
 
-            {/* ── 이미지 섹션 ── */}
-            <section>
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
-                이미지
-              </h3>
-              <div className="flex flex-col gap-5 px-4">
-                <ImageSlot
-                  label="스토리보드"
-                  url={scene.storyboardUrl}
-                  loading={imageLoading === 'storyboard'}
-                  onPickFile={() => pickFile('storyboard')}
-                  onPasteClipboard={() => pasteClipboard('storyboard')}
-                  onRemove={() => removeImage('storyboard')}
-                  onView={() => setShowImageModal(true)}
-                  onPasteEvent={(e) => handlePasteEvent(e, 'storyboard')}
-                  onDrop={(e) => handleDrop(e, 'storyboard')}
-                />
-                <ImageSlot
-                  label="가이드"
-                  url={scene.guideUrl}
-                  loading={imageLoading === 'guide'}
-                  onPickFile={() => pickFile('guide')}
-                  onPasteClipboard={() => pasteClipboard('guide')}
-                  onRemove={() => removeImage('guide')}
-                  onView={() => setShowImageModal(true)}
-                  onPasteEvent={(e) => handlePasteEvent(e, 'guide')}
-                  onDrop={(e) => handleDrop(e, 'guide')}
-                />
+                {/* ── 진행 단계 ── */}
+                <section>
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
+                    진행 단계
+                  </h3>
+                  <div className="flex gap-3 px-4">
+                    {STAGES.map((stage) => (
+                      <button
+                        key={stage}
+                        onClick={() => onToggle(scene.sceneId, stage)}
+                        className={cn(
+                          'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all',
+                          scene[stage]
+                            ? 'text-bg-primary shadow-md'
+                            : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary',
+                        )}
+                        style={
+                          scene[stage]
+                            ? { backgroundColor: deptConfig.stageColors[stage] }
+                            : undefined
+                        }
+                      >
+                        {scene[stage] ? '✓ ' : ''}
+                        {deptConfig.stageLabels[stage]}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {/* ── 이미지 섹션 ── */}
+                <section>
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
+                    이미지
+                  </h3>
+                  <div className="flex flex-col gap-5 px-4">
+                    <ImageSlot
+                      label="스토리보드"
+                      url={scene.storyboardUrl}
+                      loading={imageLoading === 'storyboard'}
+                      onPickFile={() => pickFile('storyboard')}
+                      onPasteClipboard={() => pasteClipboard('storyboard')}
+                      onRemove={() => removeImage('storyboard')}
+                      onView={() => setShowImageModal(true)}
+                      onPasteEvent={(e) => handlePasteEvent(e, 'storyboard')}
+                      onDrop={(e) => handleDrop(e, 'storyboard')}
+                    />
+                    <ImageSlot
+                      label="가이드"
+                      url={scene.guideUrl}
+                      loading={imageLoading === 'guide'}
+                      onPickFile={() => pickFile('guide')}
+                      onPasteClipboard={() => pasteClipboard('guide')}
+                      onRemove={() => removeImage('guide')}
+                      onView={() => setShowImageModal(true)}
+                      onPasteEvent={(e) => handlePasteEvent(e, 'guide')}
+                      onDrop={(e) => handleDrop(e, 'guide')}
+                    />
+                  </div>
+                </section>
               </div>
-            </section>
+            </motion.div>
+
+            {/* ── 말풍선 탭 버튼 (책갈피 스타일) ── */}
+            <motion.button
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.15, duration: 0.2 }}
+              onClick={() => setShowComments(!showComments)}
+              className={cn(
+                'absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl transition-all cursor-pointer',
+                showComments
+                  ? 'bg-accent text-white shadow-lg shadow-accent/30'
+                  : 'bg-bg-border/80 text-text-secondary hover:bg-accent/30 hover:text-accent',
+              )}
+              title="의견"
+            >
+              <MessageCircle size={18} />
+              {commentCount > 0 && (
+                <span className="text-[10px] font-bold leading-none">{commentCount}</span>
+              )}
+            </motion.button>
           </div>
-        </motion.div>
+
+          {/* ── 댓글 패널 ── */}
+          <AnimatePresence>
+            {showComments && (
+              <motion.div
+                key="comment-panel"
+                initial={{ opacity: 0, x: 30, scaleX: 0.9 }}
+                animate={{ opacity: 1, x: 0, scaleX: 1 }}
+                exit={{ opacity: 0, x: 30, scaleX: 0.9 }}
+                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                style={{ transformOrigin: 'left center' }}
+                className="w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col ml-3"
+              >
+                {/* 패널 헤더 */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border shrink-0">
+                  <div className="flex items-center gap-2">
+                    <MessageCircle size={14} className="text-accent" />
+                    <h3 className="text-sm font-medium text-text-primary">의견</h3>
+                    {commentCount > 0 && (
+                      <span className="text-[10px] bg-accent/20 text-accent px-1.5 py-0.5 rounded-full font-medium">
+                        {commentCount}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setShowComments(false)}
+                    className="p-1 text-text-secondary hover:text-text-primary rounded transition-colors cursor-pointer"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                {/* 패널 바디 */}
+                <CommentPanel
+                  sceneKey={sceneKey}
+                  onCountChange={setCommentCount}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </motion.div>
 
       {/* 이미지 전체 뷰 모달 */}

@@ -518,7 +518,7 @@ interface SceneTableProps {
   searchQuery?: string;
 }
 
-/** 검색어 하이라이트 — 매칭 부분을 accent 배경+글로우로 강조 */
+/** 검색어 하이라이트 — 인라인 스타일로 확실한 시각 피드백 */
 function HighlightText({ text, query }: { text: string; query?: string }) {
   if (!query || !text) return <>{text}</>;
   const q = query.toLowerCase();
@@ -527,9 +527,21 @@ function HighlightText({ text, query }: { text: string; query?: string }) {
   return (
     <>
       {text.slice(0, idx)}
-      <mark className="bg-accent/20 text-accent font-semibold px-0.5 rounded-sm ring-1 ring-accent/30" style={{ boxShadow: '0 0 8px rgb(var(--color-accent) / 0.35)' }}>
+      <span
+        style={{
+          backgroundColor: 'rgb(var(--color-accent) / 0.3)',
+          color: 'rgb(var(--color-accent))',
+          fontWeight: 600,
+          padding: '1px 3px',
+          borderRadius: '3px',
+          boxShadow: '0 0 0 1px rgb(var(--color-accent) / 0.5), 0 0 8px rgb(var(--color-accent) / 0.3)',
+          textDecoration: 'underline',
+          textDecorationColor: 'rgb(var(--color-accent) / 0.5)',
+          textUnderlineOffset: '2px',
+        }}
+      >
         {text.slice(idx, idx + query.length)}
-      </mark>
+      </span>
       {text.slice(idx + query.length)}
     </>
   );
@@ -569,7 +581,7 @@ function SceneTable({ scenes, allScenes, department, onToggle, onDelete, onOpenD
               >
                 <td className="px-2 py-2 font-mono text-accent text-xs">#{scene.no}</td>
                 <td className="px-2 py-2 text-text-primary text-xs truncate"><HighlightText text={scene.sceneId || '-'} query={searchQuery} /></td>
-                <td className="px-2 py-2 text-text-secondary text-xs truncate">{scene.assignee || '-'}</td>
+                <td className="px-2 py-2 text-text-secondary text-xs truncate"><HighlightText text={scene.assignee || '-'} query={searchQuery} /></td>
                 <td className="px-2 py-2 text-text-secondary font-mono text-xs truncate">{scene.layoutId ? `#${scene.layoutId}` : '-'}</td>
                 <td className="px-2 py-2 text-text-secondary text-xs truncate"><HighlightText text={scene.memo || '-'} query={searchQuery} /></td>
                 {STAGES.map((stage) => (
@@ -1064,7 +1076,8 @@ export function ScenesView() {
     scenes = scenes.filter(
       (s) =>
         s.sceneId.toLowerCase().includes(q) ||
-        s.memo.toLowerCase().includes(q)
+        s.memo.toLowerCase().includes(q) ||
+        s.assignee.toLowerCase().includes(q)
     );
   }
   // 상태 필터

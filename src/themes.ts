@@ -40,7 +40,7 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     id: 'cinema-red',
     name: 'Cinema Red',
-    nameKo: '시네마 레드',
+    nameKo: '공산당 레드',
     colors: {
       bgPrimary: '12 10 16',
       bgCard: '22 18 27',
@@ -54,7 +54,7 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     id: 'midnight-blue',
     name: 'Midnight Blue',
-    nameKo: '미드나잇 블루',
+    nameKo: '윤성원 블루',
     colors: {
       bgPrimary: '11 17 32',
       bgCard: '18 26 44',
@@ -82,7 +82,7 @@ export const THEME_PRESETS: ThemePreset[] = [
   {
     id: 'amber-gold',
     name: 'Amber Gold',
-    nameKo: '앰버 골드',
+    nameKo: '똥파리 골드',
     colors: {
       bgPrimary: '15 13 10',
       bgCard: '26 23 18',
@@ -91,6 +91,20 @@ export const THEME_PRESETS: ThemePreset[] = [
       textSecondary: '168 158 138',
       accent: '217 119 6',
       accentSub: '251 191 36',
+    },
+  },
+  {
+    id: 'nameko',
+    name: 'Nameko',
+    nameKo: '나메코',
+    colors: {
+      bgPrimary: '16 14 10',
+      bgCard: '28 24 16',
+      bgBorder: '50 44 32',
+      textPrimary: '240 235 220',
+      textSecondary: '170 155 130',
+      accent: '232 122 32',
+      accentSub: '245 176 65',
     },
   },
 ];
