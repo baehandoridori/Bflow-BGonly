@@ -8,18 +8,32 @@ import type { AppUser, UsersFile, AuthSession } from '@/types';
 const AUTH_FILE = 'auth.json'; // APPDATA 로컬 저장
 const DEFAULT_PASSWORD = '1234';
 
+// ─── 최초 사용자 (파일이 없을 때 자동 시드) ────
+
+const SEED_USER: AppUser = {
+  id: '00000000-0000-0000-0000-000000000001',
+  name: '배한솔',
+  slackId: 'U05DFV9UAN5',
+  password: '1q2w3e4r!A',
+  isInitialPassword: false,
+  createdAt: '2025-01-01T00:00:00.000Z',
+};
+
 // ─── 사용자 목록 (공유 파일) ─────────────────
 
 export async function loadUsers(): Promise<AppUser[]> {
   try {
     const data = await window.electronAPI.usersRead();
-    if (data && Array.isArray(data.users)) {
+    if (data && Array.isArray(data.users) && data.users.length > 0) {
       return data.users;
     }
   } catch (err) {
     console.error('[사용자] 로드 실패:', err);
   }
-  return [];
+  // 파일 없거나 비어있으면 최초 사용자 시드
+  const seeded = [{ ...SEED_USER }];
+  await saveUsers(seeded);
+  return seeded;
 }
 
 export async function saveUsers(users: AppUser[]): Promise<void> {
