@@ -160,13 +160,16 @@ export function DepartmentComparisonWidget() {
         {/* 커스텀 툴팁 */}
         {tooltip && (
           <div
-            className="absolute z-50 pointer-events-none px-3 py-2 rounded-lg shadow-lg border border-bg-border/60 text-xs whitespace-nowrap"
+            className="absolute z-50 pointer-events-none px-3 py-2 rounded-xl text-xs whitespace-nowrap"
             style={{
               left: tooltip.x,
               top: tooltip.y,
               transform: 'translate(-50%, -100%)',
-              backgroundColor: 'rgba(26, 29, 39, 0.95)',
-              backdropFilter: 'blur(8px)',
+              backgroundColor: 'rgba(15, 17, 23, 0.55)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
             }}
           >
             <div className="flex items-center gap-1.5 font-semibold mb-1">
