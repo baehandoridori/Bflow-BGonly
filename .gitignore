@@ -7,3 +7,4 @@ dist-electron/
 credentials.json
 service-account.json
 test-data/
+__pycache__/
