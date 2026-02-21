@@ -426,8 +426,11 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             <HighlightText text={scene.assignee || ''} query={searchQuery} />
           </span>
           {commentCount > 0 && (
-            <span className="flex items-center gap-0.5 text-accent" title={`의견 ${commentCount}개`}>
-              <MessageCircle size={12} />
+            <span
+              className="flex items-center gap-0.5 bg-accent/20 text-accent px-1.5 py-0.5 rounded-full"
+              title={`의견 ${commentCount}개`}
+            >
+              <MessageCircle size={11} fill="currentColor" />
               <span className="text-[10px] font-bold leading-none">{commentCount}</span>
             </span>
           )}
@@ -443,12 +446,12 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 
       {/* ── 가운데: 이미지 썸네일 ── */}
       {hasImages ? (
-        <div className="flex gap-px bg-bg-border">
+        <div className="flex gap-px bg-bg-border overflow-hidden">
           {scene.storyboardUrl && (
             <img
               src={scene.storyboardUrl}
               alt="SB"
-              className="flex-1 h-28 object-cover bg-bg-primary"
+              className="flex-1 h-28 object-contain bg-bg-primary min-w-0"
               draggable={false}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
@@ -457,7 +460,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             <img
               src={scene.guideUrl}
               alt="Guide"
-              className="flex-1 h-28 object-cover bg-bg-primary"
+              className="flex-1 h-28 object-contain bg-bg-primary min-w-0"
               draggable={false}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
@@ -610,7 +613,7 @@ function SceneTable({ scenes, allScenes, department, commentCounts, sheetName, o
                 <td className="px-2 py-2 font-mono text-accent text-xs">
                   <span className="flex items-center gap-1">
                     #{scene.no}
-                    {(() => { const cc = commentCounts[`${sheetName}:${scene.no}`]; return cc > 0 ? <span className="inline-flex items-center gap-0.5 text-accent"><MessageCircle size={11} /><span className="text-[10px] font-bold">{cc}</span></span> : null; })()}
+                    {(() => { const cc = commentCounts[`${sheetName}:${scene.no}`]; return cc > 0 ? <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full"><MessageCircle size={10} fill="currentColor" /><span className="text-[10px] font-bold">{cc}</span></span> : null; })()}
                   </span>
                 </td>
                 <td className="px-2 py-2 text-text-primary text-xs truncate"><HighlightText text={scene.sceneId || '-'} query={searchQuery} /></td>
