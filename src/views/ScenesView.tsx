@@ -17,49 +17,76 @@ function progressGradient(pct: number): string {
   return 'linear-gradient(90deg, #FF6B6B 0%, #E17055 100%)';
 }
 
-/* ── 보케 파티클 (완료 파트 배경) ── */
-function BokehBackground() {
-  const particles = useMemo(() =>
-    Array.from({ length: 18 }, (_, i) => ({
-      id: i,
-      x: Math.random() * 100,
-      y: Math.random() * 100,
-      size: 4 + Math.random() * 12,
-      delay: Math.random() * 6,
-      duration: 5 + Math.random() * 7,
-      color: ['#00B894', '#55efc4', '#6C5CE7', '#A29BFE', '#FDCB6E', '#74B9FF'][Math.floor(Math.random() * 6)],
-    })), []
-  );
+/* ── 레이어드 보케 (카메라 아웃포커스 느낌) ── */
+function BokehLayer({ count, minSize, maxSize, opacity, speed }: {
+  count: number; minSize: number; maxSize: number; opacity: number; speed: number;
+}) {
+  const orbs = useMemo(() => {
+    const palette = ['#00B894', '#55efc4', '#6C5CE7', '#A29BFE', '#FDCB6E', '#74B9FF', '#fd79a8'];
+    return Array.from({ length: count }, (_, i) => {
+      const size = minSize + Math.random() * (maxSize - minSize);
+      return {
+        id: i,
+        x: Math.random() * 110 - 5,
+        y: Math.random() * 110 - 5,
+        size,
+        color: palette[i % palette.length],
+        dur: speed + Math.random() * speed,
+        delay: Math.random() * speed,
+        dx: [(Math.random() - 0.5) * 60, (Math.random() - 0.5) * 50, (Math.random() - 0.5) * 40],
+        dy: [(Math.random() - 0.5) * 50, (Math.random() - 0.5) * 60, (Math.random() - 0.5) * 35],
+      };
+    });
+  }, [count, minSize, maxSize, speed]);
 
   return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      {particles.map((p) => (
+    <>
+      {orbs.map((o) => (
         <motion.div
-          key={p.id}
+          key={o.id}
           className="absolute rounded-full"
           style={{
-            width: p.size,
-            height: p.size,
-            left: `${p.x}%`,
-            top: `${p.y}%`,
-            background: `radial-gradient(circle, ${p.color}60 0%, ${p.color}00 70%)`,
-            boxShadow: `0 0 ${p.size * 2}px ${p.color}30`,
+            width: o.size, height: o.size,
+            left: `${o.x}%`, top: `${o.y}%`,
+            background: `radial-gradient(circle at 35% 35%, ${o.color}${Math.round(opacity * 255).toString(16).padStart(2, '0')} 0%, ${o.color}00 70%)`,
+            filter: o.size > 30 ? `blur(${Math.round(o.size / 8)}px)` : 'none',
           }}
           animate={{
-            x: [0, (Math.random() - 0.5) * 40, (Math.random() - 0.5) * 30, 0],
-            y: [0, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 40, 0],
-            opacity: [0.3, 0.7, 0.4, 0.3],
-            scale: [1, 1.3, 0.9, 1],
+            x: [0, ...o.dx, 0],
+            y: [0, ...o.dy, 0],
+            opacity: [opacity * 0.6, opacity, opacity * 0.7, opacity * 0.5, opacity * 0.6],
+            scale: [1, 1.15, 0.95, 1.1, 1],
           }}
-          transition={{
-            duration: p.duration,
-            delay: p.delay,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
+          transition={{ duration: o.dur, delay: o.delay, repeat: Infinity, ease: 'easeInOut' }}
         />
       ))}
-    </div>
+    </>
+  );
+}
+
+/* ── 오로라 웨이브 (흐르는 그라데이션) ── */
+function AuroraWave() {
+  return (
+    <>
+      <motion.div
+        className="absolute -inset-[50%] rounded-full"
+        style={{
+          background: 'conic-gradient(from 0deg, #00B89410, #6C5CE710, #55efc410, #FDCB6E10, #A29BFE10, #00B89410)',
+          filter: 'blur(40px)',
+        }}
+        animate={{ rotate: [0, 360] }}
+        transition={{ duration: 25, repeat: Infinity, ease: 'linear' }}
+      />
+      <motion.div
+        className="absolute -inset-[30%] rounded-full"
+        style={{
+          background: 'conic-gradient(from 180deg, #55efc408, #74B9FF08, #A29BFE08, #00B89408, #55efc408)',
+          filter: 'blur(30px)',
+        }}
+        animate={{ rotate: [360, 0] }}
+        transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+      />
+    </>
   );
 }
 
@@ -69,19 +96,57 @@ function PartCompleteOverlay() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
+      transition={{ duration: 0.8, ease: 'easeOut' }}
       className="absolute inset-0 z-10 pointer-events-none overflow-hidden rounded-xl"
     >
-      <BokehBackground />
+      {/* 레이어 0: 오로라 웨이브 */}
+      <AuroraWave />
+
+      {/* 레이어 1: 큰 소프트 보케 (배경 깊이) */}
+      <BokehLayer count={6} minSize={40} maxSize={90} opacity={0.15} speed={8} />
+
+      {/* 레이어 2: 중간 보케 */}
+      <BokehLayer count={10} minSize={12} maxSize={35} opacity={0.25} speed={6} />
+
+      {/* 레이어 3: 작은 샤프 보케 (전경) */}
+      <BokehLayer count={14} minSize={3} maxSize={10} opacity={0.5} speed={4} />
+
+      {/* 완료 뱃지 */}
       <div className="absolute inset-0 flex items-center justify-center">
         <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.3, type: 'spring', stiffness: 200, damping: 20 }}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-bg-card/80 backdrop-blur-sm border border-green-500/30 shadow-lg shadow-green-500/10"
+          initial={{ opacity: 0, scale: 0.5, y: 10 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ delay: 0.4, type: 'spring', stiffness: 180, damping: 14 }}
+          className="relative"
         >
-          <Sparkles size={16} className="text-green-400" />
-          <span className="text-sm font-bold text-green-400">이 파트는 완료되었습니다!</span>
-          <Sparkles size={16} className="text-green-400" />
+          {/* 뱃지 글로우 */}
+          <motion.div
+            className="absolute -inset-3 rounded-2xl"
+            style={{
+              background: 'radial-gradient(ellipse, #00B89425 0%, transparent 70%)',
+              filter: 'blur(8px)',
+            }}
+            animate={{ opacity: [0.5, 1, 0.5], scale: [0.95, 1.05, 0.95] }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          {/* 뱃지 본체 */}
+          <div className="relative flex items-center gap-2.5 px-6 py-3 rounded-xl bg-bg-card/90 backdrop-blur-md border border-green-400/40 shadow-xl shadow-green-500/15">
+            <motion.div
+              animate={{ rotate: [0, 15, -15, 0] }}
+              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
+            >
+              <Sparkles size={18} className="text-green-400 drop-shadow-[0_0_6px_#00B89480]" />
+            </motion.div>
+            <span className="text-sm font-bold bg-gradient-to-r from-green-300 to-emerald-400 bg-clip-text text-transparent drop-shadow-[0_0_8px_#00B89440]">
+              이 파트는 완료되었습니다!
+            </span>
+            <motion.div
+              animate={{ rotate: [0, -15, 15, 0] }}
+              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', delay: 1.5 }}
+            >
+              <Sparkles size={18} className="text-green-400 drop-shadow-[0_0_6px_#00B89480]" />
+            </motion.div>
+          </div>
         </motion.div>
       </div>
     </motion.div>
