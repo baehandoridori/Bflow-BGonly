@@ -1649,7 +1649,7 @@ export function ScenesView() {
                 key={dept}
                 onClick={() => { setSelectedDepartment(dept); setSelectedPart(null); }}
                 className={cn(
-                  'px-3 py-1.5 text-xs rounded-md transition-all duration-200 font-medium',
+                  'px-4 py-2 text-sm rounded-md transition-all duration-200 font-medium',
                   isActive
                     ? 'text-white shadow-sm'
                     : 'text-text-secondary hover:text-text-primary',
@@ -1669,7 +1669,7 @@ export function ScenesView() {
           <select
             value={selectedEpisode ?? currentEp?.episodeNumber ?? ''}
             onChange={(e) => setSelectedEpisode(Number(e.target.value))}
-            className="bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary"
+            className="bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary font-medium"
           >
             {episodeOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -1683,7 +1683,7 @@ export function ScenesView() {
               className="p-1.5 text-text-secondary/40 hover:text-text-primary rounded transition-colors"
               title="에피소드 관리"
             >
-              <MoreVertical size={14} />
+              <MoreVertical size={16} />
             </button>
           )}
         </div>
@@ -1691,7 +1691,7 @@ export function ScenesView() {
         {/* 에피소드 추가 */}
         <button
           onClick={handleAddEpisode}
-          className="px-2.5 py-1.5 bg-accent/20 text-accent text-xs rounded-lg hover:bg-accent/30 transition-colors"
+          className="px-3 py-2 bg-accent/20 text-accent text-sm font-medium rounded-lg hover:bg-accent/30 transition-colors"
           title={`EP.${String(nextEpisodeNumber).padStart(2, '0')} 추가`}
         >
           + EP
@@ -1711,15 +1711,15 @@ export function ScenesView() {
                   openPartMenu(e);
                 }}
                 className={cn(
-                  'px-3 py-1.5 rounded-lg text-sm transition-colors',
+                  'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
                   isActive
-                    ? 'bg-accent text-white'
-                    : 'bg-bg-primary text-text-secondary hover:text-text-primary'
+                    ? 'bg-accent text-white shadow-sm shadow-accent/20'
+                    : 'bg-bg-primary text-text-secondary hover:text-text-primary border border-bg-border'
                 )}
                 title={memo ? `메모: ${memo}` : undefined}
               >
                 {part.partId}파트
-                {memo && <span className="ml-1 text-[10px] italic opacity-70">({memo})</span>}
+                {memo && <span className="ml-1 text-xs italic opacity-70">({memo})</span>}
               </button>
             );
           })}
@@ -1736,11 +1736,11 @@ export function ScenesView() {
         </div>
 
         {/* 담당자 필터 */}
-        <div className="flex gap-1">
+        <div className="flex gap-1.5">
           <button
             onClick={() => setSelectedAssignee(null)}
             className={cn(
-              'px-2.5 py-1 rounded-md text-xs transition-colors',
+              'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
               !selectedAssignee
                 ? 'bg-accent/20 text-accent'
                 : 'text-text-secondary hover:text-text-primary'
@@ -1753,7 +1753,7 @@ export function ScenesView() {
               key={name}
               onClick={() => setSelectedAssignee(name)}
               className={cn(
-                'px-2.5 py-1 rounded-md text-xs transition-colors',
+                'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                 selectedAssignee === name
                   ? 'bg-accent/20 text-accent'
                   : 'text-text-secondary hover:text-text-primary'
@@ -1765,7 +1765,7 @@ export function ScenesView() {
         </div>
 
         {/* 구분선 */}
-        <div className="w-px h-6 bg-bg-border" />
+        <div className="w-px h-7 bg-bg-border" />
 
         {/* 상태 필터 */}
         {(['all', 'not-started', 'in-progress', 'done'] as StatusFilter[]).map((f) => {
@@ -1777,7 +1777,7 @@ export function ScenesView() {
               key={f}
               onClick={() => setStatusFilter(f)}
               className={cn(
-                'px-2 py-1 rounded-md text-xs transition-colors',
+                'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                 statusFilter === f
                   ? f === 'done' ? 'bg-green-500/20 text-green-400'
                     : f === 'not-started' ? 'bg-red-500/20 text-red-400'
@@ -1794,12 +1794,12 @@ export function ScenesView() {
         {/* 오른쪽 그룹: 정렬 + 뷰모드 + 검색 */}
         <div className="flex items-center gap-2 ml-auto">
           {/* 정렬 */}
-          <div className="flex items-center gap-1">
-            <ArrowUpDown size={14} className="text-text-secondary" />
+          <div className="flex items-center gap-1.5">
+            <ArrowUpDown size={16} className="text-text-secondary" />
             <select
               value={sortKey}
               onChange={(e) => setSortKey(e.target.value as SortKey)}
-              className="bg-bg-primary border border-bg-border rounded px-2 py-1 text-xs text-text-primary"
+              className="bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary"
             >
               <option value="no">번호순</option>
               <option value="assignee">담당자순</option>
@@ -1808,7 +1808,7 @@ export function ScenesView() {
             </select>
             <button
               onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
-              className="px-1.5 py-1 text-xs text-text-secondary hover:text-text-primary rounded hover:bg-bg-border/50"
+              className="px-2 py-1.5 text-sm text-text-secondary hover:text-text-primary rounded-lg hover:bg-bg-border/50 transition-colors"
               title={sortDir === 'asc' ? '오름차순' : '내림차순'}
             >
               {sortDir === 'asc' ? '↑' : '↓'}
@@ -1820,22 +1820,22 @@ export function ScenesView() {
             <button
               onClick={() => setSceneGroupMode('flat')}
               className={cn(
-                'p-1.5 transition-colors',
+                'p-2 transition-colors',
                 sceneGroupMode === 'flat' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
               )}
               title="씬번호별"
             >
-              <List size={14} />
+              <List size={16} />
             </button>
             <button
               onClick={() => setSceneGroupMode('layout')}
               className={cn(
-                'p-1.5 transition-colors',
+                'p-2 transition-colors',
                 sceneGroupMode === 'layout' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
               )}
               title="레이아웃별"
             >
-              <Layers size={14} />
+              <Layers size={16} />
             </button>
           </div>
 
@@ -1844,22 +1844,22 @@ export function ScenesView() {
             <button
               onClick={() => setSceneViewMode('card')}
               className={cn(
-                'p-1.5 transition-colors',
+                'p-2 transition-colors',
                 sceneViewMode === 'card' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
               )}
               title="카드 뷰"
             >
-              <LayoutGrid size={14} />
+              <LayoutGrid size={16} />
             </button>
             <button
               onClick={() => setSceneViewMode('table')}
               className={cn(
-                'p-1.5 transition-colors',
+                'p-2 transition-colors',
                 sceneViewMode === 'table' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
               )}
               title="테이블 뷰"
             >
-              <Table2 size={14} />
+              <Table2 size={16} />
             </button>
           </div>
 
@@ -1869,29 +1869,28 @@ export function ScenesView() {
             placeholder="검색..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 w-36"
+            className="bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 w-40"
           />
         </div>
       </div>
 
       {/* 상단 고정 진행도 */}
-      <div className="flex items-center gap-3 bg-bg-card border border-bg-border rounded-xl px-4 py-2">
-        <span className="text-sm text-text-secondary">
+      <div className="flex items-center gap-4 bg-bg-card border border-bg-border rounded-xl px-5 py-3">
+        <span className="text-sm font-medium text-text-secondary">
           {scenes.length}씬 표시 중
         </span>
-        <div className="flex-1 h-2 bg-bg-primary rounded-full overflow-hidden">
+        <div className="flex-1 h-2.5 bg-bg-primary rounded-full overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-700 ease-out"
             style={{ width: `${overallPct}%`, background: progressGradient(overallPct) }}
           />
         </div>
-        <span className="text-sm font-bold text-accent">{overallPct}%</span>
+        <span className="text-base font-bold text-accent">{overallPct}%</span>
         {/* 씬 추가 버튼 */}
         {currentPart && (
           <button
             onClick={() => setShowAddScene(true)}
-  
-            className="px-3 py-1 bg-accent text-white text-xs rounded-md hover:bg-accent/80 transition-colors"
+            className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 shadow-sm shadow-accent/20 transition-colors"
           >
             + 씬 추가
           </button>

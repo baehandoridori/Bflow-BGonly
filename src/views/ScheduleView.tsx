@@ -494,7 +494,7 @@ function EventCreateModal({
         <div className="p-5 flex flex-col gap-4">
           {/* 제목 */}
           <div>
-            <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">제목</label>
+            <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">제목</label>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -507,7 +507,7 @@ function EventCreateModal({
           {/* 날짜 */}
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">시작일</label>
+              <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">시작일</label>
               <input
                 type="date"
                 value={startDate}
@@ -516,7 +516,7 @@ function EventCreateModal({
               />
             </div>
             <div className="flex-1">
-              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">마감일</label>
+              <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">마감일</label>
               <input
                 type="date"
                 value={endDate}
@@ -528,7 +528,7 @@ function EventCreateModal({
 
           {/* 이벤트 유형 */}
           <div>
-            <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">유형</label>
+            <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">유형</label>
             <div className="flex gap-1.5 mt-1">
               {([['custom', '일반'], ['episode', '에피소드'], ['part', '파트'], ['scene', '씬']] as const).map(([t, l]) => (
                 <button
@@ -550,7 +550,7 @@ function EventCreateModal({
           {/* 연결 항목 (에피소드/파트/씬 선택) */}
           {evType !== 'custom' && (
             <div className="flex flex-col gap-2 bg-bg-primary/50 rounded-xl p-3 border border-bg-border/50">
-              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">연결 대상</label>
+              <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">연결 대상</label>
               <select
                 value={linkedEp}
                 onChange={(e) => { setLinkedEp(e.target.value ? Number(e.target.value) : ''); setLinkedPart(''); setLinkedScene(''); }}
@@ -594,7 +594,7 @@ function EventCreateModal({
 
           {/* 색상 */}
           <div>
-            <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">색상</label>
+            <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">색상</label>
             <div className="flex gap-1.5 mt-1.5">
               {EVENT_COLORS.map((c) => (
                 <button
@@ -612,7 +612,7 @@ function EventCreateModal({
 
           {/* 메모 */}
           <div>
-            <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모</label>
+            <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">메모</label>
             <textarea
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
@@ -1139,7 +1139,7 @@ export function ScheduleView() {
                 key={f}
                 onClick={() => setFilter(f)}
                 className={cn(
-                  'px-2.5 py-1 text-[10px] rounded-md font-medium cursor-pointer transition-colors',
+                  'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
                   filter === f
                     ? 'bg-accent/20 text-accent'
                     : 'text-text-secondary hover:text-text-primary',
@@ -1157,7 +1157,7 @@ export function ScheduleView() {
                 key={f}
                 onClick={() => setDeptFilter(f)}
                 className={cn(
-                  'px-2.5 py-1 text-[10px] rounded-md font-medium cursor-pointer transition-colors',
+                  'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
                   deptFilter === f
                     ? 'bg-accent/20 text-accent'
                     : 'text-text-secondary hover:text-text-primary',
@@ -1175,7 +1175,7 @@ export function ScheduleView() {
                 key={m}
                 onClick={() => setViewMode(m)}
                 className={cn(
-                  'px-3 py-1 text-[11px] rounded-md font-medium cursor-pointer transition-colors',
+                  'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
                   viewMode === m
                     ? 'bg-accent/20 text-accent'
                     : 'text-text-secondary hover:text-text-primary',
@@ -1189,16 +1189,16 @@ export function ScheduleView() {
           {/* 이벤트 생성 */}
           <button
             onClick={() => { setCreateDate(undefined); setShowCreate(true); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent/80 text-white text-xs font-medium transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-accent hover:bg-accent/80 text-white text-sm font-medium shadow-sm shadow-accent/20 transition-colors cursor-pointer"
           >
-            <Plus size={14} />
+            <Plus size={16} />
             이벤트
           </button>
         </div>
       </div>
 
       {/* ═══ 이벤트 수 통계 ═══ */}
-      <div className="flex items-center gap-4 text-xs text-text-secondary/50 px-1">
+      <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-1">
         <span>전체 {events.length}개</span>
         <span className="text-bg-border/50">·</span>
         <span>이번 달 {events.filter((e) => {
