@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-electron/
+*.local
+.env
+.env.*
+credentials.json
+service-account.json
+test-data/
+__pycache__/
