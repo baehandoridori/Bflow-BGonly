@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LogIn, ChevronRight } from 'lucide-react';
 import { login } from '@/services/userService';
@@ -226,122 +226,131 @@ function PlexusBackground() {
 }
 
 // ─── 드라마틱 텍스트 모핑 애니메이션 ───────────────────────────
-// 시퀀스: "Be the flow." → "BAE the flow." → "B the flow." → "B flow."
+// 시퀀스: "Be the flow." → "BAE the flow." → "B the flow." → "Bflow."
+// "B"는 항상 고정, 서픽스("e"→"AE"→"")만 부드럽게 모핑
+// " the "는 연기처럼 사라지며 공간 수축
 
 type MorphStage = 0 | 1 | 2 | 3 | 4;
-// 0: 초기 등장 "Be the flow."
-// 1: "Be" → "BAE" 모핑
-// 2: "BAE" → "B" 모핑
-// 3: "the " 연기처럼 사라짐 + 공간 수축 → "B flow."
-// 4: 최종 상태 + 서브타이틀 + CTA
 
-const PREFIXES: Record<number, string> = { 0: 'Be', 1: 'BAE', 2: 'B', 3: 'B', 4: 'B' };
-
-const smokeExit = {
-  opacity: 0,
-  y: -30,
-  filter: 'blur(16px)',
-  scale: 1.1,
-};
-const smokeEnter = {
-  opacity: 0,
-  y: 20,
-  filter: 'blur(12px)',
-  scale: 0.9,
-};
-const smokeVisible = {
-  opacity: 1,
-  y: 0,
-  filter: 'blur(0px)',
-  scale: 1,
-};
+const STAGE_SUFFIX: string[] = ['e', 'AE', '', '', ''];
 
 function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
   const [stage, setStage] = useState<MorphStage>(0);
   const doneRef = useRef(false);
 
+  // ── 서픽스/the 너비 측정 (부드러운 width 애니메이션용) ──
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const theInnerRef = useRef<HTMLSpanElement>(null);
+  const [suffixW, setSuffixW] = useState<Record<string, number>>({ e: 0, AE: 0, '': 0 });
+  const [theW, setTheW] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = measureRef.current;
+    if (!el) return;
+    const w: Record<string, number> = {};
+    for (const s of ['e', 'AE']) {
+      el.textContent = s;
+      w[s] = el.getBoundingClientRect().width;
+    }
+    w[''] = 0;
+    setSuffixW(w);
+    if (theInnerRef.current) {
+      setTheW(theInnerRef.current.getBoundingClientRect().width);
+    }
+  }, []);
+
+  // ── 스테이지 타이머 ──
   useEffect(() => {
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    // Stage 0 → 1: "Be" → "BAE" (1.8s 후)
-    timers.push(setTimeout(() => setStage(1), 1800));
-    // Stage 1 → 2: "BAE" → "B" (1.8 + 1.0 = 2.8s)
-    timers.push(setTimeout(() => setStage(2), 2800));
-    // Stage 2 → 3: "the" 사라짐 (2.8 + 1.0 = 3.8s)
-    timers.push(setTimeout(() => setStage(3), 3800));
-    // Stage 3 → 4: 최종 (3.8 + 1.2 = 5.0s)
-    timers.push(setTimeout(() => {
-      setStage(4);
-      if (!doneRef.current) {
-        doneRef.current = true;
-        onAnimationDone();
-      }
-    }, 5000));
+    const timers = [
+      setTimeout(() => setStage(1), 1800),  // Be → BAE
+      setTimeout(() => setStage(2), 2800),  // BAE → B
+      setTimeout(() => setStage(3), 3800),  // "the" 사라짐
+      setTimeout(() => {
+        setStage(4);
+        if (!doneRef.current) { doneRef.current = true; onAnimationDone(); }
+      }, 5000),
+    ];
     return () => timers.forEach(clearTimeout);
   }, [onAnimationDone]);
 
-  const prefixText = PREFIXES[stage];
+  const suffix = STAGE_SUFFIX[stage];
   const showThe = stage < 3;
+  const showSub = stage >= 4;
 
   return (
-    <motion.div className="flex flex-col items-center gap-5 z-10 relative">
-      {/* 메인 텍스트 행 */}
-      <h1 className="flex items-baseline overflow-hidden text-5xl md:text-7xl font-bold tracking-tight">
-        {/* B / Be / BAE — 프리픽스 (모핑) */}
-        <AnimatePresence mode="wait">
-          <motion.span
-            key={prefixText}
-            initial={stage === 0 ? { y: 80, opacity: 0, rotateX: -90 } : smokeEnter}
-            animate={stage === 0 ? { y: 0, opacity: 1, rotateX: 0 } : smokeVisible}
-            exit={smokeExit}
-            transition={{
-              duration: stage === 0 ? 0.7 : 0.5,
-              ease: stage === 0 ? [0.16, 1, 0.3, 1] : [0.4, 0, 0.2, 1],
-              delay: stage === 0 ? 0.3 : 0,
-            }}
-            className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent"
-          >
-            {prefixText}
-          </motion.span>
-        </AnimatePresence>
+    <motion.div layout className="flex flex-col items-center gap-5 z-10 relative">
+      {/* 숨겨진 측정용 스팬 — 실제 텍스트와 동일 폰트 */}
+      <span
+        ref={measureRef}
+        className="absolute invisible pointer-events-none text-5xl md:text-7xl font-bold tracking-tight"
+        aria-hidden="true"
+      />
 
-        {/* " the " — 연기처럼 사라짐 */}
+      {/* ── 메인 텍스트 행 ── */}
+      <motion.h1
+        layout="position"
+        transition={{ layout: { type: 'spring', stiffness: 300, damping: 30 } }}
+        initial={{ opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-baseline text-5xl md:text-7xl font-bold tracking-tight"
+        style={{ transition: 'opacity 0.8s ease 0.3s, transform 0.8s cubic-bezier(0.16,1,0.3,1) 0.3s' }}
+      >
+        {/* "B" — 항상 고정, 그래디언트 */}
+        <span className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent">
+          B
+        </span>
+
+        {/* 서픽스 컨테이너 — 측정값 기반 부드러운 너비 전환 */}
         <motion.span
+          initial={false}
+          animate={{ width: suffixW[suffix] ?? 0 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="inline-block overflow-hidden align-baseline"
+          style={{ height: '1.15em' }}
+        >
+          <AnimatePresence mode="popLayout">
+            {suffix && (
+              <motion.span
+                key={suffix}
+                initial={{ opacity: 0, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, filter: 'blur(12px)' }}
+                transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+                className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent"
+              >
+                {suffix}
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </motion.span>
+
+        {/* " the " — 연기처럼 사라지며 공간 수축 */}
+        <motion.span
+          initial={false}
           animate={{
+            width: showThe ? theW : 0,
             opacity: showThe ? 1 : 0,
             filter: showThe ? 'blur(0px)' : 'blur(16px)',
-            width: showThe ? 'auto' : 0,
-            marginLeft: showThe ? '0px' : '0px',
-            marginRight: showThe ? '0px' : '0px',
-            paddingLeft: showThe ? '0px' : '0px',
-            paddingRight: showThe ? '0px' : '0px',
           }}
           transition={{
-            opacity: { duration: 0.8, ease: [0.4, 0, 0.2, 1] },
-            filter: { duration: 0.8, ease: [0.4, 0, 0.2, 1] },
-            width: { duration: 1.0, ease: [0.16, 1, 0.3, 1], delay: 0.2 },
+            width: { type: 'spring', stiffness: 200, damping: 25, delay: showThe ? 0 : 0.15 },
+            opacity: { duration: 0.7, ease: 'easeInOut' },
+            filter: { duration: 0.7, ease: 'easeInOut' },
           }}
-          className="inline-block text-text-primary overflow-hidden whitespace-nowrap"
-          style={{ originX: 0.5 }}
+          className="inline-block overflow-hidden whitespace-nowrap text-text-primary"
         >
-          {'\u00A0the'}
+          <span ref={theInnerRef}>{'\u00A0the\u00A0'}</span>
         </motion.span>
 
-        {/* " flow." — 고정 */}
-        <motion.span
-          initial={{ y: 80, opacity: 0, rotateX: -90 }}
-          animate={{ y: 0, opacity: 1, rotateX: 0 }}
-          transition={{ delay: 0.6, duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-          className="inline-block text-text-primary"
-          style={{ whiteSpace: 'pre' }}
-        >
-          {'\u00A0flow.'}
-        </motion.span>
-      </h1>
+        {/* "flow." — 항상 고정, 공백 없음 */}
+        <span className="inline-block text-text-primary">flow.</span>
+      </motion.h1>
 
-      {/* 서브타이틀 */}
+      {/* ── 서브타이틀 (등장 시 Bflow가 위로 부드럽게 올라감) ── */}
       <AnimatePresence>
-        {stage >= 4 && (
+        {showSub && (
           <motion.p
+            layout
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, ease: 'easeOut' }}
@@ -354,8 +363,9 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
 
       {/* 디바이더 */}
       <motion.div
+        layout
         initial={{ scaleX: 0 }}
-        animate={{ scaleX: stage >= 4 ? 1 : 0 }}
+        animate={{ scaleX: showSub ? 1 : 0 }}
         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
         className="h-px w-24 bg-gradient-to-r from-transparent via-accent to-transparent"
       />
@@ -370,16 +380,29 @@ function ClickPrompt() {
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -5 }}
       transition={{ delay: 0.3, duration: 0.6, ease: 'easeOut' }}
       className="absolute bottom-20 left-0 right-0 flex justify-center z-10"
     >
       <motion.div
-        animate={{ opacity: [0.4, 0.8, 0.4] }}
-        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-        className="flex items-center gap-1.5 text-xs text-text-secondary/50 tracking-widest uppercase"
+        animate={{
+          opacity: [0.7, 1, 0.7],
+          textShadow: [
+            '0 0 8px rgba(108,92,231,0.4), 0 0 24px rgba(108,92,231,0.15)',
+            '0 0 16px rgba(108,92,231,0.7), 0 0 48px rgba(108,92,231,0.3), 0 0 80px rgba(162,155,254,0.15)',
+            '0 0 8px rgba(108,92,231,0.4), 0 0 24px rgba(108,92,231,0.15)',
+          ],
+        }}
+        transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+        className="flex items-center gap-2 text-sm text-accent tracking-[0.2em] uppercase font-light"
       >
-        click to continue
-        <ChevronRight size={12} className="animate-pulse" />
+        click anywhere to continue
+        <motion.span
+          animate={{ x: [0, 4, 0] }}
+          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+        >
+          <ChevronRight size={14} />
+        </motion.span>
       </motion.div>
     </motion.div>
   );
