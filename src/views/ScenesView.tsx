@@ -6,7 +6,100 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X } from 'lucide-react';
+
+/* ── 라쏘 드래그 선택 훅 ── */
+interface LassoRect { x: number; y: number; w: number; h: number }
+
+function useLassoSelection(
+  containerRef: React.RefObject<HTMLElement | null>,
+  cardSelector: string,
+  getSceneId: (el: Element) => string | null,
+  onSelectionChange: (ids: Set<string>) => void,
+  enabled: boolean,
+) {
+  const [lassoRect, setLassoRect] = useState<LassoRect | null>(null);
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+  const isDragging = useRef(false);
+  const prevIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!enabled) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onMouseDown = (e: MouseEvent) => {
+      // 버튼/인풋/select/체크박스 위에서는 라쏘 시작 안 함
+      const target = e.target as HTMLElement;
+      if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
+      // 좌클릭만
+      if (e.button !== 0) return;
+
+      startRef.current = { x: e.clientX, y: e.clientY };
+      isDragging.current = false;
+
+      const onMouseMove = (me: MouseEvent) => {
+        if (!startRef.current) return;
+        const dx = me.clientX - startRef.current.x;
+        const dy = me.clientY - startRef.current.y;
+        // 5px 이상 이동해야 라쏘 시작 (클릭과 구분)
+        if (!isDragging.current && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+        isDragging.current = true;
+
+        const x = Math.min(startRef.current.x, me.clientX);
+        const y = Math.min(startRef.current.y, me.clientY);
+        const w = Math.abs(dx);
+        const h = Math.abs(dy);
+        setLassoRect({ x, y, w, h });
+
+        // 실시간으로 겹치는 카드 계산
+        const cards = container.querySelectorAll(cardSelector);
+        const selected = new Set<string>();
+        cards.forEach((card) => {
+          const rect = card.getBoundingClientRect();
+          // 교차 판정
+          if (
+            rect.left < x + w &&
+            rect.right > x &&
+            rect.top < y + h &&
+            rect.bottom > y
+          ) {
+            const id = getSceneId(card);
+            if (id) selected.add(id);
+          }
+        });
+        // 변경 시에만 콜백
+        if (selected.size !== prevIds.current.size || ![...selected].every((id) => prevIds.current.has(id))) {
+          prevIds.current = selected;
+          onSelectionChange(selected);
+        }
+      };
+
+      const onMouseUp = (me: MouseEvent) => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        if (!isDragging.current) {
+          // 단순 클릭이면 선택 해제 (Ctrl 없으면)
+          if (!me.ctrlKey && !me.metaKey) {
+            onSelectionChange(new Set());
+            prevIds.current = new Set();
+          }
+        }
+        startRef.current = null;
+        isDragging.current = false;
+        setLassoRect(null);
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    };
+
+    container.addEventListener('mousedown', onMouseDown);
+    return () => container.removeEventListener('mousedown', onMouseDown);
+  }, [enabled, containerRef, cardSelector, getSceneId, onSelectionChange]);
+
+  return { lassoRect, isSelecting: isDragging.current };
+}
 
 /* ── 글로우 하이라이트 CSS 주입 (스포트라이트/인원별 뷰에서 이동 시) ── */
 const GLOW_CSS = `
@@ -257,27 +350,40 @@ interface SceneCardProps {
   celebrating: boolean;
   department: Department;
   isHighlighted?: boolean;
+  isSelected?: boolean;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: () => void;
   onCelebrationEnd: () => void;
+  onCtrlClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, onToggle, onDelete, onOpenDetail, onCelebrationEnd }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
 
   const borderColor = pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct > 0 ? '#E17055' : '#2D3041';
 
+  const handleClick = (e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      onCtrlClick?.();
+    } else {
+      onOpenDetail();
+    }
+  };
+
   return (
     <motion.div
+      data-scene-id={scene.sceneId}
       className={cn(
         'bg-bg-card border border-bg-border rounded-lg flex flex-col group relative cursor-pointer hover:border-text-secondary/30 transition-colors',
         isHighlighted && 'scene-highlight',
+        isSelected && 'scene-card-selected',
       )}
       style={{ borderLeftWidth: 3, borderLeftColor: borderColor, overflow: 'visible' }}
-      onClick={onOpenDetail}
+      onClick={handleClick}
       ref={isHighlighted ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
       {...(isHighlighted ? {
         initial: { scale: 1.06 },
@@ -287,6 +393,13 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
     >
       {/* 하이라이트 배경 오버레이 */}
       {isHighlighted && <div className="scene-highlight-bg" />}
+
+      {/* 선택 체크마크 */}
+      {isSelected && (
+        <div className="absolute top-1.5 right-1.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30">
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
+      )}
 
       {/* ── 상단: 씬 정보 ── */}
       <div className="px-2.5 pt-2 pb-1 flex items-center justify-between">
@@ -849,6 +962,7 @@ export function ScenesView() {
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment } = useAppStore();
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
+  const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
 
   const deptConfig = DEPARTMENT_CONFIGS[selectedDepartment];
 
@@ -865,6 +979,22 @@ export function ScenesView() {
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
+
+  // 라쏘 드래그 선택
+  const gridRef = useRef<HTMLDivElement>(null);
+  const getSceneIdFromEl = useCallback((el: Element) => el.getAttribute('data-scene-id'), []);
+  const handleLassoChange = useCallback((ids: Set<string>) => setSelectedScenes(ids), [setSelectedScenes]);
+  const isCardView = sceneViewMode === 'card';
+  const { lassoRect } = useLassoSelection(
+    gridRef,
+    '[data-scene-id]',
+    getSceneIdFromEl,
+    handleLassoChange,
+    isCardView,
+  );
+
+  // 파트/에피소드 변경 시 선택 초기화
+  useEffect(() => { clearSelectedScenes(); }, [selectedEpisode, selectedPart, selectedDepartment, clearSelectedScenes]);
 
   // 백그라운드 동기화: 낙관적 업데이트 후 서버/파일과 싱크
   const syncInBackground = async () => {
@@ -1428,7 +1558,7 @@ export function ScenesView() {
       )}
 
       {/* 씬 목록 */}
-      <div className="relative flex-1">
+      <div ref={gridRef} className="relative flex-1">
         {/* 파트 완료 보케 오버레이 */}
         <AnimatePresence>
           {scenes.length > 0 && overallPct >= 100 && <PartCompleteOverlay />}
@@ -1494,10 +1624,12 @@ export function ScenesView() {
                           celebrating={celebratingId === scene.sceneId}
                           department={selectedDepartment}
                           isHighlighted={highlightSceneId === scene.sceneId}
+                          isSelected={selectedSceneIds.has(scene.sceneId)}
                           onToggle={handleToggle}
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}
                           onCelebrationEnd={clearCelebration}
+                          onCtrlClick={() => toggleSelectedScene(scene.sceneId)}
                         />
                       );
                     })}
@@ -1531,16 +1663,124 @@ export function ScenesView() {
                 sceneIndex={sIdx}
                 celebrating={celebratingId === scene.sceneId}
                 department={selectedDepartment}
+                isSelected={selectedSceneIds.has(scene.sceneId)}
                 onToggle={handleToggle}
                 onDelete={handleDeleteScene}
                 onOpenDetail={() => setDetailSceneIndex(sIdx)}
                 onCelebrationEnd={clearCelebration}
+                onCtrlClick={() => toggleSelectedScene(scene.sceneId)}
               />
             );
           })}
         </div>
       )}
       </div>
+
+      {/* 라쏘 드래그 선택 박스 */}
+      {lassoRect && (
+        <div
+          className="lasso-box"
+          style={{
+            left: lassoRect.x,
+            top: lassoRect.y,
+            width: lassoRect.w,
+            height: lassoRect.h,
+          }}
+        />
+      )}
+
+      {/* 일괄 액션 바 (선택된 씬이 있을 때) */}
+      <AnimatePresence>
+        {selectedSceneIds.size > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-xl shadow-2xl shadow-black/40"
+            style={{
+              background: 'rgba(26,29,39,0.95)',
+              border: '1px solid rgba(108,92,231,0.3)',
+              backdropFilter: 'blur(12px)',
+            }}
+          >
+            <div className="flex items-center gap-2 pr-3 border-r border-bg-border">
+              <CheckSquare size={16} className="text-accent" />
+              <span className="text-sm font-medium text-text-primary">
+                {selectedSceneIds.size}개 선택
+              </span>
+            </div>
+
+            {/* 일괄 스테이지 토글 */}
+            {STAGES.map((stage) => (
+              <button
+                key={stage}
+                onClick={() => {
+                  selectedSceneIds.forEach((id) => handleToggle(id, stage));
+                }}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+                style={{
+                  backgroundColor: `${deptConfig.stageColors[stage]}20`,
+                  color: deptConfig.stageColors[stage],
+                  border: `1px solid ${deptConfig.stageColors[stage]}40`,
+                }}
+              >
+                {deptConfig.stageLabels[stage]}
+              </button>
+            ))}
+
+            <div className="w-px h-6 bg-bg-border" />
+
+            {/* 일괄 삭제 */}
+            <button
+              onClick={() => {
+                if (!confirm(`${selectedSceneIds.size}개 씬을 삭제하시겠습니까?`)) return;
+                const allScenes = currentPart?.scenes ?? [];
+                // 인덱스가 큰 것부터 삭제 (인덱스 밀림 방지)
+                const indices = [...selectedSceneIds]
+                  .map((id) => allScenes.findIndex((s) => s.sceneId === id))
+                  .filter((i) => i >= 0)
+                  .sort((a, b) => b - a);
+                indices.forEach((idx) => {
+                  if (currentPart) {
+                    deleteSceneOptimistic(currentPart.sheetName, idx);
+                  }
+                });
+                clearSelectedScenes();
+                // 백그라운드 싱크
+                (async () => {
+                  try {
+                    for (const idx of indices) {
+                      if (sheetsConnected) {
+                        await deleteSceneFromSheets(currentPart!.sheetName, idx);
+                      } else {
+                        await deleteTestScene(episodes, currentPart!.sheetName, idx);
+                      }
+                    }
+                    syncInBackground();
+                  } catch (err) {
+                    console.error('[일괄 삭제 실패]', err);
+                    syncInBackground();
+                  }
+                })();
+              }}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
+            >
+              <Trash2 size={13} className="inline mr-1" />
+              삭제
+            </button>
+
+            {/* 선택 해제 */}
+            <button
+              onClick={clearSelectedScenes}
+              className="p-1.5 text-text-secondary hover:text-text-primary rounded-lg hover:bg-bg-border/50 transition-colors"
+              title="선택 해제"
+            >
+              <X size={16} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 씬 상세 모달 */}
       {detailScene && detailSceneIndex !== null && (

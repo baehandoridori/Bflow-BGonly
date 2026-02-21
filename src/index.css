@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 앱 전체 텍스트 선택 방지 (드래그 시 파란색 하이라이트 제거) */
+*, *::before, *::after {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* 입력 필드는 텍스트 선택 허용 */
+input, textarea, select, [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* 스크롤바 스타일 */
 ::-webkit-scrollbar {
   width: 6px;
@@ -27,4 +39,22 @@
 
 .react-grid-item > .react-resizable-handle::after {
   border-color: #6C5CE7 !important;
+}
+
+/* 라쏘 선택 박스 */
+.lasso-box {
+  position: fixed;
+  border: 1.5px solid rgba(108,92,231,0.7);
+  background: rgba(108,92,231,0.08);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 9999;
+  backdrop-filter: blur(1px);
+}
+
+/* 씬 카드 선택 상태 */
+.scene-card-selected {
+  outline: 2px solid rgba(108,92,231,0.8) !important;
+  outline-offset: -1px;
+  background: rgba(108,92,231,0.06) !important;
 }

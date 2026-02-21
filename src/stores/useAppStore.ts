@@ -62,6 +62,12 @@ interface AppState {
   setStatusFilter: (f: StatusFilter) => void;
   setSceneViewMode: (mode: SceneViewMode) => void;
   setSceneGroupMode: (mode: SceneGroupMode) => void;
+
+  // 씬 다중 선택 (라쏘 드래그 / Ctrl+클릭)
+  selectedSceneIds: Set<string>;
+  toggleSelectedScene: (id: string) => void;
+  setSelectedScenes: (ids: Set<string>) => void;
+  clearSelectedScenes: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -109,4 +115,13 @@ export const useAppStore = create<AppState>((set) => ({
   setStatusFilter: (f) => set({ statusFilter: f }),
   setSceneViewMode: (mode) => set({ sceneViewMode: mode }),
   setSceneGroupMode: (mode) => set({ sceneGroupMode: mode }),
+
+  selectedSceneIds: new Set<string>(),
+  toggleSelectedScene: (id) => set((s) => {
+    const next = new Set(s.selectedSceneIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return { selectedSceneIds: next };
+  }),
+  setSelectedScenes: (ids) => set({ selectedSceneIds: ids }),
+  clearSelectedScenes: () => set({ selectedSceneIds: new Set<string>() }),
 }));
