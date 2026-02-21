@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAppStore } from '@/stores/useAppStore';
 import { getEvents, getEventsForDate } from '@/services/calendarService';
-import type { CalendarEvent } from '@/types/calendar';
+import type { CalendarEvent, CalendarFilter } from '@/types/calendar';
 import { Widget } from './Widget';
 
 const WEEKDAYS_SHORT = ['일', '월', '화', '수', '목', '금', '토'];
+
+type WidgetViewMode = 'month' | '2week' | 'week' | 'today';
 
 function fmtDate(d: Date): string {
   const y = d.getFullYear();
@@ -15,17 +17,43 @@ function fmtDate(d: Date): string {
   return `${y}-${m}-${dd}`;
 }
 
+function parseDate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0, 0);
+}
+
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
 export function CalendarWidget() {
   const { setView } = useAppStore();
+  const dashboardDeptFilter = useAppStore((s) => s.dashboardDeptFilter);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
+  const [viewMode, setViewMode] = useState<WidgetViewMode>('month');
+  const [typeFilter, setTypeFilter] = useState<CalendarFilter>('all');
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [showFilter, setShowFilter] = useState(false);
 
   const today = fmtDate(new Date());
 
   useEffect(() => {
     getEvents().then(setEvents);
   }, []);
+
+  // 부서 필터 연동
+  const filteredEvents = useMemo(() => {
+    let result = events;
+    if (typeFilter !== 'all') result = result.filter((e) => e.type === typeFilter);
+    if (dashboardDeptFilter !== 'all') {
+      result = result.filter((e) => e.linkedDepartment === dashboardDeptFilter || e.type === 'custom');
+    }
+    return result;
+  }, [events, typeFilter, dashboardDeptFilter]);
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(year, month, 1);
@@ -56,100 +84,207 @@ export function CalendarWidget() {
     return days;
   }, [year, month, today]);
 
-  // 오늘 일정
-  const todayEvents = useMemo(() => getEventsForDate(events, today), [events, today]);
+  // 선택 날짜 또는 오늘 일정
+  const displayDate = selectedDate ?? today;
+  const dateEvents = useMemo(() => getEventsForDate(filteredEvents, displayDate), [filteredEvents, displayDate]);
+
+  // 리스트 뷰용 이벤트 (2week/week/today)
+  const listEvents = useMemo(() => {
+    if (viewMode === 'today') {
+      return getEventsForDate(filteredEvents, today);
+    }
+    const now = new Date();
+    const nowDow = now.getDay();
+    const weekStart = addDays(now, -nowDow);
+    const numDays = viewMode === '2week' ? 14 : 7;
+    const weekEnd = addDays(weekStart, numDays - 1);
+    const startStr = fmtDate(weekStart);
+    const endStr = fmtDate(weekEnd);
+    return filteredEvents
+      .filter((e) => e.endDate >= startStr && e.startDate <= endStr)
+      .sort((a, b) => a.startDate.localeCompare(b.startDate));
+  }, [filteredEvents, viewMode, today]);
 
   const goToPrevMonth = () => {
     if (month === 0) { setYear(year - 1); setMonth(11); }
     else setMonth(month - 1);
+    setSelectedDate(null);
   };
   const goToNextMonth = () => {
     if (month === 11) { setYear(year + 1); setMonth(0); }
     else setMonth(month + 1);
+    setSelectedDate(null);
   };
 
   return (
     <Widget title="캘린더" icon={<CalendarDays size={14} />}>
-      <div className="flex flex-col gap-2 h-full">
+      <div className="flex flex-col gap-1.5 h-full">
         {/* 미니 헤더 */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <button onClick={goToPrevMonth} className="p-0.5 text-text-secondary/50 hover:text-text-primary cursor-pointer">
-              <ChevronLeft size={12} />
+            {viewMode === 'month' && (
+              <>
+                <button onClick={goToPrevMonth} className="p-0.5 text-text-secondary/50 hover:text-text-primary cursor-pointer">
+                  <ChevronLeft size={12} />
+                </button>
+                <span className="text-[11px] font-semibold text-text-primary min-w-[48px] text-center">
+                  {month + 1}월
+                </span>
+                <button onClick={goToNextMonth} className="p-0.5 text-text-secondary/50 hover:text-text-primary cursor-pointer">
+                  <ChevronRight size={12} />
+                </button>
+              </>
+            )}
+            {viewMode !== 'month' && (
+              <span className="text-[11px] font-semibold text-text-primary">
+                {viewMode === 'today' ? '오늘' : viewMode === 'week' ? '이번 주' : '2주'}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {/* 필터 토글 */}
+            <button
+              onClick={() => setShowFilter(!showFilter)}
+              className={cn(
+                'p-0.5 cursor-pointer transition-colors',
+                showFilter ? 'text-accent' : 'text-text-secondary/40 hover:text-text-secondary',
+              )}
+            >
+              <Filter size={10} />
             </button>
-            <span className="text-[11px] font-semibold text-text-primary min-w-[60px] text-center">
-              {month + 1}월
-            </span>
-            <button onClick={goToNextMonth} className="p-0.5 text-text-secondary/50 hover:text-text-primary cursor-pointer">
-              <ChevronRight size={12} />
+            <button
+              onClick={() => setView('schedule')}
+              className="text-[10px] text-accent hover:underline cursor-pointer"
+            >
+              전체
             </button>
           </div>
-          <button
-            onClick={() => setView('schedule')}
-            className="text-[10px] text-accent hover:underline cursor-pointer"
-          >
-            전체 보기
-          </button>
         </div>
 
-        {/* 요일 */}
-        <div className="grid grid-cols-7 gap-px">
-          {WEEKDAYS_SHORT.map((d, i) => (
-            <div key={d} className={cn(
-              'text-center text-[9px] font-medium py-0.5',
-              i === 0 ? 'text-red-400/50' : i === 6 ? 'text-blue-400/50' : 'text-text-secondary/40',
-            )}>
-              {d}
-            </div>
-          ))}
-        </div>
-
-        {/* 날짜 그리드 */}
-        <div className="grid grid-cols-7 gap-px flex-1">
-          {calendarDays.map((day, i) => {
-            const hasEvents = events.some((e) => e.startDate <= day.dateStr && e.endDate >= day.dateStr);
-            return (
-              <div
-                key={i}
+        {/* 필터 바 */}
+        {showFilter && (
+          <div className="flex flex-wrap gap-0.5">
+            {/* 뷰모드 */}
+            {(['month', '2week', 'week', 'today'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setViewMode(m); setSelectedDate(null); }}
                 className={cn(
-                  'flex flex-col items-center justify-center py-0.5 rounded-sm transition-colors relative',
-                  day.isCurrentMonth ? '' : 'opacity-25',
-                  day.isToday && 'bg-accent/10',
+                  'px-1.5 py-0.5 text-[8px] rounded font-medium cursor-pointer transition-colors',
+                  viewMode === m ? 'bg-accent/20 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
                 )}
               >
-                <span className={cn(
-                  'text-[10px] tabular-nums leading-none',
-                  day.isToday
-                    ? 'bg-accent text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold'
-                    : day.dow === 0 ? 'text-red-400/60'
-                    : day.dow === 6 ? 'text-blue-400/60'
-                    : 'text-text-primary/50',
-                )}>
-                  {day.date}
-                </span>
-                {hasEvents && !day.isToday && (
-                  <div className="w-1 h-1 rounded-full bg-accent/60 mt-0.5" />
+                {m === 'month' ? '월' : m === '2week' ? '2주' : m === 'week' ? '주' : '오늘'}
+              </button>
+            ))}
+            <span className="text-text-secondary/20 mx-0.5">|</span>
+            {/* 타입 필터 */}
+            {(['all', 'custom', 'episode', 'part', 'scene'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setTypeFilter(f)}
+                className={cn(
+                  'px-1.5 py-0.5 text-[8px] rounded font-medium cursor-pointer transition-colors',
+                  typeFilter === f ? 'bg-accent/20 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
                 )}
-              </div>
-            );
-          })}
-        </div>
+              >
+                {f === 'all' ? '전체' : f === 'custom' ? '일반' : f === 'episode' ? 'EP' : f === 'part' ? '파트' : '씬'}
+              </button>
+            ))}
+          </div>
+        )}
 
-        {/* 오늘 일정 미리보기 */}
-        {todayEvents.length > 0 && (
-          <div className="border-t border-bg-border/30 pt-2 mt-auto">
-            <div className="text-[10px] text-text-secondary/50 mb-1">오늘 일정</div>
+        {/* 월간 미니 캘린더 */}
+        {viewMode === 'month' && (
+          <>
+            <div className="grid grid-cols-7 gap-px">
+              {WEEKDAYS_SHORT.map((d, i) => (
+                <div key={d} className={cn(
+                  'text-center text-[9px] font-medium py-0.5',
+                  i === 0 ? 'text-red-400/50' : i === 6 ? 'text-blue-400/50' : 'text-text-secondary/40',
+                )}>
+                  {d}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-px flex-1">
+              {calendarDays.map((day, i) => {
+                const hasEvents = filteredEvents.some((e) => e.startDate <= day.dateStr && e.endDate >= day.dateStr);
+                const isSelected = selectedDate === day.dateStr;
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      'flex flex-col items-center justify-center py-0.5 rounded-sm transition-colors relative cursor-pointer',
+                      day.isCurrentMonth ? 'hover:bg-bg-border/20' : 'opacity-25',
+                      day.isToday && 'bg-accent/10',
+                      isSelected && 'bg-accent/20 ring-1 ring-accent/40',
+                    )}
+                    onClick={() => setSelectedDate(isSelected ? null : day.dateStr)}
+                  >
+                    <span className={cn(
+                      'text-[10px] tabular-nums leading-none',
+                      day.isToday
+                        ? 'bg-accent text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold'
+                        : day.dow === 0 ? 'text-red-400/60'
+                        : day.dow === 6 ? 'text-blue-400/60'
+                        : 'text-text-primary/50',
+                    )}>
+                      {day.date}
+                    </span>
+                    {hasEvents && !day.isToday && (
+                      <div className="w-1 h-1 rounded-full bg-accent/60 mt-0.5" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* 이벤트 리스트 (선택 날짜 or 2week/week/today) */}
+        {viewMode === 'month' && dateEvents.length > 0 && (
+          <div className="border-t border-bg-border/30 pt-1.5 mt-auto">
+            <div className="text-[10px] text-text-secondary/50 mb-1">
+              {selectedDate ? `${parseDate(selectedDate).getMonth() + 1}/${parseDate(selectedDate).getDate()} 일정` : '오늘 일정'}
+            </div>
             <div className="flex flex-col gap-0.5">
-              {todayEvents.slice(0, 3).map((ev) => (
+              {dateEvents.slice(0, 4).map((ev) => (
                 <div key={ev.id} className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
                   <span className="text-[10px] text-text-primary truncate">{ev.title}</span>
                 </div>
               ))}
-              {todayEvents.length > 3 && (
-                <span className="text-[10px] text-accent">+{todayEvents.length - 3} 더</span>
+              {dateEvents.length > 4 && (
+                <span className="text-[10px] text-accent">+{dateEvents.length - 4} 더</span>
               )}
             </div>
+          </div>
+        )}
+
+        {viewMode !== 'month' && (
+          <div className="flex flex-col gap-0.5 flex-1 overflow-auto">
+            {listEvents.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-[10px] text-text-secondary/40">
+                일정 없음
+              </div>
+            ) : (
+              listEvents.map((ev) => {
+                const s = parseDate(ev.startDate);
+                const e = parseDate(ev.endDate);
+                const dateRange = ev.startDate === ev.endDate
+                  ? `${s.getMonth() + 1}/${s.getDate()}`
+                  : `${s.getMonth() + 1}/${s.getDate()}→${e.getMonth() + 1}/${e.getDate()}`;
+                return (
+                  <div key={ev.id} className="flex items-center gap-1.5 py-0.5">
+                    <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
+                    <span className="text-[10px] text-text-primary truncate flex-1">{ev.title}</span>
+                    <span className="text-[8px] text-text-secondary/40 shrink-0">{dateRange}</span>
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
       </div>

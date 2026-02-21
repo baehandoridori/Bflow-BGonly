@@ -54,6 +54,14 @@ const ALL_WIDGETS: WidgetMeta[] = [
 
 const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]));
 
+/** 위젯 ID에서 실제 컴포넌트를 찾기 (calendar-{timestamp} 형태 지원) */
+function getWidgetComponent(id: string): React.ReactNode | undefined {
+  if (id.startsWith('calendar-') || id === 'calendar') {
+    return <CalendarWidget />;
+  }
+  return WIDGET_MAP[id];
+}
+
 /* ── 부서별 레이아웃 ── */
 const DEPT_LAYOUT: Layout[] = [
   { i: 'overall-progress', x: 0, y: 0, w: 1, h: 3, minW: 1, minH: 2 },
@@ -150,10 +158,12 @@ export function Dashboard() {
 
   const currentLayout = layouts.lg ?? defaultLayout;
 
-  // 현재 숨겨진 위젯 목록
+  // 현재 숨겨진 위젯 목록 (캘린더 위젯은 항상 추가 가능)
   const hiddenWidgets = useMemo(() => {
     const visibleIds = new Set(currentLayout.map((l) => l.i));
     return ALL_WIDGETS.filter((w) => {
+      // 캘린더 위젯은 중복 배치 허용 → 항상 추가 가능
+      if (w.id === 'calendar') return true;
       if (visibleIds.has(w.id)) return false;
       if (dashboardFilter === 'all' && w.deptOnly) return false;
       if (dashboardFilter !== 'all' && w.allOnly) return false;
@@ -181,9 +191,11 @@ export function Dashboard() {
 
   const handleAddWidget = useCallback((widgetId: string) => {
     const current = widgetLayout ?? DEPT_LAYOUT;
+    // 캘린더 위젯은 고유 ID로 중복 배치 허용
+    const actualId = widgetId === 'calendar' ? `calendar-${Date.now()}` : widgetId;
     // 맨 아래에 추가
     const maxY = current.reduce((max, l) => Math.max(max, l.y + l.h), 0);
-    const newItem: Layout = { i: widgetId, x: 0, y: maxY, w: 2, h: 3, minW: 1, minH: 2 };
+    const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 2, h: 3, minW: 1, minH: 2 };
     const newLayout = [...current, newItem];
     setWidgetLayout(newLayout);
     saveLayout(newLayout);
@@ -360,7 +372,7 @@ export function Dashboard() {
                       <X size={11} className="text-white" strokeWidth={3} />
                     </button>
                   )}
-                  {WIDGET_MAP[item.i] ?? (
+                  {getWidgetComponent(item.i) ?? (
                     <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
                       위젯: {item.i}
                     </div>
