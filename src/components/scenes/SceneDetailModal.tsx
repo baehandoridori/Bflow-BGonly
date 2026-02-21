@@ -309,6 +309,7 @@ export function SceneDetailModal({
   const [showImageModal, setShowImageModal] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
+  const [deleteConfirm, setDeleteConfirm] = useState<'storyboard' | 'guide' | null>(null);
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
@@ -515,12 +516,14 @@ export function SceneDetailModal({
     [sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate],
   );
 
-  const removeImage = useCallback(
-    (imageType: 'storyboard' | 'guide') => {
-      const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+  const confirmRemoveImage = useCallback(
+    () => {
+      if (!deleteConfirm) return;
+      const field = deleteConfirm === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
       onFieldUpdate(sceneIndex, field, '');
+      setDeleteConfirm(null);
     },
-    [sceneIndex, onFieldUpdate],
+    [sceneIndex, onFieldUpdate, deleteConfirm],
   );
 
   // 씬 네비게이션 도트 표시 여부 (2개 이상일 때만)
@@ -540,15 +543,13 @@ export function SceneDetailModal({
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        {/* 모달 + 댓글 패널 컨테이너 — 부드러운 이동 애니메이션 */}
+        {/* 모달 래퍼 — 댓글 패널은 absolute로 배치하여 레이아웃 점프 방지 */}
         <motion.div
-          className="flex items-start gap-0"
+          className="relative"
           animate={{ x: showComments ? -160 : 0 }}
           transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* 모달 래퍼 (말풍선 탭 포지셔닝용) */}
-          <div className="relative">
             {/* 모달 본체 */}
             <motion.div
               key="detail-modal"
@@ -704,7 +705,7 @@ export function SceneDetailModal({
                       loading={imageLoading === 'storyboard'}
                       onPickFile={() => pickFile('storyboard')}
                       onPasteClipboard={() => pasteClipboard('storyboard')}
-                      onRemove={() => removeImage('storyboard')}
+                      onRemove={() => setDeleteConfirm('storyboard')}
                       onView={() => setShowImageModal(true)}
                       onPasteEvent={(e) => handlePasteEvent(e, 'storyboard')}
                       onDrop={(e) => handleDrop(e, 'storyboard')}
@@ -715,7 +716,7 @@ export function SceneDetailModal({
                       loading={imageLoading === 'guide'}
                       onPickFile={() => pickFile('guide')}
                       onPasteClipboard={() => pasteClipboard('guide')}
-                      onRemove={() => removeImage('guide')}
+                      onRemove={() => setDeleteConfirm('guide')}
                       onView={() => setShowImageModal(true)}
                       onPasteEvent={(e) => handlePasteEvent(e, 'guide')}
                       onDrop={(e) => handleDrop(e, 'guide')}
@@ -771,28 +772,28 @@ export function SceneDetailModal({
               )}
             </motion.div>
 
-            {/* ── 말풍선 탭 버튼 (책갈피 스타일) ── */}
-            <motion.button
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.15, duration: 0.2 }}
-              onClick={() => setShowComments(!showComments)}
-              className={cn(
-                'absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl transition-all cursor-pointer',
-                showComments
-                  ? 'bg-accent text-white shadow-lg shadow-accent/30'
-                  : 'bg-bg-border/80 text-text-secondary hover:bg-accent/30 hover:text-accent',
+            {/* ── 말풍선 탭 버튼 — 의견 모달 열리면 접힘 ── */}
+            <AnimatePresence>
+              {!showComments && (
+                <motion.button
+                  key="comment-tab"
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
+                  transition={{ delay: 0.15, duration: 0.2 }}
+                  onClick={() => setShowComments(true)}
+                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:bg-accent/30 hover:text-accent transition-all cursor-pointer"
+                  title="의견"
+                >
+                  <MessageCircle size={18} />
+                  {commentCount > 0 && (
+                    <span className="text-[10px] font-bold leading-none">{commentCount}</span>
+                  )}
+                </motion.button>
               )}
-              title="의견"
-            >
-              <MessageCircle size={18} />
-              {commentCount > 0 && (
-                <span className="text-[10px] font-bold leading-none">{commentCount}</span>
-              )}
-            </motion.button>
-          </div>
+            </AnimatePresence>
 
-          {/* ── 댓글 패널 ── */}
+          {/* ── 댓글 패널 — absolute 배치로 레이아웃 점프 방지 ── */}
           <AnimatePresence>
             {showComments && (
               <motion.div
@@ -802,7 +803,7 @@ export function SceneDetailModal({
                 exit={{ opacity: 0, x: 30, scaleX: 0.9 }}
                 transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
                 style={{ transformOrigin: 'left center' }}
-                className="w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col ml-3"
+                className="absolute left-full top-0 ml-3 w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col"
               >
                 {/* 패널 헤더 */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border shrink-0">
@@ -832,6 +833,58 @@ export function SceneDetailModal({
           </AnimatePresence>
         </motion.div>
       </motion.div>
+
+      {/* ── 이미지 삭제 확인 팝업 ── */}
+      <AnimatePresence>
+        {deleteConfirm && (
+          <motion.div
+            key="delete-confirm-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center"
+            style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', backgroundColor: 'rgba(0,0,0,0.5)' }}
+            onClick={() => setDeleteConfirm(null)}
+          >
+            <motion.div
+              key="delete-confirm-dialog"
+              initial={{ opacity: 0, scale: 0.9, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 12 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="bg-bg-card rounded-2xl shadow-2xl border border-bg-border p-6 w-80 flex flex-col items-center gap-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-12 h-12 rounded-full bg-red-500/15 flex items-center justify-center">
+                <Trash2 size={24} className="text-red-400" />
+              </div>
+              <div className="text-center">
+                <h3 className="text-sm font-semibold text-text-primary mb-1">
+                  이미지를 삭제하시겠습니까?
+                </h3>
+                <p className="text-xs text-text-secondary">
+                  {deleteConfirm === 'storyboard' ? '스토리보드' : '가이드'} 이미지가 삭제됩니다.
+                </p>
+              </div>
+              <div className="flex gap-3 w-full">
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex-1 py-2 rounded-xl text-sm font-medium bg-bg-primary text-text-secondary border border-bg-border hover:bg-bg-border transition-colors cursor-pointer"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={confirmRemoveImage}
+                  className="flex-1 py-2 rounded-xl text-sm font-medium bg-red-500/80 hover:bg-red-500 text-white transition-colors cursor-pointer"
+                >
+                  삭제
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 이미지 전체 뷰 모달 */}
       {showImageModal && (

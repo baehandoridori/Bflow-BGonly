@@ -6,9 +6,10 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { loadAllComments } from '@/services/commentService';
 
 /* ── 라쏘 드래그 선택 훅 ── */
 interface LassoRect { x: number; y: number; w: number; h: number }
@@ -354,6 +355,7 @@ interface SceneCardProps {
   isHighlighted?: boolean;
   isSelected?: boolean;
   searchQuery?: string;
+  commentCount?: number;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: () => void;
@@ -361,7 +363,7 @@ interface SceneCardProps {
   onCtrlClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
@@ -423,6 +425,12 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
           <span className="text-xs font-medium text-text-primary truncate max-w-[80px]">
             <HighlightText text={scene.assignee || ''} query={searchQuery} />
           </span>
+          {commentCount > 0 && (
+            <span className="flex items-center gap-0.5 text-accent" title={`의견 ${commentCount}개`}>
+              <MessageCircle size={12} />
+              <span className="text-[10px] font-bold leading-none">{commentCount}</span>
+            </span>
+          )}
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(sceneIndex); }}
             className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400 transition-opacity"
@@ -513,6 +521,8 @@ interface SceneTableProps {
   scenes: Scene[];
   allScenes: Scene[];
   department: Department;
+  commentCounts: Record<string, number>;
+  sheetName: string;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: (sceneIndex: number) => void;
@@ -565,7 +575,7 @@ function HighlightText({ text, query }: { text: string; query?: string }) {
   );
 }
 
-function SceneTable({ scenes, allScenes, department, onToggle, onDelete, onOpenDetail, searchQuery }: SceneTableProps) {
+function SceneTable({ scenes, allScenes, department, commentCounts, sheetName, onToggle, onDelete, onOpenDetail, searchQuery }: SceneTableProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   return (
     <div className="overflow-auto rounded-lg border border-bg-border">
@@ -597,7 +607,12 @@ function SceneTable({ scenes, allScenes, department, onToggle, onDelete, onOpenD
                 )}
                 onClick={() => onOpenDetail(idx)}
               >
-                <td className="px-2 py-2 font-mono text-accent text-xs">#{scene.no}</td>
+                <td className="px-2 py-2 font-mono text-accent text-xs">
+                  <span className="flex items-center gap-1">
+                    #{scene.no}
+                    {(() => { const cc = commentCounts[`${sheetName}:${scene.no}`]; return cc > 0 ? <span className="inline-flex items-center gap-0.5 text-accent"><MessageCircle size={11} /><span className="text-[10px] font-bold">{cc}</span></span> : null; })()}
+                  </span>
+                </td>
                 <td className="px-2 py-2 text-text-primary text-xs truncate"><HighlightText text={scene.sceneId || '-'} query={searchQuery} /></td>
                 <td className="px-2 py-2 text-text-secondary text-xs truncate"><HighlightText text={scene.assignee || '-'} query={searchQuery} /></td>
                 <td className="px-2 py-2 text-text-secondary font-mono text-xs truncate">{scene.layoutId ? `#${scene.layoutId}` : '-'}</td>
@@ -1036,6 +1051,18 @@ export function ScenesView() {
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
+
+  // 전체 댓글 카운트 로드
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    loadAllComments().then((all) => {
+      const counts: Record<string, number> = {};
+      for (const [key, list] of Object.entries(all)) {
+        if (list.length > 0) counts[key] = list.length;
+      }
+      setCommentCounts(counts);
+    });
+  }, [detailSceneIndex]); // 상세 모달 닫을 때 갱신
 
   // 라쏘 드래그 선택
   const gridRef = useRef<HTMLDivElement>(null);
@@ -1701,6 +1728,8 @@ export function ScenesView() {
                     scenes={groupScenes}
                     allScenes={currentPart?.scenes ?? []}
                     department={selectedDepartment}
+                    commentCounts={commentCounts}
+                    sheetName={currentPart?.sheetName ?? ''}
                     onToggle={handleToggle}
                     onDelete={handleDeleteScene}
                     searchQuery={searchQuery}
@@ -1721,6 +1750,7 @@ export function ScenesView() {
                           isHighlighted={highlightSceneId === scene.sceneId}
                           isSelected={selectedSceneIds.has(scene.sceneId)}
                           searchQuery={searchQuery}
+                          commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
                           onToggle={handleToggle}
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -1742,6 +1772,8 @@ export function ScenesView() {
             scenes={scenes}
             allScenes={currentPart?.scenes ?? []}
             department={selectedDepartment}
+            commentCounts={commentCounts}
+            sheetName={currentPart?.sheetName ?? ''}
             onToggle={handleToggle}
             onDelete={handleDeleteScene}
             searchQuery={searchQuery}
@@ -1764,6 +1796,7 @@ export function ScenesView() {
                 isHighlighted={highlightSceneId === scene.sceneId}
                 isSelected={selectedSceneIds.has(scene.sceneId)}
                 searchQuery={searchQuery}
+                commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
                 onToggle={handleToggle}
                 onDelete={handleDeleteScene}
                 onOpenDetail={() => setDetailSceneIndex(sIdx)}
