@@ -36,6 +36,8 @@ interface SceneDetailModalProps {
   onNavigate?: (direction: 'prev' | 'next') => void;
   hasPrev?: boolean;
   hasNext?: boolean;
+  totalScenes?: number;
+  currentSceneIndex?: number;
 }
 
 // ─── 속성 행 컴포넌트 ──────────────────────────────
@@ -197,35 +199,35 @@ function ImageSlot({
                 }
               }}
             />
-            {/* 호버 오버레이 */}
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors rounded-xl flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100">
+            {/* 호버 오버레이 — 아이콘 확대 */}
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors rounded-xl flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100">
               <button
                 onClick={onView}
-                className="p-2 bg-white/20 hover:bg-white/30 rounded-lg backdrop-blur-sm text-white transition-colors"
+                className="p-3.5 bg-white/20 hover:bg-white/35 rounded-xl backdrop-blur-sm text-white transition-all hover:scale-110"
                 title="확대 보기"
               >
-                <Eye size={18} />
+                <Eye size={26} />
               </button>
               <button
                 onClick={onPasteClipboard}
-                className="p-2 bg-white/20 hover:bg-white/30 rounded-lg backdrop-blur-sm text-white transition-colors"
+                className="p-3 bg-white/20 hover:bg-white/35 rounded-xl backdrop-blur-sm text-white transition-all hover:scale-110"
                 title="클립보드에서 교체"
               >
-                <ClipboardPaste size={18} />
+                <ClipboardPaste size={22} />
               </button>
               <button
                 onClick={onPickFile}
-                className="p-2 bg-white/20 hover:bg-white/30 rounded-lg backdrop-blur-sm text-white transition-colors"
+                className="p-3 bg-white/20 hover:bg-white/35 rounded-xl backdrop-blur-sm text-white transition-all hover:scale-110"
                 title="파일로 교체"
               >
-                <ImagePlus size={18} />
+                <ImagePlus size={22} />
               </button>
               <button
                 onClick={onRemove}
-                className="p-2 bg-white/20 hover:bg-red-500/60 rounded-lg backdrop-blur-sm text-white transition-colors"
+                className="p-3 bg-white/20 hover:bg-red-500/60 rounded-xl backdrop-blur-sm text-white transition-all hover:scale-110"
                 title="이미지 삭제"
               >
-                <Trash2 size={18} />
+                <Trash2 size={22} />
               </button>
             </div>
           </div>
@@ -300,6 +302,8 @@ export function SceneDetailModal({
   onNavigate,
   hasPrev = false,
   hasNext = false,
+  totalScenes = 0,
+  currentSceneIndex = 0,
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
@@ -315,10 +319,18 @@ export function SceneDetailModal({
     getComments(sceneKey).then((c) => setCommentCount(c.length));
   }, [sceneKey]);
 
-  // ESC 닫기 + 좌우 화살표 씬 이동 (이미지 뷰어 열려있으면 방향키 양보)
+  // ESC 닫기 + 좌우 화살표 씬 이동 (이미지 뷰어 열려있으면 이미지 모달만 닫기)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (showImageModal) {
+          // 이미지 모달만 닫기 (상세 모달은 유지)
+          setShowImageModal(false);
+          return;
+        }
+        onClose();
+        return;
+      }
       // 입력 중이면 화살표 무시
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -330,6 +342,48 @@ export function SceneDetailModal({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, onNavigate, hasPrev, hasNext, showImageModal]);
+
+  // ── 글로벌 Ctrl+V 이미지 붙여넣기 ──
+  useEffect(() => {
+    const onPaste = async (e: ClipboardEvent) => {
+      if (showImageModal) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const blob = item.getAsFile();
+          if (!blob) continue;
+          // 스토리보드가 없으면 스토리보드에, 아니면 가이드에
+          const imageType: 'storyboard' | 'guide' = !scene.storyboardUrl ? 'storyboard' : 'guide';
+          try {
+            setImageLoading(imageType);
+            const base64 = await resizeBlob(blob);
+            const { saveImage: si } = await import('@/utils/imageUtils');
+            const url = await si(
+              base64,
+              sheetName,
+              scene.sceneId || String(scene.no),
+              imageType,
+              isLiveMode,
+            );
+            const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+            onFieldUpdate(sceneIndex, field, url);
+          } catch (err) {
+            console.error('[Ctrl+V 실패]', err);
+            alert(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
+          } finally {
+            setImageLoading(null);
+          }
+          return;
+        }
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [showImageModal, scene.storyboardUrl, sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate]);
 
   // ── 이미지 핸들러 ──
 
@@ -469,6 +523,9 @@ export function SceneDetailModal({
     [sceneIndex, onFieldUpdate],
   );
 
+  // 씬 네비게이션 도트 표시 여부 (2개 이상일 때만)
+  const showSceneDots = totalScenes > 1;
+
   return (
     <AnimatePresence>
       {/* 백드롭 */}
@@ -483,8 +540,13 @@ export function SceneDetailModal({
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        {/* 모달 + 댓글 패널 컨테이너 */}
-        <div className="flex items-start gap-0" onClick={(e) => e.stopPropagation()}>
+        {/* 모달 + 댓글 패널 컨테이너 — 부드러운 이동 애니메이션 */}
+        <motion.div
+          className="flex items-start gap-0"
+          animate={{ x: showComments ? -160 : 0 }}
+          transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+          onClick={(e) => e.stopPropagation()}
+        >
           {/* 모달 래퍼 (말풍선 탭 포지셔닝용) */}
           <div className="relative">
             {/* 모달 본체 */}
@@ -661,6 +723,52 @@ export function SceneDetailModal({
                   </div>
                 </section>
               </div>
+
+              {/* ── 하단 씬 네비게이션 도트 ── */}
+              {showSceneDots && (
+                <div className="flex items-center justify-center gap-1.5 pb-4 pt-1">
+                  {Array.from({ length: totalScenes }, (_, i) => {
+                    const isCurrent = i === currentSceneIndex;
+                    // 도트가 많을 때 축소 표시 (양쪽 2개 + 현재 주변 2개)
+                    const showDot = totalScenes <= 9 ||
+                      i === 0 || i === totalScenes - 1 ||
+                      Math.abs(i - currentSceneIndex) <= 2;
+                    const showEllipsis = !showDot && (
+                      (i === 1 && currentSceneIndex > 3) ||
+                      (i === totalScenes - 2 && currentSceneIndex < totalScenes - 4)
+                    );
+                    if (showEllipsis) {
+                      return (
+                        <span key={i} className="text-[8px] text-text-secondary/40 px-0.5">...</span>
+                      );
+                    }
+                    if (!showDot) return null;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          if (i < currentSceneIndex && onNavigate) {
+                            for (let j = 0; j < currentSceneIndex - i; j++) {
+                              setTimeout(() => onNavigate('prev'), j * 30);
+                            }
+                          } else if (i > currentSceneIndex && onNavigate) {
+                            for (let j = 0; j < i - currentSceneIndex; j++) {
+                              setTimeout(() => onNavigate('next'), j * 30);
+                            }
+                          }
+                        }}
+                        className={cn(
+                          'rounded-full transition-all duration-300 cursor-pointer',
+                          isCurrent
+                            ? 'w-5 h-1.5 bg-accent'
+                            : 'w-1.5 h-1.5 bg-text-secondary/30 hover:bg-text-secondary/50',
+                        )}
+                        title={`씬 ${i + 1}`}
+                      />
+                    );
+                  })}
+                </div>
+              )}
             </motion.div>
 
             {/* ── 말풍선 탭 버튼 (책갈피 스타일) ── */}
@@ -722,7 +830,7 @@ export function SceneDetailModal({
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+        </motion.div>
       </motion.div>
 
       {/* 이미지 전체 뷰 모달 */}
@@ -732,6 +840,12 @@ export function SceneDetailModal({
           guideUrl={scene.guideUrl}
           sceneId={scene.sceneId}
           onClose={() => setShowImageModal(false)}
+          // 씬 네비게이션 props
+          hasPrevScene={hasPrev}
+          hasNextScene={hasNext}
+          currentSceneIndex={currentSceneIndex}
+          totalScenes={totalScenes}
+          onSceneNavigate={onNavigate}
         />
       )}
     </AnimatePresence>

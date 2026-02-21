@@ -552,8 +552,21 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
     setPhase('ready');
   }, []);
 
-  // 클릭으로 넘어가기 (ready 상태에서만)
+  // 클릭으로 넘어가기 (landing 중이면 즉시 스킵, ready 면 트랜지션)
   const handleClick = useCallback(() => {
+    if (phase === 'landing') {
+      // 애니메이션 스킵 → 즉시 트랜지션
+      setPhase('transition');
+      setTimeout(() => {
+        if (mode === 'splash') {
+          setPhase('done');
+          onComplete?.();
+        } else {
+          setPhase('login');
+        }
+      }, 300);
+      return;
+    }
     if (phase !== 'ready') return;
     setPhase('transition');
     setTimeout(() => {

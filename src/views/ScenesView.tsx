@@ -353,6 +353,7 @@ interface SceneCardProps {
   department: Department;
   isHighlighted?: boolean;
   isSelected?: boolean;
+  searchQuery?: string;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: () => void;
@@ -360,7 +361,7 @@ interface SceneCardProps {
   onCtrlClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
@@ -410,7 +411,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             #{scene.no}
           </span>
           <span className="text-xs text-text-primary truncate">
-            {scene.sceneId || '(씬번호 없음)'}
+            <HighlightText text={scene.sceneId || '(씬번호 없음)'} query={searchQuery} />
           </span>
           {scene.layoutId && (
             <span className="text-[10px] italic text-text-secondary/70 shrink-0">
@@ -420,7 +421,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <span className="text-xs font-medium text-text-primary truncate max-w-[80px]">
-            {scene.assignee || ''}
+            <HighlightText text={scene.assignee || ''} query={searchQuery} />
           </span>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(sceneIndex); }}
@@ -462,7 +463,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       {scene.memo && (
         <div className="px-2.5 py-1 border-t border-bg-border/30">
           <p className="text-[10px] text-text-secondary/60 leading-relaxed line-clamp-2">
-            {scene.memo}
+            <HighlightText text={scene.memo} query={searchQuery} />
           </p>
         </div>
       )}
@@ -518,28 +519,45 @@ interface SceneTableProps {
   searchQuery?: string;
 }
 
-/** 검색어 하이라이트 — 인라인 스타일로 확실한 시각 피드백 */
+/** 검색 하이라이트 CSS — 글로우 애니메이션 */
+const SEARCH_HIGHLIGHT_CSS = `
+@keyframes search-glow-pulse {
+  0%   { box-shadow: 0 0 3px 1px rgba(var(--color-accent), 0.5), 0 0 8px 2px rgba(var(--color-accent), 0.3); }
+  50%  { box-shadow: 0 0 6px 2px rgba(var(--color-accent), 0.7), 0 0 14px 4px rgba(var(--color-accent), 0.4); }
+  100% { box-shadow: 0 0 3px 1px rgba(var(--color-accent), 0.5), 0 0 8px 2px rgba(var(--color-accent), 0.3); }
+}
+.search-highlight-text {
+  background-color: rgba(var(--color-accent), 0.25);
+  color: rgba(var(--color-accent), 1);
+  font-weight: 600;
+  padding: 1px 3px;
+  border-radius: 3px;
+  animation: search-glow-pulse 1.5s ease-in-out infinite;
+  text-decoration: underline;
+  text-decoration-color: rgba(var(--color-accent), 0.5);
+  text-underline-offset: 2px;
+}
+`;
+let searchHighlightCssInjected = false;
+function ensureSearchHighlightCss() {
+  if (searchHighlightCssInjected) return;
+  const el = document.createElement('style');
+  el.textContent = SEARCH_HIGHLIGHT_CSS;
+  document.head.appendChild(el);
+  searchHighlightCssInjected = true;
+}
+
+/** 검색어 하이라이트 — CSS 클래스 기반 글로우 */
 function HighlightText({ text, query }: { text: string; query?: string }) {
   if (!query || !text) return <>{text}</>;
   const q = query.toLowerCase();
   const idx = text.toLowerCase().indexOf(q);
   if (idx === -1) return <>{text}</>;
+  ensureSearchHighlightCss();
   return (
     <>
       {text.slice(0, idx)}
-      <span
-        style={{
-          backgroundColor: 'rgb(var(--color-accent) / 0.3)',
-          color: 'rgb(var(--color-accent))',
-          fontWeight: 600,
-          padding: '1px 3px',
-          borderRadius: '3px',
-          boxShadow: '0 0 0 1px rgb(var(--color-accent) / 0.5), 0 0 8px rgb(var(--color-accent) / 0.3)',
-          textDecoration: 'underline',
-          textDecorationColor: 'rgb(var(--color-accent) / 0.5)',
-          textUnderlineOffset: '2px',
-        }}
-      >
+      <span className="search-highlight-text">
         {text.slice(idx, idx + query.length)}
       </span>
       {text.slice(idx + query.length)}
@@ -680,9 +698,9 @@ function AddFormImageSlot({
     try {
       const { pasteImageFromClipboard: pic } = await import('@/utils/imageUtils');
       // 로컬 붙여넣기 (base64만 가져오기)
-      const w = window as unknown as { electronAPI?: { readClipboardImage?: () => Promise<string> } };
-      if (w.electronAPI?.readClipboardImage) {
-        const raw = await w.electronAPI.readClipboardImage();
+      const w = window as unknown as { electronAPI?: { clipboardReadImage?: () => Promise<string | null> } };
+      if (w.electronAPI?.clipboardReadImage) {
+        const raw = await w.electronAPI.clipboardReadImage();
         if (raw) {
           const { resizeBlob: rb } = await import('@/utils/imageUtils');
           // raw is data URL
@@ -1691,7 +1709,8 @@ export function ScenesView() {
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
                     {groupScenes.map((scene, idx) => {
-                      const sIdx = currentPart?.scenes.indexOf(scene) ?? idx;
+                      const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
+                      const sIdx = rawIdx >= 0 ? rawIdx : idx;
                       return (
                         <SceneCard
                           key={`${scene.sceneId}-${idx}`}
@@ -1701,6 +1720,7 @@ export function ScenesView() {
                           department={selectedDepartment}
                           isHighlighted={highlightSceneId === scene.sceneId}
                           isSelected={selectedSceneIds.has(scene.sceneId)}
+                          searchQuery={searchQuery}
                           onToggle={handleToggle}
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -1732,7 +1752,8 @@ export function ScenesView() {
         /* ── 카드 뷰 (플랫) ── */
         <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 content-start">
           {scenes.map((scene, idx) => {
-            const sIdx = currentPart?.scenes.indexOf(scene) ?? idx;
+            const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
+                      const sIdx = rawIdx >= 0 ? rawIdx : idx;
             return (
               <SceneCard
                 key={`${scene.sceneId}-${idx}`}
@@ -1742,6 +1763,7 @@ export function ScenesView() {
                 department={selectedDepartment}
                 isHighlighted={highlightSceneId === scene.sceneId}
                 isSelected={selectedSceneIds.has(scene.sceneId)}
+                searchQuery={searchQuery}
                 onToggle={handleToggle}
                 onDelete={handleDeleteScene}
                 onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -1873,6 +1895,8 @@ export function ScenesView() {
           onClose={() => setDetailSceneIndex(null)}
           hasPrev={detailSceneIndex > 0}
           hasNext={detailSceneIndex < (currentPart?.scenes.length ?? 1) - 1}
+          totalScenes={currentPart?.scenes.length ?? 0}
+          currentSceneIndex={detailSceneIndex}
           onNavigate={(dir) => {
             const next = dir === 'prev' ? detailSceneIndex - 1 : detailSceneIndex + 1;
             const max = (currentPart?.scenes.length ?? 1) - 1;

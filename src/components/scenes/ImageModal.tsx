@@ -18,11 +18,27 @@ interface ImageModalProps {
   guideUrl: string;
   sceneId: string;
   onClose: () => void;
+  // 씬 네비게이션 (선택)
+  hasPrevScene?: boolean;
+  hasNextScene?: boolean;
+  currentSceneIndex?: number;
+  totalScenes?: number;
+  onSceneNavigate?: (direction: 'prev' | 'next') => void;
 }
 
 /* ────────────────────────────────────────────────────────────── */
 
-export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageModalProps) {
+export function ImageModal({
+  storyboardUrl,
+  guideUrl,
+  sceneId,
+  onClose,
+  hasPrevScene = false,
+  hasNextScene = false,
+  currentSceneIndex = 0,
+  totalScenes = 0,
+  onSceneNavigate,
+}: ImageModalProps) {
   const hasBoth = !!storyboardUrl && !!guideUrl;
 
   const [view, setView] = useState<ViewState>(
@@ -56,16 +72,15 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
     [view, hasBoth],
   );
 
-  /* ── 키보드 핸들러 ── */
+  /* ── 키보드 핸들러 (ESC는 SceneDetailModal에서 처리) ── */
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft')  { e.preventDefault(); navigate(-1); }
       if (e.key === 'ArrowRight') { e.preventDefault(); navigate(1); }
-      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [navigate, onClose]);
+  }, [navigate]);
 
   /* ── 마우스 휠 줌 ── */
   useEffect(() => {
@@ -99,6 +114,10 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
   /* ── 네비게이션 가능 여부 ── */
   const canGoLeft  = hasBoth && view !== 'overlay' && viewOrder.indexOf(view) > 0;
   const canGoRight = hasBoth && view !== 'overlay' && viewOrder.indexOf(view) < viewOrder.length - 1;
+
+  /* ── 씬 네비게이션 / 사진 네비게이션 표시 여부 ── */
+  const showSceneDots = totalScenes > 1;
+  const showPhotoDots = hasBoth && view !== 'overlay';
 
   /* ── 스와이프 애니메이션 variants (빠른 tween) ── */
   const slideVariants = {
@@ -257,22 +276,111 @@ export function ImageModal({ storyboardUrl, guideUrl, sceneId, onClose }: ImageM
           </button>
         )}
 
-        {/* ─── 하단 인디케이터 (도트) ─── */}
-        {hasBoth && view !== 'overlay' && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 z-10">
-            {viewOrder.map((v) => (
-              <div
-                key={v}
-                className={cn(
-                  'rounded-full transition-all duration-300',
-                  v === view
-                    ? 'w-6 h-2 bg-accent'
-                    : 'w-2 h-2 bg-white/30 hover:bg-white/50',
-                )}
-              />
-            ))}
-          </div>
-        )}
+        {/* ─── 하단 네비게이션: 사진 도트 + 씬 도트 ─── */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3 z-10">
+          {/* 사진(이미지 뷰) 네비게이션 도트 */}
+          <AnimatePresence>
+            {showPhotoDots && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                className="flex items-center gap-2"
+              >
+                {viewOrder.map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => {
+                      const dir = viewOrder.indexOf(v) - viewOrder.indexOf(view);
+                      setDirection(dir > 0 ? 1 : dir < 0 ? -1 : 0);
+                      setView(v);
+                    }}
+                    className={cn(
+                      'rounded-full transition-all duration-300 cursor-pointer',
+                      v === view
+                        ? 'w-6 h-2 bg-accent'
+                        : 'w-2 h-2 bg-white/30 hover:bg-white/50',
+                    )}
+                  />
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* 씬 네비게이션 도트 */}
+          <AnimatePresence>
+            {showSceneDots && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1], delay: showPhotoDots ? 0.05 : 0 }}
+                className="flex items-center gap-3 bg-bg-card/70 border border-bg-border/50 rounded-full px-4 py-2 backdrop-blur-sm"
+              >
+                <button
+                  onClick={() => onSceneNavigate?.('prev')}
+                  disabled={!hasPrevScene}
+                  className={cn(
+                    'transition-colors',
+                    hasPrevScene ? 'text-white/60 hover:text-white cursor-pointer' : 'text-white/15 cursor-not-allowed',
+                  )}
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <div className="flex items-center gap-1.5">
+                  {Array.from({ length: totalScenes }, (_, i) => {
+                    const isCurrent = i === currentSceneIndex;
+                    const showDot = totalScenes <= 9 ||
+                      i === 0 || i === totalScenes - 1 ||
+                      Math.abs(i - currentSceneIndex) <= 1;
+                    const showEllipsis = !showDot && (
+                      (i === 1 && currentSceneIndex > 2) ||
+                      (i === totalScenes - 2 && currentSceneIndex < totalScenes - 3)
+                    );
+                    if (showEllipsis) {
+                      return <span key={i} className="text-[7px] text-white/25 px-0.5">...</span>;
+                    }
+                    if (!showDot) return null;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          if (i < currentSceneIndex && onSceneNavigate) {
+                            for (let j = 0; j < currentSceneIndex - i; j++) {
+                              setTimeout(() => onSceneNavigate('prev'), j * 30);
+                            }
+                          } else if (i > currentSceneIndex && onSceneNavigate) {
+                            for (let j = 0; j < i - currentSceneIndex; j++) {
+                              setTimeout(() => onSceneNavigate('next'), j * 30);
+                            }
+                          }
+                        }}
+                        className={cn(
+                          'rounded-full transition-all duration-300 cursor-pointer',
+                          isCurrent
+                            ? 'w-4 h-1.5 bg-white/80'
+                            : 'w-1.5 h-1.5 bg-white/25 hover:bg-white/40',
+                        )}
+                        title={`씬 ${i + 1}`}
+                      />
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => onSceneNavigate?.('next')}
+                  disabled={!hasNextScene}
+                  className={cn(
+                    'transition-colors',
+                    hasNextScene ? 'text-white/60 hover:text-white cursor-pointer' : 'text-white/15 cursor-not-allowed',
+                  )}
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* ─── 이미지 영역 ─── */}
         <div
