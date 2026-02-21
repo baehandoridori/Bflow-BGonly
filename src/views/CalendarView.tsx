@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar as CalendarIcon, ChevronRight, Layers, BarChart3 } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Layers, BarChart3 } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { sceneProgress, isFullyDone } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS, DEPARTMENTS } from '@/types';
@@ -266,9 +266,165 @@ function ProgressHeatmap({ episodes }: { episodes: Episode[] }) {
 }
 
 /* ────────────────────────────────────────────────
+   월간 캘린더
+   ──────────────────────────────────────────────── */
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+function MonthlyCalendar({ episodes }: { episodes: Episode[] }) {
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [month, setMonth] = useState(() => new Date().getMonth()); // 0-based
+
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDow = firstDay.getDay(); // 0=일요일
+    const totalDays = lastDay.getDate();
+
+    // 이전 달 채우기
+    const prevMonthLast = new Date(year, month, 0).getDate();
+    const days: { date: number; month: number; year: number; isCurrentMonth: boolean; isToday: boolean; dow: number }[] = [];
+
+    for (let i = startDow - 1; i >= 0; i--) {
+      const d = prevMonthLast - i;
+      days.push({ date: d, month: month - 1, year, isCurrentMonth: false, isToday: false, dow: days.length % 7 });
+    }
+
+    for (let d = 1; d <= totalDays; d++) {
+      const isToday = `${year}-${month}-${d}` === todayStr;
+      days.push({ date: d, month, year, isCurrentMonth: true, isToday, dow: days.length % 7 });
+    }
+
+    // 다음 달 채우기 (6행 채우기)
+    const remaining = 42 - days.length;
+    for (let d = 1; d <= remaining; d++) {
+      days.push({ date: d, month: month + 1, year, isCurrentMonth: false, isToday: false, dow: days.length % 7 });
+    }
+
+    return days;
+  }, [year, month, todayStr]);
+
+  // 전체 통계 (간단한 표시용)
+  const stats = useMemo(() => {
+    const allScenes = episodes.flatMap((ep) => ep.parts.flatMap((p) => p.scenes));
+    const total = allScenes.length;
+    const done = allScenes.filter(isFullyDone).length;
+    const pct = total > 0 ? Math.round(allScenes.reduce((sum, s) => sum + sceneProgress(s), 0) / total) : 0;
+    return { total, done, pct, remaining: total - done };
+  }, [episodes]);
+
+  const monthLabel = `${year}년 ${month + 1}월`;
+
+  const goToPrevMonth = () => {
+    if (month === 0) { setYear(year - 1); setMonth(11); }
+    else setMonth(month - 1);
+  };
+  const goToNextMonth = () => {
+    if (month === 11) { setYear(year + 1); setMonth(0); }
+    else setMonth(month + 1);
+  };
+  const goToToday = () => {
+    setYear(today.getFullYear());
+    setMonth(today.getMonth());
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* 캘린더 헤더 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={goToPrevMonth}
+            className="p-1.5 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <h2 className="text-base font-semibold text-text-primary min-w-[100px] text-center">
+            {monthLabel}
+          </h2>
+          <button
+            onClick={goToNextMonth}
+            className="p-1.5 rounded-lg hover:bg-bg-border/30 text-text-secondary/60 hover:text-text-primary transition-colors cursor-pointer"
+          >
+            <ChevronRight size={16} />
+          </button>
+          <button
+            onClick={goToToday}
+            className="ml-2 px-2.5 py-1 text-[10px] rounded-md bg-accent/10 text-accent hover:bg-accent/20 transition-colors cursor-pointer font-medium"
+          >
+            오늘
+          </button>
+        </div>
+
+        {/* 간단 통계 */}
+        <div className="flex items-center gap-4 text-xs text-text-secondary/50">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-status-high" />
+            <span>완료 {stats.done}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-accent" />
+            <span>남은 씬 {stats.remaining}</span>
+          </div>
+          <span className="tabular-nums font-medium" style={{ color: stats.pct >= 100 ? '#00B894' : undefined }}>
+            전체 {stats.pct}%
+          </span>
+        </div>
+      </div>
+
+      {/* 요일 헤더 */}
+      <div className="grid grid-cols-7 gap-px">
+        {WEEKDAYS.map((day, i) => (
+          <div
+            key={day}
+            className={cn(
+              'text-center text-[11px] font-medium py-2',
+              i === 0 ? 'text-red-400/60' : i === 6 ? 'text-blue-400/60' : 'text-text-secondary/40',
+            )}
+          >
+            {day}
+          </div>
+        ))}
+      </div>
+
+      {/* 날짜 그리드 */}
+      <div className="grid grid-cols-7 gap-px bg-bg-border/15 rounded-xl overflow-hidden border border-bg-border/30">
+        {calendarDays.map((day, i) => (
+          <div
+            key={i}
+            className={cn(
+              'min-h-[72px] p-2 bg-bg-primary/50 transition-colors duration-100',
+              day.isCurrentMonth ? 'hover:bg-bg-border/15' : 'opacity-30',
+              day.isToday && 'bg-accent/8',
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <span
+                className={cn(
+                  'text-xs tabular-nums',
+                  day.isToday
+                    ? 'bg-accent text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold'
+                    : day.dow === 0 ? 'text-red-400/70'
+                    : day.dow === 6 ? 'text-blue-400/70'
+                    : day.isCurrentMonth ? 'text-text-primary/60' : 'text-text-secondary/30',
+                )}
+              >
+                {day.date}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────
    메인 캘린더 뷰
    ──────────────────────────────────────────────── */
-type CalViewMode = 'gantt' | 'heatmap';
+type CalViewMode = 'gantt' | 'heatmap' | 'calendar';
 
 export function CalendarView() {
   const episodes = useDataStore((s) => s.episodes);
@@ -329,6 +485,19 @@ export function CalendarView() {
             <Layers size={13} />
             히트맵
           </button>
+          <button
+            onClick={() => setViewMode('calendar')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1 text-xs rounded-md font-medium cursor-pointer',
+              'transition-colors duration-150',
+              viewMode === 'calendar'
+                ? 'bg-accent/20 text-accent'
+                : 'text-text-secondary hover:text-text-primary',
+            )}
+          >
+            <CalendarIcon size={13} />
+            캘린더
+          </button>
         </div>
       </div>
 
@@ -366,8 +535,12 @@ export function CalendarView() {
           <div className="bg-bg-card rounded-xl border border-bg-border/40 p-4">
             <GanttChart episodes={episodes} />
           </div>
-        ) : (
+        ) : viewMode === 'heatmap' ? (
           <ProgressHeatmap episodes={episodes} />
+        ) : (
+          <div className="bg-bg-card rounded-xl border border-bg-border/40 p-4">
+            <MonthlyCalendar episodes={episodes} />
+          </div>
         )}
       </div>
 

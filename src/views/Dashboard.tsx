@@ -331,32 +331,37 @@ export function Dashboard() {
               <div
                 key={item.i}
                 className="relative"
-                style={isEditMode ? {
-                  animation: 'widget-wiggle 0.3s ease-in-out infinite',
-                  animationDelay: `${(idx % 5) * 0.06}s`,
-                } : undefined}
               >
-                {/* 편집 모드: 삭제 버튼 */}
-                {isEditMode && (
-                  <button
-                    onClick={() => handleRemoveWidget(item.i)}
-                    className={cn(
-                      'absolute -top-1.5 -left-1.5 z-20 w-5 h-5 rounded-full',
-                      'bg-red-500 hover:bg-red-400',
-                      'flex items-center justify-center',
-                      'shadow-md shadow-black/30',
-                      'transition-colors duration-100 cursor-pointer',
-                    )}
-                    title="위젯 제거"
-                  >
-                    <X size={11} className="text-white" strokeWidth={3} />
-                  </button>
-                )}
-                {WIDGET_MAP[item.i] ?? (
-                  <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
-                    위젯: {item.i}
-                  </div>
-                )}
+                {/* 위글 래퍼 — 위글 transform을 자식에 적용하여 RGL의 translate와 충돌 방지 */}
+                <div
+                  className="h-full"
+                  style={isEditMode ? {
+                    animation: 'widget-wiggle 0.3s ease-in-out infinite',
+                    animationDelay: `${(idx % 5) * 0.06}s`,
+                  } : undefined}
+                >
+                  {/* 편집 모드: 삭제 버튼 */}
+                  {isEditMode && (
+                    <button
+                      onClick={() => handleRemoveWidget(item.i)}
+                      className={cn(
+                        'absolute -top-1.5 -left-1.5 z-20 w-5 h-5 rounded-full',
+                        'bg-red-500 hover:bg-red-400',
+                        'flex items-center justify-center',
+                        'shadow-md shadow-black/30',
+                        'transition-colors duration-100 cursor-pointer',
+                      )}
+                      title="위젯 제거"
+                    >
+                      <X size={11} className="text-white" strokeWidth={3} />
+                    </button>
+                  )}
+                  {WIDGET_MAP[item.i] ?? (
+                    <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
+                      위젯: {item.i}
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
           </ResponsiveGridLayout>

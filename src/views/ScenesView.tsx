@@ -10,13 +10,33 @@ import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, 
 
 /* ── 글로우 하이라이트 CSS 주입 (스포트라이트/인원별 뷰에서 이동 시) ── */
 const GLOW_CSS = `
-@keyframes scene-glow {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(108,92,231,0.6), 0 0 16px rgba(108,92,231,0.3); }
-  50% { box-shadow: 0 0 0 3px rgba(108,92,231,0.8), 0 0 24px rgba(108,92,231,0.5); }
+@keyframes scene-glow-pulse {
+  0%   { box-shadow: 0 0 0 2px rgba(108,92,231,0.7), 0 0 12px 2px rgba(108,92,231,0.4), 0 0 30px 4px rgba(108,92,231,0.15); }
+  50%  { box-shadow: 0 0 0 3px rgba(108,92,231,0.9), 0 0 20px 4px rgba(108,92,231,0.5), 0 0 40px 8px rgba(108,92,231,0.25); }
+  100% { box-shadow: 0 0 0 2px rgba(108,92,231,0.7), 0 0 12px 2px rgba(108,92,231,0.4), 0 0 30px 4px rgba(108,92,231,0.15); }
+}
+@keyframes scene-glow-fade {
+  0%   { box-shadow: 0 0 0 2px rgba(108,92,231,0.7), 0 0 12px 2px rgba(108,92,231,0.4), 0 0 30px 4px rgba(108,92,231,0.15); }
+  100% { box-shadow: 0 0 0 0px rgba(108,92,231,0), 0 0 0px 0px rgba(108,92,231,0), 0 0 0px 0px rgba(108,92,231,0); }
 }
 .scene-highlight {
-  animation: scene-glow 1.2s ease-in-out 3;
+  animation: scene-glow-pulse 0.8s ease-in-out 3, scene-glow-fade 0.6s ease-out 2.4s forwards;
   border-color: rgba(108,92,231,0.7) !important;
+  z-index: 10;
+}
+.scene-highlight-bg {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: rgba(108,92,231,0.06);
+  animation: scene-bg-fade 3s ease-out forwards;
+  z-index: 0;
+}
+@keyframes scene-bg-fade {
+  0%   { background: rgba(108,92,231,0.08); }
+  70%  { background: rgba(108,92,231,0.04); }
+  100% { background: transparent; }
 }
 `;
 let glowCssInjected = false;
@@ -251,15 +271,23 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const borderColor = pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct > 0 ? '#E17055' : '#2D3041';
 
   return (
-    <div
+    <motion.div
       className={cn(
-        'bg-bg-card border border-bg-border rounded-lg flex flex-col group relative cursor-pointer hover:border-text-secondary/30 transition-colors overflow-hidden',
+        'bg-bg-card border border-bg-border rounded-lg flex flex-col group relative cursor-pointer hover:border-text-secondary/30 transition-colors',
         isHighlighted && 'scene-highlight',
       )}
-      style={{ borderLeftWidth: 3, borderLeftColor: borderColor }}
+      style={{ borderLeftWidth: 3, borderLeftColor: borderColor, overflow: 'visible' }}
       onClick={onOpenDetail}
       ref={isHighlighted ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
+      {...(isHighlighted ? {
+        initial: { scale: 1.06 },
+        animate: { scale: 1 },
+        transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
+      } : {})}
     >
+      {/* 하이라이트 배경 오버레이 */}
+      {isHighlighted && <div className="scene-highlight-bg" />}
+
       {/* ── 상단: 씬 정보 ── */}
       <div className="px-2.5 pt-2 pb-1 flex items-center justify-between">
         <div className="flex items-center gap-1 min-w-0">
@@ -315,6 +343,15 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         <div className="flex-1" />
       )}
 
+      {/* ── 메모 ── */}
+      {scene.memo && (
+        <div className="px-2.5 py-1 border-t border-bg-border/30">
+          <p className="text-[10px] text-text-secondary/60 leading-relaxed line-clamp-2">
+            {scene.memo}
+          </p>
+        </div>
+      )}
+
       {/* ── 하단: 체크박스 + 진행 바 ── */}
       <div className="px-2.5 pt-1.5 pb-2 flex flex-col gap-1.5 mt-auto">
         <div className="flex gap-1">
@@ -350,7 +387,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
           <Confetti active={celebrating} onComplete={onCelebrationEnd} />
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -1120,13 +1157,21 @@ export function ScenesView() {
     <div className="flex flex-col gap-4 h-full">
       {/* 뒤로가기 (인원별/에피소드 뷰에서 이동해온 경우) */}
       {backLabel && (
-        <button
+        <motion.button
+          initial={{ opacity: 0, x: -8 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
           onClick={() => setView(previousView!)}
-          className="flex items-center gap-1.5 text-xs text-text-secondary/60 hover:text-accent transition-colors w-fit cursor-pointer"
+          className={cn(
+            'flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg w-fit cursor-pointer',
+            'bg-accent/10 text-accent border border-accent/20',
+            'hover:bg-accent/20 hover:border-accent/30',
+            'transition-colors duration-150',
+          )}
         >
           <ArrowLeft size={14} />
-          <span>{backLabel}로 돌아가기</span>
-        </button>
+          <span>← {backLabel}로 돌아가기</span>
+        </motion.button>
       )}
 
       {/* 필터 바 */}
