@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LogIn } from 'lucide-react';
+import { LogIn, ChevronRight } from 'lucide-react';
 import { login } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
 
@@ -9,20 +9,16 @@ import { useAuthStore } from '@/stores/useAuthStore';
 interface Particle {
   x: number;
   y: number;
-  z: number; // 0(먼) ~ 1(가까움)
+  z: number;
   vx: number;
   vy: number;
   baseSpeed: number;
   size: number;
-  color: [number, number, number]; // RGB
+  color: [number, number, number];
 }
 
 const PLEXUS_COLORS: [number, number, number][] = [
-  [108, 92, 231],   // #6C5CE7 보라
-  [162, 155, 254],   // #A29BFE 연보라
-  [116, 185, 255],   // #74B9FF 파랑
-  [0, 184, 148],     // #00B894 청록
-  [85, 239, 196],    // #55EFC4 민트
+  [108, 92, 231], [162, 155, 254], [116, 185, 255], [0, 184, 148], [85, 239, 196],
 ];
 
 const PARTICLE_COUNT = 90;
@@ -35,14 +31,10 @@ function createParticle(w: number, h: number): Particle {
   const color = PLEXUS_COLORS[Math.floor(Math.random() * PLEXUS_COLORS.length)];
   const baseSpeed = 0.15 + Math.random() * 0.3;
   return {
-    x: Math.random() * w,
-    y: Math.random() * h,
-    z,
+    x: Math.random() * w, y: Math.random() * h, z,
     vx: (Math.random() - 0.5) * baseSpeed * z,
     vy: (Math.random() - 0.5) * baseSpeed * z,
-    baseSpeed,
-    size: 1.5 + z * 2.5,
-    color,
+    baseSpeed, size: 1.5 + z * 2.5, color,
   };
 }
 
@@ -52,8 +44,6 @@ function PlexusBackground() {
   const mouseRef = useRef({ x: -9999, y: -9999 });
   const rafRef = useRef(0);
   const sizeRef = useRef({ w: 0, h: 0 });
-
-  // 노이즈 캔버스 (밴딩 제거용 디더링 텍스처 — 한 번만 생성)
   const noiseRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -62,7 +52,6 @@ function PlexusBackground() {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    // 리사이즈 처리
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
       const w = window.innerWidth;
@@ -74,28 +63,22 @@ function PlexusBackground() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       sizeRef.current = { w, h };
 
-      // 노이즈 텍스처 생성 (밴딩 제거)
       if (!noiseRef.current || noiseRef.current.width !== w) {
         const nc = document.createElement('canvas');
-        nc.width = w;
-        nc.height = h;
+        nc.width = w; nc.height = h;
         const nctx = nc.getContext('2d');
         if (nctx) {
           const imageData = nctx.createImageData(w, h);
           const data = imageData.data;
           for (let i = 0; i < data.length; i += 4) {
             const v = Math.random() * 25;
-            data[i] = v;
-            data[i + 1] = v;
-            data[i + 2] = v;
-            data[i + 3] = 18; // 매우 낮은 opacity
+            data[i] = v; data[i + 1] = v; data[i + 2] = v; data[i + 3] = 18;
           }
           nctx.putImageData(imageData, 0, 0);
         }
         noiseRef.current = nc;
       }
 
-      // 파티클 초기화 또는 리사이즈
       if (particlesRef.current.length === 0) {
         particlesRef.current = Array.from({ length: PARTICLE_COUNT }, () => createParticle(w, h));
       }
@@ -104,13 +87,9 @@ function PlexusBackground() {
     resize();
     window.addEventListener('resize', resize);
 
-    // 마우스 추적
-    const onMouse = (e: MouseEvent) => {
-      mouseRef.current = { x: e.clientX, y: e.clientY };
-    };
+    const onMouse = (e: MouseEvent) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
     window.addEventListener('mousemove', onMouse, { passive: true });
 
-    // 애니메이션 루프
     let running = true;
     const animate = () => {
       if (!running) return;
@@ -119,11 +98,9 @@ function PlexusBackground() {
       const my = mouseRef.current.y;
       const particles = particlesRef.current;
 
-      // 배경 — 다단계 radial gradient (밴딩 최소화)
       ctx.fillStyle = '#12141C';
       ctx.fillRect(0, 0, w, h);
 
-      // 미묘한 중앙 글로우
       const cg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.7);
       cg.addColorStop(0, 'rgba(108, 92, 231, 0.06)');
       cg.addColorStop(0.3, 'rgba(108, 92, 231, 0.03)');
@@ -132,7 +109,6 @@ function PlexusBackground() {
       ctx.fillStyle = cg;
       ctx.fillRect(0, 0, w, h);
 
-      // 마우스 주변 글로우
       if (mx > 0 && my > 0) {
         const mg = ctx.createRadialGradient(mx, my, 0, mx, my, 250);
         mg.addColorStop(0, 'rgba(108, 92, 231, 0.08)');
@@ -142,14 +118,9 @@ function PlexusBackground() {
         ctx.fillRect(0, 0, w, h);
       }
 
-      // 노이즈 디더링 오버레이 (밴딩 제거)
-      if (noiseRef.current) {
-        ctx.drawImage(noiseRef.current, 0, 0);
-      }
+      if (noiseRef.current) ctx.drawImage(noiseRef.current, 0, 0);
 
-      // 파티클 업데이트
       for (const p of particles) {
-        // 마우스 인터랙션 — 가까운 파티클(z 높을수록) 더 강하게 반응
         const dmx = p.x - mx;
         const dmy = p.y - my;
         const distMouse = Math.sqrt(dmx * dmx + dmy * dmy);
@@ -158,12 +129,7 @@ function PlexusBackground() {
           p.vx += (dmx / distMouse) * force;
           p.vy += (dmy / distMouse) * force;
         }
-
-        // 속도 감쇠 + 이동
-        p.vx *= 0.98;
-        p.vy *= 0.98;
-
-        // 최소 속도 유지 (유기적 흐름)
+        p.vx *= 0.98; p.vy *= 0.98;
         const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
         const minSpeed = p.baseSpeed * p.z * 0.15;
         if (speed < minSpeed) {
@@ -171,11 +137,7 @@ function PlexusBackground() {
           p.vx = Math.cos(angle) * minSpeed;
           p.vy = Math.sin(angle) * minSpeed;
         }
-
-        p.x += p.vx;
-        p.y += p.vy;
-
-        // 경계 랩핑 (부드러운 진입)
+        p.x += p.vx; p.y += p.vy;
         const margin = 50;
         if (p.x < -margin) p.x = w + margin;
         if (p.x > w + margin) p.x = -margin;
@@ -183,59 +145,41 @@ function PlexusBackground() {
         if (p.y > h + margin) p.y = -margin;
       }
 
-      // Z-depth 기준 정렬 (먼 것부터 그리기)
       const sorted = [...particles].sort((a, b) => a.z - b.z);
 
-      // 연결선 그리기 (먼 파티클의 연결선은 더 투명하고 얇게)
       for (let i = 0; i < sorted.length; i++) {
         for (let j = i + 1; j < sorted.length; j++) {
-          const a = sorted[i];
-          const b = sorted[j];
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
+          const a = sorted[i]; const b = sorted[j];
+          const dx = a.x - b.x; const dy = a.y - b.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-
-          // Z 깊이에 따른 연결 거리 스케일링
           const avgZ = (a.z + b.z) * 0.5;
           const scaledDist = CONNECTION_DIST * avgZ;
-
           if (dist < scaledDist) {
             const lineAlpha = (1 - dist / scaledDist) * avgZ * 0.35;
-            const lineWidth = avgZ * 1.2;
-
-            // 마우스 근처 연결선은 밝게 글로우
             const midX = (a.x + b.x) * 0.5;
             const midY = (a.y + b.y) * 0.5;
             const dMid = Math.sqrt((midX - mx) ** 2 + (midY - my) ** 2);
             const glowBoost = dMid < MOUSE_RADIUS ? (1 - dMid / MOUSE_RADIUS) * 0.4 : 0;
-
             const r = Math.round((a.color[0] + b.color[0]) * 0.5);
             const g = Math.round((a.color[1] + b.color[1]) * 0.5);
             const bl = Math.round((a.color[2] + b.color[2]) * 0.5);
-
             ctx.beginPath();
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
+            ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
             ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${Math.min(lineAlpha + glowBoost, 0.6)})`;
-            ctx.lineWidth = lineWidth;
+            ctx.lineWidth = avgZ * 1.2;
             ctx.stroke();
           }
         }
       }
 
-      // 파티클(노드) 그리기 — Z 깊이에 따른 크기, 블러, 투명도
       for (const p of sorted) {
         const alpha = 0.3 + p.z * 0.6;
         const [r, g, b] = p.color;
-
-        // 마우스 근처 파티클 글로우
-        const dmx2 = p.x - mx;
-        const dmy2 = p.y - my;
+        const dmx2 = p.x - mx; const dmy2 = p.y - my;
         const distM = Math.sqrt(dmx2 * dmx2 + dmy2 * dmy2);
         const nearMouse = distM < MOUSE_RADIUS;
         const glowSize = nearMouse ? p.size + (1 - distM / MOUSE_RADIUS) * 4 * p.z : p.size;
 
-        // 먼 파티클 — 블러 효과 (큰 그래디언트 원으로 시뮬레이션)
         if (p.z < 0.4) {
           const blurSize = glowSize * (3 - p.z * 5);
           const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, blurSize);
@@ -245,7 +189,6 @@ function PlexusBackground() {
           ctx.fillStyle = grad;
           ctx.fillRect(p.x - blurSize, p.y - blurSize, blurSize * 2, blurSize * 2);
         } else {
-          // 가까운 파티클 — 선명한 점 + 글로우 후광
           if (nearMouse) {
             const haloSize = glowSize * 3;
             const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, haloSize);
@@ -255,13 +198,10 @@ function PlexusBackground() {
             ctx.fillStyle = halo;
             ctx.fillRect(p.x - haloSize, p.y - haloSize, haloSize * 2, haloSize * 2);
           }
-
           ctx.beginPath();
           ctx.arc(p.x, p.y, glowSize, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
           ctx.fill();
-
-          // 밝은 코어
           if (p.z > 0.7) {
             ctx.beginPath();
             ctx.arc(p.x, p.y, glowSize * 0.4, 0, Math.PI * 2);
@@ -270,12 +210,10 @@ function PlexusBackground() {
           }
         }
       }
-
       rafRef.current = requestAnimationFrame(animate);
     };
 
     rafRef.current = requestAnimationFrame(animate);
-
     return () => {
       running = false;
       cancelAnimationFrame(rafRef.current);
@@ -284,60 +222,165 @@ function PlexusBackground() {
     };
   }, []);
 
+  return <canvas ref={canvasRef} className="absolute inset-0" style={{ width: '100%', height: '100%' }} />;
+}
+
+// ─── 드라마틱 텍스트 모핑 애니메이션 ───────────────────────────
+// 시퀀스: "Be the flow." → "BAE the flow." → "B the flow." → "B flow."
+
+type MorphStage = 0 | 1 | 2 | 3 | 4;
+// 0: 초기 등장 "Be the flow."
+// 1: "Be" → "BAE" 모핑
+// 2: "BAE" → "B" 모핑
+// 3: "the " 연기처럼 사라짐 + 공간 수축 → "B flow."
+// 4: 최종 상태 + 서브타이틀 + CTA
+
+const PREFIXES: Record<number, string> = { 0: 'Be', 1: 'BAE', 2: 'B', 3: 'B', 4: 'B' };
+
+const smokeExit = {
+  opacity: 0,
+  y: -30,
+  filter: 'blur(16px)',
+  scale: 1.1,
+};
+const smokeEnter = {
+  opacity: 0,
+  y: 20,
+  filter: 'blur(12px)',
+  scale: 0.9,
+};
+const smokeVisible = {
+  opacity: 1,
+  y: 0,
+  filter: 'blur(0px)',
+  scale: 1,
+};
+
+function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
+  const [stage, setStage] = useState<MorphStage>(0);
+  const doneRef = useRef(false);
+
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    // Stage 0 → 1: "Be" → "BAE" (1.8s 후)
+    timers.push(setTimeout(() => setStage(1), 1800));
+    // Stage 1 → 2: "BAE" → "B" (1.8 + 1.0 = 2.8s)
+    timers.push(setTimeout(() => setStage(2), 2800));
+    // Stage 2 → 3: "the" 사라짐 (2.8 + 1.0 = 3.8s)
+    timers.push(setTimeout(() => setStage(3), 3800));
+    // Stage 3 → 4: 최종 (3.8 + 1.2 = 5.0s)
+    timers.push(setTimeout(() => {
+      setStage(4);
+      if (!doneRef.current) {
+        doneRef.current = true;
+        onAnimationDone();
+      }
+    }, 5000));
+    return () => timers.forEach(clearTimeout);
+  }, [onAnimationDone]);
+
+  const prefixText = PREFIXES[stage];
+  const showThe = stage < 3;
+
   return (
-    <canvas
-      ref={canvasRef}
-      className="absolute inset-0"
-      style={{ width: '100%', height: '100%' }}
-    />
+    <motion.div className="flex flex-col items-center gap-5 z-10 relative">
+      {/* 메인 텍스트 행 */}
+      <h1 className="flex items-baseline overflow-hidden text-5xl md:text-7xl font-bold tracking-tight">
+        {/* B / Be / BAE — 프리픽스 (모핑) */}
+        <AnimatePresence mode="wait">
+          <motion.span
+            key={prefixText}
+            initial={stage === 0 ? { y: 80, opacity: 0, rotateX: -90 } : smokeEnter}
+            animate={stage === 0 ? { y: 0, opacity: 1, rotateX: 0 } : smokeVisible}
+            exit={smokeExit}
+            transition={{
+              duration: stage === 0 ? 0.7 : 0.5,
+              ease: stage === 0 ? [0.16, 1, 0.3, 1] : [0.4, 0, 0.2, 1],
+              delay: stage === 0 ? 0.3 : 0,
+            }}
+            className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent"
+          >
+            {prefixText}
+          </motion.span>
+        </AnimatePresence>
+
+        {/* " the " — 연기처럼 사라짐 */}
+        <motion.span
+          animate={{
+            opacity: showThe ? 1 : 0,
+            filter: showThe ? 'blur(0px)' : 'blur(16px)',
+            width: showThe ? 'auto' : 0,
+            marginLeft: showThe ? '0px' : '0px',
+            marginRight: showThe ? '0px' : '0px',
+            paddingLeft: showThe ? '0px' : '0px',
+            paddingRight: showThe ? '0px' : '0px',
+          }}
+          transition={{
+            opacity: { duration: 0.8, ease: [0.4, 0, 0.2, 1] },
+            filter: { duration: 0.8, ease: [0.4, 0, 0.2, 1] },
+            width: { duration: 1.0, ease: [0.16, 1, 0.3, 1], delay: 0.2 },
+          }}
+          className="inline-block text-text-primary overflow-hidden whitespace-nowrap"
+          style={{ originX: 0.5 }}
+        >
+          {'\u00A0the'}
+        </motion.span>
+
+        {/* " flow." — 고정 */}
+        <motion.span
+          initial={{ y: 80, opacity: 0, rotateX: -90 }}
+          animate={{ y: 0, opacity: 1, rotateX: 0 }}
+          transition={{ delay: 0.6, duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+          className="inline-block text-text-primary"
+          style={{ whiteSpace: 'pre' }}
+        >
+          {'\u00A0flow.'}
+        </motion.span>
+      </h1>
+
+      {/* 서브타이틀 */}
+      <AnimatePresence>
+        {stage >= 4 && (
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, ease: 'easeOut' }}
+            className="text-base md:text-lg text-text-secondary/70 font-light tracking-wide"
+          >
+            Your workflow, but better. That&apos;s the <span className="text-accent font-medium">B</span>.
+          </motion.p>
+        )}
+      </AnimatePresence>
+
+      {/* 디바이더 */}
+      <motion.div
+        initial={{ scaleX: 0 }}
+        animate={{ scaleX: stage >= 4 ? 1 : 0 }}
+        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+        className="h-px w-24 bg-gradient-to-r from-transparent via-accent to-transparent"
+      />
+    </motion.div>
   );
 }
 
-// ─── 히어로 텍스트 애니메이션 ─────────────────────────────────
+// ─── 클릭 투 컨티뉴 ────────────────────────────────────────────
 
-const HERO_LETTERS = 'B the flow.'.split('');
-
-function HeroText() {
+function ClickPrompt() {
   return (
-    <motion.div className="flex flex-col items-center gap-5 z-10 relative">
-      <h1 className="flex overflow-hidden">
-        {HERO_LETTERS.map((char, i) => (
-          <motion.span
-            key={i}
-            initial={{ y: 80, opacity: 0, rotateX: -90 }}
-            animate={{ y: 0, opacity: 1, rotateX: 0 }}
-            transition={{
-              delay: 0.3 + i * 0.06,
-              duration: 0.7,
-              ease: [0.16, 1, 0.3, 1],
-            }}
-            className={`inline-block text-5xl md:text-7xl font-bold tracking-tight ${
-              i === 0
-                ? 'bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent'
-                : 'text-text-primary'
-            }`}
-            style={{ display: 'inline-block', whiteSpace: 'pre' }}
-          >
-            {char === ' ' ? '\u00A0' : char}
-          </motion.span>
-        ))}
-      </h1>
-
-      <motion.p
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.2, duration: 0.8, ease: 'easeOut' }}
-        className="text-base md:text-lg text-text-secondary/70 font-light tracking-wide"
-      >
-        Your workflow, but better. That&apos;s the <span className="text-accent font-medium">B</span>.
-      </motion.p>
-
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.3, duration: 0.6, ease: 'easeOut' }}
+      className="absolute bottom-20 left-0 right-0 flex justify-center z-10"
+    >
       <motion.div
-        initial={{ scaleX: 0 }}
-        animate={{ scaleX: 1 }}
-        transition={{ delay: 1.6, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        className="h-px w-24 bg-gradient-to-r from-transparent via-accent to-transparent"
-      />
+        animate={{ opacity: [0.4, 0.8, 0.4] }}
+        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+        className="flex items-center gap-1.5 text-xs text-text-secondary/50 tracking-widest uppercase"
+      >
+        click to continue
+        <ChevronRight size={12} className="animate-pulse" />
+      </motion.div>
     </motion.div>
   );
 }
@@ -469,30 +512,20 @@ interface LoginScreenProps {
   onComplete?: () => void;
 }
 
-type Phase = 'landing' | 'transition' | 'login' | 'done';
+type Phase = 'landing' | 'ready' | 'transition' | 'login' | 'done';
 
 export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
   const { setCurrentUser } = useAuthStore();
   const [phase, setPhase] = useState<Phase>('landing');
 
-  // 타이머: 히어로 → 전환
-  useEffect(() => {
-    const duration = mode === 'splash' ? 2400 : 2800;
-    const t1 = setTimeout(() => setPhase('transition'), duration);
-    const t2 = setTimeout(() => {
-      if (mode === 'splash') {
-        setPhase('done');
-        onComplete?.();
-      } else {
-        setPhase('login');
-      }
-    }, duration + 600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [mode, onComplete]);
+  // 텍스트 애니메이션 완료 콜백
+  const handleAnimationDone = useCallback(() => {
+    setPhase('ready');
+  }, []);
 
-  // 클릭/키 입력 시 즉시 스킵
-  const skip = useCallback(() => {
-    if (phase !== 'landing') return;
+  // 클릭으로 넘어가기 (ready 상태에서만)
+  const handleClick = useCallback(() => {
+    if (phase !== 'ready') return;
     setPhase('transition');
     setTimeout(() => {
       if (mode === 'splash') {
@@ -501,7 +534,7 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
       } else {
         setPhase('login');
       }
-    }, 400);
+    }, 500);
   }, [phase, mode, onComplete]);
 
   const handleLogin = useCallback(async (name: string, password: string): Promise<string | null> => {
@@ -517,35 +550,40 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
 
   return (
     <div
-      className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden select-none z-[9998]"
+      className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden select-none z-[9998] cursor-pointer"
       style={{ background: '#12141C' }}
-      onClick={skip}
-      onKeyDown={skip}
+      onClick={handleClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
       tabIndex={-1}
     >
       <PlexusBackground />
 
       <AnimatePresence mode="wait">
-        {(phase === 'landing' || phase === 'transition') && (
+        {(phase === 'landing' || phase === 'ready' || phase === 'transition') && (
           <motion.div
             key="hero"
             exit={{ opacity: 0, y: -40, scale: 0.97, filter: 'blur(8px)' }}
             transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
             className="flex flex-col items-center"
           >
-            <HeroText />
+            <HeroText onAnimationDone={handleAnimationDone} />
           </motion.div>
         )}
 
         {phase === 'login' && (
           <motion.div
             key="login"
-            className="flex flex-col items-center"
+            className="flex flex-col items-center cursor-default"
             onClick={(e) => e.stopPropagation()}
           >
             <LoginForm onLogin={handleLogin} />
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* 클릭 프롬프트 — ready 상태에서만 표시 */}
+      <AnimatePresence>
+        {phase === 'ready' && <ClickPrompt />}
       </AnimatePresence>
 
       <Footer />
