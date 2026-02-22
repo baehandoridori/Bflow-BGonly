@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Droplets, Eye } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -32,9 +32,36 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
 export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const [appOpacity, setAppOpacity] = useState(0.92);
   const [glassIntensity, setGlassIntensity] = useState(0.7);
-  const [isHover, setIsHover] = useState(false);
+  const [showControls, setShowControls] = useState(false);
   const [ready, setReady] = useState(false);
   const [isFocused, setIsFocused] = useState(true);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 마우스 위치 추적 → 오른쪽 위 근처일 때만 컨트롤 표시
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    // 오른쪽 60% + 상단 48px 영역
+    const inZone = x > rect.width * 0.4 && y < 48;
+    if (inZone) {
+      if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+      setShowControls(true);
+    } else if (!inZone && showControls) {
+      // 영역 밖이면 300ms 후 숨김 (슬라이더 조작 중 갑자기 사라지는 것 방지)
+      if (!hideTimerRef.current) {
+        hideTimerRef.current = setTimeout(() => {
+          setShowControls(false);
+          hideTimerRef.current = null;
+        }, 300);
+      }
+    }
+  }, [showControls]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+    setShowControls(false);
+  }, []);
 
   // 포커스 변경 감지 (Acrylic 회색 fallback 대응)
   useEffect(() => {
@@ -146,9 +173,11 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       style={{
         background: `rgba(12, 14, 22, ${tintAlpha})`,
         transition: 'background 0.3s ease',
-      }}
-      onMouseEnter={() => setIsHover(true)}
-      onMouseLeave={() => setIsHover(false)}
+        WebkitAppRegion: 'drag',
+        cursor: 'default',
+      } as React.CSSProperties}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
     >
       {/* ── 유리 반사 하이라이트 (상단) ── */}
       <div
@@ -175,49 +204,54 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         }}
       />
 
-      {/* ── 드래그 영역 + 호버 컨트롤 ── */}
-      <div
-        className="shrink-0 relative z-10"
-        style={{ WebkitAppRegion: 'drag', height: '36px' } as React.CSSProperties}
-      >
-        {isHover && (
-          <div
-            className="absolute inset-0 flex items-center gap-3 px-3"
-            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          >
-            {/* 앱 오퍼시티 */}
-            <div className="flex items-center gap-1" title="앱 투명도">
-              <Eye size={11} className="text-white/35" />
-              <input type="range" min={15} max={100}
-                value={Math.round(appOpacity * 100)}
-                onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
-                className="w-12 h-1 cursor-pointer" />
-            </div>
-
-            {/* 글래스 틴트 */}
-            <div className="flex items-center gap-1" title="글래스 효과">
-              <Droplets size={11} className="text-white/35" />
-              <input type="range" min={0} max={100}
-                value={Math.round(glassIntensity * 100)}
-                onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
-                className="w-12 h-1 cursor-pointer" />
-            </div>
-
-            <div className="flex-1" />
-
-            {/* 닫기 */}
-            <button
-              onClick={handleClose}
-              className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer"
-            >
-              <X size={9} className="text-white" strokeWidth={3} />
-            </button>
+      {/* ── 오른쪽 위 호버 시 컨트롤 ── */}
+      {showControls && (
+        <div
+          className="absolute top-0 right-0 z-20 flex items-center gap-2 px-2.5"
+          style={{
+            WebkitAppRegion: 'no-drag',
+            height: '36px',
+            background: 'linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.5) 100%)',
+            borderBottomLeftRadius: '8px',
+          } as React.CSSProperties}
+          onMouseEnter={() => {
+            if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+            setShowControls(true);
+          }}
+        >
+          {/* 앱 오퍼시티 */}
+          <div className="flex items-center gap-1" title="앱 투명도">
+            <Eye size={11} className="text-white/40" />
+            <input type="range" min={15} max={100}
+              value={Math.round(appOpacity * 100)}
+              onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
+              className="w-11 h-1 cursor-pointer" />
           </div>
-        )}
-      </div>
+
+          {/* 글래스 틴트 */}
+          <div className="flex items-center gap-1" title="글래스 효과">
+            <Droplets size={11} className="text-white/40" />
+            <input type="range" min={0} max={100}
+              value={Math.round(glassIntensity * 100)}
+              onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
+              className="w-11 h-1 cursor-pointer" />
+          </div>
+
+          {/* 닫기 */}
+          <button
+            onClick={handleClose}
+            className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-1"
+          >
+            <X size={9} className="text-white" strokeWidth={3} />
+          </button>
+        </div>
+      )}
 
       {/* ── 위젯 콘텐츠 ── */}
-      <div className="flex-1 overflow-hidden relative z-10">
+      <div
+        className="flex-1 overflow-hidden relative z-10"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
         <IsPopupContext.Provider value={true}>
         <WidgetIdContext.Provider value={widgetId}>
           <div className="h-full overflow-auto">
