@@ -246,6 +246,7 @@ export default function App() {
   };
 
   // 로딩 스플래시 — authReady 후에도 유지, 클릭으로 스킵 가능
+  // 영상은 1회 재생 후 마지막 프레임에서 멈춤 (스플래시 아트처럼)
   if (!loadingSplashDone) {
     const canSkip = authReady;
     return (
@@ -256,10 +257,10 @@ export default function App() {
         }}
         onClick={() => { if (canSkip) setLoadingSplashDone(true); }}
       >
-        {/* 스플래시 영상 */}
+        {/* 스플래시 영상 — loop 없이 1회 재생 후 마지막 프레임 고정 */}
         <div className="relative" style={{ width: 'min(420px, 75vmin)', aspectRatio: '672 / 592' }}>
           <video
-            autoPlay muted loop playsInline preload="auto"
+            autoPlay muted playsInline preload="auto"
             src="/splash/opening_video.mp4"
             className="absolute object-cover"
             style={{
@@ -275,19 +276,29 @@ export default function App() {
           />
         </div>
 
-        {/* 로딩 중 / 클릭 투 스킵 */}
-        {canSkip ? (
-          <span
-            className="absolute bottom-8 text-sm text-white/50 tracking-wide animate-pulse"
-            style={{ animation: 'fadeIn 0.5s ease-out, pulse 2s ease-in-out infinite' }}
-          >
-            아무 곳이나 클릭하여 건너뛰기
-          </span>
-        ) : (
-          <span className="absolute bottom-8 text-sm text-white/30 animate-pulse tracking-wide">
-            로딩 중...
-          </span>
-        )}
+        {/* 하단 문구 */}
+        <div className="absolute bottom-6 flex flex-col items-center gap-1.5">
+          {canSkip ? (
+            <>
+              <span
+                className="text-sm text-accent/80 font-medium tracking-wide"
+                style={{ animation: 'fadeIn 0.5s ease-out' }}
+              >
+                로딩 완료
+              </span>
+              <span
+                className="text-xs text-white/40 tracking-wide"
+                style={{ animation: 'fadeIn 0.5s ease-out 0.2s both' }}
+              >
+                아무 곳이나 클릭하여 건너뛰기
+              </span>
+            </>
+          ) : (
+            <span className="text-sm text-white/30 animate-pulse tracking-wide">
+              로딩 중...
+            </span>
+          )}
+        </div>
 
         <style>{`
           @keyframes loadingSplashReveal {

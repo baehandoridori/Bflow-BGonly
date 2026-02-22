@@ -15,6 +15,7 @@ import { loadSession, loadUsers } from '@/services/userService';
 import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig } from '@/services/sheetsService';
 import { readTestSheet } from '@/services/testSheetService';
 import { getPreset, applyTheme } from '@/themes';
+import { DEFAULT_WEB_APP_URL } from '@/config';
 
 const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNode }> = {
   'overall-progress': { label: '전체 진행률', component: <OverallProgressWidget /> },
@@ -117,28 +118,26 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         // 대시보드 필터를 'all'로 설정 (위젯이 데이터 표시하도록)
         useAppStore.getState().setDashboardDeptFilter('all');
 
-        if (!isTestMode) {
-          // 프로덕션: App.tsx와 동일한 서비스 함수 사용
-          let connected = await checkConnection();
-          console.log('[WidgetPopup] 시트 연결:', connected);
-          if (!connected) {
-            // 시트 미연결 — 저장된 설정으로 연결 시도
-            const cfg = await loadSheetsConfig();
-            if (cfg?.webAppUrl) {
-              const result = await connectSheets(cfg.webAppUrl);
-              connected = result.ok;
-              console.log('[WidgetPopup] 재연결 시도:', result.ok);
-            }
+        // 시트 연결 시도 (모드 무관 — App.tsx와 동일 로직)
+        let connected = await checkConnection();
+        console.log('[WidgetPopup] 시트 연결:', connected);
+        if (!connected) {
+          const cfg = await loadSheetsConfig();
+          const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+          if (urlToConnect) {
+            const result = await connectSheets(urlToConnect);
+            connected = result.ok;
+            console.log('[WidgetPopup] 재연결 시도:', result.ok);
           }
-          if (connected) {
-            const episodes = await readAllFromSheets();
-            console.log('[WidgetPopup] 데이터:', episodes.length, '에피소드');
-            useDataStore.getState().setEpisodes(episodes);
-          }
+        }
+        if (connected) {
+          const episodes = await readAllFromSheets();
+          console.log('[WidgetPopup] 시트 데이터:', episodes.length, '에피소드');
+          useDataStore.getState().setEpisodes(episodes);
         } else {
-          // 테스트: testSheetService 사용 (migrateEpisodes 포함)
+          // 시트 미연결 시에만 테스트 데이터 fallback
           const episodes = await readTestSheet();
-          console.log('[WidgetPopup] 테스트 데이터:', episodes.length, '에피소드');
+          console.log('[WidgetPopup] fallback 테스트 데이터:', episodes.length, '에피소드');
           useDataStore.getState().setEpisodes(episodes);
         }
 
