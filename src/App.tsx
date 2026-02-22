@@ -73,6 +73,9 @@ export default function App() {
       }
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
+
+      // 위젯 팝업 윈도우에 데이터 변경 알림
+      window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
       console.error('[동기화 실패]', err);
       setSyncError(String(err));

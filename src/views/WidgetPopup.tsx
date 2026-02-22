@@ -92,6 +92,36 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     return () => { cleanup?.(); };
   }, []);
 
+  // 실시간 데이터 동기화: sheet:changed 이벤트 수신 시 데이터 새로고침
+  useEffect(() => {
+    if (!ready) return; // 초기 로드 완료 전에는 무시
+
+    const reloadData = async () => {
+      try {
+        const api = window.electronAPI;
+        if (!api) return;
+
+        const connected = await checkConnection();
+        if (connected) {
+          const episodes = await readAllFromSheets();
+          console.log('[WidgetPopup] 실시간 동기화:', episodes.length, '에피소드');
+          useDataStore.getState().setEpisodes(episodes);
+        }
+
+        // 유저 정보도 갱신
+        const users = await loadUsers();
+        useAuthStore.getState().setUsers(users);
+      } catch (err) {
+        console.error('[WidgetPopup] 동기화 실패:', err);
+      }
+    };
+
+    const cleanup = window.electronAPI?.onSheetChanged?.(() => {
+      reloadData();
+    });
+    return () => { cleanup?.(); };
+  }, [ready]);
+
   // 테마 + 데이터 초기화
   useEffect(() => {
     // Acrylic 모드: HTML/Body를 투명하게 하여 네이티브 블러가 보이도록

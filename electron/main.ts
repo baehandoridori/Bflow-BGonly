@@ -67,10 +67,8 @@ function startWatching(filePath: string): void {
 
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        // 렌더러에 "다른 사용자가 파일을 변경함" 알림
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('sheet:changed');
-        }
+        // 모든 윈도우(메인 + 위젯 팝업)에 "데이터 변경" 알림
+        broadcastSheetChanged();
       }, 200); // 200ms debounce
     });
   } catch {
@@ -83,6 +81,20 @@ function stopWatching(): void {
   if (fileWatcher) {
     fileWatcher.close();
     fileWatcher = null;
+  }
+}
+
+/** 모든 윈도우(메인 + 위젯 팝업)에 sheet:changed 이벤트 브로드캐스트 */
+function broadcastSheetChanged(excludeWebContentsId?: number): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.webContents.id !== excludeWebContentsId) {
+      mainWindow.webContents.send('sheet:changed');
+    }
+  }
+  for (const [, win] of widgetWindows) {
+    if (!win.isDestroyed() && win.webContents.id !== excludeWebContentsId) {
+      win.webContents.send('sheet:changed');
+    }
   }
 }
 
@@ -386,6 +398,14 @@ ipcMain.handle('sheets:soft-delete-episode', async (_event, episodeNumber: numbe
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg };
   }
+});
+
+// ─── IPC 핸들러: 데이터 변경 브로드캐스트 (라이브 모드) ──────
+
+ipcMain.handle('sheets:notify-change', (event) => {
+  // 호출한 윈도우를 제외한 모든 윈도우에 sheet:changed 전송
+  broadcastSheetChanged(event.sender.id);
+  return { ok: true };
 });
 
 // ─── IPC 핸들러: 이미지 파일 저장 ────────────────────────────

@@ -71,6 +71,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsSoftDeleteEpisode: (episodeNumber: number) =>
     ipcRenderer.invoke('sheets:soft-delete-episode', episodeNumber),
 
+  // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
+  sheetsNotifyChange: () => ipcRenderer.invoke('sheets:notify-change'),
+
   // 위젯 팝업 윈도우
   widgetOpenPopup: (widgetId: string, title: string) =>
     ipcRenderer.invoke('widget:open-popup', widgetId, title),
