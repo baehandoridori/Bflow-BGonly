@@ -9,6 +9,7 @@ import { AssigneeCardsWidget } from '@/components/widgets/AssigneeCardsWidget';
 import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget';
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
+import { WidgetIdContext } from '@/components/widgets/Widget';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
@@ -537,11 +538,13 @@ export function Dashboard() {
                       <X size={11} className="text-white" strokeWidth={3} />
                     </button>
                   )}
+                  <WidgetIdContext.Provider value={item.i.startsWith('calendar-') ? 'calendar' : item.i}>
                   {getWidgetComponent(item.i) ?? (
                     <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
                       위젯: {item.i}
                     </div>
                   )}
+                  </WidgetIdContext.Provider>
                 </div>
               </div>
             ))}

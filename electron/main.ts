@@ -38,6 +38,7 @@ protocol.registerSchemesAsPrivileged([
 const isTestMode = process.argv.includes('--test-mode') || process.env.TEST_MODE === '1';
 
 let mainWindow: BrowserWindow | null = null;
+const widgetWindows = new Map<string, BrowserWindow>();
 
 // ─── 파일 감시 (실시간 동기화) ────────────────────────────────
 
@@ -430,6 +431,66 @@ ipcMain.handle('clipboard:read-image', () => {
   if (image.isEmpty()) return null;
   const buffer = image.toJPEG(80);
   return `data:image/jpeg;base64,${buffer.toString('base64')}`;
+});
+
+// ─── IPC 핸들러: 위젯 팝업 윈도우 ──────────────────────────────
+
+ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: string) => {
+  // 이미 열린 팝업이면 포커스
+  const existing = widgetWindows.get(widgetId);
+  if (existing && !existing.isDestroyed()) {
+    existing.focus();
+    return { ok: true };
+  }
+
+  const popupWin = new BrowserWindow({
+    width: 420,
+    height: 360,
+    minWidth: 280,
+    minHeight: 200,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: true,
+    skipTaskbar: false,
+    title: widgetTitle,
+    backgroundColor: '#00000000',
+    hasShadow: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  // 같은 앱을 로드하되, 해시로 팝업 모드 + 위젯 ID 전달
+  const hash = `#widget-popup/${encodeURIComponent(widgetId)}`;
+  if (process.env.VITE_DEV_SERVER_URL) {
+    popupWin.loadURL(`${process.env.VITE_DEV_SERVER_URL}${hash}`);
+  } else {
+    popupWin.loadFile(path.join(__dirname, '../dist/index.html'), { hash });
+  }
+
+  widgetWindows.set(widgetId, popupWin);
+  popupWin.on('closed', () => {
+    widgetWindows.delete(widgetId);
+  });
+
+  return { ok: true };
+});
+
+ipcMain.handle('widget:set-opacity', (_event, widgetId: string, opacity: number) => {
+  const win = widgetWindows.get(widgetId);
+  if (win && !win.isDestroyed()) {
+    win.setOpacity(Math.max(0.15, Math.min(1, opacity)));
+  }
+});
+
+ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
+  const win = widgetWindows.get(widgetId);
+  if (win && !win.isDestroyed()) {
+    win.close();
+  }
 });
 
 // ─── 앱 라이프사이클 ─────────────────────────────────────────

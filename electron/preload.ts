@@ -70,4 +70,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('sheets:soft-delete-part', sheetName),
   sheetsSoftDeleteEpisode: (episodeNumber: number) =>
     ipcRenderer.invoke('sheets:soft-delete-episode', episodeNumber),
+
+  // 위젯 팝업 윈도우
+  widgetOpenPopup: (widgetId: string, title: string) =>
+    ipcRenderer.invoke('widget:open-popup', widgetId, title),
+  widgetSetOpacity: (widgetId: string, opacity: number) =>
+    ipcRenderer.invoke('widget:set-opacity', widgetId, opacity),
+  widgetClosePopup: (widgetId: string) =>
+    ipcRenderer.invoke('widget:close-popup', widgetId),
 });

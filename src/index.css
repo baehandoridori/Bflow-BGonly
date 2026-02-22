@@ -93,6 +93,30 @@ input[type="date"]::-webkit-inner-spin-button {
   background: rgb(var(--color-accent) / 0.06) !important;
 }
 
+/* 위젯 팝업 윈도우: 둥근 모서리 (투명 배경 BrowserWindow) */
+.widget-popup-root {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* 오퍼시티 슬라이더 스타일 */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgb(var(--color-accent));
+  cursor: pointer;
+}
+
 /* 접근성: 모션 감소 설정 존중 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
