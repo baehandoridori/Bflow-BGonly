@@ -1,9 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { LayoutDashboard, Film, List, Users, GanttChart, CalendarDays, Settings } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
+import { getPreset, rgbToHex } from '@/themes';
 
 const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: '대시보드', icon: <LayoutDashboard size={20} /> },
@@ -15,10 +16,25 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 
-/** 리퀴드 글래스 스타일 Bf 로고 아이콘 */
+/** 리퀴드 글래스 스타일 B 로고 아이콘 (테마 accent 색상 반영) */
 function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
   const containerRef = useRef<HTMLButtonElement>(null);
   const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
+
+  // 테마 accent 색상 가져오기
+  const themeId = useAppStore((s) => s.themeId);
+  const customThemeColors = useAppStore((s) => s.customThemeColors);
+  const { ac, acSub, acHex, acSubHex } = useMemo(() => {
+    const colors = customThemeColors ?? getPreset(themeId)?.colors;
+    const accent = colors?.accent ?? '108 92 231';
+    const accentSub = colors?.accentSub ?? '162 155 254';
+    return {
+      ac: accent.split(' ').join(', '),       // "108, 92, 231"
+      acSub: accentSub.split(' ').join(', '), // "162, 155, 254"
+      acHex: rgbToHex(accent),
+      acSubHex: rgbToHex(accentSub),
+    };
+  }, [themeId, customThemeColors]);
 
   const handleMouseMove = (e: React.MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -51,7 +67,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
       <div
         className="absolute -inset-1 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
         style={{
-          background: `radial-gradient(circle at ${lightX}% ${lightY}%, rgba(108, 92, 231, 0.4), rgba(116, 185, 255, 0.15), transparent 70%)`,
+          background: `radial-gradient(circle at ${lightX}% ${lightY}%, rgba(${ac}, 0.4), rgba(${acSub}, 0.15), transparent 70%)`,
           filter: 'blur(6px)',
         }}
       />
@@ -62,7 +78,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
         style={{
           background: `
             radial-gradient(circle at ${lightX}% ${lightY}%, rgba(255,255,255,0.18) 0%, transparent 60%),
-            linear-gradient(135deg, rgba(108, 92, 231, 0.35) 0%, rgba(116, 185, 255, 0.2) 50%, rgba(85, 239, 196, 0.15) 100%)
+            linear-gradient(135deg, rgba(${ac}, 0.35) 0%, rgba(${acSub}, 0.2) 50%, rgba(${ac}, 0.1) 100%)
           `,
           backdropFilter: 'blur(20px) saturate(1.5)',
           WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
@@ -70,7 +86,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
           boxShadow: `
             0 0 0 0.5px rgba(255,255,255,0.1) inset,
             0 2px 8px rgba(0,0,0,0.3),
-            0 1px 2px rgba(108, 92, 231, 0.2)
+            0 1px 2px rgba(${ac}, 0.2)
           `,
         }}
       >
@@ -99,11 +115,11 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
             background: `
               conic-gradient(
                 from ${mousePos.x * 360}deg at ${lightX}% ${lightY}%,
-                rgba(108, 92, 231, 0.15),
-                rgba(116, 185, 255, 0.1),
-                rgba(85, 239, 196, 0.1),
-                rgba(162, 155, 254, 0.1),
-                rgba(108, 92, 231, 0.15)
+                rgba(${ac}, 0.15),
+                rgba(${acSub}, 0.1),
+                rgba(${ac}, 0.08),
+                rgba(${acSub}, 0.1),
+                rgba(${ac}, 0.15)
               )
             `,
             mixBlendMode: 'overlay',
@@ -113,9 +129,9 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
         {/* 텍스트 */}
         <div className="relative flex items-center justify-center w-full h-full">
           <span
-            className="font-bold text-sm tracking-tight"
+            className="font-bold text-base tracking-tight"
             style={{
-              background: 'linear-gradient(135deg, #FFFFFF 0%, rgba(255,255,255,0.85) 100%)',
+              background: `linear-gradient(135deg, ${acHex} 0%, ${acSubHex} 100%)`,
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               backgroundClip: 'text',
@@ -123,7 +139,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
               filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))',
             }}
           >
-            Bf
+            B
           </span>
         </div>
 
