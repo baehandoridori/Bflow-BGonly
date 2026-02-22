@@ -92,7 +92,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     return () => { cleanup?.(); };
   }, []);
 
-  // 실시간 데이터 동기화: sheet:changed 이벤트 수신 시 데이터 새로고침
+  // 실시간 데이터 동기화: sheet:changed 이벤트 + 주기적 폴링 (30초)
   useEffect(() => {
     if (!ready) return; // 초기 로드 완료 전에는 무시
 
@@ -104,8 +104,20 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         const connected = await checkConnection();
         if (connected) {
           const episodes = await readAllFromSheets();
-          console.log('[WidgetPopup] 실시간 동기화:', episodes.length, '에피소드');
+          console.log('[WidgetPopup] 동기화:', episodes.length, '에피소드');
           useDataStore.getState().setEpisodes(episodes);
+        } else {
+          // 연결 안 되어 있으면 재연결 시도
+          const cfg = await loadSheetsConfig();
+          const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+          if (urlToConnect) {
+            const result = await connectSheets(urlToConnect);
+            if (result.ok) {
+              const episodes = await readAllFromSheets();
+              console.log('[WidgetPopup] 재연결 후 동기화:', episodes.length, '에피소드');
+              useDataStore.getState().setEpisodes(episodes);
+            }
+          }
         }
 
         // 유저 정보도 갱신
@@ -116,10 +128,21 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       }
     };
 
-    const cleanup = window.electronAPI?.onSheetChanged?.(() => {
+    // 1) sheet:changed 이벤트 수신 시 즉시 새로고침
+    const cleanupEvent = window.electronAPI?.onSheetChanged?.(() => {
+      console.log('[WidgetPopup] sheet:changed 이벤트 수신');
       reloadData();
     });
-    return () => { cleanup?.(); };
+
+    // 2) 30초 주기 폴링 (이벤트 미수신 시 안전망)
+    const pollInterval = setInterval(() => {
+      reloadData();
+    }, 30_000);
+
+    return () => {
+      cleanupEvent?.();
+      clearInterval(pollInterval);
+    };
   }, [ready]);
 
   // 테마 + 데이터 초기화

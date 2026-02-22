@@ -5,6 +5,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS } from '@/types';
+import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
 import { getEvents } from '@/services/calendarService';
 import type { CalendarEvent } from '@/types/calendar';
@@ -103,6 +104,8 @@ export function SpotlightSearch() {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const epName = (ep: Episode) => episodeTitles[ep.episodeNumber] || ep.title;
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   useEffect(() => { getEvents().then(setCalEvents); }, []);
   const {
@@ -221,7 +224,7 @@ export function SpotlightSearch() {
         // ── 파트 검색 ──
         const deptLabel = DEPARTMENT_CONFIGS[part.department].shortLabel;
         const partLabel = `${part.partId}파트`;
-        const partFullLabel = `${ep.title} ${partLabel} (${deptLabel})`;
+        const partFullLabel = `${epName(ep)} ${partLabel} (${deptLabel})`;
         const partScore = Math.max(
           fuzzyScore(q, partLabel),
           fuzzyScore(q, `${part.partId}`),
@@ -235,7 +238,7 @@ export function SpotlightSearch() {
             id: `part-${part.sheetName}`,
             category: 'part',
             title: `${partLabel} (${deptLabel})`,
-            subtitle: `${ep.title} · ${totalScenes}개 씬`,
+            subtitle: `${epName(ep)} · ${totalScenes}개 씬`,
             meta: `${avgPct}%`,
             pct: avgPct,
             icon: <Layers size={16} />,
@@ -245,7 +248,7 @@ export function SpotlightSearch() {
                 episode: ep.episodeNumber,
                 part: part.partId,
                 department: part.department,
-                toastMsg: `${ep.title} ${partLabel}(${deptLabel})로 이동합니다`,
+                toastMsg: `${epName(ep)} ${partLabel}(${deptLabel})로 이동합니다`,
               });
               close();
             },
@@ -260,7 +263,7 @@ export function SpotlightSearch() {
               id: `scene-${part.sheetName}-${scene.sceneId}`,
               category: 'scene',
               title: scene.sceneId,
-              subtitle: `${ep.title} ${part.partId}파트 · ${deptLabel}`,
+              subtitle: `${epName(ep)} ${part.partId}파트 · ${deptLabel}`,
               meta: `${pct}%`,
               pct,
               icon: <Hash size={16} />,
@@ -281,7 +284,7 @@ export function SpotlightSearch() {
               id: `memo-${part.sheetName}-${scene.sceneId}`,
               category: 'memo',
               title: scene.memo.length > 50 ? scene.memo.slice(0, 50) + '...' : scene.memo,
-              subtitle: `${scene.sceneId} · ${ep.title} ${part.partId}파트`,
+              subtitle: `${scene.sceneId} · ${epName(ep)} ${part.partId}파트`,
               icon: <FileText size={16} />,
               score: fuzzyScore(q, scene.memo),
               action: () => {
@@ -335,7 +338,9 @@ export function SpotlightSearch() {
 
     // ── 에피소드 검색 ──
     for (const ep of episodes) {
+      const epDisplayName = epName(ep);
       const epScore = Math.max(
+        fuzzyScore(q, epDisplayName),
         fuzzyScore(q, ep.title),
         fuzzyScore(q, `EP${ep.episodeNumber}`),
         fuzzyScore(q, String(ep.episodeNumber)),
@@ -350,14 +355,14 @@ export function SpotlightSearch() {
         items.push({
           id: `episode-${ep.episodeNumber}`,
           category: 'episode',
-          title: ep.title,
+          title: epDisplayName,
           subtitle: `${ep.parts.length}개 파트 · ${totalScenes}개 씬`,
           meta: `${avgPct}%`,
           pct: avgPct,
           icon: <Film size={16} />,
           score: epScore,
           action: () => {
-            resetAndNavigate({ episode: ep.episodeNumber, toastMsg: `${ep.title}로 이동합니다` });
+            resetAndNavigate({ episode: ep.episodeNumber, toastMsg: `${epDisplayName}로 이동합니다` });
             close();
           },
         });

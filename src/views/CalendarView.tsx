@@ -35,7 +35,7 @@ interface TimelineRow {
   depth: number; // 0=에피소드, 1=파트
 }
 
-function buildTimelineRows(episodes: Episode[]): TimelineRow[] {
+function buildTimelineRows(episodes: Episode[], episodeTitles: Record<number, string> = {}): TimelineRow[] {
   const rows: TimelineRow[] = [];
 
   for (const ep of episodes) {
@@ -48,7 +48,7 @@ function buildTimelineRows(episodes: Episode[]): TimelineRow[] {
 
     rows.push({
       id: `ep-${ep.episodeNumber}`,
-      label: ep.title,
+      label: episodeTitles[ep.episodeNumber] || ep.title,
       pct: epPct,
       totalScenes,
       fullyDone,
@@ -80,13 +80,13 @@ function buildTimelineRows(episodes: Episode[]): TimelineRow[] {
 /* ────────────────────────────────────────────────
    타임라인 차트 (진행률 바)
    ──────────────────────────────────────────────── */
-function TimelineChart({ episodes, deptFilter }: { episodes: Episode[]; deptFilter: 'all' | 'bg' | 'acting' }) {
+function TimelineChart({ episodes, deptFilter, episodeTitles }: { episodes: Episode[]; deptFilter: 'all' | 'bg' | 'acting'; episodeTitles?: Record<number, string> }) {
   const rows = useMemo(() => {
-    const all = buildTimelineRows(episodes);
+    const all = buildTimelineRows(episodes, episodeTitles);
     if (deptFilter === 'all') return all;
     // 에피소드 행은 유지, 파트 행은 부서 필터
     return all.filter((r) => r.depth === 0 || r.department === deptFilter);
-  }, [episodes, deptFilter]);
+  }, [episodes, deptFilter, episodeTitles]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const toggleCollapse = useCallback((epId: string) => {
@@ -206,7 +206,7 @@ function TimelineChart({ episodes, deptFilter }: { episodes: Episode[]; deptFilt
 /* ────────────────────────────────────────────────
    진행 현황 히트맵
    ──────────────────────────────────────────────── */
-function ProgressHeatmap({ episodes, deptFilter }: { episodes: Episode[]; deptFilter: 'all' | 'bg' | 'acting' }) {
+function ProgressHeatmap({ episodes, deptFilter, episodeTitles }: { episodes: Episode[]; deptFilter: 'all' | 'bg' | 'acting'; episodeTitles?: Record<number, string> }) {
   const cells = useMemo(() => {
     return episodes.flatMap((ep) =>
       ep.parts.filter((part) => deptFilter === 'all' || part.department === deptFilter).map((part) => {
@@ -216,7 +216,7 @@ function ProgressHeatmap({ episodes, deptFilter }: { episodes: Episode[]; deptFi
           : 0;
         return {
           key: `${ep.episodeNumber}-${part.partId}-${part.department}`,
-          epTitle: ep.title,
+          epTitle: episodeTitles?.[ep.episodeNumber] || ep.title,
           partId: part.partId,
           department: part.department,
           pct,
@@ -528,6 +528,7 @@ type CalViewMode = 'timeline' | 'heatmap' | 'gantt';
 
 export function CalendarView() {
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
   const [viewMode, setViewMode] = useState<CalViewMode>('timeline');
   const [deptFilter, setDeptFilter] = useState<'all' | 'bg' | 'acting'>('all');
 
@@ -655,7 +656,7 @@ export function CalendarView() {
             </div>
           ) : (
             <div className="bg-bg-card rounded-xl border border-bg-border/40 p-4">
-              <TimelineChart episodes={episodes} deptFilter={deptFilter} />
+              <TimelineChart episodes={episodes} deptFilter={deptFilter} episodeTitles={episodeTitles} />
             </div>
           )
         ) : viewMode === 'heatmap' ? (
@@ -665,7 +666,7 @@ export function CalendarView() {
               <p className="text-sm">에피소드 데이터가 없습니다</p>
             </div>
           ) : (
-            <ProgressHeatmap episodes={episodes} deptFilter={deptFilter} />
+            <ProgressHeatmap episodes={episodes} deptFilter={deptFilter} episodeTitles={episodeTitles} />
           )
         ) : (
           <div className="bg-bg-card rounded-xl border border-bg-border/40 overflow-hidden">

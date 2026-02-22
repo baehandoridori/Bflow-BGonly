@@ -89,6 +89,8 @@ function EpisodeCard({
   stats: EpStats;
   onNavigate: (ep: Episode) => void;
 }) {
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const displayName = episodeTitles[episode.episodeNumber] || episode.title;
   const pct = Math.round(stats.overallPct);
   const isComplete = pct >= 100;
 
@@ -117,7 +119,7 @@ function EpisodeCard({
             {episode.episodeNumber}
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-text-primary">{episode.title}</h3>
+            <h3 className="text-sm font-semibold text-text-primary">{displayName}</h3>
             <p className="text-xs text-text-secondary/60">
               {stats.totalScenes}개 씬 · {stats.fullyDone} 완료
             </p>
@@ -201,6 +203,7 @@ function EpisodeCard({
    파트별 매트릭스 뷰
    ──────────────────────────────────────────────── */
 function PartMatrix({ episodes }: { episodes: { ep: Episode; stats: EpStats }[] }) {
+  const episodeTitlesMap = useDataStore((s) => s.episodeTitles);
   // 모든 파트 ID 수집
   const allParts = useMemo(() => {
     const set = new Set<string>();
@@ -234,7 +237,7 @@ function PartMatrix({ episodes }: { episodes: { ep: Episode; stats: EpStats }[] 
         <tbody>
           {episodes.map(({ ep, stats }) => (
             <tr key={ep.episodeNumber} className="border-b border-bg-border/15 hover:bg-bg-border/10 transition-colors duration-100">
-              <td className="py-2.5 px-3 font-medium text-text-primary/80">{ep.title}</td>
+              <td className="py-2.5 px-3 font-medium text-text-primary/80">{episodeTitlesMap[ep.episodeNumber] || ep.title}</td>
               {allParts.map((key) => {
                 const [partId, dept] = key.split('_');
                 const ps = stats.partStats.find((p) => p.partId === partId && p.department === (dept as Department));
@@ -282,6 +285,7 @@ type EpViewMode = 'card' | 'matrix';
 
 export function EpisodeView() {
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitlesMap = useDataStore((s) => s.episodeTitles);
   const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment } = useAppStore();
   const [viewMode, setViewMode] = useState<EpViewMode>('card');
 

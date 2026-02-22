@@ -7,6 +7,12 @@ interface DataState {
   episodes: Episode[];
   setEpisodes: (episodes: Episode[]) => void;
 
+  // 에피소드 커스텀 제목 (episodeNumber → title)
+  episodeTitles: Record<number, string>;
+  setEpisodeTitles: (titles: Record<number, string>) => void;
+  /** ep.title 대신 커스텀 제목을 우선 반환 */
+  getEpisodeDisplayName: (ep: Episode) => string;
+
   // 통계 (episodes에서 파생)
   stats: DashboardStats;
 
@@ -42,6 +48,13 @@ export const useDataStore = create<DataState>((set, get) => ({
   stats: calcDashboardStats([]),
 
   setEpisodes: (episodes) => set(applyUpdate(get, episodes)),
+
+  episodeTitles: {},
+  setEpisodeTitles: (titles) => set({ episodeTitles: titles }),
+  getEpisodeDisplayName: (ep) => {
+    const custom = get().episodeTitles[ep.episodeNumber];
+    return custom || ep.title;
+  },
 
   isSyncing: false,
   lastSyncTime: null,

@@ -1,9 +1,8 @@
-import { useState, useMemo, useCallback } from 'react';
-import { ChevronRight, ChevronDown, Plus, FolderOpen, Folder, StickyNote, MoreVertical } from 'lucide-react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { ChevronRight, Plus, FolderOpen, Folder, MoreVertical } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { Episode, Department } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
-import { sceneProgress } from '@/utils/calcStats';
 
 interface EpisodeTreeNavProps {
   episodes: Episode[];
@@ -11,6 +10,8 @@ interface EpisodeTreeNavProps {
   selectedEpisode: number | null;
   selectedPart: string | null;
   partMemos: Record<string, string>;
+  episodeTitles: Record<number, string>;   // episodeNumber → custom title
+  episodeMemos: Record<number, string>;    // episodeNumber → memo
   onSelectEpisodePart: (epNum: number, partId: string | null) => void;
   onAddEpisode: () => void;
   onAddPart: () => void;
@@ -28,19 +29,80 @@ function calcPartProgress(scenes: { lo: boolean; done: boolean; review: boolean;
   return Math.round((done / total) * 100);
 }
 
+/** 에피소드 표시 이름: 커스텀 제목 우선, 없으면 EP.xx 숨기고 번호만 */
+function getEpisodeDisplayName(ep: Episode, customTitle?: string): string {
+  if (customTitle) return customTitle;
+  return ep.title; // fallback
+}
+
+/** 애니메이션 가능한 접기/펼치기 래퍼 */
+function CollapsibleSection({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | 'auto'>(isOpen ? 'auto' : 0);
+  const [isAnimating, setIsAnimating] = useState(false);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    if (isOpen) {
+      // 열기: 0 → scrollHeight → auto
+      const scrollH = el.scrollHeight;
+      setHeight(0);
+      setIsAnimating(true);
+      requestAnimationFrame(() => {
+        setHeight(scrollH);
+        const timer = setTimeout(() => {
+          setHeight('auto');
+          setIsAnimating(false);
+        }, 250);
+        return () => clearTimeout(timer);
+      });
+    } else {
+      // 닫기: auto → scrollHeight → 0
+      const scrollH = el.scrollHeight;
+      setHeight(scrollH);
+      setIsAnimating(true);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setHeight(0);
+          const timer = setTimeout(() => setIsAnimating(false), 250);
+          return () => clearTimeout(timer);
+        });
+      });
+    }
+  }, [isOpen]);
+
+  return (
+    <div
+      ref={contentRef}
+      style={{
+        height: typeof height === 'number' ? `${height}px` : 'auto',
+        overflow: isAnimating || !isOpen ? 'hidden' : 'visible',
+        transition: isAnimating ? 'height 0.25s cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+        opacity: !isOpen && !isAnimating ? 0 : 1,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function EpisodeTreeNav({
   episodes,
   selectedDepartment,
   selectedEpisode,
   selectedPart,
   partMemos,
+  episodeTitles,
+  episodeMemos,
   onSelectEpisodePart,
   onAddEpisode,
   onAddPart,
   onPartContextMenu,
   onEpisodeEdit,
 }: EpisodeTreeNavProps) {
-  // 에피소드별 열림/닫힘 상태 (기본: 선택된 에피소드만 열림)
+  // 에피소드별 열림/닫힘 상태
   const [expandedEps, setExpandedEps] = useState<Set<number>>(() => {
     const set = new Set<number>();
     if (selectedEpisode != null) set.add(selectedEpisode);
@@ -56,7 +118,6 @@ export function EpisodeTreeNav({
     });
   }, []);
 
-  // 에피소드 선택 시 자동 확장
   const handleSelectEpisode = useCallback((epNum: number) => {
     setExpandedEps((prev) => {
       const next = new Set(prev);
@@ -68,7 +129,6 @@ export function EpisodeTreeNav({
 
   const deptColor = DEPARTMENT_CONFIGS[selectedDepartment].color;
 
-  // 에피소드별 부서 필터링된 파트
   const epPartsMap = useMemo(() => {
     const map = new Map<number, Episode['parts']>();
     for (const ep of episodes) {
@@ -92,7 +152,7 @@ export function EpisodeTreeNav({
       </div>
 
       {/* 트리 */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden py-1.5">
         {episodes.length === 0 ? (
           <div className="text-xs text-text-secondary/50 text-center py-6">
             에피소드가 없습니다
@@ -104,38 +164,52 @@ export function EpisodeTreeNav({
             const deptParts = epPartsMap.get(ep.episodeNumber) ?? [];
             const totalScenes = deptParts.reduce((s, p) => s + p.scenes.length, 0);
             const epProgress = calcPartProgress(deptParts.flatMap((p) => p.scenes));
+            const displayName = getEpisodeDisplayName(ep, episodeTitles[ep.episodeNumber]);
+            const epMemo = episodeMemos[ep.episodeNumber];
 
             return (
-              <div key={ep.episodeNumber}>
+              <div key={ep.episodeNumber} className="mb-0.5">
                 {/* 에피소드 노드 */}
                 <div
                   className={cn(
-                    'group flex items-center gap-1 px-2 py-1.5 mx-1 rounded-lg cursor-pointer transition-colors',
+                    'group flex items-center gap-1.5 px-2 py-1.5 mx-1 rounded-lg cursor-pointer transition-colors',
                     isEpSelected
                       ? 'bg-accent/10 text-accent'
                       : 'text-text-secondary hover:bg-bg-primary hover:text-text-primary',
                   )}
                   onClick={() => handleSelectEpisode(ep.episodeNumber)}
                 >
-                  {/* 확장 아이콘 */}
+                  {/* 확장 아이콘 — 크고 눈에 띄게 + 회전 애니메이션 */}
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleExpand(ep.episodeNumber); }}
-                    className="p-0.5 shrink-0"
+                    className={cn(
+                      'p-0.5 shrink-0 rounded transition-colors',
+                      isEpSelected
+                        ? 'text-accent hover:bg-accent/20'
+                        : 'text-text-secondary/70 hover:text-text-primary hover:bg-bg-border/50',
+                    )}
                   >
-                    {isExpanded
-                      ? <ChevronDown size={12} className="text-text-secondary/50" />
-                      : <ChevronRight size={12} className="text-text-secondary/50" />
-                    }
+                    <ChevronRight
+                      size={14}
+                      strokeWidth={2.5}
+                      className="transition-transform duration-200 ease-in-out"
+                      style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                    />
                   </button>
 
                   {/* 폴더 아이콘 */}
                   {isExpanded
-                    ? <FolderOpen size={13} className="shrink-0" style={{ color: deptColor }} />
-                    : <Folder size={13} className="shrink-0" style={{ color: deptColor }} />
+                    ? <FolderOpen size={14} className="shrink-0" style={{ color: deptColor }} />
+                    : <Folder size={14} className="shrink-0" style={{ color: deptColor }} />
                   }
 
-                  {/* 에피소드 이름 */}
-                  <span className="text-xs font-semibold truncate flex-1">{ep.title}</span>
+                  {/* 에피소드 이름 + 메모 */}
+                  <div className="flex flex-col flex-1 min-w-0">
+                    <span className="text-xs font-semibold truncate leading-tight">{displayName}</span>
+                    {epMemo && (
+                      <span className="text-[10px] text-text-secondary/50 italic truncate leading-tight">{epMemo}</span>
+                    )}
+                  </div>
 
                   {/* 씬 수 */}
                   <span className="text-[10px] text-text-secondary/40 tabular-nums shrink-0">
@@ -146,7 +220,7 @@ export function EpisodeTreeNav({
                   {totalScenes > 0 && (
                     <div className="w-8 h-1.5 bg-bg-primary rounded-full overflow-hidden shrink-0">
                       <div
-                        className="h-full rounded-full transition-all"
+                        className="h-full rounded-full transition-all duration-500"
                         style={{
                           width: `${epProgress}%`,
                           backgroundColor: epProgress >= 100 ? '#22c55e' : deptColor,
@@ -161,15 +235,15 @@ export function EpisodeTreeNav({
                     className="p-0.5 opacity-0 group-hover:opacity-100 text-text-secondary/40 hover:text-text-primary transition-opacity shrink-0"
                     title="에피소드 관리"
                   >
-                    <MoreVertical size={11} />
+                    <MoreVertical size={12} />
                   </button>
                 </div>
 
-                {/* 파트 목록 (확장 시) */}
-                {isExpanded && (
-                  <div className="ml-3 pl-2 border-l border-bg-border/50">
+                {/* 파트 목록 (애니메이션 접기/펼치기) */}
+                <CollapsibleSection isOpen={isExpanded}>
+                  <div className="ml-4 pl-2 border-l border-bg-border/40">
                     {deptParts.length === 0 ? (
-                      <div className="text-[10px] text-text-secondary/30 py-1 px-3">
+                      <div className="text-[10px] text-text-secondary/30 py-1.5 px-3">
                         파트 없음
                       </div>
                     ) : (
@@ -190,15 +264,17 @@ export function EpisodeTreeNav({
                             onClick={() => onSelectEpisodePart(ep.episodeNumber, part.partId)}
                             onContextMenu={(e) => onPartContextMenu(e, part.sheetName)}
                           >
-                            {/* 파트 라벨 */}
-                            <span className="text-xs font-medium truncate flex-1">
-                              {part.partId}파트
+                            {/* 파트 라벨 + 메모 (글자) */}
+                            <div className="flex flex-col flex-1 min-w-0">
+                              <span className="text-xs font-medium truncate leading-tight">
+                                {part.partId}파트
+                              </span>
                               {memo && (
-                                <span className="ml-1 inline-flex items-center" title={`메모: ${memo}`}>
-                                  <StickyNote size={9} className="text-yellow-400/70" />
+                                <span className="text-[10px] text-text-secondary/50 italic truncate leading-tight">
+                                  {memo}
                                 </span>
                               )}
-                            </span>
+                            </div>
 
                             {/* 씬 수 */}
                             <span className="text-[10px] text-text-secondary/40 tabular-nums shrink-0">
@@ -209,7 +285,7 @@ export function EpisodeTreeNav({
                             {part.scenes.length > 0 && (
                               <div className="w-6 h-1 bg-bg-primary rounded-full overflow-hidden shrink-0">
                                 <div
-                                  className="h-full rounded-full transition-all"
+                                  className="h-full rounded-full transition-all duration-500"
                                   style={{
                                     width: `${partProgress}%`,
                                     backgroundColor: partProgress >= 100 ? '#22c55e' : deptColor,
@@ -234,7 +310,7 @@ export function EpisodeTreeNav({
                       </button>
                     )}
                   </div>
-                )}
+                </CollapsibleSection>
               </div>
             );
           })

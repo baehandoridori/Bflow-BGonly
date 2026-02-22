@@ -31,7 +31,7 @@ interface AssigneeData {
   deptBreakdown: { dept: Department; count: number }[];
 }
 
-function buildAssigneeData(episodes: Episode[]): AssigneeData[] {
+function buildAssigneeData(episodes: Episode[], episodeTitles: Record<number, string> = {}): AssigneeData[] {
   const map = new Map<string, SceneRef[]>();
 
   for (const ep of episodes) {
@@ -41,7 +41,7 @@ function buildAssigneeData(episodes: Episode[]): AssigneeData[] {
         const refs = map.get(name) || [];
         refs.push({
           scene,
-          episodeTitle: ep.title,
+          episodeTitle: episodeTitles[ep.episodeNumber] || ep.title,
           episodeNumber: ep.episodeNumber,
           partId: part.partId,
           department: part.department,
@@ -255,12 +255,13 @@ type SortOption = 'name' | 'scenes' | 'progress';
    ──────────────────────────────────────────────── */
 export function AssigneeView() {
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
   const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setSelectedAssignee, setHighlightSceneId } = useAppStore();
   const [sortBy, setSortBy] = useState<SortOption>('scenes');
   const [sortAsc, setSortAsc] = useState(false);
 
   const assignees = useMemo(() => {
-    const data = buildAssigneeData(episodes);
+    const data = buildAssigneeData(episodes, episodeTitles);
     const sorted = [...data].sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
@@ -271,7 +272,7 @@ export function AssigneeView() {
       return sortAsc ? cmp : -cmp;
     });
     return sorted;
-  }, [episodes, sortBy, sortAsc]);
+  }, [episodes, episodeTitles, sortBy, sortAsc]);
 
   const summary = useMemo(() => {
     const totalAssignees = assignees.filter((a) => a.name !== '미배정').length;

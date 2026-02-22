@@ -390,6 +390,7 @@ function EventDetailModal({
   onNavigate: (ev: CalendarEvent) => void;
   onEdit: (ev: CalendarEvent) => void;
 }) {
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
   const start = parseDate(event.startDate);
   const end = parseDate(event.endDate);
   const isSingle = event.startDate === event.endDate;
@@ -438,7 +439,7 @@ function EventDetailModal({
                 </span>
                 {event.linkedEpisode != null && (
                   <span className="text-[10px] text-text-secondary">
-                    EP.{String(event.linkedEpisode).padStart(2, '0')}
+                    {episodeTitles[event.linkedEpisode] || `EP.${String(event.linkedEpisode).padStart(2, '0')}`}
                     {event.linkedPart && ` ${event.linkedPart}파트`}
                     {event.linkedSceneId && ` #${event.linkedSceneId}`}
                   </span>
@@ -518,6 +519,7 @@ function EventCreateModal({
   onSave: (ev: Omit<CalendarEvent, 'id' | 'createdAt'>) => void;
 }) {
   const currentUser = useAuthStore((s) => s.currentUser);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
   const today = fmtDate(new Date());
   const isEditMode = !!editEvent;
 
@@ -555,7 +557,7 @@ function EventCreateModal({
       else if (evType === 'scene') setTitle('씬 선택...');
       return;
     }
-    const epLabel = ep.title;
+    const epLabel = episodeTitles[ep.episodeNumber] || ep.title;
     if (evType === 'episode') {
       setTitle(epLabel);
     } else if (evType === 'part' || evType === 'scene') {
@@ -702,7 +704,7 @@ function EventCreateModal({
               >
                 <option value="">에피소드 선택</option>
                 {episodes.map((ep) => (
-                  <option key={ep.episodeNumber} value={ep.episodeNumber}>{ep.title}</option>
+                  <option key={ep.episodeNumber} value={ep.episodeNumber}>{episodeTitles[ep.episodeNumber] || ep.title}</option>
                 ))}
               </select>
               {(evType === 'part' || evType === 'scene') && linkedEp !== '' && (
@@ -1028,6 +1030,7 @@ function TodayView({
 
 export function ScheduleView() {
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
   const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId, setToast } = useAppStore();
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);

@@ -1178,6 +1178,15 @@ export function ScenesView() {
   const [epEditOpen, setEpEditOpen] = useState(false);
   const [epMemo, setEpMemo] = useState('');
 
+  // 에피소드 제목/메모 (커스텀 — _METADATA에 저장)
+  const [episodeTitles, setEpisodeTitles] = useState<Record<number, string>>({});
+  const [episodeMemos, setEpisodeMemos] = useState<Record<number, string>>({});
+  const [epTitleInput, setEpTitleInput] = useState('');
+
+  // 에피소드 추가 모달
+  const [addEpOpen, setAddEpOpen] = useState(false);
+  const [newEpName, setNewEpName] = useState('');
+
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
 
@@ -1218,6 +1227,8 @@ export function ScenesView() {
         setEpisodes(eps);
       }
       // 테스트 모드: 파일 쓰기는 이미 test 함수에서 처리됨
+      // 위젯 팝업에 데이터 변경 알림
+      window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
       console.error('[백그라운드 동기화 실패]', err);
     }
@@ -1226,7 +1237,7 @@ export function ScenesView() {
   // 에피소드 목록
   const episodeOptions = episodes.map((ep) => ({
     value: ep.episodeNumber,
-    label: ep.title,
+    label: episodeTitles[ep.episodeNumber] || ep.title,
   }));
 
   // 선택된 에피소드 + 부서별 파트 필터링
@@ -1255,6 +1266,33 @@ export function ScenesView() {
     };
     loadPartMemos();
   }, [sheetsConnected, currentEp?.episodeNumber, selectedDepartment]);
+
+  // 에피소드 제목/메모 로드
+  useEffect(() => {
+    const loadEpMeta = async () => {
+      const titles: Record<number, string> = {};
+      const memos: Record<number, string> = {};
+      for (const ep of episodes) {
+        try {
+          const key = String(ep.episodeNumber);
+          const titleData = sheetsConnected
+            ? await readMetadataFromSheets('episode-title', key)
+            : await readLocalMetadata('episode-title', key);
+          if (titleData?.value) titles[ep.episodeNumber] = titleData.value;
+
+          const memoData = sheetsConnected
+            ? await readMetadataFromSheets('episode-memo', key)
+            : await readLocalMetadata('episode-memo', key);
+          if (memoData?.value) memos[ep.episodeNumber] = memoData.value;
+        } catch { /* 무시 */ }
+      }
+      setEpisodeTitles(titles);
+      setEpisodeMemos(memos);
+      // 글로벌 스토어에도 동기화 (다른 뷰에서 사용)
+      useDataStore.getState().setEpisodeTitles(titles);
+    };
+    if (episodes.length > 0) loadEpMeta();
+  }, [sheetsConnected, episodes.length]);
 
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
   const detailScene = detailSceneIndex !== null
@@ -1389,6 +1427,8 @@ export function ScenesView() {
     try {
       if (sheetsConnected) {
         await updateSheetCell(currentPart.sheetName, sceneIndex, stage, newValue);
+        // 위젯 팝업에 데이터 변경 알림
+        window.electronAPI?.sheetsNotifyChange?.();
       } else {
         await toggleTestSceneStage(
           episodes, currentPart.sheetName, sceneId, stage
@@ -1400,18 +1440,41 @@ export function ScenesView() {
     }
   };
 
-  const handleAddEpisode = async () => {
-    // 낙관적 업데이트: UI 즉시 반영
+  const handleAddEpisode = () => {
+    setNewEpName('');
+    setAddEpOpen(true);
+  };
+
+  const handleConfirmAddEpisode = async () => {
+    const epName = newEpName.trim();
+    setAddEpOpen(false);
+
+    // 낙관적 업데이트
     addEpisodeOptimistic(nextEpisodeNumber, selectedDepartment);
     setSelectedEpisode(nextEpisodeNumber);
+
+    // 제목 저장 (즉시 UI 반영)
+    if (epName) {
+      setEpisodeTitles((prev) => {
+        const next = { ...prev, [nextEpisodeNumber]: epName };
+        useDataStore.getState().setEpisodeTitles(next);
+        return next;
+      });
+    }
 
     // 백그라운드에서 서버/파일에 저장
     try {
       if (sheetsConnected) {
         await addEpisodeToSheets(nextEpisodeNumber, selectedDepartment);
+        if (epName) {
+          await writeMetadataToSheets('episode-title', String(nextEpisodeNumber), epName);
+        }
         syncInBackground();
       } else {
         await addTestEpisode(episodes, nextEpisodeNumber, selectedDepartment);
+        if (epName) {
+          await writeLocalMetadata('episode-title', String(nextEpisodeNumber), epName);
+        }
       }
     } catch (err) {
       const msg = String(err);
@@ -1604,7 +1667,8 @@ export function ScenesView() {
   // ─── 에피소드 삭제 ────────────────────
   const handleDeleteEpisode = async () => {
     if (!currentEp) return;
-    if (!confirm(`EP.${String(currentEp.episodeNumber).padStart(2, '0')}를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
+    const epDisplayName = episodeTitles[currentEp.episodeNumber] || currentEp.title;
+    if (!confirm(`"${epDisplayName}"를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
 
     deleteEpisodeOptimistic(currentEp.episodeNumber);
     setSelectedEpisode(episodes[0]?.episodeNumber ?? 1);
@@ -1621,18 +1685,38 @@ export function ScenesView() {
     }
   };
 
-  // ─── 에피소드 메모 저장 (시트 + 로컬 fallback) ──────────────
-  const handleSaveEpMemo = async (memo: string) => {
+  // ─── 에피소드 제목/메모 저장 (시트 + 로컬 fallback) ──────────────
+  const handleSaveEpEdit = async (title: string, memo: string) => {
     if (!currentEp) return;
     setEpEditOpen(false);
     const key = String(currentEp.episodeNumber);
-    // 로컬에 항상 저장
+
+    // 즉시 UI 반영
+    if (title.trim()) {
+      setEpisodeTitles((prev) => {
+        const next = { ...prev, [currentEp.episodeNumber]: title.trim() };
+        useDataStore.getState().setEpisodeTitles(next);
+        return next;
+      });
+    } else {
+      setEpisodeTitles((prev) => {
+        const next = { ...prev };
+        delete next[currentEp.episodeNumber];
+        useDataStore.getState().setEpisodeTitles(next);
+        return next;
+      });
+    }
+    setEpisodeMemos((prev) => ({ ...prev, [currentEp.episodeNumber]: memo }));
+
+    // 저장
+    await writeLocalMetadata('episode-title', key, title.trim());
     await writeLocalMetadata('episode-memo', key, memo);
     if (sheetsConnected) {
       try {
+        await writeMetadataToSheets('episode-title', key, title.trim());
         await writeMetadataToSheets('episode-memo', key, memo);
       } catch (err) {
-        console.warn('[에피소드 메모] 시트 저장 실패 → 로컬에 저장됨', err);
+        console.warn('[에피소드 메타] 시트 저장 실패 → 로컬에 저장됨', err);
       }
     }
   };
@@ -1648,9 +1732,10 @@ export function ScenesView() {
   // 트리뷰에서 에피소드 편집 열기
   const handleTreeEpisodeEdit = useCallback((epNum: number) => {
     setSelectedEpisode(epNum);
-    setEpMemo('');
+    setEpTitleInput(episodeTitles[epNum] ?? '');
+    setEpMemo(episodeMemos[epNum] ?? '');
     setEpEditOpen(true);
-  }, [setSelectedEpisode]);
+  }, [setSelectedEpisode, episodeTitles, episodeMemos]);
 
   return (
     <div className="flex gap-3 h-full">
@@ -1663,6 +1748,8 @@ export function ScenesView() {
             selectedEpisode={selectedEpisode ?? currentEp?.episodeNumber ?? null}
             selectedPart={selectedPart}
             partMemos={partMemos}
+            episodeTitles={episodeTitles}
+            episodeMemos={episodeMemos}
             onSelectEpisodePart={handleTreeSelect}
             onAddEpisode={handleAddEpisode}
             onAddPart={handleAddPart}
@@ -1752,7 +1839,13 @@ export function ScenesView() {
               </select>
               {currentEp && (
                 <button
-                  onClick={() => { setEpMemo(''); setEpEditOpen(!epEditOpen); }}
+                  onClick={() => {
+                    if (currentEp) {
+                      setEpTitleInput(episodeTitles[currentEp.episodeNumber] ?? '');
+                      setEpMemo(episodeMemos[currentEp.episodeNumber] ?? '');
+                    }
+                    setEpEditOpen(!epEditOpen);
+                  }}
                   className="p-1.5 text-text-secondary/40 hover:text-text-primary rounded transition-colors"
                   title="에피소드 관리"
                 >
@@ -1765,9 +1858,9 @@ export function ScenesView() {
             <button
               onClick={handleAddEpisode}
               className="px-3 py-2 bg-accent/20 text-accent text-sm font-medium rounded-lg hover:bg-accent/30 transition-colors"
-              title={`EP.${String(nextEpisodeNumber).padStart(2, '0')} 추가`}
+              title="에피소드 추가"
             >
-              + EP
+              + 에피소드
             </button>
 
             {/* 파트 탭 */}
@@ -1815,7 +1908,7 @@ export function ScenesView() {
           <>
             <div className="w-px h-6 bg-bg-border" />
             <span className="text-sm font-medium text-text-primary">
-              {currentEp.title}
+              {episodeTitles[currentEp.episodeNumber] || currentEp.title}
               {currentPart && <span className="text-text-secondary ml-1">/ {currentPart.partId}파트</span>}
             </span>
           </>
@@ -2458,16 +2551,25 @@ export function ScenesView() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-bold text-text-primary">
-              {currentEp.title} 관리
+              {episodeTitles[currentEp.episodeNumber] || currentEp.title} 관리
             </h3>
+            <div>
+              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 제목</label>
+              <input
+                autoFocus
+                value={epTitleInput}
+                onChange={(e) => setEpTitleInput(e.target.value)}
+                placeholder="에피소드 이름 (비우면 기본값)"
+                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
+              />
+            </div>
             <div>
               <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모</label>
               <input
-                autoFocus
                 value={epMemo}
                 onChange={(e) => setEpMemo(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveEpMemo(epMemo);
+                  if (e.key === 'Enter') handleSaveEpEdit(epTitleInput, epMemo);
                   if (e.key === 'Escape') setEpEditOpen(false);
                 }}
                 placeholder="에피소드 메모"
@@ -2490,12 +2592,56 @@ export function ScenesView() {
                   취소
                 </button>
                 <button
-                  onClick={() => handleSaveEpMemo(epMemo)}
+                  onClick={() => handleSaveEpEdit(epTitleInput, epMemo)}
                   className="px-3 py-1.5 text-xs text-white bg-accent rounded-lg hover:bg-accent/80 transition-colors"
                 >
                   저장
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 에피소드 추가 모달 */}
+      {addEpOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setAddEpOpen(false)}
+        >
+          <div
+            className="bg-bg-card rounded-xl shadow-2xl border border-bg-border w-80 p-4 flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-bold text-text-primary">새 에피소드 추가</h3>
+            <div>
+              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 이름</label>
+              <input
+                autoFocus
+                value={newEpName}
+                onChange={(e) => setNewEpName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleConfirmAddEpisode();
+                  if (e.key === 'Escape') setAddEpOpen(false);
+                }}
+                placeholder="예: 1화 - 봄날의 시작"
+                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
+              />
+              <p className="text-[10px] text-text-secondary/40 mt-1">비우면 기본 이름으로 생성됩니다</p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setAddEpOpen(false)}
+                className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleConfirmAddEpisode}
+                className="px-3 py-1.5 text-xs text-white bg-accent rounded-lg hover:bg-accent/80 transition-colors"
+              >
+                추가
+              </button>
             </div>
           </div>
         </div>
