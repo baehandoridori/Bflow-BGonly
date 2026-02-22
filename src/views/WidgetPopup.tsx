@@ -34,6 +34,15 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const [glassIntensity, setGlassIntensity] = useState(0.7);
   const [isHover, setIsHover] = useState(false);
   const [ready, setReady] = useState(false);
+  const [isFocused, setIsFocused] = useState(true);
+
+  // 포커스 변경 감지 (Acrylic 회색 fallback 대응)
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onWidgetFocusChange?.((focused) => {
+      setIsFocused(focused);
+    });
+    return () => { cleanup?.(); };
+  }, []);
 
   // 테마 + 데이터 초기화
   useEffect(() => {
@@ -125,14 +134,19 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   }
 
   // 글래스 틴트 계산 (Acrylic이 블러 담당, CSS는 틴트/반사만)
-  const tintAlpha = 0.3 + (1 - glassIntensity) * 0.5;  // 0.3~0.8 (글래스 높으면 더 투명)
+  // 포커스 잃으면 틴트를 진하게 올려 Acrylic 회색 fallback을 가림
+  const baseTintAlpha = 0.3 + (1 - glassIntensity) * 0.5;  // 0.3~0.8
+  const tintAlpha = isFocused ? baseTintAlpha : 0.92;
   const borderAlpha = 0.06 + glassIntensity * 0.14;
-  const reflectAlpha = glassIntensity * 0.15;
+  const reflectAlpha = isFocused ? glassIntensity * 0.15 : 0.02;
 
   return (
     <div
       className="h-screen w-screen flex flex-col overflow-hidden"
-      style={{ background: `rgba(12, 14, 22, ${tintAlpha})` }}
+      style={{
+        background: `rgba(12, 14, 22, ${tintAlpha})`,
+        transition: 'background 0.3s ease',
+      }}
       onMouseEnter={() => setIsHover(true)}
       onMouseLeave={() => setIsHover(false)}
     >

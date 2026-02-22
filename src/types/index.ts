@@ -239,6 +239,7 @@ export interface ElectronAPI {
   widgetSetOpacity?: (widgetId: string, opacity: number) => Promise<void>;
   widgetClosePopup?: (widgetId: string) => Promise<void>;
   widgetCaptureBehind?: (widgetId: string) => Promise<string | null>;
+  onWidgetFocusChange?: (callback: (focused: boolean) => void) => () => void;
 }
 
 declare global {

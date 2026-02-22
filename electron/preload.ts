@@ -80,4 +80,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('widget:close-popup', widgetId),
   widgetCaptureBehind: (widgetId: string) =>
     ipcRenderer.invoke('widget:capture-behind', widgetId) as Promise<string | null>,
+  onWidgetFocusChange: (callback: (focused: boolean) => void) => {
+    const handler = (_event: unknown, focused: boolean) => callback(focused);
+    ipcRenderer.on('widget:focus-change', handler);
+    return () => { ipcRenderer.removeListener('widget:focus-change', handler); };
+  },
 });

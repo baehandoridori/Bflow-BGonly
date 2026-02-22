@@ -477,6 +477,18 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     widgetWindows.delete(widgetId);
   });
 
+  // 포커스 변경 시 렌더러에 알림 (Acrylic 회색 fallback 대응)
+  popupWin.on('blur', () => {
+    if (!popupWin.isDestroyed()) {
+      popupWin.webContents.send('widget:focus-change', false);
+    }
+  });
+  popupWin.on('focus', () => {
+    if (!popupWin.isDestroyed()) {
+      popupWin.webContents.send('widget:focus-change', true);
+    }
+  });
+
   return { ok: true };
 });
 
