@@ -1,8 +1,10 @@
-import { useState, useCallback, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useCallback, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LogIn, ChevronRight } from 'lucide-react';
 import { login } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { getPreset } from '@/themes';
 
 // ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
@@ -17,18 +19,40 @@ interface Particle {
   color: [number, number, number];
 }
 
-const PLEXUS_COLORS: [number, number, number][] = [
-  [108, 92, 231], [162, 155, 254], [116, 185, 255], [0, 184, 148], [85, 239, 196],
-];
+function getPlexusColors(): [number, number, number][] {
+  const themeId = useAppStore.getState().themeId;
+  const custom = useAppStore.getState().customThemeColors;
+  const colors = custom ?? getPreset(themeId)?.colors;
+  if (!colors) return [[108, 92, 231], [162, 155, 254], [116, 185, 255], [0, 184, 148], [85, 239, 196]];
+  const parse = (s: string): [number, number, number] => {
+    const [r, g, b] = s.split(' ').map(Number);
+    return [r, g, b];
+  };
+  const accent = parse(colors.accent);
+  const accentSub = parse(colors.accentSub);
+  // 밝기 변주 추가
+  const lighter: [number, number, number] = [
+    Math.min(255, accent[0] + 40),
+    Math.min(255, accent[1] + 40),
+    Math.min(255, accent[2] + 40),
+  ];
+  const mix: [number, number, number] = [
+    Math.round((accent[0] + accentSub[0]) / 2),
+    Math.round((accent[1] + accentSub[1]) / 2),
+    Math.round((accent[2] + accentSub[2]) / 2),
+  ];
+  return [accent, accentSub, lighter, mix, accentSub];
+}
 
 const PARTICLE_COUNT = 90;
 const CONNECTION_DIST = 180;
 const MOUSE_RADIUS = 200;
 const MOUSE_FORCE = 0.04;
 
-function createParticle(w: number, h: number): Particle {
+function createParticle(w: number, h: number, plexusColors?: [number, number, number][]): Particle {
   const z = 0.15 + Math.random() * 0.85;
-  const color = PLEXUS_COLORS[Math.floor(Math.random() * PLEXUS_COLORS.length)];
+  const cols = plexusColors ?? getPlexusColors();
+  const color = cols[Math.floor(Math.random() * cols.length)];
   const baseSpeed = 0.15 + Math.random() * 0.3;
   return {
     x: Math.random() * w, y: Math.random() * h, z,
@@ -79,8 +103,17 @@ function PlexusBackground() {
         noiseRef.current = nc;
       }
 
+      const plexusColors = getPlexusColors();
       if (particlesRef.current.length === 0) {
-        particlesRef.current = Array.from({ length: PARTICLE_COUNT }, () => createParticle(w, h));
+        particlesRef.current = Array.from({ length: PARTICLE_COUNT }, () => createParticle(w, h, plexusColors));
+      } else {
+        // 리사이즈: 기존 파티클을 새 영역에 맞게 재배치
+        const oldW = sizeRef.current.w || w;
+        const oldH = sizeRef.current.h || h;
+        for (const p of particlesRef.current) {
+          p.x = (p.x / oldW) * w;
+          p.y = (p.y / oldH) * h;
+        }
       }
     };
 
@@ -101,18 +134,20 @@ function PlexusBackground() {
       ctx.fillStyle = '#12141C';
       ctx.fillRect(0, 0, w, h);
 
+      const tc = getPlexusColors()[0];
+      const ts = getPlexusColors()[1];
       const cg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.7);
-      cg.addColorStop(0, 'rgba(108, 92, 231, 0.06)');
-      cg.addColorStop(0.3, 'rgba(108, 92, 231, 0.03)');
-      cg.addColorStop(0.6, 'rgba(116, 185, 255, 0.015)');
+      cg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.06)`);
+      cg.addColorStop(0.3, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
+      cg.addColorStop(0.6, `rgba(${ts[0]}, ${ts[1]}, ${ts[2]}, 0.015)`);
       cg.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = cg;
       ctx.fillRect(0, 0, w, h);
 
       if (mx > 0 && my > 0) {
         const mg = ctx.createRadialGradient(mx, my, 0, mx, my, 250);
-        mg.addColorStop(0, 'rgba(108, 92, 231, 0.08)');
-        mg.addColorStop(0.4, 'rgba(108, 92, 231, 0.03)');
+        mg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.08)`);
+        mg.addColorStop(0.4, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
         mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = mg;
         ctx.fillRect(0, 0, w, h);
@@ -238,6 +273,15 @@ const STAGE_SUFFIX: string[] = ['e', 'AE', '', '', ''];
 function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
   const [stage, setStage] = useState<MorphStage>(0);
   const doneRef = useRef(false);
+  const themeId = useAppStore((s) => s.themeId);
+  const customColors = useAppStore((s) => s.customThemeColors);
+  const { accentCss, accentSubCss } = useMemo(() => {
+    const colors = customColors ?? getPreset(themeId)?.colors;
+    const a = colors?.accent ?? '108 92 231';
+    const s = colors?.accentSub ?? '162 155 254';
+    const toRgb = (t: string) => t.split(' ').join(',');
+    return { accentCss: toRgb(a), accentSubCss: toRgb(s) };
+  }, [themeId, customColors]);
 
   // ── 서픽스/the 너비 측정 ──
   const measureRef = useRef<HTMLSpanElement>(null);
@@ -301,9 +345,9 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
           <motion.span
             animate={{
               filter: [
-                'drop-shadow(0 0 10px rgba(108,92,231,0.6)) drop-shadow(0 0 25px rgba(108,92,231,0.3)) drop-shadow(0 0 50px rgba(162,155,254,0.15))',
-                'drop-shadow(0 0 16px rgba(108,92,231,0.8)) drop-shadow(0 0 40px rgba(108,92,231,0.45)) drop-shadow(0 0 70px rgba(162,155,254,0.2))',
-                'drop-shadow(0 0 10px rgba(108,92,231,0.6)) drop-shadow(0 0 25px rgba(108,92,231,0.3)) drop-shadow(0 0 50px rgba(162,155,254,0.15))',
+                `drop-shadow(0 0 10px rgba(${accentCss},0.6)) drop-shadow(0 0 25px rgba(${accentCss},0.3)) drop-shadow(0 0 50px rgba(${accentSubCss},0.15))`,
+                `drop-shadow(0 0 16px rgba(${accentCss},0.8)) drop-shadow(0 0 40px rgba(${accentCss},0.45)) drop-shadow(0 0 70px rgba(${accentSubCss},0.2))`,
+                `drop-shadow(0 0 10px rgba(${accentCss},0.6)) drop-shadow(0 0 25px rgba(${accentCss},0.3)) drop-shadow(0 0 50px rgba(${accentSubCss},0.15))`,
               ],
             }}
             transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
@@ -382,6 +426,15 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
 // ─── 클릭 투 컨티뉴 ────────────────────────────────────────────
 
 function ClickPrompt() {
+  const themeId = useAppStore((s) => s.themeId);
+  const customColors = useAppStore((s) => s.customThemeColors);
+  const { aCss, sCss } = useMemo(() => {
+    const colors = customColors ?? getPreset(themeId)?.colors;
+    const a = colors?.accent ?? '108 92 231';
+    const s = colors?.accentSub ?? '162 155 254';
+    return { aCss: a.split(' ').join(','), sCss: s.split(' ').join(',') };
+  }, [themeId, customColors]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -394,9 +447,9 @@ function ClickPrompt() {
         animate={{
           opacity: [0.7, 1, 0.7],
           textShadow: [
-            '0 0 8px rgba(108,92,231,0.4), 0 0 24px rgba(108,92,231,0.15)',
-            '0 0 16px rgba(108,92,231,0.7), 0 0 48px rgba(108,92,231,0.3), 0 0 80px rgba(162,155,254,0.15)',
-            '0 0 8px rgba(108,92,231,0.4), 0 0 24px rgba(108,92,231,0.15)',
+            `0 0 8px rgba(${aCss},0.4), 0 0 24px rgba(${aCss},0.15)`,
+            `0 0 16px rgba(${aCss},0.7), 0 0 48px rgba(${aCss},0.3), 0 0 80px rgba(${sCss},0.15)`,
+            `0 0 8px rgba(${aCss},0.4), 0 0 24px rgba(${aCss},0.15)`,
           ],
         }}
         transition={{ duration: 3.0, repeat: Infinity, ease: 'easeInOut' }}

@@ -127,54 +127,118 @@ function layoutEventBars(
 
 function EventBarChip({
   bar, compact, onClick, onDragStart, isDragging, isGhost,
+  hoveredEventId, onHover,
 }: {
   bar: EventBar;
   compact?: boolean;
   onClick: (e: CalendarEvent) => void;
-  onDragStart?: (eventId: string, mode: DragMode, e: React.MouseEvent) => void;
+  onDragStart?: (eventId: string, mode: DragMode, anchorDate: string) => void;
   isDragging?: boolean;
   isGhost?: boolean;
+  hoveredEventId?: string | null;
+  onHover?: (id: string | null) => void;
 }) {
   const ev = bar.event;
   const hex = ev.color || EVENT_COLORS[0];
+  const isHovered = hoveredEventId === ev.id;
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!onDragStart || e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
 
-    // 리사이즈 핸들 영역 (양쪽 6px)
+    const startX = e.clientX;
+    const startY = e.clientY;
+
+    // 리사이즈 핸들 영역 (양쪽 8px)
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const relX = e.clientX - rect.left;
     const relRight = rect.width - relX;
-
-    if (bar.isStart && relX <= 6) {
-      onDragStart(ev.id, 'resize-start', e);
-    } else if (bar.isEnd && relRight <= 6) {
-      onDragStart(ev.id, 'resize-end', e);
+    let mode: DragMode;
+    if (bar.isStart && relX <= 8) {
+      mode = 'resize-start';
+    } else if (bar.isEnd && relRight <= 8) {
+      mode = 'resize-end';
     } else {
-      onDragStart(ev.id, 'move', e);
+      mode = 'move';
     }
+
+    // 앵커 날짜: 바를 숨기고 아래 셀에서 data-date 추출
+    const barEl = e.currentTarget as HTMLElement;
+    barEl.style.pointerEvents = 'none';
+    const cellEl = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    barEl.style.pointerEvents = '';
+    let anchorDate: string | null = null;
+    let cur = cellEl;
+    while (cur) {
+      anchorDate = cur.getAttribute('data-date');
+      if (anchorDate) break;
+      cur = cur.parentElement;
+    }
+    if (!anchorDate) anchorDate = ev.startDate;
+
+    // 클릭 vs 드래그 구분 (5px 임계값)
+    const THRESHOLD = 5;
+    let dragStarted = false;
+
+    const onMove = (me: MouseEvent) => {
+      const dx = me.clientX - startX;
+      const dy = me.clientY - startY;
+      if (!dragStarted && Math.sqrt(dx * dx + dy * dy) >= THRESHOLD) {
+        dragStarted = true;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        onDragStart(ev.id, mode, anchorDate!);
+      }
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (!dragStarted) {
+        onClick(ev); // 이동 없음 → 클릭으로 처리
+      }
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   };
+
+  const handleEnter = () => {
+    onHover?.(ev.id);
+    tooltipTimer.current = setTimeout(() => setShowTooltip(true), 500);
+  };
+  const handleLeave = () => {
+    onHover?.(null);
+    clearTimeout(tooltipTimer.current);
+    setShowTooltip(false);
+  };
+
+  const dateLabel = ev.startDate === ev.endDate
+    ? ev.startDate
+    : `${ev.startDate} → ${ev.endDate}`;
 
   return (
     <div
       onMouseDown={handleMouseDown}
-      onClick={(e) => { e.stopPropagation(); if (!isDragging) onClick(ev); }}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
       className={cn(
         'absolute text-left z-10',
-        isGhost ? 'pointer-events-none opacity-50' : 'transition-all duration-150 hover:brightness-110 hover:scale-[1.02] hover:z-20',
+        isGhost ? 'pointer-events-none opacity-50' : 'transition-all duration-150',
+        !isGhost && isHovered && 'brightness-110 scale-[1.02] z-20',
         isDragging ? 'opacity-40' : '',
         'group/bar',
       )}
       style={{
         left: `calc(${(bar.startCol / 7) * 100}% + 2px)`,
         width: `calc(${(bar.span / 7) * 100}% - 4px)`,
-        top: `${bar.row * (compact ? 20 : 24) + (compact ? 24 : 30)}px`,
-        height: compact ? '18px' : '22px',
+        top: `${bar.row * (compact ? 22 : 26) + (compact ? 26 : 34)}px`,
+        height: compact ? '20px' : '24px',
         cursor: isDragging ? 'grabbing' : 'grab',
       }}
-      title={`${ev.title}${ev.memo ? ` — ${ev.memo}` : ''}`}
     >
       <div
         className={cn(
@@ -199,7 +263,7 @@ function EventBarChip({
       >
         {/* 리사이즈 핸들 (왼쪽) */}
         {bar.isStart && !isGhost && (
-          <div className="absolute left-0 top-0 w-[6px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
+          <div className="absolute left-0 top-0 w-[8px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
             style={{ backgroundColor: `${hex}40` }}
           />
         )}
@@ -208,11 +272,32 @@ function EventBarChip({
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
         {/* 리사이즈 핸들 (오른쪽) */}
         {bar.isEnd && !isGhost && (
-          <div className="absolute right-0 top-0 w-[6px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
+          <div className="absolute right-0 top-0 w-[8px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
             style={{ backgroundColor: `${hex}40` }}
           />
         )}
       </div>
+
+      {/* 글래스모피즘 툴팁 */}
+      {showTooltip && !isDragging && !isGhost && (
+        <div
+          className="absolute z-50 pointer-events-none rounded-xl px-3 py-2 text-[11px] leading-relaxed max-w-[220px]"
+          style={{
+            bottom: 'calc(100% + 6px)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(26, 29, 39, 0.85)',
+            backdropFilter: 'blur(16px) saturate(1.4)',
+            WebkitBackdropFilter: 'blur(16px) saturate(1.4)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.03) inset',
+          }}
+        >
+          <div className="font-semibold text-text-primary truncate">{ev.title}</div>
+          <div className="text-text-secondary/60 mt-0.5">{dateLabel}</div>
+          {ev.memo && <div className="text-text-secondary/50 mt-0.5 line-clamp-2">{ev.memo}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -448,6 +533,28 @@ function EventCreateModal({
     return selectedEpParts.find((p) => p.sheetName === linkedPart)?.scenes ?? [];
   }, [linkedPart, selectedEpParts]);
 
+  // 에피소드/파트/씬 선택 시 제목 자동 입력
+  useEffect(() => {
+    if (isEditMode) return; // 편집 모드에서는 자동입력 안 함
+    if (evType === 'custom') return;
+    const ep = episodes.find((e) => e.episodeNumber === linkedEp);
+    if (!ep) return;
+    const epLabel = ep.title;
+    if (evType === 'episode') {
+      setTitle(epLabel);
+    } else if (evType === 'part' || evType === 'scene') {
+      const part = selectedEpParts.find((p) => p.sheetName === linkedPart);
+      if (part) {
+        const deptLabel = DEPARTMENT_CONFIGS[part.department as 'bg' | 'acting']?.shortLabel ?? '';
+        if (evType === 'part') {
+          setTitle(`${epLabel} ${part.partId}파트 (${deptLabel})`);
+        } else if (linkedScene) {
+          setTitle(`${epLabel} ${part.partId}파트 #${linkedScene}`);
+        }
+      }
+    }
+  }, [evType, linkedEp, linkedPart, linkedScene, episodes, selectedEpParts, isEditMode]);
+
   const handleSubmit = () => {
     if (!title.trim()) return;
     const partData = selectedEpParts.find((p) => p.sheetName === linkedPart);
@@ -512,7 +619,8 @@ function EventCreateModal({
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-accent [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
+                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-xl px-4 py-3 text-sm text-text-primary outline-none focus:border-accent [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:w-5 [&::-webkit-calendar-picker-indicator]:h-5"
+                style={{ colorScheme: 'dark' }}
               />
             </div>
             <div className="flex-1">
@@ -521,7 +629,8 @@ function EventCreateModal({
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-accent [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
+                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-xl px-4 py-3 text-sm text-text-primary outline-none focus:border-accent [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:w-5 [&::-webkit-calendar-picker-indicator]:h-5"
+                style={{ colorScheme: 'dark' }}
               />
             </div>
           </div>
@@ -659,11 +768,12 @@ function CalendarGrid({
   maxVisibleBars: number;
   onDateClick: (date: string) => void;
   onEventClick: (ev: CalendarEvent) => void;
-  onDragStart?: (eventId: string, mode: DragMode, e: React.MouseEvent) => void;
+  onDragStart?: (eventId: string, mode: DragMode, anchorDate: string) => void;
   dragPreview?: DragPreview | null;
   isDragging?: boolean;
 }) {
   const [overflow, setOverflow] = useState<{ date: string; rect: DOMRect } | null>(null);
+  const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
 
   // 드래그 중이면 프리뷰 날짜로 이벤트를 대체해서 고스트 바 표시
   const displayEvents = useMemo(() => {
@@ -698,7 +808,7 @@ function CalendarGrid({
           const bars = layoutEventBars(displayEvents, week[0], 7);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
           const visibleRows = Math.min(maxRow, maxVisibleBars);
-          const rowHeight = Math.max(36 + visibleRows * 24 + 8, 96);
+          const rowHeight = Math.max(42 + visibleRows * 26 + 12, 110);
 
           return (
             <div key={wi} className="relative grid grid-cols-7 gap-px" style={{ minHeight: rowHeight }}>
@@ -775,6 +885,8 @@ function CalendarGrid({
                     onDragStart={onDragStart}
                     isDragging={barIsDragging}
                     isGhost={barIsDragging}
+                    hoveredEventId={hoveredEventId}
+                    onHover={setHoveredEventId}
                   />
                 );
               })}
@@ -881,7 +993,7 @@ function TodayView({
 
 export function ScheduleView() {
   const episodes = useDataStore((s) => s.episodes);
-  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId } = useAppStore();
+  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId, setToast } = useAppStore();
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
@@ -912,12 +1024,12 @@ export function ScheduleView() {
     return result;
   }, [events, filter, deptFilter]);
 
-  // 주 데이터 계산
+  // 주 데이터 계산 (모든 날짜를 정오로 생성 — parseDate와 일관성 유지)
   const weeks = useMemo(() => {
     if (viewMode === 'today') return [];
 
     if (viewMode === 'month') {
-      const firstDay = new Date(year, month, 1);
+      const firstDay = new Date(year, month, 1, 12, 0, 0, 0);
       const lastDay = new Date(year, month + 1, 0);
       const startDow = firstDay.getDay();
 
@@ -928,7 +1040,7 @@ export function ScheduleView() {
       }
       // 이번 달
       for (let d = 1; d <= lastDay.getDate(); d++) {
-        days.push(new Date(year, month, d));
+        days.push(new Date(year, month, d, 12, 0, 0, 0));
       }
       // 다음 달 (6행 채우기)
       while (days.length < 42) {
@@ -944,6 +1056,7 @@ export function ScheduleView() {
 
     if (viewMode === 'week' || viewMode === '2week') {
       const todayDate = new Date();
+      todayDate.setHours(12, 0, 0, 0);
       const todayDow = todayDate.getDay();
       const weekStart = addDays(todayDate, -todayDow + weekOffset * 7);
       const numWeeks = viewMode === '2week' ? 2 : 1;
@@ -1048,7 +1161,8 @@ export function ScheduleView() {
     // 씬 뷰로 이동
     setView('scenes');
     setDetailEvent(null);
-  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId]);
+    setToast(`${ev.title} → 씬 뷰로 이동합니다`);
+  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId, setToast]);
 
   // 드래그&드롭
   const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
@@ -1058,21 +1172,10 @@ export function ScheduleView() {
 
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
 
-  const handleBarDragStart = useCallback((eventId: string, mode: DragMode, e: React.MouseEvent) => {
+  const handleBarDragStart = useCallback((eventId: string, mode: DragMode, anchorDate: string) => {
     const ev = events.find((ev) => ev.id === eventId);
     if (!ev) return;
-    // 드래그 시작 시점의 앵커 날짜를 셀에서 가져온다
-    const target = e.target as HTMLElement;
-    let anchorEl: HTMLElement | null = target;
-    let anchorDate: string | null = null;
-    while (anchorEl) {
-      anchorDate = anchorEl.getAttribute('data-date');
-      if (anchorDate) break;
-      anchorEl = anchorEl.parentElement;
-    }
-    // 셀을 못 찾으면 이벤트 시작일을 앵커로
-    if (!anchorDate) anchorDate = ev.startDate;
-    startDrag(eventId, mode, ev.startDate, ev.endDate, e.clientX, anchorDate);
+    startDrag(eventId, mode, ev.startDate, ev.endDate, 0, anchorDate);
   }, [events, startDrag]);
 
   // 헤더 라벨

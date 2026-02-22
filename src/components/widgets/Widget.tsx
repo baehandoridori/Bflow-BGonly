@@ -5,11 +5,12 @@ import { cn } from '@/utils/cn';
 interface WidgetProps {
   title: string;
   icon?: React.ReactNode;
+  headerRight?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }
 
-export function Widget({ title, icon, children, className }: WidgetProps) {
+export function Widget({ title, icon, headerRight, children, className }: WidgetProps) {
   const isEditMode = useAppStore((s) => s.isEditMode);
 
   return (
@@ -36,6 +37,7 @@ export function Widget({ title, icon, children, className }: WidgetProps) {
         )}
         {icon && <span className="text-accent flex-shrink-0">{icon}</span>}
         <span className="text-sm font-medium truncate text-text-primary/90">{title}</span>
+        {headerRight && <div className="ml-auto flex items-center">{headerRight}</div>}
       </div>
 
       {/* 내용 */}

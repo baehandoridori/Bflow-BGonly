@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Filter, Settings2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAppStore } from '@/stores/useAppStore';
 import { getEvents, getEventsForDate } from '@/services/calendarService';
@@ -117,7 +117,42 @@ export function CalendarWidget() {
   };
 
   return (
-    <Widget title="캘린더" icon={<CalendarDays size={14} />}>
+    <Widget
+      title="캘린더"
+      icon={<CalendarDays size={14} />}
+      headerRight={
+        <div className="flex items-center gap-1">
+          {/* 뷰 모드 토글 */}
+          {(['month', '2week', 'week', 'today'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => { setViewMode(m); setSelectedDate(null); }}
+              className={cn(
+                'px-1.5 py-0.5 text-[9px] rounded font-medium cursor-pointer transition-colors',
+                viewMode === m ? 'bg-accent/20 text-accent' : 'text-text-secondary/40 hover:text-text-primary',
+              )}
+            >
+              {m === 'month' ? '월' : m === '2week' ? '2주' : m === 'week' ? '주' : '오늘'}
+            </button>
+          ))}
+          <button
+            onClick={() => setShowFilter(!showFilter)}
+            className={cn(
+              'p-0.5 cursor-pointer transition-colors ml-0.5',
+              showFilter ? 'text-accent' : 'text-text-secondary/40 hover:text-text-secondary',
+            )}
+          >
+            <Settings2 size={10} />
+          </button>
+          <button
+            onClick={() => setView('schedule')}
+            className="text-[9px] text-accent hover:underline cursor-pointer ml-0.5"
+          >
+            전체
+          </button>
+        </div>
+      }
+    >
       <div className="flex flex-col gap-1.5 h-full">
         {/* 미니 헤더 */}
         <div className="flex items-center justify-between">
@@ -141,43 +176,11 @@ export function CalendarWidget() {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1">
-            {/* 필터 토글 */}
-            <button
-              onClick={() => setShowFilter(!showFilter)}
-              className={cn(
-                'p-0.5 cursor-pointer transition-colors',
-                showFilter ? 'text-accent' : 'text-text-secondary/40 hover:text-text-secondary',
-              )}
-            >
-              <Filter size={10} />
-            </button>
-            <button
-              onClick={() => setView('schedule')}
-              className="text-[10px] text-accent hover:underline cursor-pointer"
-            >
-              전체
-            </button>
-          </div>
         </div>
 
-        {/* 필터 바 */}
+        {/* 필터 바 (접기/펼치기) */}
         {showFilter && (
           <div className="flex flex-wrap gap-0.5">
-            {/* 뷰모드 */}
-            {(['month', '2week', 'week', 'today'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => { setViewMode(m); setSelectedDate(null); }}
-                className={cn(
-                  'px-1.5 py-0.5 text-[8px] rounded font-medium cursor-pointer transition-colors',
-                  viewMode === m ? 'bg-accent/20 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
-                )}
-              >
-                {m === 'month' ? '월' : m === '2week' ? '2주' : m === 'week' ? '주' : '오늘'}
-              </button>
-            ))}
-            <span className="text-text-secondary/20 mx-0.5">|</span>
             {/* 타입 필터 */}
             {(['all', 'custom', 'episode', 'part', 'scene'] as const).map((f) => (
               <button
@@ -210,8 +213,12 @@ export function CalendarWidget() {
 
             <div className="grid grid-cols-7 gap-px flex-1">
               {calendarDays.map((day, i) => {
-                const hasEvents = filteredEvents.some((e) => e.startDate <= day.dateStr && e.endDate >= day.dateStr);
+                const dayEvents = filteredEvents.filter((e) => e.startDate <= day.dateStr && e.endDate >= day.dateStr);
+                const hasEvents = dayEvents.length > 0;
                 const isSelected = selectedDate === day.dateStr;
+                // 연속 이벤트 → 바 형태, 단일 이벤트 → 도트
+                const barEvents = dayEvents.filter((e) => e.startDate !== e.endDate).slice(0, 2);
+                const dotEvents = dayEvents.filter((e) => e.startDate === e.endDate).slice(0, 2);
                 return (
                   <div
                     key={i}
@@ -234,7 +241,14 @@ export function CalendarWidget() {
                       {day.date}
                     </span>
                     {hasEvents && !day.isToday && (
-                      <div className="w-1 h-1 rounded-full bg-accent/60 mt-0.5" />
+                      <div className="flex items-center gap-px mt-0.5">
+                        {barEvents.map((ev) => (
+                          <div key={ev.id} className="w-3 h-[3px] rounded-full" style={{ backgroundColor: `${ev.color}90` }} />
+                        ))}
+                        {barEvents.length === 0 && dotEvents.map((ev) => (
+                          <div key={ev.id} className="w-1 h-1 rounded-full" style={{ backgroundColor: `${ev.color}90` }} />
+                        ))}
+                      </div>
                     )}
                   </div>
                 );
@@ -264,7 +278,20 @@ export function CalendarWidget() {
         )}
 
         {viewMode !== 'month' && (
-          <div className="flex flex-col gap-0.5 flex-1 overflow-auto">
+          <div className="flex flex-col gap-1 flex-1 overflow-auto">
+            {/* 날짜 범위 표시 */}
+            {viewMode !== 'today' && (
+              <div className="text-[10px] text-text-secondary/50 pb-0.5">
+                {(() => {
+                  const now = new Date();
+                  const nowDow = now.getDay();
+                  const weekStart = addDays(now, -nowDow);
+                  const numDays = viewMode === '2week' ? 14 : 7;
+                  const weekEnd = addDays(weekStart, numDays - 1);
+                  return `${weekStart.getMonth() + 1}/${weekStart.getDate()} — ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`;
+                })()}
+              </div>
+            )}
             {listEvents.length === 0 ? (
               <div className="flex items-center justify-center h-full text-[10px] text-text-secondary/40">
                 일정 없음
@@ -273,12 +300,20 @@ export function CalendarWidget() {
               listEvents.map((ev) => {
                 const s = parseDate(ev.startDate);
                 const e = parseDate(ev.endDate);
+                const isContinuous = ev.startDate !== ev.endDate;
                 const dateRange = ev.startDate === ev.endDate
                   ? `${s.getMonth() + 1}/${s.getDate()}`
                   : `${s.getMonth() + 1}/${s.getDate()}→${e.getMonth() + 1}/${e.getDate()}`;
                 return (
-                  <div key={ev.id} className="flex items-center gap-1.5 py-0.5">
-                    <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
+                  <div
+                    key={ev.id}
+                    className="flex items-center gap-1.5 py-1 px-1.5 rounded-md transition-colors hover:bg-bg-border/10"
+                    style={isContinuous ? {
+                      borderLeft: `2px solid ${ev.color}`,
+                      background: `linear-gradient(90deg, ${ev.color}08 0%, transparent 100%)`,
+                    } : undefined}
+                  >
+                    {!isContinuous && <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />}
                     <span className="text-[10px] text-text-primary truncate flex-1">{ev.title}</span>
                     <span className="text-[8px] text-text-secondary/40 shrink-0">{dateRange}</span>
                   </div>

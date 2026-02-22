@@ -1,16 +1,18 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Film, User, FileText, Zap, Hash, Layers } from 'lucide-react';
+import { Search, Film, User, FileText, Zap, Hash, Layers, CalendarDays } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
+import { getEvents } from '@/services/calendarService';
+import type { CalendarEvent } from '@/types/calendar';
 
 /* ────────────────────────────────────────────────
    타입
    ──────────────────────────────────────────────── */
-type ResultCategory = 'scene' | 'assignee' | 'episode' | 'part' | 'memo' | 'action';
+type ResultCategory = 'scene' | 'assignee' | 'episode' | 'part' | 'memo' | 'event' | 'action';
 
 interface SearchResult {
   id: string;
@@ -59,10 +61,11 @@ const CATEGORY_LABELS: Record<ResultCategory, string> = {
   episode: '에피소드',
   part: '파트',
   memo: '메모',
+  event: '캘린더 이벤트',
   action: '빠른 액션',
 };
 
-const CATEGORY_ORDER: ResultCategory[] = ['action', 'scene', 'part', 'assignee', 'episode', 'memo'];
+const CATEGORY_ORDER: ResultCategory[] = ['action', 'scene', 'part', 'assignee', 'episode', 'memo', 'event'];
 
 /* ────────────────────────────────────────────────
    미니 프로그레스 바
@@ -100,6 +103,8 @@ export function SpotlightSearch() {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const episodes = useDataStore((s) => s.episodes);
+  const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
+  useEffect(() => { getEvents().then(setCalEvents); }, []);
   const {
     setView,
     setSelectedEpisode,
@@ -355,10 +360,32 @@ export function SpotlightSearch() {
       }
     }
 
+    // ── 캘린더 이벤트 검색 (제목 + 메모) ──
+    for (const ev of calEvents) {
+      const titleScore = fuzzyScore(q, ev.title);
+      const memoScore = ev.memo ? fuzzyScore(q, ev.memo) : 0;
+      const evScore = Math.max(titleScore, memoScore);
+      if (evScore > 0) {
+        items.push({
+          id: `event-${ev.id}`,
+          category: 'event',
+          title: ev.title,
+          subtitle: `${ev.startDate} → ${ev.endDate}${ev.memo ? ` · ${ev.memo.slice(0, 30)}` : ''}`,
+          icon: <CalendarDays size={16} />,
+          score: evScore,
+          action: () => {
+            setView('schedule');
+            setToast(`캘린더: ${ev.title}`);
+            close();
+          },
+        });
+      }
+    }
+
     // 점수 내림차순 정렬, 상위 20개
     items.sort((a, b) => b.score - a.score);
     return items.slice(0, 20);
-  }, [query, episodes, resetAndNavigate]);
+  }, [query, episodes, calEvents, resetAndNavigate, setView, setToast]);
 
   /* ── 카테고리별 그룹핑 ── */
   const grouped = useMemo(() => {
