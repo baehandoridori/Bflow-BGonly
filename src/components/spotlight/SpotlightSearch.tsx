@@ -360,22 +360,26 @@ export function SpotlightSearch() {
       }
     }
 
-    // ── 캘린더 이벤트 검색 (제목 + 메모) ──
+    // ── 캘린더 이벤트 검색 (제목 + 메모 + 타입) ──
+    const typeLabels: Record<string, string> = { custom: '일반', episode: '에피소드', part: '파트', scene: '씬' };
     for (const ev of calEvents) {
-      const titleScore = fuzzyScore(q, ev.title);
+      if (!ev) continue;
+      const titleScore = ev.title ? fuzzyScore(q, ev.title) : 0;
       const memoScore = ev.memo ? fuzzyScore(q, ev.memo) : 0;
-      const evScore = Math.max(titleScore, memoScore);
+      const typeScore = ev.type && typeLabels[ev.type] ? fuzzyScore(q, typeLabels[ev.type]) * 0.5 : 0;
+      const evScore = Math.max(titleScore, memoScore, typeScore);
       if (evScore > 0) {
+        const typeLabel = ev.type && typeLabels[ev.type] ? `[${typeLabels[ev.type]}] ` : '';
         items.push({
           id: `event-${ev.id}`,
           category: 'event',
-          title: ev.title,
-          subtitle: `${ev.startDate} → ${ev.endDate}${ev.memo ? ` · ${ev.memo.slice(0, 30)}` : ''}`,
+          title: ev.title || '(제목 없음)',
+          subtitle: `${typeLabel}${ev.startDate} → ${ev.endDate}${ev.memo ? ` · ${ev.memo.slice(0, 30)}` : ''}`,
           icon: <CalendarDays size={16} />,
           score: evScore,
           action: () => {
             setView('schedule');
-            setToast(`캘린더: ${ev.title}`);
+            setToast(`캘린더: ${ev.title || '이벤트'}`);
             close();
           },
         });

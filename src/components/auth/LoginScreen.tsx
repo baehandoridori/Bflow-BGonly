@@ -19,6 +19,31 @@ interface Particle {
   color: [number, number, number];
 }
 
+// RGB ↔ HSL 변환 유틸
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return [h * 360, s * 100, l * 100];
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  h = ((h % 360) + 360) % 360;
+  s /= 100; l /= 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+
 function getPlexusColors(): [number, number, number][] {
   const themeId = useAppStore.getState().themeId;
   const custom = useAppStore.getState().customThemeColors;
@@ -30,32 +55,42 @@ function getPlexusColors(): [number, number, number][] {
   };
   const accent = parse(colors.accent);
   const accentSub = parse(colors.accentSub);
-  // 밝기 변주 추가
+
+  // HSL 기반 보색/유사색 생성
+  const [ah, as, al] = rgbToHsl(...accent);
+  const complementary = hslToRgb(ah + 180, as * 0.6, Math.min(al + 10, 85));  // 보색 (채도 낮춤)
+  const analogous1 = hslToRgb(ah + 30, as * 0.8, al);                         // 유사색 +30°
+  const analogous2 = hslToRgb(ah - 30, as * 0.8, al);                         // 유사색 -30°
   const lighter: [number, number, number] = [
-    Math.min(255, accent[0] + 40),
-    Math.min(255, accent[1] + 40),
-    Math.min(255, accent[2] + 40),
+    Math.min(255, accent[0] + 50),
+    Math.min(255, accent[1] + 50),
+    Math.min(255, accent[2] + 50),
   ];
   const mix: [number, number, number] = [
     Math.round((accent[0] + accentSub[0]) / 2),
     Math.round((accent[1] + accentSub[1]) / 2),
     Math.round((accent[2] + accentSub[2]) / 2),
   ];
-  return [accent, accentSub, lighter, mix, accentSub];
+
+  // 테마 색상 위주 (비중 높음) + 보색/유사색 약간 섞기
+  return [accent, accent, accentSub, lighter, mix, analogous1, analogous2, complementary];
 }
 
 const PARTICLE_COUNT = 90;
 const CONNECTION_DIST = 180;
 const MOUSE_RADIUS = 200;
 const MOUSE_FORCE = 0.04;
+// "창을 통해 보는" 가상 캔버스 크기 (실제 창보다 넓음)
+const VIRTUAL_W = 2800;
+const VIRTUAL_H = 1800;
 
-function createParticle(w: number, h: number, plexusColors?: [number, number, number][]): Particle {
+function createParticle(_w: number, _h: number, plexusColors?: [number, number, number][]): Particle {
   const z = 0.15 + Math.random() * 0.85;
   const cols = plexusColors ?? getPlexusColors();
   const color = cols[Math.floor(Math.random() * cols.length)];
   const baseSpeed = 0.15 + Math.random() * 0.3;
   return {
-    x: Math.random() * w, y: Math.random() * h, z,
+    x: Math.random() * VIRTUAL_W, y: Math.random() * VIRTUAL_H, z,
     vx: (Math.random() - 0.5) * baseSpeed * z,
     vy: (Math.random() - 0.5) * baseSpeed * z,
     baseSpeed, size: 1.5 + z * 2.5, color,
@@ -105,16 +140,9 @@ function PlexusBackground() {
 
       const plexusColors = getPlexusColors();
       if (particlesRef.current.length === 0) {
-        particlesRef.current = Array.from({ length: PARTICLE_COUNT }, () => createParticle(w, h, plexusColors));
-      } else {
-        // 리사이즈: 기존 파티클을 새 영역에 맞게 재배치
-        const oldW = sizeRef.current.w || w;
-        const oldH = sizeRef.current.h || h;
-        for (const p of particlesRef.current) {
-          p.x = (p.x / oldW) * w;
-          p.y = (p.y / oldH) * h;
-        }
+        particlesRef.current = Array.from({ length: PARTICLE_COUNT }, () => createParticle(VIRTUAL_W, VIRTUAL_H, plexusColors));
       }
+      // 리사이즈: 파티클 위치 변경 없음 — 창을 통해 보는 느낌
     };
 
     resize();
@@ -127,15 +155,20 @@ function PlexusBackground() {
     const animate = () => {
       if (!running) return;
       const { w, h } = sizeRef.current;
-      const mx = mouseRef.current.x;
-      const my = mouseRef.current.y;
       const particles = particlesRef.current;
+
+      // 뷰포트 오프셋: 가상 캔버스 중앙에 창을 배치
+      const ox = (VIRTUAL_W - w) / 2;
+      const oy = (VIRTUAL_H - h) / 2;
+      // 마우스를 가상 캔버스 좌표로 변환
+      const mx = mouseRef.current.x + ox;
+      const my = mouseRef.current.y + oy;
 
       ctx.fillStyle = '#12141C';
       ctx.fillRect(0, 0, w, h);
 
       const tc = getPlexusColors()[0];
-      const ts = getPlexusColors()[1];
+      const ts = getPlexusColors()[2] ?? getPlexusColors()[1];
       const cg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.7);
       cg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.06)`);
       cg.addColorStop(0.3, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
@@ -144,8 +177,8 @@ function PlexusBackground() {
       ctx.fillStyle = cg;
       ctx.fillRect(0, 0, w, h);
 
-      if (mx > 0 && my > 0) {
-        const mg = ctx.createRadialGradient(mx, my, 0, mx, my, 250);
+      if (mouseRef.current.x > 0 && mouseRef.current.y > 0) {
+        const mg = ctx.createRadialGradient(mouseRef.current.x, mouseRef.current.y, 0, mouseRef.current.x, mouseRef.current.y, 250);
         mg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.08)`);
         mg.addColorStop(0.4, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
         mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -155,6 +188,7 @@ function PlexusBackground() {
 
       if (noiseRef.current) ctx.drawImage(noiseRef.current, 0, 0);
 
+      // 물리 업데이트 (가상 캔버스 좌표)
       for (const p of particles) {
         const dmx = p.x - mx;
         const dmy = p.y - my;
@@ -173,15 +207,23 @@ function PlexusBackground() {
           p.vy = Math.sin(angle) * minSpeed;
         }
         p.x += p.vx; p.y += p.vy;
+        // 가상 캔버스 경계에서 래핑
         const margin = 50;
-        if (p.x < -margin) p.x = w + margin;
-        if (p.x > w + margin) p.x = -margin;
-        if (p.y < -margin) p.y = h + margin;
-        if (p.y > h + margin) p.y = -margin;
+        if (p.x < -margin) p.x = VIRTUAL_W + margin;
+        if (p.x > VIRTUAL_W + margin) p.x = -margin;
+        if (p.y < -margin) p.y = VIRTUAL_H + margin;
+        if (p.y > VIRTUAL_H + margin) p.y = -margin;
       }
 
-      const sorted = [...particles].sort((a, b) => a.z - b.z);
+      // 뷰포트 안에 보이는 파티클만 필터 (성능)
+      const viewMargin = CONNECTION_DIST + 60;
+      const visible = particles.filter(
+        (p) => p.x >= ox - viewMargin && p.x <= ox + w + viewMargin &&
+               p.y >= oy - viewMargin && p.y <= oy + h + viewMargin,
+      );
+      const sorted = [...visible].sort((a, b) => a.z - b.z);
 
+      // 연결선 렌더링 (화면 좌표 = 가상좌표 - 오프셋)
       for (let i = 0; i < sorted.length; i++) {
         for (let j = i + 1; j < sorted.length; j++) {
           const a = sorted[i]; const b = sorted[j];
@@ -199,7 +241,7 @@ function PlexusBackground() {
             const g = Math.round((a.color[1] + b.color[1]) * 0.5);
             const bl = Math.round((a.color[2] + b.color[2]) * 0.5);
             ctx.beginPath();
-            ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+            ctx.moveTo(a.x - ox, a.y - oy); ctx.lineTo(b.x - ox, b.y - oy);
             ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${Math.min(lineAlpha + glowBoost, 0.6)})`;
             ctx.lineWidth = avgZ * 1.2;
             ctx.stroke();
@@ -207,9 +249,12 @@ function PlexusBackground() {
         }
       }
 
+      // 파티클 렌더링 (화면 좌표)
       for (const p of sorted) {
         const alpha = 0.3 + p.z * 0.6;
         const [r, g, b] = p.color;
+        const sx = p.x - ox; // 화면 x
+        const sy = p.y - oy; // 화면 y
         const dmx2 = p.x - mx; const dmy2 = p.y - my;
         const distM = Math.sqrt(dmx2 * dmx2 + dmy2 * dmy2);
         const nearMouse = distM < MOUSE_RADIUS;
@@ -217,29 +262,29 @@ function PlexusBackground() {
 
         if (p.z < 0.4) {
           const blurSize = glowSize * (3 - p.z * 5);
-          const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, blurSize);
+          const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, blurSize);
           grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.5})`);
           grad.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${alpha * 0.15})`);
           grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
           ctx.fillStyle = grad;
-          ctx.fillRect(p.x - blurSize, p.y - blurSize, blurSize * 2, blurSize * 2);
+          ctx.fillRect(sx - blurSize, sy - blurSize, blurSize * 2, blurSize * 2);
         } else {
           if (nearMouse) {
             const haloSize = glowSize * 3;
-            const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, haloSize);
+            const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, haloSize);
             halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.3})`);
             halo.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${alpha * 0.08})`);
             halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
             ctx.fillStyle = halo;
-            ctx.fillRect(p.x - haloSize, p.y - haloSize, haloSize * 2, haloSize * 2);
+            ctx.fillRect(sx - haloSize, sy - haloSize, haloSize * 2, haloSize * 2);
           }
           ctx.beginPath();
-          ctx.arc(p.x, p.y, glowSize, 0, Math.PI * 2);
+          ctx.arc(sx, sy, glowSize, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
           ctx.fill();
           if (p.z > 0.7) {
             ctx.beginPath();
-            ctx.arc(p.x, p.y, glowSize * 0.4, 0, Math.PI * 2);
+            ctx.arc(sx, sy, glowSize * 0.4, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.4})`;
             ctx.fill();
           }

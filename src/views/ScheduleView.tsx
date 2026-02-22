@@ -548,8 +548,11 @@ function EventCreateModal({
         const deptLabel = DEPARTMENT_CONFIGS[part.department as 'bg' | 'acting']?.shortLabel ?? '';
         if (evType === 'part') {
           setTitle(`${epLabel} ${part.partId}파트 (${deptLabel})`);
-        } else if (linkedScene) {
-          setTitle(`${epLabel} ${part.partId}파트 #${linkedScene}`);
+        } else if (evType === 'scene') {
+          // 씬 선택 시 제목, 씬 미선택이면 파트까지만 표시
+          setTitle(linkedScene
+            ? `${epLabel} ${part.partId}파트 #${linkedScene}`
+            : `${epLabel} ${part.partId}파트 (${deptLabel}) — 씬 선택...`);
         }
       }
     }
@@ -619,7 +622,7 @@ function EventCreateModal({
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-xl px-4 py-3 text-sm text-text-primary outline-none focus:border-accent [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:w-5 [&::-webkit-calendar-picker-indicator]:h-5"
+                className="mt-1 w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:brightness-200 [&::-webkit-calendar-picker-indicator]:w-6 [&::-webkit-calendar-picker-indicator]:h-6"
                 style={{ colorScheme: 'dark' }}
               />
             </div>
@@ -629,7 +632,7 @@ function EventCreateModal({
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-xl px-4 py-3 text-sm text-text-primary outline-none focus:border-accent [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:w-5 [&::-webkit-calendar-picker-indicator]:h-5"
+                className="mt-1 w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:brightness-200 [&::-webkit-calendar-picker-indicator]:w-6 [&::-webkit-calendar-picker-indicator]:h-6"
                 style={{ colorScheme: 'dark' }}
               />
             </div>
@@ -642,7 +645,14 @@ function EventCreateModal({
               {([['custom', '일반'], ['episode', '에피소드'], ['part', '파트'], ['scene', '씬']] as const).map(([t, l]) => (
                 <button
                   key={t}
-                  onClick={() => { setEvType(t); setLinkedEp(''); setLinkedPart(''); setLinkedScene(''); }}
+                  onClick={() => {
+                    setEvType(t);
+                    // 더 구체적인 타입으로 갈 때 기존 선택 유지, 덜 구체적으로 갈 때만 초기화
+                    if (t === 'custom') { setLinkedEp(''); setLinkedPart(''); setLinkedScene(''); }
+                    else if (t === 'episode') { setLinkedPart(''); setLinkedScene(''); }
+                    else if (t === 'part') { setLinkedScene(''); }
+                    // 'scene' → 모든 기존 선택 유지
+                  }}
                   className={cn(
                     'px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer',
                     evType === t
@@ -808,7 +818,7 @@ function CalendarGrid({
           const bars = layoutEventBars(displayEvents, week[0], 7);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
           const visibleRows = Math.min(maxRow, maxVisibleBars);
-          const rowHeight = Math.max(42 + visibleRows * 26 + 12, 110);
+          const rowHeight = Math.max(56 + visibleRows * 28 + 16, 140);
 
           return (
             <div key={wi} className="relative grid grid-cols-7 gap-px" style={{ minHeight: rowHeight }}>

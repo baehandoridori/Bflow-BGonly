@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Layers, BarChart3, CalendarDays } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
@@ -292,28 +292,31 @@ function EventGanttChart() {
     getEvents().then(setEvents);
   }, []);
 
-  // 날짜 범위 계산: 이번 달 ± 2주
+  const DAY_WIDTH = 32; // 날짜 하나의 픽셀 폭
+
+  // 날짜 범위 계산: 이번 달 ± 1.5개월
   const { dateRange, dayLabels, totalDays } = useMemo(() => {
     const now = new Date();
-    const rangeStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    rangeStart.setDate(rangeStart.getDate() - 14);
-    const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    rangeEnd.setDate(rangeEnd.getDate() + 14);
+    const rangeStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0);
 
     const startStr = fmtDate(rangeStart);
     const endStr = fmtDate(rangeEnd);
 
-    const days: { date: string; label: string; isToday: boolean; isWeekend: boolean; isFirstOfMonth: boolean }[] = [];
+    const days: { date: string; label: string; isToday: boolean; isWeekend: boolean; isFirstOfMonth: boolean; isMonday: boolean; monthLabel?: string }[] = [];
     const cur = new Date(rangeStart);
     const todayStr = fmtDate(now);
     while (fmtDate(cur) <= endStr) {
       const dateStr = fmtDate(cur);
+      const isFirst = cur.getDate() === 1;
       days.push({
         date: dateStr,
         label: String(cur.getDate()),
         isToday: dateStr === todayStr,
         isWeekend: cur.getDay() === 0 || cur.getDay() === 6,
-        isFirstOfMonth: cur.getDate() === 1,
+        isFirstOfMonth: isFirst,
+        isMonday: cur.getDay() === 1,
+        monthLabel: isFirst ? `${cur.getFullYear()}.${cur.getMonth() + 1}월` : undefined,
       });
       cur.setDate(cur.getDate() + 1);
     }
@@ -330,8 +333,20 @@ function EventGanttChart() {
 
   // 이벤트별 오프셋 & 폭 계산
   const rangeStartDate = parseDate(dateRange.start);
+  const totalWidth = totalDays * DAY_WIDTH;
+  const LABEL_WIDTH = 160; // 왼쪽 라벨 영역
 
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 오늘 위치로 자동 스크롤
+  useEffect(() => {
+    const todayIdx = dayLabels.findIndex((d) => d.isToday);
+    if (todayIdx >= 0 && scrollRef.current) {
+      const scrollTo = todayIdx * DAY_WIDTH - scrollRef.current.clientWidth / 2;
+      scrollRef.current.scrollLeft = Math.max(0, scrollTo);
+    }
+  }, [dayLabels]);
 
   if (events.length === 0) {
     return (
@@ -343,43 +358,69 @@ function EventGanttChart() {
     );
   }
 
-  return (
-    <div className="flex flex-col gap-0">
-      {/* 날짜 헤더 */}
-      <div className="flex border-b border-bg-border/30 sticky top-0 bg-bg-card z-10">
-        <div className="shrink-0 w-36 px-3 py-2 text-[10px] font-semibold text-text-secondary/60 border-r border-bg-border/20">
-          이벤트
-        </div>
-        <div className="flex-1 flex overflow-x-auto">
-          {dayLabels.map((d) => {
-            const dow = parseDate(d.date).getDay();
-            const isMonday = dow === 1;
-            return (
-              <div
-                key={d.date}
-                className={cn(
-                  'shrink-0 text-center text-[9px] py-1 border-r border-bg-border/10',
-                  d.isToday ? 'bg-accent/15 text-accent font-bold' : d.isWeekend ? 'bg-bg-border/8 text-text-secondary/40' : 'text-text-secondary/50',
-                  d.isFirstOfMonth && 'border-l-2 border-l-accent/30',
-                  isMonday && !d.isFirstOfMonth && 'border-l border-l-bg-border/40',
-                )}
-                style={{ width: `${100 / totalDays}%`, minWidth: 20 }}
-                title={d.date}
-              >
-                {d.isFirstOfMonth && (
-                  <div className="text-[8px] text-accent font-semibold">
-                    {parseDate(d.date).getMonth() + 1}월
-                  </div>
-                )}
-                {d.label}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+  // 월별 그룹 계산
+  const months = useMemo(() => {
+    const result: { label: string; span: number }[] = [];
+    let curMonth = '';
+    for (const d of dayLabels) {
+      const pd = parseDate(d.date);
+      const ml = `${pd.getFullYear()}.${pd.getMonth() + 1}월`;
+      if (ml !== curMonth) {
+        result.push({ label: ml, span: 1 });
+        curMonth = ml;
+      } else {
+        result[result.length - 1].span++;
+      }
+    }
+    return result;
+  }, [dayLabels]);
 
-      {/* 이벤트 행 */}
-      <div className="flex flex-col relative">
+  return (
+    <div ref={scrollRef} className="overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
+      <div style={{ width: LABEL_WIDTH + totalWidth, minWidth: '100%' }}>
+        {/* 월 라벨 헤더 */}
+        <div className="flex">
+          <div
+            className="shrink-0 bg-bg-card border-r border-bg-border/20 z-20"
+            style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
+          />
+          {months.map((m) => (
+            <div
+              key={m.label}
+              className="shrink-0 text-center text-[10px] font-bold text-accent border-r-2 border-accent/30 py-1"
+              style={{ width: m.span * DAY_WIDTH }}
+            >
+              {m.label}
+            </div>
+          ))}
+        </div>
+
+        {/* 날짜 헤더 */}
+        <div className="flex border-b border-bg-border/30">
+          <div
+            className="shrink-0 bg-bg-card border-r border-bg-border/20 px-3 py-1 text-[10px] font-semibold text-text-secondary/60 z-20"
+            style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
+          >
+            이벤트
+          </div>
+          {dayLabels.map((d) => (
+            <div
+              key={d.date}
+              className={cn(
+                'shrink-0 text-center text-[9px] py-1',
+                d.isToday ? 'bg-accent/15 text-accent font-bold' : d.isWeekend ? 'bg-bg-border/8 text-text-secondary/40' : 'text-text-secondary/50',
+                d.isFirstOfMonth && 'border-l-2 border-l-accent/40',
+                d.isMonday && !d.isFirstOfMonth && 'border-l border-l-bg-border/30',
+              )}
+              style={{ width: DAY_WIDTH }}
+              title={d.date}
+            >
+              {d.label}
+            </div>
+          ))}
+        </div>
+
+        {/* 이벤트 행 */}
         {visibleEvents.map((ev, i) => {
           const evStart = parseDate(ev.startDate < dateRange.start ? dateRange.start : ev.startDate);
           const evEnd = parseDate(ev.endDate > dateRange.end ? dateRange.end : ev.endDate);
@@ -393,25 +434,25 @@ function EventGanttChart() {
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.15, delay: i * 0.02 }}
-              className="flex items-center border-b border-bg-border/10 hover:bg-bg-border/5 transition-colors"
-              style={{ minHeight: 32 }}
+              className="flex border-b border-bg-border/10 hover:bg-bg-border/5 transition-colors"
+              style={{ height: 32 }}
             >
-              {/* 라벨 */}
+              {/* 왼쪽 라벨 (sticky) */}
               <div
-                className="shrink-0 w-36 px-3 py-1 flex items-center gap-1.5 border-r border-bg-border/20 cursor-pointer hover:bg-bg-border/10"
+                className="shrink-0 flex items-center gap-1.5 px-3 border-r border-bg-border/20 bg-bg-card cursor-pointer hover:bg-bg-border/10 z-20"
+                style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
                 onClick={() => setSelectedEvent(selectedEvent?.id === ev.id ? null : ev)}
               >
                 <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: hex }} />
                 <span className="text-[11px] text-text-primary truncate">{ev.title}</span>
               </div>
               {/* 바 영역 */}
-              <div className="flex-1 relative" style={{ height: 28 }}>
+              <div className="relative flex-1" style={{ width: totalWidth }}>
                 <div
                   className="absolute top-1 h-5 rounded-md flex items-center px-1.5 text-[9px] font-medium truncate cursor-pointer hover:brightness-110"
                   style={{
-                    left: `${(offsetDays / totalDays) * 100}%`,
-                    width: `${(spanDays / totalDays) * 100}%`,
-                    minWidth: 4,
+                    left: offsetDays * DAY_WIDTH,
+                    width: Math.max(spanDays * DAY_WIDTH - 2, 4),
                     background: `linear-gradient(135deg, ${hex}50 0%, ${hex}30 100%)`,
                     border: `1px solid ${hex}60`,
                     color: hex,
@@ -419,42 +460,41 @@ function EventGanttChart() {
                   onClick={() => setSelectedEvent(selectedEvent?.id === ev.id ? null : ev)}
                   title={`${ev.title}: ${ev.startDate} → ${ev.endDate}`}
                 >
-                  {spanDays >= 3 && <span className="truncate">{ev.title}</span>}
+                  <span className="truncate">{ev.title}</span>
                 </div>
+                {/* 행 안의 세로선 */}
+                {i === 0 && dayLabels.map((d, idx) => {
+                  const isToday = d.isToday;
+                  const isMonth = d.isFirstOfMonth;
+                  const isWeek = d.isMonday && !d.isFirstOfMonth;
+                  if (!isToday && !isMonth && !isWeek) return null;
+                  return (
+                    <div
+                      key={`vl-${d.date}`}
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: idx * DAY_WIDTH,
+                        top: 0,
+                        height: visibleEvents.length * 32,
+                        width: isToday ? 2 : isMonth ? 2 : 1,
+                        backgroundColor: isToday
+                          ? 'rgb(var(--color-accent))'
+                          : isMonth
+                            ? 'rgba(var(--color-accent), 0.35)'
+                            : 'rgba(var(--color-bg-border), 0.25)',
+                        zIndex: isToday ? 5 : isMonth ? 3 : 1,
+                      }}
+                    />
+                  );
+                })}
               </div>
             </motion.div>
           );
         })}
-
-        {/* 오늘 날짜 세로선 + 주간 구분선 */}
-        {dayLabels.map((d) => {
-          const idx = dayLabels.indexOf(d);
-          const dow = parseDate(d.date).getDay();
-          const isMonday = dow === 1;
-          if (!d.isToday && !isMonday) return null;
-          return (
-            <div
-              key={`line-${d.date}`}
-              className="absolute top-0 bottom-0 pointer-events-none"
-              style={{
-                left: `calc(${(idx / totalDays) * 100}%)`,
-                width: d.isToday ? 2 : 1,
-                backgroundColor: d.isToday ? 'rgb(var(--color-accent))' : 'rgba(var(--color-bg-border), 0.3)',
-                zIndex: d.isToday ? 5 : 1,
-              }}
-            />
-          );
-        })}
       </div>
-
       {/* 선택된 이벤트 상세 */}
       {selectedEvent && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          exit={{ opacity: 0, height: 0 }}
-          className="border-t border-bg-border/30 px-4 py-3 bg-bg-primary/30"
-        >
+        <div className="border-t border-bg-border/30 px-4 py-3 bg-bg-primary/30">
           <div className="flex items-start gap-3">
             <div className="w-3 h-3 rounded-full shrink-0 mt-0.5" style={{ backgroundColor: selectedEvent.color }} />
             <div className="flex-1 min-w-0">
@@ -475,7 +515,7 @@ function EventGanttChart() {
               {selectedEvent.type === 'custom' ? '일반' : selectedEvent.type.toUpperCase()}
             </span>
           </div>
-        </motion.div>
+        </div>
       )}
     </div>
   );

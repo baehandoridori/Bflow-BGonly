@@ -1331,12 +1331,17 @@ export function ScenesView() {
     ? Math.max(...episodes.map((ep) => ep.episodeNumber)) + 1
     : 1;
 
-  // 다음 파트 ID 계산 (현재 부서의 파트 기준)
-  const nextPartId = currentEp && parts.length > 0
-    ? String.fromCharCode(
-        Math.max(...parts.map((p) => p.partId.charCodeAt(0))) + 1
-      )
-    : 'A';
+  // 다음 파트 ID 계산 (현재 부서의 파트 기준, 중복 방지)
+  const nextPartId = useMemo(() => {
+    if (!currentEp || parts.length === 0) return 'A';
+    const existingIds = new Set(parts.map((p) => p.partId));
+    let candidate = String.fromCharCode(Math.max(...parts.map((p) => p.partId.charCodeAt(0))) + 1);
+    // 이미 존재하면 다음 문자로
+    while (existingIds.has(candidate) && candidate <= 'Z') {
+      candidate = String.fromCharCode(candidate.charCodeAt(0) + 1);
+    }
+    return candidate;
+  }, [currentEp, parts]);
 
   // ─── 핸들러들 ─────────────────────────────────
 
@@ -1417,6 +1422,13 @@ export function ScenesView() {
     if (!currentEp) return;
     if (nextPartId > 'Z') {
       alert('파트는 Z까지만 가능합니다');
+      return;
+    }
+    // 중복 방지: 동일 부서에 같은 partId가 이미 존재하면 차단
+    const deptSuffix = selectedDepartment === 'bg' ? '_BG' : '_ACT';
+    const expectedSheetName = `EP${String(currentEp.episodeNumber).padStart(2, '0')}_${nextPartId}${deptSuffix}`;
+    if (allParts.some((p) => p.sheetName === expectedSheetName)) {
+      alert(`${nextPartId}파트(${selectedDepartment === 'bg' ? 'BG' : '액팅'})는 이미 존재합니다.`);
       return;
     }
 

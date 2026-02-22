@@ -211,14 +211,13 @@ export function CalendarWidget() {
               ))}
             </div>
 
-            <div className="grid grid-cols-7 gap-px flex-1">
+            <div className="grid grid-cols-7 gap-px flex-1 relative">
               {calendarDays.map((day, i) => {
                 const dayEvents = filteredEvents.filter((e) => e.startDate <= day.dateStr && e.endDate >= day.dateStr);
                 const hasEvents = dayEvents.length > 0;
                 const isSelected = selectedDate === day.dateStr;
-                // 연속 이벤트 → 바 형태, 단일 이벤트 → 도트
-                const barEvents = dayEvents.filter((e) => e.startDate !== e.endDate).slice(0, 2);
-                const dotEvents = dayEvents.filter((e) => e.startDate === e.endDate).slice(0, 2);
+                // 단일 이벤트만 도트 표시 (연속 이벤트는 오버레이 바로 표시)
+                const dotEvents = dayEvents.filter((e) => e.startDate === e.endDate).slice(0, 3);
                 return (
                   <div
                     key={i}
@@ -240,16 +239,47 @@ export function CalendarWidget() {
                     )}>
                       {day.date}
                     </span>
-                    {hasEvents && !day.isToday && (
+                    {hasEvents && !day.isToday && dotEvents.length > 0 && (
                       <div className="flex items-center gap-px mt-0.5">
-                        {barEvents.map((ev) => (
-                          <div key={ev.id} className="w-3 h-[3px] rounded-full" style={{ backgroundColor: `${ev.color}90` }} />
-                        ))}
-                        {barEvents.length === 0 && dotEvents.map((ev) => (
+                        {dotEvents.map((ev) => (
                           <div key={ev.id} className="w-1 h-1 rounded-full" style={{ backgroundColor: `${ev.color}90` }} />
                         ))}
                       </div>
                     )}
+                    {/* 연속 이벤트 시작일에 바 표시 */}
+                    {day.isCurrentMonth && (() => {
+                      const startingHere = filteredEvents.filter(
+                        (e) => e.startDate !== e.endDate && (e.startDate === day.dateStr || (day.dow === 0 && e.startDate < day.dateStr && e.endDate >= day.dateStr)),
+                      );
+                      if (startingHere.length === 0) return null;
+                      return startingHere.slice(0, 2).map((ev, evIdx) => {
+                        const isStart = ev.startDate === day.dateStr;
+                        const evEnd = parseDate(ev.endDate);
+                        const dayDate = parseDate(day.dateStr);
+                        // 이번 주 끝 (토요일)까지 또는 이벤트 끝까지
+                        const weekEnd = addDays(dayDate, 6 - day.dow);
+                        const barEnd = evEnd < weekEnd ? evEnd : weekEnd;
+                        const spanDays = Math.round((barEnd.getTime() - dayDate.getTime()) / 86400000) + 1;
+                        const widthCols = Math.min(spanDays, 7 - day.dow);
+                        return (
+                          <div
+                            key={`bar-${ev.id}-${day.dateStr}`}
+                            className="absolute pointer-events-none"
+                            style={{
+                              bottom: 1 + evIdx * 5,
+                              left: 0,
+                              width: `calc(${widthCols * 100}% + ${(widthCols - 1)}px)`,
+                              height: 3,
+                              backgroundColor: `${ev.color}70`,
+                              borderRadius: isStart ? '2px 0 0 2px' : 0,
+                              borderTopRightRadius: ev.endDate <= fmtDate(barEnd) ? 2 : 0,
+                              borderBottomRightRadius: ev.endDate <= fmtDate(barEnd) ? 2 : 0,
+                              zIndex: 10,
+                            }}
+                          />
+                        );
+                      });
+                    })()}
                   </div>
                 );
               })}
