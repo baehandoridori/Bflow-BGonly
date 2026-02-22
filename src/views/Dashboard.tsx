@@ -132,7 +132,7 @@ function WidgetPicker({
 
 /* ── 대시보드 메인 ── */
 export function Dashboard() {
-  const { widgetLayout, isEditMode, setWidgetLayout, setEditMode, setSelectedDepartment } = useAppStore();
+  const { widgetLayout, allWidgetLayout, isEditMode, setWidgetLayout, setAllWidgetLayout, setEditMode, setSelectedDepartment } = useAppStore();
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
   const setDashboardFilter = useAppStore((s) => s.setDashboardDeptFilter);
   const [showPicker, setShowPicker] = useState(false);
@@ -152,9 +152,11 @@ export function Dashboard() {
   const defaultLayout = dashboardFilter === 'all' ? ALL_LAYOUT : DEPT_LAYOUT;
 
   const layouts: Layouts = useMemo(() => {
-    const lg = dashboardFilter === 'all' ? ALL_LAYOUT : (widgetLayout ?? DEPT_LAYOUT);
+    const lg = dashboardFilter === 'all'
+      ? (allWidgetLayout ?? ALL_LAYOUT)
+      : (widgetLayout ?? DEPT_LAYOUT);
     return { lg };
-  }, [widgetLayout, dashboardFilter]);
+  }, [widgetLayout, allWidgetLayout, dashboardFilter]);
 
   const currentLayout = layouts.lg ?? defaultLayout;
 
@@ -174,33 +176,50 @@ export function Dashboard() {
   const handleLayoutChange = useCallback(
     (_current: Layout[], allLayouts: Layouts) => {
       if (!isEditMode) return;
-      if (dashboardFilter === 'all') return;
       const newLayout = allLayouts.lg ?? _current;
-      setWidgetLayout(newLayout);
-      saveLayout(newLayout);
+      if (dashboardFilter === 'all') {
+        setAllWidgetLayout(newLayout);
+        saveLayout(newLayout, 'all');
+      } else {
+        setWidgetLayout(newLayout);
+        saveLayout(newLayout);
+      }
     },
-    [isEditMode, setWidgetLayout, dashboardFilter],
+    [isEditMode, setWidgetLayout, setAllWidgetLayout, dashboardFilter],
   );
 
   const handleRemoveWidget = useCallback((widgetId: string) => {
-    const current = widgetLayout ?? DEPT_LAYOUT;
-    const newLayout = current.filter((l) => l.i !== widgetId);
-    setWidgetLayout(newLayout);
-    saveLayout(newLayout);
-  }, [widgetLayout, setWidgetLayout]);
+    if (dashboardFilter === 'all') {
+      const current = allWidgetLayout ?? ALL_LAYOUT;
+      const newLayout = current.filter((l) => l.i !== widgetId);
+      setAllWidgetLayout(newLayout);
+      saveLayout(newLayout, 'all');
+    } else {
+      const current = widgetLayout ?? DEPT_LAYOUT;
+      const newLayout = current.filter((l) => l.i !== widgetId);
+      setWidgetLayout(newLayout);
+      saveLayout(newLayout);
+    }
+  }, [widgetLayout, allWidgetLayout, setWidgetLayout, setAllWidgetLayout, dashboardFilter]);
 
   const handleAddWidget = useCallback((widgetId: string) => {
-    const current = widgetLayout ?? DEPT_LAYOUT;
+    const isAll = dashboardFilter === 'all';
+    const current = isAll ? (allWidgetLayout ?? ALL_LAYOUT) : (widgetLayout ?? DEPT_LAYOUT);
     // 캘린더 위젯은 고유 ID로 중복 배치 허용
     const actualId = widgetId === 'calendar' ? `calendar-${Date.now()}` : widgetId;
     // 맨 아래에 추가
     const maxY = current.reduce((max, l) => Math.max(max, l.y + l.h), 0);
     const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 2, h: 3, minW: 1, minH: 2 };
     const newLayout = [...current, newItem];
-    setWidgetLayout(newLayout);
-    saveLayout(newLayout);
+    if (isAll) {
+      setAllWidgetLayout(newLayout);
+      saveLayout(newLayout, 'all');
+    } else {
+      setWidgetLayout(newLayout);
+      saveLayout(newLayout);
+    }
     setShowPicker(false);
-  }, [widgetLayout, setWidgetLayout]);
+  }, [widgetLayout, allWidgetLayout, setWidgetLayout, setAllWidgetLayout, dashboardFilter]);
 
   const handleToggleEdit = useCallback(() => {
     if (isEditMode) {

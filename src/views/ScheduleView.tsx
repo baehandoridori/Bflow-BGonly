@@ -142,6 +142,7 @@ function EventBarChip({
   const hex = ev.color || EVENT_COLORS[0];
   const isHovered = hoveredEventId === ev.id;
   const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const tooltipTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -206,9 +207,15 @@ function EventBarChip({
     document.addEventListener('mouseup', onUp);
   };
 
-  const handleEnter = () => {
+  const handleEnter = (e: React.MouseEvent) => {
     onHover?.(ev.id);
-    tooltipTimer.current = setTimeout(() => setShowTooltip(true), 500);
+    const barRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setTooltipPos({ x: e.clientX - barRect.left, y: e.clientY - barRect.top });
+    tooltipTimer.current = setTimeout(() => setShowTooltip(true), 400);
+  };
+  const handleMove = (e: React.MouseEvent) => {
+    const barRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setTooltipPos({ x: e.clientX - barRect.left, y: e.clientY - barRect.top });
   };
   const handleLeave = () => {
     onHover?.(null);
@@ -224,6 +231,7 @@ function EventBarChip({
     <div
       onMouseDown={handleMouseDown}
       onMouseEnter={handleEnter}
+      onMouseMove={handleMove}
       onMouseLeave={handleLeave}
       className={cn(
         'absolute text-left z-10',
@@ -278,24 +286,24 @@ function EventBarChip({
         )}
       </div>
 
-      {/* 글래스모피즘 툴팁 */}
+      {/* 글래스모피즘 툴팁 — 마우스 추적 */}
       {showTooltip && !isDragging && !isGhost && (
         <div
-          className="absolute z-50 pointer-events-none rounded-xl px-3 py-2 text-[11px] leading-relaxed max-w-[220px]"
+          className="absolute z-[60] pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
           style={{
-            bottom: 'calc(100% + 6px)',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: 'rgba(26, 29, 39, 0.85)',
-            backdropFilter: 'blur(16px) saturate(1.4)',
-            WebkitBackdropFilter: 'blur(16px) saturate(1.4)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.03) inset',
+            left: tooltipPos.x,
+            top: tooltipPos.y - 12,
+            transform: 'translate(-50%, -100%)',
+            background: 'linear-gradient(135deg, rgba(30, 34, 48, 0.78) 0%, rgba(20, 22, 32, 0.82) 100%)',
+            backdropFilter: 'blur(24px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
+            border: '1px solid rgba(255, 255, 255, 0.14)',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06) inset, 0 1px 0 rgba(255,255,255,0.1) inset',
           }}
         >
-          <div className="font-semibold text-text-primary truncate">{ev.title}</div>
-          <div className="text-text-secondary/60 mt-0.5">{dateLabel}</div>
-          {ev.memo && <div className="text-text-secondary/50 mt-0.5 line-clamp-2">{ev.memo}</div>}
+          <div className="text-[13px] font-semibold text-text-primary truncate">{ev.title}</div>
+          <div className="text-[12px] text-text-secondary/70 mt-1">{dateLabel}</div>
+          {ev.memo && <div className="text-[11px] text-text-secondary/50 mt-1 line-clamp-2">{ev.memo}</div>}
         </div>
       )}
     </div>
@@ -538,13 +546,22 @@ function EventCreateModal({
     if (isEditMode) return; // 편집 모드에서는 자동입력 안 함
     if (evType === 'custom') return;
     const ep = episodes.find((e) => e.episodeNumber === linkedEp);
-    if (!ep) return;
+    if (!ep) {
+      // 에피소드 미선택 시 안내 제목
+      if (evType === 'episode') setTitle('에피소드 선택...');
+      else if (evType === 'part') setTitle('파트 선택...');
+      else if (evType === 'scene') setTitle('씬 선택...');
+      return;
+    }
     const epLabel = ep.title;
     if (evType === 'episode') {
       setTitle(epLabel);
     } else if (evType === 'part' || evType === 'scene') {
       const part = selectedEpParts.find((p) => p.sheetName === linkedPart);
-      if (part) {
+      if (!part) {
+        // 파트 미선택 — 에피소드까지만 표시
+        setTitle(`${epLabel} — 파트 선택...`);
+      } else {
         const deptLabel = DEPARTMENT_CONFIGS[part.department as 'bg' | 'acting']?.shortLabel ?? '';
         if (evType === 'part') {
           setTitle(`${epLabel} ${part.partId}파트 (${deptLabel})`);
@@ -622,7 +639,7 @@ function EventCreateModal({
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="mt-1 w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:brightness-200 [&::-webkit-calendar-picker-indicator]:w-6 [&::-webkit-calendar-picker-indicator]:h-6"
+                className="mt-1 w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-bright"
                 style={{ colorScheme: 'dark' }}
               />
             </div>
@@ -632,7 +649,7 @@ function EventCreateModal({
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="mt-1 w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:brightness-200 [&::-webkit-calendar-picker-indicator]:w-6 [&::-webkit-calendar-picker-indicator]:h-6"
+                className="mt-1 w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-bright"
                 style={{ colorScheme: 'dark' }}
               />
             </div>
@@ -818,7 +835,7 @@ function CalendarGrid({
           const bars = layoutEventBars(displayEvents, week[0], 7);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
           const visibleRows = Math.min(maxRow, maxVisibleBars);
-          const rowHeight = Math.max(56 + visibleRows * 28 + 16, 140);
+          const rowHeight = Math.max(64 + visibleRows * 30 + 20, 160);
 
           return (
             <div key={wi} className="relative grid grid-cols-7 gap-px" style={{ minHeight: rowHeight }}>

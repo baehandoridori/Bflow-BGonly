@@ -40,8 +40,10 @@ interface AppState {
 
   // 위젯 레이아웃
   widgetLayout: WidgetLayoutItem[] | null;
+  allWidgetLayout: WidgetLayoutItem[] | null; // 통합 대시보드 전용
   isEditMode: boolean;
   setWidgetLayout: (layout: WidgetLayoutItem[]) => void;
+  setAllWidgetLayout: (layout: WidgetLayoutItem[]) => void;
   setEditMode: (v: boolean) => void;
 
   // 필터/정렬 상태
@@ -104,8 +106,10 @@ export const useAppStore = create<AppState>((set) => ({
   setDashboardDeptFilter: (f) => set({ dashboardDeptFilter: f }),
 
   widgetLayout: null,
+  allWidgetLayout: null,
   isEditMode: false,
   setWidgetLayout: (layout) => set({ widgetLayout: layout }),
+  setAllWidgetLayout: (layout) => set({ allWidgetLayout: layout }),
   setEditMode: (v) => set({ isEditMode: v }),
 
   selectedEpisode: null,

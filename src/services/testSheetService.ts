@@ -17,15 +17,41 @@ async function getSheetPath(): Promise<string> {
   return sheetFilePath;
 }
 
-/** 레거시 데이터 마이그레이션: department 없는 Part에 'bg' 기본값 설정 */
+/** 레거시 데이터 마이그레이션: department 없는 Part에 'bg' 기본값 설정 + 액팅 파트 자동 생성 */
 function migrateEpisodes(episodes: Episode[]): Episode[] {
-  return episodes.map((ep) => ({
-    ...ep,
-    parts: ep.parts.map((part) => ({
+  return episodes.map((ep) => {
+    // 기존 파트에 department 기본값 설정
+    const migratedParts = ep.parts.map((part) => ({
       ...part,
       department: part.department || 'bg' as Department,
-    })),
-  }));
+    }));
+
+    // 액팅 파트가 하나도 없으면 BG 파트 기반으로 생성
+    const hasActing = migratedParts.some((p) => p.department === 'acting');
+    if (!hasActing) {
+      const bgParts = migratedParts.filter((p) => p.department === 'bg');
+      const actParts: Part[] = bgParts.map((bgPart) => {
+        const actSheetName = bgPart.sheetName.replace(/_BG$/, '_ACT')
+          .replace(/^(EP\d+_[A-Z])$/, '$1_ACT'); // 레거시 이름 대응
+        return {
+          partId: bgPart.partId,
+          department: 'acting' as Department,
+          sheetName: actSheetName,
+          scenes: bgPart.scenes.slice(0, Math.max(Math.floor(bgPart.scenes.length * 0.8), 1)).map((s, i) => ({
+            ...s,
+            sceneId: s.sceneId, // 동일 씬ID 유지
+            lo: Math.random() > 0.3,
+            done: Math.random() > 0.5,
+            review: Math.random() > 0.7,
+            png: Math.random() > 0.85,
+          })),
+        };
+      });
+      return { ...ep, parts: [...migratedParts, ...actParts] };
+    }
+
+    return { ...ep, parts: migratedParts };
+  });
 }
 
 /** 테스트 시트에서 전체 데이터 읽기 */

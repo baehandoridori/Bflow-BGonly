@@ -339,6 +339,23 @@ function EventGanttChart() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // 월별 그룹 계산
+  const months = useMemo(() => {
+    const result: { label: string; span: number }[] = [];
+    let curMonth = '';
+    for (const d of dayLabels) {
+      const pd = parseDate(d.date);
+      const ml = `${pd.getFullYear()}.${pd.getMonth() + 1}월`;
+      if (ml !== curMonth) {
+        result.push({ label: ml, span: 1 });
+        curMonth = ml;
+      } else {
+        result[result.length - 1].span++;
+      }
+    }
+    return result;
+  }, [dayLabels]);
+
   // 오늘 위치로 자동 스크롤
   useEffect(() => {
     const todayIdx = dayLabels.findIndex((d) => d.isToday);
@@ -357,23 +374,6 @@ function EventGanttChart() {
       </div>
     );
   }
-
-  // 월별 그룹 계산
-  const months = useMemo(() => {
-    const result: { label: string; span: number }[] = [];
-    let curMonth = '';
-    for (const d of dayLabels) {
-      const pd = parseDate(d.date);
-      const ml = `${pd.getFullYear()}.${pd.getMonth() + 1}월`;
-      if (ml !== curMonth) {
-        result.push({ label: ml, span: 1 });
-        curMonth = ml;
-      } else {
-        result[result.length - 1].span++;
-      }
-    }
-    return result;
-  }, [dayLabels]);
 
   return (
     <div ref={scrollRef} className="overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>

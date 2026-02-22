@@ -76,7 +76,7 @@ function getPlexusColors(): [number, number, number][] {
   return [accent, accent, accentSub, lighter, mix, analogous1, analogous2, complementary];
 }
 
-const PARTICLE_COUNT = 90;
+const PARTICLE_COUNT = 180;
 const CONNECTION_DIST = 180;
 const MOUSE_RADIUS = 200;
 const MOUSE_FORCE = 0.04;

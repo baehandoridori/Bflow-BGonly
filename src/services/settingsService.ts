@@ -7,14 +7,16 @@ import type { WidgetLayoutItem } from '@/types';
 import type { ThemeConfig } from '@/themes';
 
 const LAYOUT_FILE = 'layout.json';
+const ALL_LAYOUT_FILE = 'layout-all.json';
 const PREFERENCES_FILE = 'preferences.json';
 const THEME_FILE = 'theme.json';
 
 // ─── 위젯 레이아웃 ───────────────────────────
 
-export async function loadLayout(): Promise<WidgetLayoutItem[] | null> {
+export async function loadLayout(key?: 'all'): Promise<WidgetLayoutItem[] | null> {
   try {
-    const data = await window.electronAPI.readSettings(LAYOUT_FILE);
+    const file = key === 'all' ? ALL_LAYOUT_FILE : LAYOUT_FILE;
+    const data = await window.electronAPI.readSettings(file);
     if (data && Array.isArray(data)) {
       return data as WidgetLayoutItem[];
     }
@@ -24,9 +26,10 @@ export async function loadLayout(): Promise<WidgetLayoutItem[] | null> {
   return null;
 }
 
-export async function saveLayout(layout: WidgetLayoutItem[]): Promise<void> {
+export async function saveLayout(layout: WidgetLayoutItem[], key?: 'all'): Promise<void> {
   try {
-    await window.electronAPI.writeSettings(LAYOUT_FILE, layout);
+    const file = key === 'all' ? ALL_LAYOUT_FILE : LAYOUT_FILE;
+    await window.electronAPI.writeSettings(file, layout);
   } catch (err) {
     console.error('[설정] 레이아웃 저장 실패:', err);
   }

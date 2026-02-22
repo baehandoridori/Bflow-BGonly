@@ -21,7 +21,7 @@ import { loadSession, loadUsers } from '@/services/userService';
 import { applyTheme, getPreset, DEFAULT_THEME_ID } from '@/themes';
 
 export default function App() {
-  const { currentView, isTestMode, setTestMode, setWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors } = useAppStore();
+  const { currentView, isTestMode, setTestMode, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -94,6 +94,10 @@ export default function App() {
         const savedLayout = await loadLayout();
         if (savedLayout) {
           setWidgetLayout(savedLayout);
+        }
+        const savedAllLayout = await loadLayout('all');
+        if (savedAllLayout) {
+          setAllWidgetLayout(savedAllLayout);
         }
 
         // 테마 로드 + 적용 (가드 설정 후 상태 변경)

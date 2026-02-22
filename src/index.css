@@ -41,6 +41,18 @@ input, textarea, select, [contenteditable="true"] {
   background: rgb(var(--color-bg-border) / 0.8);
 }
 
+/* 날짜 선택기 아이콘 밝은 색 고정 */
+.date-picker-bright::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(3);
+  cursor: pointer;
+  width: 1.5rem;
+  height: 1.5rem;
+  opacity: 0.85;
+}
+.date-picker-bright::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 /* react-grid-layout 커스텀 */
 .react-grid-item.react-grid-placeholder {
   background: rgb(var(--color-accent)) !important;
