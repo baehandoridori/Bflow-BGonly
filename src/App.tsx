@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -48,6 +48,9 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [storeToast, setStoreToast]);
 
+  // 테마 초기화 완료 가드 (init에서 로드 전까지 저장 방지)
+  const themeInitRef = useRef(false);
+
   // 스플래시: 이미 로그인 상태여도 앱 시작 시 랜딩 표시
   const [showSplash, setShowSplash] = useState(true);
 
@@ -93,17 +96,24 @@ export default function App() {
           setWidgetLayout(savedLayout);
         }
 
-        // 테마 로드 + 적용
+        // 테마 로드 + 적용 (가드 설정 후 상태 변경)
         const savedTheme = await loadTheme();
         if (savedTheme) {
-          setThemeId(savedTheme.themeId);
           if (savedTheme.customColors) {
-            setCustomThemeColors(savedTheme.customColors);
             applyTheme(savedTheme.customColors);
           } else {
             const preset = getPreset(savedTheme.themeId);
             if (preset) applyTheme(preset.colors);
           }
+          // 가드를 먼저 열고 → 상태 변경 (useEffect가 실행될 때 가드가 이미 true)
+          themeInitRef.current = true;
+          setThemeId(savedTheme.themeId);
+          if (savedTheme.customColors) {
+            setCustomThemeColors(savedTheme.customColors);
+          }
+        } else {
+          // 저장된 테마 없음 → 기본 테마 유지, 이후 변경부터 저장 허용
+          themeInitRef.current = true;
         }
 
         // 사용자 목록 로드
@@ -151,8 +161,9 @@ export default function App() {
     }
   }, [currentUser, setUsers]);
 
-  // 테마 변경 시: CSS 적용 + appdata 저장
+  // 테마 변경 시: CSS 적용 + appdata 저장 (초기화 완료 후에만 저장)
   useEffect(() => {
+    if (!themeInitRef.current) return; // init()에서 테마 로드 전까지 저장 방지
     if (themeId === 'custom' && customThemeColors) {
       applyTheme(customThemeColors);
       saveTheme({ themeId, customColors: customThemeColors });

@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAppStore } from '@/stores/useAppStore';
+import { getPreset, rgbToHex } from '@/themes';
 
 /**
  * Bflow 스플래시 스크린 — 이스터에그
@@ -22,6 +24,25 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
   const [phase, setPhase] = useState<SplashPhase>('video');
   const [videoError, setVideoError] = useState(false);
   const [dismissing, setDismissing] = useState(false);
+
+  // 테마 accent 색상 (스플래시 글로우 + 그라데이션에 사용)
+  const themeId = useAppStore((s) => s.themeId);
+  const customThemeColors = useAppStore((s) => s.customThemeColors);
+  const { accentRgba, accentSubRgba, accentHex, accentSubHex } = useMemo(() => {
+    const colors = customThemeColors ?? getPreset(themeId)?.colors;
+    const accent = colors?.accent ?? '108 92 231';
+    const accentSub = colors?.accentSub ?? '162 155 254';
+    const toRgba = (triplet: string, opacity: number) => {
+      const [r, g, b] = triplet.split(' ');
+      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    };
+    return {
+      accentRgba: (o: number) => toRgba(accent, o),
+      accentSubRgba: (o: number) => toRgba(accentSub, o),
+      accentHex: rgbToHex(accent),
+      accentSubHex: rgbToHex(accentSub),
+    };
+  }, [themeId, customThemeColors]);
 
   // 닫기 (페이드아웃 후 콜백)
   const dismiss = useCallback(() => {
@@ -101,7 +122,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
         className="absolute rounded-full pointer-events-none"
         style={{
           width: 500, height: 500,
-          background: 'rgba(6, 214, 214, 0.25)',
+          background: accentRgba(0.25),
           top: '50%', left: '50%',
           transform: 'translate(-50%, -50%)',
           filter: 'blur(120px)',
@@ -113,7 +134,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
         className="absolute rounded-full pointer-events-none"
         style={{
           width: 350, height: 350,
-          background: 'rgba(59, 130, 246, 0.15)',
+          background: accentSubRgba(0.15),
           top: '35%', left: '60%',
           transform: 'translate(-50%, -50%)',
           filter: 'blur(120px)',
@@ -180,7 +201,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
             >
               <span
                 style={{
-                  background: 'linear-gradient(135deg, #06D6D6, #3B82F6)',
+                  background: `linear-gradient(135deg, ${accentHex}, ${accentSubHex})`,
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   backgroundClip: 'text',
