@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Droplets, Eye } from 'lucide-react';
+import { GripHorizontal, X, Droplets, Eye } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -173,9 +173,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       style={{
         background: `rgba(12, 14, 22, ${tintAlpha})`,
         transition: 'background 0.3s ease',
-        WebkitAppRegion: 'drag',
-        cursor: 'default',
-      } as React.CSSProperties}
+      }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
@@ -204,13 +202,33 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         }}
       />
 
+      {/* ── 상단 드래그 핸들 (가운데 위) ── */}
+      <div
+        className="shrink-0 relative z-20 flex items-center justify-center"
+        style={{
+          WebkitAppRegion: 'drag',
+          height: '28px',
+          cursor: 'grab',
+        } as React.CSSProperties}
+      >
+        <div
+          className="flex items-center justify-center rounded-full"
+          style={{
+            width: '48px',
+            height: '6px',
+            background: 'rgba(255, 255, 255, 0.2)',
+            transition: 'background 0.2s ease',
+          }}
+        />
+      </div>
+
       {/* ── 오른쪽 위 호버 시 컨트롤 ── */}
       {showControls && (
         <div
-          className="absolute top-0 right-0 z-20 flex items-center gap-2 px-2.5"
+          className="absolute top-0 right-0 z-30 flex items-center gap-2 px-2.5"
           style={{
             WebkitAppRegion: 'no-drag',
-            height: '36px',
+            height: '28px',
             background: 'linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.5) 100%)',
             borderBottomLeftRadius: '8px',
           } as React.CSSProperties}
@@ -248,10 +266,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       )}
 
       {/* ── 위젯 콘텐츠 ── */}
-      <div
-        className="flex-1 overflow-hidden relative z-10"
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-      >
+      <div className="flex-1 overflow-hidden relative z-10">
         <IsPopupContext.Provider value={true}>
         <WidgetIdContext.Provider value={widgetId}>
           <div className="h-full overflow-auto">
