@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen } from 'electron';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
@@ -490,6 +490,43 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
     win.close();
+  }
+});
+
+// ─── IPC 핸들러: 위젯 뒤 데스크톱 캡처 (글래스 블러용) ──────
+
+ipcMain.handle('widget:capture-behind', async (_event, widgetId: string) => {
+  const win = widgetWindows.get(widgetId);
+  if (!win || win.isDestroyed()) return null;
+
+  try {
+    const bounds = win.getBounds();
+    const display = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y });
+
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: display.size,
+    });
+
+    // 해당 디스플레이의 소스 찾기
+    const source = sources.find(s => s.display_id === String(display.id)) || sources[0];
+    if (!source) return null;
+
+    const thumbnail = source.thumbnail;
+
+    // 위젯 위치 기준으로 크롭
+    const x = Math.max(0, bounds.x - display.bounds.x);
+    const y = Math.max(0, bounds.y - display.bounds.y);
+    const w = Math.min(bounds.width, display.size.width - x);
+    const h = Math.min(bounds.height, display.size.height - y);
+
+    if (w <= 0 || h <= 0) return null;
+
+    const cropped = thumbnail.crop({ x, y, width: w, height: h });
+    return `data:image/png;base64,${cropped.toPNG().toString('base64')}`;
+  } catch (err) {
+    console.error('[widget:capture-behind]', err);
+    return null;
   }
 });
 

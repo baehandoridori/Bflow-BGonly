@@ -26,7 +26,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
 
 /**
  * 위젯 팝업 윈도우 전용 렌더러
- * 리퀴드 글래스 스타일: 배경 블러, 모서리 왜곡, 유리 반사 효과
+ * 리퀴드 글래스 스타일: desktopCapturer 배경 블러 + 모서리 왜곡 + 유리 반사
  * 두 개의 슬라이더: 앱 오퍼시티 / 글래스 효과 강도
  */
 export function WidgetPopup({ widgetId }: { widgetId: string }) {
@@ -34,7 +34,31 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const [glassIntensity, setGlassIntensity] = useState(0.7);
   const [isHover, setIsHover] = useState(false);
   const [ready, setReady] = useState(false);
+  const [bgCapture, setBgCapture] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const captureTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 데스크톱 캡처 (위젯 뒤 화면을 블러 배경으로 사용)
+  const captureDesktop = useCallback(async () => {
+    try {
+      const data = await window.electronAPI?.widgetCaptureBehind?.(widgetId);
+      if (data) setBgCapture(data);
+    } catch { /* 무시 */ }
+  }, [widgetId]);
+
+  // 캡처 시작: 마운트 시 + 주기적 갱신
+  useEffect(() => {
+    // 초기 캡처 (약간 지연 — 창이 완전히 열린 후)
+    const initTimer = setTimeout(captureDesktop, 300);
+
+    // 2초마다 갱신 (위젯 이동/리사이즈 반영)
+    captureTimerRef.current = setInterval(captureDesktop, 2000);
+
+    return () => {
+      clearTimeout(initTimer);
+      if (captureTimerRef.current) clearInterval(captureTimerRef.current);
+    };
+  }, [captureDesktop]);
 
   // 테마 + 데이터 초기화
   useEffect(() => {
@@ -144,8 +168,6 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         style={{
           borderRadius: '18px',
           background: `rgba(12, 14, 22, ${bgAlpha})`,
-          backdropFilter: `blur(${blurPx}px) saturate(${1 + glassIntensity * 0.8})`,
-          WebkitBackdropFilter: `blur(${blurPx}px) saturate(${1 + glassIntensity * 0.8})`,
           border: `1px solid rgba(255, 255, 255, ${borderAlpha})`,
           boxShadow: `
             0 20px 60px rgba(0,0,0,0.5),
@@ -155,6 +177,39 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           `,
         }}
       >
+        {/* ── 데스크톱 캡처 블러 배경 (진짜 뒷배경 블러) ── */}
+        {bgCapture && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              borderRadius: '18px',
+              overflow: 'hidden',
+            }}
+          >
+            <img
+              src={bgCapture}
+              alt=""
+              style={{
+                position: 'absolute',
+                inset: `-${blurPx}px`,
+                width: `calc(100% + ${blurPx * 2}px)`,
+                height: `calc(100% + ${blurPx * 2}px)`,
+                objectFit: 'cover',
+                filter: `blur(${blurPx}px) saturate(${1 + glassIntensity * 0.8}) brightness(0.85)`,
+              }}
+            />
+          </div>
+        )}
+
+        {/* ── 글래스 오버레이 (반투명 틴트) ── */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            borderRadius: '18px',
+            background: `rgba(12, 14, 22, ${bgAlpha * 0.7})`,
+          }}
+        />
+
         {/* ── 유리 상단 반사 하이라이트 ── */}
         <div
           className="absolute inset-x-0 top-0 pointer-events-none"

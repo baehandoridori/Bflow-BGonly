@@ -238,6 +238,7 @@ export interface ElectronAPI {
   widgetOpenPopup?: (widgetId: string, title: string) => Promise<{ ok: boolean }>;
   widgetSetOpacity?: (widgetId: string, opacity: number) => Promise<void>;
   widgetClosePopup?: (widgetId: string) => Promise<void>;
+  widgetCaptureBehind?: (widgetId: string) => Promise<string | null>;
 }
 
 declare global {

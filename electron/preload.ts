@@ -78,4 +78,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('widget:set-opacity', widgetId, opacity),
   widgetClosePopup: (widgetId: string) =>
     ipcRenderer.invoke('widget:close-popup', widgetId),
+  widgetCaptureBehind: (widgetId: string) =>
+    ipcRenderer.invoke('widget:capture-behind', widgetId) as Promise<string | null>,
 });
