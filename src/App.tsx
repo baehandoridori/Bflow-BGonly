@@ -14,6 +14,7 @@ import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
 import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
+import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { readTestSheet } from '@/services/testSheetService';
 import { loadSheetsConfig, connectSheets, readAllFromSheets } from '@/services/sheetsService';
 import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
@@ -54,6 +55,8 @@ export default function App() {
 
   // 스플래시: 이미 로그인 상태여도 앱 시작 시 랜딩 표시
   const [showSplash, setShowSplash] = useState(true);
+  // 로딩 스플래시: authReady 후에도 유지, 클릭으로 스킵
+  const [loadingSplashDone, setLoadingSplashDone] = useState(false);
 
   // 데이터 로드 함수 — 모드에 따라 테스트 시트 또는 Apps Script 웹 앱 사용
   const loadData = useCallback(async () => {
@@ -185,9 +188,11 @@ export default function App() {
   }, [themeId, customThemeColors]);
 
   // 초기화 완료 후 데이터 로드 (sheetsConnected/isTestMode 변경 시)
+  // authReady 가드: init 완료 전까지 테스트 데이터 로딩 방지 (플래시 제거)
   useEffect(() => {
+    if (!authReady) return;
     loadData();
-  }, [loadData]);
+  }, [authReady, loadData]);
 
   // 실시간 동기화: 다른 사용자가 시트를 변경하면 즉시 리로드
   useEffect(() => {
@@ -240,13 +245,16 @@ export default function App() {
     }
   };
 
-  // 인증 초기화 대기 — 로딩 중 스플래시 영상 재생
-  if (!authReady) {
+  // 로딩 스플래시 — authReady 후에도 유지, 클릭으로 스킵 가능
+  if (!loadingSplashDone) {
+    const canSkip = authReady;
     return (
-      <div className="flex items-center justify-center h-screen w-screen overflow-hidden"
+      <div
+        className="flex items-center justify-center h-screen w-screen overflow-hidden cursor-pointer select-none"
         style={{
           background: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, #0F1117 100%)',
         }}
+        onClick={() => { if (canSkip) setLoadingSplashDone(true); }}
       >
         {/* 스플래시 영상 */}
         <div className="relative" style={{ width: 'min(420px, 75vmin)', aspectRatio: '672 / 592' }}>
@@ -267,19 +275,35 @@ export default function App() {
           />
         </div>
 
-        {/* 로딩 텍스트 */}
-        <span className="absolute bottom-8 text-sm text-white/30 animate-pulse tracking-wide">
-          로딩 중...
-        </span>
+        {/* 로딩 중 / 클릭 투 스킵 */}
+        {canSkip ? (
+          <span
+            className="absolute bottom-8 text-sm text-white/50 tracking-wide animate-pulse"
+            style={{ animation: 'fadeIn 0.5s ease-out, pulse 2s ease-in-out infinite' }}
+          >
+            아무 곳이나 클릭하여 건너뛰기
+          </span>
+        ) : (
+          <span className="absolute bottom-8 text-sm text-white/30 animate-pulse tracking-wide">
+            로딩 중...
+          </span>
+        )}
 
         <style>{`
           @keyframes loadingSplashReveal {
             to { filter: blur(0px) brightness(1); transform: scale(1); }
           }
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
         `}</style>
       </div>
     );
   }
+
+  // 인증 초기화 아직 미완료 (비정상 경로 — 위에서 splash가 처리하므로 거의 발생 안 함)
+  if (!authReady) return null;
 
   // 로그인 화면 (비로그인 상태)
   if (!currentUser) {
@@ -295,6 +319,7 @@ export default function App() {
     <>
       <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
       <SpotlightSearch />
+      <GlobalTooltipProvider />
 
       {/* 비밀번호 변경 모달 */}
       {showPasswordChange && <PasswordChangeModal />}

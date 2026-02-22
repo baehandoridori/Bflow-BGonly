@@ -114,6 +114,8 @@ export function SpotlightSearch() {
     setHighlightSceneId,
     setSearchQuery,
     setStatusFilter,
+    setSceneViewMode,
+    setSceneGroupMode,
     setToast,
   } = useAppStore();
 
@@ -151,9 +153,11 @@ export function SpotlightSearch() {
     sceneId?: string;
     toastMsg?: string;
   }) => {
-    // 필터 리셋
+    // 필터 리셋 + 뷰 모드 초기화 (카드뷰, 씬번호별)
     setSearchQuery('');
     setStatusFilter('all');
+    setSceneViewMode('card');
+    setSceneGroupMode('flat');
     if (!opts.assignee) setSelectedAssignee(null);
 
     // 네비게이션
@@ -164,7 +168,7 @@ export function SpotlightSearch() {
     if (opts.assignee) setSelectedAssignee(opts.assignee);
     if (opts.sceneId) setHighlightSceneId(opts.sceneId);
     if (opts.toastMsg) setToast(opts.toastMsg);
-  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSelectedDepartment, setHighlightSceneId, setSearchQuery, setStatusFilter, setToast]);
+  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSelectedDepartment, setHighlightSceneId, setSearchQuery, setStatusFilter, setSceneViewMode, setSceneGroupMode, setToast]);
 
   /* ── 검색 결과 빌드 ── */
   const results = useMemo<SearchResult[]>(() => {
