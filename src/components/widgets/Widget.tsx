@@ -5,6 +5,8 @@ import { cn } from '@/utils/cn';
 
 /** Dashboard에서 각 위젯을 래핑하여 widgetId를 전달하는 Context */
 export const WidgetIdContext = createContext<string | null>(null);
+/** 팝업 모드 감지 (팝업 안에서는 팝아웃 버튼 숨김, 스타일 변경) */
+export const IsPopupContext = createContext(false);
 
 interface WidgetProps {
   title: string;
@@ -18,6 +20,7 @@ interface WidgetProps {
 export function Widget({ title, widgetId: propId, icon, headerRight, children, className }: WidgetProps) {
   const isEditMode = useAppStore((s) => s.isEditMode);
   const ctxId = useContext(WidgetIdContext);
+  const isPopup = useContext(IsPopupContext);
   const widgetId = propId ?? ctxId;
 
   const handlePopout = () => {
@@ -25,10 +28,19 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
     window.electronAPI?.widgetOpenPopup?.(widgetId, title);
   };
 
+  // 팝업 모드: 헤더/외곽 없이 콘텐츠만 표시
+  if (isPopup) {
+    return (
+      <div className={cn('flex flex-col h-full', className)}>
+        <div className="flex-1 overflow-auto p-4">{children}</div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
-        'border border-white/[0.08] rounded-xl flex flex-col h-full overflow-hidden',
+        'border border-white/[0.08] rounded-2xl flex flex-col h-full overflow-hidden',
         'shadow-sm shadow-black/10',
         'hover:shadow-lg hover:shadow-black/25 hover:border-white/[0.12]',
         'transition-all duration-200 ease-out',
@@ -36,7 +48,7 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
         className
       )}
       style={{
-        background: 'rgba(16, 18, 28, 0.32)',
+        background: 'rgba(16, 18, 28, 0.28)',
         backdropFilter: 'blur(24px) saturate(1.8)',
         WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
         boxShadow: '0 8px 32px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.08) inset, 0 1px 0 rgba(255,255,255,0.12) inset',

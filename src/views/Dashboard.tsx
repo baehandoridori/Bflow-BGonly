@@ -80,21 +80,29 @@ function DashboardPlexus() {
       const { w, h } = sizeRef.current;
       ctx.clearRect(0, 0, w, h);
 
-      // ── 배경 그라데이션 조명 (테마 컬러 기반 은은한 글로우) ──
+      // ── 배경 그라데이션 조명 (위젯 글래스모피즘을 위한 충분한 밝기) ──
       const cols = getColors();
       const [ar, ag, ab] = cols[0];
       const [sr, sg, sb] = cols[1] ?? cols[0];
-      // 좌상단 글로우
-      const grd1 = ctx.createRadialGradient(w * 0.15, h * 0.2, 0, w * 0.15, h * 0.2, w * 0.5);
-      grd1.addColorStop(0, `rgba(${ar},${ag},${ab},0.06)`);
+      // 좌상단 글로우 (강)
+      const grd1 = ctx.createRadialGradient(w * 0.12, h * 0.15, 0, w * 0.12, h * 0.15, w * 0.55);
+      grd1.addColorStop(0, `rgba(${ar},${ag},${ab},0.18)`);
+      grd1.addColorStop(0.5, `rgba(${ar},${ag},${ab},0.06)`);
       grd1.addColorStop(1, `rgba(${ar},${ag},${ab},0)`);
       ctx.fillStyle = grd1;
       ctx.fillRect(0, 0, w, h);
-      // 우하단 글로우
-      const grd2 = ctx.createRadialGradient(w * 0.85, h * 0.8, 0, w * 0.85, h * 0.8, w * 0.5);
-      grd2.addColorStop(0, `rgba(${sr},${sg},${sb},0.05)`);
+      // 우하단 글로우 (강)
+      const grd2 = ctx.createRadialGradient(w * 0.88, h * 0.85, 0, w * 0.88, h * 0.85, w * 0.55);
+      grd2.addColorStop(0, `rgba(${sr},${sg},${sb},0.15)`);
+      grd2.addColorStop(0.5, `rgba(${sr},${sg},${sb},0.05)`);
       grd2.addColorStop(1, `rgba(${sr},${sg},${sb},0)`);
       ctx.fillStyle = grd2;
+      ctx.fillRect(0, 0, w, h);
+      // 중앙 소프트 글로우 (위젯 뒤로 비치는 조명)
+      const grd3 = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.4);
+      grd3.addColorStop(0, `rgba(${(ar + sr) >> 1},${(ag + sg) >> 1},${(ab + sb) >> 1},0.08)`);
+      grd3.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grd3;
       ctx.fillRect(0, 0, w, h);
 
       const mx = mouseRef.current.x;
@@ -122,7 +130,7 @@ function DashboardPlexus() {
           const dy = pts[i].y - pts[j].y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < DASH_CONNECT_DIST) {
-            const alpha = (1 - dist / DASH_CONNECT_DIST) * 0.2;
+            const alpha = (1 - dist / DASH_CONNECT_DIST) * 0.28;
             const [r, g, b] = pts[i].color;
             ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
             ctx.lineWidth = (1 - dist / DASH_CONNECT_DIST) * 1.2;
