@@ -24,10 +24,10 @@ export function Widget({ title, icon, headerRight, children, className }: Widget
         className
       )}
       style={{
-        background: 'rgba(26, 29, 39, 0.65)',
-        backdropFilter: 'blur(16px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(16px) saturate(1.4)',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.2), 0 0 0 1px rgba(255,255,255,0.04) inset',
+        background: 'rgba(20, 22, 32, 0.45)',
+        backdropFilter: 'blur(20px) saturate(1.6)',
+        WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.06) inset, 0 1px 0 rgba(255,255,255,0.08) inset',
       }}
     >
       {/* 헤더 */}

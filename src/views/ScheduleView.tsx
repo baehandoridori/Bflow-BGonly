@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, X, Filter,
@@ -284,13 +285,15 @@ function EventBarChip({
         )}
       </div>
 
-      {/* 글래스모피즘 툴팁 — 마우스 추적 (fixed로 셀 넘침 방지) */}
-      {showTooltip && !isDragging && !isGhost && (
+      {/* 글래스모피즘 툴팁 — Portal로 body에 직접 렌더 (부모 transform/overflow 무관) */}
+      {showTooltip && !isDragging && !isGhost && createPortal(
         <div
-          className="fixed z-[9999] pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
+          className="pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
           style={{
-            left: tooltipPos.x,
-            top: tooltipPos.y - 12,
+            position: 'fixed',
+            zIndex: 99999,
+            left: Math.min(tooltipPos.x, window.innerWidth - 280),
+            top: Math.max(tooltipPos.y - 12, 8),
             transform: 'translate(-50%, -100%)',
             background: 'linear-gradient(135deg, rgba(30, 34, 48, 0.78) 0%, rgba(20, 22, 32, 0.82) 100%)',
             backdropFilter: 'blur(24px) saturate(1.8)',
@@ -302,7 +305,8 @@ function EventBarChip({
           <div className="text-[13px] font-semibold text-text-primary truncate">{ev.title}</div>
           <div className="text-[12px] text-text-secondary/70 mt-1">{dateLabel}</div>
           {ev.memo && <div className="text-[11px] text-text-secondary/50 mt-1 line-clamp-2">{ev.memo}</div>}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -633,23 +637,29 @@ function EventCreateModal({
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">시작일</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="mt-1 w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-bright"
-                style={{ colorScheme: 'dark' }}
-              />
+              <div className="relative mt-1">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 pr-10 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
+                  style={{ colorScheme: 'dark' }}
+                />
+                <CalendarDays size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+              </div>
             </div>
             <div className="flex-1">
               <label className="text-xs font-semibold text-text-secondary/60 uppercase tracking-wider">마감일</label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="mt-1 w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-bright"
-                style={{ colorScheme: 'dark' }}
-              />
+              <div className="relative mt-1">
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 pr-10 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
+                  style={{ colorScheme: 'dark' }}
+                />
+                <CalendarDays size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+              </div>
             </div>
           </div>
 

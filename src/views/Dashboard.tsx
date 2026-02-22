@@ -19,9 +19,10 @@ import 'react-resizable/css/styles.css';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
-/* ── 경량 플렉서스 배경 (대시보드용) ── */
+/* ── 대시보드 플렉서스 배경 (연결선 + 그라데이션 조명 + 마우스 반응) ── */
 interface DashPt { x: number; y: number; vx: number; vy: number; size: number; color: [number, number, number]; alpha: number }
-const DASH_PT_COUNT = 60;
+const DASH_PT_COUNT = 120;
+const DASH_CONNECT_DIST = 140;
 
 function DashboardPlexus() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -58,8 +59,8 @@ function DashboardPlexus() {
           const c = cols[Math.floor(Math.random() * cols.length)];
           return {
             x: Math.random() * w, y: Math.random() * h,
-            vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3,
-            size: 1 + Math.random() * 2.5, color: c, alpha: 0.15 + Math.random() * 0.25,
+            vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
+            size: 1.2 + Math.random() * 2.5, color: c, alpha: 0.25 + Math.random() * 0.35,
           };
         });
       }
@@ -77,30 +78,78 @@ function DashboardPlexus() {
       if (!running) return;
       const { w, h } = sizeRef.current;
       ctx.clearRect(0, 0, w, h);
+
+      // ── 배경 그라데이션 조명 (테마 컬러 기반 은은한 글로우) ──
+      const cols = getColors();
+      const [ar, ag, ab] = cols[0];
+      const [sr, sg, sb] = cols[1] ?? cols[0];
+      // 좌상단 글로우
+      const grd1 = ctx.createRadialGradient(w * 0.15, h * 0.2, 0, w * 0.15, h * 0.2, w * 0.5);
+      grd1.addColorStop(0, `rgba(${ar},${ag},${ab},0.06)`);
+      grd1.addColorStop(1, `rgba(${ar},${ag},${ab},0)`);
+      ctx.fillStyle = grd1;
+      ctx.fillRect(0, 0, w, h);
+      // 우하단 글로우
+      const grd2 = ctx.createRadialGradient(w * 0.85, h * 0.8, 0, w * 0.85, h * 0.8, w * 0.5);
+      grd2.addColorStop(0, `rgba(${sr},${sg},${sb},0.05)`);
+      grd2.addColorStop(1, `rgba(${sr},${sg},${sb},0)`);
+      ctx.fillStyle = grd2;
+      ctx.fillRect(0, 0, w, h);
+
       const mx = mouseRef.current.x;
       const my = mouseRef.current.y;
-      for (const p of ptsRef.current) {
+      const pts = ptsRef.current;
+
+      // 업데이트 위치
+      for (const p of pts) {
         const dx = p.x - mx; const dy = p.y - my;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 200 && dist > 1) {
-          const force = (1 - dist / 200) * 0.02;
+        if (dist < 220 && dist > 1) {
+          const force = (1 - dist / 220) * 0.015;
           p.vx += (dx / dist) * force; p.vy += (dy / dist) * force;
         }
-        p.vx *= 0.99; p.vy *= 0.99;
+        p.vx *= 0.992; p.vy *= 0.992;
         p.x += p.vx; p.y += p.vy;
-        if (p.x < -20) p.x = w + 20; if (p.x > w + 20) p.x = -20;
-        if (p.y < -20) p.y = h + 20; if (p.y > h + 20) p.y = -20;
-        const nearMouse = dist < 200;
-        const glowAlpha = nearMouse ? p.alpha + (1 - dist / 200) * 0.2 : p.alpha;
+        if (p.x < -30) p.x = w + 30; if (p.x > w + 30) p.x = -30;
+        if (p.y < -30) p.y = h + 30; if (p.y > h + 30) p.y = -30;
+      }
+
+      // ── 연결선 ──
+      for (let i = 0; i < pts.length; i++) {
+        for (let j = i + 1; j < pts.length; j++) {
+          const dx = pts[i].x - pts[j].x;
+          const dy = pts[i].y - pts[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < DASH_CONNECT_DIST) {
+            const alpha = (1 - dist / DASH_CONNECT_DIST) * 0.2;
+            const [r, g, b] = pts[i].color;
+            ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+            ctx.lineWidth = (1 - dist / DASH_CONNECT_DIST) * 1.2;
+            ctx.beginPath();
+            ctx.moveTo(pts[i].x, pts[i].y);
+            ctx.lineTo(pts[j].x, pts[j].y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      // ── 파티클 ──
+      for (const p of pts) {
+        const dx = p.x - mx; const dy = p.y - my;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const nearMouse = dist < 220;
+        const glowAlpha = nearMouse ? p.alpha + (1 - dist / 220) * 0.25 : p.alpha;
         const [r, g, b] = p.color;
-        const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 4);
-        grad.addColorStop(0, `rgba(${r},${g},${b},${glowAlpha})`);
-        grad.addColorStop(0.4, `rgba(${r},${g},${b},${glowAlpha * 0.3})`);
+        // 소프트 글로우
+        const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 5);
+        grad.addColorStop(0, `rgba(${r},${g},${b},${glowAlpha * 0.5})`);
+        grad.addColorStop(0.3, `rgba(${r},${g},${b},${glowAlpha * 0.15})`);
         grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
         ctx.fillStyle = grad;
-        ctx.fillRect(p.x - p.size * 4, p.y - p.size * 4, p.size * 8, p.size * 8);
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${r},${g},${b},${glowAlpha * 0.8})`;
+        ctx.fillRect(p.x - p.size * 5, p.y - p.size * 5, p.size * 10, p.size * 10);
+        // 코어 도트
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.8, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${r},${g},${b},${glowAlpha * 0.9})`;
         ctx.fill();
       }
       requestAnimationFrame(animate);
@@ -109,7 +158,7 @@ function DashboardPlexus() {
     return () => { running = false; window.removeEventListener('resize', resize); canvas.parentElement?.removeEventListener('mousemove', onMouse); };
   }, []);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ filter: 'blur(1px)', opacity: 0.6 }} />;
+  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ opacity: 0.85 }} />;
 }
 
 /* ── wiggle CSS injection ── */

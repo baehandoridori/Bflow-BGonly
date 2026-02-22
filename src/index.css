@@ -41,19 +41,24 @@ input, textarea, select, [contenteditable="true"] {
   background: rgb(var(--color-bg-border) / 0.8);
 }
 
-/* 날짜 선택기 아이콘 밝은 색 고정 (다크 테마) — 모든 date input */
-input[type="date"]::-webkit-calendar-picker-indicator,
-.date-picker-bright::-webkit-calendar-picker-indicator {
+/* 날짜 선택기: 네이티브 아이콘을 투명화하고 커스텀 아이콘 오버레이 사용 */
+.date-picker-hidden::-webkit-calendar-picker-indicator {
+  opacity: 0 !important;
+  cursor: pointer !important;
+  width: 2rem !important;
+  height: 2rem !important;
+  position: absolute !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+/* 일반 date input (date-picker-hidden 아닌 것)은 밝게 */
+input[type="date"]:not(.date-picker-hidden)::-webkit-calendar-picker-indicator {
   filter: invert(1) brightness(2) !important;
   cursor: pointer !important;
-  width: 1.5rem !important;
-  height: 1.5rem !important;
   opacity: 0.9 !important;
-}
-input[type="date"]::-webkit-calendar-picker-indicator:hover,
-.date-picker-bright::-webkit-calendar-picker-indicator:hover {
-  opacity: 1 !important;
-  filter: invert(1) brightness(2.5) !important;
 }
 input[type="date"]::-webkit-inner-spin-button {
   display: none;
