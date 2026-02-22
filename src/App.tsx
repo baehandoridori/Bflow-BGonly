@@ -236,11 +236,43 @@ export default function App() {
     }
   };
 
-  // 인증 초기화 대기
+  // 인증 초기화 대기 — 로딩 중 스플래시 영상 재생
   if (!authReady) {
     return (
-      <div className="flex items-center justify-center h-screen w-screen bg-bg-primary">
-        <span className="text-sm text-text-secondary animate-pulse">로딩 중...</span>
+      <div className="flex items-center justify-center h-screen w-screen overflow-hidden"
+        style={{
+          background: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, #0F1117 100%)',
+        }}
+      >
+        {/* 스플래시 영상 */}
+        <div className="relative" style={{ width: 'min(420px, 75vmin)', aspectRatio: '672 / 592' }}>
+          <video
+            autoPlay muted loop playsInline preload="auto"
+            src="/splash/opening_video.mp4"
+            className="absolute object-cover"
+            style={{
+              inset: '-10%', width: '120%', height: '120%',
+              animation: 'loadingSplashReveal 1.5s ease-out 0.3s forwards',
+              filter: 'blur(8px) brightness(0.6)',
+              transform: 'scale(1.05)',
+              WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+              maskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+              WebkitMaskComposite: 'destination-in' as never,
+              maskComposite: 'intersect' as never,
+            }}
+          />
+        </div>
+
+        {/* 로딩 텍스트 */}
+        <span className="absolute bottom-8 text-sm text-white/30 animate-pulse tracking-wide">
+          로딩 중...
+        </span>
+
+        <style>{`
+          @keyframes loadingSplashReveal {
+            to { filter: blur(0px) brightness(1); transform: scale(1); }
+          }
+        `}</style>
       </div>
     );
   }

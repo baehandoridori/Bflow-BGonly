@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { X, Minus } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { X, Droplets, Eye } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -26,16 +26,18 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
 
 /**
  * 위젯 팝업 윈도우 전용 렌더러
- * 프레임 없는 투명 BrowserWindow에서 단일 위젯을 리퀴드 글래스 스타일로 표시.
+ * 리퀴드 글래스 스타일: 배경 블러, 모서리 왜곡, 유리 반사 효과
+ * 두 개의 슬라이더: 앱 오퍼시티 / 글래스 효과 강도
  */
 export function WidgetPopup({ widgetId }: { widgetId: string }) {
-  const [opacity, setOpacity] = useState(0.92);
+  const [appOpacity, setAppOpacity] = useState(0.92);
+  const [glassIntensity, setGlassIntensity] = useState(0.7);
   const [isHover, setIsHover] = useState(false);
   const [ready, setReady] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // 테마 + 데이터 초기화
   useEffect(() => {
-    // body/html 투명하게
     document.documentElement.style.background = 'transparent';
     document.body.style.background = 'transparent';
 
@@ -50,42 +52,50 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           if (colors) applyTheme(colors);
         }
 
-        // 데이터 로드
         const api = window.electronAPI;
-        if (!api) { console.warn('[WidgetPopup] electronAPI 없음'); setReady(true); return; }
+        if (!api) { setReady(true); return; }
 
         const { isTestMode } = await api.getMode();
         useAppStore.getState().setTestMode(isTestMode);
-        console.log('[WidgetPopup] 모드:', isTestMode ? '테스트' : '프로덕션');
+
+        // 대시보드 필터를 'all'로 설정 (위젯이 데이터 표시하도록)
+        useAppStore.getState().setDashboardDeptFilter('all');
 
         if (!isTestMode) {
           const connected = await api.sheetsIsConnected();
           console.log('[WidgetPopup] 시트 연결:', connected);
           if (connected) {
             const result = await api.sheetsReadAll();
-            console.log('[WidgetPopup] 시트 데이터:', result.ok, result.data?.length ?? 0, '에피소드');
+            console.log('[WidgetPopup] 데이터:', result.ok, result.data?.length ?? 0, '에피소드');
             if (result.ok && result.data) {
               useDataStore.getState().setEpisodes(result.data);
+            }
+          } else {
+            // 시트 미연결 — 저장된 설정으로 연결 시도
+            const cfg = await api.readSettings('sheets.json') as { webAppUrl?: string } | null;
+            if (cfg?.webAppUrl) {
+              const connectResult = await api.sheetsConnect(cfg.webAppUrl);
+              if (connectResult.ok) {
+                const result = await api.sheetsReadAll();
+                if (result.ok && result.data) {
+                  useDataStore.getState().setEpisodes(result.data);
+                }
+              }
             }
           }
         } else {
           const sheetPath = await api.testGetSheetPath();
           const raw = await api.testReadSheet(sheetPath);
           if (raw && typeof raw === 'object' && 'episodes' in raw) {
-            const episodes = (raw as { episodes: Episode[] }).episodes;
-            console.log('[WidgetPopup] 테스트 데이터:', episodes.length, '에피소드');
-            useDataStore.getState().setEpisodes(episodes);
+            useDataStore.getState().setEpisodes((raw as { episodes: Episode[] }).episodes);
           }
         }
 
-        // 유저 정보 (세션 복원)
+        // 유저
         const users = await loadUsers();
         useAuthStore.getState().setUsers(users);
         const { user } = await loadSession();
-        if (user) {
-          useAuthStore.getState().setCurrentUser(user);
-          console.log('[WidgetPopup] 유저:', user.name);
-        }
+        if (user) useAuthStore.getState().setCurrentUser(user);
       } catch (err) {
         console.error('[WidgetPopup] 초기화 실패:', err);
       }
@@ -99,9 +109,9 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     window.electronAPI?.widgetClosePopup?.(widgetId);
   }, [widgetId]);
 
-  const handleOpacityChange = useCallback((val: number) => {
+  const handleAppOpacity = useCallback((val: number) => {
     const clamped = Math.max(0.15, Math.min(1, val));
-    setOpacity(clamped);
+    setAppOpacity(clamped);
     window.electronAPI?.widgetSetOpacity?.(widgetId, clamped);
   }, [widgetId]);
 
@@ -114,70 +124,104 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     );
   }
 
+  // 글래스 효과 계산
+  const blurPx = Math.round(10 + glassIntensity * 40); // 10~50px
+  const bgAlpha = 0.15 + (1 - glassIntensity) * 0.5;  // 0.15~0.65 (글래스 높으면 배경 투명)
+  const borderAlpha = 0.06 + glassIntensity * 0.14;    // 0.06~0.20
+  const reflectAlpha = glassIntensity * 0.15;            // 0~0.15
+
   return (
     <div
+      ref={rootRef}
       className="h-screen w-screen p-1"
       style={{ background: 'transparent' }}
       onMouseEnter={() => setIsHover(true)}
       onMouseLeave={() => setIsHover(false)}
     >
+      {/* ── 리퀴드 글래스 컨테이너 ── */}
       <div
-        className="h-full w-full flex flex-col overflow-hidden"
+        className="h-full w-full flex flex-col overflow-hidden relative"
         style={{
-          borderRadius: '16px',
-          background: 'rgba(12, 14, 22, 0.55)',
-          backdropFilter: 'blur(40px) saturate(1.8)',
-          WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
+          borderRadius: '18px',
+          background: `rgba(12, 14, 22, ${bgAlpha})`,
+          backdropFilter: `blur(${blurPx}px) saturate(${1 + glassIntensity * 0.8})`,
+          WebkitBackdropFilter: `blur(${blurPx}px) saturate(${1 + glassIntensity * 0.8})`,
+          border: `1px solid rgba(255, 255, 255, ${borderAlpha})`,
           boxShadow: `
             0 20px 60px rgba(0,0,0,0.5),
-            0 0 0 1px rgba(255,255,255,0.06) inset,
-            0 1px 0 rgba(255,255,255,0.1) inset
+            0 0 0 1px rgba(255,255,255,${borderAlpha * 0.5}) inset,
+            0 1px 0 rgba(255,255,255,${reflectAlpha}) inset,
+            0 -1px 0 rgba(255,255,255,${reflectAlpha * 0.3}) inset
           `,
         }}
       >
-        {/* ── 드래그 영역 (타이틀 바 없이, 상단 전체) ── */}
+        {/* ── 유리 상단 반사 하이라이트 ── */}
         <div
-          className="shrink-0 relative"
+          className="absolute inset-x-0 top-0 pointer-events-none"
           style={{
-            WebkitAppRegion: 'drag',
-            height: '32px',
-          } as React.CSSProperties}
+            height: '40%',
+            borderRadius: '18px 18px 0 0',
+            background: `linear-gradient(180deg, rgba(255,255,255,${reflectAlpha * 1.2}) 0%, rgba(255,255,255,${reflectAlpha * 0.2}) 30%, transparent 100%)`,
+            maskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+          }}
+        />
+
+        {/* ── 모서리 굴절 효과 (안쪽 테두리 그라데이션) ── */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            borderRadius: '18px',
+            boxShadow: `
+              inset 0 0 ${Math.round(glassIntensity * 20)}px rgba(255,255,255,${reflectAlpha * 0.4}),
+              inset 0 0 ${Math.round(glassIntensity * 4)}px rgba(255,255,255,${reflectAlpha * 0.8})
+            `,
+          }}
+        />
+
+        {/* ── 드래그 영역 + 호버 컨트롤 ── */}
+        <div
+          className="shrink-0 relative z-10"
+          style={{ WebkitAppRegion: 'drag', height: '36px' } as React.CSSProperties}
         >
-          {/* 호버 시에만 오퍼시티 + 닫기 컨트롤 */}
           {isHover && (
             <div
-              className="absolute inset-0 flex items-center justify-end gap-2 px-3"
+              className="absolute inset-0 flex items-center gap-3 px-3"
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
-              {/* 오퍼시티 슬라이더 */}
-              <div className="flex items-center gap-1.5">
-                <Minus size={10} className="text-white/30" />
-                <input
-                  type="range"
-                  min={15}
-                  max={100}
-                  value={Math.round(opacity * 100)}
-                  onChange={(e) => handleOpacityChange(Number(e.target.value) / 100)}
-                  className="w-14 h-1 cursor-pointer"
-                  title={`투명도 ${Math.round(opacity * 100)}%`}
-                />
+              {/* 앱 오퍼시티 */}
+              <div className="flex items-center gap-1" title="앱 투명도">
+                <Eye size={11} className="text-white/35" />
+                <input type="range" min={15} max={100}
+                  value={Math.round(appOpacity * 100)}
+                  onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
+                  className="w-12 h-1 cursor-pointer" />
               </div>
+
+              {/* 글래스 효과 */}
+              <div className="flex items-center gap-1" title="글래스 효과">
+                <Droplets size={11} className="text-white/35" />
+                <input type="range" min={0} max={100}
+                  value={Math.round(glassIntensity * 100)}
+                  onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
+                  className="w-12 h-1 cursor-pointer" />
+              </div>
+
+              <div className="flex-1" />
 
               {/* 닫기 */}
               <button
                 onClick={handleClose}
-                className="w-5 h-5 rounded-full flex items-center justify-center bg-red-500/80 hover:bg-red-500 transition-colors cursor-pointer"
-                title="닫기"
+                className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer"
               >
-                <X size={10} className="text-white" strokeWidth={3} />
+                <X size={9} className="text-white" strokeWidth={3} />
               </button>
             </div>
           )}
         </div>
 
         {/* ── 위젯 콘텐츠 ── */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden relative z-10">
           <IsPopupContext.Provider value={true}>
           <WidgetIdContext.Provider value={widgetId}>
             <div className="h-full overflow-auto">
