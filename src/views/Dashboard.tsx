@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState, useEffect } from 'react';
+import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider, type Layouts, type Layout } from 'react-grid-layout';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pencil, Check, Plus, X } from 'lucide-react';
@@ -12,11 +12,105 @@ import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
+import { getPreset } from '@/themes';
 
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
+
+/* ── 경량 플렉서스 배경 (대시보드용) ── */
+interface DashPt { x: number; y: number; vx: number; vy: number; size: number; color: [number, number, number]; alpha: number }
+const DASH_PT_COUNT = 60;
+
+function DashboardPlexus() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const ptsRef = useRef<DashPt[]>([]);
+  const mouseRef = useRef({ x: -9999, y: -9999 });
+  const sizeRef = useRef({ w: 0, h: 0 });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: true });
+    if (!ctx) return;
+
+    const getColors = (): [number, number, number][] => {
+      const themeId = useAppStore.getState().themeId;
+      const custom = useAppStore.getState().customThemeColors;
+      const colors = custom ?? getPreset(themeId)?.colors;
+      if (!colors) return [[108, 92, 231], [162, 155, 254]];
+      const parse = (s: string): [number, number, number] => { const [r, g, b] = s.split(' ').map(Number); return [r, g, b]; };
+      return [parse(colors.accent), parse(colors.accentSub)];
+    };
+
+    const resize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.parentElement!.clientWidth;
+      const h = canvas.parentElement!.clientHeight;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      sizeRef.current = { w, h };
+      if (ptsRef.current.length === 0) {
+        const cols = getColors();
+        ptsRef.current = Array.from({ length: DASH_PT_COUNT }, () => {
+          const c = cols[Math.floor(Math.random() * cols.length)];
+          return {
+            x: Math.random() * w, y: Math.random() * h,
+            vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3,
+            size: 1 + Math.random() * 2.5, color: c, alpha: 0.15 + Math.random() * 0.25,
+          };
+        });
+      }
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    const onMouse = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+    canvas.parentElement!.addEventListener('mousemove', onMouse, { passive: true });
+
+    let running = true;
+    const animate = () => {
+      if (!running) return;
+      const { w, h } = sizeRef.current;
+      ctx.clearRect(0, 0, w, h);
+      const mx = mouseRef.current.x;
+      const my = mouseRef.current.y;
+      for (const p of ptsRef.current) {
+        const dx = p.x - mx; const dy = p.y - my;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 200 && dist > 1) {
+          const force = (1 - dist / 200) * 0.02;
+          p.vx += (dx / dist) * force; p.vy += (dy / dist) * force;
+        }
+        p.vx *= 0.99; p.vy *= 0.99;
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < -20) p.x = w + 20; if (p.x > w + 20) p.x = -20;
+        if (p.y < -20) p.y = h + 20; if (p.y > h + 20) p.y = -20;
+        const nearMouse = dist < 200;
+        const glowAlpha = nearMouse ? p.alpha + (1 - dist / 200) * 0.2 : p.alpha;
+        const [r, g, b] = p.color;
+        const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 4);
+        grad.addColorStop(0, `rgba(${r},${g},${b},${glowAlpha})`);
+        grad.addColorStop(0.4, `rgba(${r},${g},${b},${glowAlpha * 0.3})`);
+        grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(p.x - p.size * 4, p.y - p.size * 4, p.size * 8, p.size * 8);
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${r},${g},${b},${glowAlpha * 0.8})`;
+        ctx.fill();
+      }
+      requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+    return () => { running = false; window.removeEventListener('resize', resize); canvas.parentElement?.removeEventListener('mousemove', onMouse); };
+  }, []);
+
+  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ filter: 'blur(1px)', opacity: 0.6 }} />;
+}
 
 /* ── wiggle CSS injection ── */
 const WIGGLE_CSS = `
@@ -229,7 +323,10 @@ export function Dashboard() {
   }, [isEditMode, setEditMode]);
 
   return (
-    <div className="flex flex-col gap-4 h-full">
+    <div className="relative flex flex-col gap-4 h-full overflow-hidden">
+      {/* 경량 플렉서스 배경 */}
+      <DashboardPlexus />
+
       {/* 부서 탭 + 편집 버튼 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

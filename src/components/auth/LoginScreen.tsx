@@ -76,24 +76,24 @@ function getPlexusColors(): [number, number, number][] {
   return [accent, accent, accentSub, lighter, mix, analogous1, analogous2, complementary];
 }
 
-const PARTICLE_COUNT = 180;
-const CONNECTION_DIST = 180;
-const MOUSE_RADIUS = 200;
-const MOUSE_FORCE = 0.04;
+const PARTICLE_COUNT = 400;
+const CONNECTION_DIST = 160;
+const MOUSE_RADIUS = 250;
+const MOUSE_FORCE = 0.06;
 // "창을 통해 보는" 가상 캔버스 크기 (실제 창보다 넓음)
 const VIRTUAL_W = 2800;
 const VIRTUAL_H = 1800;
 
 function createParticle(_w: number, _h: number, plexusColors?: [number, number, number][]): Particle {
-  const z = 0.15 + Math.random() * 0.85;
+  const z = 0.1 + Math.random() * 0.9;
   const cols = plexusColors ?? getPlexusColors();
   const color = cols[Math.floor(Math.random() * cols.length)];
-  const baseSpeed = 0.15 + Math.random() * 0.3;
+  const baseSpeed = 0.12 + Math.random() * 0.35;
   return {
     x: Math.random() * VIRTUAL_W, y: Math.random() * VIRTUAL_H, z,
     vx: (Math.random() - 0.5) * baseSpeed * z,
     vy: (Math.random() - 0.5) * baseSpeed * z,
-    baseSpeed, size: 1.5 + z * 2.5, color,
+    baseSpeed, size: 1.2 + z * 3, color,
   };
 }
 
@@ -232,7 +232,7 @@ function PlexusBackground() {
           const avgZ = (a.z + b.z) * 0.5;
           const scaledDist = CONNECTION_DIST * avgZ;
           if (dist < scaledDist) {
-            const lineAlpha = (1 - dist / scaledDist) * avgZ * 0.35;
+            const lineAlpha = (1 - dist / scaledDist) * avgZ * 0.5;
             const midX = (a.x + b.x) * 0.5;
             const midY = (a.y + b.y) * 0.5;
             const dMid = Math.sqrt((midX - mx) ** 2 + (midY - my) ** 2);
@@ -242,8 +242,8 @@ function PlexusBackground() {
             const bl = Math.round((a.color[2] + b.color[2]) * 0.5);
             ctx.beginPath();
             ctx.moveTo(a.x - ox, a.y - oy); ctx.lineTo(b.x - ox, b.y - oy);
-            ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${Math.min(lineAlpha + glowBoost, 0.6)})`;
-            ctx.lineWidth = avgZ * 1.2;
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${Math.min(lineAlpha + glowBoost, 0.75)})`;
+            ctx.lineWidth = avgZ * 1.5;
             ctx.stroke();
           }
         }
@@ -251,7 +251,7 @@ function PlexusBackground() {
 
       // 파티클 렌더링 (화면 좌표)
       for (const p of sorted) {
-        const alpha = 0.3 + p.z * 0.6;
+        const alpha = 0.35 + p.z * 0.6;
         const [r, g, b] = p.color;
         const sx = p.x - ox; // 화면 x
         const sy = p.y - oy; // 화면 y

@@ -41,16 +41,22 @@ input, textarea, select, [contenteditable="true"] {
   background: rgb(var(--color-bg-border) / 0.8);
 }
 
-/* 날짜 선택기 아이콘 밝은 색 고정 */
+/* 날짜 선택기 아이콘 밝은 색 고정 (다크 테마) — 모든 date input */
+input[type="date"]::-webkit-calendar-picker-indicator,
 .date-picker-bright::-webkit-calendar-picker-indicator {
-  filter: invert(1) brightness(3);
-  cursor: pointer;
-  width: 1.5rem;
-  height: 1.5rem;
-  opacity: 0.85;
+  filter: invert(1) brightness(2) !important;
+  cursor: pointer !important;
+  width: 1.5rem !important;
+  height: 1.5rem !important;
+  opacity: 0.9 !important;
 }
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
 .date-picker-bright::-webkit-calendar-picker-indicator:hover {
-  opacity: 1;
+  opacity: 1 !important;
+  filter: invert(1) brightness(2.5) !important;
+}
+input[type="date"]::-webkit-inner-spin-button {
+  display: none;
 }
 
 /* react-grid-layout 커스텀 */

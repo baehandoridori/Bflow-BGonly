@@ -294,11 +294,11 @@ function EventGanttChart() {
 
   const DAY_WIDTH = 32; // 날짜 하나의 픽셀 폭
 
-  // 날짜 범위 계산: 이번 달 ± 1.5개월
+  // 날짜 범위 계산: 지난달 ~ 다다음달
   const { dateRange, dayLabels, totalDays } = useMemo(() => {
     const now = new Date();
     const rangeStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+    const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 3, 0);
 
     const startStr = fmtDate(rangeStart);
     const endStr = fmtDate(rangeEnd);

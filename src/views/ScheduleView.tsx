@@ -209,13 +209,11 @@ function EventBarChip({
 
   const handleEnter = (e: React.MouseEvent) => {
     onHover?.(ev.id);
-    const barRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setTooltipPos({ x: e.clientX - barRect.left, y: e.clientY - barRect.top });
+    setTooltipPos({ x: e.clientX, y: e.clientY });
     tooltipTimer.current = setTimeout(() => setShowTooltip(true), 400);
   };
   const handleMove = (e: React.MouseEvent) => {
-    const barRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setTooltipPos({ x: e.clientX - barRect.left, y: e.clientY - barRect.top });
+    setTooltipPos({ x: e.clientX, y: e.clientY });
   };
   const handleLeave = () => {
     onHover?.(null);
@@ -286,10 +284,10 @@ function EventBarChip({
         )}
       </div>
 
-      {/* 글래스모피즘 툴팁 — 마우스 추적 */}
+      {/* 글래스모피즘 툴팁 — 마우스 추적 (fixed로 셀 넘침 방지) */}
       {showTooltip && !isDragging && !isGhost && (
         <div
-          className="absolute z-[60] pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
+          className="fixed z-[9999] pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
           style={{
             left: tooltipPos.x,
             top: tooltipPos.y - 12,
@@ -872,12 +870,12 @@ function CalendarGrid({
                     <div className="p-1.5">
                       <span
                         className={cn(
-                          'text-xs tabular-nums inline-flex items-center justify-center',
+                          'text-xs tabular-nums inline-flex items-center justify-center font-medium',
                           isToday
-                            ? 'bg-accent text-white w-5 h-5 rounded-full text-[10px] font-bold'
-                            : dow === 0 ? 'text-red-400/70'
-                            : dow === 6 ? 'text-blue-400/70'
-                            : isCurMonth ? 'text-text-primary/60' : 'text-text-secondary/30',
+                            ? 'bg-accent text-white w-6 h-6 rounded-full text-[11px] font-bold'
+                            : dow === 0 ? 'text-red-400'
+                            : dow === 6 ? 'text-blue-400'
+                            : isCurMonth ? 'text-text-primary/80' : 'text-text-secondary/40',
                         )}
                       >
                         {day.getDate()}

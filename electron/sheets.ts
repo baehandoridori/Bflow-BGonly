@@ -162,17 +162,24 @@ export async function readAllEpisodes(): Promise<EpisodeData[]> {
   const episodes: EpisodeData[] = json.data ?? [];
 
   // 후처리: department 기본값 + 이미지 URL 검증
+  const deptSummary: Record<string, number> = {};
   for (const ep of episodes) {
     for (const part of ep.parts) {
       // GAS에서 department를 내려주지 않는 레거시 대응 → 'bg' 기본
       if (!part.department) {
         part.department = parseDepartmentFromSheetName(part.sheetName);
       }
+      deptSummary[part.department] = (deptSummary[part.department] || 0) + 1;
       for (const scene of part.scenes) {
         scene.storyboardUrl = sanitizeImageUrl(scene.storyboardUrl);
         scene.guideUrl = sanitizeImageUrl(scene.guideUrl);
       }
     }
+  }
+
+  console.log(`[Sheets] 부서별 파트 수: ${JSON.stringify(deptSummary)} — 총 ${episodes.length}개 에피소드`);
+  if (!deptSummary['acting']) {
+    console.warn('[Sheets] ⚠️ 액팅 파트가 없습니다. Google Sheet에 _ACT 탭이 있는지, GAS를 새로 배포했는지 확인하세요.');
   }
 
   return episodes;

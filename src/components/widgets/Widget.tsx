@@ -16,13 +16,19 @@ export function Widget({ title, icon, headerRight, children, className }: Widget
   return (
     <div
       className={cn(
-        'bg-bg-card border border-bg-border rounded-xl flex flex-col h-full overflow-hidden',
+        'border border-bg-border/60 rounded-xl flex flex-col h-full overflow-hidden',
         'shadow-sm shadow-black/10',
         'hover:shadow-md hover:shadow-black/20 hover:border-bg-border/80',
         'transition-shadow transition-border duration-200 ease-out',
         isEditMode && 'ring-1 ring-accent/30',
         className
       )}
+      style={{
+        background: 'rgba(26, 29, 39, 0.65)',
+        backdropFilter: 'blur(16px) saturate(1.4)',
+        WebkitBackdropFilter: 'blur(16px) saturate(1.4)',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.2), 0 0 0 1px rgba(255,255,255,0.04) inset',
+      }}
     >
       {/* 헤더 */}
       <div
