@@ -456,6 +456,11 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     title: widgetTitle,
     backgroundColor: '#00000000',
     hasShadow: true,
+    // 네이티브 데스크톱 블러 (Electron 30+)
+    // Windows: Acrylic 블러 | macOS: vibrancy
+    ...(process.platform === 'win32'
+      ? { backgroundMaterial: 'acrylic' as const }
+      : { vibrancy: 'under-window' as const }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
