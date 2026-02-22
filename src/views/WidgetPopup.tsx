@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { GripHorizontal, X, Droplets, Eye } from 'lucide-react';
+import { X, Droplets, Eye } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -12,8 +12,9 @@ import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
+import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig } from '@/services/sheetsService';
+import { readTestSheet } from '@/services/testSheetService';
 import { getPreset, applyTheme } from '@/themes';
-import type { Episode } from '@/types';
 
 const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNode }> = {
   'overall-progress': { label: '전체 진행률', component: <OverallProgressWidget /> },
@@ -37,18 +38,35 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const [isFocused, setIsFocused] = useState(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 마우스 위치 추적 → 오른쪽 위 근처일 때만 컨트롤 표시
+  const [showHandle, setShowHandle] = useState(false);
+  const handleHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 마우스 위치 추적 → 상단 영역별 호버 감지
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    // 오른쪽 60% + 상단 48px 영역
-    const inZone = x > rect.width * 0.4 && y < 48;
-    if (inZone) {
+
+    // 드래그 핸들: 상단 40px 영역
+    const inHandleZone = y < 40;
+    if (inHandleZone) {
+      if (handleHideTimerRef.current) { clearTimeout(handleHideTimerRef.current); handleHideTimerRef.current = null; }
+      setShowHandle(true);
+    } else if (!inHandleZone && showHandle) {
+      if (!handleHideTimerRef.current) {
+        handleHideTimerRef.current = setTimeout(() => {
+          setShowHandle(false);
+          handleHideTimerRef.current = null;
+        }, 200);
+      }
+    }
+
+    // 컨트롤: 오른쪽 60% + 상단 48px 영역
+    const inControlZone = x > rect.width * 0.4 && y < 48;
+    if (inControlZone) {
       if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
       setShowControls(true);
-    } else if (!inZone && showControls) {
-      // 영역 밖이면 300ms 후 숨김 (슬라이더 조작 중 갑자기 사라지는 것 방지)
+    } else if (!inControlZone && showControls) {
       if (!hideTimerRef.current) {
         hideTimerRef.current = setTimeout(() => {
           setShowControls(false);
@@ -56,11 +74,13 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         }, 300);
       }
     }
-  }, [showControls]);
+  }, [showControls, showHandle]);
 
   const handleMouseLeave = useCallback(() => {
     if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+    if (handleHideTimerRef.current) { clearTimeout(handleHideTimerRef.current); handleHideTimerRef.current = null; }
     setShowControls(false);
+    setShowHandle(false);
   }, []);
 
   // 포커스 변경 감지 (Acrylic 회색 fallback 대응)
@@ -98,33 +118,28 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         useAppStore.getState().setDashboardDeptFilter('all');
 
         if (!isTestMode) {
-          const connected = await api.sheetsIsConnected();
+          // 프로덕션: App.tsx와 동일한 서비스 함수 사용
+          let connected = await checkConnection();
           console.log('[WidgetPopup] 시트 연결:', connected);
-          if (connected) {
-            const result = await api.sheetsReadAll();
-            console.log('[WidgetPopup] 데이터:', result.ok, result.data?.length ?? 0, '에피소드');
-            if (result.ok && result.data) {
-              useDataStore.getState().setEpisodes(result.data);
-            }
-          } else {
+          if (!connected) {
             // 시트 미연결 — 저장된 설정으로 연결 시도
-            const cfg = await api.readSettings('sheets.json') as { webAppUrl?: string } | null;
+            const cfg = await loadSheetsConfig();
             if (cfg?.webAppUrl) {
-              const connectResult = await api.sheetsConnect(cfg.webAppUrl);
-              if (connectResult.ok) {
-                const result = await api.sheetsReadAll();
-                if (result.ok && result.data) {
-                  useDataStore.getState().setEpisodes(result.data);
-                }
-              }
+              const result = await connectSheets(cfg.webAppUrl);
+              connected = result.ok;
+              console.log('[WidgetPopup] 재연결 시도:', result.ok);
             }
+          }
+          if (connected) {
+            const episodes = await readAllFromSheets();
+            console.log('[WidgetPopup] 데이터:', episodes.length, '에피소드');
+            useDataStore.getState().setEpisodes(episodes);
           }
         } else {
-          const sheetPath = await api.testGetSheetPath();
-          const raw = await api.testReadSheet(sheetPath);
-          if (raw && typeof raw === 'object' && 'episodes' in raw) {
-            useDataStore.getState().setEpisodes((raw as { episodes: Episode[] }).episodes);
-          }
+          // 테스트: testSheetService 사용 (migrateEpisodes 포함)
+          const episodes = await readTestSheet();
+          console.log('[WidgetPopup] 테스트 데이터:', episodes.length, '에피소드');
+          useDataStore.getState().setEpisodes(episodes);
         }
 
         // 유저
@@ -202,13 +217,13 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         }}
       />
 
-      {/* ── 상단 드래그 핸들 (가운데 위) ── */}
+      {/* ── 상단 드래그 핸들 (가운데 위, 호버 시에만 표시) ── */}
       <div
         className="shrink-0 relative z-20 flex items-center justify-center"
         style={{
           WebkitAppRegion: 'drag',
           height: '28px',
-          cursor: 'grab',
+          cursor: showHandle ? 'grab' : 'default',
         } as React.CSSProperties}
       >
         <div
@@ -217,7 +232,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
             width: '48px',
             height: '6px',
             background: 'rgba(255, 255, 255, 0.2)',
-            transition: 'background 0.2s ease',
+            opacity: showHandle ? 1 : 0,
+            transition: 'opacity 0.2s ease',
           }}
         />
       </div>
