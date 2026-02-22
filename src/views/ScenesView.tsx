@@ -351,6 +351,8 @@ import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
 import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
+import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 // ─── 씬 카드 (요약 카드 — 클릭으로 상세 모달 열기) ──────────────
 
@@ -1163,6 +1165,7 @@ export function ScenesView() {
   const [showAddScene, setShowAddScene] = useState(false);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
+  const [treeOpen, setTreeOpen] = useState(true);
 
   // 파트 컨텍스트 메뉴
   const { menuPosition: partMenuPos, openMenu: openPartMenu, closeMenu: closePartMenu } = useContextMenu();
@@ -1636,8 +1639,44 @@ export function ScenesView() {
 
   const backLabel = previousView && previousView !== 'scenes' ? VIEW_LABELS[previousView] : null;
 
+  // 트리뷰에서 에피소드+파트 동시 선택
+  const handleTreeSelect = useCallback((epNum: number, partId: string | null) => {
+    setSelectedEpisode(epNum);
+    setSelectedPart(partId);
+  }, [setSelectedEpisode, setSelectedPart]);
+
+  // 트리뷰에서 에피소드 편집 열기
+  const handleTreeEpisodeEdit = useCallback((epNum: number) => {
+    setSelectedEpisode(epNum);
+    setEpMemo('');
+    setEpEditOpen(true);
+  }, [setSelectedEpisode]);
+
   return (
-    <div className="flex flex-col gap-4 h-full">
+    <div className="flex gap-3 h-full">
+      {/* ── 트리뷰 사이드바 ── */}
+      {treeOpen && (
+        <div className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-hidden flex flex-col">
+          <EpisodeTreeNav
+            episodes={episodes}
+            selectedDepartment={selectedDepartment}
+            selectedEpisode={selectedEpisode ?? currentEp?.episodeNumber ?? null}
+            selectedPart={selectedPart}
+            partMemos={partMemos}
+            onSelectEpisodePart={handleTreeSelect}
+            onAddEpisode={handleAddEpisode}
+            onAddPart={handleAddPart}
+            onPartContextMenu={(e, sheetName) => {
+              setPartMenuTarget(sheetName);
+              openPartMenu(e);
+            }}
+            onEpisodeEdit={handleTreeEpisodeEdit}
+          />
+        </div>
+      )}
+
+      {/* ── 메인 콘텐츠 영역 ── */}
+      <div className="flex-1 flex flex-col gap-4 min-w-0">
       {/* 뒤로가기 (인원별/에피소드 뷰에서 이동해온 경우) */}
       {backLabel && (
         <motion.button
@@ -1659,6 +1698,17 @@ export function ScenesView() {
 
       {/* 필터 바 */}
       <div className="flex flex-wrap items-center gap-3 bg-bg-card border border-bg-border rounded-xl p-3">
+        {/* 트리 사이드바 토글 */}
+        <button
+          onClick={() => setTreeOpen(!treeOpen)}
+          className="p-2 text-text-secondary/50 hover:text-text-primary rounded-lg hover:bg-bg-primary transition-colors"
+          title={treeOpen ? '트리 닫기' : '트리 열기'}
+        >
+          {treeOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+        </button>
+
+        <div className="w-px h-6 bg-bg-border" />
+
         {/* 부서 탭 */}
         <div className="flex bg-bg-primary rounded-lg p-0.5 border border-bg-border">
           {DEPARTMENTS.map((dept) => {
@@ -1682,78 +1732,94 @@ export function ScenesView() {
           })}
         </div>
 
-        <div className="w-px h-6 bg-bg-border" />
+        {/* 트리 닫힘 시에만 에피소드/파트 선택 UI 표시 */}
+        {!treeOpen && (
+          <>
+            <div className="w-px h-6 bg-bg-border" />
 
-        {/* 에피소드 선택 + 편집 */}
-        <div className="flex items-center gap-1">
-          <select
-            value={selectedEpisode ?? currentEp?.episodeNumber ?? ''}
-            onChange={(e) => setSelectedEpisode(Number(e.target.value))}
-            className="bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary font-medium"
-          >
-            {episodeOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          {currentEp && (
-            <button
-              onClick={() => { setEpMemo(''); setEpEditOpen(!epEditOpen); }}
-              className="p-1.5 text-text-secondary/40 hover:text-text-primary rounded transition-colors"
-              title="에피소드 관리"
-            >
-              <MoreVertical size={16} />
-            </button>
-          )}
-        </div>
-
-        {/* 에피소드 추가 */}
-        <button
-          onClick={handleAddEpisode}
-          className="px-3 py-2 bg-accent/20 text-accent text-sm font-medium rounded-lg hover:bg-accent/30 transition-colors"
-          title={`EP.${String(nextEpisodeNumber).padStart(2, '0')} 추가`}
-        >
-          + EP
-        </button>
-
-        {/* 파트 탭 */}
-        <div className="flex gap-1">
-          {parts.map((part) => {
-            const isActive = (selectedPart ?? (parts.length > 0 ? parts[0].partId : '')) === part.partId;
-            const memo = partMemos[part.sheetName];
-            return (
-              <button
-                key={part.partId}
-                onClick={() => setSelectedPart(part.partId)}
-                onContextMenu={(e) => {
-                  setPartMenuTarget(part.sheetName);
-                  openPartMenu(e);
-                }}
-                className={cn(
-                  'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-accent text-white shadow-sm shadow-accent/20'
-                    : 'bg-bg-primary text-text-secondary hover:text-text-primary border border-bg-border'
-                )}
-                title={memo ? `메모: ${memo}` : undefined}
+            {/* 에피소드 선택 + 편집 */}
+            <div className="flex items-center gap-1">
+              <select
+                value={selectedEpisode ?? currentEp?.episodeNumber ?? ''}
+                onChange={(e) => setSelectedEpisode(Number(e.target.value))}
+                className="bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary font-medium"
               >
-                {part.partId}파트
-                {memo && <span className="ml-1 text-xs italic opacity-70">({memo})</span>}
-              </button>
-            );
-          })}
-          {/* 파트 추가 */}
-          {currentEp && (
+                {episodeOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              {currentEp && (
+                <button
+                  onClick={() => { setEpMemo(''); setEpEditOpen(!epEditOpen); }}
+                  className="p-1.5 text-text-secondary/40 hover:text-text-primary rounded transition-colors"
+                  title="에피소드 관리"
+                >
+                  <MoreVertical size={16} />
+                </button>
+              )}
+            </div>
+
+            {/* 에피소드 추가 */}
             <button
-              onClick={handleAddPart}
-              className="px-2.5 py-1.5 bg-bg-primary text-text-secondary text-sm rounded-lg hover:text-accent hover:border-accent border border-bg-border transition-colors"
-              title={`${nextPartId}파트 추가`}
+              onClick={handleAddEpisode}
+              className="px-3 py-2 bg-accent/20 text-accent text-sm font-medium rounded-lg hover:bg-accent/30 transition-colors"
+              title={`EP.${String(nextEpisodeNumber).padStart(2, '0')} 추가`}
             >
-              +
+              + EP
             </button>
-          )}
-        </div>
+
+            {/* 파트 탭 */}
+            <div className="flex gap-1">
+              {parts.map((part) => {
+                const isActive = (selectedPart ?? (parts.length > 0 ? parts[0].partId : '')) === part.partId;
+                const memo = partMemos[part.sheetName];
+                return (
+                  <button
+                    key={part.partId}
+                    onClick={() => setSelectedPart(part.partId)}
+                    onContextMenu={(e) => {
+                      setPartMenuTarget(part.sheetName);
+                      openPartMenu(e);
+                    }}
+                    className={cn(
+                      'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-accent text-white shadow-sm shadow-accent/20'
+                        : 'bg-bg-primary text-text-secondary hover:text-text-primary border border-bg-border'
+                    )}
+                    title={memo ? `메모: ${memo}` : undefined}
+                  >
+                    {part.partId}파트
+                    {memo && <span className="ml-1 text-xs italic opacity-70">({memo})</span>}
+                  </button>
+                );
+              })}
+              {/* 파트 추가 */}
+              {currentEp && (
+                <button
+                  onClick={handleAddPart}
+                  className="px-2.5 py-1.5 bg-bg-primary text-text-secondary text-sm rounded-lg hover:text-accent hover:border-accent border border-bg-border transition-colors"
+                  title={`${nextPartId}파트 추가`}
+                >
+                  +
+                </button>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* 트리 열림 시: 현재 위치 표시 */}
+        {treeOpen && currentEp && (
+          <>
+            <div className="w-px h-6 bg-bg-border" />
+            <span className="text-sm font-medium text-text-primary">
+              {currentEp.title}
+              {currentPart && <span className="text-text-secondary ml-1">/ {currentPart.partId}파트</span>}
+            </span>
+          </>
+        )}
 
         {/* 담당자 필터 */}
         <div className="flex gap-1.5">
@@ -2434,6 +2500,7 @@ export function ScenesView() {
           </div>
         </div>
       )}
+      </div>{/* 메인 콘텐츠 영역 끝 */}
     </div>
   );
 }
