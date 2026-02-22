@@ -10,6 +10,7 @@ import {
 import { THEME_PRESETS, rgbToHex, hexToRgb, getPreset } from '@/themes';
 import type { ThemeColors } from '@/themes';
 import { cn } from '@/utils/cn';
+import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export function SettingsView() {
   const {
@@ -19,7 +20,7 @@ export function SettingsView() {
     setThemeId, setCustomThemeColors,
   } = useAppStore();
 
-  const [webAppUrl, setWebAppUrl] = useState(sheetsConfig?.webAppUrl ?? '');
+  const [webAppUrl, setWebAppUrl] = useState(sheetsConfig?.webAppUrl || DEFAULT_WEB_APP_URL || '');
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);

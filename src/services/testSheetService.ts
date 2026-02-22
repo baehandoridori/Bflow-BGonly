@@ -268,6 +268,49 @@ function makePart(epNum: number, partId: string, sceneCount: number, department:
   };
 }
 
+// ─── 로컬 메타데이터 (테스트 모드 + sheets fallback) ──────────
+
+const METADATA_FILE = 'metadata.json';
+
+interface MetadataStore {
+  [compositeKey: string]: { type: string; key: string; value: string; updatedAt: string };
+}
+
+async function loadMetadataStore(): Promise<MetadataStore> {
+  try {
+    const data = await window.electronAPI.readSettings(METADATA_FILE);
+    if (data && typeof data === 'object') return data as MetadataStore;
+  } catch { /* 파일 없음 — 빈 객체 */ }
+  return {};
+}
+
+async function saveMetadataStore(store: MetadataStore): Promise<void> {
+  try {
+    await window.electronAPI.writeSettings(METADATA_FILE, store);
+  } catch (err) {
+    console.error('[메타데이터] 로컬 저장 실패:', err);
+  }
+}
+
+/** 로컬 메타데이터 읽기 */
+export async function readLocalMetadata(
+  type: string, key: string
+): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
+  const store = await loadMetadataStore();
+  return store[`${type}::${key}`] ?? null;
+}
+
+/** 로컬 메타데이터 쓰기 */
+export async function writeLocalMetadata(
+  type: string, key: string, value: string
+): Promise<void> {
+  const store = await loadMetadataStore();
+  store[`${type}::${key}`] = { type, key, value, updatedAt: new Date().toISOString() };
+  await saveMetadataStore(store);
+}
+
+// ─── 샘플 데이터 생성기 ─────────────────────────────────
+
 function generateSampleData(): Episode[] {
   return [
     {

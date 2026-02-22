@@ -19,6 +19,7 @@ import { loadSheetsConfig, connectSheets, readAllFromSheets } from '@/services/s
 import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
 import { applyTheme, getPreset, DEFAULT_THEME_ID } from '@/themes';
+import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
   const { currentView, isTestMode, setTestMode, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors } = useAppStore();
@@ -131,10 +132,13 @@ export default function App() {
         }
 
         // 저장된 Sheets 설정이 있으면 자동 연결 시도 (모드 무관)
+        // 설정이 없으면 config.ts의 DEFAULT_WEB_APP_URL을 fallback으로 사용
         const config = await loadSheetsConfig();
-        if (config?.webAppUrl) {
-          setSheetsConfig(config);
-          const result = await connectSheets(config.webAppUrl);
+        const urlToConnect = config?.webAppUrl || DEFAULT_WEB_APP_URL;
+        if (urlToConnect) {
+          const effectiveConfig = config ?? { webAppUrl: urlToConnect };
+          setSheetsConfig(effectiveConfig);
+          const result = await connectSheets(urlToConnect);
           if (result.ok) {
             setSheetsConnected(true);
             console.log('[Sheets] 자동 연결 성공');

@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef } from 'react';
 import { LayoutDashboard, Film, List, Users, GanttChart, CalendarDays, Settings } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
@@ -21,20 +21,18 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
   const containerRef = useRef<HTMLButtonElement>(null);
   const [mousePos, setMousePos] = useState({ x: 0.5, y: 0.5 });
 
-  // 테마 accent 색상 가져오기
+  // 테마 accent 색상 — 매 렌더마다 직접 계산 (테마 변경 시 즉시 반영)
   const themeId = useAppStore((s) => s.themeId);
   const customThemeColors = useAppStore((s) => s.customThemeColors);
-  const { ac, acSub, acHex, acSubHex } = useMemo(() => {
-    const colors = customThemeColors ?? getPreset(themeId)?.colors;
-    const accent = colors?.accent ?? '108 92 231';
-    const accentSub = colors?.accentSub ?? '162 155 254';
-    return {
-      ac: accent.split(' ').join(', '),       // "108, 92, 231"
-      acSub: accentSub.split(' ').join(', '), // "162, 155, 254"
-      acHex: rgbToHex(accent),
-      acSubHex: rgbToHex(accentSub),
-    };
-  }, [themeId, customThemeColors]);
+  const colors = customThemeColors ?? getPreset(themeId)?.colors;
+  const accent = colors?.accent ?? '108 92 231';
+  const accentSub = colors?.accentSub ?? '162 155 254';
+  const ac = accent.split(' ').join(', ');
+  const acSub = accentSub.split(' ').join(', ');
+  const acHex = rgbToHex(accent);
+  const acSubHex = rgbToHex(accentSub);
+  // background-clip:text 그라디언트 re-paint 강제 키
+  const themeKey = `${themeId}-${accent}-${accentSub}`;
 
   const handleMouseMove = (e: React.MouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -126,15 +124,17 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
           }}
         />
 
-        {/* 텍스트 */}
+        {/* 텍스트 — key로 테마 변경 시 강제 re-mount하여 gradient repaint 보장 */}
         <div className="relative flex items-center justify-center w-full h-full">
           <span
+            key={themeKey}
             className="font-bold text-base tracking-tight"
             style={{
               background: `linear-gradient(135deg, ${acHex} 0%, ${acSubHex} 100%)`,
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               backgroundClip: 'text',
+              color: 'transparent',
               textShadow: 'none',
               filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))',
             }}

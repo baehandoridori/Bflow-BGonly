@@ -332,6 +332,8 @@ import {
   addTestScene,
   deleteTestScene,
   updateTestSceneField,
+  readLocalMetadata,
+  writeLocalMetadata,
 } from '@/services/testSheetService';
 import {
   updateSheetCell,
@@ -1234,14 +1236,15 @@ export function ScenesView() {
     ? (parts.find((p) => p.partId === selectedPart) ?? parts[0])
     : undefined;
 
-  // 파트 메모 로드
+  // 파트 메모 로드 (시트 연결 시 → sheets, 미연결 시 → 로컬)
   useEffect(() => {
-    if (!sheetsConnected) return;
     const loadPartMemos = async () => {
       const memos: Record<string, string> = {};
       for (const part of parts) {
         try {
-          const data = await readMetadataFromSheets('part-memo', part.sheetName);
+          const data = sheetsConnected
+            ? await readMetadataFromSheets('part-memo', part.sheetName)
+            : await readLocalMetadata('part-memo', part.sheetName);
           if (data?.value) memos[part.sheetName] = data.value;
         } catch { /* 무시 */ }
       }
@@ -1580,15 +1583,17 @@ export function ScenesView() {
     }
   };
 
-  // ─── 파트 메모 저장 ─────────────────
+  // ─── 파트 메모 저장 (시트 + 로컬 fallback) ─────────────────
   const handleSavePartMemo = async (sheetName: string, memo: string) => {
     setPartMemos((prev) => ({ ...prev, [sheetName]: memo }));
     setEditingPartMemo(null);
+    // 로컬에 항상 저장 (테스트 모드 및 시트 실패 시 fallback)
+    await writeLocalMetadata('part-memo', sheetName, memo);
     if (sheetsConnected) {
       try {
         await writeMetadataToSheets('part-memo', sheetName, memo);
       } catch (err) {
-        console.error('[파트 메모 저장 실패]', err);
+        console.warn('[파트 메모] 시트 저장 실패 → 로컬에 저장됨', err);
       }
     }
   };
@@ -1613,15 +1618,18 @@ export function ScenesView() {
     }
   };
 
-  // ─── 에피소드 메모 저장 ──────────────
+  // ─── 에피소드 메모 저장 (시트 + 로컬 fallback) ──────────────
   const handleSaveEpMemo = async (memo: string) => {
     if (!currentEp) return;
     setEpEditOpen(false);
+    const key = String(currentEp.episodeNumber);
+    // 로컬에 항상 저장
+    await writeLocalMetadata('episode-memo', key, memo);
     if (sheetsConnected) {
       try {
-        await writeMetadataToSheets('episode-memo', String(currentEp.episodeNumber), memo);
+        await writeMetadataToSheets('episode-memo', key, memo);
       } catch (err) {
-        console.error('[에피소드 메모 저장 실패]', err);
+        console.warn('[에피소드 메모] 시트 저장 실패 → 로컬에 저장됨', err);
       }
     }
   };
