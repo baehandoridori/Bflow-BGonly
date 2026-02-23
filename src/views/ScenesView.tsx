@@ -340,6 +340,8 @@ import {
   addTestPart,
   addTestScene,
   deleteTestScene,
+  deleteTestPart,
+  deleteTestEpisode,
   updateTestSceneField,
   readLocalMetadata,
   writeLocalMetadata,
@@ -1823,6 +1825,8 @@ export function ScenesView() {
       if (sheetsConnected) {
         await softDeletePartInSheets(sheetName);
         syncInBackground();
+      } else {
+        await deleteTestPart(useDataStore.getState().episodes, sheetName);
       }
     } catch (err) {
       alert(`파트 삭제 실패: ${err}`);
@@ -1859,6 +1863,8 @@ export function ScenesView() {
       if (sheetsConnected) {
         await softDeleteEpisodeInSheets(currentEp.episodeNumber);
         syncInBackground();
+      } else {
+        await deleteTestEpisode(useDataStore.getState().episodes, currentEp.episodeNumber);
       }
     } catch (err) {
       alert(`에피소드 삭제 실패: ${err}`);

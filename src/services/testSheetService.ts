@@ -154,6 +154,31 @@ export async function addTestScene(
   return updated;
 }
 
+/** 파트 삭제 (테스트) — 해당 sheetName의 파트를 제거하고 저장 */
+export async function deleteTestPart(
+  episodes: Episode[],
+  sheetName: string
+): Promise<Episode[]> {
+  const updated = episodes
+    .map((ep) => ({
+      ...ep,
+      parts: ep.parts.filter((p) => p.sheetName !== sheetName),
+    }))
+    .filter((ep) => ep.parts.length > 0);
+  await writeTestSheet(updated);
+  return updated;
+}
+
+/** 에피소드 삭제 (테스트) — 해당 에피소드를 제거하고 저장 */
+export async function deleteTestEpisode(
+  episodes: Episode[],
+  episodeNumber: number
+): Promise<Episode[]> {
+  const updated = episodes.filter((ep) => ep.episodeNumber !== episodeNumber);
+  await writeTestSheet(updated);
+  return updated;
+}
+
 /** 씬 삭제 (테스트) */
 export async function deleteTestScene(
   episodes: Episode[],
