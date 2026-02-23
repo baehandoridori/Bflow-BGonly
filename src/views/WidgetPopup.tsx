@@ -333,18 +333,23 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
 
   // ── 독 모드: 축소(72×72) → 호버 시 확장(380×320) ──
   if (isDocked) {
-    // 축소 상태: Acrylic 배경 + 아이콘
+    // 축소 상태: 위젯 이름 표시 (140×36 pill)
     if (!isDockHover) {
       return (
         <div
-          className="h-screen w-screen flex items-center justify-center cursor-pointer"
-          style={{ background: `rgba(12, 14, 22, ${baseTintAlpha})` }}
+          className="h-screen w-screen flex items-center justify-center cursor-pointer select-none"
+          style={{
+            background: `rgba(12, 14, 22, ${baseTintAlpha})`,
+            transition: 'background 0.15s ease',
+          }}
           onMouseEnter={handleDockMouseEnter}
           onClick={handleRestore}
         >
-          <div className="flex flex-col items-center gap-1">
-            <BarChart3 size={24} className="text-white/90" />
-            <span className="text-[8px] text-white/50 leading-none">위젯</span>
+          <div className="flex items-center gap-1.5 px-3">
+            <BarChart3 size={13} className="text-white/50 shrink-0" />
+            <span className="text-[11px] text-white/80 font-medium leading-none truncate">
+              {widgetMeta.label}
+            </span>
           </div>
         </div>
       );
@@ -353,7 +358,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     // 확장 상태: 원본 글래스 스타일 + 위젯 프리뷰
     return (
       <div
-        className="h-screen w-screen flex flex-col overflow-hidden"
+        className="h-screen w-screen flex flex-col overflow-hidden animate-dock-fadein"
         style={{
           background: `rgba(12, 14, 22, ${tintAlpha})`,
           cursor: 'pointer',

@@ -117,6 +117,15 @@ input[type="range"]::-webkit-slider-thumb {
   cursor: pointer;
 }
 
+/* 독 확장 페이드인 애니메이션 */
+@keyframes dock-fadein {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-dock-fadein {
+  animation: dock-fadein 0.15s ease-out;
+}
+
 /* 접근성: 모션 감소 설정 존중 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

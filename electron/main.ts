@@ -45,6 +45,39 @@ const widgetWindows = new Map<string, BrowserWindow>();
 const widgetOriginalBounds = new Map<string, Electron.Rectangle>();
 const animatingWidgets = new Set<string>();
 
+// ─── 독 스태킹 관리 ─────────────────────────────────────────
+const dockedWidgetIds: string[] = [];          // 독에 쌓인 순서
+let expandedDockWidgetId: string | null = null; // 현재 호버 확장 중인 위젯
+
+const DOCK_ITEM_W = 140;
+const DOCK_ITEM_H = 36;
+const DOCK_GAP = 6;
+const DOCK_MARGIN = 20;
+
+/** 독 스택에서 index 번째 위치 (아래→위로 쌓임) */
+function getDockPosition(index: number): { x: number; y: number; width: number; height: number } {
+  const display = screen.getPrimaryDisplay();
+  const wa = display.workArea;
+  return {
+    x: wa.x + wa.width - DOCK_ITEM_W - DOCK_MARGIN,
+    y: wa.y + wa.height - DOCK_ITEM_H - DOCK_MARGIN - index * (DOCK_ITEM_H + DOCK_GAP),
+    width: DOCK_ITEM_W,
+    height: DOCK_ITEM_H,
+  };
+}
+
+/** 모든 독 위젯을 스택 위치로 재배치 (확장 중인 위젯 제외) */
+function repositionAllDocked(excludeWidgetId?: string): void {
+  for (let i = 0; i < dockedWidgetIds.length; i++) {
+    const wid = dockedWidgetIds[i];
+    if (wid === excludeWidgetId) continue;
+    const win = widgetWindows.get(wid);
+    if (!win || win.isDestroyed()) continue;
+    const pos = getDockPosition(i);
+    win.setBounds(pos);
+  }
+}
+
 // ─── 위젯 윈도우 애니메이션 (ease-in-out cubic) ─────────────
 
 function animateBounds(
@@ -577,6 +610,13 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
   popupWin.on('closed', () => {
     widgetWindows.delete(widgetId);
     widgetOriginalBounds.delete(widgetId);
+    // 독 스택에서 제거 + 나머지 재배치
+    const dockIdx = dockedWidgetIds.indexOf(widgetId);
+    if (dockIdx >= 0) {
+      dockedWidgetIds.splice(dockIdx, 1);
+      if (expandedDockWidgetId === widgetId) expandedDockWidgetId = null;
+      repositionAllDocked();
+    }
   });
 
   // 포커스 변경 시 렌더러에 알림
@@ -672,66 +712,67 @@ ipcMain.handle('widget:minimize-to-dock', async (_event, widgetId: string) => {
     widgetOriginalBounds.set(widgetId, win.getBounds());
   }
 
-  const display = screen.getPrimaryDisplay();
-  const wa = display.workArea;
-  const dockSize = 72;
-  const margin = 20;
+  // 독 스택에 추가
+  if (!dockedWidgetIds.includes(widgetId)) {
+    dockedWidgetIds.push(widgetId);
+  }
+  const stackIndex = dockedWidgetIds.indexOf(widgetId);
+  const target = getDockPosition(stackIndex);
 
-  win.setMinimumSize(dockSize, dockSize);
+  win.setMinimumSize(DOCK_ITEM_W, DOCK_ITEM_H);
   win.setResizable(false);
   win.setSkipTaskbar(true);
   win.webContents.send('widget:dock-change', true);
 
-  await animateBounds(win, {
-    x: wa.x + wa.width - dockSize - margin,
-    y: wa.y + wa.height - dockSize - margin,
-    width: dockSize,
-    height: dockSize,
-  }, 300, widgetId);
+  // 기존 독 위젯들 재배치
+  repositionAllDocked(widgetId);
+
+  await animateBounds(win, target, 250, widgetId);
 });
 
 ipcMain.handle('widget:dock-expand', async (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
+  expandedDockWidgetId = widgetId;
+
   const display = screen.getPrimaryDisplay();
   const wa = display.workArea;
   const expandW = 380;
   const expandH = 320;
-  const margin = 20;
 
   await animateBounds(win, {
-    x: wa.x + wa.width - expandW - margin,
-    y: wa.y + wa.height - expandH - margin,
+    x: wa.x + wa.width - expandW - DOCK_MARGIN,
+    y: wa.y + wa.height - expandH - DOCK_MARGIN,
     width: expandW,
     height: expandH,
-  }, 250, widgetId);
+  }, 180, widgetId);
 });
 
 ipcMain.handle('widget:dock-collapse', async (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
-  const display = screen.getPrimaryDisplay();
-  const wa = display.workArea;
-  const dockSize = 72;
-  const margin = 20;
+  expandedDockWidgetId = null;
 
-  await animateBounds(win, {
-    x: wa.x + wa.width - dockSize - margin,
-    y: wa.y + wa.height - dockSize - margin,
-    width: dockSize,
-    height: dockSize,
-  }, 200, widgetId);
+  const stackIndex = dockedWidgetIds.indexOf(widgetId);
+  const target = stackIndex >= 0 ? getDockPosition(stackIndex) : getDockPosition(0);
+
+  await animateBounds(win, target, 150, widgetId);
 });
 
 ipcMain.handle('widget:restore-from-dock', async (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
+  // 독 스택에서 제거
+  const idx = dockedWidgetIds.indexOf(widgetId);
+  if (idx >= 0) dockedWidgetIds.splice(idx, 1);
+  if (expandedDockWidgetId === widgetId) expandedDockWidgetId = null;
+
   const original = widgetOriginalBounds.get(widgetId);
   if (original) {
-    await animateBounds(win, original, 300, widgetId);
+    await animateBounds(win, original, 250, widgetId);
     widgetOriginalBounds.delete(widgetId);
   }
 
@@ -739,6 +780,9 @@ ipcMain.handle('widget:restore-from-dock', async (_event, widgetId: string) => {
   win.setResizable(true);
   win.setSkipTaskbar(false);
   win.webContents.send('widget:dock-change', false);
+
+  // 나머지 독 위젯들 재배치
+  repositionAllDocked();
 });
 
 // ─── IPC 핸들러: 위젯 뒤 데스크톱 캡처 (글래스 블러용) ──────
