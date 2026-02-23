@@ -446,12 +446,15 @@ export function EpisodeView() {
       at: new Date().toLocaleDateString('ko-KR'),
       memo,
     });
+    // 아카이빙 시 에피소드 제목도 반드시 METADATA에 저장
+    const epTitle = episodeTitlesMap[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
 
     setArchiveDialogEpNum(null);
 
     try {
       if (sheetsConnected) {
         const { writeMetadataToSheets } = await import('@/services/sheetsService');
+        await writeMetadataToSheets('episode-title', String(epNum), epTitle);
         await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
         // AC_ 탭 리네임 시도 (미배포 시 실패해도 METADATA로 동작)
         try {
@@ -463,6 +466,7 @@ export function EpisodeView() {
       } else {
         const api = window.electronAPI;
         if (api) {
+          await api.writeSettings(`metadata_episode-title_${epNum}.json`, epTitle);
           await api.writeSettings(`metadata_archived-episode_${epNum}.json`, 'true');
           await api.writeSettings(`metadata_archive-info_${epNum}.json`, archiveInfo);
         }
@@ -470,7 +474,7 @@ export function EpisodeView() {
       deleteEpisodeOptimistic(epNum);
       setArchivedEpisodes((prev) => [
         ...prev,
-        { episodeNumber: epNum, title: ep.title, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
+        { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
       ]);
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {

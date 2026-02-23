@@ -1877,13 +1877,16 @@ export function ScenesView() {
       at: new Date().toLocaleDateString('ko-KR'),
       memo,
     });
+    // 아카이빙 시 에피소드 제목도 반드시 METADATA에 저장 (복원 시 표시용)
+    const epTitle = episodeTitles[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
 
     setArchiveDialogEpNum(null);
 
     try {
       if (sheetsConnected) {
         const { writeMetadataToSheets } = await import('@/services/sheetsService');
-        // 항상 METADATA에 아카이빙 정보 기록
+        // 제목 + 아카이빙 정보 METADATA에 기록
+        await writeMetadataToSheets('episode-title', String(epNum), epTitle);
         await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
         // AC_ 탭 리네임 시도 (미배포 시 실패해도 METADATA로 동작)
         try {
@@ -1893,13 +1896,14 @@ export function ScenesView() {
           console.warn('[아카이빙] 탭 리네임 실패 (Apps Script 재배포 필요):', tabErr);
         }
       } else {
+        await writeLocalMetadata('episode-title', String(epNum), epTitle);
         await writeLocalMetadata('archived-episode', String(epNum), 'true');
         await writeLocalMetadata('archive-info', String(epNum), archiveInfo);
       }
       deleteEpisodeOptimistic(epNum);
       setArchivedEpisodes((prev) => [
         ...prev,
-        { episodeNumber: epNum, title: ep.title, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
+        { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
       ]);
       if (selectedEpisode === epNum) {
         setSelectedEpisode(episodes.find((e) => e.episodeNumber !== epNum)?.episodeNumber ?? 1);

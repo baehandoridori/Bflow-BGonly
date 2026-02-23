@@ -215,19 +215,20 @@ function getWidgetComponent(id: string): React.ReactNode | undefined {
 }
 
 /* ── 부서별 레이아웃 ── */
+/* minW:minH 비율을 약 1:3 으로 맞춤 (컬럼 ~280px, 행 80px → 1col:3row ≈ 280:240 ≈ 1:1) */
 const DEPT_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 3, minW: 1, minH: 2 },
-  { i: 'stage-bars', x: 1, y: 0, w: 2, h: 3, minW: 2, minH: 2 },
-  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 3, minW: 1, minH: 2 },
+  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 3, minW: 1, minH: 3 },
+  { i: 'stage-bars', x: 1, y: 0, w: 2, h: 3, minW: 2, minH: 3 },
+  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 3, minW: 1, minH: 3 },
   { i: 'episode-summary', x: 0, y: 3, w: 3, h: 4, minW: 2, minH: 3 },
   { i: 'calendar', x: 3, y: 3, w: 1, h: 4, minW: 1, minH: 3 },
 ];
 
 /* ── 통합 레이아웃 ── */
 const ALL_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 3, minW: 1, minH: 2 },
-  { i: 'dept-comparison', x: 1, y: 0, w: 2, h: 3, minW: 2, minH: 2 },
-  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 3, minW: 1, minH: 2 },
+  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 3, minW: 1, minH: 3 },
+  { i: 'dept-comparison', x: 1, y: 0, w: 2, h: 3, minW: 2, minH: 3 },
+  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 3, minW: 1, minH: 3 },
   { i: 'episode-summary', x: 0, y: 3, w: 3, h: 4, minW: 2, minH: 3 },
   { i: 'calendar', x: 3, y: 3, w: 1, h: 4, minW: 1, minH: 3 },
 ];
@@ -381,7 +382,7 @@ export function Dashboard() {
   }, [isEditMode, setEditMode]);
 
   return (
-    <div className="relative flex flex-col gap-4 h-full overflow-hidden">
+    <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden">
       {/* 경량 플렉서스 배경 */}
       <DashboardPlexus />
 

@@ -1,7 +1,8 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Layers, BarChart3, CalendarDays } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Layers, BarChart3, CalendarDays, X, ExternalLink, Eye } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress, isFullyDone } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS, DEPARTMENTS } from '@/types';
 import type { Episode, Department } from '@/types';
@@ -356,12 +357,17 @@ function EventGanttChart() {
     return result;
   }, [dayLabels]);
 
-  // 오늘 위치로 자동 스크롤
+  // 오늘 위치로 자동 스크롤 (DOM 렌더링 후 안정적으로 실행)
   useEffect(() => {
     const todayIdx = dayLabels.findIndex((d) => d.isToday);
     if (todayIdx >= 0 && scrollRef.current) {
-      const scrollTo = todayIdx * DAY_WIDTH - scrollRef.current.clientWidth / 2;
-      scrollRef.current.scrollLeft = Math.max(0, scrollTo);
+      // LABEL_WIDTH(sticky) 보정 + 오늘을 뷰포트 중앙에 배치
+      const todayOffset = todayIdx * DAY_WIDTH;
+      const viewportWidth = scrollRef.current.clientWidth - LABEL_WIDTH;
+      const scrollTo = todayOffset - viewportWidth / 2;
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ left: Math.max(0, scrollTo) });
+      });
     }
   }, [dayLabels]);
 
@@ -375,148 +381,251 @@ function EventGanttChart() {
     );
   }
 
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const setView = useAppStore((s) => s.setView);
+  const setSelectedEpisode = useAppStore((s) => s.setSelectedEpisode);
+
+  // 연결된 에피소드/씬으로 이동
+  const handleNavigate = useCallback((ev: CalendarEvent) => {
+    if (ev.linkedEpisode != null) {
+      setSelectedEpisode(ev.linkedEpisode);
+      setView('scenes');
+    }
+  }, [setView, setSelectedEpisode]);
+
+  // D-day 계산
+  const calcDday = useCallback((endDate: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const end = parseDate(endDate);
+    const diff = Math.round((end.getTime() - today.getTime()) / 86400000);
+    if (diff === 0) return 'D-DAY';
+    if (diff > 0) return `D-${diff}`;
+    return `D+${Math.abs(diff)}`;
+  }, []);
+
   return (
-    <div ref={scrollRef} className="overflow-x-auto" style={{ scrollbarWidth: 'thin' }}>
-      <div style={{ width: LABEL_WIDTH + totalWidth, minWidth: '100%' }}>
-        {/* 월 라벨 헤더 */}
-        <div className="flex">
-          <div
-            className="shrink-0 bg-bg-card border-r border-bg-border/20 z-20"
-            style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
-          />
-          {months.map((m) => (
+    <div className="flex h-full">
+      {/* 간트 차트 메인 영역 */}
+      <div className={cn('flex-1 overflow-x-auto transition-all duration-200', selectedEvent && 'border-r border-bg-border/30')} ref={scrollRef} style={{ scrollbarWidth: 'thin' }}>
+        <div style={{ width: LABEL_WIDTH + totalWidth, minWidth: '100%' }}>
+          {/* 월 라벨 헤더 */}
+          <div className="flex">
             <div
-              key={m.label}
-              className="shrink-0 text-center text-[10px] font-bold text-accent border-r-2 border-accent/30 py-1"
-              style={{ width: m.span * DAY_WIDTH }}
-            >
-              {m.label}
-            </div>
-          ))}
-        </div>
-
-        {/* 날짜 헤더 */}
-        <div className="flex border-b border-bg-border/30">
-          <div
-            className="shrink-0 bg-bg-card border-r border-bg-border/20 px-3 py-1 text-[10px] font-semibold text-text-secondary/60 z-20"
-            style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
-          >
-            이벤트
-          </div>
-          {dayLabels.map((d) => (
-            <div
-              key={d.date}
-              className={cn(
-                'shrink-0 text-center text-[9px] py-1',
-                d.isToday ? 'bg-accent/15 text-accent font-bold' : d.isWeekend ? 'bg-bg-border/8 text-text-secondary/40' : 'text-text-secondary/50',
-                d.isFirstOfMonth && 'border-l-2 border-l-accent/40',
-                d.isMonday && !d.isFirstOfMonth && 'border-l border-l-bg-border/30',
-              )}
-              style={{ width: DAY_WIDTH }}
-              title={d.date}
-            >
-              {d.label}
-            </div>
-          ))}
-        </div>
-
-        {/* 이벤트 행 */}
-        {visibleEvents.map((ev, i) => {
-          const evStart = parseDate(ev.startDate < dateRange.start ? dateRange.start : ev.startDate);
-          const evEnd = parseDate(ev.endDate > dateRange.end ? dateRange.end : ev.endDate);
-          const offsetDays = Math.round((evStart.getTime() - rangeStartDate.getTime()) / 86400000);
-          const spanDays = Math.round((evEnd.getTime() - evStart.getTime()) / 86400000) + 1;
-          const hex = ev.color || EVENT_COLORS[0];
-
-          return (
-            <motion.div
-              key={ev.id}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.15, delay: i * 0.02 }}
-              className="flex border-b border-bg-border/10 hover:bg-bg-border/5 transition-colors"
-              style={{ height: 32 }}
-            >
-              {/* 왼쪽 라벨 (sticky) */}
+              className="shrink-0 bg-bg-card border-r border-bg-border/20 z-20"
+              style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
+            />
+            {months.map((m) => (
               <div
-                className="shrink-0 flex items-center gap-1.5 px-3 border-r border-bg-border/20 bg-bg-card cursor-pointer hover:bg-bg-border/10 z-20"
-                style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
-                onClick={() => setSelectedEvent(selectedEvent?.id === ev.id ? null : ev)}
+                key={m.label}
+                className="shrink-0 text-center text-[10px] font-bold text-accent border-r-2 border-accent/30 py-1"
+                style={{ width: m.span * DAY_WIDTH }}
               >
-                <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: hex }} />
-                <span className="text-[11px] text-text-primary truncate">{ev.title}</span>
+                {m.label}
               </div>
-              {/* 바 영역 */}
-              <div className="relative flex-1" style={{ width: totalWidth }}>
+            ))}
+          </div>
+
+          {/* 날짜 헤더 */}
+          <div className="flex border-b border-bg-border/30">
+            <div
+              className="shrink-0 bg-bg-card border-r border-bg-border/20 px-3 py-1 text-[10px] font-semibold text-text-secondary/60 z-20"
+              style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
+            >
+              이벤트
+            </div>
+            {dayLabels.map((d) => (
+              <div
+                key={d.date}
+                className={cn(
+                  'shrink-0 text-center text-[9px] py-1',
+                  d.isToday ? 'bg-accent/15 text-accent font-bold' : d.isWeekend ? 'bg-bg-border/8 text-text-secondary/40' : 'text-text-secondary/50',
+                  d.isFirstOfMonth && 'border-l-2 border-l-accent/40',
+                  d.isMonday && !d.isFirstOfMonth && 'border-l border-l-bg-border/30',
+                )}
+                style={{ width: DAY_WIDTH }}
+                title={d.date}
+              >
+                {d.label}
+              </div>
+            ))}
+          </div>
+
+          {/* 이벤트 행 */}
+          {visibleEvents.map((ev, i) => {
+            const evStart = parseDate(ev.startDate < dateRange.start ? dateRange.start : ev.startDate);
+            const evEnd = parseDate(ev.endDate > dateRange.end ? dateRange.end : ev.endDate);
+            const offsetDays = Math.round((evStart.getTime() - rangeStartDate.getTime()) / 86400000);
+            const spanDays = Math.round((evEnd.getTime() - evStart.getTime()) / 86400000) + 1;
+            const hex = ev.color || EVENT_COLORS[0];
+            const isSelected = selectedEvent?.id === ev.id;
+
+            return (
+              <motion.div
+                key={ev.id}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.15, delay: i * 0.02 }}
+                className={cn(
+                  'flex border-b border-bg-border/10 hover:bg-bg-border/5 transition-colors',
+                  isSelected && 'bg-accent/5',
+                )}
+                style={{ height: 32 }}
+              >
+                {/* 왼쪽 라벨 (sticky) */}
                 <div
-                  className="absolute top-1 h-5 rounded-md flex items-center px-1.5 text-[9px] font-medium truncate cursor-pointer hover:brightness-110"
-                  style={{
-                    left: offsetDays * DAY_WIDTH,
-                    width: Math.max(spanDays * DAY_WIDTH - 2, 4),
-                    background: `linear-gradient(135deg, ${hex}50 0%, ${hex}30 100%)`,
-                    border: `1px solid ${hex}60`,
-                    color: hex,
-                  }}
-                  onClick={() => setSelectedEvent(selectedEvent?.id === ev.id ? null : ev)}
-                  title={`${ev.title}: ${ev.startDate} → ${ev.endDate}`}
+                  className={cn(
+                    'shrink-0 flex items-center gap-1.5 px-3 border-r border-bg-border/20 bg-bg-card cursor-pointer hover:bg-bg-border/10 z-20',
+                    isSelected && 'bg-accent/10',
+                  )}
+                  style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
+                  onClick={() => setSelectedEvent(isSelected ? null : ev)}
                 >
-                  <span className="truncate">{ev.title}</span>
+                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: hex }} />
+                  <span className="text-[11px] text-text-primary truncate">{ev.title}</span>
                 </div>
-                {/* 행 안의 세로선 */}
-                {i === 0 && dayLabels.map((d, idx) => {
-                  const isToday = d.isToday;
-                  const isMonth = d.isFirstOfMonth;
-                  const isWeek = d.isMonday && !d.isFirstOfMonth;
-                  if (!isToday && !isMonth && !isWeek) return null;
-                  return (
-                    <div
-                      key={`vl-${d.date}`}
-                      className="absolute pointer-events-none"
-                      style={{
-                        left: idx * DAY_WIDTH,
-                        top: 0,
-                        height: visibleEvents.length * 32,
-                        width: isToday ? 2 : isMonth ? 2 : 1,
-                        backgroundColor: isToday
-                          ? 'rgb(var(--color-accent))'
-                          : isMonth
-                            ? 'rgba(var(--color-accent), 0.35)'
-                            : 'rgba(var(--color-bg-border), 0.25)',
-                        zIndex: isToday ? 5 : isMonth ? 3 : 1,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            </motion.div>
-          );
-        })}
+                {/* 바 영역 */}
+                <div className="relative flex-1" style={{ width: totalWidth }}>
+                  <div
+                    className="absolute top-1 h-5 rounded-md flex items-center px-1.5 text-[9px] font-medium truncate cursor-pointer hover:brightness-110"
+                    style={{
+                      left: offsetDays * DAY_WIDTH,
+                      width: Math.max(spanDays * DAY_WIDTH - 2, 4),
+                      background: `linear-gradient(135deg, ${hex}50 0%, ${hex}30 100%)`,
+                      border: `1px solid ${hex}60`,
+                      color: hex,
+                    }}
+                    onClick={() => setSelectedEvent(isSelected ? null : ev)}
+                    title={`${ev.title}: ${ev.startDate} → ${ev.endDate}`}
+                  >
+                    <span className="truncate">{ev.title}</span>
+                  </div>
+                  {/* 행 안의 세로선 */}
+                  {i === 0 && dayLabels.map((d, idx) => {
+                    const isToday = d.isToday;
+                    const isMonth = d.isFirstOfMonth;
+                    const isWeek = d.isMonday && !d.isFirstOfMonth;
+                    if (!isToday && !isMonth && !isWeek) return null;
+                    return (
+                      <div
+                        key={`vl-${d.date}`}
+                        className="absolute pointer-events-none"
+                        style={{
+                          left: idx * DAY_WIDTH,
+                          top: 0,
+                          height: visibleEvents.length * 32,
+                          width: isToday ? 2 : isMonth ? 2 : 1,
+                          backgroundColor: isToday
+                            ? 'rgb(var(--color-accent))'
+                            : isMonth
+                              ? 'rgba(var(--color-accent), 0.35)'
+                              : 'rgba(var(--color-bg-border), 0.25)',
+                          zIndex: isToday ? 5 : isMonth ? 3 : 1,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
       </div>
-      {/* 선택된 이벤트 상세 */}
-      {selectedEvent && (
-        <div className="border-t border-bg-border/30 px-4 py-3 bg-bg-primary/30">
-          <div className="flex items-start gap-3">
-            <div className="w-3 h-3 rounded-full shrink-0 mt-0.5" style={{ backgroundColor: selectedEvent.color }} />
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-text-primary">{selectedEvent.title}</div>
-              <div className="text-[11px] text-text-secondary/60 mt-0.5">
-                {selectedEvent.startDate} → {selectedEvent.endDate}
-                {selectedEvent.linkedEpisode != null && ` · EP${String(selectedEvent.linkedEpisode).padStart(2, '0')}`}
-                {selectedEvent.linkedPart && ` ${selectedEvent.linkedPart}파트`}
+
+      {/* 사이드 패널 — 선택된 이벤트 상세 */}
+      <AnimatePresence>
+        {selectedEvent && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 280, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="shrink-0 overflow-hidden"
+          >
+            <div className="w-[280px] h-full flex flex-col bg-bg-primary/40 backdrop-blur-sm">
+              {/* 헤더 */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border/30">
+                <span className="text-xs font-semibold text-text-secondary/60">이벤트 상세</span>
+                <button
+                  onClick={() => setSelectedEvent(null)}
+                  className="p-1 rounded-md hover:bg-bg-border/20 text-text-secondary/40 hover:text-text-secondary transition-colors cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
               </div>
-              {selectedEvent.memo && (
-                <div className="text-[11px] text-text-secondary/50 mt-1">{selectedEvent.memo}</div>
+
+              {/* 상세 내용 */}
+              <div className="flex-1 overflow-auto p-4 space-y-4">
+                {/* 제목 + 색상 */}
+                <div className="flex items-start gap-3">
+                  <div className="w-3 h-3 rounded-full shrink-0 mt-1" style={{ backgroundColor: selectedEvent.color }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-text-primary leading-tight">{selectedEvent.title}</div>
+                    <span
+                      className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                      style={{ backgroundColor: `${selectedEvent.color}20`, color: selectedEvent.color }}
+                    >
+                      {selectedEvent.type === 'custom' ? '일반' : selectedEvent.type.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 기간 */}
+                <div className="space-y-1.5">
+                  <div className="text-[10px] font-semibold text-text-secondary/40 uppercase tracking-wider">기간</div>
+                  <div className="text-xs text-text-primary">
+                    {selectedEvent.startDate} → {selectedEvent.endDate}
+                  </div>
+                  <div className="text-[11px] font-medium" style={{ color: selectedEvent.color }}>
+                    {calcDday(selectedEvent.endDate)}
+                  </div>
+                </div>
+
+                {/* 연결된 항목 */}
+                {selectedEvent.linkedEpisode != null && (
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-semibold text-text-secondary/40 uppercase tracking-wider">연결된 항목</div>
+                    <div className="text-xs text-text-primary">
+                      {episodeTitles[selectedEvent.linkedEpisode] || `EP.${String(selectedEvent.linkedEpisode).padStart(2, '0')}`}
+                      {selectedEvent.linkedPart && <span className="text-text-secondary/60"> · {selectedEvent.linkedPart}파트</span>}
+                      {selectedEvent.linkedSceneId && <span className="text-text-secondary/60"> · #{selectedEvent.linkedSceneId}</span>}
+                    </div>
+                  </div>
+                )}
+
+                {/* 메모 */}
+                {selectedEvent.memo && (
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-semibold text-text-secondary/40 uppercase tracking-wider">메모</div>
+                    <div className="text-xs text-text-secondary/80 whitespace-pre-wrap leading-relaxed">{selectedEvent.memo}</div>
+                  </div>
+                )}
+
+                {/* 생성자 */}
+                {selectedEvent.createdBy && (
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-semibold text-text-secondary/40 uppercase tracking-wider">생성자</div>
+                    <div className="text-xs text-text-secondary/60">{selectedEvent.createdBy}</div>
+                  </div>
+                )}
+              </div>
+
+              {/* 하단 액션 버튼 */}
+              {selectedEvent.linkedEpisode != null && (
+                <div className="border-t border-bg-border/30 p-3 space-y-2">
+                  <button
+                    onClick={() => handleNavigate(selectedEvent)}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-accent/10 text-accent hover:bg-accent/20 transition-colors cursor-pointer"
+                  >
+                    <Eye size={13} />
+                    씬 확인하기
+                  </button>
+                </div>
               )}
             </div>
-            <span
-              className="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
-              style={{ backgroundColor: `${selectedEvent.color}20`, color: selectedEvent.color }}
-            >
-              {selectedEvent.type === 'custom' ? '일반' : selectedEvent.type.toUpperCase()}
-            </span>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
