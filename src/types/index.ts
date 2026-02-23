@@ -248,6 +248,10 @@ export interface ElectronAPI {
   widgetGetSize?: (widgetId: string) => Promise<{ width: number; height: number } | null>;
   widgetCaptureBehind?: (widgetId: string) => Promise<string | null>;
   onWidgetFocusChange?: (callback: (focused: boolean) => void) => () => void;
+  widgetSetAlwaysOnTop?: (widgetId: string, aot: boolean) => Promise<void>;
+  widgetMinimizeToDock?: (widgetId: string) => Promise<void>;
+  widgetRestoreFromDock?: (widgetId: string) => Promise<void>;
+  onWidgetDockChange?: (callback: (isDocked: boolean) => void) => () => void;
 }
 
 declare global {

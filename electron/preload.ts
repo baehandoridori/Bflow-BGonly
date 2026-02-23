@@ -100,4 +100,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('widget:focus-change', handler);
     return () => { ipcRenderer.removeListener('widget:focus-change', handler); };
   },
+
+  // 위젯 AOT 토글
+  widgetSetAlwaysOnTop: (widgetId: string, aot: boolean) =>
+    ipcRenderer.invoke('widget:set-aot', widgetId, aot),
+
+  // 위젯 독 모드 (최소화 → 플로팅 아이콘)
+  widgetMinimizeToDock: (widgetId: string) =>
+    ipcRenderer.invoke('widget:minimize-to-dock', widgetId),
+  widgetRestoreFromDock: (widgetId: string) =>
+    ipcRenderer.invoke('widget:restore-from-dock', widgetId),
+  onWidgetDockChange: (callback: (isDocked: boolean) => void) => {
+    const handler = (_event: unknown, isDocked: boolean) => callback(isDocked);
+    ipcRenderer.on('widget:dock-change', handler);
+    return () => { ipcRenderer.removeListener('widget:dock-change', handler); };
+  },
 });

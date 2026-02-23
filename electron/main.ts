@@ -42,6 +42,7 @@ const isTestMode = process.argv.includes('--test-mode') || process.env.TEST_MODE
 
 let mainWindow: BrowserWindow | null = null;
 const widgetWindows = new Map<string, BrowserWindow>();
+const widgetOriginalBounds = new Map<string, Electron.Rectangle>();
 
 // ─── 파일 감시 (실시간 동기화) ────────────────────────────────
 
@@ -502,14 +503,13 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     minWidth: 280,
     minHeight: 200,
     frame: false,
-    transparent: false,
+    transparent: true,
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: false,
     title: widgetTitle,
-    backgroundColor: '#1a1a2e',  // Acrylic 비활성화 시에도 보이도록 (Ctrl+Shift+S 캡처 등)
-    hasShadow: true,
-    backgroundMaterial: 'acrylic',
+    backgroundColor: '#00000000',
+    hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -528,9 +528,10 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
   widgetWindows.set(widgetId, popupWin);
   popupWin.on('closed', () => {
     widgetWindows.delete(widgetId);
+    widgetOriginalBounds.delete(widgetId);
   });
 
-  // 포커스 변경 시 렌더러에 알림 (Acrylic 회색 fallback 대응)
+  // 포커스 변경 시 렌더러에 알림
   popupWin.on('blur', () => {
     if (!popupWin.isDestroyed()) {
       popupWin.webContents.send('widget:focus-change', false);
@@ -540,6 +541,29 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     if (!popupWin.isDestroyed()) {
       popupWin.webContents.send('widget:focus-change', true);
     }
+  });
+
+  // 네이티브 최소화 인터셉트 → 독 모드로 전환
+  popupWin.on('minimize', () => {
+    if (popupWin.isDestroyed()) return;
+    popupWin.restore();
+    // 독 모드 진입
+    if (!widgetOriginalBounds.has(widgetId)) {
+      widgetOriginalBounds.set(widgetId, popupWin.getBounds());
+    }
+    const display = screen.getPrimaryDisplay();
+    const wa = display.workArea;
+    const dockW = 420;
+    const dockH = 360;
+    popupWin.setBounds({
+      x: wa.x + wa.width - dockW - 12,
+      y: wa.y + wa.height - dockH - 12,
+      width: dockW,
+      height: dockH,
+    });
+    popupWin.setSkipTaskbar(true);
+    popupWin.setResizable(false);
+    popupWin.webContents.send('widget:dock-change', true);
   });
 
   return { ok: true };
@@ -574,6 +598,49 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
   if (win && !win.isDestroyed()) {
     win.close();
   }
+});
+
+ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
+  const win = widgetWindows.get(widgetId);
+  if (win && !win.isDestroyed()) {
+    win.setAlwaysOnTop(aot);
+  }
+});
+
+ipcMain.handle('widget:minimize-to-dock', (_event, widgetId: string) => {
+  const win = widgetWindows.get(widgetId);
+  if (!win || win.isDestroyed()) return;
+
+  if (!widgetOriginalBounds.has(widgetId)) {
+    widgetOriginalBounds.set(widgetId, win.getBounds());
+  }
+  const display = screen.getPrimaryDisplay();
+  const wa = display.workArea;
+  const dockW = 420;
+  const dockH = 360;
+  win.setBounds({
+    x: wa.x + wa.width - dockW - 12,
+    y: wa.y + wa.height - dockH - 12,
+    width: dockW,
+    height: dockH,
+  });
+  win.setSkipTaskbar(true);
+  win.setResizable(false);
+  win.webContents.send('widget:dock-change', true);
+});
+
+ipcMain.handle('widget:restore-from-dock', (_event, widgetId: string) => {
+  const win = widgetWindows.get(widgetId);
+  if (!win || win.isDestroyed()) return;
+
+  const original = widgetOriginalBounds.get(widgetId);
+  if (original) {
+    win.setBounds(original);
+    widgetOriginalBounds.delete(widgetId);
+  }
+  win.setSkipTaskbar(false);
+  win.setResizable(true);
+  win.webContents.send('widget:dock-change', false);
 });
 
 // ─── IPC 핸들러: 위젯 뒤 데스크톱 캡처 (글래스 블러용) ──────

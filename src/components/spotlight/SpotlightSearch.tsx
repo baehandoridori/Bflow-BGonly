@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Film, User, FileText, Zap, Hash, Layers, CalendarDays } from 'lucide-react';
+import { Search, Film, User, FileText, Zap, Hash, Layers, CalendarDays, StickyNote } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress } from '@/utils/calcStats';
@@ -8,6 +8,9 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
 import { getEvents } from '@/services/calendarService';
+import { checkConnection } from '@/services/sheetsService';
+import { readMetadataFromSheets } from '@/services/sheetsService';
+import { readLocalMetadata } from '@/services/testSheetService';
 import type { CalendarEvent } from '@/types/calendar';
 
 /* ────────────────────────────────────────────────
@@ -108,6 +111,26 @@ export function SpotlightSearch() {
   const epName = (ep: Episode) => episodeTitles[ep.episodeNumber] || ep.title;
   const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
   useEffect(() => { getEvents().then(setCalEvents); }, []);
+  const episodeMemos = useDataStore((s) => s.episodeMemos);
+  const [partMemos, setPartMemos] = useState<Record<string, string>>({});
+  // 파트 메모 로드
+  useEffect(() => {
+    (async () => {
+      const memos: Record<string, string> = {};
+      const connected = await checkConnection().catch(() => false);
+      for (const ep of episodes) {
+        for (const part of ep.parts) {
+          try {
+            const data = connected
+              ? await readMetadataFromSheets('part-memo', part.sheetName)
+              : await readLocalMetadata('part-memo', part.sheetName);
+            if (data?.value) memos[part.sheetName] = data.value;
+          } catch { /* 무시 */ }
+        }
+      }
+      if (Object.keys(memos).length > 0) setPartMemos(memos);
+    })();
+  }, [episodes]);
   const {
     setView,
     setSelectedEpisode,
@@ -299,6 +322,53 @@ export function SpotlightSearch() {
             });
           }
         }
+
+        // ── 파트 메모 검색 ──
+        const partMemoText = partMemos[part.sheetName];
+        if (partMemoText) {
+          const pmScore = fuzzyScore(q, partMemoText);
+          if (pmScore > 0) {
+            items.push({
+              id: `partmemo-${part.sheetName}`,
+              category: 'memo',
+              title: partMemoText.length > 50 ? partMemoText.slice(0, 50) + '...' : partMemoText,
+              subtitle: `파트 메모 · ${epName(ep)} ${part.partId}파트 (${deptLabel})`,
+              icon: <StickyNote size={16} />,
+              score: pmScore,
+              action: () => {
+                resetAndNavigate({
+                  episode: ep.episodeNumber,
+                  part: part.partId,
+                  department: part.department,
+                });
+                close();
+              },
+            });
+          }
+        }
+      }
+
+      // ── 에피소드 메모 검색 ──
+      const epMemoText = episodeMemos[ep.episodeNumber];
+      if (epMemoText) {
+        const emScore = fuzzyScore(q, epMemoText);
+        if (emScore > 0) {
+          items.push({
+            id: `epmemo-${ep.episodeNumber}`,
+            category: 'memo',
+            title: epMemoText.length > 50 ? epMemoText.slice(0, 50) + '...' : epMemoText,
+            subtitle: `에피소드 메모 · ${epName(ep)}`,
+            icon: <StickyNote size={16} />,
+            score: emScore,
+            action: () => {
+              resetAndNavigate({
+                episode: ep.episodeNumber,
+                toastMsg: `${epName(ep)} 메모`,
+              });
+              close();
+            },
+          });
+        }
       }
     }
 
@@ -398,7 +468,7 @@ export function SpotlightSearch() {
     // 점수 내림차순 정렬, 상위 20개
     items.sort((a, b) => b.score - a.score);
     return items.slice(0, 20);
-  }, [query, episodes, calEvents, resetAndNavigate, setView, setToast]);
+  }, [query, episodes, calEvents, episodeMemos, partMemos, resetAndNavigate, setView, setToast]);
 
   /* ── 카테고리별 그룹핑 ── */
   const grouped = useMemo(() => {
