@@ -1,8 +1,16 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { ChevronRight, Plus, FolderOpen, Folder, MoreVertical } from 'lucide-react';
+import { ChevronRight, Plus, FolderOpen, Folder, MoreVertical, Archive, RotateCcw } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { Episode, Department } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
+
+export interface ArchivedEpisodeInfo {
+  episodeNumber: number;
+  title: string;
+  partCount: number;
+  archivedBy?: string;
+  archivedAt?: string;
+}
 
 interface EpisodeTreeNavProps {
   episodes: Episode[];
@@ -12,11 +20,14 @@ interface EpisodeTreeNavProps {
   partMemos: Record<string, string>;
   episodeTitles: Record<number, string>;   // episodeNumber → custom title
   episodeMemos: Record<number, string>;    // episodeNumber → memo
+  archivedEpisodes: ArchivedEpisodeInfo[];
   onSelectEpisodePart: (epNum: number, partId: string | null) => void;
   onAddEpisode: () => void;
   onAddPart: () => void;
   onPartContextMenu: (e: React.MouseEvent, sheetName: string) => void;
   onEpisodeEdit: (epNum: number) => void;
+  onArchiveEpisode: (epNum: number) => void;
+  onUnarchiveEpisode: (epNum: number) => void;
 }
 
 /** 씬 배열 → 전체 진행률(%) */
@@ -96,11 +107,14 @@ export function EpisodeTreeNav({
   partMemos,
   episodeTitles,
   episodeMemos,
+  archivedEpisodes,
   onSelectEpisodePart,
   onAddEpisode,
   onAddPart,
   onPartContextMenu,
   onEpisodeEdit,
+  onArchiveEpisode,
+  onUnarchiveEpisode,
 }: EpisodeTreeNavProps) {
   // 에피소드별 열림/닫힘 상태
   const [expandedEps, setExpandedEps] = useState<Set<number>>(() => {
@@ -309,13 +323,99 @@ export function EpisodeTreeNav({
                         <span>파트 추가</span>
                       </button>
                     )}
+
+                    {/* 완료 에피소드 아카이빙 버튼 */}
+                    {isEpSelected && epProgress >= 100 && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onArchiveEpisode(ep.episodeNumber); }}
+                        className="flex items-center gap-1 px-2 py-1 mx-1 text-[10px] text-amber-400/60 hover:text-amber-400 rounded transition-colors"
+                        title="아카이빙 (완료된 에피소드 보관)"
+                      >
+                        <Archive size={10} />
+                        <span>아카이빙</span>
+                      </button>
+                    )}
                   </div>
                 </CollapsibleSection>
               </div>
             );
           })
         )}
+
+        {/* ── 아카이빙 섹션 (맨 하단 고정) ── */}
+        {archivedEpisodes.length > 0 && (
+          <div className="mt-3 pt-2 border-t border-bg-border/30">
+            <ArchivedSection
+              archivedEpisodes={archivedEpisodes}
+              episodeTitles={episodeTitles}
+              onUnarchive={onUnarchiveEpisode}
+            />
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+/* ── 아카이빙된 에피소드 섹션 ── */
+function ArchivedSection({
+  archivedEpisodes,
+  episodeTitles,
+  onUnarchive,
+}: {
+  archivedEpisodes: ArchivedEpisodeInfo[];
+  episodeTitles: Record<number, string>;
+  onUnarchive: (epNum: number) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-1.5 px-2 py-1.5 mx-1 w-[calc(100%-8px)] rounded-lg text-text-secondary/50 hover:text-text-secondary hover:bg-bg-primary/50 transition-colors"
+      >
+        <ChevronRight
+          size={12}
+          strokeWidth={2}
+          className="transition-transform duration-200 ease-in-out shrink-0"
+          style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+        />
+        <Archive size={12} className="shrink-0 text-amber-500/50" />
+        <span className="text-[11px] font-medium">아카이빙</span>
+        <span className="text-[10px] tabular-nums ml-auto">{archivedEpisodes.length}</span>
+      </button>
+
+      <CollapsibleSection isOpen={isOpen}>
+        <div className="ml-4 pl-2 border-l border-amber-500/20">
+          {archivedEpisodes.map((archived) => {
+            const displayName = episodeTitles[archived.episodeNumber] || archived.title;
+            return (
+              <div
+                key={archived.episodeNumber}
+                className="group/arc flex items-center gap-1.5 px-2 py-1.5 mx-1 rounded-md text-text-secondary/40"
+              >
+                <Folder size={12} className="shrink-0 text-amber-500/30" />
+                <div className="flex flex-col flex-1 min-w-0">
+                  <span className="text-[11px] font-medium truncate leading-tight">{displayName}</span>
+                  <span className="text-[9px] text-text-secondary/30 leading-tight">
+                    {archived.partCount}개 파트
+                    {archived.archivedBy && ` · ${archived.archivedBy}`}
+                    {archived.archivedAt && ` · ${archived.archivedAt}`}
+                  </span>
+                </div>
+                <button
+                  onClick={() => onUnarchive(archived.episodeNumber)}
+                  className="p-0.5 opacity-0 group-hover/arc:opacity-100 text-text-secondary/30 hover:text-accent transition-opacity shrink-0"
+                  title="아카이빙 해제 (복원)"
+                >
+                  <RotateCcw size={11} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </CollapsibleSection>
     </div>
   );
 }

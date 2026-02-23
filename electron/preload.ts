@@ -71,6 +71,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsSoftDeleteEpisode: (episodeNumber: number) =>
     ipcRenderer.invoke('sheets:soft-delete-episode', episodeNumber),
 
+  // 아카이빙
+  sheetsReadArchived: () =>
+    ipcRenderer.invoke('sheets:read-archived'),
+  sheetsArchiveEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('sheets:archive-episode', episodeNumber),
+  sheetsUnarchiveEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('sheets:unarchive-episode', episodeNumber),
+
   // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
   sheetsNotifyChange: () => ipcRenderer.invoke('sheets:notify-change'),
 

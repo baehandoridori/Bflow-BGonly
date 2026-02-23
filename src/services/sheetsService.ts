@@ -123,6 +123,22 @@ export async function softDeleteEpisodeInSheets(episodeNumber: number): Promise<
   await assertOk(window.electronAPI.sheetsSoftDeleteEpisode(episodeNumber), '에피소드 삭제 실패');
 }
 
+// ─── 아카이빙 ────────────────────────────────
+
+export async function readArchivedFromSheets(): Promise<{ episodeNumber: number; title: string; partCount: number }[]> {
+  const result = await window.electronAPI.sheetsReadArchived();
+  if (!result.ok) throw new Error(result.error ?? '아카이빙 목록 읽기 실패');
+  return result.data ?? [];
+}
+
+export async function archiveEpisodeInSheets(episodeNumber: number): Promise<void> {
+  await assertOk(window.electronAPI.sheetsArchiveEpisode(episodeNumber), '에피소드 아카이빙 실패');
+}
+
+export async function unarchiveEpisodeInSheets(episodeNumber: number): Promise<void> {
+  await assertOk(window.electronAPI.sheetsUnarchiveEpisode(episodeNumber), '에피소드 복원 실패');
+}
+
 // ─── 이미지 업로드 (Drive) ───────────────────
 
 export async function uploadImageToSheets(

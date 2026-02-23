@@ -234,6 +234,10 @@ export interface ElectronAPI {
   sheetsWriteMetadata: (type: string, key: string, value: string) => Promise<SheetsUpdateResult>;
   sheetsSoftDeletePart: (sheetName: string) => Promise<SheetsUpdateResult>;
   sheetsSoftDeleteEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
+  // 아카이빙
+  sheetsReadArchived: () => Promise<{ ok: boolean; data: { episodeNumber: number; title: string; partCount: number }[]; error?: string }>;
+  sheetsArchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
+  sheetsUnarchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 데이터 변경 브로드캐스트
   sheetsNotifyChange?: () => Promise<{ ok: boolean }>;
   // 위젯 팝업 윈도우
