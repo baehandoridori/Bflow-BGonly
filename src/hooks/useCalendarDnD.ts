@@ -65,6 +65,7 @@ export function useCalendarDnD(
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [preview, setPreview] = useState<DragPreview | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const previewRef = useRef<DragPreview | null>(null);
 
   const startDrag = useCallback((
     eventId: string,
@@ -84,11 +85,9 @@ export function useCalendarDnD(
     };
     dragRef.current = state;
     setDragState(state);
-    setPreview({
-      eventId,
-      newStartDate: startDate,
-      newEndDate: endDate,
-    });
+    const p = { eventId, newStartDate: startDate, newEndDate: endDate };
+    previewRef.current = p;
+    setPreview(p);
   }, []);
 
   useEffect(() => {
@@ -104,7 +103,7 @@ export function useCalendarDnD(
       if (!hoverDate) return;
 
       const deltaDays = daysBetweenDates(state.anchorDate, hoverDate);
-      if (deltaDays === 0 && preview) {
+      if (deltaDays === 0 && previewRef.current) {
         // 같은 날짜이면 프리뷰 변경 불필요
         return;
       }
@@ -128,12 +127,14 @@ export function useCalendarDnD(
         if (newEnd < newStart) newEnd = newStart;
       }
 
-      setPreview({ eventId: state.eventId, newStartDate: newStart, newEndDate: newEnd });
+      const p = { eventId: state.eventId, newStartDate: newStart, newEndDate: newEnd };
+      previewRef.current = p;
+      setPreview(p);
     };
 
     const handleMouseUp = () => {
       const state = dragRef.current;
-      const currentPreview = preview;
+      const currentPreview = previewRef.current;
       if (state && currentPreview) {
         const changed =
           currentPreview.newStartDate !== state.originalStartDate ||
@@ -149,6 +150,7 @@ export function useCalendarDnD(
       }
 
       dragRef.current = null;
+      previewRef.current = null;
       setDragState(null);
       setPreview(null);
     };
@@ -166,7 +168,7 @@ export function useCalendarDnD(
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
     };
-  }, [dragState, preview, onEventMove, onEventResize]);
+  }, [dragState, onEventMove, onEventResize]);
 
   return {
     isDragging: !!dragState,
