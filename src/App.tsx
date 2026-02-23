@@ -15,8 +15,8 @@ import { LoginScreen } from '@/components/auth/LoginScreen';
 import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
-import { readTestSheet } from '@/services/testSheetService';
-import { loadSheetsConfig, connectSheets, readAllFromSheets } from '@/services/sheetsService';
+import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
+import { loadSheetsConfig, connectSheets, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
 import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
 import { applyTheme, getPreset, DEFAULT_THEME_ID } from '@/themes';
@@ -24,7 +24,7 @@ import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
   const { currentView, isTestMode, setTestMode, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors } = useAppStore();
-  const { setEpisodes, setSyncing, setLastSyncTime, setSyncError } = useDataStore();
+  const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
     authReady, setAuthReady,
@@ -65,14 +65,35 @@ export default function App() {
     try {
       let episodes;
       if (sheetsConnected) {
-        // 시트 연결됨: Apps Script 웹 앱에서 읽기
         episodes = await readAllFromSheets();
       } else {
-        // 시트 미연결: 로컬 JSON 파일 (테스트용)
         episodes = await readTestSheet();
       }
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
+
+      // 에피소드 제목/메모를 병렬로 일괄 로드 (초기 렌더 딜레이 제거)
+      const readMeta = sheetsConnected ? readMetadataFromSheets : readLocalMetadata;
+      const titlePromises = episodes.map((ep) =>
+        readMeta('episode-title', String(ep.episodeNumber))
+          .then((d) => [ep.episodeNumber, d?.value] as const)
+          .catch(() => [ep.episodeNumber, undefined] as const),
+      );
+      const memoPromises = episodes.map((ep) =>
+        readMeta('episode-memo', String(ep.episodeNumber))
+          .then((d) => [ep.episodeNumber, d?.value] as const)
+          .catch(() => [ep.episodeNumber, undefined] as const),
+      );
+      const [titleResults, memoResults] = await Promise.all([
+        Promise.all(titlePromises),
+        Promise.all(memoPromises),
+      ]);
+      const titles: Record<number, string> = {};
+      const memos: Record<number, string> = {};
+      for (const [num, val] of titleResults) if (val) titles[num] = val;
+      for (const [num, val] of memoResults) if (val) memos[num] = val;
+      setEpisodeTitles(titles);
+      setEpisodeMemos(memos);
 
       // 위젯 팝업 윈도우에 데이터 변경 알림
       window.electronAPI?.sheetsNotifyChange?.();
@@ -82,7 +103,7 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }, [sheetsConnected, setEpisodes, setSyncing, setLastSyncTime, setSyncError]);
+  }, [sheetsConnected, setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {

@@ -307,11 +307,13 @@ export function MyTasksWidget() {
     toggleSceneStage(sheetName, scene.sceneId, stage);
 
     // 완료 기록
+    let completedBy: string | undefined;
+    let completedAt: string | undefined;
     if (newValue) {
       const afterToggle = { ...scene, [stage]: true };
       if (afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png) {
-        const completedBy = currentUser?.name ?? '알 수 없음';
-        const completedAt = new Date().toISOString();
+        completedBy = currentUser?.name ?? '알 수 없음';
+        completedAt = new Date().toISOString();
         updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completedBy);
         updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completedAt);
       }
@@ -320,8 +322,13 @@ export function MyTasksWidget() {
     // 시트 동기화
     try {
       if (sheetsConnected) {
-        const { updateSheetCell } = await import('@/services/sheetsService');
+        const { updateSheetCell, updateSceneFieldInSheets } = await import('@/services/sheetsService');
         await updateSheetCell(sheetName, sceneIndex, stage, newValue);
+        // 완료 기록도 시트에 반영
+        if (completedBy) {
+          await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
+          await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
+        }
         window.electronAPI?.sheetsNotifyChange?.();
       }
     } catch (err) {

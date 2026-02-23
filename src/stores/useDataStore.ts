@@ -13,6 +13,10 @@ interface DataState {
   /** ep.title 대신 커스텀 제목을 우선 반환 */
   getEpisodeDisplayName: (ep: Episode) => string;
 
+  // 에피소드 메모 (episodeNumber → memo)
+  episodeMemos: Record<number, string>;
+  setEpisodeMemos: (memos: Record<number, string>) => void;
+
   // 통계 (episodes에서 파생)
   stats: DashboardStats;
 
@@ -55,6 +59,9 @@ export const useDataStore = create<DataState>((set, get) => ({
     const custom = get().episodeTitles[ep.episodeNumber];
     return custom || ep.title;
   },
+
+  episodeMemos: {},
+  setEpisodeMemos: (memos) => set({ episodeMemos: memos }),
 
   isSyncing: false,
   lastSyncTime: null,

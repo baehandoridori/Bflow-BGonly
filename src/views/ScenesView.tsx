@@ -1269,9 +1269,11 @@ export function ScenesView() {
   const [epEditOpen, setEpEditOpen] = useState(false);
   const [epMemo, setEpMemo] = useState('');
 
-  // 에피소드 제목/메모 (커스텀 — _METADATA에 저장)
-  const [episodeTitles, setEpisodeTitles] = useState<Record<number, string>>({});
-  const [episodeMemos, setEpisodeMemos] = useState<Record<number, string>>({});
+  // 에피소드 제목/메모 — 글로벌 스토어에서 읽기 (App.tsx에서 병렬 로드)
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const episodeMemos = useDataStore((s) => s.episodeMemos);
+  const setEpisodeTitles = useDataStore((s) => s.setEpisodeTitles);
+  const setEpisodeMemos = useDataStore((s) => s.setEpisodeMemos);
   const [epTitleInput, setEpTitleInput] = useState('');
 
   // 에피소드 추가 모달
@@ -1371,32 +1373,7 @@ export function ScenesView() {
     loadPartMemos();
   }, [sheetsConnected, currentEp?.episodeNumber, selectedDepartment]);
 
-  // 에피소드 제목/메모 로드
-  useEffect(() => {
-    const loadEpMeta = async () => {
-      const titles: Record<number, string> = {};
-      const memos: Record<number, string> = {};
-      for (const ep of episodes) {
-        try {
-          const key = String(ep.episodeNumber);
-          const titleData = sheetsConnected
-            ? await readMetadataFromSheets('episode-title', key)
-            : await readLocalMetadata('episode-title', key);
-          if (titleData?.value) titles[ep.episodeNumber] = titleData.value;
-
-          const memoData = sheetsConnected
-            ? await readMetadataFromSheets('episode-memo', key)
-            : await readLocalMetadata('episode-memo', key);
-          if (memoData?.value) memos[ep.episodeNumber] = memoData.value;
-        } catch { /* 무시 */ }
-      }
-      setEpisodeTitles(titles);
-      setEpisodeMemos(memos);
-      // 글로벌 스토어에도 동기화 (다른 뷰에서 사용)
-      useDataStore.getState().setEpisodeTitles(titles);
-    };
-    if (episodes.length > 0) loadEpMeta();
-  }, [sheetsConnected, episodes.length]);
+  // 에피소드 제목/메모 → App.tsx에서 병렬 로드됨 (글로벌 스토어)
 
   // 아카이빙된 에피소드 목록 로드
   useEffect(() => {
@@ -1647,7 +1624,7 @@ export function ScenesView() {
     if (epName) {
       const next = { ...episodeTitles, [nextEpisodeNumber]: epName };
       setEpisodeTitles(next);
-      useDataStore.getState().setEpisodeTitles(next);
+      // setEpisodeTitles는 이미 글로벌 스토어 setter
     }
 
     // 백그라운드에서 서버/파일에 저장
@@ -1974,14 +1951,14 @@ export function ScenesView() {
     if (title.trim()) {
       const next = { ...episodeTitles, [currentEp.episodeNumber]: title.trim() };
       setEpisodeTitles(next);
-      useDataStore.getState().setEpisodeTitles(next);
+      // setEpisodeTitles는 이미 글로벌 스토어 setter
     } else {
       const next = { ...episodeTitles };
       delete next[currentEp.episodeNumber];
       setEpisodeTitles(next);
-      useDataStore.getState().setEpisodeTitles(next);
+      // setEpisodeTitles는 이미 글로벌 스토어 setter
     }
-    setEpisodeMemos((prev) => ({ ...prev, [currentEp.episodeNumber]: memo }));
+    setEpisodeMemos({ ...episodeMemos, [currentEp.episodeNumber]: memo });
 
     // 저장
     await writeLocalMetadata('episode-title', key, title.trim());

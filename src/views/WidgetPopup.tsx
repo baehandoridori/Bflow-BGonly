@@ -13,8 +13,9 @@ import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
-import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig } from '@/services/sheetsService';
-import { readTestSheet } from '@/services/testSheetService';
+import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig, readMetadataFromSheets } from '@/services/sheetsService';
+import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
+import type { Episode } from '@/types';
 import { getPreset, applyTheme } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
@@ -98,6 +99,28 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   useEffect(() => {
     if (!ready) return; // 초기 로드 완료 전에는 무시
 
+    const loadEpMetadata = async (episodes: Episode[], connected: boolean) => {
+      const readMeta = connected ? readMetadataFromSheets : readLocalMetadata;
+      const [titleResults, memoResults] = await Promise.all([
+        Promise.all(episodes.map((ep) =>
+          readMeta('episode-title', String(ep.episodeNumber))
+            .then((d) => [ep.episodeNumber, d?.value] as const)
+            .catch(() => [ep.episodeNumber, undefined] as const),
+        )),
+        Promise.all(episodes.map((ep) =>
+          readMeta('episode-memo', String(ep.episodeNumber))
+            .then((d) => [ep.episodeNumber, d?.value] as const)
+            .catch(() => [ep.episodeNumber, undefined] as const),
+        )),
+      ]);
+      const titles: Record<number, string> = {};
+      const memos: Record<number, string> = {};
+      for (const [num, val] of titleResults) if (val) titles[num] = val;
+      for (const [num, val] of memoResults) if (val) memos[num] = val;
+      useDataStore.getState().setEpisodeTitles(titles);
+      useDataStore.getState().setEpisodeMemos(memos);
+    };
+
     const reloadData = async () => {
       try {
         const api = window.electronAPI;
@@ -108,8 +131,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           const episodes = await readAllFromSheets();
           console.log('[WidgetPopup] 동기화:', episodes.length, '에피소드');
           useDataStore.getState().setEpisodes(episodes);
+          loadEpMetadata(episodes, true).catch(() => {});
         } else {
-          // 연결 안 되어 있으면 재연결 시도
           const cfg = await loadSheetsConfig();
           const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
           if (urlToConnect) {
@@ -118,11 +141,11 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
               const episodes = await readAllFromSheets();
               console.log('[WidgetPopup] 재연결 후 동기화:', episodes.length, '에피소드');
               useDataStore.getState().setEpisodes(episodes);
+              loadEpMetadata(episodes, true).catch(() => {});
             }
           }
         }
 
-        // 유저 정보도 갱신
         const users = await loadUsers();
         useAuthStore.getState().setUsers(users);
       } catch (err) {
@@ -185,16 +208,39 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
             console.log('[WidgetPopup] 재연결 시도:', result.ok);
           }
         }
+        // 팝업에서도 sheetsConnected를 설정 (위젯 토글이 시트에 반영되도록)
+        useAppStore.getState().setSheetsConnected(connected);
+
+        let loadedEpisodes: Episode[];
         if (connected) {
-          const episodes = await readAllFromSheets();
-          console.log('[WidgetPopup] 시트 데이터:', episodes.length, '에피소드');
-          useDataStore.getState().setEpisodes(episodes);
+          loadedEpisodes = await readAllFromSheets();
+          console.log('[WidgetPopup] 시트 데이터:', loadedEpisodes.length, '에피소드');
         } else {
-          // 시트 미연결 시에만 테스트 데이터 fallback
-          const episodes = await readTestSheet();
-          console.log('[WidgetPopup] fallback 테스트 데이터:', episodes.length, '에피소드');
-          useDataStore.getState().setEpisodes(episodes);
+          loadedEpisodes = await readTestSheet();
+          console.log('[WidgetPopup] fallback 테스트 데이터:', loadedEpisodes.length, '에피소드');
         }
+        useDataStore.getState().setEpisodes(loadedEpisodes);
+
+        // 에피소드 메타데이터(제목/메모) 병렬 로드
+        const readMeta = connected ? readMetadataFromSheets : readLocalMetadata;
+        const [titleResults, memoResults] = await Promise.all([
+          Promise.all(loadedEpisodes.map((ep) =>
+            readMeta('episode-title', String(ep.episodeNumber))
+              .then((d) => [ep.episodeNumber, d?.value] as const)
+              .catch(() => [ep.episodeNumber, undefined] as const),
+          )),
+          Promise.all(loadedEpisodes.map((ep) =>
+            readMeta('episode-memo', String(ep.episodeNumber))
+              .then((d) => [ep.episodeNumber, d?.value] as const)
+              .catch(() => [ep.episodeNumber, undefined] as const),
+          )),
+        ]);
+        const titles: Record<number, string> = {};
+        const memos: Record<number, string> = {};
+        for (const [num, val] of titleResults) if (val) titles[num] = val;
+        for (const [num, val] of memoResults) if (val) memos[num] = val;
+        useDataStore.getState().setEpisodeTitles(titles);
+        useDataStore.getState().setEpisodeMemos(memos);
 
         // 유저
         const users = await loadUsers();
