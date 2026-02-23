@@ -117,13 +117,34 @@ input[type="range"]::-webkit-slider-thumb {
   cursor: pointer;
 }
 
-/* 독 확장 페이드인 애니메이션 */
-@keyframes dock-fadein {
-  from { opacity: 0; }
-  to { opacity: 1; }
+/* ── 독 pill 기본 스타일 ── */
+.dock-pill {
+  contain: layout style;
+  border-radius: 8px;
 }
-.animate-dock-fadein {
-  animation: dock-fadein 0.15s ease-out;
+
+/* ── 독 확장 애니메이션 (pill → 위젯 프리뷰) ── */
+@keyframes dock-expand-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ── 독 복원 애니메이션 (pill → 전체 위젯) ── */
+@keyframes dock-restore-in {
+  from {
+    opacity: 0.6;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 /* 접근성: 모션 감소 설정 존중 */

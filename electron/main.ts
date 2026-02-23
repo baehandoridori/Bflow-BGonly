@@ -78,8 +78,12 @@ function repositionAllDocked(excludeWidgetId?: string): void {
   }
 }
 
-// ─── 위젯 윈도우 애니메이션 (ease-in-out cubic) ─────────────
+// ─── 위젯 윈도우 애니메이션 (expo ease-out, 프리컴퓨트 프레임) ─────────
 
+/**
+ * 프레임을 미리 계산하여 setBounds 호출을 최소화.
+ * expo ease-out: 빠르게 시작 → 감속 (자연스러운 관성 느낌)
+ */
 function animateBounds(
   win: BrowserWindow,
   target: Electron.Rectangle,
@@ -91,36 +95,34 @@ function animateBounds(
     if (widgetId) animatingWidgets.add(widgetId);
 
     const start = win.getBounds();
-    const startTime = Date.now();
+    const FRAME_MS = 16;
+    const totalFrames = Math.max(2, Math.ceil(durationMs / FRAME_MS));
 
-    const step = () => {
-      if (win.isDestroyed()) {
-        if (widgetId) animatingWidgets.delete(widgetId);
-        resolve();
-        return;
-      }
-      const elapsed = Date.now() - startTime;
-      const t = Math.min(1, elapsed / durationMs);
-      // ease-in-out cubic
-      const ease = t < 0.5
-        ? 4 * t * t * t
-        : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
-      win.setBounds({
+    // expo ease-out 프리컴퓨트
+    const frames: Electron.Rectangle[] = [];
+    for (let i = 1; i <= totalFrames; i++) {
+      const t = i / totalFrames;
+      const ease = 1 - Math.pow(1 - t, 3); // cubic ease-out (빠른 시작, 부드러운 정지)
+      frames.push({
         x: Math.round(start.x + (target.x - start.x) * ease),
         y: Math.round(start.y + (target.y - start.y) * ease),
         width: Math.max(1, Math.round(start.width + (target.width - start.width) * ease)),
         height: Math.max(1, Math.round(start.height + (target.height - start.height) * ease)),
       });
+    }
 
-      if (t < 1) {
-        setTimeout(step, 16); // ~60fps
-      } else {
+    let frameIdx = 0;
+    const timer = setInterval(() => {
+      if (win.isDestroyed() || frameIdx >= frames.length) {
+        clearInterval(timer);
+        if (!win.isDestroyed()) win.setBounds(target); // 최종 위치 보장
         if (widgetId) animatingWidgets.delete(widgetId);
         resolve();
+        return;
       }
-    };
-    step();
+      win.setBounds(frames[frameIdx]);
+      frameIdx++;
+    }, FRAME_MS);
   });
 }
 
@@ -719,15 +721,21 @@ ipcMain.handle('widget:minimize-to-dock', async (_event, widgetId: string) => {
   const stackIndex = dockedWidgetIds.indexOf(widgetId);
   const target = getDockPosition(stackIndex);
 
+  // 1) 렌더러에 독 모드 전환 알림 (pill UI로 먼저 전환)
+  win.webContents.send('widget:dock-change', true);
+
+  // 2) 렌더러가 pill UI로 전환할 시간 확보 → 가벼운 UI 상태에서 리사이즈
+  await new Promise(r => setTimeout(r, 30));
+
   win.setMinimumSize(DOCK_ITEM_W, DOCK_ITEM_H);
   win.setResizable(false);
   win.setSkipTaskbar(true);
-  win.webContents.send('widget:dock-change', true);
 
   // 기존 독 위젯들 재배치
   repositionAllDocked(widgetId);
 
-  await animateBounds(win, target, 250, widgetId);
+  // 3) 부드러운 축소 애니메이션 (pill UI 상태라 렌더링 부담 최소)
+  await animateBounds(win, target, 220, widgetId);
 });
 
 ipcMain.handle('widget:dock-expand', async (_event, widgetId: string) => {
@@ -741,12 +749,13 @@ ipcMain.handle('widget:dock-expand', async (_event, widgetId: string) => {
   const expandW = 380;
   const expandH = 320;
 
-  await animateBounds(win, {
+  // 즉시 스냅 — CSS가 콘텐츠 페이드인 처리 (setBounds 루프보다 훨씬 부드러움)
+  win.setBounds({
     x: wa.x + wa.width - expandW - DOCK_MARGIN,
     y: wa.y + wa.height - expandH - DOCK_MARGIN,
     width: expandW,
     height: expandH,
-  }, 180, widgetId);
+  });
 });
 
 ipcMain.handle('widget:dock-collapse', async (_event, widgetId: string) => {
@@ -758,7 +767,8 @@ ipcMain.handle('widget:dock-collapse', async (_event, widgetId: string) => {
   const stackIndex = dockedWidgetIds.indexOf(widgetId);
   const target = stackIndex >= 0 ? getDockPosition(stackIndex) : getDockPosition(0);
 
-  await animateBounds(win, target, 150, widgetId);
+  // 즉시 스냅 — CSS가 콘텐츠 전환 처리
+  win.setBounds(target);
 });
 
 ipcMain.handle('widget:restore-from-dock', async (_event, widgetId: string) => {
@@ -770,15 +780,18 @@ ipcMain.handle('widget:restore-from-dock', async (_event, widgetId: string) => {
   if (idx >= 0) dockedWidgetIds.splice(idx, 1);
   if (expandedDockWidgetId === widgetId) expandedDockWidgetId = null;
 
-  const original = widgetOriginalBounds.get(widgetId);
-  if (original) {
-    await animateBounds(win, original, 250, widgetId);
-    widgetOriginalBounds.delete(widgetId);
-  }
-
   win.setMinimumSize(280, 200);
   win.setResizable(true);
   win.setSkipTaskbar(false);
+
+  const original = widgetOriginalBounds.get(widgetId);
+  if (original) {
+    // 부드러운 복원 애니메이션 (pill 상태라 렌더링 가벼움)
+    await animateBounds(win, original, 220, widgetId);
+    widgetOriginalBounds.delete(widgetId);
+  }
+
+  // 애니메이션 완료 후 독 모드 해제 → 위젯 콘텐츠 렌더링
   win.webContents.send('widget:dock-change', false);
 
   // 나머지 독 위젯들 재배치

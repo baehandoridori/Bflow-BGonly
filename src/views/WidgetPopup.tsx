@@ -333,23 +333,25 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const borderAlpha = 0.06 + glassIntensity * 0.14;
   const reflectAlpha = isFocused ? glassIntensity * 0.15 : 0.02;
 
-  // ── 독 모드: 축소(72×72) → 호버 시 확장(380×320) ──
+  // ── 독 모드: 축소(pill) → 호버 시 확장(위젯 프리뷰) ──
   if (isDocked) {
-    // 축소 상태: 위젯 이름 표시 (140×36 pill)
+    // 축소 상태: 위젯 이름 pill (140×36, 경량 렌더링)
     if (!isDockHover) {
       return (
         <div
-          className="h-screen w-screen flex items-center justify-center cursor-pointer select-none"
+          className="dock-pill h-screen w-screen overflow-hidden cursor-pointer select-none"
           style={{
-            background: `rgb(var(--color-bg-primary) / ${baseTintAlpha})`,
-            transition: 'background 0.15s ease',
+            background: `rgb(var(--color-bg-card) / 0.92)`,
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            willChange: 'transform',
           }}
           onMouseEnter={handleDockMouseEnter}
           onClick={handleRestore}
         >
-          <div className="flex items-center gap-1.5 px-3">
-            <BarChart3 size={13} className="text-white/50 shrink-0" />
-            <span className="text-[11px] text-white/80 font-medium leading-none truncate">
+          <div className="flex items-center justify-center gap-1.5 px-3 h-full">
+            <BarChart3 size={13} className="text-text-secondary shrink-0" />
+            <span className="text-[11px] text-text-primary font-medium leading-none truncate max-w-[100px]">
               {widgetMeta.label}
             </span>
           </div>
@@ -360,10 +362,11 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     // 확장 상태: 원본 글래스 스타일 + 위젯 프리뷰
     return (
       <div
-        className="h-screen w-screen flex flex-col overflow-hidden animate-dock-fadein"
+        className="dock-expanded h-screen w-screen flex flex-col overflow-hidden"
         style={{
           background: `rgb(var(--color-bg-primary) / ${tintAlpha})`,
           cursor: 'pointer',
+          animation: 'dock-expand-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both',
         }}
         onMouseLeave={handleDockMouseLeave}
         onMouseEnter={() => {
@@ -406,8 +409,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         </div>
         {/* 클릭하여 열기 오버레이 */}
         <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-          <span className="px-3 py-1.5 rounded-full text-xs font-medium text-white/80"
-            style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <span className="px-3 py-1.5 rounded-full text-xs font-medium text-text-primary/80"
+            style={{ background: 'rgb(var(--color-bg-card) / 0.6)', backdropFilter: 'blur(8px)' }}>
             클릭하여 열기
           </span>
         </div>
@@ -421,7 +424,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       className="h-screen w-screen flex flex-col overflow-hidden"
       style={{
         background: `rgb(var(--color-bg-primary) / ${tintAlpha})`,
-        transition: 'background 0.3s ease',
+        transition: 'background 0.3s ease, opacity 0.2s ease',
+        animation: 'dock-restore-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both',
       }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
