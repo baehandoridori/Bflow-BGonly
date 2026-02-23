@@ -10,6 +10,7 @@ export interface ArchivedEpisodeInfo {
   partCount: number;
   archivedBy?: string;
   archivedAt?: string;
+  memo?: string;
 }
 
 interface EpisodeTreeNavProps {
@@ -28,6 +29,7 @@ interface EpisodeTreeNavProps {
   onEpisodeEdit: (epNum: number) => void;
   onArchiveEpisode: (epNum: number) => void;
   onUnarchiveEpisode: (epNum: number) => void;
+  onEpisodeContextMenu: (e: React.MouseEvent, epNum: number) => void;
 }
 
 /** 씬 배열 → 전체 진행률(%) */
@@ -115,6 +117,7 @@ export function EpisodeTreeNav({
   onEpisodeEdit,
   onArchiveEpisode,
   onUnarchiveEpisode,
+  onEpisodeContextMenu,
 }: EpisodeTreeNavProps) {
   // 에피소드별 열림/닫힘 상태
   const [expandedEps, setExpandedEps] = useState<Set<number>>(() => {
@@ -192,6 +195,7 @@ export function EpisodeTreeNav({
                       : 'text-text-secondary hover:bg-bg-primary hover:text-text-primary',
                   )}
                   onClick={() => handleSelectEpisode(ep.episodeNumber)}
+                  onContextMenu={(e) => onEpisodeContextMenu(e, ep.episodeNumber)}
                 >
                   {/* 확장 아이콘 — 크고 눈에 띄게 + 회전 애니메이션 */}
                   <button
@@ -324,17 +328,6 @@ export function EpisodeTreeNav({
                       </button>
                     )}
 
-                    {/* 아카이빙 버튼 (진행률 무관, 직접 선택) */}
-                    {isEpSelected && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onArchiveEpisode(ep.episodeNumber); }}
-                        className="flex items-center gap-1 px-2 py-1 mx-1 text-[10px] text-text-secondary/30 hover:text-amber-400 rounded transition-colors"
-                        title="아카이빙 (에피소드 보관)"
-                      >
-                        <Archive size={10} />
-                        <span>아카이빙</span>
-                      </button>
-                    )}
                   </div>
                 </CollapsibleSection>
               </div>
@@ -403,6 +396,9 @@ function ArchivedSection({
                     {archived.archivedBy && ` · ${archived.archivedBy}`}
                     {archived.archivedAt && ` · ${archived.archivedAt}`}
                   </span>
+                  {archived.memo && (
+                    <span className="text-[9px] text-amber-500/40 italic truncate leading-tight">{archived.memo}</span>
+                  )}
                 </div>
                 <button
                   onClick={() => onUnarchive(archived.episodeNumber)}

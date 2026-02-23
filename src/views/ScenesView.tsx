@@ -1273,7 +1273,14 @@ export function ScenesView() {
   const [newEpName, setNewEpName] = useState('');
 
   // 아카이빙된 에피소드 목록
-  const [archivedEpisodes, setArchivedEpisodes] = useState<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string }[]>([]);
+  const [archivedEpisodes, setArchivedEpisodes] = useState<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; memo?: string }[]>([]);
+
+  // 아카이빙 확인 다이얼로그 (메모 입력 포함)
+  const [archiveDialogEpNum, setArchiveDialogEpNum] = useState<number | null>(null);
+  const [archiveMemoInput, setArchiveMemoInput] = useState('완료로 인한 아카이빙');
+
+  // 에피소드 우클릭 컨텍스트 메뉴
+  const [epContextMenu, setEpContextMenu] = useState<{ x: number; y: number; epNum: number } | null>(null);
 
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
@@ -1395,6 +1402,7 @@ export function ScenesView() {
             const key = String(item.episodeNumber);
             let archivedBy: string | undefined;
             let archivedAt: string | undefined;
+            let memo: string | undefined;
             try {
               const meta = sheetsConnected
                 ? await readMetadataFromSheets('archive-info', key)
@@ -1403,9 +1411,10 @@ export function ScenesView() {
                 const parsed = JSON.parse(meta.value);
                 archivedBy = parsed.by;
                 archivedAt = parsed.at;
+                memo = parsed.memo;
               }
             } catch { /* 무시 */ }
-            enriched.push({ ...item, archivedBy, archivedAt });
+            enriched.push({ ...item, archivedBy, archivedAt, memo });
           }
           setArchivedEpisodes(enriched);
         } else {
@@ -1419,11 +1428,13 @@ export function ScenesView() {
                 const infoMeta = await readLocalMetadata('archive-info', String(i));
                 let archivedBy: string | undefined;
                 let archivedAt: string | undefined;
+                let memo: string | undefined;
                 if (infoMeta?.value) {
                   try {
                     const parsed = JSON.parse(infoMeta.value);
                     archivedBy = parsed.by;
                     archivedAt = parsed.at;
+                    memo = parsed.memo;
                   } catch { /* 무시 */ }
                 }
                 archived.push({
@@ -1432,6 +1443,7 @@ export function ScenesView() {
                   partCount: 0,
                   archivedBy,
                   archivedAt,
+                  memo,
                 });
               }
             } catch { /* 무시 */ }
@@ -1837,17 +1849,26 @@ export function ScenesView() {
   };
 
   // ─── 에피소드 아카이빙 ────────────────────
-  const handleArchiveEpisode = async (epNum: number) => {
+  // 우클릭 메뉴에서 "아카이빙하기" 선택 시 → 다이얼로그 표시
+  const openArchiveDialog = useCallback((epNum: number) => {
+    setArchiveMemoInput('완료로 인한 아카이빙');
+    setArchiveDialogEpNum(epNum);
+  }, []);
+
+  const handleArchiveConfirm = async () => {
+    const epNum = archiveDialogEpNum;
+    if (epNum == null) return;
     const ep = episodes.find((e) => e.episodeNumber === epNum);
     if (!ep) return;
-    const epDisplayName = episodeTitles[epNum] || ep.title;
-    if (!confirm(`"${epDisplayName}"를 아카이빙하시겠습니까?\n(완료된 에피소드를 보관합니다)`)) return;
 
-    // 아카이빙 정보 기록
+    const memo = archiveMemoInput.trim() || '완료로 인한 아카이빙';
     const archiveInfo = JSON.stringify({
       by: currentUser?.name ?? '알 수 없음',
       at: new Date().toLocaleDateString('ko-KR'),
+      memo,
     });
+
+    setArchiveDialogEpNum(null);
 
     try {
       if (sheetsConnected) {
@@ -1858,12 +1879,10 @@ export function ScenesView() {
         await writeLocalMetadata('archived-episode', String(epNum), 'true');
         await writeLocalMetadata('archive-info', String(epNum), archiveInfo);
       }
-      // UI에서 에피소드 제거 (optimistic)
       deleteEpisodeOptimistic(epNum);
-      // 아카이빙 목록에 추가
       setArchivedEpisodes((prev) => [
         ...prev,
-        { episodeNumber: epNum, title: ep.title, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR') },
+        { episodeNumber: epNum, title: ep.title, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
       ]);
       if (selectedEpisode === epNum) {
         setSelectedEpisode(episodes.find((e) => e.episodeNumber !== epNum)?.episodeNumber ?? 1);
@@ -1874,6 +1893,13 @@ export function ScenesView() {
       syncInBackground();
     }
   };
+
+  // 에피소드 우클릭 컨텍스트 메뉴 핸들러
+  const handleEpisodeContextMenu = useCallback((e: React.MouseEvent, epNum: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEpContextMenu({ x: e.clientX, y: e.clientY, epNum });
+  }, []);
 
   const handleUnarchiveEpisode = async (epNum: number) => {
     const archived = archivedEpisodes.find((a) => a.episodeNumber === epNum);
@@ -1970,8 +1996,9 @@ export function ScenesView() {
             }}
             onEpisodeEdit={handleTreeEpisodeEdit}
             archivedEpisodes={archivedEpisodes}
-            onArchiveEpisode={handleArchiveEpisode}
+            onArchiveEpisode={openArchiveDialog}
             onUnarchiveEpisode={handleUnarchiveEpisode}
+            onEpisodeContextMenu={handleEpisodeContextMenu}
           />
         </div>
       )}
@@ -2799,13 +2826,6 @@ export function ScenesView() {
                 >
                   <Trash2 size={12} />
                 </button>
-                <button
-                  onClick={() => { setEpEditOpen(false); handleArchiveEpisode(currentEp.episodeNumber); }}
-                  className="px-2.5 py-1.5 text-xs text-amber-400/70 hover:text-amber-400 border border-amber-500/20 hover:bg-amber-500/10 rounded-lg transition-colors"
-                  title="에피소드 아카이빙 (보관)"
-                >
-                  <Archive size={12} />
-                </button>
               </div>
               <div className="flex gap-2">
                 <button
@@ -2836,6 +2856,89 @@ export function ScenesView() {
         />
       )}
       </div>{/* 메인 콘텐츠 영역 끝 */}
+
+      {/* ── 에피소드 우클릭 컨텍스트 메뉴 ── */}
+      {epContextMenu && (
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={() => setEpContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setEpContextMenu(null); }} />
+          <div
+            className="fixed z-[9999] bg-bg-card border border-bg-border rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ left: epContextMenu.x, top: epContextMenu.y }}
+          >
+            <button
+              onClick={() => {
+                const epNum = epContextMenu.epNum;
+                setEpContextMenu(null);
+                openArchiveDialog(epNum);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-secondary hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer"
+            >
+              <Archive size={13} className="text-amber-400" />
+              아카이빙하기
+            </button>
+            <button
+              onClick={() => {
+                const epNum = epContextMenu.epNum;
+                setEpContextMenu(null);
+                handleTreeEpisodeEdit(epNum);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-secondary hover:bg-bg-primary hover:text-text-primary transition-colors cursor-pointer"
+            >
+              <Pencil size={13} />
+              에피소드 편집
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ── 아카이빙 확인 다이얼로그 (메모 입력) ── */}
+      {archiveDialogEpNum != null && (() => {
+        const ep = episodes.find((e) => e.episodeNumber === archiveDialogEpNum);
+        const epDisplayName = episodeTitles[archiveDialogEpNum] || ep?.title || `EP.${String(archiveDialogEpNum).padStart(2, '0')}`;
+        return (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50" onClick={() => setArchiveDialogEpNum(null)}>
+            <div className="bg-bg-card rounded-xl border border-bg-border shadow-2xl p-5 w-[360px]" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">
+                  <Archive size={16} className="text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-text-primary">에피소드 아카이빙</h3>
+                  <p className="text-xs text-text-secondary/60">{epDisplayName}</p>
+                </div>
+              </div>
+              <div className="mb-4">
+                <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
+                <input
+                  value={archiveMemoInput}
+                  onChange={(e) => setArchiveMemoInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleArchiveConfirm();
+                    if (e.key === 'Escape') setArchiveDialogEpNum(null);
+                  }}
+                  placeholder="완료로 인한 아카이빙"
+                  className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-amber-400"
+                  autoFocus
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setArchiveDialogEpNum(null)}
+                  className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleArchiveConfirm}
+                  className="px-3 py-1.5 text-xs text-white bg-amber-500 rounded-lg hover:bg-amber-500/80 transition-colors"
+                >
+                  아카이빙
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

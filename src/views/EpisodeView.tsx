@@ -1,8 +1,9 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Film, ChevronRight } from 'lucide-react';
+import { Film, ChevronRight, Archive, RotateCcw, Folder, Pencil } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS, DEPARTMENTS, STAGES } from '@/types';
 import type { Episode, Department } from '@/types';
@@ -84,10 +85,12 @@ function EpisodeCard({
   episode,
   stats,
   onNavigate,
+  onContextMenu,
 }: {
   episode: Episode;
   stats: EpStats;
   onNavigate: (ep: Episode) => void;
+  onContextMenu?: (e: React.MouseEvent, ep: Episode) => void;
 }) {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const displayName = episodeTitles[episode.episodeNumber] || episode.title;
@@ -97,6 +100,7 @@ function EpisodeCard({
   return (
     <motion.button
       onClick={() => onNavigate(episode)}
+      onContextMenu={(e) => onContextMenu?.(e, episode)}
       className={cn(
         'relative w-full text-left rounded-xl p-5 cursor-pointer',
         'border border-bg-border/60 bg-bg-card',
@@ -286,8 +290,91 @@ type EpViewMode = 'card' | 'matrix';
 export function EpisodeView() {
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitlesMap = useDataStore((s) => s.episodeTitles);
+  const deleteEpisodeOptimistic = useDataStore((s) => s.deleteEpisodeOptimistic);
+  const currentUser = useAuthStore((s) => s.currentUser);
   const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment } = useAppStore();
+  const isTestMode = useAppStore((s) => s.isTestMode);
+  const sheetsConnected = useAppStore((s) => s.sheetsConnected);
   const [viewMode, setViewMode] = useState<EpViewMode>('card');
+
+  // 아카이빙 관련 상태
+  const [archivedEpisodes, setArchivedEpisodes] = useState<{
+    episodeNumber: number; title: string; partCount: number;
+    archivedBy?: string; archivedAt?: string; memo?: string;
+  }[]>([]);
+  const [archivedOpen, setArchivedOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; epNum: number } | null>(null);
+  const [archiveDialogEpNum, setArchiveDialogEpNum] = useState<number | null>(null);
+  const [archiveMemoInput, setArchiveMemoInput] = useState('완료로 인한 아카이빙');
+
+  // 아카이빙된 에피소드 로드
+  useEffect(() => {
+    const loadArchived = async () => {
+      try {
+        const api = window.electronAPI;
+        if (sheetsConnected) {
+          const { readArchivedFromSheets, readMetadataFromSheets } = await import('@/services/sheetsService');
+          const list = await readArchivedFromSheets();
+          const enriched: typeof archivedEpisodes = [];
+          for (const item of list) {
+            const key = String(item.episodeNumber);
+            let archivedBy: string | undefined;
+            let archivedAt: string | undefined;
+            let memo: string | undefined;
+            try {
+              const infoMeta = await readMetadataFromSheets('archive-info', key);
+              if (infoMeta?.value) {
+                const parsed = JSON.parse(infoMeta.value);
+                archivedBy = parsed.by;
+                archivedAt = parsed.at;
+                memo = parsed.memo;
+              }
+            } catch {}
+            enriched.push({ ...item, archivedBy, archivedAt, memo });
+          }
+          setArchivedEpisodes(enriched);
+        } else if (api) {
+          // 로컬 모드 fallback
+          const archived: typeof archivedEpisodes = [];
+          for (let i = 1; i <= 100; i++) {
+            try {
+              const meta = await api.readSettings(`metadata_archived-episode_${i}.json`);
+              const metaVal = typeof meta === 'string' ? meta : (meta as Record<string, unknown>)?.value;
+              if (metaVal === 'true') {
+                const infoRaw = await api.readSettings(`metadata_archive-info_${i}.json`);
+                let archivedBy: string | undefined;
+                let archivedAt: string | undefined;
+                let memo: string | undefined;
+                if (infoRaw) {
+                  try {
+                    const val = typeof infoRaw === 'string' ? infoRaw : (infoRaw as Record<string, unknown>)?.value;
+                    if (typeof val === 'string') {
+                      const parsed = JSON.parse(val);
+                      archivedBy = parsed.by;
+                      archivedAt = parsed.at;
+                      memo = parsed.memo;
+                    }
+                  } catch {}
+                }
+                archived.push({
+                  episodeNumber: i,
+                  title: `EP.${String(i).padStart(2, '0')}`,
+                  partCount: 0,
+                  archivedBy,
+                  archivedAt,
+                  memo,
+                });
+              }
+            } catch {}
+          }
+          setArchivedEpisodes(archived);
+        }
+      } catch (err) {
+        console.error('[EpisodeView] 아카이빙 로드 실패:', err);
+      }
+    };
+    loadArchived();
+  }, [sheetsConnected, episodes]);
 
   const epData = useMemo(() => {
     return episodes
@@ -308,6 +395,81 @@ export function EpisodeView() {
     setSelectedEpisode(ep.episodeNumber);
     setView('scenes');
   }, [setSelectedEpisode, setView]);
+
+  // 에피소드 우클릭 컨텍스트 메뉴
+  const handleEpContextMenu = useCallback((e: React.MouseEvent, ep: Episode) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, epNum: ep.episodeNumber });
+  }, []);
+
+  // 아카이빙 다이얼로그 열기
+  const openArchiveDialog = useCallback((epNum: number) => {
+    setArchiveMemoInput('완료로 인한 아카이빙');
+    setArchiveDialogEpNum(epNum);
+  }, []);
+
+  // 아카이빙 확인
+  const handleArchiveConfirm = async () => {
+    const epNum = archiveDialogEpNum;
+    if (epNum == null) return;
+    const ep = episodes.find((e) => e.episodeNumber === epNum);
+    if (!ep) return;
+
+    const memo = archiveMemoInput.trim() || '완료로 인한 아카이빙';
+    const archiveInfo = JSON.stringify({
+      by: currentUser?.name ?? '알 수 없음',
+      at: new Date().toLocaleDateString('ko-KR'),
+      memo,
+    });
+
+    setArchiveDialogEpNum(null);
+
+    try {
+      if (sheetsConnected) {
+        const { archiveEpisodeInSheets, writeMetadataToSheets } = await import('@/services/sheetsService');
+        await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
+        await archiveEpisodeInSheets(epNum);
+      } else {
+        const api = window.electronAPI;
+        if (api) {
+          await api.writeSettings(`metadata_archived-episode_${epNum}.json`, 'true');
+          await api.writeSettings(`metadata_archive-info_${epNum}.json`, archiveInfo);
+        }
+      }
+      deleteEpisodeOptimistic(epNum);
+      setArchivedEpisodes((prev) => [
+        ...prev,
+        { episodeNumber: epNum, title: ep.title, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
+      ]);
+      window.electronAPI?.sheetsNotifyChange?.();
+    } catch (err) {
+      alert(`아카이빙 실패: ${err}`);
+    }
+  };
+
+  // 아카이빙 해제
+  const handleUnarchive = async (epNum: number) => {
+    const archived = archivedEpisodes.find((a) => a.episodeNumber === epNum);
+    const epDisplayName = episodeTitlesMap[epNum] || archived?.title || `EP.${String(epNum).padStart(2, '0')}`;
+    if (!confirm(`"${epDisplayName}"를 아카이빙에서 복원하시겠습니까?`)) return;
+
+    try {
+      if (sheetsConnected) {
+        const { unarchiveEpisodeInSheets } = await import('@/services/sheetsService');
+        await unarchiveEpisodeInSheets(epNum);
+      } else {
+        const api = window.electronAPI;
+        if (api) {
+          await api.writeSettings(`metadata_archived-episode_${epNum}.json`, '');
+        }
+      }
+      setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
+      window.electronAPI?.sheetsNotifyChange?.();
+    } catch (err) {
+      alert(`복원 실패: ${err}`);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -365,24 +527,79 @@ export function EpisodeView() {
           transition={{ duration: 0.15 }}
           className="flex-1 overflow-auto"
         >
-          {epData.length === 0 ? (
+          {epData.length === 0 && archivedEpisodes.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-text-secondary/40">
               <Film size={40} className="mb-3 opacity-30" />
               <p className="text-sm">에피소드가 없습니다</p>
               <p className="text-xs mt-1">씬 목록 뷰에서 에피소드를 추가하세요</p>
             </div>
           ) : viewMode === 'card' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {epData.map(({ ep, stats }, i) => (
-                <motion.div
-                  key={ep.episodeNumber}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: i * 0.04 }}
-                >
-                  <EpisodeCard episode={ep} stats={stats} onNavigate={handleNavigate} />
-                </motion.div>
-              ))}
+            <div className="flex flex-col gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {epData.map(({ ep, stats }, i) => (
+                  <motion.div
+                    key={ep.episodeNumber}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: i * 0.04 }}
+                  >
+                    <EpisodeCard episode={ep} stats={stats} onNavigate={handleNavigate} onContextMenu={handleEpContextMenu} />
+                  </motion.div>
+                ))}
+              </div>
+
+              {/* ── 아카이빙된 에피소드 (컴팩트 뷰) ── */}
+              {archivedEpisodes.length > 0 && (
+                <div className="mt-2 border-t border-bg-border/30 pt-3">
+                  <button
+                    onClick={() => setArchivedOpen(!archivedOpen)}
+                    className="flex items-center gap-2 mb-2 text-text-secondary/50 hover:text-text-secondary transition-colors"
+                  >
+                    <ChevronRight
+                      size={14}
+                      className="transition-transform duration-200"
+                      style={{ transform: archivedOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                    />
+                    <Archive size={14} className="text-amber-500/50" />
+                    <span className="text-xs font-medium">아카이빙 ({archivedEpisodes.length})</span>
+                  </button>
+                  {archivedOpen && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
+                      {archivedEpisodes.map((archived) => {
+                        const displayName = episodeTitlesMap[archived.episodeNumber] || archived.title;
+                        return (
+                          <div
+                            key={archived.episodeNumber}
+                            className="group flex items-center gap-3 px-4 py-3 bg-bg-card/50 rounded-lg border border-bg-border/30 hover:border-amber-500/20 transition-colors"
+                          >
+                            <Folder size={14} className="shrink-0 text-amber-500/30" />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-medium text-text-secondary/60 truncate">{displayName}</div>
+                              <div className="text-[10px] text-text-secondary/30 truncate">
+                                {archived.partCount}개 파트
+                                {archived.archivedBy && ` · ${archived.archivedBy}`}
+                                {archived.archivedAt && ` · ${archived.archivedAt}`}
+                              </div>
+                              {archived.memo && (
+                                <div className="text-[10px] text-amber-500/40 italic truncate mt-0.5">
+                                  {archived.memo}
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => handleUnarchive(archived.episodeNumber)}
+                              className="p-1 opacity-0 group-hover:opacity-100 text-text-secondary/30 hover:text-accent transition-opacity shrink-0"
+                              title="아카이빙 해제 (복원)"
+                            >
+                              <RotateCcw size={12} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div className="bg-bg-card rounded-xl border border-bg-border/50 p-4">
@@ -391,6 +608,90 @@ export function EpisodeView() {
           )}
         </motion.div>
       </AnimatePresence>
+
+      {/* ── 우클릭 컨텍스트 메뉴 ── */}
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-[9998]" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+          <div
+            className="fixed z-[9999] bg-bg-card border border-bg-border rounded-lg shadow-xl py-1 min-w-[160px]"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            <button
+              onClick={() => {
+                const epNum = contextMenu.epNum;
+                setContextMenu(null);
+                openArchiveDialog(epNum);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-secondary hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer"
+            >
+              <Archive size={13} className="text-amber-400" />
+              아카이빙하기
+            </button>
+            <button
+              onClick={() => {
+                const epNum = contextMenu.epNum;
+                setContextMenu(null);
+                setSelectedEpisode(epNum);
+                setView('scenes');
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-secondary hover:bg-bg-primary hover:text-text-primary transition-colors cursor-pointer"
+            >
+              <Pencil size={13} />
+              씬 목록 보기
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ── 아카이빙 확인 다이얼로그 (메모 입력) ── */}
+      {archiveDialogEpNum != null && (() => {
+        const ep = episodes.find((e) => e.episodeNumber === archiveDialogEpNum);
+        const epDisplayName = episodeTitlesMap[archiveDialogEpNum] || ep?.title || `EP.${String(archiveDialogEpNum).padStart(2, '0')}`;
+        return (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50" onClick={() => setArchiveDialogEpNum(null)}>
+            <div className="bg-bg-card rounded-xl border border-bg-border shadow-2xl p-5 w-[360px]" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">
+                  <Archive size={16} className="text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-text-primary">에피소드 아카이빙</h3>
+                  <p className="text-xs text-text-secondary/60">{epDisplayName}</p>
+                </div>
+              </div>
+              <div className="mb-4">
+                <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
+                <input
+                  value={archiveMemoInput}
+                  onChange={(e) => setArchiveMemoInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleArchiveConfirm();
+                    if (e.key === 'Escape') setArchiveDialogEpNum(null);
+                  }}
+                  placeholder="완료로 인한 아카이빙"
+                  className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-amber-400"
+                  autoFocus
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setArchiveDialogEpNum(null)}
+                  className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleArchiveConfirm}
+                  className="px-3 py-1.5 text-xs text-white bg-amber-500 rounded-lg hover:bg-amber-500/80 transition-colors"
+                >
+                  아카이빙
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
