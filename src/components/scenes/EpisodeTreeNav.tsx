@@ -324,12 +324,12 @@ export function EpisodeTreeNav({
                       </button>
                     )}
 
-                    {/* 완료 에피소드 아카이빙 버튼 */}
-                    {isEpSelected && epProgress >= 100 && (
+                    {/* 아카이빙 버튼 (진행률 무관, 직접 선택) */}
+                    {isEpSelected && (
                       <button
                         onClick={(e) => { e.stopPropagation(); onArchiveEpisode(ep.episodeNumber); }}
-                        className="flex items-center gap-1 px-2 py-1 mx-1 text-[10px] text-amber-400/60 hover:text-amber-400 rounded transition-colors"
-                        title="아카이빙 (완료된 에피소드 보관)"
+                        className="flex items-center gap-1 px-2 py-1 mx-1 text-[10px] text-text-secondary/30 hover:text-amber-400 rounded transition-colors"
+                        title="아카이빙 (에피소드 보관)"
                       >
                         <Archive size={10} />
                         <span>아카이빙</span>

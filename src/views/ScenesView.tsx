@@ -6,7 +6,7 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { loadAllComments } from '@/services/commentService';
@@ -2791,13 +2791,22 @@ export function ScenesView() {
               />
             </div>
             <div className="flex gap-2 justify-between">
-              <button
-                onClick={handleDeleteEpisode}
-                className="px-3 py-1.5 text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:bg-red-500/10 rounded-lg transition-colors"
-              >
-                <Trash2 size={12} className="inline mr-1" />
-                삭제
-              </button>
+              <div className="flex gap-1">
+                <button
+                  onClick={handleDeleteEpisode}
+                  className="px-2.5 py-1.5 text-xs text-red-400 hover:text-red-300 border border-red-500/20 hover:bg-red-500/10 rounded-lg transition-colors"
+                  title="에피소드 삭제 (숨김 처리)"
+                >
+                  <Trash2 size={12} />
+                </button>
+                <button
+                  onClick={() => { setEpEditOpen(false); handleArchiveEpisode(currentEp.episodeNumber); }}
+                  className="px-2.5 py-1.5 text-xs text-amber-400/70 hover:text-amber-400 border border-amber-500/20 hover:bg-amber-500/10 rounded-lg transition-colors"
+                  title="에피소드 아카이빙 (보관)"
+                >
+                  <Archive size={12} />
+                </button>
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => setEpEditOpen(false)}
