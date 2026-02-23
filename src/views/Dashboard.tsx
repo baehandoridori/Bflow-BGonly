@@ -268,9 +268,9 @@ function WidgetPicker({
       <div
         className="rounded-xl overflow-hidden py-1.5"
         style={{
-          backgroundColor: 'rgba(26,29,39,0.92)',
-          border: '1px solid rgba(45,48,65,0.6)',
-          boxShadow: '0 12px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04) inset',
+          backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
+          border: '1px solid rgb(var(--color-bg-border) / 0.6)',
+          boxShadow: '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset',
         }}
       >
         <div className="px-3 py-1.5 text-[10px] font-medium text-text-secondary/50 uppercase tracking-wider">

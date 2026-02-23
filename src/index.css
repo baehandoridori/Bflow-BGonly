@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── 테마 CSS 변수 (기본값: Violet Dream) ─── */
+/* ─── 테마 CSS 변수 (기본값: Violet Dream / Dark) ─── */
 :root {
   --color-bg-primary: 15 17 23;
   --color-bg-card: 26 29 39;
@@ -11,6 +11,38 @@
   --color-text-secondary: 139 141 163;
   --color-accent: 108 92 231;
   --color-accent-sub: 162 155 254;
+
+  /* 시멘틱: 오버레이/모달 배경 */
+  --color-overlay: 0 0 0;
+  --overlay-alpha: 0.55;
+  /* 시멘틱: 툴팁 */
+  --color-tooltip-bg: 30 34 48;
+  --color-tooltip-text: 255 255 255;
+  /* 시멘틱: 글래스모피즘 */
+  --color-glass-tint: 16 18 28;
+  --glass-tint-alpha: 0.28;
+  --color-glass-highlight: 255 255 255;
+  --glass-highlight-alpha: 0.08;
+  /* 시멘틱: 그림자 */
+  --color-shadow: 0 0 0;
+  --shadow-alpha: 0.35;
+  /* 시멘틱: accent 버튼 위 텍스트 (항상 흰색) */
+  --color-on-accent: 255 255 255;
+}
+
+/* ─── 라이트 모드 오버라이드 ─── */
+[data-color-mode="light"] {
+  --color-overlay: 0 0 0;
+  --overlay-alpha: 0.25;
+  --color-tooltip-bg: 30 35 50;
+  --color-tooltip-text: 240 242 248;
+  --color-glass-tint: 255 255 255;
+  --glass-tint-alpha: 0.6;
+  --color-glass-highlight: 0 0 0;
+  --glass-highlight-alpha: 0.04;
+  --color-shadow: 0 0 0;
+  --shadow-alpha: 0.1;
+  --color-on-accent: 255 255 255;
 }
 
 /* 앱 전체 텍스트 선택 방지 (드래그 시 파란색 하이라이트 제거) */
@@ -25,7 +57,19 @@ input, textarea, select, [contenteditable="true"] {
   user-select: text;
 }
 
-/* 스크롤바 스타일 */
+/* ─── 라이트↔다크 전환 트랜지션 ─── */
+body.theme-ready *,
+body.theme-ready *::before,
+body.theme-ready *::after {
+  transition:
+    background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    fill 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── 스크롤바 (테마 반응형) ─── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -38,7 +82,12 @@ input, textarea, select, [contenteditable="true"] {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--color-bg-border) / 0.8);
+  background: rgb(var(--color-accent) / 0.5);
+}
+
+/* ─── 텍스트 선택 (테마 반응형) ─── */
+::selection {
+  background: rgb(var(--color-accent) / 0.3);
 }
 
 /* 날짜 선택기: 네이티브 아이콘을 투명화하고 커스텀 아이콘 오버레이 사용 */
@@ -54,11 +103,13 @@ input, textarea, select, [contenteditable="true"] {
   margin: 0 !important;
   padding: 0 !important;
 }
-/* 일반 date input (date-picker-hidden 아닌 것)은 밝게 */
+/* 일반 date input — 라이트/다크 자동 대응 */
 input[type="date"]:not(.date-picker-hidden)::-webkit-calendar-picker-indicator {
-  filter: invert(1) brightness(2) !important;
   cursor: pointer !important;
   opacity: 0.9 !important;
+}
+[data-color-mode="dark"] input[type="date"]:not(.date-picker-hidden)::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(2) !important;
 }
 input[type="date"]::-webkit-inner-spin-button {
   display: none;
@@ -103,7 +154,7 @@ input[type="date"]::-webkit-inner-spin-button {
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgb(var(--color-glass-highlight) / 0.1);
   border-radius: 4px;
   outline: none;
 }
@@ -123,6 +174,15 @@ input[type="range"]::-webkit-slider-thumb {
   border-radius: 8px;
 }
 
+/* ── 독 축소 애니메이션 (일반 → pill로 전환 시 콘텐츠 축소) ── */
+@keyframes dock-minimize-out {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.3); opacity: 0; }
+}
+.anim-minimize-out {
+  animation: dock-minimize-out 0.2s cubic-bezier(0.32, 0, 0.67, 0) forwards;
+}
+
 /* ── 독 확장 애니메이션 (pill → 위젯 프리뷰) ── */
 @keyframes dock-expand-in {
   from {
@@ -135,16 +195,19 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
-/* ── 독 복원 애니메이션 (pill → 전체 위젯) ── */
+/* ── 독 복원 애니메이션 (독 → 전체 위젯) ── */
 @keyframes dock-restore-in {
   from {
-    opacity: 0.6;
-    transform: scale(0.95);
+    opacity: 0;
+    transform: scale(0.85);
   }
   to {
     opacity: 1;
     transform: scale(1);
   }
+}
+.anim-restore-in {
+  animation: dock-restore-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* 접근성: 모션 감소 설정 존중 */

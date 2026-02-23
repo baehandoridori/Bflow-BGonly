@@ -686,7 +686,7 @@ export function EpisodeView() {
         const ep = episodes.find((e) => e.episodeNumber === archiveDialogEpNum);
         const epDisplayName = episodeTitlesMap[archiveDialogEpNum] || ep?.title || `EP.${String(archiveDialogEpNum).padStart(2, '0')}`;
         return (
-          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50" onClick={() => setArchiveDialogEpNum(null)}>
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-overlay/50" onClick={() => setArchiveDialogEpNum(null)}>
             <div className="bg-bg-card rounded-xl border border-bg-border shadow-2xl p-5 w-[360px]" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">

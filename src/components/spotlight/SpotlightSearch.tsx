@@ -530,7 +530,7 @@ export function SpotlightSearch() {
           <motion.div
             className="fixed inset-0 z-[9998]"
             style={{
-              backgroundColor: 'rgba(0,0,0,0.45)',
+              backgroundColor: 'rgb(var(--color-overlay) / var(--overlay-alpha))',
               backdropFilter: 'blur(12px)',
               WebkitBackdropFilter: 'blur(12px)',
             }}
@@ -557,7 +557,7 @@ export function SpotlightSearch() {
                   backgroundColor: 'rgba(26,29,39,0.88)',
                   border: '1px solid rgba(45,48,65,0.6)',
                   boxShadow:
-                    '0 24px 48px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04) inset, 0 1px 0 rgba(255,255,255,0.06) inset',
+                    '0 24px 48px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset, 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5)) inset',
                 }}
               >
                 {/* ── 검색 입력 ── */}

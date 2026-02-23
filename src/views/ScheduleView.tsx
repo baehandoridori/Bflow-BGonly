@@ -299,7 +299,7 @@ function EventBarChip({
             backdropFilter: 'blur(24px) saturate(1.8)',
             WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
             border: '1px solid rgba(255, 255, 255, 0.14)',
-            boxShadow: '0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06) inset, 0 1px 0 rgba(255,255,255,0.1) inset',
+            boxShadow: '0 12px 40px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)), 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5))',
           }}
         >
           <div className="text-[13px] font-semibold text-text-primary truncate">{ev.title}</div>
@@ -410,7 +410,7 @@ function EventDetailModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
       onClick={onClose}
     >
       <motion.div
@@ -603,7 +603,7 @@ function EventCreateModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
       onClick={onClose}
     >
       <motion.div

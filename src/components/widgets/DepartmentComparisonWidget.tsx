@@ -179,7 +179,7 @@ export function DepartmentComparisonWidget() {
               backdropFilter: 'blur(24px) saturate(1.8)',
               WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
               border: '1px solid rgba(255, 255, 255, 0.14)',
-              boxShadow: '0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06) inset, 0 1px 0 rgba(255,255,255,0.1) inset',
+              boxShadow: '0 12px 40px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset, 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5)) inset',
             }}
           >
             <div className="flex items-center gap-2 font-semibold text-[13px] mb-1.5">

@@ -152,6 +152,9 @@ export default function App() {
           themeInitRef.current = true;
         }
 
+        // 테마 초기 적용 후 전환 트랜지션 활성화 (초기 로드 시 번쩍임 방지)
+        setTimeout(() => document.body.classList.add('theme-ready'), 120);
+
         // 사용자 목록 로드
         const users = await loadUsers();
         setUsers(users);

@@ -200,7 +200,7 @@ function ImageSlot({
               }}
             />
             {/* 호버 오버레이 — 아이콘 확대 */}
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors rounded-xl flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100">
+            <div className="absolute inset-0 bg-overlay/0 group-hover:bg-overlay/50 transition-colors rounded-xl flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100">
               <button
                 onClick={onView}
                 className="p-3.5 bg-white/20 hover:bg-white/35 rounded-xl backdrop-blur-sm text-white transition-all hover:scale-110"
@@ -538,7 +538,7 @@ export function SceneDetailModal({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm"
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();
         }}
@@ -844,7 +844,7 @@ export function SceneDetailModal({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             className="fixed inset-0 z-[60] flex items-center justify-center"
-            style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', backgroundColor: 'rgba(0,0,0,0.5)' }}
+            style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', backgroundColor: 'rgb(var(--color-overlay) / var(--overlay-alpha))' }}
             onClick={() => setDeleteConfirm(null)}
           >
             <motion.div

@@ -83,7 +83,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
           border: '1px solid rgba(255, 255, 255, 0.2)',
           boxShadow: `
             0 0 0 0.5px rgba(255,255,255,0.1) inset,
-            0 2px 8px rgba(0,0,0,0.3),
+            0 2px 8px rgb(var(--color-shadow) / var(--shadow-alpha)),
             0 1px 2px rgba(${ac}, 0.2)
           `,
         }}
@@ -136,7 +136,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
               backgroundClip: 'text',
               color: 'transparent',
               textShadow: 'none',
-              filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.3))',
+              filter: 'drop-shadow(0 1px 2px rgb(var(--color-shadow) / var(--shadow-alpha)))',
             }}
           >
             B

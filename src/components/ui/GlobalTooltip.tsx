@@ -132,16 +132,16 @@ export function GlobalTooltipProvider() {
         >
           {/* 리퀴드글래스 컨테이너 */}
           <div
-            className="relative px-3 py-1.5 rounded-lg text-xs font-medium text-white/90 whitespace-nowrap max-w-[280px] overflow-hidden"
+            className="relative px-3 py-1.5 rounded-lg text-xs font-medium text-tooltip-text/90 whitespace-nowrap max-w-[280px] overflow-hidden"
             style={{
-              background: 'linear-gradient(135deg, rgba(30, 34, 48, 0.85) 0%, rgba(20, 23, 32, 0.9) 100%)',
+              background: 'linear-gradient(135deg, rgb(var(--color-tooltip-bg) / 0.92) 0%, rgb(var(--color-tooltip-bg) / 0.96) 100%)',
               backdropFilter: 'blur(16px) saturate(1.6)',
               WebkitBackdropFilter: 'blur(16px) saturate(1.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              border: '1px solid rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha))',
               boxShadow: `
-                0 4px 16px rgba(0, 0, 0, 0.4),
-                0 0 0 0.5px rgba(255, 255, 255, 0.05) inset,
-                0 1px 0 rgba(255, 255, 255, 0.06) inset
+                0 4px 16px rgb(var(--color-shadow) / var(--shadow-alpha)),
+                0 0 0 0.5px rgb(var(--color-glass-highlight) / 0.05) inset,
+                0 1px 0 rgb(var(--color-glass-highlight) / 0.06) inset
               `,
             }}
           >
@@ -149,7 +149,7 @@ export function GlobalTooltipProvider() {
             <div
               className="absolute inset-x-0 top-0 h-[40%] rounded-t-lg pointer-events-none"
               style={{
-                background: 'linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 100%)',
+                background: 'linear-gradient(180deg, rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) 0%, transparent 100%)',
               }}
             />
             <span className="relative">{tooltip.text}</span>

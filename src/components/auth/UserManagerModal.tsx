@@ -30,7 +30,7 @@ export function UserManagerModal() {
   }, [setUsers]);
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/60">
       <div className="w-[420px] max-h-[80vh] bg-bg-card border border-bg-border rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
         {/* 헤더 */}
         <div className="flex items-center justify-between">
@@ -61,7 +61,7 @@ export function UserManagerModal() {
           />
           <button
             onClick={handleAdd}
-            className="flex items-center gap-1 bg-accent text-white text-xs rounded-lg px-3 py-1.5 hover:bg-accent/80 transition-colors shrink-0"
+            className="flex items-center gap-1 bg-accent text-on-accent text-xs rounded-lg px-3 py-1.5 hover:bg-accent/80 transition-colors shrink-0"
           >
             <UserPlus size={14} /> 추가
           </button>

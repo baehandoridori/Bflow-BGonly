@@ -95,7 +95,7 @@ function ScenePickerModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm" onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -188,7 +188,7 @@ function ScenePickerModal({
               disabled={pickedKeys.size === 0}
               className={cn(
                 'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
-                pickedKeys.size > 0 ? 'bg-accent text-white hover:bg-accent/90' : 'bg-bg-border/30 text-text-secondary/40 cursor-not-allowed',
+                pickedKeys.size > 0 ? 'bg-accent text-on-accent hover:bg-accent/90' : 'bg-bg-border/30 text-text-secondary/40 cursor-not-allowed',
               )}
             >
               추가

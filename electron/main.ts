@@ -78,52 +78,13 @@ function repositionAllDocked(excludeWidgetId?: string): void {
   }
 }
 
-// ─── 위젯 윈도우 애니메이션 (expo ease-out, 프리컴퓨트 프레임) ─────────
+// ─── 위젯 윈도우 애니메이션 (CSS 기반 — setBounds 루프 대신 단일 스냅) ─────
+// iOS 스타일: CSS가 시각 전환을 담당, 네이티브 setBounds는 1회만 호출
+// → 프레임 드롭 완전 제거 (setBounds 루프가 Windows에서 스터터링 유발)
 
-/**
- * 프레임을 미리 계산하여 setBounds 호출을 최소화.
- * expo ease-out: 빠르게 시작 → 감속 (자연스러운 관성 느낌)
- */
-function animateBounds(
-  win: BrowserWindow,
-  target: Electron.Rectangle,
-  durationMs: number,
-  widgetId?: string,
-): Promise<void> {
-  return new Promise((resolve) => {
-    if (win.isDestroyed()) { resolve(); return; }
-    if (widgetId) animatingWidgets.add(widgetId);
-
-    const start = win.getBounds();
-    const FRAME_MS = 16;
-    const totalFrames = Math.max(2, Math.ceil(durationMs / FRAME_MS));
-
-    // expo ease-out 프리컴퓨트
-    const frames: Electron.Rectangle[] = [];
-    for (let i = 1; i <= totalFrames; i++) {
-      const t = i / totalFrames;
-      const ease = 1 - Math.pow(1 - t, 3); // cubic ease-out (빠른 시작, 부드러운 정지)
-      frames.push({
-        x: Math.round(start.x + (target.x - start.x) * ease),
-        y: Math.round(start.y + (target.y - start.y) * ease),
-        width: Math.max(1, Math.round(start.width + (target.width - start.width) * ease)),
-        height: Math.max(1, Math.round(start.height + (target.height - start.height) * ease)),
-      });
-    }
-
-    let frameIdx = 0;
-    const timer = setInterval(() => {
-      if (win.isDestroyed() || frameIdx >= frames.length) {
-        clearInterval(timer);
-        if (!win.isDestroyed()) win.setBounds(target); // 최종 위치 보장
-        if (widgetId) animatingWidgets.delete(widgetId);
-        resolve();
-        return;
-      }
-      win.setBounds(frames[frameIdx]);
-      frameIdx++;
-    }, FRAME_MS);
-  });
+/** 딜레이 유틸 */
+function delay(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms));
 }
 
 // ─── 파일 감시 (실시간 동기화) ────────────────────────────────
@@ -721,21 +682,20 @@ ipcMain.handle('widget:minimize-to-dock', async (_event, widgetId: string) => {
   const stackIndex = dockedWidgetIds.indexOf(widgetId);
   const target = getDockPosition(stackIndex);
 
-  // 1) 렌더러에 독 모드 전환 알림 (pill UI로 먼저 전환)
+  // 1) 렌더러에 독 모드 전환 알림 → CSS 축소 애니메이션 시작
   win.webContents.send('widget:dock-change', true);
 
-  // 2) 렌더러가 pill UI로 전환할 시간 확보 → 가벼운 UI 상태에서 리사이즈
-  await new Promise(r => setTimeout(r, 30));
+  // 2) CSS 축소 애니메이션이 끝날 때까지 대기 (콘텐츠가 시각적으로 사라진 뒤)
+  await delay(220);
 
+  // 3) 윈도우를 한 번에 스냅 (이미 CSS로 사라진 상태라 점프 안 보임)
   win.setMinimumSize(DOCK_ITEM_W, DOCK_ITEM_H);
   win.setResizable(false);
   win.setSkipTaskbar(true);
+  win.setBounds(target);
 
   // 기존 독 위젯들 재배치
   repositionAllDocked(widgetId);
-
-  // 3) 부드러운 축소 애니메이션 (pill UI 상태라 렌더링 부담 최소)
-  await animateBounds(win, target, 220, widgetId);
 });
 
 ipcMain.handle('widget:dock-expand', async (_event, widgetId: string) => {
@@ -780,18 +740,19 @@ ipcMain.handle('widget:restore-from-dock', async (_event, widgetId: string) => {
   if (idx >= 0) dockedWidgetIds.splice(idx, 1);
   if (expandedDockWidgetId === widgetId) expandedDockWidgetId = null;
 
+  // 1) 윈도우 속성 복원
   win.setMinimumSize(280, 200);
   win.setResizable(true);
   win.setSkipTaskbar(false);
 
+  // 2) 원래 크기로 즉시 스냅 (아직 독 pill 상태라 점프 안 보임)
   const original = widgetOriginalBounds.get(widgetId);
   if (original) {
-    // 부드러운 복원 애니메이션 (pill 상태라 렌더링 가벼움)
-    await animateBounds(win, original, 220, widgetId);
+    win.setBounds(original);
     widgetOriginalBounds.delete(widgetId);
   }
 
-  // 애니메이션 완료 후 독 모드 해제 → 위젯 콘텐츠 렌더링
+  // 3) 독 모드 해제 → CSS 복원 애니메이션(anim-restore-in) 시작
   win.webContents.send('widget:dock-change', false);
 
   // 나머지 독 위젯들 재배치

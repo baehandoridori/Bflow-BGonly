@@ -807,7 +807,7 @@ function AddFormImageSlot({
           <img src={base64} alt={label} className="h-20 rounded border border-bg-border object-cover" draggable={false} />
           <button
             onClick={() => onSetBase64('')}
-            className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/60 text-white rounded-full text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute top-0.5 right-0.5 w-4 h-4 bg-overlay/60 text-on-accent rounded-full text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
           >
             ×
           </button>
@@ -1172,7 +1172,7 @@ function AddEpisodeModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
@@ -2624,7 +2624,7 @@ export function ScenesView() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
             onClick={() => setBatchEditOpen(false)}
           >
             <motion.div
@@ -2765,7 +2765,7 @@ export function ScenesView() {
       {/* 파트 메모 인라인 편집 */}
       {editingPartMemo && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 backdrop-blur-sm"
           onClick={() => setEditingPartMemo(null)}
         >
           <div
@@ -2805,7 +2805,7 @@ export function ScenesView() {
       {/* 에피소드 편집 팝업 */}
       {epEditOpen && currentEp && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/40 backdrop-blur-sm"
           onClick={() => setEpEditOpen(false)}
         >
           <div
@@ -2917,7 +2917,7 @@ export function ScenesView() {
         const ep = episodes.find((e) => e.episodeNumber === archiveDialogEpNum);
         const epDisplayName = episodeTitles[archiveDialogEpNum] || ep?.title || `EP.${String(archiveDialogEpNum).padStart(2, '0')}`;
         return (
-          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50" onClick={() => setArchiveDialogEpNum(null)}>
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-overlay/50" onClick={() => setArchiveDialogEpNum(null)}>
             <div className="bg-bg-card rounded-xl border border-bg-border shadow-2xl p-5 w-[360px]" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">

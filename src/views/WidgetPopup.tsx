@@ -319,7 +319,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
 
   if (!widgetMeta) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center text-white/50 text-sm"
+      <div className="h-screen w-screen flex items-center justify-center text-text-primary/50 text-sm"
         style={{ background: 'transparent' }}>
         알 수 없는 위젯: {widgetId}
       </div>
@@ -483,7 +483,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           style={{
             WebkitAppRegion: 'no-drag',
             height: '28px',
-            background: 'linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.5) 100%)',
+            background: 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)',
             borderBottomLeftRadius: '8px',
           } as React.CSSProperties}
           onMouseEnter={() => {
@@ -493,7 +493,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         >
           {/* 앱 오퍼시티 */}
           <div className="flex items-center gap-1" title="앱 투명도">
-            <Eye size={11} className="text-white/40" />
+            <Eye size={11} className="text-text-secondary/60" />
             <input type="range" min={15} max={100}
               value={Math.round(appOpacity * 100)}
               onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
@@ -502,7 +502,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
 
           {/* 글래스 틴트 */}
           <div className="flex items-center gap-1" title="글래스 효과">
-            <Droplets size={11} className="text-white/40" />
+            <Droplets size={11} className="text-text-secondary/60" />
             <input type="range" min={0} max={100}
               value={Math.round(glassIntensity * 100)}
               onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
@@ -519,8 +519,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
             title={isAOT ? '항상 위에 표시 (켜짐)' : '항상 위에 표시 (꺼짐)'}
           >
             {isAOT
-              ? <Pin size={9} className="text-white" strokeWidth={3} />
-              : <PinOff size={9} className="text-white/60" strokeWidth={2.5} />}
+              ? <Pin size={9} className="text-on-accent" strokeWidth={3} />
+              : <PinOff size={9} className="text-text-primary/60" strokeWidth={2.5} />}
           </button>
 
           {/* 최소화 (독 모드) */}
@@ -529,7 +529,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
             className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-yellow-500/70 hover:bg-yellow-500 transition-colors cursor-pointer"
             title="최소화"
           >
-            <Minus size={9} className="text-white" strokeWidth={3} />
+            <Minus size={9} className="text-text-primary" strokeWidth={3} />
           </button>
 
           {/* 닫기 */}
@@ -537,7 +537,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
             onClick={handleClose}
             className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-0.5"
           >
-            <X size={9} className="text-white" strokeWidth={3} />
+            <X size={9} className="text-text-primary" strokeWidth={3} />
           </button>
         </div>
       )}
@@ -549,7 +549,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           <div className="h-full overflow-auto">
             {ready ? widgetMeta.component : (
               <div className="flex items-center justify-center h-full">
-                <span className="text-sm text-white/30 animate-pulse">로딩 중...</span>
+                <span className="text-sm text-text-secondary/30 animate-pulse">로딩 중...</span>
               </div>
             )}
           </div>
