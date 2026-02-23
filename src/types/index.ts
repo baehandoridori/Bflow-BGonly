@@ -251,6 +251,8 @@ export interface ElectronAPI {
   widgetSetAlwaysOnTop?: (widgetId: string, aot: boolean) => Promise<void>;
   widgetMinimizeToDock?: (widgetId: string) => Promise<void>;
   widgetRestoreFromDock?: (widgetId: string) => Promise<void>;
+  widgetDockExpand?: (widgetId: string) => Promise<void>;
+  widgetDockCollapse?: (widgetId: string) => Promise<void>;
   onWidgetDockChange?: (callback: (isDocked: boolean) => void) => () => void;
 }
 

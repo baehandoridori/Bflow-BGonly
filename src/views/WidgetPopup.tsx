@@ -42,7 +42,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
 
 /**
  * 위젯 팝업 윈도우 전용 렌더러
- * CSS backdropFilter 기반 리퀴드 글래스 + AOT 핀 + 독 모드
+ * Windows Acrylic 네이티브 블러 + CSS 글래스 틴트 + AOT 핀 + 독 모드
  */
 export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const [appOpacity, setAppOpacity] = useState(0.92);
@@ -69,7 +69,6 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // 드래그 핸들: 상단 40px 영역
     const inHandleZone = y < 40;
     if (inHandleZone) {
       if (handleHideTimerRef.current) { clearTimeout(handleHideTimerRef.current); handleHideTimerRef.current = null; }
@@ -83,7 +82,6 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       }
     }
 
-    // 컨트롤: 오른쪽 60% + 상단 48px 영역
     const inControlZone = x > rect.width * 0.4 && y < 48;
     if (inControlZone) {
       if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
@@ -105,7 +103,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     setShowHandle(false);
   }, []);
 
-  // 포커스 변경 감지
+  // 포커스 변경 감지 (Acrylic 회색 fallback 대응)
   useEffect(() => {
     const cleanup = window.electronAPI?.onWidgetFocusChange?.((focused) => {
       setIsFocused(focused);
@@ -202,6 +200,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
 
   // 테마 + 데이터 초기화
   useEffect(() => {
+    // Acrylic 모드: HTML/Body를 투명하게 하여 네이티브 블러가 보이도록
     document.documentElement.style.background = 'transparent';
     document.body.style.background = 'transparent';
 
@@ -301,6 +300,21 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     window.electronAPI?.widgetRestoreFromDock?.(widgetId);
   }, [widgetId]);
 
+  // 독 호버: 윈도우 확장/축소
+  const handleDockMouseEnter = useCallback(() => {
+    if (dockHoverTimerRef.current) { clearTimeout(dockHoverTimerRef.current); dockHoverTimerRef.current = null; }
+    setIsDockHover(true);
+    window.electronAPI?.widgetDockExpand?.(widgetId);
+  }, [widgetId]);
+
+  const handleDockMouseLeave = useCallback(() => {
+    if (dockHoverTimerRef.current) clearTimeout(dockHoverTimerRef.current);
+    dockHoverTimerRef.current = setTimeout(() => {
+      setIsDockHover(false);
+      window.electronAPI?.widgetDockCollapse?.(widgetId);
+    }, 300);
+  }, [widgetId]);
+
   if (!widgetMeta) {
     return (
       <div className="h-screen w-screen flex items-center justify-center text-white/50 text-sm"
@@ -310,240 +324,219 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     );
   }
 
-  // 글래스 효과 계산 (CSS backdropFilter 기반)
-  const blurPx = Math.round(10 + glassIntensity * 40); // 10~50px
-  const baseBgAlpha = 0.15 + (1 - glassIntensity) * 0.5; // 0.15~0.65
-  const bgAlpha = isFocused ? baseBgAlpha : baseBgAlpha + 0.2; // 비포커스 시 약간 어둡게
+  // 글래스 틴트 계산 (Acrylic이 블러 담당, CSS는 틴트/반사만)
+  // 이전보다 알파를 낮춰서 Acrylic 블러가 더 잘 비침
+  const baseTintAlpha = 0.12 + (1 - glassIntensity) * 0.35; // 0.12~0.47 (낮을수록 투명)
+  const tintAlpha = isFocused ? baseTintAlpha : baseTintAlpha + 0.3; // 비포커스: 약간 어둡게 (0.92 아님)
   const borderAlpha = 0.06 + glassIntensity * 0.14;
   const reflectAlpha = isFocused ? glassIntensity * 0.15 : 0.02;
 
-  // ── 독 모드 UI ──
+  // ── 독 모드: 축소(56×56) → 호버 시 확장(420×360) ──
   if (isDocked) {
+    // 축소 상태: 아이콘만 표시
+    if (!isDockHover) {
+      return (
+        <div
+          className="h-screen w-screen flex items-center justify-center cursor-pointer"
+          style={{
+            background: `rgba(12, 14, 22, ${baseTintAlpha + 0.1})`,
+          }}
+          onMouseEnter={handleDockMouseEnter}
+          onClick={handleRestore}
+        >
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center"
+            style={{
+              background: 'rgba(108, 92, 231, 0.8)',
+              boxShadow: '0 2px 12px rgba(108, 92, 231, 0.5)',
+            }}
+          >
+            <BarChart3 size={18} className="text-white" />
+          </div>
+        </div>
+      );
+    }
+
+    // 확장 상태: 프리뷰 표시
     return (
       <div
-        className="h-screen w-screen relative"
-        style={{ background: 'transparent' }}
-        onMouseLeave={() => {
-          if (dockHoverTimerRef.current) clearTimeout(dockHoverTimerRef.current);
-          dockHoverTimerRef.current = setTimeout(() => setIsDockHover(false), 200);
-        }}
-      >
-        {/* 호버 프리뷰 — 위젯 콘텐츠 미리보기 */}
-        <div
-          className="absolute inset-1"
-          style={{
-            borderRadius: '18px',
-            background: `rgba(12, 14, 22, ${bgAlpha})`,
-            backdropFilter: `blur(${blurPx}px) saturate(${1 + glassIntensity * 0.8})`,
-            WebkitBackdropFilter: `blur(${blurPx}px) saturate(${1 + glassIntensity * 0.8})`,
-            border: `1px solid rgba(255, 255, 255, ${borderAlpha})`,
-            boxShadow: `0 20px 60px rgba(0,0,0,0.5),
-              0 0 0 1px rgba(255,255,255,${borderAlpha * 0.5}) inset,
-              0 1px 0 rgba(255,255,255,${reflectAlpha}) inset`,
-            opacity: isDockHover ? 1 : 0,
-            transform: isDockHover ? 'scale(1)' : 'scale(0.88)',
-            transformOrigin: 'bottom right',
-            transition: 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-            pointerEvents: isDockHover ? 'auto' : 'none',
-          }}
-          onClick={handleRestore}
-          onMouseEnter={() => {
-            if (dockHoverTimerRef.current) { clearTimeout(dockHoverTimerRef.current); dockHoverTimerRef.current = null; }
-          }}
-        >
-          {/* 위젯 콘텐츠 (프리뷰, 비활성) */}
-          <div className="h-full overflow-hidden" style={{ borderRadius: '18px', pointerEvents: 'none' }}>
-            <IsPopupContext.Provider value={true}>
-            <WidgetIdContext.Provider value={widgetId}>
-              <div className="h-full overflow-auto">
-                {ready ? widgetMeta.component : null}
-              </div>
-            </WidgetIdContext.Provider>
-            </IsPopupContext.Provider>
-          </div>
-          {/* 클릭하여 복원 힌트 */}
-          <div className="absolute inset-0 flex items-center justify-center"
-            style={{ borderRadius: '18px', background: 'rgba(0,0,0,0.15)', cursor: 'pointer' }}>
-            <span className="px-3 py-1.5 rounded-full text-xs font-medium text-white/80"
-              style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)' }}>
-              클릭하여 열기
-            </span>
-          </div>
-        </div>
-
-        {/* 플로팅 독 아이콘 — 항상 오른쪽 아래에 표시 */}
-        <div
-          className="absolute bottom-2 right-2 w-12 h-12 rounded-full flex items-center justify-center cursor-pointer"
-          style={{
-            background: 'rgba(108, 92, 231, 0.85)',
-            boxShadow: '0 4px 16px rgba(108, 92, 231, 0.5), 0 0 0 2px rgba(255,255,255,0.12)',
-            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-            transform: isDockHover ? 'scale(0.9)' : 'scale(1)',
-          }}
-          onMouseEnter={() => {
-            if (dockHoverTimerRef.current) { clearTimeout(dockHoverTimerRef.current); dockHoverTimerRef.current = null; }
-            setIsDockHover(true);
-          }}
-          onClick={handleRestore}
-        >
-          <BarChart3 size={20} className="text-white" />
-        </div>
-      </div>
-    );
-  }
-
-  // ── 일반 모드 UI ──
-  return (
-    <div
-      className="h-screen w-screen p-1"
-      style={{ background: 'transparent' }}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
-    >
-      {/* ── 리퀴드 글래스 컨테이너 ── */}
-      <div
-        className="h-full w-full flex flex-col overflow-hidden relative"
+        className="h-screen w-screen flex flex-col overflow-hidden"
         style={{
-          borderRadius: '18px',
-          background: `rgba(12, 14, 22, ${bgAlpha})`,
-          backdropFilter: `blur(${blurPx}px) saturate(${1 + glassIntensity * 0.8})`,
-          WebkitBackdropFilter: `blur(${blurPx}px) saturate(${1 + glassIntensity * 0.8})`,
-          border: `1px solid rgba(255, 255, 255, ${borderAlpha})`,
-          boxShadow: `
-            0 20px 60px rgba(0,0,0,0.5),
-            0 0 0 1px rgba(255,255,255,${borderAlpha * 0.5}) inset,
-            0 1px 0 rgba(255,255,255,${reflectAlpha}) inset,
-            0 -1px 0 rgba(255,255,255,${reflectAlpha * 0.3}) inset
-          `,
-          transition: 'background 0.3s ease',
+          background: `rgba(12, 14, 22, ${tintAlpha})`,
         }}
+        onMouseLeave={handleDockMouseLeave}
+        onMouseEnter={() => {
+          if (dockHoverTimerRef.current) { clearTimeout(dockHoverTimerRef.current); dockHoverTimerRef.current = null; }
+        }}
+        onClick={handleRestore}
       >
-        {/* ── 유리 상단 반사 하이라이트 ── */}
+        {/* 유리 반사 */}
         <div
           className="absolute inset-x-0 top-0 pointer-events-none"
           style={{
             height: '40%',
-            borderRadius: '18px 18px 0 0',
             background: `linear-gradient(180deg, rgba(255,255,255,${reflectAlpha * 1.2}) 0%, rgba(255,255,255,${reflectAlpha * 0.2}) 30%, transparent 100%)`,
             maskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
             WebkitMaskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
           }}
         />
-
-        {/* ── 모서리 굴절 효과 ── */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            borderRadius: '18px',
-            boxShadow: `
-              inset 0 0 ${Math.round(glassIntensity * 20)}px rgba(255,255,255,${reflectAlpha * 0.4}),
-              inset 0 0 ${Math.round(glassIntensity * 4)}px rgba(255,255,255,${reflectAlpha * 0.8})
-            `,
-          }}
-        />
-
-        {/* ── 상단 드래그 핸들 ── */}
-        <div
-          className="shrink-0 relative z-20 flex items-center justify-center"
-          style={{
-            WebkitAppRegion: 'drag',
-            height: '28px',
-            cursor: showHandle ? 'grab' : 'default',
-          } as React.CSSProperties}
-        >
-          <div
-            className="flex items-center justify-center rounded-full"
-            style={{
-              width: '48px',
-              height: '6px',
-              background: 'rgba(255, 255, 255, 0.2)',
-              opacity: showHandle ? 1 : 0,
-              transition: 'opacity 0.2s ease',
-            }}
-          />
-        </div>
-
-        {/* ── 오른쪽 위 호버 시 컨트롤 ── */}
-        {showControls && (
-          <div
-            className="absolute top-0 right-0 z-30 flex items-center gap-2 px-2.5"
-            style={{
-              WebkitAppRegion: 'no-drag',
-              height: '28px',
-              background: 'linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.5) 100%)',
-              borderBottomLeftRadius: '8px',
-              borderTopRightRadius: '18px',
-            } as React.CSSProperties}
-            onMouseEnter={() => {
-              if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
-              setShowControls(true);
-            }}
-          >
-            {/* 앱 오퍼시티 */}
-            <div className="flex items-center gap-1" title="앱 투명도">
-              <Eye size={11} className="text-white/40" />
-              <input type="range" min={15} max={100}
-                value={Math.round(appOpacity * 100)}
-                onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
-                className="w-11 h-1 cursor-pointer" />
-            </div>
-
-            {/* 글래스 틴트 */}
-            <div className="flex items-center gap-1" title="글래스 효과">
-              <Droplets size={11} className="text-white/40" />
-              <input type="range" min={0} max={100}
-                value={Math.round(glassIntensity * 100)}
-                onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
-                className="w-11 h-1 cursor-pointer" />
-            </div>
-
-            {/* AOT 핀 토글 */}
-            <button
-              onClick={handleToggleAOT}
-              className="w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors cursor-pointer"
-              style={{
-                background: isAOT ? 'rgba(108, 92, 231, 0.7)' : 'rgba(255,255,255,0.15)',
-              }}
-              title={isAOT ? '항상 위에 표시 (켜짐)' : '항상 위에 표시 (꺼짐)'}
-            >
-              {isAOT
-                ? <Pin size={9} className="text-white" strokeWidth={3} />
-                : <PinOff size={9} className="text-white/60" strokeWidth={2.5} />}
-            </button>
-
-            {/* 최소화 (독 모드) */}
-            <button
-              onClick={handleMinimize}
-              className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-yellow-500/70 hover:bg-yellow-500 transition-colors cursor-pointer"
-              title="최소화"
-            >
-              <Minus size={9} className="text-white" strokeWidth={3} />
-            </button>
-
-            {/* 닫기 */}
-            <button
-              onClick={handleClose}
-              className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-0.5"
-            >
-              <X size={9} className="text-white" strokeWidth={3} />
-            </button>
-          </div>
-        )}
-
-        {/* ── 위젯 콘텐츠 ── */}
-        <div className="flex-1 overflow-hidden relative z-10">
+        {/* 프리뷰 콘텐츠 (비활성) */}
+        <div className="flex-1 overflow-hidden relative z-10" style={{ pointerEvents: 'none' }}>
           <IsPopupContext.Provider value={true}>
           <WidgetIdContext.Provider value={widgetId}>
             <div className="h-full overflow-auto">
-              {ready ? widgetMeta.component : (
-                <div className="flex items-center justify-center h-full">
-                  <span className="text-sm text-white/30 animate-pulse">로딩 중...</span>
-                </div>
-              )}
+              {ready ? widgetMeta.component : null}
             </div>
           </WidgetIdContext.Provider>
           </IsPopupContext.Provider>
         </div>
+        {/* 클릭하여 열기 오버레이 */}
+        <div className="absolute inset-0 flex items-center justify-center z-20" style={{ cursor: 'pointer' }}>
+          <span className="px-3 py-1.5 rounded-full text-xs font-medium text-white/80"
+            style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)' }}>
+            클릭하여 열기
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 일반 모드 UI (Acrylic 네이티브 블러) ──
+  return (
+    <div
+      className="h-screen w-screen flex flex-col overflow-hidden"
+      style={{
+        background: `rgba(12, 14, 22, ${tintAlpha})`,
+        transition: 'background 0.3s ease',
+      }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
+      {/* ── 유리 반사 하이라이트 (상단) ── */}
+      <div
+        className="absolute inset-x-0 top-0 pointer-events-none"
+        style={{
+          height: '40%',
+          background: `linear-gradient(180deg, rgba(255,255,255,${reflectAlpha * 1.2}) 0%, rgba(255,255,255,${reflectAlpha * 0.2}) 30%, transparent 100%)`,
+          maskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+        }}
+      />
+
+      {/* ── 모서리 굴절 효과 ── */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          border: `1px solid rgba(255, 255, 255, ${borderAlpha})`,
+          boxShadow: `
+            inset 0 0 ${Math.round(glassIntensity * 20)}px rgba(255,255,255,${reflectAlpha * 0.4}),
+            inset 0 0 ${Math.round(glassIntensity * 4)}px rgba(255,255,255,${reflectAlpha * 0.8}),
+            0 0 0 1px rgba(255,255,255,${borderAlpha * 0.5}) inset,
+            0 1px 0 rgba(255,255,255,${reflectAlpha}) inset
+          `,
+        }}
+      />
+
+      {/* ── 상단 드래그 핸들 ── */}
+      <div
+        className="shrink-0 relative z-20 flex items-center justify-center"
+        style={{
+          WebkitAppRegion: 'drag',
+          height: '28px',
+          cursor: showHandle ? 'grab' : 'default',
+        } as React.CSSProperties}
+      >
+        <div
+          className="flex items-center justify-center rounded-full"
+          style={{
+            width: '48px',
+            height: '6px',
+            background: 'rgba(255, 255, 255, 0.2)',
+            opacity: showHandle ? 1 : 0,
+            transition: 'opacity 0.2s ease',
+          }}
+        />
+      </div>
+
+      {/* ── 오른쪽 위 호버 시 컨트롤 ── */}
+      {showControls && (
+        <div
+          className="absolute top-0 right-0 z-30 flex items-center gap-2 px-2.5"
+          style={{
+            WebkitAppRegion: 'no-drag',
+            height: '28px',
+            background: 'linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.35) 30%, rgba(0,0,0,0.5) 100%)',
+            borderBottomLeftRadius: '8px',
+          } as React.CSSProperties}
+          onMouseEnter={() => {
+            if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+            setShowControls(true);
+          }}
+        >
+          {/* 앱 오퍼시티 */}
+          <div className="flex items-center gap-1" title="앱 투명도">
+            <Eye size={11} className="text-white/40" />
+            <input type="range" min={15} max={100}
+              value={Math.round(appOpacity * 100)}
+              onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
+              className="w-11 h-1 cursor-pointer" />
+          </div>
+
+          {/* 글래스 틴트 */}
+          <div className="flex items-center gap-1" title="글래스 효과">
+            <Droplets size={11} className="text-white/40" />
+            <input type="range" min={0} max={100}
+              value={Math.round(glassIntensity * 100)}
+              onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
+              className="w-11 h-1 cursor-pointer" />
+          </div>
+
+          {/* AOT 핀 토글 */}
+          <button
+            onClick={handleToggleAOT}
+            className="w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors cursor-pointer"
+            style={{
+              background: isAOT ? 'rgba(108, 92, 231, 0.7)' : 'rgba(255,255,255,0.15)',
+            }}
+            title={isAOT ? '항상 위에 표시 (켜짐)' : '항상 위에 표시 (꺼짐)'}
+          >
+            {isAOT
+              ? <Pin size={9} className="text-white" strokeWidth={3} />
+              : <PinOff size={9} className="text-white/60" strokeWidth={2.5} />}
+          </button>
+
+          {/* 최소화 (독 모드) */}
+          <button
+            onClick={handleMinimize}
+            className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-yellow-500/70 hover:bg-yellow-500 transition-colors cursor-pointer"
+            title="최소화"
+          >
+            <Minus size={9} className="text-white" strokeWidth={3} />
+          </button>
+
+          {/* 닫기 */}
+          <button
+            onClick={handleClose}
+            className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-0.5"
+          >
+            <X size={9} className="text-white" strokeWidth={3} />
+          </button>
+        </div>
+      )}
+
+      {/* ── 위젯 콘텐츠 ── */}
+      <div className="flex-1 overflow-hidden relative z-10">
+        <IsPopupContext.Provider value={true}>
+        <WidgetIdContext.Provider value={widgetId}>
+          <div className="h-full overflow-auto">
+            {ready ? widgetMeta.component : (
+              <div className="flex items-center justify-center h-full">
+                <span className="text-sm text-white/30 animate-pulse">로딩 중...</span>
+              </div>
+            )}
+          </div>
+        </WidgetIdContext.Provider>
+        </IsPopupContext.Provider>
       </div>
     </div>
   );

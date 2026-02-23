@@ -110,6 +110,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('widget:minimize-to-dock', widgetId),
   widgetRestoreFromDock: (widgetId: string) =>
     ipcRenderer.invoke('widget:restore-from-dock', widgetId),
+  widgetDockExpand: (widgetId: string) =>
+    ipcRenderer.invoke('widget:dock-expand', widgetId),
+  widgetDockCollapse: (widgetId: string) =>
+    ipcRenderer.invoke('widget:dock-collapse', widgetId),
   onWidgetDockChange: (callback: (isDocked: boolean) => void) => {
     const handler = (_event: unknown, isDocked: boolean) => callback(isDocked);
     ipcRenderer.on('widget:dock-change', handler);
