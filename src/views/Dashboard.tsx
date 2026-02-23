@@ -9,6 +9,7 @@ import { AssigneeCardsWidget } from '@/components/widgets/AssigneeCardsWidget';
 import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget';
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
+import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { WidgetIdContext } from '@/components/widgets/Widget';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
@@ -202,6 +203,7 @@ const ALL_WIDGETS: WidgetMeta[] = [
   { id: 'episode-summary', label: '에피소드 요약', component: <EpisodeSummaryWidget /> },
   { id: 'dept-comparison', label: '부서별 비교', component: <DepartmentComparisonWidget />, allOnly: true },
   { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
+  { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
 ];
 
 const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]));
@@ -210,6 +212,9 @@ const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]
 function getWidgetComponent(id: string): React.ReactNode | undefined {
   if (id.startsWith('calendar-') || id === 'calendar') {
     return <CalendarWidget />;
+  }
+  if (id.startsWith('my-tasks')) {
+    return <MyTasksWidget />;
   }
   return WIDGET_MAP[id];
 }

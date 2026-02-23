@@ -9,6 +9,7 @@ import { AssigneeCardsWidget } from '@/components/widgets/AssigneeCardsWidget';
 import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget';
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
+import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
@@ -24,6 +25,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
   'episode-summary': { label: '에피소드 요약', component: <EpisodeSummaryWidget /> },
   'dept-comparison': { label: '부서별 비교', component: <DepartmentComparisonWidget /> },
   'calendar': { label: '캘린더', component: <CalendarWidget /> },
+  'my-tasks': { label: '내 할일', component: <MyTasksWidget /> },
 };
 
 /**
