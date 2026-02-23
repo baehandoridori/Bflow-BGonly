@@ -19,6 +19,19 @@ import type { Episode } from '@/types';
 import { getPreset, applyTheme } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
+// 모듈 레벨 쿨다운: sheetsNotifyChange 호출 시 자체 변경 감지
+// contextBridge의 frozen 객체에 직접 프로퍼티 재할당이 불가하므로
+// 별도 플래그로 관리하고, sheetsNotifyChange 호출 래퍼를 export
+let _reloadCooldown = false;
+const _COOLDOWN_MS = 3000;
+
+/** 팝업 위젯에서 시트 변경 알림 시 이 래퍼를 사용 (쿨다운 자동 적용) */
+export function notifySheetChangeWithCooldown() {
+  _reloadCooldown = true;
+  setTimeout(() => { _reloadCooldown = false; }, _COOLDOWN_MS);
+  return window.electronAPI?.sheetsNotifyChange?.();
+}
+
 const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNode }> = {
   'overall-progress': { label: '전체 진행률', component: <OverallProgressWidget /> },
   'stage-bars': { label: '단계별 진행률', component: <StageBarsWidget /> },
@@ -100,19 +113,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   useEffect(() => {
     if (!ready) return;
 
-    // 자체 변경 쿨다운 (sheetsNotifyChange 직후 reloadData 억제)
-    let reloadCooldown = false;
-    const COOLDOWN_MS = 3000;
-
-    // 자체 변경 감지: sheetsNotifyChange를 가로채서 쿨다운 설정
-    const origNotify = window.electronAPI?.sheetsNotifyChange;
-    if (window.electronAPI && origNotify) {
-      window.electronAPI.sheetsNotifyChange = () => {
-        reloadCooldown = true;
-        setTimeout(() => { reloadCooldown = false; }, COOLDOWN_MS);
-        return origNotify();
-      };
-    }
+    // 자체 변경 쿨다운: 모듈 레벨 _reloadCooldown 플래그 사용
+    // (위젯 컴포넌트에서 notifySheetChangeWithCooldown()을 호출하면 쿨다운 자동 적용)
 
     const loadEpMetadata = async (episodes: Episode[], connected: boolean) => {
       const readMeta = connected ? readMetadataFromSheets : readLocalMetadata;
@@ -172,10 +174,10 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
 
     // 1) sheet:changed 이벤트 수신 시 — 자체 변경 직후면 지연
     const cleanupEvent = window.electronAPI?.onSheetChanged?.(() => {
-      if (reloadCooldown) {
+      if (_reloadCooldown) {
         // 자체 변경 직후: 쿨다운 후에 1회만 리로드 (디바운스)
         if (reloadTimer) clearTimeout(reloadTimer);
-        reloadTimer = setTimeout(() => { reloadData(); }, COOLDOWN_MS + 500);
+        reloadTimer = setTimeout(() => { reloadData(); }, _COOLDOWN_MS + 500);
         return;
       }
       // 외부 변경: 바로 리로드
@@ -184,17 +186,13 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
 
     // 2) 30초 주기 폴링 (이벤트 미수신 시 안전망)
     const pollInterval = setInterval(() => {
-      if (!reloadCooldown) reloadData();
+      if (!_reloadCooldown) reloadData();
     }, 30_000);
 
     return () => {
       cleanupEvent?.();
       clearInterval(pollInterval);
       if (reloadTimer) clearTimeout(reloadTimer);
-      // sheetsNotifyChange 원복
-      if (window.electronAPI && origNotify) {
-        window.electronAPI.sheetsNotifyChange = origNotify;
-      }
     };
   }, [ready]);
 

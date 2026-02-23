@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useContext, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useContext, useRef, forwardRef } from 'react';
 import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, ChevronRight, PartyPopper } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
@@ -201,17 +201,7 @@ function ScenePickerModal({
 }
 
 /* ─── 인라인 편집 행 ──────────────────────────── */
-function EditableSceneRow({
-  flat,
-  deptCfg,
-  epLabel,
-  sceneNum,
-  pct,
-  isCustom,
-  onToggle,
-  onRemove,
-  onEditField,
-}: {
+interface EditableSceneRowProps {
   flat: FlatScene;
   deptCfg: typeof DEPARTMENT_CONFIGS['bg'];
   epLabel: string;
@@ -221,7 +211,19 @@ function EditableSceneRow({
   onToggle: (flat: FlatScene, stage: Stage) => void;
   onRemove: (key: SceneKey) => void;
   onEditField: (flat: FlatScene, field: string, value: string) => void;
-}) {
+}
+
+const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(function EditableSceneRow({
+  flat,
+  deptCfg,
+  epLabel,
+  sceneNum,
+  pct,
+  isCustom,
+  onToggle,
+  onRemove,
+  onEditField,
+}, ref) {
   const s = flat.scene;
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -245,6 +247,7 @@ function EditableSceneRow({
 
   return (
     <motion.div
+      ref={ref}
       key={flat.key}
       layout
       initial={{ opacity: 0 }}
@@ -351,7 +354,7 @@ function EditableSceneRow({
       </div>
     </motion.div>
   );
-}
+});
 
 /* ─── Windows 11 스타일 탭 바 ────────────────── */
 function TabBar({
@@ -469,6 +472,15 @@ export function MyTasksWidget() {
   const isPopup = useContext(IsPopupContext);
   const widgetId = useContext(WidgetIdContext);
 
+  // 시트 변경 알림: 팝업에서는 쿨다운 래퍼, 대시보드에서는 직접 호출
+  const notifyChange = useCallback(async () => {
+    if (isPopup) {
+      const { notifySheetChangeWithCooldown } = await import('@/views/WidgetPopup');
+      return notifySheetChangeWithCooldown();
+    }
+    return window.electronAPI?.sheetsNotifyChange?.();
+  }, [isPopup]);
+
   // 뷰 관리
   const [customViews, setCustomViews] = useState<TaskView[]>(() => loadViews());
   const [activeViewId, setActiveViewId] = useState(DEFAULT_VIEW.id);
@@ -580,13 +592,13 @@ export function MyTasksWidget() {
           await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
           await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
         }
-        window.electronAPI?.sheetsNotifyChange?.();
+        notifyChange();
       }
     } catch (err) {
       console.error('[MyTasks 토글 실패]', err);
       toggleSceneStage(sheetName, scene.sceneId, stage);
     }
-  }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, sheetsConnected]);
+  }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, sheetsConnected, notifyChange]);
 
   // 인라인 필드 편집
   const handleEditField = useCallback(async (flat: FlatScene, field: string, value: string) => {
@@ -597,12 +609,12 @@ export function MyTasksWidget() {
       if (sheetsConnected) {
         const { updateSceneFieldInSheets } = await import('@/services/sheetsService');
         await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
-        window.electronAPI?.sheetsNotifyChange?.();
+        notifyChange();
       }
     } catch (err) {
       console.error('[MyTasks 편집 실패]', err);
     }
-  }, [updateSceneFieldOptimistic, sheetsConnected]);
+  }, [updateSceneFieldOptimistic, sheetsConnected, notifyChange]);
 
   // 뷰 조작
   const createCustomView = () => {
