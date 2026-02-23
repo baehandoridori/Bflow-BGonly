@@ -503,13 +503,13 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     minWidth: 280,
     minHeight: 200,
     frame: false,
-    transparent: true,
+    transparent: false,
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: false,
     title: widgetTitle,
-    backgroundColor: '#00000000',
-    hasShadow: false,
+    backgroundColor: '#1a1a2e',  // Acrylic 비활성화 시에도 보이도록 (Ctrl+Shift+S 캡처 등)
+    hasShadow: true,
     backgroundMaterial: 'acrylic',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -542,28 +542,6 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     if (!popupWin.isDestroyed()) {
       popupWin.webContents.send('widget:focus-change', true);
     }
-  });
-
-  // 네이티브 최소화 인터셉트 → 독 모드로 전환
-  popupWin.on('minimize', () => {
-    if (popupWin.isDestroyed()) return;
-    popupWin.restore();
-    if (!widgetOriginalBounds.has(widgetId)) {
-      widgetOriginalBounds.set(widgetId, popupWin.getBounds());
-    }
-    const display = screen.getPrimaryDisplay();
-    const wa = display.workArea;
-    const dockSize = 64;
-    const margin = 24;
-    popupWin.setBounds({
-      x: wa.x + wa.width - dockSize - margin,
-      y: wa.y + wa.height - dockSize - margin,
-      width: dockSize,
-      height: dockSize,
-    });
-    popupWin.setSkipTaskbar(true);
-    popupWin.setResizable(false);
-    popupWin.webContents.send('widget:dock-change', true);
   });
 
   return { ok: true };
@@ -611,33 +589,38 @@ ipcMain.handle('widget:minimize-to-dock', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
+  // 현재 바운드 저장 (복원용)
   if (!widgetOriginalBounds.has(widgetId)) {
     widgetOriginalBounds.set(widgetId, win.getBounds());
   }
+
   const display = screen.getPrimaryDisplay();
   const wa = display.workArea;
-  const dockSize = 64;
-  const margin = 24;
+  const dockSize = 72;
+  const margin = 20;
+
+  // minSize를 줄여야 작은 창이 가능
+  win.setMinimumSize(dockSize, dockSize);
+  win.setResizable(false);
+  win.setSkipTaskbar(true);
   win.setBounds({
     x: wa.x + wa.width - dockSize - margin,
     y: wa.y + wa.height - dockSize - margin,
     width: dockSize,
     height: dockSize,
   });
-  win.setSkipTaskbar(true);
-  win.setResizable(false);
   win.webContents.send('widget:dock-change', true);
 });
 
 ipcMain.handle('widget:dock-expand', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
+
   const display = screen.getPrimaryDisplay();
   const wa = display.workArea;
-  const expandW = 420;
-  const expandH = 360;
-  const margin = 24;
-  // 오른쪽 아래 기준으로 확장 (workArea 내부 보장)
+  const expandW = 380;
+  const expandH = 320;
+  const margin = 20;
   win.setBounds({
     x: wa.x + wa.width - expandW - margin,
     y: wa.y + wa.height - expandH - margin,
@@ -649,11 +632,11 @@ ipcMain.handle('widget:dock-expand', (_event, widgetId: string) => {
 ipcMain.handle('widget:dock-collapse', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
+
   const display = screen.getPrimaryDisplay();
   const wa = display.workArea;
-  const dockSize = 64;
-  const margin = 24;
-  // 오른쪽 아래 기준으로 축소
+  const dockSize = 72;
+  const margin = 20;
   win.setBounds({
     x: wa.x + wa.width - dockSize - margin,
     y: wa.y + wa.height - dockSize - margin,
@@ -666,12 +649,16 @@ ipcMain.handle('widget:restore-from-dock', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
+  // 원래 minSize 복원
+  win.setMinimumSize(280, 200);
+  win.setResizable(true);
+  win.setSkipTaskbar(false);
+
   const original = widgetOriginalBounds.get(widgetId);
   if (original) {
     win.setBounds(original);
     widgetOriginalBounds.delete(widgetId);
   }
-  win.setSkipTaskbar(false);
   win.setResizable(true);
   win.webContents.send('widget:dock-change', false);
 });

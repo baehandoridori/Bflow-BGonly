@@ -325,60 +325,42 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   }
 
   // 글래스 틴트 계산 (Acrylic이 블러 담당, CSS는 틴트/반사만)
-  // 이전보다 알파를 낮춰서 Acrylic 블러가 더 잘 비침
-  const baseTintAlpha = 0.12 + (1 - glassIntensity) * 0.35; // 0.12~0.47 (낮을수록 투명)
-  const tintAlpha = isFocused ? baseTintAlpha : baseTintAlpha + 0.3; // 비포커스: 약간 어둡게 (0.92 아님)
+  // 포커스 잃으면 틴트를 진하게 올려 Acrylic 회색 fallback을 가림
+  const baseTintAlpha = 0.3 + (1 - glassIntensity) * 0.5;  // 0.3~0.8
+  const tintAlpha = isFocused ? baseTintAlpha : 0.92;
   const borderAlpha = 0.06 + glassIntensity * 0.14;
   const reflectAlpha = isFocused ? glassIntensity * 0.15 : 0.02;
 
-  // ── 독 모드: 축소(64×64) → 호버 시 확장(420×360) ──
+  // ── 독 모드: 축소(72×72) → 호버 시 확장(380×320) ──
   if (isDocked) {
-    // 축소 상태: 투명 배경 + 플로팅 아이콘만 표시
+    // 축소 상태: Acrylic 배경 + 아이콘
     if (!isDockHover) {
       return (
         <div
           className="h-screen w-screen flex items-center justify-center cursor-pointer"
-          style={{ background: 'transparent' }}
+          style={{ background: `rgba(12, 14, 22, ${baseTintAlpha})` }}
           onMouseEnter={handleDockMouseEnter}
           onClick={handleRestore}
         >
-          <div
-            className="w-12 h-12 rounded-full flex items-center justify-center"
-            style={{
-              background: 'rgba(108, 92, 231, 0.9)',
-              boxShadow: '0 4px 20px rgba(108, 92, 231, 0.6), 0 0 0 2px rgba(108, 92, 231, 0.3)',
-              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-            }}
-          >
-            <BarChart3 size={20} className="text-white" />
+          <div className="flex flex-col items-center gap-1">
+            <BarChart3 size={24} className="text-white/90" />
+            <span className="text-[8px] text-white/50 leading-none">위젯</span>
           </div>
         </div>
       );
     }
 
-    // 확장 상태: Acrylic 프리뷰 표시
+    // 확장 상태: 프리뷰 표시
     return (
       <div
         className="h-screen w-screen flex flex-col overflow-hidden"
-        style={{
-          background: `rgba(12, 14, 22, ${tintAlpha})`,
-          borderRadius: '12px',
-        }}
+        style={{ background: `rgba(12, 14, 22, ${tintAlpha})` }}
         onMouseLeave={handleDockMouseLeave}
         onMouseEnter={() => {
           if (dockHoverTimerRef.current) { clearTimeout(dockHoverTimerRef.current); dockHoverTimerRef.current = null; }
         }}
         onClick={handleRestore}
       >
-        {/* 유리 반사 */}
-        <div
-          className="absolute inset-x-0 top-0 pointer-events-none"
-          style={{
-            height: '40%',
-            background: `linear-gradient(180deg, rgba(255,255,255,${reflectAlpha * 1.2}) 0%, rgba(255,255,255,${reflectAlpha * 0.2}) 30%, transparent 100%)`,
-            borderRadius: '12px 12px 0 0',
-          }}
-        />
         {/* 프리뷰 콘텐츠 (비활성) */}
         <div className="flex-1 overflow-hidden relative z-10" style={{ pointerEvents: 'none' }}>
           <IsPopupContext.Provider value={true}>
@@ -390,8 +372,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           </IsPopupContext.Provider>
         </div>
         {/* 클릭하여 열기 오버레이 */}
-        <div className="absolute inset-0 flex items-center justify-center z-20"
-          style={{ cursor: 'pointer', borderRadius: '12px' }}>
+        <div className="absolute inset-0 flex items-center justify-center z-20" style={{ cursor: 'pointer' }}>
           <span className="px-3 py-1.5 rounded-full text-xs font-medium text-white/80"
             style={{ background: 'rgba(0,0,0,0.4)' }}>
             클릭하여 열기
@@ -408,7 +389,6 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       style={{
         background: `rgba(12, 14, 22, ${tintAlpha})`,
         transition: 'background 0.3s ease',
-        borderRadius: '12px',
       }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
@@ -419,7 +399,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         style={{
           height: '40%',
           background: `linear-gradient(180deg, rgba(255,255,255,${reflectAlpha * 1.2}) 0%, rgba(255,255,255,${reflectAlpha * 0.2}) 30%, transparent 100%)`,
-          borderRadius: '12px 12px 0 0',
+          maskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
         }}
       />
 
@@ -427,7 +408,6 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          borderRadius: '12px',
           border: `1px solid rgba(255, 255, 255, ${borderAlpha})`,
           boxShadow: `
             inset 0 0 ${Math.round(glassIntensity * 20)}px rgba(255,255,255,${reflectAlpha * 0.4}),
