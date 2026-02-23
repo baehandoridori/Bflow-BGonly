@@ -19,11 +19,11 @@ import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
 import { loadSheetsConfig, connectSheets, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
 import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
-import { applyTheme, getPreset, DEFAULT_THEME_ID } from '@/themes';
+import { applyTheme, getPreset, getLightColors, DEFAULT_THEME_ID } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
-  const { currentView, isTestMode, setTestMode, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors } = useAppStore();
+  const { currentView, isTestMode, setTestMode, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -131,15 +131,19 @@ export default function App() {
         // 테마 로드 + 적용 (가드 설정 후 상태 변경)
         const savedTheme = await loadTheme();
         if (savedTheme) {
+          const savedMode = savedTheme.colorMode ?? 'dark';
           if (savedTheme.customColors) {
-            applyTheme(savedTheme.customColors);
+            applyTheme(savedTheme.customColors, savedMode);
+          } else if (savedMode === 'light') {
+            applyTheme(getLightColors(savedTheme.themeId), savedMode);
           } else {
             const preset = getPreset(savedTheme.themeId);
-            if (preset) applyTheme(preset.colors);
+            if (preset) applyTheme(preset.colors, savedMode);
           }
           // 가드를 먼저 열고 → 상태 변경 (useEffect가 실행될 때 가드가 이미 true)
           themeInitRef.current = true;
           setThemeId(savedTheme.themeId);
+          setColorMode(savedMode);
           if (savedTheme.customColors) {
             setCustomThemeColors(savedTheme.customColors);
           }
@@ -200,16 +204,19 @@ export default function App() {
   useEffect(() => {
     if (!themeInitRef.current) return; // init()에서 테마 로드 전까지 저장 방지
     if (themeId === 'custom' && customThemeColors) {
-      applyTheme(customThemeColors);
-      saveTheme({ themeId, customColors: customThemeColors });
+      applyTheme(customThemeColors, colorMode);
+      saveTheme({ themeId, customColors: customThemeColors, colorMode });
+    } else if (colorMode === 'light') {
+      applyTheme(getLightColors(themeId), colorMode);
+      saveTheme({ themeId, colorMode });
     } else {
       const preset = getPreset(themeId);
       if (preset) {
-        applyTheme(preset.colors);
-        saveTheme({ themeId });
+        applyTheme(preset.colors, colorMode);
+        saveTheme({ themeId, colorMode });
       }
     }
-  }, [themeId, customThemeColors]);
+  }, [themeId, customThemeColors, colorMode]);
 
   // 초기화 완료 후 데이터 로드 (sheetsConnected/isTestMode 변경 시)
   // authReady 가드: init 완료 전까지 테스트 데이터 로딩 방지 (플래시 제거)

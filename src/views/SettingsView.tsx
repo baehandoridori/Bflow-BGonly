@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Palette, Check } from 'lucide-react';
+import { Palette, Check, Sun, Moon } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import {
   loadSheetsConfig,
@@ -7,7 +7,7 @@ import {
   connectSheets,
   checkConnection,
 } from '@/services/sheetsService';
-import { THEME_PRESETS, rgbToHex, hexToRgb, getPreset } from '@/themes';
+import { THEME_PRESETS, rgbToHex, hexToRgb, getPreset, getLightColors } from '@/themes';
 import type { ThemeColors } from '@/themes';
 import { cn } from '@/utils/cn';
 import { DEFAULT_WEB_APP_URL } from '@/config';
@@ -16,8 +16,8 @@ export function SettingsView() {
   const {
     isTestMode, sheetsConnected, sheetsConfig,
     setSheetsConnected, setSheetsConfig,
-    themeId, customThemeColors,
-    setThemeId, setCustomThemeColors,
+    themeId, customThemeColors, colorMode,
+    setThemeId, setCustomThemeColors, setColorMode,
   } = useAppStore();
 
   const [webAppUrl, setWebAppUrl] = useState(sheetsConfig?.webAppUrl || DEFAULT_WEB_APP_URL || '');
@@ -118,13 +118,42 @@ export function SettingsView() {
           <h3 className="text-sm font-semibold text-text-secondary">색상 테마</h3>
         </div>
 
+        {/* 다크/라이트 모드 세그먼트 */}
+        <div className="flex items-center gap-1 p-1 bg-bg-primary rounded-lg mb-4 w-fit">
+          <button
+            onClick={() => setColorMode('dark')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+              colorMode === 'dark'
+                ? 'bg-bg-card text-text-primary shadow-sm'
+                : 'text-text-secondary hover:text-text-primary',
+            )}
+          >
+            <Moon size={13} />
+            다크
+          </button>
+          <button
+            onClick={() => setColorMode('light')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+              colorMode === 'light'
+                ? 'bg-bg-card text-text-primary shadow-sm'
+                : 'text-text-secondary hover:text-text-primary',
+            )}
+          >
+            <Sun size={13} />
+            라이트
+          </button>
+        </div>
+
         {/* 프리셋 그리드 */}
         <div className="grid grid-cols-3 gap-3 mb-4">
           {THEME_PRESETS.map((preset) => {
             const isActive = themeId === preset.id;
-            const accent = rgbToHex(preset.colors.accent);
-            const sub = rgbToHex(preset.colors.accentSub);
-            const bg = rgbToHex(preset.colors.bgCard);
+            const displayColors = colorMode === 'light' ? getLightColors(preset.id) : preset.colors;
+            const accent = rgbToHex(displayColors.accent);
+            const sub = rgbToHex(displayColors.accentSub);
+            const bg = rgbToHex(displayColors.bgCard);
             return (
               <button
                 key={preset.id}

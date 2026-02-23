@@ -133,8 +133,24 @@ export function getPreset(id: string): ThemePreset | undefined {
   return THEME_PRESETS.find(p => p.id === id);
 }
 
+/** 프리셋 ID로 라이트 모드 색상 생성 (accent 유지, 배경/텍스트만 변경) */
+export function getLightColors(themeId: string): ThemeColors {
+  const preset = getPreset(themeId);
+  const accent = preset?.colors.accent ?? THEME_PRESETS[0].colors.accent;
+  const accentSub = preset?.colors.accentSub ?? THEME_PRESETS[0].colors.accentSub;
+  return {
+    bgPrimary: '245 246 250',
+    bgCard: '255 255 255',
+    bgBorder: '220 222 230',
+    textPrimary: '28 32 42',
+    textSecondary: '107 114 128',
+    accent,
+    accentSub,
+  };
+}
+
 /** CSS 변수에 테마 적용 */
-export function applyTheme(colors: ThemeColors): void {
+export function applyTheme(colors: ThemeColors, colorMode?: 'dark' | 'light'): void {
   const root = document.documentElement;
   root.style.setProperty('--color-bg-primary', colors.bgPrimary);
   root.style.setProperty('--color-bg-card', colors.bgCard);
@@ -143,10 +159,13 @@ export function applyTheme(colors: ThemeColors): void {
   root.style.setProperty('--color-text-secondary', colors.textSecondary);
   root.style.setProperty('--color-accent', colors.accent);
   root.style.setProperty('--color-accent-sub', colors.accentSub);
+  // 라이트/다크 모드 표시 (CSS/컴포넌트에서 참조 가능)
+  root.setAttribute('data-color-mode', colorMode ?? 'dark');
 }
 
 /** 저장용 테마 설정 */
 export interface ThemeConfig {
   themeId: string;
   customColors?: ThemeColors;
+  colorMode?: 'dark' | 'light';
 }

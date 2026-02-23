@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Sun, Moon } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
@@ -9,7 +9,7 @@ interface HeaderProps {
 }
 
 export function Header({ onRefresh }: HeaderProps) {
-  const { currentView } = useAppStore();
+  const { currentView, colorMode, toggleColorMode } = useAppStore();
   const { isSyncing, lastSyncTime } = useDataStore();
 
   const VIEW_TITLES: Record<string, string> = {
@@ -46,6 +46,15 @@ export function Header({ onRefresh }: HeaderProps) {
           )}
         >
           <RefreshCw size={18} />
+        </button>
+
+        {/* 다크/라이트 모드 토글 */}
+        <button
+          onClick={toggleColorMode}
+          title={colorMode === 'dark' ? '라이트 모드로 전환' : '다크 모드로 전환'}
+          className="p-2 rounded-lg hover:bg-bg-border/50 transition-colors"
+        >
+          {colorMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>
 
         {/* 구분선 */}

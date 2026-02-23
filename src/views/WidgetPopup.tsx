@@ -16,7 +16,7 @@ import { loadSession, loadUsers } from '@/services/userService';
 import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig, readMetadataFromSheets } from '@/services/sheetsService';
 import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
 import type { Episode } from '@/types';
-import { getPreset, applyTheme } from '@/themes';
+import { getPreset, getLightColors, applyTheme } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 // 모듈 레벨 쿨다운: sheetsNotifyChange 호출 시 자체 변경 감지
@@ -208,10 +208,12 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       try {
         const saved = await loadTheme();
         if (saved) {
+          const savedMode = saved.colorMode ?? 'dark';
           useAppStore.getState().setThemeId(saved.themeId);
+          useAppStore.getState().setColorMode(savedMode);
           if (saved.customColors) useAppStore.getState().setCustomThemeColors(saved.customColors);
-          const colors = saved.customColors ?? getPreset(saved.themeId)?.colors;
-          if (colors) applyTheme(colors);
+          let colors = saved.customColors ?? (savedMode === 'light' ? getLightColors(saved.themeId) : getPreset(saved.themeId)?.colors);
+          if (colors) applyTheme(colors, savedMode);
         }
 
         const api = window.electronAPI;
@@ -339,7 +341,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         <div
           className="h-screen w-screen flex items-center justify-center cursor-pointer select-none"
           style={{
-            background: `rgba(12, 14, 22, ${baseTintAlpha})`,
+            background: `rgb(var(--color-bg-primary) / ${baseTintAlpha})`,
             transition: 'background 0.15s ease',
           }}
           onMouseEnter={handleDockMouseEnter}
@@ -360,7 +362,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       <div
         className="h-screen w-screen flex flex-col overflow-hidden animate-dock-fadein"
         style={{
-          background: `rgba(12, 14, 22, ${tintAlpha})`,
+          background: `rgb(var(--color-bg-primary) / ${tintAlpha})`,
           cursor: 'pointer',
         }}
         onMouseLeave={handleDockMouseLeave}
@@ -418,7 +420,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     <div
       className="h-screen w-screen flex flex-col overflow-hidden"
       style={{
-        background: `rgba(12, 14, 22, ${tintAlpha})`,
+        background: `rgb(var(--color-bg-primary) / ${tintAlpha})`,
         transition: 'background 0.3s ease',
       }}
       onMouseMove={handleMouseMove}
