@@ -217,7 +217,9 @@ function BokehOrbs({ count, minR, maxR, baseAlpha, drift, speed }: {
 }
 
 /* ── 오로라 메시 (conic-gradient → radial 다중 레이어로 밴딩 제거) ── */
-function AuroraMesh() {
+function AuroraMesh({ isLight }: { isLight?: boolean }) {
+  // 라이트 모드에서는 알파값을 높여 흰색 배경 위에서도 오로라가 보이게
+  const m = isLight ? 3 : 1;
   return (
     <>
       {/* 부드러운 radial 워시 2개 — conic보다 밴딩 없음 */}
@@ -226,9 +228,9 @@ function AuroraMesh() {
         style={{
           width: '140%', height: '140%', left: '-20%', top: '-20%',
           background: `radial-gradient(ellipse at 30% 40%,
-            rgba(0,184,148,0.06) 0%, rgb(var(--color-accent) / 0.04) 40%, transparent 70%),
+            rgba(0,184,148,${0.06 * m}) 0%, rgb(var(--color-accent) / ${0.04 * m}) 40%, transparent 70%),
             radial-gradient(ellipse at 70% 60%,
-            rgba(202,138,4,0.05) 0%, rgb(var(--color-accent-sub) / 0.03) 40%, transparent 70%)`,
+            rgba(202,138,4,${0.05 * m}) 0%, rgb(var(--color-accent-sub) / ${0.03 * m}) 40%, transparent 70%)`,
         }}
         animate={{ x: [0, 30, -20, 0], y: [0, -20, 15, 0] }}
         transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
@@ -238,9 +240,9 @@ function AuroraMesh() {
         style={{
           width: '120%', height: '120%', left: '-10%', top: '-10%',
           background: `radial-gradient(ellipse at 60% 30%,
-            rgba(34,197,94,0.05) 0%, rgba(116,185,255,0.03) 40%, transparent 65%),
+            rgba(34,197,94,${0.05 * m}) 0%, rgba(116,185,255,${0.03 * m}) 40%, transparent 65%),
             radial-gradient(ellipse at 40% 70%,
-            rgba(253,203,110,0.04) 0%, rgba(0,184,148,0.03) 40%, transparent 65%)`,
+            rgba(253,203,110,${0.04 * m}) 0%, rgba(0,184,148,${0.03 * m}) 40%, transparent 65%)`,
         }}
         animate={{ x: [0, -25, 20, 0], y: [0, 20, -15, 0] }}
         transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
@@ -251,6 +253,9 @@ function AuroraMesh() {
 
 /* ── 파트 완료 오버레이 ── */
 function PartCompleteOverlay() {
+  const colorMode = useAppStore((s) => s.colorMode);
+  const isLight = colorMode === 'light';
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -259,16 +264,16 @@ function PartCompleteOverlay() {
       className="absolute inset-0 z-10 pointer-events-none overflow-hidden rounded-xl"
     >
       {/* 레이어 0: 오로라 메시 (부드러운 radial, 밴딩 없음) */}
-      <AuroraMesh />
+      <AuroraMesh isLight={isLight} />
 
       {/* 레이어 1: 대형 소프트 보케 — 깊이감 */}
-      <BokehOrbs count={5} minR={50} maxR={100} baseAlpha={0.12} drift={50} speed={10} />
+      <BokehOrbs count={5} minR={50} maxR={100} baseAlpha={isLight ? 0.22 : 0.12} drift={50} speed={10} />
 
       {/* 레이어 2: 중형 보케 */}
-      <BokehOrbs count={8} minR={15} maxR={40} baseAlpha={0.2} drift={40} speed={7} />
+      <BokehOrbs count={8} minR={15} maxR={40} baseAlpha={isLight ? 0.35 : 0.2} drift={40} speed={7} />
 
       {/* 레이어 3: 소형 샤프 보케 — 전경 */}
-      <BokehOrbs count={12} minR={4} maxR={12} baseAlpha={0.45} drift={25} speed={5} />
+      <BokehOrbs count={12} minR={4} maxR={12} baseAlpha={isLight ? 0.6 : 0.45} drift={25} speed={5} />
 
       {/* 완료 뱃지 */}
       <div className="absolute inset-0 flex items-center justify-center">
@@ -282,7 +287,9 @@ function PartCompleteOverlay() {
           <motion.div
             className="absolute -inset-4 rounded-2xl"
             style={{
-              background: 'radial-gradient(ellipse, rgba(0,184,148,0.15) 0%, rgba(0,184,148,0.05) 40%, transparent 70%)',
+              background: isLight
+                ? 'radial-gradient(ellipse, rgba(0,184,148,0.25) 0%, rgba(0,184,148,0.1) 40%, transparent 70%)'
+                : 'radial-gradient(ellipse, rgba(0,184,148,0.15) 0%, rgba(0,184,148,0.05) 40%, transparent 70%)',
               filter: 'blur(10px)',
             }}
             animate={{ opacity: [0.4, 0.8, 0.4], scale: [0.97, 1.03, 0.97] }}
@@ -292,9 +299,11 @@ function PartCompleteOverlay() {
           <div
             className="relative flex items-center gap-3 px-7 py-3.5 rounded-xl backdrop-blur-md"
             style={{
-              background: 'rgba(26,29,39,0.92)',
-              border: '1px solid rgba(0,184,148,0.35)',
-              boxShadow: '0 8px 32px rgba(0,184,148,0.12), 0 0 1px rgba(0,184,148,0.4)',
+              background: isLight ? 'rgba(255,255,255,0.88)' : 'rgba(26,29,39,0.92)',
+              border: isLight ? '1px solid rgba(0,184,148,0.4)' : '1px solid rgba(0,184,148,0.35)',
+              boxShadow: isLight
+                ? '0 8px 32px rgba(0,184,148,0.18), 0 0 1px rgba(0,184,148,0.5), 0 2px 8px rgba(0,0,0,0.06)'
+                : '0 8px 32px rgba(0,184,148,0.12), 0 0 1px rgba(0,184,148,0.4)',
             }}
           >
             <motion.div
@@ -377,7 +386,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
 
-  const borderColor = pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct > 0 ? '#E17055' : '#2D3041';
+  const borderColor = pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {

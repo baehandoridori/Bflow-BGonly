@@ -87,6 +87,56 @@ function delay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
+/**
+ * 윈도우 바운드를 부드럽게 애니메이션 (easeInOut 커브)
+ * CSS transition은 윈도우 크기/위치에 적용 불가 → 네이티브 setBounds 보간
+ */
+function animateBounds(
+  win: BrowserWindow,
+  from: Electron.Rectangle,
+  to: Electron.Rectangle,
+  duration: number,
+  widgetId: string,
+): Promise<void> {
+  return new Promise((resolve) => {
+    animatingWidgets.add(widgetId);
+    const startTime = Date.now();
+    const FPS = 60;
+    const interval = Math.round(1000 / FPS);
+
+    // easeInOutCubic
+    const ease = (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+    const lerp = (a: number, b: number, t: number) => Math.round(a + (b - a) * t);
+
+    const timer = setInterval(() => {
+      if (win.isDestroyed()) {
+        clearInterval(timer);
+        animatingWidgets.delete(widgetId);
+        resolve();
+        return;
+      }
+
+      const elapsed = Date.now() - startTime;
+      const raw = Math.min(elapsed / duration, 1);
+      const t = ease(raw);
+
+      win.setBounds({
+        x: lerp(from.x, to.x, t),
+        y: lerp(from.y, to.y, t),
+        width: lerp(from.width, to.width, t),
+        height: lerp(from.height, to.height, t),
+      });
+
+      if (raw >= 1) {
+        clearInterval(timer);
+        animatingWidgets.delete(widgetId);
+        resolve();
+      }
+    }, interval);
+  });
+}
+
 // ─── 파일 감시 (실시간 동기화) ────────────────────────────────
 
 let fileWatcher: fs.FSWatcher | null = null;
@@ -671,8 +721,9 @@ ipcMain.handle('widget:minimize-to-dock', async (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
+  const currentBounds = win.getBounds();
   if (!widgetOriginalBounds.has(widgetId)) {
-    widgetOriginalBounds.set(widgetId, win.getBounds());
+    widgetOriginalBounds.set(widgetId, currentBounds);
   }
 
   // 독 스택에 추가
@@ -682,17 +733,15 @@ ipcMain.handle('widget:minimize-to-dock', async (_event, widgetId: string) => {
   const stackIndex = dockedWidgetIds.indexOf(widgetId);
   const target = getDockPosition(stackIndex);
 
-  // 1) 렌더러에 독 모드 전환 알림 → CSS 축소 애니메이션 시작
+  // 1) 렌더러에 독 모드 전환 알림 → CSS 콘텐츠 축소 시작
   win.webContents.send('widget:dock-change', true);
 
-  // 2) CSS 축소 애니메이션이 끝날 때까지 대기 (콘텐츠가 시각적으로 사라진 뒤)
-  await delay(220);
-
-  // 3) 윈도우를 한 번에 스냅 (이미 CSS로 사라진 상태라 점프 안 보임)
+  // 2) 최소 크기 제한 해제 후, 윈도우를 부드럽게 축소
   win.setMinimumSize(DOCK_ITEM_W, DOCK_ITEM_H);
   win.setResizable(false);
   win.setSkipTaskbar(true);
-  win.setBounds(target);
+
+  await animateBounds(win, currentBounds, target, 350, widgetId);
 
   // 기존 독 위젯들 재배치
   repositionAllDocked(widgetId);
@@ -709,13 +758,16 @@ ipcMain.handle('widget:dock-expand', async (_event, widgetId: string) => {
   const expandW = 380;
   const expandH = 320;
 
-  // 즉시 스냅 — CSS가 콘텐츠 페이드인 처리 (setBounds 루프보다 훨씬 부드러움)
-  win.setBounds({
+  const currentBounds = win.getBounds();
+  const target = {
     x: wa.x + wa.width - expandW - DOCK_MARGIN,
     y: wa.y + wa.height - expandH - DOCK_MARGIN,
     width: expandW,
     height: expandH,
-  });
+  };
+
+  // 부드럽게 확장 (pill → 프리뷰)
+  await animateBounds(win, currentBounds, target, 200, widgetId);
 });
 
 ipcMain.handle('widget:dock-collapse', async (_event, widgetId: string) => {
@@ -724,11 +776,12 @@ ipcMain.handle('widget:dock-collapse', async (_event, widgetId: string) => {
 
   expandedDockWidgetId = null;
 
+  const currentBounds = win.getBounds();
   const stackIndex = dockedWidgetIds.indexOf(widgetId);
   const target = stackIndex >= 0 ? getDockPosition(stackIndex) : getDockPosition(0);
 
-  // 즉시 스냅 — CSS가 콘텐츠 전환 처리
-  win.setBounds(target);
+  // 부드럽게 축소 (프리뷰 → pill)
+  await animateBounds(win, currentBounds, target, 180, widgetId);
 });
 
 ipcMain.handle('widget:restore-from-dock', async (_event, widgetId: string) => {
@@ -740,20 +793,22 @@ ipcMain.handle('widget:restore-from-dock', async (_event, widgetId: string) => {
   if (idx >= 0) dockedWidgetIds.splice(idx, 1);
   if (expandedDockWidgetId === widgetId) expandedDockWidgetId = null;
 
-  // 1) 윈도우 속성 복원
-  win.setMinimumSize(280, 200);
+  const currentBounds = win.getBounds();
+  const original = widgetOriginalBounds.get(widgetId);
+  const target = original ?? { x: currentBounds.x - 140, y: currentBounds.y - 160, width: 420, height: 360 };
+
+  // 1) 윈도우 속성 복원 + 독 모드 해제 → CSS 복원 애니메이션 시작
+  win.setMinimumSize(40, 36);   // 일시적으로 최소크기 낮춤 (애니메이션 중 클리핑 방지)
   win.setResizable(true);
   win.setSkipTaskbar(false);
-
-  // 2) 원래 크기로 즉시 스냅 (아직 독 pill 상태라 점프 안 보임)
-  const original = widgetOriginalBounds.get(widgetId);
-  if (original) {
-    win.setBounds(original);
-    widgetOriginalBounds.delete(widgetId);
-  }
-
-  // 3) 독 모드 해제 → CSS 복원 애니메이션(anim-restore-in) 시작
   win.webContents.send('widget:dock-change', false);
+
+  // 2) 부드럽게 확장 애니메이션
+  await animateBounds(win, currentBounds, target, 350, widgetId);
+
+  // 3) 최소 크기 복원
+  win.setMinimumSize(280, 200);
+  if (original) widgetOriginalBounds.delete(widgetId);
 
   // 나머지 독 위젯들 재배치
   repositionAllDocked();

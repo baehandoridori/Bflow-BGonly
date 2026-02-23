@@ -210,6 +210,40 @@ input[type="range"]::-webkit-slider-thumb {
   animation: dock-restore-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ── 모핑: pill → 전체 위젯 복원 (네이티브 setBounds 애니메이션과 동기) ── */
+@keyframes morph-restore-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+    border-radius: 8px;
+  }
+  40% {
+    opacity: 0.6;
+    transform: scale(0.85);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    border-radius: 0;
+  }
+}
+
+/* ── 모핑: 전체 위젯 → pill 독 모드 (콘텐츠가 아이콘으로 변해감) ── */
+@keyframes morph-dock-in {
+  0% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+  60% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* 접근성: 모션 감소 설정 존중 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -63,6 +63,9 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const [isDockHover, setIsDockHover] = useState(false);
   const dockHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 모핑 전환 상태: 'idle' | 'minimizing' | 'restoring'
+  const [morphState, setMorphState] = useState<'idle' | 'minimizing' | 'restoring'>('idle');
+
   // 마우스 위치 추적 → 상단 영역별 호버 감지
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -292,14 +295,23 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   }, [widgetId, isAOT]);
 
   const handleMinimize = useCallback(() => {
-    setIsDocked(true);
-    window.electronAPI?.widgetMinimizeToDock?.(widgetId);
+    setMorphState('minimizing');
+    // 콘텐츠 페이드아웃 시작 후 네이티브 모핑 호출
+    setTimeout(() => {
+      setIsDocked(true);
+      window.electronAPI?.widgetMinimizeToDock?.(widgetId);
+      // 모핑 완료 후 idle 복귀
+      setTimeout(() => setMorphState('idle'), 400);
+    }, 60);
   }, [widgetId]);
 
   const handleRestore = useCallback(() => {
+    setMorphState('restoring');
     setIsDocked(false);
     setIsDockHover(false);
     window.electronAPI?.widgetRestoreFromDock?.(widgetId);
+    // 모핑 완료 후 idle 복귀
+    setTimeout(() => setMorphState('idle'), 400);
   }, [widgetId]);
 
   // 독 호버: 윈도우 확장/축소
@@ -344,7 +356,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
             background: `rgb(var(--color-bg-card) / 0.92)`,
             backdropFilter: 'blur(12px)',
             WebkitBackdropFilter: 'blur(12px)',
-            willChange: 'transform',
+            willChange: 'transform, opacity',
+            animation: 'morph-dock-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both',
           }}
           onMouseEnter={handleDockMouseEnter}
           onClick={handleRestore}
@@ -419,13 +432,20 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   }
 
   // ── 일반 모드 UI (Acrylic 네이티브 블러) ──
+  const isMinimizing = morphState === 'minimizing';
+  const isRestoring = morphState === 'restoring';
   return (
     <div
       className="h-screen w-screen flex flex-col overflow-hidden"
       style={{
         background: `rgb(var(--color-bg-primary) / ${tintAlpha})`,
-        transition: 'background 0.3s ease, opacity 0.2s ease',
-        animation: 'dock-restore-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both',
+        transition: 'background 0.3s ease, opacity 0.35s ease, transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+        ...(isMinimizing ? {
+          opacity: 0,
+          transform: 'scale(0.8)',
+        } : isRestoring ? {
+          animation: 'morph-restore-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both',
+        } : {}),
       }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
