@@ -1391,63 +1391,75 @@ export function ScenesView() {
 
   // 아카이빙된 에피소드 목록 로드
   useEffect(() => {
+    // METADATA 기반 아카이빙 목록 읽기 (readArchived 액션 미배포 시에도 동작)
+    const loadArchivedFromMetadata = async () => {
+      const archived: typeof archivedEpisodes = [];
+      for (let i = 1; i <= 99; i++) {
+        try {
+          let infoStr: string | undefined;
+          if (sheetsConnected) {
+            const infoMeta = await readMetadataFromSheets('archive-info', String(i));
+            infoStr = infoMeta?.value;
+          } else {
+            const infoMeta = await readLocalMetadata('archive-info', String(i));
+            infoStr = infoMeta?.value;
+          }
+          if (infoStr) {
+            try {
+              const parsed = JSON.parse(infoStr);
+              // archive-info가 있으면 아카이빙된 에피소드
+              const titleMeta = sheetsConnected
+                ? await readMetadataFromSheets('episode-title', String(i))
+                : await readLocalMetadata('episode-title', String(i));
+              archived.push({
+                episodeNumber: i,
+                title: titleMeta?.value || `EP.${String(i).padStart(2, '0')}`,
+                partCount: 0,
+                archivedBy: parsed.by,
+                archivedAt: parsed.at,
+                memo: parsed.memo,
+              });
+            } catch { /* JSON 파싱 실패 무시 */ }
+          }
+        } catch { /* 개별 에피소드 실패 무시 */ }
+      }
+      return archived;
+    };
+
     const loadArchived = async () => {
       try {
         if (sheetsConnected) {
-          const { readArchivedFromSheets } = await import('@/services/sheetsService');
-          const list = await readArchivedFromSheets();
-          // 각 아카이빙에 대해 메타데이터에서 archivedBy/archivedAt 읽기
-          const enriched = [];
-          for (const item of list) {
-            const key = String(item.episodeNumber);
-            let archivedBy: string | undefined;
-            let archivedAt: string | undefined;
-            let memo: string | undefined;
-            try {
-              const meta = sheetsConnected
-                ? await readMetadataFromSheets('archive-info', key)
-                : await readLocalMetadata('archive-info', key);
-              if (meta?.value) {
-                const parsed = JSON.parse(meta.value);
-                archivedBy = parsed.by;
-                archivedAt = parsed.at;
-                memo = parsed.memo;
-              }
-            } catch { /* 무시 */ }
-            enriched.push({ ...item, archivedBy, archivedAt, memo });
+          try {
+            // 먼저 readArchived 액션 시도 (Apps Script 재배포 후 동작)
+            const { readArchivedFromSheets } = await import('@/services/sheetsService');
+            const list = await readArchivedFromSheets();
+            const enriched = [];
+            for (const item of list) {
+              const key = String(item.episodeNumber);
+              let archivedBy: string | undefined;
+              let archivedAt: string | undefined;
+              let memo: string | undefined;
+              try {
+                const meta = await readMetadataFromSheets('archive-info', key);
+                if (meta?.value) {
+                  const parsed = JSON.parse(meta.value);
+                  archivedBy = parsed.by;
+                  archivedAt = parsed.at;
+                  memo = parsed.memo;
+                }
+              } catch { /* 무시 */ }
+              enriched.push({ ...item, archivedBy, archivedAt, memo });
+            }
+            setArchivedEpisodes(enriched);
+          } catch {
+            // readArchived 미배포 시 → METADATA에서 fallback 읽기
+            console.info('[아카이빙] readArchived 미지원, METADATA fallback 사용');
+            const archived = await loadArchivedFromMetadata();
+            setArchivedEpisodes(archived);
           }
-          setArchivedEpisodes(enriched);
         } else {
           // 로컬 fallback: metadata에서 읽기
-          const archived: typeof archivedEpisodes = [];
-          for (let i = 1; i <= 99; i++) {
-            try {
-              const meta = await readLocalMetadata('archived-episode', String(i));
-              if (meta?.value === 'true') {
-                const titleMeta = await readLocalMetadata('episode-title', String(i));
-                const infoMeta = await readLocalMetadata('archive-info', String(i));
-                let archivedBy: string | undefined;
-                let archivedAt: string | undefined;
-                let memo: string | undefined;
-                if (infoMeta?.value) {
-                  try {
-                    const parsed = JSON.parse(infoMeta.value);
-                    archivedBy = parsed.by;
-                    archivedAt = parsed.at;
-                    memo = parsed.memo;
-                  } catch { /* 무시 */ }
-                }
-                archived.push({
-                  episodeNumber: i,
-                  title: titleMeta?.value || `EP.${String(i).padStart(2, '0')}`,
-                  partCount: 0,
-                  archivedBy,
-                  archivedAt,
-                  memo,
-                });
-              }
-            } catch { /* 무시 */ }
-          }
+          const archived = await loadArchivedFromMetadata();
           setArchivedEpisodes(archived);
         }
       } catch (err) {
@@ -1618,11 +1630,9 @@ export function ScenesView() {
 
     // 제목 저장 (즉시 UI 반영)
     if (epName) {
-      setEpisodeTitles((prev) => {
-        const next = { ...prev, [nextEpisodeNumber]: epName };
-        useDataStore.getState().setEpisodeTitles(next);
-        return next;
-      });
+      const next = { ...episodeTitles, [nextEpisodeNumber]: epName };
+      setEpisodeTitles(next);
+      useDataStore.getState().setEpisodeTitles(next);
     }
 
     // 백그라운드에서 서버/파일에 저장
@@ -1872,9 +1882,16 @@ export function ScenesView() {
 
     try {
       if (sheetsConnected) {
-        const { archiveEpisodeInSheets, writeMetadataToSheets } = await import('@/services/sheetsService');
+        const { writeMetadataToSheets } = await import('@/services/sheetsService');
+        // 항상 METADATA에 아카이빙 정보 기록
         await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
-        await archiveEpisodeInSheets(epNum);
+        // AC_ 탭 리네임 시도 (미배포 시 실패해도 METADATA로 동작)
+        try {
+          const { archiveEpisodeInSheets } = await import('@/services/sheetsService');
+          await archiveEpisodeInSheets(epNum);
+        } catch (tabErr) {
+          console.warn('[아카이빙] 탭 리네임 실패 (Apps Script 재배포 필요):', tabErr);
+        }
       } else {
         await writeLocalMetadata('archived-episode', String(epNum), 'true');
         await writeLocalMetadata('archive-info', String(epNum), archiveInfo);
@@ -1928,20 +1945,17 @@ export function ScenesView() {
     setEpEditOpen(false);
     const key = String(currentEp.episodeNumber);
 
-    // 즉시 UI 반영
+    // 즉시 UI 반영 — setState 콜백 안에서 글로벌 스토어 업데이트하면
+    // "Cannot update a component while rendering" 경고 발생하므로 분리
     if (title.trim()) {
-      setEpisodeTitles((prev) => {
-        const next = { ...prev, [currentEp.episodeNumber]: title.trim() };
-        useDataStore.getState().setEpisodeTitles(next);
-        return next;
-      });
+      const next = { ...episodeTitles, [currentEp.episodeNumber]: title.trim() };
+      setEpisodeTitles(next);
+      useDataStore.getState().setEpisodeTitles(next);
     } else {
-      setEpisodeTitles((prev) => {
-        const next = { ...prev };
-        delete next[currentEp.episodeNumber];
-        useDataStore.getState().setEpisodeTitles(next);
-        return next;
-      });
+      const next = { ...episodeTitles };
+      delete next[currentEp.episodeNumber];
+      setEpisodeTitles(next);
+      useDataStore.getState().setEpisodeTitles(next);
     }
     setEpisodeMemos((prev) => ({ ...prev, [currentEp.episodeNumber]: memo }));
 

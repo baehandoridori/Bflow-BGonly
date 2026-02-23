@@ -307,63 +307,87 @@ export function EpisodeView() {
   const [archiveDialogEpNum, setArchiveDialogEpNum] = useState<number | null>(null);
   const [archiveMemoInput, setArchiveMemoInput] = useState('완료로 인한 아카이빙');
 
-  // 아카이빙된 에피소드 로드
+  // 아카이빙된 에피소드 로드 (METADATA 기반 — Apps Script 재배포 전에도 동작)
   useEffect(() => {
+    const loadArchivedFromMetadata = async () => {
+      const { readMetadataFromSheets } = await import('@/services/sheetsService');
+      const archived: typeof archivedEpisodes = [];
+      for (let i = 1; i <= 99; i++) {
+        try {
+          const infoMeta = sheetsConnected
+            ? await readMetadataFromSheets('archive-info', String(i))
+            : null;
+          if (infoMeta?.value) {
+            const parsed = JSON.parse(infoMeta.value);
+            const titleMeta = await readMetadataFromSheets('episode-title', String(i));
+            archived.push({
+              episodeNumber: i,
+              title: titleMeta?.value || `EP.${String(i).padStart(2, '0')}`,
+              partCount: 0,
+              archivedBy: parsed.by,
+              archivedAt: parsed.at,
+              memo: parsed.memo,
+            });
+          }
+        } catch { /* 개별 실패 무시 */ }
+      }
+      return archived;
+    };
+
     const loadArchived = async () => {
       try {
-        const api = window.electronAPI;
         if (sheetsConnected) {
-          const { readArchivedFromSheets, readMetadataFromSheets } = await import('@/services/sheetsService');
-          const list = await readArchivedFromSheets();
-          const enriched: typeof archivedEpisodes = [];
-          for (const item of list) {
-            const key = String(item.episodeNumber);
-            let archivedBy: string | undefined;
-            let archivedAt: string | undefined;
-            let memo: string | undefined;
-            try {
-              const infoMeta = await readMetadataFromSheets('archive-info', key);
-              if (infoMeta?.value) {
-                const parsed = JSON.parse(infoMeta.value);
-                archivedBy = parsed.by;
-                archivedAt = parsed.at;
-                memo = parsed.memo;
-              }
-            } catch {}
-            enriched.push({ ...item, archivedBy, archivedAt, memo });
-          }
-          setArchivedEpisodes(enriched);
-        } else if (api) {
-          // 로컬 모드 fallback
-          const archived: typeof archivedEpisodes = [];
-          for (let i = 1; i <= 100; i++) {
-            try {
-              const meta = await api.readSettings(`metadata_archived-episode_${i}.json`);
-              const metaVal = typeof meta === 'string' ? meta : (meta as Record<string, unknown>)?.value;
-              if (metaVal === 'true') {
-                const infoRaw = await api.readSettings(`metadata_archive-info_${i}.json`);
-                let archivedBy: string | undefined;
-                let archivedAt: string | undefined;
-                let memo: string | undefined;
-                if (infoRaw) {
-                  try {
-                    const val = typeof infoRaw === 'string' ? infoRaw : (infoRaw as Record<string, unknown>)?.value;
-                    if (typeof val === 'string') {
-                      const parsed = JSON.parse(val);
-                      archivedBy = parsed.by;
-                      archivedAt = parsed.at;
-                      memo = parsed.memo;
-                    }
-                  } catch {}
+          try {
+            // readArchived 액션 시도 (Apps Script 재배포 후)
+            const { readArchivedFromSheets, readMetadataFromSheets } = await import('@/services/sheetsService');
+            const list = await readArchivedFromSheets();
+            const enriched: typeof archivedEpisodes = [];
+            for (const item of list) {
+              const key = String(item.episodeNumber);
+              let archivedBy: string | undefined;
+              let archivedAt: string | undefined;
+              let memo: string | undefined;
+              try {
+                const infoMeta = await readMetadataFromSheets('archive-info', key);
+                if (infoMeta?.value) {
+                  const parsed = JSON.parse(infoMeta.value);
+                  archivedBy = parsed.by;
+                  archivedAt = parsed.at;
+                  memo = parsed.memo;
                 }
-                archived.push({
-                  episodeNumber: i,
-                  title: `EP.${String(i).padStart(2, '0')}`,
-                  partCount: 0,
-                  archivedBy,
-                  archivedAt,
-                  memo,
-                });
+              } catch {}
+              enriched.push({ ...item, archivedBy, archivedAt, memo });
+            }
+            setArchivedEpisodes(enriched);
+          } catch {
+            // readArchived 미배포 → METADATA fallback
+            console.info('[EpisodeView] readArchived 미지원, METADATA fallback');
+            const archived = await loadArchivedFromMetadata();
+            setArchivedEpisodes(archived);
+          }
+        } else {
+          // 로컬 모드 fallback
+          const api = window.electronAPI;
+          if (!api) return;
+          const archived: typeof archivedEpisodes = [];
+          for (let i = 1; i <= 99; i++) {
+            try {
+              const infoRaw = await api.readSettings(`metadata_archive-info_${i}.json`);
+              if (infoRaw) {
+                const val = typeof infoRaw === 'string' ? infoRaw : (infoRaw as Record<string, unknown>)?.value;
+                if (typeof val === 'string') {
+                  const parsed = JSON.parse(val);
+                  const titleRaw = await api.readSettings(`metadata_episode-title_${i}.json`);
+                  const titleVal = typeof titleRaw === 'string' ? titleRaw : (titleRaw as Record<string, unknown>)?.value;
+                  archived.push({
+                    episodeNumber: i,
+                    title: (typeof titleVal === 'string' ? titleVal : null) || `EP.${String(i).padStart(2, '0')}`,
+                    partCount: 0,
+                    archivedBy: parsed.by,
+                    archivedAt: parsed.at,
+                    memo: parsed.memo,
+                  });
+                }
               }
             } catch {}
           }
@@ -427,9 +451,15 @@ export function EpisodeView() {
 
     try {
       if (sheetsConnected) {
-        const { archiveEpisodeInSheets, writeMetadataToSheets } = await import('@/services/sheetsService');
+        const { writeMetadataToSheets } = await import('@/services/sheetsService');
         await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
-        await archiveEpisodeInSheets(epNum);
+        // AC_ 탭 리네임 시도 (미배포 시 실패해도 METADATA로 동작)
+        try {
+          const { archiveEpisodeInSheets } = await import('@/services/sheetsService');
+          await archiveEpisodeInSheets(epNum);
+        } catch (tabErr) {
+          console.warn('[아카이빙] 탭 리네임 실패 (Apps Script 재배포 필요):', tabErr);
+        }
       } else {
         const api = window.electronAPI;
         if (api) {
