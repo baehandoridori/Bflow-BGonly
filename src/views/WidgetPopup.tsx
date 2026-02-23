@@ -350,18 +350,44 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       );
     }
 
-    // 확장 상태: 프리뷰 표시
+    // 확장 상태: 원본 글래스 스타일 + 위젯 프리뷰
     return (
       <div
         className="h-screen w-screen flex flex-col overflow-hidden"
-        style={{ background: `rgba(12, 14, 22, ${tintAlpha})` }}
+        style={{
+          background: `rgba(12, 14, 22, ${tintAlpha})`,
+          cursor: 'pointer',
+        }}
         onMouseLeave={handleDockMouseLeave}
         onMouseEnter={() => {
           if (dockHoverTimerRef.current) { clearTimeout(dockHoverTimerRef.current); dockHoverTimerRef.current = null; }
         }}
         onClick={handleRestore}
       >
-        {/* 프리뷰 콘텐츠 (비활성) */}
+        {/* 유리 반사 하이라이트 */}
+        <div
+          className="absolute inset-x-0 top-0 pointer-events-none"
+          style={{
+            height: '40%',
+            background: `linear-gradient(180deg, rgba(255,255,255,${reflectAlpha * 1.2}) 0%, rgba(255,255,255,${reflectAlpha * 0.2}) 30%, transparent 100%)`,
+            maskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+          }}
+        />
+        {/* 모서리 굴절 효과 */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            border: `1px solid rgba(255, 255, 255, ${borderAlpha})`,
+            boxShadow: `
+              inset 0 0 ${Math.round(glassIntensity * 20)}px rgba(255,255,255,${reflectAlpha * 0.4}),
+              inset 0 0 ${Math.round(glassIntensity * 4)}px rgba(255,255,255,${reflectAlpha * 0.8}),
+              0 0 0 1px rgba(255,255,255,${borderAlpha * 0.5}) inset,
+              0 1px 0 rgba(255,255,255,${reflectAlpha}) inset
+            `,
+          }}
+        />
+        {/* 위젯 콘텐츠 (비활성 프리뷰) */}
         <div className="flex-1 overflow-hidden relative z-10" style={{ pointerEvents: 'none' }}>
           <IsPopupContext.Provider value={true}>
           <WidgetIdContext.Provider value={widgetId}>
@@ -372,7 +398,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           </IsPopupContext.Provider>
         </div>
         {/* 클릭하여 열기 오버레이 */}
-        <div className="absolute inset-0 flex items-center justify-center z-20" style={{ cursor: 'pointer' }}>
+        <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
           <span className="px-3 py-1.5 rounded-full text-xs font-medium text-white/80"
             style={{ background: 'rgba(0,0,0,0.4)' }}>
             클릭하여 열기

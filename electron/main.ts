@@ -43,6 +43,53 @@ const isTestMode = process.argv.includes('--test-mode') || process.env.TEST_MODE
 let mainWindow: BrowserWindow | null = null;
 const widgetWindows = new Map<string, BrowserWindow>();
 const widgetOriginalBounds = new Map<string, Electron.Rectangle>();
+const animatingWidgets = new Set<string>();
+
+// ─── 위젯 윈도우 애니메이션 (ease-in-out cubic) ─────────────
+
+function animateBounds(
+  win: BrowserWindow,
+  target: Electron.Rectangle,
+  durationMs: number,
+  widgetId?: string,
+): Promise<void> {
+  return new Promise((resolve) => {
+    if (win.isDestroyed()) { resolve(); return; }
+    if (widgetId) animatingWidgets.add(widgetId);
+
+    const start = win.getBounds();
+    const startTime = Date.now();
+
+    const step = () => {
+      if (win.isDestroyed()) {
+        if (widgetId) animatingWidgets.delete(widgetId);
+        resolve();
+        return;
+      }
+      const elapsed = Date.now() - startTime;
+      const t = Math.min(1, elapsed / durationMs);
+      // ease-in-out cubic
+      const ease = t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+      win.setBounds({
+        x: Math.round(start.x + (target.x - start.x) * ease),
+        y: Math.round(start.y + (target.y - start.y) * ease),
+        width: Math.max(1, Math.round(start.width + (target.width - start.width) * ease)),
+        height: Math.max(1, Math.round(start.height + (target.height - start.height) * ease)),
+      });
+
+      if (t < 1) {
+        setTimeout(step, 16); // ~60fps
+      } else {
+        if (widgetId) animatingWidgets.delete(widgetId);
+        resolve();
+      }
+    };
+    step();
+  });
+}
 
 // ─── 파일 감시 (실시간 동기화) ────────────────────────────────
 
@@ -508,7 +555,7 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     resizable: true,
     skipTaskbar: false,
     title: widgetTitle,
-    backgroundColor: '#1a1a2e',  // Acrylic 비활성화 시에도 보이도록 (Ctrl+Shift+S 캡처 등)
+    backgroundColor: '#00000000',
     hasShadow: true,
     backgroundMaterial: 'acrylic',
     webPreferences: {
@@ -541,6 +588,38 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
   popupWin.on('focus', () => {
     if (!popupWin.isDestroyed()) {
       popupWin.webContents.send('widget:focus-change', true);
+    }
+  });
+
+  // 화면 모서리 자석 스냅
+  let snapFlag = false;
+  popupWin.on('moved', () => {
+    if (popupWin.isDestroyed() || snapFlag) return;
+    if (animatingWidgets.has(widgetId)) return;
+    // 독 모드에서는 스냅 안 함
+    if (widgetOriginalBounds.has(widgetId)) return;
+
+    const bounds = popupWin.getBounds();
+    const display = screen.getDisplayNearestPoint({
+      x: bounds.x + bounds.width / 2,
+      y: bounds.y + bounds.height / 2,
+    });
+    const wa = display.workArea;
+    const threshold = 15;
+
+    let newX = bounds.x;
+    let newY = bounds.y;
+    let snapped = false;
+
+    if (Math.abs(bounds.x - wa.x) < threshold) { newX = wa.x; snapped = true; }
+    if (Math.abs((bounds.x + bounds.width) - (wa.x + wa.width)) < threshold) { newX = wa.x + wa.width - bounds.width; snapped = true; }
+    if (Math.abs(bounds.y - wa.y) < threshold) { newY = wa.y; snapped = true; }
+    if (Math.abs((bounds.y + bounds.height) - (wa.y + wa.height)) < threshold) { newY = wa.y + wa.height - bounds.height; snapped = true; }
+
+    if (snapped && (newX !== bounds.x || newY !== bounds.y)) {
+      snapFlag = true;
+      popupWin.setBounds({ x: newX, y: newY, width: bounds.width, height: bounds.height });
+      setTimeout(() => { snapFlag = false; }, 50);
     }
   });
 
@@ -585,11 +664,10 @@ ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   }
 });
 
-ipcMain.handle('widget:minimize-to-dock', (_event, widgetId: string) => {
+ipcMain.handle('widget:minimize-to-dock', async (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
-  // 현재 바운드 저장 (복원용)
   if (!widgetOriginalBounds.has(widgetId)) {
     widgetOriginalBounds.set(widgetId, win.getBounds());
   }
@@ -599,20 +677,20 @@ ipcMain.handle('widget:minimize-to-dock', (_event, widgetId: string) => {
   const dockSize = 72;
   const margin = 20;
 
-  // minSize를 줄여야 작은 창이 가능
   win.setMinimumSize(dockSize, dockSize);
   win.setResizable(false);
   win.setSkipTaskbar(true);
-  win.setBounds({
+  win.webContents.send('widget:dock-change', true);
+
+  await animateBounds(win, {
     x: wa.x + wa.width - dockSize - margin,
     y: wa.y + wa.height - dockSize - margin,
     width: dockSize,
     height: dockSize,
-  });
-  win.webContents.send('widget:dock-change', true);
+  }, 300, widgetId);
 });
 
-ipcMain.handle('widget:dock-expand', (_event, widgetId: string) => {
+ipcMain.handle('widget:dock-expand', async (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
@@ -621,15 +699,16 @@ ipcMain.handle('widget:dock-expand', (_event, widgetId: string) => {
   const expandW = 380;
   const expandH = 320;
   const margin = 20;
-  win.setBounds({
+
+  await animateBounds(win, {
     x: wa.x + wa.width - expandW - margin,
     y: wa.y + wa.height - expandH - margin,
     width: expandW,
     height: expandH,
-  });
+  }, 250, widgetId);
 });
 
-ipcMain.handle('widget:dock-collapse', (_event, widgetId: string) => {
+ipcMain.handle('widget:dock-collapse', async (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
@@ -637,29 +716,28 @@ ipcMain.handle('widget:dock-collapse', (_event, widgetId: string) => {
   const wa = display.workArea;
   const dockSize = 72;
   const margin = 20;
-  win.setBounds({
+
+  await animateBounds(win, {
     x: wa.x + wa.width - dockSize - margin,
     y: wa.y + wa.height - dockSize - margin,
     width: dockSize,
     height: dockSize,
-  });
+  }, 200, widgetId);
 });
 
-ipcMain.handle('widget:restore-from-dock', (_event, widgetId: string) => {
+ipcMain.handle('widget:restore-from-dock', async (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
 
-  // 원래 minSize 복원
+  const original = widgetOriginalBounds.get(widgetId);
+  if (original) {
+    await animateBounds(win, original, 300, widgetId);
+    widgetOriginalBounds.delete(widgetId);
+  }
+
   win.setMinimumSize(280, 200);
   win.setResizable(true);
   win.setSkipTaskbar(false);
-
-  const original = widgetOriginalBounds.get(widgetId);
-  if (original) {
-    win.setBounds(original);
-    widgetOriginalBounds.delete(widgetId);
-  }
-  win.setResizable(true);
   win.webContents.send('widget:dock-change', false);
 });
 
