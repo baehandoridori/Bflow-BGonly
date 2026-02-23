@@ -300,20 +300,26 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     window.electronAPI?.widgetRestoreFromDock?.(widgetId);
   }, [widgetId]);
 
-  // 독 호버: 윈도우 확장/축소
+  // 독 호버: 딜레이 후 확장 (드래그할 시간 확보)
   const handleDockMouseEnter = useCallback(() => {
     if (dockHoverTimerRef.current) { clearTimeout(dockHoverTimerRef.current); dockHoverTimerRef.current = null; }
-    setIsDockHover(true);
-    window.electronAPI?.widgetDockExpand?.(widgetId);
+    dockHoverTimerRef.current = setTimeout(() => {
+      setIsDockHover(true);
+      window.electronAPI?.widgetDockExpand?.(widgetId);
+      dockHoverTimerRef.current = null;
+    }, 500);
   }, [widgetId]);
 
   const handleDockMouseLeave = useCallback(() => {
-    if (dockHoverTimerRef.current) clearTimeout(dockHoverTimerRef.current);
-    dockHoverTimerRef.current = setTimeout(() => {
-      setIsDockHover(false);
-      window.electronAPI?.widgetDockCollapse?.(widgetId);
-    }, 300);
-  }, [widgetId]);
+    if (dockHoverTimerRef.current) { clearTimeout(dockHoverTimerRef.current); dockHoverTimerRef.current = null; }
+    if (isDockHover) {
+      dockHoverTimerRef.current = setTimeout(() => {
+        setIsDockHover(false);
+        window.electronAPI?.widgetDockCollapse?.(widgetId);
+        dockHoverTimerRef.current = null;
+      }, 300);
+    }
+  }, [widgetId, isDockHover]);
 
   if (!widgetMeta) {
     return (
@@ -333,16 +339,24 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
 
   // ── 독 모드: 축소(72×72) → 호버 시 확장(380×320) ──
   if (isDocked) {
-    // 축소 상태: Acrylic 배경 + 아이콘
+    // 축소 상태: Acrylic 배경 + 아이콘 (드래그 가능, 500ms 호버 후 확장)
     if (!isDockHover) {
       return (
         <div
-          className="h-screen w-screen flex items-center justify-center cursor-pointer"
-          style={{ background: `rgba(12, 14, 22, ${baseTintAlpha})` }}
+          className="h-screen w-screen flex items-center justify-center"
+          style={{
+            background: `rgba(12, 14, 22, ${baseTintAlpha})`,
+            WebkitAppRegion: 'drag',
+            cursor: 'grab',
+          } as React.CSSProperties}
           onMouseEnter={handleDockMouseEnter}
-          onClick={handleRestore}
+          onMouseLeave={handleDockMouseLeave}
         >
-          <div className="flex flex-col items-center gap-1">
+          <div
+            className="flex flex-col items-center gap-1 cursor-pointer"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            onClick={handleRestore}
+          >
             <BarChart3 size={24} className="text-white/90" />
             <span className="text-[8px] text-white/50 leading-none">위젯</span>
           </div>
