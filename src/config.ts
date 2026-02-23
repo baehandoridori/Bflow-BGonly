@@ -12,6 +12,6 @@
 // ─── Google Apps Script 웹 앱 기본 URL ───────────────────────
 // 아래 URL을 실제 배포된 GAS 웹 앱 URL로 교체하세요.
 // 예시: 'https://script.google.com/macros/s/AKfycb.../exec'
-export const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxXmIXDH1ouaIvK1pRu15vXq92udDveY2h0arZT35bZHJEHisPwGIk6YTIRtOpZqJva/exec';
+export const DEFAULT_WEB_APP_URL = 'hhttps://script.google.com/macros/s/AKfycbxXmIXDH1ouaIvK1pRu15vXq92udDveY2h0arZT35bZHJEHisPwGIk6YTIRtOpZqJva/exec';
 
 // URL이 비어있으면 자동 연결을 건너뜁니다.
