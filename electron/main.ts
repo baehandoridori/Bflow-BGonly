@@ -127,8 +127,8 @@ function animateBounds(
 // ─── 파일 감시 (실시간 동기화) ────────────────────────────────
 
 let fileWatcher: fs.FSWatcher | null = null;
-// 자기가 쓴 직후에는 알림 무시 (자기 반영 방지)
-let ignoreNextChange = false;
+// 자기가 쓴 직후에는 알림 무시 (자기 반영 방지) — 카운터 방식으로 다중 쓰기 지원
+let ignoreChangeCount = 0;
 
 function startWatching(filePath: string): void {
   stopWatching();
@@ -144,8 +144,8 @@ function startWatching(filePath: string): void {
     fileWatcher = fs.watch(filePath, { persistent: false }, (eventType) => {
       if (eventType !== 'change') return;
 
-      if (ignoreNextChange) {
-        ignoreNextChange = false;
+      if (ignoreChangeCount > 0) {
+        ignoreChangeCount--;
         return;
       }
 
@@ -153,7 +153,7 @@ function startWatching(filePath: string): void {
       debounceTimer = setTimeout(() => {
         // 모든 윈도우(메인 + 위젯 팝업)에 "데이터 변경" 알림
         broadcastSheetChanged();
-      }, 200); // 200ms debounce
+      }, 500); // 500ms debounce (배치 쓰기 시 안전 마진 확보)
     });
   } catch {
     // 파일이 아직 없으면 1초 후 재시도
@@ -316,8 +316,8 @@ ipcMain.handle('test:write-sheet', async (_event, filePath: string, data: unknow
   const dir = path.dirname(filePath);
   ensureDir(dir);
 
-  // 자기 쓰기 → 파일 변경 이벤트 무시 플래그
-  ignoreNextChange = true;
+  // 자기 쓰기 → 파일 변경 이벤트 무시 (카운터 증가)
+  ignoreChangeCount++;
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), { encoding: 'utf-8' });
 
   // 최초 쓰기 시 감시 시작

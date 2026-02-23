@@ -218,14 +218,22 @@ export default function App() {
     loadData();
   }, [authReady, loadData]);
 
-  // 실시간 동기화: 다른 사용자가 시트를 변경하면 즉시 리로드
+  // 실시간 동기화: 다른 사용자가 시트를 변경하면 리로드 (디바운스 적용)
   useEffect(() => {
     if (!window.electronAPI?.onSheetChanged) return;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const cleanup = window.electronAPI.onSheetChanged(() => {
-      console.log('[동기화] 다른 사용자의 변경 감지 → 데이터 리로드');
-      loadData();
+      // 연속 변경 시 마지막 변경 후 300ms 뒤에 리로드 (배치 쓰기 보호)
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        console.log('[동기화] 다른 사용자의 변경 감지 → 데이터 리로드');
+        loadData();
+      }, 300);
     });
-    return cleanup;
+    return () => {
+      cleanup?.();
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
   }, [loadData]);
 
   // Ctrl+Alt+U: 관리자 모드 토글

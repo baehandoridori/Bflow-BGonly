@@ -913,11 +913,13 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
         toAdd.push(id);
         updatedIds.push(id);
       }
-      // 마지막 항목만 sync, 나머지는 skipSync
-      for (let i = 0; i < toAdd.length; i++) {
-        const isLast = i === toAdd.length - 1;
-        onSubmit(toAdd[i], assignee, memo, layoutId, undefined, !isLast);
-      }
+      // 순차 실행: 각 씬 추가가 완료된 후 다음 씬 추가 (stale state 방지)
+      (async () => {
+        for (let i = 0; i < toAdd.length; i++) {
+          const isLast = i === toAdd.length - 1;
+          await onSubmit(toAdd[i], assignee, memo, layoutId, undefined, !isLast);
+        }
+      })();
       setNumber(suggestNextNumber(prefix, updatedIds));
       setBulkEnd('');
     } else {
@@ -1582,8 +1584,10 @@ export function ScenesView() {
         // 백엔드에도 저장 (시트에는 completedBy/At 열이 없으므로 테스트 모드에서만)
         if (!sheetsConnected) {
           try {
-            await updateTestSceneField(episodes, currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
-            await updateTestSceneField(episodes, currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
+            const latestEps1 = useDataStore.getState().episodes;
+            await updateTestSceneField(latestEps1, currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
+            const latestEps2 = useDataStore.getState().episodes;
+            await updateTestSceneField(latestEps2, currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
           } catch (err) {
             console.error('[완료기록 실패]', err);
           }
@@ -1636,7 +1640,7 @@ export function ScenesView() {
         }
         syncInBackground();
       } else {
-        await addTestEpisode(episodes, nextEpisodeNumber, selectedDepartment);
+        await addTestEpisode(useDataStore.getState().episodes, nextEpisodeNumber, selectedDepartment);
         if (epName) {
           await writeLocalMetadata('episode-title', String(nextEpisodeNumber), epName);
         }
@@ -1675,7 +1679,7 @@ export function ScenesView() {
         await addPartToSheets(currentEp.episodeNumber, nextPartId, selectedDepartment);
         syncInBackground();
       } else {
-        await addTestPart(episodes, currentEp.episodeNumber, nextPartId, selectedDepartment);
+        await addTestPart(useDataStore.getState().episodes, currentEp.episodeNumber, nextPartId, selectedDepartment);
       }
     } catch (err) {
       const msg = String(err);
@@ -1702,7 +1706,9 @@ export function ScenesView() {
         // 배치 모드에서는 마지막 씬 추가 후에만 sync
         if (!skipSync) syncInBackground();
       } else {
-        await addTestScene(episodes, currentPart.sheetName, sceneId, assignee, memo);
+        // 최신 상태를 사용 (closure의 stale episodes 방지)
+        const latestEpisodes = useDataStore.getState().episodes;
+        await addTestScene(latestEpisodes, currentPart.sheetName, sceneId, assignee, memo);
       }
     } catch (err) {
       const msg = String(err);
@@ -1768,7 +1774,7 @@ export function ScenesView() {
         await deleteSceneFromSheets(currentPart.sheetName, sceneIndex);
         syncInBackground();
       } else {
-        await deleteTestScene(episodes, currentPart.sheetName, sceneIndex);
+        await deleteTestScene(useDataStore.getState().episodes, currentPart.sheetName, sceneIndex);
       }
     } catch (err) {
       alert(`씬 삭제 실패: ${err}`);
@@ -1787,7 +1793,7 @@ export function ScenesView() {
         await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, field, value);
         syncInBackground();
       } else {
-        await updateTestSceneField(episodes, currentPart.sheetName, sceneIndex, field, value);
+        await updateTestSceneField(useDataStore.getState().episodes, currentPart.sheetName, sceneIndex, field, value);
       }
     } catch (err) {
       alert(`수정 실패: ${err}`);
@@ -2583,7 +2589,7 @@ export function ScenesView() {
                       if (sheetsConnected) {
                         await deleteSceneFromSheets(currentPart!.sheetName, idx);
                       } else {
-                        await deleteTestScene(episodes, currentPart!.sheetName, idx);
+                        await deleteTestScene(useDataStore.getState().episodes, currentPart!.sheetName, idx);
                       }
                     }
                     syncInBackground();

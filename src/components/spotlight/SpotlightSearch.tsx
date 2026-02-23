@@ -146,20 +146,31 @@ export function SpotlightSearch() {
   } = useAppStore();
 
   /* ── 글로벌 단축키: Ctrl+Space ── */
+  const isOpenRef = useRef(isOpen);
+  useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // 입력 필드에 포커스 중이면 IME 충돌 방지를 위해 무시
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+        || (document.activeElement as HTMLElement)?.isContentEditable;
+
       if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+        // 입력 필드에서는 IME 전환을 위해 가로채지 않음
+        if (isEditable && !isOpenRef.current) return;
         e.preventDefault();
         setIsOpen((prev) => !prev);
+        return;
       }
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && isOpenRef.current) {
         e.preventDefault();
         setIsOpen(false);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isOpen]);
+  }, []); // 의존성 없음 — isOpenRef로 최신 상태 참조
 
   /* ── 열릴 때 포커스 & 쿼리 초기화 ── */
   useEffect(() => {
