@@ -96,8 +96,23 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   }, []);
 
   // 실시간 데이터 동기화: sheet:changed 이벤트 + 주기적 폴링 (30초)
+  // 레이스컨디션 방지: 자체 변경 직후 리로드를 지연시켜 낙관적 업데이트 보호
   useEffect(() => {
-    if (!ready) return; // 초기 로드 완료 전에는 무시
+    if (!ready) return;
+
+    // 자체 변경 쿨다운 (sheetsNotifyChange 직후 reloadData 억제)
+    let reloadCooldown = false;
+    const COOLDOWN_MS = 3000;
+
+    // 자체 변경 감지: sheetsNotifyChange를 가로채서 쿨다운 설정
+    const origNotify = window.electronAPI?.sheetsNotifyChange;
+    if (window.electronAPI && origNotify) {
+      window.electronAPI.sheetsNotifyChange = () => {
+        reloadCooldown = true;
+        setTimeout(() => { reloadCooldown = false; }, COOLDOWN_MS);
+        return origNotify();
+      };
+    }
 
     const loadEpMetadata = async (episodes: Episode[], connected: boolean) => {
       const readMeta = connected ? readMetadataFromSheets : readLocalMetadata;
@@ -120,6 +135,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       useDataStore.getState().setEpisodeTitles(titles);
       useDataStore.getState().setEpisodeMemos(memos);
     };
+
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
     const reloadData = async () => {
       try {
@@ -153,20 +170,31 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       }
     };
 
-    // 1) sheet:changed 이벤트 수신 시 즉시 새로고침
+    // 1) sheet:changed 이벤트 수신 시 — 자체 변경 직후면 지연
     const cleanupEvent = window.electronAPI?.onSheetChanged?.(() => {
-      console.log('[WidgetPopup] sheet:changed 이벤트 수신');
+      if (reloadCooldown) {
+        // 자체 변경 직후: 쿨다운 후에 1회만 리로드 (디바운스)
+        if (reloadTimer) clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(() => { reloadData(); }, COOLDOWN_MS + 500);
+        return;
+      }
+      // 외부 변경: 바로 리로드
       reloadData();
     });
 
     // 2) 30초 주기 폴링 (이벤트 미수신 시 안전망)
     const pollInterval = setInterval(() => {
-      reloadData();
+      if (!reloadCooldown) reloadData();
     }, 30_000);
 
     return () => {
       cleanupEvent?.();
       clearInterval(pollInterval);
+      if (reloadTimer) clearTimeout(reloadTimer);
+      // sheetsNotifyChange 원복
+      if (window.electronAPI && origNotify) {
+        window.electronAPI.sheetsNotifyChange = origNotify;
+      }
     };
   }, [ready]);
 

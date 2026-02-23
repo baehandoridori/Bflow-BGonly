@@ -507,7 +507,7 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     resizable: true,
     skipTaskbar: false,
     title: widgetTitle,
-    backgroundColor: '#00000000',
+    backgroundColor: '#1a1a2e',  // Acrylic 비활성화 시에도 보이도록 (Ctrl+Shift+S 캡처 등)
     hasShadow: true,
     backgroundMaterial: 'acrylic',
     webPreferences: {

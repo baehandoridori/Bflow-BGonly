@@ -1,33 +1,26 @@
-import { useState, useMemo, useCallback, useEffect, useContext } from 'react';
-import { CheckSquare, Plus, ChevronDown, X, Search, Edit3, Check, ListFilter } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect, useContext, useRef } from 'react';
+import { CheckSquare, Plus, X, Search, Edit3, Check, ListFilter, Pencil } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Widget, IsPopupContext } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
-import type { Stage, Scene, Episode, Part, Department } from '@/types';
+import type { Stage, Scene, Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
 
 /* ─── 타입 ──────────────────────────────────── */
 
-/** 씬 참조 키 (sheetName:sceneId) */
 type SceneKey = string;
 const makeKey = (sheetName: string, sceneId: string): SceneKey => `${sheetName}:${sceneId}`;
-const parseKey = (key: SceneKey) => {
-  const idx = key.indexOf(':');
-  return { sheetName: key.slice(0, idx), sceneId: key.slice(idx + 1) };
-};
 
-/** 커스텀 뷰 */
 interface TaskView {
   id: string;
   name: string;
   type: 'assigned' | 'custom';
-  sceneKeys: SceneKey[]; // custom일 때만 사용
+  sceneKeys: SceneKey[];
 }
 
-/** 평탄화된 씬 + 메타 */
 interface FlatScene {
   scene: Scene;
   sheetName: string;
@@ -44,10 +37,6 @@ const DEFAULT_VIEW: TaskView = { id: '__assigned', name: '내 할일', type: 'as
 /* ─── 유틸 ─────────────────────────────────── */
 function scenePct(s: Scene): number {
   return ([s.lo, s.done, s.review, s.png].filter(Boolean).length / 4) * 100;
-}
-
-function getDept(sheetName: string): Department {
-  return sheetName.includes('_ACT') ? 'acting' : 'bg';
 }
 
 /* ─── 커스텀 뷰 퍼시스턴스 ──────────────────── */
@@ -114,13 +103,10 @@ function ScenePickerModal({
         className="bg-bg-card border border-bg-border/50 rounded-2xl shadow-2xl w-[520px] max-h-[70vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 헤더 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border/30">
           <span className="text-sm font-semibold text-text-primary">씬 추가</span>
           <button onClick={onClose} className="p-1 hover:bg-bg-border/20 rounded-md cursor-pointer"><X size={16} /></button>
         </div>
-
-        {/* 에피소드 / 파트 선택 */}
         <div className="flex gap-2 px-4 py-2 border-b border-bg-border/20">
           <select
             value={selectedEp ?? ''}
@@ -148,8 +134,6 @@ function ScenePickerModal({
             ))}
           </div>
         </div>
-
-        {/* 검색 */}
         <div className="px-4 py-2">
           <div className="flex items-center gap-2 bg-bg-primary border border-bg-border rounded-lg px-2 py-1.5">
             <Search size={12} className="text-text-secondary/40" />
@@ -161,8 +145,6 @@ function ScenePickerModal({
             />
           </div>
         </div>
-
-        {/* 씬 목록 */}
         <div className="flex-1 overflow-auto px-4 pb-2">
           <div className="grid grid-cols-1 gap-1">
             {filtered.map((s) => {
@@ -197,8 +179,6 @@ function ScenePickerModal({
             })}
           </div>
         </div>
-
-        {/* 하단 액션 */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-bg-border/30">
           <span className="text-[11px] text-text-secondary/50">{pickedKeys.size}개 선택됨</span>
           <div className="flex gap-2">
@@ -220,6 +200,264 @@ function ScenePickerModal({
   );
 }
 
+/* ─── 인라인 편집 행 ──────────────────────────── */
+function EditableSceneRow({
+  flat,
+  deptCfg,
+  epLabel,
+  sceneNum,
+  pct,
+  isCustom,
+  onToggle,
+  onRemove,
+  onEditField,
+}: {
+  flat: FlatScene;
+  deptCfg: typeof DEPARTMENT_CONFIGS['bg'];
+  epLabel: string;
+  sceneNum: string;
+  pct: number;
+  isCustom: boolean;
+  onToggle: (flat: FlatScene, stage: Stage) => void;
+  onRemove: (key: SceneKey) => void;
+  onEditField: (flat: FlatScene, field: string, value: string) => void;
+}) {
+  const s = flat.scene;
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startEdit = (field: string, currentValue: string) => {
+    setEditingField(field);
+    setEditValue(currentValue);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const commitEdit = () => {
+    if (editingField && editValue !== undefined) {
+      const original = editingField === 'assignee' ? s.assignee : editingField === 'memo' ? s.memo : '';
+      if (editValue !== original) {
+        onEditField(flat, editingField, editValue);
+      }
+    }
+    setEditingField(null);
+  };
+
+  return (
+    <motion.div
+      key={flat.key}
+      layout
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className={cn(
+        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
+        pct >= 100 ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
+      )}
+    >
+      {/* 씬 정보 */}
+      <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] font-mono font-bold text-accent shrink-0">#{sceneNum}</span>
+          {editingField === 'memo' ? (
+            <input
+              ref={inputRef}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={commitEdit}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
+              className="text-[10px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none flex-1 min-w-0"
+            />
+          ) : (
+            <span
+              className="text-[10px] text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
+              onDoubleClick={() => startEdit('memo', s.memo)}
+              title="더블클릭하여 메모 편집"
+            >
+              {s.memo || s.sceneId}
+            </span>
+          )}
+          <span className="text-[8px] text-text-secondary/30 shrink-0">{epLabel} · {flat.partId}</span>
+        </div>
+        {/* 담당자 */}
+        <div className="flex items-center gap-1">
+          {editingField === 'assignee' ? (
+            <input
+              ref={inputRef}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={commitEdit}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
+              className="text-[9px] text-text-secondary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none w-16"
+            />
+          ) : (
+            <span
+              className="text-[9px] text-text-secondary/40 cursor-pointer hover:text-text-secondary transition-colors"
+              onDoubleClick={() => startEdit('assignee', s.assignee)}
+              title="더블클릭하여 담당자 편집"
+            >
+              {s.assignee || '미배정'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 단계 체크박스 */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        {STAGES.map((stage) => {
+          const checked = s[stage];
+          const color = deptCfg.stageColors[stage];
+          return (
+            <button
+              key={stage}
+              onClick={() => onToggle(flat, stage)}
+              title={deptCfg.stageLabels[stage]}
+              className={cn(
+                'w-5 h-5 rounded text-[7px] font-bold flex items-center justify-center cursor-pointer transition-all',
+                checked
+                  ? 'text-white shadow-sm'
+                  : 'border text-text-secondary/30 hover:text-text-secondary/60',
+              )}
+              style={checked
+                ? { backgroundColor: color, borderColor: color }
+                : { borderColor: `${color}40` }
+              }
+            >
+              {checked ? <Check size={10} /> : deptCfg.stageLabels[stage][0]}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 커스텀 뷰 제거 / 편집 버튼 */}
+      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        {!editingField && (
+          <button
+            onClick={() => startEdit('memo', s.memo)}
+            className="p-0.5 text-text-secondary/20 hover:text-accent cursor-pointer"
+            title="편집"
+          >
+            <Pencil size={9} />
+          </button>
+        )}
+        {isCustom && (
+          <button
+            onClick={() => onRemove(flat.key)}
+            className="p-0.5 text-text-secondary/20 hover:text-red-400 cursor-pointer"
+          >
+            <X size={10} />
+          </button>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ─── Windows 11 스타일 탭 바 ────────────────── */
+function TabBar({
+  views,
+  activeViewId,
+  onSelect,
+  onClose,
+  onCreate,
+  onRename,
+}: {
+  views: TaskView[];
+  activeViewId: string;
+  onSelect: (id: string) => void;
+  onClose: (id: string) => void;
+  onCreate: () => void;
+  onRename: (id: string, name: string) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startRename = (id: string, name: string) => {
+    setEditingId(id);
+    setEditName(name);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const commitRename = () => {
+    if (editingId && editName.trim()) {
+      onRename(editingId, editName.trim());
+    }
+    setEditingId(null);
+  };
+
+  return (
+    <div className="flex items-end gap-0 min-h-[28px] -mb-px overflow-x-auto scrollbar-hide">
+      {views.map((v) => {
+        const isActive = v.id === activeViewId;
+        const isEditing = editingId === v.id;
+
+        return (
+          <div
+            key={v.id}
+            className={cn(
+              'flex items-center gap-1 pl-2.5 pr-1 py-1 text-[10px] font-medium cursor-pointer transition-all relative group shrink-0',
+              'rounded-t-lg border border-b-0',
+              isActive
+                ? 'bg-bg-card border-bg-border/40 text-text-primary z-10'
+                : 'bg-transparent border-transparent text-text-secondary/40 hover:text-text-secondary/70 hover:bg-bg-border/10',
+            )}
+            onClick={() => onSelect(v.id)}
+            onDoubleClick={() => v.type === 'custom' && startRename(v.id, v.name)}
+          >
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') setEditingId(null);
+                  e.stopPropagation();
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] bg-transparent outline-none border-b border-accent/50 w-16 text-text-primary"
+              />
+            ) : (
+              <span className="truncate max-w-[80px]">{v.name}</span>
+            )}
+            {v.type === 'custom' && !isEditing && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onClose(v.id); }}
+                className={cn(
+                  'p-0.5 rounded-sm transition-all shrink-0',
+                  isActive
+                    ? 'text-text-secondary/30 hover:text-text-secondary hover:bg-bg-border/20'
+                    : 'text-transparent group-hover:text-text-secondary/20 hover:!text-text-secondary hover:bg-bg-border/20',
+                )}
+              >
+                <X size={8} />
+              </button>
+            )}
+            {/* 활성 탭 하단 선 */}
+            {isActive && (
+              <motion.div
+                layoutId="tab-indicator"
+                className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent rounded-full"
+              />
+            )}
+          </div>
+        );
+      })}
+
+      {/* + 새 탭 버튼 */}
+      <button
+        onClick={onCreate}
+        className="flex items-center justify-center w-6 h-6 text-text-secondary/30 hover:text-accent hover:bg-bg-border/10 rounded-lg cursor-pointer transition-colors shrink-0 ml-0.5"
+        title="새 커스텀 뷰"
+      >
+        <Plus size={11} />
+      </button>
+    </div>
+  );
+}
+
 /* ─── 메인 위젯 ─────────────────────────────── */
 export function MyTasksWidget() {
   const episodes = useDataStore((s) => s.episodes);
@@ -233,19 +471,15 @@ export function MyTasksWidget() {
   // 뷰 관리
   const [customViews, setCustomViews] = useState<TaskView[]>(() => loadViews());
   const [activeViewId, setActiveViewId] = useState(DEFAULT_VIEW.id);
-  const [showViewMenu, setShowViewMenu] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const [editingViewName, setEditingViewName] = useState<string | null>(null);
-  const [newViewName, setNewViewName] = useState('');
   const [filterDone, setFilterDone] = useState(false);
 
   const allViews = [DEFAULT_VIEW, ...customViews];
   const activeView = allViews.find((v) => v.id === activeViewId) ?? DEFAULT_VIEW;
 
-  // 커스텀 뷰 저장
   useEffect(() => { saveViews(customViews); }, [customViews]);
 
-  // 전체 평탄화된 씬
+  // 전체 평탄화
   const allFlat: FlatScene[] = useMemo(() => {
     const result: FlatScene[] = [];
     for (const ep of episodes) {
@@ -266,7 +500,6 @@ export function MyTasksWidget() {
     return result;
   }, [episodes]);
 
-  // 현재 뷰의 씬 목록
   const visibleScenes = useMemo(() => {
     let result: FlatScene[];
     if (activeView.type === 'assigned') {
@@ -279,7 +512,6 @@ export function MyTasksWidget() {
     if (filterDone) {
       result = result.filter((f) => scenePct(f.scene) < 100);
     }
-    // 정렬: 에피소드 → 파트 → 씬번호
     return result.sort((a, b) => {
       if (a.episodeNumber !== b.episodeNumber) return a.episodeNumber - b.episodeNumber;
       if (a.partId !== b.partId) return a.partId.localeCompare(b.partId);
@@ -289,7 +521,6 @@ export function MyTasksWidget() {
     });
   }, [activeView, allFlat, currentUser, filterDone]);
 
-  // 통계
   const stats = useMemo(() => {
     const total = visibleScenes.length;
     const stages = total * 4;
@@ -298,15 +529,13 @@ export function MyTasksWidget() {
     return { total, fullyDone, pct: stages > 0 ? (checked / stages) * 100 : 0 };
   }, [visibleScenes]);
 
-  // 단계 토글 핸들러 (실제 데이터에 반영)
+  // 토글 핸들러
   const handleToggle = useCallback(async (flat: FlatScene, stage: Stage) => {
     const { sheetName, scene, sceneIndex } = flat;
     const newValue = !scene[stage];
 
-    // 낙관적 업데이트
     toggleSceneStage(sheetName, scene.sceneId, stage);
 
-    // 완료 기록
     let completedBy: string | undefined;
     let completedAt: string | undefined;
     if (newValue) {
@@ -319,12 +548,10 @@ export function MyTasksWidget() {
       }
     }
 
-    // 시트 동기화
     try {
       if (sheetsConnected) {
         const { updateSheetCell, updateSceneFieldInSheets } = await import('@/services/sheetsService');
         await updateSheetCell(sheetName, sceneIndex, stage, newValue);
-        // 완료 기록도 시트에 반영
         if (completedBy) {
           await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
           await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
@@ -333,141 +560,90 @@ export function MyTasksWidget() {
       }
     } catch (err) {
       console.error('[MyTasks 토글 실패]', err);
-      toggleSceneStage(sheetName, scene.sceneId, stage); // 롤백
+      toggleSceneStage(sheetName, scene.sceneId, stage);
     }
   }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, sheetsConnected]);
 
-  // 커스텀 뷰 생성
+  // 인라인 필드 편집 핸들러
+  const handleEditField = useCallback(async (flat: FlatScene, field: string, value: string) => {
+    const { sheetName, sceneIndex } = flat;
+    updateSceneFieldOptimistic(sheetName, sceneIndex, field, value);
+
+    try {
+      if (sheetsConnected) {
+        const { updateSceneFieldInSheets } = await import('@/services/sheetsService');
+        await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
+        window.electronAPI?.sheetsNotifyChange?.();
+      }
+    } catch (err) {
+      console.error('[MyTasks 편집 실패]', err);
+    }
+  }, [updateSceneFieldOptimistic, sheetsConnected]);
+
+  // 뷰 조작
   const createCustomView = () => {
     const id = `view_${Date.now()}`;
     const view: TaskView = { id, name: '새 할일 목록', type: 'custom', sceneKeys: [] };
     setCustomViews((prev) => [...prev, view]);
     setActiveViewId(id);
-    setEditingViewName(id);
-    setNewViewName('새 할일 목록');
-    setShowViewMenu(false);
   };
 
-  // 커스텀 뷰 이름 저장
-  const saveViewName = () => {
-    if (editingViewName && newViewName.trim()) {
-      setCustomViews((prev) => prev.map((v) => v.id === editingViewName ? { ...v, name: newViewName.trim() } : v));
-    }
-    setEditingViewName(null);
+  const renameView = (id: string, name: string) => {
+    setCustomViews((prev) => prev.map((v) => v.id === id ? { ...v, name } : v));
   };
 
-  // 커스텀 뷰에 씬 추가
+  const deleteView = (viewId: string) => {
+    setCustomViews((prev) => prev.filter((v) => v.id !== viewId));
+    if (activeViewId === viewId) setActiveViewId(DEFAULT_VIEW.id);
+  };
+
   const addToView = (keys: SceneKey[]) => {
     setCustomViews((prev) => prev.map((v) =>
       v.id === activeViewId ? { ...v, sceneKeys: [...new Set([...v.sceneKeys, ...keys])] } : v,
     ));
   };
 
-  // 커스텀 뷰에서 씬 제거
   const removeFromView = (key: SceneKey) => {
     setCustomViews((prev) => prev.map((v) =>
       v.id === activeViewId ? { ...v, sceneKeys: v.sceneKeys.filter((k) => k !== key) } : v,
     ));
   };
 
-  // 커스텀 뷰 삭제
-  const deleteView = (viewId: string) => {
-    setCustomViews((prev) => prev.filter((v) => v.id !== viewId));
-    if (activeViewId === viewId) setActiveViewId(DEFAULT_VIEW.id);
-    setShowViewMenu(false);
-  };
-
   const existingKeys = useMemo(() => new Set(activeView.sceneKeys), [activeView]);
 
   return (
     <Widget
-      title={activeView.name}
+      title="내 할일"
       icon={<CheckSquare size={14} />}
       headerRight={
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setFilterDone(!filterDone)}
-            className={cn(
-              'p-0.5 cursor-pointer transition-colors',
-              filterDone ? 'text-accent' : 'text-text-secondary/40 hover:text-text-secondary',
-            )}
-            title={filterDone ? '전체 표시' : '미완료만'}
-          >
-            <ListFilter size={11} />
-          </button>
-
-          {/* 뷰 전환 드롭다운 */}
-          <div className="relative">
-            <button
-              onClick={() => setShowViewMenu(!showViewMenu)}
-              className="flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-medium text-text-secondary/50 hover:text-text-primary cursor-pointer rounded transition-colors hover:bg-bg-border/10"
-            >
-              뷰 <ChevronDown size={9} />
-            </button>
-            <AnimatePresence>
-              {showViewMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  className="absolute right-0 top-full mt-1 w-48 bg-bg-card border border-bg-border/50 rounded-xl shadow-xl z-50 overflow-hidden"
-                >
-                  {allViews.map((v) => (
-                    <div key={v.id} className="flex items-center group">
-                      <button
-                        onClick={() => { setActiveViewId(v.id); setShowViewMenu(false); }}
-                        className={cn(
-                          'flex-1 text-left px-3 py-2 text-xs transition-colors cursor-pointer',
-                          activeViewId === v.id ? 'bg-accent/10 text-accent font-medium' : 'text-text-primary hover:bg-bg-border/10',
-                        )}
-                      >
-                        {v.name}
-                      </button>
-                      {v.type === 'custom' && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); deleteView(v.id); }}
-                          className="px-2 py-2 text-text-secondary/30 hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <div className="border-t border-bg-border/30">
-                    <button
-                      onClick={createCustomView}
-                      className="w-full px-3 py-2 text-xs text-accent hover:bg-accent/5 cursor-pointer flex items-center gap-1.5"
-                    >
-                      <Plus size={10} />
-                      새 커스텀 뷰
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
+        <button
+          onClick={() => setFilterDone(!filterDone)}
+          className={cn(
+            'p-0.5 cursor-pointer transition-colors',
+            filterDone ? 'text-accent' : 'text-text-secondary/40 hover:text-text-secondary',
+          )}
+          title={filterDone ? '전체 표시' : '미완료만'}
+        >
+          <ListFilter size={11} />
+        </button>
       }
     >
-      <div className="flex flex-col h-full gap-2">
-        {/* 뷰 이름 편집 */}
-        {editingViewName && (
-          <div className="flex items-center gap-1.5 px-1">
-            <Edit3 size={10} className="text-accent shrink-0" />
-            <input
-              value={newViewName}
-              onChange={(e) => setNewViewName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && saveViewName()}
-              onBlur={saveViewName}
-              autoFocus
-              className="bg-bg-primary border border-accent/30 rounded px-2 py-0.5 text-xs text-text-primary flex-1 outline-none"
-              placeholder="뷰 이름"
-            />
-          </div>
-        )}
+      <div className="flex flex-col h-full gap-0">
+        {/* Windows 11 스타일 탭 바 */}
+        <TabBar
+          views={allViews}
+          activeViewId={activeViewId}
+          onSelect={setActiveViewId}
+          onClose={deleteView}
+          onCreate={createCustomView}
+          onRename={renameView}
+        />
+
+        {/* 탭 아래 구분선 */}
+        <div className="h-px bg-bg-border/30" />
 
         {/* 요약 바 */}
-        <div className="flex items-center gap-2 px-1">
+        <div className="flex items-center gap-2 px-1 pt-2 pb-1">
           <div className="flex-1 h-1.5 rounded-full bg-bg-border/20 overflow-hidden">
             <motion.div
               className="h-full rounded-full"
@@ -496,80 +672,34 @@ export function MyTasksWidget() {
               {visibleScenes.map((flat) => {
                 const s = flat.scene;
                 const pct = scenePct(s);
-                const dept = flat.department;
-                const deptCfg = DEPARTMENT_CONFIGS[dept];
+                const deptCfg = DEPARTMENT_CONFIGS[flat.department];
                 const epLabel = episodeTitles[flat.episodeNumber] || `EP.${String(flat.episodeNumber).padStart(2, '0')}`;
                 const sceneNum = s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(s.no);
 
                 return (
-                  <motion.div
+                  <EditableSceneRow
                     key={flat.key}
-                    layout
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className={cn(
-                      'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
-                      pct >= 100 ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
-                    )}
-                  >
-                    {/* 씬 정보 */}
-                    <div className="flex flex-col min-w-0 flex-1 gap-0.5">
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-mono font-bold text-accent shrink-0">#{sceneNum}</span>
-                        <span className="text-[10px] text-text-primary truncate">{s.sceneId}</span>
-                        <span className="text-[8px] text-text-secondary/30 shrink-0">{epLabel} · {flat.partId}</span>
-                      </div>
-                    </div>
-
-                    {/* 단계 체크박스 */}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      {STAGES.map((stage) => {
-                        const checked = s[stage];
-                        const color = deptCfg.stageColors[stage];
-                        return (
-                          <button
-                            key={stage}
-                            onClick={() => handleToggle(flat, stage)}
-                            title={deptCfg.stageLabels[stage]}
-                            className={cn(
-                              'w-5 h-5 rounded text-[7px] font-bold flex items-center justify-center cursor-pointer transition-all',
-                              checked
-                                ? 'text-white shadow-sm'
-                                : 'border text-text-secondary/30 hover:text-text-secondary/60',
-                            )}
-                            style={checked
-                              ? { backgroundColor: color, borderColor: color }
-                              : { borderColor: `${color}40` }
-                            }
-                          >
-                            {checked ? <Check size={10} /> : deptCfg.stageLabels[stage][0]}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* 커스텀 뷰에서 제거 */}
-                    {activeView.type === 'custom' && (
-                      <button
-                        onClick={() => removeFromView(flat.key)}
-                        className="p-0.5 text-text-secondary/20 hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                      >
-                        <X size={10} />
-                      </button>
-                    )}
-                  </motion.div>
+                    flat={flat}
+                    deptCfg={deptCfg}
+                    epLabel={epLabel}
+                    sceneNum={sceneNum}
+                    pct={pct}
+                    isCustom={activeView.type === 'custom'}
+                    onToggle={handleToggle}
+                    onRemove={removeFromView}
+                    onEditField={handleEditField}
+                  />
                 );
               })}
             </div>
           )}
         </div>
 
-        {/* 하단: 할일 추가 버튼 (커스텀 뷰에서만 또는 always) */}
+        {/* 할일 추가 버튼 */}
         {activeView.type === 'custom' && (
           <button
             onClick={() => setShowPicker(true)}
-            className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[10px] text-accent border border-accent/20 rounded-lg hover:bg-accent/5 cursor-pointer transition-colors"
+            className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[10px] text-accent border border-accent/20 rounded-lg hover:bg-accent/5 cursor-pointer transition-colors mt-1"
           >
             <Plus size={11} />
             내 할일 추가
@@ -577,7 +707,6 @@ export function MyTasksWidget() {
         )}
       </div>
 
-      {/* 씬 선택 모달 */}
       <AnimatePresence>
         {showPicker && (
           <ScenePickerModal
