@@ -1130,6 +1130,91 @@ const VIEW_LABELS: Partial<Record<ViewMode, string>> = {
   episode: '에피소드 현황',
 };
 
+/* ── 에피소드 추가 모달 (애니메이션 플레이스홀더) ── */
+const EP_PLACEHOLDER_EXAMPLES = [
+  '예: 혁도그 (멤버십)',
+  '예: 혁장고 (멤버십)',
+  '예: 혁둘기 (일반)',
+];
+
+function AddEpisodeModal({
+  newEpName,
+  setNewEpName,
+  onConfirm,
+  onClose,
+}: {
+  newEpName: string;
+  setNewEpName: (v: string) => void;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const [phIdx, setPhIdx] = useState(0);
+  const [phOpacity, setPhOpacity] = useState(1);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPhOpacity(0);
+      setTimeout(() => {
+        setPhIdx((prev) => (prev + 1) % EP_PLACEHOLDER_EXAMPLES.length);
+        setPhOpacity(1);
+      }, 400);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-bg-card rounded-xl shadow-2xl border border-bg-border w-80 p-4 flex flex-col gap-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-bold text-text-primary">새 에피소드 추가</h3>
+        <div>
+          <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 이름</label>
+          <div className="relative mt-1">
+            <input
+              autoFocus
+              value={newEpName}
+              onChange={(e) => setNewEpName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onConfirm();
+                if (e.key === 'Escape') onClose();
+              }}
+              className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
+            />
+            {!newEpName && (
+              <span
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-secondary/30 pointer-events-none select-none"
+                style={{ opacity: phOpacity, transition: 'opacity 0.4s ease-in-out' }}
+              >
+                {EP_PLACEHOLDER_EXAMPLES[phIdx]}
+              </span>
+            )}
+          </div>
+          <p className="text-[10px] text-text-secondary/40 mt-1">비우면 기본 이름으로 생성됩니다</p>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors"
+          >
+            취소
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-3 py-1.5 text-xs text-white bg-accent rounded-lg hover:bg-accent/80 transition-colors"
+          >
+            추가
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ScenesView() {
   const episodes = useDataStore((s) => s.episodes);
   const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
@@ -1186,6 +1271,9 @@ export function ScenesView() {
   // 에피소드 추가 모달
   const [addEpOpen, setAddEpOpen] = useState(false);
   const [newEpName, setNewEpName] = useState('');
+
+  // 아카이빙된 에피소드 목록
+  const [archivedEpisodes, setArchivedEpisodes] = useState<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string }[]>([]);
 
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
@@ -1292,6 +1380,69 @@ export function ScenesView() {
       useDataStore.getState().setEpisodeTitles(titles);
     };
     if (episodes.length > 0) loadEpMeta();
+  }, [sheetsConnected, episodes.length]);
+
+  // 아카이빙된 에피소드 목록 로드
+  useEffect(() => {
+    const loadArchived = async () => {
+      try {
+        if (sheetsConnected) {
+          const { readArchivedFromSheets } = await import('@/services/sheetsService');
+          const list = await readArchivedFromSheets();
+          // 각 아카이빙에 대해 메타데이터에서 archivedBy/archivedAt 읽기
+          const enriched = [];
+          for (const item of list) {
+            const key = String(item.episodeNumber);
+            let archivedBy: string | undefined;
+            let archivedAt: string | undefined;
+            try {
+              const meta = sheetsConnected
+                ? await readMetadataFromSheets('archive-info', key)
+                : await readLocalMetadata('archive-info', key);
+              if (meta?.value) {
+                const parsed = JSON.parse(meta.value);
+                archivedBy = parsed.by;
+                archivedAt = parsed.at;
+              }
+            } catch { /* 무시 */ }
+            enriched.push({ ...item, archivedBy, archivedAt });
+          }
+          setArchivedEpisodes(enriched);
+        } else {
+          // 로컬 fallback: metadata에서 읽기
+          const archived: typeof archivedEpisodes = [];
+          for (let i = 1; i <= 99; i++) {
+            try {
+              const meta = await readLocalMetadata('archived-episode', String(i));
+              if (meta?.value === 'true') {
+                const titleMeta = await readLocalMetadata('episode-title', String(i));
+                const infoMeta = await readLocalMetadata('archive-info', String(i));
+                let archivedBy: string | undefined;
+                let archivedAt: string | undefined;
+                if (infoMeta?.value) {
+                  try {
+                    const parsed = JSON.parse(infoMeta.value);
+                    archivedBy = parsed.by;
+                    archivedAt = parsed.at;
+                  } catch { /* 무시 */ }
+                }
+                archived.push({
+                  episodeNumber: i,
+                  title: titleMeta?.value || `EP.${String(i).padStart(2, '0')}`,
+                  partCount: 0,
+                  archivedBy,
+                  archivedAt,
+                });
+              }
+            } catch { /* 무시 */ }
+          }
+          setArchivedEpisodes(archived);
+        }
+      } catch (err) {
+        console.warn('[아카이빙 목록 로드 실패]', err);
+      }
+    };
+    loadArchived();
   }, [sheetsConnected, episodes.length]);
 
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
@@ -1685,6 +1836,66 @@ export function ScenesView() {
     }
   };
 
+  // ─── 에피소드 아카이빙 ────────────────────
+  const handleArchiveEpisode = async (epNum: number) => {
+    const ep = episodes.find((e) => e.episodeNumber === epNum);
+    if (!ep) return;
+    const epDisplayName = episodeTitles[epNum] || ep.title;
+    if (!confirm(`"${epDisplayName}"를 아카이빙하시겠습니까?\n(완료된 에피소드를 보관합니다)`)) return;
+
+    // 아카이빙 정보 기록
+    const archiveInfo = JSON.stringify({
+      by: currentUser?.name ?? '알 수 없음',
+      at: new Date().toLocaleDateString('ko-KR'),
+    });
+
+    try {
+      if (sheetsConnected) {
+        const { archiveEpisodeInSheets, writeMetadataToSheets } = await import('@/services/sheetsService');
+        await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
+        await archiveEpisodeInSheets(epNum);
+      } else {
+        await writeLocalMetadata('archived-episode', String(epNum), 'true');
+        await writeLocalMetadata('archive-info', String(epNum), archiveInfo);
+      }
+      // UI에서 에피소드 제거 (optimistic)
+      deleteEpisodeOptimistic(epNum);
+      // 아카이빙 목록에 추가
+      setArchivedEpisodes((prev) => [
+        ...prev,
+        { episodeNumber: epNum, title: ep.title, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR') },
+      ]);
+      if (selectedEpisode === epNum) {
+        setSelectedEpisode(episodes.find((e) => e.episodeNumber !== epNum)?.episodeNumber ?? 1);
+      }
+      syncInBackground();
+    } catch (err) {
+      alert(`아카이빙 실패: ${err}`);
+      syncInBackground();
+    }
+  };
+
+  const handleUnarchiveEpisode = async (epNum: number) => {
+    const archived = archivedEpisodes.find((a) => a.episodeNumber === epNum);
+    const epDisplayName = episodeTitles[epNum] || archived?.title || `EP.${String(epNum).padStart(2, '0')}`;
+    if (!confirm(`"${epDisplayName}"를 아카이빙에서 복원하시겠습니까?`)) return;
+
+    try {
+      if (sheetsConnected) {
+        const { unarchiveEpisodeInSheets } = await import('@/services/sheetsService');
+        await unarchiveEpisodeInSheets(epNum);
+      } else {
+        await writeLocalMetadata('archived-episode', String(epNum), '');
+      }
+      // 아카이빙 목록에서 제거
+      setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
+      syncInBackground();
+    } catch (err) {
+      alert(`복원 실패: ${err}`);
+      syncInBackground();
+    }
+  };
+
   // ─── 에피소드 제목/메모 저장 (시트 + 로컬 fallback) ──────────────
   const handleSaveEpEdit = async (title: string, memo: string) => {
     if (!currentEp) return;
@@ -1758,6 +1969,9 @@ export function ScenesView() {
               openPartMenu(e);
             }}
             onEpisodeEdit={handleTreeEpisodeEdit}
+            archivedEpisodes={archivedEpisodes}
+            onArchiveEpisode={handleArchiveEpisode}
+            onUnarchiveEpisode={handleUnarchiveEpisode}
           />
         </div>
       )}
@@ -2605,46 +2819,12 @@ export function ScenesView() {
 
       {/* 에피소드 추가 모달 */}
       {addEpOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-          onClick={() => setAddEpOpen(false)}
-        >
-          <div
-            className="bg-bg-card rounded-xl shadow-2xl border border-bg-border w-80 p-4 flex flex-col gap-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-sm font-bold text-text-primary">새 에피소드 추가</h3>
-            <div>
-              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 이름</label>
-              <input
-                autoFocus
-                value={newEpName}
-                onChange={(e) => setNewEpName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleConfirmAddEpisode();
-                  if (e.key === 'Escape') setAddEpOpen(false);
-                }}
-                placeholder="예: 1화 - 봄날의 시작"
-                className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
-              />
-              <p className="text-[10px] text-text-secondary/40 mt-1">비우면 기본 이름으로 생성됩니다</p>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setAddEpOpen(false)}
-                className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleConfirmAddEpisode}
-                className="px-3 py-1.5 text-xs text-white bg-accent rounded-lg hover:bg-accent/80 transition-colors"
-              >
-                추가
-              </button>
-            </div>
-          </div>
-        </div>
+        <AddEpisodeModal
+          newEpName={newEpName}
+          setNewEpName={setNewEpName}
+          onConfirm={handleConfirmAddEpisode}
+          onClose={() => setAddEpOpen(false)}
+        />
       )}
       </div>{/* 메인 콘텐츠 영역 끝 */}
     </div>

@@ -46,6 +46,8 @@
 
 // EP01_A (레거시=BG), EP01_A_BG, EP01_A_ACT 모두 매칭
 var EP_PATTERN = /^EP(\d+)_([A-Z])(?:_(BG|ACT))?$/;
+// 아카이빙된 탭: AC_EP01_A_BG 등
+var AC_EP_PATTERN = /^AC_EP(\d+)_([A-Z])(?:_(BG|ACT))?$/;
 
 // 헤더 행 (새 탭 생성 시 자동 삽입)
 var HEADERS = ['No', '씬번호', '메모', '스토리보드URL', '가이드URL', '담당자', 'LO', '완료', '검수', 'PNG', '레이아웃'];
@@ -71,6 +73,9 @@ function doGet(e) {
 
       case 'readAll':
         return jsonResponse({ ok: true, data: readAllEpisodes() });
+
+      case 'readArchived':
+        return jsonResponse({ ok: true, data: readArchivedEpisodes() });
 
       case 'updateCell':
         updateSceneStage(
@@ -134,6 +139,14 @@ function doGet(e) {
 
       case 'softDeleteEpisode':
         softDeleteEpisode(parseInt(e.parameter.episodeNumber, 10));
+        return jsonResponse({ ok: true });
+
+      case 'archiveEpisode':
+        archiveEpisode(parseInt(e.parameter.episodeNumber, 10));
+        return jsonResponse({ ok: true });
+
+      case 'unarchiveEpisode':
+        unarchiveEpisode(parseInt(e.parameter.episodeNumber, 10));
         return jsonResponse({ ok: true });
 
       case 'debugImages':
@@ -527,6 +540,37 @@ function readAllEpisodes() {
   return episodes;
 }
 
+// ─── 아카이빙된 에피소드 목록 읽기 ─────────────────────────────
+
+function readArchivedEpisodes() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var epMap = {};
+
+  for (var i = 0; i < sheets.length; i++) {
+    var title = sheets[i].getName();
+    var match = title.match(AC_EP_PATTERN);
+    if (match) {
+      var epNum = parseInt(match[1], 10);
+      if (!epMap[epNum]) {
+        epMap[epNum] = {
+          episodeNumber: epNum,
+          title: 'EP.' + String(epNum).padStart(2, '0'),
+          partCount: 0
+        };
+      }
+      epMap[epNum].partCount++;
+    }
+  }
+
+  var result = [];
+  var keys = Object.keys(epMap).sort(function(a, b) { return Number(a) - Number(b); });
+  for (var j = 0; j < keys.length; j++) {
+    result.push(epMap[keys[j]]);
+  }
+  return result;
+}
+
 // ─── 셀 업데이트 (체크박스 토글) ─────────────────────────────
 
 function updateSceneStage(sheetName, rowIndex, stage, value) {
@@ -844,6 +888,43 @@ function softDeleteEpisode(episodeNumber) {
   }
   // 에피소드 자체도 삭제 마킹
   writeMetadata('deleted-episode', String(episodeNumber), 'true');
+}
+
+/**
+ * 에피소드를 아카이빙한다 — 해당 에피소드의 모든 파트 시트 이름에 AC_ 접두사를 붙인다.
+ * @param {number} episodeNumber 에피소드 번호
+ */
+function archiveEpisode(episodeNumber) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tabs = getEpisodeTabs();
+  for (var i = 0; i < tabs.length; i++) {
+    if (tabs[i].episodeNumber === episodeNumber) {
+      var sheet = ss.getSheetByName(tabs[i].title);
+      if (sheet && !tabs[i].title.startsWith('AC_')) {
+        sheet.setName('AC_' + tabs[i].title);
+      }
+    }
+  }
+  // 아카이빙 메타데이터 기록
+  writeMetadata('archived-episode', String(episodeNumber), 'true');
+}
+
+/**
+ * 에피소드 아카이빙을 해제한다 — AC_ 접두사를 제거한다.
+ * @param {number} episodeNumber 에피소드 번호
+ */
+function unarchiveEpisode(episodeNumber) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var epPrefix = 'AC_EP' + String(episodeNumber).padStart(2, '0');
+  for (var i = 0; i < sheets.length; i++) {
+    var name = sheets[i].getName();
+    if (name.startsWith(epPrefix)) {
+      sheets[i].setName(name.replace(/^AC_/, ''));
+    }
+  }
+  // 아카이빙 메타데이터 제거
+  writeMetadata('archived-episode', String(episodeNumber), '');
 }
 
 /**

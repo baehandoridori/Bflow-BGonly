@@ -275,6 +275,25 @@ export async function softDeleteEpisode(episodeNumber: number): Promise<void> {
   await gasGet({ action: 'softDeleteEpisode', episodeNumber: String(episodeNumber) });
 }
 
+// ─── 아카이빙 ────────────────────────────────────────────────
+
+export async function archiveEpisode(episodeNumber: number): Promise<void> {
+  await gasGet({ action: 'archiveEpisode', episodeNumber: String(episodeNumber) });
+}
+
+export async function unarchiveEpisode(episodeNumber: number): Promise<void> {
+  await gasGet({ action: 'unarchiveEpisode', episodeNumber: String(episodeNumber) });
+}
+
+export async function readArchivedEpisodes(): Promise<{ episodeNumber: number; title: string; partCount: number }[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  const res = await gasFetch(`${webAppUrl}?action=readArchived`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; data?: any; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '아카이빙 목록 읽기 실패');
+  return json.data ?? [];
+}
+
 // ─── 이미지 업로드 (Drive에 저장 → URL 반환) ──────────────────
 
 export async function uploadImage(

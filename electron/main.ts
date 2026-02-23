@@ -17,6 +17,9 @@ import {
   writeMetadata,
   softDeletePart,
   softDeleteEpisode,
+  archiveEpisode,
+  unarchiveEpisode,
+  readArchivedEpisodes,
 } from './sheets';
 
 // 앱 이름 설정 — AppData 경로에 영향
@@ -393,6 +396,36 @@ ipcMain.handle('sheets:soft-delete-part', async (_event, sheetName: string) => {
 ipcMain.handle('sheets:soft-delete-episode', async (_event, episodeNumber: number) => {
   try {
     await softDeleteEpisode(episodeNumber);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:read-archived', async () => {
+  try {
+    const data = await readArchivedEpisodes();
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('sheets:archive-episode', async (_event, episodeNumber: number) => {
+  try {
+    await archiveEpisode(episodeNumber);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:unarchive-episode', async (_event, episodeNumber: number) => {
+  try {
+    await unarchiveEpisode(episodeNumber);
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
