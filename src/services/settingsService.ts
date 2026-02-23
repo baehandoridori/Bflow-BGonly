@@ -1,6 +1,6 @@
 /**
  * 개인 설정 서비스: AppData 기반 읽기/쓰기
- * Electron IPC를 통해 %APPDATA%/Bflow-BGonly/ 에 저장
+ * Electron IPC를 통해 %APPDATA%/B flow/ 에 저장
  */
 
 import type { WidgetLayoutItem } from '@/types';

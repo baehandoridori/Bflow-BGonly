@@ -1,6 +1,6 @@
 /**
  * 씬별 댓글/의견 서비스
- * %APPDATA%/Bflow-BGonly/comments.json 에 저장
+ * %APPDATA%/B flow/comments.json 에 저장
  */
 
 const COMMENTS_FILE = 'comments.json';

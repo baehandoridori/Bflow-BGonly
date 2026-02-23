@@ -1,5 +1,5 @@
 {
-  "name": "bflow-bgonly",
+  "name": "bflow",
   "version": "0.1.0",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",

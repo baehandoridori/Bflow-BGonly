@@ -1,6 +1,6 @@
 /**
  * 캘린더 이벤트 CRUD 서비스
- * %APPDATA%/Bflow-BGonly/calendar-events.json 에 저장
+ * %APPDATA%/B flow/calendar-events.json 에 저장
  */
 
 import type { CalendarEvent, CalendarStore } from '@/types/calendar';
