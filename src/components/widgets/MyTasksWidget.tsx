@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useContext, useRef } from 'react';
-import { CheckSquare, Plus, X, Search, Edit3, Check, ListFilter, Pencil } from 'lucide-react';
+import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, ChevronRight, PartyPopper } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Widget, IsPopupContext } from './Widget';
+import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -467,12 +467,14 @@ export function MyTasksWidget() {
   const currentUser = useAuthStore((s) => s.currentUser);
   const sheetsConnected = useAppStore((s) => s.sheetsConnected);
   const isPopup = useContext(IsPopupContext);
+  const widgetId = useContext(WidgetIdContext);
 
   // 뷰 관리
   const [customViews, setCustomViews] = useState<TaskView[]>(() => loadViews());
   const [activeViewId, setActiveViewId] = useState(DEFAULT_VIEW.id);
   const [showPicker, setShowPicker] = useState(false);
   const [filterDone, setFilterDone] = useState(false);
+  const [showDone, setShowDone] = useState(false);
 
   const allViews = [DEFAULT_VIEW, ...customViews];
   const activeView = allViews.find((v) => v.id === activeViewId) ?? DEFAULT_VIEW;
@@ -500,7 +502,8 @@ export function MyTasksWidget() {
     return result;
   }, [episodes]);
 
-  const visibleScenes = useMemo(() => {
+  // 뷰에 해당하는 씬 (정렬만)
+  const allViewScenes = useMemo(() => {
     let result: FlatScene[];
     if (activeView.type === 'assigned') {
       const name = currentUser?.name ?? '';
@@ -509,9 +512,6 @@ export function MyTasksWidget() {
       const keys = new Set(activeView.sceneKeys);
       result = allFlat.filter((f) => keys.has(f.key));
     }
-    if (filterDone) {
-      result = result.filter((f) => scenePct(f.scene) < 100);
-    }
     return result.sort((a, b) => {
       if (a.episodeNumber !== b.episodeNumber) return a.episodeNumber - b.episodeNumber;
       if (a.partId !== b.partId) return a.partId.localeCompare(b.partId);
@@ -519,15 +519,39 @@ export function MyTasksWidget() {
       const bNum = parseInt(b.scene.sceneId.match(/\d+$/)?.[0] || '0', 10);
       return aNum - bNum;
     });
-  }, [activeView, allFlat, currentUser, filterDone]);
+  }, [activeView, allFlat, currentUser]);
+
+  // 진행 중 / 완료 분리
+  const pendingScenes = useMemo(() => allViewScenes.filter((f) => scenePct(f.scene) < 100), [allViewScenes]);
+  const doneScenes = useMemo(() => allViewScenes.filter((f) => scenePct(f.scene) >= 100), [allViewScenes]);
 
   const stats = useMemo(() => {
-    const total = visibleScenes.length;
+    const total = allViewScenes.length;
     const stages = total * 4;
-    const checked = visibleScenes.reduce((s, f) => s + [f.scene.lo, f.scene.done, f.scene.review, f.scene.png].filter(Boolean).length, 0);
-    const fullyDone = visibleScenes.filter((f) => scenePct(f.scene) >= 100).length;
-    return { total, fullyDone, pct: stages > 0 ? (checked / stages) * 100 : 0 };
-  }, [visibleScenes]);
+    const checked = allViewScenes.reduce((s, f) => s + [f.scene.lo, f.scene.done, f.scene.review, f.scene.png].filter(Boolean).length, 0);
+    return { total, fullyDone: doneScenes.length, pct: stages > 0 ? (checked / stages) * 100 : 0 };
+  }, [allViewScenes, doneScenes]);
+
+  // 팝업에서 완료 섹션 접기/펼치기 시 창 크기 조절
+  const baseSizeRef = useRef<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!isPopup || !widgetId) return;
+    (async () => {
+      if (!baseSizeRef.current) {
+        const size = await window.electronAPI?.widgetGetSize?.(widgetId);
+        if (size) baseSizeRef.current = size;
+      }
+      if (!baseSizeRef.current) return;
+      const base = baseSizeRef.current;
+      if (showDone && doneScenes.length > 0) {
+        // 완료 항목 수에 따라 높이 증가 (최대 300px 추가)
+        const extra = Math.min(doneScenes.length * 36 + 32, 300);
+        window.electronAPI?.widgetResize?.(widgetId, base.width, base.height + extra);
+      } else {
+        window.electronAPI?.widgetResize?.(widgetId, base.width, base.height);
+      }
+    })();
+  }, [showDone, doneScenes.length, isPopup, widgetId]);
 
   // 토글 핸들러
   const handleToggle = useCallback(async (flat: FlatScene, stage: Stage) => {
@@ -564,7 +588,7 @@ export function MyTasksWidget() {
     }
   }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, sheetsConnected]);
 
-  // 인라인 필드 편집 핸들러
+  // 인라인 필드 편집
   const handleEditField = useCallback(async (flat: FlatScene, field: string, value: string) => {
     const { sheetName, sceneIndex } = flat;
     updateSceneFieldOptimistic(sheetName, sceneIndex, field, value);
@@ -583,33 +607,50 @@ export function MyTasksWidget() {
   // 뷰 조작
   const createCustomView = () => {
     const id = `view_${Date.now()}`;
-    const view: TaskView = { id, name: '새 할일 목록', type: 'custom', sceneKeys: [] };
-    setCustomViews((prev) => [...prev, view]);
+    setCustomViews((prev) => [...prev, { id, name: '새 할일 목록', type: 'custom' as const, sceneKeys: [] }]);
     setActiveViewId(id);
   };
-
   const renameView = (id: string, name: string) => {
     setCustomViews((prev) => prev.map((v) => v.id === id ? { ...v, name } : v));
   };
-
   const deleteView = (viewId: string) => {
     setCustomViews((prev) => prev.filter((v) => v.id !== viewId));
     if (activeViewId === viewId) setActiveViewId(DEFAULT_VIEW.id);
   };
-
   const addToView = (keys: SceneKey[]) => {
     setCustomViews((prev) => prev.map((v) =>
       v.id === activeViewId ? { ...v, sceneKeys: [...new Set([...v.sceneKeys, ...keys])] } : v,
     ));
   };
-
   const removeFromView = (key: SceneKey) => {
     setCustomViews((prev) => prev.map((v) =>
       v.id === activeViewId ? { ...v, sceneKeys: v.sceneKeys.filter((k) => k !== key) } : v,
     ));
   };
-
   const existingKeys = useMemo(() => new Set(activeView.sceneKeys), [activeView]);
+
+  // 행 렌더 헬퍼
+  const renderRow = (flat: FlatScene) => {
+    const s = flat.scene;
+    const pct = scenePct(s);
+    const deptCfg = DEPARTMENT_CONFIGS[flat.department];
+    const epLabel = episodeTitles[flat.episodeNumber] || `EP.${String(flat.episodeNumber).padStart(2, '0')}`;
+    const sceneNum = s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(s.no);
+    return (
+      <EditableSceneRow
+        key={flat.key}
+        flat={flat}
+        deptCfg={deptCfg}
+        epLabel={epLabel}
+        sceneNum={sceneNum}
+        pct={pct}
+        isCustom={activeView.type === 'custom'}
+        onToggle={handleToggle}
+        onRemove={removeFromView}
+        onEditField={handleEditField}
+      />
+    );
+  };
 
   return (
     <Widget
@@ -638,8 +679,6 @@ export function MyTasksWidget() {
           onCreate={createCustomView}
           onRename={renameView}
         />
-
-        {/* 탭 아래 구분선 */}
         <div className="h-px bg-bg-border/30" />
 
         {/* 요약 바 */}
@@ -658,9 +697,10 @@ export function MyTasksWidget() {
           </span>
         </div>
 
-        {/* 씬 리스트 */}
+        {/* 메인 리스트 */}
         <div className="flex-1 overflow-auto -mx-1 px-1">
-          {visibleScenes.length === 0 ? (
+          {/* 진행 중 항목 */}
+          {pendingScenes.length === 0 && doneScenes.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-text-secondary/40 gap-1">
               <CheckSquare size={24} className="opacity-30" />
               <span className="text-[10px]">
@@ -668,30 +708,59 @@ export function MyTasksWidget() {
               </span>
             </div>
           ) : (
-            <div className="flex flex-col gap-0.5">
-              {visibleScenes.map((flat) => {
-                const s = flat.scene;
-                const pct = scenePct(s);
-                const deptCfg = DEPARTMENT_CONFIGS[flat.department];
-                const epLabel = episodeTitles[flat.episodeNumber] || `EP.${String(flat.episodeNumber).padStart(2, '0')}`;
-                const sceneNum = s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(s.no);
+            <>
+              {pendingScenes.length === 0 && doneScenes.length > 0 && (
+                <div className="flex flex-col items-center justify-center py-4 text-text-secondary/40 gap-1">
+                  <PartyPopper size={20} className="opacity-40 text-green-400" />
+                  <span className="text-[10px] text-green-400/60">모든 할일 완료!</span>
+                </div>
+              )}
+              <AnimatePresence mode="popLayout">
+                {pendingScenes.map(renderRow)}
+              </AnimatePresence>
 
-                return (
-                  <EditableSceneRow
-                    key={flat.key}
-                    flat={flat}
-                    deptCfg={deptCfg}
-                    epLabel={epLabel}
-                    sceneNum={sceneNum}
-                    pct={pct}
-                    isCustom={activeView.type === 'custom'}
-                    onToggle={handleToggle}
-                    onRemove={removeFromView}
-                    onEditField={handleEditField}
-                  />
-                );
-              })}
-            </div>
+              {/* ─── 완료된 항목 섹션 ─── */}
+              {doneScenes.length > 0 && !filterDone && (
+                <div className="mt-2">
+                  {/* 접기/펼치기 토글 */}
+                  <button
+                    onClick={() => setShowDone(!showDone)}
+                    className="flex items-center gap-1.5 w-full px-1 py-1 text-[10px] text-text-secondary/40 hover:text-text-secondary/70 cursor-pointer transition-colors rounded-md hover:bg-bg-border/5"
+                  >
+                    <motion.div
+                      animate={{ rotate: showDone ? 0 : -90 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <ChevronDown size={10} />
+                    </motion.div>
+                    <span className="font-medium">완료된 항목</span>
+                    <span className="text-[9px] tabular-nums bg-green-500/10 text-green-400/70 px-1.5 py-0 rounded-full">
+                      {doneScenes.length}
+                    </span>
+                    <div className="flex-1 h-px bg-bg-border/15 ml-1" />
+                  </button>
+
+                  {/* 완료 항목 리스트 */}
+                  <AnimatePresence>
+                    {showDone && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                        className="overflow-hidden"
+                      >
+                        <div className="flex flex-col gap-0.5 pt-1">
+                          <AnimatePresence mode="popLayout">
+                            {doneScenes.map(renderRow)}
+                          </AnimatePresence>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+            </>
           )}
         </div>
 

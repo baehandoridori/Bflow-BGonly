@@ -552,6 +552,23 @@ ipcMain.handle('widget:set-opacity', (_event, widgetId: string, opacity: number)
   }
 });
 
+ipcMain.handle('widget:resize', (_event, widgetId: string, width: number, height: number) => {
+  const win = widgetWindows.get(widgetId);
+  if (win && !win.isDestroyed()) {
+    const bounds = win.getBounds();
+    win.setBounds({ x: bounds.x, y: bounds.y, width: Math.round(width), height: Math.round(height) }, true);
+  }
+});
+
+ipcMain.handle('widget:get-size', (_event, widgetId: string) => {
+  const win = widgetWindows.get(widgetId);
+  if (win && !win.isDestroyed()) {
+    const [w, h] = win.getSize();
+    return { width: w, height: h };
+  }
+  return null;
+});
+
 ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {

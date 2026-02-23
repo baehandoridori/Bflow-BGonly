@@ -244,6 +244,8 @@ export interface ElectronAPI {
   widgetOpenPopup?: (widgetId: string, title: string) => Promise<{ ok: boolean }>;
   widgetSetOpacity?: (widgetId: string, opacity: number) => Promise<void>;
   widgetClosePopup?: (widgetId: string) => Promise<void>;
+  widgetResize?: (widgetId: string, width: number, height: number) => Promise<void>;
+  widgetGetSize?: (widgetId: string) => Promise<{ width: number; height: number } | null>;
   widgetCaptureBehind?: (widgetId: string) => Promise<string | null>;
   onWidgetFocusChange?: (callback: (focused: boolean) => void) => () => void;
 }

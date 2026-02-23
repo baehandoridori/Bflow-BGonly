@@ -89,6 +89,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('widget:set-opacity', widgetId, opacity),
   widgetClosePopup: (widgetId: string) =>
     ipcRenderer.invoke('widget:close-popup', widgetId),
+  widgetResize: (widgetId: string, width: number, height: number) =>
+    ipcRenderer.invoke('widget:resize', widgetId, width, height),
+  widgetGetSize: (widgetId: string) =>
+    ipcRenderer.invoke('widget:get-size', widgetId) as Promise<{ width: number; height: number } | null>,
   widgetCaptureBehind: (widgetId: string) =>
     ipcRenderer.invoke('widget:capture-behind', widgetId) as Promise<string | null>,
   onWidgetFocusChange: (callback: (focused: boolean) => void) => {
