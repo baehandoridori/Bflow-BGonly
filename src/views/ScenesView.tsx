@@ -419,7 +419,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       <div className="px-2.5 pt-2 pb-1 flex items-center justify-between">
         <div className="flex items-center gap-1 min-w-0">
           <span className="text-xs font-mono font-bold text-accent shrink-0">
-            #{scene.no}
+            #{scene.sceneId ? (scene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || scene.no) : scene.no}
           </span>
           <span className="text-xs text-text-primary truncate">
             <HighlightText text={scene.sceneId || '(씬번호 없음)'} query={searchQuery} />
@@ -859,7 +859,7 @@ interface AddSceneFormProps {
   existingSceneIds: string[];
   sheetName: string;
   isLiveMode: boolean;
-  onSubmit: (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }) => void;
+  onSubmit: (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }, skipSync?: boolean) => void;
   onCancel: () => void;
 }
 
@@ -905,12 +905,18 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
       const endN = parseInt(bulkEnd, 10);
       if (isNaN(startN) || isNaN(endN) || endN < startN) return;
       let updatedIds = [...existingSceneIds];
+      const toAdd: string[] = [];
       for (let n = startN; n <= endN; n++) {
         const numStr = String(n).padStart(3, '0');
         const id = `${prefix}${numStr}`;
-        if (updatedIds.includes(id)) continue; // 중복 스킵
-        onSubmit(id, assignee, memo, layoutId);
+        if (updatedIds.includes(id)) continue;
+        toAdd.push(id);
         updatedIds.push(id);
+      }
+      // 마지막 항목만 sync, 나머지는 skipSync
+      for (let i = 0; i < toAdd.length; i++) {
+        const isLast = i === toAdd.length - 1;
+        onSubmit(toAdd[i], assignee, memo, layoutId, undefined, !isLast);
       }
       setNumber(suggestNextNumber(prefix, updatedIds));
       setBulkEnd('');
@@ -1319,7 +1325,10 @@ export function ScenesView() {
       if (sheetsConnected) {
         const { readAllFromSheets } = await import('@/services/sheetsService');
         const eps = await readAllFromSheets();
-        setEpisodes(eps);
+        // 아카이빙된 에피소드가 다시 돌아오지 않도록 필터링
+        const archivedNums = new Set(archivedEpisodes.map((a) => a.episodeNumber));
+        const filtered = eps.filter((ep) => !archivedNums.has(ep.episodeNumber));
+        setEpisodes(filtered);
       }
       // 테스트 모드: 파일 쓰기는 이미 test 함수에서 처리됨
       // 위젯 팝업에 데이터 변경 알림
@@ -1500,7 +1509,13 @@ export function ScenesView() {
   scenes = [...scenes].sort((a, b) => {
     let cmp = 0;
     switch (sortKey) {
-      case 'no': cmp = a.no - b.no; break;
+      case 'no': {
+        // sceneId에서 숫자 추출하여 정렬 (a001→1, sc010→10)
+        const aNum = parseInt(a.sceneId?.match(/\d+$/)?.[0] || '0', 10) || a.no;
+        const bNum = parseInt(b.sceneId?.match(/\d+$/)?.[0] || '0', 10) || b.no;
+        cmp = aNum - bNum;
+        break;
+      }
       case 'assignee': cmp = (a.assignee || '').localeCompare(b.assignee || ''); break;
       case 'progress': cmp = sceneProgress(a) - sceneProgress(b); break;
       case 'incomplete': {
@@ -1696,7 +1711,7 @@ export function ScenesView() {
     }
   };
 
-  const handleAddScene = async (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }) => {
+  const handleAddScene = async (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }, skipSync?: boolean) => {
     if (!currentPart) return;
 
     const sceneIndex = currentPart.scenes.length; // 새 씬의 인덱스
@@ -1707,7 +1722,8 @@ export function ScenesView() {
     try {
       if (sheetsConnected) {
         await addSceneToSheets(currentPart.sheetName, sceneId, assignee, memo);
-        syncInBackground();
+        // 배치 모드에서는 마지막 씬 추가 후에만 sync
+        if (!skipSync) syncInBackground();
       } else {
         await addTestScene(episodes, currentPart.sheetName, sceneId, assignee, memo);
       }
@@ -1718,7 +1734,7 @@ export function ScenesView() {
       } else {
         alert(`씬 추가 실패: ${err}`);
       }
-      syncInBackground();
+      if (!skipSync) syncInBackground();
     }
 
     // layoutId 가 있으면 씬 생성 후 별도로 설정
@@ -1882,33 +1898,37 @@ export function ScenesView() {
 
     setArchiveDialogEpNum(null);
 
+    // ① 먼저 UI에서 즉시 제거 (낙관적 업데이트)
+    deleteEpisodeOptimistic(epNum);
+    setArchivedEpisodes((prev) => [
+      ...prev,
+      { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
+    ]);
+    if (selectedEpisode === epNum) {
+      setSelectedEpisode(episodes.find((e) => e.episodeNumber !== epNum)?.episodeNumber ?? 1);
+    }
+
     try {
       if (sheetsConnected) {
         const { writeMetadataToSheets } = await import('@/services/sheetsService');
-        // 제목 + 아카이빙 정보 METADATA에 기록
+        // ② METADATA 먼저 기록
         await writeMetadataToSheets('episode-title', String(epNum), epTitle);
         await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
-        // AC_ 탭 리네임 시도 (미배포 시 실패해도 METADATA로 동작)
+        // ③ 탭 리네임 (EP_ → AC_EP_) — 반드시 await 후에만 sync 가능
         try {
           const { archiveEpisodeInSheets } = await import('@/services/sheetsService');
           await archiveEpisodeInSheets(epNum);
         } catch (tabErr) {
           console.warn('[아카이빙] 탭 리네임 실패 (Apps Script 재배포 필요):', tabErr);
         }
+        // ④ 탭 리네임 완료 후에만 동기화 (리네임 전 sync하면 에피소드 부활)
+        syncInBackground();
       } else {
         await writeLocalMetadata('episode-title', String(epNum), epTitle);
         await writeLocalMetadata('archived-episode', String(epNum), 'true');
         await writeLocalMetadata('archive-info', String(epNum), archiveInfo);
       }
-      deleteEpisodeOptimistic(epNum);
-      setArchivedEpisodes((prev) => [
-        ...prev,
-        { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
-      ]);
-      if (selectedEpisode === epNum) {
-        setSelectedEpisode(episodes.find((e) => e.episodeNumber !== epNum)?.episodeNumber ?? 1);
-      }
-      syncInBackground();
+      window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
       alert(`아카이빙 실패: ${err}`);
       syncInBackground();

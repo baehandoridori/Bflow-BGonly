@@ -451,12 +451,20 @@ export function EpisodeView() {
 
     setArchiveDialogEpNum(null);
 
+    // ① 먼저 UI에서 즉시 제거 (낙관적 업데이트)
+    deleteEpisodeOptimistic(epNum);
+    setArchivedEpisodes((prev) => [
+      ...prev,
+      { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
+    ]);
+
     try {
       if (sheetsConnected) {
         const { writeMetadataToSheets } = await import('@/services/sheetsService');
+        // ② METADATA 먼저 기록
         await writeMetadataToSheets('episode-title', String(epNum), epTitle);
         await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
-        // AC_ 탭 리네임 시도 (미배포 시 실패해도 METADATA로 동작)
+        // ③ 탭 리네임 (EP_ → AC_EP_) — 반드시 await 완료 후
         try {
           const { archiveEpisodeInSheets } = await import('@/services/sheetsService');
           await archiveEpisodeInSheets(epNum);
@@ -471,11 +479,6 @@ export function EpisodeView() {
           await api.writeSettings(`metadata_archive-info_${epNum}.json`, archiveInfo);
         }
       }
-      deleteEpisodeOptimistic(epNum);
-      setArchivedEpisodes((prev) => [
-        ...prev,
-        { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
-      ]);
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
       alert(`아카이빙 실패: ${err}`);

@@ -48,8 +48,9 @@ function DashboardPlexus() {
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
-      const w = canvas.parentElement!.clientWidth;
-      const h = canvas.parentElement!.clientHeight;
+      // fixed 포지션이므로 window 크기 사용
+      const w = window.innerWidth;
+      const h = window.innerHeight;
       canvas.width = w * dpr; canvas.height = h * dpr;
       canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -69,10 +70,9 @@ function DashboardPlexus() {
     resize();
     window.addEventListener('resize', resize);
     const onMouse = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      mouseRef.current = { x: e.clientX, y: e.clientY };
     };
-    canvas.parentElement!.addEventListener('mousemove', onMouse, { passive: true });
+    window.addEventListener('mousemove', onMouse, { passive: true });
 
     let running = true;
     const animate = () => {
@@ -164,10 +164,10 @@ function DashboardPlexus() {
       requestAnimationFrame(animate);
     };
     requestAnimationFrame(animate);
-    return () => { running = false; window.removeEventListener('resize', resize); canvas.parentElement?.removeEventListener('mousemove', onMouse); };
+    return () => { running = false; window.removeEventListener('resize', resize); window.removeEventListener('mousemove', onMouse); };
   }, []);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" style={{ opacity: 0.85 }} />;
+  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" style={{ opacity: 0.85 }} />;
 }
 
 /* ── wiggle CSS injection ── */
@@ -215,22 +215,27 @@ function getWidgetComponent(id: string): React.ReactNode | undefined {
 }
 
 /* ── 부서별 레이아웃 ── */
-/* minW:minH 비율을 약 1:3 으로 맞춤 (컬럼 ~280px, 행 80px → 1col:3row ≈ 280:240 ≈ 1:1) */
+/*
+ * 위젯 최소 비율 ≈ 1:1 보장
+ * 4컬럼 기준 1col ≈ 283px, rowHeight=80px
+ * minW=1 → minH=4 (283:320 ≈ 1:1.13)
+ * minW=2 → minH=7 (580:560 ≈ 1:0.97)
+ */
 const DEPT_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 3, minW: 1, minH: 3 },
-  { i: 'stage-bars', x: 1, y: 0, w: 2, h: 3, minW: 2, minH: 3 },
-  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 3, minW: 1, minH: 3 },
-  { i: 'episode-summary', x: 0, y: 3, w: 3, h: 4, minW: 2, minH: 3 },
-  { i: 'calendar', x: 3, y: 3, w: 1, h: 4, minW: 1, minH: 3 },
+  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
+  { i: 'stage-bars', x: 1, y: 0, w: 2, h: 4, minW: 2, minH: 4 },
+  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
+  { i: 'episode-summary', x: 0, y: 4, w: 3, h: 5, minW: 2, minH: 4 },
+  { i: 'calendar', x: 3, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
 ];
 
 /* ── 통합 레이아웃 ── */
 const ALL_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 3, minW: 1, minH: 3 },
-  { i: 'dept-comparison', x: 1, y: 0, w: 2, h: 3, minW: 2, minH: 3 },
-  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 3, minW: 1, minH: 3 },
-  { i: 'episode-summary', x: 0, y: 3, w: 3, h: 4, minW: 2, minH: 3 },
-  { i: 'calendar', x: 3, y: 3, w: 1, h: 4, minW: 1, minH: 3 },
+  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
+  { i: 'dept-comparison', x: 1, y: 0, w: 2, h: 4, minW: 2, minH: 4 },
+  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
+  { i: 'episode-summary', x: 0, y: 4, w: 3, h: 5, minW: 2, minH: 4 },
+  { i: 'calendar', x: 3, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
 ];
 
 /* ── 위젯 추가 팝오버 ── */
@@ -382,8 +387,8 @@ export function Dashboard() {
   }, [isEditMode, setEditMode]);
 
   return (
-    <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden">
-      {/* 경량 플렉서스 배경 */}
+    <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
+      {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) */}
       <DashboardPlexus />
 
       {/* 부서 탭 + 편집 버튼 */}
