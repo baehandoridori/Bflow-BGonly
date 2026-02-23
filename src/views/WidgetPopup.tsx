@@ -331,38 +331,38 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const borderAlpha = 0.06 + glassIntensity * 0.14;
   const reflectAlpha = isFocused ? glassIntensity * 0.15 : 0.02;
 
-  // ── 독 모드: 축소(56×56) → 호버 시 확장(420×360) ──
+  // ── 독 모드: 축소(64×64) → 호버 시 확장(420×360) ──
   if (isDocked) {
-    // 축소 상태: 아이콘만 표시
+    // 축소 상태: 투명 배경 + 플로팅 아이콘만 표시
     if (!isDockHover) {
       return (
         <div
           className="h-screen w-screen flex items-center justify-center cursor-pointer"
-          style={{
-            background: `rgba(12, 14, 22, ${baseTintAlpha + 0.1})`,
-          }}
+          style={{ background: 'transparent' }}
           onMouseEnter={handleDockMouseEnter}
           onClick={handleRestore}
         >
           <div
-            className="w-10 h-10 rounded-full flex items-center justify-center"
+            className="w-12 h-12 rounded-full flex items-center justify-center"
             style={{
-              background: 'rgba(108, 92, 231, 0.8)',
-              boxShadow: '0 2px 12px rgba(108, 92, 231, 0.5)',
+              background: 'rgba(108, 92, 231, 0.9)',
+              boxShadow: '0 4px 20px rgba(108, 92, 231, 0.6), 0 0 0 2px rgba(108, 92, 231, 0.3)',
+              transition: 'transform 0.2s ease, box-shadow 0.2s ease',
             }}
           >
-            <BarChart3 size={18} className="text-white" />
+            <BarChart3 size={20} className="text-white" />
           </div>
         </div>
       );
     }
 
-    // 확장 상태: 프리뷰 표시
+    // 확장 상태: Acrylic 프리뷰 표시
     return (
       <div
         className="h-screen w-screen flex flex-col overflow-hidden"
         style={{
           background: `rgba(12, 14, 22, ${tintAlpha})`,
+          borderRadius: '12px',
         }}
         onMouseLeave={handleDockMouseLeave}
         onMouseEnter={() => {
@@ -376,8 +376,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           style={{
             height: '40%',
             background: `linear-gradient(180deg, rgba(255,255,255,${reflectAlpha * 1.2}) 0%, rgba(255,255,255,${reflectAlpha * 0.2}) 30%, transparent 100%)`,
-            maskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
-            WebkitMaskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+            borderRadius: '12px 12px 0 0',
           }}
         />
         {/* 프리뷰 콘텐츠 (비활성) */}
@@ -391,9 +390,10 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           </IsPopupContext.Provider>
         </div>
         {/* 클릭하여 열기 오버레이 */}
-        <div className="absolute inset-0 flex items-center justify-center z-20" style={{ cursor: 'pointer' }}>
+        <div className="absolute inset-0 flex items-center justify-center z-20"
+          style={{ cursor: 'pointer', borderRadius: '12px' }}>
           <span className="px-3 py-1.5 rounded-full text-xs font-medium text-white/80"
-            style={{ background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)' }}>
+            style={{ background: 'rgba(0,0,0,0.4)' }}>
             클릭하여 열기
           </span>
         </div>
@@ -408,6 +408,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       style={{
         background: `rgba(12, 14, 22, ${tintAlpha})`,
         transition: 'background 0.3s ease',
+        borderRadius: '12px',
       }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
@@ -418,8 +419,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         style={{
           height: '40%',
           background: `linear-gradient(180deg, rgba(255,255,255,${reflectAlpha * 1.2}) 0%, rgba(255,255,255,${reflectAlpha * 0.2}) 30%, transparent 100%)`,
-          maskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+          borderRadius: '12px 12px 0 0',
         }}
       />
 
@@ -427,6 +427,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
+          borderRadius: '12px',
           border: `1px solid rgba(255, 255, 255, ${borderAlpha})`,
           boxShadow: `
             inset 0 0 ${Math.round(glassIntensity * 20)}px rgba(255,255,255,${reflectAlpha * 0.4}),

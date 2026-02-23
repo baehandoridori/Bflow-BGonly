@@ -503,13 +503,13 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     minWidth: 280,
     minHeight: 200,
     frame: false,
-    transparent: false,
+    transparent: true,
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: false,
     title: widgetTitle,
-    backgroundColor: '#1a1a2e',
-    hasShadow: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
     backgroundMaterial: 'acrylic',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -553,13 +553,13 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     }
     const display = screen.getPrimaryDisplay();
     const wa = display.workArea;
-    const dockW = 56;
-    const dockH = 56;
+    const dockSize = 64;
+    const margin = 24;
     popupWin.setBounds({
-      x: wa.x + wa.width - dockW - 16,
-      y: wa.y + wa.height - dockH - 16,
-      width: dockW,
-      height: dockH,
+      x: wa.x + wa.width - dockSize - margin,
+      y: wa.y + wa.height - dockSize - margin,
+      width: dockSize,
+      height: dockSize,
     });
     popupWin.setSkipTaskbar(true);
     popupWin.setResizable(false);
@@ -616,13 +616,13 @@ ipcMain.handle('widget:minimize-to-dock', (_event, widgetId: string) => {
   }
   const display = screen.getPrimaryDisplay();
   const wa = display.workArea;
-  const dockW = 56;
-  const dockH = 56;
+  const dockSize = 64;
+  const margin = 24;
   win.setBounds({
-    x: wa.x + wa.width - dockW - 16,
-    y: wa.y + wa.height - dockH - 16,
-    width: dockW,
-    height: dockH,
+    x: wa.x + wa.width - dockSize - margin,
+    y: wa.y + wa.height - dockSize - margin,
+    width: dockSize,
+    height: dockSize,
   });
   win.setSkipTaskbar(true);
   win.setResizable(false);
@@ -632,12 +632,15 @@ ipcMain.handle('widget:minimize-to-dock', (_event, widgetId: string) => {
 ipcMain.handle('widget:dock-expand', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
-  const bounds = win.getBounds();
+  const display = screen.getPrimaryDisplay();
+  const wa = display.workArea;
   const expandW = 420;
   const expandH = 360;
+  const margin = 24;
+  // 오른쪽 아래 기준으로 확장 (workArea 내부 보장)
   win.setBounds({
-    x: bounds.x + bounds.width - expandW,
-    y: bounds.y + bounds.height - expandH,
+    x: wa.x + wa.width - expandW - margin,
+    y: wa.y + wa.height - expandH - margin,
     width: expandW,
     height: expandH,
   });
@@ -646,14 +649,16 @@ ipcMain.handle('widget:dock-expand', (_event, widgetId: string) => {
 ipcMain.handle('widget:dock-collapse', (_event, widgetId: string) => {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
-  const bounds = win.getBounds();
-  const collapseW = 56;
-  const collapseH = 56;
+  const display = screen.getPrimaryDisplay();
+  const wa = display.workArea;
+  const dockSize = 64;
+  const margin = 24;
+  // 오른쪽 아래 기준으로 축소
   win.setBounds({
-    x: bounds.x + bounds.width - collapseW,
-    y: bounds.y + bounds.height - collapseH,
-    width: collapseW,
-    height: collapseH,
+    x: wa.x + wa.width - dockSize - margin,
+    y: wa.y + wa.height - dockSize - margin,
+    width: dockSize,
+    height: dockSize,
   });
 });
 
