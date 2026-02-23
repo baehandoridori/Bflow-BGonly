@@ -357,6 +357,29 @@ function EventGanttChart() {
     return result;
   }, [dayLabels]);
 
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const setView = useAppStore((s) => s.setView);
+  const setSelectedEpisode = useAppStore((s) => s.setSelectedEpisode);
+
+  // 연결된 에피소드/씬으로 이동
+  const handleNavigate = useCallback((ev: CalendarEvent) => {
+    if (ev.linkedEpisode != null) {
+      setSelectedEpisode(ev.linkedEpisode);
+      setView('scenes');
+    }
+  }, [setView, setSelectedEpisode]);
+
+  // D-day 계산
+  const calcDday = useCallback((endDate: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const end = parseDate(endDate);
+    const diff = Math.round((end.getTime() - today.getTime()) / 86400000);
+    if (diff === 0) return 'D-DAY';
+    if (diff > 0) return `D-${diff}`;
+    return `D+${Math.abs(diff)}`;
+  }, []);
+
   // 오늘 위치로 자동 스크롤 (DOM 렌더링 후 안정적으로 실행)
   useEffect(() => {
     const todayIdx = dayLabels.findIndex((d) => d.isToday);
@@ -380,29 +403,6 @@ function EventGanttChart() {
       </div>
     );
   }
-
-  const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const setView = useAppStore((s) => s.setView);
-  const setSelectedEpisode = useAppStore((s) => s.setSelectedEpisode);
-
-  // 연결된 에피소드/씬으로 이동
-  const handleNavigate = useCallback((ev: CalendarEvent) => {
-    if (ev.linkedEpisode != null) {
-      setSelectedEpisode(ev.linkedEpisode);
-      setView('scenes');
-    }
-  }, [setView, setSelectedEpisode]);
-
-  // D-day 계산
-  const calcDday = useCallback((endDate: string) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const end = parseDate(endDate);
-    const diff = Math.round((end.getTime() - today.getTime()) / 86400000);
-    if (diff === 0) return 'D-DAY';
-    if (diff > 0) return `D-${diff}`;
-    return `D+${Math.abs(diff)}`;
-  }, []);
 
   return (
     <div className="flex h-full">
