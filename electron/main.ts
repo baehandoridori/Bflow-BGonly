@@ -28,7 +28,12 @@ import {
   addCommentToSheets,
   editCommentInSheets,
   deleteCommentFromSheets,
+  readUsersFromSheets,
+  addUserToSheets,
+  updateUserInSheets,
+  deleteUserFromSheets,
 } from './sheets';
+import type { SheetUser } from './sheets';
 import type { BatchAction } from './sheets';
 
 // 앱 이름 설정 — AppData 경로에 영향
@@ -575,6 +580,48 @@ ipcMain.handle('sheets:archive-episode-via-registry', async (
 ipcMain.handle('sheets:unarchive-episode-via-registry', async (_event, episodeNumber: number) => {
   try {
     await unarchiveEpisodeViaRegistry(episodeNumber);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: _USERS (Phase 0-4) ──────────────────────────
+
+ipcMain.handle('sheets:read-users', async () => {
+  try {
+    const data = await readUsersFromSheets();
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('sheets:add-user', async (_event, user: SheetUser) => {
+  try {
+    await addUserToSheets(user);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:update-user', async (_event, userId: string, updates: Record<string, string>) => {
+  try {
+    await updateUserInSheets(userId, updates);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:delete-user', async (_event, userId: string) => {
+  try {
+    await deleteUserFromSheets(userId);
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

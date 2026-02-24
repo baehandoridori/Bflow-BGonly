@@ -83,6 +83,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
     ipcRenderer.invoke('sheets:batch', actions),
 
+  // _USERS (Phase 0-4: 사용자 동기화)
+  sheetsReadUsers: () =>
+    ipcRenderer.invoke('sheets:read-users'),
+  sheetsAddUser: (user: unknown) =>
+    ipcRenderer.invoke('sheets:add-user', user),
+  sheetsUpdateUser: (userId: string, updates: Record<string, string>) =>
+    ipcRenderer.invoke('sheets:update-user', userId, updates),
+  sheetsDeleteUser: (userId: string) =>
+    ipcRenderer.invoke('sheets:delete-user', userId),
+
   // _COMMENTS (Phase 0-3: 댓글 동기화)
   sheetsReadComments: (sheetName: string) =>
     ipcRenderer.invoke('sheets:read-comments', sheetName),

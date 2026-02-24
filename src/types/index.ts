@@ -81,6 +81,9 @@ export interface AppUser {
   password: string;    // base64 인코딩된 JSON 내 평문 (내부 툴)
   isInitialPassword: boolean;
   createdAt: string;   // ISO 8601
+  hireDate?: string;   // Phase 0-4: 입사일 (YYYY-MM-DD)
+  birthday?: string;   // Phase 0-4: 생일 (MM-DD)
+  role?: string;       // Phase 0-4: 역할 (admin | user)
 }
 
 export interface UsersFile {
@@ -262,6 +265,11 @@ export interface ElectronAPI {
       failedAt?: number;
       failedAction?: string;
     }>;
+  // _USERS (Phase 0-4)
+  sheetsReadUsers: () => Promise<{ ok: boolean; data: AppUser[]; error?: string }>;
+  sheetsAddUser: (user: AppUser) => Promise<SheetsUpdateResult>;
+  sheetsUpdateUser: (userId: string, updates: Record<string, string>) => Promise<SheetsUpdateResult>;
+  sheetsDeleteUser: (userId: string) => Promise<SheetsUpdateResult>;
   // _COMMENTS (Phase 0-3)
   sheetsReadComments: (sheetName: string) => Promise<{ ok: boolean; data: { commentId: string; sheetName: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string }[]; error?: string }>;
   sheetsAddComment: (commentId: string, sheetName: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<SheetsUpdateResult>;

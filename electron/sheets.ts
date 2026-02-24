@@ -430,6 +430,48 @@ export async function unarchiveEpisodeViaRegistry(episodeNumber: number): Promis
   });
 }
 
+// ─── _USERS (Phase 0-4) ───────────────────────────────────────
+
+export interface SheetUser {
+  id: string;
+  name: string;
+  role: string;
+  password: string;
+  slackId: string;
+  hireDate: string;
+  birthday: string;
+  isInitialPassword: boolean;
+  createdAt: string;
+}
+
+export async function readUsersFromSheets(): Promise<SheetUser[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readUsers`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; data?: SheetUser[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '사용자 읽기 실패');
+  return json.data ?? [];
+}
+
+export async function addUserToSheets(user: SheetUser): Promise<void> {
+  await gasGet({
+    action: 'addUser',
+    userId: user.id, name: user.name, role: user.role || 'user',
+    password: user.password, slackId: user.slackId || '',
+    hireDate: user.hireDate || '', birthday: user.birthday || '',
+    isInitialPassword: String(user.isInitialPassword),
+    createdAt: user.createdAt,
+  });
+}
+
+export async function updateUserInSheets(userId: string, updates: Record<string, string>): Promise<void> {
+  await gasGet({ action: 'updateUser', userId, ...updates });
+}
+
+export async function deleteUserFromSheets(userId: string): Promise<void> {
+  await gasGet({ action: 'deleteUser', userId });
+}
+
 // ─── _COMMENTS (Phase 0-3) ────────────────────────────────────
 
 export interface SheetComment {

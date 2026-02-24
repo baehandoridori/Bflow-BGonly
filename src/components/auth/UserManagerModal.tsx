@@ -7,6 +7,8 @@ export function UserManagerModal() {
   const { users, setUsers, setShowUserManager } = useAuthStore();
   const [name, setName] = useState('');
   const [slackId, setSlackId] = useState('');
+  const [hireDate, setHireDate] = useState('');
+  const [birthday, setBirthday] = useState('');
   const [error, setError] = useState('');
 
   const handleAdd = useCallback(async () => {
@@ -16,12 +18,14 @@ export function UserManagerModal() {
       return;
     }
     setError('');
-    await addUser(name.trim(), slackId.trim());
+    await addUser(name.trim(), slackId.trim(), hireDate.trim() || undefined, birthday.trim() || undefined);
     const updated = await loadUsers();
     setUsers(updated);
     setName('');
     setSlackId('');
-  }, [name, slackId, users, setUsers]);
+    setHireDate('');
+    setBirthday('');
+  }, [name, slackId, hireDate, birthday, users, setUsers]);
 
   const handleDelete = useCallback(async (userId: string) => {
     await deleteUser(userId);
@@ -31,7 +35,7 @@ export function UserManagerModal() {
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/60">
-      <div className="w-[420px] max-h-[80vh] bg-bg-card border border-bg-border rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
+      <div className="w-[480px] max-h-[80vh] bg-bg-card border border-bg-border rounded-2xl p-6 flex flex-col gap-4 shadow-2xl">
         {/* 헤더 */}
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-text-primary">사용자 관리 (관리자)</h2>
@@ -44,27 +48,46 @@ export function UserManagerModal() {
         </div>
 
         {/* 사용자 추가 폼 */}
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="이름"
-            className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
-          />
-          <input
-            type="text"
-            value={slackId}
-            onChange={(e) => setSlackId(e.target.value)}
-            placeholder="Slack ID"
-            className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
-          />
-          <button
-            onClick={handleAdd}
-            className="flex items-center gap-1 bg-accent text-on-accent text-xs rounded-lg px-3 py-1.5 hover:bg-accent/80 transition-colors shrink-0"
-          >
-            <UserPlus size={14} /> 추가
-          </button>
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="이름"
+              className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
+            />
+            <input
+              type="text"
+              value={slackId}
+              onChange={(e) => setSlackId(e.target.value)}
+              placeholder="Slack ID"
+              className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
+            />
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="date"
+              value={hireDate}
+              onChange={(e) => setHireDate(e.target.value)}
+              placeholder="입사일"
+              title="입사일"
+              className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent"
+            />
+            <input
+              type="text"
+              value={birthday}
+              onChange={(e) => setBirthday(e.target.value)}
+              placeholder="생일 (MM-DD)"
+              className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent"
+            />
+            <button
+              onClick={handleAdd}
+              className="flex items-center gap-1 bg-accent text-on-accent text-xs rounded-lg px-3 py-1.5 hover:bg-accent/80 transition-colors shrink-0"
+            >
+              <UserPlus size={14} /> 추가
+            </button>
+          </div>
         </div>
         {error && <p className="text-xs text-status-none">{error}</p>}
 
@@ -82,6 +105,8 @@ export function UserManagerModal() {
                 <span className="text-sm text-text-primary font-medium">{u.name}</span>
                 <span className="text-xs text-text-secondary">
                   {u.slackId || '—'}
+                  {u.hireDate && <span className="ml-2">{u.hireDate}</span>}
+                  {u.birthday && <span className="ml-2">{u.birthday}</span>}
                   {u.isInitialPassword && (
                     <span className="ml-2 text-status-mid">(초기비밀번호)</span>
                   )}

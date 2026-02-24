@@ -18,7 +18,7 @@ import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
 import { loadSheetsConfig, connectSheets, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
 import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
-import { loadSession, loadUsers } from '@/services/userService';
+import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors, DEFAULT_THEME_ID } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
@@ -175,7 +175,10 @@ export default function App() {
           const result = await connectSheets(urlToConnect);
           if (result.ok) {
             setSheetsConnected(true);
+            setUsersSheetsMode(true);
             console.log('[Sheets] 자동 연결 성공');
+            // Phase 0-4: 로컬 users.dat를 _USERS 탭으로 마이그레이션 (비동기)
+            migrateUsersToSheets().catch(() => {});
           }
         }
       } catch (err) {

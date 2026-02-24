@@ -202,6 +202,34 @@ function executeAction(action, params) {
       deleteCommentFromSheet(params.commentId);
       return null;
 
+    // Phase 0-4: _USERS 관련 액션
+    case 'readUsers':
+      return readUsers();
+
+    case 'addUser':
+      addUserToSheet(
+        params.userId, params.name, params.role, params.password,
+        params.slackId, params.hireDate, params.birthday,
+        params.isInitialPassword === 'true', params.createdAt
+      );
+      return null;
+
+    case 'updateUser':
+      updateUserInSheet(params.userId, {
+        name: params.name,
+        role: params.role,
+        password: params.password,
+        slackId: params.slackId,
+        hireDate: params.hireDate,
+        birthday: params.birthday,
+        isInitialPassword: params.isInitialPassword,
+      });
+      return null;
+
+    case 'deleteUser':
+      deleteUserFromSheet(params.userId);
+      return null;
+
     default:
       throw new Error('Unknown action: ' + action);
   }
@@ -1447,6 +1475,116 @@ function deleteCommentFromSheet(commentId) {
   var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
   for (var i = data.length - 1; i >= 0; i--) {
     if (String(data[i][0]) === commentId) {
+      sheet.deleteRow(i + 2);
+      return;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Phase 0-4: _USERS 탭 — 사용자 계정 동기화
+// ═══════════════════════════════════════════════════════════════
+
+var USERS_SHEET_NAME = '_USERS';
+var USERS_HEADERS = ['userId', 'name', 'role', 'password', 'slackId', 'hireDate', 'birthday', 'isInitialPassword', 'createdAt'];
+
+/**
+ * _USERS 시트를 가져온다 (없으면 생성).
+ */
+function ensureUsersSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(USERS_SHEET_NAME);
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet(USERS_SHEET_NAME);
+  sheet.getRange(1, 1, 1, USERS_HEADERS.length).setValues([USERS_HEADERS]);
+  sheet.getRange(1, 1, 1, USERS_HEADERS.length).setFontWeight('bold').setBackground('#FFF3E0');
+  return sheet;
+}
+
+/**
+ * 전체 사용자 목록을 읽는다.
+ */
+function readUsers() {
+  var sheet = ensureUsersSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, USERS_HEADERS.length).getValues();
+  var result = [];
+  for (var i = 0; i < data.length; i++) {
+    var pw = String(data[i][3]);
+    // Base64 디코딩
+    var decodedPw = '';
+    try { decodedPw = Utilities.newBlob(Utilities.base64Decode(pw)).getDataAsString(); } catch (e) { decodedPw = pw; }
+    result.push({
+      id: String(data[i][0]),
+      name: String(data[i][1]),
+      role: String(data[i][2]) || 'user',
+      password: decodedPw,
+      slackId: String(data[i][4]),
+      hireDate: String(data[i][5]),
+      birthday: String(data[i][6]),
+      isInitialPassword: String(data[i][7]) === 'true',
+      createdAt: String(data[i][8])
+    });
+  }
+  return result;
+}
+
+/**
+ * 사용자를 추가한다.
+ */
+function addUserToSheet(userId, name, role, password, slackId, hireDate, birthday, isInitialPassword, createdAt) {
+  var sheet = ensureUsersSheet();
+  // Base64 인코딩
+  var encodedPw = Utilities.base64Encode(password || '1234');
+  sheet.appendRow([
+    userId, name, role || 'user', encodedPw, slackId || '',
+    hireDate || '', birthday || '',
+    isInitialPassword ? 'true' : 'false',
+    createdAt || new Date().toISOString()
+  ]);
+}
+
+/**
+ * 사용자 정보를 업데이트한다.
+ */
+function updateUserInSheet(userId, updates) {
+  var sheet = ensureUsersSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('사용자를 찾을 수 없습니다');
+
+  var data = sheet.getRange(2, 1, lastRow - 1, USERS_HEADERS.length).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === userId) {
+      var row = i + 2;
+      if (updates.name !== undefined) sheet.getRange(row, 2).setValue(updates.name);
+      if (updates.role !== undefined) sheet.getRange(row, 3).setValue(updates.role);
+      if (updates.password !== undefined) {
+        sheet.getRange(row, 4).setValue(Utilities.base64Encode(updates.password));
+      }
+      if (updates.slackId !== undefined) sheet.getRange(row, 5).setValue(updates.slackId);
+      if (updates.hireDate !== undefined) sheet.getRange(row, 6).setValue(updates.hireDate);
+      if (updates.birthday !== undefined) sheet.getRange(row, 7).setValue(updates.birthday);
+      if (updates.isInitialPassword !== undefined) sheet.getRange(row, 8).setValue(updates.isInitialPassword);
+      return;
+    }
+  }
+  throw new Error('사용자를 찾을 수 없습니다: ' + userId);
+}
+
+/**
+ * 사용자를 삭제한다.
+ */
+function deleteUserFromSheet(userId) {
+  var sheet = ensureUsersSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = data.length - 1; i >= 0; i--) {
+    if (String(data[i][0]) === userId) {
       sheet.deleteRow(i + 2);
       return;
     }
