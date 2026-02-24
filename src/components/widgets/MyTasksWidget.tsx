@@ -593,6 +593,15 @@ export function MyTasksWidget() {
           await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
         }
         notifyChange();
+      } else {
+        const { toggleTestSceneStage, updateTestSceneField } = await import('@/services/testSheetService');
+        await toggleTestSceneStage(useDataStore.getState().episodes, sheetName, scene.sceneId, stage);
+        if (completedBy) {
+          const eps1 = useDataStore.getState().episodes;
+          await updateTestSceneField(eps1, sheetName, sceneIndex, 'completedBy', completedBy);
+          const eps2 = useDataStore.getState().episodes;
+          await updateTestSceneField(eps2, sheetName, sceneIndex, 'completedAt', completedAt!);
+        }
       }
     } catch (err) {
       console.error('[MyTasks 토글 실패]', err);
@@ -610,6 +619,9 @@ export function MyTasksWidget() {
         const { updateSceneFieldInSheets } = await import('@/services/sheetsService');
         await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
         notifyChange();
+      } else {
+        const { updateTestSceneField } = await import('@/services/testSheetService');
+        await updateTestSceneField(useDataStore.getState().episodes, sheetName, sceneIndex, field, value);
       }
     } catch (err) {
       console.error('[MyTasks 편집 실패]', err);

@@ -162,15 +162,24 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           useDataStore.getState().setEpisodes(episodes);
           loadEpMetadata(episodes, true).catch(() => {});
         } else {
+          // 재연결 시도
           const cfg = await loadSheetsConfig();
           const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+          let reconnected = false;
           if (urlToConnect) {
             const result = await connectSheets(urlToConnect);
             if (result.ok) {
+              reconnected = true;
               const episodes = await readAllFromSheets();
               useDataStore.getState().setEpisodes(episodes);
               loadEpMetadata(episodes, true).catch(() => {});
             }
+          }
+          // 재연결 실패 시 로컬(테스트) 데이터에서 다시 읽기
+          if (!reconnected) {
+            const episodes = await readTestSheet();
+            useDataStore.getState().setEpisodes(episodes);
+            loadEpMetadata(episodes, false).catch(() => {});
           }
         }
 
