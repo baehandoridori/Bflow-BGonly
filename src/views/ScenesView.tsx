@@ -1274,6 +1274,7 @@ export function ScenesView() {
   const [bulkAddLoading, setBulkAddLoading] = useState(false);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
+  const [batchAssigneeValue, setBatchAssigneeValue] = useState('');
   const [treeOpen, setTreeOpen] = useState(true);
 
   // 파트 컨텍스트 메뉴
@@ -1300,6 +1301,10 @@ export function ScenesView() {
 
   // 아카이빙된 에피소드 목록
   const [archivedEpisodes, setArchivedEpisodes] = useState<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; memo?: string }[]>([]);
+
+  // 동기화 매니저: 버전 카운터 + 낙관적 보호 플래그
+  const syncVersionRef = useRef(0);
+  const archiveGuardRef = useRef(false); // 아카이빙 작업 중 sync 차단
 
   // 아카이빙 확인 다이얼로그 (메모 입력 포함)
   const [archiveDialogEpNum, setArchiveDialogEpNum] = useState<number | null>(null);
@@ -1341,25 +1346,35 @@ export function ScenesView() {
   useEffect(() => { clearSelectedScenes(); }, [selectedEpisode, selectedPart, selectedDepartment, clearSelectedScenes]);
 
   // 백그라운드 동기화: 낙관적 업데이트 후 서버와 싱크
+  // 동기화 매니저: 버전 카운터로 오래된 응답 폐기 + 아카이브 가드로 낙관적 상태 보호
   const syncInBackground = async () => {
+    const myVersion = ++syncVersionRef.current;
     try {
       const { readAllFromSheets, readArchivedFromSheets } = await import('@/services/sheetsService');
-      // readAllFromSheets는 _REGISTRY 기반으로 이미 archived를 제외하므로 그대로 사용
       const eps = await readAllFromSheets();
+
+      // 버전 체크: 이 sync 이후에 새 sync가 시작되었으면 결과 폐기
+      if (syncVersionRef.current !== myVersion) return;
+
       setEpisodes(eps);
 
-      // 아카이빙 목록도 최신으로 갱신 (아카이빙/해제 직후 즉시 반영)
-      try {
-        const archivedList = await readArchivedFromSheets();
-        setArchivedEpisodes(archivedList.map((item) => ({
-          episodeNumber: item.episodeNumber,
-          title: item.title,
-          partCount: item.partCount,
-          archivedBy: item.archivedBy || undefined,
-          archivedAt: item.archivedAt || undefined,
-          memo: item.archiveMemo || undefined,
-        })));
-      } catch { /* 아카이빙 목록 갱신 실패는 무시 */ }
+      // 아카이빙 가드: 아카이빙/해제 작업 진행 중이면 archived 목록 갱신 스킵
+      if (!archiveGuardRef.current) {
+        try {
+          const archivedList = await readArchivedFromSheets();
+          // 다시 한번 버전+가드 체크 (비동기 응답 사이에 상태가 바뀌었을 수 있음)
+          if (syncVersionRef.current === myVersion && !archiveGuardRef.current) {
+            setArchivedEpisodes(archivedList.map((item) => ({
+              episodeNumber: item.episodeNumber,
+              title: item.title,
+              partCount: item.partCount,
+              archivedBy: item.archivedBy || undefined,
+              archivedAt: item.archivedAt || undefined,
+              memo: item.archiveMemo || undefined,
+            })));
+          }
+        } catch { /* 아카이빙 목록 갱신 실패는 무시 */ }
+      }
 
       // 위젯 팝업에 데이터 변경 알림
       window.electronAPI?.sheetsNotifyChange?.();
@@ -1417,13 +1432,15 @@ export function ScenesView() {
 
   // 에피소드 제목/메모 → App.tsx에서 병렬 로드됨 (글로벌 스토어)
 
-  // 아카이빙된 에피소드 목록 로드
+  // 아카이빙된 에피소드 목록 로드 (마운트 시 1회만 — 이후는 syncInBackground가 갱신)
+  // episodes.length 의존성 제거: deleteEpisodeOptimistic() 호출 시 재로드가 낙관적 상태를 덮어쓰는 문제 방지
   useEffect(() => {
     const loadArchived = async () => {
       try {
-        // Phase 0-2: _REGISTRY 기반 — readArchived에서 아카이빙 정보 포함
         const { readArchivedFromSheets } = await import('@/services/sheetsService');
         const list = await readArchivedFromSheets();
+        // 아카이브 가드 활성화 상태면 낙관적 상태 보호
+        if (archiveGuardRef.current) return;
         const enriched = list.map((item) => ({
           episodeNumber: item.episodeNumber,
           title: item.title,
@@ -1438,7 +1455,7 @@ export function ScenesView() {
       }
     };
     loadArchived();
-  }, [episodes.length]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
   const detailScene = detailSceneIndex !== null
@@ -1914,6 +1931,11 @@ export function ScenesView() {
 
     setArchiveDialogEpNum(null);
 
+    // 아카이브 가드 ON — sync가 낙관적 상태를 덮어쓰지 못하게 보호
+    archiveGuardRef.current = true;
+    // 진행 중인 sync 응답 무효화
+    syncVersionRef.current++;
+
     // 롤백용 스냅샷
     const prevEpisodes = useDataStore.getState().episodes;
     const prevArchivedEpisodes = [...archivedEpisodes];
@@ -1932,13 +1954,15 @@ export function ScenesView() {
       // Phase 0-2: _REGISTRY 기반 아카이빙 (탭 이름 변경 없이 status만 변경)
       const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
       await archiveEpisodeViaRegistryInSheets(epNum, archivedBy, memo);
-      // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 백그라운드 동기화
+      // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화
       setTimeout(() => {
+        archiveGuardRef.current = false;
         syncInBackground();
         window.electronAPI?.sheetsNotifyChange?.();
-      }, 3000);
+      }, 5000);
     } catch (err) {
       // 롤백: 활성 목록 + 아카이브 목록 모두 원복
+      archiveGuardRef.current = false;
       setEpisodes(prevEpisodes);
       setArchivedEpisodes(prevArchivedEpisodes);
       alert(`아카이빙 실패: ${err}`);
@@ -1957,6 +1981,10 @@ export function ScenesView() {
     const epDisplayName = episodeTitles[epNum] || archived?.title || `EP.${String(epNum).padStart(2, '0')}`;
     if (!confirm(`"${epDisplayName}"를 아카이빙에서 복원하시겠습니까?`)) return;
 
+    // 아카이브 가드 ON — sync가 낙관적 상태를 덮어쓰지 못하게 보호
+    archiveGuardRef.current = true;
+    syncVersionRef.current++;
+
     // 롤백용 스냅샷
     const prevArchivedEpisodes = [...archivedEpisodes];
 
@@ -1967,13 +1995,15 @@ export function ScenesView() {
       // Phase 0-2: _REGISTRY 기반 복원 (탭 이름 변경 없이 status만 변경)
       const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
       await unarchiveEpisodeViaRegistryInSheets(epNum);
-      // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 백그라운드 동기화
+      // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화
       setTimeout(() => {
+        archiveGuardRef.current = false;
         syncInBackground();
         window.electronAPI?.sheetsNotifyChange?.();
-      }, 3000);
+      }, 5000);
     } catch (err) {
       // 롤백
+      archiveGuardRef.current = false;
       setArchivedEpisodes(prevArchivedEpisodes);
       alert(`복원 실패: ${err}`);
     }
@@ -2706,7 +2736,7 @@ export function ScenesView() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
-            onClick={() => setBatchEditOpen(false)}
+            onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 12 }}
@@ -2717,7 +2747,7 @@ export function ScenesView() {
             >
               <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">
                 <h3 className="text-sm font-bold text-text-primary">일괄 편집 ({selectedSceneIds.size}개 씬)</h3>
-                <button onClick={() => setBatchEditOpen(false)} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
+                <button onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
                   <X size={16} />
                 </button>
               </div>
@@ -2726,7 +2756,7 @@ export function ScenesView() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   const form = e.target as HTMLFormElement;
-                  const assignee = (form.elements.namedItem('batchAssignee') as HTMLInputElement).value.trim();
+                  const assignee = batchAssigneeValue.trim();
                   const memo = (form.elements.namedItem('batchMemo') as HTMLInputElement).value.trim();
                   const layoutId = (form.elements.namedItem('batchLayout') as HTMLInputElement).value.trim();
 
@@ -2757,6 +2787,7 @@ export function ScenesView() {
                   });
 
                   setBatchEditOpen(false);
+                  setBatchAssigneeValue('');
                   clearSelectedScenes();
 
                   // Phase 0: 배치로 한 번에 전송
@@ -2772,7 +2803,12 @@ export function ScenesView() {
               >
                 <div>
                   <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">담당자 (비어있으면 건너뜀)</label>
-                  <input name="batchAssignee" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent" placeholder="담당자" />
+                  <AssigneeSelect
+                    value={batchAssigneeValue}
+                    onChange={setBatchAssigneeValue}
+                    placeholder="담당자"
+                    className="mt-1"
+                  />
                 </div>
                 <div>
                   <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모 (비어있으면 건너뜀)</label>

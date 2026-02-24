@@ -733,25 +733,19 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     popupWin.loadFile(path.join(__dirname, '../dist/index.html'), { hash });
   }
 
-  // 윈도우 준비 완료 시 표시 + AOT 적용 + 주기적 재적용 시작
+  // 윈도우 준비 완료 시 즉시 표시 + AOT 적용
   popupWin.once('ready-to-show', () => {
     if (popupWin.isDestroyed()) return;
     popupWin.setAlwaysOnTop(true, 'floating');
-    popupWin.showInactive();
-    // 딜레이 후 포커스 + AOT 재확인 + moveTop
-    setTimeout(() => {
-      if (!popupWin.isDestroyed()) {
-        popupWin.focus();
-        popupWin.setAlwaysOnTop(true, 'floating');
-        popupWin.moveTop();
-      }
-    }, 100);
+    popupWin.show();
+    popupWin.moveTop();
+    // Acrylic이 AOT를 리셋하는 것을 보상 — 단일 딜레이로 재적용
     setTimeout(() => {
       if (!popupWin.isDestroyed()) {
         popupWin.setAlwaysOnTop(true, 'floating');
         popupWin.moveTop();
       }
-    }, 400);
+    }, 150);
     // 주기적 AOT 재적용 시작 (Windows Acrylic이 리셋하는 것을 보상)
     startAOTEnforcer(widgetId);
   });
