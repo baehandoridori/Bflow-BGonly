@@ -688,6 +688,9 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     popupWin.loadFile(path.join(__dirname, '../dist/index.html'), { hash });
   }
 
+  // AOT를 floating level로 설정 (Windows에서 안정적으로 항상 위 유지)
+  popupWin.setAlwaysOnTop(true, 'floating');
+
   widgetWindows.set(widgetId, popupWin);
   popupWin.on('closed', () => {
     widgetWindows.delete(widgetId);
@@ -782,7 +785,8 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    win.setAlwaysOnTop(aot);
+    // 'floating' level: 다른 앱 위에도 항상 표시 (Windows에서 안정적)
+    win.setAlwaysOnTop(aot, 'floating');
   }
 });
 

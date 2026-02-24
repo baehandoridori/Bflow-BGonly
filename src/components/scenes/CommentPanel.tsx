@@ -41,6 +41,8 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
   const [editText, setEditText] = useState('');
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -57,9 +59,11 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [comments.length]);
 
-  // 댓글 작성
+  // 댓글 작성 (낙관적 업데이트 + 중복 방지)
   const handleSubmit = async () => {
-    if (!input.trim() || !currentUser) return;
+    if (!input.trim() || !currentUser || submitting) return;
+    setSubmitting(true);
+
     const mentions = extractMentions(input, users.map(u => u.name));
     const comment: SceneComment = {
       id: crypto.randomUUID(),
@@ -69,19 +73,33 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
       mentions,
       createdAt: new Date().toISOString(),
     };
-    await addComment(sceneKey, comment);
+
+    // 낙관적: 즉시 UI 반영
     const next = [...comments, comment];
     setComments(next);
     onCountChange?.(next.length);
     setInput('');
     setShowMentions(false);
+
+    try {
+      await addComment(sceneKey, comment);
+    } catch (err) {
+      // 롤백
+      console.error('[댓글 추가 실패]', err);
+      setComments(comments);
+      onCountChange?.(comments.length);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  // 댓글 수정
+  // 댓글 수정 (낙관적)
   const handleEdit = async (commentId: string) => {
     if (!editText.trim()) return;
     const mentions = extractMentions(editText, users.map(u => u.name));
-    await updateComment(sceneKey, commentId, editText.trim(), mentions);
+    const prevComments = [...comments];
+
+    // 낙관적 UI 업데이트
     setComments(prev =>
       prev.map(c =>
         c.id === commentId
@@ -90,14 +108,31 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
       )
     );
     setEditingId(null);
+
+    try {
+      await updateComment(sceneKey, commentId, editText.trim(), mentions);
+    } catch (err) {
+      console.error('[댓글 수정 실패]', err);
+      setComments(prevComments);
+    }
   };
 
-  // 댓글 삭제
+  // 댓글 삭제 (낙관적)
   const handleDelete = async (commentId: string) => {
-    await deleteComment(sceneKey, commentId);
+    const prevComments = [...comments];
     const next = comments.filter(c => c.id !== commentId);
+
+    // 낙관적 UI 업데이트
     setComments(next);
     onCountChange?.(next.length);
+
+    try {
+      await deleteComment(sceneKey, commentId);
+    } catch (err) {
+      console.error('[댓글 삭제 실패]', err);
+      setComments(prevComments);
+      onCountChange?.(prevComments.length);
+    }
   };
 
   // @멘션 감지
@@ -109,6 +144,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
       if (!afterAt.includes(' ') && afterAt.length < 20) {
         setShowMentions(true);
         setMentionFilter(afterAt.toLowerCase());
+        setMentionIndex(0);
         return;
       }
     }
@@ -128,7 +164,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
     u.name.toLowerCase().includes(mentionFilter)
   );
 
-  // 텍스트 내 @멘션 렌더
+  // 텍스트 내 @멘션 렌더 (굵은 글씨 + 배경 하이라이트)
   const renderText = (text: string) => {
     const parts = text.split(/(@\S+)/g);
     return parts.map((part, i) => {
@@ -137,7 +173,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
         const isUser = users.some(u => u.name === name);
         if (isUser) {
           return (
-            <span key={i} className="text-accent font-medium">
+            <span key={i} className="text-accent font-bold bg-accent/10 rounded px-0.5">
               {part}
             </span>
           );
@@ -207,18 +243,18 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
                             if (e.key === 'Escape') setEditingId(null);
                           }}
                         />
-                        <div className="flex gap-2 mt-1">
-                          <button
-                            onClick={() => handleEdit(comment.id)}
-                            className="text-[10px] text-accent hover:underline cursor-pointer"
-                          >
-                            저장
-                          </button>
+                        <div className="flex gap-2 mt-1 justify-end">
                           <button
                             onClick={() => setEditingId(null)}
-                            className="text-[10px] text-text-secondary hover:underline cursor-pointer"
+                            className="px-2.5 py-1 text-[10px] text-text-secondary border border-bg-border rounded-md hover:bg-bg-border/50 transition-colors cursor-pointer"
                           >
                             취소
+                          </button>
+                          <button
+                            onClick={() => handleEdit(comment.id)}
+                            className="px-2.5 py-1 text-[10px] text-white bg-accent rounded-md hover:bg-accent/80 transition-colors cursor-pointer"
+                          >
+                            저장
                           </button>
                         </div>
                       </div>
@@ -259,11 +295,13 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
         {/* @멘션 자동완성 */}
         {showMentions && filteredUsers.length > 0 && (
           <div className="absolute bottom-full left-4 right-4 mb-1 bg-bg-card border border-bg-border rounded-lg shadow-lg max-h-32 overflow-y-auto z-10">
-            {filteredUsers.map((user) => (
+            {filteredUsers.map((user, i) => (
               <button
                 key={user.id}
                 onClick={() => insertMention(user.name)}
-                className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent/10 text-text-primary transition-colors flex items-center gap-2 cursor-pointer"
+                className={`w-full text-left px-3 py-1.5 text-xs text-text-primary transition-colors flex items-center gap-2 cursor-pointer ${
+                  i === mentionIndex ? 'bg-accent/15' : 'hover:bg-accent/10'
+                }`}
               >
                 <span className="text-accent text-[10px]">@</span>
                 <span>{user.name}</span>
@@ -280,6 +318,29 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
             className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent"
             rows={2}
             onKeyDown={(e) => {
+              // @멘션 드롭다운 키보드 탐색
+              if (showMentions && filteredUsers.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setMentionIndex((prev) => (prev + 1) % filteredUsers.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setMentionIndex((prev) => (prev - 1 + filteredUsers.length) % filteredUsers.length);
+                  return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault();
+                  insertMention(filteredUsers[mentionIndex].name);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setShowMentions(false);
+                  return;
+                }
+              }
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 handleSubmit();
@@ -288,10 +349,14 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
           />
           <button
             onClick={handleSubmit}
-            disabled={!input.trim()}
+            disabled={!input.trim() || submitting}
             className="p-2.5 rounded-lg bg-accent hover:bg-accent/80 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-colors cursor-pointer"
           >
-            <Send size={14} />
+            {submitting ? (
+              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Send size={14} />
+            )}
           </button>
         </div>
       </div>

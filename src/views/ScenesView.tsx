@@ -372,9 +372,10 @@ interface SceneCardProps {
   onOpenDetail: () => void;
   onCelebrationEnd: () => void;
   onCtrlClick?: () => void;
+  onShiftClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
@@ -385,8 +386,12 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       onCtrlClick?.();
+    } else if (e.shiftKey) {
+      e.preventDefault();
+      onShiftClick?.();
     } else {
-      onOpenDetail();
+      // 단순 클릭: 씬 선택/선택해제 (토글)
+      onCtrlClick?.();
     }
   };
 
@@ -400,6 +405,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       )}
       style={{ borderLeftWidth: 3, borderLeftColor: borderColor, overflow: 'visible' }}
       onClick={handleClick}
+      onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
       ref={isHighlighted ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
       {...(isHighlighted ? {
         initial: { scale: 1.06 },
@@ -1314,6 +1320,9 @@ export function ScenesView() {
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
   // 댓글 카운트 로딩은 currentPart 정의 후 아래에서 수행 (useEffect)
 
+  // Shift+Click 범위 선택을 위한 마지막 클릭 인덱스
+  const lastClickedIndexRef = useRef<number | null>(null);
+
   // 라쏘 드래그 선택
   const gridRef = useRef<HTMLDivElement>(null);
   const getSceneIdFromEl = useCallback((el: Element) => el.getAttribute('data-scene-id'), []);
@@ -1333,12 +1342,24 @@ export function ScenesView() {
   // 백그라운드 동기화: 낙관적 업데이트 후 서버와 싱크
   const syncInBackground = async () => {
     try {
-      const { readAllFromSheets } = await import('@/services/sheetsService');
+      const { readAllFromSheets, readArchivedFromSheets } = await import('@/services/sheetsService');
+      // readAllFromSheets는 _REGISTRY 기반으로 이미 archived를 제외하므로 그대로 사용
       const eps = await readAllFromSheets();
-      // 아카이빙된 에피소드가 다시 돌아오지 않도록 필터링
-      const archivedNums = new Set(archivedEpisodes.map((a) => a.episodeNumber));
-      const filtered = eps.filter((ep) => !archivedNums.has(ep.episodeNumber));
-      setEpisodes(filtered);
+      setEpisodes(eps);
+
+      // 아카이빙 목록도 최신으로 갱신 (아카이빙/해제 직후 즉시 반영)
+      try {
+        const archivedList = await readArchivedFromSheets();
+        setArchivedEpisodes(archivedList.map((item) => ({
+          episodeNumber: item.episodeNumber,
+          title: item.title,
+          partCount: item.partCount,
+          archivedBy: item.archivedBy || undefined,
+          archivedAt: item.archivedAt || undefined,
+          memo: item.archiveMemo || undefined,
+        })));
+      } catch { /* 아카이빙 목록 갱신 실패는 무시 */ }
+
       // 위젯 팝업에 데이터 변경 알림
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
@@ -1519,16 +1540,26 @@ export function ScenesView() {
 
   // ─── 핸들러들 ─────────────────────────────────
 
-  const handleToggle = async (sceneId: string, stage: Stage) => {
+  // 토글 직렬화 큐: 빠른 연속 토글 시 race condition 방지
+  const toggleQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const handleToggle = (sceneId: string, stage: Stage) => {
     if (!currentEp || !currentPart) return;
 
-    const scene = currentPart.scenes.find((s) => s.sceneId === sceneId);
+    // 현재 스토어에서 최신 씬 상태 직접 조회 (stale closure 방지)
+    const latestPart = useDataStore.getState().episodes
+      .flatMap((ep) => ep.parts)
+      .find((p) => p.sheetName === currentPart.sheetName);
+    if (!latestPart) return;
+
+    const scene = latestPart.scenes.find((s) => s.sceneId === sceneId);
     if (!scene) return;
 
     const newValue = !scene[stage];
-    const sceneIndex = currentPart.scenes.findIndex((s) => s.sceneId === sceneId);
+    const sceneIndex = latestPart.scenes.findIndex((s) => s.sceneId === sceneId);
     if (sceneIndex < 0) return;
 
+    // 낙관적 업데이트 — 즉시 UI 반영
     toggleSceneStage(currentPart.sheetName, sceneId, stage);
 
     // 완료 축하 애니메이션 + 완료 기록: 방금 토글로 4단계 모두 완료 시
@@ -1536,23 +1567,30 @@ export function ScenesView() {
       const afterToggle = { ...scene, [stage]: true };
       if (afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png) {
         setCelebratingId(sceneId);
-        // completedBy / completedAt 기록
         const completedBy = currentUser?.name ?? '알 수 없음';
         const completedAt = new Date().toISOString();
         updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
         updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
-
       }
     }
 
-    try {
-      await updateSheetCell(currentPart.sheetName, sceneIndex, stage, newValue);
-      // 위젯 팝업에 데이터 변경 알림
-      window.electronAPI?.sheetsNotifyChange?.();
-    } catch (err) {
-      console.error('[토글 실패]', err);
-      toggleSceneStage(currentPart.sheetName, sceneId, stage);
-    }
+    // API 호출을 큐에 넣어 순차 실행 (race condition 방지)
+    const sheetName = currentPart.sheetName;
+    toggleQueueRef.current = toggleQueueRef.current.then(async () => {
+      try {
+        await updateSheetCell(sheetName, sceneIndex, stage, newValue);
+        window.electronAPI?.sheetsNotifyChange?.();
+      } catch (err) {
+        console.error('[토글 실패]', err);
+        toggleSceneStage(sheetName, sceneId, stage);
+      }
+    });
+  };
+
+  // 일괄 토글: 선택된 씬들의 특정 단계를 순차 토글
+  const handleBulkToggle = (sceneIds: Set<string>, stage: Stage) => {
+    if (!currentPart) return;
+    sceneIds.forEach((id) => handleToggle(id, stage));
   };
 
   const handleAddEpisode = () => {
@@ -1716,8 +1754,8 @@ export function ScenesView() {
     try {
       const { addScenesToSheets } = await import('@/services/sheetsService');
       await addScenesToSheets(currentPart.sheetName, scenes);
-      // 서버 성공 후 전체 동기화로 최신 상태 반영
-      syncInBackground();
+      // 서버 성공 후 전체 동기화 완료까지 대기 (데이터 없음 깜빡임 방지)
+      await syncInBackground();
     } catch (err) {
       alert(`대량 씬 추가 실패: ${err}`);
     } finally {
@@ -2335,8 +2373,15 @@ export function ScenesView() {
         })()}
 
       {scenes.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-text-secondary h-full">
-          표시할 씬이 없습니다.
+        <div className="flex-1 flex flex-col items-center justify-center text-text-secondary h-full gap-2">
+          {bulkAddLoading || useDataStore.getState().isSyncing ? (
+            <>
+              <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+              <span className="text-xs animate-pulse">데이터를 불러오는 중...</span>
+            </>
+          ) : (
+            <span>표시할 씬이 없습니다.</span>
+          )}
         </div>
       ) : sceneGroupMode === 'layout' && layoutGroups ? (
         /* ── 레이아웃별 그룹 뷰 (P1-4) ── */
@@ -2407,7 +2452,25 @@ export function ScenesView() {
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}
                           onCelebrationEnd={clearCelebration}
-                          onCtrlClick={() => toggleSelectedScene(scene.sceneId)}
+                          onCtrlClick={() => {
+                            toggleSelectedScene(scene.sceneId);
+                            lastClickedIndexRef.current = idx;
+                          }}
+                          onShiftClick={() => {
+                            const lastIdx = lastClickedIndexRef.current;
+                            if (lastIdx !== null && lastIdx !== idx) {
+                              const from = Math.min(lastIdx, idx);
+                              const to = Math.max(lastIdx, idx);
+                              const rangeIds = new Set(selectedSceneIds);
+                              for (let i = from; i <= to; i++) {
+                                if (groupScenes[i]) rangeIds.add(groupScenes[i].sceneId);
+                              }
+                              setSelectedScenes(rangeIds);
+                            } else {
+                              toggleSelectedScene(scene.sceneId);
+                            }
+                            lastClickedIndexRef.current = idx;
+                          }}
                         />
                       );
                     })}
@@ -2455,7 +2518,26 @@ export function ScenesView() {
                 onDelete={handleDeleteScene}
                 onOpenDetail={() => setDetailSceneIndex(sIdx)}
                 onCelebrationEnd={clearCelebration}
-                onCtrlClick={() => toggleSelectedScene(scene.sceneId)}
+                onCtrlClick={() => {
+                  toggleSelectedScene(scene.sceneId);
+                  lastClickedIndexRef.current = idx;
+                }}
+                onShiftClick={() => {
+                  // Shift+Click: 범위 선택
+                  const lastIdx = lastClickedIndexRef.current;
+                  if (lastIdx !== null && lastIdx !== idx) {
+                    const from = Math.min(lastIdx, idx);
+                    const to = Math.max(lastIdx, idx);
+                    const rangeIds = new Set(selectedSceneIds);
+                    for (let i = from; i <= to; i++) {
+                      if (scenes[i]) rangeIds.add(scenes[i].sceneId);
+                    }
+                    setSelectedScenes(rangeIds);
+                  } else {
+                    toggleSelectedScene(scene.sceneId);
+                  }
+                  lastClickedIndexRef.current = idx;
+                }}
               />
             );
           })}
@@ -2502,9 +2584,7 @@ export function ScenesView() {
             {STAGES.map((stage) => (
               <button
                 key={stage}
-                onClick={() => {
-                  selectedSceneIds.forEach((id) => handleToggle(id, stage));
-                }}
+                onClick={() => handleBulkToggle(selectedSceneIds, stage)}
                 className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
                 style={{
                   backgroundColor: `${deptConfig.stageColors[stage]}20`,

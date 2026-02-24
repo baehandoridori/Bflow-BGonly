@@ -291,6 +291,7 @@ export function EpisodeView() {
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitlesMap = useDataStore((s) => s.episodeTitles);
   const deleteEpisodeOptimistic = useDataStore((s) => s.deleteEpisodeOptimistic);
+  const setEpisodes = useDataStore((s) => s.setEpisodes);
   const currentUser = useAuthStore((s) => s.currentUser);
   const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment } = useAppStore();
   const [viewMode, setViewMode] = useState<EpViewMode>('card');
@@ -382,10 +383,17 @@ export function EpisodeView() {
     ]);
 
     try {
-      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      const { archiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/sheetsService');
       await archiveEpisodeViaRegistryInSheets(epNum, currentUser?.name ?? '알 수 없음', memo);
+      // 서버 동기화로 최신 에피소드 목록 반영
+      const eps = await readAllFromSheets();
+      setEpisodes(eps);
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
+      // 롤백
+      const prevEps = [...episodes, { episodeNumber: epNum, title: epTitle, parts: ep.parts }];
+      setEpisodes(prevEps);
+      setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
       alert(`아카이빙 실패: ${err}`);
     }
   };
@@ -396,12 +404,26 @@ export function EpisodeView() {
     const epDisplayName = episodeTitlesMap[epNum] || archived?.title || `EP.${String(epNum).padStart(2, '0')}`;
     if (!confirm(`"${epDisplayName}"를 아카이빙에서 복원하시겠습니까?`)) return;
 
+    // 낙관적: 아카이브 목록에서 즉시 제거
+    setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
+
     try {
-      const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      const { unarchiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/sheetsService');
       await unarchiveEpisodeViaRegistryInSheets(epNum);
-      setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
+      // 복원된 에피소드를 활성 목록에 즉시 반영
+      const eps = await readAllFromSheets();
+      setEpisodes(eps);
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
+      // 롤백: 아카이브 목록에 다시 추가
+      if (archived) setArchivedEpisodes((prev) => [...prev, {
+        episodeNumber: archived.episodeNumber,
+        title: archived.title,
+        partCount: archived.partCount,
+        archivedBy: archived.archivedBy,
+        archivedAt: archived.archivedAt,
+        memo: archived.memo,
+      }]);
       alert(`복원 실패: ${err}`);
     }
   };

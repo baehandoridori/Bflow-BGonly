@@ -10,6 +10,8 @@ export function UserManagerModal() {
   const [hireDate, setHireDate] = useState('');
   const [birthday, setBirthday] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleAdd = useCallback(async () => {
     if (!name.trim()) { setError('이름을 입력해주세요.'); return; }
@@ -18,19 +20,33 @@ export function UserManagerModal() {
       return;
     }
     setError('');
-    await addUser(name.trim(), slackId.trim(), hireDate.trim() || undefined, birthday.trim() || undefined);
-    const updated = await loadUsers();
-    setUsers(updated);
-    setName('');
-    setSlackId('');
-    setHireDate('');
-    setBirthday('');
+    setLoading(true);
+    try {
+      await addUser(name.trim(), slackId.trim(), hireDate.trim() || undefined, birthday.trim() || undefined);
+      const updated = await loadUsers();
+      setUsers(updated);
+      setName('');
+      setSlackId('');
+      setHireDate('');
+      setBirthday('');
+    } catch (err) {
+      setError(`추가 실패: ${err}`);
+    } finally {
+      setLoading(false);
+    }
   }, [name, slackId, hireDate, birthday, users, setUsers]);
 
   const handleDelete = useCallback(async (userId: string) => {
-    await deleteUser(userId);
-    const updated = await loadUsers();
-    setUsers(updated);
+    setDeletingId(userId);
+    try {
+      await deleteUser(userId);
+      const updated = await loadUsers();
+      setUsers(updated);
+    } catch (err) {
+      setError(`삭제 실패: ${err}`);
+    } finally {
+      setDeletingId(null);
+    }
   }, [setUsers]);
 
   return (
@@ -83,9 +99,17 @@ export function UserManagerModal() {
             />
             <button
               onClick={handleAdd}
-              className="flex items-center gap-1 bg-accent text-on-accent text-xs rounded-lg px-3 py-1.5 hover:bg-accent/80 transition-colors shrink-0"
+              disabled={loading}
+              className="flex items-center gap-1 bg-accent text-on-accent text-xs rounded-lg px-3 py-1.5 hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
             >
-              <UserPlus size={14} /> 추가
+              {loading ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  추가 중...
+                </>
+              ) : (
+                <><UserPlus size={14} /> 추가</>
+              )}
             </button>
           </div>
         </div>
@@ -114,10 +138,15 @@ export function UserManagerModal() {
               </div>
               <button
                 onClick={() => handleDelete(u.id)}
-                className="p-1.5 rounded hover:bg-status-none/20 text-text-secondary hover:text-status-none transition-colors"
+                disabled={deletingId === u.id}
+                className="p-1.5 rounded hover:bg-status-none/20 text-text-secondary hover:text-status-none disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 title="사용자 삭제"
               >
-                <Trash2 size={14} />
+                {deletingId === u.id ? (
+                  <div className="w-3.5 h-3.5 border-2 border-text-secondary/30 border-t-text-secondary rounded-full animate-spin" />
+                ) : (
+                  <Trash2 size={14} />
+                )}
               </button>
             </div>
           ))}
