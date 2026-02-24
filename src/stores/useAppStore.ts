@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { WidgetLayoutItem, SheetsConfig, Department } from '@/types';
 import type { ThemeColors } from '@/themes';
 
-export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'calendar' | 'schedule' | 'settings';
+export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'settings';
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
 export type SortDir = 'asc' | 'desc';
 export type StatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';
@@ -25,6 +25,10 @@ interface AppState {
   // 씬 하이라이트 (스포트라이트/인원별 뷰에서 씬 이동 시 글로우 피드백)
   highlightSceneId: string | null;
   setHighlightSceneId: (id: string | null) => void;
+
+  // 팀원 하이라이트 (댓글 @멘션 클릭 → 팀원 뷰 글로우)
+  highlightUserName: string | null;
+  setHighlightUserName: (name: string | null) => void;
 
   // 부서 선택 (ScenesView — 항상 'bg' | 'acting')
   selectedDepartment: Department;
@@ -97,6 +101,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   highlightSceneId: null,
   setHighlightSceneId: (id) => set({ highlightSceneId: id }),
+
+  highlightUserName: null,
+  setHighlightUserName: (name) => set({ highlightUserName: name }),
 
   dashboardDeptFilter: 'all',
   setDashboardDeptFilter: (f) => set({ dashboardDeptFilter: f }),

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Pencil, Trash2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useAppStore } from '@/stores/useAppStore';
 import {
   getComments,
   addComment,
@@ -164,7 +165,14 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
     u.name.toLowerCase().includes(mentionFilter)
   );
 
-  // 텍스트 내 @멘션 렌더 (굵은 글씨 + 배경 하이라이트)
+  // @멘션 클릭 → 팀원 뷰로 이동 + 글로우 하이라이트
+  const { setView, setHighlightUserName } = useAppStore();
+  const handleMentionClick = (userName: string) => {
+    setHighlightUserName(userName);
+    setView('team');
+  };
+
+  // 텍스트 내 @멘션 렌더 (굵은 글씨 + 배경 하이라이트 + 클릭 가능)
   const renderText = (text: string) => {
     const parts = text.split(/(@\S+)/g);
     return parts.map((part, i) => {
@@ -173,7 +181,12 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
         const isUser = users.some(u => u.name === name);
         if (isUser) {
           return (
-            <span key={i} className="text-accent font-bold bg-accent/10 rounded px-0.5">
+            <span
+              key={i}
+              className="text-accent font-bold bg-accent/10 rounded px-0.5 cursor-pointer hover:bg-accent/20 transition-colors"
+              onClick={() => handleMentionClick(name)}
+              title={`${name} 팀원 보기`}
+            >
               {part}
             </span>
           );

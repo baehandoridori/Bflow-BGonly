@@ -7,6 +7,7 @@ import { Dashboard } from '@/views/Dashboard';
 import { ScenesView } from '@/views/ScenesView';
 import { EpisodeView } from '@/views/EpisodeView';
 import { AssigneeView } from '@/views/AssigneeView';
+import { TeamView } from '@/views/TeamView';
 import { CalendarView } from '@/views/CalendarView';
 import { ScheduleView } from '@/views/ScheduleView';
 import { SettingsView } from '@/views/SettingsView';
@@ -283,6 +284,8 @@ export default function App() {
         return <EpisodeView />;
       case 'assignee':
         return <AssigneeView />;
+      case 'team':
+        return <TeamView />;
       case 'calendar':
         return <CalendarView />;
       case 'schedule':

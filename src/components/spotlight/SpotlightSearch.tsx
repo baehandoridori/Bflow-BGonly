@@ -241,6 +241,14 @@ export function SpotlightSearch() {
           icon: <Zap size={16} />,
           action: () => { setView('assignee'); close(); },
         },
+        {
+          id: 'action-team',
+          category: 'action',
+          title: '팀원 현황',
+          subtitle: '등록된 팀원 목록 보기',
+          icon: <Zap size={16} />,
+          action: () => { setView('team'); close(); },
+        },
       ];
     }
 
