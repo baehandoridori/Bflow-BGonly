@@ -15,7 +15,6 @@ import { LoginScreen } from '@/components/auth/LoginScreen';
 import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
-import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
 import { loadSheetsConfig, connectSheets, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
 import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
@@ -23,7 +22,7 @@ import { applyTheme, getPreset, getLightColors, DEFAULT_THEME_ID } from '@/theme
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
-  const { currentView, isTestMode, setTestMode, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
+  const { currentView, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -58,29 +57,23 @@ export default function App() {
   // 로딩 스플래시: authReady 후에도 유지, 클릭으로 스킵
   const [loadingSplashDone, setLoadingSplashDone] = useState(false);
 
-  // 데이터 로드 함수 — 모드에 따라 테스트 시트 또는 Apps Script 웹 앱 사용
+  // 데이터 로드 함수 — Apps Script 웹 앱에서 데이터 읽기
   const loadData = useCallback(async () => {
     setSyncing(true);
     setSyncError(null);
     try {
-      let episodes;
-      if (sheetsConnected) {
-        episodes = await readAllFromSheets();
-      } else {
-        episodes = await readTestSheet();
-      }
+      const episodes = await readAllFromSheets();
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
 
       // 에피소드 제목/메모를 병렬로 일괄 로드 (초기 렌더 딜레이 제거)
-      const readMeta = sheetsConnected ? readMetadataFromSheets : readLocalMetadata;
       const titlePromises = episodes.map((ep) =>
-        readMeta('episode-title', String(ep.episodeNumber))
+        readMetadataFromSheets('episode-title', String(ep.episodeNumber))
           .then((d) => [ep.episodeNumber, d?.value] as const)
           .catch(() => [ep.episodeNumber, undefined] as const),
       );
       const memoPromises = episodes.map((ep) =>
-        readMeta('episode-memo', String(ep.episodeNumber))
+        readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
           .then((d) => [ep.episodeNumber, d?.value] as const)
           .catch(() => [ep.episodeNumber, undefined] as const),
       );
@@ -103,7 +96,7 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }, [sheetsConnected, setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos]);
+  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {
@@ -115,9 +108,6 @@ export default function App() {
           setAuthReady(true);
           return;
         }
-
-        const { isTestMode: testMode } = await window.electronAPI.getMode();
-        setTestMode(testMode);
 
         const savedLayout = await loadLayout();
         if (savedLayout) {
@@ -224,8 +214,8 @@ export default function App() {
     }
   }, [themeId, customThemeColors, colorMode]);
 
-  // 초기화 완료 후 데이터 로드 (sheetsConnected/isTestMode 변경 시)
-  // authReady 가드: init 완료 전까지 테스트 데이터 로딩 방지 (플래시 제거)
+  // 초기화 완료 후 데이터 로드
+  // authReady 가드: init 완료 전까지 데이터 로딩 방지 (플래시 제거)
   useEffect(() => {
     if (!authReady) return;
     loadData();

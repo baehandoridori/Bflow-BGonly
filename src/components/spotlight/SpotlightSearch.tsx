@@ -8,9 +8,7 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
 import { getEvents } from '@/services/calendarService';
-import { checkConnection } from '@/services/sheetsService';
 import { readMetadataFromSheets } from '@/services/sheetsService';
-import { readLocalMetadata } from '@/services/testSheetService';
 import type { CalendarEvent } from '@/types/calendar';
 
 /* ────────────────────────────────────────────────
@@ -117,13 +115,10 @@ export function SpotlightSearch() {
   useEffect(() => {
     (async () => {
       const memos: Record<string, string> = {};
-      const connected = await checkConnection().catch(() => false);
       for (const ep of episodes) {
         for (const part of ep.parts) {
           try {
-            const data = connected
-              ? await readMetadataFromSheets('part-memo', part.sheetName)
-              : await readLocalMetadata('part-memo', part.sheetName);
+            const data = await readMetadataFromSheets('part-memo', part.sheetName);
             if (data?.value) memos[part.sheetName] = data.value;
           } catch { /* 무시 */ }
         }

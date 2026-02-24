@@ -14,7 +14,6 @@ import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
 import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig, readMetadataFromSheets } from '@/services/sheetsService';
-import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
 import type { Episode } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
@@ -127,16 +126,15 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   useEffect(() => {
     if (!ready) return;
 
-    const loadEpMetadata = async (episodes: Episode[], connected: boolean) => {
-      const readMeta = connected ? readMetadataFromSheets : readLocalMetadata;
+    const loadEpMetadata = async (episodes: Episode[]) => {
       const [titleResults, memoResults] = await Promise.all([
         Promise.all(episodes.map((ep) =>
-          readMeta('episode-title', String(ep.episodeNumber))
+          readMetadataFromSheets('episode-title', String(ep.episodeNumber))
             .then((d) => [ep.episodeNumber, d?.value] as const)
             .catch(() => [ep.episodeNumber, undefined] as const),
         )),
         Promise.all(episodes.map((ep) =>
-          readMeta('episode-memo', String(ep.episodeNumber))
+          readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
             .then((d) => [ep.episodeNumber, d?.value] as const)
             .catch(() => [ep.episodeNumber, undefined] as const),
         )),
@@ -160,26 +158,18 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         if (connected) {
           const episodes = await readAllFromSheets();
           useDataStore.getState().setEpisodes(episodes);
-          loadEpMetadata(episodes, true).catch(() => {});
+          loadEpMetadata(episodes).catch(() => {});
         } else {
           // 재연결 시도
           const cfg = await loadSheetsConfig();
           const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
-          let reconnected = false;
           if (urlToConnect) {
             const result = await connectSheets(urlToConnect);
             if (result.ok) {
-              reconnected = true;
               const episodes = await readAllFromSheets();
               useDataStore.getState().setEpisodes(episodes);
-              loadEpMetadata(episodes, true).catch(() => {});
+              loadEpMetadata(episodes).catch(() => {});
             }
-          }
-          // 재연결 실패 시 로컬(테스트) 데이터에서 다시 읽기
-          if (!reconnected) {
-            const episodes = await readTestSheet();
-            useDataStore.getState().setEpisodes(episodes);
-            loadEpMetadata(episodes, false).catch(() => {});
           }
         }
 
@@ -231,8 +221,6 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         const api = window.electronAPI;
         if (!api) { setReady(true); return; }
 
-        const { isTestMode } = await api.getMode();
-        useAppStore.getState().setTestMode(isTestMode);
         useAppStore.getState().setDashboardDeptFilter('all');
 
         let connected = await checkConnection();
@@ -246,33 +234,29 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         }
         useAppStore.getState().setSheetsConnected(connected);
 
-        let loadedEpisodes: Episode[];
         if (connected) {
-          loadedEpisodes = await readAllFromSheets();
-        } else {
-          loadedEpisodes = await readTestSheet();
-        }
-        useDataStore.getState().setEpisodes(loadedEpisodes);
+          const loadedEpisodes = await readAllFromSheets();
+          useDataStore.getState().setEpisodes(loadedEpisodes);
 
-        const readMeta = connected ? readMetadataFromSheets : readLocalMetadata;
-        const [titleResults, memoResults] = await Promise.all([
-          Promise.all(loadedEpisodes.map((ep) =>
-            readMeta('episode-title', String(ep.episodeNumber))
-              .then((d) => [ep.episodeNumber, d?.value] as const)
-              .catch(() => [ep.episodeNumber, undefined] as const),
-          )),
-          Promise.all(loadedEpisodes.map((ep) =>
-            readMeta('episode-memo', String(ep.episodeNumber))
-              .then((d) => [ep.episodeNumber, d?.value] as const)
-              .catch(() => [ep.episodeNumber, undefined] as const),
-          )),
-        ]);
-        const titles: Record<number, string> = {};
-        const memos: Record<number, string> = {};
-        for (const [num, val] of titleResults) if (val) titles[num] = val;
-        for (const [num, val] of memoResults) if (val) memos[num] = val;
-        useDataStore.getState().setEpisodeTitles(titles);
-        useDataStore.getState().setEpisodeMemos(memos);
+          const [titleResults, memoResults] = await Promise.all([
+            Promise.all(loadedEpisodes.map((ep) =>
+              readMetadataFromSheets('episode-title', String(ep.episodeNumber))
+                .then((d) => [ep.episodeNumber, d?.value] as const)
+                .catch(() => [ep.episodeNumber, undefined] as const),
+            )),
+            Promise.all(loadedEpisodes.map((ep) =>
+              readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
+                .then((d) => [ep.episodeNumber, d?.value] as const)
+                .catch(() => [ep.episodeNumber, undefined] as const),
+            )),
+          ]);
+          const titles: Record<number, string> = {};
+          const memos: Record<number, string> = {};
+          for (const [num, val] of titleResults) if (val) titles[num] = val;
+          for (const [num, val] of memoResults) if (val) memos[num] = val;
+          useDataStore.getState().setEpisodeTitles(titles);
+          useDataStore.getState().setEpisodeMemos(memos);
+        }
 
         const users = await loadUsers();
         useAuthStore.getState().setUsers(users);

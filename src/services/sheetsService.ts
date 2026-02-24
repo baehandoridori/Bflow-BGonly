@@ -2,8 +2,6 @@
  * Google Sheets 연동 서비스 — 렌더러 프로세스
  *
  * Apps Script 웹 앱 URL을 통해 시트 데이터를 읽고 쓴다.
- * 테스트 모드에서는 로컬 JSON, 라이브 모드에서는 Apps Script 웹 앱을 사용.
- * App.tsx에서 모드에 따라 이 서비스 또는 testSheetService를 호출한다.
  */
 
 import type { Episode, Stage, SheetsConfig, Department, RegistryEntry } from '@/types';

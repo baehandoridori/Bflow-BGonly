@@ -52,9 +52,6 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// 테스트 모드 감지
-const isTestMode = process.argv.includes('--test-mode') || process.env.TEST_MODE === '1';
-
 let mainWindow: BrowserWindow | null = null;
 const widgetWindows = new Map<string, BrowserWindow>();
 const widgetOriginalBounds = new Map<string, Electron.Rectangle>();
@@ -152,50 +149,6 @@ function animateBounds(
   });
 }
 
-// ─── 파일 감시 (실시간 동기화) ────────────────────────────────
-
-let fileWatcher: fs.FSWatcher | null = null;
-// 자기가 쓴 직후에는 알림 무시 (자기 반영 방지) — 카운터 방식으로 다중 쓰기 지원
-let ignoreChangeCount = 0;
-
-function startWatching(filePath: string): void {
-  stopWatching();
-
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  let debounceTimer: NodeJS.Timeout | null = null;
-
-  try {
-    fileWatcher = fs.watch(filePath, { persistent: false }, (eventType) => {
-      if (eventType !== 'change') return;
-
-      if (ignoreChangeCount > 0) {
-        ignoreChangeCount--;
-        return;
-      }
-
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        // 모든 윈도우(메인 + 위젯 팝업)에 "데이터 변경" 알림
-        broadcastSheetChanged();
-      }, 500); // 500ms debounce (배치 쓰기 시 안전 마진 확보)
-    });
-  } catch {
-    // 파일이 아직 없으면 1초 후 재시도
-    setTimeout(() => startWatching(filePath), 1000);
-  }
-}
-
-function stopWatching(): void {
-  if (fileWatcher) {
-    fileWatcher.close();
-    fileWatcher = null;
-  }
-}
-
 /** 모든 윈도우(메인 + 위젯 팝업)에 sheet:changed 이벤트 브로드캐스트 */
 function broadcastSheetChanged(excludeWebContentsId?: number): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -236,7 +189,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: isTestMode ? 'B flow [테스트]' : 'B flow',
+    title: 'B flow',
     backgroundColor: '#0F1117',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -254,25 +207,12 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-    stopWatching();
   });
-
-  // 테스트 모드: 시트 파일 감시 시작
-  if (isTestMode) {
-    const sheetPath = path.join(getAppRoot(), 'test-data', 'sheets.json');
-    if (fs.existsSync(sheetPath)) {
-      startWatching(sheetPath);
-    }
-  }
 }
 
 // ─── IPC 핸들러: 사용자 파일 (base64 인코딩 JSON) ────────────
 
 function getUsersFilePath(): string {
-  // 테스트: test-data/users.dat  |  프로덕션: exe 옆 users.dat
-  if (isTestMode) {
-    return path.join(getAppRoot(), 'test-data', 'users.dat');
-  }
   return path.join(getAppRoot(), 'users.dat');
 }
 
@@ -302,10 +242,6 @@ ipcMain.handle('users:write', (_event, data: unknown) => {
 
 ipcMain.handle('settings:get-path', () => getDataPath());
 
-ipcMain.handle('settings:get-mode', () => ({
-  isTestMode,
-  appRoot: getAppRoot(),
-}));
 
 ipcMain.handle('settings:read', async (_event, fileName: string) => {
   const filePath = path.join(getDataPath(), fileName);
@@ -322,37 +258,6 @@ ipcMain.handle('settings:write', async (_event, fileName: string, data: unknown)
   ensureDir(dirPath);
   const filePath = path.join(dirPath, fileName);
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), { encoding: 'utf-8' });
-  return true;
-});
-
-// ─── IPC 핸들러: 테스트 데이터 ───────────────────────────────
-
-ipcMain.handle('test:get-sheet-path', () => {
-  return path.join(getAppRoot(), 'test-data', 'sheets.json');
-});
-
-ipcMain.handle('test:read-sheet', async (_event, filePath: string) => {
-  try {
-    const data = fs.readFileSync(filePath, { encoding: 'utf-8' });
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-});
-
-ipcMain.handle('test:write-sheet', async (_event, filePath: string, data: unknown) => {
-  const dir = path.dirname(filePath);
-  ensureDir(dir);
-
-  // 자기 쓰기 → 파일 변경 이벤트 무시 (카운터 증가)
-  ignoreChangeCount++;
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), { encoding: 'utf-8' });
-
-  // 최초 쓰기 시 감시 시작
-  if (!fileWatcher && isTestMode) {
-    startWatching(filePath);
-  }
-
   return true;
 });
 
@@ -1065,6 +970,5 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  stopWatching();
   app.quit();
 });

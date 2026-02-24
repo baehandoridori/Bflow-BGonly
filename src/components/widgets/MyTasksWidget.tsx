@@ -468,7 +468,6 @@ export function MyTasksWidget() {
   const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const currentUser = useAuthStore((s) => s.currentUser);
-  const sheetsConnected = useAppStore((s) => s.sheetsConnected);
   const isPopup = useContext(IsPopupContext);
   const widgetId = useContext(WidgetIdContext);
 
@@ -585,29 +584,18 @@ export function MyTasksWidget() {
     }
 
     try {
-      if (sheetsConnected) {
-        const { updateSheetCell, updateSceneFieldInSheets } = await import('@/services/sheetsService');
-        await updateSheetCell(sheetName, sceneIndex, stage, newValue);
-        if (completedBy) {
-          await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
-          await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
-        }
-        notifyChange();
-      } else {
-        const { toggleTestSceneStage, updateTestSceneField } = await import('@/services/testSheetService');
-        await toggleTestSceneStage(useDataStore.getState().episodes, sheetName, scene.sceneId, stage);
-        if (completedBy) {
-          const eps1 = useDataStore.getState().episodes;
-          await updateTestSceneField(eps1, sheetName, sceneIndex, 'completedBy', completedBy);
-          const eps2 = useDataStore.getState().episodes;
-          await updateTestSceneField(eps2, sheetName, sceneIndex, 'completedAt', completedAt!);
-        }
+      const { updateSheetCell, updateSceneFieldInSheets } = await import('@/services/sheetsService');
+      await updateSheetCell(sheetName, sceneIndex, stage, newValue);
+      if (completedBy) {
+        await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
+        await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
       }
+      notifyChange();
     } catch (err) {
       console.error('[MyTasks 토글 실패]', err);
       toggleSceneStage(sheetName, scene.sceneId, stage);
     }
-  }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, sheetsConnected, notifyChange]);
+  }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, notifyChange]);
 
   // 인라인 필드 편집
   const handleEditField = useCallback(async (flat: FlatScene, field: string, value: string) => {
@@ -615,18 +603,13 @@ export function MyTasksWidget() {
     updateSceneFieldOptimistic(sheetName, sceneIndex, field, value);
 
     try {
-      if (sheetsConnected) {
-        const { updateSceneFieldInSheets } = await import('@/services/sheetsService');
-        await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
-        notifyChange();
-      } else {
-        const { updateTestSceneField } = await import('@/services/testSheetService');
-        await updateTestSceneField(useDataStore.getState().episodes, sheetName, sceneIndex, field, value);
-      }
+      const { updateSceneFieldInSheets } = await import('@/services/sheetsService');
+      await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
+      notifyChange();
     } catch (err) {
       console.error('[MyTasks 편집 실패]', err);
     }
-  }, [updateSceneFieldOptimistic, sheetsConnected, notifyChange]);
+  }, [updateSceneFieldOptimistic, notifyChange]);
 
   // 뷰 조작
   const createCustomView = () => {

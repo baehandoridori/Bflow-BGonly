@@ -156,7 +156,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
 }
 
 export function Sidebar() {
-  const { currentView, setView, isTestMode } = useAppStore();
+  const { currentView, setView } = useAppStore();
   const [showSplash, setShowSplash] = useState(false);
 
   return (
@@ -190,11 +190,8 @@ export function Sidebar() {
           </button>
         ))}
 
-        {/* 하단: 테스트 모드 + 버전 */}
+        {/* 하단: 버전 */}
         <div className="mt-auto mb-2 flex flex-col items-center gap-0.5">
-          {isTestMode && (
-            <span className="text-[9px] text-status-low font-mono">TEST</span>
-          )}
           <span className="text-[10px] text-text-secondary/50 font-mono">
             v{__APP_VERSION__}
           </span>

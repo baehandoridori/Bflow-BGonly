@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { loadAllComments, setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
+import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 
 /* ── 라쏘 드래그 선택 훅 ── */
 interface LassoRect { x: number; y: number; w: number; h: number }
@@ -334,18 +334,6 @@ function PartCompleteOverlay() {
     </motion.div>
   );
 }
-import {
-  toggleTestSceneStage,
-  addTestEpisode,
-  addTestPart,
-  addTestScene,
-  deleteTestScene,
-  deleteTestPart,
-  deleteTestEpisode,
-  updateTestSceneField,
-  readLocalMetadata,
-  writeLocalMetadata,
-} from '@/services/testSheetService';
 import {
   updateSheetCell,
   addEpisodeToSheets,
@@ -872,13 +860,12 @@ function AddFormImageSlot({
 interface AddSceneFormProps {
   existingSceneIds: string[];
   sheetName: string;
-  isLiveMode: boolean;
   onSubmit: (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }, skipSync?: boolean) => void;
   onBulkSubmit?: (scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<void>;
   onCancel: () => void;
 }
 
-function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onBulkSubmit, onCancel }: AddSceneFormProps) {
+function AddSceneForm({ existingSceneIds, sheetName, onSubmit, onBulkSubmit, onCancel }: AddSceneFormProps) {
   const [prefixMode, setPrefixMode] = useState<PrefixMode>('alphabet');
   const [alphaPrefix, setAlphaPrefix] = useState('a');
   const [customPrefix, setCustomPrefix] = useState('');
@@ -1255,7 +1242,6 @@ export function ScenesView() {
   const deleteSceneOptimistic = useDataStore((s) => s.deleteSceneOptimistic);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const setEpisodes = useDataStore((s) => s.setEpisodes);
-  const { sheetsConnected } = useAppStore();
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery, selectedDepartment } = useAppStore();
   const { sortKey, sortDir, statusFilter, sceneViewMode, sceneGroupMode } = useAppStore();
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment } = useAppStore();
@@ -1319,11 +1305,11 @@ export function ScenesView() {
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
 
-  // 댓글 모드 설정 (시트 연결 여부에 따라)
+  // 댓글 모드 설정 (항상 시트 모드)
   useEffect(() => {
-    setCommentsSheetsMode(sheetsConnected);
+    setCommentsSheetsMode(true);
     return () => { invalidatePartCache(); };
-  }, [sheetsConnected]);
+  }, []);
 
   // 전체 댓글 카운트 로드
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
@@ -1345,18 +1331,15 @@ export function ScenesView() {
   // 파트/에피소드 변경 시 선택 초기화
   useEffect(() => { clearSelectedScenes(); }, [selectedEpisode, selectedPart, selectedDepartment, clearSelectedScenes]);
 
-  // 백그라운드 동기화: 낙관적 업데이트 후 서버/파일과 싱크
+  // 백그라운드 동기화: 낙관적 업데이트 후 서버와 싱크
   const syncInBackground = async () => {
     try {
-      if (sheetsConnected) {
-        const { readAllFromSheets } = await import('@/services/sheetsService');
-        const eps = await readAllFromSheets();
-        // 아카이빙된 에피소드가 다시 돌아오지 않도록 필터링
-        const archivedNums = new Set(archivedEpisodes.map((a) => a.episodeNumber));
-        const filtered = eps.filter((ep) => !archivedNums.has(ep.episodeNumber));
-        setEpisodes(filtered);
-      }
-      // 테스트 모드: 파일 쓰기는 이미 test 함수에서 처리됨
+      const { readAllFromSheets } = await import('@/services/sheetsService');
+      const eps = await readAllFromSheets();
+      // 아카이빙된 에피소드가 다시 돌아오지 않도록 필터링
+      const archivedNums = new Set(archivedEpisodes.map((a) => a.episodeNumber));
+      const filtered = eps.filter((ep) => !archivedNums.has(ep.episodeNumber));
+      setEpisodes(filtered);
       // 위젯 팝업에 데이터 변경 알림
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
@@ -1382,8 +1365,8 @@ export function ScenesView() {
 
   // 댓글 카운트 로드 (currentPart 정의 후)
   useEffect(() => {
-    if (sheetsConnected && currentPart) {
-      // 시트 모드: 현재 파트의 댓글만 지연 로딩
+    if (currentPart) {
+      // 현재 파트의 댓글만 지연 로딩
       loadPartComments(currentPart.sheetName).then((store) => {
         setCommentCounts((prev) => {
           const next = { ...prev };
@@ -1393,107 +1376,48 @@ export function ScenesView() {
           return next;
         });
       }).catch(() => {});
-    } else if (!sheetsConnected) {
-      // 로컬 모드: 전체 댓글 로드
-      loadAllComments().then((all) => {
-        const counts: Record<string, number> = {};
-        for (const [key, list] of Object.entries(all)) {
-          if (list.length > 0) counts[key] = list.length;
-        }
-        setCommentCounts(counts);
-      });
     }
-  }, [detailSceneIndex, sheetsConnected, currentPart?.sheetName]);
+  }, [detailSceneIndex, currentPart?.sheetName]);
 
-  // 파트 메모 로드 (시트 연결 시 → sheets, 미연결 시 → 로컬)
+  // 파트 메모 로드
   useEffect(() => {
     const loadPartMemos = async () => {
       const memos: Record<string, string> = {};
       for (const part of parts) {
         try {
-          const data = sheetsConnected
-            ? await readMetadataFromSheets('part-memo', part.sheetName)
-            : await readLocalMetadata('part-memo', part.sheetName);
+          const data = await readMetadataFromSheets('part-memo', part.sheetName);
           if (data?.value) memos[part.sheetName] = data.value;
         } catch { /* 무시 */ }
       }
       if (Object.keys(memos).length > 0) setPartMemos(memos);
     };
     loadPartMemos();
-  }, [sheetsConnected, currentEp?.episodeNumber, selectedDepartment]);
+  }, [currentEp?.episodeNumber, selectedDepartment]);
 
   // 에피소드 제목/메모 → App.tsx에서 병렬 로드됨 (글로벌 스토어)
 
   // 아카이빙된 에피소드 목록 로드
   useEffect(() => {
-    // METADATA 기반 아카이빙 목록 읽기 (readArchived 액션 미배포 시에도 동작)
-    const loadArchivedFromMetadata = async () => {
-      const archived: typeof archivedEpisodes = [];
-      for (let i = 1; i <= 99; i++) {
-        try {
-          let infoStr: string | undefined;
-          if (sheetsConnected) {
-            const infoMeta = await readMetadataFromSheets('archive-info', String(i));
-            infoStr = infoMeta?.value;
-          } else {
-            const infoMeta = await readLocalMetadata('archive-info', String(i));
-            infoStr = infoMeta?.value;
-          }
-          if (infoStr) {
-            try {
-              const parsed = JSON.parse(infoStr);
-              // archive-info가 있으면 아카이빙된 에피소드
-              const titleMeta = sheetsConnected
-                ? await readMetadataFromSheets('episode-title', String(i))
-                : await readLocalMetadata('episode-title', String(i));
-              archived.push({
-                episodeNumber: i,
-                title: titleMeta?.value || `EP.${String(i).padStart(2, '0')}`,
-                partCount: 0,
-                archivedBy: parsed.by,
-                archivedAt: parsed.at,
-                memo: parsed.memo,
-              });
-            } catch { /* JSON 파싱 실패 무시 */ }
-          }
-        } catch { /* 개별 에피소드 실패 무시 */ }
-      }
-      return archived;
-    };
-
     const loadArchived = async () => {
       try {
-        if (sheetsConnected) {
-          try {
-            // Phase 0-2: _REGISTRY 기반 — readArchived에서 아카이빙 정보 포함
-            const { readArchivedFromSheets } = await import('@/services/sheetsService');
-            const list = await readArchivedFromSheets();
-            const enriched = list.map((item) => ({
-              episodeNumber: item.episodeNumber,
-              title: item.title,
-              partCount: item.partCount,
-              archivedBy: item.archivedBy || undefined,
-              archivedAt: item.archivedAt || undefined,
-              memo: item.archiveMemo || undefined,
-            }));
-            setArchivedEpisodes(enriched);
-          } catch {
-            // readArchived 미배포 시 → METADATA에서 fallback 읽기
-            console.info('[아카이빙] readArchived 미지원, METADATA fallback 사용');
-            const archived = await loadArchivedFromMetadata();
-            setArchivedEpisodes(archived);
-          }
-        } else {
-          // 로컬 fallback: metadata에서 읽기
-          const archived = await loadArchivedFromMetadata();
-          setArchivedEpisodes(archived);
-        }
+        // Phase 0-2: _REGISTRY 기반 — readArchived에서 아카이빙 정보 포함
+        const { readArchivedFromSheets } = await import('@/services/sheetsService');
+        const list = await readArchivedFromSheets();
+        const enriched = list.map((item) => ({
+          episodeNumber: item.episodeNumber,
+          title: item.title,
+          partCount: item.partCount,
+          archivedBy: item.archivedBy || undefined,
+          archivedAt: item.archivedAt || undefined,
+          memo: item.archiveMemo || undefined,
+        }));
+        setArchivedEpisodes(enriched);
       } catch (err) {
         console.warn('[아카이빙 목록 로드 실패]', err);
       }
     };
     loadArchived();
-  }, [sheetsConnected, episodes.length]);
+  }, [episodes.length]);
 
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
   const detailScene = detailSceneIndex !== null
@@ -1619,30 +1543,13 @@ export function ScenesView() {
         updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
         updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
 
-        // 백엔드에도 저장 (시트에는 completedBy/At 열이 없으므로 테스트 모드에서만)
-        if (!sheetsConnected) {
-          try {
-            const latestEps1 = useDataStore.getState().episodes;
-            await updateTestSceneField(latestEps1, currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
-            const latestEps2 = useDataStore.getState().episodes;
-            await updateTestSceneField(latestEps2, currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
-          } catch (err) {
-            console.error('[완료기록 실패]', err);
-          }
-        }
       }
     }
 
     try {
-      if (sheetsConnected) {
-        await updateSheetCell(currentPart.sheetName, sceneIndex, stage, newValue);
-        // 위젯 팝업에 데이터 변경 알림
-        window.electronAPI?.sheetsNotifyChange?.();
-      } else {
-        await toggleTestSceneStage(
-          episodes, currentPart.sheetName, sceneId, stage
-        );
-      }
+      await updateSheetCell(currentPart.sheetName, sceneIndex, stage, newValue);
+      // 위젯 팝업에 데이터 변경 알림
+      window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
       console.error('[토글 실패]', err);
       toggleSceneStage(currentPart.sheetName, sceneId, stage);
@@ -1672,24 +1579,17 @@ export function ScenesView() {
       setEpisodeTitles(next);
     }
 
-    // 백그라운드에서 서버/파일에 저장
+    // 백그라운드에서 서버에 저장
     try {
-      if (sheetsConnected) {
-        // Phase 0: 배치로 한 번에 전송
-        const actions: BatchAction[] = [
-          batchActions.addEpisode(nextEpisodeNumber, selectedDepartment),
-        ];
-        if (epName) {
-          actions.push(batchActions.writeMetadata('episode-title', String(nextEpisodeNumber), epName));
-        }
-        await batchToSheets(actions);
-        syncInBackground();
-      } else {
-        await addTestEpisode(useDataStore.getState().episodes, nextEpisodeNumber, selectedDepartment);
-        if (epName) {
-          await writeLocalMetadata('episode-title', String(nextEpisodeNumber), epName);
-        }
+      // Phase 0: 배치로 한 번에 전송
+      const actions: BatchAction[] = [
+        batchActions.addEpisode(nextEpisodeNumber, selectedDepartment),
+      ];
+      if (epName) {
+        actions.push(batchActions.writeMetadata('episode-title', String(nextEpisodeNumber), epName));
       }
+      await batchToSheets(actions);
+      syncInBackground();
     } catch (err) {
       // 롤백
       setEpisodes(prevEpisodes);
@@ -1723,12 +1623,8 @@ export function ScenesView() {
     setSelectedPart(nextPartId);
 
     try {
-      if (sheetsConnected) {
-        await addPartToSheets(currentEp.episodeNumber, nextPartId, selectedDepartment);
-        syncInBackground();
-      } else {
-        await addTestPart(useDataStore.getState().episodes, currentEp.episodeNumber, nextPartId, selectedDepartment);
-      }
+      await addPartToSheets(currentEp.episodeNumber, nextPartId, selectedDepartment);
+      syncInBackground();
     } catch (err) {
       const msg = String(err);
       if (msg.includes('Unknown action')) {
@@ -1749,15 +1645,9 @@ export function ScenesView() {
     addSceneOptimistic(currentPart.sheetName, sceneId, assignee, memo);
 
     try {
-      if (sheetsConnected) {
-        await addSceneToSheets(currentPart.sheetName, sceneId, assignee, memo);
-        // 배치 모드에서는 마지막 씬 추가 후에만 sync
-        if (!skipSync) syncInBackground();
-      } else {
-        // 최신 상태를 사용 (closure의 stale episodes 방지)
-        const latestEpisodes = useDataStore.getState().episodes;
-        await addTestScene(latestEpisodes, currentPart.sheetName, sceneId, assignee, memo);
-      }
+      await addSceneToSheets(currentPart.sheetName, sceneId, assignee, memo);
+      // 배치 모드에서는 마지막 씬 추가 후에만 sync
+      if (!skipSync) syncInBackground();
     } catch (err) {
       const msg = String(err);
       if (msg.includes('Unknown action')) {
@@ -1777,9 +1667,7 @@ export function ScenesView() {
       const latestIndex = latestPart?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
       if (latestIndex >= 0) {
         updateSceneFieldOptimistic(currentPart.sheetName, latestIndex, 'layoutId', layoutId);
-        if (sheetsConnected) {
-          updateSceneFieldInSheets(currentPart.sheetName, latestIndex, 'layoutId', layoutId).catch(() => {});
-        }
+        updateSceneFieldInSheets(currentPart.sheetName, latestIndex, 'layoutId', layoutId).catch(() => {});
       }
     }
 
@@ -1796,11 +1684,11 @@ export function ScenesView() {
           if (latestIndex < 0) return;
 
           if (images.storyboard) {
-            const url = await saveImage(images.storyboard, partSheetName, sceneId, 'storyboard', sheetsConnected);
+            const url = await saveImage(images.storyboard, partSheetName, sceneId, 'storyboard');
             handleFieldUpdate(latestIndex, 'storyboardUrl', url);
           }
           if (images.guide) {
-            const url = await saveImage(images.guide, partSheetName, sceneId, 'guide', sheetsConnected);
+            const url = await saveImage(images.guide, partSheetName, sceneId, 'guide');
             handleFieldUpdate(latestIndex, 'guideUrl', url);
           }
         } catch (err) {
@@ -1816,10 +1704,8 @@ export function ScenesView() {
 
     setBulkAddLoading(true);
     try {
-      if (sheetsConnected) {
-        const { addScenesToSheets } = await import('@/services/sheetsService');
-        await addScenesToSheets(currentPart.sheetName, scenes);
-      }
+      const { addScenesToSheets } = await import('@/services/sheetsService');
+      await addScenesToSheets(currentPart.sheetName, scenes);
       // 서버 성공 후 전체 동기화로 최신 상태 반영
       syncInBackground();
     } catch (err) {
@@ -1837,12 +1723,8 @@ export function ScenesView() {
     deleteSceneOptimistic(currentPart.sheetName, sceneIndex);
 
     try {
-      if (sheetsConnected) {
-        await deleteSceneFromSheets(currentPart.sheetName, sceneIndex);
-        syncInBackground();
-      } else {
-        await deleteTestScene(useDataStore.getState().episodes, currentPart.sheetName, sceneIndex);
-      }
+      await deleteSceneFromSheets(currentPart.sheetName, sceneIndex);
+      syncInBackground();
     } catch (err) {
       alert(`씬 삭제 실패: ${err}`);
       syncInBackground();
@@ -1856,12 +1738,8 @@ export function ScenesView() {
     updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, field, value);
 
     try {
-      if (sheetsConnected) {
-        await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, field, value);
-        syncInBackground();
-      } else {
-        await updateTestSceneField(useDataStore.getState().episodes, currentPart.sheetName, sceneIndex, field, value);
-      }
+      await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, field, value);
+      syncInBackground();
     } catch (err) {
       alert(`수정 실패: ${err}`);
       syncInBackground();
@@ -1878,30 +1756,22 @@ export function ScenesView() {
     setSelectedPart(null);
 
     try {
-      if (sheetsConnected) {
-        await softDeletePartInSheets(sheetName);
-        syncInBackground();
-      } else {
-        await deleteTestPart(useDataStore.getState().episodes, sheetName);
-      }
+      await softDeletePartInSheets(sheetName);
+      syncInBackground();
     } catch (err) {
       alert(`파트 삭제 실패: ${err}`);
       syncInBackground();
     }
   };
 
-  // ─── 파트 메모 저장 (시트 + 로컬 fallback) ─────────────────
+  // ─── 파트 메모 저장 ─────────────────
   const handleSavePartMemo = async (sheetName: string, memo: string) => {
     setPartMemos((prev) => ({ ...prev, [sheetName]: memo }));
     setEditingPartMemo(null);
-    // 로컬에 항상 저장 (테스트 모드 및 시트 실패 시 fallback)
-    await writeLocalMetadata('part-memo', sheetName, memo);
-    if (sheetsConnected) {
-      try {
-        await writeMetadataToSheets('part-memo', sheetName, memo);
-      } catch (err) {
-        console.warn('[파트 메모] 시트 저장 실패 → 로컬에 저장됨', err);
-      }
+    try {
+      await writeMetadataToSheets('part-memo', sheetName, memo);
+    } catch (err) {
+      console.warn('[파트 메모] 시트 저장 실패', err);
     }
   };
 
@@ -1916,12 +1786,8 @@ export function ScenesView() {
     setEpEditOpen(false);
 
     try {
-      if (sheetsConnected) {
-        await softDeleteEpisodeInSheets(currentEp.episodeNumber);
-        syncInBackground();
-      } else {
-        await deleteTestEpisode(useDataStore.getState().episodes, currentEp.episodeNumber);
-      }
+      await softDeleteEpisodeInSheets(currentEp.episodeNumber);
+      syncInBackground();
     } catch (err) {
       alert(`에피소드 삭제 실패: ${err}`);
       syncInBackground();
@@ -1963,16 +1829,10 @@ export function ScenesView() {
     }
 
     try {
-      if (sheetsConnected) {
-        // Phase 0-2: _REGISTRY 기반 아카이빙 (탭 이름 변경 없이 status만 변경)
-        const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
-        await archiveEpisodeViaRegistryInSheets(epNum, archivedBy, memo);
-        syncInBackground();
-      } else {
-        await writeLocalMetadata('episode-title', String(epNum), epTitle);
-        await writeLocalMetadata('archived-episode', String(epNum), 'true');
-        await writeLocalMetadata('archive-info', String(epNum), JSON.stringify({ by: archivedBy, at: archivedAt, memo }));
-      }
+      // Phase 0-2: _REGISTRY 기반 아카이빙 (탭 이름 변경 없이 status만 변경)
+      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      await archiveEpisodeViaRegistryInSheets(epNum, archivedBy, memo);
+      syncInBackground();
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
       // 롤백: 활성 목록 + 아카이브 목록 모두 원복
@@ -2002,13 +1862,9 @@ export function ScenesView() {
     setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
 
     try {
-      if (sheetsConnected) {
-        // Phase 0-2: _REGISTRY 기반 복원 (탭 이름 변경 없이 status만 변경)
-        const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
-        await unarchiveEpisodeViaRegistryInSheets(epNum);
-      } else {
-        await writeLocalMetadata('archived-episode', String(epNum), '');
-      }
+      // Phase 0-2: _REGISTRY 기반 복원 (탭 이름 변경 없이 status만 변경)
+      const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      await unarchiveEpisodeViaRegistryInSheets(epNum);
       syncInBackground();
     } catch (err) {
       // 롤백
@@ -2039,15 +1895,11 @@ export function ScenesView() {
     setEpisodeMemos({ ...episodeMemos, [currentEp.episodeNumber]: memo });
 
     // 저장
-    await writeLocalMetadata('episode-title', key, title.trim());
-    await writeLocalMetadata('episode-memo', key, memo);
-    if (sheetsConnected) {
-      try {
-        await writeMetadataToSheets('episode-title', key, title.trim());
-        await writeMetadataToSheets('episode-memo', key, memo);
-      } catch (err) {
-        console.warn('[에피소드 메타] 시트 저장 실패 → 로컬에 저장됨', err);
-      }
+    try {
+      await writeMetadataToSheets('episode-title', key, title.trim());
+      await writeMetadataToSheets('episode-memo', key, memo);
+    } catch (err) {
+      console.warn('[에피소드 메타] 시트 저장 실패', err);
     }
   };
 
@@ -2415,9 +2267,8 @@ export function ScenesView() {
         <AddSceneForm
           existingSceneIds={(currentPart?.scenes ?? []).map((s) => s.sceneId)}
           sheetName={currentPart?.sheetName ?? ''}
-          isLiveMode={sheetsConnected}
           onSubmit={handleAddScene}
-          onBulkSubmit={sheetsConnected ? handleBulkAddScenes : undefined}
+          onBulkSubmit={handleBulkAddScenes}
           onCancel={() => setShowAddScene(false)}
         />
       )}
@@ -2670,16 +2521,10 @@ export function ScenesView() {
                 // 백그라운드 싱크
                 (async () => {
                   try {
-                    if (sheetsConnected) {
-                      // Phase 0: 배치로 한 번에
-                      await batchToSheets(
-                        indices.map((idx) => batchActions.deleteScene(currentPart!.sheetName, idx))
-                      );
-                    } else {
-                      for (const idx of indices) {
-                        await deleteTestScene(useDataStore.getState().episodes, currentPart!.sheetName, idx);
-                      }
-                    }
+                    // Phase 0: 배치로 한 번에
+                    await batchToSheets(
+                      indices.map((idx) => batchActions.deleteScene(currentPart!.sheetName, idx))
+                    );
                     syncInBackground();
                   } catch (err) {
                     console.error('[일괄 삭제 실패]', err);
@@ -2753,21 +2598,15 @@ export function ScenesView() {
                     if (idx < 0 || !currentPart) return;
                     if (assignee) {
                       updateSceneFieldOptimistic(currentPart.sheetName, idx, 'assignee', assignee);
-                      if (sheetsConnected) {
-                        batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'assignee', assignee));
-                      }
+                      batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'assignee', assignee));
                     }
                     if (memo) {
                       updateSceneFieldOptimistic(currentPart.sheetName, idx, 'memo', memo);
-                      if (sheetsConnected) {
-                        batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'memo', memo));
-                      }
+                      batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'memo', memo));
                     }
                     if (layoutId) {
                       updateSceneFieldOptimistic(currentPart.sheetName, idx, 'layoutId', layoutId);
-                      if (sheetsConnected) {
-                        batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'layoutId', layoutId));
-                      }
+                      batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'layoutId', layoutId));
                     }
                   });
 
@@ -2822,7 +2661,6 @@ export function ScenesView() {
             scene={detailScene}
             sceneIndex={detailSceneIndex}
             sheetName={currentPart?.sheetName ?? ''}
-            isLiveMode={sheetsConnected}
             department={selectedDepartment}
             onFieldUpdate={handleFieldUpdate}
             onToggle={handleToggle}

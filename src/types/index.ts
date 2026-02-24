@@ -213,7 +213,6 @@ export interface SheetsConfig {
 // ─── Electron API (preload에서 노출) ─────────
 
 export interface ElectronAPI {
-  getMode: () => Promise<{ isTestMode: boolean; appRoot: string }>;
   getDataPath: () => Promise<string>;
 
   // 사용자 파일 (exe 옆 또는 test-data/ 옆, base64 인코딩 JSON)
@@ -221,9 +220,6 @@ export interface ElectronAPI {
   usersWrite: (data: UsersFile) => Promise<boolean>;
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
-  testGetSheetPath: () => Promise<string>;
-  testReadSheet: (filePath: string) => Promise<unknown | null>;
-  testWriteSheet: (filePath: string, data: unknown) => Promise<boolean>;
   onSheetChanged: (callback: () => void) => () => void;
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
   imageSave: (fileName: string, base64Data: string) => Promise<string>;

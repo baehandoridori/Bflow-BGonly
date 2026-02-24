@@ -11,10 +11,6 @@ export type SceneGroupMode = 'flat' | 'layout';
 export type DashboardDeptFilter = Department | 'all';
 
 interface AppState {
-  // 앱 모드
-  isTestMode: boolean;
-  setTestMode: (v: boolean) => void;
-
   // Google Sheets 연결 상태
   sheetsConnected: boolean;
   sheetsConfig: SheetsConfig | null;
@@ -87,9 +83,6 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  isTestMode: false,
-  setTestMode: (v) => set({ isTestMode: v }),
-
   sheetsConnected: false,
   sheetsConfig: null,
   setSheetsConnected: (v) => set({ sheetsConnected: v }),

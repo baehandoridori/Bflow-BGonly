@@ -28,7 +28,6 @@ interface SceneDetailModalProps {
   scene: Scene;
   sceneIndex: number;
   sheetName: string;
-  isLiveMode: boolean;
   department: Department;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
   onToggle: (sceneId: string, stage: Stage) => void;
@@ -294,7 +293,6 @@ export function SceneDetailModal({
   scene,
   sceneIndex,
   sheetName,
-  isLiveMode,
   department,
   onFieldUpdate,
   onToggle,
@@ -368,7 +366,7 @@ export function SceneDetailModal({
               sheetName,
               scene.sceneId || String(scene.no),
               imageType,
-              isLiveMode,
+  
             );
             const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
             onFieldUpdate(sceneIndex, field, url);
@@ -384,7 +382,7 @@ export function SceneDetailModal({
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [showImageModal, scene.storyboardUrl, sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate]);
+  }, [showImageModal, scene.storyboardUrl, sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate]);
 
   // ── 이미지 핸들러 ──
 
@@ -407,7 +405,7 @@ export function SceneDetailModal({
             sheetName,
             scene.sceneId || String(scene.no),
             imageType,
-            isLiveMode,
+
           );
           const field =
             imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
@@ -421,7 +419,7 @@ export function SceneDetailModal({
       };
       input.click();
     },
-    [sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate],
+    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
   );
 
   const pasteClipboard = useCallback(
@@ -432,7 +430,7 @@ export function SceneDetailModal({
           sheetName,
           scene.sceneId || String(scene.no),
           imageType,
-          isLiveMode,
+
         );
         if (!url) {
           alert('클립보드에 이미지가 없습니다.');
@@ -449,7 +447,7 @@ export function SceneDetailModal({
         setImageLoading(null);
       }
     },
-    [sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate],
+    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
   );
 
   const handlePasteEvent = useCallback(
@@ -470,7 +468,7 @@ export function SceneDetailModal({
               sheetName,
               scene.sceneId || String(scene.no),
               imageType,
-              isLiveMode,
+  
             );
             const field =
               imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
@@ -485,7 +483,7 @@ export function SceneDetailModal({
         }
       }
     },
-    [sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate],
+    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
   );
 
   const handleDrop = useCallback(
@@ -501,7 +499,7 @@ export function SceneDetailModal({
           sheetName,
           scene.sceneId || String(scene.no),
           imageType,
-          isLiveMode,
+
         );
         const field =
           imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
@@ -513,7 +511,7 @@ export function SceneDetailModal({
         setImageLoading(null);
       }
     },
-    [sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate],
+    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
   );
 
   const confirmRemoveImage = useCallback(
