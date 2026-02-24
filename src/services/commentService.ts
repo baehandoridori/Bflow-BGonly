@@ -36,7 +36,7 @@ export async function loadAllComments(): Promise<CommentsStore> {
 
 export async function getComments(sceneKey: string): Promise<SceneComment[]> {
   const all = await loadAllComments();
-  return all[sceneKey] ?? [];
+  return [...(all[sceneKey] ?? [])];
 }
 
 export async function addComment(sceneKey: string, comment: SceneComment): Promise<void> {

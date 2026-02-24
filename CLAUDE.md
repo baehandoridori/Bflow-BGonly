@@ -2,8 +2,8 @@
 
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
-> **현재 상태**: Phase 1~2 완료, Phase 6 Step 1~4 완료
-> **로드맵**: `ROADMAP.md` 참조
+> **현재 상태**: Phase 1~2 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, **Phase 0 긴급 안정화 착수**
+> **로드맵**: `ROADMAP.md` 참조 | **세션 가이드**: `CONTEXT.md` 참조
 >
 > **이력**: 원래 BG(배경) 전용 현황판(`Bflow-BGonly`)으로 시작했으나, 액팅까지 포함한 통합 앱이 되면서 정식 명칭 **B flow**로 전환됨. 레포 이름(`Bflow-BGonly`)과 `app.name`은 기존 사용자 데이터 경로(`%APPDATA%\Bflow-BGonly\`) 호환을 위해 유지.
 
@@ -94,7 +94,9 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 ## 참조 문서
 
-- **`ROADMAP.md`** — 전체 개발 로드맵 (Phase 1~7, 기능별 상세 스펙)
+- **`CONTEXT.md`** — 세션 컨텍스트 가이드 (아키텍처, 파일 맵, 알려진 이슈, 스킬 활용법)
+- **`ROADMAP.md`** — 전체 개발 로드맵 (Phase 0~7, 기능별 상세 스펙)
+- `tasks/lessons.md` — 과거 실수/패턴 기록 (세션 시작 시 검토)
 - `BG_DASHBOARD_PLAN.md` — 초기 구현 계획서
 - Bflow 원본 (`/home/user/Bflow`) — 패턴 참고만 (읽기 전용, 수정 금지)
 
