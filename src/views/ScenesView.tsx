@@ -1432,26 +1432,17 @@ export function ScenesView() {
       try {
         if (sheetsConnected) {
           try {
-            // 먼저 readArchived 액션 시도 (Apps Script 재배포 후 동작)
+            // Phase 0-2: _REGISTRY 기반 — readArchived에서 아카이빙 정보 포함
             const { readArchivedFromSheets } = await import('@/services/sheetsService');
             const list = await readArchivedFromSheets();
-            const enriched = [];
-            for (const item of list) {
-              const key = String(item.episodeNumber);
-              let archivedBy: string | undefined;
-              let archivedAt: string | undefined;
-              let memo: string | undefined;
-              try {
-                const meta = await readMetadataFromSheets('archive-info', key);
-                if (meta?.value) {
-                  const parsed = JSON.parse(meta.value);
-                  archivedBy = parsed.by;
-                  archivedAt = parsed.at;
-                  memo = parsed.memo;
-                }
-              } catch { /* 무시 */ }
-              enriched.push({ ...item, archivedBy, archivedAt, memo });
-            }
+            const enriched = list.map((item) => ({
+              episodeNumber: item.episodeNumber,
+              title: item.title,
+              partCount: item.partCount,
+              archivedBy: item.archivedBy || undefined,
+              archivedAt: item.archivedAt || undefined,
+              memo: item.archiveMemo || undefined,
+            }));
             setArchivedEpisodes(enriched);
           } catch {
             // readArchived 미배포 시 → METADATA에서 fallback 읽기
@@ -1899,11 +1890,8 @@ export function ScenesView() {
     if (!ep) return;
 
     const memo = archiveMemoInput.trim() || '완료로 인한 아카이빙';
-    const archiveInfo = JSON.stringify({
-      by: currentUser?.name ?? '알 수 없음',
-      at: new Date().toLocaleDateString('ko-KR'),
-      memo,
-    });
+    const archivedBy = currentUser?.name ?? '알 수 없음';
+    const archivedAt = new Date().toLocaleDateString('ko-KR');
     const epTitle = episodeTitles[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
 
     setArchiveDialogEpNum(null);
@@ -1916,7 +1904,7 @@ export function ScenesView() {
     deleteEpisodeOptimistic(epNum);
     setArchivedEpisodes((prev) => [
       ...prev,
-      { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
+      { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy, archivedAt, memo },
     ]);
     if (selectedEpisode === epNum) {
       setSelectedEpisode(episodes.find((e) => e.episodeNumber !== epNum)?.episodeNumber ?? 1);
@@ -1924,17 +1912,14 @@ export function ScenesView() {
 
     try {
       if (sheetsConnected) {
-        // Phase 0: 배치로 한 번에 (제목 + 보관정보 + 탭 리네임)
-        await batchToSheets([
-          batchActions.writeMetadata('episode-title', String(epNum), epTitle),
-          batchActions.writeMetadata('archive-info', String(epNum), archiveInfo),
-          batchActions.archiveEpisode(epNum),
-        ]);
+        // Phase 0-2: _REGISTRY 기반 아카이빙 (탭 이름 변경 없이 status만 변경)
+        const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+        await archiveEpisodeViaRegistryInSheets(epNum, archivedBy, memo);
         syncInBackground();
       } else {
         await writeLocalMetadata('episode-title', String(epNum), epTitle);
         await writeLocalMetadata('archived-episode', String(epNum), 'true');
-        await writeLocalMetadata('archive-info', String(epNum), archiveInfo);
+        await writeLocalMetadata('archive-info', String(epNum), JSON.stringify({ by: archivedBy, at: archivedAt, memo }));
       }
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
@@ -1958,17 +1943,24 @@ export function ScenesView() {
     const epDisplayName = episodeTitles[epNum] || archived?.title || `EP.${String(epNum).padStart(2, '0')}`;
     if (!confirm(`"${epDisplayName}"를 아카이빙에서 복원하시겠습니까?`)) return;
 
+    // 롤백용 스냅샷
+    const prevArchivedEpisodes = [...archivedEpisodes];
+
+    // 낙관적 업데이트
+    setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
+
     try {
       if (sheetsConnected) {
-        const { unarchiveEpisodeInSheets } = await import('@/services/sheetsService');
-        await unarchiveEpisodeInSheets(epNum);
+        // Phase 0-2: _REGISTRY 기반 복원 (탭 이름 변경 없이 status만 변경)
+        const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+        await unarchiveEpisodeViaRegistryInSheets(epNum);
       } else {
         await writeLocalMetadata('archived-episode', String(epNum), '');
       }
-      // 아카이빙 목록에서 제거
-      setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
       syncInBackground();
     } catch (err) {
+      // 롤백
+      setArchivedEpisodes(prevArchivedEpisodes);
       alert(`복원 실패: ${err}`);
       syncInBackground();
     }

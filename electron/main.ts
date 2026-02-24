@@ -21,6 +21,9 @@ import {
   unarchiveEpisode,
   readArchivedEpisodes,
   gasBatch,
+  readRegistry,
+  archiveEpisodeViaRegistry,
+  unarchiveEpisodeViaRegistry,
 } from './sheets';
 import type { BatchAction } from './sheets';
 
@@ -535,6 +538,40 @@ ipcMain.handle('sheets:batch', async (_event, actions: BatchAction[]) => {
   try {
     const result = await gasBatch(actions);
     return result;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: _REGISTRY (Phase 0-2) ───────────────────────
+
+ipcMain.handle('sheets:read-registry', async () => {
+  try {
+    const data = await readRegistry();
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('sheets:archive-episode-via-registry', async (
+  _event, episodeNumber: number, archivedBy: string, archiveMemo: string
+) => {
+  try {
+    await archiveEpisodeViaRegistry(episodeNumber, archivedBy, archiveMemo);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:unarchive-episode-via-registry', async (_event, episodeNumber: number) => {
+  try {
+    await unarchiveEpisodeViaRegistry(episodeNumber);
+    return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg };

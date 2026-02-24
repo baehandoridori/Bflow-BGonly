@@ -379,13 +379,55 @@ export async function unarchiveEpisode(episodeNumber: number): Promise<void> {
   await gasGet({ action: 'unarchiveEpisode', episodeNumber: String(episodeNumber) });
 }
 
-export async function readArchivedEpisodes(): Promise<{ episodeNumber: number; title: string; partCount: number }[]> {
+export async function readArchivedEpisodes(): Promise<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; archiveMemo?: string }[]> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
   const res = await gasFetchWithRetry(`${webAppUrl}?action=readArchived`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json() as { ok: boolean; data?: any; error?: string };
   if (!json.ok) throw new Error(json.error ?? '아카이빙 목록 읽기 실패');
   return json.data ?? [];
+}
+
+// ─── _REGISTRY (Phase 0-2) ────────────────────────────────────
+
+export interface RegistryEntry {
+  sheetName: string;
+  episodeNumber: number;
+  partId: string;
+  department: string;
+  status: string;
+  title: string;
+  archivedAt: string;
+  archivedBy: string;
+  archiveMemo: string;
+  updatedAt: string;
+}
+
+export async function readRegistry(): Promise<RegistryEntry[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readRegistry`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; data?: RegistryEntry[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '레지스트리 읽기 실패');
+  return json.data ?? [];
+}
+
+export async function archiveEpisodeViaRegistry(
+  episodeNumber: number, archivedBy: string, archiveMemo: string
+): Promise<void> {
+  await gasGet({
+    action: 'archiveEpisodeViaRegistry',
+    episodeNumber: String(episodeNumber),
+    archivedBy,
+    archiveMemo,
+  });
+}
+
+export async function unarchiveEpisodeViaRegistry(episodeNumber: number): Promise<void> {
+  await gasGet({
+    action: 'unarchiveEpisodeViaRegistry',
+    episodeNumber: String(episodeNumber),
+  });
 }
 
 // ─── 이미지 업로드 (Drive에 저장 → URL 반환) ──────────────────

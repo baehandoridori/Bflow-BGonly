@@ -170,6 +170,21 @@ export interface DashboardStats {
   episodeStats: EpisodeStats[];
 }
 
+// ─── _REGISTRY 타입 (Phase 0-2) ──────────────
+
+export interface RegistryEntry {
+  sheetName: string;
+  episodeNumber: number;
+  partId: string;
+  department: string;
+  status: 'active' | 'archived' | 'deleted';
+  title: string;
+  archivedAt: string;
+  archivedBy: string;
+  archiveMemo: string;
+  updatedAt: string;
+}
+
 // ─── Google Sheets 연동 타입 ─────────────────
 
 export interface SheetsConnectResult {
@@ -235,7 +250,7 @@ export interface ElectronAPI {
   sheetsSoftDeletePart: (sheetName: string) => Promise<SheetsUpdateResult>;
   sheetsSoftDeleteEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 아카이빙
-  sheetsReadArchived: () => Promise<{ ok: boolean; data: { episodeNumber: number; title: string; partCount: number }[]; error?: string }>;
+  sheetsReadArchived: () => Promise<{ ok: boolean; data: { episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; archiveMemo?: string }[]; error?: string }>;
   sheetsArchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   sheetsUnarchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 배치 요청 (Phase 0)
@@ -247,6 +262,10 @@ export interface ElectronAPI {
       failedAt?: number;
       failedAction?: string;
     }>;
+  // _REGISTRY (Phase 0-2)
+  sheetsReadRegistry: () => Promise<{ ok: boolean; data: RegistryEntry[]; error?: string }>;
+  sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<SheetsUpdateResult>;
+  sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 데이터 변경 브로드캐스트
   sheetsNotifyChange?: () => Promise<{ ok: boolean }>;
   // 위젯 팝업 윈도우

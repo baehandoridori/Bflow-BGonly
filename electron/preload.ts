@@ -83,6 +83,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
     ipcRenderer.invoke('sheets:batch', actions),
 
+  // _REGISTRY (Phase 0-2: 에피소드/파트 중앙 관리)
+  sheetsReadRegistry: () =>
+    ipcRenderer.invoke('sheets:read-registry'),
+  sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) =>
+    ipcRenderer.invoke('sheets:archive-episode-via-registry', episodeNumber, archivedBy, archiveMemo),
+  sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) =>
+    ipcRenderer.invoke('sheets:unarchive-episode-via-registry', episodeNumber),
+
   // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
   sheetsNotifyChange: () => ipcRenderer.invoke('sheets:notify-change'),
 

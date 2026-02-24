@@ -6,7 +6,7 @@
  * App.tsx에서 모드에 따라 이 서비스 또는 testSheetService를 호출한다.
  */
 
-import type { Episode, Stage, SheetsConfig, Department } from '@/types';
+import type { Episode, Stage, SheetsConfig, Department, RegistryEntry } from '@/types';
 
 const SHEETS_CONFIG_FILE = 'sheets-config.json';
 
@@ -185,7 +185,7 @@ export async function softDeleteEpisodeInSheets(episodeNumber: number): Promise<
 
 // ─── 아카이빙 ────────────────────────────────
 
-export async function readArchivedFromSheets(): Promise<{ episodeNumber: number; title: string; partCount: number }[]> {
+export async function readArchivedFromSheets(): Promise<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; archiveMemo?: string }[]> {
   const result = await window.electronAPI.sheetsReadArchived();
   if (!result.ok) throw new Error(result.error ?? '아카이빙 목록 읽기 실패');
   return result.data ?? [];
@@ -212,4 +212,28 @@ export async function uploadImageToSheets(
     throw new Error(result.error ?? '이미지 업로드 실패');
   }
   return result.url;
+}
+
+// ─── _REGISTRY (Phase 0-2) ──────────────────
+
+export async function readRegistryFromSheets(): Promise<RegistryEntry[]> {
+  const result = await window.electronAPI.sheetsReadRegistry();
+  if (!result.ok) throw new Error(result.error ?? '레지스트리 읽기 실패');
+  return result.data ?? [];
+}
+
+export async function archiveEpisodeViaRegistryInSheets(
+  episodeNumber: number, archivedBy: string, archiveMemo: string
+): Promise<void> {
+  await assertOk(
+    window.electronAPI.sheetsArchiveEpisodeViaRegistry(episodeNumber, archivedBy, archiveMemo),
+    '에피소드 아카이빙 실패 (레지스트리)'
+  );
+}
+
+export async function unarchiveEpisodeViaRegistryInSheets(episodeNumber: number): Promise<void> {
+  await assertOk(
+    window.electronAPI.sheetsUnarchiveEpisodeViaRegistry(episodeNumber),
+    '에피소드 복원 실패 (레지스트리)'
+  );
 }

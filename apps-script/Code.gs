@@ -152,6 +152,32 @@ function executeAction(action, params) {
     case 'debugImages':
       return debugImageCells();
 
+    // Phase 0-2: _REGISTRY 관련 액션
+    case 'readRegistry':
+      return readRegistry();
+
+    case 'updateRegistryEntry':
+      updateRegistryEntry(params.sheetName, {
+        status: params.status,
+        title: params.title,
+        archivedAt: params.archivedAt,
+        archivedBy: params.archivedBy,
+        archiveMemo: params.archiveMemo,
+      });
+      return null;
+
+    case 'archiveEpisodeViaRegistry':
+      archiveEpisodeViaRegistry(
+        parseInt(params.episodeNumber, 10),
+        params.archivedBy || '',
+        params.archiveMemo || ''
+      );
+      return null;
+
+    case 'unarchiveEpisodeViaRegistry':
+      unarchiveEpisodeViaRegistry(parseInt(params.episodeNumber, 10));
+      return null;
+
     default:
       throw new Error('Unknown action: ' + action);
   }
@@ -546,8 +572,25 @@ function analyzeValue(val) {
 // ─── 전체 에피소드 데이터 읽기 ───────────────────────────────
 
 function readAllEpisodes() {
-  var tabs = getEpisodeTabs();
+  // _REGISTRY를 사용하여 활성 탭만 필터링
+  var registry = readRegistry();
   var deletedItems = getDeletedItems();
+
+  // _REGISTRY가 있으면 활성 항목만, 없으면 기존 방식 폴백
+  var activeSheets = {};  // sheetName → { episodeNumber, partId, department, title }
+  var registryTitles = {}; // episodeNumber → title (from registry)
+
+  if (registry.length > 0) {
+    for (var r = 0; r < registry.length; r++) {
+      var entry = registry[r];
+      if (entry.status === 'active') {
+        activeSheets[entry.sheetName] = entry;
+        if (entry.title) registryTitles[String(entry.episodeNumber)] = entry.title;
+      }
+    }
+  }
+
+  var tabs = getEpisodeTabs();
   var epMap = {};
 
   for (var i = 0; i < tabs.length; i++) {
@@ -556,10 +599,15 @@ function readAllEpisodes() {
     // 소프트 삭제된 파트 건너뛰기
     if (deletedItems[tab.title]) continue;
 
+    // _REGISTRY가 있으면 활성 항목만 (archived/deleted 제외)
+    if (registry.length > 0 && !activeSheets[tab.title]) continue;
+
     if (!epMap[tab.episodeNumber]) {
+      var epTitle = registryTitles[String(tab.episodeNumber)]
+        || ('EP.' + String(tab.episodeNumber).padStart(2, '0'));
       epMap[tab.episodeNumber] = {
         episodeNumber: tab.episodeNumber,
-        title: 'EP.' + String(tab.episodeNumber).padStart(2, '0'),
+        title: epTitle,
         parts: []
       };
     }
@@ -588,23 +636,48 @@ function readAllEpisodes() {
 // ─── 아카이빙된 에피소드 목록 읽기 ─────────────────────────────
 
 function readArchivedEpisodes() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheets = ss.getSheets();
+  // _REGISTRY 기반: archived 상태인 에피소드 목록
+  var registry = readRegistry();
   var epMap = {};
 
-  for (var i = 0; i < sheets.length; i++) {
-    var title = sheets[i].getName();
-    var match = title.match(AC_EP_PATTERN);
-    if (match) {
-      var epNum = parseInt(match[1], 10);
-      if (!epMap[epNum]) {
-        epMap[epNum] = {
-          episodeNumber: epNum,
-          title: 'EP.' + String(epNum).padStart(2, '0'),
-          partCount: 0
-        };
+  if (registry.length > 0) {
+    // _REGISTRY에서 archived 항목 수집
+    for (var r = 0; r < registry.length; r++) {
+      var entry = registry[r];
+      if (entry.status === 'archived') {
+        var epNum = entry.episodeNumber;
+        if (!epMap[epNum]) {
+          epMap[epNum] = {
+            episodeNumber: epNum,
+            title: entry.title || ('EP.' + String(epNum).padStart(2, '0')),
+            partCount: 0,
+            archivedBy: entry.archivedBy || '',
+            archivedAt: entry.archivedAt || '',
+            archiveMemo: entry.archiveMemo || ''
+          };
+        }
+        epMap[epNum].partCount++;
       }
-      epMap[epNum].partCount++;
+    }
+  } else {
+    // 폴백: 기존 AC_ 접두사 방식
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheets = ss.getSheets();
+
+    for (var i = 0; i < sheets.length; i++) {
+      var sheetTitle = sheets[i].getName();
+      var match = sheetTitle.match(AC_EP_PATTERN);
+      if (match) {
+        var acEpNum = parseInt(match[1], 10);
+        if (!epMap[acEpNum]) {
+          epMap[acEpNum] = {
+            episodeNumber: acEpNum,
+            title: 'EP.' + String(acEpNum).padStart(2, '0'),
+            partCount: 0
+          };
+        }
+        epMap[acEpNum].partCount++;
+      }
     }
   }
 
@@ -673,11 +746,15 @@ function addEpisode(episodeNumber, department) {
     throw new Error('유효하지 않은 에피소드 번호');
   }
 
-  var deptSuffix = department === 'acting' ? '_ACT' : '_BG';
+  var dept = department || 'bg';
+  var deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
   var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_A' + deptSuffix;
   createSheetTab(tabName);
 
-  return { sheetName: tabName, episodeNumber: episodeNumber, partId: 'A', department: department || 'bg' };
+  // _REGISTRY에 등록
+  addRegistryEntry(tabName, episodeNumber, 'A', dept, '');
+
+  return { sheetName: tabName, episodeNumber: episodeNumber, partId: 'A', department: dept };
 }
 
 // ─── 파트 추가 ───────────────────────────────────────────────
@@ -692,11 +769,15 @@ function addPart(episodeNumber, partId, department) {
     throw new Error('파트 ID는 A-Z 대문자 1글자여야 합니다');
   }
 
-  var deptSuffix = department === 'acting' ? '_ACT' : '_BG';
+  var dept = department || 'bg';
+  var deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
   var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_' + partId + deptSuffix;
   createSheetTab(tabName);
 
-  return { sheetName: tabName, episodeNumber: episodeNumber, partId: partId, department: department || 'bg' };
+  // _REGISTRY에 등록
+  addRegistryEntry(tabName, episodeNumber, partId, dept, '');
+
+  return { sheetName: tabName, episodeNumber: episodeNumber, partId: partId, department: dept };
 }
 
 // ─── 씬 추가 ─────────────────────────────────────────────────
@@ -903,6 +984,10 @@ function writeMetadata(type, key, value) {
         // 업서트: 기존 행 갱신
         sheet.getRange(i + 2, 3).setValue(value);
         sheet.getRange(i + 2, 4).setValue(now);
+        // _REGISTRY에도 제목 동기화
+        if (type === 'episode-title') {
+          syncTitleToRegistry(parseInt(key, 10), value);
+        }
         return;
       }
     }
@@ -910,6 +995,11 @@ function writeMetadata(type, key, value) {
 
   // 새 행 추가
   sheet.appendRow([type, key, value, now]);
+
+  // _REGISTRY에도 제목 동기화
+  if (type === 'episode-title') {
+    syncTitleToRegistry(parseInt(key, 10), value);
+  }
 }
 
 /**
@@ -998,4 +1088,241 @@ function getDeletedItems() {
     }
   }
   return deleted;
+}
+
+// ─── _REGISTRY 시트 관리 (Phase 0-2) ──────────────────────────
+
+/**
+ * 에피소드 제목을 _REGISTRY의 모든 관련 행에 동기화한다.
+ */
+function syncTitleToRegistry(episodeNumber, title) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var regSheet = ss.getSheetByName('_REGISTRY');
+    if (!regSheet) return; // 아직 _REGISTRY가 없으면 무시
+
+    var lastRow = regSheet.getLastRow();
+    if (lastRow < 2) return;
+
+    var data = regSheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+    var now = new Date().toISOString();
+    for (var i = 0; i < data.length; i++) {
+      if (parseInt(data[i][1], 10) === episodeNumber) {
+        regSheet.getRange(i + 2, 6).setValue(title);  // title 열
+        regSheet.getRange(i + 2, 10).setValue(now);     // updatedAt 열
+      }
+    }
+  } catch (e) {
+    // 레지스트리 동기화 실패는 무시 (메타데이터가 primary)
+    Logger.log('syncTitleToRegistry error: ' + e.toString());
+  }
+}
+
+var REGISTRY_SHEET_NAME = '_REGISTRY';
+var REGISTRY_HEADERS = ['sheetName', 'episodeNumber', 'partId', 'department', 'status', 'title', 'archivedAt', 'archivedBy', 'archiveMemo', 'updatedAt'];
+
+/**
+ * _REGISTRY 시트를 가져온다 (없으면 생성 + 기존 데이터 마이그레이션).
+ */
+function ensureRegistrySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(REGISTRY_SHEET_NAME);
+  if (sheet) return sheet;
+
+  // _REGISTRY 신규 생성
+  sheet = ss.insertSheet(REGISTRY_SHEET_NAME);
+  sheet.getRange(1, 1, 1, REGISTRY_HEADERS.length).setValues([REGISTRY_HEADERS]);
+  sheet.getRange(1, 1, 1, REGISTRY_HEADERS.length).setFontWeight('bold').setBackground('#E8F5E9');
+
+  // 기존 데이터 마이그레이션
+  migrateToRegistry(ss, sheet);
+
+  return sheet;
+}
+
+/**
+ * 기존 탭 이름 + _METADATA에서 _REGISTRY로 마이그레이션한다.
+ */
+function migrateToRegistry(ss, registrySheet) {
+  var sheets = ss.getSheets();
+  var metaSheet = ss.getSheetByName(METADATA_SHEET_NAME);
+  var now = new Date().toISOString();
+
+  // 1. _METADATA에서 에피소드 제목/아카이브 정보 수집
+  var titles = {};      // episodeNumber → title
+  var archiveInfos = {}; // episodeNumber → { by, at, memo }
+
+  if (metaSheet) {
+    var metaLastRow = metaSheet.getLastRow();
+    if (metaLastRow >= 2) {
+      var metaData = metaSheet.getRange(2, 1, metaLastRow - 1, 4).getValues();
+      for (var m = 0; m < metaData.length; m++) {
+        var mType = String(metaData[m][0]);
+        var mKey = String(metaData[m][1]);
+        var mVal = String(metaData[m][2]);
+        if (mType === 'episode-title' && mVal) {
+          titles[mKey] = mVal;
+        }
+        if (mType === 'archive-info' && mVal) {
+          try { archiveInfos[mKey] = JSON.parse(mVal); } catch (e) {}
+        }
+      }
+    }
+  }
+
+  // 2. 활성 탭 (EP_) 등록
+  var rows = [];
+  for (var i = 0; i < sheets.length; i++) {
+    var name = sheets[i].getName();
+
+    // 활성 에피소드 탭
+    var match = name.match(EP_PATTERN);
+    if (match) {
+      var epNum = parseInt(match[1], 10);
+      var dept = match[3] === 'ACT' ? 'acting' : 'bg';
+      rows.push([
+        name, epNum, match[2], dept, 'active',
+        titles[String(epNum)] || '', '', '', '', now
+      ]);
+      continue;
+    }
+
+    // 아카이빙된 탭 (AC_EP_)
+    var acMatch = name.match(AC_EP_PATTERN);
+    if (acMatch) {
+      var acEpNum = parseInt(acMatch[1], 10);
+      var acDept = acMatch[3] === 'ACT' ? 'acting' : 'bg';
+      var info = archiveInfos[String(acEpNum)] || {};
+      rows.push([
+        name, acEpNum, acMatch[2], acDept, 'archived',
+        titles[String(acEpNum)] || '', info.at || '', info.by || '', info.memo || '', now
+      ]);
+    }
+  }
+
+  if (rows.length > 0) {
+    registrySheet.getRange(2, 1, rows.length, REGISTRY_HEADERS.length).setValues(rows);
+  }
+}
+
+/**
+ * _REGISTRY에서 전체 데이터를 읽는다.
+ * @return {Array<Object>} 레지스트리 항목 배열
+ */
+function readRegistry() {
+  var sheet = ensureRegistrySheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+  var result = [];
+  for (var i = 0; i < data.length; i++) {
+    result.push({
+      sheetName: String(data[i][0]),
+      episodeNumber: parseInt(data[i][1], 10),
+      partId: String(data[i][2]),
+      department: String(data[i][3]),
+      status: String(data[i][4]),
+      title: String(data[i][5]),
+      archivedAt: String(data[i][6]),
+      archivedBy: String(data[i][7]),
+      archiveMemo: String(data[i][8]),
+      updatedAt: String(data[i][9])
+    });
+  }
+  return result;
+}
+
+/**
+ * _REGISTRY에서 특정 시트의 항목을 업데이트한다.
+ * @param {string} sheetName  시트 이름
+ * @param {Object} updates    업데이트할 필드 (status, title, archivedAt, archivedBy, archiveMemo)
+ */
+function updateRegistryEntry(sheetName, updates) {
+  var sheet = ensureRegistrySheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('레지스트리가 비어있습니다');
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+  var now = new Date().toISOString();
+
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === sheetName) {
+      var row = i + 2;
+      if (updates.status !== undefined) sheet.getRange(row, 5).setValue(updates.status);
+      if (updates.title !== undefined) sheet.getRange(row, 6).setValue(updates.title);
+      if (updates.archivedAt !== undefined) sheet.getRange(row, 7).setValue(updates.archivedAt);
+      if (updates.archivedBy !== undefined) sheet.getRange(row, 8).setValue(updates.archivedBy);
+      if (updates.archiveMemo !== undefined) sheet.getRange(row, 9).setValue(updates.archiveMemo);
+      sheet.getRange(row, 10).setValue(now);
+      return;
+    }
+  }
+  throw new Error('레지스트리에 없는 시트: ' + sheetName);
+}
+
+/**
+ * _REGISTRY에 새 항목을 추가한다.
+ * @param {string} sheetName  시트 이름
+ * @param {number} episodeNumber  에피소드 번호
+ * @param {string} partId  파트 ID
+ * @param {string} department  부서
+ * @param {string} title  에피소드 제목
+ */
+function addRegistryEntry(sheetName, episodeNumber, partId, department, title) {
+  var sheet = ensureRegistrySheet();
+  var now = new Date().toISOString();
+  sheet.appendRow([sheetName, episodeNumber, partId, department, 'active', title || '', '', '', '', now]);
+}
+
+/**
+ * _REGISTRY 기반 에피소드 아카이빙 (Phase 0-2)
+ * 탭 이름은 바꾸지 않고, _REGISTRY의 status만 'archived'로 변경
+ * @param {number} episodeNumber
+ * @param {string} archivedBy
+ * @param {string} archiveMemo
+ */
+function archiveEpisodeViaRegistry(episodeNumber, archivedBy, archiveMemo) {
+  var sheet = ensureRegistrySheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+  var now = new Date().toLocaleDateString('ko-KR');
+  var isoNow = new Date().toISOString();
+
+  for (var i = 0; i < data.length; i++) {
+    if (parseInt(data[i][1], 10) === episodeNumber && String(data[i][4]) === 'active') {
+      var row = i + 2;
+      sheet.getRange(row, 5).setValue('archived');
+      sheet.getRange(row, 7).setValue(now);
+      sheet.getRange(row, 8).setValue(archivedBy || '');
+      sheet.getRange(row, 9).setValue(archiveMemo || '');
+      sheet.getRange(row, 10).setValue(isoNow);
+    }
+  }
+}
+
+/**
+ * _REGISTRY 기반 에피소드 아카이빙 해제 (Phase 0-2)
+ * @param {number} episodeNumber
+ */
+function unarchiveEpisodeViaRegistry(episodeNumber) {
+  var sheet = ensureRegistrySheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+  var isoNow = new Date().toISOString();
+
+  for (var i = 0; i < data.length; i++) {
+    if (parseInt(data[i][1], 10) === episodeNumber && String(data[i][4]) === 'archived') {
+      var row = i + 2;
+      sheet.getRange(row, 5).setValue('active');
+      sheet.getRange(row, 7).setValue('');
+      sheet.getRange(row, 8).setValue('');
+      sheet.getRange(row, 9).setValue('');
+      sheet.getRange(row, 10).setValue(isoNow);
+    }
+  }
 }
