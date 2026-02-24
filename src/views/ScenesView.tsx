@@ -2374,6 +2374,9 @@ export function ScenesView() {
         </div>
       </div>
 
+      {/* 진행도 + 씬 목록 영역 (드래그 라쏘 대상) */}
+      <div ref={gridRef} className="relative flex-1 flex flex-col gap-4">
+
       {/* 상단 고정 진행도 */}
       <div className="flex items-center gap-4 bg-bg-card border border-bg-border rounded-xl px-5 py-3">
         <span className="text-sm font-medium text-text-secondary">
@@ -2416,7 +2419,7 @@ export function ScenesView() {
       )}
 
       {/* 씬 목록 */}
-      <div ref={gridRef} className="relative flex-1">
+      <div className="relative flex-1">
         {/* 파트 완료 보케 오버레이 */}
         <AnimatePresence>
           {scenes.length > 0 && overallPct >= 100 && <PartCompleteOverlay />}
@@ -2624,6 +2627,7 @@ export function ScenesView() {
           }}
         />
       )}
+      </div>{/* 진행도 + 씬 목록 영역 (gridRef) 끝 */}
 
       {/* 일괄 액션 바 (선택된 씬이 있을 때) */}
       <AnimatePresence>

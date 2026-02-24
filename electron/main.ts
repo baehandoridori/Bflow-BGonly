@@ -62,21 +62,21 @@ const animatingWidgets = new Set<string>();
 const widgetAOTState = new Map<string, boolean>();       // 위젯별 AOT 의도 상태
 const widgetAOTTimers = new Map<string, ReturnType<typeof setInterval>>(); // 주기적 재적용 타이머
 
-/** AOT 재적용 — Windows Acrylic이 리셋하는 것을 보상 */
+/** AOT 재적용 — Windows Acrylic이 리셋하는 것을 보상 (moveTop 없이 선언적으로만) */
 function enforceAOT(widgetId: string): void {
   const win = widgetWindows.get(widgetId);
   if (!win || win.isDestroyed()) return;
   const shouldBeAOT = widgetAOTState.get(widgetId) ?? true;
   if (!shouldBeAOT) return;
   win.setAlwaysOnTop(true, 'floating');
-  win.moveTop();
+  // moveTop() 제거 — 반복 호출 시 Windows에서 z-order 재평가로 깜빡임 유발
 }
 
 /** 위젯의 AOT 주기적 재적용 시작 */
 function startAOTEnforcer(widgetId: string): void {
   stopAOTEnforcer(widgetId);
   widgetAOTState.set(widgetId, true);
-  const timer = setInterval(() => enforceAOT(widgetId), 2000);
+  const timer = setInterval(() => enforceAOT(widgetId), 5000);
   widgetAOTTimers.set(widgetId, timer);
 }
 
@@ -733,20 +733,20 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     popupWin.loadFile(path.join(__dirname, '../dist/index.html'), { hash });
   }
 
-  // 윈도우 준비 완료 시 즉시 표시 + AOT 적용
+  // 윈도우 준비 완료 시 즉시 표시 + AOT 적용 (V1 안정 패턴 기반)
+  // moveTop() 없이 setAlwaysOnTop만 사용 — moveTop 반복 호출이 Windows에서 깜빡임 유발
   popupWin.once('ready-to-show', () => {
     if (popupWin.isDestroyed()) return;
-    popupWin.setAlwaysOnTop(true, 'floating');
     popupWin.show();
-    popupWin.moveTop();
-    // Acrylic이 AOT를 리셋하는 것을 보상 — 단일 딜레이로 재적용
+    popupWin.setAlwaysOnTop(true, 'floating');
+    // Acrylic이 AOT를 리셋하는 것을 보상 — 두 번의 딜레이 재적용 (V1 패턴)
     setTimeout(() => {
-      if (!popupWin.isDestroyed()) {
-        popupWin.setAlwaysOnTop(true, 'floating');
-        popupWin.moveTop();
-      }
+      if (!popupWin.isDestroyed()) popupWin.setAlwaysOnTop(true, 'floating');
     }, 150);
-    // 주기적 AOT 재적용 시작 (Windows Acrylic이 리셋하는 것을 보상)
+    setTimeout(() => {
+      if (!popupWin.isDestroyed()) popupWin.setAlwaysOnTop(true, 'floating');
+    }, 500);
+    // 주기적 재적용 (5초 간격, moveTop 없이 선언적으로만)
     startAOTEnforcer(widgetId);
   });
 
@@ -775,11 +775,10 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
   popupWin.on('focus', () => {
     if (!popupWin.isDestroyed()) {
       popupWin.webContents.send('widget:focus-change', true);
-      // 포커스 획득 시 AOT 재적용 (Acrylic 호환)
+      // 포커스 획득 시 AOT 선언적 재적용만 (moveTop 없음 — focus→moveTop→focus 피드백 루프 방지)
       const shouldBeAOT = widgetAOTState.get(widgetId) ?? true;
       if (shouldBeAOT) {
         popupWin.setAlwaysOnTop(true, 'floating');
-        popupWin.moveTop();
       }
     }
   });
@@ -856,16 +855,15 @@ ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
     widgetAOTState.set(widgetId, aot);
     win.setAlwaysOnTop(aot, aot ? 'floating' : 'normal');
     if (aot) {
-      // AOT 켤 때: 포커스 + moveTop + 주기적 재적용 시작
+      // AOT 켤 때: 포커스 + 딜레이 재적용 (V1 안정 패턴, moveTop 없음)
       win.focus();
-      win.moveTop();
       startAOTEnforcer(widgetId);
       setTimeout(() => {
-        if (!win.isDestroyed()) {
-          win.setAlwaysOnTop(true, 'floating');
-          win.moveTop();
-        }
+        if (!win.isDestroyed()) win.setAlwaysOnTop(true, 'floating');
       }, 150);
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.setAlwaysOnTop(true, 'floating');
+      }, 500);
     } else {
       // AOT 끌 때: 주기적 재적용 중지
       stopAOTEnforcer(widgetId);
