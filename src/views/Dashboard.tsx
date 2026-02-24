@@ -223,14 +223,13 @@ function getWidgetComponent(id: string): React.ReactNode | undefined {
 /*
  * 위젯 최소 비율 ≈ 1:1 보장
  * 4컬럼 기준 1col ≈ 283px, rowHeight=80px
- * minW=1 → minH=4 (283:320 ≈ 1:1.13)
- * minW=2 → minH=7 (580:560 ≈ 1:0.97)
+ * minW=1 통일 — xxs(cols=1) breakpoint에서 minW > cols 경고 방지
  */
 const DEPT_LAYOUT: Layout[] = [
   { i: 'overall-progress', x: 0, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'stage-bars', x: 1, y: 0, w: 2, h: 4, minW: 2, minH: 4 },
+  { i: 'stage-bars', x: 1, y: 0, w: 2, h: 4, minW: 1, minH: 4 },
   { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'episode-summary', x: 0, y: 4, w: 2, h: 5, minW: 2, minH: 4 },
+  { i: 'episode-summary', x: 0, y: 4, w: 2, h: 5, minW: 1, minH: 4 },
   { i: 'my-tasks', x: 2, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
   { i: 'calendar', x: 3, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
 ];
@@ -238,9 +237,9 @@ const DEPT_LAYOUT: Layout[] = [
 /* ── 통합 레이아웃 ── */
 const ALL_LAYOUT: Layout[] = [
   { i: 'overall-progress', x: 0, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'dept-comparison', x: 1, y: 0, w: 2, h: 4, minW: 2, minH: 4 },
+  { i: 'dept-comparison', x: 1, y: 0, w: 2, h: 4, minW: 1, minH: 4 },
   { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'episode-summary', x: 0, y: 4, w: 2, h: 5, minW: 2, minH: 4 },
+  { i: 'episode-summary', x: 0, y: 4, w: 2, h: 5, minW: 1, minH: 4 },
   { i: 'my-tasks', x: 2, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
   { i: 'calendar', x: 3, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
 ];

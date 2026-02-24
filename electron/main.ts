@@ -58,37 +58,6 @@ const widgetWindows = new Map<string, BrowserWindow>();
 const widgetOriginalBounds = new Map<string, Electron.Rectangle>();
 const animatingWidgets = new Set<string>();
 
-// ─── AOT 상태 + 주기적 재적용 (Windows Acrylic 호환) ─────────
-const widgetAOTState = new Map<string, boolean>();       // 위젯별 AOT 의도 상태
-const widgetAOTTimers = new Map<string, ReturnType<typeof setInterval>>(); // 주기적 재적용 타이머
-
-/** AOT 재적용 — Windows Acrylic이 리셋하는 것을 보상 (moveTop 없이 선언적으로만) */
-function enforceAOT(widgetId: string): void {
-  const win = widgetWindows.get(widgetId);
-  if (!win || win.isDestroyed()) return;
-  const shouldBeAOT = widgetAOTState.get(widgetId) ?? true;
-  if (!shouldBeAOT) return;
-  win.setAlwaysOnTop(true, 'floating');
-  // moveTop() 제거 — 반복 호출 시 Windows에서 z-order 재평가로 깜빡임 유발
-}
-
-/** 위젯의 AOT 주기적 재적용 시작 */
-function startAOTEnforcer(widgetId: string): void {
-  stopAOTEnforcer(widgetId);
-  widgetAOTState.set(widgetId, true);
-  const timer = setInterval(() => enforceAOT(widgetId), 5000);
-  widgetAOTTimers.set(widgetId, timer);
-}
-
-/** 위젯의 AOT 주기적 재적용 중지 */
-function stopAOTEnforcer(widgetId: string): void {
-  const timer = widgetAOTTimers.get(widgetId);
-  if (timer) {
-    clearInterval(timer);
-    widgetAOTTimers.delete(widgetId);
-  }
-}
-
 // ─── 독 스태킹 관리 ─────────────────────────────────────────
 const dockedWidgetIds: string[] = [];          // 독에 쌓인 순서
 let expandedDockWidgetId: string | null = null; // 현재 호버 확장 중인 위젯
@@ -710,8 +679,7 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     minHeight: 200,
     frame: false,
     transparent: false,
-    alwaysOnTop: true,  // 생성 시점부터 AOT 활성화
-    show: false,        // 수동 show 제어
+    alwaysOnTop: true,
     resizable: true,
     skipTaskbar: false,
     title: widgetTitle,
@@ -733,30 +701,10 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     popupWin.loadFile(path.join(__dirname, '../dist/index.html'), { hash });
   }
 
-  // 윈도우 준비 완료 시 즉시 표시 + AOT 적용 (V1 안정 패턴 기반)
-  // moveTop() 없이 setAlwaysOnTop만 사용 — moveTop 반복 호출이 Windows에서 깜빡임 유발
-  popupWin.once('ready-to-show', () => {
-    if (popupWin.isDestroyed()) return;
-    popupWin.show();
-    popupWin.setAlwaysOnTop(true, 'floating');
-    // Acrylic이 AOT를 리셋하는 것을 보상 — 두 번의 딜레이 재적용 (V1 패턴)
-    setTimeout(() => {
-      if (!popupWin.isDestroyed()) popupWin.setAlwaysOnTop(true, 'floating');
-    }, 150);
-    setTimeout(() => {
-      if (!popupWin.isDestroyed()) popupWin.setAlwaysOnTop(true, 'floating');
-    }, 500);
-    // 주기적 재적용 (5초 간격, moveTop 없이 선언적으로만)
-    startAOTEnforcer(widgetId);
-  });
-
   widgetWindows.set(widgetId, popupWin);
   popupWin.on('closed', () => {
     widgetWindows.delete(widgetId);
     widgetOriginalBounds.delete(widgetId);
-    // AOT 정리
-    stopAOTEnforcer(widgetId);
-    widgetAOTState.delete(widgetId);
     // 독 스택에서 제거 + 나머지 재배치
     const dockIdx = dockedWidgetIds.indexOf(widgetId);
     if (dockIdx >= 0) {
@@ -775,11 +723,6 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
   popupWin.on('focus', () => {
     if (!popupWin.isDestroyed()) {
       popupWin.webContents.send('widget:focus-change', true);
-      // 포커스 획득 시 AOT 선언적 재적용만 (moveTop 없음 — focus→moveTop→focus 피드백 루프 방지)
-      const shouldBeAOT = widgetAOTState.get(widgetId) ?? true;
-      if (shouldBeAOT) {
-        popupWin.setAlwaysOnTop(true, 'floating');
-      }
     }
   });
 
@@ -852,22 +795,7 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    widgetAOTState.set(widgetId, aot);
-    win.setAlwaysOnTop(aot, aot ? 'floating' : 'normal');
-    if (aot) {
-      // AOT 켤 때: 포커스 + 딜레이 재적용 (V1 안정 패턴, moveTop 없음)
-      win.focus();
-      startAOTEnforcer(widgetId);
-      setTimeout(() => {
-        if (!win.isDestroyed()) win.setAlwaysOnTop(true, 'floating');
-      }, 150);
-      setTimeout(() => {
-        if (!win.isDestroyed()) win.setAlwaysOnTop(true, 'floating');
-      }, 500);
-    } else {
-      // AOT 끌 때: 주기적 재적용 중지
-      stopAOTEnforcer(widgetId);
-    }
+    win.setAlwaysOnTop(aot);
   }
 });
 

@@ -2083,8 +2083,8 @@ export function ScenesView() {
         </div>
       )}
 
-      {/* ── 메인 콘텐츠 영역 ── */}
-      <div className="flex-1 flex flex-col gap-4 min-w-0">
+      {/* ── 메인 콘텐츠 영역 (gridRef: 라쏘 드래그 범위) ── */}
+      <div ref={gridRef} className="flex-1 flex flex-col gap-4 min-w-0">
       {/* 뒤로가기 (인원별/에피소드 뷰에서 이동해온 경우) */}
       {backLabel && (
         <motion.button
@@ -2374,8 +2374,8 @@ export function ScenesView() {
         </div>
       </div>
 
-      {/* 진행도 + 씬 목록 영역 (드래그 라쏘 대상) */}
-      <div ref={gridRef} className="relative flex-1 flex flex-col gap-4">
+      {/* 진행도 + 씬 목록 영역 */}
+      <div className="relative flex-1 flex flex-col gap-4">
 
       {/* 상단 고정 진행도 */}
       <div className="flex items-center gap-4 bg-bg-card border border-bg-border rounded-xl px-5 py-3">
@@ -2627,7 +2627,7 @@ export function ScenesView() {
           }}
         />
       )}
-      </div>{/* 진행도 + 씬 목록 영역 (gridRef) 끝 */}
+      </div>{/* 진행도 + 씬 목록 영역 끝 */}
 
       {/* 일괄 액션 바 (선택된 씬이 있을 때) */}
       <AnimatePresence>
