@@ -387,8 +387,10 @@ export function EpisodeView() {
     try {
       const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
       await archiveEpisodeViaRegistryInSheets(epNum, currentUser?.name ?? '알 수 없음', memo);
-      // 낙관적 상태가 이미 정확하므로 readAllFromSheets 불필요 — 깜빡임 방지
-      window.electronAPI?.sheetsNotifyChange?.();
+      // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 알림
+      setTimeout(() => {
+        window.electronAPI?.sheetsNotifyChange?.();
+      }, 3000);
     } catch (err) {
       // 롤백
       const prevEps = [...episodes, { episodeNumber: epNum, title: epTitle, parts: ep.parts }];
@@ -414,10 +416,14 @@ export function EpisodeView() {
     try {
       const { unarchiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/sheetsService');
       await unarchiveEpisodeViaRegistryInSheets(epNum);
-      // 서버에서 실제 데이터 가져와 교체
-      const eps = await readAllFromSheets();
-      setEpisodes(eps);
-      window.electronAPI?.sheetsNotifyChange?.();
+      // 낙관적 상태를 신뢰 — 서버 처리 후(3초) 실제 데이터로 교체
+      setTimeout(async () => {
+        try {
+          const eps = await readAllFromSheets();
+          setEpisodes(eps);
+          window.electronAPI?.sheetsNotifyChange?.();
+        } catch { /* 다음 폴링 사이클에서 자연 동기화 */ }
+      }, 3000);
     } catch (err) {
       // 롤백
       setEpisodes(prevEps);

@@ -1932,14 +1932,16 @@ export function ScenesView() {
       // Phase 0-2: _REGISTRY 기반 아카이빙 (탭 이름 변경 없이 status만 변경)
       const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
       await archiveEpisodeViaRegistryInSheets(epNum, archivedBy, memo);
-      syncInBackground();
-      window.electronAPI?.sheetsNotifyChange?.();
+      // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 백그라운드 동기화
+      setTimeout(() => {
+        syncInBackground();
+        window.electronAPI?.sheetsNotifyChange?.();
+      }, 3000);
     } catch (err) {
       // 롤백: 활성 목록 + 아카이브 목록 모두 원복
       setEpisodes(prevEpisodes);
       setArchivedEpisodes(prevArchivedEpisodes);
       alert(`아카이빙 실패: ${err}`);
-      syncInBackground();
     }
   };
 
@@ -1965,12 +1967,15 @@ export function ScenesView() {
       // Phase 0-2: _REGISTRY 기반 복원 (탭 이름 변경 없이 status만 변경)
       const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
       await unarchiveEpisodeViaRegistryInSheets(epNum);
-      syncInBackground();
+      // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 백그라운드 동기화
+      setTimeout(() => {
+        syncInBackground();
+        window.electronAPI?.sheetsNotifyChange?.();
+      }, 3000);
     } catch (err) {
       // 롤백
       setArchivedEpisodes(prevArchivedEpisodes);
       alert(`복원 실패: ${err}`);
-      syncInBackground();
     }
   };
 
@@ -2020,7 +2025,7 @@ export function ScenesView() {
   }, [setSelectedEpisode, episodeTitles, episodeMemos]);
 
   return (
-    <div className="flex gap-3 h-full">
+    <div className="flex gap-3 min-h-full">
       {/* ── 트리뷰 사이드바 ── */}
       {treeOpen && (
         <div className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-y-auto flex flex-col sticky top-0 self-start max-h-[calc(100vh-5.5rem)]">

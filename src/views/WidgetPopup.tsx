@@ -87,8 +87,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       }
     }
 
-    // 상단 컨트롤 영역 (위 52px 전체 — 핀/최소화/닫기)
-    const inControlZone = y < 52;
+    // 상단 컨트롤 영역 (위 60px 전체 — 핀/최소화/닫기, 넉넉한 감지 영역)
+    const inControlZone = y < 60;
     if (inControlZone) {
       if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
       setShowControls(true);
@@ -97,7 +97,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         hideTimerRef.current = setTimeout(() => {
           setShowControls(false);
           hideTimerRef.current = null;
-        }, 400);
+        }, 600);
       }
     }
 
@@ -130,8 +130,11 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    if (y < 40) setShowHandle(true);
-    if (y < 52) setShowControls(true);
+    // 상단 60px 이내면 핸들 + 컨트롤 모두 표시 (넉넉한 영역)
+    if (y < 60) {
+      setShowHandle(true);
+      setShowControls(true);
+    }
     if (y > rect.height - 48 && x > rect.width * 0.4) setShowBottomControls(true);
   }, []);
 
@@ -523,88 +526,95 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         />
       </div>
 
-      {/* ── 상단 호버 시 컨트롤 (핀/최소화/닫기) ── */}
-      {showControls && (
-        <div
-          className="absolute top-0 right-0 z-30 flex items-center gap-2 px-2.5"
+      {/* ── 상단 컨트롤 (핀/최소화/닫기) — 항상 렌더링, opacity로 전환 ── */}
+      {/* no-drag 영역이 항상 존재해야 drag region이 마우스 이벤트를 삼키지 않음 */}
+      <div
+        className="absolute top-0 right-0 z-30 flex items-center gap-2 px-2.5"
+        style={{
+          WebkitAppRegion: 'no-drag',
+          height: '28px',
+          background: showControls
+            ? 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)'
+            : 'transparent',
+          borderBottomLeftRadius: '8px',
+          opacity: showControls ? 1 : 0,
+          pointerEvents: showControls ? 'auto' : 'none',
+          transition: 'opacity 0.2s ease, background 0.2s ease',
+        } as React.CSSProperties}
+        onMouseEnter={() => {
+          if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+          setShowControls(true);
+        }}
+      >
+        {/* AOT 핀 토글 */}
+        <button
+          onClick={handleToggleAOT}
+          className="w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors cursor-pointer"
           style={{
-            WebkitAppRegion: 'no-drag',
-            height: '28px',
-            background: 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)',
-            borderBottomLeftRadius: '8px',
-          } as React.CSSProperties}
-          onMouseEnter={() => {
-            if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
-            setShowControls(true);
+            background: isAOT ? 'rgba(108, 92, 231, 0.7)' : 'rgba(255,255,255,0.15)',
           }}
+          title={isAOT ? '항상 위에 표시 (켜짐)' : '항상 위에 표시 (꺼짐)'}
         >
-          {/* AOT 핀 토글 */}
-          <button
-            onClick={handleToggleAOT}
-            className="w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors cursor-pointer"
-            style={{
-              background: isAOT ? 'rgba(108, 92, 231, 0.7)' : 'rgba(255,255,255,0.15)',
-            }}
-            title={isAOT ? '항상 위에 표시 (켜짐)' : '항상 위에 표시 (꺼짐)'}
-          >
-            {isAOT
-              ? <Pin size={9} className="text-on-accent" strokeWidth={3} />
-              : <PinOff size={9} className="text-text-primary/60" strokeWidth={2.5} />}
-          </button>
+          {isAOT
+            ? <Pin size={9} className="text-on-accent" strokeWidth={3} />
+            : <PinOff size={9} className="text-text-primary/60" strokeWidth={2.5} />}
+        </button>
 
-          {/* 최소화 (독 모드) */}
-          <button
-            onClick={handleMinimize}
-            className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-yellow-500/70 hover:bg-yellow-500 transition-colors cursor-pointer"
-            title="최소화"
-          >
-            <Minus size={9} className="text-text-primary" strokeWidth={3} />
-          </button>
-
-          {/* 닫기 */}
-          <button
-            onClick={handleClose}
-            className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-0.5"
-          >
-            <X size={9} className="text-text-primary" strokeWidth={3} />
-          </button>
-        </div>
-      )}
-
-      {/* ── 우하단 호버 시 슬라이더 (오퍼시티/글래스) ── */}
-      {showBottomControls && (
-        <div
-          className="absolute bottom-0 right-0 z-30 flex items-center gap-2 px-2.5"
-          style={{
-            WebkitAppRegion: 'no-drag',
-            height: '28px',
-            background: 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)',
-            borderTopLeftRadius: '8px',
-          } as React.CSSProperties}
-          onMouseEnter={() => {
-            if (bottomHideTimerRef.current) { clearTimeout(bottomHideTimerRef.current); bottomHideTimerRef.current = null; }
-            setShowBottomControls(true);
-          }}
+        {/* 최소화 (독 모드) */}
+        <button
+          onClick={handleMinimize}
+          className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-yellow-500/70 hover:bg-yellow-500 transition-colors cursor-pointer"
+          title="최소화"
         >
-          {/* 앱 오퍼시티 */}
-          <div className="flex items-center gap-1" title="앱 투명도">
-            <Eye size={11} className="text-text-secondary/60" />
-            <input type="range" min={15} max={100}
-              value={Math.round(appOpacity * 100)}
-              onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
-              className="w-11 h-1 cursor-pointer" />
-          </div>
+          <Minus size={9} className="text-text-primary" strokeWidth={3} />
+        </button>
 
-          {/* 글래스 틴트 */}
-          <div className="flex items-center gap-1" title="글래스 효과">
-            <Droplets size={11} className="text-text-secondary/60" />
-            <input type="range" min={0} max={100}
-              value={Math.round(glassIntensity * 100)}
-              onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
-              className="w-11 h-1 cursor-pointer" />
-          </div>
+        {/* 닫기 */}
+        <button
+          onClick={handleClose}
+          className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-0.5"
+        >
+          <X size={9} className="text-text-primary" strokeWidth={3} />
+        </button>
+      </div>
+
+      {/* ── 우하단 슬라이더 (오퍼시티/글래스) — 항상 렌더링, opacity로 전환 ── */}
+      <div
+        className="absolute bottom-0 right-0 z-30 flex items-center gap-2 px-2.5"
+        style={{
+          WebkitAppRegion: 'no-drag',
+          height: '28px',
+          background: showBottomControls
+            ? 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)'
+            : 'transparent',
+          borderTopLeftRadius: '8px',
+          opacity: showBottomControls ? 1 : 0,
+          pointerEvents: showBottomControls ? 'auto' : 'none',
+          transition: 'opacity 0.2s ease, background 0.2s ease',
+        } as React.CSSProperties}
+        onMouseEnter={() => {
+          if (bottomHideTimerRef.current) { clearTimeout(bottomHideTimerRef.current); bottomHideTimerRef.current = null; }
+          setShowBottomControls(true);
+        }}
+      >
+        {/* 앱 오퍼시티 */}
+        <div className="flex items-center gap-1" title="앱 투명도">
+          <Eye size={11} className="text-text-secondary/60" />
+          <input type="range" min={15} max={100}
+            value={Math.round(appOpacity * 100)}
+            onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
+            className="w-11 h-1 cursor-pointer" />
         </div>
-      )}
+
+        {/* 글래스 틴트 */}
+        <div className="flex items-center gap-1" title="글래스 효과">
+          <Droplets size={11} className="text-text-secondary/60" />
+          <input type="range" min={0} max={100}
+            value={Math.round(glassIntensity * 100)}
+            onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
+            className="w-11 h-1 cursor-pointer" />
+        </div>
+      </div>
 
       {/* ── 위젯 콘텐츠 ── */}
       <div className="flex-1 overflow-hidden relative z-10">
