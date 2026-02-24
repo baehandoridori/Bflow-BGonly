@@ -256,6 +256,9 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           for (const [num, val] of memoResults) if (val) memos[num] = val;
           useDataStore.getState().setEpisodeTitles(titles);
           useDataStore.getState().setEpisodeMemos(memos);
+        } else {
+          console.warn('[WidgetPopup] 시트 연결 실패 — 빈 상태로 시작');
+          useDataStore.getState().setEpisodes([]);
         }
 
         const users = await loadUsers();

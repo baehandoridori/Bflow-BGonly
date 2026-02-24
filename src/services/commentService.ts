@@ -102,18 +102,6 @@ export function invalidatePartCache(sheetName?: string): void {
 
 // ─── 통합 API ───────────────────────────────────
 
-export async function loadAllComments(): Promise<CommentsStore> {
-  if (!sheetsMode) return loadLocalAll();
-  // 시트 모드: 캐시된 파트 데이터 병합 (카운트 표시용)
-  const merged: CommentsStore = {};
-  sheetPartCache.forEach((store) => {
-    Object.entries(store).forEach(([key, comments]) => {
-      merged[key] = comments;
-    });
-  });
-  return merged;
-}
-
 export async function getComments(sceneKey: string): Promise<SceneComment[]> {
   if (sheetsMode) {
     const { sheetName } = parseSceneKey(sceneKey);

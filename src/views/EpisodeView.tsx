@@ -5,7 +5,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
-import { DEPARTMENT_CONFIGS, DEPARTMENTS, STAGES } from '@/types';
+import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
 
@@ -369,11 +369,6 @@ export function EpisodeView() {
     if (!ep) return;
 
     const memo = archiveMemoInput.trim() || '완료로 인한 아카이빙';
-    const archiveInfo = JSON.stringify({
-      by: currentUser?.name ?? '알 수 없음',
-      at: new Date().toLocaleDateString('ko-KR'),
-      memo,
-    });
     // 아카이빙 시 에피소드 제목도 반드시 METADATA에 저장
     const epTitle = episodeTitlesMap[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
 

@@ -859,13 +859,12 @@ function AddFormImageSlot({
 
 interface AddSceneFormProps {
   existingSceneIds: string[];
-  sheetName: string;
   onSubmit: (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }, skipSync?: boolean) => void;
   onBulkSubmit?: (scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<void>;
   onCancel: () => void;
 }
 
-function AddSceneForm({ existingSceneIds, sheetName, onSubmit, onBulkSubmit, onCancel }: AddSceneFormProps) {
+function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: AddSceneFormProps) {
   const [prefixMode, setPrefixMode] = useState<PrefixMode>('alphabet');
   const [alphaPrefix, setAlphaPrefix] = useState('a');
   const [customPrefix, setCustomPrefix] = useState('');
@@ -1604,6 +1603,16 @@ export function ScenesView() {
     }
   };
 
+  // 공통 시트 에러 핸들러
+  const handleSheetError = (err: unknown, actionName: string) => {
+    const msg = String(err);
+    if (msg.includes('Unknown action')) {
+      alert(`${actionName} 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
+    } else {
+      alert(`${actionName} 실패: ${err}`);
+    }
+  };
+
   const handleAddPart = async () => {
     if (!currentEp) return;
     if (nextPartId > 'Z') {
@@ -1618,6 +1627,10 @@ export function ScenesView() {
       return;
     }
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevSelectedPart = selectedPart;
+
     // 낙관적 업데이트
     addPartOptimistic(currentEp.episodeNumber, nextPartId, selectedDepartment);
     setSelectedPart(nextPartId);
@@ -1626,12 +1639,9 @@ export function ScenesView() {
       await addPartToSheets(currentEp.episodeNumber, nextPartId, selectedDepartment);
       syncInBackground();
     } catch (err) {
-      const msg = String(err);
-      if (msg.includes('Unknown action')) {
-        alert(`파트 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
-      } else {
-        alert(`파트 추가 실패: ${err}`);
-      }
+      setEpisodes(prevEpisodes);
+      setSelectedPart(prevSelectedPart);
+      handleSheetError(err, '파트 추가');
       syncInBackground();
     }
   };
@@ -1641,6 +1651,9 @@ export function ScenesView() {
 
     const sceneIndex = currentPart.scenes.length; // 새 씬의 인덱스
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+
     // 낙관적 업데이트 (폼은 닫지 않음 — 연속 입력 지원)
     addSceneOptimistic(currentPart.sheetName, sceneId, assignee, memo);
 
@@ -1649,13 +1662,10 @@ export function ScenesView() {
       // 배치 모드에서는 마지막 씬 추가 후에만 sync
       if (!skipSync) syncInBackground();
     } catch (err) {
-      const msg = String(err);
-      if (msg.includes('Unknown action')) {
-        alert(`씬 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
-      } else {
-        alert(`씬 추가 실패: ${err}`);
-      }
+      setEpisodes(prevEpisodes);
+      handleSheetError(err, '씬 추가');
       if (!skipSync) syncInBackground();
+      return; // 롤백 시 이후 layoutId/이미지 처리 스킵
     }
 
     // layoutId 가 있으면 씬 생성 후 별도로 설정
@@ -1719,6 +1729,9 @@ export function ScenesView() {
     if (!currentPart) return;
     if (!confirm('이 씬을 삭제하시겠습니까?')) return;
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+
     // 낙관적 업데이트
     deleteSceneOptimistic(currentPart.sheetName, sceneIndex);
 
@@ -1726,13 +1739,17 @@ export function ScenesView() {
       await deleteSceneFromSheets(currentPart.sheetName, sceneIndex);
       syncInBackground();
     } catch (err) {
-      alert(`씬 삭제 실패: ${err}`);
+      setEpisodes(prevEpisodes);
+      handleSheetError(err, '씬 삭제');
       syncInBackground();
     }
   };
 
   const handleFieldUpdate = async (sceneIndex: number, field: string, value: string) => {
     if (!currentPart) return;
+
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
 
     // 낙관적 업데이트
     updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, field, value);
@@ -1741,7 +1758,8 @@ export function ScenesView() {
       await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, field, value);
       syncInBackground();
     } catch (err) {
-      alert(`수정 실패: ${err}`);
+      setEpisodes(prevEpisodes);
+      handleSheetError(err, '수정');
       syncInBackground();
     }
   };
@@ -1752,6 +1770,10 @@ export function ScenesView() {
     if (!part) return;
     if (!confirm(`${part.partId}파트를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevSelectedPart = selectedPart;
+
     deletePartOptimistic(sheetName);
     setSelectedPart(null);
 
@@ -1759,7 +1781,9 @@ export function ScenesView() {
       await softDeletePartInSheets(sheetName);
       syncInBackground();
     } catch (err) {
-      alert(`파트 삭제 실패: ${err}`);
+      setEpisodes(prevEpisodes);
+      setSelectedPart(prevSelectedPart);
+      handleSheetError(err, '파트 삭제');
       syncInBackground();
     }
   };
@@ -1781,6 +1805,10 @@ export function ScenesView() {
     const epDisplayName = episodeTitles[currentEp.episodeNumber] || currentEp.title;
     if (!confirm(`"${epDisplayName}"를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevSelectedEpisode = selectedEpisode;
+
     deleteEpisodeOptimistic(currentEp.episodeNumber);
     setSelectedEpisode(episodes[0]?.episodeNumber ?? 1);
     setEpEditOpen(false);
@@ -1789,7 +1817,9 @@ export function ScenesView() {
       await softDeleteEpisodeInSheets(currentEp.episodeNumber);
       syncInBackground();
     } catch (err) {
-      alert(`에피소드 삭제 실패: ${err}`);
+      setEpisodes(prevEpisodes);
+      setSelectedEpisode(prevSelectedEpisode);
+      handleSheetError(err, '에피소드 삭제');
       syncInBackground();
     }
   };
@@ -2266,7 +2296,6 @@ export function ScenesView() {
       {showAddScene && (
         <AddSceneForm
           existingSceneIds={(currentPart?.scenes ?? []).map((s) => s.sceneId)}
-          sheetName={currentPart?.sheetName ?? ''}
           onSubmit={handleAddScene}
           onBulkSubmit={handleBulkAddScenes}
           onCancel={() => setShowAddScene(false)}

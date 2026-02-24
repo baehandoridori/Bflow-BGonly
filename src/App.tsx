@@ -15,10 +15,10 @@ import { LoginScreen } from '@/components/auth/LoginScreen';
 import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
-import { loadSheetsConfig, connectSheets, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
+import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
 import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { applyTheme, getPreset, getLightColors, DEFAULT_THEME_ID } from '@/themes';
+import { applyTheme, getPreset, getLightColors } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
@@ -62,6 +62,20 @@ export default function App() {
     setSyncing(true);
     setSyncError(null);
     try {
+      // 연결 확인 + 재연결 시도
+      const connected = await checkConnection();
+      if (!connected) {
+        const cfg = await loadSheetsConfig();
+        const url = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+        if (url) {
+          const result = await connectSheets(url);
+          if (!result.ok) throw new Error('시트 연결 실패');
+          setSheetsConnected(true);
+        } else {
+          throw new Error('시트 URL 미설정');
+        }
+      }
+
       const episodes = await readAllFromSheets();
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
@@ -96,7 +110,7 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos]);
+  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setSheetsConnected]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {
