@@ -2023,7 +2023,7 @@ export function ScenesView() {
     <div className="flex gap-3 h-full">
       {/* ── 트리뷰 사이드바 ── */}
       {treeOpen && (
-        <div className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-y-auto flex flex-col">
+        <div className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-y-auto flex flex-col sticky top-0 self-start max-h-[calc(100vh-5.5rem)]">
           <EpisodeTreeNav
             episodes={episodes}
             selectedDepartment={selectedDepartment}

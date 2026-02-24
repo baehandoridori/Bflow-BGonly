@@ -306,7 +306,8 @@ export function EpisodeView() {
   const [archiveDialogEpNum, setArchiveDialogEpNum] = useState<number | null>(null);
   const [archiveMemoInput, setArchiveMemoInput] = useState('완료로 인한 아카이빙');
 
-  // 아카이빙된 에피소드 로드 (_REGISTRY 기반)
+  // 아카이빙된 에피소드 로드 (_REGISTRY 기반) — 마운트 시 1회만 로드
+  // 이후 아카이빙/언아카이빙은 낙관적 업데이트로 로컬 상태만 변경 (깜빡임 방지)
   useEffect(() => {
     const loadArchived = async () => {
       try {
@@ -327,7 +328,8 @@ export function EpisodeView() {
       }
     };
     loadArchived();
-  }, [episodes]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const epData = useMemo(() => {
     return episodes

@@ -679,7 +679,7 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     minHeight: 200,
     frame: false,
     transparent: false,
-    alwaysOnTop: false, // ready-to-show에서 설정
+    alwaysOnTop: true,  // 생성 시점부터 AOT 활성화
     show: false,        // 수동 show 제어
     resizable: true,
     skipTaskbar: false,
@@ -702,18 +702,22 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     popupWin.loadFile(path.join(__dirname, '../dist/index.html'), { hash });
   }
 
-  // 윈도우 준비 완료 시 AOT 설정 + 표시 (Acrylic 초기화 후)
+  // 윈도우 준비 완료 시 표시 + AOT 재확인
   popupWin.once('ready-to-show', () => {
     if (popupWin.isDestroyed()) return;
+    popupWin.show();
     popupWin.setAlwaysOnTop(true, 'floating');
-    popupWin.showInactive();
-    // Acrylic + AOT 안정화를 위해 약간의 딜레이 후 포커스 + AOT 재확인
+    // Acrylic + AOT 안정화를 위해 딜레이 후 AOT 재확인
     setTimeout(() => {
       if (!popupWin.isDestroyed()) {
-        popupWin.focus();
         popupWin.setAlwaysOnTop(true, 'floating');
       }
     }, 150);
+    setTimeout(() => {
+      if (!popupWin.isDestroyed()) {
+        popupWin.setAlwaysOnTop(true, 'floating');
+      }
+    }, 500);
   });
 
   widgetWindows.set(widgetId, popupWin);
@@ -810,13 +814,16 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    win.setAlwaysOnTop(aot, 'floating');
+    win.setAlwaysOnTop(aot, aot ? 'floating' : 'normal');
     if (aot) {
-      // AOT 켤 때 포커스 확보 + 재확인
+      // AOT 켤 때 포커스 확보 + 다단 재확인 (Windows Acrylic 호환)
       win.focus();
       setTimeout(() => {
         if (!win.isDestroyed()) win.setAlwaysOnTop(true, 'floating');
       }, 100);
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.setAlwaysOnTop(true, 'floating');
+      }, 300);
     }
   }
 });

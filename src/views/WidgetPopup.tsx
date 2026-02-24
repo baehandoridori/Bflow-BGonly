@@ -47,9 +47,11 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const [appOpacity, setAppOpacity] = useState(0.92);
   const [glassIntensity, setGlassIntensity] = useState(0.7);
   const [showControls, setShowControls] = useState(false);
+  const [showBottomControls, setShowBottomControls] = useState(false);
   const [ready, setReady] = useState(false);
   const [isFocused, setIsFocused] = useState(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bottomHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showHandle, setShowHandle] = useState(false);
   const handleHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -65,12 +67,13 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   // 모핑 전환 상태: 'idle' | 'minimizing' | 'restoring'
   const [morphState, setMorphState] = useState<'idle' | 'minimizing' | 'restoring'>('idle');
 
-  // 마우스 위치 추적 → 상단 영역별 호버 감지
+  // 마우스 위치 추적 → 상단(컨트롤) + 하단(슬라이더) 영역별 호버 감지
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // 상단 드래그 핸들 영역 (위 40px)
     const inHandleZone = y < 40;
     if (inHandleZone) {
       if (handleHideTimerRef.current) { clearTimeout(handleHideTimerRef.current); handleHideTimerRef.current = null; }
@@ -84,7 +87,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       }
     }
 
-    const inControlZone = x > rect.width * 0.25 && y < 52;
+    // 상단 컨트롤 영역 (위 52px 전체 — 핀/최소화/닫기)
+    const inControlZone = y < 52;
     if (inControlZone) {
       if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
       setShowControls(true);
@@ -93,16 +97,32 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         hideTimerRef.current = setTimeout(() => {
           setShowControls(false);
           hideTimerRef.current = null;
-        }, 300);
+        }, 400);
       }
     }
-  }, [showControls, showHandle]);
+
+    // 하단 우측 슬라이더 영역 (아래 48px, 오른쪽 60%)
+    const inBottomZone = y > rect.height - 48 && x > rect.width * 0.4;
+    if (inBottomZone) {
+      if (bottomHideTimerRef.current) { clearTimeout(bottomHideTimerRef.current); bottomHideTimerRef.current = null; }
+      setShowBottomControls(true);
+    } else if (!inBottomZone && showBottomControls) {
+      if (!bottomHideTimerRef.current) {
+        bottomHideTimerRef.current = setTimeout(() => {
+          setShowBottomControls(false);
+          bottomHideTimerRef.current = null;
+        }, 400);
+      }
+    }
+  }, [showControls, showHandle, showBottomControls]);
 
   const handleMouseLeave = useCallback(() => {
     if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
     if (handleHideTimerRef.current) { clearTimeout(handleHideTimerRef.current); handleHideTimerRef.current = null; }
+    if (bottomHideTimerRef.current) { clearTimeout(bottomHideTimerRef.current); bottomHideTimerRef.current = null; }
     setShowControls(false);
     setShowHandle(false);
+    setShowBottomControls(false);
   }, []);
 
   // 윈도우 바깥에서 진입 시에도 호버 감지 (onMouseMove만으로는 외부→내부 진입 미감지)
@@ -111,7 +131,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     if (y < 40) setShowHandle(true);
-    if (x > rect.width * 0.25 && y < 52) setShowControls(true);
+    if (y < 52) setShowControls(true);
+    if (y > rect.height - 48 && x > rect.width * 0.4) setShowBottomControls(true);
   }, []);
 
   // 포커스 변경 감지 (Acrylic 회색 fallback 대응)
@@ -502,7 +523,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         />
       </div>
 
-      {/* ── 오른쪽 위 호버 시 컨트롤 ── */}
+      {/* ── 상단 호버 시 컨트롤 (핀/최소화/닫기) ── */}
       {showControls && (
         <div
           className="absolute top-0 right-0 z-30 flex items-center gap-2 px-2.5"
@@ -517,24 +538,6 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
             setShowControls(true);
           }}
         >
-          {/* 앱 오퍼시티 */}
-          <div className="flex items-center gap-1" title="앱 투명도">
-            <Eye size={11} className="text-text-secondary/60" />
-            <input type="range" min={15} max={100}
-              value={Math.round(appOpacity * 100)}
-              onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
-              className="w-11 h-1 cursor-pointer" />
-          </div>
-
-          {/* 글래스 틴트 */}
-          <div className="flex items-center gap-1" title="글래스 효과">
-            <Droplets size={11} className="text-text-secondary/60" />
-            <input type="range" min={0} max={100}
-              value={Math.round(glassIntensity * 100)}
-              onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
-              className="w-11 h-1 cursor-pointer" />
-          </div>
-
           {/* AOT 핀 토글 */}
           <button
             onClick={handleToggleAOT}
@@ -565,6 +568,41 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           >
             <X size={9} className="text-text-primary" strokeWidth={3} />
           </button>
+        </div>
+      )}
+
+      {/* ── 우하단 호버 시 슬라이더 (오퍼시티/글래스) ── */}
+      {showBottomControls && (
+        <div
+          className="absolute bottom-0 right-0 z-30 flex items-center gap-2 px-2.5"
+          style={{
+            WebkitAppRegion: 'no-drag',
+            height: '28px',
+            background: 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)',
+            borderTopLeftRadius: '8px',
+          } as React.CSSProperties}
+          onMouseEnter={() => {
+            if (bottomHideTimerRef.current) { clearTimeout(bottomHideTimerRef.current); bottomHideTimerRef.current = null; }
+            setShowBottomControls(true);
+          }}
+        >
+          {/* 앱 오퍼시티 */}
+          <div className="flex items-center gap-1" title="앱 투명도">
+            <Eye size={11} className="text-text-secondary/60" />
+            <input type="range" min={15} max={100}
+              value={Math.round(appOpacity * 100)}
+              onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
+              className="w-11 h-1 cursor-pointer" />
+          </div>
+
+          {/* 글래스 틴트 */}
+          <div className="flex items-center gap-1" title="글래스 효과">
+            <Droplets size={11} className="text-text-secondary/60" />
+            <input type="range" min={0} max={100}
+              value={Math.round(glassIntensity * 100)}
+              onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
+              className="w-11 h-1 cursor-pointer" />
+          </div>
         </div>
       )}
 
