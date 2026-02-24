@@ -76,6 +76,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
     ipcRenderer.invoke('sheets:batch', actions),
 
+  // 대량 셀 업데이트 (다중 씬 체크박스 토글)
+  sheetsBulkUpdateCells: (sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) =>
+    ipcRenderer.invoke('sheets:bulk-update-cells', sheetName, updates),
+
   // 대량 씬 추가 (Phase 0-5)
   sheetsAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) =>
     ipcRenderer.invoke('sheets:add-scenes', sheetName, scenes),

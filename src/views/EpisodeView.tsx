@@ -383,11 +383,9 @@ export function EpisodeView() {
     ]);
 
     try {
-      const { archiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/sheetsService');
+      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
       await archiveEpisodeViaRegistryInSheets(epNum, currentUser?.name ?? '알 수 없음', memo);
-      // 서버 동기화로 최신 에피소드 목록 반영
-      const eps = await readAllFromSheets();
-      setEpisodes(eps);
+      // 낙관적 상태가 이미 정확하므로 readAllFromSheets 불필요 — 깜빡임 방지
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
       // 롤백
@@ -404,26 +402,24 @@ export function EpisodeView() {
     const epDisplayName = episodeTitlesMap[epNum] || archived?.title || `EP.${String(epNum).padStart(2, '0')}`;
     if (!confirm(`"${epDisplayName}"를 아카이빙에서 복원하시겠습니까?`)) return;
 
-    // 낙관적: 아카이브 목록에서 즉시 제거
-    setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
+    // 낙관적: 아카이브 목록에서 즉시 제거 + 에피소드 목록에 임시 추가
+    const prevArchivedEps = [...archivedEpisodes];
+    const prevEps = [...episodes];
+    setArchivedEpisodes(archivedEpisodes.filter((a) => a.episodeNumber !== epNum));
+    const tempTitle = epDisplayName;
+    setEpisodes([...episodes, { episodeNumber: epNum, title: tempTitle, parts: [] }]);
 
     try {
       const { unarchiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/sheetsService');
       await unarchiveEpisodeViaRegistryInSheets(epNum);
-      // 복원된 에피소드를 활성 목록에 즉시 반영
+      // 서버에서 실제 데이터 가져와 교체
       const eps = await readAllFromSheets();
       setEpisodes(eps);
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
-      // 롤백: 아카이브 목록에 다시 추가
-      if (archived) setArchivedEpisodes((prev) => [...prev, {
-        episodeNumber: archived.episodeNumber,
-        title: archived.title,
-        partCount: archived.partCount,
-        archivedBy: archived.archivedBy,
-        archivedAt: archived.archivedAt,
-        memo: archived.memo,
-      }]);
+      // 롤백
+      setEpisodes(prevEps);
+      setArchivedEpisodes(prevArchivedEps);
       alert(`복원 실패: ${err}`);
     }
   };

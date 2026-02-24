@@ -347,6 +347,7 @@ import {
   softDeleteEpisodeInSheets,
   batchToSheets,
   batchActions,
+  bulkUpdateCells,
 } from '@/services/sheetsService';
 import type { BatchAction } from '@/services/sheetsService';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
@@ -490,7 +491,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       {/* ── 메모 ── */}
       {scene.memo && (
         <div className="px-2.5 py-1 border-t border-bg-border/30">
-          <p className="text-[10px] text-text-secondary/60 leading-relaxed line-clamp-2">
+          <p className="text-[10px] text-amber-400/70 leading-relaxed line-clamp-2">
             <HighlightText text={scene.memo} query={searchQuery} />
           </p>
         </div>
@@ -1587,10 +1588,41 @@ export function ScenesView() {
     });
   };
 
-  // 일괄 토글: 선택된 씬들의 특정 단계를 순차 토글
-  const handleBulkToggle = (sceneIds: Set<string>, stage: Stage) => {
+  // 일괄 토글: 선택된 씬들의 특정 단계를 단일 API 호출로 처리
+  const handleBulkToggle = async (sceneIds: Set<string>, stage: Stage) => {
     if (!currentPart) return;
-    sceneIds.forEach((id) => handleToggle(id, stage));
+    const sheetName = currentPart.sheetName;
+
+    // 최신 스토어에서 씬 상태 조회 (stale closure 방지)
+    const latestPart = useDataStore.getState().episodes
+      .flatMap((ep) => ep.parts)
+      .find((p) => p.sheetName === sheetName);
+    if (!latestPart) return;
+
+    // 업데이트 목록 구성
+    const updates: { sceneId: string; sceneIndex: number; stage: Stage; newValue: boolean }[] = [];
+    sceneIds.forEach((id) => {
+      const idx = latestPart.scenes.findIndex((s) => s.sceneId === id);
+      if (idx < 0) return;
+      const scene = latestPart.scenes[idx];
+      updates.push({ sceneId: id, sceneIndex: idx, stage, newValue: !scene[stage] });
+    });
+    if (updates.length === 0) return;
+
+    // 낙관적 업데이트 — 모든 씬을 한번에 UI 반영
+    updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
+
+    // 단일 API 호출로 모든 셀 업데이트
+    try {
+      await bulkUpdateCells(sheetName, updates.map((u) => ({
+        rowIndex: u.sceneIndex, stage: u.stage, value: u.newValue,
+      })));
+      window.electronAPI?.sheetsNotifyChange?.();
+    } catch (err) {
+      console.error('[일괄 토글 실패]', err);
+      // 롤백 — 모든 토글 되돌리기
+      updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
+    }
   };
 
   const handleAddEpisode = () => {
@@ -1991,7 +2023,7 @@ export function ScenesView() {
     <div className="flex gap-3 h-full">
       {/* ── 트리뷰 사이드바 ── */}
       {treeOpen && (
-        <div className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-hidden flex flex-col">
+        <div className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-y-auto flex flex-col">
           <EpisodeTreeNav
             episodes={episodes}
             selectedDepartment={selectedDepartment}
@@ -2433,7 +2465,7 @@ export function ScenesView() {
                     onCtrlClick={(id) => toggleSelectedScene(id)}
                   />
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
                     {groupScenes.map((scene, idx) => {
                       const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
                       const sIdx = rawIdx >= 0 ? rawIdx : idx;
@@ -2499,7 +2531,7 @@ export function ScenesView() {
         </div>
       ) : (
         /* ── 카드 뷰 (플랫) ── */
-        <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 content-start">
+        <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 content-start">
           {scenes.map((scene, idx) => {
             const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
                       const sIdx = rawIdx >= 0 ? rawIdx : idx;

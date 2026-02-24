@@ -33,6 +33,7 @@ import {
   updateUserInSheets,
   deleteUserFromSheets,
   addScenes,
+  bulkUpdateCells,
 } from './sheets';
 import type { SheetUser } from './sheets';
 import type { BatchAction } from './sheets';
@@ -459,6 +460,18 @@ ipcMain.handle('sheets:batch', async (_event, actions: BatchAction[]) => {
   }
 });
 
+// ─── IPC 핸들러: 대량 셀 업데이트 (다중 씬 체크박스 토글) ─────
+
+ipcMain.handle('sheets:bulk-update-cells', async (_event, sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) => {
+  try {
+    await bulkUpdateCells(sheetName, updates);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
 // ─── IPC 핸들러: _REGISTRY (Phase 0-2) ───────────────────────
 
 ipcMain.handle('sheets:read-registry', async () => {
@@ -666,7 +679,8 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     minHeight: 200,
     frame: false,
     transparent: false,
-    alwaysOnTop: true,
+    alwaysOnTop: false, // ready-to-show에서 설정
+    show: false,        // 수동 show 제어
     resizable: true,
     skipTaskbar: false,
     title: widgetTitle,
@@ -688,8 +702,19 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     popupWin.loadFile(path.join(__dirname, '../dist/index.html'), { hash });
   }
 
-  // AOT를 floating level로 설정 (Windows에서 안정적으로 항상 위 유지)
-  popupWin.setAlwaysOnTop(true, 'floating');
+  // 윈도우 준비 완료 시 AOT 설정 + 표시 (Acrylic 초기화 후)
+  popupWin.once('ready-to-show', () => {
+    if (popupWin.isDestroyed()) return;
+    popupWin.setAlwaysOnTop(true, 'floating');
+    popupWin.showInactive();
+    // Acrylic + AOT 안정화를 위해 약간의 딜레이 후 포커스 + AOT 재확인
+    setTimeout(() => {
+      if (!popupWin.isDestroyed()) {
+        popupWin.focus();
+        popupWin.setAlwaysOnTop(true, 'floating');
+      }
+    }, 150);
+  });
 
   widgetWindows.set(widgetId, popupWin);
   popupWin.on('closed', () => {
@@ -785,8 +810,14 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    // 'floating' level: 다른 앱 위에도 항상 표시 (Windows에서 안정적)
     win.setAlwaysOnTop(aot, 'floating');
+    if (aot) {
+      // AOT 켤 때 포커스 확보 + 재확인
+      win.focus();
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.setAlwaysOnTop(true, 'floating');
+      }, 100);
+    }
   }
 });
 

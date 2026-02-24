@@ -261,6 +261,9 @@ export interface ElectronAPI {
       failedAt?: number;
       failedAction?: string;
     }>;
+  // 대량 셀 업데이트 (다중 씬 체크박스 토글)
+  sheetsBulkUpdateCells: (sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) =>
+    Promise<SheetsUpdateResult>;
   // 대량 씬 추가 (Phase 0-5)
   sheetsAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<SheetsUpdateResult>;
   // _USERS (Phase 0-4)

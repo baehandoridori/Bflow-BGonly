@@ -21,15 +21,23 @@ export function UserManagerModal() {
     }
     setError('');
     setLoading(true);
+
+    // 낙관적: 즉시 UI에 추가
+    const tempId = `temp-${Date.now()}`;
+    const tempUser = { id: tempId, name: name.trim(), role: 'user' as const, slackId: slackId.trim(), password: '', createdAt: new Date().toISOString(), hireDate: hireDate.trim() || undefined, birthday: birthday.trim() || undefined, isInitialPassword: true };
+    const prevUsers = [...users];
+    setUsers([...users, tempUser]);
+    setName('');
+    setSlackId('');
+    setHireDate('');
+    setBirthday('');
+
     try {
-      await addUser(name.trim(), slackId.trim(), hireDate.trim() || undefined, birthday.trim() || undefined);
+      await addUser(tempUser.name, tempUser.slackId, tempUser.hireDate, tempUser.birthday);
       const updated = await loadUsers();
       setUsers(updated);
-      setName('');
-      setSlackId('');
-      setHireDate('');
-      setBirthday('');
     } catch (err) {
+      setUsers(prevUsers); // 롤백
       setError(`추가 실패: ${err}`);
     } finally {
       setLoading(false);
@@ -38,16 +46,22 @@ export function UserManagerModal() {
 
   const handleDelete = useCallback(async (userId: string) => {
     setDeletingId(userId);
+
+    // 낙관적: 즉시 UI에서 제거
+    const prevUsers = [...users];
+    setUsers(users.filter((u) => u.id !== userId));
+
     try {
       await deleteUser(userId);
       const updated = await loadUsers();
       setUsers(updated);
     } catch (err) {
+      setUsers(prevUsers); // 롤백
       setError(`삭제 실패: ${err}`);
     } finally {
       setDeletingId(null);
     }
-  }, [setUsers]);
+  }, [users, setUsers]);
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/60">

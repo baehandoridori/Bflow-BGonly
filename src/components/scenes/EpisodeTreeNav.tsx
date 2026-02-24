@@ -225,7 +225,7 @@ export function EpisodeTreeNav({
                   <div className="flex flex-col flex-1 min-w-0">
                     <span className="text-xs font-semibold truncate leading-tight">{displayName}</span>
                     {epMemo && (
-                      <span className="text-[10px] text-text-secondary/50 italic truncate leading-tight">{epMemo}</span>
+                      <span className="text-[10px] text-amber-400/60 italic truncate leading-tight">{epMemo}</span>
                     )}
                   </div>
 
@@ -288,7 +288,7 @@ export function EpisodeTreeNav({
                                 {part.partId}파트
                               </span>
                               {memo && (
-                                <span className="text-[10px] text-text-secondary/50 italic truncate leading-tight">
+                                <span className="text-[10px] text-amber-400/60 italic truncate leading-tight">
                                   {memo}
                                 </span>
                               )}

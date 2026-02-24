@@ -297,6 +297,28 @@ function doPost(e) {
         updateSceneStage(body.sheetName, body.rowIndex, body.stage, body.value);
         return jsonResponse({ ok: true });
 
+      // Phase 0: 대량 셀 업데이트 (다중 씬 체크박스 토글)
+      case 'bulkUpdateCells': {
+        var bulkSheetName = body.sheetName;
+        var bulkUpdates = typeof body.updates === 'string' ? JSON.parse(body.updates) : body.updates;
+        if (!bulkSheetName || !bulkUpdates || !Array.isArray(bulkUpdates)) {
+          return jsonResponse({ ok: false, error: 'bulkUpdateCells requires sheetName and updates array' });
+        }
+
+        var bss = SpreadsheetApp.getActiveSpreadsheet();
+        var bSheet = bss.getSheetByName(bulkSheetName);
+        if (!bSheet) return jsonResponse({ ok: false, error: 'Sheet not found: ' + bulkSheetName });
+
+        for (var bi = 0; bi < bulkUpdates.length; bi++) {
+          var bu = bulkUpdates[bi];
+          var bCol = STAGE_COLUMNS[bu.stage];
+          if (!bCol) return jsonResponse({ ok: false, error: 'Invalid stage: ' + bu.stage });
+          bSheet.getRange(bu.rowIndex + 2, bCol).setValue(bu.value === true || bu.value === 'true');
+        }
+        SpreadsheetApp.flush();
+        return jsonResponse({ ok: true });
+      }
+
       case 'uploadImage':
         var url = uploadImageToDrive(
           body.base64,

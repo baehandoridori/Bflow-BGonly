@@ -65,11 +65,25 @@ export interface BatchResult {
 }
 
 export async function batchToSheets(actions: BatchAction[]): Promise<BatchResult> {
-  const result = await window.electronAPI.sheetsBatch(actions);
-  if (!result.ok) {
-    throw new Error(result.error ?? '배치 요청 실패');
+  const CHUNK_SIZE = 20;
+
+  if (actions.length <= CHUNK_SIZE) {
+    const result = await window.electronAPI.sheetsBatch(actions);
+    if (!result.ok) throw new Error(result.error ?? '배치 요청 실패');
+    return result;
   }
-  return result;
+
+  // 20개 초과 시 자동 분할 실행
+  const allResults: { ok: boolean; data?: unknown }[] = [];
+  for (let i = 0; i < actions.length; i += CHUNK_SIZE) {
+    const chunk = actions.slice(i, i + CHUNK_SIZE);
+    const result = await window.electronAPI.sheetsBatch(chunk);
+    if (!result.ok) {
+      throw new Error(result.error ?? `배치 요청 실패 (chunk ${Math.floor(i / CHUNK_SIZE) + 1})`);
+    }
+    if (result.results) allResults.push(...result.results);
+  }
+  return { ok: true, results: allResults };
 }
 
 /** 배치 액션 빌더 — 타입 안전한 배치 작업 생성 */
@@ -123,6 +137,20 @@ export async function updateSheetCell(
   );
   if (!result.ok) {
     throw new Error(result.error ?? '셀 업데이트 실패');
+  }
+}
+
+// ─── 대량 셀 업데이트 (다중 씬 체크박스 토글) ──
+
+export async function bulkUpdateCells(
+  sheetName: string,
+  updates: { rowIndex: number; stage: string; value: boolean }[]
+): Promise<void> {
+  const result = await window.electronAPI.sheetsBulkUpdateCells(
+    sheetName, updates
+  );
+  if (!result.ok) {
+    throw new Error(result.error ?? '대량 셀 업데이트 실패');
   }
 }
 

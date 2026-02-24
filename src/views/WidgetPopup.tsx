@@ -105,6 +105,15 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     setShowHandle(false);
   }, []);
 
+  // 윈도우 바깥에서 진입 시에도 호버 감지 (onMouseMove만으로는 외부→내부 진입 미감지)
+  const handleMouseEnter = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (y < 40) setShowHandle(true);
+    if (x > rect.width * 0.25 && y < 52) setShowControls(true);
+  }, []);
+
   // 포커스 변경 감지 (Acrylic 회색 fallback 대응)
   useEffect(() => {
     const cleanup = window.electronAPI?.onWidgetFocusChange?.((focused) => {
@@ -347,7 +356,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     if (!isDockHover) {
       return (
         <div
-          className="dock-pill h-screen w-screen overflow-hidden cursor-pointer select-none"
+          className="dock-pill w-full h-full overflow-hidden cursor-pointer select-none"
           style={{
             background: `rgb(var(--color-bg-card) / 0.92)`,
             backdropFilter: 'blur(12px)',
@@ -371,7 +380,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     // 확장 상태: 원본 글래스 스타일 + 위젯 프리뷰
     return (
       <div
-        className="dock-expanded h-screen w-screen flex flex-col overflow-hidden"
+        className="dock-expanded w-full h-full flex flex-col overflow-hidden"
         style={{
           background: `rgb(var(--color-bg-primary) / ${tintAlpha})`,
           cursor: 'pointer',
@@ -443,6 +452,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           animation: 'morph-restore-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both',
         } : {}),
       }}
+      onMouseEnter={handleMouseEnter}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >

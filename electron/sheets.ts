@@ -128,6 +128,30 @@ export async function gasBatch(actions: BatchAction[]): Promise<BatchResponse> {
   return json;
 }
 
+// ─── 대량 셀 업데이트 (다중 씬 체크박스 토글) ─────────────────
+
+export async function bulkUpdateCells(
+  sheetName: string,
+  updates: { rowIndex: number; stage: string; value: boolean }[]
+): Promise<void> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  if (updates.length === 0) return;
+
+  const res = await gasFetchWithRetry(webAppUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'bulkUpdateCells',
+      sheetName,
+      updates,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '대량 셀 업데이트 실패');
+}
+
 // ─── 연결 ─────────────────────────────────────────────────────
 
 export async function initSheets(url: string): Promise<boolean> {
