@@ -329,6 +329,28 @@ export async function addScene(
   await gasGet({ action: 'addScene', sheetName, sceneId, assignee, memo });
 }
 
+// ─── 대량 씬 추가 (Phase 0-5) ─────────────────────────────────
+
+export async function addScenes(
+  sheetName: string,
+  scenes: { sceneId: string; assignee: string; memo: string }[]
+): Promise<void> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+
+  const res = await gasFetchWithRetry(webAppUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'addScenes',
+      sheetName,
+      scenesJson: JSON.stringify(scenes),
+    }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '대량 씬 추가 실패');
+}
+
 // ─── 씬 삭제 ──────────────────────────────────────────────────
 
 export async function deleteScene(sheetName: string, rowIndex: number): Promise<void> {

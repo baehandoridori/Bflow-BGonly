@@ -214,6 +214,18 @@ export async function uploadImageToSheets(
   return result.url;
 }
 
+// ─── 대량 씬 추가 (Phase 0-5) ────────────────
+
+export async function addScenesToSheets(
+  sheetName: string,
+  scenes: { sceneId: string; assignee: string; memo: string }[],
+): Promise<void> {
+  const result = await window.electronAPI.sheetsAddScenes(sheetName, scenes);
+  if (!result.ok) {
+    throw new Error(result.error ?? '대량 씬 추가 실패');
+  }
+}
+
 // ─── _REGISTRY (Phase 0-2) ──────────────────
 
 export async function readRegistryFromSheets(): Promise<RegistryEntry[]> {

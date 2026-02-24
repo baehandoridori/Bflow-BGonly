@@ -265,6 +265,8 @@ export interface ElectronAPI {
       failedAt?: number;
       failedAction?: string;
     }>;
+  // 대량 씬 추가 (Phase 0-5)
+  sheetsAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<SheetsUpdateResult>;
   // _USERS (Phase 0-4)
   sheetsReadUsers: () => Promise<{ ok: boolean; data: AppUser[]; error?: string }>;
   sheetsAddUser: (user: AppUser) => Promise<SheetsUpdateResult>;

@@ -874,10 +874,11 @@ interface AddSceneFormProps {
   sheetName: string;
   isLiveMode: boolean;
   onSubmit: (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }, skipSync?: boolean) => void;
+  onBulkSubmit?: (scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<void>;
   onCancel: () => void;
 }
 
-function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCancel }: AddSceneFormProps) {
+function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onBulkSubmit, onCancel }: AddSceneFormProps) {
   const [prefixMode, setPrefixMode] = useState<PrefixMode>('alphabet');
   const [alphaPrefix, setAlphaPrefix] = useState('a');
   const [customPrefix, setCustomPrefix] = useState('');
@@ -927,13 +928,21 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
         toAdd.push(id);
         updatedIds.push(id);
       }
-      // 순차 실행: 각 씬 추가가 완료된 후 다음 씬 추가 (stale state 방지)
-      (async () => {
-        for (let i = 0; i < toAdd.length; i++) {
-          const isLast = i === toAdd.length - 1;
-          await onSubmit(toAdd[i], assignee, memo, layoutId, undefined, !isLast);
-        }
-      })();
+
+      const BULK_THRESHOLD = 5;
+      if (toAdd.length >= BULK_THRESHOLD && onBulkSubmit) {
+        // Phase 0-5: 대량 추가 — 서버 확인 후 반영 (로딩 화면 포함)
+        const scenes = toAdd.map((id) => ({ sceneId: id, assignee, memo }));
+        onBulkSubmit(scenes);
+      } else {
+        // 소량: 기존 방식 (낙관적 업데이트)
+        (async () => {
+          for (let i = 0; i < toAdd.length; i++) {
+            const isLast = i === toAdd.length - 1;
+            await onSubmit(toAdd[i], assignee, memo, layoutId, undefined, !isLast);
+          }
+        })();
+      }
       setNumber(suggestNextNumber(prefix, updatedIds));
       setBulkEnd('');
     } else {
@@ -1270,6 +1279,7 @@ export function ScenesView() {
   const deleteEpisodeOptimistic = useDataStore((s) => s.deleteEpisodeOptimistic);
 
   const [showAddScene, setShowAddScene] = useState(false);
+  const [bulkAddLoading, setBulkAddLoading] = useState(false);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [treeOpen, setTreeOpen] = useState(true);
@@ -1797,6 +1807,25 @@ export function ScenesView() {
           console.error('[씬 추가 이미지 업로드 실패]', err);
         }
       })();
+    }
+  };
+
+  // Phase 0-5: 대량 씬 추가 (5개 이상 — 서버 확인 후 반영)
+  const handleBulkAddScenes = async (scenes: { sceneId: string; assignee: string; memo: string }[]) => {
+    if (!currentPart || scenes.length === 0) return;
+
+    setBulkAddLoading(true);
+    try {
+      if (sheetsConnected) {
+        const { addScenesToSheets } = await import('@/services/sheetsService');
+        await addScenesToSheets(currentPart.sheetName, scenes);
+      }
+      // 서버 성공 후 전체 동기화로 최신 상태 반영
+      syncInBackground();
+    } catch (err) {
+      alert(`대량 씬 추가 실패: ${err}`);
+    } finally {
+      setBulkAddLoading(false);
     }
   };
 
@@ -2388,8 +2417,17 @@ export function ScenesView() {
           sheetName={currentPart?.sheetName ?? ''}
           isLiveMode={sheetsConnected}
           onSubmit={handleAddScene}
+          onBulkSubmit={sheetsConnected ? handleBulkAddScenes : undefined}
           onCancel={() => setShowAddScene(false)}
         />
+      )}
+
+      {/* 대량 씬 추가 로딩 오버레이 (Phase 0-5) */}
+      {bulkAddLoading && (
+        <div className="flex items-center justify-center py-8 gap-3">
+          <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-text-secondary">씬을 추가하고 있습니다...</span>
+        </div>
       )}
 
       {/* 씬 목록 */}

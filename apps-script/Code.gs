@@ -113,6 +113,10 @@ function executeAction(action, params) {
       );
       return null;
 
+    case 'addScenes':
+      addScenes(params.sheetName, params.scenesJson);
+      return null;
+
     case 'deleteScene':
       deleteScene(params.sheetName, parseInt(params.rowIndex, 10));
       return null;
@@ -302,6 +306,11 @@ function doPost(e) {
           body.mimeType || 'image/jpeg'
         );
         return jsonResponse({ ok: true, url: url });
+
+      // Phase 0-5: 대량 씬 추가 (POST — scenesJson이 크므로 GET 불가)
+      case 'addScenes':
+        addScenes(body.sheetName, body.scenesJson);
+        return jsonResponse({ ok: true });
 
       default:
         return jsonResponse({ ok: false, error: 'Unknown action: ' + action });
@@ -850,6 +859,49 @@ function addScene(sheetName, sceneId, assignee, memo) {
   // 새 행 추가 (K열: 레이아웃 — 빈 값)
   var newRow = [nextNo, sceneId || '', memo || '', '', '', assignee || '', false, false, false, false, ''];
   sheet.appendRow(newRow);
+}
+
+// ─── 대량 씬 추가 (Phase 0-5) ───────────────────────────────
+
+/**
+ * 여러 씬을 한 번에 추가한다 (setValues 사용 — 70개도 1~2초).
+ * @param {string} sheetName  시트 이름
+ * @param {string} scenesJson  JSON 문자열: [{ sceneId, assignee, memo }, ...]
+ */
+function addScenes(sheetName, scenesJson) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('Sheet not found: ' + sheetName);
+
+  var scenes;
+  try { scenes = JSON.parse(scenesJson); } catch (e) { throw new Error('Invalid scenes JSON'); }
+  if (!scenes || scenes.length === 0) return;
+
+  // 다음 No 계산
+  var lastRow = sheet.getLastRow();
+  var nextNo = 1;
+  if (lastRow >= 2) {
+    var lastNo = sheet.getRange(lastRow, 1).getValue();
+    nextNo = (parseInt(lastNo, 10) || lastRow - 1) + 1;
+  }
+
+  // 전체 행 데이터 배열 생성
+  var rows = [];
+  for (var i = 0; i < scenes.length; i++) {
+    var s = scenes[i];
+    rows.push([
+      nextNo + i,
+      s.sceneId || '',
+      s.memo || '',
+      '', '', // storyboardUrl, guideUrl
+      s.assignee || '',
+      false, false, false, false, // lo, done, review, png
+      '' // layoutId
+    ]);
+  }
+
+  // setValues로 한 번에 기록 (appendRow x N 대비 극적으로 빠름)
+  sheet.getRange(lastRow + 1, 1, rows.length, 11).setValues(rows);
 }
 
 // ─── 씬 삭제 ─────────────────────────────────────────────────

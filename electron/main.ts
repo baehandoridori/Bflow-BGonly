@@ -32,6 +32,7 @@ import {
   addUserToSheets,
   updateUserInSheets,
   deleteUserFromSheets,
+  addScenes,
 } from './sheets';
 import type { SheetUser } from './sheets';
 import type { BatchAction } from './sheets';
@@ -580,6 +581,20 @@ ipcMain.handle('sheets:archive-episode-via-registry', async (
 ipcMain.handle('sheets:unarchive-episode-via-registry', async (_event, episodeNumber: number) => {
   try {
     await unarchiveEpisodeViaRegistry(episodeNumber);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: 대량 씬 추가 (Phase 0-5) ────────────────────
+
+ipcMain.handle('sheets:add-scenes', async (
+  _event, sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]
+) => {
+  try {
+    await addScenes(sheetName, scenes);
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

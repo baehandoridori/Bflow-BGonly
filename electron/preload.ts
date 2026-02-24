@@ -83,6 +83,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
     ipcRenderer.invoke('sheets:batch', actions),
 
+  // 대량 씬 추가 (Phase 0-5)
+  sheetsAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) =>
+    ipcRenderer.invoke('sheets:add-scenes', sheetName, scenes),
+
   // _USERS (Phase 0-4: 사용자 동기화)
   sheetsReadUsers: () =>
     ipcRenderer.invoke('sheets:read-users'),
