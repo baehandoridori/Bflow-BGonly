@@ -207,22 +207,22 @@ function getWidgetComponent(id: string): React.ReactNode | undefined {
 
 /* ── 부서별 레이아웃 (24칸 그리드, rowHeight=16px) ── */
 const DEPT_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 4 },
-  { i: 'stage-bars', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 4 },
-  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 4 },
-  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 4 },
-  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 4 },
-  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 4 },
+  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'stage-bars', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 2 },
+  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
+  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
 ];
 
 /* ── 통합 레이아웃 (24칸 그리드, rowHeight=16px) ── */
 const ALL_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 4 },
-  { i: 'dept-comparison', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 4 },
-  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 4 },
-  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 4 },
-  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 4 },
-  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 4 },
+  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'dept-comparison', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 2 },
+  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
+  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
 ];
 
 /* ── 위젯 추가 팝오버 ── */
@@ -410,7 +410,7 @@ export function Dashboard() {
     const actualId = widgetId === 'calendar' ? `calendar-${Date.now()}` : widgetId;
     // 맨 아래에 추가
     const maxY = current.reduce((max, l) => Math.max(max, l.y + l.h), 0);
-    const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 8, h: 15, minW: 2, minH: 4 };
+    const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 8, h: 15, minW: 2, minH: 2 };
     const newLayout = [...current, newItem];
     if (isAll) {
       setAllWidgetLayout(newLayout);
