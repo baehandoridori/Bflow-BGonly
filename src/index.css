@@ -123,9 +123,12 @@ input[type="date"]::-webkit-inner-spin-button {
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
-/* 기본 리사이즈 핸들 숨김 (커스텀 Edge Glow 사용) */
+/* 리사이즈 핸들: 투명하지만 충분한 히트 영역 확보 (edge glow 감지 영역과 일치) */
 .react-grid-item > .react-resizable-handle {
   opacity: 0;
+  width: 16px;
+  height: 16px;
+  z-index: 10;
 }
 .react-grid-item > .react-resizable-handle::after {
   border-color: rgb(var(--color-accent)) !important;

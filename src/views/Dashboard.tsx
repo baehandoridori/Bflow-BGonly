@@ -275,17 +275,30 @@ function WidgetPicker({
   );
 }
 
-/* ── 8방향 리사이즈 히트 영역 정의 ── */
-const RESIZE_ZONES: { zone: ResizeZone; style: React.CSSProperties }[] = [
-  { zone: 'n', style: { top: 0, left: 16, right: 16, height: 10, cursor: 'n-resize' } },
-  { zone: 's', style: { bottom: 0, left: 16, right: 16, height: 10, cursor: 's-resize' } },
-  { zone: 'w', style: { left: 0, top: 16, bottom: 16, width: 10, cursor: 'w-resize' } },
-  { zone: 'e', style: { right: 0, top: 16, bottom: 16, width: 10, cursor: 'e-resize' } },
-  { zone: 'nw', style: { top: 0, left: 0, width: 16, height: 16, cursor: 'nw-resize' } },
-  { zone: 'ne', style: { top: 0, right: 0, width: 16, height: 16, cursor: 'ne-resize' } },
-  { zone: 'sw', style: { bottom: 0, left: 0, width: 16, height: 16, cursor: 'sw-resize' } },
-  { zone: 'se', style: { bottom: 0, right: 0, width: 16, height: 16, cursor: 'se-resize' } },
-];
+/* ── 커서 위치 기반 edge zone 감지 (onMouseMove용) ── */
+function detectEdgeZone(e: React.MouseEvent, el: HTMLElement): ResizeZone {
+  const rect = el.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const w = rect.width;
+  const h = rect.height;
+  const EDGE = 16;
+
+  const top = y < EDGE;
+  const bottom = y > h - EDGE;
+  const left = x < EDGE;
+  const right = x > w - EDGE;
+
+  if (top && left) return 'nw';
+  if (top && right) return 'ne';
+  if (bottom && left) return 'sw';
+  if (bottom && right) return 'se';
+  if (top) return 'n';
+  if (bottom) return 's';
+  if (left) return 'w';
+  if (right) return 'e';
+  return null;
+}
 
 /* ── 대시보드 메인 ── */
 export function Dashboard() {
@@ -543,6 +556,14 @@ export function Dashboard() {
                     isSettle && 'widget-settling',
                   )}
                   style={{ overflow: 'visible' }}
+                  onMouseMove={(e) => {
+                    if (isDrag || isActive) return;
+                    const zone = detectEdgeZone(e, e.currentTarget);
+                    setEdgeZones((p) => {
+                      if (p[item.i] === zone) return p;
+                      return { ...p, [item.i]: zone };
+                    });
+                  }}
                   onMouseLeave={() => setEdgeZones((p) => ({ ...p, [item.i]: null }))}
                 >
                   <WidgetIdContext.Provider value={item.i.startsWith('calendar-') ? 'calendar' : item.i}>
@@ -606,15 +627,6 @@ export function Dashboard() {
                     />
                   )}
 
-                  {/* 8방향 리사이즈 히트 영역 */}
-                  {!isDrag && !isActive && RESIZE_ZONES.map(({ zone: z, style }) => (
-                    <div
-                      key={z}
-                      style={{ position: 'absolute', ...style, zIndex: 20 }}
-                      onMouseEnter={() => setEdgeZones((p) => ({ ...p, [item.i]: z }))}
-                      onMouseLeave={() => setEdgeZones((p) => ({ ...p, [item.i]: null }))}
-                    />
-                  ))}
                 </div>
               );
             })}
