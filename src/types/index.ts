@@ -238,6 +238,15 @@ export interface ElectronAPI {
   sheetsReadArchived: () => Promise<{ ok: boolean; data: { episodeNumber: number; title: string; partCount: number }[]; error?: string }>;
   sheetsArchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   sheetsUnarchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
+  // 배치 요청 (Phase 0)
+  sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
+    Promise<{
+      ok: boolean;
+      results?: { ok: boolean; data?: unknown }[];
+      error?: string;
+      failedAt?: number;
+      failedAction?: string;
+    }>;
   // 데이터 변경 브로드캐스트
   sheetsNotifyChange?: () => Promise<{ ok: boolean }>;
   // 위젯 팝업 윈도우

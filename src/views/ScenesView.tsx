@@ -357,7 +357,10 @@ import {
   readMetadataFromSheets,
   softDeletePartInSheets,
   softDeleteEpisodeInSheets,
+  batchToSheets,
+  batchActions,
 } from '@/services/sheetsService';
+import type { BatchAction } from '@/services/sheetsService';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
@@ -1631,6 +1634,10 @@ export function ScenesView() {
     const epName = newEpName.trim();
     setAddEpOpen(false);
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevTitles = { ...episodeTitles };
+
     // 낙관적 업데이트
     addEpisodeOptimistic(nextEpisodeNumber, selectedDepartment);
     setSelectedEpisode(nextEpisodeNumber);
@@ -1639,16 +1646,19 @@ export function ScenesView() {
     if (epName) {
       const next = { ...episodeTitles, [nextEpisodeNumber]: epName };
       setEpisodeTitles(next);
-      // setEpisodeTitles는 이미 글로벌 스토어 setter
     }
 
     // 백그라운드에서 서버/파일에 저장
     try {
       if (sheetsConnected) {
-        await addEpisodeToSheets(nextEpisodeNumber, selectedDepartment);
+        // Phase 0: 배치로 한 번에 전송
+        const actions: BatchAction[] = [
+          batchActions.addEpisode(nextEpisodeNumber, selectedDepartment),
+        ];
         if (epName) {
-          await writeMetadataToSheets('episode-title', String(nextEpisodeNumber), epName);
+          actions.push(batchActions.writeMetadata('episode-title', String(nextEpisodeNumber), epName));
         }
+        await batchToSheets(actions);
         syncInBackground();
       } else {
         await addTestEpisode(useDataStore.getState().episodes, nextEpisodeNumber, selectedDepartment);
@@ -1657,6 +1667,9 @@ export function ScenesView() {
         }
       }
     } catch (err) {
+      // 롤백
+      setEpisodes(prevEpisodes);
+      setEpisodeTitles(prevTitles);
       const msg = String(err);
       if (msg.includes('Unknown action')) {
         alert(`에피소드 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
@@ -1891,12 +1904,15 @@ export function ScenesView() {
       at: new Date().toLocaleDateString('ko-KR'),
       memo,
     });
-    // 아카이빙 시 에피소드 제목도 반드시 METADATA에 저장 (복원 시 표시용)
     const epTitle = episodeTitles[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
 
     setArchiveDialogEpNum(null);
 
-    // ① 먼저 UI에서 즉시 제거 (낙관적 업데이트)
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevArchivedEpisodes = [...archivedEpisodes];
+
+    // ① 낙관적 업데이트
     deleteEpisodeOptimistic(epNum);
     setArchivedEpisodes((prev) => [
       ...prev,
@@ -1908,18 +1924,12 @@ export function ScenesView() {
 
     try {
       if (sheetsConnected) {
-        const { writeMetadataToSheets } = await import('@/services/sheetsService');
-        // ② METADATA 먼저 기록
-        await writeMetadataToSheets('episode-title', String(epNum), epTitle);
-        await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
-        // ③ 탭 리네임 (EP_ → AC_EP_) — 반드시 await 후에만 sync 가능
-        try {
-          const { archiveEpisodeInSheets } = await import('@/services/sheetsService');
-          await archiveEpisodeInSheets(epNum);
-        } catch (tabErr) {
-          console.warn('[아카이빙] 탭 리네임 실패 (Apps Script 재배포 필요):', tabErr);
-        }
-        // ④ 탭 리네임 완료 후에만 동기화 (리네임 전 sync하면 에피소드 부활)
+        // Phase 0: 배치로 한 번에 (제목 + 보관정보 + 탭 리네임)
+        await batchToSheets([
+          batchActions.writeMetadata('episode-title', String(epNum), epTitle),
+          batchActions.writeMetadata('archive-info', String(epNum), archiveInfo),
+          batchActions.archiveEpisode(epNum),
+        ]);
         syncInBackground();
       } else {
         await writeLocalMetadata('episode-title', String(epNum), epTitle);
@@ -1928,6 +1938,9 @@ export function ScenesView() {
       }
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
+      // 롤백: 활성 목록 + 아카이브 목록 모두 원복
+      setEpisodes(prevEpisodes);
+      setArchivedEpisodes(prevArchivedEpisodes);
       alert(`아카이빙 실패: ${err}`);
       syncInBackground();
     }
@@ -2591,6 +2604,10 @@ export function ScenesView() {
                   .map((id) => allScenes.findIndex((s) => s.sceneId === id))
                   .filter((i) => i >= 0)
                   .sort((a, b) => b - a);
+
+                // 롤백용 스냅샷
+                const prevEpisodes = useDataStore.getState().episodes;
+
                 indices.forEach((idx) => {
                   if (currentPart) {
                     deleteSceneOptimistic(currentPart.sheetName, idx);
@@ -2600,16 +2617,21 @@ export function ScenesView() {
                 // 백그라운드 싱크
                 (async () => {
                   try {
-                    for (const idx of indices) {
-                      if (sheetsConnected) {
-                        await deleteSceneFromSheets(currentPart!.sheetName, idx);
-                      } else {
+                    if (sheetsConnected) {
+                      // Phase 0: 배치로 한 번에
+                      await batchToSheets(
+                        indices.map((idx) => batchActions.deleteScene(currentPart!.sheetName, idx))
+                      );
+                    } else {
+                      for (const idx of indices) {
                         await deleteTestScene(useDataStore.getState().episodes, currentPart!.sheetName, idx);
                       }
                     }
                     syncInBackground();
                   } catch (err) {
                     console.error('[일괄 삭제 실패]', err);
+                    // 롤백
+                    useDataStore.getState().setEpisodes(prevEpisodes);
                     syncInBackground();
                   }
                 })();
@@ -2670,30 +2692,44 @@ export function ScenesView() {
                   }
 
                   const allScenes = currentPart?.scenes ?? [];
+                  const batchActionList: BatchAction[] = [];
+
+                  // 낙관적 업데이트 + 배치 액션 수집
                   selectedSceneIds.forEach((id) => {
                     const idx = allScenes.findIndex((s) => s.sceneId === id);
                     if (idx < 0 || !currentPart) return;
                     if (assignee) {
                       updateSceneFieldOptimistic(currentPart.sheetName, idx, 'assignee', assignee);
                       if (sheetsConnected) {
-                        updateSceneFieldInSheets(currentPart.sheetName, idx, 'assignee', assignee).catch(() => {});
+                        batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'assignee', assignee));
                       }
                     }
                     if (memo) {
                       updateSceneFieldOptimistic(currentPart.sheetName, idx, 'memo', memo);
                       if (sheetsConnected) {
-                        updateSceneFieldInSheets(currentPart.sheetName, idx, 'memo', memo).catch(() => {});
+                        batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'memo', memo));
                       }
                     }
                     if (layoutId) {
                       updateSceneFieldOptimistic(currentPart.sheetName, idx, 'layoutId', layoutId);
                       if (sheetsConnected) {
-                        updateSceneFieldInSheets(currentPart.sheetName, idx, 'layoutId', layoutId).catch(() => {});
+                        batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'layoutId', layoutId));
                       }
                     }
                   });
+
                   setBatchEditOpen(false);
                   clearSelectedScenes();
+
+                  // Phase 0: 배치로 한 번에 전송
+                  if (batchActionList.length > 0) {
+                    batchToSheets(batchActionList)
+                      .then(() => syncInBackground())
+                      .catch((err) => {
+                        console.error('[일괄 편집 실패]', err);
+                        syncInBackground();
+                      });
+                  }
                 }}
               >
                 <div>

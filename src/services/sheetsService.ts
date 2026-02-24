@@ -52,6 +52,66 @@ export async function readAllFromSheets(): Promise<Episode[]> {
   return result.data ?? [];
 }
 
+// ─── Batch 요청 (Phase 0: 여러 작업을 한 번에) ──────────────
+
+export interface BatchAction {
+  action: string;
+  params: Record<string, string>;
+}
+
+export interface BatchResult {
+  ok: boolean;
+  results?: { ok: boolean; data?: unknown }[];
+  error?: string;
+  failedAt?: number;
+}
+
+export async function batchToSheets(actions: BatchAction[]): Promise<BatchResult> {
+  const result = await window.electronAPI.sheetsBatch(actions);
+  if (!result.ok) {
+    throw new Error(result.error ?? '배치 요청 실패');
+  }
+  return result;
+}
+
+/** 배치 액션 빌더 — 타입 안전한 배치 작업 생성 */
+export const batchActions = {
+  addEpisode: (episodeNumber: number, department: Department = 'bg'): BatchAction => ({
+    action: 'addEpisode',
+    params: { episodeNumber: String(episodeNumber), department },
+  }),
+
+  addPart: (episodeNumber: number, partId: string, department: Department = 'bg'): BatchAction => ({
+    action: 'addPart',
+    params: { episodeNumber: String(episodeNumber), partId, department },
+  }),
+
+  writeMetadata: (type: string, key: string, value: string): BatchAction => ({
+    action: 'writeMetadata',
+    params: { type, key, value },
+  }),
+
+  archiveEpisode: (episodeNumber: number): BatchAction => ({
+    action: 'archiveEpisode',
+    params: { episodeNumber: String(episodeNumber) },
+  }),
+
+  deleteScene: (sheetName: string, rowIndex: number): BatchAction => ({
+    action: 'deleteScene',
+    params: { sheetName, rowIndex: String(rowIndex) },
+  }),
+
+  updateSceneField: (sheetName: string, rowIndex: number, field: string, value: string): BatchAction => ({
+    action: 'updateSceneField',
+    params: { sheetName, rowIndex: String(rowIndex), field, value },
+  }),
+
+  softDeleteEpisode: (episodeNumber: number): BatchAction => ({
+    action: 'softDeleteEpisode',
+    params: { episodeNumber: String(episodeNumber) },
+  }),
+};
+
 // ─── 셀 업데이트 (체크박스 토글) ──────────────
 
 export async function updateSheetCell(

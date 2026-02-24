@@ -55,6 +55,79 @@ async function gasFetch(
   throw new Error('리다이렉트 횟수 초과');
 }
 
+// ─── 재시도 래퍼 (Phase 0: 자동 재시도) ────────────────────────
+
+const MAX_RETRIES = 2;
+const RETRY_DELAYS = [1000, 3000]; // 1초, 3초
+
+function isRetryable(status: number): boolean {
+  return status >= 500 || status === 429;
+}
+
+async function gasFetchWithRetry(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await gasFetch(url, options);
+
+      if (!res.ok && isRetryable(res.status) && attempt < MAX_RETRIES) {
+        console.warn(
+          `[Sheets] HTTP ${res.status}, 재시도 ${attempt + 1}/${MAX_RETRIES} (${RETRY_DELAYS[attempt]}ms 후)`
+        );
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+
+      return res;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `[Sheets] 네트워크 오류, 재시도 ${attempt + 1}/${MAX_RETRIES} (${RETRY_DELAYS[attempt]}ms 후):`,
+          lastError.message
+        );
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+    }
+  }
+
+  throw lastError ?? new Error('요청 실패 (재시도 소진)');
+}
+
+// ─── Batch POST 호출 (Phase 0) ─────────────────────────────
+
+export async function gasBatch(actions: BatchAction[]): Promise<BatchResponse> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  if (actions.length === 0) return { ok: true, results: [] };
+
+  const res = await gasFetchWithRetry(webAppUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'batch',
+      actions,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json() as BatchResponse;
+  if (!json.ok) {
+    const detail = json.failedAction
+      ? ` (action #${json.failedAt}: ${json.failedAction})`
+      : '';
+    throw new Error((json.error ?? '배치 요청 실패') + detail);
+  }
+
+  return json;
+}
+
 // ─── 연결 ─────────────────────────────────────────────────────
 
 export async function initSheets(url: string): Promise<boolean> {
@@ -88,6 +161,27 @@ export function isConnected(): boolean {
 // ─── 데이터 타입 ──────────────────────────────────────────────
 
 export type Department = 'bg' | 'acting';
+
+// ─── Batch 요청 타입 (Phase 0) ──────────────────────────────
+
+export interface BatchAction {
+  action: string;
+  params: Record<string, string>;
+}
+
+export interface BatchResultItem {
+  ok: boolean;
+  data?: unknown;
+}
+
+export interface BatchResponse {
+  ok: boolean;
+  results?: BatchResultItem[];
+  error?: string;
+  failedAt?: number;
+  failedAction?: string;
+  completedResults?: BatchResultItem[];
+}
 
 export interface EpisodeData {
   episodeNumber: number;
@@ -153,7 +247,7 @@ function parseDepartmentFromSheetName(sheetName: string): Department {
 export async function readAllEpisodes(): Promise<EpisodeData[]> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
 
-  const res = await gasFetch(`${webAppUrl}?action=readAll`);
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readAll`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json();
@@ -191,7 +285,7 @@ async function gasGet(params: Record<string, string>): Promise<void> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
 
   const qs = new URLSearchParams(params);
-  const res = await gasFetch(`${webAppUrl}?${qs}`);
+  const res = await gasFetchWithRetry(`${webAppUrl}?${qs}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json() as { ok: boolean; error?: string };
@@ -255,7 +349,7 @@ export async function readMetadata(type: string, key: string): Promise<{ type: s
   if (!webAppUrl) throw new Error('Sheets 미연결');
 
   const qs = new URLSearchParams({ action: 'readMetadata', type, key });
-  const res = await gasFetch(`${webAppUrl}?${qs}`);
+  const res = await gasFetchWithRetry(`${webAppUrl}?${qs}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json() as { ok: boolean; data?: any; error?: string };
@@ -287,7 +381,7 @@ export async function unarchiveEpisode(episodeNumber: number): Promise<void> {
 
 export async function readArchivedEpisodes(): Promise<{ episodeNumber: number; title: string; partCount: number }[]> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
-  const res = await gasFetch(`${webAppUrl}?action=readArchived`);
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readArchived`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json() as { ok: boolean; data?: any; error?: string };
   if (!json.ok) throw new Error(json.error ?? '아카이빙 목록 읽기 실패');
@@ -312,7 +406,7 @@ export async function uploadImage(
   const rawBase64 = match[2];
 
   // POST로 이미지 데이터 전송 (URL 길이 제한 회피)
-  const res = await gasFetch(webAppUrl, {
+  const res = await gasFetchWithRetry(webAppUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

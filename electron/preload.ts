@@ -79,6 +79,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsUnarchiveEpisode: (episodeNumber: number) =>
     ipcRenderer.invoke('sheets:unarchive-episode', episodeNumber),
 
+  // 배치 요청 (Phase 0: 여러 작업을 한 번에)
+  sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
+    ipcRenderer.invoke('sheets:batch', actions),
+
   // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
   sheetsNotifyChange: () => ipcRenderer.invoke('sheets:notify-change'),
 

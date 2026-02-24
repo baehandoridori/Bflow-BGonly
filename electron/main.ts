@@ -20,7 +20,9 @@ import {
   archiveEpisode,
   unarchiveEpisode,
   readArchivedEpisodes,
+  gasBatch,
 } from './sheets';
+import type { BatchAction } from './sheets';
 
 // 앱 이름 설정 — AppData 경로에 영향
 app.name = 'Bflow-BGonly';
@@ -521,6 +523,18 @@ ipcMain.handle('sheets:unarchive-episode', async (_event, episodeNumber: number)
   try {
     await unarchiveEpisode(episodeNumber);
     return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: 배치 요청 (Phase 0) ────────────────────────
+
+ipcMain.handle('sheets:batch', async (_event, actions: BatchAction[]) => {
+  try {
+    const result = await gasBatch(actions);
+    return result;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg };

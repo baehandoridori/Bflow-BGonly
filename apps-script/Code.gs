@@ -61,100 +61,113 @@ var FIELD_COLUMNS = {
   guideUrl: 5, assignee: 6, lo: 7, done: 8, review: 9, png: 10, layoutId: 11
 };
 
+// ─── 통합 액션 디스패처 (Phase 0: 배치 + 개별 요청 공용) ────
+
+/**
+ * 단일 액션을 실행하고 결과를 반환한다.
+ * doGet (개별 요청)과 doPost batch (배치 요청) 모두에서 호출된다.
+ *
+ * @param {string} action  액션 이름
+ * @param {Object} params  파라미터 (모든 값은 문자열, URL 파라미터와 동일 형태)
+ * @return {*} 액션 결과 (데이터가 없으면 null)
+ */
+function executeAction(action, params) {
+  switch (action) {
+    case 'ping':
+      return { pong: true };
+
+    case 'readAll':
+      return readAllEpisodes();
+
+    case 'readArchived':
+      return readArchivedEpisodes();
+
+    case 'updateCell':
+      updateSceneStage(
+        params.sheetName,
+        parseInt(params.rowIndex, 10),
+        params.stage,
+        params.value === 'true' || params.value === true
+      );
+      return null;
+
+    case 'addEpisode':
+      return addEpisode(
+        parseInt(params.episodeNumber, 10),
+        params.department || 'bg'
+      );
+
+    case 'addPart':
+      return addPart(
+        parseInt(params.episodeNumber, 10),
+        params.partId,
+        params.department || 'bg'
+      );
+
+    case 'addScene':
+      addScene(
+        params.sheetName,
+        params.sceneId || '',
+        params.assignee || '',
+        params.memo || ''
+      );
+      return null;
+
+    case 'deleteScene':
+      deleteScene(params.sheetName, parseInt(params.rowIndex, 10));
+      return null;
+
+    case 'updateSceneField':
+      updateSceneField(
+        params.sheetName,
+        parseInt(params.rowIndex, 10),
+        params.field,
+        params.value
+      );
+      return null;
+
+    case 'readMetadata':
+      return readMetadata(params.type, params.key);
+
+    case 'writeMetadata':
+      writeMetadata(params.type, params.key, params.value || '');
+      return null;
+
+    case 'softDeletePart':
+      softDeletePart(params.sheetName);
+      return null;
+
+    case 'softDeleteEpisode':
+      softDeleteEpisode(parseInt(params.episodeNumber, 10));
+      return null;
+
+    case 'archiveEpisode':
+      archiveEpisode(parseInt(params.episodeNumber, 10));
+      return null;
+
+    case 'unarchiveEpisode':
+      unarchiveEpisode(parseInt(params.episodeNumber, 10));
+      return null;
+
+    case 'debugImages':
+      return debugImageCells();
+
+    default:
+      throw new Error('Unknown action: ' + action);
+  }
+}
+
 // ─── 요청 핸들러 ─────────────────────────────────────────────
 
 function doGet(e) {
   var action = (e && e.parameter && e.parameter.action) || 'readAll';
 
   try {
-    switch (action) {
-      case 'ping':
-        return jsonResponse({ ok: true });
-
-      case 'readAll':
-        return jsonResponse({ ok: true, data: readAllEpisodes() });
-
-      case 'readArchived':
-        return jsonResponse({ ok: true, data: readArchivedEpisodes() });
-
-      case 'updateCell':
-        updateSceneStage(
-          e.parameter.sheetName,
-          parseInt(e.parameter.rowIndex, 10),
-          e.parameter.stage,
-          e.parameter.value === 'true'
-        );
-        return jsonResponse({ ok: true });
-
-      case 'addEpisode':
-        var result = addEpisode(
-          parseInt(e.parameter.episodeNumber, 10),
-          e.parameter.department || 'bg'
-        );
-        return jsonResponse({ ok: true, data: result });
-
-      case 'addPart':
-        var result2 = addPart(
-          parseInt(e.parameter.episodeNumber, 10),
-          e.parameter.partId,
-          e.parameter.department || 'bg'
-        );
-        return jsonResponse({ ok: true, data: result2 });
-
-      case 'addScene':
-        addScene(
-          e.parameter.sheetName,
-          e.parameter.sceneId || '',
-          e.parameter.assignee || '',
-          e.parameter.memo || ''
-        );
-        return jsonResponse({ ok: true });
-
-      case 'deleteScene':
-        deleteScene(
-          e.parameter.sheetName,
-          parseInt(e.parameter.rowIndex, 10)
-        );
-        return jsonResponse({ ok: true });
-
-      case 'updateSceneField':
-        updateSceneField(
-          e.parameter.sheetName,
-          parseInt(e.parameter.rowIndex, 10),
-          e.parameter.field,
-          e.parameter.value
-        );
-        return jsonResponse({ ok: true });
-
-      case 'readMetadata':
-        return jsonResponse({ ok: true, data: readMetadata(e.parameter.type, e.parameter.key) });
-
-      case 'writeMetadata':
-        writeMetadata(e.parameter.type, e.parameter.key, e.parameter.value || '');
-        return jsonResponse({ ok: true });
-
-      case 'softDeletePart':
-        softDeletePart(e.parameter.sheetName);
-        return jsonResponse({ ok: true });
-
-      case 'softDeleteEpisode':
-        softDeleteEpisode(parseInt(e.parameter.episodeNumber, 10));
-        return jsonResponse({ ok: true });
-
-      case 'archiveEpisode':
-        archiveEpisode(parseInt(e.parameter.episodeNumber, 10));
-        return jsonResponse({ ok: true });
-
-      case 'unarchiveEpisode':
-        unarchiveEpisode(parseInt(e.parameter.episodeNumber, 10));
-        return jsonResponse({ ok: true });
-
-      case 'debugImages':
-        return jsonResponse({ ok: true, data: debugImageCells() });
-
-      default:
-        return jsonResponse({ ok: false, error: 'Unknown action: ' + action });
+    var result = executeAction(action, e.parameter || {});
+    if (result === null || result === undefined) {
+      return jsonResponse({ ok: true });
     }
+    return jsonResponse({ ok: true, data: result });
   } catch (err) {
     return jsonResponse({ ok: false, error: err.toString() });
   }
@@ -166,6 +179,38 @@ function doPost(e) {
     var action = body.action;
 
     switch (action) {
+      // ─── 배치 요청 (Phase 0) ────────────────────────
+      case 'batch': {
+        if (!body.actions || !Array.isArray(body.actions)) {
+          return jsonResponse({ ok: false, error: 'batch requires actions array' });
+        }
+        if (body.actions.length === 0) {
+          return jsonResponse({ ok: true, results: [] });
+        }
+        if (body.actions.length > 20) {
+          return jsonResponse({ ok: false, error: 'batch max 20 actions' });
+        }
+
+        var results = [];
+        for (var i = 0; i < body.actions.length; i++) {
+          var op = body.actions[i];
+          try {
+            var batchResult = executeAction(op.action, op.params || {});
+            results.push({ ok: true, data: batchResult });
+          } catch (err) {
+            // 실패 즉시 중단 (fail-fast)
+            return jsonResponse({
+              ok: false,
+              error: err.toString(),
+              failedAt: i,
+              failedAction: op.action,
+              completedResults: results
+            });
+          }
+        }
+        return jsonResponse({ ok: true, results: results });
+      }
+
       case 'updateCell':
         updateSceneStage(body.sheetName, body.rowIndex, body.stage, body.value);
         return jsonResponse({ ok: true });
