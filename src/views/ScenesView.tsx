@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { loadAllComments } from '@/services/commentService';
+import { loadAllComments, setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 
 /* ── 라쏘 드래그 선택 훅 ── */
 interface LassoRect { x: number; y: number; w: number; h: number }
@@ -1309,17 +1309,15 @@ export function ScenesView() {
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
 
+  // 댓글 모드 설정 (시트 연결 여부에 따라)
+  useEffect(() => {
+    setCommentsSheetsMode(sheetsConnected);
+    return () => { invalidatePartCache(); };
+  }, [sheetsConnected]);
+
   // 전체 댓글 카운트 로드
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
-  useEffect(() => {
-    loadAllComments().then((all) => {
-      const counts: Record<string, number> = {};
-      for (const [key, list] of Object.entries(all)) {
-        if (list.length > 0) counts[key] = list.length;
-      }
-      setCommentCounts(counts);
-    });
-  }, [detailSceneIndex]); // 상세 모달 닫을 때 갱신
+  // 댓글 카운트 로딩은 currentPart 정의 후 아래에서 수행 (useEffect)
 
   // 라쏘 드래그 선택
   const gridRef = useRef<HTMLDivElement>(null);
@@ -1371,6 +1369,31 @@ export function ScenesView() {
   const currentPart = parts.length > 0
     ? (parts.find((p) => p.partId === selectedPart) ?? parts[0])
     : undefined;
+
+  // 댓글 카운트 로드 (currentPart 정의 후)
+  useEffect(() => {
+    if (sheetsConnected && currentPart) {
+      // 시트 모드: 현재 파트의 댓글만 지연 로딩
+      loadPartComments(currentPart.sheetName).then((store) => {
+        setCommentCounts((prev) => {
+          const next = { ...prev };
+          for (const [key, list] of Object.entries(store)) {
+            next[key] = list.length;
+          }
+          return next;
+        });
+      }).catch(() => {});
+    } else if (!sheetsConnected) {
+      // 로컬 모드: 전체 댓글 로드
+      loadAllComments().then((all) => {
+        const counts: Record<string, number> = {};
+        for (const [key, list] of Object.entries(all)) {
+          if (list.length > 0) counts[key] = list.length;
+        }
+        setCommentCounts(counts);
+      });
+    }
+  }, [detailSceneIndex, sheetsConnected, currentPart?.sheetName]);
 
   // 파트 메모 로드 (시트 연결 시 → sheets, 미연결 시 → 로컬)
   useEffect(() => {

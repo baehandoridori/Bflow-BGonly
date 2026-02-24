@@ -262,6 +262,11 @@ export interface ElectronAPI {
       failedAt?: number;
       failedAction?: string;
     }>;
+  // _COMMENTS (Phase 0-3)
+  sheetsReadComments: (sheetName: string) => Promise<{ ok: boolean; data: { commentId: string; sheetName: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string }[]; error?: string }>;
+  sheetsAddComment: (commentId: string, sheetName: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<SheetsUpdateResult>;
+  sheetsEditComment: (commentId: string, text: string, mentions: string[]) => Promise<SheetsUpdateResult>;
+  sheetsDeleteComment: (commentId: string) => Promise<SheetsUpdateResult>;
   // _REGISTRY (Phase 0-2)
   sheetsReadRegistry: () => Promise<{ ok: boolean; data: RegistryEntry[]; error?: string }>;
   sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<SheetsUpdateResult>;

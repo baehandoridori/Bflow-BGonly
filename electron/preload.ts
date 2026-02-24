@@ -83,6 +83,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
     ipcRenderer.invoke('sheets:batch', actions),
 
+  // _COMMENTS (Phase 0-3: 댓글 동기화)
+  sheetsReadComments: (sheetName: string) =>
+    ipcRenderer.invoke('sheets:read-comments', sheetName),
+  sheetsAddComment: (commentId: string, sheetName: string, sceneId: string,
+    userId: string, userName: string, text: string, mentions: string[], createdAt: string) =>
+    ipcRenderer.invoke('sheets:add-comment', commentId, sheetName, sceneId, userId, userName, text, mentions, createdAt),
+  sheetsEditComment: (commentId: string, text: string, mentions: string[]) =>
+    ipcRenderer.invoke('sheets:edit-comment', commentId, text, mentions),
+  sheetsDeleteComment: (commentId: string) =>
+    ipcRenderer.invoke('sheets:delete-comment', commentId),
+
   // _REGISTRY (Phase 0-2: 에피소드/파트 중앙 관리)
   sheetsReadRegistry: () =>
     ipcRenderer.invoke('sheets:read-registry'),

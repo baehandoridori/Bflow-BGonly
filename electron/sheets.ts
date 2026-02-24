@@ -430,6 +430,52 @@ export async function unarchiveEpisodeViaRegistry(episodeNumber: number): Promis
   });
 }
 
+// ─── _COMMENTS (Phase 0-3) ────────────────────────────────────
+
+export interface SheetComment {
+  commentId: string;
+  sheetName: string;
+  sceneId: string;
+  userId: string;
+  userName: string;
+  text: string;
+  mentions: string[];
+  createdAt: string;
+  editedAt: string;
+}
+
+export async function readCommentsForPart(sheetName: string): Promise<SheetComment[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readComments&sheetName=${encodeURIComponent(sheetName)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; data?: SheetComment[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '댓글 읽기 실패');
+  return json.data ?? [];
+}
+
+export async function addCommentToSheets(
+  commentId: string, sheetName: string, sceneId: string,
+  userId: string, userName: string, text: string,
+  mentions: string[], createdAt: string
+): Promise<void> {
+  await gasGet({
+    action: 'addComment', commentId, sheetName, sceneId,
+    userId, userName, text, mentions: mentions.join(','), createdAt,
+  });
+}
+
+export async function editCommentInSheets(
+  commentId: string, text: string, mentions: string[]
+): Promise<void> {
+  await gasGet({
+    action: 'editComment', commentId, text, mentions: mentions.join(','),
+  });
+}
+
+export async function deleteCommentFromSheets(commentId: string): Promise<void> {
+  await gasGet({ action: 'deleteComment', commentId });
+}
+
 // ─── 이미지 업로드 (Drive에 저장 → URL 반환) ──────────────────
 
 export async function uploadImage(

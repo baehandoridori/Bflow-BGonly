@@ -24,6 +24,10 @@ import {
   readRegistry,
   archiveEpisodeViaRegistry,
   unarchiveEpisodeViaRegistry,
+  readCommentsForPart,
+  addCommentToSheets,
+  editCommentInSheets,
+  deleteCommentFromSheets,
 } from './sheets';
 import type { BatchAction } from './sheets';
 
@@ -571,6 +575,53 @@ ipcMain.handle('sheets:archive-episode-via-registry', async (
 ipcMain.handle('sheets:unarchive-episode-via-registry', async (_event, episodeNumber: number) => {
   try {
     await unarchiveEpisodeViaRegistry(episodeNumber);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: _COMMENTS (Phase 0-3) ───────────────────────
+
+ipcMain.handle('sheets:read-comments', async (_event, sheetName: string) => {
+  try {
+    const data = await readCommentsForPart(sheetName);
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('sheets:add-comment', async (
+  _event, commentId: string, sheetName: string, sceneId: string,
+  userId: string, userName: string, text: string, mentions: string[], createdAt: string
+) => {
+  try {
+    await addCommentToSheets(commentId, sheetName, sceneId, userId, userName, text, mentions, createdAt);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:edit-comment', async (
+  _event, commentId: string, text: string, mentions: string[]
+) => {
+  try {
+    await editCommentInSheets(commentId, text, mentions);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:delete-comment', async (_event, commentId: string) => {
+  try {
+    await deleteCommentFromSheets(commentId);
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

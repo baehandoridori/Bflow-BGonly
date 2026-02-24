@@ -178,6 +178,30 @@ function executeAction(action, params) {
       unarchiveEpisodeViaRegistry(parseInt(params.episodeNumber, 10));
       return null;
 
+    // Phase 0-3: _COMMENTS 관련 액션
+    case 'readComments':
+      return readComments(params.sheetName);
+
+    case 'addComment':
+      addCommentToSheet(
+        params.commentId, params.sheetName, params.sceneId,
+        params.userId, params.userName, params.text,
+        params.mentions ? params.mentions.split(',') : [],
+        params.createdAt
+      );
+      return null;
+
+    case 'editComment':
+      editCommentInSheet(
+        params.commentId, params.text,
+        params.mentions ? params.mentions.split(',') : []
+      );
+      return null;
+
+    case 'deleteComment':
+      deleteCommentFromSheet(params.commentId);
+      return null;
+
     default:
       throw new Error('Unknown action: ' + action);
   }
@@ -1323,6 +1347,108 @@ function unarchiveEpisodeViaRegistry(episodeNumber) {
       sheet.getRange(row, 8).setValue('');
       sheet.getRange(row, 9).setValue('');
       sheet.getRange(row, 10).setValue(isoNow);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Phase 0-3: _COMMENTS 탭 — 댓글 동기화
+// ═══════════════════════════════════════════════════════════════
+
+var COMMENTS_SHEET_NAME = '_COMMENTS';
+var COMMENTS_HEADERS = ['commentId', 'sheetName', 'sceneId', 'userId', 'userName', 'text', 'mentions', 'createdAt', 'editedAt'];
+
+/**
+ * _COMMENTS 시트를 가져온다 (없으면 생성).
+ */
+function ensureCommentsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(COMMENTS_SHEET_NAME);
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet(COMMENTS_SHEET_NAME);
+  sheet.getRange(1, 1, 1, COMMENTS_HEADERS.length).setValues([COMMENTS_HEADERS]);
+  sheet.getRange(1, 1, 1, COMMENTS_HEADERS.length).setFontWeight('bold').setBackground('#E3F2FD');
+  return sheet;
+}
+
+/**
+ * 특정 파트(sheetName)의 댓글을 읽는다 — 파트별 지연 로딩용.
+ * @param {string} sheetName  시트 이름 (예: EP01_A_BG)
+ * @return {Array<Object>} 댓글 배열
+ */
+function readComments(sheetName) {
+  var sheet = ensureCommentsSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, COMMENTS_HEADERS.length).getValues();
+  var result = [];
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][1]) === sheetName) {
+      result.push({
+        commentId: String(data[i][0]),
+        sheetName: String(data[i][1]),
+        sceneId: String(data[i][2]),
+        userId: String(data[i][3]),
+        userName: String(data[i][4]),
+        text: String(data[i][5]),
+        mentions: String(data[i][6]) ? String(data[i][6]).split(',') : [],
+        createdAt: String(data[i][7]),
+        editedAt: String(data[i][8]) || ''
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * 댓글을 추가한다.
+ */
+function addCommentToSheet(commentId, sheetName, sceneId, userId, userName, text, mentions, createdAt) {
+  var sheet = ensureCommentsSheet();
+  sheet.appendRow([
+    commentId, sheetName, sceneId, userId, userName, text,
+    (mentions || []).join(','),
+    createdAt || new Date().toISOString(),
+    ''
+  ]);
+}
+
+/**
+ * 댓글을 수정한다.
+ */
+function editCommentInSheet(commentId, text, mentions) {
+  var sheet = ensureCommentsSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('댓글을 찾을 수 없습니다');
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === commentId) {
+      var row = i + 2;
+      sheet.getRange(row, 6).setValue(text);
+      sheet.getRange(row, 7).setValue((mentions || []).join(','));
+      sheet.getRange(row, 9).setValue(new Date().toISOString());
+      return;
+    }
+  }
+  throw new Error('댓글을 찾을 수 없습니다: ' + commentId);
+}
+
+/**
+ * 댓글을 삭제한다.
+ */
+function deleteCommentFromSheet(commentId) {
+  var sheet = ensureCommentsSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = data.length - 1; i >= 0; i--) {
+    if (String(data[i][0]) === commentId) {
+      sheet.deleteRow(i + 2);
+      return;
     }
   }
 }
