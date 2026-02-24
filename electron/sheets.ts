@@ -162,17 +162,24 @@ export async function readAllEpisodes(): Promise<EpisodeData[]> {
   const episodes: EpisodeData[] = json.data ?? [];
 
   // 후처리: department 기본값 + 이미지 URL 검증
+  const deptSummary: Record<string, number> = {};
   for (const ep of episodes) {
     for (const part of ep.parts) {
       // GAS에서 department를 내려주지 않는 레거시 대응 → 'bg' 기본
       if (!part.department) {
         part.department = parseDepartmentFromSheetName(part.sheetName);
       }
+      deptSummary[part.department] = (deptSummary[part.department] || 0) + 1;
       for (const scene of part.scenes) {
         scene.storyboardUrl = sanitizeImageUrl(scene.storyboardUrl);
         scene.guideUrl = sanitizeImageUrl(scene.guideUrl);
       }
     }
+  }
+
+  console.log(`[Sheets] 부서별 파트 수: ${JSON.stringify(deptSummary)} — 총 ${episodes.length}개 에피소드`);
+  if (!deptSummary['acting']) {
+    console.warn('[Sheets] ⚠️ 액팅 파트가 없습니다. Google Sheet에 _ACT 탭이 있는지, GAS를 새로 배포했는지 확인하세요.');
   }
 
   return episodes;
@@ -240,6 +247,51 @@ export async function updateSceneField(
   sheetName: string, rowIndex: number, field: string, value: string
 ): Promise<void> {
   await gasGet({ action: 'updateSceneField', sheetName, rowIndex: String(rowIndex), field, value });
+}
+
+// ─── 메타데이터 CRUD ─────────────────────────────────────────
+
+export async function readMetadata(type: string, key: string): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+
+  const qs = new URLSearchParams({ action: 'readMetadata', type, key });
+  const res = await gasFetch(`${webAppUrl}?${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json() as { ok: boolean; data?: any; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '메타데이터 읽기 실패');
+  return json.data ?? null;
+}
+
+export async function writeMetadata(type: string, key: string, value: string): Promise<void> {
+  await gasGet({ action: 'writeMetadata', type, key, value });
+}
+
+export async function softDeletePart(sheetName: string): Promise<void> {
+  await gasGet({ action: 'softDeletePart', sheetName });
+}
+
+export async function softDeleteEpisode(episodeNumber: number): Promise<void> {
+  await gasGet({ action: 'softDeleteEpisode', episodeNumber: String(episodeNumber) });
+}
+
+// ─── 아카이빙 ────────────────────────────────────────────────
+
+export async function archiveEpisode(episodeNumber: number): Promise<void> {
+  await gasGet({ action: 'archiveEpisode', episodeNumber: String(episodeNumber) });
+}
+
+export async function unarchiveEpisode(episodeNumber: number): Promise<void> {
+  await gasGet({ action: 'unarchiveEpisode', episodeNumber: String(episodeNumber) });
+}
+
+export async function readArchivedEpisodes(): Promise<{ episodeNumber: number; title: string; partCount: number }[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  const res = await gasFetch(`${webAppUrl}?action=readArchived`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; data?: any; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '아카이빙 목록 읽기 실패');
+  return json.data ?? [];
 }
 
 // ─── 이미지 업로드 (Drive에 저장 → URL 반환) ──────────────────

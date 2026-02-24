@@ -8,6 +8,7 @@ import { DEPARTMENT_CONFIGS, DEPARTMENTS } from '@/types';
 
 export function EpisodeSummaryWidget() {
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
   const isAll = dashboardFilter === 'all';
   const dept = isAll ? undefined : dashboardFilter;
@@ -50,7 +51,7 @@ export function EpisodeSummaryWidget() {
             <div key={ep.episodeNumber} className="bg-bg-primary rounded-lg p-3 border border-transparent hover:border-bg-border/50 hover:bg-bg-card transition-all duration-200 ease-out">
               {/* 에피소드 헤더 */}
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">{ep.title}</span>
+                <span className="text-sm font-medium">{episodeTitles[ep.episodeNumber] || ep.title}</span>
                 <span className="text-xs text-accent font-bold">
                   {ep.overallPct.toFixed(1)}%
                 </span>

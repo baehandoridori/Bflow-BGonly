@@ -133,7 +133,7 @@ export function OverallProgressWidget() {
         {/* 원형 차트 */}
         <div className="relative">
           <svg width={160} height={160}>
-            <circle cx={80} cy={80} r={radius} fill="none" stroke="#2D3041" strokeWidth={10} />
+            <circle cx={80} cy={80} r={radius} fill="none" stroke="rgb(var(--color-bg-border))" strokeWidth={10} />
             {segments.map((seg, i) => (
               <circle
                 key={i}
@@ -152,7 +152,7 @@ export function OverallProgressWidget() {
             ))}
           </svg>
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-3xl font-bold">{pct}%</span>
+            <span className="text-3xl font-bold text-text-primary">{pct}%</span>
           </div>
         </div>
 
@@ -178,7 +178,7 @@ export function OverallProgressWidget() {
                 &ldquo;{currentMsg.text}&rdquo;
               </p>
               {currentMsg.author && (
-                <p className="text-[10px] text-text-secondary/50 mt-0.5">
+                <p className="text-[10px] text-text-secondary/60 mt-0.5">
                   — {currentMsg.author}
                 </p>
               )}

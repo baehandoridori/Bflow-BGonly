@@ -17,15 +17,41 @@ async function getSheetPath(): Promise<string> {
   return sheetFilePath;
 }
 
-/** 레거시 데이터 마이그레이션: department 없는 Part에 'bg' 기본값 설정 */
+/** 레거시 데이터 마이그레이션: department 없는 Part에 'bg' 기본값 설정 + 액팅 파트 자동 생성 */
 function migrateEpisodes(episodes: Episode[]): Episode[] {
-  return episodes.map((ep) => ({
-    ...ep,
-    parts: ep.parts.map((part) => ({
+  return episodes.map((ep) => {
+    // 기존 파트에 department 기본값 설정
+    const migratedParts = ep.parts.map((part) => ({
       ...part,
       department: part.department || 'bg' as Department,
-    })),
-  }));
+    }));
+
+    // 액팅 파트가 하나도 없으면 BG 파트 기반으로 생성
+    const hasActing = migratedParts.some((p) => p.department === 'acting');
+    if (!hasActing) {
+      const bgParts = migratedParts.filter((p) => p.department === 'bg');
+      const actParts: Part[] = bgParts.map((bgPart) => {
+        const actSheetName = bgPart.sheetName.replace(/_BG$/, '_ACT')
+          .replace(/^(EP\d+_[A-Z])$/, '$1_ACT'); // 레거시 이름 대응
+        return {
+          partId: bgPart.partId,
+          department: 'acting' as Department,
+          sheetName: actSheetName,
+          scenes: bgPart.scenes.slice(0, Math.max(Math.floor(bgPart.scenes.length * 0.8), 1)).map((s, i) => ({
+            ...s,
+            sceneId: s.sceneId, // 동일 씬ID 유지
+            lo: Math.random() > 0.3,
+            done: Math.random() > 0.5,
+            review: Math.random() > 0.7,
+            png: Math.random() > 0.85,
+          })),
+        };
+      });
+      return { ...ep, parts: [...migratedParts, ...actParts] };
+    }
+
+    return { ...ep, parts: migratedParts };
+  });
 }
 
 /** 테스트 시트에서 전체 데이터 읽기 */
@@ -124,6 +150,31 @@ export async function addTestScene(
       return { ...part, scenes: [...part.scenes, newScene] };
     }),
   }));
+  await writeTestSheet(updated);
+  return updated;
+}
+
+/** 파트 삭제 (테스트) — 해당 sheetName의 파트를 제거하고 저장 */
+export async function deleteTestPart(
+  episodes: Episode[],
+  sheetName: string
+): Promise<Episode[]> {
+  const updated = episodes
+    .map((ep) => ({
+      ...ep,
+      parts: ep.parts.filter((p) => p.sheetName !== sheetName),
+    }))
+    .filter((ep) => ep.parts.length > 0);
+  await writeTestSheet(updated);
+  return updated;
+}
+
+/** 에피소드 삭제 (테스트) — 해당 에피소드를 제거하고 저장 */
+export async function deleteTestEpisode(
+  episodes: Episode[],
+  episodeNumber: number
+): Promise<Episode[]> {
+  const updated = episodes.filter((ep) => ep.episodeNumber !== episodeNumber);
   await writeTestSheet(updated);
   return updated;
 }
@@ -241,6 +292,49 @@ function makePart(epNum: number, partId: string, sceneCount: number, department:
     ),
   };
 }
+
+// ─── 로컬 메타데이터 (테스트 모드 + sheets fallback) ──────────
+
+const METADATA_FILE = 'metadata.json';
+
+interface MetadataStore {
+  [compositeKey: string]: { type: string; key: string; value: string; updatedAt: string };
+}
+
+async function loadMetadataStore(): Promise<MetadataStore> {
+  try {
+    const data = await window.electronAPI.readSettings(METADATA_FILE);
+    if (data && typeof data === 'object') return data as MetadataStore;
+  } catch { /* 파일 없음 — 빈 객체 */ }
+  return {};
+}
+
+async function saveMetadataStore(store: MetadataStore): Promise<void> {
+  try {
+    await window.electronAPI.writeSettings(METADATA_FILE, store);
+  } catch (err) {
+    console.error('[메타데이터] 로컬 저장 실패:', err);
+  }
+}
+
+/** 로컬 메타데이터 읽기 */
+export async function readLocalMetadata(
+  type: string, key: string
+): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
+  const store = await loadMetadataStore();
+  return store[`${type}::${key}`] ?? null;
+}
+
+/** 로컬 메타데이터 쓰기 */
+export async function writeLocalMetadata(
+  type: string, key: string, value: string
+): Promise<void> {
+  const store = await loadMetadataStore();
+  store[`${type}::${key}`] = { type, key, value, updatedAt: new Date().toISOString() };
+  await saveMetadataStore(store);
+}
+
+// ─── 샘플 데이터 생성기 ─────────────────────────────────
 
 function generateSampleData(): Episode[] {
   return [

@@ -39,10 +39,19 @@ export function DepartmentComparisonWidget() {
       setTooltip({
         ...info,
         x: e.clientX - rect.left,
-        y: e.clientY - rect.top - 8,
+        y: e.clientY - rect.top,
       });
     },
     []
+  );
+
+  const handleBarMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!containerRef.current || !tooltip) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      setTooltip((prev) => prev ? { ...prev, x: e.clientX - rect.left, y: e.clientY - rect.top } : null);
+    },
+    [tooltip]
   );
 
   const handleBarLeave = useCallback(() => setTooltip(null), []);
@@ -144,12 +153,13 @@ export function DepartmentComparisonWidget() {
                             color: d.config.stageColors[stage],
                           })
                         }
+                        onMouseMove={handleBarMove}
                         onMouseLeave={handleBarLeave}
                       />
                     );
                   })}
                 </div>
-                <span className="text-[9px] text-text-secondary/60">
+                <span className="text-[10px] text-text-secondary/60">
                   {DEPARTMENT_CONFIGS.bg.stageLabels[stage]}
                 </span>
               </div>
@@ -157,32 +167,32 @@ export function DepartmentComparisonWidget() {
           })}
         </div>
 
-        {/* 커스텀 툴팁 */}
+        {/* 글래스모피즘 툴팁 */}
         {tooltip && (
           <div
-            className="absolute z-50 pointer-events-none px-3 py-2 rounded-xl text-xs whitespace-nowrap"
+            className="absolute z-[60] pointer-events-none px-4 py-3 rounded-2xl whitespace-nowrap"
             style={{
               left: tooltip.x,
-              top: tooltip.y,
+              top: tooltip.y - 8,
               transform: 'translate(-50%, -100%)',
-              backgroundColor: 'rgba(15, 17, 23, 0.55)',
-              backdropFilter: 'blur(16px)',
-              WebkitBackdropFilter: 'blur(16px)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+              background: 'linear-gradient(135deg, rgba(30, 34, 48, 0.78) 0%, rgba(20, 22, 32, 0.82) 100%)',
+              backdropFilter: 'blur(24px) saturate(1.8)',
+              WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
+              border: '1px solid rgba(255, 255, 255, 0.14)',
+              boxShadow: '0 12px 40px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset, 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5)) inset',
             }}
           >
-            <div className="flex items-center gap-1.5 font-semibold mb-1">
+            <div className="flex items-center gap-2 font-semibold text-[13px] mb-1.5">
               <span
-                className="inline-block w-2 h-2 rounded-full"
+                className="inline-block w-2.5 h-2.5 rounded-full"
                 style={{ backgroundColor: tooltip.color }}
               />
-              <span>{tooltip.label}</span>
-              <span className="text-text-secondary">·</span>
+              <span className="text-text-primary">{tooltip.label}</span>
+              <span className="text-text-secondary/50">·</span>
               <span style={{ color: tooltip.color }}>{tooltip.stageLabel}</span>
             </div>
-            <div className="text-text-secondary">
-              {tooltip.total}씬 중 <span className="text-text-primary font-medium">{tooltip.done}씬</span> 완료 ({tooltip.pct.toFixed(1)}%)
+            <div className="text-[12px] text-text-secondary/80">
+              {tooltip.total}씬 중 <span className="text-text-primary font-semibold">{tooltip.done}씬</span> 완료 ({tooltip.pct.toFixed(1)}%)
             </div>
           </div>
         )}

@@ -1,16 +1,22 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Film, User, FileText, Zap, Hash } from 'lucide-react';
+import { Search, Film, User, FileText, Zap, Hash, Layers, CalendarDays, StickyNote } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS } from '@/types';
+import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
+import { getEvents } from '@/services/calendarService';
+import { checkConnection } from '@/services/sheetsService';
+import { readMetadataFromSheets } from '@/services/sheetsService';
+import { readLocalMetadata } from '@/services/testSheetService';
+import type { CalendarEvent } from '@/types/calendar';
 
 /* ────────────────────────────────────────────────
    타입
    ──────────────────────────────────────────────── */
-type ResultCategory = 'scene' | 'assignee' | 'episode' | 'memo' | 'action';
+type ResultCategory = 'scene' | 'assignee' | 'episode' | 'part' | 'memo' | 'event' | 'action';
 
 interface SearchResult {
   id: string;
@@ -57,11 +63,13 @@ const CATEGORY_LABELS: Record<ResultCategory, string> = {
   scene: '씬',
   assignee: '담당자',
   episode: '에피소드',
+  part: '파트',
   memo: '메모',
+  event: '캘린더 이벤트',
   action: '빠른 액션',
 };
 
-const CATEGORY_ORDER: ResultCategory[] = ['action', 'scene', 'assignee', 'episode', 'memo'];
+const CATEGORY_ORDER: ResultCategory[] = ['action', 'scene', 'part', 'assignee', 'episode', 'memo', 'event'];
 
 /* ────────────────────────────────────────────────
    미니 프로그레스 바
@@ -99,6 +107,30 @@ export function SpotlightSearch() {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const epName = (ep: Episode) => episodeTitles[ep.episodeNumber] || ep.title;
+  const [calEvents, setCalEvents] = useState<CalendarEvent[]>([]);
+  useEffect(() => { getEvents().then(setCalEvents); }, []);
+  const episodeMemos = useDataStore((s) => s.episodeMemos);
+  const [partMemos, setPartMemos] = useState<Record<string, string>>({});
+  // 파트 메모 로드
+  useEffect(() => {
+    (async () => {
+      const memos: Record<string, string> = {};
+      const connected = await checkConnection().catch(() => false);
+      for (const ep of episodes) {
+        for (const part of ep.parts) {
+          try {
+            const data = connected
+              ? await readMetadataFromSheets('part-memo', part.sheetName)
+              : await readLocalMetadata('part-memo', part.sheetName);
+            if (data?.value) memos[part.sheetName] = data.value;
+          } catch { /* 무시 */ }
+        }
+      }
+      if (Object.keys(memos).length > 0) setPartMemos(memos);
+    })();
+  }, [episodes]);
   const {
     setView,
     setSelectedEpisode,
@@ -106,23 +138,39 @@ export function SpotlightSearch() {
     setSelectedAssignee,
     setSelectedDepartment,
     setHighlightSceneId,
+    setSearchQuery,
+    setStatusFilter,
+    setSceneViewMode,
+    setSceneGroupMode,
+    setToast,
   } = useAppStore();
 
   /* ── 글로벌 단축키: Ctrl+Space ── */
+  const isOpenRef = useRef(isOpen);
+  useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // 입력 필드에 포커스 중이면 IME 충돌 방지를 위해 무시
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+        || (document.activeElement as HTMLElement)?.isContentEditable;
+
       if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
+        // 입력 필드에서는 IME 전환을 위해 가로채지 않음
+        if (isEditable && !isOpenRef.current) return;
         e.preventDefault();
         setIsOpen((prev) => !prev);
+        return;
       }
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && isOpenRef.current) {
         e.preventDefault();
         setIsOpen(false);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isOpen]);
+  }, []); // 의존성 없음 — isOpenRef로 최신 상태 참조
 
   /* ── 열릴 때 포커스 & 쿼리 초기화 ── */
   useEffect(() => {
@@ -132,6 +180,32 @@ export function SpotlightSearch() {
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [isOpen]);
+
+  /* ── 필터 리셋 후 네비게이션 헬퍼 ── */
+  const resetAndNavigate = useCallback((opts: {
+    episode?: number;
+    part?: string;
+    department?: 'bg' | 'acting';
+    assignee?: string;
+    sceneId?: string;
+    toastMsg?: string;
+  }) => {
+    // 필터 리셋 + 뷰 모드 초기화 (카드뷰, 씬번호별)
+    setSearchQuery('');
+    setStatusFilter('all');
+    setSceneViewMode('card');
+    setSceneGroupMode('flat');
+    if (!opts.assignee) setSelectedAssignee(null);
+
+    // 네비게이션
+    setView('scenes');
+    if (opts.episode !== undefined) setSelectedEpisode(opts.episode);
+    if (opts.part !== undefined) setSelectedPart(opts.part);
+    if (opts.department !== undefined) setSelectedDepartment(opts.department);
+    if (opts.assignee) setSelectedAssignee(opts.assignee);
+    if (opts.sceneId) setHighlightSceneId(opts.sceneId);
+    if (opts.toastMsg) setToast(opts.toastMsg);
+  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSelectedDepartment, setHighlightSceneId, setSearchQuery, setStatusFilter, setSceneViewMode, setSceneGroupMode, setToast]);
 
   /* ── 검색 결과 빌드 ── */
   const results = useMemo<SearchResult[]>(() => {
@@ -181,26 +255,60 @@ export function SpotlightSearch() {
     // ── 씬 & 메모 검색 ──
     for (const ep of episodes) {
       for (const part of ep.parts) {
+        // ── 파트 검색 ──
+        const deptLabel = DEPARTMENT_CONFIGS[part.department].shortLabel;
+        const partLabel = `${part.partId}파트`;
+        const partFullLabel = `${epName(ep)} ${partLabel} (${deptLabel})`;
+        const partScore = Math.max(
+          fuzzyScore(q, partLabel),
+          fuzzyScore(q, `${part.partId}`),
+          fuzzyScore(q, partFullLabel),
+        );
+        if (partScore > 0) {
+          const totalScenes = part.scenes.length;
+          const progressSum = part.scenes.reduce((s, sc) => s + sceneProgress(sc), 0);
+          const avgPct = totalScenes > 0 ? Math.round(progressSum / totalScenes) : 0;
+          items.push({
+            id: `part-${part.sheetName}`,
+            category: 'part',
+            title: `${partLabel} (${deptLabel})`,
+            subtitle: `${epName(ep)} · ${totalScenes}개 씬`,
+            meta: `${avgPct}%`,
+            pct: avgPct,
+            icon: <Layers size={16} />,
+            score: partScore,
+            action: () => {
+              resetAndNavigate({
+                episode: ep.episodeNumber,
+                part: part.partId,
+                department: part.department,
+                toastMsg: `${epName(ep)} ${partLabel}(${deptLabel})로 이동합니다`,
+              });
+              close();
+            },
+          });
+        }
+
         for (const scene of part.scenes) {
           const sceneScore = fuzzyScore(q, scene.sceneId);
           if (sceneScore > 0) {
             const pct = Math.round(sceneProgress(scene));
-            const deptLabel = DEPARTMENT_CONFIGS[part.department].shortLabel;
             items.push({
               id: `scene-${part.sheetName}-${scene.sceneId}`,
               category: 'scene',
               title: scene.sceneId,
-              subtitle: `${ep.title} ${part.partId}파트 · ${deptLabel}`,
+              subtitle: `${epName(ep)} ${part.partId}파트 · ${deptLabel}`,
               meta: `${pct}%`,
               pct,
               icon: <Hash size={16} />,
               score: sceneScore,
               action: () => {
-                setView('scenes');
-                setSelectedEpisode(ep.episodeNumber);
-                setSelectedPart(part.partId);
-                setSelectedDepartment(part.department);
-                setHighlightSceneId(scene.sceneId);
+                resetAndNavigate({
+                  episode: ep.episodeNumber,
+                  part: part.partId,
+                  department: part.department,
+                  sceneId: scene.sceneId,
+                });
                 close();
               },
             });
@@ -210,19 +318,67 @@ export function SpotlightSearch() {
               id: `memo-${part.sheetName}-${scene.sceneId}`,
               category: 'memo',
               title: scene.memo.length > 50 ? scene.memo.slice(0, 50) + '...' : scene.memo,
-              subtitle: `${scene.sceneId} · ${ep.title} ${part.partId}파트`,
+              subtitle: `${scene.sceneId} · ${epName(ep)} ${part.partId}파트`,
               icon: <FileText size={16} />,
               score: fuzzyScore(q, scene.memo),
               action: () => {
-                setView('scenes');
-                setSelectedEpisode(ep.episodeNumber);
-                setSelectedPart(part.partId);
-                setSelectedDepartment(part.department);
-                setHighlightSceneId(scene.sceneId);
+                resetAndNavigate({
+                  episode: ep.episodeNumber,
+                  part: part.partId,
+                  department: part.department,
+                  sceneId: scene.sceneId,
+                });
                 close();
               },
             });
           }
+        }
+
+        // ── 파트 메모 검색 ──
+        const partMemoText = partMemos[part.sheetName];
+        if (partMemoText) {
+          const pmScore = fuzzyScore(q, partMemoText);
+          if (pmScore > 0) {
+            items.push({
+              id: `partmemo-${part.sheetName}`,
+              category: 'memo',
+              title: partMemoText.length > 50 ? partMemoText.slice(0, 50) + '...' : partMemoText,
+              subtitle: `파트 메모 · ${epName(ep)} ${part.partId}파트 (${deptLabel})`,
+              icon: <StickyNote size={16} />,
+              score: pmScore,
+              action: () => {
+                resetAndNavigate({
+                  episode: ep.episodeNumber,
+                  part: part.partId,
+                  department: part.department,
+                });
+                close();
+              },
+            });
+          }
+        }
+      }
+
+      // ── 에피소드 메모 검색 ──
+      const epMemoText = episodeMemos[ep.episodeNumber];
+      if (epMemoText) {
+        const emScore = fuzzyScore(q, epMemoText);
+        if (emScore > 0) {
+          items.push({
+            id: `epmemo-${ep.episodeNumber}`,
+            category: 'memo',
+            title: epMemoText.length > 50 ? epMemoText.slice(0, 50) + '...' : epMemoText,
+            subtitle: `에피소드 메모 · ${epName(ep)}`,
+            icon: <StickyNote size={16} />,
+            score: emScore,
+            action: () => {
+              resetAndNavigate({
+                episode: ep.episodeNumber,
+                toastMsg: `${epName(ep)} 메모`,
+              });
+              close();
+            },
+          });
         }
       }
     }
@@ -254,8 +410,7 @@ export function SpotlightSearch() {
           icon: <User size={16} />,
           score,
           action: () => {
-            setView('scenes');
-            setSelectedAssignee(name);
+            resetAndNavigate({ assignee: name, toastMsg: `${name}님의 씬을 표시합니다` });
             close();
           },
         });
@@ -264,7 +419,9 @@ export function SpotlightSearch() {
 
     // ── 에피소드 검색 ──
     for (const ep of episodes) {
+      const epDisplayName = epName(ep);
       const epScore = Math.max(
+        fuzzyScore(q, epDisplayName),
         fuzzyScore(q, ep.title),
         fuzzyScore(q, `EP${ep.episodeNumber}`),
         fuzzyScore(q, String(ep.episodeNumber)),
@@ -279,15 +436,40 @@ export function SpotlightSearch() {
         items.push({
           id: `episode-${ep.episodeNumber}`,
           category: 'episode',
-          title: ep.title,
+          title: epDisplayName,
           subtitle: `${ep.parts.length}개 파트 · ${totalScenes}개 씬`,
           meta: `${avgPct}%`,
           pct: avgPct,
           icon: <Film size={16} />,
           score: epScore,
           action: () => {
-            setView('scenes');
-            setSelectedEpisode(ep.episodeNumber);
+            resetAndNavigate({ episode: ep.episodeNumber, toastMsg: `${epDisplayName}로 이동합니다` });
+            close();
+          },
+        });
+      }
+    }
+
+    // ── 캘린더 이벤트 검색 (제목 + 메모 + 타입) ──
+    const typeLabels: Record<string, string> = { custom: '일반', episode: '에피소드', part: '파트', scene: '씬' };
+    for (const ev of calEvents) {
+      if (!ev) continue;
+      const titleScore = ev.title ? fuzzyScore(q, ev.title) : 0;
+      const memoScore = ev.memo ? fuzzyScore(q, ev.memo) : 0;
+      const typeScore = ev.type && typeLabels[ev.type] ? fuzzyScore(q, typeLabels[ev.type]) * 0.5 : 0;
+      const evScore = Math.max(titleScore, memoScore, typeScore);
+      if (evScore > 0) {
+        const typeLabel = ev.type && typeLabels[ev.type] ? `[${typeLabels[ev.type]}] ` : '';
+        items.push({
+          id: `event-${ev.id}`,
+          category: 'event',
+          title: ev.title || '(제목 없음)',
+          subtitle: `${typeLabel}${ev.startDate} → ${ev.endDate}${ev.memo ? ` · ${ev.memo.slice(0, 30)}` : ''}`,
+          icon: <CalendarDays size={16} />,
+          score: evScore,
+          action: () => {
+            setView('schedule');
+            setToast(`캘린더: ${ev.title || '이벤트'}`);
             close();
           },
         });
@@ -297,7 +479,7 @@ export function SpotlightSearch() {
     // 점수 내림차순 정렬, 상위 20개
     items.sort((a, b) => b.score - a.score);
     return items.slice(0, 20);
-  }, [query, episodes, setView, setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSelectedDepartment]);
+  }, [query, episodes, calEvents, episodeMemos, partMemos, resetAndNavigate, setView, setToast]);
 
   /* ── 카테고리별 그룹핑 ── */
   const grouped = useMemo(() => {
@@ -348,7 +530,7 @@ export function SpotlightSearch() {
           <motion.div
             className="fixed inset-0 z-[9998]"
             style={{
-              backgroundColor: 'rgba(0,0,0,0.45)',
+              backgroundColor: 'rgb(var(--color-overlay) / var(--overlay-alpha))',
               backdropFilter: 'blur(12px)',
               WebkitBackdropFilter: 'blur(12px)',
             }}
@@ -375,7 +557,7 @@ export function SpotlightSearch() {
                   backgroundColor: 'rgba(26,29,39,0.88)',
                   border: '1px solid rgba(45,48,65,0.6)',
                   boxShadow:
-                    '0 24px 48px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04) inset, 0 1px 0 rgba(255,255,255,0.06) inset',
+                    '0 24px 48px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset, 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5)) inset',
                 }}
               >
                 {/* ── 검색 입력 ── */}
@@ -387,11 +569,11 @@ export function SpotlightSearch() {
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="씬번호, 담당자, 에피소드 검색..."
-                    className="flex-1 bg-transparent text-text-primary text-[15px] placeholder:text-text-secondary/40 outline-none"
+                    className="flex-1 bg-transparent text-text-primary text-[15px] placeholder:text-text-secondary/50 outline-none"
                     autoComplete="off"
                     spellCheck={false}
                   />
-                  <kbd className="hidden sm:flex items-center px-1.5 py-0.5 rounded text-[10px] text-text-secondary/40 border border-bg-border/40 font-mono">
+                  <kbd className="hidden sm:flex items-center px-1.5 py-0.5 rounded text-[10px] text-text-secondary/50 border border-bg-border/40 font-mono">
                     ESC
                   </kbd>
                 </div>
@@ -406,14 +588,14 @@ export function SpotlightSearch() {
                   style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,141,163,0.2) transparent' }}
                 >
                   {flatResults.length === 0 && query.trim() && (
-                    <div className="px-5 py-10 text-center text-text-secondary/40 text-sm">
+                    <div className="px-5 py-10 text-center text-text-secondary/50 text-sm">
                       검색 결과가 없습니다
                     </div>
                   )}
 
                   {grouped.map((group) => (
                     <div key={group.category} className="mb-1">
-                      <div className="px-5 pt-2.5 pb-1 text-[11px] font-medium text-text-secondary/40 uppercase tracking-wider">
+                      <div className="px-5 pt-2.5 pb-1 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
                         {group.label}
                       </div>
                       {group.items.map((item) => {
@@ -436,7 +618,7 @@ export function SpotlightSearch() {
                             <span
                               className={cn(
                                 'shrink-0 transition-colors duration-75',
-                                isSelected ? 'text-accent' : 'text-text-secondary/40',
+                                isSelected ? 'text-accent' : 'text-text-secondary/50',
                               )}
                             >
                               {item.icon}
@@ -454,7 +636,7 @@ export function SpotlightSearch() {
                             </div>
                             {item.pct !== undefined && <MiniProgress pct={item.pct} />}
                             {item.meta && (
-                              <span className="text-[11px] text-text-secondary/40 shrink-0 font-mono tabular-nums w-8 text-right">
+                              <span className="text-[11px] text-text-secondary/50 shrink-0 font-mono tabular-nums w-8 text-right">
                                 {item.meta}
                               </span>
                             )}
@@ -466,7 +648,7 @@ export function SpotlightSearch() {
                 </div>
 
                 {/* ── 하단 힌트 ── */}
-                <div className="flex items-center justify-between px-5 py-2 border-t border-bg-border/20 text-[10px] text-text-secondary/30">
+                <div className="flex items-center justify-between px-5 py-2 border-t border-bg-border/20 text-[10px] text-text-secondary/45">
                   <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1">
                       <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/20 font-mono text-[10px]">

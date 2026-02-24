@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -8,19 +8,23 @@ import { ScenesView } from '@/views/ScenesView';
 import { EpisodeView } from '@/views/EpisodeView';
 import { AssigneeView } from '@/views/AssigneeView';
 import { CalendarView } from '@/views/CalendarView';
+import { ScheduleView } from '@/views/ScheduleView';
 import { SettingsView } from '@/views/SettingsView';
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
 import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
-import { readTestSheet } from '@/services/testSheetService';
-import { loadSheetsConfig, connectSheets, readAllFromSheets } from '@/services/sheetsService';
-import { loadLayout } from '@/services/settingsService';
+import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
+import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
+import { loadSheetsConfig, connectSheets, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
+import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
+import { applyTheme, getPreset, getLightColors, DEFAULT_THEME_ID } from '@/themes';
+import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
-  const { currentView, isTestMode, setTestMode, setWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected } = useAppStore();
-  const { setEpisodes, setSyncing, setLastSyncTime, setSyncError } = useDataStore();
+  const { currentView, isTestMode, setTestMode, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
+  const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
     authReady, setAuthReady,
@@ -29,11 +33,30 @@ export default function App() {
     showPasswordChange, showUserManager, setShowUserManager,
   } = useAuthStore();
 
-  // 토스트 상태 (초기 비밀번호 알림 등)
-  const [toast, setToast] = useState<string | null>(null);
+  // 토스트 상태 (글로벌 스토어 기반)
+  const storeToast = useAppStore((s) => s.toast);
+  const setStoreToast = useAppStore((s) => s.setToast);
+  const [localToast, setLocalToast] = useState<string | null>(null);
+  const toast = storeToast || localToast;
+  const setToast = useCallback((msg: string | null) => {
+    setLocalToast(msg);
+    if (msg) setStoreToast(null); // 로컬 우선
+  }, [setStoreToast]);
+
+  // 글로벌 스토어 토스트 자동 제거
+  useEffect(() => {
+    if (!storeToast) return;
+    const timer = setTimeout(() => setStoreToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [storeToast, setStoreToast]);
+
+  // 테마 초기화 완료 가드 (init에서 로드 전까지 저장 방지)
+  const themeInitRef = useRef(false);
 
   // 스플래시: 이미 로그인 상태여도 앱 시작 시 랜딩 표시
   const [showSplash, setShowSplash] = useState(true);
+  // 로딩 스플래시: authReady 후에도 유지, 클릭으로 스킵
+  const [loadingSplashDone, setLoadingSplashDone] = useState(false);
 
   // 데이터 로드 함수 — 모드에 따라 테스트 시트 또는 Apps Script 웹 앱 사용
   const loadData = useCallback(async () => {
@@ -42,21 +65,45 @@ export default function App() {
     try {
       let episodes;
       if (sheetsConnected) {
-        // 시트 연결됨: Apps Script 웹 앱에서 읽기
         episodes = await readAllFromSheets();
       } else {
-        // 시트 미연결: 로컬 JSON 파일 (테스트용)
         episodes = await readTestSheet();
       }
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
+
+      // 에피소드 제목/메모를 병렬로 일괄 로드 (초기 렌더 딜레이 제거)
+      const readMeta = sheetsConnected ? readMetadataFromSheets : readLocalMetadata;
+      const titlePromises = episodes.map((ep) =>
+        readMeta('episode-title', String(ep.episodeNumber))
+          .then((d) => [ep.episodeNumber, d?.value] as const)
+          .catch(() => [ep.episodeNumber, undefined] as const),
+      );
+      const memoPromises = episodes.map((ep) =>
+        readMeta('episode-memo', String(ep.episodeNumber))
+          .then((d) => [ep.episodeNumber, d?.value] as const)
+          .catch(() => [ep.episodeNumber, undefined] as const),
+      );
+      const [titleResults, memoResults] = await Promise.all([
+        Promise.all(titlePromises),
+        Promise.all(memoPromises),
+      ]);
+      const titles: Record<number, string> = {};
+      const memos: Record<number, string> = {};
+      for (const [num, val] of titleResults) if (val) titles[num] = val;
+      for (const [num, val] of memoResults) if (val) memos[num] = val;
+      setEpisodeTitles(titles);
+      setEpisodeMemos(memos);
+
+      // 위젯 팝업 윈도우에 데이터 변경 알림
+      window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
       console.error('[동기화 실패]', err);
       setSyncError(String(err));
     } finally {
       setSyncing(false);
     }
-  }, [sheetsConnected, setEpisodes, setSyncing, setLastSyncTime, setSyncError]);
+  }, [sheetsConnected, setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {
@@ -76,6 +123,37 @@ export default function App() {
         if (savedLayout) {
           setWidgetLayout(savedLayout);
         }
+        const savedAllLayout = await loadLayout('all');
+        if (savedAllLayout) {
+          setAllWidgetLayout(savedAllLayout);
+        }
+
+        // 테마 로드 + 적용 (가드 설정 후 상태 변경)
+        const savedTheme = await loadTheme();
+        if (savedTheme) {
+          const savedMode = savedTheme.colorMode ?? 'dark';
+          if (savedTheme.customColors) {
+            applyTheme(savedTheme.customColors, savedMode);
+          } else if (savedMode === 'light') {
+            applyTheme(getLightColors(savedTheme.themeId), savedMode);
+          } else {
+            const preset = getPreset(savedTheme.themeId);
+            if (preset) applyTheme(preset.colors, savedMode);
+          }
+          // 가드를 먼저 열고 → 상태 변경 (useEffect가 실행될 때 가드가 이미 true)
+          themeInitRef.current = true;
+          setThemeId(savedTheme.themeId);
+          setColorMode(savedMode);
+          if (savedTheme.customColors) {
+            setCustomThemeColors(savedTheme.customColors);
+          }
+        } else {
+          // 저장된 테마 없음 → 기본 테마 유지, 이후 변경부터 저장 허용
+          themeInitRef.current = true;
+        }
+
+        // 테마 초기 적용 후 전환 트랜지션 활성화 (초기 로드 시 번쩍임 방지)
+        setTimeout(() => document.body.classList.add('theme-ready'), 120);
 
         // 사용자 목록 로드
         const users = await loadUsers();
@@ -88,10 +166,13 @@ export default function App() {
         }
 
         // 저장된 Sheets 설정이 있으면 자동 연결 시도 (모드 무관)
+        // 설정이 없으면 config.ts의 DEFAULT_WEB_APP_URL을 fallback으로 사용
         const config = await loadSheetsConfig();
-        if (config?.webAppUrl) {
-          setSheetsConfig(config);
-          const result = await connectSheets(config.webAppUrl);
+        const urlToConnect = config?.webAppUrl || DEFAULT_WEB_APP_URL;
+        if (urlToConnect) {
+          const effectiveConfig = config ?? { webAppUrl: urlToConnect };
+          setSheetsConfig(effectiveConfig);
+          const result = await connectSheets(urlToConnect);
           if (result.ok) {
             setSheetsConnected(true);
             console.log('[Sheets] 자동 연결 성공');
@@ -122,19 +203,47 @@ export default function App() {
     }
   }, [currentUser, setUsers]);
 
-  // 초기화 완료 후 데이터 로드 (sheetsConnected/isTestMode 변경 시)
+  // 테마 변경 시: CSS 적용 + appdata 저장 (초기화 완료 후에만 저장)
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (!themeInitRef.current) return; // init()에서 테마 로드 전까지 저장 방지
+    if (themeId === 'custom' && customThemeColors) {
+      applyTheme(customThemeColors, colorMode);
+      saveTheme({ themeId, customColors: customThemeColors, colorMode });
+    } else if (colorMode === 'light') {
+      applyTheme(getLightColors(themeId), colorMode);
+      saveTheme({ themeId, colorMode });
+    } else {
+      const preset = getPreset(themeId);
+      if (preset) {
+        applyTheme(preset.colors, colorMode);
+        saveTheme({ themeId, colorMode });
+      }
+    }
+  }, [themeId, customThemeColors, colorMode]);
 
-  // 실시간 동기화: 다른 사용자가 시트를 변경하면 즉시 리로드
+  // 초기화 완료 후 데이터 로드 (sheetsConnected/isTestMode 변경 시)
+  // authReady 가드: init 완료 전까지 테스트 데이터 로딩 방지 (플래시 제거)
+  useEffect(() => {
+    if (!authReady) return;
+    loadData();
+  }, [authReady, loadData]);
+
+  // 실시간 동기화: 다른 사용자가 시트를 변경하면 리로드 (디바운스 적용)
   useEffect(() => {
     if (!window.electronAPI?.onSheetChanged) return;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const cleanup = window.electronAPI.onSheetChanged(() => {
-      console.log('[동기화] 다른 사용자의 변경 감지 → 데이터 리로드');
-      loadData();
+      // 연속 변경 시 마지막 변경 후 300ms 뒤에 리로드 (배치 쓰기 보호)
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        console.log('[동기화] 다른 사용자의 변경 감지 → 데이터 리로드');
+        loadData();
+      }, 300);
     });
-    return cleanup;
+    return () => {
+      cleanup?.();
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
   }, [loadData]);
 
   // Ctrl+Alt+U: 관리자 모드 토글
@@ -169,6 +278,8 @@ export default function App() {
         return <AssigneeView />;
       case 'calendar':
         return <CalendarView />;
+      case 'schedule':
+        return <ScheduleView />;
       case 'settings':
         return <SettingsView />;
       default:
@@ -176,14 +287,76 @@ export default function App() {
     }
   };
 
-  // 인증 초기화 대기
-  if (!authReady) {
+  // 로딩 스플래시 — authReady 후에도 유지, 클릭으로 스킵 가능
+  // 영상은 1회 재생 후 마지막 프레임에서 멈춤 (스플래시 아트처럼)
+  if (!loadingSplashDone) {
+    const canSkip = authReady;
     return (
-      <div className="flex items-center justify-center h-screen w-screen bg-bg-primary">
-        <span className="text-sm text-text-secondary animate-pulse">로딩 중...</span>
+      <div
+        className="flex items-center justify-center h-screen w-screen overflow-hidden cursor-pointer select-none"
+        style={{
+          background: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, #0F1117 100%)',
+        }}
+        onClick={() => { if (canSkip) setLoadingSplashDone(true); }}
+      >
+        {/* 스플래시 영상 — loop 없이 1회 재생 후 마지막 프레임 고정 */}
+        <div className="relative" style={{ width: 'min(420px, 75vmin)', aspectRatio: '672 / 592' }}>
+          <video
+            autoPlay muted playsInline preload="auto"
+            src="/splash/opening_video.mp4"
+            className="absolute object-cover"
+            style={{
+              inset: '-10%', width: '120%', height: '120%',
+              animation: 'loadingSplashReveal 1.5s ease-out 0.3s forwards',
+              filter: 'blur(8px) brightness(0.6)',
+              transform: 'scale(1.05)',
+              WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+              maskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+              WebkitMaskComposite: 'destination-in' as never,
+              maskComposite: 'intersect' as never,
+            }}
+          />
+        </div>
+
+        {/* 하단 문구 */}
+        <div className="absolute bottom-6 flex flex-col items-center gap-1.5">
+          {canSkip ? (
+            <>
+              <span
+                className="text-sm text-accent/80 font-medium tracking-wide"
+                style={{ animation: 'fadeIn 0.5s ease-out' }}
+              >
+                로딩 완료
+              </span>
+              <span
+                className="text-xs text-white/40 tracking-wide"
+                style={{ animation: 'fadeIn 0.5s ease-out 0.2s both' }}
+              >
+                아무 곳이나 클릭하여 건너뛰기
+              </span>
+            </>
+          ) : (
+            <span className="text-sm text-white/30 animate-pulse tracking-wide">
+              로딩 중...
+            </span>
+          )}
+        </div>
+
+        <style>{`
+          @keyframes loadingSplashReveal {
+            to { filter: blur(0px) brightness(1); transform: scale(1); }
+          }
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+        `}</style>
       </div>
     );
   }
+
+  // 인증 초기화 아직 미완료 (비정상 경로 — 위에서 splash가 처리하므로 거의 발생 안 함)
+  if (!authReady) return null;
 
   // 로그인 화면 (비로그인 상태)
   if (!currentUser) {
@@ -199,6 +372,7 @@ export default function App() {
     <>
       <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
       <SpotlightSearch />
+      <GlobalTooltipProvider />
 
       {/* 비밀번호 변경 모달 */}
       {showPasswordChange && <PasswordChangeModal />}
@@ -206,9 +380,12 @@ export default function App() {
       {/* 관리자: 사용자 관리 모달 */}
       {showUserManager && <UserManagerModal />}
 
-      {/* 토스트 알림 */}
+      {/* 토스트 알림 (로컬 + 글로벌 스토어) */}
       {toast && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[10000] bg-bg-card border border-bg-border rounded-xl px-5 py-3 shadow-2xl text-sm text-text-primary animate-slide-down">
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-[10000] bg-bg-card border border-bg-border rounded-xl px-5 py-3 shadow-2xl text-sm text-text-primary animate-slide-down"
+          onClick={() => { setLocalToast(null); setStoreToast(null); }}
+        >
           {toast}
         </div>
       )}

@@ -99,6 +99,46 @@ export async function updateSceneFieldInSheets(
   await assertOk(window.electronAPI.sheetsUpdateSceneField(sheetName, rowIndex, field, value), '씬 수정 실패');
 }
 
+// ─── 메타데이터 CRUD ─────────────────────────
+
+export async function readMetadataFromSheets(
+  type: string, key: string
+): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
+  const result = await window.electronAPI.sheetsReadMetadata(type, key);
+  if (!result.ok) throw new Error(result.error ?? '메타데이터 읽기 실패');
+  return result.data ?? null;
+}
+
+export async function writeMetadataToSheets(
+  type: string, key: string, value: string
+): Promise<void> {
+  await assertOk(window.electronAPI.sheetsWriteMetadata(type, key, value), '메타데이터 쓰기 실패');
+}
+
+export async function softDeletePartInSheets(sheetName: string): Promise<void> {
+  await assertOk(window.electronAPI.sheetsSoftDeletePart(sheetName), '파트 삭제 실패');
+}
+
+export async function softDeleteEpisodeInSheets(episodeNumber: number): Promise<void> {
+  await assertOk(window.electronAPI.sheetsSoftDeleteEpisode(episodeNumber), '에피소드 삭제 실패');
+}
+
+// ─── 아카이빙 ────────────────────────────────
+
+export async function readArchivedFromSheets(): Promise<{ episodeNumber: number; title: string; partCount: number }[]> {
+  const result = await window.electronAPI.sheetsReadArchived();
+  if (!result.ok) throw new Error(result.error ?? '아카이빙 목록 읽기 실패');
+  return result.data ?? [];
+}
+
+export async function archiveEpisodeInSheets(episodeNumber: number): Promise<void> {
+  await assertOk(window.electronAPI.sheetsArchiveEpisode(episodeNumber), '에피소드 아카이빙 실패');
+}
+
+export async function unarchiveEpisodeInSheets(episodeNumber: number): Promise<void> {
+  await assertOk(window.electronAPI.sheetsUnarchiveEpisode(episodeNumber), '에피소드 복원 실패');
+}
+
 // ─── 이미지 업로드 (Drive) ───────────────────
 
 export async function uploadImageToSheets(

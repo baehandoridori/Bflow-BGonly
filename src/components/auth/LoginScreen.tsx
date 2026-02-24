@@ -1,295 +1,513 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LogIn } from 'lucide-react';
+import { LogIn, ChevronRight } from 'lucide-react';
 import { login } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { getPreset } from '@/themes';
 
-// ─── 성능 최적화된 배경 (DOM 직접 조작, React 상태 없음) ──────
+// ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
-interface OrbData {
-  baseX: number;
-  baseY: number;
+interface Particle {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  baseSpeed: number;
   size: number;
-  color: string;
-  speed: number;
-  angle: number;
-  opacity: number;
+  color: [number, number, number];
 }
 
-const ORB_PALETTE = [
-  [108, 92, 231, 0.30],
-  [162, 155, 254, 0.22],
-  [0, 184, 148, 0.18],
-  [116, 185, 255, 0.18],
-  [108, 92, 231, 0.12],
-  [85, 239, 196, 0.14],
-  [253, 203, 110, 0.10],
-];
-
-function initOrbs(): OrbData[] {
-  return ORB_PALETTE.map(([r, g, b, a], i) => ({
-    baseX: 10 + Math.random() * 80,
-    baseY: 10 + Math.random() * 80,
-    size: 120 + Math.random() * 280,
-    color: `rgba(${r},${g},${b},${a})`,
-    speed: 0.12 + Math.random() * 0.2,
-    angle: (i / ORB_PALETTE.length) * Math.PI * 2,
-    opacity: 0.5 + Math.random() * 0.5,
-  }));
+// RGB ↔ HSL 변환 유틸
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return [h * 360, s * 100, l * 100];
 }
 
-// 플렉서블 아트 — 유기적 SVG 커브 (마우스 반응형)
-function FlexArt({ containerRef }: { containerRef: React.RefObject<SVGSVGElement> }) {
-  return (
-    <svg
-      ref={containerRef as React.LegacyRef<SVGSVGElement>}
-      className="absolute inset-0 w-full h-full pointer-events-none"
-      viewBox="0 0 1000 1000"
-      preserveAspectRatio="none"
-      style={{ opacity: 0.6 }}
-    >
-      <defs>
-        <linearGradient id="flex-g1" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#6C5CE7" stopOpacity="0.15" />
-          <stop offset="50%" stopColor="#A29BFE" stopOpacity="0.08" />
-          <stop offset="100%" stopColor="#74B9FF" stopOpacity="0.12" />
-        </linearGradient>
-        <linearGradient id="flex-g2" x1="100%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#00B894" stopOpacity="0.10" />
-          <stop offset="50%" stopColor="#6C5CE7" stopOpacity="0.06" />
-          <stop offset="100%" stopColor="#55EFC4" stopOpacity="0.10" />
-        </linearGradient>
-        <linearGradient id="flex-g3" x1="50%" y1="0%" x2="50%" y2="100%">
-          <stop offset="0%" stopColor="#FDCB6E" stopOpacity="0.06" />
-          <stop offset="100%" stopColor="#E17055" stopOpacity="0.08" />
-        </linearGradient>
-      </defs>
-      {/* 커브 패스 — JS에서 동적 업데이트 */}
-      <path id="flex-path-0" fill="none" stroke="url(#flex-g1)" strokeWidth="1.5" />
-      <path id="flex-path-1" fill="none" stroke="url(#flex-g2)" strokeWidth="1.2" />
-      <path id="flex-path-2" fill="none" stroke="url(#flex-g3)" strokeWidth="1" />
-      {/* 채워진 유기체 */}
-      <path id="flex-blob-0" fill="url(#flex-g1)" />
-      <path id="flex-blob-1" fill="url(#flex-g2)" />
-    </svg>
-  );
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  h = ((h % 360) + 360) % 360;
+  s /= 100; l /= 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
 }
 
-function InteractiveBackground() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const orbRefs = useRef<HTMLDivElement[]>([]);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const glowRef = useRef<HTMLDivElement>(null);
-  const orbs = useRef(initOrbs());
-  const mouseRef = useRef({ x: 0.5, y: 0.5 });
-  const timeRef = useRef(0);
+function getPlexusColors(): [number, number, number][] {
+  const themeId = useAppStore.getState().themeId;
+  const custom = useAppStore.getState().customThemeColors;
+  const colors = custom ?? getPreset(themeId)?.colors;
+  if (!colors) return [[108, 92, 231], [162, 155, 254], [116, 185, 255], [0, 184, 148], [85, 239, 196]];
+  const parse = (s: string): [number, number, number] => {
+    const [r, g, b] = s.split(' ').map(Number);
+    return [r, g, b];
+  };
+  const accent = parse(colors.accent);
+  const accentSub = parse(colors.accentSub);
+
+  // HSL 기반 보색/유사색 생성
+  const [ah, as, al] = rgbToHsl(...accent);
+  const complementary = hslToRgb(ah + 180, as * 0.6, Math.min(al + 10, 85));  // 보색 (채도 낮춤)
+  const analogous1 = hslToRgb(ah + 30, as * 0.8, al);                         // 유사색 +30°
+  const analogous2 = hslToRgb(ah - 30, as * 0.8, al);                         // 유사색 -30°
+  const lighter: [number, number, number] = [
+    Math.min(255, accent[0] + 50),
+    Math.min(255, accent[1] + 50),
+    Math.min(255, accent[2] + 50),
+  ];
+  const mix: [number, number, number] = [
+    Math.round((accent[0] + accentSub[0]) / 2),
+    Math.round((accent[1] + accentSub[1]) / 2),
+    Math.round((accent[2] + accentSub[2]) / 2),
+  ];
+
+  // 테마 색상 위주 (비중 높음) + 보색/유사색 약간 섞기
+  return [accent, accent, accentSub, lighter, mix, analogous1, analogous2, complementary];
+}
+
+const PARTICLE_COUNT = 666;
+const CONNECTION_DIST = 160;
+const MOUSE_RADIUS = 250;
+const MOUSE_FORCE = 0.06;
+// "창을 통해 보는" 가상 캔버스 크기 (실제 창보다 넓음)
+const VIRTUAL_W = 2800;
+const VIRTUAL_H = 1800;
+
+function createParticle(_w: number, _h: number, plexusColors?: [number, number, number][]): Particle {
+  const z = 0.1 + Math.random() * 0.9;
+  const cols = plexusColors ?? getPlexusColors();
+  const color = cols[Math.floor(Math.random() * cols.length)];
+  const baseSpeed = 0.12 + Math.random() * 0.35;
+  return {
+    x: Math.random() * VIRTUAL_W, y: Math.random() * VIRTUAL_H, z,
+    vx: (Math.random() - 0.5) * baseSpeed * z,
+    vy: (Math.random() - 0.5) * baseSpeed * z,
+    baseSpeed, size: 1.2 + z * 3, color,
+  };
+}
+
+function PlexusBackground() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const particlesRef = useRef<Particle[]>([]);
+  const mouseRef = useRef({ x: -9999, y: -9999 });
   const rafRef = useRef(0);
+  const sizeRef = useRef({ w: 0, h: 0 });
+  const noiseRef = useRef<HTMLCanvasElement | null>(null);
 
-  // 마우스 이벤트는 window 레벨에서 직접 처리
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      mouseRef.current = { x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight };
-      // 글로우 포인터 즉시 업데이트
-      if (glowRef.current) {
-        glowRef.current.style.left = `${mouseRef.current.x * 100}%`;
-        glowRef.current.style.top = `${mouseRef.current.y * 100}%`;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+
+    const resize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      sizeRef.current = { w, h };
+
+      if (!noiseRef.current || noiseRef.current.width !== w) {
+        const nc = document.createElement('canvas');
+        nc.width = w; nc.height = h;
+        const nctx = nc.getContext('2d');
+        if (nctx) {
+          const imageData = nctx.createImageData(w, h);
+          const data = imageData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const v = Math.random() * 25;
+            data[i] = v; data[i + 1] = v; data[i + 2] = v; data[i + 3] = 18;
+          }
+          nctx.putImageData(imageData, 0, 0);
+        }
+        noiseRef.current = nc;
       }
+
+      const plexusColors = getPlexusColors();
+      if (particlesRef.current.length === 0) {
+        particlesRef.current = Array.from({ length: PARTICLE_COUNT }, () => createParticle(VIRTUAL_W, VIRTUAL_H, plexusColors));
+      }
+      // 리사이즈: 파티클 위치 변경 없음 — 창을 통해 보는 느낌
     };
-    window.addEventListener('mousemove', handler, { passive: true });
-    return () => window.removeEventListener('mousemove', handler);
-  }, []);
 
-  // rAF 루프 — React 상태 업데이트 없이 DOM 직접 조작
-  useEffect(() => {
+    resize();
+    window.addEventListener('resize', resize);
+
+    const onMouse = (e: MouseEvent) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
+    window.addEventListener('mousemove', onMouse, { passive: true });
+
     let running = true;
-
     const animate = () => {
       if (!running) return;
-      timeRef.current += 0.006;
-      const t = timeRef.current;
-      const mx = mouseRef.current.x;
-      const my = mouseRef.current.y;
+      const { w, h } = sizeRef.current;
+      const particles = particlesRef.current;
 
-      // 오브 위치 업데이트
-      orbs.current.forEach((orb, i) => {
-        const el = orbRefs.current[i];
-        if (!el) return;
+      // 뷰포트 오프셋: 가상 캔버스 중앙에 창을 배치
+      const ox = (VIRTUAL_W - w) / 2;
+      const oy = (VIRTUAL_H - h) / 2;
+      // 마우스를 가상 캔버스 좌표로 변환
+      const mx = mouseRef.current.x + ox;
+      const my = mouseRef.current.y + oy;
 
-        const bx = orb.baseX + Math.sin(t * orb.speed + orb.angle) * 10;
-        const by = orb.baseY + Math.cos(t * orb.speed * 0.7 + orb.angle + 1) * 8;
-        // 마우스 반발
-        const dx = bx - mx * 100;
-        const dy = by - my * 100;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const force = Math.max(0, 1 - dist / 45) * 15;
-        const fx = dist > 0.1 ? (dx / dist) * force : 0;
-        const fy = dist > 0.1 ? (dy / dist) * force : 0;
+      ctx.fillStyle = '#12141C';
+      ctx.fillRect(0, 0, w, h);
 
-        el.style.transform = `translate(${bx + fx}vw, ${by + fy}vh) translate(-50%, -50%)`;
-      });
+      const tc = getPlexusColors()[0];
+      const ts = getPlexusColors()[2] ?? getPlexusColors()[1];
+      const cg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.7);
+      cg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.06)`);
+      cg.addColorStop(0.3, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
+      cg.addColorStop(0.6, `rgba(${ts[0]}, ${ts[1]}, ${ts[2]}, 0.015)`);
+      cg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = cg;
+      ctx.fillRect(0, 0, w, h);
 
-      // 플렉서블 아트 커브 업데이트
-      const svg = svgRef.current;
-      if (svg) {
-        const mxS = mx * 1000;
-        const myS = my * 1000;
+      if (mouseRef.current.x > 0 && mouseRef.current.y > 0) {
+        const mg = ctx.createRadialGradient(mouseRef.current.x, mouseRef.current.y, 0, mouseRef.current.x, mouseRef.current.y, 250);
+        mg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.08)`);
+        mg.addColorStop(0.4, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
+        mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = mg;
+        ctx.fillRect(0, 0, w, h);
+      }
 
-        // 커브 0 — 큰 S자
-        const p0 = svg.getElementById('flex-path-0');
-        if (p0) {
-          const cx1 = 200 + Math.sin(t * 0.3) * 150 + (mxS - 500) * 0.08;
-          const cy1 = 300 + Math.cos(t * 0.25) * 100 + (myS - 500) * 0.06;
-          const cx2 = 800 + Math.sin(t * 0.35 + 1) * 120 + (mxS - 500) * 0.05;
-          const cy2 = 700 + Math.cos(t * 0.3 + 2) * 80 + (myS - 500) * 0.07;
-          p0.setAttribute('d', `M -50 ${400 + Math.sin(t * 0.2) * 80} C ${cx1} ${cy1}, ${cx2} ${cy2}, 1050 ${600 + Math.cos(t * 0.25) * 60}`);
+      if (noiseRef.current) ctx.drawImage(noiseRef.current, 0, 0);
+
+      // 물리 업데이트 (가상 캔버스 좌표)
+      for (const p of particles) {
+        const dmx = p.x - mx;
+        const dmy = p.y - my;
+        const distMouse = Math.sqrt(dmx * dmx + dmy * dmy);
+        if (distMouse < MOUSE_RADIUS && distMouse > 1) {
+          const force = (1 - distMouse / MOUSE_RADIUS) * MOUSE_FORCE * p.z;
+          p.vx += (dmx / distMouse) * force;
+          p.vy += (dmy / distMouse) * force;
         }
-
-        // 커브 1 — 우아한 호
-        const p1 = svg.getElementById('flex-path-1');
-        if (p1) {
-          const cx1 = 400 + Math.cos(t * 0.4) * 200 + (mxS - 500) * 0.06;
-          const cy1 = 100 + Math.sin(t * 0.35) * 150 + (myS - 500) * 0.05;
-          const cx2 = 600 + Math.cos(t * 0.3 + 3) * 180 + (mxS - 500) * 0.04;
-          const cy2 = 900 + Math.sin(t * 0.28 + 1) * 100 + (myS - 500) * 0.06;
-          p1.setAttribute('d', `M ${-20 + Math.sin(t * 0.15) * 40} 800 C ${cx1} ${cy1}, ${cx2} ${cy2}, ${1020 + Math.cos(t * 0.2) * 30} 200`);
+        p.vx *= 0.98; p.vy *= 0.98;
+        const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+        const minSpeed = p.baseSpeed * p.z * 0.15;
+        if (speed < minSpeed) {
+          const angle = Math.atan2(p.vy, p.vx) || Math.random() * Math.PI * 2;
+          p.vx = Math.cos(angle) * minSpeed;
+          p.vy = Math.sin(angle) * minSpeed;
         }
+        p.x += p.vx; p.y += p.vy;
+        // 가상 캔버스 경계에서 래핑
+        const margin = 50;
+        if (p.x < -margin) p.x = VIRTUAL_W + margin;
+        if (p.x > VIRTUAL_W + margin) p.x = -margin;
+        if (p.y < -margin) p.y = VIRTUAL_H + margin;
+        if (p.y > VIRTUAL_H + margin) p.y = -margin;
+      }
 
-        // 커브 2 — 가벼운 파동
-        const p2 = svg.getElementById('flex-path-2');
-        if (p2) {
-          let d = `M -50 ${500 + Math.sin(t * 0.18) * 40}`;
-          for (let seg = 1; seg <= 5; seg++) {
-            const sx = seg * 210;
-            const sy = 500 + Math.sin(t * 0.2 + seg * 1.2) * 60 + (myS - 500) * 0.03;
-            d += ` S ${sx - 80} ${sy + (seg % 2 ? 60 : -60)}, ${sx} ${sy}`;
+      // 뷰포트 안에 보이는 파티클만 필터 (성능)
+      const viewMargin = CONNECTION_DIST + 60;
+      const visible = particles.filter(
+        (p) => p.x >= ox - viewMargin && p.x <= ox + w + viewMargin &&
+               p.y >= oy - viewMargin && p.y <= oy + h + viewMargin,
+      );
+      const sorted = [...visible].sort((a, b) => a.z - b.z);
+
+      // 연결선 렌더링 (화면 좌표 = 가상좌표 - 오프셋)
+      for (let i = 0; i < sorted.length; i++) {
+        for (let j = i + 1; j < sorted.length; j++) {
+          const a = sorted[i]; const b = sorted[j];
+          const dx = a.x - b.x; const dy = a.y - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const avgZ = (a.z + b.z) * 0.5;
+          const scaledDist = CONNECTION_DIST * avgZ;
+          if (dist < scaledDist) {
+            const lineAlpha = (1 - dist / scaledDist) * avgZ * 0.5;
+            const midX = (a.x + b.x) * 0.5;
+            const midY = (a.y + b.y) * 0.5;
+            const dMid = Math.sqrt((midX - mx) ** 2 + (midY - my) ** 2);
+            const glowBoost = dMid < MOUSE_RADIUS ? (1 - dMid / MOUSE_RADIUS) * 0.4 : 0;
+            const r = Math.round((a.color[0] + b.color[0]) * 0.5);
+            const g = Math.round((a.color[1] + b.color[1]) * 0.5);
+            const bl = Math.round((a.color[2] + b.color[2]) * 0.5);
+            ctx.beginPath();
+            ctx.moveTo(a.x - ox, a.y - oy); ctx.lineTo(b.x - ox, b.y - oy);
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${Math.min(lineAlpha + glowBoost, 0.75)})`;
+            ctx.lineWidth = avgZ * 1.5;
+            ctx.stroke();
           }
-          p2.setAttribute('d', d);
-        }
-
-        // 블롭 0 — 유기적 형태
-        const b0 = svg.getElementById('flex-blob-0');
-        if (b0) {
-          const cx = 300 + Math.sin(t * 0.2) * 80 + (mxS - 500) * 0.06;
-          const cy = 300 + Math.cos(t * 0.25) * 60 + (myS - 500) * 0.05;
-          const r = 120 + Math.sin(t * 0.3) * 30;
-          const d0 = Math.sin(t * 0.5) * 25;
-          const d1 = Math.cos(t * 0.4 + 1) * 20;
-          const d2 = Math.sin(t * 0.45 + 2) * 22;
-          const d3 = Math.cos(t * 0.5 + 3) * 18;
-          b0.setAttribute('d', `M ${cx} ${cy - r + d0} Q ${cx + r + d1} ${cy - d2}, ${cx + d3} ${cy + r - d0} Q ${cx - r - d1} ${cy + d2}, ${cx - d3} ${cy - r + d0} Z`);
-        }
-
-        // 블롭 1 — 하단 우측
-        const b1 = svg.getElementById('flex-blob-1');
-        if (b1) {
-          const cx = 720 + Math.cos(t * 0.22) * 60 + (mxS - 500) * 0.04;
-          const cy = 680 + Math.sin(t * 0.18) * 50 + (myS - 500) * 0.05;
-          const r = 90 + Math.cos(t * 0.35) * 25;
-          const d0 = Math.cos(t * 0.6) * 20;
-          const d1 = Math.sin(t * 0.5 + 2) * 15;
-          b1.setAttribute('d', `M ${cx} ${cy - r + d0} Q ${cx + r + d1} ${cy}, ${cx} ${cy + r - d0} Q ${cx - r - d1} ${cy}, ${cx} ${cy - r + d0} Z`);
         }
       }
 
+      // 파티클 렌더링 (화면 좌표)
+      for (const p of sorted) {
+        const alpha = 0.35 + p.z * 0.6;
+        const [r, g, b] = p.color;
+        const sx = p.x - ox; // 화면 x
+        const sy = p.y - oy; // 화면 y
+        const dmx2 = p.x - mx; const dmy2 = p.y - my;
+        const distM = Math.sqrt(dmx2 * dmx2 + dmy2 * dmy2);
+        const nearMouse = distM < MOUSE_RADIUS;
+        const glowSize = nearMouse ? p.size + (1 - distM / MOUSE_RADIUS) * 4 * p.z : p.size;
+
+        if (p.z < 0.4) {
+          const blurSize = glowSize * (3 - p.z * 5);
+          const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, blurSize);
+          grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.5})`);
+          grad.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${alpha * 0.15})`);
+          grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(sx - blurSize, sy - blurSize, blurSize * 2, blurSize * 2);
+        } else {
+          if (nearMouse) {
+            const haloSize = glowSize * 3;
+            const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, haloSize);
+            halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.3})`);
+            halo.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${alpha * 0.08})`);
+            halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+            ctx.fillStyle = halo;
+            ctx.fillRect(sx - haloSize, sy - haloSize, haloSize * 2, haloSize * 2);
+          }
+          ctx.beginPath();
+          ctx.arc(sx, sy, glowSize, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+          ctx.fill();
+          if (p.z > 0.7) {
+            ctx.beginPath();
+            ctx.arc(sx, sy, glowSize * 0.4, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.4})`;
+            ctx.fill();
+          }
+        }
+      }
       rafRef.current = requestAnimationFrame(animate);
     };
 
     rafRef.current = requestAnimationFrame(animate);
-    return () => { running = false; cancelAnimationFrame(rafRef.current); };
+    return () => {
+      running = false;
+      cancelAnimationFrame(rafRef.current);
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('mousemove', onMouse);
+    };
   }, []);
 
+  return <canvas ref={canvasRef} className="absolute inset-0" style={{ width: '100%', height: '100%' }} />;
+}
+
+// ─── 드라마틱 텍스트 모핑 애니메이션 ───────────────────────────
+// 시퀀스: "Be the flow." → "BAE the flow." → "B the flow." → "Bflow."
+// "B"는 항상 고정, 서픽스("e"→"AE"→"")만 크로스페이드 모핑
+// " the "는 연기처럼 사라지며 공간 수축
+// layout 애니메이션 없이 명시적 트랜스폼으로 부드러운 모션 구현
+
+type MorphStage = 0 | 1 | 2 | 3 | 4;
+
+const STAGE_SUFFIX: string[] = ['e', 'AE', '', '', ''];
+
+function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
+  const [stage, setStage] = useState<MorphStage>(0);
+  const doneRef = useRef(false);
+  const themeId = useAppStore((s) => s.themeId);
+  const customColors = useAppStore((s) => s.customThemeColors);
+  const { accentCss, accentSubCss } = useMemo(() => {
+    const colors = customColors ?? getPreset(themeId)?.colors;
+    const a = colors?.accent ?? '108 92 231';
+    const s = colors?.accentSub ?? '162 155 254';
+    const toRgb = (t: string) => t.split(' ').join(',');
+    return { accentCss: toRgb(a), accentSubCss: toRgb(s) };
+  }, [themeId, customColors]);
+
+  // ── 서픽스/the 너비 측정 ──
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const theInnerRef = useRef<HTMLSpanElement>(null);
+  const [suffixW, setSuffixW] = useState<Record<string, number>>({ e: 0, AE: 0, '': 0 });
+  const [theW, setTheW] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = measureRef.current;
+    if (!el) return;
+    const w: Record<string, number> = {};
+    for (const s of ['e', 'AE']) {
+      el.textContent = s;
+      w[s] = el.getBoundingClientRect().width;
+    }
+    w[''] = 0;
+    setSuffixW(w);
+    if (theInnerRef.current) {
+      setTheW(theInnerRef.current.getBoundingClientRect().width);
+    }
+  }, []);
+
+  // ── 스테이지 타이머 — 여유로운 간격 ──
+  useEffect(() => {
+    const timers = [
+      setTimeout(() => setStage(1), 2000),   // Be → BAE
+      setTimeout(() => setStage(2), 3400),   // BAE → B
+      setTimeout(() => setStage(3), 4600),   // " the " 사라짐 → "Bflow."
+      setTimeout(() => {
+        setStage(4);                         // 서브타이틀 등장
+        if (!doneRef.current) { doneRef.current = true; onAnimationDone(); }
+      }, 6200),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [onAnimationDone]);
+
+  const suffix = STAGE_SUFFIX[stage];
+  const showThe = stage < 3;
+  const showSub = stage >= 4;
+
   return (
-    <div ref={containerRef} className="absolute inset-0 overflow-hidden">
-      {/* 오브 — 위치는 CSS transform으로 직접 조작 */}
-      {orbs.current.map((orb, i) => (
-        <div
-          key={i}
-          ref={(el) => { if (el) orbRefs.current[i] = el; }}
-          className="absolute left-0 top-0 rounded-full will-change-transform"
-          style={{
-            width: orb.size,
-            height: orb.size,
-            background: `radial-gradient(circle at 40% 40%, ${orb.color} 0%, ${orb.color.replace(/[\d.]+\)$/, '0)')} 70%)`,
-            filter: `blur(${50 + orb.size * 0.12}px)`,
-            opacity: orb.opacity,
-            transform: `translate(${orb.baseX}vw, ${orb.baseY}vh) translate(-50%, -50%)`,
-          }}
-        />
-      ))}
-
-      {/* 플렉서블 아트 커브 */}
-      <FlexArt containerRef={svgRef} />
-
-      {/* 마우스 글로우 */}
-      <div
-        ref={glowRef}
-        className="absolute pointer-events-none will-change-transform"
-        style={{
-          left: '50%',
-          top: '50%',
-          width: 500,
-          height: 500,
-          transform: 'translate(-50%, -50%)',
-          background: 'radial-gradient(circle, rgba(108,92,231,0.07) 0%, rgba(108,92,231,0.02) 40%, transparent 70%)',
-        }}
+    <div className="flex flex-col items-center z-10 relative">
+      {/* 숨겨진 측정용 스팬 */}
+      <span
+        ref={measureRef}
+        className="absolute invisible pointer-events-none text-5xl md:text-7xl font-bold tracking-tight"
+        aria-hidden="true"
       />
 
-      {/* 디더링 노이즈 — 밴딩 제거 */}
-      <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-[0.04]">
-        <filter id="dither-noise">
-          <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch" />
-        </filter>
-        <rect width="100%" height="100%" filter="url(#dither-noise)" />
-      </svg>
+      {/* h1 래퍼 — 서브타이틀 등장 시 위로 부드럽게 이동 (layout 대신 명시적 y) */}
+      <motion.div
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: showSub ? -24 : 0 }}
+        transition={{
+          opacity: { duration: 1.2, ease: [0.16, 1, 0.3, 1] },
+          y: { duration: 0.9, ease: [0.16, 1, 0.3, 1] },
+        }}
+      >
+        <h1 className="flex items-baseline text-5xl md:text-7xl font-bold tracking-tight">
+          {/* "B" — 항상 고정, 그래디언트 + 빛나는 글로우 */}
+          <motion.span
+            animate={{
+              filter: [
+                `drop-shadow(0 0 10px rgba(${accentCss},0.6)) drop-shadow(0 0 25px rgba(${accentCss},0.3)) drop-shadow(0 0 50px rgba(${accentSubCss},0.15))`,
+                `drop-shadow(0 0 16px rgba(${accentCss},0.8)) drop-shadow(0 0 40px rgba(${accentCss},0.45)) drop-shadow(0 0 70px rgba(${accentSubCss},0.2))`,
+                `drop-shadow(0 0 10px rgba(${accentCss},0.6)) drop-shadow(0 0 25px rgba(${accentCss},0.3)) drop-shadow(0 0 50px rgba(${accentSubCss},0.15))`,
+              ],
+            }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent"
+          >
+            B
+          </motion.span>
+
+          {/* 서픽스 컨테이너 — inline-grid로 baseline 정렬 유지 + 크로스페이드 */}
+          <motion.span
+            initial={false}
+            animate={{ width: suffixW[suffix] ?? 0 }}
+            transition={{ type: 'spring', stiffness: 170, damping: 22 }}
+            className="inline-grid overflow-hidden align-baseline"
+          >
+            <AnimatePresence>
+              {suffix && (
+                <motion.span
+                  key={suffix}
+                  initial={{ opacity: 0, filter: 'blur(8px)' }}
+                  animate={{ opacity: 1, filter: 'blur(0px)' }}
+                  exit={{ opacity: 0, filter: 'blur(10px)' }}
+                  transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
+                  className="bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent whitespace-nowrap"
+                  style={{ gridArea: '1 / 1' }}
+                >
+                  {suffix}
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.span>
+
+          {/* " the " — 연기처럼 사라지며 공간 수축 */}
+          <motion.span
+            initial={false}
+            animate={{
+              width: showThe ? theW : 0,
+              opacity: showThe ? 1 : 0,
+              filter: showThe ? 'blur(0px)' : 'blur(16px)',
+            }}
+            transition={{
+              width: { type: 'spring', stiffness: 130, damping: 20, delay: showThe ? 0 : 0.25 },
+              opacity: { duration: 0.9, ease: [0.4, 0, 0.2, 1] },
+              filter: { duration: 0.9, ease: [0.4, 0, 0.2, 1] },
+            }}
+            className="inline-block overflow-hidden whitespace-nowrap text-text-primary"
+          >
+            <span ref={theInnerRef}>{'\u00A0the\u00A0'}</span>
+          </motion.span>
+
+          {/* "flow." — 항상 고정, 공백 없음 */}
+          <span className="inline-block text-text-primary">flow.</span>
+        </h1>
+      </motion.div>
+
+      {/* ── 서브타이틀 + 디바이더 — 가운데에서 자연스럽게 등장 ── */}
+      <AnimatePresence>
+        {showSub && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1], delay: 0.15 }}
+            className="flex flex-col items-center gap-4 mt-6"
+          >
+            <p className="text-base md:text-lg text-text-secondary/70 font-light tracking-wide">
+              Your workflow, but better. That&apos;s the <span className="text-accent font-medium">B</span>.
+            </p>
+            <div className="h-px w-24 bg-gradient-to-r from-transparent via-accent to-transparent" />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-// ─── 히어로 텍스트 애니메이션 ─────────────────────────────────
+// ─── 클릭 투 컨티뉴 ────────────────────────────────────────────
 
-const HERO_LETTERS = 'B the flow.'.split('');
+function ClickPrompt() {
+  const themeId = useAppStore((s) => s.themeId);
+  const customColors = useAppStore((s) => s.customThemeColors);
+  const { aCss, sCss } = useMemo(() => {
+    const colors = customColors ?? getPreset(themeId)?.colors;
+    const a = colors?.accent ?? '108 92 231';
+    const s = colors?.accentSub ?? '162 155 254';
+    return { aCss: a.split(' ').join(','), sCss: s.split(' ').join(',') };
+  }, [themeId, customColors]);
 
-function HeroText() {
   return (
-    <motion.div className="flex flex-col items-center gap-5 z-10 relative">
-      <h1 className="flex overflow-hidden">
-        {HERO_LETTERS.map((char, i) => (
-          <motion.span
-            key={i}
-            initial={{ y: 80, opacity: 0, rotateX: -90 }}
-            animate={{ y: 0, opacity: 1, rotateX: 0 }}
-            transition={{
-              delay: 0.3 + i * 0.06,
-              duration: 0.7,
-              ease: [0.16, 1, 0.3, 1],
-            }}
-            className={`inline-block text-5xl md:text-7xl font-bold tracking-tight ${
-              i === 0
-                ? 'bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent'
-                : 'text-text-primary'
-            }`}
-            style={{ display: 'inline-block', whiteSpace: 'pre' }}
-          >
-            {char === ' ' ? '\u00A0' : char}
-          </motion.span>
-        ))}
-      </h1>
-
-      <motion.p
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.2, duration: 0.8, ease: 'easeOut' }}
-        className="text-base md:text-lg text-text-secondary/70 font-light tracking-wide"
-      >
-        Your workflow, but better. That&apos;s the <span className="text-accent font-medium">B</span>.
-      </motion.p>
-
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ delay: 0.4, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+      className="absolute bottom-20 left-0 right-0 flex justify-center z-10"
+    >
       <motion.div
-        initial={{ scaleX: 0 }}
-        animate={{ scaleX: 1 }}
-        transition={{ delay: 1.6, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        className="h-px w-24 bg-gradient-to-r from-transparent via-accent to-transparent"
-      />
+        animate={{
+          opacity: [0.7, 1, 0.7],
+          textShadow: [
+            `0 0 8px rgba(${aCss},0.4), 0 0 24px rgba(${aCss},0.15)`,
+            `0 0 16px rgba(${aCss},0.7), 0 0 48px rgba(${aCss},0.3), 0 0 80px rgba(${sCss},0.15)`,
+            `0 0 8px rgba(${aCss},0.4), 0 0 24px rgba(${aCss},0.15)`,
+          ],
+        }}
+        transition={{ duration: 3.0, repeat: Infinity, ease: 'easeInOut' }}
+        className="flex items-center gap-2 text-sm text-accent tracking-[0.2em] uppercase font-light"
+      >
+        click anywhere to continue
+        <motion.span
+          animate={{ x: [0, 5, 0] }}
+          transition={{ duration: 2.0, repeat: Infinity, ease: 'easeInOut' }}
+        >
+          <ChevronRight size={14} />
+        </motion.span>
+      </motion.div>
     </motion.div>
   );
 }
@@ -304,7 +522,7 @@ function Footer() {
       transition={{ delay: 1.8, duration: 0.6 }}
       className="absolute bottom-6 left-0 right-0 text-center z-10"
     >
-      <p className="text-[11px] text-text-secondary/30 tracking-[0.2em] uppercase">
+      <p className="text-[11px] text-text-secondary/50 tracking-[0.2em] uppercase">
         Born in JBBJ &middot; Built for every studio
       </p>
     </motion.footer>
@@ -372,7 +590,7 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="사용자 이름"
-          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/30 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
+          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
         />
       </div>
 
@@ -383,9 +601,9 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="비밀번호 입력"
-          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/30 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
+          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
         />
-        <p className="text-[10px] text-text-secondary/30">최초 비밀번호는 1234</p>
+        <p className="text-[10px] text-text-secondary/50">최초 비밀번호는 1234</p>
       </div>
 
       <AnimatePresence>
@@ -416,39 +634,38 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
 
 // ─── 메인 컴포넌트 ───────────────────────────────────────────
 
-/**
- * @param mode 'login' = 로그인 필요, 'splash' = 이미 로그인됨 → 스플래시만
- * @param onComplete 스플래시 완료 콜백 (mode='splash' 전용)
- */
 interface LoginScreenProps {
   mode?: 'login' | 'splash';
   onComplete?: () => void;
 }
 
-type Phase = 'landing' | 'transition' | 'login' | 'done';
+type Phase = 'landing' | 'ready' | 'transition' | 'login' | 'done';
 
 export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
   const { setCurrentUser } = useAuthStore();
   const [phase, setPhase] = useState<Phase>('landing');
 
-  // 타이머: 히어로 → 전환
-  useEffect(() => {
-    const duration = mode === 'splash' ? 2400 : 2800;
-    const t1 = setTimeout(() => setPhase('transition'), duration);
-    const t2 = setTimeout(() => {
-      if (mode === 'splash') {
-        setPhase('done');
-        onComplete?.();
-      } else {
-        setPhase('login');
-      }
-    }, duration + 600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [mode, onComplete]);
+  // 텍스트 애니메이션 완료 콜백
+  const handleAnimationDone = useCallback(() => {
+    setPhase('ready');
+  }, []);
 
-  // 클릭/키 입력 시 즉시 스킵
-  const skip = useCallback(() => {
-    if (phase !== 'landing') return;
+  // 클릭으로 넘어가기 (landing 중이면 즉시 스킵, ready 면 트랜지션)
+  const handleClick = useCallback(() => {
+    if (phase === 'landing') {
+      // 애니메이션 스킵 → 즉시 트랜지션
+      setPhase('transition');
+      setTimeout(() => {
+        if (mode === 'splash') {
+          setPhase('done');
+          onComplete?.();
+        } else {
+          setPhase('login');
+        }
+      }, 300);
+      return;
+    }
+    if (phase !== 'ready') return;
     setPhase('transition');
     setTimeout(() => {
       if (mode === 'splash') {
@@ -457,7 +674,7 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
       } else {
         setPhase('login');
       }
-    }, 400);
+    }, 500);
   }, [phase, mode, onComplete]);
 
   const handleLogin = useCallback(async (name: string, password: string): Promise<string | null> => {
@@ -473,34 +690,40 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
 
   return (
     <div
-      className="fixed inset-0 flex flex-col items-center justify-center bg-bg-primary overflow-hidden select-none z-[9998]"
-      onClick={skip}
-      onKeyDown={skip}
+      className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden select-none z-[9998] cursor-pointer"
+      style={{ background: '#12141C' }}
+      onClick={handleClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
       tabIndex={-1}
     >
-      <InteractiveBackground />
+      <PlexusBackground />
 
       <AnimatePresence mode="wait">
-        {(phase === 'landing' || phase === 'transition') && (
+        {(phase === 'landing' || phase === 'ready' || phase === 'transition') && (
           <motion.div
             key="hero"
-            exit={{ opacity: 0, y: -40, scale: 0.97, filter: 'blur(8px)' }}
-            transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+            exit={{ opacity: 0, y: -30, scale: 0.98, filter: 'blur(6px)' }}
+            transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
             className="flex flex-col items-center"
           >
-            <HeroText />
+            <HeroText onAnimationDone={handleAnimationDone} />
           </motion.div>
         )}
 
         {phase === 'login' && (
           <motion.div
             key="login"
-            className="flex flex-col items-center"
+            className="flex flex-col items-center cursor-default"
             onClick={(e) => e.stopPropagation()}
           >
             <LoginForm onLogin={handleLogin} />
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* 클릭 프롬프트 — ready 상태에서만 표시 */}
+      <AnimatePresence>
+        {phase === 'ready' && <ClickPrompt />}
       </AnimatePresence>
 
       <Footer />

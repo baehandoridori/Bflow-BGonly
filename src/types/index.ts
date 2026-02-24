@@ -229,6 +229,31 @@ export interface ElectronAPI {
   sheetsDeleteScene: (sheetName: string, rowIndex: number) => Promise<SheetsUpdateResult>;
   sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) => Promise<SheetsUpdateResult>;
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  // METADATA 시트
+  sheetsReadMetadata: (type: string, key: string) => Promise<{ ok: boolean; data?: { type: string; key: string; value: string; updatedAt: string } | null; error?: string }>;
+  sheetsWriteMetadata: (type: string, key: string, value: string) => Promise<SheetsUpdateResult>;
+  sheetsSoftDeletePart: (sheetName: string) => Promise<SheetsUpdateResult>;
+  sheetsSoftDeleteEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
+  // 아카이빙
+  sheetsReadArchived: () => Promise<{ ok: boolean; data: { episodeNumber: number; title: string; partCount: number }[]; error?: string }>;
+  sheetsArchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
+  sheetsUnarchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
+  // 데이터 변경 브로드캐스트
+  sheetsNotifyChange?: () => Promise<{ ok: boolean }>;
+  // 위젯 팝업 윈도우
+  widgetOpenPopup?: (widgetId: string, title: string) => Promise<{ ok: boolean }>;
+  widgetSetOpacity?: (widgetId: string, opacity: number) => Promise<void>;
+  widgetClosePopup?: (widgetId: string) => Promise<void>;
+  widgetResize?: (widgetId: string, width: number, height: number) => Promise<void>;
+  widgetGetSize?: (widgetId: string) => Promise<{ width: number; height: number } | null>;
+  widgetCaptureBehind?: (widgetId: string) => Promise<string | null>;
+  onWidgetFocusChange?: (callback: (focused: boolean) => void) => () => void;
+  widgetSetAlwaysOnTop?: (widgetId: string, aot: boolean) => Promise<void>;
+  widgetMinimizeToDock?: (widgetId: string) => Promise<void>;
+  widgetRestoreFromDock?: (widgetId: string) => Promise<void>;
+  widgetDockExpand?: (widgetId: string) => Promise<void>;
+  widgetDockCollapse?: (widgetId: string) => Promise<void>;
+  onWidgetDockChange?: (callback: (isDocked: boolean) => void) => () => void;
 }
 
 declare global {

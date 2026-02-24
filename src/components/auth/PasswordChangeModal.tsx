@@ -38,7 +38,7 @@ export function PasswordChangeModal() {
   }, [currentUser, currentPw, newPw, confirmPw, setCurrentUser, setUsers, setShowPasswordChange]);
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/60">
       <form
         onSubmit={handleSubmit}
         className="w-80 bg-bg-card border border-bg-border rounded-2xl p-6 flex flex-col gap-4 shadow-2xl"
@@ -105,7 +105,7 @@ export function PasswordChangeModal() {
         <button
           type="submit"
           disabled={loading || !passwordsMatch}
-          className="bg-accent text-white text-sm font-medium rounded-lg px-4 py-2 hover:bg-accent/80 disabled:opacity-50 transition-colors"
+          className="bg-accent text-on-accent text-sm font-medium rounded-lg px-4 py-2 hover:bg-accent/80 disabled:opacity-50 transition-colors"
         >
           {loading ? '변경 중...' : '변경'}
         </button>

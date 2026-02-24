@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import type { WidgetLayoutItem, SheetsConfig, Department } from '@/types';
+import type { ThemeColors } from '@/themes';
 
-export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'calendar' | 'settings';
+export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'calendar' | 'schedule' | 'settings';
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
 export type SortDir = 'asc' | 'desc';
 export type StatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';
@@ -39,8 +40,10 @@ interface AppState {
 
   // 위젯 레이아웃
   widgetLayout: WidgetLayoutItem[] | null;
+  allWidgetLayout: WidgetLayoutItem[] | null; // 통합 대시보드 전용
   isEditMode: boolean;
   setWidgetLayout: (layout: WidgetLayoutItem[]) => void;
+  setAllWidgetLayout: (layout: WidgetLayoutItem[]) => void;
   setEditMode: (v: boolean) => void;
 
   // 필터/정렬 상태
@@ -68,6 +71,19 @@ interface AppState {
   toggleSelectedScene: (id: string) => void;
   setSelectedScenes: (ids: Set<string>) => void;
   clearSelectedScenes: () => void;
+
+  // 글로벌 토스트
+  toast: string | null;
+  setToast: (msg: string | null) => void;
+
+  // 테마
+  themeId: string;
+  customThemeColors: ThemeColors | null;
+  colorMode: 'dark' | 'light';
+  setThemeId: (id: string) => void;
+  setCustomThemeColors: (colors: ThemeColors | null) => void;
+  setColorMode: (mode: 'dark' | 'light') => void;
+  toggleColorMode: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -93,8 +109,10 @@ export const useAppStore = create<AppState>((set) => ({
   setDashboardDeptFilter: (f) => set({ dashboardDeptFilter: f }),
 
   widgetLayout: null,
+  allWidgetLayout: null,
   isEditMode: false,
   setWidgetLayout: (layout) => set({ widgetLayout: layout }),
+  setAllWidgetLayout: (layout) => set({ allWidgetLayout: layout }),
   setEditMode: (v) => set({ isEditMode: v }),
 
   selectedEpisode: null,
@@ -124,4 +142,15 @@ export const useAppStore = create<AppState>((set) => ({
   }),
   setSelectedScenes: (ids) => set({ selectedSceneIds: ids }),
   clearSelectedScenes: () => set({ selectedSceneIds: new Set<string>() }),
+
+  toast: null,
+  setToast: (msg) => set({ toast: msg }),
+
+  themeId: 'violet',
+  customThemeColors: null,
+  colorMode: 'dark',
+  setThemeId: (id) => set({ themeId: id }),
+  setCustomThemeColors: (colors) => set({ customThemeColors: colors }),
+  setColorMode: (mode) => set({ colorMode: mode }),
+  toggleColorMode: () => set((s) => ({ colorMode: s.colorMode === 'dark' ? 'light' : 'dark' })),
 }));

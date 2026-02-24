@@ -60,4 +60,63 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('sheets:update-scene-field', sheetName, rowIndex, field, value),
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) =>
     ipcRenderer.invoke('sheets:upload-image', sheetName, sceneId, imageType, base64Data),
+
+  // METADATA 시트 관련
+  sheetsReadMetadata: (type: string, key: string) =>
+    ipcRenderer.invoke('sheets:read-metadata', type, key),
+  sheetsWriteMetadata: (type: string, key: string, value: string) =>
+    ipcRenderer.invoke('sheets:write-metadata', type, key, value),
+  sheetsSoftDeletePart: (sheetName: string) =>
+    ipcRenderer.invoke('sheets:soft-delete-part', sheetName),
+  sheetsSoftDeleteEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('sheets:soft-delete-episode', episodeNumber),
+
+  // 아카이빙
+  sheetsReadArchived: () =>
+    ipcRenderer.invoke('sheets:read-archived'),
+  sheetsArchiveEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('sheets:archive-episode', episodeNumber),
+  sheetsUnarchiveEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('sheets:unarchive-episode', episodeNumber),
+
+  // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
+  sheetsNotifyChange: () => ipcRenderer.invoke('sheets:notify-change'),
+
+  // 위젯 팝업 윈도우
+  widgetOpenPopup: (widgetId: string, title: string) =>
+    ipcRenderer.invoke('widget:open-popup', widgetId, title),
+  widgetSetOpacity: (widgetId: string, opacity: number) =>
+    ipcRenderer.invoke('widget:set-opacity', widgetId, opacity),
+  widgetClosePopup: (widgetId: string) =>
+    ipcRenderer.invoke('widget:close-popup', widgetId),
+  widgetResize: (widgetId: string, width: number, height: number) =>
+    ipcRenderer.invoke('widget:resize', widgetId, width, height),
+  widgetGetSize: (widgetId: string) =>
+    ipcRenderer.invoke('widget:get-size', widgetId) as Promise<{ width: number; height: number } | null>,
+  widgetCaptureBehind: (widgetId: string) =>
+    ipcRenderer.invoke('widget:capture-behind', widgetId) as Promise<string | null>,
+  onWidgetFocusChange: (callback: (focused: boolean) => void) => {
+    const handler = (_event: unknown, focused: boolean) => callback(focused);
+    ipcRenderer.on('widget:focus-change', handler);
+    return () => { ipcRenderer.removeListener('widget:focus-change', handler); };
+  },
+
+  // 위젯 AOT 토글
+  widgetSetAlwaysOnTop: (widgetId: string, aot: boolean) =>
+    ipcRenderer.invoke('widget:set-aot', widgetId, aot),
+
+  // 위젯 독 모드 (최소화 → 플로팅 아이콘)
+  widgetMinimizeToDock: (widgetId: string) =>
+    ipcRenderer.invoke('widget:minimize-to-dock', widgetId),
+  widgetRestoreFromDock: (widgetId: string) =>
+    ipcRenderer.invoke('widget:restore-from-dock', widgetId),
+  widgetDockExpand: (widgetId: string) =>
+    ipcRenderer.invoke('widget:dock-expand', widgetId),
+  widgetDockCollapse: (widgetId: string) =>
+    ipcRenderer.invoke('widget:dock-collapse', widgetId),
+  onWidgetDockChange: (callback: (isDocked: boolean) => void) => {
+    const handler = (_event: unknown, isDocked: boolean) => callback(isDocked);
+    ipcRenderer.on('widget:dock-change', handler);
+    return () => { ipcRenderer.removeListener('widget:dock-change', handler); };
+  },
 });

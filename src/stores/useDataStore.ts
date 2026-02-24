@@ -7,6 +7,16 @@ interface DataState {
   episodes: Episode[];
   setEpisodes: (episodes: Episode[]) => void;
 
+  // 에피소드 커스텀 제목 (episodeNumber → title)
+  episodeTitles: Record<number, string>;
+  setEpisodeTitles: (titles: Record<number, string>) => void;
+  /** ep.title 대신 커스텀 제목을 우선 반환 */
+  getEpisodeDisplayName: (ep: Episode) => string;
+
+  // 에피소드 메모 (episodeNumber → memo)
+  episodeMemos: Record<number, string>;
+  setEpisodeMemos: (memos: Record<number, string>) => void;
+
   // 통계 (episodes에서 파생)
   stats: DashboardStats;
 
@@ -29,6 +39,8 @@ interface DataState {
   addSceneOptimistic: (sheetName: string, sceneId: string, assignee: string, memo: string) => void;
   deleteSceneOptimistic: (sheetName: string, rowIndex: number) => void;
   updateSceneFieldOptimistic: (sheetName: string, rowIndex: number, field: string, value: string) => void;
+  deletePartOptimistic: (sheetName: string) => void;
+  deleteEpisodeOptimistic: (episodeNumber: number) => void;
 }
 
 function applyUpdate(get: () => DataState, episodes: Episode[]) {
@@ -40,6 +52,16 @@ export const useDataStore = create<DataState>((set, get) => ({
   stats: calcDashboardStats([]),
 
   setEpisodes: (episodes) => set(applyUpdate(get, episodes)),
+
+  episodeTitles: {},
+  setEpisodeTitles: (titles) => set({ episodeTitles: titles }),
+  getEpisodeDisplayName: (ep) => {
+    const custom = get().episodeTitles[ep.episodeNumber];
+    return custom || ep.title;
+  },
+
+  episodeMemos: {},
+  setEpisodeMemos: (memos) => set({ episodeMemos: memos }),
 
   isSyncing: false,
   lastSyncTime: null,
@@ -139,6 +161,21 @@ export const useDataStore = create<DataState>((set, get) => ({
         };
       }),
     }));
+    set(applyUpdate(get, episodes));
+  },
+
+  deletePartOptimistic: (sheetName) => {
+    const episodes = get().episodes
+      .map((ep) => ({
+        ...ep,
+        parts: ep.parts.filter((p) => p.sheetName !== sheetName),
+      }))
+      .filter((ep) => ep.parts.length > 0);
+    set(applyUpdate(get, episodes));
+  },
+
+  deleteEpisodeOptimistic: (episodeNumber) => {
+    const episodes = get().episodes.filter((ep) => ep.episodeNumber !== episodeNumber);
     set(applyUpdate(get, episodes));
   },
 }));
