@@ -1,0 +1,37 @@
+/* ── 토스 스타일 위젯 인터랙션 애니메이션 ── */
+
+/* 기본 아이템: 부드러운 transition (밀려나는 위젯) */
+.react-grid-item {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.2s ease,
+              opacity 0.2s ease !important;
+}
+
+/* 드래그 중인 아이템 */
+.react-grid-item.react-draggable-dragging {
+  z-index: 100 !important;
+  opacity: 0.95 !important;
+  transition: box-shadow 0.15s ease !important;
+}
+
+/* 리사이즈 중인 아이템 */
+.react-grid-item.resizing {
+  transition: none !important;
+}
+
+/* ── 드래그 시 pulse glow 애니메이션 ── */
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* ── 안착 flash 애니메이션 ── */
+@keyframes settleFlash {
+  0% { opacity: 0.7; }
+  100% { opacity: 0; }
+}
+
+/* ── 안착 spring bounce (settle 후 위젯) ── */
+.widget-settling {
+  transition: all 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}

@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider, type Layouts, type Layout } from 'react-grid-layout';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Check, Plus, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { OverallProgressWidget } from '@/components/widgets/OverallProgressWidget';
 import { StageBarsWidget } from '@/components/widgets/StageBarsWidget';
@@ -11,6 +11,7 @@ import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentCompa
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { WidgetIdContext } from '@/components/widgets/Widget';
+import { EdgeGlow, type ResizeZone } from '@/components/widgets/EdgeGlow';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
@@ -18,6 +19,7 @@ import { getPreset } from '@/themes';
 
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
+import '@/styles/widget-animations.css';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -171,22 +173,6 @@ function DashboardPlexus() {
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" style={{ opacity: 0.85 }} />;
 }
 
-/* ── wiggle CSS injection ── */
-const WIGGLE_CSS = `
-@keyframes widget-wiggle {
-  0%, 100% { transform: rotate(-0.7deg); }
-  50% { transform: rotate(0.7deg); }
-}
-`;
-let wiggleCssInjected = false;
-function ensureWiggleCss() {
-  if (wiggleCssInjected) return;
-  const el = document.createElement('style');
-  el.textContent = WIGGLE_CSS;
-  document.head.appendChild(el);
-  wiggleCssInjected = true;
-}
-
 /* ── 위젯 메타데이터 ── */
 interface WidgetMeta {
   id: string;
@@ -219,30 +205,24 @@ function getWidgetComponent(id: string): React.ReactNode | undefined {
   return WIDGET_MAP[id];
 }
 
-/* ── 부서별 레이아웃 ── */
-/*
- * 위젯 최소 비율 ≈ 1:1 보장
- * 4컬럼 기준 1col ≈ 283px, rowHeight=80px
- * minW=1 → minH=4 (283:320 ≈ 1:1.13)
- * minW=2 → minH=7 (580:560 ≈ 1:0.97)
- */
+/* ── 부서별 레이아웃 (24칸 그리드, rowHeight=16px) ── */
 const DEPT_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'stage-bars', x: 1, y: 0, w: 2, h: 4, minW: 2, minH: 4 },
-  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'episode-summary', x: 0, y: 4, w: 2, h: 5, minW: 2, minH: 4 },
-  { i: 'my-tasks', x: 2, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
-  { i: 'calendar', x: 3, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
+  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 4, minH: 12 },
+  { i: 'stage-bars', x: 6, y: 0, w: 12, h: 20, minW: 8, minH: 12 },
+  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 4, minH: 12 },
+  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 8, minH: 12 },
+  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 4, minH: 12 },
+  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 4, minH: 12 },
 ];
 
-/* ── 통합 레이아웃 ── */
+/* ── 통합 레이아웃 (24칸 그리드, rowHeight=16px) ── */
 const ALL_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'dept-comparison', x: 1, y: 0, w: 2, h: 4, minW: 2, minH: 4 },
-  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'episode-summary', x: 0, y: 4, w: 2, h: 5, minW: 2, minH: 4 },
-  { i: 'my-tasks', x: 2, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
-  { i: 'calendar', x: 3, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
+  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 4, minH: 12 },
+  { i: 'dept-comparison', x: 6, y: 0, w: 12, h: 20, minW: 8, minH: 12 },
+  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 4, minH: 12 },
+  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 8, minH: 12 },
+  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 4, minH: 12 },
+  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 4, minH: 12 },
 ];
 
 /* ── 위젯 추가 팝오버 ── */
@@ -295,17 +275,61 @@ function WidgetPicker({
   );
 }
 
+/* ── 8방향 리사이즈 히트 영역 정의 ── */
+const RESIZE_ZONES: { zone: ResizeZone; style: React.CSSProperties }[] = [
+  { zone: 'n', style: { top: 0, left: 16, right: 16, height: 10, cursor: 'n-resize' } },
+  { zone: 's', style: { bottom: 0, left: 16, right: 16, height: 10, cursor: 's-resize' } },
+  { zone: 'w', style: { left: 0, top: 16, bottom: 16, width: 10, cursor: 'w-resize' } },
+  { zone: 'e', style: { right: 0, top: 16, bottom: 16, width: 10, cursor: 'e-resize' } },
+  { zone: 'nw', style: { top: 0, left: 0, width: 16, height: 16, cursor: 'nw-resize' } },
+  { zone: 'ne', style: { top: 0, right: 0, width: 16, height: 16, cursor: 'ne-resize' } },
+  { zone: 'sw', style: { bottom: 0, left: 0, width: 16, height: 16, cursor: 'sw-resize' } },
+  { zone: 'se', style: { bottom: 0, right: 0, width: 16, height: 16, cursor: 'se-resize' } },
+];
+
 /* ── 대시보드 메인 ── */
 export function Dashboard() {
-  const { widgetLayout, allWidgetLayout, isEditMode, setWidgetLayout, setAllWidgetLayout, setEditMode, setSelectedDepartment } = useAppStore();
+  const { widgetLayout, allWidgetLayout, setWidgetLayout, setAllWidgetLayout, setSelectedDepartment } = useAppStore();
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
   const setDashboardFilter = useAppStore((s) => s.setDashboardDeptFilter);
   const [showPicker, setShowPicker] = useState(false);
 
-  // 편집 모드에서 wiggle CSS 주입
-  useEffect(() => {
-    if (isEditMode) ensureWiggleCss();
-  }, [isEditMode]);
+  // Edge glow 상태: 위젯별 현재 호버 중인 리사이즈 존
+  const [edgeZones, setEdgeZones] = useState<Record<string, ResizeZone>>({});
+
+  // 드래그/리사이즈 상태
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [resizingId, setResizingId] = useState<string | null>(null);
+  const [settlingId, setSettlingId] = useState<string | null>(null);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const isActive = draggingId !== null || resizingId !== null;
+
+  // 드래그 콜백
+  const handleDragStart = useCallback((_layout: Layout[], oldItem: Layout) => {
+    setDraggingId(oldItem.i);
+  }, []);
+
+  const handleDragStop = useCallback((_layout: Layout[], oldItem: Layout) => {
+    setDraggingId(null);
+    setSettlingId(oldItem.i);
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => setSettlingId(null), 450);
+  }, []);
+
+  // 리사이즈 콜백
+  const handleResizeStart = useCallback((_layout: Layout[], oldItem: Layout) => {
+    setResizingId(oldItem.i);
+  }, []);
+
+  const handleResizeStop = useCallback((_layout: Layout[], oldItem: Layout) => {
+    setResizingId(null);
+    setSettlingId(oldItem.i);
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => setSettlingId(null), 450);
+  }, []);
+
+  // cleanup
+  useEffect(() => () => { if (settleTimerRef.current) clearTimeout(settleTimerRef.current); }, []);
 
   const handleDeptSelect = useCallback((filter: typeof dashboardFilter) => {
     setDashboardFilter(filter);
@@ -340,7 +364,6 @@ export function Dashboard() {
 
   const handleLayoutChange = useCallback(
     (_current: Layout[], allLayouts: Layouts) => {
-      if (!isEditMode) return;
       const newLayout = allLayouts.lg ?? _current;
       if (dashboardFilter === 'all') {
         setAllWidgetLayout(newLayout);
@@ -350,7 +373,7 @@ export function Dashboard() {
         saveLayout(newLayout);
       }
     },
-    [isEditMode, setWidgetLayout, setAllWidgetLayout, dashboardFilter],
+    [setWidgetLayout, setAllWidgetLayout, dashboardFilter],
   );
 
   const handleRemoveWidget = useCallback((widgetId: string) => {
@@ -374,7 +397,7 @@ export function Dashboard() {
     const actualId = widgetId === 'calendar' ? `calendar-${Date.now()}` : widgetId;
     // 맨 아래에 추가
     const maxY = current.reduce((max, l) => Math.max(max, l.y + l.h), 0);
-    const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 2, h: 3, minW: 1, minH: 2 };
+    const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 8, h: 15, minW: 4, minH: 8 };
     const newLayout = [...current, newItem];
     if (isAll) {
       setAllWidgetLayout(newLayout);
@@ -385,13 +408,6 @@ export function Dashboard() {
     }
     setShowPicker(false);
   }, [widgetLayout, allWidgetLayout, setWidgetLayout, setAllWidgetLayout, dashboardFilter]);
-
-  const handleToggleEdit = useCallback(() => {
-    if (isEditMode) {
-      setShowPicker(false);
-    }
-    setEditMode(!isEditMode);
-  }, [isEditMode, setEditMode]);
 
   return (
     <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
@@ -453,10 +469,9 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* 편집 모드 토글 */}
+        {/* 위젯 추가 */}
         <div className="relative flex items-center gap-2">
-          {/* 위젯 추가 (편집 모드에서만) */}
-          {isEditMode && hiddenWidgets.length > 0 && (
+          {hiddenWidgets.length > 0 && (
             <div className="relative">
               <button
                 onClick={() => setShowPicker(!showPicker)}
@@ -481,29 +496,6 @@ export function Dashboard() {
               </AnimatePresence>
             </div>
           )}
-
-          <button
-            onClick={handleToggleEdit}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer',
-              'transition-colors duration-150',
-              isEditMode
-                ? 'bg-status-high/15 text-status-high hover:bg-status-high/25 border border-status-high/30'
-                : 'bg-bg-card text-text-secondary hover:text-text-primary border border-bg-border hover:border-bg-border/80',
-            )}
-          >
-            {isEditMode ? (
-              <>
-                <Check size={14} />
-                완료
-              </>
-            ) : (
-              <>
-                <Pencil size={14} />
-                레이아웃 편집
-              </>
-            )}
-          </button>
         </div>
       </div>
 
@@ -520,73 +512,116 @@ export function Dashboard() {
             className="layout"
             layouts={layouts}
             breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-            cols={{ lg: 4, md: 4, sm: 2, xs: 2, xxs: 1 }}
-            rowHeight={80}
-            margin={[14, 14]}
+            cols={{ lg: 24, md: 24, sm: 12, xs: 12, xxs: 6 }}
+            rowHeight={16}
+            margin={[6, 6]}
+            containerPadding={[10, 8]}
             compactType="vertical"
-            isDraggable={isEditMode}
-            isResizable={isEditMode}
+            preventCollision={false}
+            isDraggable
+            isResizable
+            resizeHandles={['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']}
             draggableHandle=".widget-drag-handle"
             onLayoutChange={handleLayoutChange}
+            onDragStart={handleDragStart}
+            onDragStop={handleDragStop}
+            onResizeStart={handleResizeStart}
+            onResizeStop={handleResizeStop}
             useCSSTransforms
           >
-            {currentLayout.map((item, idx) => (
-              <div
-                key={item.i}
-                className="relative"
-              >
-                {/* 위글 래퍼 — 위글 transform을 자식에 적용하여 RGL의 translate와 충돌 방지 */}
+            {currentLayout.map((item) => {
+              const zone = edgeZones[item.i] ?? null;
+              const isDrag = draggingId === item.i;
+              const isResize = resizingId === item.i;
+              const isSettle = settlingId === item.i;
+              const isDimmed = isActive && !isDrag && !isResize;
+              return (
                 <div
-                  className="h-full"
-                  style={isEditMode ? {
-                    animation: 'widget-wiggle 0.3s ease-in-out infinite',
-                    animationDelay: `${(idx % 5) * 0.06}s`,
-                  } : undefined}
+                  key={item.i}
+                  className={cn(
+                    'relative h-full',
+                    isSettle && 'widget-settling',
+                  )}
+                  style={{ overflow: 'visible' }}
+                  onMouseLeave={() => setEdgeZones((p) => ({ ...p, [item.i]: null }))}
                 >
-                  {/* 편집 모드: 삭제 버튼 */}
-                  {isEditMode && (
-                    <button
-                      onClick={() => handleRemoveWidget(item.i)}
-                      className={cn(
-                        'absolute -top-1.5 -left-1.5 z-20 w-5 h-5 rounded-full',
-                        'bg-red-500 hover:bg-red-400',
-                        'flex items-center justify-center',
-                        'shadow-md shadow-black/30',
-                        'transition-colors duration-100 cursor-pointer',
-                      )}
-                      title="위젯 제거"
-                    >
-                      <X size={11} className="text-white" strokeWidth={3} />
-                    </button>
-                  )}
                   <WidgetIdContext.Provider value={item.i.startsWith('calendar-') ? 'calendar' : item.i}>
-                  {getWidgetComponent(item.i) ?? (
-                    <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
-                      위젯: {item.i}
-                    </div>
-                  )}
+                    {getWidgetComponent(item.i) ?? (
+                      <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
+                        위젯: {item.i}
+                      </div>
+                    )}
                   </WidgetIdContext.Provider>
+
+                  {/* Edge Glow 시각 효과 */}
+                  {!isDrag && !isActive && <EdgeGlow zone={zone} />}
+
+                  {/* 드래그 시 pulse glow 보더 */}
+                  {isDrag && (
+                    <div
+                      style={{
+                        position: 'absolute', inset: -1, borderRadius: 13,
+                        pointerEvents: 'none',
+                        border: '1.5px solid rgb(var(--color-accent) / 0.5)',
+                        boxShadow: '0 0 20px rgb(var(--color-accent) / 0.2), inset 0 0 20px rgb(var(--color-accent) / 0.06)',
+                        animation: 'glowPulse 1.5s ease-in-out infinite',
+                      }}
+                    />
+                  )}
+
+                  {/* 리사이즈 시 보더 강조 */}
+                  {isResize && (
+                    <div
+                      style={{
+                        position: 'absolute', inset: -1, borderRadius: 13,
+                        pointerEvents: 'none',
+                        border: '1.5px solid rgb(var(--color-accent) / 0.45)',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgb(var(--color-accent) / 0.3)',
+                      }}
+                    />
+                  )}
+
+                  {/* 안착 flash */}
+                  {isSettle && (
+                    <div
+                      style={{
+                        position: 'absolute', inset: -1, borderRadius: 13,
+                        pointerEvents: 'none',
+                        border: '1.5px solid rgb(var(--color-accent) / 0.45)',
+                        animation: 'settleFlash 0.45s ease-out forwards',
+                      }}
+                    />
+                  )}
+
+                  {/* 다른 위젯 dim 오버레이 */}
+                  {isDimmed && (
+                    <div
+                      style={{
+                        position: 'absolute', inset: 0, borderRadius: 12,
+                        background: 'rgb(var(--color-bg-primary) / 0.5)',
+                        backdropFilter: 'blur(2px)',
+                        pointerEvents: 'none',
+                        transition: 'opacity 0.25s ease',
+                      }}
+                    />
+                  )}
+
+                  {/* 8방향 리사이즈 히트 영역 */}
+                  {!isDrag && !isActive && RESIZE_ZONES.map(({ zone: z, style }) => (
+                    <div
+                      key={z}
+                      style={{ position: 'absolute', ...style, zIndex: 20 }}
+                      onMouseEnter={() => setEdgeZones((p) => ({ ...p, [item.i]: z }))}
+                      onMouseLeave={() => setEdgeZones((p) => ({ ...p, [item.i]: null }))}
+                    />
+                  ))}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </ResponsiveGridLayout>
         </motion.div>
       </AnimatePresence>
 
-      {/* 편집 모드 하단 안내 */}
-      <AnimatePresence>
-        {isEditMode && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            transition={{ duration: 0.15 }}
-            className="flex items-center justify-center py-2 text-xs text-text-secondary/50"
-          >
-            위젯을 드래그하여 재배치하세요. 모서리를 드래그하여 크기를 조절하세요.
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

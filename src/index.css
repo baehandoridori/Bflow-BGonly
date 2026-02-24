@@ -117,11 +117,16 @@ input[type="date"]::-webkit-inner-spin-button {
 
 /* react-grid-layout 커스텀 */
 .react-grid-item.react-grid-placeholder {
-  background: rgb(var(--color-accent)) !important;
-  opacity: 0.15;
-  border-radius: 12px;
+  background: rgb(var(--color-accent) / 0.06) !important;
+  border: 2px dashed rgb(var(--color-accent) / 0.35) !important;
+  border-radius: 12px !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
+/* 기본 리사이즈 핸들 숨김 (커스텀 Edge Glow 사용) */
+.react-grid-item > .react-resizable-handle {
+  opacity: 0;
+}
 .react-grid-item > .react-resizable-handle::after {
   border-color: rgb(var(--color-accent)) !important;
 }
