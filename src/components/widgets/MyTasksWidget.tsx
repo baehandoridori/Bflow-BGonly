@@ -108,6 +108,7 @@ function AddTaskModal({
   onAddPersonalTodo: (todo: PersonalTodo) => void;
   onClose: () => void;
 }) {
+  const colorMode = useAppStore((s) => s.colorMode);
   const [mode, setMode] = useState<'scene' | 'personal'>(defaultMode);
 
   // 씬 선택 상태
@@ -338,7 +339,7 @@ function AddTaskModal({
                       value={todoStartDate}
                       onChange={(e) => setTodoStartDate(e.target.value)}
                       className="w-full bg-bg-card border-2 border-accent/40 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
-                      style={{ colorScheme: 'dark' }}
+                      style={{ colorScheme: colorMode }}
                     />
                     <Calendar size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
                   </div>
@@ -351,7 +352,7 @@ function AddTaskModal({
                       value={todoEndDate}
                       onChange={(e) => setTodoEndDate(e.target.value)}
                       className="w-full bg-bg-card border-2 border-accent/40 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
-                      style={{ colorScheme: 'dark' }}
+                      style={{ colorScheme: colorMode }}
                     />
                     <Calendar size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
                   </div>

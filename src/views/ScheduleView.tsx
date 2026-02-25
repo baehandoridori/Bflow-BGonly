@@ -520,6 +520,7 @@ function EventCreateModal({
 }) {
   const currentUser = useAuthStore((s) => s.currentUser);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const colorMode = useAppStore((s) => s.colorMode);
   const today = fmtDate(new Date());
   const isEditMode = !!editEvent;
 
@@ -645,7 +646,7 @@ function EventCreateModal({
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                   className="w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 pr-10 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
-                  style={{ colorScheme: 'dark' }}
+                  style={{ colorScheme: colorMode }}
                 />
                 <CalendarDays size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
               </div>
@@ -658,7 +659,7 @@ function EventCreateModal({
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
                   className="w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 pr-10 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
-                  style={{ colorScheme: 'dark' }}
+                  style={{ colorScheme: colorMode }}
                 />
                 <CalendarDays size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
               </div>

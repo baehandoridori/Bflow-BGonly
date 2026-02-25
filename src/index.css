@@ -33,15 +33,15 @@
 /* ─── 라이트 모드 오버라이드 ─── */
 [data-color-mode="light"] {
   --color-overlay: 0 0 0;
-  --overlay-alpha: 0.25;
+  --overlay-alpha: 0.3;
   --color-tooltip-bg: 30 35 50;
   --color-tooltip-text: 240 242 248;
   --color-glass-tint: 255 255 255;
-  --glass-tint-alpha: 0.6;
+  --glass-tint-alpha: 0.72;
   --color-glass-highlight: 0 0 0;
-  --glass-highlight-alpha: 0.04;
+  --glass-highlight-alpha: 0.07;
   --color-shadow: 0 0 0;
-  --shadow-alpha: 0.1;
+  --shadow-alpha: 0.15;
   --color-on-accent: 255 255 255;
 }
 
