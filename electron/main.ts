@@ -795,7 +795,14 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    win.setAlwaysOnTop(aot);
+    // Acrylic 윈도우에서 setAlwaysOnTop(false) 후 true로 되돌리면
+    // Windows DWM이 topmost를 복원하지 못하는 버그 우회:
+    // false 대신 'normal' 레벨(사실상 맨 뒤)로 전환하여 alwaysOnTop 플래그 유지
+    if (aot) {
+      win.setAlwaysOnTop(true, 'floating');
+    } else {
+      win.setAlwaysOnTop(true, 'normal');
+    }
   }
 });
 
