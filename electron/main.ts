@@ -795,17 +795,7 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    if (aot) {
-      // Windows Acrylic: DWM 상태 리셋 후 floating 레벨로 재적용
-      win.setAlwaysOnTop(false);
-      setTimeout(() => {
-        if (!win.isDestroyed()) {
-          win.setAlwaysOnTop(true, 'floating');
-        }
-      }, 50);
-    } else {
-      win.setAlwaysOnTop(false);
-    }
+    win.setAlwaysOnTop(aot, aot ? 'floating' : 'normal');
   }
 });
 
