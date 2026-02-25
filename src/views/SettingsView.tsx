@@ -173,7 +173,7 @@ export function SettingsView() {
                   }}
                 />
                 <span className="text-xs text-text-primary font-medium">{preset.nameKo}</span>
-                <span className="text-[10px] text-text-secondary">{preset.name}</span>
+                <span className="text-[11px] text-text-secondary">{preset.name}</span>
                 {isActive && (
                   <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent flex items-center justify-center">
                     <Check size={12} className="text-white" />
@@ -197,7 +197,7 @@ export function SettingsView() {
               <Palette size={20} className="text-text-secondary" />
             </div>
             <span className="text-xs text-text-primary font-medium">커스텀</span>
-            <span className="text-[10px] text-text-secondary">Custom</span>
+            <span className="text-[11px] text-text-secondary">Custom</span>
             {themeId === 'custom' && (
               <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent flex items-center justify-center">
                 <Check size={12} className="text-white" />

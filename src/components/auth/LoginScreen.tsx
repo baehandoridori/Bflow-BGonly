@@ -5,6 +5,7 @@ import { login } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { getPreset } from '@/themes';
+import { cn } from '@/utils/cn';
 
 // ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
@@ -164,7 +165,8 @@ function PlexusBackground() {
       const mx = mouseRef.current.x + ox;
       const my = mouseRef.current.y + oy;
 
-      ctx.fillStyle = '#12141C';
+      const isLight = useAppStore.getState().colorMode === 'light';
+      ctx.fillStyle = isLight ? '#ECEDF2' : '#12141C';
       ctx.fillRect(0, 0, w, h);
 
       const tc = getPlexusColors()[0];
@@ -396,7 +398,7 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
               ],
             }}
             transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-            className="inline-block bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent"
+            className="inline-block bg-gradient-to-br from-accent via-accent-sub to-[#74B9FF] bg-clip-text text-transparent"
           >
             B
           </motion.span>
@@ -416,7 +418,7 @@ function HeroText({ onAnimationDone }: { onAnimationDone: () => void }) {
                   animate={{ opacity: 1, filter: 'blur(0px)' }}
                   exit={{ opacity: 0, filter: 'blur(10px)' }}
                   transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
-                  className="bg-gradient-to-br from-accent via-[#A29BFE] to-[#74B9FF] bg-clip-text text-transparent whitespace-nowrap"
+                  className="bg-gradient-to-br from-accent via-accent-sub to-[#74B9FF] bg-clip-text text-transparent whitespace-nowrap"
                   style={{ gridArea: '1 / 1' }}
                 >
                   {suffix}
@@ -537,6 +539,8 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+  const colorMode = useAppStore((s) => s.colorMode);
+  const isLight = colorMode === 'light';
 
   useEffect(() => {
     const timer = setTimeout(() => nameRef.current?.focus(), 400);
@@ -562,48 +566,60 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
       transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
       className="relative w-80 rounded-2xl p-8 flex flex-col gap-5 z-10"
       style={{
-        background: 'rgba(26, 29, 39, 0.6)',
+        background: isLight ? 'rgba(255, 255, 255, 0.75)' : 'rgba(26, 29, 39, 0.6)',
         backdropFilter: 'blur(24px) saturate(1.4)',
         WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
-        border: '1px solid rgba(108, 92, 231, 0.15)',
-        boxShadow: '0 32px 64px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.03) inset, 0 0 80px rgba(108, 92, 231, 0.06)',
+        border: `1px solid rgb(var(--color-accent) / 0.15)`,
+        boxShadow: isLight
+          ? '0 32px 64px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0,0,0,0.04) inset, 0 0 80px rgb(var(--color-accent) / 0.06)'
+          : '0 32px 64px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.03) inset, 0 0 80px rgba(108, 92, 231, 0.06)',
       }}
     >
       <div
         className="absolute inset-0 rounded-2xl pointer-events-none"
-        style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 50%)' }}
+        style={{ background: isLight ? 'linear-gradient(135deg, rgba(255,255,255,0.3) 0%, transparent 50%)' : 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 50%)' }}
       />
 
       <div className="text-center relative">
-        <h2 className="text-lg font-semibold tracking-tight">
-          <span className="bg-gradient-to-r from-accent to-[#A29BFE] bg-clip-text text-transparent">B</span>
+        <h2 className="text-xl font-semibold tracking-tight">
+          <span className="bg-gradient-to-r from-accent to-accent-sub bg-clip-text text-transparent">B</span>
           <span className="text-text-primary"> flow</span>
         </h2>
-        <p className="text-xs text-text-secondary/50 mt-1 tracking-wide">sign in to continue</p>
+        <p className="text-sm text-text-secondary/60 mt-1.5 tracking-wide">sign in to continue</p>
       </div>
 
       <div className="flex flex-col gap-1.5 relative">
-        <label className="text-[11px] text-text-secondary/60 uppercase tracking-wider">Name</label>
+        <label className="text-xs text-text-secondary/70 uppercase tracking-wider">Name</label>
         <input
           ref={nameRef}
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="사용자 이름"
-          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
+          className={cn(
+            'rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/50 transition-all duration-200',
+            isLight
+              ? 'bg-black/[0.04] border border-black/[0.1] focus:bg-black/[0.06]'
+              : 'bg-white/[0.04] border border-white/[0.08] focus:bg-white/[0.06]',
+          )}
         />
       </div>
 
       <div className="flex flex-col gap-1.5 relative">
-        <label className="text-[11px] text-text-secondary/60 uppercase tracking-wider">Password</label>
+        <label className="text-xs text-text-secondary/70 uppercase tracking-wider">Password</label>
         <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="비밀번호 입력"
-          className="bg-white/[0.04] border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] transition-all duration-200"
+          className={cn(
+            'rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/50 transition-all duration-200',
+            isLight
+              ? 'bg-black/[0.04] border border-black/[0.1] focus:bg-black/[0.06]'
+              : 'bg-white/[0.04] border border-white/[0.08] focus:bg-white/[0.06]',
+          )}
         />
-        <p className="text-[10px] text-text-secondary/50">최초 비밀번호는 1234</p>
+        <p className="text-[11px] text-text-secondary/60">최초 비밀번호는 1234</p>
       </div>
 
       <AnimatePresence>
@@ -622,8 +638,8 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
       <button
         type="submit"
         disabled={loading}
-        className="relative flex items-center justify-center gap-2 text-white text-sm font-medium rounded-xl px-4 py-2.5 cursor-pointer overflow-hidden transition-all duration-200 hover:shadow-lg hover:shadow-accent/20 disabled:opacity-50"
-        style={{ background: 'linear-gradient(135deg, #6C5CE7 0%, #A29BFE 100%)' }}
+        className="relative flex items-center justify-center gap-2 text-on-accent text-sm font-medium rounded-xl px-4 py-3 cursor-pointer overflow-hidden transition-all duration-200 hover:shadow-lg hover:shadow-accent/25 disabled:opacity-50"
+        style={{ background: 'linear-gradient(135deg, rgb(var(--color-accent)) 0%, rgb(var(--color-accent-sub)) 100%)' }}
       >
         <LogIn size={15} />
         {loading ? '로그인 중...' : '로그인'}
@@ -691,7 +707,7 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
   return (
     <div
       className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden select-none z-[9998] cursor-pointer"
-      style={{ background: '#12141C' }}
+      style={{ background: 'rgb(var(--color-bg-primary))' }}
       onClick={handleClick}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
       tabIndex={-1}

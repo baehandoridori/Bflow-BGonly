@@ -178,7 +178,7 @@ export function OverallProgressWidget() {
                 &ldquo;{currentMsg.text}&rdquo;
               </p>
               {currentMsg.author && (
-                <p className="text-[10px] text-text-secondary/60 mt-0.5">
+                <p className="text-[11px] text-text-secondary/60 mt-0.5">
                   — {currentMsg.author}
                 </p>
               )}

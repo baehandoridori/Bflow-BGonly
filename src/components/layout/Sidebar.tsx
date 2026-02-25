@@ -193,7 +193,7 @@ export function Sidebar() {
 
         {/* 하단: 버전 */}
         <div className="mt-auto mb-2 flex flex-col items-center gap-0.5">
-          <span className="text-[10px] text-text-secondary/50 font-mono">
+          <span className="text-[11px] text-text-secondary/50 font-mono">
             v{__APP_VERSION__}
           </span>
         </div>

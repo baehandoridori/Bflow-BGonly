@@ -238,7 +238,7 @@ export function ImageModal({
         {/* ─── 오버레이 슬라이더 ─── */}
         {view === 'overlay' && (
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-bg-card/90 border border-bg-border rounded-xl px-4 py-2 z-10">
-            <span className="text-[10px] text-text-secondary">스토리보드</span>
+            <span className="text-[11px] text-text-secondary">스토리보드</span>
             <input
               type="range"
               min={0}
@@ -248,7 +248,7 @@ export function ImageModal({
               onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
               className="w-48 accent-accent"
             />
-            <span className="text-[10px] text-text-secondary">가이드</span>
+            <span className="text-[11px] text-text-secondary">가이드</span>
           </div>
         )}
 

@@ -231,7 +231,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.3 }}
             transition={{ delay: 1.5, duration: 0.6 }}
-            className="absolute bottom-4 right-4 z-10 text-[10px] text-white/40 tracking-wider pointer-events-none"
+            className="absolute bottom-4 right-4 z-10 text-[11px] text-white/40 tracking-wider pointer-events-none"
           >
             ESC or click to close
           </motion.div>

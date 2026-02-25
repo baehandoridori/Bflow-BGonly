@@ -116,7 +116,7 @@ export function DepartmentComparisonWidget() {
                 <span className="text-sm font-bold" style={{ color: d.config.color }}>
                   {pct.toFixed(1)}%
                 </span>
-                <span className="text-[10px] text-text-secondary">
+                <span className="text-[11px] text-text-secondary">
                   {d.stats.fullyDone}/{d.stats.totalScenes}씬
                 </span>
               </div>
@@ -159,7 +159,7 @@ export function DepartmentComparisonWidget() {
                     );
                   })}
                 </div>
-                <span className="text-[10px] text-text-secondary/60">
+                <span className="text-[11px] text-text-secondary/60">
                   {DEPARTMENT_CONFIGS.bg.stageLabels[stage]}
                 </span>
               </div>

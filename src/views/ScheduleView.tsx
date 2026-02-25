@@ -249,7 +249,7 @@ function EventBarChip({
     >
       <div
         className={cn(
-          'h-full flex items-center px-1.5 text-[10px] font-medium truncate relative',
+          'h-full flex items-center px-1.5 text-[11px] font-medium truncate relative',
           bar.isStart ? 'rounded-l-md' : '',
           bar.isEnd ? 'rounded-r-md' : '',
         )}
@@ -363,10 +363,10 @@ function OverflowPopup({
               <div className="w-2 h-2 rounded-full shrink-0 mt-0.5" style={{ backgroundColor: ev.color }} />
               <div className="flex-1 min-w-0">
                 <span className="text-xs text-text-primary truncate block">{ev.title}</span>
-                <span className="text-[10px] text-text-secondary/50 block">{dateRange}</span>
-                {ev.memo && <span className="text-[10px] text-text-secondary/40 truncate block">{ev.memo.length > 40 ? ev.memo.slice(0, 40) + '…' : ev.memo}</span>}
+                <span className="text-[11px] text-text-secondary/50 block">{dateRange}</span>
+                {ev.memo && <span className="text-[11px] text-text-secondary/40 truncate block">{ev.memo.length > 40 ? ev.memo.slice(0, 40) + '…' : ev.memo}</span>}
               </div>
-              <span className="text-[10px] text-text-secondary/50 ml-auto shrink-0">
+              <span className="text-[11px] text-text-secondary/50 ml-auto shrink-0">
                 {ev.type !== 'custom' ? ev.type.toUpperCase() : ''}
               </span>
             </button>
@@ -432,13 +432,13 @@ function EventDetailModal({
               <h3 className="text-base font-bold text-text-primary truncate">{event.title}</h3>
               <div className="flex items-center gap-2 mt-1">
                 <span
-                  className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                  className="text-[11px] px-1.5 py-0.5 rounded-full font-medium"
                   style={{ backgroundColor: `${event.color}20`, color: event.color }}
                 >
                   {typeLabels[event.type]}
                 </span>
                 {event.linkedEpisode != null && (
-                  <span className="text-[10px] text-text-secondary">
+                  <span className="text-[11px] text-text-secondary">
                     {episodeTitles[event.linkedEpisode] || `EP.${String(event.linkedEpisode).padStart(2, '0')}`}
                     {event.linkedPart && ` ${event.linkedPart}파트`}
                     {event.linkedSceneId && ` #${event.linkedSceneId}`}
@@ -1007,10 +1007,10 @@ function TodayView({
                 <div className="w-1 h-10 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
                 <div className="flex-1 min-w-0 text-left">
                   <p className="text-sm font-medium text-text-primary truncate">{ev.title}</p>
-                  <p className="text-[10px] text-text-secondary/60 mt-0.5">{dateRange} · {ev.createdBy}</p>
+                  <p className="text-[11px] text-text-secondary/60 mt-0.5">{dateRange} · {ev.createdBy}</p>
                 </div>
                 <span
-                  className="text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
+                  className="text-[11px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
                   style={{ backgroundColor: `${ev.color}20`, color: ev.color }}
                 >
                   {ev.type === 'custom' ? '일반' : ev.type.toUpperCase()}

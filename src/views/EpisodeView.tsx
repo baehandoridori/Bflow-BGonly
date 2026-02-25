@@ -191,7 +191,7 @@ function EpisodeCard({
               <span className="font-medium text-text-primary/70">
                 {ps.partId}
               </span>
-              <span className="text-[10px] font-medium" style={{ color: deptCfg.color }}>
+              <span className="text-[11px] font-medium" style={{ color: deptCfg.color }}>
                 {deptCfg.shortLabel}
               </span>
               <span className="text-text-secondary/40 tabular-nums">{partPct}%</span>
@@ -231,7 +231,7 @@ function PartMatrix({ episodes }: { episodes: { ep: Episode; stats: EpStats }[] 
               return (
                 <th key={key} className="py-2 px-2 text-center">
                   <span className="text-xs font-medium text-text-secondary/60">{partId}</span>
-                  <span className="text-[10px] ml-0.5" style={{ color: cfg?.color }}>{cfg?.shortLabel}</span>
+                  <span className="text-[11px] ml-0.5" style={{ color: cfg?.color }}>{cfg?.shortLabel}</span>
                 </th>
               );
             })}
@@ -536,13 +536,13 @@ export function EpisodeView() {
                             <Folder size={14} className="shrink-0 text-amber-500/30" />
                             <div className="flex-1 min-w-0">
                               <div className="text-xs font-medium text-text-secondary/60 truncate">{displayName}</div>
-                              <div className="text-[10px] text-text-secondary/30 truncate">
+                              <div className="text-[11px] text-text-secondary/30 truncate">
                                 {archived.partCount}개 파트
                                 {archived.archivedBy && ` · ${archived.archivedBy}`}
                                 {archived.archivedAt && ` · ${archived.archivedAt}`}
                               </div>
                               {archived.memo && (
-                                <div className="text-[10px] text-amber-500/40 italic truncate mt-0.5">
+                                <div className="text-[11px] text-amber-500/40 italic truncate mt-0.5">
                                   {archived.memo}
                                 </div>
                               )}
@@ -622,7 +622,7 @@ export function EpisodeView() {
                 </div>
               </div>
               <div className="mb-4">
-                <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
+                <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
                 <input
                   value={archiveMemoInput}
                   onChange={(e) => setArchiveMemoInput(e.target.value)}

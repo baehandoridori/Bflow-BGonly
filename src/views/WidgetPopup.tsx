@@ -393,7 +393,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         >
           <div className="flex items-center justify-center gap-1.5 px-2 h-full w-full">
             <BarChart3 size={12} className="text-text-secondary shrink-0" />
-            <span className="text-[10px] text-text-primary font-medium leading-none truncate">
+            <span className="text-[11px] text-text-primary font-medium leading-none truncate">
               {widgetMeta.label}
             </span>
           </div>

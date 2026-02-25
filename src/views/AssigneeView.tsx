@@ -143,7 +143,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
             {data.deptBreakdown.map(({ dept, count }) => (
               <span
                 key={dept}
-                className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                className="text-[11px] px-1.5 py-0.5 rounded font-medium"
                 style={{
                   color: DEPARTMENT_CONFIGS[dept].color,
                   backgroundColor: `${DEPARTMENT_CONFIGS[dept].color}15`,
@@ -169,7 +169,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
                       style={{ width: `${sPct}%`, backgroundColor: ss.color }}
                     />
                   </div>
-                  <div className="text-[10px] text-text-secondary/50 mt-0.5 text-center">{ss.label}</div>
+                  <div className="text-[11px] text-text-secondary/50 mt-0.5 text-center">{ss.label}</div>
                 </div>
               );
             })}
@@ -213,7 +213,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
                     >
                       <span className="text-xs font-mono text-text-primary/70 w-12">{ref.scene.sceneId}</span>
                       <span
-                        className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0"
+                        className="text-[11px] px-1.5 py-0.5 rounded font-medium shrink-0"
                         style={{
                           color: DEPARTMENT_CONFIGS[ref.department].color,
                           backgroundColor: `${DEPARTMENT_CONFIGS[ref.department].color}15`,
@@ -233,7 +233,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
                           }}
                         />
                       </div>
-                      <span className="text-[10px] text-text-secondary/50 tabular-nums w-7 text-right">{sp}%</span>
+                      <span className="text-[11px] text-text-secondary/50 tabular-nums w-7 text-right">{sp}%</span>
                     </button>
                   );
                 })}
@@ -334,7 +334,7 @@ export function AssigneeView() {
             >
               {label}
               {sortBy === key && (
-                <span className="ml-0.5 text-[10px]">{sortAsc ? '↑' : '↓'}</span>
+                <span className="ml-0.5 text-[11px]">{sortAsc ? '↑' : '↓'}</span>
               )}
             </button>
           ))}

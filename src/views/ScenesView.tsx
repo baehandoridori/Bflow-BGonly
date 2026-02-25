@@ -434,7 +434,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             <HighlightText text={scene.sceneId || '(씬번호 없음)'} query={searchQuery} />
           </span>
           {scene.layoutId && (
-            <span className="text-[10px] italic text-text-secondary/70 shrink-0">
+            <span className="text-[11px] italic text-text-secondary/70 shrink-0">
               - L#{scene.layoutId}
             </span>
           )}
@@ -449,7 +449,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
               title={`의견 ${commentCount}개`}
             >
               <MessageCircle size={11} fill="currentColor" />
-              <span className="text-[10px] font-bold leading-none">{commentCount}</span>
+              <span className="text-[11px] font-bold leading-none">{commentCount}</span>
             </span>
           )}
           <button
@@ -491,7 +491,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       {/* ── 메모 ── */}
       {scene.memo && (
         <div className="px-2.5 py-1 border-t border-bg-border/30">
-          <p className="text-[10px] text-amber-400/70 leading-relaxed line-clamp-2">
+          <p className="text-[11px] text-amber-400/70 leading-relaxed line-clamp-2">
             <HighlightText text={scene.memo} query={searchQuery} />
           </p>
         </div>
@@ -505,7 +505,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
               key={stage}
               onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
               className={cn(
-                'flex-1 py-0.5 rounded text-[10px] font-medium transition-all text-center',
+                'flex-1 py-0.5 rounded text-[11px] font-medium transition-all text-center',
                 scene[stage]
                   ? 'text-bg-primary'
                   : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary'
@@ -640,7 +640,7 @@ function SceneTable({ scenes, allScenes, department, commentCounts, sheetName, o
                 <td className="px-2 py-2 font-mono text-accent text-xs">
                   <span className="flex items-center gap-1">
                     #{scene.no}
-                    {(() => { const cc = commentCounts[`${sheetName}:${scene.no}`]; return cc > 0 ? <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full"><MessageCircle size={10} fill="currentColor" /><span className="text-[10px] font-bold">{cc}</span></span> : null; })()}
+                    {(() => { const cc = commentCounts[`${sheetName}:${scene.no}`]; return cc > 0 ? <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full"><MessageCircle size={10} fill="currentColor" /><span className="text-[11px] font-bold">{cc}</span></span> : null; })()}
                   </span>
                 </td>
                 <td className="px-2 py-2 text-text-primary text-xs truncate"><HighlightText text={scene.sceneId || '-'} query={searchQuery} /></td>
@@ -811,12 +811,12 @@ function AddFormImageSlot({
   if (base64) {
     return (
       <div className="flex flex-col gap-1">
-        <span className="text-[10px] text-text-secondary">{label}</span>
+        <span className="text-[11px] text-text-secondary">{label}</span>
         <div className="relative group">
           <img src={base64} alt={label} className="h-20 rounded border border-bg-border object-cover" draggable={false} />
           <button
             onClick={() => onSetBase64('')}
-            className="absolute top-0.5 right-0.5 w-4 h-4 bg-overlay/60 text-on-accent rounded-full text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute top-0.5 right-0.5 w-4 h-4 bg-overlay/60 text-on-accent rounded-full text-[11px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
           >
             ×
           </button>
@@ -827,7 +827,7 @@ function AddFormImageSlot({
 
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[10px] text-text-secondary">{label}</span>
+      <span className="text-[11px] text-text-secondary">{label}</span>
       <div
         ref={slotRef}
         tabIndex={0}
@@ -844,19 +844,19 @@ function AddFormImageSlot({
         {phase === 'paste-hint' ? (
           <>
             <ClipboardPaste size={16} className="text-accent" />
-            <p className="text-[10px] text-accent leading-tight">Ctrl+V 붙여넣기</p>
+            <p className="text-[11px] text-accent leading-tight">Ctrl+V 붙여넣기</p>
             <button
               onClick={(e) => { e.stopPropagation(); handlePasteFromClipboard(); }}
-              className="text-[10px] text-accent/70 underline hover:text-accent"
+              className="text-[11px] text-accent/70 underline hover:text-accent"
             >
               붙여넣기
             </button>
-            <p className="text-[10px] text-text-secondary/50">한번 더 클릭 → 파일선택</p>
+            <p className="text-[11px] text-text-secondary/50">한번 더 클릭 → 파일선택</p>
           </>
         ) : (
           <>
             <ImagePlus size={14} className="text-text-secondary/45" />
-            <p className="text-[10px] text-text-secondary/50">클릭하여 추가</p>
+            <p className="text-[11px] text-text-secondary/50">클릭하여 추가</p>
           </>
         )}
       </div>
@@ -963,7 +963,7 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
     <div className="bg-bg-card border border-bg-border rounded-xl p-4 flex flex-col gap-4 shadow-lg shadow-accent/5">
       {/* ── 접두사 세그먼트 컨트롤 ── */}
       <div className="flex items-center gap-3">
-        <span className="text-[10px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">접두사</span>
+        <span className="text-[11px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">접두사</span>
         <div className="flex items-center gap-2">
           {/* 세그먼트 라디오 (pill 스타일) */}
           <div className="flex bg-bg-primary rounded-lg p-0.5 border border-bg-border">
@@ -1018,10 +1018,10 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
 
           {/* 미리보기 뱃지 */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-accent/10 border border-accent/20 rounded-lg">
-            <span className="text-[10px] text-accent/60">ID</span>
+            <span className="text-[11px] text-accent/60">ID</span>
             <span className="text-xs text-accent font-mono font-bold">{sceneId}</span>
             {isDuplicate && (
-              <span className="text-[10px] text-red-400 bg-red-500/10 px-1.5 rounded">중복</span>
+              <span className="text-[11px] text-red-400 bg-red-500/10 px-1.5 rounded">중복</span>
             )}
           </div>
         </div>
@@ -1042,7 +1042,7 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
         <div className="flex flex-col gap-3">
           {/* 번호 행 */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">번호</span>
+            <span className="text-[11px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">번호</span>
             <div className="relative flex items-center">
               <input
                 value={number}
@@ -1068,7 +1068,7 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
             <button
               onClick={() => setBulkMode(!bulkMode)}
               className={cn(
-                'px-2 py-1 text-[10px] rounded-md font-medium transition-colors cursor-pointer',
+                'px-2 py-1 text-[11px] rounded-md font-medium transition-colors cursor-pointer',
                 bulkMode ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border',
               )}
             >
@@ -1099,7 +1099,7 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
 
           {/* 메모 + 레이아웃 행 */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">정보</span>
+            <span className="text-[11px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">정보</span>
             <input
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
@@ -1118,7 +1118,7 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
 
           {/* 하단 버튼 */}
           <div className="flex gap-2 items-center justify-end">
-            <span className="text-[10px] text-text-secondary/50">
+            <span className="text-[11px] text-text-secondary/50">
               Enter 추가 · Esc 취소
             </span>
             <button
@@ -1197,7 +1197,7 @@ function AddEpisodeModal({
       >
         <h3 className="text-sm font-bold text-text-primary">새 에피소드 추가</h3>
         <div>
-          <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 이름</label>
+          <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 이름</label>
           <div className="relative mt-1">
             <input
               autoFocus
@@ -1218,7 +1218,7 @@ function AddEpisodeModal({
               </span>
             )}
           </div>
-          <p className="text-[10px] text-text-secondary/40 mt-1">비우면 기본 이름으로 생성됩니다</p>
+          <p className="text-[11px] text-text-secondary/40 mt-1">비우면 기본 이름으로 생성됩니다</p>
         </div>
         <div className="flex gap-2 justify-end">
           <button
@@ -2806,7 +2806,7 @@ export function ScenesView() {
                 }}
               >
                 <div>
-                  <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">담당자 (비어있으면 건너뜀)</label>
+                  <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">담당자 (비어있으면 건너뜀)</label>
                   <AssigneeSelect
                     value={batchAssigneeValue}
                     onChange={setBatchAssigneeValue}
@@ -2815,11 +2815,11 @@ export function ScenesView() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모 (비어있으면 건너뜀)</label>
+                  <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모 (비어있으면 건너뜀)</label>
                   <input name="batchMemo" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent" placeholder="메모" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">레이아웃 (비어있으면 건너뜀)</label>
+                  <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">레이아웃 (비어있으면 건너뜀)</label>
                   <input name="batchLayout" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent" placeholder="레이아웃 ID" />
                 </div>
                 <button type="submit" className="w-full py-2.5 rounded-xl text-sm font-medium bg-accent hover:bg-accent/80 text-white transition-colors cursor-pointer">
@@ -2944,7 +2944,7 @@ export function ScenesView() {
               {episodeTitles[currentEp.episodeNumber] || currentEp.title} 관리
             </h3>
             <div>
-              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 제목</label>
+              <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 제목</label>
               <input
                 autoFocus
                 value={epTitleInput}
@@ -2954,7 +2954,7 @@ export function ScenesView() {
               />
             </div>
             <div>
-              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모</label>
+              <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모</label>
               <input
                 value={epMemo}
                 onChange={(e) => setEpMemo(e.target.value)}
@@ -3057,7 +3057,7 @@ export function ScenesView() {
                 </div>
               </div>
               <div className="mb-4">
-                <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
+                <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
                 <input
                   value={archiveMemoInput}
                   onChange={(e) => setArchiveMemoInput(e.target.value)}

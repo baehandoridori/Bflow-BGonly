@@ -63,7 +63,7 @@ export function EpisodeSummaryWidget() {
                   {deptBreakdown.map((d) => (
                     <div key={d.dept} className="flex items-center gap-2">
                       <span
-                        className="text-[10px] font-medium w-6"
+                        className="text-[11px] font-medium w-6"
                         style={{ color: d.config.color }}
                       >
                         {d.config.shortLabel}
@@ -77,7 +77,7 @@ export function EpisodeSummaryWidget() {
                           }}
                         />
                       </div>
-                      <span className="text-[10px] text-text-secondary w-16 text-right">
+                      <span className="text-[11px] text-text-secondary w-16 text-right">
                         {d.pct.toFixed(1)}% ({d.totalScenes})
                       </span>
                     </div>
@@ -97,7 +97,7 @@ export function EpisodeSummaryWidget() {
                           style={{ width: `${part.pct}%` }}
                         />
                       </div>
-                      <span className="text-[10px] text-text-secondary w-12 text-right">
+                      <span className="text-[11px] text-text-secondary w-12 text-right">
                         {part.pct.toFixed(1)}% ({part.totalScenes})
                       </span>
                     </div>

@@ -272,7 +272,7 @@ function WidgetPicker({
           boxShadow: '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset',
         }}
       >
-        <div className="px-3 py-1.5 text-[10px] font-medium text-text-secondary/50 uppercase tracking-wider">
+        <div className="px-3 py-1.5 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
           위젯 추가
         </div>
         {hiddenWidgets.map((w) => (

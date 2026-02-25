@@ -203,7 +203,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
         {comments.length === 0 ? (
           <div className="text-center py-10">
             <p className="text-text-secondary text-xs">아직 의견이 없습니다</p>
-            <p className="text-text-secondary/40 text-[10px] mt-1">첫 의견을 남겨보세요</p>
+            <p className="text-text-secondary/40 text-[11px] mt-1">첫 의견을 남겨보세요</p>
           </div>
         ) : (
           comments.map((comment) => {
@@ -222,7 +222,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
                     }}
                   >
                     <span
-                      className="text-[10px] font-bold"
+                      className="text-[11px] font-bold"
                       style={{ color: isOwn ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))' }}
                     >
                       {comment.userName.charAt(0).toUpperCase()}
@@ -233,11 +233,11 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
                       <span className="text-xs font-medium text-text-primary">
                         {comment.userName}
                       </span>
-                      <span className="text-[10px] text-text-secondary/50">
+                      <span className="text-[11px] text-text-secondary/50">
                         {formatTime(comment.createdAt)}
                       </span>
                       {comment.editedAt && (
-                        <span className="text-[10px] text-text-secondary/30 italic">수정됨</span>
+                        <span className="text-[11px] text-text-secondary/30 italic">수정됨</span>
                       )}
                     </div>
                     {isEditing ? (
@@ -259,13 +259,13 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
                         <div className="flex gap-2 mt-1 justify-end">
                           <button
                             onClick={() => setEditingId(null)}
-                            className="px-2.5 py-1 text-[10px] text-text-secondary border border-bg-border rounded-md hover:bg-bg-border/50 transition-colors cursor-pointer"
+                            className="px-2.5 py-1 text-[11px] text-text-secondary border border-bg-border rounded-md hover:bg-bg-border/50 transition-colors cursor-pointer"
                           >
                             취소
                           </button>
                           <button
                             onClick={() => handleEdit(comment.id)}
-                            className="px-2.5 py-1 text-[10px] text-white bg-accent rounded-md hover:bg-accent/80 transition-colors cursor-pointer"
+                            className="px-2.5 py-1 text-[11px] text-white bg-accent rounded-md hover:bg-accent/80 transition-colors cursor-pointer"
                           >
                             저장
                           </button>
@@ -316,7 +316,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
                   i === mentionIndex ? 'bg-accent/15' : 'hover:bg-accent/10'
                 }`}
               >
-                <span className="text-accent text-[10px]">@</span>
+                <span className="text-accent text-[11px]">@</span>
                 <span>{user.name}</span>
               </button>
             ))}

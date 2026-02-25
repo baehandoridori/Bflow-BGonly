@@ -125,7 +125,7 @@ function ScenePickerModal({
                 key={p.sheetName}
                 onClick={() => setSelectedPart(p.sheetName)}
                 className={cn(
-                  'px-2 py-1 text-[10px] rounded-md font-medium cursor-pointer transition-colors',
+                  'px-2 py-1 text-[11px] rounded-md font-medium cursor-pointer transition-colors',
                   selectedPart === p.sheetName ? 'bg-accent/20 text-accent' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border/50',
                 )}
               >
@@ -163,15 +163,15 @@ function ScenePickerModal({
                   )}
                 >
                   <div className={cn(
-                    'w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
+                    'w-4 h-4 rounded border flex items-center justify-center text-[11px] shrink-0',
                     picked ? 'bg-accent border-accent text-white' : 'border-bg-border/50',
                   )}>
                     {picked && <Check size={10} />}
                   </div>
                   <span className="text-xs font-mono font-bold text-accent shrink-0">#{s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || s.no}</span>
                   <span className="text-xs text-text-primary truncate">{s.sceneId}</span>
-                  {s.assignee && <span className="text-[10px] text-text-secondary/50 shrink-0">{s.assignee}</span>}
-                  <span className="ml-auto text-[10px] tabular-nums shrink-0" style={{ color: pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : '#8B8DA3' }}>
+                  {s.assignee && <span className="text-[11px] text-text-secondary/50 shrink-0">{s.assignee}</span>}
+                  <span className="ml-auto text-[11px] tabular-nums shrink-0" style={{ color: pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : '#8B8DA3' }}>
                     {Math.round(pct)}%
                   </span>
                 </div>
@@ -261,7 +261,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
       {/* 씬 정보 */}
       <div className="flex flex-col min-w-0 flex-1 gap-0.5">
         <div className="flex items-center gap-1">
-          <span className="text-[10px] font-mono font-bold text-accent shrink-0">#{sceneNum}</span>
+          <span className="text-[11px] font-mono font-bold text-accent shrink-0">#{sceneNum}</span>
           {editingField === 'memo' ? (
             <input
               ref={inputRef}
@@ -269,11 +269,11 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
               onChange={(e) => setEditValue(e.target.value)}
               onBlur={commitEdit}
               onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
-              className="text-[10px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none flex-1 min-w-0"
+              className="text-[11px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none flex-1 min-w-0"
             />
           ) : (
             <span
-              className="text-[10px] text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
+              className="text-[11px] text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
               onDoubleClick={() => startEdit('memo', s.memo)}
               title="더블클릭하여 메모 편집"
             >
@@ -399,7 +399,7 @@ function TabBar({
           <div
             key={v.id}
             className={cn(
-              'flex items-center gap-1 pl-2.5 pr-1 py-1 text-[10px] font-medium cursor-pointer transition-all relative group shrink-0',
+              'flex items-center gap-1 pl-2.5 pr-1 py-1 text-[11px] font-medium cursor-pointer transition-all relative group shrink-0',
               'rounded-t-lg border border-b-0',
               isActive
                 ? 'bg-bg-card border-bg-border/40 text-text-primary z-10'
@@ -420,7 +420,7 @@ function TabBar({
                   e.stopPropagation();
                 }}
                 onClick={(e) => e.stopPropagation()}
-                className="text-[10px] bg-transparent outline-none border-b border-accent/50 w-16 text-text-primary"
+                className="text-[11px] bg-transparent outline-none border-b border-accent/50 w-16 text-text-primary"
               />
             ) : (
               <span className="truncate max-w-[80px]">{v.name}</span>
@@ -699,7 +699,7 @@ export function MyTasksWidget() {
               transition={{ duration: 0.5 }}
             />
           </div>
-          <span className="text-[10px] tabular-nums text-text-secondary/50 shrink-0">
+          <span className="text-[11px] tabular-nums text-text-secondary/50 shrink-0">
             {stats.fullyDone}/{stats.total} ({Math.round(stats.pct)}%)
           </span>
         </div>
@@ -710,7 +710,7 @@ export function MyTasksWidget() {
           {pendingScenes.length === 0 && doneScenes.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-text-secondary/40 gap-1">
               <CheckSquare size={24} className="opacity-30" />
-              <span className="text-[10px]">
+              <span className="text-[11px]">
                 {activeView.type === 'assigned' ? '할당된 씬이 없습니다' : '씬을 추가해 보세요'}
               </span>
             </div>
@@ -719,7 +719,7 @@ export function MyTasksWidget() {
               {pendingScenes.length === 0 && doneScenes.length > 0 && (
                 <div className="flex flex-col items-center justify-center py-4 text-text-secondary/40 gap-1">
                   <PartyPopper size={20} className="opacity-40 text-green-400" />
-                  <span className="text-[10px] text-green-400/60">모든 할일 완료!</span>
+                  <span className="text-[11px] text-green-400/60">모든 할일 완료!</span>
                 </div>
               )}
               <AnimatePresence mode="popLayout">
@@ -732,7 +732,7 @@ export function MyTasksWidget() {
                   {/* 접기/펼치기 토글 */}
                   <button
                     onClick={() => setShowDone(!showDone)}
-                    className="flex items-center gap-1.5 w-full px-1 py-1 text-[10px] text-text-secondary/40 hover:text-text-secondary/70 cursor-pointer transition-colors rounded-md hover:bg-bg-border/5"
+                    className="flex items-center gap-1.5 w-full px-1 py-1 text-[11px] text-text-secondary/40 hover:text-text-secondary/70 cursor-pointer transition-colors rounded-md hover:bg-bg-border/5"
                   >
                     <motion.div
                       animate={{ rotate: showDone ? 0 : -90 }}
@@ -775,7 +775,7 @@ export function MyTasksWidget() {
         {activeView.type === 'custom' && (
           <button
             onClick={() => setShowPicker(true)}
-            className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[10px] text-accent border border-accent/20 rounded-lg hover:bg-accent/5 cursor-pointer transition-colors mt-1"
+            className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[11px] text-accent border border-accent/20 rounded-lg hover:bg-accent/5 cursor-pointer transition-colors mt-1"
           >
             <Plus size={11} />
             내 할일 추가

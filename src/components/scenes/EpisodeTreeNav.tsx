@@ -225,12 +225,12 @@ export function EpisodeTreeNav({
                   <div className="flex flex-col flex-1 min-w-0">
                     <span className="text-xs font-semibold truncate leading-tight">{displayName}</span>
                     {epMemo && (
-                      <span className="text-[10px] text-amber-400/60 italic truncate leading-tight">{epMemo}</span>
+                      <span className="text-[11px] text-amber-400/60 italic truncate leading-tight">{epMemo}</span>
                     )}
                   </div>
 
                   {/* 씬 수 */}
-                  <span className="text-[10px] text-text-secondary/40 tabular-nums shrink-0">
+                  <span className="text-[11px] text-text-secondary/40 tabular-nums shrink-0">
                     {totalScenes}
                   </span>
 
@@ -261,7 +261,7 @@ export function EpisodeTreeNav({
                 <CollapsibleSection isOpen={isExpanded}>
                   <div className="ml-4 pl-2 border-l border-bg-border/40">
                     {deptParts.length === 0 ? (
-                      <div className="text-[10px] text-text-secondary/30 py-1.5 px-3">
+                      <div className="text-[11px] text-text-secondary/30 py-1.5 px-3">
                         파트 없음
                       </div>
                     ) : (
@@ -288,14 +288,14 @@ export function EpisodeTreeNav({
                                 {part.partId}파트
                               </span>
                               {memo && (
-                                <span className="text-[10px] text-amber-400/60 italic truncate leading-tight">
+                                <span className="text-[11px] text-amber-400/60 italic truncate leading-tight">
                                   {memo}
                                 </span>
                               )}
                             </div>
 
                             {/* 씬 수 */}
-                            <span className="text-[10px] text-text-secondary/40 tabular-nums shrink-0">
+                            <span className="text-[11px] text-text-secondary/40 tabular-nums shrink-0">
                               {part.scenes.length}
                             </span>
 
@@ -320,7 +320,7 @@ export function EpisodeTreeNav({
                     {isEpSelected && (
                       <button
                         onClick={(e) => { e.stopPropagation(); onAddPart(); }}
-                        className="flex items-center gap-1 px-2 py-1 mx-1 text-[10px] text-text-secondary/40 hover:text-accent rounded transition-colors"
+                        className="flex items-center gap-1 px-2 py-1 mx-1 text-[11px] text-text-secondary/40 hover:text-accent rounded transition-colors"
                         title="파트 추가"
                       >
                         <Plus size={10} />
@@ -376,7 +376,7 @@ function ArchivedSection({
         />
         <Archive size={12} className="shrink-0 text-amber-500/50" />
         <span className="text-[11px] font-medium">아카이빙</span>
-        <span className="text-[10px] tabular-nums ml-auto">{archivedEpisodes.length}</span>
+        <span className="text-[11px] tabular-nums ml-auto">{archivedEpisodes.length}</span>
       </button>
 
       <CollapsibleSection isOpen={isOpen}>
