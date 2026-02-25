@@ -795,8 +795,11 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    // Windows Acrylic에서는 'floating' 레벨을 명시해야 AOT가 안정적으로 적용됨
-    win.setAlwaysOnTop(aot, aot ? 'floating' : 'normal');
+    win.setAlwaysOnTop(aot);
+    if (aot) {
+      // off→on 토글 시 z-order 최상단으로 올림 (1회성, 사용자 액션)
+      win.moveTop();
+    }
   }
 });
 
