@@ -2503,7 +2503,7 @@ export function ScenesView() {
                     onCtrlClick={(id) => toggleSelectedScene(id)}
                   />
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
                     {groupScenes.map((scene, idx) => {
                       const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
                       const sIdx = rawIdx >= 0 ? rawIdx : idx;
@@ -2569,7 +2569,7 @@ export function ScenesView() {
         </div>
       ) : (
         /* ── 카드 뷰 (플랫) ── */
-        <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 content-start">
+        <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 content-start">
           {scenes.map((scene, idx) => {
             const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
                       const sIdx = rawIdx >= 0 ? rawIdx : idx;
