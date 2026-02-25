@@ -832,6 +832,25 @@ function addEpisode(episodeNumber, department) {
   var dept = department || 'bg';
   var deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
   var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_A' + deptSuffix;
+
+  // 이미 존재하는 시트인지 확인 (소프트 삭제된 시트 복원 처리)
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var existingSheet = ss.getSheetByName(tabName);
+
+  if (existingSheet) {
+    try { existingSheet.showSheet(); } catch (e) {}
+    writeMetadata('deleted', tabName, '');
+    writeMetadata('deleted-episode', String(episodeNumber), '');
+
+    try {
+      updateRegistryEntry(tabName, { status: 'active' });
+    } catch (e) {
+      addRegistryEntry(tabName, episodeNumber, 'A', dept, '');
+    }
+
+    return { sheetName: tabName, episodeNumber: episodeNumber, partId: 'A', department: dept };
+  }
+
   createSheetTab(tabName);
 
   // _REGISTRY에 등록
@@ -855,6 +874,29 @@ function addPart(episodeNumber, partId, department) {
   var dept = department || 'bg';
   var deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
   var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_' + partId + deptSuffix;
+
+  // 이미 존재하는 시트인지 확인 (소프트 삭제된 시트 복원 처리)
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var existingSheet = ss.getSheetByName(tabName);
+
+  if (existingSheet) {
+    // 숨겨진(소프트 삭제된) 시트 → 복원하여 재사용
+    try { existingSheet.showSheet(); } catch (e) {}
+
+    // _METADATA에서 삭제 마킹 해제
+    writeMetadata('deleted', tabName, '');
+
+    // _REGISTRY 상태를 'active'로 복원
+    try {
+      updateRegistryEntry(tabName, { status: 'active' });
+    } catch (e) {
+      // 레지스트리에 없으면 새로 등록
+      addRegistryEntry(tabName, episodeNumber, partId, dept, '');
+    }
+
+    return { sheetName: tabName, episodeNumber: episodeNumber, partId: partId, department: dept };
+  }
+
   createSheetTab(tabName);
 
   // _REGISTRY에 등록
@@ -1129,11 +1171,26 @@ function writeMetadata(type, key, value) {
 }
 
 /**
- * 파트를 소프트 삭제한다 (_METADATA에 기록).
+ * 파트를 소프트 삭제한다 (_METADATA에 기록 + 실제 시트 숨김 + _REGISTRY 상태 변경).
  * @param {string} sheetName 시트 이름
  */
 function softDeletePart(sheetName) {
   writeMetadata('deleted', sheetName, 'true');
+
+  // 실제 시트 탭을 숨김 처리
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (sheet) {
+    try { sheet.hideSheet(); } catch (e) {
+      // 시트가 1개뿐이면 숨길 수 없음 — 무시
+      Logger.log('시트 숨김 실패 (마지막 시트?): ' + e.toString());
+    }
+  }
+
+  // _REGISTRY 상태를 'deleted'로 변경
+  try { updateRegistryEntry(sheetName, { status: 'deleted' }); } catch (e) {
+    Logger.log('레지스트리 상태 변경 실패: ' + e.toString());
+  }
 }
 
 /**
