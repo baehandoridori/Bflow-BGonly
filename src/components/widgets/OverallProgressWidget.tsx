@@ -59,14 +59,29 @@ const MESSAGES: Record<string, MotivMessage[]> = {
   ],
 };
 
+/* ── 진행도 무관 랜덤 멘트 (팀원 어록) ── */
+const RANDOM_MESSAGES: MotivMessage[] = [
+  { text: '응후응후', author: '이혜민' },
+  { text: 'る..', author: 'ちいかわ' },
+  { text: '저는 서울에 사는 초등학생을 보면 너무 화나요', author: '이명훈' },
+  { text: '저 인스타 지울 수 있습니다', author: '강지융' },
+  { text: '근데 인스타에 연락처가 있어서 못지워요', author: '강지융' },
+  { text: '네 ㅋㅋ 찌찌 ㅋㅋ', author: '원동우' },
+  { text: '너 지웅이 좋아해?', author: '류이레' },
+  { text: '우리 언젠가 분명히 잡혀갈거야.....', author: '정영준' },
+  { text: '틀리면 엑쓰', author: '경환엄마' },
+];
+
 function getMessagePool(pct: number): MotivMessage[] {
-  if (pct === 0) return MESSAGES['0'];
-  if (pct >= 100) return MESSAGES['100'];
-  if (pct < 10) return MESSAGES['1-10'];
-  if (pct < 25) return MESSAGES['10-25'];
-  if (pct < 50) return MESSAGES['25-50'];
-  if (pct < 75) return MESSAGES['50-75'];
-  return MESSAGES['75-99'];
+  let base: MotivMessage[];
+  if (pct === 0) base = MESSAGES['0'];
+  else if (pct >= 100) base = MESSAGES['100'];
+  else if (pct < 10) base = MESSAGES['1-10'];
+  else if (pct < 25) base = MESSAGES['10-25'];
+  else if (pct < 50) base = MESSAGES['25-50'];
+  else if (pct < 75) base = MESSAGES['50-75'];
+  else base = MESSAGES['75-99'];
+  return [...base, ...RANDOM_MESSAGES];
 }
 
 export function OverallProgressWidget() {

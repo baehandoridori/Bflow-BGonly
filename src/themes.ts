@@ -95,16 +95,16 @@ export const THEME_PRESETS: ThemePreset[] = [
   },
   {
     id: 'nameko',
-    name: 'Nameko',
-    nameKo: '나메코',
+    name: '이혜민 머쉬룸',
+    nameKo: '이혜민 머쉬룸',
     colors: {
       bgPrimary: '16 14 10',
       bgCard: '28 24 16',
       bgBorder: '50 44 32',
       textPrimary: '240 235 220',
       textSecondary: '170 155 130',
-      accent: '232 122 32',
-      accentSub: '245 176 65',
+      accent: '129 77 65',
+      accentSub: '224 203 175',
     },
   },
 ];
