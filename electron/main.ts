@@ -803,13 +803,13 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    // Acrylic + Windows DWM 버그 우회:
-    // setAlwaysOnTop(false)는 DWM topmost를 영구 파괴하므로 절대 사용하지 않음.
-    // Acrylic 윈도우에서 레벨이 반전됨: 'normal'이 실제 topmost, 'floating'이 뒤로 감.
+    // Acrylic + Windows DWM 우회:
+    // OFF: setAlwaysOnTop(false) — 일반 윈도우로 전환
+    // ON: setAlwaysOnTop(true, 'normal') — Acrylic에서 'normal' 레벨이 실제 topmost
     if (aot) {
       win.setAlwaysOnTop(true, 'normal');
     } else {
-      win.setAlwaysOnTop(true, 'floating');
+      win.setAlwaysOnTop(false);
     }
   }
 });
