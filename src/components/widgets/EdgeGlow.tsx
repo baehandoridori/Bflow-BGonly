@@ -39,8 +39,8 @@ function EdgeLine({ edge, visible, dim }: { edge: string; visible: boolean; dim?
         borderRadius: 1,
         background: `linear-gradient(${isH ? '90deg' : '180deg'}, transparent, rgb(var(--color-accent)) 50%, transparent)`,
         opacity,
-        transform: visible ? 'scale(1)' : (isH ? 'scaleX(0.4)' : 'scaleY(0.4)'),
-        transition: 'opacity 0.2s ease, transform 0.2s ease',
+        transform: visible ? 'scale(1)' : (isH ? 'scaleX(0.7)' : 'scaleY(0.7)'),
+        transition: 'opacity 0.3s ease-out, transform 0.3s ease-out, box-shadow 0.3s ease-out',
         pointerEvents: 'none',
         boxShadow: visible && !dim ? '0 0 10px rgb(var(--color-accent) / 0.4)' : 'none',
       }}
@@ -48,55 +48,45 @@ function EdgeLine({ edge, visible, dim }: { edge: string; visible: boolean; dim?
   );
 }
 
-/** ㄴㄱ자 코너 glow SVG */
+/** 곡선 코너 glow — 위젯 border-radius를 따라가는 호(arc) 형태 */
 function CornerGlow({ corner, visible, dim }: { corner: string; visible: boolean; dim?: boolean }) {
-  const size = 22;
-  const thick = 2.5;
-  const len = 15;
+  const R = 16;       // 위젯 rounded-2xl 매칭
+  const arm = 8;      // 직선 연장 길이
+  const size = R + arm;
+  const accent = 'rgb(var(--color-accent))';
+  const thick = `2px solid ${accent}`;
 
-  const paths: Record<string, string> = {
-    nw: `M ${thick / 2} ${len} L ${thick / 2} ${thick / 2} L ${len} ${thick / 2}`,
-    ne: `M ${size - len} ${thick / 2} L ${size - thick / 2} ${thick / 2} L ${size - thick / 2} ${len}`,
-    sw: `M ${thick / 2} ${size - len} L ${thick / 2} ${size - thick / 2} L ${len} ${size - thick / 2}`,
-    se: `M ${size - len} ${size - thick / 2} L ${size - thick / 2} ${size - thick / 2} L ${size - thick / 2} ${size - len}`,
+  const posStyles: Record<string, React.CSSProperties> = {
+    nw: { top: 0, left: 0, borderTop: thick, borderLeft: thick, borderTopLeftRadius: R },
+    ne: { top: 0, right: 0, borderTop: thick, borderRight: thick, borderTopRightRadius: R },
+    sw: { bottom: 0, left: 0, borderBottom: thick, borderLeft: thick, borderBottomLeftRadius: R },
+    se: { bottom: 0, right: 0, borderBottom: thick, borderRight: thick, borderBottomRightRadius: R },
   };
 
-  const posMap: Record<string, React.CSSProperties> = {
-    nw: { top: -2, left: -2 },
-    ne: { top: -2, right: -2 },
-    sw: { bottom: -2, left: -2 },
-    se: { bottom: -2, right: -2 },
-  };
+  const opacity = !visible ? 0 : dim ? 0.35 : 0.9;
 
   return (
-    <svg
-      width={size}
-      height={size}
+    <div
       style={{
         position: 'absolute',
-        ...posMap[corner],
-        opacity: !visible ? 0 : dim ? 0.35 : 1,
-        transform: `scale(${visible ? 1 : 0.6})`,
-        transition: 'opacity 0.2s ease, transform 0.2s ease',
+        width: size,
+        height: size,
+        ...posStyles[corner],
+        opacity,
+        transform: `scale(${visible ? 1 : 0.8})`,
+        transition: 'opacity 0.3s ease-out, transform 0.3s ease-out, filter 0.3s ease-out',
         pointerEvents: 'none',
-        filter: visible && !dim ? 'drop-shadow(0 0 6px rgb(var(--color-accent) / 0.5))' : 'none',
+        filter: visible && !dim
+          ? `drop-shadow(0 0 8px ${accent.replace(')', ' / 0.4)')})`
+          : 'none',
       }}
-    >
-      <path
-        d={paths[corner]}
-        fill="none"
-        stroke="rgb(var(--color-accent))"
-        strokeWidth={thick}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    />
   );
 }
 
 interface EdgeGlowProps {
   zone: ResizeZone;
-  /** 위젯 호버 시 전체 edge/corner 은은하게 발광 */
+  /** 드래그 핸들 호버 시 전체 edge/corner 은은하게 발광 */
   hovered?: boolean;
 }
 
