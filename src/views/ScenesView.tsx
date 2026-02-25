@@ -371,6 +371,7 @@ interface SceneCardProps {
   isSelected?: boolean;
   searchQuery?: string;
   commentCount?: number;
+  selectionId?: string;  // 'all' 모드에서 부서 접두사 포함된 고유 ID (라쏘/선택용)
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: () => void;
@@ -379,7 +380,7 @@ interface SceneCardProps {
   onShiftClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, selectionId, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
@@ -401,7 +402,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 
   return (
     <motion.div
-      data-scene-id={scene.sceneId}
+      data-scene-id={selectionId ?? scene.sceneId}
       className={cn(
         'bg-bg-card border border-bg-border rounded-lg flex flex-col group relative cursor-pointer hover:border-text-secondary/30 transition-colors',
         isHighlighted && 'scene-highlight',
@@ -1718,31 +1719,22 @@ export function ScenesView() {
     handleToggleForSheet(currentPart.sheetName, sceneId, stage);
   };
 
-  // 일괄 토글: 선택된 씬들의 특정 단계를 단일 API 호출로 처리
-  const handleBulkToggle = async (sceneIds: Set<string>, stage: Stage) => {
-    if (!currentPart) return;
-    const sheetName = currentPart.sheetName;
-
-    // 최신 스토어에서 씬 상태 조회 (stale closure 방지)
+  // 단일 파트에 대한 일괄 토글 (내부 헬퍼)
+  const bulkToggleForSheet = async (sheetName: string, rawIds: string[], stage: Stage) => {
     const latestPart = useDataStore.getState().episodes
       .flatMap((ep) => ep.parts)
       .find((p) => p.sheetName === sheetName);
     if (!latestPart) return;
 
-    // 업데이트 목록 구성
     const updates: { sceneId: string; sceneIndex: number; stage: Stage; newValue: boolean }[] = [];
-    sceneIds.forEach((id) => {
+    rawIds.forEach((id) => {
       const idx = latestPart.scenes.findIndex((s) => s.sceneId === id);
       if (idx < 0) return;
-      const scene = latestPart.scenes[idx];
-      updates.push({ sceneId: id, sceneIndex: idx, stage, newValue: !scene[stage] });
+      updates.push({ sceneId: id, sceneIndex: idx, stage, newValue: !latestPart.scenes[idx][stage] });
     });
     if (updates.length === 0) return;
 
-    // 낙관적 업데이트 — 모든 씬을 한번에 UI 반영
     updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
-
-    // 단일 API 호출로 모든 셀 업데이트
     try {
       await bulkUpdateCells(sheetName, updates.map((u) => ({
         rowIndex: u.sceneIndex, stage: u.stage, value: u.newValue,
@@ -1750,9 +1742,26 @@ export function ScenesView() {
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
       console.error('[일괄 토글 실패]', err);
-      // 롤백 — 모든 토글 되돌리기
       updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
     }
+  };
+
+  // 일괄 토글: 선택된 씬들의 특정 단계를 단일 API 호출로 처리
+  const handleBulkToggle = async (sceneIds: Set<string>, stage: Stage) => {
+    if (selectedDepartment === 'all') {
+      // 'all' 모드: 복합 키(bg:id / act:id) 파싱 → 부서별 분리 처리
+      const bgIds: string[] = [];
+      const actIds: string[] = [];
+      sceneIds.forEach((id) => {
+        if (id.startsWith('bg:')) bgIds.push(id.slice(3));
+        else if (id.startsWith('act:')) actIds.push(id.slice(4));
+      });
+      if (bgIds.length > 0 && bgPart) await bulkToggleForSheet(bgPart.sheetName, bgIds, stage);
+      if (actIds.length > 0 && actPart) await bulkToggleForSheet(actPart.sheetName, actIds, stage);
+      return;
+    }
+    if (!currentPart) return;
+    await bulkToggleForSheet(currentPart.sheetName, [...sceneIds], stage);
   };
 
   const handleAddEpisode = () => {
@@ -2692,8 +2701,8 @@ export function ScenesView() {
                     onDelete={(idx) => handleDeleteSceneForSheet(bgPart.sheetName, idx)}
                     searchQuery={searchQuery}
                     onOpenDetail={(idx) => { setDetailContext({ sheetName: bgPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                    selectedSceneIds={selectedSceneIds}
-                    onCtrlClick={(id) => toggleSelectedScene(id)}
+                    selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('bg:')).map(id => id.slice(3)))}
+                    onCtrlClick={(id) => toggleSelectedScene(`bg:${id}`)}
                   />
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
@@ -2708,14 +2717,15 @@ export function ScenesView() {
                           celebrating={celebratingId === scene.sceneId}
                           department="bg"
                           isHighlighted={highlightSceneId === scene.sceneId}
-                          isSelected={selectedSceneIds.has(scene.sceneId)}
+                          isSelected={selectedSceneIds.has(`bg:${scene.sceneId}`)}
+                          selectionId={`bg:${scene.sceneId}`}
                           searchQuery={searchQuery}
                           commentCount={commentCounts[`${bgPart.sheetName}:${scene.no}`] ?? 0}
                           onToggle={(id, stage) => handleToggleForSheet(bgPart.sheetName, id, stage)}
                           onDelete={(si) => handleDeleteSceneForSheet(bgPart.sheetName, si)}
                           onOpenDetail={() => { setDetailContext({ sheetName: bgPart.sheetName, sceneIndex: sIdx }); setDetailSceneIndex(sIdx); }}
                           onCelebrationEnd={clearCelebration}
-                          onCtrlClick={() => toggleSelectedScene(scene.sceneId)}
+                          onCtrlClick={() => toggleSelectedScene(`bg:${scene.sceneId}`)}
                         />
                       );
                     })}
@@ -2773,8 +2783,8 @@ export function ScenesView() {
                     onDelete={(idx) => handleDeleteSceneForSheet(actPart.sheetName, idx)}
                     searchQuery={searchQuery}
                     onOpenDetail={(idx) => { setDetailContext({ sheetName: actPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                    selectedSceneIds={selectedSceneIds}
-                    onCtrlClick={(id) => toggleSelectedScene(id)}
+                    selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('act:')).map(id => id.slice(4)))}
+                    onCtrlClick={(id) => toggleSelectedScene(`act:${id}`)}
                   />
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
@@ -2789,14 +2799,15 @@ export function ScenesView() {
                           celebrating={celebratingId === scene.sceneId}
                           department="acting"
                           isHighlighted={highlightSceneId === scene.sceneId}
-                          isSelected={selectedSceneIds.has(scene.sceneId)}
+                          isSelected={selectedSceneIds.has(`act:${scene.sceneId}`)}
+                          selectionId={`act:${scene.sceneId}`}
                           searchQuery={searchQuery}
                           commentCount={commentCounts[`${actPart.sheetName}:${scene.no}`] ?? 0}
                           onToggle={(id, stage) => handleToggleForSheet(actPart.sheetName, id, stage)}
                           onDelete={(si) => handleDeleteSceneForSheet(actPart.sheetName, si)}
                           onOpenDetail={() => { setDetailContext({ sheetName: actPart.sheetName, sceneIndex: sIdx }); setDetailSceneIndex(sIdx); }}
                           onCelebrationEnd={clearCelebration}
-                          onCtrlClick={() => toggleSelectedScene(scene.sceneId)}
+                          onCtrlClick={() => toggleSelectedScene(`act:${scene.sceneId}`)}
                         />
                       );
                     })}
@@ -3078,33 +3089,46 @@ export function ScenesView() {
             <button
               onClick={() => {
                 if (!confirm(`${selectedSceneIds.size}개 씬을 삭제하시겠습니까?`)) return;
-                const allScenes = currentPart?.scenes ?? [];
-                // 인덱스가 큰 것부터 삭제 (인덱스 밀림 방지)
-                const indices = [...selectedSceneIds]
-                  .map((id) => allScenes.findIndex((s) => s.sceneId === id))
-                  .filter((i) => i >= 0)
-                  .sort((a, b) => b - a);
-
-                // 롤백용 스냅샷
                 const prevEpisodes = useDataStore.getState().episodes;
 
-                indices.forEach((idx) => {
-                  if (currentPart) {
-                    deleteSceneOptimistic(currentPart.sheetName, idx);
+                // 'all' 모드: 복합 키 파싱 → 부서별 분리
+                const partEntries: { sheetName: string; indices: number[] }[] = [];
+                if (selectedDepartment === 'all') {
+                  const bgIds: string[] = [];
+                  const actIds: string[] = [];
+                  selectedSceneIds.forEach((id) => {
+                    if (id.startsWith('bg:')) bgIds.push(id.slice(3));
+                    else if (id.startsWith('act:')) actIds.push(id.slice(4));
+                  });
+                  if (bgIds.length > 0 && bgPart) {
+                    const idxs = bgIds.map((id) => bgPart.scenes.findIndex((s) => s.sceneId === id)).filter((i) => i >= 0).sort((a, b) => b - a);
+                    partEntries.push({ sheetName: bgPart.sheetName, indices: idxs });
                   }
+                  if (actIds.length > 0 && actPart) {
+                    const idxs = actIds.map((id) => actPart.scenes.findIndex((s) => s.sceneId === id)).filter((i) => i >= 0).sort((a, b) => b - a);
+                    partEntries.push({ sheetName: actPart.sheetName, indices: idxs });
+                  }
+                } else if (currentPart) {
+                  const idxs = [...selectedSceneIds]
+                    .map((id) => currentPart.scenes.findIndex((s) => s.sceneId === id))
+                    .filter((i) => i >= 0).sort((a, b) => b - a);
+                  partEntries.push({ sheetName: currentPart.sheetName, indices: idxs });
+                }
+
+                partEntries.forEach(({ sheetName, indices }) => {
+                  indices.forEach((idx) => deleteSceneOptimistic(sheetName, idx));
                 });
                 clearSelectedScenes();
-                // 백그라운드 싱크
+
                 (async () => {
                   try {
-                    // Phase 0: 배치로 한 번에
-                    await batchToSheets(
-                      indices.map((idx) => batchActions.deleteScene(currentPart!.sheetName, idx))
+                    const actions = partEntries.flatMap(({ sheetName, indices }) =>
+                      indices.map((idx) => batchActions.deleteScene(sheetName, idx))
                     );
+                    await batchToSheets(actions);
                     syncInBackground();
                   } catch (err) {
                     console.error('[일괄 삭제 실패]', err);
-                    // 롤백
                     useDataStore.getState().setEpisodes(prevEpisodes);
                     syncInBackground();
                   }
@@ -3165,24 +3189,37 @@ export function ScenesView() {
                     return;
                   }
 
-                  const allScenes = currentPart?.scenes ?? [];
                   const batchActionList: BatchAction[] = [];
+
+                  // 복합 키 → { sheetName, rawId } 파싱 헬퍼
+                  const resolveSelection = (id: string): { sheetName: string; rawId: string; scenes: Scene[] } | null => {
+                    if (selectedDepartment === 'all') {
+                      if (id.startsWith('bg:') && bgPart) return { sheetName: bgPart.sheetName, rawId: id.slice(3), scenes: bgPart.scenes };
+                      if (id.startsWith('act:') && actPart) return { sheetName: actPart.sheetName, rawId: id.slice(4), scenes: actPart.scenes };
+                      return null;
+                    }
+                    if (!currentPart) return null;
+                    return { sheetName: currentPart.sheetName, rawId: id, scenes: currentPart.scenes };
+                  };
 
                   // 낙관적 업데이트 + 배치 액션 수집
                   selectedSceneIds.forEach((id) => {
-                    const idx = allScenes.findIndex((s) => s.sceneId === id);
-                    if (idx < 0 || !currentPart) return;
+                    const resolved = resolveSelection(id);
+                    if (!resolved) return;
+                    const { sheetName, rawId, scenes: partScenes } = resolved;
+                    const idx = partScenes.findIndex((s) => s.sceneId === rawId);
+                    if (idx < 0) return;
                     if (assignee) {
-                      updateSceneFieldOptimistic(currentPart.sheetName, idx, 'assignee', assignee);
-                      batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'assignee', assignee));
+                      updateSceneFieldOptimistic(sheetName, idx, 'assignee', assignee);
+                      batchActionList.push(batchActions.updateSceneField(sheetName, idx, 'assignee', assignee));
                     }
                     if (memo) {
-                      updateSceneFieldOptimistic(currentPart.sheetName, idx, 'memo', memo);
-                      batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'memo', memo));
+                      updateSceneFieldOptimistic(sheetName, idx, 'memo', memo);
+                      batchActionList.push(batchActions.updateSceneField(sheetName, idx, 'memo', memo));
                     }
                     if (layoutId) {
-                      updateSceneFieldOptimistic(currentPart.sheetName, idx, 'layoutId', layoutId);
-                      batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'layoutId', layoutId));
+                      updateSceneFieldOptimistic(sheetName, idx, 'layoutId', layoutId);
+                      batchActionList.push(batchActions.updateSceneField(sheetName, idx, 'layoutId', layoutId));
                     }
                   });
 
