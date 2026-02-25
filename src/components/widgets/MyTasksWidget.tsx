@@ -336,7 +336,7 @@ function AddTaskModal({
                     type="date"
                     value={todoStartDate}
                     onChange={(e) => setTodoStartDate(e.target.value)}
-                    className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 [color-scheme:dark]"
+                    className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-50"
                   />
                 </div>
                 <div className="flex-1">
@@ -345,7 +345,7 @@ function AddTaskModal({
                     type="date"
                     value={todoEndDate}
                     onChange={(e) => setTodoEndDate(e.target.value)}
-                    className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 [color-scheme:dark]"
+                    className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-50"
                   />
                 </div>
               </div>
@@ -541,9 +541,9 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
         {isRemovable && (
           <button
             onClick={() => onRemove(flat.key)}
-            className="p-0.5 text-text-secondary/20 hover:text-red-400 cursor-pointer"
+            className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-400/10 rounded cursor-pointer transition-all"
           >
-            <X size={10} />
+            <X size={14} />
           </button>
         )}
       </div>
@@ -619,9 +619,9 @@ function PersonalTodoContent({
       {/* 삭제 */}
       <button
         onClick={() => onRemove(todo.id)}
-        className="p-0.5 text-text-secondary/20 hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+        className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-400/10 rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-all shrink-0"
       >
-        <X size={10} />
+        <X size={14} />
       </button>
     </div>
   );
