@@ -701,6 +701,14 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     popupWin.loadFile(path.join(__dirname, '../dist/index.html'), { hash });
   }
 
+  // Acrylic DWM 버그 우회: 생성자의 alwaysOnTop:true는 기본 레벨이라 Acrylic에서 무효.
+  // 윈도우 준비 후 'normal' 레벨로 명시적 재설정 (Acrylic에서 'normal'이 실제 topmost)
+  popupWin.once('ready-to-show', () => {
+    if (!popupWin.isDestroyed()) {
+      popupWin.setAlwaysOnTop(true, 'normal');
+    }
+  });
+
   widgetWindows.set(widgetId, popupWin);
   popupWin.on('closed', () => {
     widgetWindows.delete(widgetId);
@@ -795,13 +803,13 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    // Acrylic 윈도우에서 setAlwaysOnTop(false) 후 true로 되돌리면
-    // Windows DWM이 topmost를 복원하지 못하는 버그 우회:
-    // false 대신 'normal' 레벨(사실상 맨 뒤)로 전환하여 alwaysOnTop 플래그 유지
+    // Acrylic + Windows DWM 버그 우회:
+    // setAlwaysOnTop(false)는 DWM topmost를 영구 파괴하므로 절대 사용하지 않음.
+    // Acrylic 윈도우에서 레벨이 반전됨: 'normal'이 실제 topmost, 'floating'이 뒤로 감.
     if (aot) {
-      win.setAlwaysOnTop(true, 'floating');
-    } else {
       win.setAlwaysOnTop(true, 'normal');
+    } else {
+      win.setAlwaysOnTop(true, 'floating');
     }
   }
 });
