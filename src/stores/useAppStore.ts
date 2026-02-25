@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { WidgetLayoutItem, SheetsConfig, Department, ChartType } from '@/types';
+import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptFilter } from '@/types';
 import type { ThemeColors } from '@/themes';
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'settings';
@@ -30,9 +30,9 @@ interface AppState {
   highlightUserName: string | null;
   setHighlightUserName: (name: string | null) => void;
 
-  // 부서 선택 (ScenesView — 항상 'bg' | 'acting')
-  selectedDepartment: Department;
-  setSelectedDepartment: (dept: Department) => void;
+  // 부서 선택 (ScenesView — 'all' | 'bg' | 'acting')
+  selectedDepartment: ScenesDeptFilter;
+  setSelectedDepartment: (dept: ScenesDeptFilter) => void;
 
   // 대시보드 부서 필터 ('all' = 통합 모드)
   dashboardDeptFilter: DashboardDeptFilter;
@@ -106,7 +106,7 @@ export const useAppStore = create<AppState>((set) => ({
   previousView: null,
   setView: (view) => set((s) => ({ currentView: view, previousView: s.currentView })),
 
-  selectedDepartment: 'bg',
+  selectedDepartment: 'all',
   setSelectedDepartment: (dept) => set({ selectedDepartment: dept }),
 
   highlightSceneId: null,

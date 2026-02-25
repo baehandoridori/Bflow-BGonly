@@ -5,7 +5,8 @@
       "Bash(find:*)",
       "Bash(head:*)",
       "Bash(tail:*)",
-      "Bash(cd /c/Bflow-BGonly && npx tsc --noEmit 2>&1)"
+      "Bash(cd /c/Bflow-BGonly && npx tsc --noEmit 2>&1)",
+      "Bash(find C:\\\\Bflow-BGonly\\\\src:*)"
     ]
   }
 }
