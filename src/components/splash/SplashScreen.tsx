@@ -112,9 +112,9 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
       transition={{ duration: 0.4 }}
       className="fixed inset-0 z-[9999] flex items-center justify-center overflow-hidden cursor-pointer"
       onClick={dismiss}
-      // 원형 마스크 + 넉넉한 페더 — 전체 검정 덮기 대신 원형 창
+      // 원형 마스크 + 넉넉한 페더 — 라이트 모드에서도 다크 배경 유지
       style={{
-        background: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, transparent 100%)',
+        background: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, transparent 100%), #0F1117',
       }}
     >
       {/* 배경 글로우 */}
