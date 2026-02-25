@@ -132,11 +132,11 @@ input[type="date"]::-webkit-inner-spin-button {
   display: none !important;
 }
 
-/* 상/하 핸들: 전체 너비로 확장 */
+/* 상/하 핸들: 전체 너비, 22px 높이 */
 .react-grid-item > .react-resizable-handle-n,
 .react-grid-item > .react-resizable-handle-s {
   width: 100% !important;
-  height: 14px !important;
+  height: 22px !important;
   left: 0 !important;
   right: 0 !important;
   margin-left: 0 !important;
@@ -144,10 +144,10 @@ input[type="date"]::-webkit-inner-spin-button {
 .react-grid-item > .react-resizable-handle-n { top: 0 !important; }
 .react-grid-item > .react-resizable-handle-s { bottom: 0 !important; }
 
-/* 좌/우 핸들: 전체 높이로 확장 */
+/* 좌/우 핸들: 전체 높이, 22px 너비 */
 .react-grid-item > .react-resizable-handle-e,
 .react-grid-item > .react-resizable-handle-w {
-  width: 14px !important;
+  width: 22px !important;
   height: 100% !important;
   top: 0 !important;
   bottom: 0 !important;
@@ -156,13 +156,13 @@ input[type="date"]::-webkit-inner-spin-button {
 .react-grid-item > .react-resizable-handle-e { right: 0 !important; }
 .react-grid-item > .react-resizable-handle-w { left: 0 !important; }
 
-/* 모서리 핸들: 16×16 고정 */
+/* 모서리 핸들: 22×22 */
 .react-grid-item > .react-resizable-handle-nw,
 .react-grid-item > .react-resizable-handle-ne,
 .react-grid-item > .react-resizable-handle-sw,
 .react-grid-item > .react-resizable-handle-se {
-  width: 16px !important;
-  height: 16px !important;
+  width: 22px !important;
+  height: 22px !important;
 }
 
 /* 라쏘 선택 박스 */

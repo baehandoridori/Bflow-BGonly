@@ -282,7 +282,7 @@ function detectEdgeZone(e: React.MouseEvent, el: HTMLElement): ResizeZone {
   const y = e.clientY - rect.top;
   const w = rect.width;
   const h = rect.height;
-  const EDGE = 16;
+  const EDGE = 22;
 
   const top = y < EDGE;
   const bottom = y > h - EDGE;
@@ -562,19 +562,20 @@ export function Dashboard() {
                     isSettle && 'widget-settling',
                   )}
                   style={{ overflow: 'visible' }}
-                  onMouseEnter={() => { if (!isActive) setHoveredId(item.i); }}
                   onMouseMove={(e) => {
                     if (isDrag || isActive) return;
-                    if (hoveredId !== item.i) setHoveredId(item.i);
                     const zone = detectEdgeZone(e, e.currentTarget);
                     setEdgeZones((p) => {
                       if (p[item.i] === zone) return p;
                       return { ...p, [item.i]: zone };
                     });
+                    // 드래그 핸들(헤더) 위일 때만 전체 글로우
+                    const onDragHandle = !!(e.target as HTMLElement).closest?.('.widget-drag-handle');
+                    setHoveredId(onDragHandle ? item.i : null);
                   }}
                   onMouseLeave={() => {
                     setEdgeZones((p) => ({ ...p, [item.i]: null }));
-                    setHoveredId((prev) => prev === item.i ? null : prev);
+                    setHoveredId(null);
                   }}
                 >
                   <WidgetIdContext.Provider value={item.i.startsWith('calendar-') ? 'calendar' : item.i}>

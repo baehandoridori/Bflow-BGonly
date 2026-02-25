@@ -104,7 +104,6 @@ interface EdgeGlowProps {
 export const EdgeGlow = memo(function EdgeGlow({ zone, hovered }: EdgeGlowProps) {
   const activeEdges = zone ? (ZONE_EDGES[zone] ?? []) : [];
   const activeCorners = zone ? (ZONE_CORNERS[zone] ?? []) : [];
-  // 호버 시 전체 edge/corner 은은하게, 특정 zone은 강하게
   const allEdges = ['n', 's', 'w', 'e'];
   const allCorners = ['nw', 'ne', 'sw', 'se'];
 
@@ -121,6 +120,7 @@ export const EdgeGlow = memo(function EdgeGlow({ zone, hovered }: EdgeGlowProps)
           />
         );
       })}
+      {/* 코너: 드래그 핸들 호버 시 은은하게, 실제 모서리 zone일 때만 강하게 */}
       {allCorners.map((c) => {
         const isZoneActive = activeCorners.includes(c);
         return (
@@ -128,7 +128,7 @@ export const EdgeGlow = memo(function EdgeGlow({ zone, hovered }: EdgeGlowProps)
             key={c}
             corner={c}
             visible={isZoneActive || !!hovered}
-            dim={!isZoneActive && !!hovered}
+            dim={!isZoneActive}
           />
         );
       })}
