@@ -93,9 +93,13 @@ export async function addUser(
     } catch (err) {
       console.error('[사용자] 시트 추가 실패:', err);
     }
+    // 시트에서 다시 로드하여 로컬에 동기화 (중복 방지)
+    const users = await loadUsers();
+    await saveUsers(users);
+    return newUser;
   }
 
-  // 로컬에도 저장 (폴백 + 빠른 세션 복원용)
+  // 로컬 전용 모드
   const users = await loadUsers();
   users.push(newUser);
   await saveUsers(users);

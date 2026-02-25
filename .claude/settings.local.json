@@ -6,7 +6,10 @@
       "Bash(head:*)",
       "Bash(tail:*)",
       "Bash(cd /c/Bflow-BGonly && npx tsc --noEmit 2>&1)",
-      "Bash(find C:\\\\Bflow-BGonly\\\\src:*)"
+      "Bash(find C:\\\\Bflow-BGonly\\\\src:*)",
+      "Bash(echo OK:*)",
+      "Bash(cd /c/Bflow-BGonly && git push origin claude/analyze-and-plan-EFRnF 2>&1)",
+      "Bash(echo gh not found anywhere:*)"
     ]
   }
 }

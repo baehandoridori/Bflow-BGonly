@@ -3,6 +3,42 @@ import { X, UserPlus, Trash2 } from 'lucide-react';
 import { addUser, deleteUser, loadUsers } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
 
+/** 날짜 문자열을 YYYY.MM.DD 형식으로 변환 */
+function formatDate(dateStr: string | undefined): string {
+  if (!dateStr) return '';
+  try {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return dateStr.replace(/-/g, '.');
+    }
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  } catch {
+    return dateStr;
+  }
+}
+
+/** 생일 문자열을 MM.DD 형식으로 변환 (MM-DD, raw Date 등 대응) */
+function formatBirthday(dateStr: string | undefined): string {
+  if (!dateStr) return '';
+  try {
+    // MM-DD 형식
+    if (/^\d{2}-\d{2}$/.test(dateStr)) {
+      return dateStr.replace(/-/g, '.');
+    }
+    // YYYY-MM-DD 형식 → MM.DD만 추출
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return dateStr.slice(5).replace(/-/g, '.');
+    }
+    // raw Date 문자열 (Tue Feb 03 2026 ... 등)
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return `${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  } catch {
+    return dateStr;
+  }
+}
+
 export function UserManagerModal() {
   const { users, setUsers, setShowUserManager } = useAuthStore();
   const [name, setName] = useState('');
@@ -134,21 +170,27 @@ export function UserManagerModal() {
           {users.length === 0 && (
             <p className="text-sm text-text-secondary text-center py-4">등록된 사용자가 없습니다.</p>
           )}
-          {users.map((u) => (
+          {users.map((u, idx) => (
             <div
-              key={u.id}
+              key={u.id || `user-${idx}`}
               className="flex items-center justify-between bg-bg-primary rounded-lg px-3 py-2 border border-bg-border"
             >
-              <div className="flex flex-col">
-                <span className="text-sm text-text-primary font-medium">{u.name}</span>
-                <span className="text-xs text-text-secondary">
-                  {u.slackId || '—'}
-                  {u.hireDate && <span className="ml-2">{u.hireDate}</span>}
-                  {u.birthday && <span className="ml-2">{u.birthday}</span>}
-                  {u.isInitialPassword && (
-                    <span className="ml-2 text-status-mid">(초기비밀번호)</span>
+              <div className="flex flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-text-primary font-medium">{u.name}</span>
+                  {u.role === 'admin' && (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-accent/15 text-accent leading-none">관리자</span>
                   )}
-                </span>
+                  {u.isInitialPassword && (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-500 leading-none">초기비밀번호</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-text-secondary">
+                  {u.slackId && <span>{u.slackId}</span>}
+                  {u.hireDate && <span>입사 {formatDate(u.hireDate)}</span>}
+                  {u.birthday && <span>생일 {formatBirthday(u.birthday)}</span>}
+                  {!u.slackId && !u.hireDate && !u.birthday && <span>—</span>}
+                </div>
               </div>
               <button
                 onClick={() => handleDelete(u.id)}
