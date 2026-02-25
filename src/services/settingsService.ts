@@ -30,13 +30,24 @@ function migrateLayout(layout: WidgetLayoutItem[]): WidgetLayoutItem[] {
   }));
 }
 
+/** 저장된 레이아웃의 minW/minH를 현재 코드 기준으로 강제 갱신 */
+const MIN_W = 2;
+const MIN_H = 2;
+function enforceMinConstraints(layout: WidgetLayoutItem[]): WidgetLayoutItem[] {
+  return layout.map((l) => ({
+    ...l,
+    minW: MIN_W,
+    minH: MIN_H,
+  }));
+}
+
 export async function loadLayout(key?: 'all'): Promise<WidgetLayoutItem[] | null> {
   try {
     const file = key === 'all' ? ALL_LAYOUT_FILE : LAYOUT_FILE;
     const data = await window.electronAPI.readSettings(file);
     if (data && Array.isArray(data)) {
       const layout = data as WidgetLayoutItem[];
-      return migrateLayout(layout);
+      return enforceMinConstraints(migrateLayout(layout));
     }
   } catch (err) {
     console.error('[설정] 레이아웃 로드 실패:', err);
