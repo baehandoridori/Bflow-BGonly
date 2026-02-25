@@ -39,6 +39,8 @@ function buildTeamData(
   episodes: ReturnType<typeof useDataStore.getState>['episodes'],
   episodeTitles: Record<number, string>,
 ): TeamMemberData[] {
+  // 중복 사용자 제거 (동일 ID)
+  const uniqueUsers = Array.from(new Map(users.map((u) => [u.id, u])).values());
   // 씬 → 담당자 맵핑
   const sceneMap = new Map<string, SceneRef[]>();
   for (const ep of episodes) {
@@ -60,7 +62,7 @@ function buildTeamData(
     }
   }
 
-  return users.map((user) => {
+  return uniqueUsers.map((user) => {
     const scenes = sceneMap.get(user.name) || [];
     const totalScenes = scenes.length;
     const fullyDone = scenes.filter((r) => isFullyDone(r.scene)).length;

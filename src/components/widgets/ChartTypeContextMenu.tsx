@@ -120,9 +120,16 @@ export function ChartTypeContextMenu({
 
 /* ── 위젯별 지원 차트 타입 매핑 ── */
 const WIDGET_CHART_TYPES: Record<string, ChartType[]> = {
+  // 전체 대시보드 위젯
+  'overall-progress': ['donut', 'horizontal-bar', 'stat-card'],
+  'stage-bars': ['horizontal-bar', 'vertical-bar'],
+  'dept-comparison': ['horizontal-bar', 'vertical-bar', 'donut'],
+  'episode-summary': ['horizontal-bar', 'vertical-bar'],
+  // 에피소드 대시보드 위젯
   'ep-overall-progress': ['donut', 'horizontal-bar', 'stat-card'],
   'ep-stage-bars': ['horizontal-bar', 'vertical-bar'],
   'ep-dept-comparison': ['horizontal-bar', 'vertical-bar', 'donut'],
+  'ep-part-progress': ['horizontal-bar', 'vertical-bar'],
 };
 
 export function getWidgetSupportedCharts(widgetId: string): ChartType[] {

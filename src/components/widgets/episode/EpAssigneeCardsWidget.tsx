@@ -4,9 +4,11 @@ import { Widget } from '../Widget';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { calcEpisodeDetailStats } from '@/utils/calcStats';
+import { DEPARTMENT_CONFIGS } from '@/types';
 
 export function EpAssigneeCardsWidget() {
   const epNum = useAppStore((s) => s.episodeDashboardEp);
+  const deptFilter = useAppStore((s) => s.dashboardDeptFilter);
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
 
@@ -18,10 +20,11 @@ export function EpAssigneeCardsWidget() {
   if (!stats || epNum === null) return null;
 
   const displayName = episodeTitles[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
-  const assignees = stats.perAssignee;
+  const deptLabel = deptFilter !== 'all' ? ` ${DEPARTMENT_CONFIGS[deptFilter].shortLabel}` : '';
+  const assignees = deptFilter !== 'all' ? stats.perDeptAssignee[deptFilter] : stats.perAssignee;
 
   return (
-    <Widget title={`${displayName} 담당자별 현황`} icon={<Users size={16} />}>
+    <Widget title={`${displayName}${deptLabel} 담당자별 현황`} icon={<Users size={16} />}>
       <div className="grid grid-cols-2 gap-2">
         {assignees.map((a) => {
           const pct = Number(a.pct.toFixed(1));

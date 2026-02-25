@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider, type Layouts, type Layout } from 'react-grid-layout';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronDown, ArrowLeft, Check } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { OverallProgressWidget } from '@/components/widgets/OverallProgressWidget';
@@ -18,6 +18,7 @@ import { EpStageBarsWidget } from '@/components/widgets/episode/EpStageBarsWidge
 import { EpAssigneeCardsWidget } from '@/components/widgets/episode/EpAssigneeCardsWidget';
 import { EpPartProgressWidget } from '@/components/widgets/episode/EpPartProgressWidget';
 import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptComparisonWidget';
+import { EpSinglePartWidget, parsePartWidgetId } from '@/components/widgets/episode/EpSinglePartWidget';
 import { ChartTypeContextMenu, getWidgetSupportedCharts, useChartContextMenu } from '@/components/widgets/ChartTypeContextMenu';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
@@ -222,6 +223,10 @@ function getWidgetComponent(id: string, isEpMode: boolean): React.ReactNode | un
   if (id.startsWith('my-tasks')) {
     return <MyTasksWidget />;
   }
+  // 파트 단일 위젯: ep-part-{bg|acting|all}-{A~Z}[-{ts}]
+  if (parsePartWidgetId(id)) {
+    return <EpSinglePartWidget />;
+  }
   if (isEpMode) {
     return EP_WIDGET_MAP[id] ?? WIDGET_MAP[id];
   }
@@ -258,17 +263,41 @@ const EP_LAYOUT: Layout[] = [
   { i: 'my-tasks', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
 ];
 
+/* ── 파트 전용 위젯 타입 (2단계 선택) ── */
+interface PartWidgetType {
+  deptKey: 'bg' | 'acting' | 'all';
+  label: string;
+}
+
+const PART_WIDGET_TYPES: PartWidgetType[] = [
+  { deptKey: 'bg', label: '파트 BG 진행률' },
+  { deptKey: 'acting', label: '파트 ACT 진행률' },
+  { deptKey: 'all', label: '파트 전체 진행률' },
+];
+
 /* ── 위젯 추가 팝오버 ── */
 function WidgetPicker({
   hiddenWidgets,
   onAdd,
   onClose,
+  isEpMode,
+  partIds,
 }: {
   hiddenWidgets: WidgetMeta[];
   onAdd: (id: string) => void;
   onClose: () => void;
+  isEpMode: boolean;
+  partIds: string[];
 }) {
-  if (hiddenWidgets.length === 0) return null;
+  const [expandedPartType, setExpandedPartType] = useState<string | null>(null);
+  const hasContent = hiddenWidgets.length > 0 || (isEpMode && partIds.length > 0);
+  if (!hasContent) return null;
+
+  const menuStyle = {
+    backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
+    border: '1px solid rgb(var(--color-bg-border) / 0.6)',
+    boxShadow: '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset',
+  };
 
   return (
     <motion.div
@@ -278,17 +307,11 @@ function WidgetPicker({
       transition={{ duration: 0.15 }}
       className="absolute top-full left-0 mt-2 z-50 min-w-[200px]"
     >
-      <div
-        className="rounded-xl overflow-hidden py-1.5"
-        style={{
-          backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
-          border: '1px solid rgb(var(--color-bg-border) / 0.6)',
-          boxShadow: '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset',
-        }}
-      >
+      <div className="rounded-xl overflow-hidden py-1.5" style={menuStyle}>
         <div className="px-3 py-1.5 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
           위젯 추가
         </div>
+        {/* 일반 위젯 목록 */}
         {hiddenWidgets.map((w) => (
           <button
             key={w.id}
@@ -303,6 +326,59 @@ function WidgetPicker({
             <span>{w.label}</span>
           </button>
         ))}
+
+        {/* 파트 전용 위젯 (EP 모드 + 파트 존재 시) */}
+        {isEpMode && partIds.length > 0 && (
+          <>
+            <div className="mx-2 my-1 border-t border-bg-border/40" />
+            {PART_WIDGET_TYPES.map((pt) => {
+              const isExpanded = expandedPartType === pt.deptKey;
+              return (
+                <div key={pt.deptKey}>
+                  <button
+                    onClick={() => setExpandedPartType(isExpanded ? null : pt.deptKey)}
+                    className={cn(
+                      'w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer',
+                      'text-text-primary/80 hover:bg-accent/12 hover:text-text-primary',
+                      'transition-colors duration-75',
+                    )}
+                  >
+                    <ChevronRight size={14} className={cn('text-accent/60 shrink-0 transition-transform duration-150', isExpanded && 'rotate-90')} />
+                    <span>{pt.label}</span>
+                  </button>
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="pl-4">
+                          {partIds.map((partId) => (
+                            <button
+                              key={partId}
+                              onClick={() => onAdd(`ep-part-${pt.deptKey}-${partId}-${Date.now()}`)}
+                              className={cn(
+                                'w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm cursor-pointer',
+                                'text-text-primary/70 hover:bg-accent/12 hover:text-text-primary',
+                                'transition-colors duration-75',
+                              )}
+                            >
+                              <Plus size={12} className="text-accent/50 shrink-0" />
+                              <span>{partId}파트</span>
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
     </motion.div>
   );
@@ -427,9 +503,20 @@ export function Dashboard() {
   const episodeDashboardEp = useAppStore((s) => s.episodeDashboardEp);
   const setEpisodeDashboardEp = useAppStore((s) => s.setEpisodeDashboardEp);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const episodeMemos = useDataStore((s) => s.episodeMemos);
   const [showPicker, setShowPicker] = useState(false);
   const [showEpDropdown, setShowEpDropdown] = useState(false);
+  const [showEpSwitcher, setShowEpSwitcher] = useState(false);
   const isEpMode = episodeDashboardEp !== null;
+  const episodes = useDataStore((s) => s.episodes);
+
+  // 현재 에피소드의 파트 ID 목록 (위젯 피커 2단계용)
+  const epPartIds = useMemo(() => {
+    if (!isEpMode) return [];
+    const ep = episodes.find((e) => e.episodeNumber === episodeDashboardEp);
+    if (!ep) return [];
+    return [...new Set(ep.parts.map((p) => p.partId))].sort();
+  }, [episodes, episodeDashboardEp, isEpMode]);
 
   // 차트 타입 우클릭 메뉴
   const { menu: chartMenu, handleContextMenu: handleChartContextMenu, closeMenu: closeChartMenu } = useChartContextMenu();
@@ -487,6 +574,7 @@ export function Dashboard() {
     setEpisodeDashboardEp(epNum);
     setDashboardFilter('all');
     setShowEpDropdown(false);
+    setShowEpSwitcher(false);
   }, [setEpisodeDashboardEp, setDashboardFilter]);
 
   // 에피소드 대시보드 → 전체 대시보드 복귀
@@ -602,7 +690,7 @@ export function Dashboard() {
           {isEpMode ? (
             /* ── 에피소드 대시보드 탭 바 ── */
             <div className="flex items-center gap-2">
-              {/* 뒤로가기 버튼 */}
+              {/* 전체보기 버튼 */}
               <button
                 onClick={handleBackToMain}
                 className={cn(
@@ -613,11 +701,41 @@ export function Dashboard() {
                 )}
               >
                 <ArrowLeft size={14} />
-                <span className="text-xs">뒤로가기</span>
+                <span className="text-xs">전체보기</span>
               </button>
 
-              {/* 에피소드 제목 */}
-              <span className="text-sm font-semibold text-accent px-2">{epDisplayName}</span>
+              {/* 에피소드 제목 + 전환 드롭다운 */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowEpSwitcher(!showEpSwitcher)}
+                  className={cn(
+                    'flex items-center gap-1 px-2 py-1 rounded-md cursor-pointer',
+                    'hover:bg-bg-border/30 transition-colors duration-150',
+                  )}
+                >
+                  <span className="text-sm font-semibold text-accent">{epDisplayName}</span>
+                  <ChevronDown size={14} className={cn('text-accent/60 transition-transform duration-200', showEpSwitcher && 'rotate-180')} />
+                </button>
+                <AnimatePresence>
+                  {showEpSwitcher && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowEpSwitcher(false)} />
+                      <EpisodeDropdown
+                        selectedEp={episodeDashboardEp}
+                        onSelect={handleEpSelect}
+                        onClose={() => setShowEpSwitcher(false)}
+                      />
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* 에피소드 메모 */}
+              {episodeDashboardEp !== null && episodeMemos[episodeDashboardEp] && (
+                <span className="text-xs text-text-secondary/70 max-w-[300px] truncate" title={episodeMemos[episodeDashboardEp]}>
+                  {episodeMemos[episodeDashboardEp]}
+                </span>
+              )}
 
               {/* 통합/배경/액팅 탭 */}
               <div className="relative flex bg-bg-card rounded-lg p-1 border border-bg-border gap-0.5">
@@ -667,6 +785,34 @@ export function Dashboard() {
                     </button>
                   );
                 })}
+
+                {/* EP 모드 내 에피소드 드롭다운 */}
+                <div className="relative border-l border-bg-border/50 ml-0.5 pl-0.5">
+                  <button
+                    onClick={() => setShowEpDropdown(!showEpDropdown)}
+                    className={cn(
+                      'relative z-10 px-4 py-1.5 text-sm rounded-md font-medium cursor-pointer',
+                      'transition-colors duration-200 ease-out',
+                      'text-text-secondary hover:text-text-primary',
+                      'flex items-center gap-1',
+                    )}
+                  >
+                    <span>에피소드</span>
+                    <ChevronDown size={14} className={cn('transition-transform duration-200', showEpDropdown && 'rotate-180')} />
+                  </button>
+                  <AnimatePresence>
+                    {showEpDropdown && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowEpDropdown(false)} />
+                        <EpisodeDropdown
+                          selectedEp={episodeDashboardEp}
+                          onSelect={handleEpSelect}
+                          onClose={() => setShowEpDropdown(false)}
+                        />
+                      </>
+                    )}
+                  </AnimatePresence>
+                </div>
               </div>
             </div>
           ) : (
@@ -773,6 +919,8 @@ export function Dashboard() {
                     hiddenWidgets={hiddenWidgets}
                     onAdd={handleAddWidget}
                     onClose={() => setShowPicker(false)}
+                    isEpMode={isEpMode}
+                    partIds={epPartIds}
                   />
                 )}
               </AnimatePresence>
@@ -891,17 +1039,22 @@ export function Dashboard() {
                   )}
 
                   {/* 다른 위젯 dim 오버레이 */}
-                  {isDimmed && (
-                    <div
-                      style={{
-                        position: 'absolute', inset: 0, borderRadius: 12,
-                        background: 'rgb(var(--color-bg-primary) / 0.5)',
-                        backdropFilter: 'blur(2px)',
-                        pointerEvents: 'none',
-                        transition: 'opacity 0.25s ease',
-                      }}
-                    />
-                  )}
+                  <AnimatePresence>
+                    {isDimmed && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+                        style={{
+                          position: 'absolute', inset: 0, borderRadius: 12,
+                          background: 'rgb(var(--color-bg-primary) / 0.5)',
+                          backdropFilter: 'blur(2px)',
+                          pointerEvents: 'none',
+                        }}
+                      />
+                    )}
+                  </AnimatePresence>
 
                 </div>
               );

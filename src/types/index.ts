@@ -158,6 +158,7 @@ export interface EpisodeDetailStats {
   perDept: Record<Department, { overallPct: number; totalScenes: number; stageStats: StageStats[] }>;
   perPart: PartDetailStatsEntry[];
   perAssignee: AssigneeStats[];
+  perDeptAssignee: Record<Department, AssigneeStats[]>;
 }
 
 // ─── 통계 ────────────────────────────────────
