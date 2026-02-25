@@ -48,39 +48,54 @@ function EdgeLine({ edge, visible, dim }: { edge: string; visible: boolean; dim?
   );
 }
 
-/** 곡선 코너 glow — 위젯 border-radius를 따라가는 호(arc) 형태 */
+/** 곡선 코너 glow — 위젯 border-radius를 따라가는 네온 발광 */
 function CornerGlow({ corner, visible, dim }: { corner: string; visible: boolean; dim?: boolean }) {
   const R = 16;       // 위젯 rounded-2xl 매칭
   const arm = 8;      // 직선 연장 길이
   const size = R + arm;
   const accent = 'rgb(var(--color-accent))';
-  const thick = `2px solid ${accent}`;
 
-  const posStyles: Record<string, React.CSSProperties> = {
-    nw: { top: 0, left: 0, borderTop: thick, borderLeft: thick, borderTopLeftRadius: R },
-    ne: { top: 0, right: 0, borderTop: thick, borderRight: thick, borderTopRightRadius: R },
-    sw: { bottom: 0, left: 0, borderBottom: thick, borderLeft: thick, borderBottomLeftRadius: R },
-    se: { bottom: 0, right: 0, borderBottom: thick, borderRight: thick, borderBottomRightRadius: R },
+  const borderProps: Record<string, (w: string) => React.CSSProperties> = {
+    nw: (w) => ({ top: 0, left: 0, borderTop: w, borderLeft: w, borderTopLeftRadius: R }),
+    ne: (w) => ({ top: 0, right: 0, borderTop: w, borderRight: w, borderTopRightRadius: R }),
+    sw: (w) => ({ bottom: 0, left: 0, borderBottom: w, borderLeft: w, borderBottomLeftRadius: R }),
+    se: (w) => ({ bottom: 0, right: 0, borderBottom: w, borderRight: w, borderBottomRightRadius: R }),
   };
 
   const opacity = !visible ? 0 : dim ? 0.35 : 0.9;
+  const glowOpacity = !visible ? 0 : dim ? 0.15 : 0.45;
+  const trans = 'opacity 0.3s ease-out, transform 0.3s ease-out';
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        width: size,
-        height: size,
-        ...posStyles[corner],
-        opacity,
-        transform: `scale(${visible ? 1 : 0.8})`,
-        transition: 'opacity 0.3s ease-out, transform 0.3s ease-out, filter 0.3s ease-out',
-        pointerEvents: 'none',
-        filter: visible && !dim
-          ? `drop-shadow(0 0 8px ${accent.replace(')', ' / 0.4)')})`
-          : 'none',
-      }}
-    />
+    <>
+      {/* 뒤: blur 레이어 — 부드러운 발광 */}
+      <div
+        style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          ...borderProps[corner](`3px solid ${accent}`),
+          opacity: glowOpacity,
+          transform: `scale(${visible ? 1 : 0.8})`,
+          transition: trans,
+          pointerEvents: 'none',
+          filter: 'blur(5px)',
+        }}
+      />
+      {/* 앞: sharp 레이어 — 밝은 코어 라인 */}
+      <div
+        style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          ...borderProps[corner](`2px solid ${accent}`),
+          opacity,
+          transform: `scale(${visible ? 1 : 0.8})`,
+          transition: trans,
+          pointerEvents: 'none',
+        }}
+      />
+    </>
   );
 }
 
