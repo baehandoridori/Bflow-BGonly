@@ -2,8 +2,8 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { PieChart } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Widget } from './Widget';
-import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { calcDashboardStats } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS } from '@/types';
 
@@ -85,7 +85,7 @@ function getMessagePool(pct: number): MotivMessage[] {
 }
 
 export function OverallProgressWidget() {
-  const episodes = useDataStore((s) => s.episodes);
+  const episodes = useDashboardEpisodes();
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
   const isAll = dashboardFilter === 'all';
   const dept = isAll ? undefined : dashboardFilter;

@@ -5,6 +5,7 @@ import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Stage, Scene, Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
@@ -743,7 +744,7 @@ function TabBar({
 
 /* ─── 메인 위젯 ─────────────────────────────── */
 export function MyTasksWidget() {
-  const episodes = useDataStore((s) => s.episodes);
+  const episodes = useDashboardEpisodes();
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);

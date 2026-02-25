@@ -17,13 +17,13 @@ import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
-import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
+import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
-  const { currentView, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
+  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -131,6 +131,18 @@ export default function App() {
         const savedAllLayout = await loadLayout('all');
         if (savedAllLayout) {
           setAllWidgetLayout(savedAllLayout);
+        }
+        const savedEpLayout = await loadLayout('episode');
+        if (savedEpLayout) {
+          setEpisodeWidgetLayout(savedEpLayout);
+        }
+
+        // 차트 타입 로드
+        const savedPrefs = await loadPreferences();
+        if (savedPrefs?.chartTypes) {
+          for (const [widgetId, type] of Object.entries(savedPrefs.chartTypes)) {
+            setChartType(widgetId, type as 'horizontal-bar' | 'vertical-bar' | 'donut' | 'stat-card');
+          }
         }
 
         // 테마 로드 + 적용 (가드 설정 후 상태 변경)

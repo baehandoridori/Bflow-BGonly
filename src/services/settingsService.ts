@@ -8,6 +8,7 @@ import type { ThemeConfig } from '@/themes';
 
 const LAYOUT_FILE = 'layout.json';
 const ALL_LAYOUT_FILE = 'layout-all.json';
+const EPISODE_LAYOUT_FILE = 'layout-episode.json';
 const PREFERENCES_FILE = 'preferences.json';
 const THEME_FILE = 'theme.json';
 
@@ -41,9 +42,9 @@ function enforceMinConstraints(layout: WidgetLayoutItem[]): WidgetLayoutItem[] {
   }));
 }
 
-export async function loadLayout(key?: 'all'): Promise<WidgetLayoutItem[] | null> {
+export async function loadLayout(key?: 'all' | 'episode'): Promise<WidgetLayoutItem[] | null> {
   try {
-    const file = key === 'all' ? ALL_LAYOUT_FILE : LAYOUT_FILE;
+    const file = key === 'all' ? ALL_LAYOUT_FILE : key === 'episode' ? EPISODE_LAYOUT_FILE : LAYOUT_FILE;
     const data = await window.electronAPI.readSettings(file);
     if (data && Array.isArray(data)) {
       const layout = data as WidgetLayoutItem[];
@@ -55,9 +56,9 @@ export async function loadLayout(key?: 'all'): Promise<WidgetLayoutItem[] | null
   return null;
 }
 
-export async function saveLayout(layout: WidgetLayoutItem[], key?: 'all'): Promise<void> {
+export async function saveLayout(layout: WidgetLayoutItem[], key?: 'all' | 'episode'): Promise<void> {
   try {
-    const file = key === 'all' ? ALL_LAYOUT_FILE : LAYOUT_FILE;
+    const file = key === 'all' ? ALL_LAYOUT_FILE : key === 'episode' ? EPISODE_LAYOUT_FILE : LAYOUT_FILE;
     await window.electronAPI.writeSettings(file, layout);
   } catch (err) {
     console.error('[설정] 레이아웃 저장 실패:', err);
@@ -70,6 +71,7 @@ export interface UserPreferences {
   lastEpisode?: number;
   lastPart?: string;
   lastView?: string;
+  chartTypes?: Record<string, string>;
 }
 
 export async function loadPreferences(): Promise<UserPreferences | null> {

@@ -1,7 +1,7 @@
 import { useMemo, useState, useRef, useCallback } from 'react';
 import { GitCompareArrows } from 'lucide-react';
 import { Widget } from './Widget';
-import { useDataStore } from '@/stores/useDataStore';
+import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { calcDashboardStats } from '@/utils/calcStats';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Stage } from '@/types';
@@ -18,7 +18,7 @@ interface TooltipInfo {
 }
 
 export function DepartmentComparisonWidget() {
-  const episodes = useDataStore((s) => s.episodes);
+  const episodes = useDashboardEpisodes();
   const [tooltip, setTooltip] = useState<TooltipInfo | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 

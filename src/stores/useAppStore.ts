@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { WidgetLayoutItem, SheetsConfig, Department } from '@/types';
+import type { WidgetLayoutItem, SheetsConfig, Department, ChartType } from '@/types';
 import type { ThemeColors } from '@/themes';
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'settings';
@@ -38,13 +38,23 @@ interface AppState {
   dashboardDeptFilter: DashboardDeptFilter;
   setDashboardDeptFilter: (f: DashboardDeptFilter) => void;
 
+  // 에피소드 대시보드
+  episodeDashboardEp: number | null;
+  setEpisodeDashboardEp: (ep: number | null) => void;
+
   // 위젯 레이아웃
   widgetLayout: WidgetLayoutItem[] | null;
   allWidgetLayout: WidgetLayoutItem[] | null; // 통합 대시보드 전용
+  episodeWidgetLayout: WidgetLayoutItem[] | null; // 에피소드 대시보드 전용
   isEditMode: boolean;
   setWidgetLayout: (layout: WidgetLayoutItem[]) => void;
   setAllWidgetLayout: (layout: WidgetLayoutItem[]) => void;
+  setEpisodeWidgetLayout: (layout: WidgetLayoutItem[]) => void;
   setEditMode: (v: boolean) => void;
+
+  // 차트 타입 (위젯별)
+  chartTypes: Record<string, ChartType>;
+  setChartType: (widgetId: string, type: ChartType) => void;
 
   // 필터/정렬 상태
   selectedEpisode: number | null;
@@ -108,12 +118,22 @@ export const useAppStore = create<AppState>((set) => ({
   dashboardDeptFilter: 'all',
   setDashboardDeptFilter: (f) => set({ dashboardDeptFilter: f }),
 
+  episodeDashboardEp: null,
+  setEpisodeDashboardEp: (ep) => set({ episodeDashboardEp: ep }),
+
   widgetLayout: null,
   allWidgetLayout: null,
+  episodeWidgetLayout: null,
   isEditMode: false,
   setWidgetLayout: (layout) => set({ widgetLayout: layout }),
   setAllWidgetLayout: (layout) => set({ allWidgetLayout: layout }),
+  setEpisodeWidgetLayout: (layout) => set({ episodeWidgetLayout: layout }),
   setEditMode: (v) => set({ isEditMode: v }),
+
+  chartTypes: {},
+  setChartType: (widgetId, type) => set((s) => ({
+    chartTypes: { ...s.chartTypes, [widgetId]: type },
+  })),
 
   selectedEpisode: null,
   selectedPart: null,

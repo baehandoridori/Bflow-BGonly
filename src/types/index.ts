@@ -132,6 +132,34 @@ export interface WidgetLayoutItem {
   visible?: boolean;
 }
 
+// ─── 차트 타입 ──────────────────────────────
+
+export type ChartType = 'horizontal-bar' | 'vertical-bar' | 'donut' | 'stat-card';
+
+// ─── 에피소드 상세 통계 ─────────────────────
+
+export interface PartDetailStatsEntry {
+  partId: string;
+  bgPct: number;
+  actPct: number;
+  combinedPct: number;
+  bgScenes: number;
+  actScenes: number;
+  bgStages: { stage: Stage; label: string; color: string; done: number; total: number; pct: number }[];
+  actStages: { stage: Stage; label: string; color: string; done: number; total: number; pct: number }[];
+}
+
+export interface EpisodeDetailStats {
+  episodeNumber: number;
+  overallPct: number;
+  totalScenes: number;
+  fullyDone: number;
+  notStarted: number;
+  perDept: Record<Department, { overallPct: number; totalScenes: number; stageStats: StageStats[] }>;
+  perPart: PartDetailStatsEntry[];
+  perAssignee: AssigneeStats[];
+}
+
 // ─── 통계 ────────────────────────────────────
 
 export interface StageStats {

@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { Widget } from './Widget';
-import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { calcDashboardStats } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS } from '@/types';
 
 export function StageBarsWidget() {
-  const episodes = useDataStore((s) => s.episodes);
+  const episodes = useDashboardEpisodes();
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
   const dept = dashboardFilter === 'all' ? undefined : dashboardFilter;
   const deptConfig = dashboardFilter === 'all' ? DEPARTMENT_CONFIGS.bg : DEPARTMENT_CONFIGS[dashboardFilter];

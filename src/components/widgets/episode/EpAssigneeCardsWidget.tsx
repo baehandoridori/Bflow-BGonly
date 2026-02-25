@@ -1,36 +1,34 @@
 import { useMemo } from 'react';
 import { Users } from 'lucide-react';
-import { Widget } from './Widget';
+import { Widget } from '../Widget';
 import { useAppStore } from '@/stores/useAppStore';
-import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
-import { calcDashboardStats } from '@/utils/calcStats';
-import { DEPARTMENT_CONFIGS } from '@/types';
+import { useDataStore } from '@/stores/useDataStore';
+import { calcEpisodeDetailStats } from '@/utils/calcStats';
 
-export function AssigneeCardsWidget() {
-  const episodes = useDashboardEpisodes();
-  const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
-  const isAll = dashboardFilter === 'all';
-  const dept = isAll ? undefined : dashboardFilter;
-  const deptConfig = !isAll ? DEPARTMENT_CONFIGS[dashboardFilter] : null;
-  const stats = useMemo(() => calcDashboardStats(episodes, dept), [episodes, dept]);
-  const assigneeStats = stats.assigneeStats;
+export function EpAssigneeCardsWidget() {
+  const epNum = useAppStore((s) => s.episodeDashboardEp);
+  const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
 
-  const title = deptConfig
-    ? `담당자별 현황 (${deptConfig.shortLabel})`
-    : '담당자별 현황 (통합)';
+  const stats = useMemo(
+    () => (epNum !== null ? calcEpisodeDetailStats(episodes, epNum) : null),
+    [episodes, epNum],
+  );
+
+  if (!stats || epNum === null) return null;
+
+  const displayName = episodeTitles[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
+  const assignees = stats.perAssignee;
 
   return (
-    <Widget title={title} icon={<Users size={16} />}>
+    <Widget title={`${displayName} 담당자별 현황`} icon={<Users size={16} />}>
       <div className="grid grid-cols-2 gap-2">
-        {assigneeStats.map((a) => {
+        {assignees.map((a) => {
           const pct = Number(a.pct.toFixed(1));
           const color =
-            pct >= 80
-              ? 'text-status-high'
-              : pct >= 50
-                ? 'text-status-mid'
-                : pct >= 25
-                  ? 'text-status-low'
+            pct >= 80 ? 'text-status-high'
+              : pct >= 50 ? 'text-status-mid'
+                : pct >= 25 ? 'text-status-low'
                   : 'text-status-none';
 
           return (

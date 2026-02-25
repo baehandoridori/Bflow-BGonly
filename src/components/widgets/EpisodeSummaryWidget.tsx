@@ -3,11 +3,12 @@ import { Film } from 'lucide-react';
 import { Widget } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { calcDashboardStats } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS, DEPARTMENTS } from '@/types';
 
 export function EpisodeSummaryWidget() {
-  const episodes = useDataStore((s) => s.episodes);
+  const episodes = useDashboardEpisodes();
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
   const isAll = dashboardFilter === 'all';
