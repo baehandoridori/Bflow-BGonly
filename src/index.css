@@ -123,10 +123,14 @@ input[type="date"]::-webkit-inner-spin-button {
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
-/* 리사이즈 핸들: 투명하지만 충분한 히트 영역 확보 */
+/* 리사이즈 핸들: 기본 스타일 전부 리셋 후 투명 히트 영역만 확보 */
 .react-grid-item > .react-resizable-handle {
   opacity: 0;
   z-index: 10;
+  transform: none !important;
+  padding: 0 !important;
+  background-image: none !important;
+  background: none !important;
 }
 .react-grid-item > .react-resizable-handle::after {
   display: none !important;
