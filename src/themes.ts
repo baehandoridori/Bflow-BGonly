@@ -139,11 +139,11 @@ export function getLightColors(themeId: string): ThemeColors {
   const accent = preset?.colors.accent ?? THEME_PRESETS[0].colors.accent;
   const accentSub = preset?.colors.accentSub ?? THEME_PRESETS[0].colors.accentSub;
   return {
-    bgPrimary: '245 246 250',
+    bgPrimary: '235 237 244',     // 진행 바 트랙 등이 흰 카드 위에서 보이도록 대비 강화
     bgCard: '255 255 255',
-    bgBorder: '220 222 230',
+    bgBorder: '210 213 224',      // 보더도 약간 진하게
     textPrimary: '28 32 42',
-    textSecondary: '107 114 128',
+    textSecondary: '70 80 96',    // 알파(/50 /40) 적용 시에도 가독성 보장
     accent,
     accentSub,
   };
