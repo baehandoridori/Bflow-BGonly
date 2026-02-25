@@ -124,7 +124,7 @@ const WIDGET_CHART_TYPES: Record<string, ChartType[]> = {
   'overall-progress': ['donut', 'horizontal-bar', 'stat-card'],
   'stage-bars': ['horizontal-bar', 'vertical-bar'],
   'dept-comparison': ['horizontal-bar', 'vertical-bar', 'donut'],
-  'episode-summary': ['horizontal-bar', 'vertical-bar'],
+  // episode-summary: 리스트 형태 위젯이므로 차트 전환 미지원
   // 에피소드 대시보드 위젯
   'ep-overall-progress': ['donut', 'horizontal-bar', 'stat-card'],
   'ep-stage-bars': ['horizontal-bar', 'vertical-bar'],

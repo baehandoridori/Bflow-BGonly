@@ -5,10 +5,16 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { calcEpisodeDetailStats } from '@/utils/calcStats';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS, STAGES } from '@/types';
-import type { Stage } from '@/types';
+import { HorizontalBar } from '../charts/HorizontalBar';
+import { VerticalBar } from '../charts/VerticalBar';
+import { DonutChart } from '../charts/DonutChart';
+import type { Stage, ChartType } from '@/types';
+
+const SUPPORTED_CHARTS: ChartType[] = ['horizontal-bar', 'vertical-bar', 'donut'];
 
 export function EpDeptComparisonWidget() {
   const epNum = useAppStore((s) => s.episodeDashboardEp);
+  const chartType = useAppStore((s) => s.chartTypes['ep-dept-comparison']) ?? 'horizontal-bar';
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
 
@@ -35,6 +41,99 @@ export function EpDeptComparisonWidget() {
     return withScenes.reduce((sum, d) => sum + d.pct, 0) / withScenes.length;
   })();
 
+  const activeChart = SUPPORTED_CHARTS.includes(chartType) ? chartType : 'horizontal-bar';
+
+  // ── 세로 막대 ──
+  if (activeChart === 'vertical-bar') {
+    return (
+      <Widget title={`${displayName} 부서별 비교`} icon={<GitCompareArrows size={16} />}>
+        <div className="flex flex-col gap-4 justify-center h-full">
+          <VerticalBar
+            items={deptData.map((d) => ({
+              label: `${d.config.shortLabel} (${d.totalScenes}씬)`,
+              pct: d.pct,
+              color: d.config.color,
+            }))}
+          />
+          {/* 단계별 비교 미니 차트 */}
+          <div className="grid grid-cols-4 gap-2 pt-2 border-t border-bg-border/50">
+            {STAGES.map((stage: Stage) => (
+              <div key={stage} className="flex flex-col items-center gap-1">
+                <div className="flex gap-0.5 items-end h-10">
+                  {deptData.map((d) => {
+                    const stageStat = d.stageStats.find((s) => s.stage === stage);
+                    const pct = stageStat?.pct ?? 0;
+                    return (
+                      <div
+                        key={d.dept}
+                        className="w-3 rounded-t transition-all duration-700 ease-out"
+                        style={{
+                          height: `${Math.max(pct * 0.4, 2)}px`,
+                          backgroundColor: d.config.stageColors[stage],
+                        }}
+                        title={`${d.config.label} ${d.config.stageLabels[stage]}: ${pct.toFixed(1)}%`}
+                      />
+                    );
+                  })}
+                </div>
+                <span className="text-[11px] text-text-secondary/60">
+                  {DEPARTMENT_CONFIGS.bg.stageLabels[stage]}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Widget>
+    );
+  }
+
+  // ── 도넛 ──
+  if (activeChart === 'donut') {
+    return (
+      <Widget title={`${displayName} 부서별 비교`} icon={<GitCompareArrows size={16} />}>
+        <div className="flex flex-col gap-4 justify-center h-full">
+          <DonutChart
+            segments={deptData.filter((d) => d.totalScenes > 0).map((d) => ({
+              label: `${d.config.shortLabel} (${d.totalScenes}씬)`,
+              pct: d.pct,
+              color: d.config.color,
+            }))}
+            centerValue={`${combinedPct.toFixed(1)}%`}
+            centerLabel="통합"
+          />
+          {/* 단계별 비교 미니 차트 */}
+          <div className="grid grid-cols-4 gap-2 pt-2 border-t border-bg-border/50">
+            {STAGES.map((stage: Stage) => (
+              <div key={stage} className="flex flex-col items-center gap-1">
+                <div className="flex gap-0.5 items-end h-10">
+                  {deptData.map((d) => {
+                    const stageStat = d.stageStats.find((s) => s.stage === stage);
+                    const pct = stageStat?.pct ?? 0;
+                    return (
+                      <div
+                        key={d.dept}
+                        className="w-3 rounded-t transition-all duration-700 ease-out"
+                        style={{
+                          height: `${Math.max(pct * 0.4, 2)}px`,
+                          backgroundColor: d.config.stageColors[stage],
+                        }}
+                        title={`${d.config.label} ${d.config.stageLabels[stage]}: ${pct.toFixed(1)}%`}
+                      />
+                    );
+                  })}
+                </div>
+                <span className="text-[11px] text-text-secondary/60">
+                  {DEPARTMENT_CONFIGS.bg.stageLabels[stage]}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Widget>
+    );
+  }
+
+  // ── 기본: 가로 막대 ──
   return (
     <Widget title={`${displayName} 부서별 비교`} icon={<GitCompareArrows size={16} />}>
       <div className="flex flex-col gap-4 justify-center h-full">

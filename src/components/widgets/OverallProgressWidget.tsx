@@ -6,6 +6,11 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { calcDashboardStats } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS } from '@/types';
+import { HorizontalBar } from './charts/HorizontalBar';
+import { StatCard } from './charts/StatCard';
+import type { ChartType } from '@/types';
+
+const SUPPORTED_CHARTS: ChartType[] = ['donut', 'horizontal-bar', 'stat-card'];
 
 /* ── 퍼센티지 구간별 색상 세그먼트 ── */
 const COLOR_SEGMENTS = [
@@ -87,6 +92,7 @@ function getMessagePool(pct: number): MotivMessage[] {
 export function OverallProgressWidget() {
   const episodes = useDashboardEpisodes();
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
+  const chartType = useAppStore((s) => s.chartTypes['overall-progress']) ?? 'donut';
   const isAll = dashboardFilter === 'all';
   const dept = isAll ? undefined : dashboardFilter;
   const deptConfig = !isAll ? DEPARTMENT_CONFIGS[dashboardFilter] : null;
@@ -97,6 +103,8 @@ export function OverallProgressWidget() {
   const title = deptConfig
     ? `전체 진행률 (${deptConfig.shortLabel})`
     : '전체 진행률 (통합)';
+
+  const activeChart = SUPPORTED_CHARTS.includes(chartType) ? chartType : 'donut';
 
   // SVG 원형 진행률
   const radius = 60;
@@ -142,6 +150,45 @@ export function OverallProgressWidget() {
 
   const currentMsg = pool[msgIdx % pool.length];
 
+  // ── 가로 막대 ──
+  if (activeChart === 'horizontal-bar') {
+    return (
+      <Widget title={title} icon={<PieChart size={16} />}>
+        <div className="flex flex-col gap-3 h-full">
+          <HorizontalBar
+            items={stats.stageStats.map((s) => ({
+              label: s.label,
+              value: s.done,
+              total: s.total,
+              pct: s.pct,
+              color: deptConfig ? deptConfig.stageColors[s.stage] : '#6C5CE7',
+            }))}
+          />
+          <div className="flex gap-4 text-xs text-text-secondary mt-auto">
+            <span>전체 {stats.totalScenes}씬</span>
+            <span className="text-stage-png">완료 {stats.fullyDone}</span>
+            <span className="text-status-none">미시작 {stats.notStarted}</span>
+          </div>
+        </div>
+      </Widget>
+    );
+  }
+
+  // ── 숫자 카드 ──
+  if (activeChart === 'stat-card') {
+    return (
+      <Widget title={title} icon={<PieChart size={16} />}>
+        <StatCard
+          value={`${pct}%`}
+          label={title}
+          subValue={`${stats.totalScenes}씬 중 ${stats.fullyDone} 완료`}
+          pct={pct}
+        />
+      </Widget>
+    );
+  }
+
+  // ── 기본: 도넛 ──
   return (
     <Widget title={title} icon={<PieChart size={16} />}>
       <div className="flex flex-col items-center justify-center h-full gap-2">

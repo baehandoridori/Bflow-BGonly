@@ -5,10 +5,15 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { calcDashboardStats } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS } from '@/types';
+import { VerticalBar } from './charts/VerticalBar';
+import type { ChartType } from '@/types';
+
+const SUPPORTED_CHARTS: ChartType[] = ['horizontal-bar', 'vertical-bar'];
 
 export function StageBarsWidget() {
   const episodes = useDashboardEpisodes();
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
+  const chartType = useAppStore((s) => s.chartTypes['stage-bars']) ?? 'horizontal-bar';
   const dept = dashboardFilter === 'all' ? undefined : dashboardFilter;
   const deptConfig = dashboardFilter === 'all' ? DEPARTMENT_CONFIGS.bg : DEPARTMENT_CONFIGS[dashboardFilter];
   const stats = useMemo(() => calcDashboardStats(episodes, dept), [episodes, dept]);
@@ -17,6 +22,22 @@ export function StageBarsWidget() {
   const title = dashboardFilter === 'all'
     ? '단계별 진행률 (통합)'
     : `단계별 진행률 (${deptConfig.shortLabel})`;
+
+  const activeChart = SUPPORTED_CHARTS.includes(chartType) ? chartType : 'horizontal-bar';
+
+  if (activeChart === 'vertical-bar') {
+    return (
+      <Widget title={title} icon={<BarChart3 size={16} />}>
+        <VerticalBar
+          items={stageStats.map((stat) => ({
+            label: stat.label,
+            pct: stat.pct,
+            color: deptConfig.stageColors[stat.stage],
+          }))}
+        />
+      </Widget>
+    );
+  }
 
   return (
     <Widget title={title} icon={<BarChart3 size={16} />}>
