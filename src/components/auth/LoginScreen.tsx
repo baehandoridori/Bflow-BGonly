@@ -171,24 +171,28 @@ function PlexusBackground() {
 
       const tc = getPlexusColors()[0];
       const ts = getPlexusColors()[2] ?? getPlexusColors()[1];
-      const cg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.7);
-      cg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.06)`);
-      cg.addColorStop(0.3, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
-      cg.addColorStop(0.6, `rgba(${ts[0]}, ${ts[1]}, ${ts[2]}, 0.015)`);
-      cg.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = cg;
-      ctx.fillRect(0, 0, w, h);
 
-      if (mouseRef.current.x > 0 && mouseRef.current.y > 0) {
-        const mg = ctx.createRadialGradient(mouseRef.current.x, mouseRef.current.y, 0, mouseRef.current.x, mouseRef.current.y, 250);
-        mg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.08)`);
-        mg.addColorStop(0.4, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
-        mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = mg;
+      // 다크모드에서만 중앙 그라데이션 + 마우스 글로우 + 노이즈 오버레이 적용
+      if (!isLight) {
+        const cg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.7);
+        cg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.06)`);
+        cg.addColorStop(0.3, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
+        cg.addColorStop(0.6, `rgba(${ts[0]}, ${ts[1]}, ${ts[2]}, 0.015)`);
+        cg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = cg;
         ctx.fillRect(0, 0, w, h);
-      }
 
-      if (noiseRef.current) ctx.drawImage(noiseRef.current, 0, 0);
+        if (mouseRef.current.x > 0 && mouseRef.current.y > 0) {
+          const mg = ctx.createRadialGradient(mouseRef.current.x, mouseRef.current.y, 0, mouseRef.current.x, mouseRef.current.y, 250);
+          mg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.08)`);
+          mg.addColorStop(0.4, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
+          mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = mg;
+          ctx.fillRect(0, 0, w, h);
+        }
+
+        if (noiseRef.current) ctx.drawImage(noiseRef.current, 0, 0);
+      }
 
       // 물리 업데이트 (가상 캔버스 좌표)
       for (const p of particles) {
