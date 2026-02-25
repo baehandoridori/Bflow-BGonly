@@ -331,22 +331,30 @@ function AddTaskModal({
               {/* 일정 */}
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="text-[11px] text-text-secondary/60 mb-1.5 block">시작일</label>
-                  <input
-                    type="date"
-                    value={todoStartDate}
-                    onChange={(e) => setTodoStartDate(e.target.value)}
-                    className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-50"
-                  />
+                  <label className="text-[11px] font-semibold text-text-secondary/60 tracking-wider block mb-1">시작일</label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={todoStartDate}
+                      onChange={(e) => setTodoStartDate(e.target.value)}
+                      className="w-full bg-bg-card border-2 border-accent/40 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
+                      style={{ colorScheme: 'dark' }}
+                    />
+                    <Calendar size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+                  </div>
                 </div>
                 <div className="flex-1">
-                  <label className="text-[11px] text-text-secondary/60 mb-1.5 block">종료일</label>
-                  <input
-                    type="date"
-                    value={todoEndDate}
-                    onChange={(e) => setTodoEndDate(e.target.value)}
-                    className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-50"
-                  />
+                  <label className="text-[11px] font-semibold text-text-secondary/60 tracking-wider block mb-1">종료일</label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={todoEndDate}
+                      onChange={(e) => setTodoEndDate(e.target.value)}
+                      className="w-full bg-bg-card border-2 border-accent/40 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
+                      style={{ colorScheme: 'dark' }}
+                    />
+                    <Calendar size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+                  </div>
                 </div>
               </div>
               {/* 캘린더 연동 */}
