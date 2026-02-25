@@ -1,6 +1,7 @@
 // ─── 부서 (Department) ──────────────────────
 
 export type Department = 'bg' | 'acting';
+export type ScenesDeptFilter = Department | 'all';
 
 export const DEPARTMENTS: Department[] = ['bg', 'acting'];
 

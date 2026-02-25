@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { ChevronRight, Plus, FolderOpen, Folder, MoreVertical, Archive, RotateCcw } from 'lucide-react';
+import { ChevronRight, Plus, FolderOpen, Folder, MoreVertical, Archive, RotateCcw, PanelLeftClose } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import type { Episode, Department } from '@/types';
+import type { Episode, Department, ScenesDeptFilter } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
 
 export interface ArchivedEpisodeInfo {
@@ -15,7 +15,7 @@ export interface ArchivedEpisodeInfo {
 
 interface EpisodeTreeNavProps {
   episodes: Episode[];
-  selectedDepartment: Department;
+  selectedDepartment: ScenesDeptFilter;
   selectedEpisode: number | null;
   selectedPart: string | null;
   partMemos: Record<string, string>;
@@ -30,6 +30,7 @@ interface EpisodeTreeNavProps {
   onArchiveEpisode: (epNum: number) => void;
   onUnarchiveEpisode: (epNum: number) => void;
   onEpisodeContextMenu: (e: React.MouseEvent, epNum: number) => void;
+  onCollapse?: () => void;
 }
 
 /** 씬 배열 → 전체 진행률(%) */
@@ -118,6 +119,7 @@ export function EpisodeTreeNav({
   onArchiveEpisode,
   onUnarchiveEpisode,
   onEpisodeContextMenu,
+  onCollapse,
 }: EpisodeTreeNavProps) {
   // 에피소드별 열림/닫힘 상태
   const [expandedEps, setExpandedEps] = useState<Set<number>>(() => {
@@ -144,12 +146,46 @@ export function EpisodeTreeNav({
     onSelectEpisodePart(epNum, null);
   }, [onSelectEpisodePart]);
 
-  const deptColor = DEPARTMENT_CONFIGS[selectedDepartment].color;
+  const deptColor = selectedDepartment === 'all' ? '#6C5CE7' : DEPARTMENT_CONFIGS[selectedDepartment].color;
+
+  // 'all' 모드에서 partId별 그룹핑된 항목 타입
+  type GroupedPartItem = {
+    partId: string;
+    scenes: { lo: boolean; done: boolean; review: boolean; png: boolean }[];
+    sceneCount: number;
+  };
 
   const epPartsMap = useMemo(() => {
     const map = new Map<number, Episode['parts']>();
     for (const ep of episodes) {
-      map.set(ep.episodeNumber, ep.parts.filter((p) => p.department === selectedDepartment));
+      map.set(
+        ep.episodeNumber,
+        selectedDepartment === 'all' ? ep.parts : ep.parts.filter((p) => p.department === selectedDepartment),
+      );
+    }
+    return map;
+  }, [episodes, selectedDepartment]);
+
+  // 'all' 모드: partId 기준 그룹핑 맵 (에피소드별)
+  const epGroupedPartsMap = useMemo(() => {
+    if (selectedDepartment !== 'all') return null;
+    const map = new Map<number, GroupedPartItem[]>();
+    for (const ep of episodes) {
+      const grouped = new Map<string, GroupedPartItem>();
+      for (const part of ep.parts) {
+        const existing = grouped.get(part.partId);
+        if (existing) {
+          existing.scenes.push(...part.scenes);
+          existing.sceneCount += part.scenes.length;
+        } else {
+          grouped.set(part.partId, {
+            partId: part.partId,
+            scenes: [...part.scenes],
+            sceneCount: part.scenes.length,
+          });
+        }
+      }
+      map.set(ep.episodeNumber, Array.from(grouped.values()));
     }
     return map;
   }, [episodes, selectedDepartment]);
@@ -158,7 +194,18 @@ export function EpisodeTreeNav({
     <div className="flex flex-col h-full">
       {/* 헤더 */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-bg-border shrink-0">
-        <span className="text-xs font-bold text-text-secondary uppercase tracking-wider">에피소드</span>
+        <div className="flex items-center gap-1.5">
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              className="p-1 text-text-secondary/50 hover:text-accent rounded transition-colors"
+              title="사이드바 접기"
+            >
+              <PanelLeftClose size={14} />
+            </button>
+          )}
+          <span className="text-sm font-bold text-text-secondary uppercase tracking-wider">에피소드</span>
+        </div>
         <button
           onClick={onAddEpisode}
           className="p-1 text-text-secondary/50 hover:text-accent rounded transition-colors"
@@ -223,14 +270,14 @@ export function EpisodeTreeNav({
 
                   {/* 에피소드 이름 + 메모 */}
                   <div className="flex flex-col flex-1 min-w-0">
-                    <span className="text-xs font-semibold truncate leading-tight">{displayName}</span>
+                    <span className="text-sm font-semibold truncate leading-tight" title={displayName}>{displayName}</span>
                     {epMemo && (
-                      <span className="text-[11px] text-amber-400/60 italic truncate leading-tight">{epMemo}</span>
+                      <span className="text-xs text-amber-400/60 italic truncate leading-tight" title={epMemo}>{epMemo}</span>
                     )}
                   </div>
 
                   {/* 씬 수 */}
-                  <span className="text-[11px] text-text-secondary/40 tabular-nums shrink-0">
+                  <span className="text-xs text-text-secondary/40 tabular-nums shrink-0">
                     {totalScenes}
                   </span>
 
@@ -261,12 +308,56 @@ export function EpisodeTreeNav({
                 <CollapsibleSection isOpen={isExpanded}>
                   <div className="ml-4 pl-2 border-l border-bg-border/40">
                     {deptParts.length === 0 ? (
-                      <div className="text-[11px] text-text-secondary/30 py-1.5 px-3">
+                      <div className="text-xs text-text-secondary/30 py-1.5 px-3">
                         파트 없음
                       </div>
+                    ) : selectedDepartment === 'all' && epGroupedPartsMap ? (
+                      /* 'all' 모드: partId 기준 그룹핑 (BG+ACT 합산) */
+                      (epGroupedPartsMap.get(ep.episodeNumber) ?? []).map((group) => {
+                        const defaultPartId = (epGroupedPartsMap.get(ep.episodeNumber) ?? [])[0]?.partId;
+                        const isPartActive = isEpSelected && (selectedPart ?? defaultPartId) === group.partId;
+                        const partProgress = calcPartProgress(group.scenes);
+
+                        return (
+                          <div
+                            key={group.partId}
+                            className={cn(
+                              'group/part flex items-center gap-1.5 px-2 py-1 mx-1 rounded-md cursor-pointer transition-colors',
+                              isPartActive
+                                ? 'bg-accent/15 text-accent'
+                                : 'text-text-secondary hover:bg-bg-primary/70 hover:text-text-primary',
+                            )}
+                            onClick={() => onSelectEpisodePart(ep.episodeNumber, group.partId)}
+                          >
+                            <div className="flex flex-col flex-1 min-w-0">
+                              <span className="text-sm font-medium truncate leading-tight">
+                                {group.partId}파트
+                              </span>
+                            </div>
+
+                            <span className="text-xs text-text-secondary/40 tabular-nums shrink-0">
+                              {group.sceneCount}
+                            </span>
+
+                            {group.sceneCount > 0 && (
+                              <div className="w-6 h-1 bg-bg-primary rounded-full overflow-hidden shrink-0">
+                                <div
+                                  className="h-full rounded-full transition-all duration-500"
+                                  style={{
+                                    width: `${partProgress}%`,
+                                    backgroundColor: partProgress >= 100 ? '#22c55e' : deptColor,
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
                     ) : (
+                      /* BG/ACT 개별 모드: 기존 방식 */
                       deptParts.map((part) => {
-                        const isPartActive = isEpSelected && (selectedPart ?? deptParts[0]?.partId) === part.partId;
+                        const defaultKey = deptParts[0]?.partId;
+                        const isPartActive = isEpSelected && (selectedPart ?? defaultKey) === part.partId;
                         const partProgress = calcPartProgress(part.scenes);
                         const memo = partMemos[part.sheetName];
 
@@ -282,24 +373,21 @@ export function EpisodeTreeNav({
                             onClick={() => onSelectEpisodePart(ep.episodeNumber, part.partId)}
                             onContextMenu={(e) => onPartContextMenu(e, part.sheetName)}
                           >
-                            {/* 파트 라벨 + 메모 (글자) */}
                             <div className="flex flex-col flex-1 min-w-0">
-                              <span className="text-xs font-medium truncate leading-tight">
+                              <span className="text-sm font-medium truncate leading-tight">
                                 {part.partId}파트
                               </span>
                               {memo && (
-                                <span className="text-[11px] text-amber-400/60 italic truncate leading-tight">
+                                <span className="text-xs text-amber-400/60 italic truncate leading-tight" title={memo}>
                                   {memo}
                                 </span>
                               )}
                             </div>
 
-                            {/* 씬 수 */}
-                            <span className="text-[11px] text-text-secondary/40 tabular-nums shrink-0">
+                            <span className="text-xs text-text-secondary/40 tabular-nums shrink-0">
                               {part.scenes.length}
                             </span>
 
-                            {/* 미니 진행률 */}
                             {part.scenes.length > 0 && (
                               <div className="w-6 h-1 bg-bg-primary rounded-full overflow-hidden shrink-0">
                                 <div
@@ -320,10 +408,10 @@ export function EpisodeTreeNav({
                     {isEpSelected && (
                       <button
                         onClick={(e) => { e.stopPropagation(); onAddPart(); }}
-                        className="flex items-center gap-1 px-2 py-1 mx-1 text-[11px] text-text-secondary/40 hover:text-accent rounded transition-colors"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 mx-1 mt-1 text-xs text-accent/60 hover:text-accent hover:bg-accent/10 rounded-md border border-dashed border-accent/20 hover:border-accent/40 transition-colors"
                         title="파트 추가"
                       >
-                        <Plus size={10} />
+                        <Plus size={12} />
                         <span>파트 추가</span>
                       </button>
                     )}

@@ -138,6 +138,7 @@ export function SpotlightSearch() {
     setSceneViewMode,
     setSceneGroupMode,
     setToast,
+    setHighlightUserName,
   } = useAppStore();
 
   /* ── 글로벌 단축키: Ctrl+Space ── */
@@ -413,7 +414,9 @@ export function SpotlightSearch() {
           icon: <User size={16} />,
           score,
           action: () => {
-            resetAndNavigate({ assignee: name, toastMsg: `${name}님의 씬을 표시합니다` });
+            setView('team');
+            setHighlightUserName(name);
+            setToast(`${name}님의 정보를 표시합니다`);
             close();
           },
         });

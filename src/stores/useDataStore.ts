@@ -88,12 +88,14 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   addEpisodeOptimistic: (episodeNumber, department: Department = 'bg') => {
-    const deptSuffix = department === 'bg' ? '_BG' : '_ACT';
-    const tabName = `EP${String(episodeNumber).padStart(2, '0')}_A${deptSuffix}`;
+    const pad = String(episodeNumber).padStart(2, '0');
     const newEp: Episode = {
       episodeNumber,
-      title: `EP.${String(episodeNumber).padStart(2, '0')}`,
-      parts: [{ partId: 'A', department, sheetName: tabName, scenes: [] }],
+      title: `EP.${pad}`,
+      parts: [
+        { partId: 'A', department: 'bg', sheetName: `EP${pad}_A_BG`, scenes: [] },
+        { partId: 'A', department: 'acting', sheetName: `EP${pad}_A_ACT`, scenes: [] },
+      ],
     };
     set(applyUpdate(get, [...get().episodes, newEp]));
   },
