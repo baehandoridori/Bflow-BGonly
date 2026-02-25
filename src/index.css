@@ -123,15 +123,46 @@ input[type="date"]::-webkit-inner-spin-button {
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
-/* 리사이즈 핸들: 투명하지만 충분한 히트 영역 확보 (edge glow 감지 영역과 일치) */
+/* 리사이즈 핸들: 투명하지만 충분한 히트 영역 확보 */
 .react-grid-item > .react-resizable-handle {
   opacity: 0;
-  width: 16px;
-  height: 16px;
   z-index: 10;
 }
 .react-grid-item > .react-resizable-handle::after {
-  border-color: rgb(var(--color-accent)) !important;
+  display: none !important;
+}
+
+/* 상/하 핸들: 전체 너비로 확장 */
+.react-grid-item > .react-resizable-handle-n,
+.react-grid-item > .react-resizable-handle-s {
+  width: 100% !important;
+  height: 14px !important;
+  left: 0 !important;
+  right: 0 !important;
+  margin-left: 0 !important;
+}
+.react-grid-item > .react-resizable-handle-n { top: 0 !important; }
+.react-grid-item > .react-resizable-handle-s { bottom: 0 !important; }
+
+/* 좌/우 핸들: 전체 높이로 확장 */
+.react-grid-item > .react-resizable-handle-e,
+.react-grid-item > .react-resizable-handle-w {
+  width: 14px !important;
+  height: 100% !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  margin-top: 0 !important;
+}
+.react-grid-item > .react-resizable-handle-e { right: 0 !important; }
+.react-grid-item > .react-resizable-handle-w { left: 0 !important; }
+
+/* 모서리 핸들: 16×16 고정 */
+.react-grid-item > .react-resizable-handle-nw,
+.react-grid-item > .react-resizable-handle-ne,
+.react-grid-item > .react-resizable-handle-sw,
+.react-grid-item > .react-resizable-handle-se {
+  width: 16px !important;
+  height: 16px !important;
 }
 
 /* 라쏘 선택 박스 */

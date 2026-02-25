@@ -309,6 +309,8 @@ export function Dashboard() {
 
   // Edge glow 상태: 위젯별 현재 호버 중인 리사이즈 존
   const [edgeZones, setEdgeZones] = useState<Record<string, ResizeZone>>({});
+  // 호버 상태: 위젯 위에 마우스가 올라와 있는지
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   // 드래그/리사이즈 상태
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -320,6 +322,7 @@ export function Dashboard() {
   // 드래그 콜백
   const handleDragStart = useCallback((_layout: Layout[], oldItem: Layout) => {
     setDraggingId(oldItem.i);
+    setHoveredId(null);
   }, []);
 
   const handleDragStop = useCallback((_layout: Layout[], oldItem: Layout) => {
@@ -332,6 +335,7 @@ export function Dashboard() {
   // 리사이즈 콜백
   const handleResizeStart = useCallback((_layout: Layout[], oldItem: Layout) => {
     setResizingId(oldItem.i);
+    setHoveredId(null);
   }, []);
 
   const handleResizeStop = useCallback((_layout: Layout[], oldItem: Layout) => {
@@ -558,15 +562,20 @@ export function Dashboard() {
                     isSettle && 'widget-settling',
                   )}
                   style={{ overflow: 'visible' }}
+                  onMouseEnter={() => { if (!isActive) setHoveredId(item.i); }}
                   onMouseMove={(e) => {
                     if (isDrag || isActive) return;
+                    if (hoveredId !== item.i) setHoveredId(item.i);
                     const zone = detectEdgeZone(e, e.currentTarget);
                     setEdgeZones((p) => {
                       if (p[item.i] === zone) return p;
                       return { ...p, [item.i]: zone };
                     });
                   }}
-                  onMouseLeave={() => setEdgeZones((p) => ({ ...p, [item.i]: null }))}
+                  onMouseLeave={() => {
+                    setEdgeZones((p) => ({ ...p, [item.i]: null }));
+                    setHoveredId((prev) => prev === item.i ? null : prev);
+                  }}
                 >
                   <WidgetIdContext.Provider value={item.i.startsWith('calendar-') ? 'calendar' : item.i}>
                     {getWidgetComponent(item.i) ?? (
@@ -577,7 +586,7 @@ export function Dashboard() {
                   </WidgetIdContext.Provider>
 
                   {/* Edge Glow 시각 효과 */}
-                  {!isDrag && !isActive && <EdgeGlow zone={zone} />}
+                  {!isDrag && !isActive && <EdgeGlow zone={zone} hovered={hoveredId === item.i} />}
 
                   {/* 드래그 시 pulse glow 보더 */}
                   {isDrag && (

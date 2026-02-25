@@ -19,7 +19,7 @@ const ZONE_CORNERS: Record<string, string[]> = {
 };
 
 /** 변 glow 라인 */
-function EdgeLine({ edge, visible }: { edge: string; visible: boolean }) {
+function EdgeLine({ edge, visible, dim }: { edge: string; visible: boolean; dim?: boolean }) {
   const isH = edge === 'n' || edge === 's';
 
   const posStyles: Record<string, React.CSSProperties> = {
@@ -29,6 +29,8 @@ function EdgeLine({ edge, visible }: { edge: string; visible: boolean }) {
     e: { right: 0, top: '15%', bottom: '15%', width: 2 },
   };
 
+  const opacity = !visible ? 0 : dim ? 0.35 : 0.9;
+
   return (
     <div
       style={{
@@ -36,18 +38,18 @@ function EdgeLine({ edge, visible }: { edge: string; visible: boolean }) {
         ...posStyles[edge],
         borderRadius: 1,
         background: `linear-gradient(${isH ? '90deg' : '180deg'}, transparent, rgb(var(--color-accent)) 50%, transparent)`,
-        opacity: visible ? 0.9 : 0,
+        opacity,
         transform: visible ? 'scale(1)' : (isH ? 'scaleX(0.4)' : 'scaleY(0.4)'),
         transition: 'opacity 0.2s ease, transform 0.2s ease',
         pointerEvents: 'none',
-        boxShadow: visible ? '0 0 10px rgb(var(--color-accent) / 0.4)' : 'none',
+        boxShadow: visible && !dim ? '0 0 10px rgb(var(--color-accent) / 0.4)' : 'none',
       }}
     />
   );
 }
 
 /** ㄴㄱ자 코너 glow SVG */
-function CornerGlow({ corner, visible }: { corner: string; visible: boolean }) {
+function CornerGlow({ corner, visible, dim }: { corner: string; visible: boolean; dim?: boolean }) {
   const size = 22;
   const thick = 2.5;
   const len = 15;
@@ -73,11 +75,11 @@ function CornerGlow({ corner, visible }: { corner: string; visible: boolean }) {
       style={{
         position: 'absolute',
         ...posMap[corner],
-        opacity: visible ? 1 : 0,
+        opacity: !visible ? 0 : dim ? 0.35 : 1,
         transform: `scale(${visible ? 1 : 0.6})`,
         transition: 'opacity 0.2s ease, transform 0.2s ease',
         pointerEvents: 'none',
-        filter: visible ? 'drop-shadow(0 0 6px rgb(var(--color-accent) / 0.5))' : 'none',
+        filter: visible && !dim ? 'drop-shadow(0 0 6px rgb(var(--color-accent) / 0.5))' : 'none',
       }}
     >
       <path
@@ -94,21 +96,42 @@ function CornerGlow({ corner, visible }: { corner: string; visible: boolean }) {
 
 interface EdgeGlowProps {
   zone: ResizeZone;
+  /** 위젯 호버 시 전체 edge/corner 은은하게 발광 */
+  hovered?: boolean;
 }
 
 /** 8방향 Edge Glow + Corner Glow 표시 */
-export const EdgeGlow = memo(function EdgeGlow({ zone }: EdgeGlowProps) {
+export const EdgeGlow = memo(function EdgeGlow({ zone, hovered }: EdgeGlowProps) {
   const activeEdges = zone ? (ZONE_EDGES[zone] ?? []) : [];
   const activeCorners = zone ? (ZONE_CORNERS[zone] ?? []) : [];
+  // 호버 시 전체 edge/corner 은은하게, 특정 zone은 강하게
+  const allEdges = ['n', 's', 'w', 'e'];
+  const allCorners = ['nw', 'ne', 'sw', 'se'];
 
   return (
     <>
-      {['n', 's', 'w', 'e'].map((ed) => (
-        <EdgeLine key={ed} edge={ed} visible={activeEdges.includes(ed)} />
-      ))}
-      {['nw', 'ne', 'sw', 'se'].map((c) => (
-        <CornerGlow key={c} corner={c} visible={activeCorners.includes(c)} />
-      ))}
+      {allEdges.map((ed) => {
+        const isZoneActive = activeEdges.includes(ed);
+        return (
+          <EdgeLine
+            key={ed}
+            edge={ed}
+            visible={isZoneActive || !!hovered}
+            dim={!isZoneActive && !!hovered}
+          />
+        );
+      })}
+      {allCorners.map((c) => {
+        const isZoneActive = activeCorners.includes(c);
+        return (
+          <CornerGlow
+            key={c}
+            corner={c}
+            visible={isZoneActive || !!hovered}
+            dim={!isZoneActive && !!hovered}
+          />
+        );
+      })}
     </>
   );
 });
