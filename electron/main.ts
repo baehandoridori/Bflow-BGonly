@@ -795,7 +795,7 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    win.setAlwaysOnTop(aot, aot ? 'floating' : 'normal');
+    win.setAlwaysOnTop(aot);
   }
 });
 
