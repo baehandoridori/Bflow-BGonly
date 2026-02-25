@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useContext, useRef, forwardRef } from 'react';
-import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, ChevronRight, PartyPopper } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, ChevronRight, PartyPopper, GripVertical, Calendar } from 'lucide-react';
+import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -20,6 +20,9 @@ interface PersonalTodo {
   memo: string;
   completed: boolean;
   createdAt: string;
+  startDate?: string;
+  endDate?: string;
+  addToCalendar?: boolean;
 }
 
 interface TaskView {
@@ -51,6 +54,7 @@ function scenePct(s: Scene): number {
 /* ─── 커스텀 뷰 퍼시스턴스 ──────────────────── */
 const VIEWS_KEY = 'bflow_my_task_views';
 const ASSIGNED_TODOS_KEY = 'bflow_assigned_personal_todos';
+const ASSIGNED_SCENES_KEY = 'bflow_assigned_scene_keys';
 
 function loadViews(): TaskView[] {
   try {
@@ -75,13 +79,23 @@ function loadAssignedTodos(): PersonalTodo[] {
 function saveAssignedTodos(todos: PersonalTodo[]) {
   localStorage.setItem(ASSIGNED_TODOS_KEY, JSON.stringify(todos));
 }
+function loadAssignedSceneKeys(): SceneKey[] {
+  try {
+    const raw = localStorage.getItem(ASSIGNED_SCENES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+function saveAssignedSceneKeys(keys: SceneKey[]) {
+  localStorage.setItem(ASSIGNED_SCENES_KEY, JSON.stringify(keys));
+}
 
 /* ─── 할 일 추가 모달 (작업 + 개인) ──────────── */
 function AddTaskModal({
   episodes,
   episodeTitles,
   existingKeys,
-  isCustomView,
+  defaultMode,
   onAddScenes,
   onAddPersonalTodo,
   onClose,
@@ -89,12 +103,12 @@ function AddTaskModal({
   episodes: Episode[];
   episodeTitles: Record<number, string>;
   existingKeys: Set<SceneKey>;
-  isCustomView: boolean;
+  defaultMode: 'scene' | 'personal';
   onAddScenes: (keys: SceneKey[]) => void;
   onAddPersonalTodo: (todo: PersonalTodo) => void;
   onClose: () => void;
 }) {
-  const [mode, setMode] = useState<'scene' | 'personal'>(isCustomView ? 'scene' : 'personal');
+  const [mode, setMode] = useState<'scene' | 'personal'>(defaultMode);
 
   // 씬 선택 상태
   const [selectedEp, setSelectedEp] = useState<number | null>(episodes[0]?.episodeNumber ?? null);
@@ -105,6 +119,9 @@ function AddTaskModal({
   // 개인 할일 상태
   const [todoTitle, setTodoTitle] = useState('');
   const [todoMemo, setTodoMemo] = useState('');
+  const [todoStartDate, setTodoStartDate] = useState('');
+  const [todoEndDate, setTodoEndDate] = useState('');
+  const [todoAddToCalendar, setTodoAddToCalendar] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
   const ep = episodes.find((e) => e.episodeNumber === selectedEp);
@@ -147,6 +164,9 @@ function AddTaskModal({
       memo: todoMemo.trim(),
       completed: false,
       createdAt: new Date().toISOString(),
+      startDate: todoStartDate || undefined,
+      endDate: todoEndDate || undefined,
+      addToCalendar: todoAddToCalendar || undefined,
     });
     onClose();
   };
@@ -166,19 +186,17 @@ function AddTaskModal({
           <button onClick={onClose} className="p-1 hover:bg-bg-border/20 rounded-md cursor-pointer"><X size={16} /></button>
         </div>
 
-        {/* 탭 */}
+        {/* 탭 - 항상 작업 + 개인 둘 다 표시 */}
         <div className="flex gap-1 px-4 py-2 border-b border-bg-border/20">
-          {isCustomView && (
-            <button
-              onClick={() => setMode('scene')}
-              className={cn(
-                'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
-                mode === 'scene' ? 'bg-accent/15 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
-              )}
-            >
-              작업
-            </button>
-          )}
+          <button
+            onClick={() => setMode('scene')}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
+              mode === 'scene' ? 'bg-accent/15 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
+            )}
+          >
+            작업
+          </button>
           <button
             onClick={() => setMode('personal')}
             className={cn(
@@ -205,20 +223,17 @@ function AddTaskModal({
                   </option>
                 ))}
               </select>
-              <div className="flex gap-1">
+              <select
+                value={selectedPart ?? ''}
+                onChange={(e) => setSelectedPart(e.target.value)}
+                className="bg-bg-primary border border-bg-border rounded-lg px-2 py-1 text-xs text-text-primary"
+              >
                 {parts.map((p) => (
-                  <button
-                    key={p.sheetName}
-                    onClick={() => setSelectedPart(p.sheetName)}
-                    className={cn(
-                      'px-2 py-1 text-[11px] rounded-md font-medium cursor-pointer transition-colors',
-                      selectedPart === p.sheetName ? 'bg-accent/20 text-accent' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border/50',
-                    )}
-                  >
+                  <option key={p.sheetName} value={p.sheetName}>
                     {p.partId}파트 ({DEPARTMENT_CONFIGS[p.department].shortLabel})
-                  </button>
+                  </option>
                 ))}
-              </div>
+              </select>
             </div>
             {/* 검색 */}
             <div className="px-4 py-2">
@@ -291,7 +306,7 @@ function AddTaskModal({
         ) : (
           <>
             {/* 개인 할일 폼 */}
-            <div className="flex flex-col gap-3 px-4 py-4 flex-1">
+            <div className="flex flex-col gap-3 px-4 py-4 flex-1 overflow-auto">
               <div>
                 <label className="text-[11px] text-text-secondary/60 mb-1.5 block">제목</label>
                 <input
@@ -309,10 +324,55 @@ function AddTaskModal({
                   value={todoMemo}
                   onChange={(e) => setTodoMemo(e.target.value)}
                   placeholder="메모 (선택)"
-                  rows={3}
+                  rows={2}
                   className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-secondary/30 resize-none"
                 />
               </div>
+              {/* 일정 */}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[11px] text-text-secondary/60 mb-1.5 block">시작일</label>
+                  <input
+                    type="date"
+                    value={todoStartDate}
+                    onChange={(e) => setTodoStartDate(e.target.value)}
+                    className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 [color-scheme:dark]"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[11px] text-text-secondary/60 mb-1.5 block">종료일</label>
+                  <input
+                    type="date"
+                    value={todoEndDate}
+                    onChange={(e) => setTodoEndDate(e.target.value)}
+                    className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 [color-scheme:dark]"
+                  />
+                </div>
+              </div>
+              {/* 캘린더 연동 */}
+              <button
+                type="button"
+                onClick={() => setTodoAddToCalendar(!todoAddToCalendar)}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors cursor-pointer',
+                  todoAddToCalendar
+                    ? 'border-accent/40 bg-accent/10 text-accent'
+                    : 'border-bg-border text-text-secondary/50 hover:text-text-secondary hover:border-bg-border/80',
+                )}
+              >
+                <Calendar size={14} />
+                <span className="text-xs font-medium">캘린더 추가</span>
+                <div className={cn(
+                  'ml-auto w-8 h-[18px] rounded-full transition-colors relative',
+                  todoAddToCalendar ? 'bg-accent' : 'bg-bg-border/50',
+                )}>
+                  <motion.div
+                    className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm"
+                    animate={{ left: todoAddToCalendar ? 16 : 2 }}
+                    transition={{ duration: 0.2 }}
+                  />
+                </div>
+              </button>
             </div>
             {/* 하단 액션 */}
             <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-bg-border/30">
@@ -342,7 +402,7 @@ interface EditableSceneRowProps {
   epLabel: string;
   sceneNum: string;
   pct: number;
-  isCustom: boolean;
+  isRemovable: boolean;
   onToggle: (flat: FlatScene, stage: Stage) => void;
   onRemove: (key: SceneKey) => void;
   onEditField: (flat: FlatScene, field: string, value: string) => void;
@@ -354,7 +414,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
   epLabel,
   sceneNum,
   pct,
-  isCustom,
+  isRemovable,
   onToggle,
   onRemove,
   onEditField,
@@ -396,7 +456,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
       {/* 씬 정보 */}
       <div className="flex flex-col min-w-0 flex-1 gap-0.5">
         <div className="flex items-center gap-1">
-          <span className="text-[11px] font-mono font-bold text-accent shrink-0">#{sceneNum}</span>
+          <span className="text-[12px] font-mono font-bold text-accent shrink-0">#{sceneNum}</span>
           {editingField === 'memo' ? (
             <input
               ref={inputRef}
@@ -404,18 +464,18 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
               onChange={(e) => setEditValue(e.target.value)}
               onBlur={commitEdit}
               onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
-              className="text-[11px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none flex-1 min-w-0"
+              className="text-[13px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none flex-1 min-w-0"
             />
           ) : (
             <span
-              className="text-[11px] text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
+              className="text-[13px] text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
               onDoubleClick={() => startEdit('memo', s.memo)}
               title="더블클릭하여 메모 편집"
             >
               {s.memo || s.sceneId}
             </span>
           )}
-          <span className="text-[8px] text-text-secondary/30 shrink-0">{epLabel} · {flat.partId}</span>
+          <span className="text-[9px] text-text-secondary/30 shrink-0">{epLabel} · {flat.partId}</span>
         </div>
         {/* 담당자 */}
         <div className="flex items-center gap-1">
@@ -426,11 +486,11 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
               onChange={(e) => setEditValue(e.target.value)}
               onBlur={commitEdit}
               onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
-              className="text-[9px] text-text-secondary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none w-16"
+              className="text-[10px] text-text-secondary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none w-16"
             />
           ) : (
             <span
-              className="text-[9px] text-text-secondary/40 cursor-pointer hover:text-text-secondary transition-colors"
+              className="text-[10px] text-text-secondary/40 cursor-pointer hover:text-text-secondary transition-colors"
               onDoubleClick={() => startEdit('assignee', s.assignee)}
               title="더블클릭하여 담당자 편집"
             >
@@ -478,7 +538,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
             <Pencil size={9} />
           </button>
         )}
-        {isCustom && (
+        {isRemovable && (
           <button
             onClick={() => onRemove(flat.key)}
             className="p-0.5 text-text-secondary/20 hover:text-red-400 cursor-pointer"
@@ -491,24 +551,59 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
   );
 });
 
-/* ─── 개인 할일 행 ──────────────────────────── */
-const PersonalTodoRow = forwardRef<HTMLDivElement, {
+/* ─── 개인 할일 행 콘텐츠 ──────────────────────── */
+function PersonalTodoContent({
+  todo,
+  onToggle,
+  onRemove,
+  showDragHandle,
+}: {
   todo: PersonalTodo;
   onToggle: (id: string) => void;
   onRemove: (id: string) => void;
-}>(function PersonalTodoRow({ todo, onToggle, onRemove }, ref) {
+  showDragHandle?: boolean;
+}) {
   return (
-    <motion.div
-      ref={ref}
-      layout
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+    <div
       className={cn(
-        'flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors group',
+        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
         todo.completed ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
       )}
     >
+      {/* 드래그 핸들 */}
+      {showDragHandle && (
+        <div className="text-text-secondary/15 hover:text-text-secondary/40 cursor-grab active:cursor-grabbing shrink-0">
+          <GripVertical size={12} />
+        </div>
+      )}
+
+      {/* 개인 라벨 (씬 번호 자리) */}
+      <span className="text-[12px] font-bold text-accent shrink-0">개인</span>
+
+      {/* 제목/메모 */}
+      <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+        <span className={cn(
+          'text-[13px] text-text-primary truncate',
+          todo.completed && 'line-through text-text-secondary/50',
+        )}>
+          {todo.title}
+        </span>
+        {todo.memo && (
+          <span className="text-[11px] text-text-secondary/50 truncate">{todo.memo}</span>
+        )}
+        {(todo.startDate || todo.endDate) && (
+          <div className="flex items-center gap-1 text-[9px] text-text-secondary/40">
+            <Calendar size={8} />
+            <span>
+              {todo.startDate && new Date(todo.startDate + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+              {todo.startDate && todo.endDate && ' ~ '}
+              {todo.endDate && new Date(todo.endDate + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* 체크박스 (오른쪽) */}
       <button
         onClick={() => onToggle(todo.id)}
         className={cn(
@@ -520,29 +615,17 @@ const PersonalTodoRow = forwardRef<HTMLDivElement, {
       >
         {todo.completed && <Check size={10} />}
       </button>
-      <div className="flex flex-col min-w-0 flex-1 gap-0.5">
-        <div className="flex items-center gap-1.5">
-          <span className={cn(
-            'text-[11px] text-text-primary truncate',
-            todo.completed && 'line-through text-text-secondary/50',
-          )}>
-            {todo.title}
-          </span>
-          <span className="text-[8px] text-accent/40 bg-accent/8 px-1.5 py-0.5 rounded-full shrink-0">개인</span>
-        </div>
-        {todo.memo && (
-          <span className="text-[10px] text-text-secondary/50 truncate">{todo.memo}</span>
-        )}
-      </div>
+
+      {/* 삭제 */}
       <button
         onClick={() => onRemove(todo.id)}
         className="p-0.5 text-text-secondary/20 hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
       >
         <X size={10} />
       </button>
-    </motion.div>
+    </div>
   );
-});
+}
 
 /* ─── Windows 11 스타일 탭 바 ────────────────── */
 function TabBar({
@@ -677,12 +760,15 @@ export function MyTasksWidget() {
 
   // assigned 뷰 전용 개인 할일 (DEFAULT_VIEW는 상수이므로 별도 관리)
   const [assignedTodos, setAssignedTodos] = useState<PersonalTodo[]>(() => loadAssignedTodos());
+  // assigned 뷰에서 수동으로 추가한 씬 키
+  const [assignedSceneKeys, setAssignedSceneKeys] = useState<SceneKey[]>(() => loadAssignedSceneKeys());
 
   const allViews = [DEFAULT_VIEW, ...customViews];
   const activeView = allViews.find((v) => v.id === activeViewId) ?? DEFAULT_VIEW;
 
   useEffect(() => { saveViews(customViews); }, [customViews]);
   useEffect(() => { saveAssignedTodos(assignedTodos); }, [assignedTodos]);
+  useEffect(() => { saveAssignedSceneKeys(assignedSceneKeys); }, [assignedSceneKeys]);
 
   // 전체 평탄화
   const allFlat: FlatScene[] = useMemo(() => {
@@ -710,7 +796,8 @@ export function MyTasksWidget() {
     let result: FlatScene[];
     if (activeView.type === 'assigned') {
       const name = currentUser?.name ?? '';
-      result = name ? allFlat.filter((f) => f.scene.assignee === name) : [];
+      const manualKeys = new Set(assignedSceneKeys);
+      result = allFlat.filter((f) => (name && f.scene.assignee === name) || manualKeys.has(f.key));
     } else {
       const keys = new Set(activeView.sceneKeys);
       result = allFlat.filter((f) => keys.has(f.key));
@@ -722,7 +809,7 @@ export function MyTasksWidget() {
       const bNum = parseInt(b.scene.sceneId.match(/\d+$/)?.[0] || '0', 10);
       return aNum - bNum;
     });
-  }, [activeView, allFlat, currentUser]);
+  }, [activeView, allFlat, currentUser, assignedSceneKeys]);
 
   // 진행 중 / 완료 분리
   const pendingScenes = useMemo(() => allViewScenes.filter((f) => scenePct(f.scene) < 100), [allViewScenes]);
@@ -834,16 +921,31 @@ export function MyTasksWidget() {
     if (activeViewId === viewId) setActiveViewId(DEFAULT_VIEW.id);
   };
   const addToView = (keys: SceneKey[]) => {
-    setCustomViews((prev) => prev.map((v) =>
-      v.id === activeViewId ? { ...v, sceneKeys: [...new Set([...v.sceneKeys, ...keys])] } : v,
-    ));
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedSceneKeys((prev) => [...new Set([...prev, ...keys])]);
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, sceneKeys: [...new Set([...v.sceneKeys, ...keys])] } : v,
+      ));
+    }
   };
   const removeFromView = (key: SceneKey) => {
-    setCustomViews((prev) => prev.map((v) =>
-      v.id === activeViewId ? { ...v, sceneKeys: v.sceneKeys.filter((k) => k !== key) } : v,
-    ));
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedSceneKeys((prev) => prev.filter((k) => k !== key));
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, sceneKeys: v.sceneKeys.filter((k) => k !== key) } : v,
+      ));
+    }
   };
-  const existingKeys = useMemo(() => new Set(activeView.sceneKeys), [activeView]);
+  const existingKeys = useMemo(() => {
+    if (activeView.id === DEFAULT_VIEW.id) {
+      const keys = new Set(assignedSceneKeys);
+      allViewScenes.forEach((f) => keys.add(f.key));
+      return keys;
+    }
+    return new Set(activeView.sceneKeys);
+  }, [activeView, assignedSceneKeys, allViewScenes]);
 
   // ─── 개인 할일 조작 ─────────────────────
   const addPersonalTodo = (todo: PersonalTodo) => {
@@ -874,6 +976,20 @@ export function MyTasksWidget() {
       ));
     }
   };
+  const reorderPendingTodos = (reordered: PersonalTodo[]) => {
+    const completed = activePersonalTodos.filter((t) => t.completed);
+    const newList = [...reordered, ...completed];
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedTodos(newList);
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, personalTodos: newList } : v,
+      ));
+    }
+  };
+
+  // assigned 뷰에서 수동 추가된 씬 키 Set
+  const assignedSceneKeySet = useMemo(() => new Set(assignedSceneKeys), [assignedSceneKeys]);
 
   // 행 렌더 헬퍼
   const renderRow = (flat: FlatScene) => {
@@ -882,6 +998,7 @@ export function MyTasksWidget() {
     const deptCfg = DEPARTMENT_CONFIGS[flat.department];
     const epLabel = episodeTitles[flat.episodeNumber] || `EP.${String(flat.episodeNumber).padStart(2, '0')}`;
     const sceneNum = s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(s.no);
+    const isRemovable = activeView.type === 'custom' || (activeView.id === DEFAULT_VIEW.id && assignedSceneKeySet.has(flat.key));
     return (
       <EditableSceneRow
         key={flat.key}
@@ -890,7 +1007,7 @@ export function MyTasksWidget() {
         epLabel={epLabel}
         sceneNum={sceneNum}
         pct={pct}
-        isCustom={activeView.type === 'custom'}
+        isRemovable={isRemovable}
         onToggle={handleToggle}
         onRemove={removeFromView}
         onEditField={handleEditField}
@@ -963,10 +1080,16 @@ export function MyTasksWidget() {
               )}
               <AnimatePresence mode="popLayout">
                 {pendingScenes.map(renderRow)}
-                {pendingPersonalTodos.map((todo) => (
-                  <PersonalTodoRow key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} />
-                ))}
               </AnimatePresence>
+              {pendingPersonalTodos.length > 0 && (
+                <Reorder.Group axis="y" values={pendingPersonalTodos} onReorder={reorderPendingTodos} className="list-none p-0 m-0">
+                  {pendingPersonalTodos.map((todo) => (
+                    <Reorder.Item key={todo.id} value={todo} className="list-none">
+                      <PersonalTodoContent todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} showDragHandle />
+                    </Reorder.Item>
+                  ))}
+                </Reorder.Group>
+              )}
 
               {/* ─── 완료된 항목 섹션 ─── */}
               {(doneScenes.length > 0 || donePersonalTodos.length > 0) && !filterDone && (
@@ -1002,10 +1125,10 @@ export function MyTasksWidget() {
                         <div className="flex flex-col gap-0.5 pt-1">
                           <AnimatePresence mode="popLayout">
                             {doneScenes.map(renderRow)}
-                            {donePersonalTodos.map((todo) => (
-                              <PersonalTodoRow key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} />
-                            ))}
                           </AnimatePresence>
+                          {donePersonalTodos.map((todo) => (
+                            <PersonalTodoContent key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} />
+                          ))}
                         </div>
                       </motion.div>
                     )}
@@ -1032,7 +1155,7 @@ export function MyTasksWidget() {
             episodes={episodes}
             episodeTitles={episodeTitles}
             existingKeys={existingKeys}
-            isCustomView={activeView.type === 'custom'}
+            defaultMode={activeView.type === 'custom' ? 'scene' : 'personal'}
             onAddScenes={addToView}
             onAddPersonalTodo={addPersonalTodo}
             onClose={() => setShowPicker(false)}
