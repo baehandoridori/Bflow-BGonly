@@ -8,9 +8,7 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
 import { getEvents } from '@/services/calendarService';
-import { checkConnection } from '@/services/sheetsService';
 import { readMetadataFromSheets } from '@/services/sheetsService';
-import { readLocalMetadata } from '@/services/testSheetService';
 import type { CalendarEvent } from '@/types/calendar';
 
 /* ────────────────────────────────────────────────
@@ -117,13 +115,10 @@ export function SpotlightSearch() {
   useEffect(() => {
     (async () => {
       const memos: Record<string, string> = {};
-      const connected = await checkConnection().catch(() => false);
       for (const ep of episodes) {
         for (const part of ep.parts) {
           try {
-            const data = connected
-              ? await readMetadataFromSheets('part-memo', part.sheetName)
-              : await readLocalMetadata('part-memo', part.sheetName);
+            const data = await readMetadataFromSheets('part-memo', part.sheetName);
             if (data?.value) memos[part.sheetName] = data.value;
           } catch { /* 무시 */ }
         }
@@ -245,6 +240,14 @@ export function SpotlightSearch() {
           subtitle: '담당자별 태스크 뷰로 이동',
           icon: <Zap size={16} />,
           action: () => { setView('assignee'); close(); },
+        },
+        {
+          id: 'action-team',
+          category: 'action',
+          title: '팀원 현황',
+          subtitle: '등록된 팀원 목록 보기',
+          icon: <Zap size={16} />,
+          action: () => { setView('team'); close(); },
         },
       ];
     }
@@ -550,30 +553,30 @@ export function SpotlightSearch() {
               exit={{ opacity: 0, y: -16, scale: 0.98 }}
               transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              {/* 글래스 컨테이너 */}
+              {/* 글래스 컨테이너 — 라이트/다크 모드 자동 대응 */}
               <div
                 className="rounded-2xl overflow-hidden"
                 style={{
-                  backgroundColor: 'rgba(26,29,39,0.88)',
-                  border: '1px solid rgba(45,48,65,0.6)',
+                  backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
+                  border: '1px solid rgb(var(--color-bg-border) / 0.5)',
                   boxShadow:
                     '0 24px 48px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset, 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5)) inset',
                 }}
               >
                 {/* ── 검색 입력 ── */}
                 <div className="flex items-center gap-3 px-5 py-4">
-                  <Search size={20} className="text-text-secondary/60 shrink-0" />
+                  <Search size={20} className="text-text-secondary shrink-0" />
                   <input
                     ref={inputRef}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="씬번호, 담당자, 에피소드 검색..."
-                    className="flex-1 bg-transparent text-text-primary text-[15px] placeholder:text-text-secondary/50 outline-none"
+                    className="flex-1 bg-transparent text-text-primary text-base placeholder:text-text-secondary/60 outline-none"
                     autoComplete="off"
                     spellCheck={false}
                   />
-                  <kbd className="hidden sm:flex items-center px-1.5 py-0.5 rounded text-[10px] text-text-secondary/50 border border-bg-border/40 font-mono">
+                  <kbd className="hidden sm:flex items-center px-1.5 py-0.5 rounded text-[11px] text-text-secondary/60 border border-bg-border/40 font-mono">
                     ESC
                   </kbd>
                 </div>
@@ -588,14 +591,14 @@ export function SpotlightSearch() {
                   style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(139,141,163,0.2) transparent' }}
                 >
                   {flatResults.length === 0 && query.trim() && (
-                    <div className="px-5 py-10 text-center text-text-secondary/50 text-sm">
+                    <div className="px-5 py-10 text-center text-text-secondary/70 text-sm">
                       검색 결과가 없습니다
                     </div>
                   )}
 
                   {grouped.map((group) => (
                     <div key={group.category} className="mb-1">
-                      <div className="px-5 pt-2.5 pb-1 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
+                      <div className="px-5 pt-2.5 pb-1 text-xs font-medium text-text-secondary/70 uppercase tracking-wider">
                         {group.label}
                       </div>
                       {group.items.map((item) => {
@@ -618,7 +621,7 @@ export function SpotlightSearch() {
                             <span
                               className={cn(
                                 'shrink-0 transition-colors duration-75',
-                                isSelected ? 'text-accent' : 'text-text-secondary/50',
+                                isSelected ? 'text-accent' : 'text-text-secondary/70',
                               )}
                             >
                               {item.icon}
@@ -630,13 +633,13 @@ export function SpotlightSearch() {
                               )}>
                                 {item.title}
                               </div>
-                              <div className="text-xs text-text-secondary/50 truncate">
+                              <div className="text-[13px] text-text-secondary/70 truncate">
                                 {item.subtitle}
                               </div>
                             </div>
                             {item.pct !== undefined && <MiniProgress pct={item.pct} />}
                             {item.meta && (
-                              <span className="text-[11px] text-text-secondary/50 shrink-0 font-mono tabular-nums w-8 text-right">
+                              <span className="text-xs text-text-secondary/70 shrink-0 font-mono tabular-nums w-8 text-right">
                                 {item.meta}
                               </span>
                             )}
@@ -648,25 +651,25 @@ export function SpotlightSearch() {
                 </div>
 
                 {/* ── 하단 힌트 ── */}
-                <div className="flex items-center justify-between px-5 py-2 border-t border-bg-border/20 text-[10px] text-text-secondary/45">
+                <div className="flex items-center justify-between px-5 py-2.5 border-t border-bg-border/25 text-[11px] text-text-secondary/60">
                   <div className="flex items-center gap-3">
                     <span className="flex items-center gap-1">
-                      <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/20 font-mono text-[10px]">
+                      <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/25 font-mono text-[11px]">
                         ↑↓
                       </kbd>
                       <span>이동</span>
                     </span>
                     <span className="flex items-center gap-1">
-                      <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/20 font-mono text-[10px]">
+                      <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/25 font-mono text-[11px]">
                         ↵
                       </kbd>
                       <span>선택</span>
                     </span>
                   </div>
                   <span className="flex items-center gap-0.5">
-                    <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/20 font-mono text-[10px]">Ctrl</kbd>
+                    <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/25 font-mono text-[11px]">Ctrl</kbd>
                     <span>+</span>
-                    <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/20 font-mono text-[10px]">Space</kbd>
+                    <kbd className="px-1 py-px rounded bg-bg-primary/30 border border-bg-border/25 font-mono text-[11px]">Space</kbd>
                   </span>
                 </div>
               </div>

@@ -230,7 +230,7 @@ export function CalendarWidget() {
                     onClick={() => setSelectedDate(isSelected ? null : day.dateStr)}
                   >
                     <span className={cn(
-                      'text-[10px] tabular-nums leading-none',
+                      'text-[11px] tabular-nums leading-none',
                       day.isToday
                         ? 'bg-accent text-white w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold'
                         : day.dow === 0 ? 'text-red-400/60'
@@ -290,18 +290,18 @@ export function CalendarWidget() {
         {/* 이벤트 리스트 (선택 날짜 or 2week/week/today) */}
         {viewMode === 'month' && dateEvents.length > 0 && (
           <div className="border-t border-bg-border/30 pt-1.5 mt-auto">
-            <div className="text-[10px] text-text-secondary/50 mb-1">
+            <div className="text-[11px] text-text-secondary/50 mb-1">
               {selectedDate ? `${parseDate(selectedDate).getMonth() + 1}/${parseDate(selectedDate).getDate()} 일정` : '오늘 일정'}
             </div>
             <div className="flex flex-col gap-0.5">
               {dateEvents.slice(0, 4).map((ev) => (
                 <div key={ev.id} className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />
-                  <span className="text-[10px] text-text-primary truncate">{ev.title}</span>
+                  <span className="text-[11px] text-text-primary truncate">{ev.title}</span>
                 </div>
               ))}
               {dateEvents.length > 4 && (
-                <span className="text-[10px] text-accent">+{dateEvents.length - 4} 더</span>
+                <span className="text-[11px] text-accent">+{dateEvents.length - 4} 더</span>
               )}
             </div>
           </div>
@@ -311,7 +311,7 @@ export function CalendarWidget() {
           <div className="flex flex-col gap-1 flex-1 overflow-auto">
             {/* 날짜 범위 표시 */}
             {viewMode !== 'today' && (
-              <div className="text-[10px] text-text-secondary/50 pb-0.5">
+              <div className="text-[11px] text-text-secondary/50 pb-0.5">
                 {(() => {
                   const now = new Date();
                   const nowDow = now.getDay();
@@ -323,7 +323,7 @@ export function CalendarWidget() {
               </div>
             )}
             {listEvents.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-[10px] text-text-secondary/40">
+              <div className="flex items-center justify-center h-full text-[11px] text-text-secondary/40">
                 일정 없음
               </div>
             ) : (
@@ -344,7 +344,7 @@ export function CalendarWidget() {
                     } : undefined}
                   >
                     {!isContinuous && <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: ev.color }} />}
-                    <span className="text-[10px] text-text-primary truncate flex-1">{ev.title}</span>
+                    <span className="text-[11px] text-text-primary truncate flex-1">{ev.title}</span>
                     <span className="text-[8px] text-text-secondary/40 shrink-0">{dateRange}</span>
                   </div>
                 );

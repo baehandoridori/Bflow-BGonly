@@ -14,7 +14,7 @@ import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export function SettingsView() {
   const {
-    isTestMode, sheetsConnected, sheetsConfig,
+    sheetsConnected, sheetsConfig,
     setSheetsConnected, setSheetsConfig,
     themeId, customThemeColors, colorMode,
     setThemeId, setCustomThemeColors, setColorMode,
@@ -173,7 +173,7 @@ export function SettingsView() {
                   }}
                 />
                 <span className="text-xs text-text-primary font-medium">{preset.nameKo}</span>
-                <span className="text-[10px] text-text-secondary">{preset.name}</span>
+                <span className="text-[11px] text-text-secondary">{preset.name}</span>
                 {isActive && (
                   <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent flex items-center justify-center">
                     <Check size={12} className="text-white" />
@@ -197,7 +197,7 @@ export function SettingsView() {
               <Palette size={20} className="text-text-secondary" />
             </div>
             <span className="text-xs text-text-primary font-medium">커스텀</span>
-            <span className="text-[10px] text-text-secondary">Custom</span>
+            <span className="text-[11px] text-text-secondary">Custom</span>
             {themeId === 'custom' && (
               <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent flex items-center justify-center">
                 <Check size={12} className="text-white" />
@@ -257,27 +257,6 @@ export function SettingsView() {
             </div>
           </div>
         )}
-      </div>
-
-      {/* 모드 표시 */}
-      <div className="bg-bg-card border border-bg-border rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-text-secondary mb-3">앱 모드</h3>
-        <div className="flex items-center gap-3">
-          <span
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-              isTestMode
-                ? 'bg-status-low/20 text-status-low'
-                : 'bg-stage-png/20 text-stage-png'
-            }`}
-          >
-            {isTestMode ? '테스트 모드' : '라이브 모드'}
-          </span>
-          <span className="text-xs text-text-secondary">
-            {isTestMode
-              ? '로컬 JSON 파일을 사용합니다. (start-dev.bat으로 실행)'
-              : 'Apps Script 웹 앱을 통해 Google Sheets와 연동합니다.'}
-          </span>
-        </div>
       </div>
 
       {/* Google Sheets 연동 설정 */}

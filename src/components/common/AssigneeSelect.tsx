@@ -46,8 +46,10 @@ export function AssigneeSelect({ value, onChange, placeholder = '담당자', cla
   const { users } = useAuthStore();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
+  const [highlightIndex, setHighlightIndex] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   // value가 외부에서 바뀌면 query도 동기화
   useEffect(() => { setQuery(value); }, [value]);
@@ -70,6 +72,9 @@ export function AssigneeSelect({ value, onChange, placeholder = '담당자', cla
     return users.filter((u) => u.name.toLowerCase().includes(q));
   }, [users, query]);
 
+  // 필터 변경 시 하이라이트 인덱스 리셋
+  useEffect(() => { setHighlightIndex(0); }, [filtered.length]);
+
   return (
     <div ref={ref} className={`relative ${className}`}>
       <input
@@ -82,10 +87,21 @@ export function AssigneeSelect({ value, onChange, placeholder = '담당자', cla
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={(e) => {
+          if (open && filtered.length > 0) {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setHighlightIndex((prev) => (prev + 1) % filtered.length);
+              return;
+            }
+            if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setHighlightIndex((prev) => (prev - 1 + filtered.length) % filtered.length);
+              return;
+            }
+          }
           if (e.key === 'Enter') {
             e.preventDefault();
-            // 드롭다운에 필터 결과가 있으면 맨 위 항목 자동 선택
-            const selected = filtered.length > 0 ? filtered[0].name : query;
+            const selected = filtered.length > 0 ? filtered[highlightIndex].name : query;
             onChange(selected);
             setQuery(selected);
             setOpen(false);
@@ -96,21 +112,31 @@ export function AssigneeSelect({ value, onChange, placeholder = '담당자', cla
         className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent transition-colors"
       />
       {open && filtered.length > 0 && (
-        <div className="absolute left-0 right-0 top-full mt-1 bg-bg-card border border-bg-border rounded-lg shadow-xl max-h-40 overflow-auto z-50">
+        <div ref={listRef} className="absolute left-0 right-0 top-full mt-1 bg-bg-card border border-bg-border rounded-lg shadow-xl max-h-40 overflow-auto z-50">
           {filtered.map((u, i) => {
             const color = getUserColor(u.name);
+            const isActive = i === highlightIndex;
             return (
               <button
                 key={u.id}
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setHighlightIndex(i)}
                 onClick={() => {
                   onChange(u.name);
                   setQuery(u.name);
                   setOpen(false);
                 }}
+                ref={(el) => {
+                  if (isActive && el && listRef.current) {
+                    const listRect = listRef.current.getBoundingClientRect();
+                    const itemRect = el.getBoundingClientRect();
+                    if (itemRect.bottom > listRect.bottom) el.scrollIntoView({ block: 'nearest' });
+                    if (itemRect.top < listRect.top) el.scrollIntoView({ block: 'nearest' });
+                  }
+                }}
                 className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors ${
-                  i === 0 ? 'bg-accent/10' : 'hover:bg-accent/10'
+                  isActive ? 'bg-accent/10' : 'hover:bg-accent/10'
                 }`}
               >
                 <span

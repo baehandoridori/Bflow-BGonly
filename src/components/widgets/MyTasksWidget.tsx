@@ -1,10 +1,11 @@
 import { useState, useMemo, useCallback, useEffect, useContext, useRef, forwardRef } from 'react';
-import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, ChevronRight, PartyPopper } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, ChevronRight, PartyPopper, GripVertical, Calendar } from 'lucide-react';
+import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Stage, Scene, Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
@@ -14,11 +15,23 @@ import { cn } from '@/utils/cn';
 type SceneKey = string;
 const makeKey = (sheetName: string, sceneId: string): SceneKey => `${sheetName}:${sceneId}`;
 
+interface PersonalTodo {
+  id: string;
+  title: string;
+  memo: string;
+  completed: boolean;
+  createdAt: string;
+  startDate?: string;
+  endDate?: string;
+  addToCalendar?: boolean;
+}
+
 interface TaskView {
   id: string;
   name: string;
   type: 'assigned' | 'custom';
   sceneKeys: SceneKey[];
+  personalTodos: PersonalTodo[];
 }
 
 interface FlatScene {
@@ -32,7 +45,7 @@ interface FlatScene {
 }
 
 /* ─── 기본 뷰 ──────────────────────────────── */
-const DEFAULT_VIEW: TaskView = { id: '__assigned', name: '내 할일', type: 'assigned', sceneKeys: [] };
+const DEFAULT_VIEW: TaskView = { id: '__assigned', name: '내 할일', type: 'assigned', sceneKeys: [], personalTodos: [] };
 
 /* ─── 유틸 ─────────────────────────────────── */
 function scenePct(s: Scene): number {
@@ -41,35 +54,77 @@ function scenePct(s: Scene): number {
 
 /* ─── 커스텀 뷰 퍼시스턴스 ──────────────────── */
 const VIEWS_KEY = 'bflow_my_task_views';
+const ASSIGNED_TODOS_KEY = 'bflow_assigned_personal_todos';
+const ASSIGNED_SCENES_KEY = 'bflow_assigned_scene_keys';
+
 function loadViews(): TaskView[] {
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw) as TaskView[];
+      return parsed.map((v) => ({ ...v, personalTodos: v.personalTodos ?? [] }));
+    }
   } catch {}
   return [];
 }
 function saveViews(views: TaskView[]) {
   localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
 }
+function loadAssignedTodos(): PersonalTodo[] {
+  try {
+    const raw = localStorage.getItem(ASSIGNED_TODOS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+function saveAssignedTodos(todos: PersonalTodo[]) {
+  localStorage.setItem(ASSIGNED_TODOS_KEY, JSON.stringify(todos));
+}
+function loadAssignedSceneKeys(): SceneKey[] {
+  try {
+    const raw = localStorage.getItem(ASSIGNED_SCENES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+function saveAssignedSceneKeys(keys: SceneKey[]) {
+  localStorage.setItem(ASSIGNED_SCENES_KEY, JSON.stringify(keys));
+}
 
-/* ─── 씬 선택 모달 ──────────────────────────── */
-function ScenePickerModal({
+/* ─── 할 일 추가 모달 (작업 + 개인) ──────────── */
+function AddTaskModal({
   episodes,
   episodeTitles,
   existingKeys,
-  onAdd,
+  defaultMode,
+  onAddScenes,
+  onAddPersonalTodo,
   onClose,
 }: {
   episodes: Episode[];
   episodeTitles: Record<number, string>;
   existingKeys: Set<SceneKey>;
-  onAdd: (keys: SceneKey[]) => void;
+  defaultMode: 'scene' | 'personal';
+  onAddScenes: (keys: SceneKey[]) => void;
+  onAddPersonalTodo: (todo: PersonalTodo) => void;
   onClose: () => void;
 }) {
+  const colorMode = useAppStore((s) => s.colorMode);
+  const [mode, setMode] = useState<'scene' | 'personal'>(defaultMode);
+
+  // 씬 선택 상태
   const [selectedEp, setSelectedEp] = useState<number | null>(episodes[0]?.episodeNumber ?? null);
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [pickedKeys, setPickedKeys] = useState<Set<SceneKey>>(new Set());
+
+  // 개인 할일 상태
+  const [todoTitle, setTodoTitle] = useState('');
+  const [todoMemo, setTodoMemo] = useState('');
+  const [todoStartDate, setTodoStartDate] = useState('');
+  const [todoEndDate, setTodoEndDate] = useState('');
+  const [todoAddToCalendar, setTodoAddToCalendar] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
 
   const ep = episodes.find((e) => e.episodeNumber === selectedEp);
   const parts = ep?.parts ?? [];
@@ -80,10 +135,19 @@ function ScenePickerModal({
     }
   }, [selectedEp]);
 
+  // 개인 탭 전환 시 제목 필드 포커스
+  useEffect(() => {
+    if (mode === 'personal') setTimeout(() => titleRef.current?.focus(), 100);
+  }, [mode]);
+
   const currentPart = parts.find((p) => p.sheetName === selectedPart);
   const scenes = currentPart?.scenes ?? [];
+  const searchLower = search.toLowerCase();
   const filtered = search
-    ? scenes.filter((s) => s.sceneId.toLowerCase().includes(search.toLowerCase()) || s.assignee.toLowerCase().includes(search.toLowerCase()))
+    ? scenes.filter((s) =>
+        s.sceneId.toLowerCase().includes(searchLower) ||
+        s.assignee.toLowerCase().includes(searchLower) ||
+        s.memo.toLowerCase().includes(searchLower))
     : scenes;
 
   const toggle = (key: SceneKey) => {
@@ -92,6 +156,21 @@ function ScenePickerModal({
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
+  };
+
+  const handleAddPersonalTodo = () => {
+    if (!todoTitle.trim()) return;
+    onAddPersonalTodo({
+      id: `ptodo_${Date.now()}`,
+      title: todoTitle.trim(),
+      memo: todoMemo.trim(),
+      completed: false,
+      createdAt: new Date().toISOString(),
+      startDate: todoStartDate || undefined,
+      endDate: todoEndDate || undefined,
+      addToCalendar: todoAddToCalendar || undefined,
+    });
+    onClose();
   };
 
   return (
@@ -103,98 +182,224 @@ function ScenePickerModal({
         className="bg-bg-card border border-bg-border/50 rounded-2xl shadow-2xl w-[520px] max-h-[70vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* 헤더 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border/30">
-          <span className="text-sm font-semibold text-text-primary">씬 추가</span>
+          <span className="text-sm font-semibold text-text-primary">할 일 추가</span>
           <button onClick={onClose} className="p-1 hover:bg-bg-border/20 rounded-md cursor-pointer"><X size={16} /></button>
         </div>
-        <div className="flex gap-2 px-4 py-2 border-b border-bg-border/20">
-          <select
-            value={selectedEp ?? ''}
-            onChange={(e) => setSelectedEp(Number(e.target.value))}
-            className="bg-bg-primary border border-bg-border rounded-lg px-2 py-1 text-xs text-text-primary flex-1"
+
+        {/* 탭 - 항상 작업 + 개인 둘 다 표시 */}
+        <div className="flex gap-1 px-4 py-2 border-b border-bg-border/20">
+          <button
+            onClick={() => setMode('scene')}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
+              mode === 'scene' ? 'bg-accent/15 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
+            )}
           >
-            {episodes.map((ep) => (
-              <option key={ep.episodeNumber} value={ep.episodeNumber}>
-                {episodeTitles[ep.episodeNumber] || `EP.${String(ep.episodeNumber).padStart(2, '0')}`}
-              </option>
-            ))}
-          </select>
-          <div className="flex gap-1">
-            {parts.map((p) => (
-              <button
-                key={p.sheetName}
-                onClick={() => setSelectedPart(p.sheetName)}
-                className={cn(
-                  'px-2 py-1 text-[10px] rounded-md font-medium cursor-pointer transition-colors',
-                  selectedPart === p.sheetName ? 'bg-accent/20 text-accent' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border/50',
-                )}
+            작업
+          </button>
+          <button
+            onClick={() => setMode('personal')}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
+              mode === 'personal' ? 'bg-accent/15 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
+            )}
+          >
+            개인
+          </button>
+        </div>
+
+        {mode === 'scene' ? (
+          <>
+            {/* 에피소드/파트 선택 */}
+            <div className="flex gap-2 px-4 py-2 border-b border-bg-border/20">
+              <select
+                value={selectedEp ?? ''}
+                onChange={(e) => setSelectedEp(Number(e.target.value))}
+                className="bg-bg-primary border border-bg-border rounded-lg px-2 py-1 text-xs text-text-primary flex-1"
               >
-                {p.partId}파트 ({DEPARTMENT_CONFIGS[p.department].shortLabel})
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="px-4 py-2">
-          <div className="flex items-center gap-2 bg-bg-primary border border-bg-border rounded-lg px-2 py-1.5">
-            <Search size={12} className="text-text-secondary/40" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="씬 검색..."
-              className="bg-transparent text-xs text-text-primary flex-1 outline-none placeholder:text-text-secondary/30"
-            />
-          </div>
-        </div>
-        <div className="flex-1 overflow-auto px-4 pb-2">
-          <div className="grid grid-cols-1 gap-1">
-            {filtered.map((s) => {
-              const key = makeKey(currentPart!.sheetName, s.sceneId);
-              const alreadyExists = existingKeys.has(key);
-              const picked = pickedKeys.has(key);
-              const pct = scenePct(s);
-              return (
-                <div
-                  key={s.sceneId}
-                  onClick={() => !alreadyExists && toggle(key)}
+                {episodes.map((ep) => (
+                  <option key={ep.episodeNumber} value={ep.episodeNumber}>
+                    {episodeTitles[ep.episodeNumber] || ep.title || `EP.${String(ep.episodeNumber).padStart(2, '0')}`}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={selectedPart ?? ''}
+                onChange={(e) => setSelectedPart(e.target.value)}
+                className="bg-bg-primary border border-bg-border rounded-lg px-2 py-1 text-xs text-text-primary"
+              >
+                {parts.map((p) => (
+                  <option key={p.sheetName} value={p.sheetName}>
+                    {p.partId}파트 ({DEPARTMENT_CONFIGS[p.department].shortLabel})
+                  </option>
+                ))}
+              </select>
+            </div>
+            {/* 검색 */}
+            <div className="px-4 py-2">
+              <div className="flex items-center gap-2 bg-bg-primary border border-bg-border rounded-lg px-2 py-1.5">
+                <Search size={12} className="text-text-secondary/40" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="씬 검색 (씬번호, 담당자, 메모)..."
+                  className="bg-transparent text-xs text-text-primary flex-1 outline-none placeholder:text-text-secondary/30"
+                />
+              </div>
+            </div>
+            {/* 씬 목록 */}
+            <div className="flex-1 overflow-auto px-4 pb-2">
+              <div className="grid grid-cols-1 gap-1">
+                {filtered.map((s) => {
+                  const key = makeKey(currentPart!.sheetName, s.sceneId);
+                  const alreadyExists = existingKeys.has(key);
+                  const picked = pickedKeys.has(key);
+                  const pct = scenePct(s);
+                  return (
+                    <div
+                      key={s.sceneId}
+                      onClick={() => !alreadyExists && toggle(key)}
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-2 rounded-lg transition-colors',
+                        alreadyExists ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-bg-border/10',
+                        picked && 'bg-accent/10 ring-1 ring-accent/30',
+                      )}
+                    >
+                      <div className={cn(
+                        'w-4 h-4 rounded border flex items-center justify-center text-[11px] shrink-0',
+                        picked ? 'bg-accent border-accent text-white' : 'border-bg-border/50',
+                      )}>
+                        {picked && <Check size={10} />}
+                      </div>
+                      <span className="text-xs font-mono font-bold text-accent shrink-0">#{s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || s.no}</span>
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="text-xs text-text-primary truncate">{s.sceneId}</span>
+                        {s.memo && <span className="text-[10px] text-text-secondary/40 truncate">{s.memo}</span>}
+                      </div>
+                      {s.assignee && <span className="text-[11px] text-text-secondary/50 shrink-0">{s.assignee}</span>}
+                      <span className="ml-auto text-[11px] tabular-nums shrink-0" style={{ color: pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : '#8B8DA3' }}>
+                        {Math.round(pct)}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {/* 하단 액션 */}
+            <div className="flex items-center justify-between px-4 py-3 border-t border-bg-border/30">
+              <span className="text-[11px] text-text-secondary/50">{pickedKeys.size}개 선택됨</span>
+              <div className="flex gap-2">
+                <button onClick={onClose} className="px-3 py-1.5 text-xs rounded-lg border border-bg-border/50 text-text-secondary hover:text-text-primary cursor-pointer">취소</button>
+                <button
+                  onClick={() => { onAddScenes(Array.from(pickedKeys)); onClose(); }}
+                  disabled={pickedKeys.size === 0}
                   className={cn(
-                    'flex items-center gap-2 px-3 py-2 rounded-lg transition-colors',
-                    alreadyExists ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-bg-border/10',
-                    picked && 'bg-accent/10 ring-1 ring-accent/30',
+                    'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
+                    pickedKeys.size > 0 ? 'bg-accent text-on-accent hover:bg-accent/90' : 'bg-bg-border/30 text-text-secondary/40 cursor-not-allowed',
                   )}
                 >
-                  <div className={cn(
-                    'w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0',
-                    picked ? 'bg-accent border-accent text-white' : 'border-bg-border/50',
-                  )}>
-                    {picked && <Check size={10} />}
+                  추가
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* 개인 할일 폼 */}
+            <div className="flex flex-col gap-3 px-4 py-4 flex-1 overflow-auto">
+              <div>
+                <label className="text-[11px] text-text-secondary/60 mb-1.5 block">제목</label>
+                <input
+                  ref={titleRef}
+                  value={todoTitle}
+                  onChange={(e) => setTodoTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && todoTitle.trim()) handleAddPersonalTodo(); }}
+                  placeholder="할 일을 입력하세요"
+                  className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-secondary/30"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-text-secondary/60 mb-1.5 block">메모</label>
+                <textarea
+                  value={todoMemo}
+                  onChange={(e) => setTodoMemo(e.target.value)}
+                  placeholder="메모 (선택)"
+                  rows={2}
+                  className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-secondary/30 resize-none"
+                />
+              </div>
+              {/* 일정 */}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[11px] font-semibold text-text-secondary/60 tracking-wider block mb-1">시작일</label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={todoStartDate}
+                      onChange={(e) => setTodoStartDate(e.target.value)}
+                      className="w-full bg-bg-card border-2 border-accent/40 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
+                      style={{ colorScheme: colorMode }}
+                    />
+                    <Calendar size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
                   </div>
-                  <span className="text-xs font-mono font-bold text-accent shrink-0">#{s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || s.no}</span>
-                  <span className="text-xs text-text-primary truncate">{s.sceneId}</span>
-                  {s.assignee && <span className="text-[10px] text-text-secondary/50 shrink-0">{s.assignee}</span>}
-                  <span className="ml-auto text-[10px] tabular-nums shrink-0" style={{ color: pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : '#8B8DA3' }}>
-                    {Math.round(pct)}%
-                  </span>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-bg-border/30">
-          <span className="text-[11px] text-text-secondary/50">{pickedKeys.size}개 선택됨</span>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-xs rounded-lg border border-bg-border/50 text-text-secondary hover:text-text-primary cursor-pointer">취소</button>
-            <button
-              onClick={() => { onAdd(Array.from(pickedKeys)); onClose(); }}
-              disabled={pickedKeys.size === 0}
-              className={cn(
-                'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
-                pickedKeys.size > 0 ? 'bg-accent text-on-accent hover:bg-accent/90' : 'bg-bg-border/30 text-text-secondary/40 cursor-not-allowed',
-              )}
-            >
-              추가
-            </button>
-          </div>
-        </div>
+                <div className="flex-1">
+                  <label className="text-[11px] font-semibold text-text-secondary/60 tracking-wider block mb-1">종료일</label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={todoEndDate}
+                      onChange={(e) => setTodoEndDate(e.target.value)}
+                      className="w-full bg-bg-card border-2 border-accent/40 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
+                      style={{ colorScheme: colorMode }}
+                    />
+                    <Calendar size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+                  </div>
+                </div>
+              </div>
+              {/* 캘린더 연동 */}
+              <button
+                type="button"
+                onClick={() => setTodoAddToCalendar(!todoAddToCalendar)}
+                className={cn(
+                  'flex items-center gap-2.5 px-3 py-2.5 rounded-lg border-2 transition-all cursor-pointer',
+                  todoAddToCalendar
+                    ? 'border-[#6C5CE7] bg-[#6C5CE7]/15 text-[#6C5CE7]'
+                    : 'border-bg-border/60 text-text-secondary/60 hover:text-[#6C5CE7] hover:border-[#6C5CE7]/30 hover:bg-[#6C5CE7]/5',
+                )}
+              >
+                <Calendar size={16} className={todoAddToCalendar ? 'text-[#6C5CE7]' : ''} />
+                <span className="text-xs font-semibold">캘린더에 추가</span>
+                <div className={cn(
+                  'ml-auto w-9 h-[20px] rounded-full transition-colors relative',
+                  todoAddToCalendar ? 'bg-[#6C5CE7]' : 'bg-bg-border/40',
+                )}>
+                  <motion.div
+                    className="absolute top-[3px] w-[14px] h-[14px] rounded-full bg-white shadow-sm"
+                    animate={{ left: todoAddToCalendar ? 18 : 3 }}
+                    transition={{ duration: 0.2 }}
+                  />
+                </div>
+              </button>
+            </div>
+            {/* 하단 액션 */}
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-bg-border/30">
+              <button onClick={onClose} className="px-3 py-1.5 text-xs rounded-lg border border-bg-border/50 text-text-secondary hover:text-text-primary cursor-pointer">취소</button>
+              <button
+                onClick={handleAddPersonalTodo}
+                disabled={!todoTitle.trim()}
+                className={cn(
+                  'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
+                  todoTitle.trim() ? 'bg-accent text-on-accent hover:bg-accent/90' : 'bg-bg-border/30 text-text-secondary/40 cursor-not-allowed',
+                )}
+              >
+                추가
+              </button>
+            </div>
+          </>
+        )}
       </motion.div>
     </div>
   );
@@ -207,7 +412,7 @@ interface EditableSceneRowProps {
   epLabel: string;
   sceneNum: string;
   pct: number;
-  isCustom: boolean;
+  isRemovable: boolean;
   onToggle: (flat: FlatScene, stage: Stage) => void;
   onRemove: (key: SceneKey) => void;
   onEditField: (flat: FlatScene, field: string, value: string) => void;
@@ -219,7 +424,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
   epLabel,
   sceneNum,
   pct,
-  isCustom,
+  isRemovable,
   onToggle,
   onRemove,
   onEditField,
@@ -261,7 +466,7 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
       {/* 씬 정보 */}
       <div className="flex flex-col min-w-0 flex-1 gap-0.5">
         <div className="flex items-center gap-1">
-          <span className="text-[10px] font-mono font-bold text-accent shrink-0">#{sceneNum}</span>
+          <span className="text-[12px] font-mono font-bold text-accent shrink-0">#{sceneNum}</span>
           {editingField === 'memo' ? (
             <input
               ref={inputRef}
@@ -269,18 +474,18 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
               onChange={(e) => setEditValue(e.target.value)}
               onBlur={commitEdit}
               onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
-              className="text-[10px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none flex-1 min-w-0"
+              className="text-[13px] text-text-primary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none flex-1 min-w-0"
             />
           ) : (
             <span
-              className="text-[10px] text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
+              className="text-[13px] text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
               onDoubleClick={() => startEdit('memo', s.memo)}
               title="더블클릭하여 메모 편집"
             >
               {s.memo || s.sceneId}
             </span>
           )}
-          <span className="text-[8px] text-text-secondary/30 shrink-0">{epLabel} · {flat.partId}</span>
+          <span className="text-[9px] text-text-secondary/30 shrink-0">{epLabel} · {flat.partId}</span>
         </div>
         {/* 담당자 */}
         <div className="flex items-center gap-1">
@@ -291,11 +496,11 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
               onChange={(e) => setEditValue(e.target.value)}
               onBlur={commitEdit}
               onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
-              className="text-[9px] text-text-secondary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none w-16"
+              className="text-[10px] text-text-secondary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none w-16"
             />
           ) : (
             <span
-              className="text-[9px] text-text-secondary/40 cursor-pointer hover:text-text-secondary transition-colors"
+              className="text-[10px] text-text-secondary/40 cursor-pointer hover:text-text-secondary transition-colors"
               onDoubleClick={() => startEdit('assignee', s.assignee)}
               title="더블클릭하여 담당자 편집"
             >
@@ -343,18 +548,94 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
             <Pencil size={9} />
           </button>
         )}
-        {isCustom && (
+        {isRemovable && (
           <button
             onClick={() => onRemove(flat.key)}
-            className="p-0.5 text-text-secondary/20 hover:text-red-400 cursor-pointer"
+            className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-400/10 rounded cursor-pointer transition-all"
           >
-            <X size={10} />
+            <X size={14} />
           </button>
         )}
       </div>
     </motion.div>
   );
 });
+
+/* ─── 개인 할일 행 콘텐츠 ──────────────────────── */
+function PersonalTodoContent({
+  todo,
+  onToggle,
+  onRemove,
+  showDragHandle,
+}: {
+  todo: PersonalTodo;
+  onToggle: (id: string) => void;
+  onRemove: (id: string) => void;
+  showDragHandle?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
+        todo.completed ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
+      )}
+    >
+      {/* 드래그 핸들 */}
+      {showDragHandle && (
+        <div className="text-text-secondary/15 hover:text-text-secondary/40 cursor-grab active:cursor-grabbing shrink-0">
+          <GripVertical size={12} />
+        </div>
+      )}
+
+      {/* 개인 라벨 (씬 번호 자리) */}
+      <span className="text-[12px] font-bold text-accent shrink-0">개인</span>
+
+      {/* 제목/메모 */}
+      <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+        <span className={cn(
+          'text-[13px] text-text-primary truncate',
+          todo.completed && 'line-through text-text-secondary/50',
+        )}>
+          {todo.title}
+        </span>
+        {todo.memo && (
+          <span className="text-[11px] text-text-secondary/50 truncate">{todo.memo}</span>
+        )}
+        {(todo.startDate || todo.endDate) && (
+          <div className="flex items-center gap-1 text-[9px] text-text-secondary/40">
+            <Calendar size={8} />
+            <span>
+              {todo.startDate && new Date(todo.startDate + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+              {todo.startDate && todo.endDate && ' ~ '}
+              {todo.endDate && new Date(todo.endDate + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* 체크박스 (오른쪽) */}
+      <button
+        onClick={() => onToggle(todo.id)}
+        className={cn(
+          'w-5 h-5 rounded border flex items-center justify-center cursor-pointer transition-all shrink-0',
+          todo.completed
+            ? 'bg-green-500 border-green-500 text-white'
+            : 'border-bg-border/50 hover:border-accent/50',
+        )}
+      >
+        {todo.completed && <Check size={10} />}
+      </button>
+
+      {/* 삭제 */}
+      <button
+        onClick={() => onRemove(todo.id)}
+        className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-400/10 rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-all shrink-0"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
 
 /* ─── Windows 11 스타일 탭 바 ────────────────── */
 function TabBar({
@@ -399,7 +680,7 @@ function TabBar({
           <div
             key={v.id}
             className={cn(
-              'flex items-center gap-1 pl-2.5 pr-1 py-1 text-[10px] font-medium cursor-pointer transition-all relative group shrink-0',
+              'flex items-center gap-1 pl-2.5 pr-1 py-1 text-[11px] font-medium cursor-pointer transition-all relative group shrink-0',
               'rounded-t-lg border border-b-0',
               isActive
                 ? 'bg-bg-card border-bg-border/40 text-text-primary z-10'
@@ -420,7 +701,7 @@ function TabBar({
                   e.stopPropagation();
                 }}
                 onClick={(e) => e.stopPropagation()}
-                className="text-[10px] bg-transparent outline-none border-b border-accent/50 w-16 text-text-primary"
+                className="text-[11px] bg-transparent outline-none border-b border-accent/50 w-16 text-text-primary"
               />
             ) : (
               <span className="truncate max-w-[80px]">{v.name}</span>
@@ -463,12 +744,11 @@ function TabBar({
 
 /* ─── 메인 위젯 ─────────────────────────────── */
 export function MyTasksWidget() {
-  const episodes = useDataStore((s) => s.episodes);
+  const episodes = useDashboardEpisodes();
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const currentUser = useAuthStore((s) => s.currentUser);
-  const sheetsConnected = useAppStore((s) => s.sheetsConnected);
   const isPopup = useContext(IsPopupContext);
   const widgetId = useContext(WidgetIdContext);
 
@@ -488,10 +768,17 @@ export function MyTasksWidget() {
   const [filterDone, setFilterDone] = useState(false);
   const [showDone, setShowDone] = useState(false);
 
+  // assigned 뷰 전용 개인 할일 (DEFAULT_VIEW는 상수이므로 별도 관리)
+  const [assignedTodos, setAssignedTodos] = useState<PersonalTodo[]>(() => loadAssignedTodos());
+  // assigned 뷰에서 수동으로 추가한 씬 키
+  const [assignedSceneKeys, setAssignedSceneKeys] = useState<SceneKey[]>(() => loadAssignedSceneKeys());
+
   const allViews = [DEFAULT_VIEW, ...customViews];
   const activeView = allViews.find((v) => v.id === activeViewId) ?? DEFAULT_VIEW;
 
   useEffect(() => { saveViews(customViews); }, [customViews]);
+  useEffect(() => { saveAssignedTodos(assignedTodos); }, [assignedTodos]);
+  useEffect(() => { saveAssignedSceneKeys(assignedSceneKeys); }, [assignedSceneKeys]);
 
   // 전체 평탄화
   const allFlat: FlatScene[] = useMemo(() => {
@@ -519,7 +806,8 @@ export function MyTasksWidget() {
     let result: FlatScene[];
     if (activeView.type === 'assigned') {
       const name = currentUser?.name ?? '';
-      result = name ? allFlat.filter((f) => f.scene.assignee === name) : [];
+      const manualKeys = new Set(assignedSceneKeys);
+      result = allFlat.filter((f) => (name && f.scene.assignee === name) || manualKeys.has(f.key));
     } else {
       const keys = new Set(activeView.sceneKeys);
       result = allFlat.filter((f) => keys.has(f.key));
@@ -531,18 +819,35 @@ export function MyTasksWidget() {
       const bNum = parseInt(b.scene.sceneId.match(/\d+$/)?.[0] || '0', 10);
       return aNum - bNum;
     });
-  }, [activeView, allFlat, currentUser]);
+  }, [activeView, allFlat, currentUser, assignedSceneKeys]);
 
   // 진행 중 / 완료 분리
   const pendingScenes = useMemo(() => allViewScenes.filter((f) => scenePct(f.scene) < 100), [allViewScenes]);
   const doneScenes = useMemo(() => allViewScenes.filter((f) => scenePct(f.scene) >= 100), [allViewScenes]);
 
+  // 활성 뷰의 개인 할일
+  const activePersonalTodos = useMemo(() => {
+    if (activeView.id === DEFAULT_VIEW.id) return assignedTodos;
+    return activeView.personalTodos;
+  }, [activeView, assignedTodos]);
+
+  const pendingPersonalTodos = useMemo(() => activePersonalTodos.filter((t) => !t.completed), [activePersonalTodos]);
+  const donePersonalTodos = useMemo(() => activePersonalTodos.filter((t) => t.completed), [activePersonalTodos]);
+
   const stats = useMemo(() => {
-    const total = allViewScenes.length;
-    const stages = total * 4;
-    const checked = allViewScenes.reduce((s, f) => s + [f.scene.lo, f.scene.done, f.scene.review, f.scene.png].filter(Boolean).length, 0);
-    return { total, fullyDone: doneScenes.length, pct: stages > 0 ? (checked / stages) * 100 : 0 };
-  }, [allViewScenes, doneScenes]);
+    const sceneTotal = allViewScenes.length;
+    const personalTotal = activePersonalTodos.length;
+    const total = sceneTotal + personalTotal;
+    const sceneStages = sceneTotal * 4;
+    const sceneChecked = allViewScenes.reduce((s, f) => s + [f.scene.lo, f.scene.done, f.scene.review, f.scene.png].filter(Boolean).length, 0);
+    const personalDone = donePersonalTodos.length;
+    const fullyDone = doneScenes.length + personalDone;
+    // 씬: 4단계 가중, 개인 할일: 1단계 가중
+    const totalWeight = sceneStages + personalTotal;
+    const checkedWeight = sceneChecked + personalDone;
+    const pct = totalWeight > 0 ? (checkedWeight / totalWeight) * 100 : 0;
+    return { total, fullyDone, pct };
+  }, [allViewScenes, doneScenes, activePersonalTodos, donePersonalTodos]);
 
   // 팝업에서 완료 섹션 접기/펼치기 시 창 크기 조절
   const baseSizeRef = useRef<{ width: number; height: number } | null>(null);
@@ -585,29 +890,18 @@ export function MyTasksWidget() {
     }
 
     try {
-      if (sheetsConnected) {
-        const { updateSheetCell, updateSceneFieldInSheets } = await import('@/services/sheetsService');
-        await updateSheetCell(sheetName, sceneIndex, stage, newValue);
-        if (completedBy) {
-          await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
-          await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
-        }
-        notifyChange();
-      } else {
-        const { toggleTestSceneStage, updateTestSceneField } = await import('@/services/testSheetService');
-        await toggleTestSceneStage(useDataStore.getState().episodes, sheetName, scene.sceneId, stage);
-        if (completedBy) {
-          const eps1 = useDataStore.getState().episodes;
-          await updateTestSceneField(eps1, sheetName, sceneIndex, 'completedBy', completedBy);
-          const eps2 = useDataStore.getState().episodes;
-          await updateTestSceneField(eps2, sheetName, sceneIndex, 'completedAt', completedAt!);
-        }
+      const { updateSheetCell, updateSceneFieldInSheets } = await import('@/services/sheetsService');
+      await updateSheetCell(sheetName, sceneIndex, stage, newValue);
+      if (completedBy) {
+        await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
+        await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
       }
+      notifyChange();
     } catch (err) {
       console.error('[MyTasks 토글 실패]', err);
       toggleSceneStage(sheetName, scene.sceneId, stage);
     }
-  }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, sheetsConnected, notifyChange]);
+  }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, notifyChange]);
 
   // 인라인 필드 편집
   const handleEditField = useCallback(async (flat: FlatScene, field: string, value: string) => {
@@ -615,23 +909,18 @@ export function MyTasksWidget() {
     updateSceneFieldOptimistic(sheetName, sceneIndex, field, value);
 
     try {
-      if (sheetsConnected) {
-        const { updateSceneFieldInSheets } = await import('@/services/sheetsService');
-        await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
-        notifyChange();
-      } else {
-        const { updateTestSceneField } = await import('@/services/testSheetService');
-        await updateTestSceneField(useDataStore.getState().episodes, sheetName, sceneIndex, field, value);
-      }
+      const { updateSceneFieldInSheets } = await import('@/services/sheetsService');
+      await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
+      notifyChange();
     } catch (err) {
       console.error('[MyTasks 편집 실패]', err);
     }
-  }, [updateSceneFieldOptimistic, sheetsConnected, notifyChange]);
+  }, [updateSceneFieldOptimistic, notifyChange]);
 
   // 뷰 조작
   const createCustomView = () => {
     const id = `view_${Date.now()}`;
-    setCustomViews((prev) => [...prev, { id, name: '새 할일 목록', type: 'custom' as const, sceneKeys: [] }]);
+    setCustomViews((prev) => [...prev, { id, name: '새 할일 목록', type: 'custom' as const, sceneKeys: [], personalTodos: [] }]);
     setActiveViewId(id);
   };
   const renameView = (id: string, name: string) => {
@@ -642,16 +931,96 @@ export function MyTasksWidget() {
     if (activeViewId === viewId) setActiveViewId(DEFAULT_VIEW.id);
   };
   const addToView = (keys: SceneKey[]) => {
-    setCustomViews((prev) => prev.map((v) =>
-      v.id === activeViewId ? { ...v, sceneKeys: [...new Set([...v.sceneKeys, ...keys])] } : v,
-    ));
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedSceneKeys((prev) => [...new Set([...prev, ...keys])]);
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, sceneKeys: [...new Set([...v.sceneKeys, ...keys])] } : v,
+      ));
+    }
   };
   const removeFromView = (key: SceneKey) => {
-    setCustomViews((prev) => prev.map((v) =>
-      v.id === activeViewId ? { ...v, sceneKeys: v.sceneKeys.filter((k) => k !== key) } : v,
-    ));
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedSceneKeys((prev) => prev.filter((k) => k !== key));
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, sceneKeys: v.sceneKeys.filter((k) => k !== key) } : v,
+      ));
+    }
   };
-  const existingKeys = useMemo(() => new Set(activeView.sceneKeys), [activeView]);
+  const existingKeys = useMemo(() => {
+    if (activeView.id === DEFAULT_VIEW.id) {
+      const keys = new Set(assignedSceneKeys);
+      allViewScenes.forEach((f) => keys.add(f.key));
+      return keys;
+    }
+    return new Set(activeView.sceneKeys);
+  }, [activeView, assignedSceneKeys, allViewScenes]);
+
+  // ─── 개인 할일 조작 ─────────────────────
+  const addPersonalTodo = async (todo: PersonalTodo) => {
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedTodos((prev) => [...prev, todo]);
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, personalTodos: [...v.personalTodos, todo] } : v,
+      ));
+    }
+    // 캘린더 연동: addToCalendar가 true이고 날짜가 있으면 캘린더 이벤트 생성
+    if (todo.addToCalendar && (todo.startDate || todo.endDate)) {
+      try {
+        const { addEvent } = await import('@/services/calendarService');
+        const startDate = todo.startDate || todo.endDate!;
+        const endDate = todo.endDate || todo.startDate!;
+        await addEvent({
+          id: `cal_${todo.id}`,
+          title: todo.title,
+          memo: todo.memo,
+          color: '#6C5CE7',
+          type: 'custom',
+          startDate,
+          endDate,
+          createdBy: currentUser?.name ?? '알 수 없음',
+          createdAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('[MyTasks] 캘린더 이벤트 추가 실패:', err);
+      }
+    }
+  };
+  const togglePersonalTodo = (todoId: string) => {
+    const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? { ...t, completed: !t.completed } : t);
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedTodos(updater);
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, personalTodos: updater(v.personalTodos) } : v,
+      ));
+    }
+  };
+  const removePersonalTodo = (todoId: string) => {
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedTodos((prev) => prev.filter((t) => t.id !== todoId));
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, personalTodos: v.personalTodos.filter((t) => t.id !== todoId) } : v,
+      ));
+    }
+  };
+  const reorderPendingTodos = (reordered: PersonalTodo[]) => {
+    const completed = activePersonalTodos.filter((t) => t.completed);
+    const newList = [...reordered, ...completed];
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedTodos(newList);
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, personalTodos: newList } : v,
+      ));
+    }
+  };
+
+  // assigned 뷰에서 수동 추가된 씬 키 Set
+  const assignedSceneKeySet = useMemo(() => new Set(assignedSceneKeys), [assignedSceneKeys]);
 
   // 행 렌더 헬퍼
   const renderRow = (flat: FlatScene) => {
@@ -660,6 +1029,7 @@ export function MyTasksWidget() {
     const deptCfg = DEPARTMENT_CONFIGS[flat.department];
     const epLabel = episodeTitles[flat.episodeNumber] || `EP.${String(flat.episodeNumber).padStart(2, '0')}`;
     const sceneNum = s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(s.no);
+    const isRemovable = activeView.type === 'custom' || (activeView.id === DEFAULT_VIEW.id && assignedSceneKeySet.has(flat.key));
     return (
       <EditableSceneRow
         key={flat.key}
@@ -668,7 +1038,7 @@ export function MyTasksWidget() {
         epLabel={epLabel}
         sceneNum={sceneNum}
         pct={pct}
-        isCustom={activeView.type === 'custom'}
+        isRemovable={isRemovable}
         onToggle={handleToggle}
         onRemove={removeFromView}
         onEditField={handleEditField}
@@ -716,7 +1086,7 @@ export function MyTasksWidget() {
               transition={{ duration: 0.5 }}
             />
           </div>
-          <span className="text-[10px] tabular-nums text-text-secondary/50 shrink-0">
+          <span className="text-[11px] tabular-nums text-text-secondary/50 shrink-0">
             {stats.fullyDone}/{stats.total} ({Math.round(stats.pct)}%)
           </span>
         </div>
@@ -724,32 +1094,41 @@ export function MyTasksWidget() {
         {/* 메인 리스트 */}
         <div className="flex-1 overflow-auto -mx-1 px-1">
           {/* 진행 중 항목 */}
-          {pendingScenes.length === 0 && doneScenes.length === 0 ? (
+          {pendingScenes.length === 0 && pendingPersonalTodos.length === 0 && doneScenes.length === 0 && donePersonalTodos.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-text-secondary/40 gap-1">
               <CheckSquare size={24} className="opacity-30" />
-              <span className="text-[10px]">
-                {activeView.type === 'assigned' ? '할당된 씬이 없습니다' : '씬을 추가해 보세요'}
+              <span className="text-[11px]">
+                {activeView.type === 'assigned' ? '할당된 씬이 없습니다' : '할 일을 추가해 보세요'}
               </span>
             </div>
           ) : (
             <>
-              {pendingScenes.length === 0 && doneScenes.length > 0 && (
+              {pendingScenes.length === 0 && pendingPersonalTodos.length === 0 && (doneScenes.length > 0 || donePersonalTodos.length > 0) && (
                 <div className="flex flex-col items-center justify-center py-4 text-text-secondary/40 gap-1">
                   <PartyPopper size={20} className="opacity-40 text-green-400" />
-                  <span className="text-[10px] text-green-400/60">모든 할일 완료!</span>
+                  <span className="text-[11px] text-green-400/60">모든 할일 완료!</span>
                 </div>
               )}
               <AnimatePresence mode="popLayout">
                 {pendingScenes.map(renderRow)}
               </AnimatePresence>
+              {pendingPersonalTodos.length > 0 && (
+                <Reorder.Group axis="y" values={pendingPersonalTodos} onReorder={reorderPendingTodos} className="list-none p-0 m-0">
+                  {pendingPersonalTodos.map((todo) => (
+                    <Reorder.Item key={todo.id} value={todo} className="list-none">
+                      <PersonalTodoContent todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} showDragHandle />
+                    </Reorder.Item>
+                  ))}
+                </Reorder.Group>
+              )}
 
               {/* ─── 완료된 항목 섹션 ─── */}
-              {doneScenes.length > 0 && !filterDone && (
+              {(doneScenes.length > 0 || donePersonalTodos.length > 0) && !filterDone && (
                 <div className="mt-2">
                   {/* 접기/펼치기 토글 */}
                   <button
                     onClick={() => setShowDone(!showDone)}
-                    className="flex items-center gap-1.5 w-full px-1 py-1 text-[10px] text-text-secondary/40 hover:text-text-secondary/70 cursor-pointer transition-colors rounded-md hover:bg-bg-border/5"
+                    className="flex items-center gap-1.5 w-full px-1 py-1 text-[11px] text-text-secondary/40 hover:text-text-secondary/70 cursor-pointer transition-colors rounded-md hover:bg-bg-border/5"
                   >
                     <motion.div
                       animate={{ rotate: showDone ? 0 : -90 }}
@@ -759,7 +1138,7 @@ export function MyTasksWidget() {
                     </motion.div>
                     <span className="font-medium">완료된 항목</span>
                     <span className="text-[9px] tabular-nums bg-green-500/10 text-green-400/70 px-1.5 py-0 rounded-full">
-                      {doneScenes.length}
+                      {doneScenes.length + donePersonalTodos.length}
                     </span>
                     <div className="flex-1 h-px bg-bg-border/15 ml-1" />
                   </button>
@@ -778,6 +1157,9 @@ export function MyTasksWidget() {
                           <AnimatePresence mode="popLayout">
                             {doneScenes.map(renderRow)}
                           </AnimatePresence>
+                          {donePersonalTodos.map((todo) => (
+                            <PersonalTodoContent key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} />
+                          ))}
                         </div>
                       </motion.div>
                     )}
@@ -789,24 +1171,24 @@ export function MyTasksWidget() {
         </div>
 
         {/* 할일 추가 버튼 */}
-        {activeView.type === 'custom' && (
-          <button
-            onClick={() => setShowPicker(true)}
-            className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[10px] text-accent border border-accent/20 rounded-lg hover:bg-accent/5 cursor-pointer transition-colors mt-1"
-          >
-            <Plus size={11} />
-            내 할일 추가
-          </button>
-        )}
+        <button
+          onClick={() => setShowPicker(true)}
+          className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[11px] text-accent border border-accent/20 rounded-lg hover:bg-accent/5 cursor-pointer transition-colors mt-1"
+        >
+          <Plus size={11} />
+          내 할일 추가
+        </button>
       </div>
 
       <AnimatePresence>
         {showPicker && (
-          <ScenePickerModal
+          <AddTaskModal
             episodes={episodes}
             episodeTitles={episodeTitles}
             existingKeys={existingKeys}
-            onAdd={addToView}
+            defaultMode={activeView.type === 'custom' ? 'scene' : 'personal'}
+            onAddScenes={addToView}
+            onAddPersonalTodo={addPersonalTodo}
             onClose={() => setShowPicker(false)}
           />
         )}

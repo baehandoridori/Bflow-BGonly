@@ -1,8 +1,9 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider, type Layouts, type Layout } from 'react-grid-layout';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Check, Plus, X } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { OverallProgressWidget } from '@/components/widgets/OverallProgressWidget';
 import { StageBarsWidget } from '@/components/widgets/StageBarsWidget';
 import { AssigneeCardsWidget } from '@/components/widgets/AssigneeCardsWidget';
@@ -11,6 +12,14 @@ import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentCompa
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { WidgetIdContext } from '@/components/widgets/Widget';
+import { EdgeGlow, type ResizeZone } from '@/components/widgets/EdgeGlow';
+import { EpOverallProgressWidget } from '@/components/widgets/episode/EpOverallProgressWidget';
+import { EpStageBarsWidget } from '@/components/widgets/episode/EpStageBarsWidget';
+import { EpAssigneeCardsWidget } from '@/components/widgets/episode/EpAssigneeCardsWidget';
+import { EpPartProgressWidget } from '@/components/widgets/episode/EpPartProgressWidget';
+import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptComparisonWidget';
+import { EpSinglePartWidget, parsePartWidgetId } from '@/components/widgets/episode/EpSinglePartWidget';
+import { ChartTypeContextMenu, getWidgetSupportedCharts, useChartContextMenu } from '@/components/widgets/ChartTypeContextMenu';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
@@ -18,6 +27,7 @@ import { getPreset } from '@/themes';
 
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
+import '@/styles/widget-animations.css';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -171,22 +181,6 @@ function DashboardPlexus() {
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" style={{ opacity: 0.85 }} />;
 }
 
-/* ── wiggle CSS injection ── */
-const WIGGLE_CSS = `
-@keyframes widget-wiggle {
-  0%, 100% { transform: rotate(-0.7deg); }
-  50% { transform: rotate(0.7deg); }
-}
-`;
-let wiggleCssInjected = false;
-function ensureWiggleCss() {
-  if (wiggleCssInjected) return;
-  const el = document.createElement('style');
-  el.textContent = WIGGLE_CSS;
-  document.head.appendChild(el);
-  wiggleCssInjected = true;
-}
-
 /* ── 위젯 메타데이터 ── */
 interface WidgetMeta {
   id: string;
@@ -208,41 +202,77 @@ const ALL_WIDGETS: WidgetMeta[] = [
 
 const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]));
 
+/* ── 에피소드 대시보드 전용 위젯 ── */
+const EP_WIDGETS: WidgetMeta[] = [
+  { id: 'ep-overall-progress', label: 'EP 통합 진행률', component: <EpOverallProgressWidget /> },
+  { id: 'ep-stage-bars', label: 'EP 단계별 진행률', component: <EpStageBarsWidget /> },
+  { id: 'ep-assignee-cards', label: 'EP 담당자별 현황', component: <EpAssigneeCardsWidget /> },
+  { id: 'ep-part-progress', label: 'EP 파트별 진행률', component: <EpPartProgressWidget /> },
+  { id: 'ep-dept-comparison', label: 'EP 부서별 비교', component: <EpDeptComparisonWidget />, allOnly: true },
+  { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
+  { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
+];
+
+const EP_WIDGET_MAP = Object.fromEntries(EP_WIDGETS.map((w) => [w.id, w.component]));
+
 /** 위젯 ID에서 실제 컴포넌트를 찾기 (calendar-{timestamp} 형태 지원) */
-function getWidgetComponent(id: string): React.ReactNode | undefined {
+function getWidgetComponent(id: string, isEpMode: boolean): React.ReactNode | undefined {
   if (id.startsWith('calendar-') || id === 'calendar') {
     return <CalendarWidget />;
   }
   if (id.startsWith('my-tasks')) {
     return <MyTasksWidget />;
   }
+  // 파트 단일 위젯: ep-part-{bg|acting|all}-{A~Z}[-{ts}]
+  if (parsePartWidgetId(id)) {
+    return <EpSinglePartWidget />;
+  }
+  if (isEpMode) {
+    return EP_WIDGET_MAP[id] ?? WIDGET_MAP[id];
+  }
   return WIDGET_MAP[id];
 }
 
-/* ── 부서별 레이아웃 ── */
-/*
- * 위젯 최소 비율 ≈ 1:1 보장
- * 4컬럼 기준 1col ≈ 283px, rowHeight=80px
- * minW=1 → minH=4 (283:320 ≈ 1:1.13)
- * minW=2 → minH=7 (580:560 ≈ 1:0.97)
- */
+/* ── 부서별 레이아웃 (24칸 그리드, rowHeight=16px) ── */
 const DEPT_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'stage-bars', x: 1, y: 0, w: 2, h: 4, minW: 2, minH: 4 },
-  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'episode-summary', x: 0, y: 4, w: 2, h: 5, minW: 2, minH: 4 },
-  { i: 'my-tasks', x: 2, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
-  { i: 'calendar', x: 3, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
+  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'stage-bars', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 2 },
+  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
+  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
 ];
 
-/* ── 통합 레이아웃 ── */
+/* ── 통합 레이아웃 (24칸 그리드, rowHeight=16px) ── */
 const ALL_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'dept-comparison', x: 1, y: 0, w: 2, h: 4, minW: 2, minH: 4 },
-  { i: 'assignee-cards', x: 3, y: 0, w: 1, h: 4, minW: 1, minH: 4 },
-  { i: 'episode-summary', x: 0, y: 4, w: 2, h: 5, minW: 2, minH: 4 },
-  { i: 'my-tasks', x: 2, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
-  { i: 'calendar', x: 3, y: 4, w: 1, h: 5, minW: 1, minH: 4 },
+  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'dept-comparison', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 2 },
+  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
+  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+];
+
+/* ── 에피소드 대시보드 기본 레이아웃 (24칸 그리드) ── */
+const EP_LAYOUT: Layout[] = [
+  { i: 'ep-overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'ep-dept-comparison', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 2 },
+  { i: 'ep-assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
+  { i: 'ep-part-progress', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
+  { i: 'ep-stage-bars', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  { i: 'my-tasks', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+];
+
+/* ── 파트 전용 위젯 타입 (2단계 선택) ── */
+interface PartWidgetType {
+  deptKey: 'bg' | 'acting' | 'all';
+  label: string;
+}
+
+const PART_WIDGET_TYPES: PartWidgetType[] = [
+  { deptKey: 'bg', label: '파트 BG 진행률' },
+  { deptKey: 'acting', label: '파트 ACT 진행률' },
+  { deptKey: 'all', label: '파트 전체 진행률' },
 ];
 
 /* ── 위젯 추가 팝오버 ── */
@@ -250,12 +280,24 @@ function WidgetPicker({
   hiddenWidgets,
   onAdd,
   onClose,
+  isEpMode,
+  partIds,
 }: {
   hiddenWidgets: WidgetMeta[];
   onAdd: (id: string) => void;
   onClose: () => void;
+  isEpMode: boolean;
+  partIds: string[];
 }) {
-  if (hiddenWidgets.length === 0) return null;
+  const [expandedPartType, setExpandedPartType] = useState<string | null>(null);
+  const hasContent = hiddenWidgets.length > 0 || (isEpMode && partIds.length > 0);
+  if (!hasContent) return null;
+
+  const menuStyle = {
+    backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
+    border: '1px solid rgb(var(--color-bg-border) / 0.6)',
+    boxShadow: '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset',
+  };
 
   return (
     <motion.div
@@ -265,17 +307,11 @@ function WidgetPicker({
       transition={{ duration: 0.15 }}
       className="absolute top-full left-0 mt-2 z-50 min-w-[200px]"
     >
-      <div
-        className="rounded-xl overflow-hidden py-1.5"
-        style={{
-          backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
-          border: '1px solid rgb(var(--color-bg-border) / 0.6)',
-          boxShadow: '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset',
-        }}
-      >
-        <div className="px-3 py-1.5 text-[10px] font-medium text-text-secondary/50 uppercase tracking-wider">
+      <div className="rounded-xl overflow-hidden py-1.5" style={menuStyle}>
+        <div className="px-3 py-1.5 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
           위젯 추가
         </div>
+        {/* 일반 위젯 목록 */}
         {hiddenWidgets.map((w) => (
           <button
             key={w.id}
@@ -290,6 +326,170 @@ function WidgetPicker({
             <span>{w.label}</span>
           </button>
         ))}
+
+        {/* 파트 전용 위젯 (EP 모드 + 파트 존재 시) */}
+        {isEpMode && partIds.length > 0 && (
+          <>
+            <div className="mx-2 my-1 border-t border-bg-border/40" />
+            {PART_WIDGET_TYPES.map((pt) => {
+              const isExpanded = expandedPartType === pt.deptKey;
+              return (
+                <div key={pt.deptKey}>
+                  <button
+                    onClick={() => setExpandedPartType(isExpanded ? null : pt.deptKey)}
+                    className={cn(
+                      'w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer',
+                      'text-text-primary/80 hover:bg-accent/12 hover:text-text-primary',
+                      'transition-colors duration-75',
+                    )}
+                  >
+                    <ChevronRight size={14} className={cn('text-accent/60 shrink-0 transition-transform duration-150', isExpanded && 'rotate-90')} />
+                    <span>{pt.label}</span>
+                  </button>
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="pl-4">
+                          {partIds.map((partId) => (
+                            <button
+                              key={partId}
+                              onClick={() => onAdd(`ep-part-${pt.deptKey}-${partId}-${Date.now()}`)}
+                              className={cn(
+                                'w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm cursor-pointer',
+                                'text-text-primary/70 hover:bg-accent/12 hover:text-text-primary',
+                                'transition-colors duration-75',
+                              )}
+                            >
+                              <Plus size={12} className="text-accent/50 shrink-0" />
+                              <span>{partId}파트</span>
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ── 커서 위치 기반 edge zone 감지 (onMouseMove용) ── */
+function detectEdgeZone(e: React.MouseEvent, el: HTMLElement): ResizeZone {
+  const rect = el.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const w = rect.width;
+  const h = rect.height;
+  const EDGE = 22;
+
+  const top = y < EDGE;
+  const bottom = y > h - EDGE;
+  const left = x < EDGE;
+  const right = x > w - EDGE;
+
+  if (top && left) return 'nw';
+  if (top && right) return 'ne';
+  if (bottom && left) return 'sw';
+  if (bottom && right) return 'se';
+  if (top) return 'n';
+  if (bottom) return 's';
+  if (left) return 'w';
+  if (right) return 'e';
+  return null;
+}
+
+/* ── 에피소드 드롭다운 ── */
+function EpisodeDropdown({
+  onSelect,
+  onClose,
+  selectedEp,
+}: {
+  onSelect: (epNum: number) => void;
+  onClose: () => void;
+  selectedEp: number | null;
+}) {
+  const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const sorted = useMemo(
+    () => [...episodes].sort((a, b) => a.episodeNumber - b.episodeNumber),
+    [episodes],
+  );
+  const [focusIdx, setFocusIdx] = useState(-1);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFocusIdx((p) => Math.min(p + 1, sorted.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFocusIdx((p) => Math.max(p - 1, 0));
+      } else if (e.key === 'Enter' && focusIdx >= 0 && focusIdx < sorted.length) {
+        e.preventDefault();
+        onSelect(sorted[focusIdx].episodeNumber);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [focusIdx, sorted, onSelect, onClose]);
+
+  if (sorted.length === 0) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.96 }}
+      transition={{ duration: 0.15 }}
+      className="absolute top-full left-0 mt-2 z-50 min-w-[200px]"
+    >
+      <div
+        ref={listRef}
+        className="rounded-xl overflow-hidden py-1.5 max-h-[320px] overflow-y-auto"
+        style={{
+          backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
+          border: '1px solid rgb(var(--color-bg-border) / 0.6)',
+          boxShadow: '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset',
+        }}
+      >
+        <div className="px-3 py-1.5 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
+          에피소드 선택
+        </div>
+        {sorted.map((ep, idx) => {
+          const displayName = episodeTitles[ep.episodeNumber] || ep.title;
+          const isSelected = selectedEp === ep.episodeNumber;
+          const isFocused = focusIdx === idx;
+          return (
+            <button
+              key={ep.episodeNumber}
+              onClick={() => onSelect(ep.episodeNumber)}
+              onMouseEnter={() => setFocusIdx(idx)}
+              className={cn(
+                'w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer',
+                'transition-colors duration-75',
+                isFocused ? 'bg-accent/12 text-text-primary' : 'text-text-primary/80 hover:bg-accent/8',
+              )}
+            >
+              <span className="flex-1 truncate">{displayName}</span>
+              {isSelected && <Check size={14} className="text-accent shrink-0" />}
+            </button>
+          );
+        })}
       </div>
     </motion.div>
   );
@@ -297,15 +497,70 @@ function WidgetPicker({
 
 /* ── 대시보드 메인 ── */
 export function Dashboard() {
-  const { widgetLayout, allWidgetLayout, isEditMode, setWidgetLayout, setAllWidgetLayout, setEditMode, setSelectedDepartment } = useAppStore();
+  const { widgetLayout, allWidgetLayout, episodeWidgetLayout, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setSelectedDepartment } = useAppStore();
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
   const setDashboardFilter = useAppStore((s) => s.setDashboardDeptFilter);
+  const episodeDashboardEp = useAppStore((s) => s.episodeDashboardEp);
+  const setEpisodeDashboardEp = useAppStore((s) => s.setEpisodeDashboardEp);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const episodeMemos = useDataStore((s) => s.episodeMemos);
   const [showPicker, setShowPicker] = useState(false);
+  const [showEpDropdown, setShowEpDropdown] = useState(false);
+  const [showEpSwitcher, setShowEpSwitcher] = useState(false);
+  const isEpMode = episodeDashboardEp !== null;
+  const episodes = useDataStore((s) => s.episodes);
 
-  // 편집 모드에서 wiggle CSS 주입
-  useEffect(() => {
-    if (isEditMode) ensureWiggleCss();
-  }, [isEditMode]);
+  // 현재 에피소드의 파트 ID 목록 (위젯 피커 2단계용)
+  const epPartIds = useMemo(() => {
+    if (!isEpMode) return [];
+    const ep = episodes.find((e) => e.episodeNumber === episodeDashboardEp);
+    if (!ep) return [];
+    return [...new Set(ep.parts.map((p) => p.partId))].sort();
+  }, [episodes, episodeDashboardEp, isEpMode]);
+
+  // 차트 타입 우클릭 메뉴
+  const { menu: chartMenu, handleContextMenu: handleChartContextMenu, closeMenu: closeChartMenu } = useChartContextMenu();
+
+  // Edge glow 상태: 위젯별 현재 호버 중인 리사이즈 존
+  const [edgeZones, setEdgeZones] = useState<Record<string, ResizeZone>>({});
+  // 호버 상태: 위젯 위에 마우스가 올라와 있는지
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  // 드래그/리사이즈 상태
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [resizingId, setResizingId] = useState<string | null>(null);
+  const [settlingId, setSettlingId] = useState<string | null>(null);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const isActive = draggingId !== null || resizingId !== null;
+
+  // 드래그 콜백
+  const handleDragStart = useCallback((_layout: Layout[], oldItem: Layout) => {
+    setDraggingId(oldItem.i);
+    setHoveredId(null);
+  }, []);
+
+  const handleDragStop = useCallback((_layout: Layout[], oldItem: Layout) => {
+    setDraggingId(null);
+    setSettlingId(oldItem.i);
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => setSettlingId(null), 450);
+  }, []);
+
+  // 리사이즈 콜백
+  const handleResizeStart = useCallback((_layout: Layout[], oldItem: Layout) => {
+    setResizingId(oldItem.i);
+    setHoveredId(null);
+  }, []);
+
+  const handleResizeStop = useCallback((_layout: Layout[], oldItem: Layout) => {
+    setResizingId(null);
+    setSettlingId(oldItem.i);
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => setSettlingId(null), 450);
+  }, []);
+
+  // cleanup
+  useEffect(() => () => { if (settleTimerRef.current) clearTimeout(settleTimerRef.current); }, []);
 
   const handleDeptSelect = useCallback((filter: typeof dashboardFilter) => {
     setDashboardFilter(filter);
@@ -314,21 +569,46 @@ export function Dashboard() {
     }
   }, [setDashboardFilter, setSelectedDepartment]);
 
-  const defaultLayout = dashboardFilter === 'all' ? ALL_LAYOUT : DEPT_LAYOUT;
+  // 에피소드 드롭다운에서 EP 선택
+  const handleEpSelect = useCallback((epNum: number) => {
+    setEpisodeDashboardEp(epNum);
+    setDashboardFilter('all');
+    setShowEpDropdown(false);
+    setShowEpSwitcher(false);
+  }, [setEpisodeDashboardEp, setDashboardFilter]);
+
+  // 에피소드 대시보드 → 전체 대시보드 복귀
+  const handleBackToMain = useCallback(() => {
+    setEpisodeDashboardEp(null);
+    setDashboardFilter('all');
+  }, [setEpisodeDashboardEp, setDashboardFilter]);
+
+  // 에피소드 대시보드 제목
+  const epDisplayName = isEpMode
+    ? (episodeTitles[episodeDashboardEp] || `EP.${String(episodeDashboardEp).padStart(2, '0')}`)
+    : null;
+
+  const defaultLayout = isEpMode ? EP_LAYOUT
+    : dashboardFilter === 'all' ? ALL_LAYOUT : DEPT_LAYOUT;
 
   const layouts: Layouts = useMemo(() => {
-    const lg = dashboardFilter === 'all'
-      ? (allWidgetLayout ?? ALL_LAYOUT)
-      : (widgetLayout ?? DEPT_LAYOUT);
+    const raw = isEpMode
+      ? (episodeWidgetLayout ?? EP_LAYOUT)
+      : dashboardFilter === 'all'
+        ? (allWidgetLayout ?? ALL_LAYOUT)
+        : (widgetLayout ?? DEPT_LAYOUT);
+    // 저장된 레이아웃의 minW를 1로 클램프 — 좁은 breakpoint(xxs cols=1)에서 경고 방지
+    const lg = raw.map(item => item.minW && item.minW > 1 ? { ...item, minW: 1 } : item);
     return { lg };
-  }, [widgetLayout, allWidgetLayout, dashboardFilter]);
+  }, [widgetLayout, allWidgetLayout, episodeWidgetLayout, dashboardFilter, isEpMode]);
 
   const currentLayout = layouts.lg ?? defaultLayout;
 
   // 현재 숨겨진 위젯 목록 (캘린더 위젯은 항상 추가 가능)
+  const widgetPool = isEpMode ? EP_WIDGETS : ALL_WIDGETS;
   const hiddenWidgets = useMemo(() => {
     const visibleIds = new Set(currentLayout.map((l) => l.i));
-    return ALL_WIDGETS.filter((w) => {
+    return widgetPool.filter((w) => {
       // 캘린더 위젯은 중복 배치 허용 → 항상 추가 가능
       if (w.id === 'calendar') return true;
       if (visibleIds.has(w.id)) return false;
@@ -336,13 +616,15 @@ export function Dashboard() {
       if (dashboardFilter !== 'all' && w.allOnly) return false;
       return true;
     });
-  }, [currentLayout, dashboardFilter]);
+  }, [currentLayout, dashboardFilter, widgetPool]);
 
   const handleLayoutChange = useCallback(
     (_current: Layout[], allLayouts: Layouts) => {
-      if (!isEditMode) return;
       const newLayout = allLayouts.lg ?? _current;
-      if (dashboardFilter === 'all') {
+      if (isEpMode) {
+        setEpisodeWidgetLayout(newLayout);
+        saveLayout(newLayout, 'episode');
+      } else if (dashboardFilter === 'all') {
         setAllWidgetLayout(newLayout);
         saveLayout(newLayout, 'all');
       } else {
@@ -350,11 +632,16 @@ export function Dashboard() {
         saveLayout(newLayout);
       }
     },
-    [isEditMode, setWidgetLayout, setAllWidgetLayout, dashboardFilter],
+    [setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, dashboardFilter, isEpMode],
   );
 
   const handleRemoveWidget = useCallback((widgetId: string) => {
-    if (dashboardFilter === 'all') {
+    if (isEpMode) {
+      const current = episodeWidgetLayout ?? EP_LAYOUT;
+      const newLayout = current.filter((l) => l.i !== widgetId);
+      setEpisodeWidgetLayout(newLayout);
+      saveLayout(newLayout, 'episode');
+    } else if (dashboardFilter === 'all') {
       const current = allWidgetLayout ?? ALL_LAYOUT;
       const newLayout = current.filter((l) => l.i !== widgetId);
       setAllWidgetLayout(newLayout);
@@ -365,18 +652,24 @@ export function Dashboard() {
       setWidgetLayout(newLayout);
       saveLayout(newLayout);
     }
-  }, [widgetLayout, allWidgetLayout, setWidgetLayout, setAllWidgetLayout, dashboardFilter]);
+  }, [widgetLayout, allWidgetLayout, episodeWidgetLayout, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, dashboardFilter, isEpMode]);
 
   const handleAddWidget = useCallback((widgetId: string) => {
-    const isAll = dashboardFilter === 'all';
-    const current = isAll ? (allWidgetLayout ?? ALL_LAYOUT) : (widgetLayout ?? DEPT_LAYOUT);
+    const current = isEpMode
+      ? (episodeWidgetLayout ?? EP_LAYOUT)
+      : dashboardFilter === 'all'
+        ? (allWidgetLayout ?? ALL_LAYOUT)
+        : (widgetLayout ?? DEPT_LAYOUT);
     // 캘린더 위젯은 고유 ID로 중복 배치 허용
     const actualId = widgetId === 'calendar' ? `calendar-${Date.now()}` : widgetId;
     // 맨 아래에 추가
     const maxY = current.reduce((max, l) => Math.max(max, l.y + l.h), 0);
-    const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 2, h: 3, minW: 1, minH: 2 };
+    const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 8, h: 15, minW: 2, minH: 2 };
     const newLayout = [...current, newItem];
-    if (isAll) {
+    if (isEpMode) {
+      setEpisodeWidgetLayout(newLayout);
+      saveLayout(newLayout, 'episode');
+    } else if (dashboardFilter === 'all') {
       setAllWidgetLayout(newLayout);
       saveLayout(newLayout, 'all');
     } else {
@@ -384,14 +677,7 @@ export function Dashboard() {
       saveLayout(newLayout);
     }
     setShowPicker(false);
-  }, [widgetLayout, allWidgetLayout, setWidgetLayout, setAllWidgetLayout, dashboardFilter]);
-
-  const handleToggleEdit = useCallback(() => {
-    if (isEditMode) {
-      setShowPicker(false);
-    }
-    setEditMode(!isEditMode);
-  }, [isEditMode, setEditMode]);
+  }, [widgetLayout, allWidgetLayout, episodeWidgetLayout, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, dashboardFilter, isEpMode]);
 
   return (
     <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
@@ -401,62 +687,219 @@ export function Dashboard() {
       {/* 부서 탭 + 편집 버튼 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="relative flex bg-bg-card rounded-lg p-1 border border-bg-border gap-0.5">
-            {/* 통합 탭 */}
-            <button
-              onClick={() => handleDeptSelect('all')}
-              className={cn(
-                'relative z-10 px-5 py-1.5 text-sm rounded-md font-medium cursor-pointer',
-                'transition-colors duration-200 ease-out',
-                dashboardFilter === 'all'
-                  ? 'text-white'
-                  : 'text-text-secondary hover:text-text-primary',
-              )}
-            >
-              {dashboardFilter === 'all' && (
-                <motion.div
-                  layoutId="tab-indicator"
-                  className="absolute inset-0 rounded-md bg-accent shadow-sm shadow-accent/25"
-                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                />
-              )}
-              <span className="relative z-10">통합</span>
-            </button>
-            {/* 부서별 탭 */}
-            {DEPARTMENTS.map((dept) => {
-              const cfg = DEPARTMENT_CONFIGS[dept];
-              const isActive = dashboardFilter === dept;
-              return (
+          {isEpMode ? (
+            /* ── 에피소드 대시보드 탭 바 ── */
+            <div className="flex items-center gap-2">
+              {/* 전체보기 버튼 */}
+              <button
+                onClick={handleBackToMain}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg font-medium cursor-pointer',
+                  'bg-bg-card border border-bg-border',
+                  'text-text-secondary hover:text-text-primary hover:bg-bg-border/50',
+                  'transition-colors duration-150',
+                )}
+              >
+                <ArrowLeft size={14} />
+                <span className="text-xs">전체보기</span>
+              </button>
+
+              {/* 에피소드 제목 + 전환 드롭다운 */}
+              <div className="relative">
                 <button
-                  key={dept}
-                  onClick={() => handleDeptSelect(dept)}
+                  onClick={() => setShowEpSwitcher(!showEpSwitcher)}
+                  className={cn(
+                    'flex items-center gap-1 px-2 py-1 rounded-md cursor-pointer',
+                    'hover:bg-bg-border/30 transition-colors duration-150',
+                  )}
+                >
+                  <span className="text-sm font-semibold text-accent">{epDisplayName}</span>
+                  <ChevronDown size={14} className={cn('text-accent/60 transition-transform duration-200', showEpSwitcher && 'rotate-180')} />
+                </button>
+                <AnimatePresence>
+                  {showEpSwitcher && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowEpSwitcher(false)} />
+                      <EpisodeDropdown
+                        selectedEp={episodeDashboardEp}
+                        onSelect={handleEpSelect}
+                        onClose={() => setShowEpSwitcher(false)}
+                      />
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* 에피소드 메모 */}
+              {episodeDashboardEp !== null && episodeMemos[episodeDashboardEp] && (
+                <span className="text-xs text-text-secondary/70 max-w-[300px] truncate" title={episodeMemos[episodeDashboardEp]}>
+                  {episodeMemos[episodeDashboardEp]}
+                </span>
+              )}
+
+              {/* 통합/배경/액팅 탭 */}
+              <div className="relative flex bg-bg-card rounded-lg p-1 border border-bg-border gap-0.5">
+                <button
+                  onClick={() => handleDeptSelect('all')}
                   className={cn(
                     'relative z-10 px-5 py-1.5 text-sm rounded-md font-medium cursor-pointer',
                     'transition-colors duration-200 ease-out',
-                    isActive
+                    dashboardFilter === 'all'
                       ? 'text-white'
                       : 'text-text-secondary hover:text-text-primary',
                   )}
                 >
-                  {isActive && (
+                  {dashboardFilter === 'all' && (
                     <motion.div
-                      layoutId="tab-indicator"
-                      className="absolute inset-0 rounded-md shadow-sm"
-                      style={{ backgroundColor: cfg.color, boxShadow: `0 2px 8px ${cfg.color}40` }}
+                      layoutId="ep-tab-indicator"
+                      className="absolute inset-0 rounded-md bg-accent shadow-sm shadow-accent/25"
                       transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                     />
                   )}
-                  <span className="relative z-10">{cfg.label} ({cfg.shortLabel})</span>
+                  <span className="relative z-10">통합</span>
                 </button>
-              );
-            })}
-          </div>
+                {DEPARTMENTS.map((dept) => {
+                  const cfg = DEPARTMENT_CONFIGS[dept];
+                  const active = dashboardFilter === dept;
+                  return (
+                    <button
+                      key={dept}
+                      onClick={() => handleDeptSelect(dept)}
+                      className={cn(
+                        'relative z-10 px-5 py-1.5 text-sm rounded-md font-medium cursor-pointer',
+                        'transition-colors duration-200 ease-out',
+                        active
+                          ? 'text-white'
+                          : 'text-text-secondary hover:text-text-primary',
+                      )}
+                    >
+                      {active && (
+                        <motion.div
+                          layoutId="ep-tab-indicator"
+                          className="absolute inset-0 rounded-md shadow-sm"
+                          style={{ backgroundColor: cfg.color, boxShadow: `0 2px 8px ${cfg.color}40` }}
+                          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                        />
+                      )}
+                      <span className="relative z-10">{cfg.label} ({cfg.shortLabel})</span>
+                    </button>
+                  );
+                })}
+
+                {/* EP 모드 내 에피소드 드롭다운 */}
+                <div className="relative border-l border-bg-border/50 ml-0.5 pl-0.5">
+                  <button
+                    onClick={() => setShowEpDropdown(!showEpDropdown)}
+                    className={cn(
+                      'relative z-10 px-4 py-1.5 text-sm rounded-md font-medium cursor-pointer',
+                      'transition-colors duration-200 ease-out',
+                      'text-text-secondary hover:text-text-primary',
+                      'flex items-center gap-1',
+                    )}
+                  >
+                    <span>에피소드</span>
+                    <ChevronDown size={14} className={cn('transition-transform duration-200', showEpDropdown && 'rotate-180')} />
+                  </button>
+                  <AnimatePresence>
+                    {showEpDropdown && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowEpDropdown(false)} />
+                        <EpisodeDropdown
+                          selectedEp={episodeDashboardEp}
+                          onSelect={handleEpSelect}
+                          onClose={() => setShowEpDropdown(false)}
+                        />
+                      </>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ── 전체 대시보드 탭 바 ── */
+            <div className="relative flex bg-bg-card rounded-lg p-1 border border-bg-border gap-0.5">
+              {/* 통합 탭 */}
+              <button
+                onClick={() => handleDeptSelect('all')}
+                className={cn(
+                  'relative z-10 px-5 py-1.5 text-sm rounded-md font-medium cursor-pointer',
+                  'transition-colors duration-200 ease-out',
+                  dashboardFilter === 'all'
+                    ? 'text-white'
+                    : 'text-text-secondary hover:text-text-primary',
+                )}
+              >
+                {dashboardFilter === 'all' && (
+                  <motion.div
+                    layoutId="tab-indicator"
+                    className="absolute inset-0 rounded-md bg-accent shadow-sm shadow-accent/25"
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">통합</span>
+              </button>
+              {/* 부서별 탭 */}
+              {DEPARTMENTS.map((dept) => {
+                const cfg = DEPARTMENT_CONFIGS[dept];
+                const active = dashboardFilter === dept;
+                return (
+                  <button
+                    key={dept}
+                    onClick={() => handleDeptSelect(dept)}
+                    className={cn(
+                      'relative z-10 px-5 py-1.5 text-sm rounded-md font-medium cursor-pointer',
+                      'transition-colors duration-200 ease-out',
+                      active
+                        ? 'text-white'
+                        : 'text-text-secondary hover:text-text-primary',
+                    )}
+                  >
+                    {active && (
+                      <motion.div
+                        layoutId="tab-indicator"
+                        className="absolute inset-0 rounded-md shadow-sm"
+                        style={{ backgroundColor: cfg.color, boxShadow: `0 2px 8px ${cfg.color}40` }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                      />
+                    )}
+                    <span className="relative z-10">{cfg.label} ({cfg.shortLabel})</span>
+                  </button>
+                );
+              })}
+              {/* 에피소드 드롭다운 탭 */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowEpDropdown(!showEpDropdown)}
+                  className={cn(
+                    'relative z-10 px-4 py-1.5 text-sm rounded-md font-medium cursor-pointer',
+                    'transition-colors duration-200 ease-out',
+                    'text-text-secondary hover:text-text-primary',
+                    'flex items-center gap-1',
+                  )}
+                >
+                  <span>에피소드</span>
+                  <ChevronDown size={14} className={cn('transition-transform duration-200', showEpDropdown && 'rotate-180')} />
+                </button>
+                <AnimatePresence>
+                  {showEpDropdown && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowEpDropdown(false)} />
+                      <EpisodeDropdown
+                        selectedEp={episodeDashboardEp}
+                        onSelect={handleEpSelect}
+                        onClose={() => setShowEpDropdown(false)}
+                      />
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* 편집 모드 토글 */}
+        {/* 위젯 추가 */}
         <div className="relative flex items-center gap-2">
-          {/* 위젯 추가 (편집 모드에서만) */}
-          {isEditMode && hiddenWidgets.length > 0 && (
+          {hiddenWidgets.length > 0 && (
             <div className="relative">
               <button
                 onClick={() => setShowPicker(!showPicker)}
@@ -476,40 +919,19 @@ export function Dashboard() {
                     hiddenWidgets={hiddenWidgets}
                     onAdd={handleAddWidget}
                     onClose={() => setShowPicker(false)}
+                    isEpMode={isEpMode}
+                    partIds={epPartIds}
                   />
                 )}
               </AnimatePresence>
             </div>
           )}
-
-          <button
-            onClick={handleToggleEdit}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer',
-              'transition-colors duration-150',
-              isEditMode
-                ? 'bg-status-high/15 text-status-high hover:bg-status-high/25 border border-status-high/30'
-                : 'bg-bg-card text-text-secondary hover:text-text-primary border border-bg-border hover:border-bg-border/80',
-            )}
-          >
-            {isEditMode ? (
-              <>
-                <Check size={14} />
-                완료
-              </>
-            ) : (
-              <>
-                <Pencil size={14} />
-                레이아웃 편집
-              </>
-            )}
-          </button>
         </div>
       </div>
 
       <AnimatePresence mode="wait">
         <motion.div
-          key={dashboardFilter}
+          key={`${isEpMode ? `ep-${episodeDashboardEp}` : 'main'}-${dashboardFilter}`}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -520,73 +942,140 @@ export function Dashboard() {
             className="layout"
             layouts={layouts}
             breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-            cols={{ lg: 4, md: 4, sm: 2, xs: 2, xxs: 1 }}
-            rowHeight={80}
-            margin={[14, 14]}
+            cols={{ lg: 24, md: 24, sm: 12, xs: 12, xxs: 6 }}
+            rowHeight={16}
+            margin={[6, 6]}
+            containerPadding={[10, 8]}
             compactType="vertical"
-            isDraggable={isEditMode}
-            isResizable={isEditMode}
+            preventCollision={false}
+            isDraggable
+            isResizable
+            resizeHandles={['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']}
             draggableHandle=".widget-drag-handle"
             onLayoutChange={handleLayoutChange}
+            onDragStart={handleDragStart}
+            onDragStop={handleDragStop}
+            onResizeStart={handleResizeStart}
+            onResizeStop={handleResizeStop}
             useCSSTransforms
           >
-            {currentLayout.map((item, idx) => (
-              <div
-                key={item.i}
-                className="relative"
-              >
-                {/* 위글 래퍼 — 위글 transform을 자식에 적용하여 RGL의 translate와 충돌 방지 */}
+            {currentLayout.map((item) => {
+              const zone = edgeZones[item.i] ?? null;
+              const isDrag = draggingId === item.i;
+              const isResize = resizingId === item.i;
+              const isSettle = settlingId === item.i;
+              const isDimmed = isActive && !isDrag && !isResize;
+              return (
                 <div
-                  className="h-full"
-                  style={isEditMode ? {
-                    animation: 'widget-wiggle 0.3s ease-in-out infinite',
-                    animationDelay: `${(idx % 5) * 0.06}s`,
-                  } : undefined}
+                  key={item.i}
+                  className={cn(
+                    'relative h-full',
+                    isSettle && 'widget-settling',
+                  )}
+                  style={{ overflow: 'visible' }}
+                  onMouseMove={(e) => {
+                    if (isDrag || isActive) return;
+                    const zone = detectEdgeZone(e, e.currentTarget);
+                    setEdgeZones((p) => {
+                      if (p[item.i] === zone) return p;
+                      return { ...p, [item.i]: zone };
+                    });
+                    // 드래그 핸들(헤더) 위일 때만 전체 글로우
+                    const onDragHandle = !!(e.target as HTMLElement).closest?.('.widget-drag-handle');
+                    setHoveredId(onDragHandle ? item.i : null);
+                  }}
+                  onMouseLeave={() => {
+                    setEdgeZones((p) => ({ ...p, [item.i]: null }));
+                    setHoveredId(null);
+                  }}
+                  onContextMenu={(e) => handleChartContextMenu(e, item.i)}
                 >
-                  {/* 편집 모드: 삭제 버튼 */}
-                  {isEditMode && (
-                    <button
-                      onClick={() => handleRemoveWidget(item.i)}
-                      className={cn(
-                        'absolute -top-1.5 -left-1.5 z-20 w-5 h-5 rounded-full',
-                        'bg-red-500 hover:bg-red-400',
-                        'flex items-center justify-center',
-                        'shadow-md shadow-black/30',
-                        'transition-colors duration-100 cursor-pointer',
-                      )}
-                      title="위젯 제거"
-                    >
-                      <X size={11} className="text-white" strokeWidth={3} />
-                    </button>
-                  )}
                   <WidgetIdContext.Provider value={item.i.startsWith('calendar-') ? 'calendar' : item.i}>
-                  {getWidgetComponent(item.i) ?? (
-                    <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
-                      위젯: {item.i}
-                    </div>
-                  )}
+                    {getWidgetComponent(item.i, isEpMode) ?? (
+                      <div className="bg-bg-card rounded-xl p-4 text-text-secondary text-sm h-full">
+                        위젯: {item.i}
+                      </div>
+                    )}
                   </WidgetIdContext.Provider>
+
+                  {/* Edge Glow 시각 효과 */}
+                  {!isDrag && !isActive && <EdgeGlow zone={zone} hovered={hoveredId === item.i} />}
+
+                  {/* 드래그 시 pulse glow 보더 */}
+                  {isDrag && (
+                    <div
+                      style={{
+                        position: 'absolute', inset: -1, borderRadius: 13,
+                        pointerEvents: 'none',
+                        border: '1.5px solid rgb(var(--color-accent) / 0.5)',
+                        boxShadow: '0 0 20px rgb(var(--color-accent) / 0.2), inset 0 0 20px rgb(var(--color-accent) / 0.06)',
+                        animation: 'glowPulse 1.5s ease-in-out infinite',
+                      }}
+                    />
+                  )}
+
+                  {/* 리사이즈 시 보더 강조 */}
+                  {isResize && (
+                    <div
+                      style={{
+                        position: 'absolute', inset: -1, borderRadius: 13,
+                        pointerEvents: 'none',
+                        border: '1.5px solid rgb(var(--color-accent) / 0.45)',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgb(var(--color-accent) / 0.3)',
+                      }}
+                    />
+                  )}
+
+                  {/* 안착 flash */}
+                  {isSettle && (
+                    <div
+                      style={{
+                        position: 'absolute', inset: -1, borderRadius: 13,
+                        pointerEvents: 'none',
+                        border: '1.5px solid rgb(var(--color-accent) / 0.45)',
+                        animation: 'settleFlash 0.45s ease-out forwards',
+                      }}
+                    />
+                  )}
+
+                  {/* 다른 위젯 dim 오버레이 */}
+                  <AnimatePresence>
+                    {isDimmed && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+                        style={{
+                          position: 'absolute', inset: 0, borderRadius: 12,
+                          background: 'rgb(var(--color-bg-primary) / 0.5)',
+                          backdropFilter: 'blur(2px)',
+                          pointerEvents: 'none',
+                        }}
+                      />
+                    )}
+                  </AnimatePresence>
+
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </ResponsiveGridLayout>
         </motion.div>
       </AnimatePresence>
 
-      {/* 편집 모드 하단 안내 */}
+      {/* 차트 타입 우클릭 메뉴 */}
       <AnimatePresence>
-        {isEditMode && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            transition={{ duration: 0.15 }}
-            className="flex items-center justify-center py-2 text-xs text-text-secondary/50"
-          >
-            위젯을 드래그하여 재배치하세요. 모서리를 드래그하여 크기를 조절하세요.
-          </motion.div>
+        {chartMenu && (
+          <ChartTypeContextMenu
+            widgetId={chartMenu.widgetId}
+            supportedTypes={getWidgetSupportedCharts(chartMenu.widgetId)}
+            x={chartMenu.x}
+            y={chartMenu.y}
+            onClose={closeChartMenu}
+          />
         )}
       </AnimatePresence>
+
     </div>
   );
 }

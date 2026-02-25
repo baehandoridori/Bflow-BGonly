@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { loadAllComments } from '@/services/commentService';
+import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 
 /* ── 라쏘 드래그 선택 훅 ── */
 interface LassoRect { x: number; y: number; w: number; h: number }
@@ -35,6 +35,8 @@ function useLassoSelection(
       // 버튼/인풋/select/체크박스 위에서는 라쏘 시작 안 함
       const target = e.target as HTMLElement;
       if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
+      // 사이드바 트리뷰 내부에서는 라쏘 시작 안 함 (사이드바 아래 잉여 공간은 허용)
+      if (target.closest('[data-no-lasso]')) return;
       // 좌클릭만
       if (e.button !== 0) return;
 
@@ -335,18 +337,6 @@ function PartCompleteOverlay() {
   );
 }
 import {
-  toggleTestSceneStage,
-  addTestEpisode,
-  addTestPart,
-  addTestScene,
-  deleteTestScene,
-  deleteTestPart,
-  deleteTestEpisode,
-  updateTestSceneField,
-  readLocalMetadata,
-  writeLocalMetadata,
-} from '@/services/testSheetService';
-import {
   updateSheetCell,
   addEpisodeToSheets,
   addPartToSheets,
@@ -357,7 +347,11 @@ import {
   readMetadataFromSheets,
   softDeletePartInSheets,
   softDeleteEpisodeInSheets,
+  batchToSheets,
+  batchActions,
+  bulkUpdateCells,
 } from '@/services/sheetsService';
+import type { BatchAction } from '@/services/sheetsService';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
@@ -381,9 +375,10 @@ interface SceneCardProps {
   onOpenDetail: () => void;
   onCelebrationEnd: () => void;
   onCtrlClick?: () => void;
+  onShiftClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
@@ -394,8 +389,12 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       onCtrlClick?.();
+    } else if (e.shiftKey) {
+      e.preventDefault();
+      onShiftClick?.();
     } else {
-      onOpenDetail();
+      // 단순 클릭: 씬 선택/선택해제 (토글)
+      onCtrlClick?.();
     }
   };
 
@@ -409,6 +408,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       )}
       style={{ borderLeftWidth: 3, borderLeftColor: borderColor, overflow: 'visible' }}
       onClick={handleClick}
+      onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
       ref={isHighlighted ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
       {...(isHighlighted ? {
         initial: { scale: 1.06 },
@@ -436,7 +436,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             <HighlightText text={scene.sceneId || '(씬번호 없음)'} query={searchQuery} />
           </span>
           {scene.layoutId && (
-            <span className="text-[10px] italic text-text-secondary/70 shrink-0">
+            <span className="text-[11px] italic text-text-secondary/70 shrink-0">
               - L#{scene.layoutId}
             </span>
           )}
@@ -451,7 +451,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
               title={`의견 ${commentCount}개`}
             >
               <MessageCircle size={11} fill="currentColor" />
-              <span className="text-[10px] font-bold leading-none">{commentCount}</span>
+              <span className="text-[11px] font-bold leading-none">{commentCount}</span>
             </span>
           )}
           <button
@@ -493,7 +493,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       {/* ── 메모 ── */}
       {scene.memo && (
         <div className="px-2.5 py-1 border-t border-bg-border/30">
-          <p className="text-[10px] text-text-secondary/60 leading-relaxed line-clamp-2">
+          <p className="text-[11px] text-amber-400/70 leading-relaxed line-clamp-2">
             <HighlightText text={scene.memo} query={searchQuery} />
           </p>
         </div>
@@ -507,7 +507,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
               key={stage}
               onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
               className={cn(
-                'flex-1 py-0.5 rounded text-[10px] font-medium transition-all text-center',
+                'flex-1 py-0.5 rounded text-[11px] font-medium transition-all text-center',
                 scene[stage]
                   ? 'text-bg-primary'
                   : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary'
@@ -642,7 +642,7 @@ function SceneTable({ scenes, allScenes, department, commentCounts, sheetName, o
                 <td className="px-2 py-2 font-mono text-accent text-xs">
                   <span className="flex items-center gap-1">
                     #{scene.no}
-                    {(() => { const cc = commentCounts[`${sheetName}:${scene.no}`]; return cc > 0 ? <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full"><MessageCircle size={10} fill="currentColor" /><span className="text-[10px] font-bold">{cc}</span></span> : null; })()}
+                    {(() => { const cc = commentCounts[`${sheetName}:${scene.no}`]; return cc > 0 ? <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full"><MessageCircle size={10} fill="currentColor" /><span className="text-[11px] font-bold">{cc}</span></span> : null; })()}
                   </span>
                 </td>
                 <td className="px-2 py-2 text-text-primary text-xs truncate"><HighlightText text={scene.sceneId || '-'} query={searchQuery} /></td>
@@ -813,12 +813,12 @@ function AddFormImageSlot({
   if (base64) {
     return (
       <div className="flex flex-col gap-1">
-        <span className="text-[10px] text-text-secondary">{label}</span>
+        <span className="text-[11px] text-text-secondary">{label}</span>
         <div className="relative group">
           <img src={base64} alt={label} className="h-20 rounded border border-bg-border object-cover" draggable={false} />
           <button
             onClick={() => onSetBase64('')}
-            className="absolute top-0.5 right-0.5 w-4 h-4 bg-overlay/60 text-on-accent rounded-full text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            className="absolute top-0.5 right-0.5 w-4 h-4 bg-overlay/60 text-on-accent rounded-full text-[11px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
           >
             ×
           </button>
@@ -829,7 +829,7 @@ function AddFormImageSlot({
 
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[10px] text-text-secondary">{label}</span>
+      <span className="text-[11px] text-text-secondary">{label}</span>
       <div
         ref={slotRef}
         tabIndex={0}
@@ -846,19 +846,19 @@ function AddFormImageSlot({
         {phase === 'paste-hint' ? (
           <>
             <ClipboardPaste size={16} className="text-accent" />
-            <p className="text-[10px] text-accent leading-tight">Ctrl+V 붙여넣기</p>
+            <p className="text-[11px] text-accent leading-tight">Ctrl+V 붙여넣기</p>
             <button
               onClick={(e) => { e.stopPropagation(); handlePasteFromClipboard(); }}
-              className="text-[10px] text-accent/70 underline hover:text-accent"
+              className="text-[11px] text-accent/70 underline hover:text-accent"
             >
               붙여넣기
             </button>
-            <p className="text-[10px] text-text-secondary/50">한번 더 클릭 → 파일선택</p>
+            <p className="text-[11px] text-text-secondary/50">한번 더 클릭 → 파일선택</p>
           </>
         ) : (
           <>
             <ImagePlus size={14} className="text-text-secondary/45" />
-            <p className="text-[10px] text-text-secondary/50">클릭하여 추가</p>
+            <p className="text-[11px] text-text-secondary/50">클릭하여 추가</p>
           </>
         )}
       </div>
@@ -868,13 +868,12 @@ function AddFormImageSlot({
 
 interface AddSceneFormProps {
   existingSceneIds: string[];
-  sheetName: string;
-  isLiveMode: boolean;
   onSubmit: (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }, skipSync?: boolean) => void;
+  onBulkSubmit?: (scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<void>;
   onCancel: () => void;
 }
 
-function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCancel }: AddSceneFormProps) {
+function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: AddSceneFormProps) {
   const [prefixMode, setPrefixMode] = useState<PrefixMode>('alphabet');
   const [alphaPrefix, setAlphaPrefix] = useState('a');
   const [customPrefix, setCustomPrefix] = useState('');
@@ -924,13 +923,21 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
         toAdd.push(id);
         updatedIds.push(id);
       }
-      // 순차 실행: 각 씬 추가가 완료된 후 다음 씬 추가 (stale state 방지)
-      (async () => {
-        for (let i = 0; i < toAdd.length; i++) {
-          const isLast = i === toAdd.length - 1;
-          await onSubmit(toAdd[i], assignee, memo, layoutId, undefined, !isLast);
-        }
-      })();
+
+      const BULK_THRESHOLD = 5;
+      if (toAdd.length >= BULK_THRESHOLD && onBulkSubmit) {
+        // Phase 0-5: 대량 추가 — 서버 확인 후 반영 (로딩 화면 포함)
+        const scenes = toAdd.map((id) => ({ sceneId: id, assignee, memo }));
+        onBulkSubmit(scenes);
+      } else {
+        // 소량: 기존 방식 (낙관적 업데이트)
+        (async () => {
+          for (let i = 0; i < toAdd.length; i++) {
+            const isLast = i === toAdd.length - 1;
+            await onSubmit(toAdd[i], assignee, memo, layoutId, undefined, !isLast);
+          }
+        })();
+      }
       setNumber(suggestNextNumber(prefix, updatedIds));
       setBulkEnd('');
     } else {
@@ -958,7 +965,7 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
     <div className="bg-bg-card border border-bg-border rounded-xl p-4 flex flex-col gap-4 shadow-lg shadow-accent/5">
       {/* ── 접두사 세그먼트 컨트롤 ── */}
       <div className="flex items-center gap-3">
-        <span className="text-[10px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">접두사</span>
+        <span className="text-[11px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">접두사</span>
         <div className="flex items-center gap-2">
           {/* 세그먼트 라디오 (pill 스타일) */}
           <div className="flex bg-bg-primary rounded-lg p-0.5 border border-bg-border">
@@ -1013,10 +1020,10 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
 
           {/* 미리보기 뱃지 */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-accent/10 border border-accent/20 rounded-lg">
-            <span className="text-[10px] text-accent/60">ID</span>
+            <span className="text-[11px] text-accent/60">ID</span>
             <span className="text-xs text-accent font-mono font-bold">{sceneId}</span>
             {isDuplicate && (
-              <span className="text-[10px] text-red-400 bg-red-500/10 px-1.5 rounded">중복</span>
+              <span className="text-[11px] text-red-400 bg-red-500/10 px-1.5 rounded">중복</span>
             )}
           </div>
         </div>
@@ -1037,7 +1044,7 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
         <div className="flex flex-col gap-3">
           {/* 번호 행 */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">번호</span>
+            <span className="text-[11px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">번호</span>
             <div className="relative flex items-center">
               <input
                 value={number}
@@ -1063,7 +1070,7 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
             <button
               onClick={() => setBulkMode(!bulkMode)}
               className={cn(
-                'px-2 py-1 text-[10px] rounded-md font-medium transition-colors cursor-pointer',
+                'px-2 py-1 text-[11px] rounded-md font-medium transition-colors cursor-pointer',
                 bulkMode ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border',
               )}
             >
@@ -1094,7 +1101,7 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
 
           {/* 메모 + 레이아웃 행 */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">정보</span>
+            <span className="text-[11px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">정보</span>
             <input
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
@@ -1113,7 +1120,7 @@ function AddSceneForm({ existingSceneIds, sheetName, isLiveMode, onSubmit, onCan
 
           {/* 하단 버튼 */}
           <div className="flex gap-2 items-center justify-end">
-            <span className="text-[10px] text-text-secondary/50">
+            <span className="text-[11px] text-text-secondary/50">
               Enter 추가 · Esc 취소
             </span>
             <button
@@ -1192,7 +1199,7 @@ function AddEpisodeModal({
       >
         <h3 className="text-sm font-bold text-text-primary">새 에피소드 추가</h3>
         <div>
-          <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 이름</label>
+          <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 이름</label>
           <div className="relative mt-1">
             <input
               autoFocus
@@ -1213,7 +1220,7 @@ function AddEpisodeModal({
               </span>
             )}
           </div>
-          <p className="text-[10px] text-text-secondary/40 mt-1">비우면 기본 이름으로 생성됩니다</p>
+          <p className="text-[11px] text-text-secondary/40 mt-1">비우면 기본 이름으로 생성됩니다</p>
         </div>
         <div className="flex gap-2 justify-end">
           <button
@@ -1243,7 +1250,6 @@ export function ScenesView() {
   const deleteSceneOptimistic = useDataStore((s) => s.deleteSceneOptimistic);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const setEpisodes = useDataStore((s) => s.setEpisodes);
-  const { sheetsConnected } = useAppStore();
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery, selectedDepartment } = useAppStore();
   const { sortKey, sortDir, statusFilter, sceneViewMode, sceneGroupMode } = useAppStore();
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment } = useAppStore();
@@ -1267,8 +1273,10 @@ export function ScenesView() {
   const deleteEpisodeOptimistic = useDataStore((s) => s.deleteEpisodeOptimistic);
 
   const [showAddScene, setShowAddScene] = useState(false);
+  const [bulkAddLoading, setBulkAddLoading] = useState(false);
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
+  const [batchAssigneeValue, setBatchAssigneeValue] = useState('');
   const [treeOpen, setTreeOpen] = useState(true);
 
   // 파트 컨텍스트 메뉴
@@ -1296,6 +1304,10 @@ export function ScenesView() {
   // 아카이빙된 에피소드 목록
   const [archivedEpisodes, setArchivedEpisodes] = useState<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; memo?: string }[]>([]);
 
+  // 동기화 매니저: 버전 카운터 + 낙관적 보호 플래그
+  const syncVersionRef = useRef(0);
+  const archiveGuardRef = useRef(false); // 아카이빙 작업 중 sync 차단
+
   // 아카이빙 확인 다이얼로그 (메모 입력 포함)
   const [archiveDialogEpNum, setArchiveDialogEpNum] = useState<number | null>(null);
   const [archiveMemoInput, setArchiveMemoInput] = useState('완료로 인한 아카이빙');
@@ -1306,17 +1318,18 @@ export function ScenesView() {
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
 
+  // 댓글 모드 설정 (항상 시트 모드)
+  useEffect(() => {
+    setCommentsSheetsMode(true);
+    return () => { invalidatePartCache(); };
+  }, []);
+
   // 전체 댓글 카운트 로드
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
-  useEffect(() => {
-    loadAllComments().then((all) => {
-      const counts: Record<string, number> = {};
-      for (const [key, list] of Object.entries(all)) {
-        if (list.length > 0) counts[key] = list.length;
-      }
-      setCommentCounts(counts);
-    });
-  }, [detailSceneIndex]); // 상세 모달 닫을 때 갱신
+  // 댓글 카운트 로딩은 currentPart 정의 후 아래에서 수행 (useEffect)
+
+  // Shift+Click 범위 선택을 위한 마지막 클릭 인덱스
+  const lastClickedIndexRef = useRef<number | null>(null);
 
   // 라쏘 드래그 선택
   const gridRef = useRef<HTMLDivElement>(null);
@@ -1334,18 +1347,37 @@ export function ScenesView() {
   // 파트/에피소드 변경 시 선택 초기화
   useEffect(() => { clearSelectedScenes(); }, [selectedEpisode, selectedPart, selectedDepartment, clearSelectedScenes]);
 
-  // 백그라운드 동기화: 낙관적 업데이트 후 서버/파일과 싱크
+  // 백그라운드 동기화: 낙관적 업데이트 후 서버와 싱크
+  // 동기화 매니저: 버전 카운터로 오래된 응답 폐기 + 아카이브 가드로 낙관적 상태 보호
   const syncInBackground = async () => {
+    const myVersion = ++syncVersionRef.current;
     try {
-      if (sheetsConnected) {
-        const { readAllFromSheets } = await import('@/services/sheetsService');
-        const eps = await readAllFromSheets();
-        // 아카이빙된 에피소드가 다시 돌아오지 않도록 필터링
-        const archivedNums = new Set(archivedEpisodes.map((a) => a.episodeNumber));
-        const filtered = eps.filter((ep) => !archivedNums.has(ep.episodeNumber));
-        setEpisodes(filtered);
+      const { readAllFromSheets, readArchivedFromSheets } = await import('@/services/sheetsService');
+      const eps = await readAllFromSheets();
+
+      // 버전 체크: 이 sync 이후에 새 sync가 시작되었으면 결과 폐기
+      if (syncVersionRef.current !== myVersion) return;
+
+      setEpisodes(eps);
+
+      // 아카이빙 가드: 아카이빙/해제 작업 진행 중이면 archived 목록 갱신 스킵
+      if (!archiveGuardRef.current) {
+        try {
+          const archivedList = await readArchivedFromSheets();
+          // 다시 한번 버전+가드 체크 (비동기 응답 사이에 상태가 바뀌었을 수 있음)
+          if (syncVersionRef.current === myVersion && !archiveGuardRef.current) {
+            setArchivedEpisodes(archivedList.map((item) => ({
+              episodeNumber: item.episodeNumber,
+              title: item.title,
+              partCount: item.partCount,
+              archivedBy: item.archivedBy || undefined,
+              archivedAt: item.archivedAt || undefined,
+              memo: item.archiveMemo || undefined,
+            })));
+          }
+        } catch { /* 아카이빙 목록 갱신 실패는 무시 */ }
       }
-      // 테스트 모드: 파일 쓰기는 이미 test 함수에서 처리됨
+
       // 위젯 팝업에 데이터 변경 알림
       window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
@@ -1369,104 +1401,63 @@ export function ScenesView() {
     ? (parts.find((p) => p.partId === selectedPart) ?? parts[0])
     : undefined;
 
-  // 파트 메모 로드 (시트 연결 시 → sheets, 미연결 시 → 로컬)
+  // 댓글 카운트 로드 (currentPart 정의 후)
+  useEffect(() => {
+    if (currentPart) {
+      // 현재 파트의 댓글만 지연 로딩
+      loadPartComments(currentPart.sheetName).then((store) => {
+        setCommentCounts((prev) => {
+          const next = { ...prev };
+          for (const [key, list] of Object.entries(store)) {
+            next[key] = list.length;
+          }
+          return next;
+        });
+      }).catch(() => {});
+    }
+  }, [detailSceneIndex, currentPart?.sheetName]);
+
+  // 파트 메모 로드
   useEffect(() => {
     const loadPartMemos = async () => {
       const memos: Record<string, string> = {};
       for (const part of parts) {
         try {
-          const data = sheetsConnected
-            ? await readMetadataFromSheets('part-memo', part.sheetName)
-            : await readLocalMetadata('part-memo', part.sheetName);
+          const data = await readMetadataFromSheets('part-memo', part.sheetName);
           if (data?.value) memos[part.sheetName] = data.value;
         } catch { /* 무시 */ }
       }
       if (Object.keys(memos).length > 0) setPartMemos(memos);
     };
     loadPartMemos();
-  }, [sheetsConnected, currentEp?.episodeNumber, selectedDepartment]);
+  }, [currentEp?.episodeNumber, selectedDepartment]);
 
   // 에피소드 제목/메모 → App.tsx에서 병렬 로드됨 (글로벌 스토어)
 
-  // 아카이빙된 에피소드 목록 로드
+  // 아카이빙된 에피소드 목록 로드 (마운트 시 1회만 — 이후는 syncInBackground가 갱신)
+  // episodes.length 의존성 제거: deleteEpisodeOptimistic() 호출 시 재로드가 낙관적 상태를 덮어쓰는 문제 방지
   useEffect(() => {
-    // METADATA 기반 아카이빙 목록 읽기 (readArchived 액션 미배포 시에도 동작)
-    const loadArchivedFromMetadata = async () => {
-      const archived: typeof archivedEpisodes = [];
-      for (let i = 1; i <= 99; i++) {
-        try {
-          let infoStr: string | undefined;
-          if (sheetsConnected) {
-            const infoMeta = await readMetadataFromSheets('archive-info', String(i));
-            infoStr = infoMeta?.value;
-          } else {
-            const infoMeta = await readLocalMetadata('archive-info', String(i));
-            infoStr = infoMeta?.value;
-          }
-          if (infoStr) {
-            try {
-              const parsed = JSON.parse(infoStr);
-              // archive-info가 있으면 아카이빙된 에피소드
-              const titleMeta = sheetsConnected
-                ? await readMetadataFromSheets('episode-title', String(i))
-                : await readLocalMetadata('episode-title', String(i));
-              archived.push({
-                episodeNumber: i,
-                title: titleMeta?.value || `EP.${String(i).padStart(2, '0')}`,
-                partCount: 0,
-                archivedBy: parsed.by,
-                archivedAt: parsed.at,
-                memo: parsed.memo,
-              });
-            } catch { /* JSON 파싱 실패 무시 */ }
-          }
-        } catch { /* 개별 에피소드 실패 무시 */ }
-      }
-      return archived;
-    };
-
     const loadArchived = async () => {
       try {
-        if (sheetsConnected) {
-          try {
-            // 먼저 readArchived 액션 시도 (Apps Script 재배포 후 동작)
-            const { readArchivedFromSheets } = await import('@/services/sheetsService');
-            const list = await readArchivedFromSheets();
-            const enriched = [];
-            for (const item of list) {
-              const key = String(item.episodeNumber);
-              let archivedBy: string | undefined;
-              let archivedAt: string | undefined;
-              let memo: string | undefined;
-              try {
-                const meta = await readMetadataFromSheets('archive-info', key);
-                if (meta?.value) {
-                  const parsed = JSON.parse(meta.value);
-                  archivedBy = parsed.by;
-                  archivedAt = parsed.at;
-                  memo = parsed.memo;
-                }
-              } catch { /* 무시 */ }
-              enriched.push({ ...item, archivedBy, archivedAt, memo });
-            }
-            setArchivedEpisodes(enriched);
-          } catch {
-            // readArchived 미배포 시 → METADATA에서 fallback 읽기
-            console.info('[아카이빙] readArchived 미지원, METADATA fallback 사용');
-            const archived = await loadArchivedFromMetadata();
-            setArchivedEpisodes(archived);
-          }
-        } else {
-          // 로컬 fallback: metadata에서 읽기
-          const archived = await loadArchivedFromMetadata();
-          setArchivedEpisodes(archived);
-        }
+        const { readArchivedFromSheets } = await import('@/services/sheetsService');
+        const list = await readArchivedFromSheets();
+        // 아카이브 가드 활성화 상태면 낙관적 상태 보호
+        if (archiveGuardRef.current) return;
+        const enriched = list.map((item) => ({
+          episodeNumber: item.episodeNumber,
+          title: item.title,
+          partCount: item.partCount,
+          archivedBy: item.archivedBy || undefined,
+          archivedAt: item.archivedAt || undefined,
+          memo: item.archiveMemo || undefined,
+        }));
+        setArchivedEpisodes(enriched);
       } catch (err) {
         console.warn('[아카이빙 목록 로드 실패]', err);
       }
     };
     loadArchived();
-  }, [sheetsConnected, episodes.length]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 상세 모달에 표시할 씬 (스토어 업데이트 시 자동 갱신)
   const detailScene = detailSceneIndex !== null
@@ -1569,16 +1560,26 @@ export function ScenesView() {
 
   // ─── 핸들러들 ─────────────────────────────────
 
-  const handleToggle = async (sceneId: string, stage: Stage) => {
+  // 토글 직렬화 큐: 빠른 연속 토글 시 race condition 방지
+  const toggleQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const handleToggle = (sceneId: string, stage: Stage) => {
     if (!currentEp || !currentPart) return;
 
-    const scene = currentPart.scenes.find((s) => s.sceneId === sceneId);
+    // 현재 스토어에서 최신 씬 상태 직접 조회 (stale closure 방지)
+    const latestPart = useDataStore.getState().episodes
+      .flatMap((ep) => ep.parts)
+      .find((p) => p.sheetName === currentPart.sheetName);
+    if (!latestPart) return;
+
+    const scene = latestPart.scenes.find((s) => s.sceneId === sceneId);
     if (!scene) return;
 
     const newValue = !scene[stage];
-    const sceneIndex = currentPart.scenes.findIndex((s) => s.sceneId === sceneId);
+    const sceneIndex = latestPart.scenes.findIndex((s) => s.sceneId === sceneId);
     if (sceneIndex < 0) return;
 
+    // 낙관적 업데이트 — 즉시 UI 반영
     toggleSceneStage(currentPart.sheetName, sceneId, stage);
 
     // 완료 축하 애니메이션 + 완료 기록: 방금 토글로 4단계 모두 완료 시
@@ -1586,39 +1587,60 @@ export function ScenesView() {
       const afterToggle = { ...scene, [stage]: true };
       if (afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png) {
         setCelebratingId(sceneId);
-        // completedBy / completedAt 기록
         const completedBy = currentUser?.name ?? '알 수 없음';
         const completedAt = new Date().toISOString();
         updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
         updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
-
-        // 백엔드에도 저장 (시트에는 completedBy/At 열이 없으므로 테스트 모드에서만)
-        if (!sheetsConnected) {
-          try {
-            const latestEps1 = useDataStore.getState().episodes;
-            await updateTestSceneField(latestEps1, currentPart.sheetName, sceneIndex, 'completedBy', completedBy);
-            const latestEps2 = useDataStore.getState().episodes;
-            await updateTestSceneField(latestEps2, currentPart.sheetName, sceneIndex, 'completedAt', completedAt);
-          } catch (err) {
-            console.error('[완료기록 실패]', err);
-          }
-        }
       }
     }
 
-    try {
-      if (sheetsConnected) {
-        await updateSheetCell(currentPart.sheetName, sceneIndex, stage, newValue);
-        // 위젯 팝업에 데이터 변경 알림
+    // API 호출을 큐에 넣어 순차 실행 (race condition 방지)
+    const sheetName = currentPart.sheetName;
+    toggleQueueRef.current = toggleQueueRef.current.then(async () => {
+      try {
+        await updateSheetCell(sheetName, sceneIndex, stage, newValue);
         window.electronAPI?.sheetsNotifyChange?.();
-      } else {
-        await toggleTestSceneStage(
-          episodes, currentPart.sheetName, sceneId, stage
-        );
+      } catch (err) {
+        console.error('[토글 실패]', err);
+        toggleSceneStage(sheetName, sceneId, stage);
       }
+    });
+  };
+
+  // 일괄 토글: 선택된 씬들의 특정 단계를 단일 API 호출로 처리
+  const handleBulkToggle = async (sceneIds: Set<string>, stage: Stage) => {
+    if (!currentPart) return;
+    const sheetName = currentPart.sheetName;
+
+    // 최신 스토어에서 씬 상태 조회 (stale closure 방지)
+    const latestPart = useDataStore.getState().episodes
+      .flatMap((ep) => ep.parts)
+      .find((p) => p.sheetName === sheetName);
+    if (!latestPart) return;
+
+    // 업데이트 목록 구성
+    const updates: { sceneId: string; sceneIndex: number; stage: Stage; newValue: boolean }[] = [];
+    sceneIds.forEach((id) => {
+      const idx = latestPart.scenes.findIndex((s) => s.sceneId === id);
+      if (idx < 0) return;
+      const scene = latestPart.scenes[idx];
+      updates.push({ sceneId: id, sceneIndex: idx, stage, newValue: !scene[stage] });
+    });
+    if (updates.length === 0) return;
+
+    // 낙관적 업데이트 — 모든 씬을 한번에 UI 반영
+    updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
+
+    // 단일 API 호출로 모든 셀 업데이트
+    try {
+      await bulkUpdateCells(sheetName, updates.map((u) => ({
+        rowIndex: u.sceneIndex, stage: u.stage, value: u.newValue,
+      })));
+      window.electronAPI?.sheetsNotifyChange?.();
     } catch (err) {
-      console.error('[토글 실패]', err);
-      toggleSceneStage(currentPart.sheetName, sceneId, stage);
+      console.error('[일괄 토글 실패]', err);
+      // 롤백 — 모든 토글 되돌리기
+      updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
     }
   };
 
@@ -1631,6 +1653,10 @@ export function ScenesView() {
     const epName = newEpName.trim();
     setAddEpOpen(false);
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevTitles = { ...episodeTitles };
+
     // 낙관적 업데이트
     addEpisodeOptimistic(nextEpisodeNumber, selectedDepartment);
     setSelectedEpisode(nextEpisodeNumber);
@@ -1639,24 +1665,23 @@ export function ScenesView() {
     if (epName) {
       const next = { ...episodeTitles, [nextEpisodeNumber]: epName };
       setEpisodeTitles(next);
-      // setEpisodeTitles는 이미 글로벌 스토어 setter
     }
 
-    // 백그라운드에서 서버/파일에 저장
+    // 백그라운드에서 서버에 저장
     try {
-      if (sheetsConnected) {
-        await addEpisodeToSheets(nextEpisodeNumber, selectedDepartment);
-        if (epName) {
-          await writeMetadataToSheets('episode-title', String(nextEpisodeNumber), epName);
-        }
-        syncInBackground();
-      } else {
-        await addTestEpisode(useDataStore.getState().episodes, nextEpisodeNumber, selectedDepartment);
-        if (epName) {
-          await writeLocalMetadata('episode-title', String(nextEpisodeNumber), epName);
-        }
+      // Phase 0: 배치로 한 번에 전송
+      const actions: BatchAction[] = [
+        batchActions.addEpisode(nextEpisodeNumber, selectedDepartment),
+      ];
+      if (epName) {
+        actions.push(batchActions.writeMetadata('episode-title', String(nextEpisodeNumber), epName));
       }
+      await batchToSheets(actions);
+      syncInBackground();
     } catch (err) {
+      // 롤백
+      setEpisodes(prevEpisodes);
+      setEpisodeTitles(prevTitles);
       const msg = String(err);
       if (msg.includes('Unknown action')) {
         alert(`에피소드 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
@@ -1664,6 +1689,16 @@ export function ScenesView() {
         alert(`에피소드 추가 실패: ${err}`);
       }
       syncInBackground();
+    }
+  };
+
+  // 공통 시트 에러 핸들러
+  const handleSheetError = (err: unknown, actionName: string) => {
+    const msg = String(err);
+    if (msg.includes('Unknown action')) {
+      alert(`${actionName} 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
+    } else {
+      alert(`${actionName} 실패: ${err}`);
     }
   };
 
@@ -1681,24 +1716,21 @@ export function ScenesView() {
       return;
     }
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevSelectedPart = selectedPart;
+
     // 낙관적 업데이트
     addPartOptimistic(currentEp.episodeNumber, nextPartId, selectedDepartment);
     setSelectedPart(nextPartId);
 
     try {
-      if (sheetsConnected) {
-        await addPartToSheets(currentEp.episodeNumber, nextPartId, selectedDepartment);
-        syncInBackground();
-      } else {
-        await addTestPart(useDataStore.getState().episodes, currentEp.episodeNumber, nextPartId, selectedDepartment);
-      }
+      await addPartToSheets(currentEp.episodeNumber, nextPartId, selectedDepartment);
+      syncInBackground();
     } catch (err) {
-      const msg = String(err);
-      if (msg.includes('Unknown action')) {
-        alert(`파트 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
-      } else {
-        alert(`파트 추가 실패: ${err}`);
-      }
+      setEpisodes(prevEpisodes);
+      setSelectedPart(prevSelectedPart);
+      handleSheetError(err, '파트 추가');
       syncInBackground();
     }
   };
@@ -1708,27 +1740,21 @@ export function ScenesView() {
 
     const sceneIndex = currentPart.scenes.length; // 새 씬의 인덱스
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+
     // 낙관적 업데이트 (폼은 닫지 않음 — 연속 입력 지원)
     addSceneOptimistic(currentPart.sheetName, sceneId, assignee, memo);
 
     try {
-      if (sheetsConnected) {
-        await addSceneToSheets(currentPart.sheetName, sceneId, assignee, memo);
-        // 배치 모드에서는 마지막 씬 추가 후에만 sync
-        if (!skipSync) syncInBackground();
-      } else {
-        // 최신 상태를 사용 (closure의 stale episodes 방지)
-        const latestEpisodes = useDataStore.getState().episodes;
-        await addTestScene(latestEpisodes, currentPart.sheetName, sceneId, assignee, memo);
-      }
-    } catch (err) {
-      const msg = String(err);
-      if (msg.includes('Unknown action')) {
-        alert(`씬 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
-      } else {
-        alert(`씬 추가 실패: ${err}`);
-      }
+      await addSceneToSheets(currentPart.sheetName, sceneId, assignee, memo);
+      // 배치 모드에서는 마지막 씬 추가 후에만 sync
       if (!skipSync) syncInBackground();
+    } catch (err) {
+      setEpisodes(prevEpisodes);
+      handleSheetError(err, '씬 추가');
+      if (!skipSync) syncInBackground();
+      return; // 롤백 시 이후 layoutId/이미지 처리 스킵
     }
 
     // layoutId 가 있으면 씬 생성 후 별도로 설정
@@ -1740,9 +1766,7 @@ export function ScenesView() {
       const latestIndex = latestPart?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
       if (latestIndex >= 0) {
         updateSceneFieldOptimistic(currentPart.sheetName, latestIndex, 'layoutId', layoutId);
-        if (sheetsConnected) {
-          updateSceneFieldInSheets(currentPart.sheetName, latestIndex, 'layoutId', layoutId).catch(() => {});
-        }
+        updateSceneFieldInSheets(currentPart.sheetName, latestIndex, 'layoutId', layoutId).catch(() => {});
       }
     }
 
@@ -1759,11 +1783,11 @@ export function ScenesView() {
           if (latestIndex < 0) return;
 
           if (images.storyboard) {
-            const url = await saveImage(images.storyboard, partSheetName, sceneId, 'storyboard', sheetsConnected);
+            const url = await saveImage(images.storyboard, partSheetName, sceneId, 'storyboard');
             handleFieldUpdate(latestIndex, 'storyboardUrl', url);
           }
           if (images.guide) {
-            const url = await saveImage(images.guide, partSheetName, sceneId, 'guide', sheetsConnected);
+            const url = await saveImage(images.guide, partSheetName, sceneId, 'guide');
             handleFieldUpdate(latestIndex, 'guideUrl', url);
           }
         } catch (err) {
@@ -1773,22 +1797,39 @@ export function ScenesView() {
     }
   };
 
+  // Phase 0-5: 대량 씬 추가 (5개 이상 — 서버 확인 후 반영)
+  const handleBulkAddScenes = async (scenes: { sceneId: string; assignee: string; memo: string }[]) => {
+    if (!currentPart || scenes.length === 0) return;
+
+    setBulkAddLoading(true);
+    try {
+      const { addScenesToSheets } = await import('@/services/sheetsService');
+      await addScenesToSheets(currentPart.sheetName, scenes);
+      // 서버 성공 후 전체 동기화 완료까지 대기 (데이터 없음 깜빡임 방지)
+      await syncInBackground();
+    } catch (err) {
+      alert(`대량 씬 추가 실패: ${err}`);
+    } finally {
+      setBulkAddLoading(false);
+    }
+  };
+
   const handleDeleteScene = async (sceneIndex: number) => {
     if (!currentPart) return;
     if (!confirm('이 씬을 삭제하시겠습니까?')) return;
+
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
 
     // 낙관적 업데이트
     deleteSceneOptimistic(currentPart.sheetName, sceneIndex);
 
     try {
-      if (sheetsConnected) {
-        await deleteSceneFromSheets(currentPart.sheetName, sceneIndex);
-        syncInBackground();
-      } else {
-        await deleteTestScene(useDataStore.getState().episodes, currentPart.sheetName, sceneIndex);
-      }
+      await deleteSceneFromSheets(currentPart.sheetName, sceneIndex);
+      syncInBackground();
     } catch (err) {
-      alert(`씬 삭제 실패: ${err}`);
+      setEpisodes(prevEpisodes);
+      handleSheetError(err, '씬 삭제');
       syncInBackground();
     }
   };
@@ -1796,18 +1837,18 @@ export function ScenesView() {
   const handleFieldUpdate = async (sceneIndex: number, field: string, value: string) => {
     if (!currentPart) return;
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+
     // 낙관적 업데이트
     updateSceneFieldOptimistic(currentPart.sheetName, sceneIndex, field, value);
 
     try {
-      if (sheetsConnected) {
-        await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, field, value);
-        syncInBackground();
-      } else {
-        await updateTestSceneField(useDataStore.getState().episodes, currentPart.sheetName, sceneIndex, field, value);
-      }
+      await updateSceneFieldInSheets(currentPart.sheetName, sceneIndex, field, value);
+      syncInBackground();
     } catch (err) {
-      alert(`수정 실패: ${err}`);
+      setEpisodes(prevEpisodes);
+      handleSheetError(err, '수정');
       syncInBackground();
     }
   };
@@ -1818,34 +1859,32 @@ export function ScenesView() {
     if (!part) return;
     if (!confirm(`${part.partId}파트를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevSelectedPart = selectedPart;
+
     deletePartOptimistic(sheetName);
     setSelectedPart(null);
 
     try {
-      if (sheetsConnected) {
-        await softDeletePartInSheets(sheetName);
-        syncInBackground();
-      } else {
-        await deleteTestPart(useDataStore.getState().episodes, sheetName);
-      }
+      await softDeletePartInSheets(sheetName);
+      syncInBackground();
     } catch (err) {
-      alert(`파트 삭제 실패: ${err}`);
+      setEpisodes(prevEpisodes);
+      setSelectedPart(prevSelectedPart);
+      handleSheetError(err, '파트 삭제');
       syncInBackground();
     }
   };
 
-  // ─── 파트 메모 저장 (시트 + 로컬 fallback) ─────────────────
+  // ─── 파트 메모 저장 ─────────────────
   const handleSavePartMemo = async (sheetName: string, memo: string) => {
     setPartMemos((prev) => ({ ...prev, [sheetName]: memo }));
     setEditingPartMemo(null);
-    // 로컬에 항상 저장 (테스트 모드 및 시트 실패 시 fallback)
-    await writeLocalMetadata('part-memo', sheetName, memo);
-    if (sheetsConnected) {
-      try {
-        await writeMetadataToSheets('part-memo', sheetName, memo);
-      } catch (err) {
-        console.warn('[파트 메모] 시트 저장 실패 → 로컬에 저장됨', err);
-      }
+    try {
+      await writeMetadataToSheets('part-memo', sheetName, memo);
+    } catch (err) {
+      console.warn('[파트 메모] 시트 저장 실패', err);
     }
   };
 
@@ -1855,19 +1894,21 @@ export function ScenesView() {
     const epDisplayName = episodeTitles[currentEp.episodeNumber] || currentEp.title;
     if (!confirm(`"${epDisplayName}"를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
 
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevSelectedEpisode = selectedEpisode;
+
     deleteEpisodeOptimistic(currentEp.episodeNumber);
     setSelectedEpisode(episodes[0]?.episodeNumber ?? 1);
     setEpEditOpen(false);
 
     try {
-      if (sheetsConnected) {
-        await softDeleteEpisodeInSheets(currentEp.episodeNumber);
-        syncInBackground();
-      } else {
-        await deleteTestEpisode(useDataStore.getState().episodes, currentEp.episodeNumber);
-      }
+      await softDeleteEpisodeInSheets(currentEp.episodeNumber);
+      syncInBackground();
     } catch (err) {
-      alert(`에피소드 삭제 실패: ${err}`);
+      setEpisodes(prevEpisodes);
+      setSelectedEpisode(prevSelectedEpisode);
+      handleSheetError(err, '에피소드 삭제');
       syncInBackground();
     }
   };
@@ -1886,50 +1927,47 @@ export function ScenesView() {
     if (!ep) return;
 
     const memo = archiveMemoInput.trim() || '완료로 인한 아카이빙';
-    const archiveInfo = JSON.stringify({
-      by: currentUser?.name ?? '알 수 없음',
-      at: new Date().toLocaleDateString('ko-KR'),
-      memo,
-    });
-    // 아카이빙 시 에피소드 제목도 반드시 METADATA에 저장 (복원 시 표시용)
+    const archivedBy = currentUser?.name ?? '알 수 없음';
+    const archivedAt = new Date().toLocaleDateString('ko-KR');
     const epTitle = episodeTitles[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
 
     setArchiveDialogEpNum(null);
 
-    // ① 먼저 UI에서 즉시 제거 (낙관적 업데이트)
+    // 아카이브 가드 ON — sync가 낙관적 상태를 덮어쓰지 못하게 보호
+    archiveGuardRef.current = true;
+    // 진행 중인 sync 응답 무효화
+    syncVersionRef.current++;
+
+    // 롤백용 스냅샷
+    const prevEpisodes = useDataStore.getState().episodes;
+    const prevArchivedEpisodes = [...archivedEpisodes];
+
+    // ① 낙관적 업데이트
     deleteEpisodeOptimistic(epNum);
     setArchivedEpisodes((prev) => [
       ...prev,
-      { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy: currentUser?.name, archivedAt: new Date().toLocaleDateString('ko-KR'), memo },
+      { episodeNumber: epNum, title: epTitle, partCount: ep.parts.length, archivedBy, archivedAt, memo },
     ]);
     if (selectedEpisode === epNum) {
       setSelectedEpisode(episodes.find((e) => e.episodeNumber !== epNum)?.episodeNumber ?? 1);
     }
 
     try {
-      if (sheetsConnected) {
-        const { writeMetadataToSheets } = await import('@/services/sheetsService');
-        // ② METADATA 먼저 기록
-        await writeMetadataToSheets('episode-title', String(epNum), epTitle);
-        await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
-        // ③ 탭 리네임 (EP_ → AC_EP_) — 반드시 await 후에만 sync 가능
-        try {
-          const { archiveEpisodeInSheets } = await import('@/services/sheetsService');
-          await archiveEpisodeInSheets(epNum);
-        } catch (tabErr) {
-          console.warn('[아카이빙] 탭 리네임 실패 (Apps Script 재배포 필요):', tabErr);
-        }
-        // ④ 탭 리네임 완료 후에만 동기화 (리네임 전 sync하면 에피소드 부활)
+      // Phase 0-2: _REGISTRY 기반 아카이빙 (탭 이름 변경 없이 status만 변경)
+      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      await archiveEpisodeViaRegistryInSheets(epNum, archivedBy, memo);
+      // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화
+      setTimeout(() => {
+        archiveGuardRef.current = false;
         syncInBackground();
-      } else {
-        await writeLocalMetadata('episode-title', String(epNum), epTitle);
-        await writeLocalMetadata('archived-episode', String(epNum), 'true');
-        await writeLocalMetadata('archive-info', String(epNum), archiveInfo);
-      }
-      window.electronAPI?.sheetsNotifyChange?.();
+        window.electronAPI?.sheetsNotifyChange?.();
+      }, 5000);
     } catch (err) {
+      // 롤백: 활성 목록 + 아카이브 목록 모두 원복
+      archiveGuardRef.current = false;
+      setEpisodes(prevEpisodes);
+      setArchivedEpisodes(prevArchivedEpisodes);
       alert(`아카이빙 실패: ${err}`);
-      syncInBackground();
     }
   };
 
@@ -1945,19 +1983,31 @@ export function ScenesView() {
     const epDisplayName = episodeTitles[epNum] || archived?.title || `EP.${String(epNum).padStart(2, '0')}`;
     if (!confirm(`"${epDisplayName}"를 아카이빙에서 복원하시겠습니까?`)) return;
 
+    // 아카이브 가드 ON — sync가 낙관적 상태를 덮어쓰지 못하게 보호
+    archiveGuardRef.current = true;
+    syncVersionRef.current++;
+
+    // 롤백용 스냅샷
+    const prevArchivedEpisodes = [...archivedEpisodes];
+
+    // 낙관적 업데이트
+    setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
+
     try {
-      if (sheetsConnected) {
-        const { unarchiveEpisodeInSheets } = await import('@/services/sheetsService');
-        await unarchiveEpisodeInSheets(epNum);
-      } else {
-        await writeLocalMetadata('archived-episode', String(epNum), '');
-      }
-      // 아카이빙 목록에서 제거
-      setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
-      syncInBackground();
+      // Phase 0-2: _REGISTRY 기반 복원 (탭 이름 변경 없이 status만 변경)
+      const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      await unarchiveEpisodeViaRegistryInSheets(epNum);
+      // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화
+      setTimeout(() => {
+        archiveGuardRef.current = false;
+        syncInBackground();
+        window.electronAPI?.sheetsNotifyChange?.();
+      }, 5000);
     } catch (err) {
+      // 롤백
+      archiveGuardRef.current = false;
+      setArchivedEpisodes(prevArchivedEpisodes);
       alert(`복원 실패: ${err}`);
-      syncInBackground();
     }
   };
 
@@ -1982,15 +2032,11 @@ export function ScenesView() {
     setEpisodeMemos({ ...episodeMemos, [currentEp.episodeNumber]: memo });
 
     // 저장
-    await writeLocalMetadata('episode-title', key, title.trim());
-    await writeLocalMetadata('episode-memo', key, memo);
-    if (sheetsConnected) {
-      try {
-        await writeMetadataToSheets('episode-title', key, title.trim());
-        await writeMetadataToSheets('episode-memo', key, memo);
-      } catch (err) {
-        console.warn('[에피소드 메타] 시트 저장 실패 → 로컬에 저장됨', err);
-      }
+    try {
+      await writeMetadataToSheets('episode-title', key, title.trim());
+      await writeMetadataToSheets('episode-memo', key, memo);
+    } catch (err) {
+      console.warn('[에피소드 메타] 시트 저장 실패', err);
     }
   };
 
@@ -2011,10 +2057,10 @@ export function ScenesView() {
   }, [setSelectedEpisode, episodeTitles, episodeMemos]);
 
   return (
-    <div className="flex gap-3 h-full">
+    <div ref={gridRef} className="flex gap-3 min-h-full">
       {/* ── 트리뷰 사이드바 ── */}
       {treeOpen && (
-        <div className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-hidden flex flex-col">
+        <div data-no-lasso className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-y-auto flex flex-col sticky top-0 self-start max-h-[calc(100vh-5.5rem)]">
           <EpisodeTreeNav
             episodes={episodes}
             selectedDepartment={selectedDepartment}
@@ -2330,6 +2376,9 @@ export function ScenesView() {
         </div>
       </div>
 
+      {/* 진행도 + 씬 목록 영역 */}
+      <div className="relative flex-1 flex flex-col gap-4">
+
       {/* 상단 고정 진행도 */}
       <div className="flex items-center gap-4 bg-bg-card border border-bg-border rounded-xl px-5 py-3">
         <span className="text-sm font-medium text-text-secondary">
@@ -2357,15 +2406,22 @@ export function ScenesView() {
       {showAddScene && (
         <AddSceneForm
           existingSceneIds={(currentPart?.scenes ?? []).map((s) => s.sceneId)}
-          sheetName={currentPart?.sheetName ?? ''}
-          isLiveMode={sheetsConnected}
           onSubmit={handleAddScene}
+          onBulkSubmit={handleBulkAddScenes}
           onCancel={() => setShowAddScene(false)}
         />
       )}
 
+      {/* 대량 씬 추가 로딩 오버레이 (Phase 0-5) */}
+      {bulkAddLoading && (
+        <div className="flex items-center justify-center py-8 gap-3">
+          <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-text-secondary">씬을 추가하고 있습니다...</span>
+        </div>
+      )}
+
       {/* 씬 목록 */}
-      <div ref={gridRef} className="relative flex-1">
+      <div className="relative flex-1">
         {/* 파트 완료 보케 오버레이 */}
         <AnimatePresence>
           {scenes.length > 0 && overallPct >= 100 && <PartCompleteOverlay />}
@@ -2389,8 +2445,15 @@ export function ScenesView() {
         })()}
 
       {scenes.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-text-secondary h-full">
-          표시할 씬이 없습니다.
+        <div className="flex-1 flex flex-col items-center justify-center text-text-secondary h-full gap-2">
+          {bulkAddLoading || useDataStore.getState().isSyncing ? (
+            <>
+              <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+              <span className="text-xs animate-pulse">데이터를 불러오는 중...</span>
+            </>
+          ) : (
+            <span>표시할 씬이 없습니다.</span>
+          )}
         </div>
       ) : sceneGroupMode === 'layout' && layoutGroups ? (
         /* ── 레이아웃별 그룹 뷰 (P1-4) ── */
@@ -2442,7 +2505,7 @@ export function ScenesView() {
                     onCtrlClick={(id) => toggleSelectedScene(id)}
                   />
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
                     {groupScenes.map((scene, idx) => {
                       const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
                       const sIdx = rawIdx >= 0 ? rawIdx : idx;
@@ -2461,7 +2524,25 @@ export function ScenesView() {
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}
                           onCelebrationEnd={clearCelebration}
-                          onCtrlClick={() => toggleSelectedScene(scene.sceneId)}
+                          onCtrlClick={() => {
+                            toggleSelectedScene(scene.sceneId);
+                            lastClickedIndexRef.current = idx;
+                          }}
+                          onShiftClick={() => {
+                            const lastIdx = lastClickedIndexRef.current;
+                            if (lastIdx !== null && lastIdx !== idx) {
+                              const from = Math.min(lastIdx, idx);
+                              const to = Math.max(lastIdx, idx);
+                              const rangeIds = new Set(selectedSceneIds);
+                              for (let i = from; i <= to; i++) {
+                                if (groupScenes[i]) rangeIds.add(groupScenes[i].sceneId);
+                              }
+                              setSelectedScenes(rangeIds);
+                            } else {
+                              toggleSelectedScene(scene.sceneId);
+                            }
+                            lastClickedIndexRef.current = idx;
+                          }}
                         />
                       );
                     })}
@@ -2490,7 +2571,7 @@ export function ScenesView() {
         </div>
       ) : (
         /* ── 카드 뷰 (플랫) ── */
-        <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 content-start">
+        <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 content-start">
           {scenes.map((scene, idx) => {
             const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
                       const sIdx = rawIdx >= 0 ? rawIdx : idx;
@@ -2509,7 +2590,26 @@ export function ScenesView() {
                 onDelete={handleDeleteScene}
                 onOpenDetail={() => setDetailSceneIndex(sIdx)}
                 onCelebrationEnd={clearCelebration}
-                onCtrlClick={() => toggleSelectedScene(scene.sceneId)}
+                onCtrlClick={() => {
+                  toggleSelectedScene(scene.sceneId);
+                  lastClickedIndexRef.current = idx;
+                }}
+                onShiftClick={() => {
+                  // Shift+Click: 범위 선택
+                  const lastIdx = lastClickedIndexRef.current;
+                  if (lastIdx !== null && lastIdx !== idx) {
+                    const from = Math.min(lastIdx, idx);
+                    const to = Math.max(lastIdx, idx);
+                    const rangeIds = new Set(selectedSceneIds);
+                    for (let i = from; i <= to; i++) {
+                      if (scenes[i]) rangeIds.add(scenes[i].sceneId);
+                    }
+                    setSelectedScenes(rangeIds);
+                  } else {
+                    toggleSelectedScene(scene.sceneId);
+                  }
+                  lastClickedIndexRef.current = idx;
+                }}
               />
             );
           })}
@@ -2529,6 +2629,7 @@ export function ScenesView() {
           }}
         />
       )}
+      </div>{/* 진행도 + 씬 목록 영역 끝 */}
 
       {/* 일괄 액션 바 (선택된 씬이 있을 때) */}
       <AnimatePresence>
@@ -2556,9 +2657,7 @@ export function ScenesView() {
             {STAGES.map((stage) => (
               <button
                 key={stage}
-                onClick={() => {
-                  selectedSceneIds.forEach((id) => handleToggle(id, stage));
-                }}
+                onClick={() => handleBulkToggle(selectedSceneIds, stage)}
                 className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
                 style={{
                   backgroundColor: `${deptConfig.stageColors[stage]}20`,
@@ -2591,6 +2690,10 @@ export function ScenesView() {
                   .map((id) => allScenes.findIndex((s) => s.sceneId === id))
                   .filter((i) => i >= 0)
                   .sort((a, b) => b - a);
+
+                // 롤백용 스냅샷
+                const prevEpisodes = useDataStore.getState().episodes;
+
                 indices.forEach((idx) => {
                   if (currentPart) {
                     deleteSceneOptimistic(currentPart.sheetName, idx);
@@ -2600,16 +2703,15 @@ export function ScenesView() {
                 // 백그라운드 싱크
                 (async () => {
                   try {
-                    for (const idx of indices) {
-                      if (sheetsConnected) {
-                        await deleteSceneFromSheets(currentPart!.sheetName, idx);
-                      } else {
-                        await deleteTestScene(useDataStore.getState().episodes, currentPart!.sheetName, idx);
-                      }
-                    }
+                    // Phase 0: 배치로 한 번에
+                    await batchToSheets(
+                      indices.map((idx) => batchActions.deleteScene(currentPart!.sheetName, idx))
+                    );
                     syncInBackground();
                   } catch (err) {
                     console.error('[일괄 삭제 실패]', err);
+                    // 롤백
+                    useDataStore.getState().setEpisodes(prevEpisodes);
                     syncInBackground();
                   }
                 })();
@@ -2640,7 +2742,7 @@ export function ScenesView() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
-            onClick={() => setBatchEditOpen(false)}
+            onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 12 }}
@@ -2651,7 +2753,7 @@ export function ScenesView() {
             >
               <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">
                 <h3 className="text-sm font-bold text-text-primary">일괄 편집 ({selectedSceneIds.size}개 씬)</h3>
-                <button onClick={() => setBatchEditOpen(false)} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
+                <button onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
                   <X size={16} />
                 </button>
               </div>
@@ -2660,7 +2762,7 @@ export function ScenesView() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   const form = e.target as HTMLFormElement;
-                  const assignee = (form.elements.namedItem('batchAssignee') as HTMLInputElement).value.trim();
+                  const assignee = batchAssigneeValue.trim();
                   const memo = (form.elements.namedItem('batchMemo') as HTMLInputElement).value.trim();
                   const layoutId = (form.elements.namedItem('batchLayout') as HTMLInputElement).value.trim();
 
@@ -2670,42 +2772,56 @@ export function ScenesView() {
                   }
 
                   const allScenes = currentPart?.scenes ?? [];
+                  const batchActionList: BatchAction[] = [];
+
+                  // 낙관적 업데이트 + 배치 액션 수집
                   selectedSceneIds.forEach((id) => {
                     const idx = allScenes.findIndex((s) => s.sceneId === id);
                     if (idx < 0 || !currentPart) return;
                     if (assignee) {
                       updateSceneFieldOptimistic(currentPart.sheetName, idx, 'assignee', assignee);
-                      if (sheetsConnected) {
-                        updateSceneFieldInSheets(currentPart.sheetName, idx, 'assignee', assignee).catch(() => {});
-                      }
+                      batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'assignee', assignee));
                     }
                     if (memo) {
                       updateSceneFieldOptimistic(currentPart.sheetName, idx, 'memo', memo);
-                      if (sheetsConnected) {
-                        updateSceneFieldInSheets(currentPart.sheetName, idx, 'memo', memo).catch(() => {});
-                      }
+                      batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'memo', memo));
                     }
                     if (layoutId) {
                       updateSceneFieldOptimistic(currentPart.sheetName, idx, 'layoutId', layoutId);
-                      if (sheetsConnected) {
-                        updateSceneFieldInSheets(currentPart.sheetName, idx, 'layoutId', layoutId).catch(() => {});
-                      }
+                      batchActionList.push(batchActions.updateSceneField(currentPart.sheetName, idx, 'layoutId', layoutId));
                     }
                   });
+
                   setBatchEditOpen(false);
+                  setBatchAssigneeValue('');
                   clearSelectedScenes();
+
+                  // Phase 0: 배치로 한 번에 전송
+                  if (batchActionList.length > 0) {
+                    batchToSheets(batchActionList)
+                      .then(() => syncInBackground())
+                      .catch((err) => {
+                        console.error('[일괄 편집 실패]', err);
+                        syncInBackground();
+                      });
+                  }
                 }}
               >
                 <div>
-                  <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">담당자 (비어있으면 건너뜀)</label>
-                  <input name="batchAssignee" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent" placeholder="담당자" />
+                  <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">담당자 (비어있으면 건너뜀)</label>
+                  <AssigneeSelect
+                    value={batchAssigneeValue}
+                    onChange={setBatchAssigneeValue}
+                    placeholder="담당자"
+                    className="mt-1"
+                  />
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모 (비어있으면 건너뜀)</label>
+                  <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모 (비어있으면 건너뜀)</label>
                   <input name="batchMemo" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent" placeholder="메모" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">레이아웃 (비어있으면 건너뜀)</label>
+                  <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">레이아웃 (비어있으면 건너뜀)</label>
                   <input name="batchLayout" className="mt-1 w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent" placeholder="레이아웃 ID" />
                 </div>
                 <button type="submit" className="w-full py-2.5 rounded-xl text-sm font-medium bg-accent hover:bg-accent/80 text-white transition-colors cursor-pointer">
@@ -2733,7 +2849,6 @@ export function ScenesView() {
             scene={detailScene}
             sceneIndex={detailSceneIndex}
             sheetName={currentPart?.sheetName ?? ''}
-            isLiveMode={sheetsConnected}
             department={selectedDepartment}
             onFieldUpdate={handleFieldUpdate}
             onToggle={handleToggle}
@@ -2831,7 +2946,7 @@ export function ScenesView() {
               {episodeTitles[currentEp.episodeNumber] || currentEp.title} 관리
             </h3>
             <div>
-              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 제목</label>
+              <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">에피소드 제목</label>
               <input
                 autoFocus
                 value={epTitleInput}
@@ -2841,7 +2956,7 @@ export function ScenesView() {
               />
             </div>
             <div>
-              <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모</label>
+              <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모</label>
               <input
                 value={epMemo}
                 onChange={(e) => setEpMemo(e.target.value)}
@@ -2944,7 +3059,7 @@ export function ScenesView() {
                 </div>
               </div>
               <div className="mb-4">
-                <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
+                <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
                 <input
                   value={archiveMemoInput}
                   onChange={(e) => setArchiveMemoInput(e.target.value)}

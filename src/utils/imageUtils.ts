@@ -1,8 +1,7 @@
 /**
  * 이미지 리사이즈/저장 유틸리티
  *
- * 테스트 모드: userData/images/ 에 로컬 파일 → bflow-img:// URL
- * 라이브 모드: GAS → Drive 업로드 → https:// URL
+ * GAS → Drive 업로드 → https:// URL
  */
 
 /** File/Blob → 리사이즈 JPEG base64 data URL */
@@ -55,26 +54,17 @@ export async function saveImage(
   sheetName: string,
   sceneId: string,
   imageType: 'storyboard' | 'guide',
-  isLiveMode: boolean,
 ): Promise<string> {
-  const typeSuffix = imageType === 'storyboard' ? 'sb' : 'guide';
-  const safeId = (sceneId || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const fileName = `${sheetName}_${safeId}_${typeSuffix}.jpg`;
-
-  if (isLiveMode) {
-    const result = await window.electronAPI.sheetsUploadImage(
-      sheetName,
-      sceneId,
-      imageType,
-      base64,
-    );
-    if (!result.ok || !result.url) {
-      throw new Error(result.error ?? '이미지 업로드 실패');
-    }
-    return result.url;
+  const result = await window.electronAPI.sheetsUploadImage(
+    sheetName,
+    sceneId,
+    imageType,
+    base64,
+  );
+  if (!result.ok || !result.url) {
+    throw new Error(result.error ?? '이미지 업로드 실패');
   }
-
-  return window.electronAPI.imageSave(fileName, base64);
+  return result.url;
 }
 
 /** Electron 클립보드에서 이미지 읽기 → 리사이즈 → 저장 → URL 반환 */
@@ -82,11 +72,10 @@ export async function pasteImageFromClipboard(
   sheetName: string,
   sceneId: string,
   imageType: 'storyboard' | 'guide',
-  isLiveMode: boolean,
 ): Promise<string | null> {
   const dataUrl = await window.electronAPI.clipboardReadImage();
   if (!dataUrl) return null;
 
   const resized = await resizeDataUrl(dataUrl);
-  return saveImage(resized, sheetName, sceneId, imageType, isLiveMode);
+  return saveImage(resized, sheetName, sceneId, imageType);
 }

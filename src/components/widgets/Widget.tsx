@@ -1,12 +1,25 @@
 import { createContext, useContext } from 'react';
-import { GripVertical, ExternalLink } from 'lucide-react';
-import { useAppStore } from '@/stores/useAppStore';
+import { ExternalLink } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 /** Dashboard에서 각 위젯을 래핑하여 widgetId를 전달하는 Context */
 export const WidgetIdContext = createContext<string | null>(null);
 /** 팝업 모드 감지 (팝업 안에서는 팝아웃 버튼 숨김, 스타일 변경) */
 export const IsPopupContext = createContext(false);
+
+/** 6-dot 드래그 핸들 아이콘 */
+function DragDots() {
+  return (
+    <svg width="8" height="12" viewBox="0 0 8 12" className="text-text-secondary/25 flex-shrink-0">
+      <circle cx="2" cy="2" r="1" fill="currentColor" />
+      <circle cx="6" cy="2" r="1" fill="currentColor" />
+      <circle cx="2" cy="6" r="1" fill="currentColor" />
+      <circle cx="6" cy="6" r="1" fill="currentColor" />
+      <circle cx="2" cy="10" r="1" fill="currentColor" />
+      <circle cx="6" cy="10" r="1" fill="currentColor" />
+    </svg>
+  );
+}
 
 interface WidgetProps {
   title: string;
@@ -18,7 +31,6 @@ interface WidgetProps {
 }
 
 export function Widget({ title, widgetId: propId, icon, headerRight, children, className }: WidgetProps) {
-  const isEditMode = useAppStore((s) => s.isEditMode);
   const ctxId = useContext(WidgetIdContext);
   const isPopup = useContext(IsPopupContext);
   const widgetId = propId ?? ctxId;
@@ -44,7 +56,6 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
         'shadow-sm',
         'hover:shadow-lg hover:border-bg-border/50',
         'transition-all duration-200 ease-out',
-        isEditMode && 'ring-1 ring-accent/30',
         className
       )}
       style={{
@@ -54,22 +65,20 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
         boxShadow: '0 8px 32px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset, 0 1px 0 rgb(var(--color-glass-highlight) / 0.12) inset',
       }}
     >
-      {/* 헤더 */}
+      {/* 헤더 — 항상 드래그 가능 */}
       <div
         className={cn(
           'widget-drag-handle flex items-center gap-2 px-4 py-3',
           'border-b border-bg-border/20 select-none',
-          isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-default',
+          'cursor-grab active:cursor-grabbing',
         )}
       >
-        {isEditMode && (
-          <GripVertical size={14} className="text-text-secondary/60 flex-shrink-0" />
-        )}
+        <DragDots />
         {icon && <span className="text-accent flex-shrink-0">{icon}</span>}
         <span className="text-sm font-medium truncate text-text-primary/90">{title}</span>
         <div className="ml-auto flex items-center gap-1">
           {headerRight}
-          {widgetId && !isEditMode && (
+          {widgetId && (
             <button
               onClick={handlePopout}
               className="p-1 rounded-md text-text-secondary/40 hover:text-accent hover:bg-accent/10 transition-colors cursor-pointer"

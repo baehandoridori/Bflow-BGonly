@@ -61,100 +61,195 @@ var FIELD_COLUMNS = {
   guideUrl: 5, assignee: 6, lo: 7, done: 8, review: 9, png: 10, layoutId: 11
 };
 
+// ─── 통합 액션 디스패처 (Phase 0: 배치 + 개별 요청 공용) ────
+
+/**
+ * 단일 액션을 실행하고 결과를 반환한다.
+ * doGet (개별 요청)과 doPost batch (배치 요청) 모두에서 호출된다.
+ *
+ * @param {string} action  액션 이름
+ * @param {Object} params  파라미터 (모든 값은 문자열, URL 파라미터와 동일 형태)
+ * @return {*} 액션 결과 (데이터가 없으면 null)
+ */
+function executeAction(action, params) {
+  switch (action) {
+    case 'ping':
+      return { pong: true };
+
+    case 'readAll':
+      return readAllEpisodes();
+
+    case 'readArchived':
+      return readArchivedEpisodes();
+
+    case 'updateCell':
+      updateSceneStage(
+        params.sheetName,
+        parseInt(params.rowIndex, 10),
+        params.stage,
+        params.value === 'true' || params.value === true
+      );
+      return null;
+
+    case 'addEpisode':
+      return addEpisode(
+        parseInt(params.episodeNumber, 10),
+        params.department || 'bg'
+      );
+
+    case 'addPart':
+      return addPart(
+        parseInt(params.episodeNumber, 10),
+        params.partId,
+        params.department || 'bg'
+      );
+
+    case 'addScene':
+      addScene(
+        params.sheetName,
+        params.sceneId || '',
+        params.assignee || '',
+        params.memo || ''
+      );
+      return null;
+
+    case 'addScenes':
+      addScenes(params.sheetName, params.scenesJson);
+      return null;
+
+    case 'deleteScene':
+      deleteScene(params.sheetName, parseInt(params.rowIndex, 10));
+      return null;
+
+    case 'updateSceneField':
+      updateSceneField(
+        params.sheetName,
+        parseInt(params.rowIndex, 10),
+        params.field,
+        params.value
+      );
+      return null;
+
+    case 'readMetadata':
+      return readMetadata(params.type, params.key);
+
+    case 'writeMetadata':
+      writeMetadata(params.type, params.key, params.value || '');
+      return null;
+
+    case 'softDeletePart':
+      softDeletePart(params.sheetName);
+      return null;
+
+    case 'softDeleteEpisode':
+      softDeleteEpisode(parseInt(params.episodeNumber, 10));
+      return null;
+
+    case 'archiveEpisode':
+      archiveEpisode(parseInt(params.episodeNumber, 10));
+      return null;
+
+    case 'unarchiveEpisode':
+      unarchiveEpisode(parseInt(params.episodeNumber, 10));
+      return null;
+
+    case 'debugImages':
+      return debugImageCells();
+
+    // Phase 0-2: _REGISTRY 관련 액션
+    case 'readRegistry':
+      return readRegistry();
+
+    case 'updateRegistryEntry':
+      updateRegistryEntry(params.sheetName, {
+        status: params.status,
+        title: params.title,
+        archivedAt: params.archivedAt,
+        archivedBy: params.archivedBy,
+        archiveMemo: params.archiveMemo,
+      });
+      return null;
+
+    case 'archiveEpisodeViaRegistry':
+      archiveEpisodeViaRegistry(
+        parseInt(params.episodeNumber, 10),
+        params.archivedBy || '',
+        params.archiveMemo || ''
+      );
+      return null;
+
+    case 'unarchiveEpisodeViaRegistry':
+      unarchiveEpisodeViaRegistry(parseInt(params.episodeNumber, 10));
+      return null;
+
+    // Phase 0-3: _COMMENTS 관련 액션
+    case 'readComments':
+      return readComments(params.sheetName);
+
+    case 'addComment':
+      addCommentToSheet(
+        params.commentId, params.sheetName, params.sceneId,
+        params.userId, params.userName, params.text,
+        params.mentions ? params.mentions.split(',') : [],
+        params.createdAt
+      );
+      return null;
+
+    case 'editComment':
+      editCommentInSheet(
+        params.commentId, params.text,
+        params.mentions ? params.mentions.split(',') : []
+      );
+      return null;
+
+    case 'deleteComment':
+      deleteCommentFromSheet(params.commentId);
+      return null;
+
+    // Phase 0-4: _USERS 관련 액션
+    case 'readUsers':
+      return readUsers();
+
+    case 'addUser':
+      addUserToSheet(
+        params.userId, params.name, params.role, params.password,
+        params.slackId, params.hireDate, params.birthday,
+        params.isInitialPassword === 'true', params.createdAt
+      );
+      return null;
+
+    case 'updateUser':
+      updateUserInSheet(params.userId, {
+        name: params.name,
+        role: params.role,
+        password: params.password,
+        slackId: params.slackId,
+        hireDate: params.hireDate,
+        birthday: params.birthday,
+        isInitialPassword: params.isInitialPassword,
+      });
+      return null;
+
+    case 'deleteUser':
+      deleteUserFromSheet(params.userId);
+      return null;
+
+    default:
+      throw new Error('Unknown action: ' + action);
+  }
+}
+
 // ─── 요청 핸들러 ─────────────────────────────────────────────
 
 function doGet(e) {
   var action = (e && e.parameter && e.parameter.action) || 'readAll';
 
   try {
-    switch (action) {
-      case 'ping':
-        return jsonResponse({ ok: true });
-
-      case 'readAll':
-        return jsonResponse({ ok: true, data: readAllEpisodes() });
-
-      case 'readArchived':
-        return jsonResponse({ ok: true, data: readArchivedEpisodes() });
-
-      case 'updateCell':
-        updateSceneStage(
-          e.parameter.sheetName,
-          parseInt(e.parameter.rowIndex, 10),
-          e.parameter.stage,
-          e.parameter.value === 'true'
-        );
-        return jsonResponse({ ok: true });
-
-      case 'addEpisode':
-        var result = addEpisode(
-          parseInt(e.parameter.episodeNumber, 10),
-          e.parameter.department || 'bg'
-        );
-        return jsonResponse({ ok: true, data: result });
-
-      case 'addPart':
-        var result2 = addPart(
-          parseInt(e.parameter.episodeNumber, 10),
-          e.parameter.partId,
-          e.parameter.department || 'bg'
-        );
-        return jsonResponse({ ok: true, data: result2 });
-
-      case 'addScene':
-        addScene(
-          e.parameter.sheetName,
-          e.parameter.sceneId || '',
-          e.parameter.assignee || '',
-          e.parameter.memo || ''
-        );
-        return jsonResponse({ ok: true });
-
-      case 'deleteScene':
-        deleteScene(
-          e.parameter.sheetName,
-          parseInt(e.parameter.rowIndex, 10)
-        );
-        return jsonResponse({ ok: true });
-
-      case 'updateSceneField':
-        updateSceneField(
-          e.parameter.sheetName,
-          parseInt(e.parameter.rowIndex, 10),
-          e.parameter.field,
-          e.parameter.value
-        );
-        return jsonResponse({ ok: true });
-
-      case 'readMetadata':
-        return jsonResponse({ ok: true, data: readMetadata(e.parameter.type, e.parameter.key) });
-
-      case 'writeMetadata':
-        writeMetadata(e.parameter.type, e.parameter.key, e.parameter.value || '');
-        return jsonResponse({ ok: true });
-
-      case 'softDeletePart':
-        softDeletePart(e.parameter.sheetName);
-        return jsonResponse({ ok: true });
-
-      case 'softDeleteEpisode':
-        softDeleteEpisode(parseInt(e.parameter.episodeNumber, 10));
-        return jsonResponse({ ok: true });
-
-      case 'archiveEpisode':
-        archiveEpisode(parseInt(e.parameter.episodeNumber, 10));
-        return jsonResponse({ ok: true });
-
-      case 'unarchiveEpisode':
-        unarchiveEpisode(parseInt(e.parameter.episodeNumber, 10));
-        return jsonResponse({ ok: true });
-
-      case 'debugImages':
-        return jsonResponse({ ok: true, data: debugImageCells() });
-
-      default:
-        return jsonResponse({ ok: false, error: 'Unknown action: ' + action });
+    var result = executeAction(action, e.parameter || {});
+    if (result === null || result === undefined) {
+      return jsonResponse({ ok: true });
     }
+    return jsonResponse({ ok: true, data: result });
   } catch (err) {
     return jsonResponse({ ok: false, error: err.toString() });
   }
@@ -166,9 +261,63 @@ function doPost(e) {
     var action = body.action;
 
     switch (action) {
+      // ─── 배치 요청 (Phase 0) ────────────────────────
+      case 'batch': {
+        if (!body.actions || !Array.isArray(body.actions)) {
+          return jsonResponse({ ok: false, error: 'batch requires actions array' });
+        }
+        if (body.actions.length === 0) {
+          return jsonResponse({ ok: true, results: [] });
+        }
+        if (body.actions.length > 20) {
+          return jsonResponse({ ok: false, error: 'batch max 20 actions' });
+        }
+
+        var results = [];
+        for (var i = 0; i < body.actions.length; i++) {
+          var op = body.actions[i];
+          try {
+            var batchResult = executeAction(op.action, op.params || {});
+            results.push({ ok: true, data: batchResult });
+          } catch (err) {
+            // 실패 즉시 중단 (fail-fast)
+            return jsonResponse({
+              ok: false,
+              error: err.toString(),
+              failedAt: i,
+              failedAction: op.action,
+              completedResults: results
+            });
+          }
+        }
+        return jsonResponse({ ok: true, results: results });
+      }
+
       case 'updateCell':
         updateSceneStage(body.sheetName, body.rowIndex, body.stage, body.value);
         return jsonResponse({ ok: true });
+
+      // Phase 0: 대량 셀 업데이트 (다중 씬 체크박스 토글)
+      case 'bulkUpdateCells': {
+        var bulkSheetName = body.sheetName;
+        var bulkUpdates = typeof body.updates === 'string' ? JSON.parse(body.updates) : body.updates;
+        if (!bulkSheetName || !bulkUpdates || !Array.isArray(bulkUpdates)) {
+          return jsonResponse({ ok: false, error: 'bulkUpdateCells requires sheetName and updates array' });
+        }
+
+        var bss = SpreadsheetApp.getActiveSpreadsheet();
+        var bSheet = bss.getSheetByName(bulkSheetName);
+        if (!bSheet) return jsonResponse({ ok: false, error: 'Sheet not found: ' + bulkSheetName });
+
+        for (var bi = 0; bi < bulkUpdates.length; bi++) {
+          var bu = bulkUpdates[bi];
+          var bCol = STAGE_COLUMNS[bu.stage];
+          if (!bCol) return jsonResponse({ ok: false, error: 'Invalid stage: ' + bu.stage });
+          bSheet.getRange(bu.rowIndex + 2, bCol).setValue(bu.value === true || bu.value === 'true');
+        }
+        SpreadsheetApp.flush();
+        return jsonResponse({ ok: true });
+      }
 
       case 'uploadImage':
         var url = uploadImageToDrive(
@@ -179,6 +328,11 @@ function doPost(e) {
           body.mimeType || 'image/jpeg'
         );
         return jsonResponse({ ok: true, url: url });
+
+      // Phase 0-5: 대량 씬 추가 (POST — scenesJson이 크므로 GET 불가)
+      case 'addScenes':
+        addScenes(body.sheetName, body.scenesJson);
+        return jsonResponse({ ok: true });
 
       default:
         return jsonResponse({ ok: false, error: 'Unknown action: ' + action });
@@ -501,8 +655,25 @@ function analyzeValue(val) {
 // ─── 전체 에피소드 데이터 읽기 ───────────────────────────────
 
 function readAllEpisodes() {
-  var tabs = getEpisodeTabs();
+  // _REGISTRY를 사용하여 활성 탭만 필터링
+  var registry = readRegistry();
   var deletedItems = getDeletedItems();
+
+  // _REGISTRY가 있으면 활성 항목만, 없으면 기존 방식 폴백
+  var activeSheets = {};  // sheetName → { episodeNumber, partId, department, title }
+  var registryTitles = {}; // episodeNumber → title (from registry)
+
+  if (registry.length > 0) {
+    for (var r = 0; r < registry.length; r++) {
+      var entry = registry[r];
+      if (entry.status === 'active') {
+        activeSheets[entry.sheetName] = entry;
+        if (entry.title) registryTitles[String(entry.episodeNumber)] = entry.title;
+      }
+    }
+  }
+
+  var tabs = getEpisodeTabs();
   var epMap = {};
 
   for (var i = 0; i < tabs.length; i++) {
@@ -511,10 +682,15 @@ function readAllEpisodes() {
     // 소프트 삭제된 파트 건너뛰기
     if (deletedItems[tab.title]) continue;
 
+    // _REGISTRY가 있으면 활성 항목만 (archived/deleted 제외)
+    if (registry.length > 0 && !activeSheets[tab.title]) continue;
+
     if (!epMap[tab.episodeNumber]) {
+      var epTitle = registryTitles[String(tab.episodeNumber)]
+        || ('EP.' + String(tab.episodeNumber).padStart(2, '0'));
       epMap[tab.episodeNumber] = {
         episodeNumber: tab.episodeNumber,
-        title: 'EP.' + String(tab.episodeNumber).padStart(2, '0'),
+        title: epTitle,
         parts: []
       };
     }
@@ -543,23 +719,48 @@ function readAllEpisodes() {
 // ─── 아카이빙된 에피소드 목록 읽기 ─────────────────────────────
 
 function readArchivedEpisodes() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheets = ss.getSheets();
+  // _REGISTRY 기반: archived 상태인 에피소드 목록
+  var registry = readRegistry();
   var epMap = {};
 
-  for (var i = 0; i < sheets.length; i++) {
-    var title = sheets[i].getName();
-    var match = title.match(AC_EP_PATTERN);
-    if (match) {
-      var epNum = parseInt(match[1], 10);
-      if (!epMap[epNum]) {
-        epMap[epNum] = {
-          episodeNumber: epNum,
-          title: 'EP.' + String(epNum).padStart(2, '0'),
-          partCount: 0
-        };
+  if (registry.length > 0) {
+    // _REGISTRY에서 archived 항목 수집
+    for (var r = 0; r < registry.length; r++) {
+      var entry = registry[r];
+      if (entry.status === 'archived') {
+        var epNum = entry.episodeNumber;
+        if (!epMap[epNum]) {
+          epMap[epNum] = {
+            episodeNumber: epNum,
+            title: entry.title || ('EP.' + String(epNum).padStart(2, '0')),
+            partCount: 0,
+            archivedBy: entry.archivedBy || '',
+            archivedAt: entry.archivedAt || '',
+            archiveMemo: entry.archiveMemo || ''
+          };
+        }
+        epMap[epNum].partCount++;
       }
-      epMap[epNum].partCount++;
+    }
+  } else {
+    // 폴백: 기존 AC_ 접두사 방식
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheets = ss.getSheets();
+
+    for (var i = 0; i < sheets.length; i++) {
+      var sheetTitle = sheets[i].getName();
+      var match = sheetTitle.match(AC_EP_PATTERN);
+      if (match) {
+        var acEpNum = parseInt(match[1], 10);
+        if (!epMap[acEpNum]) {
+          epMap[acEpNum] = {
+            episodeNumber: acEpNum,
+            title: 'EP.' + String(acEpNum).padStart(2, '0'),
+            partCount: 0
+          };
+        }
+        epMap[acEpNum].partCount++;
+      }
     }
   }
 
@@ -628,11 +829,34 @@ function addEpisode(episodeNumber, department) {
     throw new Error('유효하지 않은 에피소드 번호');
   }
 
-  var deptSuffix = department === 'acting' ? '_ACT' : '_BG';
+  var dept = department || 'bg';
+  var deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
   var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_A' + deptSuffix;
+
+  // 이미 존재하는 시트인지 확인 (소프트 삭제된 시트 복원 처리)
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var existingSheet = ss.getSheetByName(tabName);
+
+  if (existingSheet) {
+    try { existingSheet.showSheet(); } catch (e) {}
+    writeMetadata('deleted', tabName, '');
+    writeMetadata('deleted-episode', String(episodeNumber), '');
+
+    try {
+      updateRegistryEntry(tabName, { status: 'active' });
+    } catch (e) {
+      addRegistryEntry(tabName, episodeNumber, 'A', dept, '');
+    }
+
+    return { sheetName: tabName, episodeNumber: episodeNumber, partId: 'A', department: dept };
+  }
+
   createSheetTab(tabName);
 
-  return { sheetName: tabName, episodeNumber: episodeNumber, partId: 'A', department: department || 'bg' };
+  // _REGISTRY에 등록
+  addRegistryEntry(tabName, episodeNumber, 'A', dept, '');
+
+  return { sheetName: tabName, episodeNumber: episodeNumber, partId: 'A', department: dept };
 }
 
 // ─── 파트 추가 ───────────────────────────────────────────────
@@ -647,11 +871,38 @@ function addPart(episodeNumber, partId, department) {
     throw new Error('파트 ID는 A-Z 대문자 1글자여야 합니다');
   }
 
-  var deptSuffix = department === 'acting' ? '_ACT' : '_BG';
+  var dept = department || 'bg';
+  var deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
   var tabName = 'EP' + String(episodeNumber).padStart(2, '0') + '_' + partId + deptSuffix;
+
+  // 이미 존재하는 시트인지 확인 (소프트 삭제된 시트 복원 처리)
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var existingSheet = ss.getSheetByName(tabName);
+
+  if (existingSheet) {
+    // 숨겨진(소프트 삭제된) 시트 → 복원하여 재사용
+    try { existingSheet.showSheet(); } catch (e) {}
+
+    // _METADATA에서 삭제 마킹 해제
+    writeMetadata('deleted', tabName, '');
+
+    // _REGISTRY 상태를 'active'로 복원
+    try {
+      updateRegistryEntry(tabName, { status: 'active' });
+    } catch (e) {
+      // 레지스트리에 없으면 새로 등록
+      addRegistryEntry(tabName, episodeNumber, partId, dept, '');
+    }
+
+    return { sheetName: tabName, episodeNumber: episodeNumber, partId: partId, department: dept };
+  }
+
   createSheetTab(tabName);
 
-  return { sheetName: tabName, episodeNumber: episodeNumber, partId: partId, department: department || 'bg' };
+  // _REGISTRY에 등록
+  addRegistryEntry(tabName, episodeNumber, partId, dept, '');
+
+  return { sheetName: tabName, episodeNumber: episodeNumber, partId: partId, department: dept };
 }
 
 // ─── 씬 추가 ─────────────────────────────────────────────────
@@ -672,6 +923,49 @@ function addScene(sheetName, sceneId, assignee, memo) {
   // 새 행 추가 (K열: 레이아웃 — 빈 값)
   var newRow = [nextNo, sceneId || '', memo || '', '', '', assignee || '', false, false, false, false, ''];
   sheet.appendRow(newRow);
+}
+
+// ─── 대량 씬 추가 (Phase 0-5) ───────────────────────────────
+
+/**
+ * 여러 씬을 한 번에 추가한다 (setValues 사용 — 70개도 1~2초).
+ * @param {string} sheetName  시트 이름
+ * @param {string} scenesJson  JSON 문자열: [{ sceneId, assignee, memo }, ...]
+ */
+function addScenes(sheetName, scenesJson) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('Sheet not found: ' + sheetName);
+
+  var scenes;
+  try { scenes = JSON.parse(scenesJson); } catch (e) { throw new Error('Invalid scenes JSON'); }
+  if (!scenes || scenes.length === 0) return;
+
+  // 다음 No 계산
+  var lastRow = sheet.getLastRow();
+  var nextNo = 1;
+  if (lastRow >= 2) {
+    var lastNo = sheet.getRange(lastRow, 1).getValue();
+    nextNo = (parseInt(lastNo, 10) || lastRow - 1) + 1;
+  }
+
+  // 전체 행 데이터 배열 생성
+  var rows = [];
+  for (var i = 0; i < scenes.length; i++) {
+    var s = scenes[i];
+    rows.push([
+      nextNo + i,
+      s.sceneId || '',
+      s.memo || '',
+      '', '', // storyboardUrl, guideUrl
+      s.assignee || '',
+      false, false, false, false, // lo, done, review, png
+      '' // layoutId
+    ]);
+  }
+
+  // setValues로 한 번에 기록 (appendRow x N 대비 극적으로 빠름)
+  sheet.getRange(lastRow + 1, 1, rows.length, 11).setValues(rows);
 }
 
 // ─── 씬 삭제 ─────────────────────────────────────────────────
@@ -858,6 +1152,10 @@ function writeMetadata(type, key, value) {
         // 업서트: 기존 행 갱신
         sheet.getRange(i + 2, 3).setValue(value);
         sheet.getRange(i + 2, 4).setValue(now);
+        // _REGISTRY에도 제목 동기화
+        if (type === 'episode-title') {
+          syncTitleToRegistry(parseInt(key, 10), value);
+        }
         return;
       }
     }
@@ -865,14 +1163,34 @@ function writeMetadata(type, key, value) {
 
   // 새 행 추가
   sheet.appendRow([type, key, value, now]);
+
+  // _REGISTRY에도 제목 동기화
+  if (type === 'episode-title') {
+    syncTitleToRegistry(parseInt(key, 10), value);
+  }
 }
 
 /**
- * 파트를 소프트 삭제한다 (_METADATA에 기록).
+ * 파트를 소프트 삭제한다 (_METADATA에 기록 + 실제 시트 숨김 + _REGISTRY 상태 변경).
  * @param {string} sheetName 시트 이름
  */
 function softDeletePart(sheetName) {
   writeMetadata('deleted', sheetName, 'true');
+
+  // 실제 시트 탭을 숨김 처리
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (sheet) {
+    try { sheet.hideSheet(); } catch (e) {
+      // 시트가 1개뿐이면 숨길 수 없음 — 무시
+      Logger.log('시트 숨김 실패 (마지막 시트?): ' + e.toString());
+    }
+  }
+
+  // _REGISTRY 상태를 'deleted'로 변경
+  try { updateRegistryEntry(sheetName, { status: 'deleted' }); } catch (e) {
+    Logger.log('레지스트리 상태 변경 실패: ' + e.toString());
+  }
 }
 
 /**
@@ -953,4 +1271,453 @@ function getDeletedItems() {
     }
   }
   return deleted;
+}
+
+// ─── _REGISTRY 시트 관리 (Phase 0-2) ──────────────────────────
+
+/**
+ * 에피소드 제목을 _REGISTRY의 모든 관련 행에 동기화한다.
+ */
+function syncTitleToRegistry(episodeNumber, title) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var regSheet = ss.getSheetByName('_REGISTRY');
+    if (!regSheet) return; // 아직 _REGISTRY가 없으면 무시
+
+    var lastRow = regSheet.getLastRow();
+    if (lastRow < 2) return;
+
+    var data = regSheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+    var now = new Date().toISOString();
+    for (var i = 0; i < data.length; i++) {
+      if (parseInt(data[i][1], 10) === episodeNumber) {
+        regSheet.getRange(i + 2, 6).setValue(title);  // title 열
+        regSheet.getRange(i + 2, 10).setValue(now);     // updatedAt 열
+      }
+    }
+  } catch (e) {
+    // 레지스트리 동기화 실패는 무시 (메타데이터가 primary)
+    Logger.log('syncTitleToRegistry error: ' + e.toString());
+  }
+}
+
+var REGISTRY_SHEET_NAME = '_REGISTRY';
+var REGISTRY_HEADERS = ['sheetName', 'episodeNumber', 'partId', 'department', 'status', 'title', 'archivedAt', 'archivedBy', 'archiveMemo', 'updatedAt'];
+
+/**
+ * _REGISTRY 시트를 가져온다 (없으면 생성 + 기존 데이터 마이그레이션).
+ */
+function ensureRegistrySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(REGISTRY_SHEET_NAME);
+  if (sheet) return sheet;
+
+  // _REGISTRY 신규 생성
+  sheet = ss.insertSheet(REGISTRY_SHEET_NAME);
+  sheet.getRange(1, 1, 1, REGISTRY_HEADERS.length).setValues([REGISTRY_HEADERS]);
+  sheet.getRange(1, 1, 1, REGISTRY_HEADERS.length).setFontWeight('bold').setBackground('#E8F5E9');
+
+  // 기존 데이터 마이그레이션
+  migrateToRegistry(ss, sheet);
+
+  return sheet;
+}
+
+/**
+ * 기존 탭 이름 + _METADATA에서 _REGISTRY로 마이그레이션한다.
+ */
+function migrateToRegistry(ss, registrySheet) {
+  var sheets = ss.getSheets();
+  var metaSheet = ss.getSheetByName(METADATA_SHEET_NAME);
+  var now = new Date().toISOString();
+
+  // 1. _METADATA에서 에피소드 제목/아카이브 정보 수집
+  var titles = {};      // episodeNumber → title
+  var archiveInfos = {}; // episodeNumber → { by, at, memo }
+
+  if (metaSheet) {
+    var metaLastRow = metaSheet.getLastRow();
+    if (metaLastRow >= 2) {
+      var metaData = metaSheet.getRange(2, 1, metaLastRow - 1, 4).getValues();
+      for (var m = 0; m < metaData.length; m++) {
+        var mType = String(metaData[m][0]);
+        var mKey = String(metaData[m][1]);
+        var mVal = String(metaData[m][2]);
+        if (mType === 'episode-title' && mVal) {
+          titles[mKey] = mVal;
+        }
+        if (mType === 'archive-info' && mVal) {
+          try { archiveInfos[mKey] = JSON.parse(mVal); } catch (e) {}
+        }
+      }
+    }
+  }
+
+  // 2. 활성 탭 (EP_) 등록
+  var rows = [];
+  for (var i = 0; i < sheets.length; i++) {
+    var name = sheets[i].getName();
+
+    // 활성 에피소드 탭
+    var match = name.match(EP_PATTERN);
+    if (match) {
+      var epNum = parseInt(match[1], 10);
+      var dept = match[3] === 'ACT' ? 'acting' : 'bg';
+      rows.push([
+        name, epNum, match[2], dept, 'active',
+        titles[String(epNum)] || '', '', '', '', now
+      ]);
+      continue;
+    }
+
+    // 아카이빙된 탭 (AC_EP_)
+    var acMatch = name.match(AC_EP_PATTERN);
+    if (acMatch) {
+      var acEpNum = parseInt(acMatch[1], 10);
+      var acDept = acMatch[3] === 'ACT' ? 'acting' : 'bg';
+      var info = archiveInfos[String(acEpNum)] || {};
+      rows.push([
+        name, acEpNum, acMatch[2], acDept, 'archived',
+        titles[String(acEpNum)] || '', info.at || '', info.by || '', info.memo || '', now
+      ]);
+    }
+  }
+
+  if (rows.length > 0) {
+    registrySheet.getRange(2, 1, rows.length, REGISTRY_HEADERS.length).setValues(rows);
+  }
+}
+
+/**
+ * _REGISTRY에서 전체 데이터를 읽는다.
+ * @return {Array<Object>} 레지스트리 항목 배열
+ */
+function readRegistry() {
+  var sheet = ensureRegistrySheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+  var result = [];
+  for (var i = 0; i < data.length; i++) {
+    result.push({
+      sheetName: String(data[i][0]),
+      episodeNumber: parseInt(data[i][1], 10),
+      partId: String(data[i][2]),
+      department: String(data[i][3]),
+      status: String(data[i][4]),
+      title: String(data[i][5]),
+      archivedAt: String(data[i][6]),
+      archivedBy: String(data[i][7]),
+      archiveMemo: String(data[i][8]),
+      updatedAt: String(data[i][9])
+    });
+  }
+  return result;
+}
+
+/**
+ * _REGISTRY에서 특정 시트의 항목을 업데이트한다.
+ * @param {string} sheetName  시트 이름
+ * @param {Object} updates    업데이트할 필드 (status, title, archivedAt, archivedBy, archiveMemo)
+ */
+function updateRegistryEntry(sheetName, updates) {
+  var sheet = ensureRegistrySheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('레지스트리가 비어있습니다');
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+  var now = new Date().toISOString();
+
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === sheetName) {
+      var row = i + 2;
+      if (updates.status !== undefined) sheet.getRange(row, 5).setValue(updates.status);
+      if (updates.title !== undefined) sheet.getRange(row, 6).setValue(updates.title);
+      if (updates.archivedAt !== undefined) sheet.getRange(row, 7).setValue(updates.archivedAt);
+      if (updates.archivedBy !== undefined) sheet.getRange(row, 8).setValue(updates.archivedBy);
+      if (updates.archiveMemo !== undefined) sheet.getRange(row, 9).setValue(updates.archiveMemo);
+      sheet.getRange(row, 10).setValue(now);
+      return;
+    }
+  }
+  throw new Error('레지스트리에 없는 시트: ' + sheetName);
+}
+
+/**
+ * _REGISTRY에 새 항목을 추가한다.
+ * @param {string} sheetName  시트 이름
+ * @param {number} episodeNumber  에피소드 번호
+ * @param {string} partId  파트 ID
+ * @param {string} department  부서
+ * @param {string} title  에피소드 제목
+ */
+function addRegistryEntry(sheetName, episodeNumber, partId, department, title) {
+  var sheet = ensureRegistrySheet();
+  var now = new Date().toISOString();
+  sheet.appendRow([sheetName, episodeNumber, partId, department, 'active', title || '', '', '', '', now]);
+}
+
+/**
+ * _REGISTRY 기반 에피소드 아카이빙 (Phase 0-2)
+ * 탭 이름은 바꾸지 않고, _REGISTRY의 status만 'archived'로 변경
+ * @param {number} episodeNumber
+ * @param {string} archivedBy
+ * @param {string} archiveMemo
+ */
+function archiveEpisodeViaRegistry(episodeNumber, archivedBy, archiveMemo) {
+  var sheet = ensureRegistrySheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+  var now = new Date().toLocaleDateString('ko-KR');
+  var isoNow = new Date().toISOString();
+
+  for (var i = 0; i < data.length; i++) {
+    if (parseInt(data[i][1], 10) === episodeNumber && String(data[i][4]) === 'active') {
+      var row = i + 2;
+      sheet.getRange(row, 5).setValue('archived');
+      sheet.getRange(row, 7).setValue(now);
+      sheet.getRange(row, 8).setValue(archivedBy || '');
+      sheet.getRange(row, 9).setValue(archiveMemo || '');
+      sheet.getRange(row, 10).setValue(isoNow);
+    }
+  }
+}
+
+/**
+ * _REGISTRY 기반 에피소드 아카이빙 해제 (Phase 0-2)
+ * @param {number} episodeNumber
+ */
+function unarchiveEpisodeViaRegistry(episodeNumber) {
+  var sheet = ensureRegistrySheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REGISTRY_HEADERS.length).getValues();
+  var isoNow = new Date().toISOString();
+
+  for (var i = 0; i < data.length; i++) {
+    if (parseInt(data[i][1], 10) === episodeNumber && String(data[i][4]) === 'archived') {
+      var row = i + 2;
+      sheet.getRange(row, 5).setValue('active');
+      sheet.getRange(row, 7).setValue('');
+      sheet.getRange(row, 8).setValue('');
+      sheet.getRange(row, 9).setValue('');
+      sheet.getRange(row, 10).setValue(isoNow);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Phase 0-3: _COMMENTS 탭 — 댓글 동기화
+// ═══════════════════════════════════════════════════════════════
+
+var COMMENTS_SHEET_NAME = '_COMMENTS';
+var COMMENTS_HEADERS = ['commentId', 'sheetName', 'sceneId', 'userId', 'userName', 'text', 'mentions', 'createdAt', 'editedAt'];
+
+/**
+ * _COMMENTS 시트를 가져온다 (없으면 생성).
+ */
+function ensureCommentsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(COMMENTS_SHEET_NAME);
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet(COMMENTS_SHEET_NAME);
+  sheet.getRange(1, 1, 1, COMMENTS_HEADERS.length).setValues([COMMENTS_HEADERS]);
+  sheet.getRange(1, 1, 1, COMMENTS_HEADERS.length).setFontWeight('bold').setBackground('#E3F2FD');
+  return sheet;
+}
+
+/**
+ * 특정 파트(sheetName)의 댓글을 읽는다 — 파트별 지연 로딩용.
+ * @param {string} sheetName  시트 이름 (예: EP01_A_BG)
+ * @return {Array<Object>} 댓글 배열
+ */
+function readComments(sheetName) {
+  var sheet = ensureCommentsSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, COMMENTS_HEADERS.length).getValues();
+  var result = [];
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][1]) === sheetName) {
+      result.push({
+        commentId: String(data[i][0]),
+        sheetName: String(data[i][1]),
+        sceneId: String(data[i][2]),
+        userId: String(data[i][3]),
+        userName: String(data[i][4]),
+        text: String(data[i][5]),
+        mentions: String(data[i][6]) ? String(data[i][6]).split(',') : [],
+        createdAt: String(data[i][7]),
+        editedAt: String(data[i][8]) || ''
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * 댓글을 추가한다.
+ */
+function addCommentToSheet(commentId, sheetName, sceneId, userId, userName, text, mentions, createdAt) {
+  var sheet = ensureCommentsSheet();
+  sheet.appendRow([
+    commentId, sheetName, sceneId, userId, userName, text,
+    (mentions || []).join(','),
+    createdAt || new Date().toISOString(),
+    ''
+  ]);
+}
+
+/**
+ * 댓글을 수정한다.
+ */
+function editCommentInSheet(commentId, text, mentions) {
+  var sheet = ensureCommentsSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('댓글을 찾을 수 없습니다');
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === commentId) {
+      var row = i + 2;
+      sheet.getRange(row, 6).setValue(text);
+      sheet.getRange(row, 7).setValue((mentions || []).join(','));
+      sheet.getRange(row, 9).setValue(new Date().toISOString());
+      return;
+    }
+  }
+  throw new Error('댓글을 찾을 수 없습니다: ' + commentId);
+}
+
+/**
+ * 댓글을 삭제한다.
+ */
+function deleteCommentFromSheet(commentId) {
+  var sheet = ensureCommentsSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = data.length - 1; i >= 0; i--) {
+    if (String(data[i][0]) === commentId) {
+      sheet.deleteRow(i + 2);
+      return;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Phase 0-4: _USERS 탭 — 사용자 계정 동기화
+// ═══════════════════════════════════════════════════════════════
+
+var USERS_SHEET_NAME = '_USERS';
+var USERS_HEADERS = ['userId', 'name', 'role', 'password', 'slackId', 'hireDate', 'birthday', 'isInitialPassword', 'createdAt'];
+
+/**
+ * _USERS 시트를 가져온다 (없으면 생성).
+ */
+function ensureUsersSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(USERS_SHEET_NAME);
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet(USERS_SHEET_NAME);
+  sheet.getRange(1, 1, 1, USERS_HEADERS.length).setValues([USERS_HEADERS]);
+  sheet.getRange(1, 1, 1, USERS_HEADERS.length).setFontWeight('bold').setBackground('#FFF3E0');
+  return sheet;
+}
+
+/**
+ * 전체 사용자 목록을 읽는다.
+ */
+function readUsers() {
+  var sheet = ensureUsersSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, USERS_HEADERS.length).getValues();
+  var result = [];
+  for (var i = 0; i < data.length; i++) {
+    var pw = String(data[i][3]);
+    // Base64 디코딩
+    var decodedPw = '';
+    try { decodedPw = Utilities.newBlob(Utilities.base64Decode(pw)).getDataAsString(); } catch (e) { decodedPw = pw; }
+    result.push({
+      id: String(data[i][0]),
+      name: String(data[i][1]),
+      role: String(data[i][2]) || 'user',
+      password: decodedPw,
+      slackId: String(data[i][4]),
+      hireDate: String(data[i][5]),
+      birthday: String(data[i][6]),
+      isInitialPassword: String(data[i][7]) === 'true',
+      createdAt: String(data[i][8])
+    });
+  }
+  return result;
+}
+
+/**
+ * 사용자를 추가한다.
+ */
+function addUserToSheet(userId, name, role, password, slackId, hireDate, birthday, isInitialPassword, createdAt) {
+  var sheet = ensureUsersSheet();
+  // Base64 인코딩
+  var encodedPw = Utilities.base64Encode(password || '1234');
+  sheet.appendRow([
+    userId, name, role || 'user', encodedPw, slackId || '',
+    hireDate || '', birthday || '',
+    isInitialPassword ? 'true' : 'false',
+    createdAt || new Date().toISOString()
+  ]);
+}
+
+/**
+ * 사용자 정보를 업데이트한다.
+ */
+function updateUserInSheet(userId, updates) {
+  var sheet = ensureUsersSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('사용자를 찾을 수 없습니다');
+
+  var data = sheet.getRange(2, 1, lastRow - 1, USERS_HEADERS.length).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === userId) {
+      var row = i + 2;
+      if (updates.name !== undefined) sheet.getRange(row, 2).setValue(updates.name);
+      if (updates.role !== undefined) sheet.getRange(row, 3).setValue(updates.role);
+      if (updates.password !== undefined) {
+        sheet.getRange(row, 4).setValue(Utilities.base64Encode(updates.password));
+      }
+      if (updates.slackId !== undefined) sheet.getRange(row, 5).setValue(updates.slackId);
+      if (updates.hireDate !== undefined) sheet.getRange(row, 6).setValue(updates.hireDate);
+      if (updates.birthday !== undefined) sheet.getRange(row, 7).setValue(updates.birthday);
+      if (updates.isInitialPassword !== undefined) sheet.getRange(row, 8).setValue(updates.isInitialPassword);
+      return;
+    }
+  }
+  throw new Error('사용자를 찾을 수 없습니다: ' + userId);
+}
+
+/**
+ * 사용자를 삭제한다.
+ */
+function deleteUserFromSheet(userId) {
+  var sheet = ensureUsersSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (var i = data.length - 1; i >= 0; i--) {
+    if (String(data[i][0]) === userId) {
+      sheet.deleteRow(i + 2);
+      return;
+    }
+  }
 }

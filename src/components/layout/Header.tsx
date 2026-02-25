@@ -10,6 +10,8 @@ interface HeaderProps {
 
 export function Header({ onRefresh }: HeaderProps) {
   const { currentView, colorMode, toggleColorMode } = useAppStore();
+  const episodeDashboardEp = useAppStore((s) => s.episodeDashboardEp);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
   const { isSyncing, lastSyncTime } = useDataStore();
 
   const VIEW_TITLES: Record<string, string> = {
@@ -21,6 +23,11 @@ export function Header({ onRefresh }: HeaderProps) {
     settings: '설정',
   };
 
+  // 에피소드 대시보드 모드일 때 제목 변경
+  const headerTitle = currentView === 'dashboard' && episodeDashboardEp !== null
+    ? `${episodeTitles[episodeDashboardEp] || `EP.${String(episodeDashboardEp).padStart(2, '0')}`} 대시보드`
+    : (VIEW_TITLES[currentView] ?? '');
+
   const lastSyncLabel = lastSyncTime
     ? `마지막 동기화: ${new Date(lastSyncTime).toLocaleTimeString('ko-KR')}`
     : '동기화 대기 중';
@@ -28,7 +35,7 @@ export function Header({ onRefresh }: HeaderProps) {
   return (
     <header className="h-14 bg-bg-card border-b border-bg-border flex items-center justify-between px-6">
       {/* 왼쪽: 현재 뷰 제목 */}
-      <h1 className="text-lg font-semibold">{VIEW_TITLES[currentView] ?? ''}</h1>
+      <h1 className="text-lg font-semibold">{headerTitle}</h1>
 
       {/* 오른쪽: 액션 버튼들 */}
       <div className="flex items-center gap-3">

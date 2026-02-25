@@ -55,6 +55,103 @@ async function gasFetch(
   throw new Error('리다이렉트 횟수 초과');
 }
 
+// ─── 재시도 래퍼 (Phase 0: 자동 재시도) ────────────────────────
+
+const MAX_RETRIES = 2;
+const RETRY_DELAYS = [1000, 3000]; // 1초, 3초
+
+function isRetryable(status: number): boolean {
+  return status >= 500 || status === 429;
+}
+
+async function gasFetchWithRetry(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await gasFetch(url, options);
+
+      if (!res.ok && isRetryable(res.status) && attempt < MAX_RETRIES) {
+        console.warn(
+          `[Sheets] HTTP ${res.status}, 재시도 ${attempt + 1}/${MAX_RETRIES} (${RETRY_DELAYS[attempt]}ms 후)`
+        );
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+
+      return res;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+
+      if (attempt < MAX_RETRIES) {
+        console.warn(
+          `[Sheets] 네트워크 오류, 재시도 ${attempt + 1}/${MAX_RETRIES} (${RETRY_DELAYS[attempt]}ms 후):`,
+          lastError.message
+        );
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+    }
+  }
+
+  throw lastError ?? new Error('요청 실패 (재시도 소진)');
+}
+
+// ─── Batch POST 호출 (Phase 0) ─────────────────────────────
+
+export async function gasBatch(actions: BatchAction[]): Promise<BatchResponse> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  if (actions.length === 0) return { ok: true, results: [] };
+
+  const res = await gasFetchWithRetry(webAppUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'batch',
+      actions,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json() as BatchResponse;
+  if (!json.ok) {
+    const detail = json.failedAction
+      ? ` (action #${json.failedAt}: ${json.failedAction})`
+      : '';
+    throw new Error((json.error ?? '배치 요청 실패') + detail);
+  }
+
+  return json;
+}
+
+// ─── 대량 셀 업데이트 (다중 씬 체크박스 토글) ─────────────────
+
+export async function bulkUpdateCells(
+  sheetName: string,
+  updates: { rowIndex: number; stage: string; value: boolean }[]
+): Promise<void> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  if (updates.length === 0) return;
+
+  const res = await gasFetchWithRetry(webAppUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'bulkUpdateCells',
+      sheetName,
+      updates,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '대량 셀 업데이트 실패');
+}
+
 // ─── 연결 ─────────────────────────────────────────────────────
 
 export async function initSheets(url: string): Promise<boolean> {
@@ -88,6 +185,27 @@ export function isConnected(): boolean {
 // ─── 데이터 타입 ──────────────────────────────────────────────
 
 export type Department = 'bg' | 'acting';
+
+// ─── Batch 요청 타입 (Phase 0) ──────────────────────────────
+
+export interface BatchAction {
+  action: string;
+  params: Record<string, string>;
+}
+
+export interface BatchResultItem {
+  ok: boolean;
+  data?: unknown;
+}
+
+export interface BatchResponse {
+  ok: boolean;
+  results?: BatchResultItem[];
+  error?: string;
+  failedAt?: number;
+  failedAction?: string;
+  completedResults?: BatchResultItem[];
+}
 
 export interface EpisodeData {
   episodeNumber: number;
@@ -153,7 +271,7 @@ function parseDepartmentFromSheetName(sheetName: string): Department {
 export async function readAllEpisodes(): Promise<EpisodeData[]> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
 
-  const res = await gasFetch(`${webAppUrl}?action=readAll`);
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readAll`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json();
@@ -191,7 +309,7 @@ async function gasGet(params: Record<string, string>): Promise<void> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
 
   const qs = new URLSearchParams(params);
-  const res = await gasFetch(`${webAppUrl}?${qs}`);
+  const res = await gasFetchWithRetry(`${webAppUrl}?${qs}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json() as { ok: boolean; error?: string };
@@ -235,6 +353,28 @@ export async function addScene(
   await gasGet({ action: 'addScene', sheetName, sceneId, assignee, memo });
 }
 
+// ─── 대량 씬 추가 (Phase 0-5) ─────────────────────────────────
+
+export async function addScenes(
+  sheetName: string,
+  scenes: { sceneId: string; assignee: string; memo: string }[]
+): Promise<void> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+
+  const res = await gasFetchWithRetry(webAppUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'addScenes',
+      sheetName,
+      scenesJson: JSON.stringify(scenes),
+    }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '대량 씬 추가 실패');
+}
+
 // ─── 씬 삭제 ──────────────────────────────────────────────────
 
 export async function deleteScene(sheetName: string, rowIndex: number): Promise<void> {
@@ -255,7 +395,7 @@ export async function readMetadata(type: string, key: string): Promise<{ type: s
   if (!webAppUrl) throw new Error('Sheets 미연결');
 
   const qs = new URLSearchParams({ action: 'readMetadata', type, key });
-  const res = await gasFetch(`${webAppUrl}?${qs}`);
+  const res = await gasFetchWithRetry(`${webAppUrl}?${qs}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json() as { ok: boolean; data?: any; error?: string };
@@ -285,13 +425,143 @@ export async function unarchiveEpisode(episodeNumber: number): Promise<void> {
   await gasGet({ action: 'unarchiveEpisode', episodeNumber: String(episodeNumber) });
 }
 
-export async function readArchivedEpisodes(): Promise<{ episodeNumber: number; title: string; partCount: number }[]> {
+export async function readArchivedEpisodes(): Promise<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; archiveMemo?: string }[]> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
-  const res = await gasFetch(`${webAppUrl}?action=readArchived`);
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readArchived`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json() as { ok: boolean; data?: any; error?: string };
   if (!json.ok) throw new Error(json.error ?? '아카이빙 목록 읽기 실패');
   return json.data ?? [];
+}
+
+// ─── _REGISTRY (Phase 0-2) ────────────────────────────────────
+
+export interface RegistryEntry {
+  sheetName: string;
+  episodeNumber: number;
+  partId: string;
+  department: string;
+  status: string;
+  title: string;
+  archivedAt: string;
+  archivedBy: string;
+  archiveMemo: string;
+  updatedAt: string;
+}
+
+export async function readRegistry(): Promise<RegistryEntry[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readRegistry`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; data?: RegistryEntry[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '레지스트리 읽기 실패');
+  return json.data ?? [];
+}
+
+export async function archiveEpisodeViaRegistry(
+  episodeNumber: number, archivedBy: string, archiveMemo: string
+): Promise<void> {
+  await gasGet({
+    action: 'archiveEpisodeViaRegistry',
+    episodeNumber: String(episodeNumber),
+    archivedBy,
+    archiveMemo,
+  });
+}
+
+export async function unarchiveEpisodeViaRegistry(episodeNumber: number): Promise<void> {
+  await gasGet({
+    action: 'unarchiveEpisodeViaRegistry',
+    episodeNumber: String(episodeNumber),
+  });
+}
+
+// ─── _USERS (Phase 0-4) ───────────────────────────────────────
+
+export interface SheetUser {
+  id: string;
+  name: string;
+  role: string;
+  password: string;
+  slackId: string;
+  hireDate: string;
+  birthday: string;
+  isInitialPassword: boolean;
+  createdAt: string;
+}
+
+export async function readUsersFromSheets(): Promise<SheetUser[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readUsers`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; data?: SheetUser[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '사용자 읽기 실패');
+  return json.data ?? [];
+}
+
+export async function addUserToSheets(user: SheetUser): Promise<void> {
+  await gasGet({
+    action: 'addUser',
+    userId: user.id, name: user.name, role: user.role || 'user',
+    password: user.password, slackId: user.slackId || '',
+    hireDate: user.hireDate || '', birthday: user.birthday || '',
+    isInitialPassword: String(user.isInitialPassword),
+    createdAt: user.createdAt,
+  });
+}
+
+export async function updateUserInSheets(userId: string, updates: Record<string, string>): Promise<void> {
+  await gasGet({ action: 'updateUser', userId, ...updates });
+}
+
+export async function deleteUserFromSheets(userId: string): Promise<void> {
+  await gasGet({ action: 'deleteUser', userId });
+}
+
+// ─── _COMMENTS (Phase 0-3) ────────────────────────────────────
+
+export interface SheetComment {
+  commentId: string;
+  sheetName: string;
+  sceneId: string;
+  userId: string;
+  userName: string;
+  text: string;
+  mentions: string[];
+  createdAt: string;
+  editedAt: string;
+}
+
+export async function readCommentsForPart(sheetName: string): Promise<SheetComment[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readComments&sheetName=${encodeURIComponent(sheetName)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; data?: SheetComment[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '댓글 읽기 실패');
+  return json.data ?? [];
+}
+
+export async function addCommentToSheets(
+  commentId: string, sheetName: string, sceneId: string,
+  userId: string, userName: string, text: string,
+  mentions: string[], createdAt: string
+): Promise<void> {
+  await gasGet({
+    action: 'addComment', commentId, sheetName, sceneId,
+    userId, userName, text, mentions: mentions.join(','), createdAt,
+  });
+}
+
+export async function editCommentInSheets(
+  commentId: string, text: string, mentions: string[]
+): Promise<void> {
+  await gasGet({
+    action: 'editComment', commentId, text, mentions: mentions.join(','),
+  });
+}
+
+export async function deleteCommentFromSheets(commentId: string): Promise<void> {
+  await gasGet({ action: 'deleteComment', commentId });
 }
 
 // ─── 이미지 업로드 (Drive에 저장 → URL 반환) ──────────────────
@@ -312,7 +582,7 @@ export async function uploadImage(
   const rawBase64 = match[2];
 
   // POST로 이미지 데이터 전송 (URL 길이 제한 회피)
-  const res = await gasFetch(webAppUrl, {
+  const res = await gasFetchWithRetry(webAppUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

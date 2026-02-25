@@ -1,8 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // 앱 모드
-  getMode: () => ipcRenderer.invoke('settings:get-mode'),
+  // 앱 설정
   getDataPath: () => ipcRenderer.invoke('settings:get-path'),
 
   // 사용자 파일 (base64 인코딩 JSON — exe 옆 또는 test-data/)
@@ -13,12 +12,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readSettings: (fileName: string) => ipcRenderer.invoke('settings:read', fileName),
   writeSettings: (fileName: string, data: unknown) =>
     ipcRenderer.invoke('settings:write', fileName, data),
-
-  // 테스트 모드 로컬 시트 데이터
-  testGetSheetPath: () => ipcRenderer.invoke('test:get-sheet-path'),
-  testReadSheet: (filePath: string) => ipcRenderer.invoke('test:read-sheet', filePath),
-  testWriteSheet: (filePath: string, data: unknown) =>
-    ipcRenderer.invoke('test:write-sheet', filePath, data),
 
   // 실시간 동기화: 다른 사용자가 시트 파일을 변경했을 때 알림
   onSheetChanged: (callback: () => void) => {
@@ -78,6 +71,47 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('sheets:archive-episode', episodeNumber),
   sheetsUnarchiveEpisode: (episodeNumber: number) =>
     ipcRenderer.invoke('sheets:unarchive-episode', episodeNumber),
+
+  // 배치 요청 (Phase 0: 여러 작업을 한 번에)
+  sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
+    ipcRenderer.invoke('sheets:batch', actions),
+
+  // 대량 셀 업데이트 (다중 씬 체크박스 토글)
+  sheetsBulkUpdateCells: (sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) =>
+    ipcRenderer.invoke('sheets:bulk-update-cells', sheetName, updates),
+
+  // 대량 씬 추가 (Phase 0-5)
+  sheetsAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) =>
+    ipcRenderer.invoke('sheets:add-scenes', sheetName, scenes),
+
+  // _USERS (Phase 0-4: 사용자 동기화)
+  sheetsReadUsers: () =>
+    ipcRenderer.invoke('sheets:read-users'),
+  sheetsAddUser: (user: unknown) =>
+    ipcRenderer.invoke('sheets:add-user', user),
+  sheetsUpdateUser: (userId: string, updates: Record<string, string>) =>
+    ipcRenderer.invoke('sheets:update-user', userId, updates),
+  sheetsDeleteUser: (userId: string) =>
+    ipcRenderer.invoke('sheets:delete-user', userId),
+
+  // _COMMENTS (Phase 0-3: 댓글 동기화)
+  sheetsReadComments: (sheetName: string) =>
+    ipcRenderer.invoke('sheets:read-comments', sheetName),
+  sheetsAddComment: (commentId: string, sheetName: string, sceneId: string,
+    userId: string, userName: string, text: string, mentions: string[], createdAt: string) =>
+    ipcRenderer.invoke('sheets:add-comment', commentId, sheetName, sceneId, userId, userName, text, mentions, createdAt),
+  sheetsEditComment: (commentId: string, text: string, mentions: string[]) =>
+    ipcRenderer.invoke('sheets:edit-comment', commentId, text, mentions),
+  sheetsDeleteComment: (commentId: string) =>
+    ipcRenderer.invoke('sheets:delete-comment', commentId),
+
+  // _REGISTRY (Phase 0-2: 에피소드/파트 중앙 관리)
+  sheetsReadRegistry: () =>
+    ipcRenderer.invoke('sheets:read-registry'),
+  sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) =>
+    ipcRenderer.invoke('sheets:archive-episode-via-registry', episodeNumber, archivedBy, archiveMemo),
+  sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) =>
+    ipcRenderer.invoke('sheets:unarchive-episode-via-registry', episodeNumber),
 
   // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
   sheetsNotifyChange: () => ipcRenderer.invoke('sheets:notify-change'),

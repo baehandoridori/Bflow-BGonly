@@ -28,7 +28,6 @@ interface SceneDetailModalProps {
   scene: Scene;
   sceneIndex: number;
   sheetName: string;
-  isLiveMode: boolean;
   department: Department;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
   onToggle: (sceneId: string, stage: Stage) => void;
@@ -264,7 +263,7 @@ function ImageSlot({
                 >
                   붙여넣기 버튼
                 </button>
-                <p className="text-[10px] text-text-secondary/50 mt-1.5">
+                <p className="text-[11px] text-text-secondary/50 mt-1.5">
                   한번 더 클릭하면 파일 탐색기 열기
                 </p>
               </div>
@@ -276,7 +275,7 @@ function ImageSlot({
                 <p className="text-xs text-text-secondary/50">
                   클릭하여 이미지 추가
                 </p>
-                <p className="text-[10px] text-text-secondary/45 mt-0.5">
+                <p className="text-[11px] text-text-secondary/45 mt-0.5">
                   드래그 앤 드롭도 가능
                 </p>
               </div>
@@ -294,7 +293,6 @@ export function SceneDetailModal({
   scene,
   sceneIndex,
   sheetName,
-  isLiveMode,
   department,
   onFieldUpdate,
   onToggle,
@@ -368,7 +366,7 @@ export function SceneDetailModal({
               sheetName,
               scene.sceneId || String(scene.no),
               imageType,
-              isLiveMode,
+  
             );
             const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
             onFieldUpdate(sceneIndex, field, url);
@@ -384,7 +382,7 @@ export function SceneDetailModal({
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [showImageModal, scene.storyboardUrl, sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate]);
+  }, [showImageModal, scene.storyboardUrl, sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate]);
 
   // ── 이미지 핸들러 ──
 
@@ -407,7 +405,7 @@ export function SceneDetailModal({
             sheetName,
             scene.sceneId || String(scene.no),
             imageType,
-            isLiveMode,
+
           );
           const field =
             imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
@@ -421,7 +419,7 @@ export function SceneDetailModal({
       };
       input.click();
     },
-    [sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate],
+    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
   );
 
   const pasteClipboard = useCallback(
@@ -432,7 +430,7 @@ export function SceneDetailModal({
           sheetName,
           scene.sceneId || String(scene.no),
           imageType,
-          isLiveMode,
+
         );
         if (!url) {
           alert('클립보드에 이미지가 없습니다.');
@@ -449,7 +447,7 @@ export function SceneDetailModal({
         setImageLoading(null);
       }
     },
-    [sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate],
+    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
   );
 
   const handlePasteEvent = useCallback(
@@ -470,7 +468,7 @@ export function SceneDetailModal({
               sheetName,
               scene.sceneId || String(scene.no),
               imageType,
-              isLiveMode,
+  
             );
             const field =
               imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
@@ -485,7 +483,7 @@ export function SceneDetailModal({
         }
       }
     },
-    [sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate],
+    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
   );
 
   const handleDrop = useCallback(
@@ -501,7 +499,7 @@ export function SceneDetailModal({
           sheetName,
           scene.sceneId || String(scene.no),
           imageType,
-          isLiveMode,
+
         );
         const field =
           imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
@@ -513,7 +511,7 @@ export function SceneDetailModal({
         setImageLoading(null);
       }
     },
-    [sheetName, scene.sceneId, scene.no, isLiveMode, sceneIndex, onFieldUpdate],
+    [sheetName, scene.sceneId, scene.no, sceneIndex, onFieldUpdate],
   );
 
   const confirmRemoveImage = useCallback(
@@ -629,7 +627,7 @@ export function SceneDetailModal({
               <div className="px-6 py-5 flex flex-col gap-6">
                 {/* ── 속성 섹션 ── */}
                 <section>
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-secondary/50 mb-2 px-4">
+                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary/50 mb-2 px-4">
                     속성
                   </h3>
                   <div className="bg-bg-primary/30 rounded-xl border border-bg-border/50 divide-y divide-bg-border/30">
@@ -666,7 +664,7 @@ export function SceneDetailModal({
 
                 {/* ── 진행 단계 ── */}
                 <section>
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
+                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
                     진행 단계
                   </h3>
                   <div className="flex gap-3 px-4">
@@ -695,7 +693,7 @@ export function SceneDetailModal({
 
                 {/* ── 이미지 섹션 ── */}
                 <section>
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
+                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
                     이미지
                   </h3>
                   <div className="flex flex-col gap-5 px-4">
@@ -787,7 +785,7 @@ export function SceneDetailModal({
                 >
                   <MessageCircle size={18} />
                   {commentCount > 0 && (
-                    <span className="text-[10px] font-bold leading-none">{commentCount}</span>
+                    <span className="text-[11px] font-bold leading-none">{commentCount}</span>
                   )}
                 </motion.button>
               )}
@@ -811,7 +809,7 @@ export function SceneDetailModal({
                     <MessageCircle size={14} className="text-accent" />
                     <h3 className="text-sm font-medium text-text-primary">의견</h3>
                     {commentCount > 0 && (
-                      <span className="text-[10px] bg-accent/20 text-accent px-1.5 py-0.5 rounded-full font-medium">
+                      <span className="text-[11px] bg-accent/20 text-accent px-1.5 py-0.5 rounded-full font-medium">
                         {commentCount}
                       </span>
                     )}

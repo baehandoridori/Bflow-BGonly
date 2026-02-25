@@ -5,7 +5,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
-import { DEPARTMENT_CONFIGS, DEPARTMENTS, STAGES } from '@/types';
+import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
 
@@ -191,7 +191,7 @@ function EpisodeCard({
               <span className="font-medium text-text-primary/70">
                 {ps.partId}
               </span>
-              <span className="text-[10px] font-medium" style={{ color: deptCfg.color }}>
+              <span className="text-[11px] font-medium" style={{ color: deptCfg.color }}>
                 {deptCfg.shortLabel}
               </span>
               <span className="text-text-secondary/40 tabular-nums">{partPct}%</span>
@@ -231,7 +231,7 @@ function PartMatrix({ episodes }: { episodes: { ep: Episode; stats: EpStats }[] 
               return (
                 <th key={key} className="py-2 px-2 text-center">
                   <span className="text-xs font-medium text-text-secondary/60">{partId}</span>
-                  <span className="text-[10px] ml-0.5" style={{ color: cfg?.color }}>{cfg?.shortLabel}</span>
+                  <span className="text-[11px] ml-0.5" style={{ color: cfg?.color }}>{cfg?.shortLabel}</span>
                 </th>
               );
             })}
@@ -291,10 +291,9 @@ export function EpisodeView() {
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitlesMap = useDataStore((s) => s.episodeTitles);
   const deleteEpisodeOptimistic = useDataStore((s) => s.deleteEpisodeOptimistic);
+  const setEpisodes = useDataStore((s) => s.setEpisodes);
   const currentUser = useAuthStore((s) => s.currentUser);
   const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment } = useAppStore();
-  const isTestMode = useAppStore((s) => s.isTestMode);
-  const sheetsConnected = useAppStore((s) => s.sheetsConnected);
   const [viewMode, setViewMode] = useState<EpViewMode>('card');
 
   // 아카이빙 관련 상태
@@ -307,98 +306,30 @@ export function EpisodeView() {
   const [archiveDialogEpNum, setArchiveDialogEpNum] = useState<number | null>(null);
   const [archiveMemoInput, setArchiveMemoInput] = useState('완료로 인한 아카이빙');
 
-  // 아카이빙된 에피소드 로드 (METADATA 기반 — Apps Script 재배포 전에도 동작)
+  // 아카이빙된 에피소드 로드 (_REGISTRY 기반) — 마운트 시 1회만 로드
+  // 이후 아카이빙/언아카이빙은 낙관적 업데이트로 로컬 상태만 변경 (깜빡임 방지)
   useEffect(() => {
-    const loadArchivedFromMetadata = async () => {
-      const { readMetadataFromSheets } = await import('@/services/sheetsService');
-      const archived: typeof archivedEpisodes = [];
-      for (let i = 1; i <= 99; i++) {
-        try {
-          const infoMeta = sheetsConnected
-            ? await readMetadataFromSheets('archive-info', String(i))
-            : null;
-          if (infoMeta?.value) {
-            const parsed = JSON.parse(infoMeta.value);
-            const titleMeta = await readMetadataFromSheets('episode-title', String(i));
-            archived.push({
-              episodeNumber: i,
-              title: titleMeta?.value || `EP.${String(i).padStart(2, '0')}`,
-              partCount: 0,
-              archivedBy: parsed.by,
-              archivedAt: parsed.at,
-              memo: parsed.memo,
-            });
-          }
-        } catch { /* 개별 실패 무시 */ }
-      }
-      return archived;
-    };
-
     const loadArchived = async () => {
       try {
-        if (sheetsConnected) {
-          try {
-            // readArchived 액션 시도 (Apps Script 재배포 후)
-            const { readArchivedFromSheets, readMetadataFromSheets } = await import('@/services/sheetsService');
-            const list = await readArchivedFromSheets();
-            const enriched: typeof archivedEpisodes = [];
-            for (const item of list) {
-              const key = String(item.episodeNumber);
-              let archivedBy: string | undefined;
-              let archivedAt: string | undefined;
-              let memo: string | undefined;
-              try {
-                const infoMeta = await readMetadataFromSheets('archive-info', key);
-                if (infoMeta?.value) {
-                  const parsed = JSON.parse(infoMeta.value);
-                  archivedBy = parsed.by;
-                  archivedAt = parsed.at;
-                  memo = parsed.memo;
-                }
-              } catch {}
-              enriched.push({ ...item, archivedBy, archivedAt, memo });
-            }
-            setArchivedEpisodes(enriched);
-          } catch {
-            // readArchived 미배포 → METADATA fallback
-            console.info('[EpisodeView] readArchived 미지원, METADATA fallback');
-            const archived = await loadArchivedFromMetadata();
-            setArchivedEpisodes(archived);
-          }
-        } else {
-          // 로컬 모드 fallback
-          const api = window.electronAPI;
-          if (!api) return;
-          const archived: typeof archivedEpisodes = [];
-          for (let i = 1; i <= 99; i++) {
-            try {
-              const infoRaw = await api.readSettings(`metadata_archive-info_${i}.json`);
-              if (infoRaw) {
-                const val = typeof infoRaw === 'string' ? infoRaw : (infoRaw as Record<string, unknown>)?.value;
-                if (typeof val === 'string') {
-                  const parsed = JSON.parse(val);
-                  const titleRaw = await api.readSettings(`metadata_episode-title_${i}.json`);
-                  const titleVal = typeof titleRaw === 'string' ? titleRaw : (titleRaw as Record<string, unknown>)?.value;
-                  archived.push({
-                    episodeNumber: i,
-                    title: (typeof titleVal === 'string' ? titleVal : null) || `EP.${String(i).padStart(2, '0')}`,
-                    partCount: 0,
-                    archivedBy: parsed.by,
-                    archivedAt: parsed.at,
-                    memo: parsed.memo,
-                  });
-                }
-              }
-            } catch {}
-          }
-          setArchivedEpisodes(archived);
+        const { readArchivedFromSheets } = await import('@/services/sheetsService');
+        const list = await readArchivedFromSheets();
+        const enriched: typeof archivedEpisodes = [];
+        for (const item of list) {
+          enriched.push({
+            ...item,
+            archivedBy: item.archivedBy || undefined,
+            archivedAt: item.archivedAt || undefined,
+            memo: item.archiveMemo || undefined,
+          });
         }
+        setArchivedEpisodes(enriched);
       } catch (err) {
         console.error('[EpisodeView] 아카이빙 로드 실패:', err);
       }
     };
     loadArchived();
-  }, [sheetsConnected, episodes]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const epData = useMemo(() => {
     return episodes
@@ -441,11 +372,6 @@ export function EpisodeView() {
     if (!ep) return;
 
     const memo = archiveMemoInput.trim() || '완료로 인한 아카이빙';
-    const archiveInfo = JSON.stringify({
-      by: currentUser?.name ?? '알 수 없음',
-      at: new Date().toLocaleDateString('ko-KR'),
-      memo,
-    });
     // 아카이빙 시 에피소드 제목도 반드시 METADATA에 저장
     const epTitle = episodeTitlesMap[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
 
@@ -459,28 +385,17 @@ export function EpisodeView() {
     ]);
 
     try {
-      if (sheetsConnected) {
-        const { writeMetadataToSheets } = await import('@/services/sheetsService');
-        // ② METADATA 먼저 기록
-        await writeMetadataToSheets('episode-title', String(epNum), epTitle);
-        await writeMetadataToSheets('archive-info', String(epNum), archiveInfo);
-        // ③ 탭 리네임 (EP_ → AC_EP_) — 반드시 await 완료 후
-        try {
-          const { archiveEpisodeInSheets } = await import('@/services/sheetsService');
-          await archiveEpisodeInSheets(epNum);
-        } catch (tabErr) {
-          console.warn('[아카이빙] 탭 리네임 실패 (Apps Script 재배포 필요):', tabErr);
-        }
-      } else {
-        const api = window.electronAPI;
-        if (api) {
-          await api.writeSettings(`metadata_episode-title_${epNum}.json`, epTitle);
-          await api.writeSettings(`metadata_archived-episode_${epNum}.json`, 'true');
-          await api.writeSettings(`metadata_archive-info_${epNum}.json`, archiveInfo);
-        }
-      }
-      window.electronAPI?.sheetsNotifyChange?.();
+      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      await archiveEpisodeViaRegistryInSheets(epNum, currentUser?.name ?? '알 수 없음', memo);
+      // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 알림
+      setTimeout(() => {
+        window.electronAPI?.sheetsNotifyChange?.();
+      }, 3000);
     } catch (err) {
+      // 롤백
+      const prevEps = [...episodes, { episodeNumber: epNum, title: epTitle, parts: ep.parts }];
+      setEpisodes(prevEps);
+      setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
       alert(`아카이빙 실패: ${err}`);
     }
   };
@@ -491,19 +406,28 @@ export function EpisodeView() {
     const epDisplayName = episodeTitlesMap[epNum] || archived?.title || `EP.${String(epNum).padStart(2, '0')}`;
     if (!confirm(`"${epDisplayName}"를 아카이빙에서 복원하시겠습니까?`)) return;
 
+    // 낙관적: 아카이브 목록에서 즉시 제거 + 에피소드 목록에 임시 추가
+    const prevArchivedEps = [...archivedEpisodes];
+    const prevEps = [...episodes];
+    setArchivedEpisodes(archivedEpisodes.filter((a) => a.episodeNumber !== epNum));
+    const tempTitle = epDisplayName;
+    setEpisodes([...episodes, { episodeNumber: epNum, title: tempTitle, parts: [] }]);
+
     try {
-      if (sheetsConnected) {
-        const { unarchiveEpisodeInSheets } = await import('@/services/sheetsService');
-        await unarchiveEpisodeInSheets(epNum);
-      } else {
-        const api = window.electronAPI;
-        if (api) {
-          await api.writeSettings(`metadata_archived-episode_${epNum}.json`, '');
-        }
-      }
-      setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
-      window.electronAPI?.sheetsNotifyChange?.();
+      const { unarchiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/sheetsService');
+      await unarchiveEpisodeViaRegistryInSheets(epNum);
+      // 낙관적 상태를 신뢰 — 서버 처리 후(3초) 실제 데이터로 교체
+      setTimeout(async () => {
+        try {
+          const eps = await readAllFromSheets();
+          setEpisodes(eps);
+          window.electronAPI?.sheetsNotifyChange?.();
+        } catch { /* 다음 폴링 사이클에서 자연 동기화 */ }
+      }, 3000);
     } catch (err) {
+      // 롤백
+      setEpisodes(prevEps);
+      setArchivedEpisodes(prevArchivedEps);
       alert(`복원 실패: ${err}`);
     }
   };
@@ -612,13 +536,13 @@ export function EpisodeView() {
                             <Folder size={14} className="shrink-0 text-amber-500/30" />
                             <div className="flex-1 min-w-0">
                               <div className="text-xs font-medium text-text-secondary/60 truncate">{displayName}</div>
-                              <div className="text-[10px] text-text-secondary/30 truncate">
+                              <div className="text-[11px] text-text-secondary/30 truncate">
                                 {archived.partCount}개 파트
                                 {archived.archivedBy && ` · ${archived.archivedBy}`}
                                 {archived.archivedAt && ` · ${archived.archivedAt}`}
                               </div>
                               {archived.memo && (
-                                <div className="text-[10px] text-amber-500/40 italic truncate mt-0.5">
+                                <div className="text-[11px] text-amber-500/40 italic truncate mt-0.5">
                                   {archived.memo}
                                 </div>
                               )}
@@ -698,7 +622,7 @@ export function EpisodeView() {
                 </div>
               </div>
               <div className="mb-4">
-                <label className="text-[10px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
+                <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">아카이빙 메모</label>
                 <input
                   value={archiveMemoInput}
                   onChange={(e) => setArchiveMemoInput(e.target.value)}

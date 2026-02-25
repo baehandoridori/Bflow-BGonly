@@ -20,7 +20,23 @@ import {
   archiveEpisode,
   unarchiveEpisode,
   readArchivedEpisodes,
+  gasBatch,
+  readRegistry,
+  archiveEpisodeViaRegistry,
+  unarchiveEpisodeViaRegistry,
+  readCommentsForPart,
+  addCommentToSheets,
+  editCommentInSheets,
+  deleteCommentFromSheets,
+  readUsersFromSheets,
+  addUserToSheets,
+  updateUserInSheets,
+  deleteUserFromSheets,
+  addScenes,
+  bulkUpdateCells,
 } from './sheets';
+import type { SheetUser } from './sheets';
+import type { BatchAction } from './sheets';
 
 // 앱 이름 설정 — AppData 경로에 영향
 app.name = 'Bflow-BGonly';
@@ -36,9 +52,6 @@ protocol.registerSchemesAsPrivileged([
     privileges: { standard: true, secure: true, supportFetchAPI: true },
   },
 ]);
-
-// 테스트 모드 감지
-const isTestMode = process.argv.includes('--test-mode') || process.env.TEST_MODE === '1';
 
 let mainWindow: BrowserWindow | null = null;
 const widgetWindows = new Map<string, BrowserWindow>();
@@ -137,50 +150,6 @@ function animateBounds(
   });
 }
 
-// ─── 파일 감시 (실시간 동기화) ────────────────────────────────
-
-let fileWatcher: fs.FSWatcher | null = null;
-// 자기가 쓴 직후에는 알림 무시 (자기 반영 방지) — 카운터 방식으로 다중 쓰기 지원
-let ignoreChangeCount = 0;
-
-function startWatching(filePath: string): void {
-  stopWatching();
-
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  let debounceTimer: NodeJS.Timeout | null = null;
-
-  try {
-    fileWatcher = fs.watch(filePath, { persistent: false }, (eventType) => {
-      if (eventType !== 'change') return;
-
-      if (ignoreChangeCount > 0) {
-        ignoreChangeCount--;
-        return;
-      }
-
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        // 모든 윈도우(메인 + 위젯 팝업)에 "데이터 변경" 알림
-        broadcastSheetChanged();
-      }, 500); // 500ms debounce (배치 쓰기 시 안전 마진 확보)
-    });
-  } catch {
-    // 파일이 아직 없으면 1초 후 재시도
-    setTimeout(() => startWatching(filePath), 1000);
-  }
-}
-
-function stopWatching(): void {
-  if (fileWatcher) {
-    fileWatcher.close();
-    fileWatcher = null;
-  }
-}
-
 /** 모든 윈도우(메인 + 위젯 팝업)에 sheet:changed 이벤트 브로드캐스트 */
 function broadcastSheetChanged(excludeWebContentsId?: number): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -221,7 +190,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: isTestMode ? 'B flow [테스트]' : 'B flow',
+    title: 'B flow',
     backgroundColor: '#0F1117',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -239,25 +208,12 @@ function createWindow(): void {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
-    stopWatching();
   });
-
-  // 테스트 모드: 시트 파일 감시 시작
-  if (isTestMode) {
-    const sheetPath = path.join(getAppRoot(), 'test-data', 'sheets.json');
-    if (fs.existsSync(sheetPath)) {
-      startWatching(sheetPath);
-    }
-  }
 }
 
 // ─── IPC 핸들러: 사용자 파일 (base64 인코딩 JSON) ────────────
 
 function getUsersFilePath(): string {
-  // 테스트: test-data/users.dat  |  프로덕션: exe 옆 users.dat
-  if (isTestMode) {
-    return path.join(getAppRoot(), 'test-data', 'users.dat');
-  }
   return path.join(getAppRoot(), 'users.dat');
 }
 
@@ -287,10 +243,6 @@ ipcMain.handle('users:write', (_event, data: unknown) => {
 
 ipcMain.handle('settings:get-path', () => getDataPath());
 
-ipcMain.handle('settings:get-mode', () => ({
-  isTestMode,
-  appRoot: getAppRoot(),
-}));
 
 ipcMain.handle('settings:read', async (_event, fileName: string) => {
   const filePath = path.join(getDataPath(), fileName);
@@ -307,37 +259,6 @@ ipcMain.handle('settings:write', async (_event, fileName: string, data: unknown)
   ensureDir(dirPath);
   const filePath = path.join(dirPath, fileName);
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), { encoding: 'utf-8' });
-  return true;
-});
-
-// ─── IPC 핸들러: 테스트 데이터 ───────────────────────────────
-
-ipcMain.handle('test:get-sheet-path', () => {
-  return path.join(getAppRoot(), 'test-data', 'sheets.json');
-});
-
-ipcMain.handle('test:read-sheet', async (_event, filePath: string) => {
-  try {
-    const data = fs.readFileSync(filePath, { encoding: 'utf-8' });
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-});
-
-ipcMain.handle('test:write-sheet', async (_event, filePath: string, data: unknown) => {
-  const dir = path.dirname(filePath);
-  ensureDir(dir);
-
-  // 자기 쓰기 → 파일 변경 이벤트 무시 (카운터 증가)
-  ignoreChangeCount++;
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), { encoding: 'utf-8' });
-
-  // 최초 쓰기 시 감시 시작
-  if (!fileWatcher && isTestMode) {
-    startWatching(filePath);
-  }
-
   return true;
 });
 
@@ -527,6 +448,167 @@ ipcMain.handle('sheets:unarchive-episode', async (_event, episodeNumber: number)
   }
 });
 
+// ─── IPC 핸들러: 배치 요청 (Phase 0) ────────────────────────
+
+ipcMain.handle('sheets:batch', async (_event, actions: BatchAction[]) => {
+  try {
+    const result = await gasBatch(actions);
+    return result;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: 대량 셀 업데이트 (다중 씬 체크박스 토글) ─────
+
+ipcMain.handle('sheets:bulk-update-cells', async (_event, sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) => {
+  try {
+    await bulkUpdateCells(sheetName, updates);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: _REGISTRY (Phase 0-2) ───────────────────────
+
+ipcMain.handle('sheets:read-registry', async () => {
+  try {
+    const data = await readRegistry();
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('sheets:archive-episode-via-registry', async (
+  _event, episodeNumber: number, archivedBy: string, archiveMemo: string
+) => {
+  try {
+    await archiveEpisodeViaRegistry(episodeNumber, archivedBy, archiveMemo);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:unarchive-episode-via-registry', async (_event, episodeNumber: number) => {
+  try {
+    await unarchiveEpisodeViaRegistry(episodeNumber);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: 대량 씬 추가 (Phase 0-5) ────────────────────
+
+ipcMain.handle('sheets:add-scenes', async (
+  _event, sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]
+) => {
+  try {
+    await addScenes(sheetName, scenes);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: _USERS (Phase 0-4) ──────────────────────────
+
+ipcMain.handle('sheets:read-users', async () => {
+  try {
+    const data = await readUsersFromSheets();
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('sheets:add-user', async (_event, user: SheetUser) => {
+  try {
+    await addUserToSheets(user);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:update-user', async (_event, userId: string, updates: Record<string, string>) => {
+  try {
+    await updateUserInSheets(userId, updates);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:delete-user', async (_event, userId: string) => {
+  try {
+    await deleteUserFromSheets(userId);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: _COMMENTS (Phase 0-3) ───────────────────────
+
+ipcMain.handle('sheets:read-comments', async (_event, sheetName: string) => {
+  try {
+    const data = await readCommentsForPart(sheetName);
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('sheets:add-comment', async (
+  _event, commentId: string, sheetName: string, sceneId: string,
+  userId: string, userName: string, text: string, mentions: string[], createdAt: string
+) => {
+  try {
+    await addCommentToSheets(commentId, sheetName, sceneId, userId, userName, text, mentions, createdAt);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:edit-comment', async (
+  _event, commentId: string, text: string, mentions: string[]
+) => {
+  try {
+    await editCommentInSheets(commentId, text, mentions);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:delete-comment', async (_event, commentId: string) => {
+  try {
+    await deleteCommentFromSheets(commentId);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
 // ─── IPC 핸들러: 데이터 변경 브로드캐스트 (라이브 모드) ──────
 
 ipcMain.handle('sheets:notify-change', (event) => {
@@ -618,6 +700,14 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
   } else {
     popupWin.loadFile(path.join(__dirname, '../dist/index.html'), { hash });
   }
+
+  // Acrylic DWM 버그 우회: 생성자의 alwaysOnTop:true는 기본 레벨이라 Acrylic에서 무효.
+  // 윈도우 준비 후 'normal' 레벨로 명시적 재설정 (Acrylic에서 'normal'이 실제 topmost)
+  popupWin.once('ready-to-show', () => {
+    if (!popupWin.isDestroyed()) {
+      popupWin.setAlwaysOnTop(true, 'normal');
+    }
+  });
 
   widgetWindows.set(widgetId, popupWin);
   popupWin.on('closed', () => {
@@ -713,7 +803,14 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    win.setAlwaysOnTop(aot);
+    // Acrylic + Windows DWM 우회:
+    // OFF: setAlwaysOnTop(false) — 일반 윈도우로 전환
+    // ON: setAlwaysOnTop(true, 'normal') — Acrylic에서 'normal' 레벨이 실제 topmost
+    if (aot) {
+      win.setAlwaysOnTop(true, 'normal');
+    } else {
+      win.setAlwaysOnTop(false);
+    }
   }
 });
 
@@ -901,6 +998,5 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  stopWatching();
   app.quit();
 });

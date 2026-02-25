@@ -7,6 +7,7 @@ import { Dashboard } from '@/views/Dashboard';
 import { ScenesView } from '@/views/ScenesView';
 import { EpisodeView } from '@/views/EpisodeView';
 import { AssigneeView } from '@/views/AssigneeView';
+import { TeamView } from '@/views/TeamView';
 import { CalendarView } from '@/views/CalendarView';
 import { ScheduleView } from '@/views/ScheduleView';
 import { SettingsView } from '@/views/SettingsView';
@@ -15,15 +16,14 @@ import { LoginScreen } from '@/components/auth/LoginScreen';
 import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
-import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
-import { loadSheetsConfig, connectSheets, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
-import { loadLayout, loadTheme, saveTheme } from '@/services/settingsService';
-import { loadSession, loadUsers } from '@/services/userService';
-import { applyTheme, getPreset, getLightColors, DEFAULT_THEME_ID } from '@/themes';
+import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
+import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
+import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
+import { applyTheme, getPreset, getLightColors } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
-  const { currentView, isTestMode, setTestMode, setWidgetLayout, setAllWidgetLayout, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
+  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -58,29 +58,37 @@ export default function App() {
   // 로딩 스플래시: authReady 후에도 유지, 클릭으로 스킵
   const [loadingSplashDone, setLoadingSplashDone] = useState(false);
 
-  // 데이터 로드 함수 — 모드에 따라 테스트 시트 또는 Apps Script 웹 앱 사용
+  // 데이터 로드 함수 — Apps Script 웹 앱에서 데이터 읽기
   const loadData = useCallback(async () => {
     setSyncing(true);
     setSyncError(null);
     try {
-      let episodes;
-      if (sheetsConnected) {
-        episodes = await readAllFromSheets();
-      } else {
-        episodes = await readTestSheet();
+      // 연결 확인 + 재연결 시도
+      const connected = await checkConnection();
+      if (!connected) {
+        const cfg = await loadSheetsConfig();
+        const url = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+        if (url) {
+          const result = await connectSheets(url);
+          if (!result.ok) throw new Error('시트 연결 실패');
+          setSheetsConnected(true);
+        } else {
+          throw new Error('시트 URL 미설정');
+        }
       }
+
+      const episodes = await readAllFromSheets();
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
 
       // 에피소드 제목/메모를 병렬로 일괄 로드 (초기 렌더 딜레이 제거)
-      const readMeta = sheetsConnected ? readMetadataFromSheets : readLocalMetadata;
       const titlePromises = episodes.map((ep) =>
-        readMeta('episode-title', String(ep.episodeNumber))
+        readMetadataFromSheets('episode-title', String(ep.episodeNumber))
           .then((d) => [ep.episodeNumber, d?.value] as const)
           .catch(() => [ep.episodeNumber, undefined] as const),
       );
       const memoPromises = episodes.map((ep) =>
-        readMeta('episode-memo', String(ep.episodeNumber))
+        readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
           .then((d) => [ep.episodeNumber, d?.value] as const)
           .catch(() => [ep.episodeNumber, undefined] as const),
       );
@@ -103,7 +111,7 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }, [sheetsConnected, setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos]);
+  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setSheetsConnected]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {
@@ -116,9 +124,6 @@ export default function App() {
           return;
         }
 
-        const { isTestMode: testMode } = await window.electronAPI.getMode();
-        setTestMode(testMode);
-
         const savedLayout = await loadLayout();
         if (savedLayout) {
           setWidgetLayout(savedLayout);
@@ -126,6 +131,18 @@ export default function App() {
         const savedAllLayout = await loadLayout('all');
         if (savedAllLayout) {
           setAllWidgetLayout(savedAllLayout);
+        }
+        const savedEpLayout = await loadLayout('episode');
+        if (savedEpLayout) {
+          setEpisodeWidgetLayout(savedEpLayout);
+        }
+
+        // 차트 타입 로드
+        const savedPrefs = await loadPreferences();
+        if (savedPrefs?.chartTypes) {
+          for (const [widgetId, type] of Object.entries(savedPrefs.chartTypes)) {
+            setChartType(widgetId, type as 'horizontal-bar' | 'vertical-bar' | 'donut' | 'stat-card');
+          }
         }
 
         // 테마 로드 + 적용 (가드 설정 후 상태 변경)
@@ -175,7 +192,10 @@ export default function App() {
           const result = await connectSheets(urlToConnect);
           if (result.ok) {
             setSheetsConnected(true);
+            setUsersSheetsMode(true);
             console.log('[Sheets] 자동 연결 성공');
+            // Phase 0-4: 로컬 users.dat를 _USERS 탭으로 마이그레이션 (비동기)
+            migrateUsersToSheets().catch(() => {});
           }
         }
       } catch (err) {
@@ -221,8 +241,8 @@ export default function App() {
     }
   }, [themeId, customThemeColors, colorMode]);
 
-  // 초기화 완료 후 데이터 로드 (sheetsConnected/isTestMode 변경 시)
-  // authReady 가드: init 완료 전까지 테스트 데이터 로딩 방지 (플래시 제거)
+  // 초기화 완료 후 데이터 로드
+  // authReady 가드: init 완료 전까지 데이터 로딩 방지 (플래시 제거)
   useEffect(() => {
     if (!authReady) return;
     loadData();
@@ -276,6 +296,8 @@ export default function App() {
         return <EpisodeView />;
       case 'assignee':
         return <AssigneeView />;
+      case 'team':
+        return <TeamView />;
       case 'calendar':
         return <CalendarView />;
       case 'schedule':

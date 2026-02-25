@@ -95,16 +95,16 @@ export const THEME_PRESETS: ThemePreset[] = [
   },
   {
     id: 'nameko',
-    name: 'Nameko',
-    nameKo: '나메코',
+    name: '이혜민 머쉬룸',
+    nameKo: '이혜민 머쉬룸',
     colors: {
       bgPrimary: '16 14 10',
       bgCard: '28 24 16',
       bgBorder: '50 44 32',
       textPrimary: '240 235 220',
       textSecondary: '170 155 130',
-      accent: '232 122 32',
-      accentSub: '245 176 65',
+      accent: '129 77 65',
+      accentSub: '224 203 175',
     },
   },
 ];
@@ -139,11 +139,11 @@ export function getLightColors(themeId: string): ThemeColors {
   const accent = preset?.colors.accent ?? THEME_PRESETS[0].colors.accent;
   const accentSub = preset?.colors.accentSub ?? THEME_PRESETS[0].colors.accentSub;
   return {
-    bgPrimary: '245 246 250',
+    bgPrimary: '225 228 238',     // 카드(흰색)와 충분한 대비 (~30pt gap)
     bgCard: '255 255 255',
-    bgBorder: '220 222 230',
-    textPrimary: '28 32 42',
-    textSecondary: '107 114 128',
+    bgBorder: '180 186 205',      // 보더 강화: 흰 배경 위에서 확실히 보이도록 (~75pt gap)
+    textPrimary: '24 28 38',      // 약간 더 진한 검정
+    textSecondary: '50 58 75',    // 강화: /50 /40 알파에서도 가독성 확보 (기존 70 80 96 → 50 58 75)
     accent,
     accentSub,
   };

@@ -2,10 +2,15 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { PieChart } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Widget } from './Widget';
-import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { calcDashboardStats } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS } from '@/types';
+import { HorizontalBar } from './charts/HorizontalBar';
+import { StatCard } from './charts/StatCard';
+import type { ChartType } from '@/types';
+
+const SUPPORTED_CHARTS: ChartType[] = ['donut', 'horizontal-bar', 'stat-card'];
 
 /* ── 퍼센티지 구간별 색상 세그먼트 ── */
 const COLOR_SEGMENTS = [
@@ -59,19 +64,35 @@ const MESSAGES: Record<string, MotivMessage[]> = {
   ],
 };
 
+/* ── 진행도 무관 랜덤 멘트 (팀원 어록) ── */
+const RANDOM_MESSAGES: MotivMessage[] = [
+  { text: '응후응후', author: '이혜민' },
+  { text: 'る..', author: 'ちいかわ' },
+  { text: '저는 서울에 사는 초등학생을 보면 너무 화나요', author: '이명훈' },
+  { text: '저 인스타 지울 수 있습니다', author: '강지융' },
+  { text: '근데 인스타에 연락처가 있어서 못지워요', author: '강지융' },
+  { text: '네 ㅋㅋ 찌찌 ㅋㅋ', author: '원동우' },
+  { text: '너 지웅이 좋아해?', author: '류이레' },
+  { text: '우리 언젠가 분명히 잡혀갈거야.....', author: '정영준' },
+  { text: '틀리면 엑쓰', author: '경환엄마' },
+];
+
 function getMessagePool(pct: number): MotivMessage[] {
-  if (pct === 0) return MESSAGES['0'];
-  if (pct >= 100) return MESSAGES['100'];
-  if (pct < 10) return MESSAGES['1-10'];
-  if (pct < 25) return MESSAGES['10-25'];
-  if (pct < 50) return MESSAGES['25-50'];
-  if (pct < 75) return MESSAGES['50-75'];
-  return MESSAGES['75-99'];
+  let base: MotivMessage[];
+  if (pct === 0) base = MESSAGES['0'];
+  else if (pct >= 100) base = MESSAGES['100'];
+  else if (pct < 10) base = MESSAGES['1-10'];
+  else if (pct < 25) base = MESSAGES['10-25'];
+  else if (pct < 50) base = MESSAGES['25-50'];
+  else if (pct < 75) base = MESSAGES['50-75'];
+  else base = MESSAGES['75-99'];
+  return [...base, ...RANDOM_MESSAGES];
 }
 
 export function OverallProgressWidget() {
-  const episodes = useDataStore((s) => s.episodes);
+  const episodes = useDashboardEpisodes();
   const dashboardFilter = useAppStore((s) => s.dashboardDeptFilter);
+  const chartType = useAppStore((s) => s.chartTypes['overall-progress']) ?? 'donut';
   const isAll = dashboardFilter === 'all';
   const dept = isAll ? undefined : dashboardFilter;
   const deptConfig = !isAll ? DEPARTMENT_CONFIGS[dashboardFilter] : null;
@@ -82,6 +103,8 @@ export function OverallProgressWidget() {
   const title = deptConfig
     ? `전체 진행률 (${deptConfig.shortLabel})`
     : '전체 진행률 (통합)';
+
+  const activeChart = SUPPORTED_CHARTS.includes(chartType) ? chartType : 'donut';
 
   // SVG 원형 진행률
   const radius = 60;
@@ -127,6 +150,45 @@ export function OverallProgressWidget() {
 
   const currentMsg = pool[msgIdx % pool.length];
 
+  // ── 가로 막대 ──
+  if (activeChart === 'horizontal-bar') {
+    return (
+      <Widget title={title} icon={<PieChart size={16} />}>
+        <div className="flex flex-col gap-3 h-full">
+          <HorizontalBar
+            items={stats.stageStats.map((s) => ({
+              label: s.label,
+              value: s.done,
+              total: s.total,
+              pct: s.pct,
+              color: deptConfig ? deptConfig.stageColors[s.stage] : '#6C5CE7',
+            }))}
+          />
+          <div className="flex gap-4 text-xs text-text-secondary mt-auto">
+            <span>전체 {stats.totalScenes}씬</span>
+            <span className="text-stage-png">완료 {stats.fullyDone}</span>
+            <span className="text-status-none">미시작 {stats.notStarted}</span>
+          </div>
+        </div>
+      </Widget>
+    );
+  }
+
+  // ── 숫자 카드 ──
+  if (activeChart === 'stat-card') {
+    return (
+      <Widget title={title} icon={<PieChart size={16} />}>
+        <StatCard
+          value={`${pct}%`}
+          label={title}
+          subValue={`${stats.totalScenes}씬 중 ${stats.fullyDone} 완료`}
+          pct={pct}
+        />
+      </Widget>
+    );
+  }
+
+  // ── 기본: 도넛 ──
   return (
     <Widget title={title} icon={<PieChart size={16} />}>
       <div className="flex flex-col items-center justify-center h-full gap-2">
@@ -178,7 +240,7 @@ export function OverallProgressWidget() {
                 &ldquo;{currentMsg.text}&rdquo;
               </p>
               {currentMsg.author && (
-                <p className="text-[10px] text-text-secondary/60 mt-0.5">
+                <p className="text-[11px] text-text-secondary/60 mt-0.5">
                   — {currentMsg.author}
                 </p>
               )}

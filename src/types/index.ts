@@ -81,6 +81,9 @@ export interface AppUser {
   password: string;    // base64 인코딩된 JSON 내 평문 (내부 툴)
   isInitialPassword: boolean;
   createdAt: string;   // ISO 8601
+  hireDate?: string;   // Phase 0-4: 입사일 (YYYY-MM-DD)
+  birthday?: string;   // Phase 0-4: 생일 (MM-DD)
+  role?: string;       // Phase 0-4: 역할 (admin | user)
 }
 
 export interface UsersFile {
@@ -129,6 +132,35 @@ export interface WidgetLayoutItem {
   visible?: boolean;
 }
 
+// ─── 차트 타입 ──────────────────────────────
+
+export type ChartType = 'horizontal-bar' | 'vertical-bar' | 'donut' | 'stat-card';
+
+// ─── 에피소드 상세 통계 ─────────────────────
+
+export interface PartDetailStatsEntry {
+  partId: string;
+  bgPct: number;
+  actPct: number;
+  combinedPct: number;
+  bgScenes: number;
+  actScenes: number;
+  bgStages: { stage: Stage; label: string; color: string; done: number; total: number; pct: number }[];
+  actStages: { stage: Stage; label: string; color: string; done: number; total: number; pct: number }[];
+}
+
+export interface EpisodeDetailStats {
+  episodeNumber: number;
+  overallPct: number;
+  totalScenes: number;
+  fullyDone: number;
+  notStarted: number;
+  perDept: Record<Department, { overallPct: number; totalScenes: number; stageStats: StageStats[] }>;
+  perPart: PartDetailStatsEntry[];
+  perAssignee: AssigneeStats[];
+  perDeptAssignee: Record<Department, AssigneeStats[]>;
+}
+
 // ─── 통계 ────────────────────────────────────
 
 export interface StageStats {
@@ -170,6 +202,21 @@ export interface DashboardStats {
   episodeStats: EpisodeStats[];
 }
 
+// ─── _REGISTRY 타입 (Phase 0-2) ──────────────
+
+export interface RegistryEntry {
+  sheetName: string;
+  episodeNumber: number;
+  partId: string;
+  department: string;
+  status: 'active' | 'archived' | 'deleted';
+  title: string;
+  archivedAt: string;
+  archivedBy: string;
+  archiveMemo: string;
+  updatedAt: string;
+}
+
 // ─── Google Sheets 연동 타입 ─────────────────
 
 export interface SheetsConnectResult {
@@ -195,7 +242,6 @@ export interface SheetsConfig {
 // ─── Electron API (preload에서 노출) ─────────
 
 export interface ElectronAPI {
-  getMode: () => Promise<{ isTestMode: boolean; appRoot: string }>;
   getDataPath: () => Promise<string>;
 
   // 사용자 파일 (exe 옆 또는 test-data/ 옆, base64 인코딩 JSON)
@@ -203,9 +249,6 @@ export interface ElectronAPI {
   usersWrite: (data: UsersFile) => Promise<boolean>;
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
-  testGetSheetPath: () => Promise<string>;
-  testReadSheet: (filePath: string) => Promise<unknown | null>;
-  testWriteSheet: (filePath: string, data: unknown) => Promise<boolean>;
   onSheetChanged: (callback: () => void) => () => void;
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
   imageSave: (fileName: string, base64Data: string) => Promise<string>;
@@ -235,9 +278,37 @@ export interface ElectronAPI {
   sheetsSoftDeletePart: (sheetName: string) => Promise<SheetsUpdateResult>;
   sheetsSoftDeleteEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 아카이빙
-  sheetsReadArchived: () => Promise<{ ok: boolean; data: { episodeNumber: number; title: string; partCount: number }[]; error?: string }>;
+  sheetsReadArchived: () => Promise<{ ok: boolean; data: { episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; archiveMemo?: string }[]; error?: string }>;
   sheetsArchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   sheetsUnarchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
+  // 배치 요청 (Phase 0)
+  sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
+    Promise<{
+      ok: boolean;
+      results?: { ok: boolean; data?: unknown }[];
+      error?: string;
+      failedAt?: number;
+      failedAction?: string;
+    }>;
+  // 대량 셀 업데이트 (다중 씬 체크박스 토글)
+  sheetsBulkUpdateCells: (sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) =>
+    Promise<SheetsUpdateResult>;
+  // 대량 씬 추가 (Phase 0-5)
+  sheetsAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<SheetsUpdateResult>;
+  // _USERS (Phase 0-4)
+  sheetsReadUsers: () => Promise<{ ok: boolean; data: AppUser[]; error?: string }>;
+  sheetsAddUser: (user: AppUser) => Promise<SheetsUpdateResult>;
+  sheetsUpdateUser: (userId: string, updates: Record<string, string>) => Promise<SheetsUpdateResult>;
+  sheetsDeleteUser: (userId: string) => Promise<SheetsUpdateResult>;
+  // _COMMENTS (Phase 0-3)
+  sheetsReadComments: (sheetName: string) => Promise<{ ok: boolean; data: { commentId: string; sheetName: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string }[]; error?: string }>;
+  sheetsAddComment: (commentId: string, sheetName: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<SheetsUpdateResult>;
+  sheetsEditComment: (commentId: string, text: string, mentions: string[]) => Promise<SheetsUpdateResult>;
+  sheetsDeleteComment: (commentId: string) => Promise<SheetsUpdateResult>;
+  // _REGISTRY (Phase 0-2)
+  sheetsReadRegistry: () => Promise<{ ok: boolean; data: RegistryEntry[]; error?: string }>;
+  sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<SheetsUpdateResult>;
+  sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 데이터 변경 브로드캐스트
   sheetsNotifyChange?: () => Promise<{ ok: boolean }>;
   // 위젯 팝업 윈도우

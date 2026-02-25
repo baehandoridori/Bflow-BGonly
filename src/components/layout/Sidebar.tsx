@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { LayoutDashboard, Film, List, Users, GanttChart, CalendarDays, Settings } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Settings } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
@@ -11,6 +11,7 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'episode', label: '에피소드', icon: <Film size={20} /> },
   { id: 'scenes', label: '씬 목록', icon: <List size={20} /> },
   { id: 'assignee', label: '인원별', icon: <Users size={20} /> },
+  { id: 'team', label: '팀원', icon: <CircleUser size={20} /> },
   { id: 'calendar', label: '타임라인', icon: <GanttChart size={20} /> },
   { id: 'schedule', label: '캘린더', icon: <CalendarDays size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
@@ -156,7 +157,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
 }
 
 export function Sidebar() {
-  const { currentView, setView, isTestMode } = useAppStore();
+  const { currentView, setView } = useAppStore();
   const [showSplash, setShowSplash] = useState(false);
 
   return (
@@ -190,12 +191,9 @@ export function Sidebar() {
           </button>
         ))}
 
-        {/* 하단: 테스트 모드 + 버전 */}
+        {/* 하단: 버전 */}
         <div className="mt-auto mb-2 flex flex-col items-center gap-0.5">
-          {isTestMode && (
-            <span className="text-[9px] text-status-low font-mono">TEST</span>
-          )}
-          <span className="text-[10px] text-text-secondary/50 font-mono">
+          <span className="text-[11px] text-text-secondary/50 font-mono">
             v{__APP_VERSION__}
           </span>
         </div>

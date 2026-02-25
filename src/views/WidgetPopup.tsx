@@ -14,7 +14,6 @@ import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
 import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig, readMetadataFromSheets } from '@/services/sheetsService';
-import { readTestSheet, readLocalMetadata } from '@/services/testSheetService';
 import type { Episode } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
@@ -48,9 +47,11 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   const [appOpacity, setAppOpacity] = useState(0.92);
   const [glassIntensity, setGlassIntensity] = useState(0.7);
   const [showControls, setShowControls] = useState(false);
+  const [showBottomControls, setShowBottomControls] = useState(false);
   const [ready, setReady] = useState(false);
   const [isFocused, setIsFocused] = useState(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bottomHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showHandle, setShowHandle] = useState(false);
   const handleHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,12 +67,13 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   // 모핑 전환 상태: 'idle' | 'minimizing' | 'restoring'
   const [morphState, setMorphState] = useState<'idle' | 'minimizing' | 'restoring'>('idle');
 
-  // 마우스 위치 추적 → 상단 영역별 호버 감지
+  // 마우스 위치 추적 → 상단(컨트롤) + 하단(슬라이더) 영역별 호버 감지
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // 상단 드래그 핸들 영역 (위 40px)
     const inHandleZone = y < 40;
     if (inHandleZone) {
       if (handleHideTimerRef.current) { clearTimeout(handleHideTimerRef.current); handleHideTimerRef.current = null; }
@@ -85,7 +87,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       }
     }
 
-    const inControlZone = x > rect.width * 0.4 && y < 48;
+    // 상단 컨트롤 영역 (위 60px 전체 — 핀/최소화/닫기, 넉넉한 감지 영역)
+    const inControlZone = y < 60;
     if (inControlZone) {
       if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
       setShowControls(true);
@@ -94,16 +97,45 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         hideTimerRef.current = setTimeout(() => {
           setShowControls(false);
           hideTimerRef.current = null;
-        }, 300);
+        }, 600);
       }
     }
-  }, [showControls, showHandle]);
+
+    // 하단 우측 슬라이더 영역 (아래 48px, 오른쪽 60%)
+    const inBottomZone = y > rect.height - 48 && x > rect.width * 0.4;
+    if (inBottomZone) {
+      if (bottomHideTimerRef.current) { clearTimeout(bottomHideTimerRef.current); bottomHideTimerRef.current = null; }
+      setShowBottomControls(true);
+    } else if (!inBottomZone && showBottomControls) {
+      if (!bottomHideTimerRef.current) {
+        bottomHideTimerRef.current = setTimeout(() => {
+          setShowBottomControls(false);
+          bottomHideTimerRef.current = null;
+        }, 400);
+      }
+    }
+  }, [showControls, showHandle, showBottomControls]);
 
   const handleMouseLeave = useCallback(() => {
     if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
     if (handleHideTimerRef.current) { clearTimeout(handleHideTimerRef.current); handleHideTimerRef.current = null; }
+    if (bottomHideTimerRef.current) { clearTimeout(bottomHideTimerRef.current); bottomHideTimerRef.current = null; }
     setShowControls(false);
     setShowHandle(false);
+    setShowBottomControls(false);
+  }, []);
+
+  // 윈도우 바깥에서 진입 시에도 호버 감지 (onMouseMove만으로는 외부→내부 진입 미감지)
+  const handleMouseEnter = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    // 상단 60px 이내면 핸들 + 컨트롤 모두 표시 (넉넉한 영역)
+    if (y < 60) {
+      setShowHandle(true);
+      setShowControls(true);
+    }
+    if (y > rect.height - 48 && x > rect.width * 0.4) setShowBottomControls(true);
   }, []);
 
   // 포커스 변경 감지 (Acrylic 회색 fallback 대응)
@@ -127,16 +159,15 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
   useEffect(() => {
     if (!ready) return;
 
-    const loadEpMetadata = async (episodes: Episode[], connected: boolean) => {
-      const readMeta = connected ? readMetadataFromSheets : readLocalMetadata;
+    const loadEpMetadata = async (episodes: Episode[]) => {
       const [titleResults, memoResults] = await Promise.all([
         Promise.all(episodes.map((ep) =>
-          readMeta('episode-title', String(ep.episodeNumber))
+          readMetadataFromSheets('episode-title', String(ep.episodeNumber))
             .then((d) => [ep.episodeNumber, d?.value] as const)
             .catch(() => [ep.episodeNumber, undefined] as const),
         )),
         Promise.all(episodes.map((ep) =>
-          readMeta('episode-memo', String(ep.episodeNumber))
+          readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
             .then((d) => [ep.episodeNumber, d?.value] as const)
             .catch(() => [ep.episodeNumber, undefined] as const),
         )),
@@ -160,26 +191,18 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         if (connected) {
           const episodes = await readAllFromSheets();
           useDataStore.getState().setEpisodes(episodes);
-          loadEpMetadata(episodes, true).catch(() => {});
+          loadEpMetadata(episodes).catch(() => {});
         } else {
           // 재연결 시도
           const cfg = await loadSheetsConfig();
           const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
-          let reconnected = false;
           if (urlToConnect) {
             const result = await connectSheets(urlToConnect);
             if (result.ok) {
-              reconnected = true;
               const episodes = await readAllFromSheets();
               useDataStore.getState().setEpisodes(episodes);
-              loadEpMetadata(episodes, true).catch(() => {});
+              loadEpMetadata(episodes).catch(() => {});
             }
-          }
-          // 재연결 실패 시 로컬(테스트) 데이터에서 다시 읽기
-          if (!reconnected) {
-            const episodes = await readTestSheet();
-            useDataStore.getState().setEpisodes(episodes);
-            loadEpMetadata(episodes, false).catch(() => {});
           }
         }
 
@@ -231,8 +254,6 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         const api = window.electronAPI;
         if (!api) { setReady(true); return; }
 
-        const { isTestMode } = await api.getMode();
-        useAppStore.getState().setTestMode(isTestMode);
         useAppStore.getState().setDashboardDeptFilter('all');
 
         let connected = await checkConnection();
@@ -246,33 +267,32 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         }
         useAppStore.getState().setSheetsConnected(connected);
 
-        let loadedEpisodes: Episode[];
         if (connected) {
-          loadedEpisodes = await readAllFromSheets();
-        } else {
-          loadedEpisodes = await readTestSheet();
-        }
-        useDataStore.getState().setEpisodes(loadedEpisodes);
+          const loadedEpisodes = await readAllFromSheets();
+          useDataStore.getState().setEpisodes(loadedEpisodes);
 
-        const readMeta = connected ? readMetadataFromSheets : readLocalMetadata;
-        const [titleResults, memoResults] = await Promise.all([
-          Promise.all(loadedEpisodes.map((ep) =>
-            readMeta('episode-title', String(ep.episodeNumber))
-              .then((d) => [ep.episodeNumber, d?.value] as const)
-              .catch(() => [ep.episodeNumber, undefined] as const),
-          )),
-          Promise.all(loadedEpisodes.map((ep) =>
-            readMeta('episode-memo', String(ep.episodeNumber))
-              .then((d) => [ep.episodeNumber, d?.value] as const)
-              .catch(() => [ep.episodeNumber, undefined] as const),
-          )),
-        ]);
-        const titles: Record<number, string> = {};
-        const memos: Record<number, string> = {};
-        for (const [num, val] of titleResults) if (val) titles[num] = val;
-        for (const [num, val] of memoResults) if (val) memos[num] = val;
-        useDataStore.getState().setEpisodeTitles(titles);
-        useDataStore.getState().setEpisodeMemos(memos);
+          const [titleResults, memoResults] = await Promise.all([
+            Promise.all(loadedEpisodes.map((ep) =>
+              readMetadataFromSheets('episode-title', String(ep.episodeNumber))
+                .then((d) => [ep.episodeNumber, d?.value] as const)
+                .catch(() => [ep.episodeNumber, undefined] as const),
+            )),
+            Promise.all(loadedEpisodes.map((ep) =>
+              readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
+                .then((d) => [ep.episodeNumber, d?.value] as const)
+                .catch(() => [ep.episodeNumber, undefined] as const),
+            )),
+          ]);
+          const titles: Record<number, string> = {};
+          const memos: Record<number, string> = {};
+          for (const [num, val] of titleResults) if (val) titles[num] = val;
+          for (const [num, val] of memoResults) if (val) memos[num] = val;
+          useDataStore.getState().setEpisodeTitles(titles);
+          useDataStore.getState().setEpisodeMemos(memos);
+        } else {
+          console.warn('[WidgetPopup] 시트 연결 실패 — 빈 상태로 시작');
+          useDataStore.getState().setEpisodes([]);
+        }
 
         const users = await loadUsers();
         useAuthStore.getState().setUsers(users);
@@ -360,7 +380,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     if (!isDockHover) {
       return (
         <div
-          className="dock-pill h-screen w-screen overflow-hidden cursor-pointer select-none"
+          className="dock-pill w-full h-full overflow-hidden cursor-pointer select-none"
           style={{
             background: `rgb(var(--color-bg-card) / 0.92)`,
             backdropFilter: 'blur(12px)',
@@ -371,9 +391,9 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           onMouseEnter={handleDockMouseEnter}
           onClick={handleRestore}
         >
-          <div className="flex items-center justify-center gap-1.5 px-3 h-full">
-            <BarChart3 size={13} className="text-text-secondary shrink-0" />
-            <span className="text-[11px] text-text-primary font-medium leading-none truncate max-w-[100px]">
+          <div className="flex items-center justify-center gap-1.5 px-2 h-full w-full">
+            <BarChart3 size={12} className="text-text-secondary shrink-0" />
+            <span className="text-[11px] text-text-primary font-medium leading-none truncate">
               {widgetMeta.label}
             </span>
           </div>
@@ -384,7 +404,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     // 확장 상태: 원본 글래스 스타일 + 위젯 프리뷰
     return (
       <div
-        className="dock-expanded h-screen w-screen flex flex-col overflow-hidden"
+        className="dock-expanded w-full h-full flex flex-col overflow-hidden"
         style={{
           background: `rgb(var(--color-bg-primary) / ${tintAlpha})`,
           cursor: 'pointer',
@@ -456,6 +476,7 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           animation: 'morph-restore-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both',
         } : {}),
       }}
+      onMouseEnter={handleMouseEnter}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
@@ -505,71 +526,95 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         />
       </div>
 
-      {/* ── 오른쪽 위 호버 시 컨트롤 ── */}
-      {showControls && (
-        <div
-          className="absolute top-0 right-0 z-30 flex items-center gap-2 px-2.5"
+      {/* ── 상단 컨트롤 (핀/최소화/닫기) — 항상 렌더링, opacity로 전환 ── */}
+      {/* no-drag 영역이 항상 존재해야 drag region이 마우스 이벤트를 삼키지 않음 */}
+      <div
+        className="absolute top-0 right-0 z-30 flex items-center gap-2 px-2.5"
+        style={{
+          WebkitAppRegion: 'no-drag',
+          height: '28px',
+          background: showControls
+            ? 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)'
+            : 'transparent',
+          borderBottomLeftRadius: '8px',
+          opacity: showControls ? 1 : 0,
+          pointerEvents: showControls ? 'auto' : 'none',
+          transition: 'opacity 0.2s ease, background 0.2s ease',
+        } as React.CSSProperties}
+        onMouseEnter={() => {
+          if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+          setShowControls(true);
+        }}
+      >
+        {/* AOT 핀 토글 */}
+        <button
+          onClick={handleToggleAOT}
+          className="w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors cursor-pointer"
           style={{
-            WebkitAppRegion: 'no-drag',
-            height: '28px',
-            background: 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)',
-            borderBottomLeftRadius: '8px',
-          } as React.CSSProperties}
-          onMouseEnter={() => {
-            if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
-            setShowControls(true);
+            background: isAOT ? 'rgba(108, 92, 231, 0.7)' : 'rgba(255,255,255,0.15)',
           }}
+          title={isAOT ? '항상 위에 표시 (켜짐)' : '항상 위에 표시 (꺼짐)'}
         >
-          {/* 앱 오퍼시티 */}
-          <div className="flex items-center gap-1" title="앱 투명도">
-            <Eye size={11} className="text-text-secondary/60" />
-            <input type="range" min={15} max={100}
-              value={Math.round(appOpacity * 100)}
-              onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
-              className="w-11 h-1 cursor-pointer" />
-          </div>
+          {isAOT
+            ? <Pin size={9} className="text-on-accent" strokeWidth={3} />
+            : <PinOff size={9} className="text-text-primary/60" strokeWidth={2.5} />}
+        </button>
 
-          {/* 글래스 틴트 */}
-          <div className="flex items-center gap-1" title="글래스 효과">
-            <Droplets size={11} className="text-text-secondary/60" />
-            <input type="range" min={0} max={100}
-              value={Math.round(glassIntensity * 100)}
-              onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
-              className="w-11 h-1 cursor-pointer" />
-          </div>
+        {/* 최소화 (독 모드) */}
+        <button
+          onClick={handleMinimize}
+          className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-yellow-500/70 hover:bg-yellow-500 transition-colors cursor-pointer"
+          title="최소화"
+        >
+          <Minus size={9} className="text-text-primary" strokeWidth={3} />
+        </button>
 
-          {/* AOT 핀 토글 */}
-          <button
-            onClick={handleToggleAOT}
-            className="w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors cursor-pointer"
-            style={{
-              background: isAOT ? 'rgba(108, 92, 231, 0.7)' : 'rgba(255,255,255,0.15)',
-            }}
-            title={isAOT ? '항상 위에 표시 (켜짐)' : '항상 위에 표시 (꺼짐)'}
-          >
-            {isAOT
-              ? <Pin size={9} className="text-on-accent" strokeWidth={3} />
-              : <PinOff size={9} className="text-text-primary/60" strokeWidth={2.5} />}
-          </button>
+        {/* 닫기 */}
+        <button
+          onClick={handleClose}
+          className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-0.5"
+        >
+          <X size={9} className="text-text-primary" strokeWidth={3} />
+        </button>
+      </div>
 
-          {/* 최소화 (독 모드) */}
-          <button
-            onClick={handleMinimize}
-            className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-yellow-500/70 hover:bg-yellow-500 transition-colors cursor-pointer"
-            title="최소화"
-          >
-            <Minus size={9} className="text-text-primary" strokeWidth={3} />
-          </button>
-
-          {/* 닫기 */}
-          <button
-            onClick={handleClose}
-            className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-0.5"
-          >
-            <X size={9} className="text-text-primary" strokeWidth={3} />
-          </button>
+      {/* ── 우하단 슬라이더 (오퍼시티/글래스) — 항상 렌더링, opacity로 전환 ── */}
+      <div
+        className="absolute bottom-0 right-0 z-30 flex items-center gap-2 px-2.5"
+        style={{
+          WebkitAppRegion: 'no-drag',
+          height: '28px',
+          background: showBottomControls
+            ? 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)'
+            : 'transparent',
+          borderTopLeftRadius: '8px',
+          opacity: showBottomControls ? 1 : 0,
+          pointerEvents: showBottomControls ? 'auto' : 'none',
+          transition: 'opacity 0.2s ease, background 0.2s ease',
+        } as React.CSSProperties}
+        onMouseEnter={() => {
+          if (bottomHideTimerRef.current) { clearTimeout(bottomHideTimerRef.current); bottomHideTimerRef.current = null; }
+          setShowBottomControls(true);
+        }}
+      >
+        {/* 앱 오퍼시티 */}
+        <div className="flex items-center gap-1" title="앱 투명도">
+          <Eye size={11} className="text-text-secondary/60" />
+          <input type="range" min={15} max={100}
+            value={Math.round(appOpacity * 100)}
+            onChange={(e) => handleAppOpacity(Number(e.target.value) / 100)}
+            className="w-11 h-1 cursor-pointer" />
         </div>
-      )}
+
+        {/* 글래스 틴트 */}
+        <div className="flex items-center gap-1" title="글래스 효과">
+          <Droplets size={11} className="text-text-secondary/60" />
+          <input type="range" min={0} max={100}
+            value={Math.round(glassIntensity * 100)}
+            onChange={(e) => setGlassIntensity(Number(e.target.value) / 100)}
+            className="w-11 h-1 cursor-pointer" />
+        </div>
+      </div>
 
       {/* ── 위젯 콘텐츠 ── */}
       <div className="flex-1 overflow-hidden relative z-10">

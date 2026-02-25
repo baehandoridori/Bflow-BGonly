@@ -158,7 +158,7 @@ function TimelineChart({ episodes, deptFilter, episodeTitles }: { episodes: Epis
               </span>
               {row.subLabel && (
                 <span
-                  className="text-[10px] px-1 py-px rounded font-medium"
+                  className="text-[11px] px-1 py-px rounded font-medium"
                   style={{ color: deptColor, backgroundColor: deptColor ? `${deptColor}15` : undefined }}
                 >
                   {row.subLabel}
@@ -176,13 +176,13 @@ function TimelineChart({ episodes, deptFilter, episodeTitles }: { episodes: Epis
                 transition={{ duration: 0.6, ease: 'easeOut', delay: i * 0.02 }}
               >
                 {pct >= 15 && (
-                  <span className="absolute inset-0 flex items-center px-2 text-[10px] font-medium text-white/80 truncate">
+                  <span className="absolute inset-0 flex items-center px-2 text-[11px] font-medium text-white/80 truncate">
                     {row.fullyDone}/{row.totalScenes} 완료
                   </span>
                 )}
               </motion.div>
               {pct < 15 && row.totalScenes > 0 && (
-                <span className="absolute inset-0 flex items-center px-2 text-[10px] text-text-secondary/50">
+                <span className="absolute inset-0 flex items-center px-2 text-[11px] text-text-secondary/50">
                   {row.fullyDone}/{row.totalScenes}
                 </span>
               )}
@@ -252,15 +252,15 @@ function ProgressHeatmap({ episodes, deptFilter, episodeTitles }: { episodes: Ep
             style={{ backgroundColor: `${color}${Math.round(opacity * 25).toString(16).padStart(2, '0')}` }}
             title={`${cell.epTitle} ${cell.partId}파트 (${deptCfg.shortLabel}) — ${pct}%`}
           >
-            <div className="text-[10px] font-medium text-text-primary/70 truncate">{cell.epTitle}</div>
+            <div className="text-[11px] font-medium text-text-primary/70 truncate">{cell.epTitle}</div>
             <div className="flex items-center gap-1 mt-0.5">
-              <span className="text-[10px] text-text-secondary/50">{cell.partId}</span>
-              <span className="text-[10px]" style={{ color: deptCfg.color }}>{deptCfg.shortLabel}</span>
+              <span className="text-[11px] text-text-secondary/50">{cell.partId}</span>
+              <span className="text-[11px]" style={{ color: deptCfg.color }}>{deptCfg.shortLabel}</span>
             </div>
             <div className="mt-2 text-lg font-bold tabular-nums" style={{ color }}>
               {pct}%
             </div>
-            <div className="text-[10px] text-text-secondary/50 mt-0.5">
+            <div className="text-[11px] text-text-secondary/50 mt-0.5">
               {cell.done}/{cell.scenes} 씬
             </div>
           </motion.div>
@@ -408,7 +408,7 @@ function EventGanttChart() {
       <div className="flex flex-col items-center justify-center h-48 text-text-secondary/50">
         <CalendarDays size={36} className="mb-2 opacity-30" />
         <p className="text-sm">이벤트가 없습니다</p>
-        <p className="text-[10px] mt-1">캘린더에서 이벤트를 추가해 보세요</p>
+        <p className="text-[11px] mt-1">캘린더에서 이벤트를 추가해 보세요</p>
       </div>
     );
   }
@@ -427,7 +427,7 @@ function EventGanttChart() {
             {months.map((m) => (
               <div
                 key={m.label}
-                className="shrink-0 text-center text-[10px] font-bold text-accent border-r-2 border-accent/30 py-1"
+                className="shrink-0 text-center text-[11px] font-bold text-accent border-r-2 border-accent/30 py-1"
                 style={{ width: m.span * DAY_WIDTH }}
               >
                 {m.label}
@@ -438,7 +438,7 @@ function EventGanttChart() {
           {/* 날짜 헤더 */}
           <div className="flex border-b border-bg-border/30">
             <div
-              className="shrink-0 bg-bg-card border-r border-bg-border/20 px-3 py-1 text-[10px] font-semibold text-text-secondary/60 z-20"
+              className="shrink-0 bg-bg-card border-r border-bg-border/20 px-3 py-1 text-[11px] font-semibold text-text-secondary/60 z-20"
               style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
             >
               이벤트
@@ -571,7 +571,7 @@ function EventGanttChart() {
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold text-text-primary leading-tight">{selectedEvent.title}</div>
                     <span
-                      className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                      className="inline-block mt-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium"
                       style={{ backgroundColor: `${selectedEvent.color}20`, color: selectedEvent.color }}
                     >
                       {selectedEvent.type === 'custom' ? '일반' : selectedEvent.type.toUpperCase()}
@@ -581,7 +581,7 @@ function EventGanttChart() {
 
                 {/* 기간 */}
                 <div className="space-y-1.5">
-                  <div className="text-[10px] font-semibold text-text-secondary/40 uppercase tracking-wider">기간</div>
+                  <div className="text-[11px] font-semibold text-text-secondary/40 uppercase tracking-wider">기간</div>
                   <div className="text-xs text-text-primary">
                     {selectedEvent.startDate} → {selectedEvent.endDate}
                   </div>
@@ -593,7 +593,7 @@ function EventGanttChart() {
                 {/* 연결된 항목 */}
                 {selectedEvent.linkedEpisode != null && (
                   <div className="space-y-1.5">
-                    <div className="text-[10px] font-semibold text-text-secondary/40 uppercase tracking-wider">연결된 항목</div>
+                    <div className="text-[11px] font-semibold text-text-secondary/40 uppercase tracking-wider">연결된 항목</div>
                     <div className="text-xs text-text-primary">
                       {episodeTitles[selectedEvent.linkedEpisode] || `EP.${String(selectedEvent.linkedEpisode).padStart(2, '0')}`}
                       {selectedEvent.linkedPart && <span className="text-text-secondary/60"> · {selectedEvent.linkedPart}파트</span>}
@@ -605,7 +605,7 @@ function EventGanttChart() {
                 {/* 메모 */}
                 {selectedEvent.memo && (
                   <div className="space-y-1.5">
-                    <div className="text-[10px] font-semibold text-text-secondary/40 uppercase tracking-wider">메모</div>
+                    <div className="text-[11px] font-semibold text-text-secondary/40 uppercase tracking-wider">메모</div>
                     <div className="text-xs text-text-secondary/80 whitespace-pre-wrap leading-relaxed">{selectedEvent.memo}</div>
                   </div>
                 )}
@@ -613,7 +613,7 @@ function EventGanttChart() {
                 {/* 생성자 */}
                 {selectedEvent.createdBy && (
                   <div className="space-y-1.5">
-                    <div className="text-[10px] font-semibold text-text-secondary/40 uppercase tracking-wider">생성자</div>
+                    <div className="text-[11px] font-semibold text-text-secondary/40 uppercase tracking-wider">생성자</div>
                     <div className="text-xs text-text-secondary/60">{selectedEvent.createdBy}</div>
                   </div>
                 )}
@@ -794,7 +794,7 @@ export function CalendarView() {
       </div>
 
       {/* 범례 */}
-      <div className="flex items-center justify-center gap-4 py-2 text-[10px] text-text-secondary/50">
+      <div className="flex items-center justify-center gap-4 py-2 text-[11px] text-text-secondary/50">
         <div className="flex items-center gap-1.5">
           <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: '#FF6B6B' }} />
           <span>0~25%</span>
