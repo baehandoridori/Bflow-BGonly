@@ -492,17 +492,14 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
 });
 
 /* ─── 개인 할일 행 ──────────────────────────── */
-function PersonalTodoRow({
-  todo,
-  onToggle,
-  onRemove,
-}: {
+const PersonalTodoRow = forwardRef<HTMLDivElement, {
   todo: PersonalTodo;
   onToggle: (id: string) => void;
   onRemove: (id: string) => void;
-}) {
+}>(function PersonalTodoRow({ todo, onToggle, onRemove }, ref) {
   return (
     <motion.div
+      ref={ref}
       layout
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -534,7 +531,7 @@ function PersonalTodoRow({
           <span className="text-[8px] text-accent/40 bg-accent/8 px-1.5 py-0.5 rounded-full shrink-0">개인</span>
         </div>
         {todo.memo && (
-          <span className="text-[9px] text-text-secondary/40 truncate">{todo.memo}</span>
+          <span className="text-[10px] text-text-secondary/50 truncate">{todo.memo}</span>
         )}
       </div>
       <button
@@ -545,7 +542,7 @@ function PersonalTodoRow({
       </button>
     </motion.div>
   );
-}
+});
 
 /* ─── Windows 11 스타일 탭 바 ────────────────── */
 function TabBar({
