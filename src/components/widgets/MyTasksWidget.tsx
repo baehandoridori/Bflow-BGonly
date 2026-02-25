@@ -219,7 +219,7 @@ function AddTaskModal({
               >
                 {episodes.map((ep) => (
                   <option key={ep.episodeNumber} value={ep.episodeNumber}>
-                    {episodeTitles[ep.episodeNumber] || `EP.${String(ep.episodeNumber).padStart(2, '0')}`}
+                    {episodeTitles[ep.episodeNumber] || ep.title || `EP.${String(ep.episodeNumber).padStart(2, '0')}`}
                   </option>
                 ))}
               </select>
@@ -354,21 +354,21 @@ function AddTaskModal({
                 type="button"
                 onClick={() => setTodoAddToCalendar(!todoAddToCalendar)}
                 className={cn(
-                  'flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors cursor-pointer',
+                  'flex items-center gap-2.5 px-3 py-2.5 rounded-lg border-2 transition-all cursor-pointer',
                   todoAddToCalendar
-                    ? 'border-accent/40 bg-accent/10 text-accent'
-                    : 'border-bg-border text-text-secondary/50 hover:text-text-secondary hover:border-bg-border/80',
+                    ? 'border-[#6C5CE7] bg-[#6C5CE7]/15 text-[#6C5CE7]'
+                    : 'border-bg-border/60 text-text-secondary/60 hover:text-[#6C5CE7] hover:border-[#6C5CE7]/30 hover:bg-[#6C5CE7]/5',
                 )}
               >
-                <Calendar size={14} />
-                <span className="text-xs font-medium">캘린더 추가</span>
+                <Calendar size={16} className={todoAddToCalendar ? 'text-[#6C5CE7]' : ''} />
+                <span className="text-xs font-semibold">캘린더에 추가</span>
                 <div className={cn(
-                  'ml-auto w-8 h-[18px] rounded-full transition-colors relative',
-                  todoAddToCalendar ? 'bg-accent' : 'bg-bg-border/50',
+                  'ml-auto w-9 h-[20px] rounded-full transition-colors relative',
+                  todoAddToCalendar ? 'bg-[#6C5CE7]' : 'bg-bg-border/40',
                 )}>
                   <motion.div
-                    className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm"
-                    animate={{ left: todoAddToCalendar ? 16 : 2 }}
+                    className="absolute top-[3px] w-[14px] h-[14px] rounded-full bg-white shadow-sm"
+                    animate={{ left: todoAddToCalendar ? 18 : 3 }}
                     transition={{ duration: 0.2 }}
                   />
                 </div>
@@ -948,13 +948,34 @@ export function MyTasksWidget() {
   }, [activeView, assignedSceneKeys, allViewScenes]);
 
   // ─── 개인 할일 조작 ─────────────────────
-  const addPersonalTodo = (todo: PersonalTodo) => {
+  const addPersonalTodo = async (todo: PersonalTodo) => {
     if (activeView.id === DEFAULT_VIEW.id) {
       setAssignedTodos((prev) => [...prev, todo]);
     } else {
       setCustomViews((prev) => prev.map((v) =>
         v.id === activeViewId ? { ...v, personalTodos: [...v.personalTodos, todo] } : v,
       ));
+    }
+    // 캘린더 연동: addToCalendar가 true이고 날짜가 있으면 캘린더 이벤트 생성
+    if (todo.addToCalendar && (todo.startDate || todo.endDate)) {
+      try {
+        const { addEvent } = await import('@/services/calendarService');
+        const startDate = todo.startDate || todo.endDate!;
+        const endDate = todo.endDate || todo.startDate!;
+        await addEvent({
+          id: `cal_${todo.id}`,
+          title: todo.title,
+          memo: todo.memo,
+          color: '#6C5CE7',
+          type: 'custom',
+          startDate,
+          endDate,
+          createdBy: currentUser?.name ?? '알 수 없음',
+          createdAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('[MyTasks] 캘린더 이벤트 추가 실패:', err);
+      }
     }
   };
   const togglePersonalTodo = (todoId: string) => {
