@@ -6,7 +6,7 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
@@ -2295,7 +2295,7 @@ export function ScenesView() {
             return (
               <button
                 key="all"
-                onClick={() => { setSelectedDepartment('all'); setSelectedPart(null); }}
+                onClick={() => { setSelectedDepartment('all'); }}
                 className={cn(
                   'relative z-10 px-4 py-2 text-sm rounded-md font-medium cursor-pointer',
                   'transition-colors duration-200 ease-out',
@@ -2325,7 +2325,7 @@ export function ScenesView() {
             return (
               <button
                 key={dept}
-                onClick={() => { setSelectedDepartment(dept); setSelectedPart(null); }}
+                onClick={() => { setSelectedDepartment(dept); }}
                 className={cn(
                   'relative z-10 px-4 py-2 text-sm rounded-md font-medium cursor-pointer',
                   'transition-colors duration-200 ease-out',
@@ -2452,7 +2452,14 @@ export function ScenesView() {
 
         {/* 담당자 필터 */}
         <GlassDropdown
-          options={assignees.map((name) => ({ value: name, label: name }))}
+          options={[
+            ...(currentUser?.name ? [{
+              value: currentUser.name,
+              label: '내 할일만',
+              separatorAfter: true,
+            }] : []),
+            ...assignees.map((name) => ({ value: name, label: name })),
+          ]}
           value={selectedAssignee ?? '__all__'}
           onChange={(v) => setSelectedAssignee(v === '__all__' ? null : v)}
           allOption={{ value: '__all__', label: '전체' }}
@@ -2575,6 +2582,21 @@ export function ScenesView() {
       {/* 진행도 + 씬 목록 영역 */}
       <div className="relative flex-1 flex flex-col gap-4">
 
+      {/* 에피소드/파트 없을 때 빈 상태 */}
+      {!currentEp ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 py-20 text-text-secondary">
+          <Film size={40} className="text-text-secondary/30" />
+          <span className="text-base font-medium">등록된 에피소드가 없습니다</span>
+          <span className="text-sm text-text-secondary/60">좌측 트리에서 + 버튼으로 에피소드를 추가해 주세요</span>
+        </div>
+      ) : selectedDepartment !== 'all' && parts.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 py-20 text-text-secondary">
+          <Layers size={40} className="text-text-secondary/30" />
+          <span className="text-base font-medium">{DEPARTMENT_CONFIGS[selectedDepartment].label} 파트가 없습니다</span>
+          <span className="text-sm text-text-secondary/60">파트를 추가하거나 다른 부서 탭을 선택해 주세요</span>
+        </div>
+      ) : (
+      <>
       {/* 상단 고정 진행도 */}
       <div className="flex items-center gap-4 bg-bg-card border border-bg-border rounded-xl px-5 py-3">
         <span className="text-sm font-medium text-text-secondary">
@@ -2983,6 +3005,9 @@ export function ScenesView() {
         </div>
       )}
       </div>
+      </>
+      )}
+
       </>
       )}
 

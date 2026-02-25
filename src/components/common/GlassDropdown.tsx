@@ -8,6 +8,7 @@ export interface GlassDropdownOption<T extends string | number = string> {
   label: string;
   icon?: React.ReactNode;
   sublabel?: string;
+  separatorAfter?: boolean;
 }
 
 interface GlassDropdownProps<T extends string | number = string> {
@@ -153,40 +154,45 @@ export function GlassDropdown<T extends string | number = string>({
               {allItems.map((opt, idx) => {
                 const isSelected = value === opt.value;
                 const isFocused = focusIdx === idx;
+                const fullOpt = opt as GlassDropdownOption<T>;
                 return (
-                  <button
-                    key={String(opt.value)}
-                    onClick={() => {
-                      onChange(opt.value);
-                      setOpen(false);
-                    }}
-                    onMouseEnter={() => setFocusIdx(idx)}
-                    onContextMenu={
-                      onItemContextMenu
-                        ? (e) => onItemContextMenu(opt.value, e)
-                        : undefined
-                    }
-                    className={cn(
-                      'w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer',
-                      'transition-colors duration-75',
-                      isFocused
-                        ? 'bg-accent/12 text-text-primary'
-                        : 'text-text-primary/80 hover:bg-accent/8',
+                  <div key={String(opt.value)}>
+                    <button
+                      onClick={() => {
+                        onChange(opt.value);
+                        setOpen(false);
+                      }}
+                      onMouseEnter={() => setFocusIdx(idx)}
+                      onContextMenu={
+                        onItemContextMenu
+                          ? (e) => onItemContextMenu(opt.value, e)
+                          : undefined
+                      }
+                      className={cn(
+                        'w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer',
+                        'transition-colors duration-75',
+                        isFocused
+                          ? 'bg-accent/12 text-text-primary'
+                          : 'text-text-primary/80 hover:bg-accent/8',
+                      )}
+                    >
+                      {fullOpt.icon && (
+                        <span className="shrink-0">
+                          {fullOpt.icon}
+                        </span>
+                      )}
+                      <span className="flex-1 truncate">{opt.label}</span>
+                      {fullOpt.sublabel && (
+                        <span className="text-xs text-text-secondary/60">
+                          {fullOpt.sublabel}
+                        </span>
+                      )}
+                      {isSelected && <Check size={14} className="text-accent shrink-0" />}
+                    </button>
+                    {fullOpt.separatorAfter && (
+                      <div className="my-1 mx-2 border-t border-bg-border/50" />
                     )}
-                  >
-                    {'icon' in opt && (opt as GlassDropdownOption<T>).icon && (
-                      <span className="shrink-0">
-                        {(opt as GlassDropdownOption<T>).icon}
-                      </span>
-                    )}
-                    <span className="flex-1 truncate">{opt.label}</span>
-                    {'sublabel' in opt && (opt as GlassDropdownOption<T>).sublabel && (
-                      <span className="text-xs text-text-secondary/60">
-                        {(opt as GlassDropdownOption<T>).sublabel}
-                      </span>
-                    )}
-                    {isSelected && <Check size={14} className="text-accent shrink-0" />}
-                  </button>
+                  </div>
                 );
               })}
             </div>
