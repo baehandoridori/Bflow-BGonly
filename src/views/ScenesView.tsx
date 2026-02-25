@@ -357,6 +357,7 @@ import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
 import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
 import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
+import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 // ─── 씬 카드 (요약 카드 — 클릭으로 상세 모달 열기) ──────────────
@@ -2058,9 +2059,24 @@ export function ScenesView() {
 
   return (
     <div ref={gridRef} className="flex gap-3 min-h-full">
-      {/* ── 트리뷰 사이드바 ── */}
-      {treeOpen && (
-        <div data-no-lasso className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-y-auto flex flex-col sticky top-0 self-start max-h-[calc(100vh-5.5rem)]">
+      {/* ── 트리뷰 사이드바 (애니메이션) ── */}
+      <motion.div
+        data-no-lasso
+        className="shrink-0 bg-bg-card border border-bg-border rounded-xl overflow-hidden flex flex-col sticky top-0 self-start max-h-[calc(100vh-5.5rem)]"
+        animate={{ width: treeOpen ? 208 : 40 }}
+        transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+      >
+        {/* 펼친 상태: EpisodeTreeNav */}
+        <motion.div
+          className="w-52 overflow-y-auto flex-1"
+          animate={{
+            opacity: treeOpen ? 1 : 0,
+            scale: treeOpen ? 1 : 0.85,
+            filter: treeOpen ? 'blur(0px)' : 'blur(4px)',
+          }}
+          transition={{ duration: 0.2 }}
+          style={{ pointerEvents: treeOpen ? 'auto' : 'none', position: treeOpen ? 'relative' : 'absolute' }}
+        >
           <EpisodeTreeNav
             episodes={episodes}
             selectedDepartment={selectedDepartment}
@@ -2082,8 +2098,26 @@ export function ScenesView() {
             onUnarchiveEpisode={handleUnarchiveEpisode}
             onEpisodeContextMenu={handleEpisodeContextMenu}
           />
-        </div>
-      )}
+        </motion.div>
+
+        {/* 접힌 상태: 아이콘 바 */}
+        {!treeOpen && (
+          <motion.div
+            className="flex flex-col items-center py-2 w-10"
+            initial={{ opacity: 0, scale: 0.3 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.2, delay: 0.1 }}
+          >
+            <button
+              onClick={() => setTreeOpen(true)}
+              className="p-2 text-text-secondary/60 hover:text-accent rounded-lg hover:bg-accent/10 transition-colors"
+              title="트리 열기"
+            >
+              <PanelLeftOpen size={16} />
+            </button>
+          </motion.div>
+        )}
+      </motion.div>
 
       {/* ── 메인 콘텐츠 영역 ── */}
       <div className="flex-1 flex flex-col gap-4 min-w-0">
@@ -2129,14 +2163,25 @@ export function ScenesView() {
                 key={dept}
                 onClick={() => { setSelectedDepartment(dept); setSelectedPart(null); }}
                 className={cn(
-                  'px-4 py-2 text-sm rounded-md transition-all duration-200 font-medium',
+                  'relative z-10 px-4 py-2 text-sm rounded-md font-medium cursor-pointer',
+                  'transition-colors duration-200 ease-out',
                   isActive
-                    ? 'text-white shadow-sm'
+                    ? 'text-white'
                     : 'text-text-secondary hover:text-text-primary',
                 )}
-                style={isActive ? { backgroundColor: cfg.color } : undefined}
               >
-                {cfg.shortLabel}
+                {isActive && (
+                  <motion.div
+                    layoutId="scenes-dept-tab-indicator"
+                    className="absolute inset-0 rounded-md shadow-sm"
+                    style={{
+                      backgroundColor: cfg.color,
+                      boxShadow: `0 2px 8px ${cfg.color}40`,
+                    }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">{cfg.shortLabel}</span>
               </button>
             );
           })}
@@ -2149,17 +2194,13 @@ export function ScenesView() {
 
             {/* 에피소드 선택 + 편집 */}
             <div className="flex items-center gap-1">
-              <select
-                value={selectedEpisode ?? currentEp?.episodeNumber ?? ''}
-                onChange={(e) => setSelectedEpisode(Number(e.target.value))}
-                className="bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary font-medium"
-              >
-                {episodeOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+              <GlassDropdown<number>
+                options={episodeOptions}
+                value={selectedEpisode ?? currentEp?.episodeNumber ?? null}
+                onChange={(v) => setSelectedEpisode(v)}
+                label="에피소드 선택"
+                minWidth={200}
+              />
               {currentEp && (
                 <button
                   onClick={() => {
@@ -2186,32 +2227,26 @@ export function ScenesView() {
               + 에피소드
             </button>
 
-            {/* 파트 탭 */}
-            <div className="flex gap-1">
-              {parts.map((part) => {
-                const isActive = (selectedPart ?? (parts.length > 0 ? parts[0].partId : '')) === part.partId;
-                const memo = partMemos[part.sheetName];
-                return (
-                  <button
-                    key={part.partId}
-                    onClick={() => setSelectedPart(part.partId)}
-                    onContextMenu={(e) => {
-                      setPartMenuTarget(part.sheetName);
-                      openPartMenu(e);
-                    }}
-                    className={cn(
-                      'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-                      isActive
-                        ? 'bg-accent text-white shadow-sm shadow-accent/20'
-                        : 'bg-bg-primary text-text-secondary hover:text-text-primary border border-bg-border'
-                    )}
-                    title={memo ? `메모: ${memo}` : undefined}
-                  >
-                    {part.partId}파트
-                    {memo && <span className="ml-1 text-xs italic opacity-70">({memo})</span>}
-                  </button>
-                );
-              })}
+            {/* 파트 드롭다운 */}
+            <div className="flex items-center gap-1">
+              <GlassDropdown
+                options={parts.map((p) => ({
+                  value: p.partId,
+                  label: `${p.partId}파트${partMemos[p.sheetName] ? ` (${partMemos[p.sheetName]})` : ''}`,
+                  sublabel: partMemos[p.sheetName] || undefined,
+                }))}
+                value={selectedPart ?? (parts.length > 0 ? parts[0].partId : null)}
+                onChange={(v) => setSelectedPart(v)}
+                label="파트 선택"
+                onItemContextMenu={(v, e) => {
+                  const part = parts.find((p) => p.partId === v);
+                  if (part) {
+                    setPartMenuTarget(part.sheetName);
+                    openPartMenu(e);
+                  }
+                }}
+                minWidth={140}
+              />
               {/* 파트 추가 */}
               {currentEp && (
                 <button
@@ -2238,33 +2273,15 @@ export function ScenesView() {
         )}
 
         {/* 담당자 필터 */}
-        <div className="flex gap-1.5">
-          <button
-            onClick={() => setSelectedAssignee(null)}
-            className={cn(
-              'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-              !selectedAssignee
-                ? 'bg-accent/20 text-accent'
-                : 'text-text-secondary hover:text-text-primary'
-            )}
-          >
-            전체
-          </button>
-          {assignees.map((name) => (
-            <button
-              key={name}
-              onClick={() => setSelectedAssignee(name)}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                selectedAssignee === name
-                  ? 'bg-accent/20 text-accent'
-                  : 'text-text-secondary hover:text-text-primary'
-              )}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
+        <GlassDropdown
+          options={assignees.map((name) => ({ value: name, label: name }))}
+          value={selectedAssignee ?? '__all__'}
+          onChange={(v) => setSelectedAssignee(v === '__all__' ? null : v)}
+          allOption={{ value: '__all__', label: '전체' }}
+          label="작업자 선택"
+          triggerLabel={selectedAssignee ?? '작업자: 전체'}
+          minWidth={130}
+        />
 
         {/* 구분선 */}
         <div className="w-px h-7 bg-bg-border" />
@@ -2297,17 +2314,18 @@ export function ScenesView() {
         <div className="flex items-center gap-2 ml-auto">
           {/* 정렬 */}
           <div className="flex items-center gap-1.5">
-            <ArrowUpDown size={16} className="text-text-secondary" />
-            <select
+            <GlassDropdown
+              options={[
+                { value: 'no', label: '번호순' },
+                { value: 'assignee', label: '담당자순' },
+                { value: 'progress', label: '진행률순' },
+                { value: 'incomplete', label: '미완료 우선' },
+              ]}
               value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as SortKey)}
-              className="bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary"
-            >
-              <option value="no">번호순</option>
-              <option value="assignee">담당자순</option>
-              <option value="progress">진행률순</option>
-              <option value="incomplete">미완료 우선</option>
-            </select>
+              onChange={(v) => setSortKey(v as SortKey)}
+              icon={<ArrowUpDown size={14} className="text-text-secondary" />}
+              minWidth={140}
+            />
             <button
               onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
               className="px-2 py-1.5 text-sm text-text-secondary hover:text-text-primary rounded-lg hover:bg-bg-border/50 transition-colors"

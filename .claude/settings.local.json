@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(find:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(cd /c/Bflow-BGonly && npx tsc --noEmit 2>&1)"
     ]
   }
 }
