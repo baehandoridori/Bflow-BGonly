@@ -795,10 +795,16 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    win.setAlwaysOnTop(aot);
     if (aot) {
-      // off→on 토글 시 z-order 최상단으로 올림 (1회성, 사용자 액션)
-      win.moveTop();
+      // Windows Acrylic: DWM 상태 리셋 후 floating 레벨로 재적용
+      win.setAlwaysOnTop(false);
+      setTimeout(() => {
+        if (!win.isDestroyed()) {
+          win.setAlwaysOnTop(true, 'floating');
+        }
+      }, 50);
+    } else {
+      win.setAlwaysOnTop(false);
     }
   }
 });
