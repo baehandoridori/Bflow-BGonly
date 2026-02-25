@@ -14,11 +14,20 @@ import { cn } from '@/utils/cn';
 type SceneKey = string;
 const makeKey = (sheetName: string, sceneId: string): SceneKey => `${sheetName}:${sceneId}`;
 
+interface PersonalTodo {
+  id: string;
+  title: string;
+  memo: string;
+  completed: boolean;
+  createdAt: string;
+}
+
 interface TaskView {
   id: string;
   name: string;
   type: 'assigned' | 'custom';
   sceneKeys: SceneKey[];
+  personalTodos: PersonalTodo[];
 }
 
 interface FlatScene {
@@ -32,7 +41,7 @@ interface FlatScene {
 }
 
 /* ─── 기본 뷰 ──────────────────────────────── */
-const DEFAULT_VIEW: TaskView = { id: '__assigned', name: '내 할일', type: 'assigned', sceneKeys: [] };
+const DEFAULT_VIEW: TaskView = { id: '__assigned', name: '내 할일', type: 'assigned', sceneKeys: [], personalTodos: [] };
 
 /* ─── 유틸 ─────────────────────────────────── */
 function scenePct(s: Scene): number {
@@ -41,35 +50,62 @@ function scenePct(s: Scene): number {
 
 /* ─── 커스텀 뷰 퍼시스턴스 ──────────────────── */
 const VIEWS_KEY = 'bflow_my_task_views';
+const ASSIGNED_TODOS_KEY = 'bflow_assigned_personal_todos';
+
 function loadViews(): TaskView[] {
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw) as TaskView[];
+      return parsed.map((v) => ({ ...v, personalTodos: v.personalTodos ?? [] }));
+    }
   } catch {}
   return [];
 }
 function saveViews(views: TaskView[]) {
   localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
 }
+function loadAssignedTodos(): PersonalTodo[] {
+  try {
+    const raw = localStorage.getItem(ASSIGNED_TODOS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+function saveAssignedTodos(todos: PersonalTodo[]) {
+  localStorage.setItem(ASSIGNED_TODOS_KEY, JSON.stringify(todos));
+}
 
-/* ─── 씬 선택 모달 ──────────────────────────── */
-function ScenePickerModal({
+/* ─── 할 일 추가 모달 (작업 + 개인) ──────────── */
+function AddTaskModal({
   episodes,
   episodeTitles,
   existingKeys,
-  onAdd,
+  isCustomView,
+  onAddScenes,
+  onAddPersonalTodo,
   onClose,
 }: {
   episodes: Episode[];
   episodeTitles: Record<number, string>;
   existingKeys: Set<SceneKey>;
-  onAdd: (keys: SceneKey[]) => void;
+  isCustomView: boolean;
+  onAddScenes: (keys: SceneKey[]) => void;
+  onAddPersonalTodo: (todo: PersonalTodo) => void;
   onClose: () => void;
 }) {
+  const [mode, setMode] = useState<'scene' | 'personal'>(isCustomView ? 'scene' : 'personal');
+
+  // 씬 선택 상태
   const [selectedEp, setSelectedEp] = useState<number | null>(episodes[0]?.episodeNumber ?? null);
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [pickedKeys, setPickedKeys] = useState<Set<SceneKey>>(new Set());
+
+  // 개인 할일 상태
+  const [todoTitle, setTodoTitle] = useState('');
+  const [todoMemo, setTodoMemo] = useState('');
+  const titleRef = useRef<HTMLInputElement>(null);
 
   const ep = episodes.find((e) => e.episodeNumber === selectedEp);
   const parts = ep?.parts ?? [];
@@ -80,10 +116,19 @@ function ScenePickerModal({
     }
   }, [selectedEp]);
 
+  // 개인 탭 전환 시 제목 필드 포커스
+  useEffect(() => {
+    if (mode === 'personal') setTimeout(() => titleRef.current?.focus(), 100);
+  }, [mode]);
+
   const currentPart = parts.find((p) => p.sheetName === selectedPart);
   const scenes = currentPart?.scenes ?? [];
+  const searchLower = search.toLowerCase();
   const filtered = search
-    ? scenes.filter((s) => s.sceneId.toLowerCase().includes(search.toLowerCase()) || s.assignee.toLowerCase().includes(search.toLowerCase()))
+    ? scenes.filter((s) =>
+        s.sceneId.toLowerCase().includes(searchLower) ||
+        s.assignee.toLowerCase().includes(searchLower) ||
+        s.memo.toLowerCase().includes(searchLower))
     : scenes;
 
   const toggle = (key: SceneKey) => {
@@ -92,6 +137,18 @@ function ScenePickerModal({
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
+  };
+
+  const handleAddPersonalTodo = () => {
+    if (!todoTitle.trim()) return;
+    onAddPersonalTodo({
+      id: `ptodo_${Date.now()}`,
+      title: todoTitle.trim(),
+      memo: todoMemo.trim(),
+      completed: false,
+      createdAt: new Date().toISOString(),
+    });
+    onClose();
   };
 
   return (
@@ -103,98 +160,176 @@ function ScenePickerModal({
         className="bg-bg-card border border-bg-border/50 rounded-2xl shadow-2xl w-[520px] max-h-[70vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* 헤더 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border/30">
-          <span className="text-sm font-semibold text-text-primary">씬 추가</span>
+          <span className="text-sm font-semibold text-text-primary">할 일 추가</span>
           <button onClick={onClose} className="p-1 hover:bg-bg-border/20 rounded-md cursor-pointer"><X size={16} /></button>
         </div>
-        <div className="flex gap-2 px-4 py-2 border-b border-bg-border/20">
-          <select
-            value={selectedEp ?? ''}
-            onChange={(e) => setSelectedEp(Number(e.target.value))}
-            className="bg-bg-primary border border-bg-border rounded-lg px-2 py-1 text-xs text-text-primary flex-1"
-          >
-            {episodes.map((ep) => (
-              <option key={ep.episodeNumber} value={ep.episodeNumber}>
-                {episodeTitles[ep.episodeNumber] || `EP.${String(ep.episodeNumber).padStart(2, '0')}`}
-              </option>
-            ))}
-          </select>
-          <div className="flex gap-1">
-            {parts.map((p) => (
-              <button
-                key={p.sheetName}
-                onClick={() => setSelectedPart(p.sheetName)}
-                className={cn(
-                  'px-2 py-1 text-[11px] rounded-md font-medium cursor-pointer transition-colors',
-                  selectedPart === p.sheetName ? 'bg-accent/20 text-accent' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border/50',
-                )}
-              >
-                {p.partId}파트 ({DEPARTMENT_CONFIGS[p.department].shortLabel})
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="px-4 py-2">
-          <div className="flex items-center gap-2 bg-bg-primary border border-bg-border rounded-lg px-2 py-1.5">
-            <Search size={12} className="text-text-secondary/40" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="씬 검색..."
-              className="bg-transparent text-xs text-text-primary flex-1 outline-none placeholder:text-text-secondary/30"
-            />
-          </div>
-        </div>
-        <div className="flex-1 overflow-auto px-4 pb-2">
-          <div className="grid grid-cols-1 gap-1">
-            {filtered.map((s) => {
-              const key = makeKey(currentPart!.sheetName, s.sceneId);
-              const alreadyExists = existingKeys.has(key);
-              const picked = pickedKeys.has(key);
-              const pct = scenePct(s);
-              return (
-                <div
-                  key={s.sceneId}
-                  onClick={() => !alreadyExists && toggle(key)}
-                  className={cn(
-                    'flex items-center gap-2 px-3 py-2 rounded-lg transition-colors',
-                    alreadyExists ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-bg-border/10',
-                    picked && 'bg-accent/10 ring-1 ring-accent/30',
-                  )}
-                >
-                  <div className={cn(
-                    'w-4 h-4 rounded border flex items-center justify-center text-[11px] shrink-0',
-                    picked ? 'bg-accent border-accent text-white' : 'border-bg-border/50',
-                  )}>
-                    {picked && <Check size={10} />}
-                  </div>
-                  <span className="text-xs font-mono font-bold text-accent shrink-0">#{s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || s.no}</span>
-                  <span className="text-xs text-text-primary truncate">{s.sceneId}</span>
-                  {s.assignee && <span className="text-[11px] text-text-secondary/50 shrink-0">{s.assignee}</span>}
-                  <span className="ml-auto text-[11px] tabular-nums shrink-0" style={{ color: pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : '#8B8DA3' }}>
-                    {Math.round(pct)}%
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-bg-border/30">
-          <span className="text-[11px] text-text-secondary/50">{pickedKeys.size}개 선택됨</span>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-xs rounded-lg border border-bg-border/50 text-text-secondary hover:text-text-primary cursor-pointer">취소</button>
+
+        {/* 탭 */}
+        <div className="flex gap-1 px-4 py-2 border-b border-bg-border/20">
+          {isCustomView && (
             <button
-              onClick={() => { onAdd(Array.from(pickedKeys)); onClose(); }}
-              disabled={pickedKeys.size === 0}
+              onClick={() => setMode('scene')}
               className={cn(
                 'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
-                pickedKeys.size > 0 ? 'bg-accent text-on-accent hover:bg-accent/90' : 'bg-bg-border/30 text-text-secondary/40 cursor-not-allowed',
+                mode === 'scene' ? 'bg-accent/15 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
               )}
             >
-              추가
+              작업
             </button>
-          </div>
+          )}
+          <button
+            onClick={() => setMode('personal')}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
+              mode === 'personal' ? 'bg-accent/15 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
+            )}
+          >
+            개인
+          </button>
         </div>
+
+        {mode === 'scene' ? (
+          <>
+            {/* 에피소드/파트 선택 */}
+            <div className="flex gap-2 px-4 py-2 border-b border-bg-border/20">
+              <select
+                value={selectedEp ?? ''}
+                onChange={(e) => setSelectedEp(Number(e.target.value))}
+                className="bg-bg-primary border border-bg-border rounded-lg px-2 py-1 text-xs text-text-primary flex-1"
+              >
+                {episodes.map((ep) => (
+                  <option key={ep.episodeNumber} value={ep.episodeNumber}>
+                    {episodeTitles[ep.episodeNumber] || `EP.${String(ep.episodeNumber).padStart(2, '0')}`}
+                  </option>
+                ))}
+              </select>
+              <div className="flex gap-1">
+                {parts.map((p) => (
+                  <button
+                    key={p.sheetName}
+                    onClick={() => setSelectedPart(p.sheetName)}
+                    className={cn(
+                      'px-2 py-1 text-[11px] rounded-md font-medium cursor-pointer transition-colors',
+                      selectedPart === p.sheetName ? 'bg-accent/20 text-accent' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border/50',
+                    )}
+                  >
+                    {p.partId}파트 ({DEPARTMENT_CONFIGS[p.department].shortLabel})
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 검색 */}
+            <div className="px-4 py-2">
+              <div className="flex items-center gap-2 bg-bg-primary border border-bg-border rounded-lg px-2 py-1.5">
+                <Search size={12} className="text-text-secondary/40" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="씬 검색 (씬번호, 담당자, 메모)..."
+                  className="bg-transparent text-xs text-text-primary flex-1 outline-none placeholder:text-text-secondary/30"
+                />
+              </div>
+            </div>
+            {/* 씬 목록 */}
+            <div className="flex-1 overflow-auto px-4 pb-2">
+              <div className="grid grid-cols-1 gap-1">
+                {filtered.map((s) => {
+                  const key = makeKey(currentPart!.sheetName, s.sceneId);
+                  const alreadyExists = existingKeys.has(key);
+                  const picked = pickedKeys.has(key);
+                  const pct = scenePct(s);
+                  return (
+                    <div
+                      key={s.sceneId}
+                      onClick={() => !alreadyExists && toggle(key)}
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-2 rounded-lg transition-colors',
+                        alreadyExists ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-bg-border/10',
+                        picked && 'bg-accent/10 ring-1 ring-accent/30',
+                      )}
+                    >
+                      <div className={cn(
+                        'w-4 h-4 rounded border flex items-center justify-center text-[11px] shrink-0',
+                        picked ? 'bg-accent border-accent text-white' : 'border-bg-border/50',
+                      )}>
+                        {picked && <Check size={10} />}
+                      </div>
+                      <span className="text-xs font-mono font-bold text-accent shrink-0">#{s.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || s.no}</span>
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="text-xs text-text-primary truncate">{s.sceneId}</span>
+                        {s.memo && <span className="text-[10px] text-text-secondary/40 truncate">{s.memo}</span>}
+                      </div>
+                      {s.assignee && <span className="text-[11px] text-text-secondary/50 shrink-0">{s.assignee}</span>}
+                      <span className="ml-auto text-[11px] tabular-nums shrink-0" style={{ color: pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : '#8B8DA3' }}>
+                        {Math.round(pct)}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {/* 하단 액션 */}
+            <div className="flex items-center justify-between px-4 py-3 border-t border-bg-border/30">
+              <span className="text-[11px] text-text-secondary/50">{pickedKeys.size}개 선택됨</span>
+              <div className="flex gap-2">
+                <button onClick={onClose} className="px-3 py-1.5 text-xs rounded-lg border border-bg-border/50 text-text-secondary hover:text-text-primary cursor-pointer">취소</button>
+                <button
+                  onClick={() => { onAddScenes(Array.from(pickedKeys)); onClose(); }}
+                  disabled={pickedKeys.size === 0}
+                  className={cn(
+                    'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
+                    pickedKeys.size > 0 ? 'bg-accent text-on-accent hover:bg-accent/90' : 'bg-bg-border/30 text-text-secondary/40 cursor-not-allowed',
+                  )}
+                >
+                  추가
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* 개인 할일 폼 */}
+            <div className="flex flex-col gap-3 px-4 py-4 flex-1">
+              <div>
+                <label className="text-[11px] text-text-secondary/60 mb-1.5 block">제목</label>
+                <input
+                  ref={titleRef}
+                  value={todoTitle}
+                  onChange={(e) => setTodoTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && todoTitle.trim()) handleAddPersonalTodo(); }}
+                  placeholder="할 일을 입력하세요"
+                  className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-secondary/30"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-text-secondary/60 mb-1.5 block">메모</label>
+                <textarea
+                  value={todoMemo}
+                  onChange={(e) => setTodoMemo(e.target.value)}
+                  placeholder="메모 (선택)"
+                  rows={3}
+                  className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-secondary/30 resize-none"
+                />
+              </div>
+            </div>
+            {/* 하단 액션 */}
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-bg-border/30">
+              <button onClick={onClose} className="px-3 py-1.5 text-xs rounded-lg border border-bg-border/50 text-text-secondary hover:text-text-primary cursor-pointer">취소</button>
+              <button
+                onClick={handleAddPersonalTodo}
+                disabled={!todoTitle.trim()}
+                className={cn(
+                  'px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer transition-colors',
+                  todoTitle.trim() ? 'bg-accent text-on-accent hover:bg-accent/90' : 'bg-bg-border/30 text-text-secondary/40 cursor-not-allowed',
+                )}
+              >
+                추가
+              </button>
+            </div>
+          </>
+        )}
       </motion.div>
     </div>
   );
@@ -356,6 +491,62 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
   );
 });
 
+/* ─── 개인 할일 행 ──────────────────────────── */
+function PersonalTodoRow({
+  todo,
+  onToggle,
+  onRemove,
+}: {
+  todo: PersonalTodo;
+  onToggle: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className={cn(
+        'flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors group',
+        todo.completed ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
+      )}
+    >
+      <button
+        onClick={() => onToggle(todo.id)}
+        className={cn(
+          'w-5 h-5 rounded border flex items-center justify-center cursor-pointer transition-all shrink-0',
+          todo.completed
+            ? 'bg-green-500 border-green-500 text-white'
+            : 'border-bg-border/50 hover:border-accent/50',
+        )}
+      >
+        {todo.completed && <Check size={10} />}
+      </button>
+      <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+        <div className="flex items-center gap-1.5">
+          <span className={cn(
+            'text-[11px] text-text-primary truncate',
+            todo.completed && 'line-through text-text-secondary/50',
+          )}>
+            {todo.title}
+          </span>
+          <span className="text-[8px] text-accent/40 bg-accent/8 px-1.5 py-0.5 rounded-full shrink-0">개인</span>
+        </div>
+        {todo.memo && (
+          <span className="text-[9px] text-text-secondary/40 truncate">{todo.memo}</span>
+        )}
+      </div>
+      <button
+        onClick={() => onRemove(todo.id)}
+        className="p-0.5 text-text-secondary/20 hover:text-red-400 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+      >
+        <X size={10} />
+      </button>
+    </motion.div>
+  );
+}
+
 /* ─── Windows 11 스타일 탭 바 ────────────────── */
 function TabBar({
   views,
@@ -487,10 +678,14 @@ export function MyTasksWidget() {
   const [filterDone, setFilterDone] = useState(false);
   const [showDone, setShowDone] = useState(false);
 
+  // assigned 뷰 전용 개인 할일 (DEFAULT_VIEW는 상수이므로 별도 관리)
+  const [assignedTodos, setAssignedTodos] = useState<PersonalTodo[]>(() => loadAssignedTodos());
+
   const allViews = [DEFAULT_VIEW, ...customViews];
   const activeView = allViews.find((v) => v.id === activeViewId) ?? DEFAULT_VIEW;
 
   useEffect(() => { saveViews(customViews); }, [customViews]);
+  useEffect(() => { saveAssignedTodos(assignedTodos); }, [assignedTodos]);
 
   // 전체 평탄화
   const allFlat: FlatScene[] = useMemo(() => {
@@ -536,12 +731,29 @@ export function MyTasksWidget() {
   const pendingScenes = useMemo(() => allViewScenes.filter((f) => scenePct(f.scene) < 100), [allViewScenes]);
   const doneScenes = useMemo(() => allViewScenes.filter((f) => scenePct(f.scene) >= 100), [allViewScenes]);
 
+  // 활성 뷰의 개인 할일
+  const activePersonalTodos = useMemo(() => {
+    if (activeView.id === DEFAULT_VIEW.id) return assignedTodos;
+    return activeView.personalTodos;
+  }, [activeView, assignedTodos]);
+
+  const pendingPersonalTodos = useMemo(() => activePersonalTodos.filter((t) => !t.completed), [activePersonalTodos]);
+  const donePersonalTodos = useMemo(() => activePersonalTodos.filter((t) => t.completed), [activePersonalTodos]);
+
   const stats = useMemo(() => {
-    const total = allViewScenes.length;
-    const stages = total * 4;
-    const checked = allViewScenes.reduce((s, f) => s + [f.scene.lo, f.scene.done, f.scene.review, f.scene.png].filter(Boolean).length, 0);
-    return { total, fullyDone: doneScenes.length, pct: stages > 0 ? (checked / stages) * 100 : 0 };
-  }, [allViewScenes, doneScenes]);
+    const sceneTotal = allViewScenes.length;
+    const personalTotal = activePersonalTodos.length;
+    const total = sceneTotal + personalTotal;
+    const sceneStages = sceneTotal * 4;
+    const sceneChecked = allViewScenes.reduce((s, f) => s + [f.scene.lo, f.scene.done, f.scene.review, f.scene.png].filter(Boolean).length, 0);
+    const personalDone = donePersonalTodos.length;
+    const fullyDone = doneScenes.length + personalDone;
+    // 씬: 4단계 가중, 개인 할일: 1단계 가중
+    const totalWeight = sceneStages + personalTotal;
+    const checkedWeight = sceneChecked + personalDone;
+    const pct = totalWeight > 0 ? (checkedWeight / totalWeight) * 100 : 0;
+    return { total, fullyDone, pct };
+  }, [allViewScenes, doneScenes, activePersonalTodos, donePersonalTodos]);
 
   // 팝업에서 완료 섹션 접기/펼치기 시 창 크기 조절
   const baseSizeRef = useRef<{ width: number; height: number } | null>(null);
@@ -614,7 +826,7 @@ export function MyTasksWidget() {
   // 뷰 조작
   const createCustomView = () => {
     const id = `view_${Date.now()}`;
-    setCustomViews((prev) => [...prev, { id, name: '새 할일 목록', type: 'custom' as const, sceneKeys: [] }]);
+    setCustomViews((prev) => [...prev, { id, name: '새 할일 목록', type: 'custom' as const, sceneKeys: [], personalTodos: [] }]);
     setActiveViewId(id);
   };
   const renameView = (id: string, name: string) => {
@@ -635,6 +847,36 @@ export function MyTasksWidget() {
     ));
   };
   const existingKeys = useMemo(() => new Set(activeView.sceneKeys), [activeView]);
+
+  // ─── 개인 할일 조작 ─────────────────────
+  const addPersonalTodo = (todo: PersonalTodo) => {
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedTodos((prev) => [...prev, todo]);
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, personalTodos: [...v.personalTodos, todo] } : v,
+      ));
+    }
+  };
+  const togglePersonalTodo = (todoId: string) => {
+    const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? { ...t, completed: !t.completed } : t);
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedTodos(updater);
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, personalTodos: updater(v.personalTodos) } : v,
+      ));
+    }
+  };
+  const removePersonalTodo = (todoId: string) => {
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedTodos((prev) => prev.filter((t) => t.id !== todoId));
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, personalTodos: v.personalTodos.filter((t) => t.id !== todoId) } : v,
+      ));
+    }
+  };
 
   // 행 렌더 헬퍼
   const renderRow = (flat: FlatScene) => {
@@ -707,16 +949,16 @@ export function MyTasksWidget() {
         {/* 메인 리스트 */}
         <div className="flex-1 overflow-auto -mx-1 px-1">
           {/* 진행 중 항목 */}
-          {pendingScenes.length === 0 && doneScenes.length === 0 ? (
+          {pendingScenes.length === 0 && pendingPersonalTodos.length === 0 && doneScenes.length === 0 && donePersonalTodos.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-text-secondary/40 gap-1">
               <CheckSquare size={24} className="opacity-30" />
               <span className="text-[11px]">
-                {activeView.type === 'assigned' ? '할당된 씬이 없습니다' : '씬을 추가해 보세요'}
+                {activeView.type === 'assigned' ? '할당된 씬이 없습니다' : '할 일을 추가해 보세요'}
               </span>
             </div>
           ) : (
             <>
-              {pendingScenes.length === 0 && doneScenes.length > 0 && (
+              {pendingScenes.length === 0 && pendingPersonalTodos.length === 0 && (doneScenes.length > 0 || donePersonalTodos.length > 0) && (
                 <div className="flex flex-col items-center justify-center py-4 text-text-secondary/40 gap-1">
                   <PartyPopper size={20} className="opacity-40 text-green-400" />
                   <span className="text-[11px] text-green-400/60">모든 할일 완료!</span>
@@ -724,10 +966,13 @@ export function MyTasksWidget() {
               )}
               <AnimatePresence mode="popLayout">
                 {pendingScenes.map(renderRow)}
+                {pendingPersonalTodos.map((todo) => (
+                  <PersonalTodoRow key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} />
+                ))}
               </AnimatePresence>
 
               {/* ─── 완료된 항목 섹션 ─── */}
-              {doneScenes.length > 0 && !filterDone && (
+              {(doneScenes.length > 0 || donePersonalTodos.length > 0) && !filterDone && (
                 <div className="mt-2">
                   {/* 접기/펼치기 토글 */}
                   <button
@@ -742,7 +987,7 @@ export function MyTasksWidget() {
                     </motion.div>
                     <span className="font-medium">완료된 항목</span>
                     <span className="text-[9px] tabular-nums bg-green-500/10 text-green-400/70 px-1.5 py-0 rounded-full">
-                      {doneScenes.length}
+                      {doneScenes.length + donePersonalTodos.length}
                     </span>
                     <div className="flex-1 h-px bg-bg-border/15 ml-1" />
                   </button>
@@ -760,6 +1005,9 @@ export function MyTasksWidget() {
                         <div className="flex flex-col gap-0.5 pt-1">
                           <AnimatePresence mode="popLayout">
                             {doneScenes.map(renderRow)}
+                            {donePersonalTodos.map((todo) => (
+                              <PersonalTodoRow key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} />
+                            ))}
                           </AnimatePresence>
                         </div>
                       </motion.div>
@@ -772,24 +1020,24 @@ export function MyTasksWidget() {
         </div>
 
         {/* 할일 추가 버튼 */}
-        {activeView.type === 'custom' && (
-          <button
-            onClick={() => setShowPicker(true)}
-            className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[11px] text-accent border border-accent/20 rounded-lg hover:bg-accent/5 cursor-pointer transition-colors mt-1"
-          >
-            <Plus size={11} />
-            내 할일 추가
-          </button>
-        )}
+        <button
+          onClick={() => setShowPicker(true)}
+          className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[11px] text-accent border border-accent/20 rounded-lg hover:bg-accent/5 cursor-pointer transition-colors mt-1"
+        >
+          <Plus size={11} />
+          내 할일 추가
+        </button>
       </div>
 
       <AnimatePresence>
         {showPicker && (
-          <ScenePickerModal
+          <AddTaskModal
             episodes={episodes}
             episodeTitles={episodeTitles}
             existingKeys={existingKeys}
-            onAdd={addToView}
+            isCustomView={activeView.type === 'custom'}
+            onAddScenes={addToView}
+            onAddPersonalTodo={addPersonalTodo}
             onClose={() => setShowPicker(false)}
           />
         )}
