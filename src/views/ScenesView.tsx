@@ -35,6 +35,8 @@ function useLassoSelection(
       // 버튼/인풋/select/체크박스 위에서는 라쏘 시작 안 함
       const target = e.target as HTMLElement;
       if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
+      // 사이드바 트리뷰 내부에서는 라쏘 시작 안 함 (사이드바 아래 잉여 공간은 허용)
+      if (target.closest('[data-no-lasso]')) return;
       // 좌클릭만
       if (e.button !== 0) return;
 
@@ -2055,10 +2057,10 @@ export function ScenesView() {
   }, [setSelectedEpisode, episodeTitles, episodeMemos]);
 
   return (
-    <div className="flex gap-3 min-h-full">
+    <div ref={gridRef} className="flex gap-3 min-h-full">
       {/* ── 트리뷰 사이드바 ── */}
       {treeOpen && (
-        <div className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-y-auto flex flex-col sticky top-0 self-start max-h-[calc(100vh-5.5rem)]">
+        <div data-no-lasso className="shrink-0 w-52 bg-bg-card border border-bg-border rounded-xl overflow-y-auto flex flex-col sticky top-0 self-start max-h-[calc(100vh-5.5rem)]">
           <EpisodeTreeNav
             episodes={episodes}
             selectedDepartment={selectedDepartment}
@@ -2083,8 +2085,8 @@ export function ScenesView() {
         </div>
       )}
 
-      {/* ── 메인 콘텐츠 영역 (gridRef: 라쏘 드래그 범위) ── */}
-      <div ref={gridRef} className="flex-1 flex flex-col gap-4 min-w-0">
+      {/* ── 메인 콘텐츠 영역 ── */}
+      <div className="flex-1 flex flex-col gap-4 min-w-0">
       {/* 뒤로가기 (인원별/에피소드 뷰에서 이동해온 경우) */}
       {backLabel && (
         <motion.button
