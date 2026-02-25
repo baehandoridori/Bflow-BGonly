@@ -316,9 +316,11 @@ export function Dashboard() {
   const defaultLayout = dashboardFilter === 'all' ? ALL_LAYOUT : DEPT_LAYOUT;
 
   const layouts: Layouts = useMemo(() => {
-    const lg = dashboardFilter === 'all'
+    const raw = dashboardFilter === 'all'
       ? (allWidgetLayout ?? ALL_LAYOUT)
       : (widgetLayout ?? DEPT_LAYOUT);
+    // 저장된 레이아웃의 minW를 1로 클램프 — 좁은 breakpoint(xxs cols=1)에서 경고 방지
+    const lg = raw.map(item => item.minW && item.minW > 1 ? { ...item, minW: 1 } : item);
     return { lg };
   }, [widgetLayout, allWidgetLayout, dashboardFilter]);
 

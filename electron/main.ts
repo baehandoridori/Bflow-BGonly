@@ -795,7 +795,8 @@ ipcMain.handle('widget:close-popup', (_event, widgetId: string) => {
 ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    win.setAlwaysOnTop(aot);
+    // Windows Acrylic에서는 'floating' 레벨을 명시해야 AOT가 안정적으로 적용됨
+    win.setAlwaysOnTop(aot, aot ? 'floating' : 'normal');
   }
 });
 
