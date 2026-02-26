@@ -16,8 +16,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 실시간 동기화: 다른 사용자가 시트 파일을 변경했을 때 알림
   onSheetChanged: (callback: () => void) => {
     ipcRenderer.on('sheet:changed', callback);
-    // cleanup 함수 반환
     return () => ipcRenderer.removeListener('sheet:changed', callback);
+  },
+
+  // 재시도 알림: 동기화 재시도 시 토스트 표시용
+  onRetryNotify: (callback: (message: string) => void) => {
+    const handler = (_event: unknown, message: string) => callback(message);
+    ipcRenderer.on('sheets:retry-notify', handler);
+    return () => { ipcRenderer.removeListener('sheets:retry-notify', handler); };
+  },
+
+  // 종료 대기 알림: 미완료 작업 저장 중 표시용
+  onSavingBeforeQuit: (callback: (pendingCount: number) => void) => {
+    const handler = (_event: unknown, count: number) => callback(count);
+    ipcRenderer.on('app:saving-before-quit', handler);
+    return () => { ipcRenderer.removeListener('app:saving-before-quit', handler); };
   },
 
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
@@ -119,6 +132,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 위젯 팝업 윈도우
   widgetOpenPopup: (widgetId: string, title: string) =>
     ipcRenderer.invoke('widget:open-popup', widgetId, title),
+  widgetGetSavedState: (widgetId: string) =>
+    ipcRenderer.invoke('widget:get-saved-state', widgetId) as Promise<{
+      x: number; y: number; width: number; height: number;
+      opacity: number; alwaysOnTop: boolean;
+    } | null>,
   widgetSetOpacity: (widgetId: string, opacity: number) =>
     ipcRenderer.invoke('widget:set-opacity', widgetId, opacity),
   widgetClosePopup: (widgetId: string) =>

@@ -50,6 +50,23 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [storeToast, setStoreToast]);
 
+  // 재시도 알림 수신 → 토스트 표시
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onRetryNotify?.((message) => {
+      setStoreToast(message);
+    });
+    return () => { cleanup?.(); };
+  }, [setStoreToast]);
+
+  // 종료 대기 알림 수신 → 저장 중 오버레이
+  const [savingBeforeQuit, setSavingBeforeQuit] = useState(false);
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onSavingBeforeQuit?.(() => {
+      setSavingBeforeQuit(true);
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
   // 테마 초기화 완료 가드 (init에서 로드 전까지 저장 방지)
   const themeInitRef = useRef(false);
 
@@ -409,6 +426,17 @@ export default function App() {
           onClick={() => { setLocalToast(null); setStoreToast(null); }}
         >
           {toast}
+        </div>
+      )}
+
+      {/* 종료 대기 오버레이 (Phase 0-5) */}
+      {savingBeforeQuit && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-bg-card border border-bg-border rounded-2xl px-8 py-6 shadow-2xl text-center">
+            <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-text-primary text-sm font-medium">저장 중...</p>
+            <p className="text-text-secondary text-xs mt-1">변경사항을 저장하고 있습니다</p>
+          </div>
         </div>
       )}
     </>

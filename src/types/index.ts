@@ -251,6 +251,8 @@ export interface ElectronAPI {
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
   onSheetChanged: (callback: () => void) => () => void;
+  onRetryNotify?: (callback: (message: string) => void) => () => void;
+  onSavingBeforeQuit?: (callback: (pendingCount: number) => void) => () => void;
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
   imageSave: (fileName: string, base64Data: string) => Promise<string>;
   imageDelete: (fileName: string) => Promise<boolean>;
@@ -313,6 +315,10 @@ export interface ElectronAPI {
   // 데이터 변경 브로드캐스트
   sheetsNotifyChange?: () => Promise<{ ok: boolean }>;
   // 위젯 팝업 윈도우
+  widgetGetSavedState?: (widgetId: string) => Promise<{
+    x: number; y: number; width: number; height: number;
+    opacity: number; alwaysOnTop: boolean;
+  } | null>;
   widgetOpenPopup?: (widgetId: string, title: string) => Promise<{ ok: boolean }>;
   widgetSetOpacity?: (widgetId: string, opacity: number) => Promise<void>;
   widgetClosePopup?: (widgetId: string) => Promise<void>;
