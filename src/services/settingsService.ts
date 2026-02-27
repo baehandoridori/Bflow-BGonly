@@ -72,6 +72,51 @@ export interface UserPreferences {
   lastPart?: string;
   lastView?: string;
   chartTypes?: Record<string, string>;
+
+  // Phase 8-1: 글꼴 크기
+  fontScale?: string;  // 'xs' | 's' | 'm' | 'l' | 'xl'
+  fontCategoryScales?: {
+    heading?: number;
+    body?: number;
+    caption?: number;
+    micro?: number;
+  };
+
+  // Phase 8-3: 플렉서스 애니메이션
+  plexus?: {
+    loginEnabled?: boolean;
+    loginParticleCount?: number;
+    dashboardEnabled?: boolean;
+    dashboardParticleCount?: number;
+    speed?: number;
+    mouseRadius?: number;
+    mouseForce?: number;
+    glowIntensity?: number;
+    connectionDist?: number;
+  };
+
+  // Phase 8-4: 스플래시 건너뛰기
+  skipLoadingSplash?: boolean;
+  skipLandingSplash?: boolean;
+
+  // Phase 8-5: 로그인 유지
+  rememberMe?: boolean;
+
+  // Phase 8-2: 키보드 단축키 커스텀 바인딩
+  shortcuts?: Record<string, string>;
+
+  // 기본 시작 뷰
+  defaultView?: string;
+
+  // 알림 설정
+  notifications?: {
+    sceneChange?: boolean;   // 내 씬 변경 알림
+    syncComplete?: boolean;  // 동기화 완료 알림
+    sound?: boolean;         // 알림 소리
+  };
+
+  // 사이드바
+  sidebarExpanded?: boolean;
 }
 
 export async function loadPreferences(): Promise<UserPreferences | null> {

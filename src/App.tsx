@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { useAppStore } from '@/stores/useAppStore';
+import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { Dashboard } from '@/views/Dashboard';
@@ -20,7 +20,10 @@ import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, re
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors } from '@/themes';
+import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
+import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
+import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
@@ -157,12 +160,50 @@ export default function App() {
           setEpisodeWidgetLayout(savedEpLayout);
         }
 
-        // 차트 타입 로드
+        // 차트 타입 + 글꼴 크기 로드
         const savedPrefs = await loadPreferences();
         if (savedPrefs?.chartTypes) {
           for (const [widgetId, type] of Object.entries(savedPrefs.chartTypes)) {
             setChartType(widgetId, type as 'horizontal-bar' | 'vertical-bar' | 'donut' | 'stat-card');
           }
+        }
+
+        // 글꼴 크기 적용 (FOUC 방지: 테마보다 먼저 적용)
+        applyFontSettings({
+          fontScale: (savedPrefs?.fontScale as FontScale) ?? DEFAULT_FONT_SCALE,
+          fontCategoryScales: savedPrefs?.fontCategoryScales
+            ? { ...DEFAULT_CATEGORY_SCALES, ...savedPrefs.fontCategoryScales }
+            : undefined,
+        });
+
+        // Phase 8-4: 스플래시 건너뛰기
+        if (savedPrefs?.skipLoadingSplash) setLoadingSplashDone(true);
+        if (savedPrefs?.skipLandingSplash) setShowSplash(false);
+
+        // Phase 8-3: 플렉서스 설정 로드
+        if (savedPrefs?.plexus) {
+          const p = savedPrefs.plexus;
+          useAppStore.getState().setPlexusSettings({
+            loginEnabled: p.loginEnabled ?? true,
+            loginParticleCount: p.loginParticleCount ?? 666,
+            dashboardEnabled: p.dashboardEnabled ?? true,
+            dashboardParticleCount: p.dashboardParticleCount ?? 120,
+            speed: p.speed ?? 1.0,
+            mouseRadius: p.mouseRadius ?? 250,
+            mouseForce: p.mouseForce ?? 0.06,
+            glowIntensity: p.glowIntensity ?? 1.0,
+            connectionDist: p.connectionDist ?? 160,
+          });
+        }
+
+        // 사이드바 상태 로드
+        if (savedPrefs?.sidebarExpanded !== undefined) {
+          useAppStore.getState().setSidebarExpanded(savedPrefs.sidebarExpanded);
+        }
+
+        // 기본 시작 뷰 로드
+        if (savedPrefs?.defaultView) {
+          useAppStore.getState().setView(savedPrefs.defaultView as ViewMode);
         }
 
         // 테마 로드 + 적용 (가드 설정 후 상태 변경)
@@ -196,10 +237,13 @@ export default function App() {
         const users = await loadUsers();
         setUsers(users);
 
-        // 세션 복원
-        const { user } = await loadSession();
-        if (user) {
-          setCurrentUser(user);
+        // 세션 복원 (Phase 8-5: rememberMe 설정 확인)
+        const rememberMe = savedPrefs?.rememberMe !== false; // 기본 true (하위 호환)
+        if (rememberMe) {
+          const { user } = await loadSession();
+          if (user) {
+            setCurrentUser(user);
+          }
         }
 
         // 저장된 Sheets 설정이 있으면 자동 연결 시도 (모드 무관)
@@ -295,6 +339,9 @@ export default function App() {
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [loadData]);
+
+  // ── 글로벌 단축키 (Phase 8-2) ──
+  useGlobalShortcuts({ onReload: loadData });
 
   // Ctrl+Alt+U: 관리자 모드 토글
   useEffect(() => {

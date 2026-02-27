@@ -94,6 +94,25 @@ interface AppState {
   setCustomThemeColors: (colors: ThemeColors | null) => void;
   setColorMode: (mode: 'dark' | 'light') => void;
   toggleColorMode: () => void;
+
+  // 플렉서스 설정
+  plexusSettings: {
+    loginEnabled: boolean;
+    loginParticleCount: number;
+    dashboardEnabled: boolean;
+    dashboardParticleCount: number;
+    speed: number;           // 0.5-2.0, default 1.0
+    mouseRadius: number;     // 100-400, default 250
+    mouseForce: number;      // 0.02-0.15, default 0.06
+    glowIntensity: number;   // 0.2-2.0, default 1.0
+    connectionDist: number;  // 80-250, default 160
+  };
+  setPlexusSettings: (settings: Partial<AppState['plexusSettings']>) => void;
+
+  // 사이드바 펼침/접힘
+  sidebarExpanded: boolean;
+  setSidebarExpanded: (v: boolean) => void;
+  toggleSidebarExpanded: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -173,4 +192,23 @@ export const useAppStore = create<AppState>((set) => ({
   setCustomThemeColors: (colors) => set({ customThemeColors: colors }),
   setColorMode: (mode) => set({ colorMode: mode }),
   toggleColorMode: () => set((s) => ({ colorMode: s.colorMode === 'dark' ? 'light' : 'dark' })),
+
+  plexusSettings: {
+    loginEnabled: true,
+    loginParticleCount: 666,
+    dashboardEnabled: true,
+    dashboardParticleCount: 120,
+    speed: 1.0,
+    mouseRadius: 250,
+    mouseForce: 0.06,
+    glowIntensity: 1.0,
+    connectionDist: 160,
+  },
+  setPlexusSettings: (partial) => set((s) => ({
+    plexusSettings: { ...s.plexusSettings, ...partial },
+  })),
+
+  sidebarExpanded: false,
+  setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
+  toggleSidebarExpanded: () => set((s) => ({ sidebarExpanded: !s.sidebarExpanded })),
 }));

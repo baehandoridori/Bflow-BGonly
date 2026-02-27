@@ -2,6 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── 타이포그래피 스케일 CSS 변수 ─── */
+:root {
+  --text-scale: 1;
+  --text-heading-scale: 1;
+  --text-body-scale: 1;
+  --text-caption-scale: 1;
+  --text-micro-scale: 1;
+}
+
+/* 타이포그래피 스케일 오버라이드: Tailwind 기본 클래스를 CSS 변수로 스케일링 */
+/* heading 그룹 */
+.text-xl  { font-size: calc(1.25rem * var(--text-scale) * var(--text-heading-scale)) !important; }
+.text-lg  { font-size: calc(1.125rem * var(--text-scale) * var(--text-heading-scale)) !important; }
+/* body 그룹 */
+.text-base { font-size: calc(1rem * var(--text-scale) * var(--text-body-scale)) !important; }
+.text-sm  { font-size: calc(0.875rem * var(--text-scale) * var(--text-body-scale)) !important; }
+/* caption 그룹 */
+.text-xs  { font-size: calc(0.75rem * var(--text-scale) * var(--text-caption-scale)) !important; }
+/* micro 그룹 — 브래킷 크기 */
+[class*="text-\[13px\]"] { font-size: calc(13px * var(--text-scale) * var(--text-body-scale)) !important; }
+[class*="text-\[12px\]"] { font-size: calc(12px * var(--text-scale) * var(--text-caption-scale)) !important; }
+[class*="text-\[11px\]"] { font-size: calc(11px * var(--text-scale) * var(--text-micro-scale)) !important; }
+[class*="text-\[10px\]"] { font-size: calc(10px * var(--text-scale) * var(--text-micro-scale)) !important; }
+[class*="text-\[9px\]"]  { font-size: calc(9px * var(--text-scale) * var(--text-micro-scale)) !important; }
+[class*="text-\[8px\]"]  { font-size: calc(8px * var(--text-scale) * var(--text-micro-scale)) !important; }
+[class*="text-\[7px\]"]  { font-size: calc(7px * var(--text-scale) * var(--text-micro-scale)) !important; }
+
 /* ─── 테마 CSS 변수 (기본값: Violet Dream / Dark) ─── */
 :root {
   --color-bg-primary: 15 17 23;

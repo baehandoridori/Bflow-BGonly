@@ -151,20 +151,25 @@ export async function changePassword(
 
 export async function login(
   name: string,
-  password: string
+  password: string,
+  rememberMe: boolean = true,
 ): Promise<{ ok: boolean; user?: AppUser; error?: string }> {
   const users = await loadUsers();
   const user = users.find((u) => u.name === name);
   if (!user) return { ok: false, error: '등록되지 않은 사용자입니다.' };
   if (user.password !== password) return { ok: false, error: '비밀번호가 일치하지 않습니다.' };
 
-  // 세션 저장
-  const session: AuthSession = {
-    userId: user.id,
-    userName: user.name,
-    loggedInAt: new Date().toISOString(),
-  };
-  await window.electronAPI.writeSettings(AUTH_FILE, session);
+  // 세션 저장 (rememberMe 활성 시에만)
+  if (rememberMe) {
+    const session: AuthSession = {
+      userId: user.id,
+      userName: user.name,
+      loggedInAt: new Date().toISOString(),
+    };
+    await window.electronAPI.writeSettings(AUTH_FILE, session);
+  } else {
+    await window.electronAPI.writeSettings(AUTH_FILE, null);
+  }
   return { ok: true, user };
 }
 

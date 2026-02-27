@@ -141,32 +141,33 @@ export function SpotlightSearch() {
     setHighlightUserName,
   } = useAppStore();
 
-  /* ── 글로벌 단축키: Ctrl+Space ── */
+  /* ── 글로벌 단축키 (useGlobalShortcuts에서 커스텀 이벤트로 위임) ── */
   const isOpenRef = useRef(isOpen);
   useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // 입력 필드에 포커스 중이면 IME 충돌 방지를 위해 무시
-      const tag = (document.activeElement as HTMLElement)?.tagName;
-      const isEditable = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
-        || (document.activeElement as HTMLElement)?.isContentEditable;
-
-      if ((e.ctrlKey || e.metaKey) && e.code === 'Space') {
-        // 입력 필드에서는 IME 전환을 위해 가로채지 않음
-        if (isEditable && !isOpenRef.current) return;
-        e.preventDefault();
-        setIsOpen((prev) => !prev);
-        return;
-      }
-      if (e.key === 'Escape' && isOpenRef.current) {
-        e.preventDefault();
-        setIsOpen(false);
-      }
+    const handleToggle = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      const origEvent = detail?.originalEvent as KeyboardEvent | undefined;
+      // IME 충돌 방지: 입력 필드에서 spotlight이 닫혀있으면 무시
+      if (detail?.isEditable && !isOpenRef.current) return;
+      origEvent?.preventDefault();
+      setIsOpen((prev) => !prev);
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []); // 의존성 없음 — isOpenRef로 최신 상태 참조
+    const handleEscape = (e: Event) => {
+      if (!isOpenRef.current) return;
+      const detail = (e as CustomEvent).detail;
+      const origEvent = detail?.originalEvent as KeyboardEvent | undefined;
+      origEvent?.preventDefault();
+      setIsOpen(false);
+    };
+    window.addEventListener('bflow:spotlight-toggle', handleToggle);
+    window.addEventListener('bflow:escape', handleEscape);
+    return () => {
+      window.removeEventListener('bflow:spotlight-toggle', handleToggle);
+      window.removeEventListener('bflow:escape', handleEscape);
+    };
+  }, []);
 
   /* ── 열릴 때 포커스 & 쿼리 초기화 ── */
   useEffect(() => {
