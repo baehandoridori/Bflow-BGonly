@@ -356,12 +356,26 @@ function EventGanttChart() {
     return { dateRange: { start: startStr, end: endStr }, dayLabels: days, totalDays: days.length };
   }, []);
 
-  // 범위 내 이벤트만 필터
-  const visibleEvents = useMemo(() => {
-    return events
+  // 휴가 토글 상태
+  const [showVacation, setShowVacation] = useState(true);
+
+  // 범위 내 이벤트만 필터 — 일반 / 휴가 분리
+  const { regularEvents, vacationEvents, visibleEvents } = useMemo(() => {
+    const inRange = events
       .filter((e) => e.endDate >= dateRange.start && e.startDate <= dateRange.end)
       .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title));
-  }, [events, dateRange]);
+    const regular = inRange.filter((e) => e.type !== 'vacation');
+    const vacation = inRange.filter((e) => e.type === 'vacation');
+    // 휴가: 사람별 한 줄씩 (같은 사람의 여러 휴가를 한 행에 모음)
+    const vacByPerson = new Map<string, typeof vacation>();
+    for (const v of vacation) {
+      const name = v.vacationUserName || v.title.split(' ')[0];
+      if (!vacByPerson.has(name)) vacByPerson.set(name, []);
+      vacByPerson.get(name)!.push(v);
+    }
+    const all = showVacation ? [...regular, ...vacation] : regular;
+    return { regularEvents: regular, vacationEvents: vacation, visibleEvents: all, vacByPerson };
+  }, [events, dateRange, showVacation]);
 
   // 이벤트별 오프셋 & 폭 계산
   const rangeStartDate = parseDate(dateRange.start);
@@ -469,10 +483,21 @@ function EventGanttChart() {
           {/* 날짜 헤더 */}
           <div className="flex border-b border-bg-border/30">
             <div
-              className="shrink-0 bg-bg-card border-r border-bg-border/20 px-3 py-1 text-[11px] font-semibold text-text-secondary/60 z-20"
+              className="shrink-0 bg-bg-card border-r border-bg-border/20 px-3 py-1 text-[11px] font-semibold text-text-secondary/60 z-20 flex items-center justify-between"
               style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
             >
-              이벤트
+              <span>이벤트</span>
+              {vacationConnected && vacationEvents.length > 0 && (
+                <button
+                  onClick={() => setShowVacation(!showVacation)}
+                  className={cn(
+                    'flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-medium transition-all cursor-pointer',
+                    showVacation ? 'bg-emerald-500/15 text-emerald-400' : 'bg-bg-border/30 text-text-secondary/50',
+                  )}
+                >
+                  <Palmtree size={10} /> 휴가
+                </button>
+              )}
             </div>
             {dayLabels.map((d) => (
               <div
@@ -491,8 +516,8 @@ function EventGanttChart() {
             ))}
           </div>
 
-          {/* 이벤트 행 */}
-          {visibleEvents.map((ev, i) => {
+          {/* 이벤트 행 — 일반 이벤트 */}
+          {regularEvents.map((ev, i) => {
             const evStart = parseDate(ev.startDate < dateRange.start ? dateRange.start : ev.startDate);
             const evEnd = parseDate(ev.endDate > dateRange.end ? dateRange.end : ev.endDate);
             const offsetDays = Math.round((evStart.getTime() - rangeStartDate.getTime()) / 86400000);
@@ -569,6 +594,79 @@ function EventGanttChart() {
               </motion.div>
             );
           })}
+
+          {/* 휴가 구분선 + 휴가 이벤트 (사람별 한 줄) */}
+          {showVacation && vacationEvents.length > 0 && (() => {
+            // 사람별 그룹핑
+            const vacByPerson = new Map<string, CalendarEvent[]>();
+            for (const v of vacationEvents) {
+              const name = v.vacationUserName || v.title.split(' ')[0];
+              if (!vacByPerson.has(name)) vacByPerson.set(name, []);
+              vacByPerson.get(name)!.push(v);
+            }
+            const personEntries = Array.from(vacByPerson.entries());
+
+            return (
+              <>
+                {/* 구분선 */}
+                <div className="flex border-b border-emerald-500/20" style={{ height: 24 }}>
+                  <div
+                    className="shrink-0 flex items-center gap-1.5 px-3 border-r border-bg-border/20 bg-emerald-500/5 z-20"
+                    style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
+                  >
+                    <Palmtree size={10} className="text-emerald-400" />
+                    <span className="text-[10px] font-semibold text-emerald-400">휴가</span>
+                  </div>
+                  <div className="flex-1 bg-emerald-500/5" style={{ width: totalWidth }} />
+                </div>
+
+                {/* 사람별 한 줄씩 */}
+                {personEntries.map(([name, personVacs], pi) => (
+                  <div
+                    key={`vac-person-${name}`}
+                    className="flex border-b border-bg-border/10 hover:bg-bg-border/5 transition-colors"
+                    style={{ height: 32 }}
+                  >
+                    {/* 왼쪽 라벨 — 이름 */}
+                    <div
+                      className="shrink-0 flex items-center gap-1.5 px-3 border-r border-bg-border/20 bg-bg-card z-20"
+                      style={{ width: LABEL_WIDTH, position: 'sticky', left: 0 }}
+                    >
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: VACATION_COLOR }} />
+                      <span className="text-[11px] text-emerald-400 truncate">{name}</span>
+                    </div>
+                    {/* 바 영역 — 해당 사람의 모든 휴가를 한 줄에 */}
+                    <div className="relative flex-1" style={{ width: totalWidth }}>
+                      {personVacs.map((v) => {
+                        const vStart = parseDate(v.startDate < dateRange.start ? dateRange.start : v.startDate);
+                        const vEnd = parseDate(v.endDate > dateRange.end ? dateRange.end : v.endDate);
+                        const off = Math.round((vStart.getTime() - rangeStartDate.getTime()) / 86400000);
+                        const span = Math.round((vEnd.getTime() - vStart.getTime()) / 86400000) + 1;
+                        const vacLabel = v.vacationType || v.type || '휴가';
+                        return (
+                          <div
+                            key={v.id}
+                            className="absolute top-1 h-5 rounded-md flex items-center px-1.5 text-[9px] font-medium truncate cursor-pointer hover:brightness-110"
+                            style={{
+                              left: off * DAY_WIDTH,
+                              width: Math.max(span * DAY_WIDTH - 2, 4),
+                              background: `linear-gradient(135deg, ${VACATION_COLOR}50 0%, ${VACATION_COLOR}30 100%)`,
+                              border: `1px solid ${VACATION_COLOR}60`,
+                              color: VACATION_COLOR,
+                            }}
+                            onClick={() => setSelectedEvent(v)}
+                            title={`${name} ${vacLabel}: ${v.startDate} → ${v.endDate}`}
+                          >
+                            <span className="truncate">{vacLabel}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </>
+            );
+          })()}
         </div>
       </div>
 

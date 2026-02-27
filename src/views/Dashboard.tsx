@@ -11,6 +11,7 @@ import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget'
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
+import { VacationWidget } from '@/components/widgets/VacationWidget';
 import { WidgetIdContext } from '@/components/widgets/Widget';
 import { EdgeGlow, type ResizeZone } from '@/components/widgets/EdgeGlow';
 import { EpOverallProgressWidget } from '@/components/widgets/episode/EpOverallProgressWidget';
@@ -226,6 +227,7 @@ const ALL_WIDGETS: WidgetMeta[] = [
   { id: 'dept-comparison', label: '부서별 비교', component: <DepartmentComparisonWidget />, allOnly: true },
   { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
   { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
+  { id: 'vacation-today', label: '휴가자 현황', component: <VacationWidget /> },
 ];
 
 const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]));

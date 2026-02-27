@@ -144,6 +144,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('vacation:register', name, type, startDate, endDate, reason),
   vacationCancel: (name: string, rowIndex: number) =>
     ipcRenderer.invoke('vacation:cancel', name, rowIndex),
+  vacationGrantDahyu: (targets: string[], reason: string, grantDate: string) =>
+    ipcRenderer.invoke('vacation:grant-dahyu', targets, reason, grantDate),
+  vacationReadAllNames: () =>
+    ipcRenderer.invoke('vacation:read-all-names'),
 
   // 위젯 팝업 윈도우
   widgetOpenPopup: (widgetId: string, title: string) =>

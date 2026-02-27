@@ -322,6 +322,8 @@ export interface ElectronAPI {
   vacationReadAllEvents: (year?: number) => Promise<{ ok: boolean; data: import('./vacation').VacationEvent[]; error?: string }>;
   vacationRegister: (name: string, type: string, startDate: string, endDate: string, reason: string) => Promise<import('./vacation').VacationResult>;
   vacationCancel: (name: string, rowIndex: number) => Promise<import('./vacation').VacationResult>;
+  vacationGrantDahyu: (targets: string[], reason: string, grantDate: string) => Promise<import('./vacation').DahyuGrantResult>;
+  vacationReadAllNames: () => Promise<{ ok: boolean; data: string[]; error?: string }>;
   // 위젯 팝업 윈도우
   widgetGetSavedState?: (widgetId: string) => Promise<{
     x: number; y: number; width: number; height: number;

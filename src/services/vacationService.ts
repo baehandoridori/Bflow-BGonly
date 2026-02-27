@@ -2,7 +2,7 @@
  * 휴가 관리 서비스 — renderer → IPC → electron/vacation.ts 래퍼
  */
 
-import type { VacationStatus, VacationLogEntry, VacationEvent, VacationConfig, VacationResult } from '@/types/vacation';
+import type { VacationStatus, VacationLogEntry, VacationEvent, VacationConfig, VacationResult, DahyuGrantResult } from '@/types/vacation';
 
 const CONFIG_FILE = 'vacation-config.json';
 
@@ -74,4 +74,22 @@ export async function cancelVacationRequest(
   rowIndex: number
 ): Promise<VacationResult> {
   return window.electronAPI.vacationCancel(name, rowIndex);
+}
+
+// ─── 대휴 지급 ─────────────────────────────────────────────────
+
+export async function grantDahyu(data: {
+  targets: string[];
+  reason: string;
+  grantDate: string;
+}): Promise<DahyuGrantResult> {
+  return window.electronAPI.vacationGrantDahyu(data.targets, data.reason, data.grantDate);
+}
+
+// ─── 전체 직원 이름 ─────────────────────────────────────────────
+
+export async function fetchAllEmployeeNames(): Promise<string[]> {
+  const result = await window.electronAPI.vacationReadAllNames();
+  if (!result.ok) throw new Error(result.error ?? '직원 목록 조회 실패');
+  return result.data ?? [];
 }

@@ -46,6 +46,8 @@ import {
   readAllVacationEvents,
   registerVacation,
   cancelVacation,
+  grantDahyu,
+  readAllEmployeeNames,
 } from './vacation';
 
 // 앱 이름 설정 — AppData 경로에 영향
@@ -757,6 +759,26 @@ ipcMain.handle('vacation:cancel', async (_event, name: string, rowIndex: number)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, success: false, state: '', error: msg };
+  }
+});
+
+ipcMain.handle('vacation:grant-dahyu', async (_event, targets: string[], reason: string, grantDate: string) => {
+  try {
+    const result = await grantDahyu({ targets, reason, grantDate });
+    return result;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, success: false, granted: [], failed: targets, state: msg };
+  }
+});
+
+ipcMain.handle('vacation:read-all-names', async () => {
+  try {
+    const names = await readAllEmployeeNames();
+    return { ok: true, data: names };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, data: [], error: msg };
   }
 });
 

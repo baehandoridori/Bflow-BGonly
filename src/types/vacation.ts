@@ -18,6 +18,7 @@ export interface VacationStatus {
   altVacationNet: number;
   specialVacationUsed: number;
   totalUseCount: number;
+  validUseCount?: number;
 }
 
 export interface VacationLogEntry {
@@ -56,4 +57,18 @@ export interface VacationResult {
 
 export interface VacationConfig {
   webAppUrl: string;
+}
+
+export interface DahyuGrantRequest {
+  targets: string[];
+  reason: string;
+  grantDate: string;
+}
+
+export interface DahyuGrantResult {
+  ok: boolean;
+  success: boolean;
+  granted: string[];
+  failed: string[];
+  state: string;
 }

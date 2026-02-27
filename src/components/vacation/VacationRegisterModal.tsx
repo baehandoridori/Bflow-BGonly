@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Palmtree, Loader2 } from 'lucide-react';
+import { X, Palmtree } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import { useAppStore } from '@/stores/useAppStore';
@@ -41,7 +41,6 @@ export function VacationRegisterModal({
   const [startDate, setStartDate] = useState(initialDate ?? fmtToday());
   const [endDate, setEndDate] = useState(initialDate ?? fmtToday());
   const [reason, setReason] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 반차 선택 시 endDate를 startDate와 동일하게
@@ -63,6 +62,8 @@ export function VacationRegisterModal({
     }
   }, [open, initialDate]);
 
+  const invalidateVacationCache = useAppStore((s) => s.invalidateVacationCache);
+
   const handleSubmit = async () => {
     if (!startDate || !endDate) {
       setError('날짜를 입력해주세요');
@@ -73,8 +74,9 @@ export function VacationRegisterModal({
       return;
     }
 
-    setIsSubmitting(true);
-    setError(null);
+    // B1a: Optimistic — 모달 즉시 닫기, 백그라운드에서 API 호출
+    setToast({ message: '휴가 등록 요청 중...', type: 'info' });
+    onClose();
 
     try {
       const result = await submitVacation({
@@ -86,16 +88,15 @@ export function VacationRegisterModal({
       });
 
       if (result.ok && result.success) {
-        setToast('휴가가 등록되었습니다');
+        setToast({ message: '휴가가 등록되었습니다', type: 'success' });
+        invalidateVacationCache();
         onSuccess?.();
-        onClose();
       } else {
-        setError(result.error || result.state || '등록에 실패했습니다');
+        // D3: 등록 실패 상세 알림
+        setToast({ message: '휴가 등록 실패: ' + (result.error || result.state || '알 수 없는 오류'), type: 'error' });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsSubmitting(false);
+      setToast({ message: '휴가 등록 실패: ' + (err instanceof Error ? err.message : String(err)), type: 'error' });
     }
   };
 
@@ -207,22 +208,9 @@ export function VacationRegisterModal({
             <div className="px-5 py-4 border-t border-bg-border/30">
               <button
                 onClick={handleSubmit}
-                disabled={isSubmitting}
-                className={cn(
-                  'w-full py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer flex items-center justify-center gap-2',
-                  isSubmitting
-                    ? 'bg-emerald-500/30 text-emerald-400/60 cursor-wait'
-                    : 'bg-emerald-500 hover:bg-emerald-500/80 text-white',
-                )}
+                className="w-full py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-500/80 text-white"
               >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    등록 처리 중... (최대 15초)
-                  </>
-                ) : (
-                  '신청하기'
-                )}
+                신청하기
               </button>
             </div>
           </motion.div>

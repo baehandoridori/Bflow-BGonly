@@ -55,6 +55,15 @@ export interface VacationStatusResponse {
   altVacationNet: number;
   specialVacationUsed: number;
   totalUseCount: number;
+  validUseCount?: number;
+}
+
+export interface DahyuGrantResult {
+  ok: boolean;
+  success: boolean;
+  granted: string[];
+  failed: string[];
+  state: string;
 }
 
 export interface VacationLogEntry {
@@ -189,4 +198,47 @@ export async function cancelVacation(
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ─── 대휴 지급 ─────────────────────────────────────────────────
+
+export async function grantDahyu(data: {
+  targets: string[];
+  reason: string;
+  grantDate: string;
+}): Promise<DahyuGrantResult> {
+  if (!vacationUrl) throw new Error('Vacation 미연결');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const res = await gasFetch(vacationUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'grantDahyu', ...data }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const json = await res.json() as DahyuGrantResult;
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ─── 전체 직원 이름 ─────────────────────────────────────────────
+
+export async function readAllEmployeeNames(): Promise<string[]> {
+  if (!vacationUrl) throw new Error('Vacation 미연결');
+
+  const qs = new URLSearchParams({ action: 'readAllNames' });
+  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json() as { ok: boolean; data?: string[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '직원 목록 읽기 실패');
+  return json.data ?? [];
 }
