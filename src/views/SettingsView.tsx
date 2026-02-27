@@ -7,6 +7,8 @@ import { GuideSection } from '@/components/settings/GuideSection';
 import { StartupSection } from '@/components/settings/StartupSection';
 import { EffectsSection } from '@/components/settings/EffectsSection';
 import { LoginSection } from '@/components/settings/LoginSection';
+import { ProfileSection } from '@/components/settings/ProfileSection';
+import { ShortcutsSection } from '@/components/settings/ShortcutsSection';
 import { loadPreferences } from '@/services/settingsService';
 import {
   type FontScale,
@@ -16,7 +18,7 @@ import {
 } from '@/utils/typography';
 
 export function SettingsView() {
-  const [activeTab, setActiveTab] = useState<SettingsTabId>('theme');
+  const [activeTab, setActiveTab] = useState<SettingsTabId>('profile');
 
   // 글꼴 크기 상태
   const [fontScale, setFontScale] = useState<FontScale>(DEFAULT_FONT_SCALE);
@@ -39,6 +41,8 @@ export function SettingsView() {
 
   const renderContent = () => {
     switch (activeTab) {
+      case 'profile':
+        return <ProfileSection />;
       case 'theme':
         return <ThemeSection />;
       case 'font':
@@ -60,14 +64,8 @@ export function SettingsView() {
         return <StartupSection />;
       case 'login':
         return <LoginSection />;
-      // 향후 Phase에서 추가
       case 'shortcuts':
-        return (
-          <div className="bg-bg-card border border-bg-border rounded-xl p-8 text-center">
-            <p className="text-sm text-text-secondary/50">이 기능은 준비 중입니다</p>
-            <p className="text-[11px] text-text-secondary/30 mt-1">향후 업데이트에서 제공될 예정입니다</p>
-          </div>
-        );
+        return <ShortcutsSection />;
       default:
         return null;
     }

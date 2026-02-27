@@ -102,6 +102,9 @@ export interface UserPreferences {
   // Phase 8-5: 로그인 유지
   rememberMe?: boolean;
 
+  // Phase 8-2: 키보드 단축키 커스텀 바인딩
+  shortcuts?: Record<string, string>;
+
   // 사이드바
   sidebarExpanded?: boolean;
 }

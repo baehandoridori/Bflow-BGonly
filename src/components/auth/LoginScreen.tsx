@@ -664,7 +664,10 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe
               : 'bg-white/[0.04] border border-white/[0.08] focus:bg-white/[0.06]',
           )}
         />
-        <p className="text-[11px] text-text-secondary/60">최초 비밀번호는 1234</p>
+        <p className="text-[11px] text-text-secondary/60 leading-relaxed">
+          최초 비밀번호는 1234<br />
+          모르겠으면 배씨에게 문의
+        </p>
       </div>
 
       {/* 로그인 유지 체크박스 */}
