@@ -77,7 +77,7 @@ function KeyBadge({ keyStr, active }: { keyStr: string; active?: boolean }) {
                 : 'bg-bg-primary/60 text-text-secondary/70 border-bg-border/50',
             )}
           >
-            {k === 'Ctrl' ? '⌃' : k === 'Alt' ? '⌥' : k === 'Shift' ? '⇧' : k === 'Space' ? '␣' : k === 'Escape' ? 'Esc' : k}
+            {k === 'Escape' ? 'Esc' : k}
           </kbd>
         </span>
       ))}
