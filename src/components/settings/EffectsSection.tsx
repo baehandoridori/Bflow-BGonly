@@ -270,6 +270,15 @@ function Slider({ label, value, min, max, step, defaultVal, onChange }: {
       <span className={cn('text-xs font-mono w-12 text-right', isModified ? 'text-accent' : 'text-text-secondary/60')}>
         {step < 1 ? value.toFixed(2) : value}
       </span>
+      {isModified && (
+        <button
+          onClick={() => onChange(defaultVal)}
+          className="shrink-0 text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
+          title={`기본값 (${step < 1 ? defaultVal.toFixed(2) : defaultVal})`}
+        >
+          <RotateCcw size={11} />
+        </button>
+      )}
     </div>
   );
 }
@@ -317,7 +326,18 @@ export function EffectsSection() {
             <p className="text-sm font-medium text-text-primary">로그인 배경 애니메이션</p>
             <p className="text-[11px] text-text-secondary/60 mt-0.5">로그인 화면의 플렉서스 파티클 효과</p>
           </div>
-          <Toggle checked={plexusSettings.loginEnabled} onChange={(v) => update({ loginEnabled: v })} />
+          <div className="flex items-center gap-2">
+            {plexusSettings.loginEnabled !== DEFAULTS.loginEnabled && (
+              <button
+                onClick={() => update({ loginEnabled: DEFAULTS.loginEnabled })}
+                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
+                title={`기본값 (${DEFAULTS.loginEnabled ? 'ON' : 'OFF'})`}
+              >
+                <RotateCcw size={11} />
+              </button>
+            )}
+            <Toggle checked={plexusSettings.loginEnabled} onChange={(v) => update({ loginEnabled: v })} />
+          </div>
         </div>
 
         <MiniPlexusPreview
@@ -347,7 +367,18 @@ export function EffectsSection() {
             <p className="text-sm font-medium text-text-primary">대시보드 배경 애니메이션</p>
             <p className="text-[11px] text-text-secondary/60 mt-0.5">대시보드의 은은한 파티클 효과</p>
           </div>
-          <Toggle checked={plexusSettings.dashboardEnabled} onChange={(v) => update({ dashboardEnabled: v })} />
+          <div className="flex items-center gap-2">
+            {plexusSettings.dashboardEnabled !== DEFAULTS.dashboardEnabled && (
+              <button
+                onClick={() => update({ dashboardEnabled: DEFAULTS.dashboardEnabled })}
+                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
+                title={`기본값 (${DEFAULTS.dashboardEnabled ? 'ON' : 'OFF'})`}
+              >
+                <RotateCcw size={11} />
+              </button>
+            )}
+            <Toggle checked={plexusSettings.dashboardEnabled} onChange={(v) => update({ dashboardEnabled: v })} />
+          </div>
         </div>
 
         <MiniPlexusPreview
