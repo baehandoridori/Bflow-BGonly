@@ -236,6 +236,8 @@ export function ShortcutsSection() {
   const persist = useCallback(async (bindings: CustomBindings) => {
     const existing = await loadPreferences() ?? {};
     await savePreferences({ ...existing, shortcuts: bindings });
+    // useGlobalShortcuts에 바인딩 변경 알림
+    window.dispatchEvent(new Event('bflow:shortcuts-changed'));
   }, []);
 
   const handleRecord = useCallback((id: string) => {

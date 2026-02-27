@@ -76,10 +76,10 @@ export function useGlobalShortcuts({ onReload }: UseGlobalShortcutsOptions = {})
   const onReloadRef = useRef(onReload);
   onReloadRef.current = onReload;
 
-  // 바인딩 로드 + 역방향 맵 구축
+  // 바인딩 로드 + 역방향 맵 구축 (설정 변경 시 자동 재로드)
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const loadBindings = async () => {
       const prefs = await loadPreferences();
       if (cancelled) return;
       const custom = prefs?.shortcuts ?? {};
@@ -91,8 +91,16 @@ export function useGlobalShortcuts({ onReload }: UseGlobalShortcutsOptions = {})
         reverse.set(keys, id);
       }
       reverseRef.current = reverse;
-    })();
-    return () => { cancelled = true; };
+    };
+    loadBindings();
+
+    // ShortcutsSection에서 저장 시 재로드
+    const onChanged = () => { loadBindings(); };
+    window.addEventListener('bflow:shortcuts-changed', onChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bflow:shortcuts-changed', onChanged);
+    };
   }, []);
 
   useEffect(() => {
@@ -108,8 +116,19 @@ export function useGlobalShortcuts({ onReload }: UseGlobalShortcutsOptions = {})
       const id = reverseRef.current.get(keyStr);
       if (!id) return;
 
-      // spotlight은 SpotlightSearch.tsx가 자체 처리하므로 건너뜀
-      if (id === 'spotlight' || id === 'escape') return;
+      // spotlight/escape는 커스텀 이벤트로 위임 (SpotlightSearch 등이 처리)
+      if (id === 'spotlight') {
+        window.dispatchEvent(new CustomEvent('bflow:spotlight-toggle', {
+          detail: { originalEvent: e, isEditable },
+        }));
+        return;
+      }
+      if (id === 'escape') {
+        window.dispatchEvent(new CustomEvent('bflow:escape', {
+          detail: { originalEvent: e },
+        }));
+        return;
+      }
 
       // 입력 필드에서는 뷰 전환/편집 단축키 무시 (F11, reload은 허용)
       if (isEditable && id !== 'fullscreen' && id !== 'reload') return;
