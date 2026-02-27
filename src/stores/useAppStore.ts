@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptFilter } from '@/types';
 import type { ThemeColors } from '@/themes';
+import type { VacationConfig } from '@/types/vacation';
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'settings';
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
@@ -109,6 +110,12 @@ interface AppState {
   };
   setPlexusSettings: (settings: Partial<AppState['plexusSettings']>) => void;
 
+  // 휴가 관리 연결 상태
+  vacationConnected: boolean;
+  vacationConfig: VacationConfig | null;
+  setVacationConnected: (v: boolean) => void;
+  setVacationConfig: (config: VacationConfig | null) => void;
+
   // 사이드바 펼침/접힘
   sidebarExpanded: boolean;
   setSidebarExpanded: (v: boolean) => void;
@@ -207,6 +214,11 @@ export const useAppStore = create<AppState>((set) => ({
   setPlexusSettings: (partial) => set((s) => ({
     plexusSettings: { ...s.plexusSettings, ...partial },
   })),
+
+  vacationConnected: false,
+  vacationConfig: null,
+  setVacationConnected: (v) => set({ vacationConnected: v }),
+  setVacationConfig: (config) => set({ vacationConfig: config }),
 
   sidebarExpanded: false,
   setSidebarExpanded: (v) => set({ sidebarExpanded: v }),

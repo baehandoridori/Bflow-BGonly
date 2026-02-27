@@ -1,14 +1,16 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Layers, BarChart3, CalendarDays, X, ExternalLink, Eye } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronRight, ChevronLeft, Layers, BarChart3, CalendarDays, X, ExternalLink, Eye, Palmtree } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress, isFullyDone } from '@/utils/calcStats';
 import { DEPARTMENT_CONFIGS, DEPARTMENTS } from '@/types';
 import type { Episode, Department } from '@/types';
 import { getEvents } from '@/services/calendarService';
+import { fetchAllVacationEvents } from '@/services/vacationService';
 import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
+import { VACATION_COLOR } from '@/types/vacation';
 import { cn } from '@/utils/cn';
 
 /* ────────────────────────────────────────────────
@@ -288,10 +290,39 @@ function fmtDate(d: Date): string {
 
 function EventGanttChart() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const vacationConnected = useAppStore((s) => s.vacationConnected);
 
   useEffect(() => {
     getEvents().then(setEvents);
   }, []);
+
+  // 휴가 이벤트 로드 & 머지
+  useEffect(() => {
+    if (!vacationConnected) return;
+    fetchAllVacationEvents()
+      .then((raw) => {
+        const mapped: CalendarEvent[] = raw.map((v, i) => ({
+          id: `gvac-${v.name}-${v.startDate}-${i}`,
+          title: `${v.name} ${v.type}`,
+          memo: '',
+          color: VACATION_COLOR,
+          type: 'vacation' as const,
+          startDate: v.startDate,
+          endDate: v.endDate,
+          createdBy: v.name,
+          createdAt: new Date().toISOString(),
+          vacationType: v.type,
+          vacationUserName: v.name,
+          isReadOnly: true,
+        }));
+        setEvents((prev) => {
+          // 기존 vacation 이벤트 제거 후 새로 추가
+          const nonVac = prev.filter((e) => e.type !== 'vacation');
+          return [...nonVac, ...mapped];
+        });
+      })
+      .catch(() => { /* 비차단 */ });
+  }, [vacationConnected]);
 
   const DAY_WIDTH = 32; // 날짜 하나의 픽셀 폭
 
@@ -574,7 +605,7 @@ function EventGanttChart() {
                       className="inline-block mt-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium"
                       style={{ backgroundColor: `${selectedEvent.color}20`, color: selectedEvent.color }}
                     >
-                      {selectedEvent.type === 'custom' ? '일반' : selectedEvent.type.toUpperCase()}
+                      {selectedEvent.type === 'custom' ? '일반' : selectedEvent.type === 'vacation' ? '휴가' : selectedEvent.type.toUpperCase()}
                     </span>
                   </div>
                 </div>
@@ -620,7 +651,13 @@ function EventGanttChart() {
               </div>
 
               {/* 하단 액션 버튼 */}
-              {selectedEvent.linkedEpisode != null && (
+              {selectedEvent.type === 'vacation' ? (
+                <div className="border-t border-bg-border/30 p-3">
+                  <p className="text-[11px] text-text-secondary/40 text-center">
+                    휴가 이벤트는 프로필 설정에서 관리됩니다
+                  </p>
+                </div>
+              ) : selectedEvent.linkedEpisode != null ? (
                 <div className="border-t border-bg-border/30 p-3 space-y-2">
                   <button
                     onClick={() => handleNavigate(selectedEvent)}
@@ -630,7 +667,7 @@ function EventGanttChart() {
                     씬 확인하기
                   </button>
                 </div>
-              )}
+              ) : null}
             </div>
           </motion.div>
         )}

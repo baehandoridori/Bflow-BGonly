@@ -13,13 +13,13 @@
  *   신규:     EP01_A_BG, EP01_A_ACT, ... (_BG | _ACT 접미사로 부서 구분)
  */
 
+import { gasFetch, gasFetchWithRetry, setRetryNotifyCallback as _setRetryNotifyCallback } from './gas-fetch';
+
 let webAppUrl: string | null = null;
 
-// ─── 재시도 알림 콜백 (메인 프로세스 → 렌더러 전달용) ────────
-let retryNotifyCallback: ((message: string) => void) | null = null;
-
+// ─── 재시도 알림 콜백 (gas-fetch.ts로 위임) ────────
 export function setRetryNotifyCallback(cb: (message: string) => void): void {
-  retryNotifyCallback = cb;
+  _setRetryNotifyCallback(cb);
 }
 
 // ─── 진행 중 작업 추적 (Phase 0-5: 종료 시 큐 보장) ─────────
@@ -49,93 +49,6 @@ function trackPending<T>(op: Promise<T>): Promise<T> {
       resolvers.forEach((r) => r());
     }
   });
-}
-
-// ─── Google Apps Script fetch 헬퍼 ──────────────────────────
-// GAS 웹 앱은 302 리다이렉트로 응답을 전달한다.
-// POST 요청: script.google.com에서 doPost 실행 → 302 → 응답 URL (GET으로 조회)
-// GET 요청: script.google.com에서 doGet 실행 → 302 → 응답 URL (GET으로 조회)
-
-async function gasFetch(
-  url: string,
-  options: RequestInit = {}
-): Promise<Response> {
-  let targetUrl = url;
-  let currentOptions = { ...options };
-
-  for (let i = 0; i < 5; i++) {
-    const res = await fetch(targetUrl, {
-      ...currentOptions,
-      redirect: 'manual',
-    });
-
-    // 리다이렉트 → 다음 URL로 이동
-    if ([301, 302, 303, 307, 308].includes(res.status)) {
-      const location = res.headers.get('location');
-      if (!location) throw new Error('리다이렉트 location 헤더 없음');
-      targetUrl = location;
-
-      // 301/302/303: POST→GET 변환 (RFC 7231, GAS 응답 리다이렉트는 GET으로 조회)
-      // 307/308: 메서드 유지
-      if ([301, 302, 303].includes(res.status) && currentOptions.method === 'POST') {
-        const { method: _, body: __, ...rest } = currentOptions;
-        currentOptions = { ...rest, method: 'GET' };
-      }
-
-      continue;
-    }
-
-    return res;
-  }
-
-  throw new Error('리다이렉트 횟수 초과');
-}
-
-// ─── 재시도 래퍼 (Phase 0: 자동 재시도) ────────────────────────
-
-const MAX_RETRIES = 2;
-const RETRY_DELAYS = [1000, 3000]; // 1초, 3초
-
-function isRetryable(status: number): boolean {
-  return status >= 500 || status === 429;
-}
-
-async function gasFetchWithRetry(
-  url: string,
-  options: RequestInit = {}
-): Promise<Response> {
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const res = await gasFetch(url, options);
-
-      if (!res.ok && isRetryable(res.status) && attempt < MAX_RETRIES) {
-        console.warn(
-          `[Sheets] HTTP ${res.status}, 재시도 ${attempt + 1}/${MAX_RETRIES} (${RETRY_DELAYS[attempt]}ms 후)`
-        );
-        retryNotifyCallback?.(`동기화 재시도 중... (${attempt + 1}/${MAX_RETRIES})`);
-        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
-        continue;
-      }
-
-      return res;
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-
-      if (attempt < MAX_RETRIES) {
-        console.warn(
-          `[Sheets] 네트워크 오류, 재시도 ${attempt + 1}/${MAX_RETRIES} (${RETRY_DELAYS[attempt]}ms 후):`,
-          lastError.message
-        );
-        retryNotifyCallback?.(`동기화 재시도 중... (${attempt + 1}/${MAX_RETRIES})`);
-        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
-        continue;
-      }
-    }
-  }
-
-  throw lastError ?? new Error('요청 실패 (재시도 소진)');
 }
 
 // ─── Batch POST 호출 (Phase 0) ─────────────────────────────

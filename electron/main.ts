@@ -38,6 +38,15 @@ import {
 import type { SheetUser } from './sheets';
 import type { BatchAction } from './sheets';
 import { setRetryNotifyCallback, getPendingOpsCount, waitForAllPendingOps } from './sheets';
+import {
+  initVacation,
+  isVacationConnected,
+  readVacationStatus,
+  readVacationLog,
+  readAllVacationEvents,
+  registerVacation,
+  cancelVacation,
+} from './vacation';
 
 // 앱 이름 설정 — AppData 경로에 영향
 app.name = 'Bflow-BGonly';
@@ -681,6 +690,74 @@ ipcMain.handle('sheets:notify-change', (event) => {
   // 호출한 윈도우를 제외한 모든 윈도우에 sheet:changed 전송
   broadcastSheetChanged(event.sender.id);
   return { ok: true };
+});
+
+// ─── IPC 핸들러: 휴가 관리 (vacation-repo WebApi) ────────────
+
+ipcMain.handle('vacation:connect', async (_event, webAppUrl: string) => {
+  try {
+    const ok = await initVacation(webAppUrl);
+    return { ok, error: ok ? null : '연결 실패 — URL을 확인해주세요' };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('vacation:is-connected', () => {
+  return isVacationConnected();
+});
+
+ipcMain.handle('vacation:read-status', async (_event, name: string) => {
+  try {
+    const data = await readVacationStatus(name);
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('vacation:read-log', async (_event, name: string, year?: number, limit?: number) => {
+  try {
+    const data = await readVacationLog(name, year, limit);
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('vacation:read-all-events', async (_event, year?: number) => {
+  try {
+    const data = await readAllVacationEvents(year);
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('vacation:register', async (
+  _event, name: string, type: string, startDate: string, endDate: string, reason: string
+) => {
+  try {
+    const result = await registerVacation({ name, type, startDate, endDate, reason });
+    return result;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, success: false, state: '', error: msg };
+  }
+});
+
+ipcMain.handle('vacation:cancel', async (_event, name: string, rowIndex: number) => {
+  try {
+    const result = await cancelVacation(name, rowIndex);
+    return result;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, success: false, state: '', error: msg };
+  }
 });
 
 // ─── IPC 핸들러: 이미지 파일 저장 ────────────────────────────

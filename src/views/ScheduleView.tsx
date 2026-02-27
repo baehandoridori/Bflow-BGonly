@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, X, Filter,
   Trash2, ExternalLink, GripVertical, Clock, MapPin, FileText, Pencil,
+  Palmtree, Settings,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
@@ -12,6 +13,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import {
   getEvents, addEvent, updateEvent, deleteEvent, filterEventsByRange,
 } from '@/services/calendarService';
+import { fetchAllVacationEvents } from '@/services/vacationService';
 import { useCalendarDnD } from '@/hooks/useCalendarDnD';
 import type { DragMode, DragPreview } from '@/hooks/useCalendarDnD';
 import type {
@@ -19,6 +21,7 @@ import type {
 } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import { DEPARTMENT_CONFIGS } from '@/types';
+import { VACATION_COLOR } from '@/types/vacation';
 
 /* ═══════════════════════════════════════════════════
    유틸리티
@@ -147,7 +150,7 @@ function EventBarChip({
   const tooltipTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!onDragStart || e.button !== 0) return;
+    if (!onDragStart || e.button !== 0 || ev.isReadOnly) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -244,7 +247,7 @@ function EventBarChip({
         width: `calc(${(bar.span / 7) * 100}% - 4px)`,
         top: `${bar.row * (compact ? 23 : 28) + (compact ? 28 : 36)}px`,
         height: compact ? '22px' : '26px',
-        cursor: isDragging ? 'grabbing' : 'grab',
+        cursor: ev.isReadOnly ? 'pointer' : isDragging ? 'grabbing' : 'grab',
       }}
     >
       <div
@@ -269,16 +272,17 @@ function EventBarChip({
         }}
       >
         {/* 리사이즈 핸들 (왼쪽) */}
-        {bar.isStart && !isGhost && (
+        {bar.isStart && !isGhost && !ev.isReadOnly && (
           <div className="absolute left-0 top-0 w-[8px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
             style={{ backgroundColor: `${hex}40` }}
           />
         )}
         {!bar.isStart && <span className="text-[9px] mr-0.5 opacity-60">◂</span>}
+        {ev.type === 'vacation' && <Palmtree size={10} className="shrink-0 mr-1 opacity-80" />}
         <span className="truncate">{ev.title}</span>
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
         {/* 리사이즈 핸들 (오른쪽) */}
-        {bar.isEnd && !isGhost && (
+        {bar.isEnd && !isGhost && !ev.isReadOnly && (
           <div className="absolute right-0 top-0 w-[8px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
             style={{ backgroundColor: `${hex}40` }}
           />
@@ -367,7 +371,7 @@ function OverflowPopup({
                 {ev.memo && <span className="text-[11px] text-text-secondary/40 truncate block">{ev.memo.length > 40 ? ev.memo.slice(0, 40) + '…' : ev.memo}</span>}
               </div>
               <span className="text-[11px] text-text-secondary/50 ml-auto shrink-0">
-                {ev.type !== 'custom' ? ev.type.toUpperCase() : ''}
+                {ev.type === 'vacation' ? '휴가' : ev.type !== 'custom' ? ev.type.toUpperCase() : ''}
               </span>
             </button>
           );
@@ -403,6 +407,7 @@ function EventDetailModal({
     episode: '에피소드',
     part: '파트',
     scene: '씬',
+    vacation: '휴가',
   };
 
   return (
@@ -470,31 +475,47 @@ function EventDetailModal({
           </div>
 
           {/* 액션 */}
-          <div className="flex gap-2 pt-1">
-            <button
-              onClick={() => { onEdit(event); onClose(); }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-bg-border/20 text-text-primary hover:bg-bg-border/30 transition-colors cursor-pointer"
-            >
-              <Pencil size={13} />
-              편집
-            </button>
-            {event.type !== 'custom' && (
+          {event.isReadOnly ? (
+            /* 휴가 이벤트 — 프로필에서 관리 안내 */
+            <div className="flex flex-col gap-2 pt-1">
+              <p className="text-[11px] text-text-secondary/50 text-center">
+                휴가 이벤트는 프로필 설정에서 관리됩니다
+              </p>
               <button
-                onClick={() => onNavigate(event)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 transition-colors cursor-pointer"
+                onClick={() => { onNavigate(event); onClose(); }}
+                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer"
               >
-                <ExternalLink size={13} />
-                이동
+                <Settings size={13} />
+                프로필 설정으로 이동
               </button>
-            )}
-            <button
-              onClick={() => { onDelete(event.id); onClose(); }}
-              className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer"
-            >
-              <Trash2 size={13} />
-              삭제
-            </button>
-          </div>
+            </div>
+          ) : (
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { onEdit(event); onClose(); }}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-bg-border/20 text-text-primary hover:bg-bg-border/30 transition-colors cursor-pointer"
+              >
+                <Pencil size={13} />
+                편집
+              </button>
+              {event.type !== 'custom' && (
+                <button
+                  onClick={() => onNavigate(event)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 transition-colors cursor-pointer"
+                >
+                  <ExternalLink size={13} />
+                  이동
+                </button>
+              )}
+              <button
+                onClick={() => { onDelete(event.id); onClose(); }}
+                className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors cursor-pointer"
+              >
+                <Trash2 size={13} />
+                삭제
+              </button>
+            </div>
+          )}
         </div>
       </motion.div>
     </motion.div>
@@ -1014,7 +1035,7 @@ function TodayView({
                   className="text-[11px] px-1.5 py-0.5 rounded-full font-medium shrink-0"
                   style={{ backgroundColor: `${ev.color}20`, color: ev.color }}
                 >
-                  {ev.type === 'custom' ? '일반' : ev.type.toUpperCase()}
+                  {ev.type === 'custom' ? '일반' : ev.type === 'vacation' ? '휴가' : ev.type.toUpperCase()}
                 </span>
               </button>
             );
@@ -1035,6 +1056,8 @@ export function ScheduleView() {
   const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId, setToast } = useAppStore();
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [vacationEvents, setVacationEvents] = useState<CalendarEvent[]>([]);
+  const [showVacation, setShowVacation] = useState(true);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
   const [filter, setFilter] = useState<CalendarFilter>('all');
   const [deptFilter, setDeptFilter] = useState<'all' | 'bg' | 'acting'>('all');
@@ -1049,19 +1072,54 @@ export function ScheduleView() {
   const [weekOffset, setWeekOffset] = useState(0); // 주/2주 뷰 오프셋
 
   const today = fmtDate(new Date());
+  const vacationConnected = useAppStore((s) => s.vacationConnected);
 
   // 이벤트 로드
   useEffect(() => {
     getEvents().then(setEvents);
   }, []);
 
+  // 휴가 이벤트 로드
+  const loadVacationEvents = useCallback(async () => {
+    if (!vacationConnected) { setVacationEvents([]); return; }
+    try {
+      const raw = await fetchAllVacationEvents();
+      const mapped: CalendarEvent[] = raw.map((v, i) => ({
+        id: `vac-${v.name}-${v.startDate}-${i}`,
+        title: `${v.name} ${v.type}`,
+        memo: '',
+        color: VACATION_COLOR,
+        type: 'vacation' as const,
+        startDate: v.startDate,
+        endDate: v.endDate,
+        createdBy: v.name,
+        createdAt: new Date().toISOString(),
+        vacationType: v.type,
+        vacationUserName: v.name,
+        isReadOnly: true,
+      }));
+      setVacationEvents(mapped);
+    } catch {
+      // 비차단 — 실패해도 캘린더는 정상 동작
+      setVacationEvents([]);
+    }
+  }, [vacationConnected]);
+
+  useEffect(() => { loadVacationEvents(); }, [loadVacationEvents]);
+
+  // 통합 이벤트 (로컬 + 휴가)
+  const allEvents = useMemo(() => {
+    if (!showVacation) return events;
+    return [...events, ...vacationEvents];
+  }, [events, vacationEvents, showVacation]);
+
   // 필터링
   const filteredEvents = useMemo(() => {
-    let result = events;
+    let result = allEvents;
     if (filter !== 'all') result = result.filter((e) => e.type === filter);
-    if (deptFilter !== 'all') result = result.filter((e) => e.linkedDepartment === deptFilter || e.type === 'custom');
+    if (deptFilter !== 'all') result = result.filter((e) => e.linkedDepartment === deptFilter || e.type === 'custom' || e.type === 'vacation');
     return result;
-  }, [events, filter, deptFilter]);
+  }, [allEvents, filter, deptFilter]);
 
   // 주 데이터 계산 (모든 날짜를 정오로 생성 — parseDate와 일관성 유지)
   const weeks = useMemo(() => {
@@ -1182,6 +1240,12 @@ export function ScheduleView() {
 
   // 이벤트에서 해당 뷰로 이동
   const handleNavigate = useCallback((ev: CalendarEvent) => {
+    // 휴가 이벤트 → 설정(프로필)으로 이동
+    if (ev.type === 'vacation') {
+      setView('settings');
+      setDetailEvent(null);
+      return;
+    }
     if (ev.linkedEpisode != null) {
       setSelectedEpisode(ev.linkedEpisode);
     }
@@ -1212,10 +1276,10 @@ export function ScheduleView() {
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
 
   const handleBarDragStart = useCallback((eventId: string, mode: DragMode, anchorDate: string) => {
-    const ev = events.find((ev) => ev.id === eventId);
-    if (!ev) return;
+    const ev = allEvents.find((ev) => ev.id === eventId);
+    if (!ev || ev.isReadOnly) return;
     startDrag(eventId, mode, ev.startDate, ev.endDate, 0, anchorDate);
-  }, [events, startDrag]);
+  }, [allEvents, startDrag]);
 
   // 헤더 라벨
   const headerLabel = useMemo(() => {
@@ -1276,14 +1340,14 @@ export function ScheduleView() {
         <div className="flex items-center gap-2">
           {/* 필터 */}
           <div className="flex items-center bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
-            {([['all', '전체'], ['custom', '일반'], ['episode', 'EP'], ['part', '파트'], ['scene', '씬']] as const).map(([f, l]) => (
+            {([['all', '전체'], ['custom', '일반'], ['episode', 'EP'], ['part', '파트'], ['scene', '씬'], ['vacation', '휴가']] as const).map(([f, l]) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
                 className={cn(
                   'px-3 py-1.5 text-xs rounded-md font-medium cursor-pointer transition-colors',
                   filter === f
-                    ? 'bg-accent/20 text-accent'
+                    ? f === 'vacation' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-accent/20 text-accent'
                     : 'text-text-secondary hover:text-text-primary',
                 )}
               >
@@ -1291,6 +1355,23 @@ export function ScheduleView() {
               </button>
             ))}
           </div>
+
+          {/* 휴가 표시 토글 */}
+          {vacationConnected && (
+            <button
+              onClick={() => setShowVacation((v) => !v)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer border',
+                showVacation
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  : 'bg-bg-card text-text-secondary/50 border-bg-border/50',
+              )}
+              title={showVacation ? '휴가 이벤트 숨기기' : '휴가 이벤트 표시'}
+            >
+              <Palmtree size={13} />
+              휴가
+            </button>
+          )}
 
           {/* 부서 필터 */}
           <div className="flex items-center bg-bg-card rounded-lg p-0.5 border border-bg-border/50">
@@ -1341,14 +1422,20 @@ export function ScheduleView() {
 
       {/* ═══ 이벤트 수 통계 ═══ */}
       <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-1">
-        <span>전체 {events.length}개</span>
+        <span>전체 {allEvents.length}개</span>
         <span className="text-bg-border/50">·</span>
-        <span>이번 달 {events.filter((e) => {
+        <span>이번 달 {allEvents.filter((e) => {
           const s = parseDate(e.startDate);
           return s.getFullYear() === year && s.getMonth() === month;
         }).length}개</span>
         <span className="text-bg-border/50">·</span>
-        <span>오늘 {events.filter((e) => e.startDate <= today && e.endDate >= today).length}개</span>
+        <span>오늘 {allEvents.filter((e) => e.startDate <= today && e.endDate >= today).length}개</span>
+        {vacationEvents.length > 0 && (
+          <>
+            <span className="text-bg-border/50">·</span>
+            <span className="text-emerald-400/70">휴가 {vacationEvents.length}건</span>
+          </>
+        )}
       </div>
 
       {/* ═══ 캘린더 본체 ═══ */}

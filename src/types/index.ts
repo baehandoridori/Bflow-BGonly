@@ -314,6 +314,14 @@ export interface ElectronAPI {
   sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 데이터 변경 브로드캐스트
   sheetsNotifyChange?: () => Promise<{ ok: boolean }>;
+  // 휴가 관리 (vacation-repo WebApi)
+  vacationConnect: (webAppUrl: string) => Promise<{ ok: boolean; error: string | null }>;
+  vacationIsConnected: () => Promise<boolean>;
+  vacationReadStatus: (name: string) => Promise<{ ok: boolean; data: import('./vacation').VacationStatus; error?: string }>;
+  vacationReadLog: (name: string, year?: number, limit?: number) => Promise<{ ok: boolean; data: import('./vacation').VacationLogEntry[]; error?: string }>;
+  vacationReadAllEvents: (year?: number) => Promise<{ ok: boolean; data: import('./vacation').VacationEvent[]; error?: string }>;
+  vacationRegister: (name: string, type: string, startDate: string, endDate: string, reason: string) => Promise<import('./vacation').VacationResult>;
+  vacationCancel: (name: string, rowIndex: number) => Promise<import('./vacation').VacationResult>;
   // 위젯 팝업 윈도우
   widgetGetSavedState?: (widgetId: string) => Promise<{
     x: number; y: number; width: number; height: number;

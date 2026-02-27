@@ -129,6 +129,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
   sheetsNotifyChange: () => ipcRenderer.invoke('sheets:notify-change'),
 
+  // 휴가 관리 (vacation-repo WebApi)
+  vacationConnect: (webAppUrl: string) =>
+    ipcRenderer.invoke('vacation:connect', webAppUrl),
+  vacationIsConnected: () =>
+    ipcRenderer.invoke('vacation:is-connected'),
+  vacationReadStatus: (name: string) =>
+    ipcRenderer.invoke('vacation:read-status', name),
+  vacationReadLog: (name: string, year?: number, limit?: number) =>
+    ipcRenderer.invoke('vacation:read-log', name, year, limit),
+  vacationReadAllEvents: (year?: number) =>
+    ipcRenderer.invoke('vacation:read-all-events', year),
+  vacationRegister: (name: string, type: string, startDate: string, endDate: string, reason: string) =>
+    ipcRenderer.invoke('vacation:register', name, type, startDate, endDate, reason),
+  vacationCancel: (name: string, rowIndex: number) =>
+    ipcRenderer.invoke('vacation:cancel', name, rowIndex),
+
   // 위젯 팝업 윈도우
   widgetOpenPopup: (widgetId: string, title: string) =>
     ipcRenderer.invoke('widget:open-popup', widgetId, title),
