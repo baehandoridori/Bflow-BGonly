@@ -10,6 +10,7 @@ import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget'
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
+import { MemoWidget } from '@/components/widgets/MemoWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
@@ -37,6 +38,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
   'dept-comparison': { label: '부서별 비교', component: <DepartmentComparisonWidget /> },
   'calendar': { label: '캘린더', component: <CalendarWidget /> },
   'my-tasks': { label: '내 할일', component: <MyTasksWidget /> },
+  'memo': { label: '메모', component: <MemoWidget /> },
 };
 
 /**
@@ -44,7 +46,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
  * Windows Acrylic 네이티브 블러 + CSS 글래스 틴트 + AOT 핀 + 독 모드
  */
 export function WidgetPopup({ widgetId }: { widgetId: string }) {
-  const [appOpacity, setAppOpacity] = useState(0.92);
+  const [appOpacity, setAppOpacity] = useState(1);
   const [glassIntensity, setGlassIntensity] = useState(0.7);
   const [showControls, setShowControls] = useState(false);
   const [showBottomControls, setShowBottomControls] = useState(false);
@@ -317,7 +319,9 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     })();
   }, []);
 
-  const widgetMeta = WIDGET_REGISTRY[widgetId];
+  // 정확 매칭 → 접두사 매칭 (memo-{timestamp} 등 다중 인스턴스 지원)
+  const widgetMeta = WIDGET_REGISTRY[widgetId]
+    ?? (widgetId.startsWith('memo-') ? WIDGET_REGISTRY['memo'] : undefined);
 
   const handleClose = useCallback(() => {
     window.electronAPI?.widgetClosePopup?.(widgetId);
