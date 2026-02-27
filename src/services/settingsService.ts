@@ -105,6 +105,16 @@ export interface UserPreferences {
   // Phase 8-2: 키보드 단축키 커스텀 바인딩
   shortcuts?: Record<string, string>;
 
+  // 기본 시작 뷰
+  defaultView?: string;
+
+  // 알림 설정
+  notifications?: {
+    sceneChange?: boolean;   // 내 씬 변경 알림
+    syncComplete?: boolean;  // 동기화 완료 알림
+    sound?: boolean;         // 알림 소리
+  };
+
   // 사이드바
   sidebarExpanded?: boolean;
 }

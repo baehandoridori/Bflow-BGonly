@@ -1,12 +1,14 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import {
   User, Calendar, Briefcase, KeyRound, AlertTriangle, Clock,
   CheckCircle2, ListTodo, ChevronRight, Palmtree, CircleDashed,
+  LayoutDashboard, Bell, Volume2,
 } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
-import { useAppStore } from '@/stores/useAppStore';
+import { useAppStore, type ViewMode } from '@/stores/useAppStore';
+import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { sceneProgress, isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 
@@ -65,6 +67,32 @@ function StatBlock({ label, value, accent }: { label: string; value: string | nu
   );
 }
 
+/** 알림 토글 행 */
+function NotiToggle({ label, description, checked, onChange }: {
+  label: string; description: string; checked: boolean; onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <div className="min-w-0">
+        <p className="text-[12px] font-medium text-text-primary">{label}</p>
+        <p className="text-[10px] text-text-secondary/40">{description}</p>
+      </div>
+      <button
+        onClick={() => onChange(!checked)}
+        className={cn(
+          'relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer shrink-0 ml-3',
+          checked ? 'bg-accent' : 'bg-bg-border/50',
+        )}
+      >
+        <div className={cn(
+          'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200',
+          checked ? 'translate-x-4' : 'translate-x-0.5',
+        )} />
+      </button>
+    </div>
+  );
+}
+
 /* ───────────── main ───────────── */
 
 export function ProfileSection() {
@@ -116,7 +144,55 @@ export function ProfileSection() {
     return { total: totalDays, used, remaining: totalDays - used };
   }, [currentUser]);
 
+  // ─ 기본 시작 뷰 / 알림 설정 ─
+  const [defaultViewState, setDefaultViewState] = useState<string>('dashboard');
+  const [notiSceneChange, setNotiSceneChange] = useState(true);
+  const [notiSyncComplete, setNotiSyncComplete] = useState(false);
+  const [notiSound, setNotiSound] = useState(true);
+  const prefsLoaded = useRef(false);
+
+  useEffect(() => {
+    if (prefsLoaded.current) return;
+    prefsLoaded.current = true;
+    loadPreferences().then((prefs) => {
+      if (prefs?.defaultView) setDefaultViewState(prefs.defaultView);
+      if (prefs?.notifications) {
+        setNotiSceneChange(prefs.notifications.sceneChange ?? true);
+        setNotiSyncComplete(prefs.notifications.syncComplete ?? false);
+        setNotiSound(prefs.notifications.sound ?? true);
+      }
+    });
+  }, []);
+
+  const persistPref = useCallback(async (patch: Record<string, unknown>) => {
+    const existing = await loadPreferences() ?? {};
+    await savePreferences({ ...existing, ...patch });
+  }, []);
+
+  const handleDefaultViewChange = useCallback((view: string) => {
+    setDefaultViewState(view);
+    persistPref({ defaultView: view });
+  }, [persistPref]);
+
+  const handleNotiToggle = useCallback((key: 'sceneChange' | 'syncComplete' | 'sound', value: boolean) => {
+    if (key === 'sceneChange') setNotiSceneChange(value);
+    else if (key === 'syncComplete') setNotiSyncComplete(value);
+    else setNotiSound(value);
+    const next = { sceneChange: notiSceneChange, syncComplete: notiSyncComplete, sound: notiSound, [key]: value };
+    persistPref({ notifications: next });
+  }, [persistPref, notiSceneChange, notiSyncComplete, notiSound]);
+
   if (!currentUser) return null;
+
+  const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
+    { value: 'dashboard', label: '대시보드' },
+    { value: 'episode', label: '에피소드' },
+    { value: 'scenes', label: '씬 목록' },
+    { value: 'assignee', label: '인원별' },
+    { value: 'team', label: '팀원' },
+    { value: 'calendar', label: '타임라인' },
+    { value: 'schedule', label: '캘린더' },
+  ];
 
   return (
     <SettingsSection
@@ -259,9 +335,74 @@ export function ProfileSection() {
         )}
       </div>
 
+      {/* ════════════ 기본 시작 뷰 ════════════ */}
+      <div className="w-full bg-bg-primary/40 rounded-xl border border-bg-border/30 p-4 mb-3">
+        <div className="flex items-center gap-2 mb-3">
+          <LayoutDashboard size={15} className="text-accent" />
+          <span className="text-[13px] font-semibold text-text-primary">기본 시작 뷰</span>
+        </div>
+        <p className="text-[11px] text-text-secondary/50 mb-2.5">로그인 후 처음 표시할 화면을 선택하세요</p>
+        <div className="flex flex-wrap gap-1.5">
+          {VIEW_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => handleDefaultViewChange(opt.value)}
+              className={cn(
+                'px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 cursor-pointer border',
+                defaultViewState === opt.value
+                  ? 'bg-accent/15 text-accent border-accent/30'
+                  : 'bg-bg-border/20 text-text-secondary/60 border-bg-border/30 hover:text-text-primary hover:bg-bg-border/40',
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ════════════ 알림 설정 ════════════ */}
+      <div className="w-full bg-bg-primary/40 rounded-xl border border-bg-border/30 p-4 mb-3">
+        <div className="flex items-center gap-2 mb-3">
+          <Bell size={15} className="text-amber-400" />
+          <span className="text-[13px] font-semibold text-text-primary">알림 설정</span>
+        </div>
+        <div className="space-y-2.5">
+          <NotiToggle
+            label="내 씬 변경 알림"
+            description="배정된 씬이 변경되면 알려줍니다"
+            checked={notiSceneChange}
+            onChange={(v) => handleNotiToggle('sceneChange', v)}
+          />
+          <NotiToggle
+            label="동기화 완료 알림"
+            description="데이터 동기화가 완료되면 알려줍니다"
+            checked={notiSyncComplete}
+            onChange={(v) => handleNotiToggle('syncComplete', v)}
+          />
+          <div className="flex items-center justify-between pt-1 border-t border-bg-border/15">
+            <div className="flex items-center gap-2">
+              <Volume2 size={13} className="text-text-secondary/50" />
+              <span className="text-[12px] text-text-secondary/70">알림 소리</span>
+            </div>
+            <button
+              onClick={() => handleNotiToggle('sound', !notiSound)}
+              className={cn(
+                'relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer',
+                notiSound ? 'bg-accent' : 'bg-bg-border/50',
+              )}
+            >
+              <div className={cn(
+                'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200',
+                notiSound ? 'translate-x-4' : 'translate-x-0.5',
+              )} />
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* ════════════ 추가 정보 카드 ════════════ */}
       {currentUser.slackId && (
-        <div className="bg-bg-primary/40 rounded-xl border border-bg-border/30 px-4">
+        <div className="bg-bg-primary/40 rounded-xl border border-bg-border/30 px-4 mb-3">
           <InfoChip
             icon={<svg viewBox="0 0 24 24" className="w-[14px] h-[14px]" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.124 2.521a2.528 2.528 0 0 1 2.52-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.52V8.834zm-1.271 0a2.528 2.528 0 0 1-2.521 2.521 2.528 2.528 0 0 1-2.521-2.521V2.522A2.528 2.528 0 0 1 15.166 0a2.528 2.528 0 0 1 2.521 2.522v6.312zm-2.521 10.124a2.528 2.528 0 0 1 2.521 2.52A2.528 2.528 0 0 1 15.166 24a2.528 2.528 0 0 1-2.521-2.522v-2.52h2.521zm0-1.271a2.528 2.528 0 0 1-2.521-2.521 2.528 2.528 0 0 1 2.521-2.521h6.312A2.528 2.528 0 0 1 24 15.166a2.528 2.528 0 0 1-2.522 2.521h-6.312z"/></svg>}
             label="Slack"

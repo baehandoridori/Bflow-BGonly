@@ -26,12 +26,11 @@ const SHORTCUTS: ShortcutDef[] = [
   { id: 'nav-team',      label: '팀원',                 description: '팀원 뷰로 이동',                defaultKeys: 'Ctrl+5',       category: '뷰 전환' },
   { id: 'nav-timeline',  label: '타임라인',             description: '타임라인 뷰로 이동',            defaultKeys: 'Ctrl+6',       category: '뷰 전환' },
   { id: 'nav-calendar',  label: '캘린더',               description: '캘린더 뷰로 이동',              defaultKeys: 'Ctrl+7',       category: '뷰 전환' },
-  { id: 'nav-settings',  label: '설정',                 description: '설정 뷰로 이동',                defaultKeys: 'Ctrl+8',       category: '뷰 전환' },
+  { id: 'nav-settings',  label: '설정',                 description: '설정 뷰로 이동',                defaultKeys: 'Ctrl+,',       category: '뷰 전환' },
   // 편집
   { id: 'edit-mode',     label: '레이아웃 편집 토글',   description: '대시보드 위젯 편집 모드',        defaultKeys: 'Ctrl+E',       category: '편집' },
   { id: 'sidebar-toggle', label: '사이드바 토글',       description: '사이드바 펼치기/접기',           defaultKeys: 'Ctrl+B',       category: '편집' },
   // 시스템
-  { id: 'admin-mode',    label: '관리자 모드',          description: '관리자 모드 토글',               defaultKeys: 'Ctrl+Alt+U',   category: '시스템' },
   { id: 'reload',        label: '새로고침',             description: '현재 데이터 새로 불러오기',      defaultKeys: 'Ctrl+R',       category: '시스템' },
   { id: 'fullscreen',    label: '전체 화면',            description: '전체 화면 토글',                 defaultKeys: 'F11',          category: '시스템' },
 ];

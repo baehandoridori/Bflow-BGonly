@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { useAppStore } from '@/stores/useAppStore';
+import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { Dashboard } from '@/views/Dashboard';
@@ -23,6 +23,7 @@ import { applyTheme, getPreset, getLightColors } from '@/themes';
 import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
 import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
+import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
@@ -200,6 +201,11 @@ export default function App() {
           useAppStore.getState().setSidebarExpanded(savedPrefs.sidebarExpanded);
         }
 
+        // 기본 시작 뷰 로드
+        if (savedPrefs?.defaultView) {
+          useAppStore.getState().setView(savedPrefs.defaultView as ViewMode);
+        }
+
         // 테마 로드 + 적용 (가드 설정 후 상태 변경)
         const savedTheme = await loadTheme();
         if (savedTheme) {
@@ -333,6 +339,9 @@ export default function App() {
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [loadData]);
+
+  // ── 글로벌 단축키 (Phase 8-2) ──
+  useGlobalShortcuts({ onReload: loadData });
 
   // Ctrl+Alt+U: 관리자 모드 토글
   useEffect(() => {
