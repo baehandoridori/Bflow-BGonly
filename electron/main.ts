@@ -37,6 +37,7 @@ import {
 } from './sheets';
 import type { SheetUser } from './sheets';
 import type { BatchAction } from './sheets';
+import { setRetryNotifyCallback, getPendingOpsCount, waitForAllPendingOps } from './sheets';
 
 // 앱 이름 설정 — AppData 경로에 영향
 app.name = 'Bflow-BGonly';
@@ -57,6 +58,71 @@ let mainWindow: BrowserWindow | null = null;
 const widgetWindows = new Map<string, BrowserWindow>();
 const widgetOriginalBounds = new Map<string, Electron.Rectangle>();
 const animatingWidgets = new Set<string>();
+let isQuitting = false;
+
+// ─── 위젯 위치 영속화 (Phase 0-6) ─────────────────────────────
+const WIDGET_POS_FILE = 'widget-positions.json';
+
+interface SavedWidgetState {
+  x: number; y: number; width: number; height: number;
+  opacity: number; alwaysOnTop: boolean;
+  title?: string;
+}
+
+// 위젯 ID → 제목 매핑 (자동 복원 시 title 미저장 파일 호환용)
+const WIDGET_TITLE_MAP: Record<string, string> = {
+  'overall-progress': '전체 진행률',
+  'stage-bars': '단계별 진행률',
+  'assignee-cards': '담당자별 현황',
+  'episode-summary': '에피소드 요약',
+  'dept-comparison': '부서별 비교',
+};
+
+const widgetPositionCache = new Map<string, SavedWidgetState>();
+let positionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function loadWidgetPositions(): void {
+  try {
+    const filePath = path.join(getDataPath(), WIDGET_POS_FILE);
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    if (data && typeof data === 'object') {
+      for (const [id, state] of Object.entries(data)) {
+        widgetPositionCache.set(id, state as SavedWidgetState);
+      }
+    }
+  } catch { /* 파일 없음 — 무시 */ }
+}
+
+function saveWidgetPositionsDebounced(): void {
+  if (positionSaveTimer) clearTimeout(positionSaveTimer);
+  positionSaveTimer = setTimeout(() => {
+    const obj: Record<string, SavedWidgetState> = {};
+    for (const [id, state] of widgetPositionCache) obj[id] = state;
+    try {
+      const dirPath = getDataPath();
+      ensureDir(dirPath);
+      fs.writeFileSync(path.join(dirPath, WIDGET_POS_FILE), JSON.stringify(obj, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('[위젯 위치] 저장 실패:', err);
+    }
+  }, 500);
+}
+
+function saveWidgetPositionsSync(): void {
+  if (positionSaveTimer) {
+    clearTimeout(positionSaveTimer);
+    positionSaveTimer = null;
+  }
+  const obj: Record<string, SavedWidgetState> = {};
+  for (const [id, state] of widgetPositionCache) obj[id] = state;
+  try {
+    const dirPath = getDataPath();
+    ensureDir(dirPath);
+    fs.writeFileSync(path.join(dirPath, WIDGET_POS_FILE), JSON.stringify(obj, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[위젯 위치] 동기 저장 실패:', err);
+  }
+}
 
 // ─── 독 스태킹 관리 ─────────────────────────────────────────
 const dockedWidgetIds: string[] = [];          // 독에 쌓인 순서
@@ -664,7 +730,7 @@ ipcMain.handle('clipboard:read-image', () => {
 
 // ─── IPC 핸들러: 위젯 팝업 윈도우 ──────────────────────────────
 
-ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: string) => {
+function openWidgetPopup(widgetId: string, widgetTitle: string): { ok: boolean } {
   // 이미 열린 팝업이면 포커스
   const existing = widgetWindows.get(widgetId);
   if (existing && !existing.isDestroyed()) {
@@ -672,14 +738,20 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     return { ok: true };
   }
 
+  // 저장된 위치/크기 복원 (Phase 0-6)
+  const savedPos = widgetPositionCache.get(widgetId);
+  const initWidth = savedPos ? Math.max(280, savedPos.width) : 420;
+  const initHeight = savedPos ? Math.max(200, savedPos.height) : 360;
+  const initAOT = savedPos ? savedPos.alwaysOnTop : true;
+
   const popupWin = new BrowserWindow({
-    width: 420,
-    height: 360,
+    width: initWidth,
+    height: initHeight,
     minWidth: 280,
     minHeight: 200,
     frame: false,
     transparent: false,
-    alwaysOnTop: true,
+    alwaysOnTop: initAOT,
     resizable: true,
     skipTaskbar: false,
     title: widgetTitle,
@@ -693,6 +765,20 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     },
   });
 
+  // 저장된 위치 적용 + 스크린 범위 검증
+  if (savedPos) {
+    const display = screen.getDisplayNearestPoint({ x: savedPos.x, y: savedPos.y });
+    const wa = display.workArea;
+    const cx = Math.max(wa.x, Math.min(wa.x + wa.width - initWidth, savedPos.x));
+    const cy = Math.max(wa.y, Math.min(wa.y + wa.height - initHeight, savedPos.y));
+    popupWin.setBounds({ x: cx, y: cy, width: initWidth, height: initHeight });
+  }
+
+  // 저장된 opacity 적용
+  if (savedPos && savedPos.opacity !== undefined) {
+    popupWin.setOpacity(Math.max(0.15, Math.min(1, savedPos.opacity)));
+  }
+
   // 같은 앱을 로드하되, 해시로 팝업 모드 + 위젯 ID 전달
   const hash = `#widget-popup/${encodeURIComponent(widgetId)}`;
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -704,15 +790,35 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
   // Acrylic DWM 버그 우회: 생성자의 alwaysOnTop:true는 기본 레벨이라 Acrylic에서 무효.
   // 윈도우 준비 후 'normal' 레벨로 명시적 재설정 (Acrylic에서 'normal'이 실제 topmost)
   popupWin.once('ready-to-show', () => {
-    if (!popupWin.isDestroyed()) {
+    if (!popupWin.isDestroyed() && initAOT) {
       popupWin.setAlwaysOnTop(true, 'normal');
     }
   });
 
   widgetWindows.set(widgetId, popupWin);
+
+  // 캐시에 title 저장 (자동 재오픈용)
+  const existingCache = widgetPositionCache.get(widgetId);
+  if (existingCache) {
+    existingCache.title = widgetTitle;
+  } else {
+    const b = popupWin.getBounds();
+    widgetPositionCache.set(widgetId, {
+      x: b.x, y: b.y, width: b.width, height: b.height,
+      opacity: 0.92, alwaysOnTop: initAOT, title: widgetTitle,
+    });
+  }
+  saveWidgetPositionsDebounced();
+
   popupWin.on('closed', () => {
     widgetWindows.delete(widgetId);
     widgetOriginalBounds.delete(widgetId);
+    // 사용자가 명시적으로 닫으면 캐시 삭제 (자동 복원 안 함)
+    // 앱 종료 중이면 캐시 유지 (before-quit에서 이미 저장됨)
+    if (!isQuitting) {
+      widgetPositionCache.delete(widgetId);
+      saveWidgetPositionsDebounced();
+    }
     // 독 스택에서 제거 + 나머지 재배치
     const dockIdx = dockedWidgetIds.indexOf(widgetId);
     if (dockIdx >= 0) {
@@ -766,13 +872,44 @@ ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: stri
     }
   });
 
+  // 위치/크기 변경 시 캐시 업데이트 (Phase 0-6)
+  const updatePositionCache = () => {
+    if (popupWin.isDestroyed() || animatingWidgets.has(widgetId)) return;
+    if (dockedWidgetIds.includes(widgetId)) return; // 독 상태면 저장 안 함
+    const b = popupWin.getBounds();
+    const prev = widgetPositionCache.get(widgetId);
+    widgetPositionCache.set(widgetId, {
+      x: b.x, y: b.y, width: b.width, height: b.height,
+      opacity: prev?.opacity ?? 0.92,
+      alwaysOnTop: prev?.alwaysOnTop ?? true,
+      title: prev?.title ?? widgetTitle,
+    });
+    saveWidgetPositionsDebounced();
+  };
+  popupWin.on('move', updatePositionCache);
+  popupWin.on('resize', updatePositionCache);
+
   return { ok: true };
+}
+
+ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: string) => {
+  return openWidgetPopup(widgetId, widgetTitle);
 });
 
 ipcMain.handle('widget:set-opacity', (_event, widgetId: string, opacity: number) => {
   const win = widgetWindows.get(widgetId);
   if (win && !win.isDestroyed()) {
-    win.setOpacity(Math.max(0.15, Math.min(1, opacity)));
+    const clamped = Math.max(0.15, Math.min(1, opacity));
+    win.setOpacity(clamped);
+    let cached = widgetPositionCache.get(widgetId);
+    if (!cached) {
+      const b = win.getBounds();
+      cached = { x: b.x, y: b.y, width: b.width, height: b.height, opacity: clamped, alwaysOnTop: win.isAlwaysOnTop(), title: '' };
+      widgetPositionCache.set(widgetId, cached);
+    } else {
+      cached.opacity = clamped;
+    }
+    saveWidgetPositionsDebounced();
   }
 });
 
@@ -811,6 +948,15 @@ ipcMain.handle('widget:set-aot', (_event, widgetId: string, aot: boolean) => {
     } else {
       win.setAlwaysOnTop(false);
     }
+    let cached = widgetPositionCache.get(widgetId);
+    if (!cached) {
+      const b = win.getBounds();
+      cached = { x: b.x, y: b.y, width: b.width, height: b.height, opacity: 0.92, alwaysOnTop: aot, title: '' };
+      widgetPositionCache.set(widgetId, cached);
+    } else {
+      cached.alwaysOnTop = aot;
+    }
+    saveWidgetPositionsDebounced();
   }
 });
 
@@ -948,9 +1094,17 @@ ipcMain.handle('widget:capture-behind', async (_event, widgetId: string) => {
   }
 });
 
+// ─── 위젯 저장 상태 조회 (WidgetPopup에서 초기 opacity/AOT 복원용) ─
+ipcMain.handle('widget:get-saved-state', (_event, widgetId: string) => {
+  return widgetPositionCache.get(widgetId) ?? null;
+});
+
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
 
 app.whenReady().then(() => {
+  // 위젯 위치 캐시 로드 (Phase 0-6)
+  loadWidgetPositions();
+
   // bflow-img:// 프로토콜 핸들러: userData/images/ 폴더에서 이미지 서빙
   // standard URL이므로 hostname은 소문자로 변환됨 → pathname에 파일명 보관
   protocol.handle('bflow-img', (request) => {
@@ -990,6 +1144,28 @@ app.whenReady().then(() => {
 
   createWindow();
 
+  // 저장된 위젯 자동 복원 (Phase 0-6)
+  if (widgetPositionCache.size > 0 && mainWindow) {
+    mainWindow.webContents.on('did-finish-load', () => {
+      for (const [widgetId, state] of widgetPositionCache) {
+        const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
+        openWidgetPopup(widgetId, title);
+      }
+    });
+  }
+
+  // 재시도 알림 콜백: sheets.ts → 모든 윈도우에 브로드캐스트
+  setRetryNotifyCallback((message: string) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sheets:retry-notify', message);
+    }
+    for (const [, win] of widgetWindows) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('sheets:retry-notify', message);
+      }
+    }
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -997,6 +1173,39 @@ app.whenReady().then(() => {
   });
 });
 
+// ─── 종료 시 미완료 작업 대기 (Phase 0-5) ─────────────────────
+
+app.on('before-quit', (e) => {
+  if (isQuitting) return;
+  isQuitting = true;
+
+  // 위젯 위치 즉시 저장 (closed 이벤트보다 먼저 실행)
+  saveWidgetPositionsSync();
+
+  const pending = getPendingOpsCount();
+  if (pending > 0) {
+    e.preventDefault();
+
+    console.log(`[종료] ${pending}개 작업 대기 중... 완료 후 종료합니다.`);
+
+    // 메인 윈도우에 "저장 중" 알림
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('app:saving-before-quit', pending);
+    }
+
+    // 최대 15초 대기 후 종료
+    waitForAllPendingOps(15000).then((allDone) => {
+      if (!allDone) {
+        console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
+      }
+      console.log('[종료] 저장 완료, 앱을 종료합니다');
+      app.quit();
+    });
+  }
+});
+
 app.on('window-all-closed', () => {
-  app.quit();
+  if (!isQuitting) {
+    app.quit();
+  }
 });

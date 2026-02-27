@@ -155,6 +155,18 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     return () => { cleanup?.(); };
   }, []);
 
+  // 저장된 opacity/AOT 복원 (Phase 0-6)
+  useEffect(() => {
+    window.electronAPI?.widgetGetSavedState?.(widgetId).then((saved) => {
+      if (saved) {
+        setAppOpacity(saved.opacity);
+        setIsAOT(saved.alwaysOnTop);
+        // BrowserWindow에도 실제 투명도 적용
+        window.electronAPI?.widgetSetOpacity?.(widgetId, saved.opacity);
+      }
+    });
+  }, [widgetId]);
+
   // 실시간 데이터 동기화: sheet:changed 이벤트 + 주기적 폴링 (30초)
   useEffect(() => {
     if (!ready) return;

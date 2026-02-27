@@ -15,6 +15,42 @@
 
 let webAppUrl: string | null = null;
 
+// ─── 재시도 알림 콜백 (메인 프로세스 → 렌더러 전달용) ────────
+let retryNotifyCallback: ((message: string) => void) | null = null;
+
+export function setRetryNotifyCallback(cb: (message: string) => void): void {
+  retryNotifyCallback = cb;
+}
+
+// ─── 진행 중 작업 추적 (Phase 0-5: 종료 시 큐 보장) ─────────
+let pendingOps = 0;
+let pendingResolvers: (() => void)[] = [];
+
+export function getPendingOpsCount(): number {
+  return pendingOps;
+}
+
+/** 모든 진행 중 쓰기 작업이 완료될 때까지 대기 (최대 timeoutMs) */
+export function waitForAllPendingOps(timeoutMs = 15000): Promise<boolean> {
+  if (pendingOps <= 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    pendingResolvers.push(() => { clearTimeout(timer); resolve(true); });
+  });
+}
+
+function trackPending<T>(op: Promise<T>): Promise<T> {
+  pendingOps++;
+  return op.finally(() => {
+    pendingOps--;
+    if (pendingOps <= 0) {
+      pendingOps = 0;
+      const resolvers = pendingResolvers.splice(0);
+      resolvers.forEach((r) => r());
+    }
+  });
+}
+
 // ─── Google Apps Script fetch 헬퍼 ──────────────────────────
 // GAS 웹 앱은 302 리다이렉트로 응답을 전달한다.
 // POST 요청: script.google.com에서 doPost 실행 → 302 → 응답 URL (GET으로 조회)
@@ -78,6 +114,7 @@ async function gasFetchWithRetry(
         console.warn(
           `[Sheets] HTTP ${res.status}, 재시도 ${attempt + 1}/${MAX_RETRIES} (${RETRY_DELAYS[attempt]}ms 후)`
         );
+        retryNotifyCallback?.(`동기화 재시도 중... (${attempt + 1}/${MAX_RETRIES})`);
         await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
         continue;
       }
@@ -91,6 +128,7 @@ async function gasFetchWithRetry(
           `[Sheets] 네트워크 오류, 재시도 ${attempt + 1}/${MAX_RETRIES} (${RETRY_DELAYS[attempt]}ms 후):`,
           lastError.message
         );
+        retryNotifyCallback?.(`동기화 재시도 중... (${attempt + 1}/${MAX_RETRIES})`);
         await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
         continue;
       }
@@ -106,26 +144,28 @@ export async function gasBatch(actions: BatchAction[]): Promise<BatchResponse> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
   if (actions.length === 0) return { ok: true, results: [] };
 
-  const res = await gasFetchWithRetry(webAppUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'batch',
-      actions,
-    }),
-  });
+  return trackPending((async () => {
+    const res = await gasFetchWithRetry(webAppUrl!, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'batch',
+        actions,
+      }),
+    });
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  const json = await res.json() as BatchResponse;
-  if (!json.ok) {
-    const detail = json.failedAction
-      ? ` (action #${json.failedAt}: ${json.failedAction})`
-      : '';
-    throw new Error((json.error ?? '배치 요청 실패') + detail);
-  }
+    const json = await res.json() as BatchResponse;
+    if (!json.ok) {
+      const detail = json.failedAction
+        ? ` (action #${json.failedAt}: ${json.failedAction})`
+        : '';
+      throw new Error((json.error ?? '배치 요청 실패') + detail);
+    }
 
-  return json;
+    return json;
+  })());
 }
 
 // ─── 대량 셀 업데이트 (다중 씬 체크박스 토글) ─────────────────
@@ -137,19 +177,21 @@ export async function bulkUpdateCells(
   if (!webAppUrl) throw new Error('Sheets 미연결');
   if (updates.length === 0) return;
 
-  const res = await gasFetchWithRetry(webAppUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'bulkUpdateCells',
-      sheetName,
-      updates,
-    }),
-  });
+  return trackPending((async () => {
+    const res = await gasFetchWithRetry(webAppUrl!, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'bulkUpdateCells',
+        sheetName,
+        updates,
+      }),
+    });
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json() as { ok: boolean; error?: string };
-  if (!json.ok) throw new Error(json.error ?? '대량 셀 업데이트 실패');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json() as { ok: boolean; error?: string };
+    if (!json.ok) throw new Error(json.error ?? '대량 셀 업데이트 실패');
+  })());
 }
 
 // ─── 연결 ─────────────────────────────────────────────────────
@@ -308,12 +350,14 @@ export async function readAllEpisodes(): Promise<EpisodeData[]> {
 async function gasGet(params: Record<string, string>): Promise<void> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
 
-  const qs = new URLSearchParams(params);
-  const res = await gasFetchWithRetry(`${webAppUrl}?${qs}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return trackPending((async () => {
+    const qs = new URLSearchParams(params);
+    const res = await gasFetchWithRetry(`${webAppUrl}?${qs}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  const json = await res.json() as { ok: boolean; error?: string };
-  if (!json.ok) throw new Error(json.error ?? '요청 실패');
+    const json = await res.json() as { ok: boolean; error?: string };
+    if (!json.ok) throw new Error(json.error ?? '요청 실패');
+  })());
 }
 
 // ─── 셀 업데이트 (체크박스 토글) ──────────────────────────────
@@ -361,18 +405,20 @@ export async function addScenes(
 ): Promise<void> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
 
-  const res = await gasFetchWithRetry(webAppUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'addScenes',
-      sheetName,
-      scenesJson: JSON.stringify(scenes),
-    }),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json() as { ok: boolean; error?: string };
-  if (!json.ok) throw new Error(json.error ?? '대량 씬 추가 실패');
+  return trackPending((async () => {
+    const res = await gasFetchWithRetry(webAppUrl!, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'addScenes',
+        sheetName,
+        scenesJson: JSON.stringify(scenes),
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json() as { ok: boolean; error?: string };
+    if (!json.ok) throw new Error(json.error ?? '대량 씬 추가 실패');
+  })());
 }
 
 // ─── 씬 삭제 ──────────────────────────────────────────────────
@@ -581,25 +627,27 @@ export async function uploadImage(
   const mimeType = match[1];
   const rawBase64 = match[2];
 
-  // POST로 이미지 데이터 전송 (URL 길이 제한 회피)
-  const res = await gasFetchWithRetry(webAppUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'uploadImage',
-      sheetName,
-      sceneId,
-      imageType,
-      mimeType,
-      base64: rawBase64,
-    }),
-  });
+  return trackPending((async () => {
+    // POST로 이미지 데이터 전송 (URL 길이 제한 회피)
+    const res = await gasFetchWithRetry(webAppUrl!, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'uploadImage',
+        sheetName,
+        sceneId,
+        imageType,
+        mimeType,
+        base64: rawBase64,
+      }),
+    });
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  const json = await res.json() as { ok: boolean; url?: string; error?: string };
-  if (!json.ok) throw new Error(json.error ?? '이미지 업로드 실패');
+    const json = await res.json() as { ok: boolean; url?: string; error?: string };
+    if (!json.ok) throw new Error(json.error ?? '이미지 업로드 실패');
 
-  // Drive URL → drive-img:// 프록시로 변환하여 즉시 표시 가능하도록
-  return { url: sanitizeImageUrl(json.url!) || json.url! };
+    // Drive URL → drive-img:// 프록시로 변환하여 즉시 표시 가능하도록
+    return { url: sanitizeImageUrl(json.url!) || json.url! };
+  })());
 }
