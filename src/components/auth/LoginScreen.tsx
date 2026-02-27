@@ -77,7 +77,7 @@ function getPlexusColors(): [number, number, number][] {
   return [accent, accent, accentSub, lighter, mix, analogous1, analogous2, complementary];
 }
 
-const PARTICLE_COUNT = 666;
+const DEFAULT_LOGIN_PARTICLE_COUNT = 666;
 const CONNECTION_DIST = 160;
 const MOUSE_RADIUS = 250;
 const MOUSE_FORCE = 0.06;
@@ -106,7 +106,12 @@ function PlexusBackground() {
   const sizeRef = useRef({ w: 0, h: 0 });
   const noiseRef = useRef<HTMLCanvasElement | null>(null);
 
+  const plexusSettings = useAppStore((s) => s.plexusSettings);
+  const loginEnabled = plexusSettings.loginEnabled;
+  const particleCount = plexusSettings.loginParticleCount || DEFAULT_LOGIN_PARTICLE_COUNT;
+
   useEffect(() => {
+    if (!loginEnabled) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -140,8 +145,8 @@ function PlexusBackground() {
       }
 
       const plexusColors = getPlexusColors();
-      if (particlesRef.current.length === 0) {
-        particlesRef.current = Array.from({ length: PARTICLE_COUNT }, () => createParticle(VIRTUAL_W, VIRTUAL_H, plexusColors));
+      if (particlesRef.current.length === 0 || particlesRef.current.length !== particleCount) {
+        particlesRef.current = Array.from({ length: particleCount }, () => createParticle(VIRTUAL_W, VIRTUAL_H, plexusColors));
       }
       // 리사이즈: 파티클 위치 변경 없음 — 창을 통해 보는 느낌
     };
@@ -306,8 +311,9 @@ function PlexusBackground() {
       window.removeEventListener('resize', resize);
       window.removeEventListener('mousemove', onMouse);
     };
-  }, []);
+  }, [loginEnabled, particleCount]);
 
+  if (!loginEnabled) return null;
   return <canvas ref={canvasRef} className="absolute inset-0" style={{ width: '100%', height: '100%' }} />;
 }
 
@@ -537,11 +543,12 @@ function Footer() {
 
 // ─── 로그인 폼 (글래스모피즘) ─────────────────────────────────
 
-function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise<string | null> }) {
+function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe: boolean) => Promise<string | null> }) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const nameRef = useRef<HTMLInputElement>(null);
   const colorMode = useAppStore((s) => s.colorMode);
   const isLight = colorMode === 'light';
@@ -551,13 +558,22 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
     return () => clearTimeout(timer);
   }, []);
 
+  // 저장된 rememberMe 설정 로드
+  useEffect(() => {
+    import('@/services/settingsService').then(({ loadPreferences }) => {
+      loadPreferences().then((prefs) => {
+        if (prefs?.rememberMe !== undefined) setRememberMe(prefs.rememberMe!);
+      });
+    });
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { setError('이름을 입력해주세요.'); return; }
     if (!password) { setError('비밀번호를 입력해주세요.'); return; }
     setLoading(true);
     setError('');
-    const err = await onLogin(name.trim(), password);
+    const err = await onLogin(name.trim(), password, rememberMe);
     setLoading(false);
     if (err) setError(err);
   };
@@ -625,6 +641,35 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string) => Promise
         />
         <p className="text-[11px] text-text-secondary/60">최초 비밀번호는 1234</p>
       </div>
+
+      {/* 로그인 유지 체크박스 */}
+      <label className="flex items-center gap-2.5 cursor-pointer relative">
+        <input
+          type="checkbox"
+          checked={rememberMe}
+          onChange={(e) => {
+            const v = e.target.checked;
+            setRememberMe(v);
+            import('@/services/settingsService').then(({ loadPreferences, savePreferences }) => {
+              loadPreferences().then((prefs) => savePreferences({ ...(prefs ?? {}), rememberMe: v }));
+            });
+          }}
+          className="sr-only peer"
+        />
+        <div className={cn(
+          'w-4 h-4 rounded border flex items-center justify-center transition-all',
+          rememberMe
+            ? 'bg-accent border-accent'
+            : isLight ? 'border-black/20 bg-black/5' : 'border-white/20 bg-white/5',
+        )}>
+          {rememberMe && (
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-white">
+              <path d="M2 5L4.5 7.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
+        </div>
+        <span className={cn('text-xs', isLight ? 'text-black/50' : 'text-text-secondary/60')}>로그인 유지</span>
+      </label>
 
       <AnimatePresence>
         {error && (
@@ -697,8 +742,8 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
     }, 500);
   }, [phase, mode, onComplete]);
 
-  const handleLogin = useCallback(async (name: string, password: string): Promise<string | null> => {
-    const result = await login(name, password);
+  const handleLogin = useCallback(async (name: string, password: string, rememberMe: boolean): Promise<string | null> => {
+    const result = await login(name, password, rememberMe);
     if (result.ok && result.user) {
       setCurrentUser(result.user);
       return null;

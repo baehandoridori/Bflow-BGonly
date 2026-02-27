@@ -175,6 +175,26 @@ export default function App() {
             : undefined,
         });
 
+        // Phase 8-4: 스플래시 건너뛰기
+        if (savedPrefs?.skipLoadingSplash) setLoadingSplashDone(true);
+        if (savedPrefs?.skipLandingSplash) setShowSplash(false);
+
+        // Phase 8-3: 플렉서스 설정 로드
+        if (savedPrefs?.plexus) {
+          const p = savedPrefs.plexus;
+          useAppStore.getState().setPlexusSettings({
+            loginEnabled: p.loginEnabled ?? true,
+            loginParticleCount: p.loginParticleCount ?? 666,
+            dashboardEnabled: p.dashboardEnabled ?? true,
+            dashboardParticleCount: p.dashboardParticleCount ?? 120,
+          });
+        }
+
+        // 사이드바 상태 로드
+        if (savedPrefs?.sidebarExpanded !== undefined) {
+          useAppStore.getState().setSidebarExpanded(savedPrefs.sidebarExpanded);
+        }
+
         // 테마 로드 + 적용 (가드 설정 후 상태 변경)
         const savedTheme = await loadTheme();
         if (savedTheme) {
@@ -206,10 +226,13 @@ export default function App() {
         const users = await loadUsers();
         setUsers(users);
 
-        // 세션 복원
-        const { user } = await loadSession();
-        if (user) {
-          setCurrentUser(user);
+        // 세션 복원 (Phase 8-5: rememberMe 설정 확인)
+        const rememberMe = savedPrefs?.rememberMe !== false; // 기본 true (하위 호환)
+        if (rememberMe) {
+          const { user } = await loadSession();
+          if (user) {
+            setCurrentUser(user);
+          }
         }
 
         // 저장된 Sheets 설정이 있으면 자동 연결 시도 (모드 무관)

@@ -4,6 +4,9 @@ import { ThemeSection } from '@/components/settings/ThemeSection';
 import { FontSizeSection } from '@/components/settings/FontSizeSection';
 import { SheetsSection } from '@/components/settings/SheetsSection';
 import { GuideSection } from '@/components/settings/GuideSection';
+import { StartupSection } from '@/components/settings/StartupSection';
+import { EffectsSection } from '@/components/settings/EffectsSection';
+import { LoginSection } from '@/components/settings/LoginSection';
 import { loadPreferences } from '@/services/settingsService';
 import {
   type FontScale,
@@ -51,11 +54,14 @@ export function SettingsView() {
         return <SheetsSection />;
       case 'guide':
         return <GuideSection />;
+      case 'effects':
+        return <EffectsSection />;
+      case 'startup':
+        return <StartupSection />;
+      case 'login':
+        return <LoginSection />;
       // 향후 Phase에서 추가
       case 'shortcuts':
-      case 'effects':
-      case 'startup':
-      case 'login':
         return (
           <div className="bg-bg-card border border-bg-border rounded-xl p-8 text-center">
             <p className="text-sm text-text-secondary/50">이 기능은 준비 중입니다</p>

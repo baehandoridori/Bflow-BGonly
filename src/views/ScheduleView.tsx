@@ -242,14 +242,14 @@ function EventBarChip({
       style={{
         left: `calc(${(bar.startCol / 7) * 100}% + 2px)`,
         width: `calc(${(bar.span / 7) * 100}% - 4px)`,
-        top: `${bar.row * (compact ? 22 : 26) + (compact ? 26 : 34)}px`,
-        height: compact ? '20px' : '24px',
+        top: `${bar.row * (compact ? 23 : 28) + (compact ? 28 : 36)}px`,
+        height: compact ? '22px' : '26px',
         cursor: isDragging ? 'grabbing' : 'grab',
       }}
     >
       <div
         className={cn(
-          'h-full flex items-center px-1.5 text-[11px] font-medium truncate relative',
+          'h-full flex items-center px-2 text-xs font-medium truncate relative',
           bar.isStart ? 'rounded-l-md' : '',
           bar.isEnd ? 'rounded-r-md' : '',
         )}
@@ -826,12 +826,12 @@ function CalendarGrid({
   return (
     <>
       {/* 요일 헤더 */}
-      <div className="grid grid-cols-7 gap-px mb-px">
+      <div className="grid grid-cols-7 mb-0.5 border-b border-bg-border/25">
         {WEEKDAYS.map((day, i) => (
           <div
             key={day}
             className={cn(
-              'text-center text-[11px] font-medium py-2',
+              'text-center text-xs font-semibold py-2.5 tracking-wider',
               i === 0 ? 'text-red-400/60' : i === 6 ? 'text-blue-400/60' : 'text-text-secondary/50',
             )}
           >
@@ -841,15 +841,15 @@ function CalendarGrid({
       </div>
 
       {/* 주별 행 */}
-      <div className="flex flex-col gap-px bg-bg-border/15 rounded-xl overflow-hidden border border-bg-border/30">
+      <div className="flex flex-col rounded-xl overflow-hidden border border-bg-border/30">
         {weeks.map((week, wi) => {
           const bars = layoutEventBars(displayEvents, week[0], 7);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
           const visibleRows = Math.min(maxRow, maxVisibleBars);
-          const rowHeight = Math.max(64 + visibleRows * 30 + 20, 160);
+          const rowHeight = Math.max(68 + visibleRows * 32 + 20, 164);
 
           return (
-            <div key={wi} className="relative grid grid-cols-7 gap-px" style={{ minHeight: rowHeight }}>
+            <div key={wi} className="relative grid grid-cols-7" style={{ minHeight: rowHeight }}>
               {/* 날짜 셀 배경 */}
               {week.map((day, di) => {
                 const dateStr = fmtDate(day);
@@ -871,7 +871,7 @@ function CalendarGrid({
                     key={di}
                     data-date={dateStr}
                     className={cn(
-                      'bg-bg-primary/50 transition-colors duration-100 cursor-pointer relative',
+                      'bg-bg-primary/50 transition-colors duration-100 cursor-pointer relative border-b border-r border-bg-border/20',
                       isCurMonth ? 'hover:bg-bg-border/15' : 'opacity-30',
                       isToday && 'bg-accent/5',
                       isDropTarget && 'bg-accent/10',
@@ -880,12 +880,12 @@ function CalendarGrid({
                     onClick={() => { if (!isDragging) onDateClick(dateStr); }}
                   >
                     {/* 날짜 번호 */}
-                    <div className="p-1.5">
+                    <div className="p-2">
                       <span
                         className={cn(
-                          'text-xs tabular-nums inline-flex items-center justify-center font-medium',
+                          'text-sm tabular-nums inline-flex items-center justify-center font-medium',
                           isToday
-                            ? 'bg-accent text-white w-6 h-6 rounded-full text-[11px] font-bold'
+                            ? 'bg-accent text-white w-7 h-7 rounded-full text-xs font-bold'
                             : dow === 0 ? 'text-red-400'
                             : dow === 6 ? 'text-blue-400'
                             : isCurMonth ? 'text-text-primary/80' : 'text-text-secondary/40',

@@ -33,7 +33,7 @@ const ResponsiveGridLayout = WidthProvider(Responsive);
 
 /* ── 대시보드 플렉서스 배경 (연결선 + 그라데이션 조명 + 마우스 반응) ── */
 interface DashPt { x: number; y: number; vx: number; vy: number; size: number; color: [number, number, number]; alpha: number }
-const DASH_PT_COUNT = 120;
+const DEFAULT_DASH_PT_COUNT = 120;
 const DASH_CONNECT_DIST = 140;
 
 function DashboardPlexus() {
@@ -42,7 +42,12 @@ function DashboardPlexus() {
   const mouseRef = useRef({ x: -9999, y: -9999 });
   const sizeRef = useRef({ w: 0, h: 0 });
 
+  const plexusSettings = useAppStore((s) => s.plexusSettings);
+  const dashEnabled = plexusSettings.dashboardEnabled;
+  const ptCount = plexusSettings.dashboardParticleCount || DEFAULT_DASH_PT_COUNT;
+
   useEffect(() => {
+    if (!dashEnabled) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d', { alpha: true });
@@ -66,9 +71,9 @@ function DashboardPlexus() {
       canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       sizeRef.current = { w, h };
-      if (ptsRef.current.length === 0) {
+      if (ptsRef.current.length === 0 || ptsRef.current.length !== ptCount) {
         const cols = getColors();
-        ptsRef.current = Array.from({ length: DASH_PT_COUNT }, () => {
+        ptsRef.current = Array.from({ length: ptCount }, () => {
           const c = cols[Math.floor(Math.random() * cols.length)];
           return {
             x: Math.random() * w, y: Math.random() * h,
@@ -176,8 +181,9 @@ function DashboardPlexus() {
     };
     requestAnimationFrame(animate);
     return () => { running = false; window.removeEventListener('resize', resize); window.removeEventListener('mousemove', onMouse); };
-  }, []);
+  }, [dashEnabled, ptCount]);
 
+  if (!dashEnabled) return null;
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" style={{ opacity: 0.85 }} />;
 }
 

@@ -25,9 +25,9 @@ const TABS: Tab[] = [
   { id: 'theme',     label: '외관',   icon: <Palette size={16} /> },
   { id: 'font',      label: '글꼴',   icon: <Type size={16} /> },
   { id: 'shortcuts',  label: '단축키', icon: <Keyboard size={16} />, disabled: true },
-  { id: 'effects',   label: '효과',   icon: <Sparkles size={16} />, disabled: true },
-  { id: 'startup',   label: '시작',   icon: <Monitor size={16} />, disabled: true },
-  { id: 'login',     label: '로그인', icon: <KeyRound size={16} />, disabled: true },
+  { id: 'effects',   label: '효과',   icon: <Sparkles size={16} /> },
+  { id: 'startup',   label: '시작',   icon: <Monitor size={16} /> },
+  { id: 'login',     label: '로그인', icon: <KeyRound size={16} /> },
   { id: 'sheets',    label: '연동',   icon: <Database size={16} /> },
   { id: 'guide',     label: '안내',   icon: <HelpCircle size={16} /> },
 ];

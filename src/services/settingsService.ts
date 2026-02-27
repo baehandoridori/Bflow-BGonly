@@ -81,6 +81,24 @@ export interface UserPreferences {
     caption?: number;
     micro?: number;
   };
+
+  // Phase 8-3: 플렉서스 애니메이션
+  plexus?: {
+    loginEnabled?: boolean;
+    loginParticleCount?: number;
+    dashboardEnabled?: boolean;
+    dashboardParticleCount?: number;
+  };
+
+  // Phase 8-4: 스플래시 건너뛰기
+  skipLoadingSplash?: boolean;
+  skipLandingSplash?: boolean;
+
+  // Phase 8-5: 로그인 유지
+  rememberMe?: boolean;
+
+  // 사이드바
+  sidebarExpanded?: boolean;
 }
 
 export async function loadPreferences(): Promise<UserPreferences | null> {

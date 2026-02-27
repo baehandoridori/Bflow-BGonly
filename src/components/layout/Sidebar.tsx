@@ -1,10 +1,11 @@
-import { useState, useRef } from 'react';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Settings } from 'lucide-react';
+import { useState, useRef, useCallback } from 'react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Settings, PanelLeft, PanelLeftClose } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
+import { loadPreferences, savePreferences } from '@/services/settingsService';
 
 const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: '대시보드', icon: <LayoutDashboard size={20} /> },
@@ -157,43 +158,106 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
 }
 
 export function Sidebar() {
-  const { currentView, setView } = useAppStore();
+  const { currentView, setView, sidebarExpanded, toggleSidebarExpanded } = useAppStore();
   const [showSplash, setShowSplash] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const isExpanded = sidebarExpanded;
+  const isVisuallyExpanded = isExpanded || isHovered;
+
+  const handleToggle = useCallback(async () => {
+    toggleSidebarExpanded();
+    const next = !sidebarExpanded;
+    const prefs = await loadPreferences() ?? {};
+    await savePreferences({ ...prefs, sidebarExpanded: next });
+  }, [sidebarExpanded, toggleSidebarExpanded]);
+
+  const handleMouseEnter = useCallback(() => {
+    if (sidebarExpanded) return;
+    clearTimeout(hoverTimeoutRef.current);
+    setIsHovered(true);
+  }, [sidebarExpanded]);
+
+  const handleMouseLeave = useCallback(() => {
+    clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = setTimeout(() => setIsHovered(false), 150);
+  }, []);
+
+  const sidebarBg = `
+    linear-gradient(180deg, transparent 55%, rgb(var(--color-accent) / 0.07) 78%, rgb(var(--color-accent-sub) / 0.12) 100%),
+    rgb(var(--color-bg-card))
+  `;
 
   return (
     <>
+      {/* 레이아웃 공간 확보용 스페이서 */}
+      <div
+        className={cn(
+          'shrink-0 transition-all duration-200',
+          isExpanded ? 'w-48' : 'w-16',
+        )}
+      />
+
+      {/* 실제 사이드바 (fixed — 호버 시 콘텐츠 안 밀림) */}
       <aside
-        className="w-16 h-full border-r border-bg-border flex flex-col items-center py-4 gap-2"
-        style={{
-          background: `
-            linear-gradient(180deg, transparent 55%, rgb(var(--color-accent) / 0.07) 78%, rgb(var(--color-accent-sub) / 0.12) 100%),
-            rgb(var(--color-bg-card))
-          `,
-        }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        className={cn(
+          'fixed top-0 left-0 h-full border-r border-bg-border flex flex-col py-4 gap-2 transition-all duration-200 ease-out overflow-hidden z-40',
+          isVisuallyExpanded ? 'w-48 items-start px-3' : 'w-16 items-center',
+        )}
+        style={{ background: sidebarBg }}
       >
-        {/* 리퀴드 글래스 로고 */}
-        <LiquidGlassLogo onClick={() => setShowSplash(true)} />
+        {/* 리퀴드 글래스 로고 + 토글 */}
+        <div className={cn(
+          'flex items-center gap-2 mb-1',
+          isVisuallyExpanded ? 'w-full justify-between px-1' : 'flex-col',
+        )}>
+          <LiquidGlassLogo onClick={() => setShowSplash(true)} />
+          <button
+            onClick={handleToggle}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary/50 hover:text-text-primary hover:bg-bg-border/50 transition-colors cursor-pointer"
+            title={isExpanded ? '사이드바 접기' : '사이드바 펼치기'}
+          >
+            {isExpanded ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
+          </button>
+        </div>
 
         {/* 네비게이션 */}
         {NAV_ITEMS.map((item) => (
           <button
             key={item.id}
             onClick={() => setView(item.id)}
-            title={item.label}
+            title={isVisuallyExpanded ? undefined : item.label}
             className={cn(
-              'w-12 h-12 rounded-lg flex items-center justify-center transition-colors cursor-pointer',
+              'rounded-lg flex items-center transition-all duration-200 cursor-pointer shrink-0',
+              isVisuallyExpanded
+                ? 'w-full px-3 h-10 gap-3 justify-start'
+                : 'w-12 h-12 justify-center',
               currentView === item.id
                 ? 'bg-accent/20 text-accent'
-                : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50'
+                : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50',
             )}
           >
-            {item.icon}
+            <span className="shrink-0">{item.icon}</span>
+            {isVisuallyExpanded && (
+              <span
+                className="text-sm font-medium whitespace-nowrap overflow-hidden"
+                style={{
+                  opacity: isVisuallyExpanded ? 1 : 0,
+                  transition: 'opacity 0.15s ease-out 0.05s',
+                }}
+              >
+                {item.label}
+              </span>
+            )}
           </button>
         ))}
 
         {/* 하단: 버전 */}
-        <div className="mt-auto mb-2 flex flex-col items-center gap-0.5">
-          <span className="text-[11px] text-text-secondary/50 font-mono">
+        <div className="mt-auto mb-2 flex flex-col items-center gap-0.5 self-center">
+          <span className="text-[11px] text-text-secondary/50 font-mono whitespace-nowrap">
             v{__APP_VERSION__}
           </span>
         </div>
