@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Settings, PanelLeft, PanelLeftClose } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Settings, PanelLeft } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
@@ -204,24 +204,14 @@ export function Sidebar() {
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         className={cn(
-          'fixed top-0 left-0 h-full border-r border-bg-border flex flex-col py-4 gap-2 transition-all duration-200 ease-out overflow-hidden z-40',
-          isVisuallyExpanded ? 'w-48 items-start px-3' : 'w-16 items-center',
+          'fixed top-0 left-0 h-full border-r border-bg-border flex flex-col py-4 gap-2 transition-[width] duration-200 ease-out overflow-hidden z-40',
+          isVisuallyExpanded ? 'w-48' : 'w-16',
         )}
         style={{ background: sidebarBg }}
       >
-        {/* 리퀴드 글래스 로고 + 토글 */}
-        <div className={cn(
-          'flex items-center gap-2 mb-1',
-          isVisuallyExpanded ? 'w-full justify-between px-1' : 'flex-col',
-        )}>
+        {/* 로고 — 항상 중앙 고정 */}
+        <div className="w-16 flex justify-center shrink-0 mb-1">
           <LiquidGlassLogo onClick={() => setShowSplash(true)} />
-          <button
-            onClick={handleToggle}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary/50 hover:text-text-primary hover:bg-bg-border/50 transition-colors cursor-pointer"
-            title={isExpanded ? '사이드바 접기' : '사이드바 펼치기'}
-          >
-            {isExpanded ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
-          </button>
         </div>
 
         {/* 네비게이션 */}
@@ -231,32 +221,41 @@ export function Sidebar() {
             onClick={() => setView(item.id)}
             title={isVisuallyExpanded ? undefined : item.label}
             className={cn(
-              'rounded-lg flex items-center transition-all duration-200 cursor-pointer shrink-0',
-              isVisuallyExpanded
-                ? 'w-full px-3 h-10 gap-3 justify-start'
-                : 'w-12 h-12 justify-center',
+              'flex items-center cursor-pointer shrink-0 h-10 mx-2 rounded-lg',
+              'transition-colors duration-200',
               currentView === item.id
                 ? 'bg-accent/20 text-accent'
                 : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/50',
             )}
           >
-            <span className="shrink-0">{item.icon}</span>
-            {isVisuallyExpanded && (
-              <span
-                className="text-sm font-medium whitespace-nowrap overflow-hidden"
-                style={{
-                  opacity: isVisuallyExpanded ? 1 : 0,
-                  transition: 'opacity 0.15s ease-out 0.05s',
-                }}
-              >
-                {item.label}
-              </span>
-            )}
+            {/* 아이콘: 항상 w-12 내 중앙 → 펼침/접힘 무관 동일 위치 */}
+            <span className="shrink-0 w-12 flex justify-center">{item.icon}</span>
+            <span
+              className="text-sm font-medium whitespace-nowrap overflow-hidden"
+              style={{
+                width: isVisuallyExpanded ? 'auto' : 0,
+                opacity: isVisuallyExpanded ? 1 : 0,
+                paddingRight: isVisuallyExpanded ? '12px' : 0,
+                transition: 'opacity 0.15s ease-out 0.05s, width 0.2s ease-out, padding 0.2s ease-out',
+              }}
+            >
+              {item.label}
+            </span>
           </button>
         ))}
 
-        {/* 하단: 버전 */}
-        <div className="mt-auto mb-2 flex flex-col items-center gap-0.5 self-center">
+        {/* 하단: 토글 + 버전 (항상 같은 위치) */}
+        <div className="mt-auto flex flex-col items-center gap-1.5 w-16 shrink-0">
+          <button
+            onClick={handleToggle}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary/40 hover:text-text-primary hover:bg-bg-border/50 transition-all duration-200 cursor-pointer"
+            title={isExpanded ? '사이드바 접기' : '사이드바 펼치기'}
+          >
+            <PanelLeft
+              size={14}
+              className={cn('transition-transform duration-200', isExpanded && 'rotate-180')}
+            />
+          </button>
           <span className="text-[11px] text-text-secondary/50 font-mono whitespace-nowrap">
             v{__APP_VERSION__}
           </span>
