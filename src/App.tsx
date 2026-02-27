@@ -20,6 +20,7 @@ import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, re
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors } from '@/themes';
+import { WelcomeToast } from '@/components/WelcomeToast';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
@@ -74,6 +75,8 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   // 로딩 스플래시: authReady 후에도 유지, 클릭으로 스킵
   const [loadingSplashDone, setLoadingSplashDone] = useState(false);
+  // 환영 팝업: 로그인 직후에만 표시
+  const [welcomeUser, setWelcomeUser] = useState<string | null>(null);
 
   // 데이터 로드 함수 — Apps Script 웹 앱에서 데이터 읽기
   const loadData = useCallback(async () => {
@@ -224,14 +227,24 @@ export default function App() {
     init();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 로그인 직후: 초기 비밀번호 토스트
+  // 로그인 직후: 스플래시 건너뛰기 + 초기 비밀번호 토스트
+  // authReady 이후(= 사용자가 로그인 폼에서 직접 로그인)에만 스플래시를 건너뜀
+  // authReady 이전(= init에서 세션 복원)은 스플래시를 유지
+  const prevUserRef = useRef(currentUser);
   useEffect(() => {
+    const wasNull = prevUserRef.current === null;
+    prevUserRef.current = currentUser;
+    if (currentUser && wasNull && authReady) {
+      // 사용자가 로그인 폼에서 직접 로그인한 경우 → 스플래시 건너뛰기 + 환영 팝업
+      setShowSplash(false);
+      setWelcomeUser(currentUser.name);
+    }
     if (currentUser?.isInitialPassword) {
       setToast('초기 비밀번호(1234)를 사용 중입니다. 비밀번호를 변경해주세요.');
       const timer = setTimeout(() => setToast(null), 5000);
       return () => clearTimeout(timer);
     }
-  }, [currentUser]);
+  }, [currentUser, authReady]);
 
   // 사용자 변경 시 목록 리로드
   useEffect(() => {
@@ -427,6 +440,11 @@ export default function App() {
         >
           {toast}
         </div>
+      )}
+
+      {/* 환영 팝업 (로그인 직후) */}
+      {welcomeUser && (
+        <WelcomeToast userName={welcomeUser} onDismiss={() => setWelcomeUser(null)} />
       )}
 
       {/* 종료 대기 오버레이 (Phase 0-5) */}
