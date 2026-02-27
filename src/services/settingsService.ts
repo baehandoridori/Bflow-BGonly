@@ -72,6 +72,15 @@ export interface UserPreferences {
   lastPart?: string;
   lastView?: string;
   chartTypes?: Record<string, string>;
+
+  // Phase 8-1: 글꼴 크기
+  fontScale?: string;  // 'xs' | 's' | 'm' | 'l' | 'xl'
+  fontCategoryScales?: {
+    heading?: number;
+    body?: number;
+    caption?: number;
+    micro?: number;
+  };
 }
 
 export async function loadPreferences(): Promise<UserPreferences | null> {

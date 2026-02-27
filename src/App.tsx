@@ -20,6 +20,8 @@ import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, re
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors } from '@/themes';
+import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
+import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
@@ -157,13 +159,21 @@ export default function App() {
           setEpisodeWidgetLayout(savedEpLayout);
         }
 
-        // 차트 타입 로드
+        // 차트 타입 + 글꼴 크기 로드
         const savedPrefs = await loadPreferences();
         if (savedPrefs?.chartTypes) {
           for (const [widgetId, type] of Object.entries(savedPrefs.chartTypes)) {
             setChartType(widgetId, type as 'horizontal-bar' | 'vertical-bar' | 'donut' | 'stat-card');
           }
         }
+
+        // 글꼴 크기 적용 (FOUC 방지: 테마보다 먼저 적용)
+        applyFontSettings({
+          fontScale: (savedPrefs?.fontScale as FontScale) ?? DEFAULT_FONT_SCALE,
+          fontCategoryScales: savedPrefs?.fontCategoryScales
+            ? { ...DEFAULT_CATEGORY_SCALES, ...savedPrefs.fontCategoryScales }
+            : undefined,
+        });
 
         // 테마 로드 + 적용 (가드 설정 후 상태 변경)
         const savedTheme = await loadTheme();
