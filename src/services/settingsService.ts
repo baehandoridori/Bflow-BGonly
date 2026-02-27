@@ -88,6 +88,11 @@ export interface UserPreferences {
     loginParticleCount?: number;
     dashboardEnabled?: boolean;
     dashboardParticleCount?: number;
+    speed?: number;
+    mouseRadius?: number;
+    mouseForce?: number;
+    glowIntensity?: number;
+    connectionDist?: number;
   };
 
   // Phase 8-4: 스플래시 건너뛰기

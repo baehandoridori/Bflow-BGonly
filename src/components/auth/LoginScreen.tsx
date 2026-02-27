@@ -78,9 +78,10 @@ function getPlexusColors(): [number, number, number][] {
 }
 
 const DEFAULT_LOGIN_PARTICLE_COUNT = 666;
-const CONNECTION_DIST = 160;
-const MOUSE_RADIUS = 250;
-const MOUSE_FORCE = 0.06;
+// 아래 상수들은 설정에서 커스터마이징 가능 (store에서 읽음)
+const DEFAULT_CONNECTION_DIST = 160;
+const DEFAULT_MOUSE_RADIUS = 250;
+const DEFAULT_MOUSE_FORCE = 0.06;
 // "창을 통해 보는" 가상 캔버스 크기 (실제 창보다 넓음)
 const VIRTUAL_W = 2800;
 const VIRTUAL_H = 1800;
@@ -109,6 +110,22 @@ function PlexusBackground() {
   const plexusSettings = useAppStore((s) => s.plexusSettings);
   const loginEnabled = plexusSettings.loginEnabled;
   const particleCount = plexusSettings.loginParticleCount || DEFAULT_LOGIN_PARTICLE_COUNT;
+
+  // 커스터마이징 가능한 설정을 ref로 관리 (애니메이션 루프 재시작 없이 즉시 반영)
+  const plexusCfgRef = useRef({
+    speed: plexusSettings.speed ?? 1.0,
+    mouseRadius: plexusSettings.mouseRadius ?? DEFAULT_MOUSE_RADIUS,
+    mouseForce: plexusSettings.mouseForce ?? DEFAULT_MOUSE_FORCE,
+    glowIntensity: plexusSettings.glowIntensity ?? 1.0,
+    connectionDist: plexusSettings.connectionDist ?? DEFAULT_CONNECTION_DIST,
+  });
+  plexusCfgRef.current = {
+    speed: plexusSettings.speed ?? 1.0,
+    mouseRadius: plexusSettings.mouseRadius ?? DEFAULT_MOUSE_RADIUS,
+    mouseForce: plexusSettings.mouseForce ?? DEFAULT_MOUSE_FORCE,
+    glowIntensity: plexusSettings.glowIntensity ?? 1.0,
+    connectionDist: plexusSettings.connectionDist ?? DEFAULT_CONNECTION_DIST,
+  };
 
   useEffect(() => {
     if (!loginEnabled) return;
@@ -199,25 +216,32 @@ function PlexusBackground() {
         if (noiseRef.current) ctx.drawImage(noiseRef.current, 0, 0);
       }
 
+      // 커스텀 설정 읽기
+      const cfg = plexusCfgRef.current;
+      const cfgMouseR = cfg.mouseRadius;
+      const cfgMouseF = cfg.mouseForce;
+      const cfgSpeed = cfg.speed;
+      const cfgConnDist = cfg.connectionDist;
+
       // 물리 업데이트 (가상 캔버스 좌표)
       for (const p of particles) {
         const dmx = p.x - mx;
         const dmy = p.y - my;
         const distMouse = Math.sqrt(dmx * dmx + dmy * dmy);
-        if (distMouse < MOUSE_RADIUS && distMouse > 1) {
-          const force = (1 - distMouse / MOUSE_RADIUS) * MOUSE_FORCE * p.z;
+        if (distMouse < cfgMouseR && distMouse > 1) {
+          const force = (1 - distMouse / cfgMouseR) * cfgMouseF * p.z;
           p.vx += (dmx / distMouse) * force;
           p.vy += (dmy / distMouse) * force;
         }
         p.vx *= 0.98; p.vy *= 0.98;
         const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-        const minSpeed = p.baseSpeed * p.z * 0.15;
+        const minSpeed = p.baseSpeed * p.z * 0.15 * cfgSpeed;
         if (speed < minSpeed) {
           const angle = Math.atan2(p.vy, p.vx) || Math.random() * Math.PI * 2;
           p.vx = Math.cos(angle) * minSpeed;
           p.vy = Math.sin(angle) * minSpeed;
         }
-        p.x += p.vx; p.y += p.vy;
+        p.x += p.vx * cfgSpeed; p.y += p.vy * cfgSpeed;
         // 가상 캔버스 경계에서 래핑
         const margin = 50;
         if (p.x < -margin) p.x = VIRTUAL_W + margin;
@@ -227,7 +251,7 @@ function PlexusBackground() {
       }
 
       // 뷰포트 안에 보이는 파티클만 필터 (성능)
-      const viewMargin = CONNECTION_DIST + 60;
+      const viewMargin = cfgConnDist + 60;
       const visible = particles.filter(
         (p) => p.x >= ox - viewMargin && p.x <= ox + w + viewMargin &&
                p.y >= oy - viewMargin && p.y <= oy + h + viewMargin,
@@ -241,13 +265,13 @@ function PlexusBackground() {
           const dx = a.x - b.x; const dy = a.y - b.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           const avgZ = (a.z + b.z) * 0.5;
-          const scaledDist = CONNECTION_DIST * avgZ;
+          const scaledDist = cfgConnDist * avgZ;
           if (dist < scaledDist) {
             const lineAlpha = (1 - dist / scaledDist) * avgZ * 0.5;
             const midX = (a.x + b.x) * 0.5;
             const midY = (a.y + b.y) * 0.5;
             const dMid = Math.sqrt((midX - mx) ** 2 + (midY - my) ** 2);
-            const glowBoost = dMid < MOUSE_RADIUS ? (1 - dMid / MOUSE_RADIUS) * 0.4 : 0;
+            const glowBoost = dMid < cfgMouseR ? (1 - dMid / cfgMouseR) * 0.4 : 0;
             const r = Math.round((a.color[0] + b.color[0]) * 0.5);
             const g = Math.round((a.color[1] + b.color[1]) * 0.5);
             const bl = Math.round((a.color[2] + b.color[2]) * 0.5);
@@ -261,6 +285,7 @@ function PlexusBackground() {
       }
 
       // 파티클 렌더링 (화면 좌표)
+      const cfgGlow = cfg.glowIntensity;
       for (const p of sorted) {
         const alpha = 0.35 + p.z * 0.6;
         const [r, g, b] = p.color;
@@ -268,23 +293,23 @@ function PlexusBackground() {
         const sy = p.y - oy; // 화면 y
         const dmx2 = p.x - mx; const dmy2 = p.y - my;
         const distM = Math.sqrt(dmx2 * dmx2 + dmy2 * dmy2);
-        const nearMouse = distM < MOUSE_RADIUS;
-        const glowSize = nearMouse ? p.size + (1 - distM / MOUSE_RADIUS) * 4 * p.z : p.size;
+        const nearMouse = distM < cfgMouseR;
+        const glowSize = nearMouse ? p.size + (1 - distM / cfgMouseR) * 4 * p.z : p.size;
 
         if (p.z < 0.4) {
-          const blurSize = glowSize * (3 - p.z * 5);
+          const blurSize = glowSize * (3 - p.z * 5) * cfgGlow;
           const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, blurSize);
-          grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.5})`);
-          grad.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${alpha * 0.15})`);
+          grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.5 * cfgGlow})`);
+          grad.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, ${alpha * 0.15 * cfgGlow})`);
           grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
           ctx.fillStyle = grad;
           ctx.fillRect(sx - blurSize, sy - blurSize, blurSize * 2, blurSize * 2);
         } else {
-          if (nearMouse) {
-            const haloSize = glowSize * 3;
+          if (nearMouse && cfgGlow > 0.2) {
+            const haloSize = glowSize * 3 * cfgGlow;
             const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, haloSize);
-            halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.3})`);
-            halo.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${alpha * 0.08})`);
+            halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.3 * cfgGlow})`);
+            halo.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${alpha * 0.08 * cfgGlow})`);
             halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
             ctx.fillStyle = halo;
             ctx.fillRect(sx - haloSize, sy - haloSize, haloSize * 2, haloSize * 2);

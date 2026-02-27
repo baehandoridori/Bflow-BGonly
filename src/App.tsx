@@ -187,6 +187,11 @@ export default function App() {
             loginParticleCount: p.loginParticleCount ?? 666,
             dashboardEnabled: p.dashboardEnabled ?? true,
             dashboardParticleCount: p.dashboardParticleCount ?? 120,
+            speed: p.speed ?? 1.0,
+            mouseRadius: p.mouseRadius ?? 250,
+            mouseForce: p.mouseForce ?? 0.06,
+            glowIntensity: p.glowIntensity ?? 1.0,
+            connectionDist: p.connectionDist ?? 160,
           });
         }
 

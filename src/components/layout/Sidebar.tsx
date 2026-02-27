@@ -193,21 +193,23 @@ export function Sidebar() {
     <>
       {/* 레이아웃 공간 확보용 스페이서 */}
       <div
-        className={cn(
-          'shrink-0 transition-all duration-200',
-          isExpanded ? 'w-48' : 'w-16',
-        )}
+        className="shrink-0"
+        style={{
+          width: isExpanded ? 132 : 64,
+          transition: 'width 350ms cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
       />
 
       {/* 실제 사이드바 (fixed — 호버 시 콘텐츠 안 밀림) */}
       <aside
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={cn(
-          'fixed top-0 left-0 h-full border-r border-bg-border flex flex-col py-4 gap-2 transition-[width] duration-200 ease-out overflow-hidden z-40',
-          isVisuallyExpanded ? 'w-48' : 'w-16',
-        )}
-        style={{ background: sidebarBg }}
+        className="fixed top-0 left-0 h-full border-r border-bg-border flex flex-col py-4 gap-2 overflow-hidden z-40"
+        style={{
+          width: isVisuallyExpanded ? 132 : 64,
+          transition: 'width 350ms cubic-bezier(0.4, 0, 0.2, 1)',
+          background: sidebarBg,
+        }}
       >
         {/* 로고 — 항상 중앙 고정 */}
         <div className="w-16 flex justify-center shrink-0 mb-1">
@@ -233,10 +235,10 @@ export function Sidebar() {
             <span
               className="text-sm font-medium whitespace-nowrap overflow-hidden"
               style={{
-                width: isVisuallyExpanded ? 'auto' : 0,
+                maxWidth: isVisuallyExpanded ? 80 : 0,
                 opacity: isVisuallyExpanded ? 1 : 0,
-                paddingRight: isVisuallyExpanded ? '12px' : 0,
-                transition: 'opacity 0.15s ease-out 0.05s, width 0.2s ease-out, padding 0.2s ease-out',
+                paddingRight: isVisuallyExpanded ? 8 : 0,
+                transition: 'max-width 350ms cubic-bezier(0.4, 0, 0.2, 1), opacity 250ms ease 80ms, padding 350ms cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             >
               {item.label}

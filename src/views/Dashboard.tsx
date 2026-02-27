@@ -46,6 +46,22 @@ function DashboardPlexus() {
   const dashEnabled = plexusSettings.dashboardEnabled;
   const ptCount = plexusSettings.dashboardParticleCount || DEFAULT_DASH_PT_COUNT;
 
+  // 커스텀 설정 ref (애니메이션 루프 재시작 없이 즉시 반영, 대시보드 기본값 대비 비례 스케일)
+  const cfgRef = useRef({
+    speed: plexusSettings.speed ?? 1.0,
+    mouseRadius: 220 * ((plexusSettings.mouseRadius ?? 250) / 250),
+    mouseForce: 0.015 * ((plexusSettings.mouseForce ?? 0.06) / 0.06),
+    glowIntensity: plexusSettings.glowIntensity ?? 1.0,
+    connectionDist: DASH_CONNECT_DIST * ((plexusSettings.connectionDist ?? 160) / 160),
+  });
+  cfgRef.current = {
+    speed: plexusSettings.speed ?? 1.0,
+    mouseRadius: 220 * ((plexusSettings.mouseRadius ?? 250) / 250),
+    mouseForce: 0.015 * ((plexusSettings.mouseForce ?? 0.06) / 0.06),
+    glowIntensity: plexusSettings.glowIntensity ?? 1.0,
+    connectionDist: DASH_CONNECT_DIST * ((plexusSettings.connectionDist ?? 160) / 160),
+  };
+
   useEffect(() => {
     if (!dashEnabled) return;
     const canvas = canvasRef.current;
@@ -124,32 +140,34 @@ function DashboardPlexus() {
       const mx = mouseRef.current.x;
       const my = mouseRef.current.y;
       const pts = ptsRef.current;
+      const dc = cfgRef.current;
 
       // 업데이트 위치
       for (const p of pts) {
         const dx = p.x - mx; const dy = p.y - my;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 220 && dist > 1) {
-          const force = (1 - dist / 220) * 0.015;
+        if (dist < dc.mouseRadius && dist > 1) {
+          const force = (1 - dist / dc.mouseRadius) * dc.mouseForce;
           p.vx += (dx / dist) * force; p.vy += (dy / dist) * force;
         }
         p.vx *= 0.992; p.vy *= 0.992;
-        p.x += p.vx; p.y += p.vy;
+        p.x += p.vx * dc.speed; p.y += p.vy * dc.speed;
         if (p.x < -30) p.x = w + 30; if (p.x > w + 30) p.x = -30;
         if (p.y < -30) p.y = h + 30; if (p.y > h + 30) p.y = -30;
       }
 
       // ── 연결선 ──
+      const cDist = dc.connectionDist;
       for (let i = 0; i < pts.length; i++) {
         for (let j = i + 1; j < pts.length; j++) {
           const dx = pts[i].x - pts[j].x;
           const dy = pts[i].y - pts[j].y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < DASH_CONNECT_DIST) {
-            const alpha = (1 - dist / DASH_CONNECT_DIST) * 0.28;
+          if (dist < cDist) {
+            const alpha = (1 - dist / cDist) * 0.28;
             const [r, g, b] = pts[i].color;
             ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
-            ctx.lineWidth = (1 - dist / DASH_CONNECT_DIST) * 1.2;
+            ctx.lineWidth = (1 - dist / cDist) * 1.2;
             ctx.beginPath();
             ctx.moveTo(pts[i].x, pts[i].y);
             ctx.lineTo(pts[j].x, pts[j].y);
@@ -159,19 +177,23 @@ function DashboardPlexus() {
       }
 
       // ── 파티클 ──
+      const dcGlow = dc.glowIntensity;
       for (const p of pts) {
         const dx = p.x - mx; const dy = p.y - my;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const nearMouse = dist < 220;
-        const glowAlpha = nearMouse ? p.alpha + (1 - dist / 220) * 0.25 : p.alpha;
+        const nearMouse = dist < dc.mouseRadius;
+        const glowAlpha = nearMouse ? p.alpha + (1 - dist / dc.mouseRadius) * 0.25 : p.alpha;
         const [r, g, b] = p.color;
         // 소프트 글로우
-        const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 5);
-        grad.addColorStop(0, `rgba(${r},${g},${b},${glowAlpha * 0.5})`);
-        grad.addColorStop(0.3, `rgba(${r},${g},${b},${glowAlpha * 0.15})`);
-        grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-        ctx.fillStyle = grad;
-        ctx.fillRect(p.x - p.size * 5, p.y - p.size * 5, p.size * 10, p.size * 10);
+        if (dcGlow > 0.2) {
+          const glR = p.size * 5 * dcGlow;
+          const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glR);
+          grad.addColorStop(0, `rgba(${r},${g},${b},${glowAlpha * 0.5 * dcGlow})`);
+          grad.addColorStop(0.3, `rgba(${r},${g},${b},${glowAlpha * 0.15 * dcGlow})`);
+          grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(p.x - glR, p.y - glR, glR * 2, glR * 2);
+        }
         // 코어 도트
         ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.8, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(${r},${g},${b},${glowAlpha * 0.9})`;
