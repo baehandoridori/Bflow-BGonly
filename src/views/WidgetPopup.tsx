@@ -161,6 +161,8 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
       if (saved) {
         setAppOpacity(saved.opacity);
         setIsAOT(saved.alwaysOnTop);
+        // BrowserWindow에도 실제 투명도 적용
+        window.electronAPI?.widgetSetOpacity?.(widgetId, saved.opacity);
       }
     });
   }, [widgetId]);
