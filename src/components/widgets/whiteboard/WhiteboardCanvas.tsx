@@ -1,5 +1,6 @@
-import { useRef, useEffect, useCallback, type ReactNode } from 'react';
+import { useRef, useState, useEffect, useCallback, type ReactNode } from 'react';
 import type { WhiteboardEngine } from './useWhiteboardEngine';
+import { loadPreferences } from '@/services/settingsService';
 
 interface WhiteboardCanvasProps {
   engine: WhiteboardEngine;
@@ -22,6 +23,13 @@ export function WhiteboardCanvas({ engine, userId, userName, readOnly, onCursorM
   const isPanningRef = useRef(false);
   const lastPanRef = useRef({ x: 0, y: 0 });
   const spaceDownRef = useRef(false);
+  const [bgColor, setBgColor] = useState('#FFFFFF');
+
+  useEffect(() => {
+    loadPreferences().then((prefs) => {
+      setBgColor(prefs?.whiteboardBgColor ?? '#FFFFFF');
+    });
+  }, []);
 
   // 최신 engine/props를 ref로 유지 (콜백 안정화)
   const engineRef = useRef(engine);
@@ -189,7 +197,8 @@ export function WhiteboardCanvas({ engine, userId, userName, readOnly, onCursorM
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full overflow-hidden bg-[#1a1a2e]"
+      className="relative w-full h-full overflow-hidden"
+      style={{ backgroundColor: bgColor }}
     >
       {/* 체커보드 배경 */}
       <div className="absolute inset-0 opacity-5" style={{

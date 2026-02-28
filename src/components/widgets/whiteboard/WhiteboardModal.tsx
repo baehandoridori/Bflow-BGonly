@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertTriangle, Maximize2, Minimize2, Wifi, WifiOff } from 'lucide-react';
 import { LiveMap, LiveObject, LiveList } from '@liveblocks/client';
-import { LiveblocksProvider, RoomProvider, ClientSideSuspense, useStatus } from '@liveblocks/react';
+import { LiveblocksProvider, RoomProvider, ClientSideSuspense, useStatus, useUpdateMyPresence } from '@liveblocks/react';
 import { WhiteboardCanvas } from './WhiteboardCanvas';
 import { WhiteboardToolbar } from './WhiteboardToolbar';
 import { WhiteboardLayerPanel } from './WhiteboardLayerPanel';
@@ -13,6 +13,7 @@ import { CursorsOverlay, useCursorUpdater } from './CursorsOverlay';
 import {
   loadLocalWhiteboard,
   saveLocalWhiteboard,
+  saveSharedWhiteboard,
   createDefaultWhiteboardData,
   checkDataWarnings,
 } from '@/services/whiteboardService';
@@ -65,6 +66,29 @@ export function WhiteboardModal({ isOpen, onClose, initialTab = 'local' }: White
   const engineRef = useRef(engine);
   engineRef.current = engine;
 
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+
+  const handleClose = useCallback(() => {
+    // 공유 탭에서 닫힐 때 현재 엔진 상태를 공유 드라이브에 저장 (프리뷰 갱신용)
+    if (tabRef.current === 'public') {
+      const eng = engineRef.current;
+      const s = eng.state;
+      if (s.strokes.length > 0) {
+        const data: WhiteboardData = {
+          version: 1,
+          layers: s.layers,
+          strokes: s.strokes,
+          canvasWidth: 1920,
+          canvasHeight: 1080,
+          lastModified: Date.now(),
+        };
+        saveSharedWhiteboard(data).catch(() => {});
+      }
+    }
+    onClose();
+  }, [onClose]);
+
   const userId = currentUser?.id ?? 'anonymous';
   const userName = currentUser?.name ?? '익명';
 
@@ -92,8 +116,8 @@ export function WhiteboardModal({ isOpen, onClose, initialTab = 'local' }: White
 
   useEffect(() => {
     if (!isOpen) return;
-    if (tab !== 'local') return;
     const key = ++loadKeyRef.current;
+    if (tab !== 'local') return;
 
     (async () => {
       try {
@@ -145,13 +169,36 @@ export function WhiteboardModal({ isOpen, onClose, initialTab = 'local' }: White
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [engine.state.strokes, engine.state.layers, isOpen, tab]);
 
+  // ── 모달 닫힘/탭 전환 시 대기 중인 로컬 저장 flush ──
+
+  useEffect(() => {
+    if (isOpen && tab === 'local') return;
+    if (!saveTimerRef.current) return;
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    const eng = engineRef.current;
+    const s = eng.state;
+    if (s.strokes.length > 0) {
+      const data: WhiteboardData = {
+        version: 1,
+        layers: s.layers,
+        strokes: s.strokes,
+        canvasWidth: 1920,
+        canvasHeight: 1080,
+        lastModified: Date.now(),
+      };
+      dataRef.current = data;
+      saveLocalWhiteboard(data).catch(() => {});
+    }
+  }, [isOpen, tab]);
+
   // ── 키보드 단축키 ──
 
   useEffect(() => {
     if (!isOpen) return;
 
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key === 'Escape') { handleClose(); return; }
       if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
 
       const eng = engineRef.current;
@@ -167,7 +214,7 @@ export function WhiteboardModal({ isOpen, onClose, initialTab = 'local' }: White
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isOpen, onClose, userId]);
+  }, [isOpen, handleClose, userId]);
 
   // ── 리사이즈 드래그 ──
 
@@ -224,7 +271,7 @@ export function WhiteboardModal({ isOpen, onClose, initialTab = 'local' }: White
         transition={{ duration: 0.25, ease: 'easeOut' }}
         className="fixed inset-0 z-50"
         style={{ backgroundColor: 'rgb(var(--color-overlay) / var(--overlay-alpha))', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}
-        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
       >
         {/* 모달 카드 */}
         <motion.div
@@ -277,7 +324,7 @@ export function WhiteboardModal({ isOpen, onClose, initialTab = 'local' }: White
             </button>
 
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="p-1.5 rounded-lg text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/20 transition-colors cursor-pointer"
             >
               <X size={18} />
@@ -391,6 +438,14 @@ export function WhiteboardModal({ isOpen, onClose, initialTab = 'local' }: White
 function LiveCanvasArea({ engine, userId, userName }: { engine: ReturnType<typeof useWhiteboardEngine>; userId: string; userName: string }) {
   const status = useStatus();
   const { updateCursor, clearCursor } = useCursorUpdater();
+  const updateMyPresence = useUpdateMyPresence();
+
+  // userName이 늦게 로드될 경우 (팝업 윈도우 등) presence 갱신
+  useEffect(() => {
+    if (userName && userName !== '익명') {
+      updateMyPresence({ userName });
+    }
+  }, [userName, updateMyPresence]);
 
   return (
     <>
