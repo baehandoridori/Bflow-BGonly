@@ -148,6 +148,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('vacation:grant-dahyu', targets, reason, grantDate),
   vacationReadAllNames: () =>
     ipcRenderer.invoke('vacation:read-all-names'),
+  vacationReadDahyuList: () =>
+    ipcRenderer.invoke('vacation:read-dahyu-list'),
+  vacationDeleteDahyu: (rowIndices: number[]) =>
+    ipcRenderer.invoke('vacation:delete-dahyu', rowIndices),
 
   // 위젯 팝업 윈도우
   widgetOpenPopup: (widgetId: string, title: string) =>

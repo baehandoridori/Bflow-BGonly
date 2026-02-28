@@ -48,6 +48,8 @@ import {
   cancelVacation,
   grantDahyu,
   readAllEmployeeNames,
+  readDahyuList,
+  deleteDahyu,
 } from './vacation';
 
 // 앱 이름 설정 — AppData 경로에 영향
@@ -779,6 +781,26 @@ ipcMain.handle('vacation:read-all-names', async () => {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, data: [], error: msg };
+  }
+});
+
+ipcMain.handle('vacation:read-dahyu-list', async () => {
+  try {
+    const list = await readDahyuList();
+    return { ok: true, data: list };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, data: [], error: msg };
+  }
+});
+
+ipcMain.handle('vacation:delete-dahyu', async (_event, rowIndices: number[]) => {
+  try {
+    const result = await deleteDahyu(rowIndices);
+    return result;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, success: false, deleted: [], failed: rowIndices, state: msg };
   }
 });
 

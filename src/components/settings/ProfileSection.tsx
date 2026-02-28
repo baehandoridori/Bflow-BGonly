@@ -3,6 +3,7 @@ import {
   User, Calendar, Briefcase, KeyRound, AlertTriangle, Clock,
   CheckCircle2, ListTodo, ChevronRight, Palmtree, CircleDashed,
   LayoutDashboard, Bell, Volume2, Plus, X, Loader2, RefreshCw,
+  ChevronDown,
 } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -14,6 +15,7 @@ import { sceneProgress, isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 import { VacationRegisterModal } from '@/components/vacation/VacationRegisterModal';
 import { DahyuGrantModal } from '@/components/vacation/DahyuGrantModal';
+import { DahyuDeleteModal } from '@/components/vacation/DahyuDeleteModal';
 import type { VacationStatus, VacationLogEntry } from '@/types/vacation';
 
 const DAHYU_ADMINS = ['허혜원', '배한솔'] as const;
@@ -139,8 +141,23 @@ export function ProfileSection() {
   const [showVacLog, setShowVacLog] = useState(false);
   const [showVacModal, setShowVacModal] = useState(false);
   const [showDahyuModal, setShowDahyuModal] = useState(false);
+  const [showDahyuDeleteModal, setShowDahyuDeleteModal] = useState(false);
+  const [dahyuDropdownOpen, setDahyuDropdownOpen] = useState(false);
+  const dahyuDropdownRef = useRef<HTMLDivElement>(null);
   const [cancellingRow, setCancellingRow] = useState<number | null>(null);
   const isDahyuAdmin = (DAHYU_ADMINS as readonly string[]).includes(currentUser?.name ?? '');
+
+  // 대휴 드롭다운 외부 클릭 닫기
+  useEffect(() => {
+    if (!dahyuDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dahyuDropdownRef.current && !dahyuDropdownRef.current.contains(e.target as Node)) {
+        setDahyuDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [dahyuDropdownOpen]);
 
   const setVacationCache = useAppStore((s) => s.setVacationCache);
 
@@ -479,12 +496,34 @@ export function ProfileSection() {
                 <ChevronRight size={12} className={cn('transition-transform', showVacLog && 'rotate-90')} />
               </button>
               {isDahyuAdmin && (
-                <button
-                  onClick={() => setShowDahyuModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/20 rounded-lg text-xs text-amber-400 font-medium transition-colors cursor-pointer"
-                >
-                  대휴 지급
-                </button>
+                <div ref={dahyuDropdownRef} className="relative ml-auto">
+                  <button
+                    onClick={() => setDahyuDropdownOpen(!dahyuDropdownOpen)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/20 rounded-lg text-xs text-amber-400 font-medium transition-colors cursor-pointer"
+                  >
+                    <Palmtree size={12} />
+                    대체휴가 관리
+                    <ChevronDown size={10} className={cn('transition-transform', dahyuDropdownOpen && 'rotate-180')} />
+                  </button>
+                  {dahyuDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-40 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[50]">
+                      <button
+                        onClick={() => { setShowDahyuModal(true); setDahyuDropdownOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-bg-border/50 transition-colors cursor-pointer"
+                      >
+                        <Plus size={12} className="text-emerald-400" />
+                        대체휴가 지급
+                      </button>
+                      <button
+                        onClick={() => { setShowDahyuDeleteModal(true); setDahyuDropdownOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-bg-border/50 transition-colors cursor-pointer"
+                      >
+                        <X size={12} />
+                        대체휴가 삭제
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -564,6 +603,15 @@ export function ProfileSection() {
         <DahyuGrantModal
           open={showDahyuModal}
           onClose={() => setShowDahyuModal(false)}
+          onSuccess={() => loadVacationData(true)}
+        />
+      )}
+
+      {/* 대휴 삭제 모달 (관리자 전용) */}
+      {isDahyuAdmin && (
+        <DahyuDeleteModal
+          open={showDahyuDeleteModal}
+          onClose={() => setShowDahyuDeleteModal(false)}
           onSuccess={() => loadVacationData(true)}
         />
       )}

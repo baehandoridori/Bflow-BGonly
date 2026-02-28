@@ -72,3 +72,18 @@ export interface DahyuGrantResult {
   failed: string[];
   state: string;
 }
+
+export interface DahyuListEntry {
+  rowIndex: number;
+  name: string;
+  grantDate: string;
+  reason: string;
+}
+
+export interface DahyuDeleteResult {
+  ok: boolean;
+  success: boolean;
+  deleted: number[];
+  failed: number[];
+  state: string;
+}

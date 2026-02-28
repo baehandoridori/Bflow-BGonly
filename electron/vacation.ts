@@ -66,6 +66,21 @@ export interface DahyuGrantResult {
   state: string;
 }
 
+export interface DahyuListEntry {
+  rowIndex: number;
+  name: string;
+  grantDate: string;
+  reason: string;
+}
+
+export interface DahyuDeleteResult {
+  ok: boolean;
+  success: boolean;
+  deleted: number[];
+  failed: number[];
+  state: string;
+}
+
 export interface VacationLogEntry {
   rowIndex: number;
   name: string;
@@ -241,4 +256,43 @@ export async function readAllEmployeeNames(): Promise<string[]> {
   const json = await res.json() as { ok: boolean; data?: string[]; error?: string };
   if (!json.ok) throw new Error(json.error ?? '직원 목록 읽기 실패');
   return json.data ?? [];
+}
+
+// ─── 대휴 목록 조회 ─────────────────────────────────────────────
+
+export async function readDahyuList(): Promise<DahyuListEntry[]> {
+  if (!vacationUrl) throw new Error('Vacation 미연결');
+
+  const qs = new URLSearchParams({ action: 'readDahyuList' });
+  const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json() as { ok: boolean; data?: DahyuListEntry[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '대휴 목록 읽기 실패');
+  return json.data ?? [];
+}
+
+// ─── 대휴 삭제 ─────────────────────────────────────────────────
+
+export async function deleteDahyu(rowIndices: number[]): Promise<DahyuDeleteResult> {
+  if (!vacationUrl) throw new Error('Vacation 미연결');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const res = await gasFetch(vacationUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'deleteDahyu', rowIndices }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const json = await res.json() as DahyuDeleteResult;
+    return json;
+  } finally {
+    clearTimeout(timer);
+  }
 }
