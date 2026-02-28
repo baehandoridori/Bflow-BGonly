@@ -129,6 +129,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
   sheetsNotifyChange: () => ipcRenderer.invoke('sheets:notify-change'),
 
+  // 화이트보드 (공유 드라이브 파일)
+  whiteboardReadShared: () =>
+    ipcRenderer.invoke('whiteboard:read-shared') as Promise<{ ok: boolean; data: unknown; error?: string }>,
+  whiteboardWriteShared: (data: unknown) =>
+    ipcRenderer.invoke('whiteboard:write-shared', data) as Promise<{ ok: boolean; error?: string }>,
+
   // 위젯 팝업 윈도우
   widgetOpenPopup: (widgetId: string, title: string) =>
     ipcRenderer.invoke('widget:open-popup', widgetId, title),

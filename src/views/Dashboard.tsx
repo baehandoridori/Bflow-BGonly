@@ -12,6 +12,7 @@ import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentCompa
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { MemoWidget } from '@/components/widgets/MemoWidget';
+import { WhiteboardWidget } from '@/components/widgets/whiteboard/WhiteboardWidget';
 import { WidgetIdContext } from '@/components/widgets/Widget';
 import { EdgeGlow, type ResizeZone } from '@/components/widgets/EdgeGlow';
 import { EpOverallProgressWidget } from '@/components/widgets/episode/EpOverallProgressWidget';
@@ -228,6 +229,7 @@ const ALL_WIDGETS: WidgetMeta[] = [
   { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
   { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
   { id: 'memo', label: '메모', component: <MemoWidget /> },
+  { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget /> },
 ];
 
 const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]));
@@ -242,6 +244,7 @@ const EP_WIDGETS: WidgetMeta[] = [
   { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
   { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
   { id: 'memo', label: '메모', component: <MemoWidget /> },
+  { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget /> },
 ];
 
 const EP_WIDGET_MAP = Object.fromEntries(EP_WIDGETS.map((w) => [w.id, w.component]));
@@ -256,6 +259,9 @@ function getWidgetComponent(id: string, isEpMode: boolean): React.ReactNode | un
   }
   if (id.startsWith('memo-') || id === 'memo') {
     return <MemoWidget />;
+  }
+  if (id === 'whiteboard') {
+    return <WhiteboardWidget />;
   }
   // 파트 단일 위젯: ep-part-{bg|acting|all}-{A~Z}[-{ts}]
   if (parsePartWidgetId(id)) {

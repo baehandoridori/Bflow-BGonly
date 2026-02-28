@@ -332,6 +332,10 @@ export interface ElectronAPI {
   widgetDockExpand?: (widgetId: string) => Promise<void>;
   widgetDockCollapse?: (widgetId: string) => Promise<void>;
   onWidgetDockChange?: (callback: (isDocked: boolean) => void) => () => void;
+
+  // 화이트보드 (공유 드라이브 파일 접근)
+  whiteboardReadShared: () => Promise<{ ok: boolean; data: import('./whiteboard').WhiteboardData | null; error?: string }>;
+  whiteboardWriteShared: (data: import('./whiteboard').WhiteboardData) => Promise<{ ok: boolean; error?: string }>;
 }
 
 declare global {

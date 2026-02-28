@@ -11,6 +11,7 @@ import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentCompa
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { MemoWidget } from '@/components/widgets/MemoWidget';
+import { WhiteboardWidget } from '@/components/widgets/whiteboard/WhiteboardWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
@@ -39,6 +40,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
   'calendar': { label: '캘린더', component: <CalendarWidget /> },
   'my-tasks': { label: '내 할일', component: <MyTasksWidget /> },
   'memo': { label: '메모', component: <MemoWidget /> },
+  'whiteboard': { label: '화이트보드', component: <WhiteboardWidget /> },
 };
 
 /**
