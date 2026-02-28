@@ -153,6 +153,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vacationDeleteDahyu: (rowIndices: number[]) =>
     ipcRenderer.invoke('vacation:delete-dahyu', rowIndices),
 
+  // 화이트보드 (공유 드라이브 파일)
+  whiteboardReadShared: () =>
+    ipcRenderer.invoke('whiteboard:read-shared') as Promise<{ ok: boolean; data: unknown; error?: string }>,
+  whiteboardWriteShared: (data: unknown) =>
+    ipcRenderer.invoke('whiteboard:write-shared', data) as Promise<{ ok: boolean; error?: string }>,
+
   // 위젯 팝업 윈도우
   widgetOpenPopup: (widgetId: string, title: string) =>
     ipcRenderer.invoke('widget:open-popup', widgetId, title),

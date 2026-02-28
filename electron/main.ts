@@ -341,6 +341,46 @@ ipcMain.handle('settings:write', async (_event, fileName: string, data: unknown)
   return true;
 });
 
+// ─── IPC 핸들러: 화이트보드 (공유 드라이브 파일) ─────────────
+
+const SHARED_DRIVE_BASE = 'G:\\공유 드라이브\\JBBJ 자료실\\한솔이의 두근두근 실험실\\Bflow-BGonly';
+const SHARED_WHITEBOARD_FILE = 'whiteboard-public.json';
+
+function getSharedWhiteboardDir(): string {
+  if (fs.existsSync(SHARED_DRIVE_BASE)) return SHARED_DRIVE_BASE;
+  return path.join(getDataPath(), 'shared-whiteboard');
+}
+
+ipcMain.handle('whiteboard:read-shared', async () => {
+  try {
+    const dir = getSharedWhiteboardDir();
+    const filePath = path.join(dir, SHARED_WHITEBOARD_FILE);
+    if (!fs.existsSync(filePath)) {
+      return { ok: true, data: null };
+    }
+    const raw = fs.readFileSync(filePath, { encoding: 'utf-8' });
+    return { ok: true, data: JSON.parse(raw) };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, data: null, error: msg };
+  }
+});
+
+ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
+  try {
+    const dir = getSharedWhiteboardDir();
+    ensureDir(dir);
+    const filePath = path.join(dir, SHARED_WHITEBOARD_FILE);
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), { encoding: 'utf-8' });
+    fs.renameSync(tmpPath, filePath);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
 // ─── IPC 핸들러: Google Sheets 연동 (Apps Script 웹 앱) ─────
 
 ipcMain.handle('sheets:connect', async (_event, webAppUrl: string) => {

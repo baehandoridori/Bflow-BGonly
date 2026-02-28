@@ -29,6 +29,9 @@
 [class*="text-\[8px\]"]  { font-size: calc(8px * var(--text-scale) * var(--text-micro-scale)) !important; }
 [class*="text-\[7px\]"]  { font-size: calc(7px * var(--text-scale) * var(--text-micro-scale)) !important; }
 
+/* ─── Liveblocks SDK 자동 삽입 배지 숨기기 ─── */
+#liveblocks-badge { display: none !important; }
+
 /* ─── 테마 CSS 변수 (기본값: Violet Dream / Dark) ─── */
 :root {
   --color-bg-primary: 15 17 23;
