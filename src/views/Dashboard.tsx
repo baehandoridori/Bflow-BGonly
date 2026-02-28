@@ -11,6 +11,8 @@ import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget'
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
+import { MemoWidget } from '@/components/widgets/MemoWidget';
+import { WhiteboardWidget } from '@/components/widgets/whiteboard/WhiteboardWidget';
 import { WidgetIdContext } from '@/components/widgets/Widget';
 import { EdgeGlow, type ResizeZone } from '@/components/widgets/EdgeGlow';
 import { EpOverallProgressWidget } from '@/components/widgets/episode/EpOverallProgressWidget';
@@ -226,6 +228,8 @@ const ALL_WIDGETS: WidgetMeta[] = [
   { id: 'dept-comparison', label: '부서별 비교', component: <DepartmentComparisonWidget />, allOnly: true },
   { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
   { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
+  { id: 'memo', label: '메모', component: <MemoWidget /> },
+  { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget /> },
 ];
 
 const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]));
@@ -239,6 +243,8 @@ const EP_WIDGETS: WidgetMeta[] = [
   { id: 'ep-dept-comparison', label: 'EP 부서별 비교', component: <EpDeptComparisonWidget />, allOnly: true },
   { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
   { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
+  { id: 'memo', label: '메모', component: <MemoWidget /> },
+  { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget /> },
 ];
 
 const EP_WIDGET_MAP = Object.fromEntries(EP_WIDGETS.map((w) => [w.id, w.component]));
@@ -250,6 +256,12 @@ function getWidgetComponent(id: string, isEpMode: boolean): React.ReactNode | un
   }
   if (id.startsWith('my-tasks')) {
     return <MyTasksWidget />;
+  }
+  if (id.startsWith('memo-') || id === 'memo') {
+    return <MemoWidget />;
+  }
+  if (id === 'whiteboard') {
+    return <WhiteboardWidget />;
   }
   // 파트 단일 위젯: ep-part-{bg|acting|all}-{A~Z}[-{ts}]
   if (parsePartWidgetId(id)) {
@@ -637,8 +649,8 @@ export function Dashboard() {
   const hiddenWidgets = useMemo(() => {
     const visibleIds = new Set(currentLayout.map((l) => l.i));
     return widgetPool.filter((w) => {
-      // 캘린더 위젯은 중복 배치 허용 → 항상 추가 가능
-      if (w.id === 'calendar') return true;
+      // 캘린더/메모 위젯은 중복 배치 허용 → 항상 추가 가능
+      if (w.id === 'calendar' || w.id === 'memo') return true;
       if (visibleIds.has(w.id)) return false;
       if (dashboardFilter === 'all' && w.deptOnly) return false;
       if (dashboardFilter !== 'all' && w.allOnly) return false;
@@ -688,8 +700,10 @@ export function Dashboard() {
       : dashboardFilter === 'all'
         ? (allWidgetLayout ?? ALL_LAYOUT)
         : (widgetLayout ?? DEPT_LAYOUT);
-    // 캘린더 위젯은 고유 ID로 중복 배치 허용
-    const actualId = widgetId === 'calendar' ? `calendar-${Date.now()}` : widgetId;
+    // 캘린더/메모 위젯은 고유 ID로 중복 배치 허용
+    const actualId = widgetId === 'calendar' ? `calendar-${Date.now()}`
+      : widgetId === 'memo' ? `memo-${Date.now()}`
+      : widgetId;
     // 맨 아래에 추가
     const maxY = current.reduce((max, l) => Math.max(max, l.y + l.h), 0);
     const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 8, h: 15, minW: 2, minH: 2 };
