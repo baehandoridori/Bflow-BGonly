@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
-import { Palette, Check, Sun, Moon } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Palette, Check, Sun, Moon, Paintbrush } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { THEME_PRESETS, rgbToHex, hexToRgb, getPreset, getLightColors } from '@/themes';
 import type { ThemeColors } from '@/themes';
 import { cn } from '@/utils/cn';
 import { SettingsSection } from './SettingsSection';
+import { loadPreferences, savePreferences } from '@/services/settingsService';
 
 export function ThemeSection() {
   const {
@@ -43,6 +44,7 @@ export function ThemeSection() {
   };
 
   return (
+    <>
     <SettingsSection
       icon={<Palette size={18} className="text-accent" />}
       title="색상 테마"
@@ -184,6 +186,101 @@ export function ThemeSection() {
           </div>
         </div>
       )}
+    </SettingsSection>
+
+    <WhiteboardBgSection />
+    </>
+  );
+}
+
+// ─── 화이트보드 배경색 섹션 ──────────────────────────────
+
+const WB_BG_PRESETS = [
+  { id: 'white',     color: '#FFFFFF', label: '흰색' },
+  { id: 'light-gray', color: '#F5F5F5', label: '밝은 회색' },
+  { id: 'dark',      color: '#1A1D27', label: '다크' },
+  { id: 'black',     color: '#0F1117', label: '블랙' },
+] as const;
+
+const DEFAULT_WB_BG = '#FFFFFF';
+
+function WhiteboardBgSection() {
+  const [bgColor, setBgColor] = useState(DEFAULT_WB_BG);
+  const [customColor, setCustomColor] = useState('#FFFFFF');
+
+  useEffect(() => {
+    loadPreferences().then((prefs) => {
+      const saved = prefs?.whiteboardBgColor ?? DEFAULT_WB_BG;
+      setBgColor(saved);
+      if (!WB_BG_PRESETS.some((p) => p.color === saved)) {
+        setCustomColor(saved);
+      }
+    });
+  }, []);
+
+  const persist = useCallback(async (color: string) => {
+    setBgColor(color);
+    const existing = await loadPreferences() ?? {};
+    await savePreferences({ ...existing, whiteboardBgColor: color });
+  }, []);
+
+  const isCustom = !WB_BG_PRESETS.some((p) => p.color === bgColor);
+
+  return (
+    <SettingsSection
+      icon={<Paintbrush size={18} className="text-accent" />}
+      title="화이트보드 배경"
+    >
+      <div className="flex items-center gap-3">
+        {WB_BG_PRESETS.map((preset) => {
+          const active = bgColor === preset.color;
+          return (
+            <button
+              key={preset.id}
+              onClick={() => persist(preset.color)}
+              className={cn(
+                'flex flex-col items-center gap-1.5 p-2 rounded-lg border-2 transition-all cursor-pointer',
+                active
+                  ? 'border-accent bg-accent/10'
+                  : 'border-bg-border hover:border-accent/40',
+              )}
+            >
+              <div
+                className="w-10 h-10 rounded-md border border-bg-border/50"
+                style={{ backgroundColor: preset.color }}
+              />
+              <span className="text-[11px] text-text-primary">{preset.label}</span>
+              {active && (
+                <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-accent flex items-center justify-center">
+                  <Check size={10} className="text-white" />
+                </div>
+              )}
+            </button>
+          );
+        })}
+
+        {/* 커스텀 색상 */}
+        <div className="flex flex-col items-center gap-1.5 p-2 rounded-lg border-2 transition-all"
+          style={{ borderColor: isCustom ? 'rgb(var(--color-accent))' : undefined }}
+        >
+          <label className="relative cursor-pointer">
+            <input
+              type="color"
+              value={isCustom ? bgColor : customColor}
+              onChange={(e) => {
+                setCustomColor(e.target.value);
+                persist(e.target.value);
+              }}
+              className="w-10 h-10 rounded-md cursor-pointer border-0 p-0"
+            />
+          </label>
+          <span className="text-[11px] text-text-primary">커스텀</span>
+        </div>
+      </div>
+
+      <p className="text-[10px] text-text-secondary/40 mt-3">
+        화이트보드 캔버스의 배경 색상을 설정합니다
+      </p>
     </SettingsSection>
   );
 }

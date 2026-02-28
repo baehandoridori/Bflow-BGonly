@@ -166,28 +166,31 @@ export function WhiteboardModal({ isOpen, onClose, initialTab = 'local' }: White
       setWarnings(checkDataWarnings(data));
     }, 500);
 
-    return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-        // 대기 중인 변경사항 즉시 저장 (fire-and-forget)
-        const eng = engineRef.current;
-        const s = eng.state;
-        if (s.strokes.length > 0) {
-          const data: WhiteboardData = {
-            version: 1,
-            layers: s.layers,
-            strokes: s.strokes,
-            canvasWidth: 1920,
-            canvasHeight: 1080,
-            lastModified: Date.now(),
-          };
-          dataRef.current = data;
-          saveLocalWhiteboard(data).catch(() => {});
-        }
-      }
-    };
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [engine.state.strokes, engine.state.layers, isOpen, tab]);
+
+  // ── 모달 닫힘/탭 전환 시 대기 중인 로컬 저장 flush ──
+
+  useEffect(() => {
+    if (isOpen && tab === 'local') return;
+    if (!saveTimerRef.current) return;
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    const eng = engineRef.current;
+    const s = eng.state;
+    if (s.strokes.length > 0) {
+      const data: WhiteboardData = {
+        version: 1,
+        layers: s.layers,
+        strokes: s.strokes,
+        canvasWidth: 1920,
+        canvasHeight: 1080,
+        lastModified: Date.now(),
+      };
+      dataRef.current = data;
+      saveLocalWhiteboard(data).catch(() => {});
+    }
+  }, [isOpen, tab]);
 
   // ── 키보드 단축키 ──
 

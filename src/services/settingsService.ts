@@ -117,6 +117,9 @@ export interface UserPreferences {
 
   // 사이드바
   sidebarExpanded?: boolean;
+
+  // 화이트보드 배경색
+  whiteboardBgColor?: string;  // 기본값 '#FFFFFF'
 }
 
 export async function loadPreferences(): Promise<UserPreferences | null> {
