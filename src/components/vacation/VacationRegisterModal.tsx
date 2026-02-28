@@ -91,6 +91,11 @@ export function VacationRegisterModal({
         setToast({ message: '휴가가 등록되었습니다', type: 'success' });
         invalidateVacationCache();
         onSuccess?.();
+        // 안전장치: GAS 파이프라인 완전 완료 후 데이터 한번 더 갱신
+        setTimeout(() => {
+          invalidateVacationCache();
+          onSuccess?.();
+        }, 3000);
       } else {
         // D3: 등록 실패 상세 알림
         setToast({ message: '휴가 등록 실패: ' + (result.error || result.state || '알 수 없는 오류'), type: 'error' });
