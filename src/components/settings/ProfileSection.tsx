@@ -564,13 +564,18 @@ export function ProfileSection() {
                           <button
                             onClick={() => handleCancelVacation(entry.rowIndex)}
                             disabled={cancellingRow === entry.rowIndex}
-                            className="ml-auto p-0.5 text-red-400/40 hover:text-red-400 cursor-pointer shrink-0"
-                            title="취소"
+                            className={cn(
+                              'ml-auto flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium shrink-0 transition-colors cursor-pointer border',
+                              cancellingRow === entry.rowIndex
+                                ? 'bg-red-500/10 border-red-500/20 text-red-400/60 cursor-not-allowed'
+                                : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 hover:border-red-500/40',
+                            )}
                           >
                             {cancellingRow === entry.rowIndex
-                              ? <Loader2 size={11} className="animate-spin" />
-                              : <X size={11} />
+                              ? <Loader2 size={10} className="animate-spin" />
+                              : <X size={10} />
                             }
+                            취소
                           </button>
                         )}
                       </div>
