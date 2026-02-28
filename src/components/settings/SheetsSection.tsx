@@ -42,13 +42,17 @@ export function SheetsSection() {
       const connected = await checkConnection();
       setSheetsConnected(connected);
 
-      // 휴가 설정 로드
+      // 휴가 설정 로드 + 자동 연결
       const vacConfig = await loadVacationConfig();
       if (vacConfig) {
         setVacationUrl(vacConfig.webAppUrl);
+        // 저장된 URL이 있으면 자동 연결 시도
+        const result = await connectVacation(vacConfig.webAppUrl);
+        setVacationConnected(result.ok);
+      } else {
+        const vacConnected = await checkVacationConnection();
+        setVacationConnected(vacConnected);
       }
-      const vacConnected = await checkVacationConnection();
-      setVacationConnected(vacConnected);
     }
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

@@ -117,8 +117,8 @@ interface AppState {
   setVacationConfig: (config: VacationConfig | null) => void;
 
   // 휴가 데이터 캐시
-  vacationCache: { status: VacationStatus | null; log: VacationLogEntry[]; lastFetch: number } | null;
-  setVacationCache: (cache: { status: VacationStatus | null; log: VacationLogEntry[]; lastFetch: number } | null) => void;
+  vacationCache: { userName: string; status: VacationStatus | null; log: VacationLogEntry[]; lastFetch: number } | null;
+  setVacationCache: (cache: { userName: string; status: VacationStatus | null; log: VacationLogEntry[]; lastFetch: number } | null) => void;
   invalidateVacationCache: () => void;
 
   // 설정 탭 (외부에서 특정 탭으로 이동 시 사용)

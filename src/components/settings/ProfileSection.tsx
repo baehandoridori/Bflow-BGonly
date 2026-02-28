@@ -163,10 +163,10 @@ export function ProfileSection() {
 
   const loadVacationData = useCallback(async (force = false) => {
     if (!currentUser || !vacationConnected) return;
-    // B2: 캐시 활용 (5분 이내 재사용)
+    // B2: 캐시 활용 (5분 이내, 동일 사용자만 재사용)
     if (!force) {
       const cache = useAppStore.getState().vacationCache;
-      if (cache && Date.now() - cache.lastFetch < 300_000) {
+      if (cache && cache.userName === currentUser.name && Date.now() - cache.lastFetch < 300_000) {
         setVacStatus(cache.status);
         setVacLog(cache.log);
         return;
@@ -181,7 +181,7 @@ export function ProfileSection() {
       ]);
       setVacStatus(status);
       setVacLog(log);
-      setVacationCache({ status, log, lastFetch: Date.now() });
+      setVacationCache({ userName: currentUser.name, status, log, lastFetch: Date.now() });
     } catch (err) {
       setVacError(err instanceof Error ? err.message : String(err));
     } finally {

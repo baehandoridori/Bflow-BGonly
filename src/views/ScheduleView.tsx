@@ -150,9 +150,19 @@ function EventBarChip({
   const tooltipTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!onDragStart || e.button !== 0 || ev.isReadOnly) return;
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+
+    // 읽기 전용 이벤트: 드래그 불가, 클릭만 처리
+    if (ev.isReadOnly || !onDragStart) {
+      const onUp = () => {
+        document.removeEventListener('mouseup', onUp);
+        onClick(ev);
+      };
+      document.addEventListener('mouseup', onUp);
+      return;
+    }
 
     const startX = e.clientX;
     const startY = e.clientY;
