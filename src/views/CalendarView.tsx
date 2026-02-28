@@ -298,7 +298,10 @@ function EventGanttChart() {
 
   // 휴가 이벤트 로드 & 머지
   useEffect(() => {
-    if (!vacationConnected) return;
+    if (!vacationConnected) {
+      setEvents((prev) => prev.filter((e) => e.type !== 'vacation'));
+      return;
+    }
     fetchAllVacationEvents()
       .then((raw) => {
         const mapped: CalendarEvent[] = raw.map((v, i) => ({

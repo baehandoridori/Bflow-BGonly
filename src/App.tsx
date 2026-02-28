@@ -17,6 +17,7 @@ import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
+import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors } from '@/themes';
@@ -27,7 +28,7 @@ import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
-  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
+  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -262,6 +263,15 @@ export default function App() {
             console.log('[Sheets] 자동 연결 성공');
             // Phase 0-4: 로컬 users.dat를 _USERS 탭으로 마이그레이션 (비동기)
             migrateUsersToSheets().catch(() => {});
+          }
+        }
+
+        // 휴가 API 자동 연결 (저장된 URL이 있으면 시도)
+        const vacConfig = await loadVacationConfig();
+        if (vacConfig?.webAppUrl) {
+          const vacResult = await connectVacation(vacConfig.webAppUrl);
+          if (vacResult.ok) {
+            setVacationConnected(true);
           }
         }
       } catch (err) {
