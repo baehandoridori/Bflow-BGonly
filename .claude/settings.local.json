@@ -13,7 +13,8 @@
       "WebFetch(domain:liveblocks.io)",
       "WebSearch",
       "Bash(npm install:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(du:*)"
     ]
   }
 }
