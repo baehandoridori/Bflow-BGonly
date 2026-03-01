@@ -294,6 +294,7 @@ export function ProfileSection() {
     { value: 'team', label: '팀원' },
     { value: 'calendar', label: '타임라인' },
     { value: 'schedule', label: '캘린더' },
+    { value: 'vacation', label: '휴가' },
   ];
 
   return (

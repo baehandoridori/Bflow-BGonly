@@ -112,7 +112,7 @@ export interface VacationResult {
 export async function readVacationStatus(name: string): Promise<VacationStatusResponse> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const qs = new URLSearchParams({ action: 'readStatus', name });
+  const qs = new URLSearchParams({ action: 'readStatus', name, _t: String(Date.now()) });
   const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -128,7 +128,7 @@ export async function readVacationLog(
 ): Promise<VacationLogEntry[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const params: Record<string, string> = { action: 'readLog', name };
+  const params: Record<string, string> = { action: 'readLog', name, _t: String(Date.now()) };
   if (year) params.year = String(year);
   if (limit) params.limit = String(limit);
 
@@ -144,7 +144,7 @@ export async function readVacationLog(
 export async function readAllVacationEvents(year?: number): Promise<VacationEvent[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const params: Record<string, string> = { action: 'readAllEvents' };
+  const params: Record<string, string> = { action: 'readAllEvents', _t: String(Date.now()) };
   if (year) params.year = String(year);
 
   const qs = new URLSearchParams(params);
@@ -249,7 +249,7 @@ export async function grantDahyu(data: {
 export async function readAllEmployeeNames(): Promise<string[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const qs = new URLSearchParams({ action: 'readAllNames' });
+  const qs = new URLSearchParams({ action: 'readAllNames', _t: String(Date.now()) });
   const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -263,7 +263,7 @@ export async function readAllEmployeeNames(): Promise<string[]> {
 export async function readDahyuList(): Promise<DahyuListEntry[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const qs = new URLSearchParams({ action: 'readDahyuList' });
+  const qs = new URLSearchParams({ action: 'readDahyuList', _t: String(Date.now()) });
   const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 

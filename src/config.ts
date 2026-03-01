@@ -14,4 +14,7 @@
 // 예시: 'https://script.google.com/macros/s/AKfycb.../exec'
 export const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwse8JuJug4dx8-zVdnoRizlp03lwbSKc9YOH2-40PAEX5tWGKMzC3WJx6zIvNEc9PC/exec';
 
+// ─── 휴가 관리 Apps Script 웹 앱 기본 URL ──────────────────
+export const DEFAULT_VACATION_URL = 'https://script.google.com/macros/s/AKfycbx82kD3CV_0saumS9i1EDfin_GRLNemL5FOeUHgp5diZn6Mt91mduRTBImiwHtutfHI/exec';
+
 // URL이 비어있으면 자동 연결을 건너뜁니다.

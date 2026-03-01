@@ -10,6 +10,7 @@ import { AssigneeView } from '@/views/AssigneeView';
 import { TeamView } from '@/views/TeamView';
 import { CalendarView } from '@/views/CalendarView';
 import { ScheduleView } from '@/views/ScheduleView';
+import { VacationView } from '@/views/VacationView';
 import { SettingsView } from '@/views/SettingsView';
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
@@ -25,7 +26,7 @@ import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '
 import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
-import { DEFAULT_WEB_APP_URL } from '@/config';
+import { DEFAULT_WEB_APP_URL, DEFAULT_VACATION_URL } from '@/config';
 
 export default function App() {
   const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected } = useAppStore();
@@ -266,10 +267,11 @@ export default function App() {
           }
         }
 
-        // 휴가 API 자동 연결 (저장된 URL이 있으면 시도)
+        // 휴가 API 자동 연결 (저장된 URL 또는 기본 URL로 시도)
         const vacConfig = await loadVacationConfig();
-        if (vacConfig?.webAppUrl) {
-          const vacResult = await connectVacation(vacConfig.webAppUrl);
+        const vacUrlToConnect = vacConfig?.webAppUrl || DEFAULT_VACATION_URL;
+        if (vacUrlToConnect) {
+          const vacResult = await connectVacation(vacUrlToConnect);
           if (vacResult.ok) {
             setVacationConnected(true);
           }
@@ -391,6 +393,8 @@ export default function App() {
         return <CalendarView />;
       case 'schedule':
         return <ScheduleView />;
+      case 'vacation':
+        return <VacationView />;
       case 'settings':
         return <SettingsView />;
       default:
@@ -406,7 +410,8 @@ export default function App() {
       <div
         className="flex items-center justify-center h-screen w-screen overflow-hidden cursor-pointer select-none"
         style={{
-          background: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, #0F1117 100%)',
+          backgroundColor: '#0F1117',
+          backgroundImage: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, #0F1117 100%)',
         }}
         onClick={() => { if (canSkip) setLoadingSplashDone(true); }}
       >

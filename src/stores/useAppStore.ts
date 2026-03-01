@@ -3,7 +3,7 @@ import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptF
 import type { ThemeColors } from '@/themes';
 import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
 
-export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'settings';
+export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'settings';
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
 export type SortDir = 'asc' | 'desc';
 export type StatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';

@@ -20,6 +20,7 @@ export function Header({ onRefresh }: HeaderProps) {
     scenes: '씬 목록',
     assignee: '인원별 현황',
     calendar: '타임라인',
+    vacation: '휴가 관리',
     settings: '설정',
   };
 

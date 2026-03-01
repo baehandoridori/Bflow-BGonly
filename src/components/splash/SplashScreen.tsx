@@ -114,7 +114,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
       onClick={dismiss}
       // 원형 마스크 + 넉넉한 페더 — 라이트 모드에서도 다크 배경 유지
       style={{
-        background: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, transparent 100%), #0F1117',
+        background: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, transparent 100%)',
       }}
     >
       {/* 배경 글로우 */}

@@ -14,6 +14,10 @@ interface VacationRegisterModalProps {
   initialDate?: string;
   /** 등록 성공 후 콜백 */
   onSuccess?: () => void;
+  /** 신청 시작 시 콜백 (모달 닫기 직전, 로딩 바 표시용) */
+  onSubmitStart?: () => void;
+  /** 등록 실패 시 콜백 (로딩 바 해제용) */
+  onSubmitEnd?: () => void;
 }
 
 const TYPE_LABELS: Record<VacationType, string> = {
@@ -33,7 +37,7 @@ function fmtToday(): string {
 }
 
 export function VacationRegisterModal({
-  open, onClose, userName, initialDate, onSuccess,
+  open, onClose, userName, initialDate, onSuccess, onSubmitStart, onSubmitEnd,
 }: VacationRegisterModalProps) {
   const setToast = useAppStore((s) => s.setToast);
 
@@ -75,6 +79,7 @@ export function VacationRegisterModal({
     }
 
     // B1a: Optimistic — 모달 즉시 닫기, 백그라운드에서 API 호출
+    onSubmitStart?.();
     setToast({ message: '휴가 등록 요청 중...', type: 'info' });
     onClose();
 
@@ -95,13 +100,15 @@ export function VacationRegisterModal({
         setTimeout(() => {
           invalidateVacationCache();
           onSuccess?.();
-        }, 3000);
+        }, 5000);
       } else {
         // D3: 등록 실패 상세 알림
         setToast({ message: '휴가 등록 실패: ' + (result.error || result.state || '알 수 없는 오류'), type: 'error' });
+        onSubmitEnd?.();
       }
     } catch (err) {
       setToast({ message: '휴가 등록 실패: ' + (err instanceof Error ? err.message : String(err)), type: 'error' });
+      onSubmitEnd?.();
     }
   };
 
