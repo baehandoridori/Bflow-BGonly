@@ -11,11 +11,13 @@ import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentCompa
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { MemoWidget } from '@/components/widgets/MemoWidget';
+import { VacationWidget } from '@/components/widgets/VacationWidget';
 import { WhiteboardWidget } from '@/components/widgets/whiteboard/WhiteboardWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
 import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig, readMetadataFromSheets } from '@/services/sheetsService';
+import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import type { Episode } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
@@ -39,6 +41,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
   'dept-comparison': { label: '부서별 비교', component: <DepartmentComparisonWidget /> },
   'calendar': { label: '캘린더', component: <CalendarWidget /> },
   'my-tasks': { label: '내 할일', component: <MyTasksWidget /> },
+  'vacation-today': { label: '휴가자 현황', component: <VacationWidget /> },
   'memo': { label: '메모', component: <MemoWidget /> },
   'whiteboard': { label: '화이트보드', component: <WhiteboardWidget /> },
 };
@@ -282,6 +285,15 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
           }
         }
         useAppStore.getState().setSheetsConnected(connected);
+
+        // 휴가 API 자동 연결
+        const vacConfig = await loadVacationConfig();
+        if (vacConfig?.webAppUrl) {
+          const vacResult = await connectVacation(vacConfig.webAppUrl);
+          if (vacResult.ok) {
+            useAppStore.getState().setVacationConnected(true);
+          }
+        }
 
         if (connected) {
           const loadedEpisodes = await readAllFromSheets();
