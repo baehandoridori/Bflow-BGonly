@@ -2,15 +2,23 @@ import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import {
   User, Calendar, Briefcase, KeyRound, AlertTriangle, Clock,
   CheckCircle2, ListTodo, ChevronRight, Palmtree, CircleDashed,
-  LayoutDashboard, Bell, Volume2,
+  LayoutDashboard, Bell, Volume2, Plus, X, Loader2, RefreshCw,
+  ChevronDown,
 } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
+import { fetchVacationStatus, fetchVacationLog, cancelVacationRequest } from '@/services/vacationService';
 import { sceneProgress, isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
+import { VacationRegisterModal } from '@/components/vacation/VacationRegisterModal';
+import { DahyuGrantModal } from '@/components/vacation/DahyuGrantModal';
+import { DahyuDeleteModal } from '@/components/vacation/DahyuDeleteModal';
+import type { VacationStatus, VacationLogEntry } from '@/types/vacation';
+
+const DAHYU_ADMINS = ['허혜원', '배한솔'] as const;
 
 /* ───────────── helpers ───────────── */
 
@@ -123,26 +131,120 @@ export function ProfileSection() {
     return { total, completed, inProgress, pct };
   }, [episodes, currentUser]);
 
-  // ─ 잔여 휴가 계산 (연차 15일 기준 · 입사 1년 미만은 월 1일) ─
-  const vacationStats = useMemo(() => {
-    if (!currentUser?.hireDate) return null;
-    const hire = new Date(currentUser.hireDate);
-    if (isNaN(hire.getTime())) return null;
-    const yearsDiff = (Date.now() - hire.getTime()) / (365.25 * 86_400_000);
-    // 근속 연수에 따른 총 연차
-    let totalDays: number;
-    if (yearsDiff < 1) {
-      // 1년 미만: 만근 월 수 × 1일
-      totalDays = Math.min(11, Math.floor(yearsDiff * 12));
-    } else {
-      // 1년 이상: 15일 + 2년마다 1일 추가 (최대 25일)
-      totalDays = Math.min(25, 15 + Math.floor(Math.max(0, yearsDiff - 1) / 2));
+  // ─ 실제 휴가 데이터 (스프레드시트 연동) ─
+  const vacationConnected = useAppStore((s) => s.vacationConnected);
+  const setToast = useAppStore((s) => s.setToast);
+  const [vacStatus, setVacStatus] = useState<VacationStatus | null>(null);
+  const [vacLog, setVacLog] = useState<VacationLogEntry[]>([]);
+  const [vacLoading, setVacLoading] = useState(false);
+  const [vacError, setVacError] = useState<string | null>(null);
+  const [showVacLog, setShowVacLog] = useState(false);
+  const [showVacModal, setShowVacModal] = useState(false);
+  const [showDahyuModal, setShowDahyuModal] = useState(false);
+  const [showDahyuDeleteModal, setShowDahyuDeleteModal] = useState(false);
+  const [dahyuDropdownOpen, setDahyuDropdownOpen] = useState(false);
+  const dahyuDropdownRef = useRef<HTMLDivElement>(null);
+  const [cancellingRow, setCancellingRow] = useState<number | null>(null);
+  const isDahyuAdmin = (DAHYU_ADMINS as readonly string[]).includes(currentUser?.name ?? '');
+
+  // 대휴 드롭다운 외부 클릭 닫기
+  useEffect(() => {
+    if (!dahyuDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dahyuDropdownRef.current && !dahyuDropdownRef.current.contains(e.target as Node)) {
+        setDahyuDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [dahyuDropdownOpen]);
+
+  const setVacationCache = useAppStore((s) => s.setVacationCache);
+
+  const loadVacationData = useCallback(async (force = false) => {
+    if (!currentUser || !vacationConnected) return;
+    // B2: 캐시 활용 (5분 이내, 동일 사용자만 재사용)
+    if (!force) {
+      const cache = useAppStore.getState().vacationCache;
+      if (cache && cache.userName === currentUser.name && Date.now() - cache.lastFetch < 300_000) {
+        setVacStatus(cache.status);
+        setVacLog(cache.log);
+        return;
+      }
     }
-    // 사용 일수는 로컬 저장소에서 가져오거나 기본 0
-    const key = `bflow_vacation_used_${currentUser.id}_${new Date().getFullYear()}`;
-    const used = Number(localStorage.getItem(key) || '0');
-    return { total: totalDays, used, remaining: totalDays - used };
-  }, [currentUser]);
+    setVacLoading(true);
+    setVacError(null);
+    try {
+      const [status, log] = await Promise.all([
+        fetchVacationStatus(currentUser.name),
+        fetchVacationLog(currentUser.name, new Date().getFullYear(), 20),
+      ]);
+      setVacStatus(status);
+      setVacLog(log);
+      setVacationCache({ userName: currentUser.name, status, log, lastFetch: Date.now() });
+    } catch (err) {
+      setVacError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setVacLoading(false);
+    }
+  }, [currentUser, vacationConnected, setVacationCache]);
+
+  useEffect(() => {
+    loadVacationData();
+  }, [loadVacationData]);
+
+  // C3: 연차/대휴 초과 사용 경고 토스트
+  const overuseAlerted = useRef(false);
+  useEffect(() => {
+    if (!vacStatus) return;
+    const isOveruse = vacStatus.overuse || vacStatus.altVacationNet < 0;
+    if (!isOveruse) { overuseAlerted.current = false; return; }
+    if (overuseAlerted.current) return;
+    overuseAlerted.current = true;
+    if (vacStatus.overuse) {
+      setToast({ message: `연차가 초과 사용되었습니다. 잔여: ${vacStatus.remainingDays}일`, type: 'warning' });
+    } else if (vacStatus.altVacationNet < 0) {
+      setToast({ message: '대체휴가가 초과 사용되었습니다.', type: 'warning' });
+    }
+  }, [vacStatus, setToast]);
+
+  const invalidateVacationCache = useAppStore((s) => s.invalidateVacationCache);
+
+  const handleCancelVacation = async (rowIndex: number) => {
+    if (!currentUser) return;
+    setCancellingRow(rowIndex);
+
+    // B1b: Optimistic — 즉시 UI에서 해당 항목을 '취소' 표시
+    const prevLog = [...vacLog];
+    setVacLog((prev) => prev.map((e) =>
+      e.rowIndex === rowIndex ? { ...e, state: '취소' } : e,
+    ));
+
+    try {
+      const result = await cancelVacationRequest(currentUser.name, rowIndex);
+      if (result.ok && result.success) {
+        setToast({ message: '휴가가 취소되었습니다', type: 'success' });
+        invalidateVacationCache();
+        await loadVacationData(true);
+      } else {
+        // 롤백
+        setVacLog(prevLog);
+        setToast({ message: result.error || '취소 실패', type: 'error' });
+      }
+    } catch (err) {
+      // 롤백
+      setVacLog(prevLog);
+      setToast({ message: err instanceof Error ? err.message : '취소 실패', type: 'error' });
+    } finally {
+      setCancellingRow(null);
+    }
+  };
+
+  const remainingColor = vacStatus
+    ? vacStatus.remainingDays >= 5 ? 'text-emerald-400'
+    : vacStatus.remainingDays >= 3 ? 'text-amber-400'
+    : 'text-red-400'
+    : 'text-text-secondary';
 
   // ─ 기본 시작 뷰 / 알림 설정 ─
   const [defaultViewState, setDefaultViewState] = useState<string>('dashboard');
@@ -310,30 +412,217 @@ export function ProfileSection() {
         )}
       </button>
 
-      {/* ════════════ 나의 잔여 휴가 확인 ════════════ */}
+      {/* ════════════ 나의 휴가 관리 ════════════ */}
       <div className="w-full bg-bg-primary/40 rounded-xl border border-bg-border/30 p-4 mb-3">
         <div className="flex items-center gap-2 mb-3">
           <Palmtree size={15} className="text-emerald-400" />
-          <span className="text-[13px] font-semibold text-text-primary">나의 잔여 휴가 확인</span>
+          <span className="text-[13px] font-semibold text-text-primary">나의 휴가 관리</span>
+          {vacationConnected && !vacLoading && (
+            <button onClick={() => loadVacationData(true)} className="ml-auto p-1 text-text-secondary/30 hover:text-text-primary cursor-pointer">
+              <RefreshCw size={12} />
+            </button>
+          )}
         </div>
 
-        {vacationStats ? (
-          <div className="flex items-center divide-x divide-bg-border/20">
-            <StatBlock label="총 연차" value={`${vacationStats.total}일`} />
-            <StatBlock label="사용" value={`${vacationStats.used}일`} accent="text-text-secondary/70" />
-            <StatBlock
-              label="잔여"
-              value={`${vacationStats.remaining}일`}
-              accent={vacationStats.remaining <= 3 ? 'text-amber-400' : 'text-emerald-400'}
-            />
+        {!vacationConnected ? (
+          <div className="flex items-center gap-2 py-2">
+            <CircleDashed size={14} className="text-text-secondary/40" />
+            <p className="text-xs text-text-secondary/50">
+              휴가 연동이 필요합니다 — <button onClick={() => setView('settings')} className="text-accent hover:underline cursor-pointer">설정 → 연동</button>에서 휴가 API URL을 등록하세요
+            </p>
           </div>
+        ) : vacLoading ? (
+          <div className="flex items-center gap-2 py-4 justify-center">
+            <CircleDashed size={14} className="text-accent animate-spin" />
+            <p className="text-xs text-text-secondary/50">휴가 현황 조회 중...</p>
+          </div>
+        ) : vacError ? (
+          <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">
+            {vacError}
+          </div>
+        ) : vacStatus?.found ? (
+          <>
+            {/* 수치 */}
+            <div className="flex items-center divide-x divide-bg-border/20 mb-3">
+              <StatBlock label="총 연차" value={`${vacStatus.totalDays}일`} />
+              <StatBlock label="사용" value={vacStatus.validUseCount != null ? `${vacStatus.usedDays}일 (${vacStatus.validUseCount}회)` : `${vacStatus.usedDays}일`} accent="text-text-secondary/70" />
+              <StatBlock label="잔여" value={`${vacStatus.remainingDays}일`} accent={remainingColor} />
+            </div>
+
+            {/* 대휴/특별휴가 — D1: "나의 대체휴가", 0일=노란색 / D2: 사용 횟수 */}
+            {(vacStatus.altVacationHeld > 0 || vacStatus.altVacationUsed > 0 || vacStatus.specialVacationUsed > 0) && (
+              <div className="flex items-center gap-4 mb-3 text-[11px] text-text-secondary/60">
+                {(vacStatus.altVacationHeld > 0 || vacStatus.altVacationUsed > 0) && (
+                  <span>
+                    나의 대체휴가{' '}
+                    <span className={vacStatus.altVacationHeld === 0 ? 'text-amber-400' : 'text-text-primary/80'}>{vacStatus.altVacationHeld}일</span>
+                    {' · 사용 '}{vacStatus.altVacationUsed}일
+                    {' · '}
+                    <span className={vacStatus.altVacationNet <= 0 ? 'text-amber-400' : 'text-emerald-400'}>
+                      잔여 {vacStatus.altVacationNet}일
+                    </span>
+                  </span>
+                )}
+                {vacStatus.specialVacationUsed > 0 && (
+                  <span>특별휴가 {vacStatus.specialVacationUsed}회</span>
+                )}
+              </div>
+            )}
+
+            {/* C3: 대휴 초과 경고 배너 */}
+            {vacStatus.altVacationNet < 0 && (
+              <div className="px-3 py-1.5 mb-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-[11px] text-amber-400">
+                대체휴가가 초과 사용되었습니다
+              </div>
+            )}
+
+            {vacStatus.overuse && (
+              <div className="px-3 py-1.5 mb-3 bg-red-500/10 border border-red-500/30 rounded-lg text-[11px] text-red-400">
+                연차가 초과 사용되었습니다
+              </div>
+            )}
+
+            {/* 버튼 */}
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={() => setShowVacModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-500/80 rounded-lg text-xs text-white font-medium transition-colors cursor-pointer"
+              >
+                <Plus size={12} />
+                휴가 신청
+              </button>
+              <button
+                onClick={() => setShowVacLog(!showVacLog)}
+                className="flex items-center gap-1 px-3 py-1.5 bg-bg-border/30 hover:bg-bg-border/50 rounded-lg text-xs text-text-secondary/70 hover:text-text-primary font-medium transition-colors cursor-pointer"
+              >
+                내역 {showVacLog ? '접기' : '보기'}
+                <ChevronRight size={12} className={cn('transition-transform', showVacLog && 'rotate-90')} />
+              </button>
+              {isDahyuAdmin && (
+                <div ref={dahyuDropdownRef} className="relative ml-auto">
+                  <button
+                    onClick={() => setDahyuDropdownOpen(!dahyuDropdownOpen)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/20 rounded-lg text-xs text-amber-400 font-medium transition-colors cursor-pointer"
+                  >
+                    <Palmtree size={12} />
+                    대체휴가 관리
+                    <ChevronDown size={10} className={cn('transition-transform', dahyuDropdownOpen && 'rotate-180')} />
+                  </button>
+                  {dahyuDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-40 bg-bg-card border border-bg-border rounded-xl shadow-2xl overflow-hidden z-[50]">
+                      <button
+                        onClick={() => { setShowDahyuModal(true); setDahyuDropdownOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-bg-border/50 transition-colors cursor-pointer"
+                      >
+                        <Plus size={12} className="text-emerald-400" />
+                        대체휴가 지급
+                      </button>
+                      <button
+                        onClick={() => { setShowDahyuDeleteModal(true); setDahyuDropdownOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-bg-border/50 transition-colors cursor-pointer"
+                      >
+                        <X size={12} />
+                        대체휴가 삭제
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 이력 목록 */}
+            {showVacLog && (
+              <div className="border-t border-bg-border/20 pt-2 space-y-1">
+                {vacLog.length === 0 ? (
+                  <p className="text-[11px] text-text-secondary/40 py-2 text-center">올해 휴가 내역이 없습니다</p>
+                ) : (
+                  vacLog.map((entry) => {
+                    const isCancelled = entry.state === '취소';
+                    const isActive = entry.state === '등록완료';
+                    const dateRange = entry.startDate === entry.endDate
+                      ? entry.startDate
+                      : `${entry.startDate} ~ ${entry.endDate}`;
+                    return (
+                      <div
+                        key={entry.rowIndex}
+                        className={cn(
+                          'flex items-center gap-2 px-2 py-1.5 rounded-lg text-[11px]',
+                          isCancelled && 'opacity-50',
+                        )}
+                      >
+                        <span className={cn(
+                          'px-1.5 py-0.5 rounded text-[9px] font-medium shrink-0',
+                          isActive ? 'bg-emerald-500/15 text-emerald-400' :
+                          isCancelled ? 'bg-red-500/15 text-red-400' :
+                          'bg-amber-500/15 text-amber-400',
+                        )}>
+                          {entry.state || '처리중'}
+                        </span>
+                        <span className="text-text-primary/80 font-medium shrink-0">{entry.type}</span>
+                        <span className="text-text-secondary/50 truncate flex-1">{dateRange}</span>
+                        {entry.reason && (
+                          <span className="text-text-secondary/30 truncate max-w-[80px]">{entry.reason}</span>
+                        )}
+                        {isActive && (
+                          <button
+                            onClick={() => handleCancelVacation(entry.rowIndex)}
+                            disabled={cancellingRow === entry.rowIndex}
+                            className={cn(
+                              'ml-auto flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium shrink-0 transition-colors cursor-pointer border',
+                              cancellingRow === entry.rowIndex
+                                ? 'bg-red-500/10 border-red-500/20 text-red-400/60 cursor-not-allowed'
+                                : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20 hover:border-red-500/40',
+                            )}
+                          >
+                            {cancellingRow === entry.rowIndex
+                              ? <Loader2 size={10} className="animate-spin" />
+                              : <X size={10} />
+                            }
+                            취소
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </>
         ) : (
           <div className="flex items-center gap-2 py-2">
             <CircleDashed size={14} className="text-text-secondary/40" />
-            <p className="text-xs text-text-secondary/50">입사일 등록 후 확인할 수 있습니다</p>
+            <p className="text-xs text-text-secondary/50">직원 정보를 찾을 수 없습니다</p>
           </div>
         )}
       </div>
+
+      {/* 휴가 신청 모달 */}
+      {currentUser && (
+        <VacationRegisterModal
+          open={showVacModal}
+          onClose={() => setShowVacModal(false)}
+          userName={currentUser.name}
+          onSuccess={() => loadVacationData(true)}
+        />
+      )}
+
+      {/* 대휴 지급 모달 (관리자 전용) */}
+      {isDahyuAdmin && (
+        <DahyuGrantModal
+          open={showDahyuModal}
+          onClose={() => setShowDahyuModal(false)}
+          onSuccess={() => loadVacationData(true)}
+        />
+      )}
+
+      {/* 대휴 삭제 모달 (관리자 전용) */}
+      {isDahyuAdmin && (
+        <DahyuDeleteModal
+          open={showDahyuDeleteModal}
+          onClose={() => setShowDahyuDeleteModal(false)}
+          onSuccess={() => loadVacationData(true)}
+        />
+      )}
 
       {/* ════════════ 기본 시작 뷰 ════════════ */}
       <div className="w-full bg-bg-primary/40 rounded-xl border border-bg-border/30 p-4 mb-3">

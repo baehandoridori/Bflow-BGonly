@@ -1,13 +1,13 @@
 // ─── 캘린더 이벤트 타입 정의 ─────────────────────
 
 /** 이벤트 종류 */
-export type CalendarEventType = 'custom' | 'episode' | 'part' | 'scene';
+export type CalendarEventType = 'custom' | 'episode' | 'part' | 'scene' | 'vacation';
 
 /** 캘린더 뷰 모드 */
 export type CalendarViewMode = 'month' | '2week' | 'week' | 'today';
 
 /** 이벤트 필터 */
-export type CalendarFilter = 'all' | 'custom' | 'episode' | 'part' | 'scene';
+export type CalendarFilter = 'all' | 'custom' | 'episode' | 'part' | 'scene' | 'vacation';
 
 /** 이벤트 색상 프리셋 */
 export const EVENT_COLORS = [
@@ -45,6 +45,12 @@ export interface CalendarEvent {
   linkedSheetName?: string;
   linkedSceneId?: string;
   linkedDepartment?: 'bg' | 'acting';
+
+  // 휴가 전용 필드 (type === 'vacation')
+  vacationType?: string;     // 연차, 오전반차, 오후반차, 대체휴가, 특별휴가
+  vacationUserName?: string; // 휴가 사용자 이름
+  vacationRowIndex?: number; // Vacation Log 행 번호 (취소용)
+  isReadOnly?: boolean;      // 드래그/편집 불가 (휴가 이벤트)
 }
 
 /** 이벤트 저장소 */

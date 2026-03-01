@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptFilter } from '@/types';
 import type { ThemeColors } from '@/themes';
+import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'settings';
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
@@ -82,9 +83,9 @@ interface AppState {
   setSelectedScenes: (ids: Set<string>) => void;
   clearSelectedScenes: () => void;
 
-  // 글로벌 토스트
-  toast: string | null;
-  setToast: (msg: string | null) => void;
+  // 글로벌 토스트 (유형별 스타일 지원)
+  toast: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null;
+  setToast: (msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null) => void;
 
   // 테마
   themeId: string;
@@ -108,6 +109,21 @@ interface AppState {
     connectionDist: number;  // 80-250, default 160
   };
   setPlexusSettings: (settings: Partial<AppState['plexusSettings']>) => void;
+
+  // 휴가 관리 연결 상태
+  vacationConnected: boolean;
+  vacationConfig: VacationConfig | null;
+  setVacationConnected: (v: boolean) => void;
+  setVacationConfig: (config: VacationConfig | null) => void;
+
+  // 휴가 데이터 캐시
+  vacationCache: { userName: string; status: VacationStatus | null; log: VacationLogEntry[]; lastFetch: number } | null;
+  setVacationCache: (cache: { userName: string; status: VacationStatus | null; log: VacationLogEntry[]; lastFetch: number } | null) => void;
+  invalidateVacationCache: () => void;
+
+  // 설정 탭 (외부에서 특정 탭으로 이동 시 사용)
+  settingsTab: string | null;
+  setSettingsTab: (tab: string | null) => void;
 
   // 사이드바 펼침/접힘
   sidebarExpanded: boolean;
@@ -207,6 +223,18 @@ export const useAppStore = create<AppState>((set) => ({
   setPlexusSettings: (partial) => set((s) => ({
     plexusSettings: { ...s.plexusSettings, ...partial },
   })),
+
+  vacationConnected: false,
+  vacationConfig: null,
+  setVacationConnected: (v) => set({ vacationConnected: v }),
+  setVacationConfig: (config) => set({ vacationConfig: config }),
+
+  vacationCache: null,
+  setVacationCache: (cache) => set({ vacationCache: cache }),
+  invalidateVacationCache: () => set({ vacationCache: null }),
+
+  settingsTab: null,
+  setSettingsTab: (tab) => set({ settingsTab: tab }),
 
   sidebarExpanded: false,
   setSidebarExpanded: (v) => set({ sidebarExpanded: v }),

@@ -11,6 +11,7 @@ import { EpisodeSummaryWidget } from '@/components/widgets/EpisodeSummaryWidget'
 import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentComparisonWidget';
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
+import { VacationWidget } from '@/components/widgets/VacationWidget';
 import { MemoWidget } from '@/components/widgets/MemoWidget';
 import { WhiteboardWidget } from '@/components/widgets/whiteboard/WhiteboardWidget';
 import { WidgetIdContext } from '@/components/widgets/Widget';
@@ -228,6 +229,7 @@ const ALL_WIDGETS: WidgetMeta[] = [
   { id: 'dept-comparison', label: '부서별 비교', component: <DepartmentComparisonWidget />, allOnly: true },
   { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
   { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
+  { id: 'vacation-today', label: '휴가자 현황', component: <VacationWidget /> },
   { id: 'memo', label: '메모', component: <MemoWidget /> },
   { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget /> },
 ];

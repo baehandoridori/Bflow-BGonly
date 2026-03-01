@@ -1,10 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import { User, LogOut, KeyRound, AlertTriangle } from 'lucide-react';
+import { User, LogOut, KeyRound, AlertTriangle, Palmtree } from 'lucide-react';
 import { logout } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useAppStore } from '@/stores/useAppStore';
 
 export function UserMenu() {
   const { currentUser, setCurrentUser, setShowPasswordChange } = useAuthStore();
+  const setView = useAppStore((s) => s.setView);
+  const setSettingsTab = useAppStore((s) => s.setSettingsTab);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -58,7 +61,18 @@ export function UserMenu() {
             )}
           </div>
 
-          {/* 메뉴 항목 */}
+          {/* 휴가 관리 */}
+          <button
+            onClick={() => { setSettingsTab('profile'); setView('settings'); setOpen(false); }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-bg-border/50 transition-colors"
+          >
+            <Palmtree size={14} className="text-emerald-400" /> 휴가 관리
+          </button>
+
+          {/* 구분선 */}
+          <div className="border-t border-bg-border mx-2 my-0.5" />
+
+          {/* 비밀번호 변경 */}
           <button
             onClick={() => { setShowPasswordChange(true); setOpen(false); }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-bg-border/50 transition-colors"

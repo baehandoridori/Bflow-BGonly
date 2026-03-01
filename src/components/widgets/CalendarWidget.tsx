@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Filter, Settings2 } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Filter, Settings2, Palmtree } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAppStore } from '@/stores/useAppStore';
 import { getEvents, getEventsForDate } from '@/services/calendarService';
+import { fetchAllVacationEvents } from '@/services/vacationService';
 import type { CalendarEvent, CalendarFilter } from '@/types/calendar';
+import { VACATION_COLOR } from '@/types/vacation';
 import { Widget } from './Widget';
 
 const WEEKDAYS_SHORT = ['일', '월', '화', '수', '목', '금', '토'];
@@ -31,7 +33,9 @@ function addDays(d: Date, n: number): Date {
 export function CalendarWidget() {
   const { setView } = useAppStore();
   const dashboardDeptFilter = useAppStore((s) => s.dashboardDeptFilter);
+  const vacationConnected = useAppStore((s) => s.vacationConnected);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [vacationEvts, setVacationEvts] = useState<CalendarEvent[]>([]);
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [viewMode, setViewMode] = useState<WidgetViewMode>('month');
@@ -45,15 +49,41 @@ export function CalendarWidget() {
     getEvents().then(setEvents);
   }, []);
 
+  // 휴가 이벤트 로드
+  useEffect(() => {
+    if (!vacationConnected) { setVacationEvts([]); return; }
+    fetchAllVacationEvents()
+      .then((raw) => {
+        setVacationEvts(raw.map((v, i) => ({
+          id: `wvac-${v.name}-${v.startDate}-${i}`,
+          title: `${v.name} ${v.type}`,
+          memo: '',
+          color: VACATION_COLOR,
+          type: 'vacation' as const,
+          startDate: v.startDate,
+          endDate: v.endDate,
+          createdBy: v.name,
+          createdAt: new Date().toISOString(),
+          vacationType: v.type,
+          vacationUserName: v.name,
+          isReadOnly: true,
+        })));
+      })
+      .catch(() => setVacationEvts([]));
+  }, [vacationConnected]);
+
+  // 통합 이벤트
+  const allEvents = useMemo(() => [...events, ...vacationEvts], [events, vacationEvts]);
+
   // 부서 필터 연동
   const filteredEvents = useMemo(() => {
-    let result = events;
+    let result = allEvents;
     if (typeFilter !== 'all') result = result.filter((e) => e.type === typeFilter);
     if (dashboardDeptFilter !== 'all') {
-      result = result.filter((e) => e.linkedDepartment === dashboardDeptFilter || e.type === 'custom');
+      result = result.filter((e) => e.linkedDepartment === dashboardDeptFilter || e.type === 'custom' || e.type === 'vacation');
     }
     return result;
-  }, [events, typeFilter, dashboardDeptFilter]);
+  }, [allEvents, typeFilter, dashboardDeptFilter]);
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(year, month, 1);
@@ -182,16 +212,18 @@ export function CalendarWidget() {
         {showFilter && (
           <div className="flex flex-wrap gap-0.5">
             {/* 타입 필터 */}
-            {(['all', 'custom', 'episode', 'part', 'scene'] as const).map((f) => (
+            {(['all', 'custom', 'episode', 'part', 'scene', 'vacation'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setTypeFilter(f)}
                 className={cn(
                   'px-1.5 py-0.5 text-[8px] rounded font-medium cursor-pointer transition-colors',
-                  typeFilter === f ? 'bg-accent/20 text-accent' : 'text-text-secondary/50 hover:text-text-primary',
+                  typeFilter === f
+                    ? f === 'vacation' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-accent/20 text-accent'
+                    : 'text-text-secondary/50 hover:text-text-primary',
                 )}
               >
-                {f === 'all' ? '전체' : f === 'custom' ? '일반' : f === 'episode' ? 'EP' : f === 'part' ? '파트' : '씬'}
+                {f === 'all' ? '전체' : f === 'custom' ? '일반' : f === 'episode' ? 'EP' : f === 'part' ? '파트' : f === 'scene' ? '씬' : '휴가'}
               </button>
             ))}
           </div>

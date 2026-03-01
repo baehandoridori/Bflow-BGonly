@@ -17,6 +17,7 @@ import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
+import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors } from '@/themes';
@@ -27,7 +28,7 @@ import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
 export default function App() {
-  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode } = useAppStore();
+  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -40,17 +41,19 @@ export default function App() {
   // 토스트 상태 (글로벌 스토어 기반)
   const storeToast = useAppStore((s) => s.toast);
   const setStoreToast = useAppStore((s) => s.setToast);
-  const [localToast, setLocalToast] = useState<string | null>(null);
+  const [localToast, setLocalToast] = useState<string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null>(null);
   const toast = storeToast || localToast;
-  const setToast = useCallback((msg: string | null) => {
+  const setToast = useCallback((msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null) => {
     setLocalToast(msg);
     if (msg) setStoreToast(null); // 로컬 우선
   }, [setStoreToast]);
 
-  // 글로벌 스토어 토스트 자동 제거
+  // 글로벌 스토어 토스트 자동 제거 (유형별 시간: error/warning 5초, 나머지 3초)
   useEffect(() => {
     if (!storeToast) return;
-    const timer = setTimeout(() => setStoreToast(null), 3000);
+    const toastType = typeof storeToast === 'string' ? 'info' : (storeToast.type || 'info');
+    const duration = (toastType === 'error' || toastType === 'warning') ? 5000 : 3000;
+    const timer = setTimeout(() => setStoreToast(null), duration);
     return () => clearTimeout(timer);
   }, [storeToast, setStoreToast]);
 
@@ -260,6 +263,15 @@ export default function App() {
             console.log('[Sheets] 자동 연결 성공');
             // Phase 0-4: 로컬 users.dat를 _USERS 탭으로 마이그레이션 (비동기)
             migrateUsersToSheets().catch(() => {});
+          }
+        }
+
+        // 휴가 API 자동 연결 (저장된 URL이 있으면 시도)
+        const vacConfig = await loadVacationConfig();
+        if (vacConfig?.webAppUrl) {
+          const vacResult = await connectVacation(vacConfig.webAppUrl);
+          if (vacResult.ok) {
+            setVacationConnected(true);
           }
         }
       } catch (err) {
@@ -479,15 +491,31 @@ export default function App() {
       {/* 관리자: 사용자 관리 모달 */}
       {showUserManager && <UserManagerModal />}
 
-      {/* 토스트 알림 (로컬 + 글로벌 스토어) */}
-      {toast && (
-        <div
-          className="fixed top-4 left-1/2 -translate-x-1/2 z-[10000] bg-bg-card border border-bg-border rounded-xl px-5 py-3 shadow-2xl text-sm text-text-primary animate-slide-down"
-          onClick={() => { setLocalToast(null); setStoreToast(null); }}
-        >
-          {toast}
-        </div>
-      )}
+      {/* 토스트 알림 (로컬 + 글로벌 스토어) — 유형별 스타일 */}
+      {toast && (() => {
+        const msg = typeof toast === 'string' ? toast : toast.message;
+        const type = typeof toast === 'string' ? 'info' : (toast.type || 'info');
+        const borderColor = type === 'success' ? 'border-emerald-500/40'
+          : type === 'error' ? 'border-red-500/40'
+          : type === 'warning' ? 'border-amber-500/40'
+          : 'border-bg-border';
+        const bgColor = type === 'success' ? 'bg-emerald-500/10'
+          : type === 'error' ? 'bg-red-500/10'
+          : type === 'warning' ? 'bg-amber-500/10'
+          : 'bg-bg-card';
+        const textColor = type === 'success' ? 'text-emerald-300'
+          : type === 'error' ? 'text-red-300'
+          : type === 'warning' ? 'text-amber-300'
+          : 'text-text-primary';
+        return (
+          <div
+            className={`fixed top-4 left-1/2 -translate-x-1/2 z-[10000] ${bgColor} border ${borderColor} rounded-xl px-5 py-3 shadow-2xl text-sm ${textColor} animate-slide-down backdrop-blur-sm cursor-pointer`}
+            onClick={() => { setLocalToast(null); setStoreToast(null); }}
+          >
+            {msg}
+          </div>
+        );
+      })()}
 
       {/* 환영 팝업 (로그인 직후) */}
       {welcomeUser && (
