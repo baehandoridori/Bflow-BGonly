@@ -293,7 +293,12 @@ function EventGanttChart() {
   const vacationConnected = useAppStore((s) => s.vacationConnected);
 
   useEffect(() => {
-    getEvents().then(setEvents);
+    getEvents().then((result) => {
+      setEvents((prev) => {
+        const vacOnly = prev.filter((e) => e.type === 'vacation');
+        return [...result, ...vacOnly];
+      });
+    });
   }, []);
 
   // 휴가 이벤트 로드 & 머지

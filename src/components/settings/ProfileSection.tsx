@@ -196,7 +196,10 @@ export function ProfileSection() {
   // C3: 연차/대휴 초과 사용 경고 토스트
   const overuseAlerted = useRef(false);
   useEffect(() => {
-    if (!vacStatus || overuseAlerted.current) return;
+    if (!vacStatus) return;
+    const isOveruse = vacStatus.overuse || vacStatus.altVacationNet < 0;
+    if (!isOveruse) { overuseAlerted.current = false; return; }
+    if (overuseAlerted.current) return;
     overuseAlerted.current = true;
     if (vacStatus.overuse) {
       setToast({ message: `연차가 초과 사용되었습니다. 잔여: ${vacStatus.remainingDays}일`, type: 'warning' });
