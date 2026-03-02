@@ -23,11 +23,11 @@ export function WhiteboardCanvas({ engine, userId, userName, readOnly, onCursorM
   const isPanningRef = useRef(false);
   const lastPanRef = useRef({ x: 0, y: 0 });
   const spaceDownRef = useRef(false);
-  const [bgColor, setBgColor] = useState('#FFFFFF');
+  const [bgColor, setBgColor] = useState('#1A1D27');
 
   useEffect(() => {
     loadPreferences().then((prefs) => {
-      setBgColor(prefs?.whiteboardBgColor ?? '#FFFFFF');
+      setBgColor(prefs?.whiteboardBgColor ?? '#1A1D27');
     });
   }, []);
 

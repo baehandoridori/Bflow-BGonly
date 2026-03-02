@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuthStore } from '@/stores/useAuthStore';
 
 interface AssigneeSelectProps {
@@ -41,12 +42,14 @@ export function getUserColor(name: string): string {
  * 사용자 목록 기반 담당자 선택 드롭다운.
  * 텍스트 입력으로 필터링, 직접 입력도 가능.
  * Enter 시 드롭다운 맨 위 항목 자동 선택.
+ * 드롭다운은 createPortal로 렌더링 (overflow 클리핑 방지).
  */
 export function AssigneeSelect({ value, onChange, placeholder = '담당자', className = '' }: AssigneeSelectProps) {
   const { users } = useAuthStore();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
   const [highlightIndex, setHighlightIndex] = useState(0);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -54,11 +57,44 @@ export function AssigneeSelect({ value, onChange, placeholder = '담당자', cla
   // value가 외부에서 바뀌면 query도 동기화
   useEffect(() => { setQuery(value); }, [value]);
 
-  // 외부 클릭 시 닫기
+  // 드롭다운 위치 계산
+  const updateDropdownPos = useCallback(() => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
+  }, []);
+
+  // open 상태 변경 시 위치 업데이트
+  useEffect(() => {
+    if (open) updateDropdownPos();
+  }, [open, updateDropdownPos]);
+
+  // 스크롤/리사이즈 시 위치 재계산
+  useEffect(() => {
+    if (!open) return;
+    const update = () => updateDropdownPos();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, updateDropdownPos]);
+
+  // 외부 클릭 시 닫기 (포탈 드롭다운 포함)
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        ref.current && !ref.current.contains(target) &&
+        listRef.current && !listRef.current.contains(target)
+      ) {
         setOpen(false);
         if (query !== value) onChange(query);
       }
@@ -111,8 +147,18 @@ export function AssigneeSelect({ value, onChange, placeholder = '담당자', cla
         placeholder={placeholder}
         className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent transition-colors"
       />
-      {open && filtered.length > 0 && (
-        <div ref={listRef} className="absolute left-0 right-0 top-full mt-1 bg-bg-card border border-bg-border rounded-lg shadow-xl max-h-40 overflow-auto z-50">
+      {open && filtered.length > 0 && dropdownPos && createPortal(
+        <div
+          ref={listRef}
+          className="bg-bg-card border border-bg-border rounded-lg shadow-xl max-h-40 overflow-auto"
+          style={{
+            position: 'fixed',
+            top: dropdownPos.top,
+            left: dropdownPos.left,
+            width: dropdownPos.width,
+            zIndex: 9999,
+          }}
+        >
           {filtered.map((u, i) => {
             const color = getUserColor(u.name);
             const isActive = i === highlightIndex;
@@ -147,7 +193,8 @@ export function AssigneeSelect({ value, onChange, placeholder = '담당자', cla
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

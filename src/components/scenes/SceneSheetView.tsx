@@ -50,10 +50,19 @@ function SheetEditableCell({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cellRef = useRef<HTMLTableCellElement>(null);
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { setDraft(value); }, [value]);
   useEffect(() => { if (editing && inputRef.current) inputRef.current.focus(); }, [editing]);
+
+  // 담당자 편집 모드 진입 시 AssigneeSelect 내부 input 자동 포커스
+  useEffect(() => {
+    if (editing && type === 'assignee' && cellRef.current) {
+      const input = cellRef.current.querySelector('input');
+      if (input) setTimeout(() => input.focus(), 0);
+    }
+  }, [editing, type]);
 
   const commit = useCallback(() => {
     if (draft !== value) onSave(sceneIndex, field, draft);
@@ -62,10 +71,15 @@ function SheetEditableCell({
 
   const handleClick = useCallback(() => {
     if (clickTimer.current) clearTimeout(clickTimer.current);
-    clickTimer.current = setTimeout(() => {
+    if (type === 'assignee') {
+      // 담당자: 즉시 편집 모드 진입 (200ms 지연 없음)
       setEditing(true);
-    }, 200);
-  }, []);
+    } else {
+      clickTimer.current = setTimeout(() => {
+        setEditing(true);
+      }, 200);
+    }
+  }, [type]);
 
   const handleDoubleClick = useCallback(() => {
     if (clickTimer.current) clearTimeout(clickTimer.current);
@@ -75,7 +89,12 @@ function SheetEditableCell({
   if (editing) {
     if (type === 'assignee') {
       return (
-        <td className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
+        <td
+          ref={cellRef}
+          className="px-2 py-1"
+          style={{ overflow: 'visible', position: 'relative' }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <AssigneeSelect
             value={draft}
             onChange={(v) => { onSave(sceneIndex, field, v); setEditing(false); }}

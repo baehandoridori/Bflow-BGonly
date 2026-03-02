@@ -121,8 +121,8 @@ function AddTaskModal({
   // 개인 할일 상태
   const [todoTitle, setTodoTitle] = useState('');
   const [todoMemo, setTodoMemo] = useState('');
-  const [todoStartDate, setTodoStartDate] = useState('');
-  const [todoEndDate, setTodoEndDate] = useState('');
+  const [todoStartDate, setTodoStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [todoEndDate, setTodoEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [todoAddToCalendar, setTodoAddToCalendar] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 

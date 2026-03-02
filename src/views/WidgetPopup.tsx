@@ -13,6 +13,12 @@ import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { MemoWidget } from '@/components/widgets/MemoWidget';
 import { VacationWidget } from '@/components/widgets/VacationWidget';
 import { WhiteboardWidget } from '@/components/widgets/whiteboard/WhiteboardWidget';
+import { EpOverallProgressWidget } from '@/components/widgets/episode/EpOverallProgressWidget';
+import { EpStageBarsWidget } from '@/components/widgets/episode/EpStageBarsWidget';
+import { EpAssigneeCardsWidget } from '@/components/widgets/episode/EpAssigneeCardsWidget';
+import { EpPartProgressWidget } from '@/components/widgets/episode/EpPartProgressWidget';
+import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptComparisonWidget';
+import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
@@ -44,6 +50,11 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
   'vacation-today': { label: '휴가자 현황', component: <VacationWidget /> },
   'memo': { label: '메모', component: <MemoWidget /> },
   'whiteboard': { label: '화이트보드', component: <WhiteboardWidget /> },
+  'ep-overall-progress': { label: 'EP 통합 진행률', component: <EpOverallProgressWidget /> },
+  'ep-stage-bars': { label: 'EP 단계별 진행률', component: <EpStageBarsWidget /> },
+  'ep-assignee-cards': { label: 'EP 담당자별 현황', component: <EpAssigneeCardsWidget /> },
+  'ep-part-progress': { label: 'EP 파트별 진행률', component: <EpPartProgressWidget /> },
+  'ep-dept-comparison': { label: 'EP 부서별 비교', component: <EpDeptComparisonWidget /> },
 };
 
 /**
@@ -333,9 +344,13 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
     })();
   }, []);
 
-  // 정확 매칭 → 접두사 매칭 (memo-{timestamp} 등 다중 인스턴스 지원)
+  // 정확 매칭 → 접두사 매칭 (memo-{timestamp}, calendar-{timestamp} 등 다중 인스턴스 지원)
   const widgetMeta = WIDGET_REGISTRY[widgetId]
-    ?? (widgetId.startsWith('memo-') ? WIDGET_REGISTRY['memo'] : undefined);
+    ?? (widgetId.startsWith('memo-') ? WIDGET_REGISTRY['memo']
+    : widgetId.startsWith('calendar-') ? WIDGET_REGISTRY['calendar']
+    : widgetId.startsWith('my-tasks-') ? WIDGET_REGISTRY['my-tasks']
+    : widgetId.startsWith('ep-part-') ? { label: '파트별 상세', component: <EpSinglePartWidget /> }
+    : undefined);
 
   const handleClose = useCallback(() => {
     window.electronAPI?.widgetClosePopup?.(widgetId);
