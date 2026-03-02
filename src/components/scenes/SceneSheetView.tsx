@@ -28,7 +28,14 @@ interface SceneSheetViewProps {
   onCtrlClick?: (sceneId: string) => void;
 }
 
-// ─── 인라인 편집 셀 ──────────────────────────────────────────
+// ─── 셀 선택 타입 ───────────────────────────────────────────
+
+interface CellId { row: number; col: number }
+const EDITABLE_FIELDS = ['memo', 'assignee'] as const;
+
+function cellKey(row: number, col: number) { return `${row}:${col}`; }
+
+// ─── 인라인 편집 셀 (controlled) ─────────────────────────────
 
 function SheetEditableCell({
   value,
@@ -37,7 +44,13 @@ function SheetEditableCell({
   onSave,
   type = 'text',
   searchQuery,
-  onOpenDetail,
+  isSelected,
+  isEditing,
+  initialChar,
+  onMouseDown,
+  onMouseEnter,
+  onStartEditing,
+  onStopEditing,
 }: {
   value: string;
   field: string;
@@ -45,48 +58,49 @@ function SheetEditableCell({
   onSave: (sceneIndex: number, field: string, value: string) => void;
   type?: 'text' | 'assignee';
   searchQuery?: string;
-  onOpenDetail?: () => void;
+  isSelected: boolean;
+  isEditing: boolean;
+  initialChar?: string | null;
+  onMouseDown: (e: React.MouseEvent) => void;
+  onMouseEnter: () => void;
+  onStartEditing: () => void;
+  onStopEditing: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
   const cellRef = useRef<HTMLTableCellElement>(null);
-  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { setDraft(value); }, [value]);
-  useEffect(() => { if (editing && inputRef.current) inputRef.current.focus(); }, [editing]);
+
+  // 편집 모드 진입 시 포커스
+  useEffect(() => {
+    if (isEditing && type === 'text' && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing, type]);
+
+  // initialChar로 편집 시작 시 draft 초기화
+  useEffect(() => {
+    if (isEditing && initialChar != null) {
+      setDraft(initialChar);
+    }
+  }, [isEditing, initialChar]);
 
   // 담당자 편집 모드 진입 시 AssigneeSelect 내부 input 자동 포커스
   useEffect(() => {
-    if (editing && type === 'assignee' && cellRef.current) {
+    if (isEditing && type === 'assignee' && cellRef.current) {
       const input = cellRef.current.querySelector('input');
       if (input) setTimeout(() => input.focus(), 0);
     }
-  }, [editing, type]);
+  }, [isEditing, type]);
 
   const commit = useCallback(() => {
     if (draft !== value) onSave(sceneIndex, field, draft);
-    setEditing(false);
-  }, [draft, value, onSave, sceneIndex, field]);
+    onStopEditing();
+  }, [draft, value, onSave, sceneIndex, field, onStopEditing]);
 
-  const handleClick = useCallback(() => {
-    if (clickTimer.current) clearTimeout(clickTimer.current);
-    if (type === 'assignee') {
-      // 담당자: 즉시 편집 모드 진입 (200ms 지연 없음)
-      setEditing(true);
-    } else {
-      clickTimer.current = setTimeout(() => {
-        setEditing(true);
-      }, 200);
-    }
-  }, [type]);
-
-  const handleDoubleClick = useCallback(() => {
-    if (clickTimer.current) clearTimeout(clickTimer.current);
-    onOpenDetail?.();
-  }, [onOpenDetail]);
-
-  if (editing) {
+  if (isEditing) {
     if (type === 'assignee') {
       return (
         <td
@@ -97,8 +111,8 @@ function SheetEditableCell({
         >
           <AssigneeSelect
             value={draft}
-            onChange={(v) => { onSave(sceneIndex, field, v); setEditing(false); }}
-            onClose={() => setEditing(false)}
+            onChange={(v) => { onSave(sceneIndex, field, v); onStopEditing(); }}
+            onClose={onStopEditing}
             className="w-full"
           />
         </td>
@@ -113,7 +127,9 @@ function SheetEditableCell({
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === 'Enter') commit();
-            if (e.key === 'Escape') { setDraft(value); setEditing(false); }
+            if (e.key === 'Escape') { setDraft(value); onStopEditing(); }
+            // 편집 중 키 이벤트가 테이블까지 전파되지 않도록
+            e.stopPropagation();
           }}
           className="w-full bg-bg-primary border border-accent/50 rounded px-1.5 py-0.5 text-xs text-text-primary outline-none focus:border-accent transition-colors"
         />
@@ -125,11 +141,23 @@ function SheetEditableCell({
   return (
     <td
       className={cn(
-        'px-2 py-1.5 text-xs text-text-secondary cursor-text truncate hover:bg-accent/5 transition-colors',
+        'px-2 py-1.5 text-xs text-text-secondary cursor-cell truncate transition-colors',
         isMemo && 'max-w-0',
+        isSelected
+          ? 'ring-2 ring-accent ring-inset bg-accent/5'
+          : 'hover:bg-accent/5',
       )}
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
+      onMouseDown={(e) => {
+        // Ctrl+클릭은 행 선택이므로 셀 선택 처리하지 않음
+        if (e.ctrlKey || e.metaKey) return;
+        e.stopPropagation();
+        onMouseDown(e);
+      }}
+      onMouseEnter={onMouseEnter}
+      onDoubleClick={(e) => {
+        e.stopPropagation(); // 행의 상세 모달 방지
+        onStartEditing();
+      }}
     >
       <HighlightText text={value || '-'} query={searchQuery} />
     </td>
@@ -147,12 +175,9 @@ function SheetThumbnailCell({ url, label }: { url: string; label: string }) {
     const rect = cellRef.current.getBoundingClientRect();
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
-    // 기본: 셀 오른쪽에 표시
     let x = rect.right + 8;
     let y = rect.top + rect.height / 2;
-    // 화면 오른쪽 넘침 방지
     if (x + 288 > viewportW) x = rect.left - 288 - 8;
-    // 화면 하단 넘침 방지
     if (y + 120 > viewportH) y = viewportH - 130;
     if (y - 120 < 0) y = 130;
     setHoverPos({ x, y });
@@ -177,7 +202,6 @@ function SheetThumbnailCell({ url, label }: { url: string; label: string }) {
         <span className="text-[10px] text-text-secondary/30">-</span>
       )}
 
-      {/* 호버 미리보기 포탈 */}
       {hoverPos && url && createPortal(
         <motion.div
           initial={{ opacity: 0, scale: 0.92 }}
@@ -247,7 +271,7 @@ export function SceneSheetView({
 }: SceneSheetViewProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
 
-  // 레이아웃 그룹핑 (layout 모드)
+  // ── 레이아웃 그룹핑 ──
   const layoutGroups = useMemo(() => {
     if (sceneGroupMode !== 'layout') return null;
     const groups = new Map<string, Scene[]>();
@@ -265,7 +289,6 @@ export function SceneSheetView({
     });
   }, [scenes, sceneGroupMode]);
 
-  // 각 씬이 그룹에서 첫 번째인지, 그룹 크기 (layout 모드용)
   const layoutMeta = useMemo(() => {
     if (!layoutGroups) return new Map<Scene, { isFirst: boolean; groupSize: number; layoutKey: string }>();
     const meta = new Map<Scene, { isFirst: boolean; groupSize: number; layoutKey: string }>();
@@ -277,7 +300,6 @@ export function SceneSheetView({
     return meta;
   }, [layoutGroups]);
 
-  // 레이아웃 모드에서 그룹 순서로 정렬된 scenes
   const orderedScenes = useMemo(() => {
     if (!layoutGroups) return scenes;
     return layoutGroups.flatMap(([, groupScenes]) => groupScenes);
@@ -285,13 +307,239 @@ export function SceneSheetView({
 
   const displayScenes = layoutGroups ? orderedScenes : scenes;
 
+  // ── 셀 선택 상태 ──
+  const [anchor, setAnchor] = useState<CellId | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<CellId | null>(null);
+  const [editingCell, setEditingCell] = useState<CellId | null>(null);
+  const [initialEditChar, setInitialEditChar] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  const maxRow = displayScenes.length - 1;
+  const maxCol = EDITABLE_FIELDS.length - 1;
+
+  // 선택 범위 계산
+  const selectedCells = useMemo(() => {
+    if (!anchor) return new Set<string>();
+    const end = rangeEnd ?? anchor;
+    const minRow = Math.min(anchor.row, end.row);
+    const maxR = Math.max(anchor.row, end.row);
+    const minCol = Math.min(anchor.col, end.col);
+    const maxC = Math.max(anchor.col, end.col);
+    const set = new Set<string>();
+    for (let r = minRow; r <= maxR; r++)
+      for (let c = minCol; c <= maxC; c++)
+        set.add(cellKey(r, c));
+    return set;
+  }, [anchor, rangeEnd]);
+
+  // scenes 변경 시 선택 초기화
+  useEffect(() => {
+    setAnchor(null);
+    setRangeEnd(null);
+    setEditingCell(null);
+    setInitialEditChar(null);
+  }, [scenes]);
+
+  // 테이블 외부 클릭 시 선택 해제
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (tableRef.current && !tableRef.current.contains(e.target as Node)) {
+        if (!editingCell) {
+          setAnchor(null);
+          setRangeEnd(null);
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [editingCell]);
+
+  // 드래그 종료 (global mouseup)
+  useEffect(() => {
+    if (!isDragging) return;
+    const handleMouseUp = () => setIsDragging(false);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => document.removeEventListener('mouseup', handleMouseUp);
+  }, [isDragging]);
+
+  // ── 셀 인터랙션 핸들러 ──
+
+  const handleCellMouseDown = useCallback((row: number, col: number, e: React.MouseEvent) => {
+    // 편집 중이면 먼저 편집 종료
+    setEditingCell(null);
+    setInitialEditChar(null);
+
+    if (e.shiftKey && anchor) {
+      // Shift+클릭: 범위 확장
+      setRangeEnd({ row, col });
+    } else {
+      // 일반 클릭: 단일 선택 + 드래그 시작
+      setAnchor({ row, col });
+      setRangeEnd(null);
+      setIsDragging(true);
+    }
+    // 테이블에 포커스
+    tableRef.current?.focus();
+  }, [anchor]);
+
+  const handleCellMouseEnter = useCallback((row: number, col: number) => {
+    if (isDragging) {
+      setRangeEnd({ row, col });
+    }
+  }, [isDragging]);
+
+  const handleStartEditing = useCallback((row: number, col: number) => {
+    setEditingCell({ row, col });
+    setInitialEditChar(null);
+    setAnchor({ row, col });
+    setRangeEnd(null);
+  }, []);
+
+  const handleStopEditing = useCallback(() => {
+    setEditingCell(null);
+    setInitialEditChar(null);
+    tableRef.current?.focus();
+  }, []);
+
+  // ── 키보드 핸들러 ──
+
+  const handleTableKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // 편집 중이면 테이블 키보드 무시 (input에서 stopPropagation)
+    if (editingCell) return;
+    if (!anchor) return;
+
+    const clampRow = (r: number) => Math.max(0, Math.min(r, maxRow));
+    const clampCol = (c: number) => Math.max(0, Math.min(c, maxCol));
+
+    // 방향키
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      const current = rangeEnd ?? anchor;
+      const dr = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+      const dc = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+
+      if (e.shiftKey) {
+        // Shift+방향키: 범위 확장
+        const newEnd = { row: clampRow(current.row + dr), col: clampCol(current.col + dc) };
+        setRangeEnd(newEnd);
+      } else {
+        // 단일 이동
+        const newAnchor = { row: clampRow(current.row + dr), col: clampCol(current.col + dc) };
+        setAnchor(newAnchor);
+        setRangeEnd(null);
+      }
+      return;
+    }
+
+    // Tab/Shift+Tab
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const current = rangeEnd ?? anchor;
+      if (e.shiftKey) {
+        // 이전 셀
+        if (current.col > 0) {
+          setAnchor({ row: current.row, col: current.col - 1 });
+        } else if (current.row > 0) {
+          setAnchor({ row: current.row - 1, col: maxCol });
+        }
+      } else {
+        // 다음 셀
+        if (current.col < maxCol) {
+          setAnchor({ row: current.row, col: current.col + 1 });
+        } else if (current.row < maxRow) {
+          setAnchor({ row: current.row + 1, col: 0 });
+        }
+      }
+      setRangeEnd(null);
+      return;
+    }
+
+    // Enter / F2 → 편집
+    if (e.key === 'Enter' || e.key === 'F2') {
+      e.preventDefault();
+      setEditingCell({ ...anchor });
+      setInitialEditChar(null);
+      return;
+    }
+
+    // Escape
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setAnchor(null);
+      setRangeEnd(null);
+      return;
+    }
+
+    // Ctrl+C → 복사
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+      e.preventDefault();
+      const scene = displayScenes[anchor.row];
+      if (scene) {
+        const fieldName = EDITABLE_FIELDS[anchor.col];
+        const val = (fieldName === 'memo' ? scene.memo : scene.assignee) || '';
+        navigator.clipboard.writeText(val);
+      }
+      return;
+    }
+
+    // Ctrl+V → 일괄 붙여넣기
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      e.preventDefault();
+      navigator.clipboard.readText().then((text) => {
+        if (!text) return;
+        const trimmed = text.trim();
+        for (const key of selectedCells) {
+          const [r, c] = key.split(':').map(Number);
+          const scene = displayScenes[r];
+          if (!scene) continue;
+          const globalIdx = allScenes.indexOf(scene);
+          if (globalIdx < 0) continue;
+          const fieldName = EDITABLE_FIELDS[c];
+          onFieldUpdate(globalIdx, fieldName, trimmed);
+        }
+      });
+      return;
+    }
+
+    // Delete/Backspace → 선택된 셀 내용 삭제
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      for (const key of selectedCells) {
+        const [r, c] = key.split(':').map(Number);
+        const scene = displayScenes[r];
+        if (!scene) continue;
+        const globalIdx = allScenes.indexOf(scene);
+        if (globalIdx < 0) continue;
+        const fieldName = EDITABLE_FIELDS[c];
+        onFieldUpdate(globalIdx, fieldName, '');
+      }
+      return;
+    }
+
+    // 일반 문자 타이핑 → 편집 모드 진입
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      setEditingCell({ ...anchor });
+      setInitialEditChar(e.key);
+      return;
+    }
+  }, [editingCell, anchor, rangeEnd, maxRow, maxCol, displayScenes, allScenes, selectedCells, onFieldUpdate]);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.2, ease: 'easeInOut' }}
     >
-      <div className="overflow-auto rounded-lg border border-bg-border">
+      <div
+        ref={tableRef}
+        tabIndex={0}
+        className="overflow-auto rounded-lg border border-bg-border focus:outline-none"
+        onKeyDown={handleTableKeyDown}
+        onMouseUp={() => setIsDragging(false)}
+        style={{ userSelect: isDragging ? 'none' : undefined }}
+      >
         <table className="w-full text-sm border-collapse">
           {/* ── 헤더 ── */}
           <thead className="sticky top-0 z-10">
@@ -326,7 +574,7 @@ export function SceneSheetView({
               const pct = sceneProgress(scene);
               const idx = allScenes.indexOf(scene);
               const meta = layoutMeta.get(scene);
-              const isSelected = selectedSceneIds?.has(scene.sceneId);
+              const isRowSelected = selectedSceneIds?.has(scene.sceneId);
               const isFirstInGroup = meta?.isFirst ?? false;
               const groupSize = meta?.groupSize ?? 1;
               const layoutKey = meta?.layoutKey ?? '';
@@ -341,7 +589,7 @@ export function SceneSheetView({
                     'border-b border-bg-border/30 transition-colors group',
                     rowIndex % 2 === 0 ? 'bg-bg-card/20' : 'bg-bg-primary/10',
                     'hover:bg-accent/5',
-                    isSelected && 'bg-accent/10 hover:bg-accent/15',
+                    isRowSelected && 'bg-accent/10 hover:bg-accent/15',
                     searchQuery && 'bg-accent/5 border-l-2 border-l-accent/60',
                     sceneGroupMode === 'layout' && isFirstInGroup && rowIndex > 0 && 'border-t-2 border-t-bg-border',
                   )}
@@ -388,7 +636,13 @@ export function SceneSheetView({
                     sceneIndex={idx}
                     onSave={onFieldUpdate}
                     searchQuery={searchQuery}
-                    onOpenDetail={() => onOpenDetail(idx)}
+                    isSelected={selectedCells.has(cellKey(rowIndex, 0))}
+                    isEditing={editingCell?.row === rowIndex && editingCell?.col === 0}
+                    initialChar={editingCell?.row === rowIndex && editingCell?.col === 0 ? initialEditChar : undefined}
+                    onMouseDown={(e) => handleCellMouseDown(rowIndex, 0, e)}
+                    onMouseEnter={() => handleCellMouseEnter(rowIndex, 0)}
+                    onStartEditing={() => handleStartEditing(rowIndex, 0)}
+                    onStopEditing={handleStopEditing}
                   />
 
                   {/* 스토리보드 썸네일 */}
@@ -405,7 +659,13 @@ export function SceneSheetView({
                     onSave={onFieldUpdate}
                     type="assignee"
                     searchQuery={searchQuery}
-                    onOpenDetail={() => onOpenDetail(idx)}
+                    isSelected={selectedCells.has(cellKey(rowIndex, 1))}
+                    isEditing={editingCell?.row === rowIndex && editingCell?.col === 1}
+                    initialChar={editingCell?.row === rowIndex && editingCell?.col === 1 ? initialEditChar : undefined}
+                    onMouseDown={(e) => handleCellMouseDown(rowIndex, 1, e)}
+                    onMouseEnter={() => handleCellMouseEnter(rowIndex, 1)}
+                    onStartEditing={() => handleStartEditing(rowIndex, 1)}
+                    onStopEditing={handleStopEditing}
                   />
 
                   {/* 진행상황 체크박스 (LO/완료/검수/PNG) */}
