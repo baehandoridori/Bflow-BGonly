@@ -807,7 +807,11 @@ export function MyTasksWidget() {
     if (activeView.type === 'assigned') {
       const name = currentUser?.name ?? '';
       const manualKeys = new Set(assignedSceneKeys);
-      result = allFlat.filter((f) => (name && f.scene.assignee === name) || manualKeys.has(f.key));
+      result = allFlat.filter((f) => {
+        if (manualKeys.has(f.key)) return true;
+        if (!name || !f.scene.assignee) return false;
+        return f.scene.assignee.split(',').some(s => s.trim() === name);
+      });
     } else {
       const keys = new Set(activeView.sceneKeys);
       result = allFlat.filter((f) => keys.has(f.key));
