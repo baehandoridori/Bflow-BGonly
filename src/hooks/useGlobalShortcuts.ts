@@ -20,6 +20,7 @@ const DEFAULT_BINDINGS: Record<string, string> = {
   'nav-team':        'Ctrl+5',
   'nav-timeline':    'Ctrl+6',
   'nav-calendar':    'Ctrl+7',
+  'nav-vacation':    'Ctrl+8',
   'nav-settings':    'Ctrl+,',
   'edit-mode':       'Ctrl+E',
   'sidebar-toggle':  'Ctrl+B',
@@ -36,6 +37,7 @@ const NAV_MAP: Record<string, ViewMode> = {
   'nav-team':       'team',
   'nav-timeline':   'calendar',
   'nav-calendar':   'schedule',
+  'nav-vacation':   'vacation',
   'nav-settings':   'settings',
 };
 

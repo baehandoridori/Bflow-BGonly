@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Settings, PanelLeft } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Settings, PanelLeft } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
@@ -15,6 +15,7 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'team', label: '팀원', icon: <CircleUser size={20} /> },
   { id: 'calendar', label: '타임라인', icon: <GanttChart size={20} /> },
   { id: 'schedule', label: '캘린더', icon: <CalendarDays size={20} /> },
+  { id: 'vacation', label: '휴가', icon: <Palmtree size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 

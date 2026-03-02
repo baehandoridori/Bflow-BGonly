@@ -50,6 +50,8 @@ import {
   readAllEmployeeNames,
   readDahyuList,
   deleteDahyu,
+  getVacPendingOpsCount,
+  waitForVacPendingOps,
 } from './vacation';
 
 // 앱 이름 설정 — AppData 경로에 영향
@@ -1343,20 +1345,25 @@ app.on('before-quit', (e) => {
   // 위젯 위치 즉시 저장 (closed 이벤트보다 먼저 실행)
   saveWidgetPositionsSync();
 
-  const pending = getPendingOpsCount();
-  if (pending > 0) {
+  const sheetsPending = getPendingOpsCount();
+  const vacPending = getVacPendingOpsCount();
+  const totalPending = sheetsPending + vacPending;
+  if (totalPending > 0) {
     e.preventDefault();
 
-    console.log(`[종료] ${pending}개 작업 대기 중... 완료 후 종료합니다.`);
+    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
 
     // 메인 윈도우에 "저장 중" 알림
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('app:saving-before-quit', pending);
+      mainWindow.webContents.send('app:saving-before-quit', totalPending);
     }
 
-    // 최대 15초 대기 후 종료
-    waitForAllPendingOps(15000).then((allDone) => {
-      if (!allDone) {
+    // 시트 15초 + 휴가 60초 대기 후 종료
+    Promise.all([
+      waitForAllPendingOps(15000),
+      waitForVacPendingOps(60000),
+    ]).then(([sheetsDone, vacDone]) => {
+      if (!sheetsDone || !vacDone) {
         console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
       }
       console.log('[종료] 저장 완료, 앱을 종료합니다');

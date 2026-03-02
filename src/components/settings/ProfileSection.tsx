@@ -147,6 +147,9 @@ export function ProfileSection() {
   const [cancellingRow, setCancellingRow] = useState<number | null>(null);
   const isDahyuAdmin = (DAHYU_ADMINS as readonly string[]).includes(currentUser?.name ?? '');
 
+  // 변경(등록/삭제) 후 캐시 유예 — 30초간 캐시 저장 안 함
+  const mutationTimeRef = useRef(0);
+
   // 대휴 드롭다운 외부 클릭 닫기
   useEffect(() => {
     if (!dahyuDropdownOpen) return;
@@ -167,8 +170,11 @@ export function ProfileSection() {
     if (!force) {
       const cache = useAppStore.getState().vacationCache;
       if (cache && cache.userName === currentUser.name && Date.now() - cache.lastFetch < 300_000) {
-        setVacStatus(cache.status);
-        setVacLog(cache.log);
+        // mutation guard 기간에는 캐시도 적용하지 않음 (낙관적 값 유지)
+        if (Date.now() - mutationTimeRef.current > 30_000) {
+          setVacStatus(cache.status);
+          setVacLog(cache.log);
+        }
         return;
       }
     }
@@ -179,9 +185,12 @@ export function ProfileSection() {
         fetchVacationStatus(currentUser.name),
         fetchVacationLog(currentUser.name, new Date().getFullYear(), 20),
       ]);
-      setVacStatus(status);
-      setVacLog(log);
-      setVacationCache({ userName: currentUser.name, status, log, lastFetch: Date.now() });
+      // 변경(등록/삭제) 직후 30초간은 낙관적 상태 유지 (서버 데이터가 아직 stale일 수 있음)
+      if (Date.now() - mutationTimeRef.current > 30_000) {
+        setVacStatus(status);
+        setVacLog(log);
+        setVacationCache({ userName: currentUser.name, status, log, lastFetch: Date.now() });
+      }
     } catch (err) {
       setVacError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -210,33 +219,62 @@ export function ProfileSection() {
 
   const invalidateVacationCache = useAppStore((s) => s.invalidateVacationCache);
 
+  /** 낙관적 일수 계산 */
+  const calcDays = (type: string, start: string, end: string): number => {
+    if (type === '오전반차' || type === '오후반차') return 0.5;
+    const s = new Date(start), e = new Date(end);
+    return Math.max(1, Math.round((e.getTime() - s.getTime()) / 86400000) + 1);
+  };
+
   const handleCancelVacation = async (rowIndex: number) => {
     if (!currentUser) return;
     setCancellingRow(rowIndex);
 
-    // B1b: Optimistic — 즉시 UI에서 해당 항목을 '취소' 표시
+    // 낙관적 로그 업데이트
     const prevLog = [...vacLog];
+    const prevStatus = vacStatus ? { ...vacStatus } : null;
     setVacLog((prev) => prev.map((e) =>
       e.rowIndex === rowIndex ? { ...e, state: '취소' } : e,
     ));
+
+    // 낙관적 상태 업데이트 (일수 복원)
+    const entry = vacLog.find(e => e.rowIndex === rowIndex);
+    if (entry && vacStatus) {
+      const days = typeof entry.days === 'number' ? entry.days : parseFloat(String(entry.days)) || 1;
+      const isAnnual = entry.type === '연차' || entry.type === '오전반차' || entry.type === '오후반차';
+      const isDahyu = entry.type === '대체휴가';
+      setVacStatus(prev => prev ? {
+        ...prev,
+        usedDays: isAnnual ? prev.usedDays - days : prev.usedDays,
+        remainingDays: isAnnual ? prev.remainingDays + days : prev.remainingDays,
+        altVacationUsed: isDahyu ? prev.altVacationUsed - days : prev.altVacationUsed,
+        altVacationNet: isDahyu ? prev.altVacationNet + days : prev.altVacationNet,
+        validUseCount: (prev.validUseCount ?? 1) - 1,
+      } : prev);
+    }
+
+    // 스피너 즉시 해제, 백그라운드 API 호출
+    mutationTimeRef.current = Date.now();
+    setCancellingRow(null);
 
     try {
       const result = await cancelVacationRequest(currentUser.name, rowIndex);
       if (result.ok && result.success) {
         setToast({ message: '휴가가 취소되었습니다', type: 'success' });
         invalidateVacationCache();
-        await loadVacationData(true);
+        // 8초 후 실제 데이터 갱신 (GAS 전파 대기)
+        setTimeout(() => loadVacationData(true), 8000);
       } else {
         // 롤백
         setVacLog(prevLog);
-        setToast({ message: result.error || '취소 실패', type: 'error' });
+        setVacStatus(prevStatus);
+        setToast({ message: '취소 실패: ' + (result.error || '알 수 없는 오류'), type: 'critical' });
       }
     } catch (err) {
       // 롤백
       setVacLog(prevLog);
-      setToast({ message: err instanceof Error ? err.message : '취소 실패', type: 'error' });
-    } finally {
-      setCancellingRow(null);
+      setVacStatus(prevStatus);
+      setToast({ message: '취소 실패: ' + (err instanceof Error ? err.message : '알 수 없는 오류'), type: 'critical' });
     }
   };
 
@@ -294,6 +332,7 @@ export function ProfileSection() {
     { value: 'team', label: '팀원' },
     { value: 'calendar', label: '타임라인' },
     { value: 'schedule', label: '캘린더' },
+    { value: 'vacation', label: '휴가' },
   ];
 
   return (
@@ -602,7 +641,34 @@ export function ProfileSection() {
           open={showVacModal}
           onClose={() => setShowVacModal(false)}
           userName={currentUser.name}
-          onSuccess={() => loadVacationData(true)}
+          onSubmitStart={(data) => {
+            mutationTimeRef.current = Date.now();
+            if (!vacStatus) return;
+            const days = calcDays(data.type, data.startDate, data.endDate);
+            const isAnnual = data.type === '연차' || data.type === '오전반차' || data.type === '오후반차';
+            const isDahyu = data.type === '대체휴가';
+            setVacStatus(prev => prev ? {
+              ...prev,
+              usedDays: isAnnual ? prev.usedDays + days : prev.usedDays,
+              remainingDays: isAnnual ? prev.remainingDays - days : prev.remainingDays,
+              overuse: isAnnual ? (prev.remainingDays - days) < 0 : prev.overuse,
+              altVacationUsed: isDahyu ? prev.altVacationUsed + days : prev.altVacationUsed,
+              altVacationNet: isDahyu ? prev.altVacationNet - days : prev.altVacationNet,
+              specialVacationUsed: data.type === '특별휴가' ? prev.specialVacationUsed + 1 : prev.specialVacationUsed,
+              totalUseCount: prev.totalUseCount + 1,
+              validUseCount: (prev.validUseCount ?? 0) + 1,
+            } : prev);
+          }}
+          onSubmitEnd={() => {
+            // 실패 → guard 해제 → 서버 데이터로 낙관적 상태 복원
+            mutationTimeRef.current = 0;
+            loadVacationData(true);
+          }}
+          onSuccess={() => {
+            // 성공 → guard 해제 → 서버 데이터로 상태 갱신
+            mutationTimeRef.current = 0;
+            loadVacationData(true);
+          }}
         />
       )}
 

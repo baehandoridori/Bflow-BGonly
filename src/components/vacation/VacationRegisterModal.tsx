@@ -14,6 +14,10 @@ interface VacationRegisterModalProps {
   initialDate?: string;
   /** 등록 성공 후 콜백 */
   onSuccess?: () => void;
+  /** 신청 시작 시 콜백 (모달 닫기 직전, 로딩 바 표시용) — 데이터 포함 */
+  onSubmitStart?: (data: { type: string; startDate: string; endDate: string }) => void;
+  /** 등록 실패 시 콜백 (로딩 바 해제용) */
+  onSubmitEnd?: () => void;
 }
 
 const TYPE_LABELS: Record<VacationType, string> = {
@@ -33,7 +37,7 @@ function fmtToday(): string {
 }
 
 export function VacationRegisterModal({
-  open, onClose, userName, initialDate, onSuccess,
+  open, onClose, userName, initialDate, onSuccess, onSubmitStart, onSubmitEnd,
 }: VacationRegisterModalProps) {
   const setToast = useAppStore((s) => s.setToast);
 
@@ -73,8 +77,13 @@ export function VacationRegisterModal({
       setError('종료일이 시작일보다 빠릅니다');
       return;
     }
+    if (!reason.trim()) {
+      setError('사유를 입력해주세요');
+      return;
+    }
 
     // B1a: Optimistic — 모달 즉시 닫기, 백그라운드에서 API 호출
+    onSubmitStart?.({ type, startDate, endDate });
     setToast({ message: '휴가 등록 요청 중...', type: 'info' });
     onClose();
 
@@ -90,18 +99,19 @@ export function VacationRegisterModal({
       if (result.ok && result.success) {
         setToast({ message: '휴가가 등록되었습니다', type: 'success' });
         invalidateVacationCache();
-        onSuccess?.();
-        // 안전장치: GAS 파이프라인 완전 완료 후 데이터 한번 더 갱신
+        // GAS 파이프라인 완전 완료 후 데이터 갱신 (8초 후)
         setTimeout(() => {
           invalidateVacationCache();
           onSuccess?.();
-        }, 3000);
+        }, 8000);
       } else {
-        // D3: 등록 실패 상세 알림
-        setToast({ message: '휴가 등록 실패: ' + (result.error || result.state || '알 수 없는 오류'), type: 'error' });
+        // D3: 등록 실패 상세 알림 — critical 토스트로 강조
+        setToast({ message: '휴가 등록 실패: ' + (result.error || result.state || '알 수 없는 오류'), type: 'critical' });
+        onSubmitEnd?.();
       }
     } catch (err) {
-      setToast({ message: '휴가 등록 실패: ' + (err instanceof Error ? err.message : String(err)), type: 'error' });
+      setToast({ message: '휴가 등록 실패: ' + (err instanceof Error ? err.message : String(err)), type: 'critical' });
+      onSubmitEnd?.();
     }
   };
 
@@ -191,7 +201,7 @@ export function VacationRegisterModal({
 
               {/* 사유 */}
               <div>
-                <label className="text-xs text-text-secondary/70 mb-1.5 block">사유</label>
+                <label className="text-xs text-text-secondary/70 mb-1.5 block">사유 <span className="text-red-400">*</span></label>
                 <input
                   type="text"
                   value={reason}

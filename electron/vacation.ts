@@ -11,6 +11,35 @@ import { gasFetch, gasFetchWithRetry } from './gas-fetch';
 
 let vacationUrl: string | null = null;
 
+// ─── 진행 중 작업 추적 (종료 시 큐 보장) ─────────────────────
+let vacPendingOps = 0;
+let vacPendingResolvers: (() => void)[] = [];
+
+export function getVacPendingOpsCount(): number {
+  return vacPendingOps;
+}
+
+/** 모든 진행 중 휴가 API 작업이 완료될 때까지 대기 (최대 timeoutMs) */
+export function waitForVacPendingOps(timeoutMs = 60000): Promise<boolean> {
+  if (vacPendingOps <= 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    vacPendingResolvers.push(() => { clearTimeout(timer); resolve(true); });
+  });
+}
+
+function trackVacPending<T>(op: Promise<T>): Promise<T> {
+  vacPendingOps++;
+  return op.finally(() => {
+    vacPendingOps--;
+    if (vacPendingOps <= 0) {
+      vacPendingOps = 0;
+      const resolvers = vacPendingResolvers.splice(0);
+      resolvers.forEach((r) => r());
+    }
+  });
+}
+
 // ─── 연결 ─────────────────────────────────────────────────────
 
 export async function initVacation(url: string): Promise<boolean> {
@@ -112,7 +141,7 @@ export interface VacationResult {
 export async function readVacationStatus(name: string): Promise<VacationStatusResponse> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const qs = new URLSearchParams({ action: 'readStatus', name });
+  const qs = new URLSearchParams({ action: 'readStatus', name, _t: String(Date.now()) });
   const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -128,7 +157,7 @@ export async function readVacationLog(
 ): Promise<VacationLogEntry[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const params: Record<string, string> = { action: 'readLog', name };
+  const params: Record<string, string> = { action: 'readLog', name, _t: String(Date.now()) };
   if (year) params.year = String(year);
   if (limit) params.limit = String(limit);
 
@@ -144,7 +173,7 @@ export async function readVacationLog(
 export async function readAllVacationEvents(year?: number): Promise<VacationEvent[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const params: Record<string, string> = { action: 'readAllEvents' };
+  const params: Record<string, string> = { action: 'readAllEvents', _t: String(Date.now()) };
   if (year) params.year = String(year);
 
   const qs = new URLSearchParams(params);
@@ -160,7 +189,7 @@ export async function readAllVacationEvents(year?: number): Promise<VacationEven
 // 주의: VacationAutoexportAndUpdateDashboard()에 Utilities.sleep(5000)이 포함되어
 // API 응답이 10초+ 소요 가능. AbortController로 60초 timeout 설정.
 
-export async function registerVacation(data: {
+export function registerVacation(data: {
   name: string;
   type: string;
   startDate: string;
@@ -169,50 +198,54 @@ export async function registerVacation(data: {
 }): Promise<VacationResult> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000); // 60초 timeout
+  return trackVacPending((async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000); // 60초 timeout
 
-  try {
-    const res = await gasFetch(vacationUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'register', ...data }),
-      signal: controller.signal,
-    });
+    try {
+      const res = await gasFetch(vacationUrl!, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register', ...data }),
+        signal: controller.signal,
+      });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const json = await res.json() as VacationResult;
-    return json;
-  } finally {
-    clearTimeout(timer);
-  }
+      const json = await res.json() as VacationResult;
+      return json;
+    } finally {
+      clearTimeout(timer);
+    }
+  })());
 }
 
-export async function cancelVacation(
+export function cancelVacation(
   name: string,
   rowIndex: number
 ): Promise<VacationResult> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
+  return trackVacPending((async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
 
-  try {
-    const res = await gasFetch(vacationUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'cancel', name, rowIndex }),
-      signal: controller.signal,
-    });
+    try {
+      const res = await gasFetch(vacationUrl!, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', name, rowIndex }),
+        signal: controller.signal,
+      });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const json = await res.json() as VacationResult;
-    return json;
-  } finally {
-    clearTimeout(timer);
-  }
+      const json = await res.json() as VacationResult;
+      return json;
+    } finally {
+      clearTimeout(timer);
+    }
+  })());
 }
 
 // ─── 대휴 지급 ─────────────────────────────────────────────────
@@ -249,7 +282,7 @@ export async function grantDahyu(data: {
 export async function readAllEmployeeNames(): Promise<string[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const qs = new URLSearchParams({ action: 'readAllNames' });
+  const qs = new URLSearchParams({ action: 'readAllNames', _t: String(Date.now()) });
   const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -263,7 +296,7 @@ export async function readAllEmployeeNames(): Promise<string[]> {
 export async function readDahyuList(): Promise<DahyuListEntry[]> {
   if (!vacationUrl) throw new Error('Vacation 미연결');
 
-  const qs = new URLSearchParams({ action: 'readDahyuList' });
+  const qs = new URLSearchParams({ action: 'readDahyuList', _t: String(Date.now()) });
   const res = await gasFetchWithRetry(`${vacationUrl}?${qs}`, {}, 'Vacation');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 

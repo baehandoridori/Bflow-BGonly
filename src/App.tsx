@@ -10,6 +10,7 @@ import { AssigneeView } from '@/views/AssigneeView';
 import { TeamView } from '@/views/TeamView';
 import { CalendarView } from '@/views/CalendarView';
 import { ScheduleView } from '@/views/ScheduleView';
+import { VacationView } from '@/views/VacationView';
 import { SettingsView } from '@/views/SettingsView';
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
@@ -25,7 +26,7 @@ import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '
 import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
-import { DEFAULT_WEB_APP_URL } from '@/config';
+import { DEFAULT_WEB_APP_URL, DEFAULT_VACATION_URL } from '@/config';
 
 export default function App() {
   const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected } = useAppStore();
@@ -41,18 +42,18 @@ export default function App() {
   // 토스트 상태 (글로벌 스토어 기반)
   const storeToast = useAppStore((s) => s.toast);
   const setStoreToast = useAppStore((s) => s.setToast);
-  const [localToast, setLocalToast] = useState<string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null>(null);
+  const [localToast, setLocalToast] = useState<string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null>(null);
   const toast = storeToast || localToast;
-  const setToast = useCallback((msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null) => {
+  const setToast = useCallback((msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null) => {
     setLocalToast(msg);
     if (msg) setStoreToast(null); // 로컬 우선
   }, [setStoreToast]);
 
-  // 글로벌 스토어 토스트 자동 제거 (유형별 시간: error/warning 5초, 나머지 3초)
+  // 글로벌 스토어 토스트 자동 제거 (유형별 시간: critical 10초, error/warning 5초, 나머지 3초)
   useEffect(() => {
     if (!storeToast) return;
     const toastType = typeof storeToast === 'string' ? 'info' : (storeToast.type || 'info');
-    const duration = (toastType === 'error' || toastType === 'warning') ? 5000 : 3000;
+    const duration = toastType === 'critical' ? 10000 : (toastType === 'error' || toastType === 'warning') ? 5000 : 3000;
     const timer = setTimeout(() => setStoreToast(null), duration);
     return () => clearTimeout(timer);
   }, [storeToast, setStoreToast]);
@@ -266,10 +267,11 @@ export default function App() {
           }
         }
 
-        // 휴가 API 자동 연결 (저장된 URL이 있으면 시도)
+        // 휴가 API 자동 연결 (저장된 URL 또는 기본 URL로 시도)
         const vacConfig = await loadVacationConfig();
-        if (vacConfig?.webAppUrl) {
-          const vacResult = await connectVacation(vacConfig.webAppUrl);
+        const vacUrlToConnect = vacConfig?.webAppUrl || DEFAULT_VACATION_URL;
+        if (vacUrlToConnect) {
+          const vacResult = await connectVacation(vacUrlToConnect);
           if (vacResult.ok) {
             setVacationConnected(true);
           }
@@ -391,6 +393,8 @@ export default function App() {
         return <CalendarView />;
       case 'schedule':
         return <ScheduleView />;
+      case 'vacation':
+        return <VacationView />;
       case 'settings':
         return <SettingsView />;
       default:
@@ -406,7 +410,8 @@ export default function App() {
       <div
         className="flex items-center justify-center h-screen w-screen overflow-hidden cursor-pointer select-none"
         style={{
-          background: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, #0F1117 100%)',
+          backgroundColor: '#0F1117',
+          backgroundImage: 'radial-gradient(ellipse 55% 65% at 50% 48%, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.5) 65%, rgba(0,0,0,0.15) 80%, #0F1117 100%)',
         }}
         onClick={() => { if (canSkip) setLoadingSplashDone(true); }}
       >
@@ -495,25 +500,36 @@ export default function App() {
       {toast && (() => {
         const msg = typeof toast === 'string' ? toast : toast.message;
         const type = typeof toast === 'string' ? 'info' : (toast.type || 'info');
-        const borderColor = type === 'success' ? 'border-emerald-500/40'
-          : type === 'error' ? 'border-red-500/40'
-          : type === 'warning' ? 'border-amber-500/40'
+        const isCritical = type === 'critical';
+        const effectiveType = isCritical ? 'error' : type;
+        const borderColor = effectiveType === 'success' ? 'border-emerald-500/40'
+          : effectiveType === 'error' ? 'border-red-500/40'
+          : effectiveType === 'warning' ? 'border-amber-500/40'
           : 'border-bg-border';
-        const bgColor = type === 'success' ? 'bg-emerald-500/10'
-          : type === 'error' ? 'bg-red-500/10'
-          : type === 'warning' ? 'bg-amber-500/10'
+        const bgColor = effectiveType === 'success' ? 'bg-emerald-500/10'
+          : effectiveType === 'error' ? 'bg-red-500/10'
+          : effectiveType === 'warning' ? 'bg-amber-500/10'
           : 'bg-bg-card';
-        const textColor = type === 'success' ? 'text-emerald-300'
-          : type === 'error' ? 'text-red-300'
-          : type === 'warning' ? 'text-amber-300'
+        const textColor = effectiveType === 'success' ? 'text-emerald-300'
+          : effectiveType === 'error' ? 'text-red-300'
+          : effectiveType === 'warning' ? 'text-amber-300'
           : 'text-text-primary';
         return (
-          <div
-            className={`fixed top-4 left-1/2 -translate-x-1/2 z-[10000] ${bgColor} border ${borderColor} rounded-xl px-5 py-3 shadow-2xl text-sm ${textColor} animate-slide-down backdrop-blur-sm cursor-pointer`}
-            onClick={() => { setLocalToast(null); setStoreToast(null); }}
-          >
-            {msg}
-          </div>
+          <>
+            {/* critical 토스트: 반투명 블러 오버레이 */}
+            {isCritical && (
+              <div
+                className="fixed inset-0 z-[9999] bg-black/30 backdrop-blur-[2px] animate-fade-in cursor-pointer"
+                onClick={() => { setLocalToast(null); setStoreToast(null); }}
+              />
+            )}
+            <div
+              className={`fixed top-4 left-1/2 -translate-x-1/2 z-[10000] ${bgColor} border ${borderColor} rounded-xl px-5 py-3 shadow-2xl text-sm ${textColor} animate-slide-down backdrop-blur-sm cursor-pointer`}
+              onClick={() => { setLocalToast(null); setStoreToast(null); }}
+            >
+              {msg}
+            </div>
+          </>
         );
       })()}
 

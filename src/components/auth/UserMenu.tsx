@@ -7,7 +7,6 @@ import { useAppStore } from '@/stores/useAppStore';
 export function UserMenu() {
   const { currentUser, setCurrentUser, setShowPasswordChange } = useAuthStore();
   const setView = useAppStore((s) => s.setView);
-  const setSettingsTab = useAppStore((s) => s.setSettingsTab);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -63,7 +62,7 @@ export function UserMenu() {
 
           {/* 휴가 관리 */}
           <button
-            onClick={() => { setSettingsTab('profile'); setView('settings'); setOpen(false); }}
+            onClick={() => { setView('vacation'); setOpen(false); }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-bg-border/50 transition-colors"
           >
             <Palmtree size={14} className="text-emerald-400" /> 휴가 관리

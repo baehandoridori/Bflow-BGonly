@@ -13,7 +13,7 @@ import {
   connectVacation,
   checkVacationConnection,
 } from '@/services/vacationService';
-import { DEFAULT_WEB_APP_URL } from '@/config';
+import { DEFAULT_WEB_APP_URL, DEFAULT_VACATION_URL } from '@/config';
 import { SettingsSection } from './SettingsSection';
 
 export function SheetsSection() {
@@ -28,7 +28,7 @@ export function SheetsSection() {
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   // 휴가 API 상태
-  const [vacationUrl, setVacationUrl] = useState('');
+  const [vacationUrl, setVacationUrl] = useState(DEFAULT_VACATION_URL || '');
   const [vacationError, setVacationError] = useState<string | null>(null);
   const [isVacationConnecting, setIsVacationConnecting] = useState(false);
   const [vacationSaveMessage, setVacationSaveMessage] = useState<string | null>(null);
