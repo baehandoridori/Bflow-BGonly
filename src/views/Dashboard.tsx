@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAuthStore } from '@/stores/useAuthStore';
+import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { OverallProgressWidget } from '@/components/widgets/OverallProgressWidget';
 import { StageBarsWidget } from '@/components/widgets/StageBarsWidget';
 import { AssigneeCardsWidget } from '@/components/widgets/AssigneeCardsWidget';
@@ -564,6 +566,19 @@ export function Dashboard() {
   const [showEpSwitcher, setShowEpSwitcher] = useState(false);
   const isEpMode = episodeDashboardEp !== null;
   const episodes = useDataStore((s) => s.episodes);
+  const currentUser = useAuthStore((s) => s.currentUser);
+
+  // ── 인사말 토스트 ──
+  const [greetingMsg, setGreetingMsg] = useState<string | null>(null);
+  useEffect(() => {
+    if (!currentUser?.name) return;
+    const first = isFirstLogin();
+    const msg = getGreeting(currentUser.name, first);
+    if (first) markFirstLoginShown();
+    setGreetingMsg(msg);
+    const timer = setTimeout(() => setGreetingMsg(null), first ? 4000 : 3000);
+    return () => clearTimeout(timer);
+  }, [currentUser?.name]);
 
   // 현재 에피소드의 파트 ID 목록 (위젯 피커 2단계용)
   const epPartIds = useMemo(() => {
@@ -773,6 +788,28 @@ export function Dashboard() {
     <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
       {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) */}
       <DashboardPlexus />
+
+      {/* 인사말 토스트 */}
+      <AnimatePresence>
+        {greetingMsg && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="flex justify-center pointer-events-none z-10"
+          >
+            <span className="px-5 py-2 rounded-full text-sm font-medium text-text-primary/90"
+              style={{
+                background: 'rgb(var(--color-bg-card) / 0.7)',
+                backdropFilter: 'blur(12px)',
+                border: '1px solid rgb(var(--color-bg-border) / 0.4)',
+              }}>
+              {greetingMsg}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 부서 탭 + 편집 버튼 */}
       <div className="flex items-center justify-between">
