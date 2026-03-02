@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { X, Droplets, Eye, Pin, PinOff, Minus, BarChart3 } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -71,8 +71,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottomHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [showHandle, setShowHandle] = useState(false);
-  const handleHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // showHandle은 제거됨 — 타이틀 바가 항상 표시되므로 불필요
 
   // AOT (Always On Top) — 기본: 켜짐
   const [isAOT, setIsAOT] = useState(true);
@@ -85,39 +84,12 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
   // 모핑 전환 상태: 'idle' | 'minimizing' | 'restoring'
   const [morphState, setMorphState] = useState<'idle' | 'minimizing' | 'restoring'>('idle');
 
-  // 마우스 위치 추적 → 상단(컨트롤) + 하단(슬라이더) 영역별 호버 감지
+  // 마우스 위치 추적 → 하단 슬라이더 영역 호버 감지
+  // (상단 컨트롤은 타이틀 바의 mouseenter/mouseleave로 처리)
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-
-    // 상단 드래그 핸들 영역 (위 40px)
-    const inHandleZone = y < 40;
-    if (inHandleZone) {
-      if (handleHideTimerRef.current) { clearTimeout(handleHideTimerRef.current); handleHideTimerRef.current = null; }
-      setShowHandle(true);
-    } else if (!inHandleZone && showHandle) {
-      if (!handleHideTimerRef.current) {
-        handleHideTimerRef.current = setTimeout(() => {
-          setShowHandle(false);
-          handleHideTimerRef.current = null;
-        }, 200);
-      }
-    }
-
-    // 상단 컨트롤 영역 (위 60px 전체 — 핀/최소화/닫기, 넉넉한 감지 영역)
-    const inControlZone = y < 60;
-    if (inControlZone) {
-      if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
-      setShowControls(true);
-    } else if (!inControlZone && showControls) {
-      if (!hideTimerRef.current) {
-        hideTimerRef.current = setTimeout(() => {
-          setShowControls(false);
-          hideTimerRef.current = null;
-        }, 600);
-      }
-    }
 
     // 하단 우측 슬라이더 영역 (아래 48px, 오른쪽 60%)
     const inBottomZone = y > rect.height - 48 && x > rect.width * 0.4;
@@ -132,27 +104,20 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         }, 400);
       }
     }
-  }, [showControls, showHandle, showBottomControls]);
+  }, [showBottomControls]);
 
   const handleMouseLeave = useCallback(() => {
     if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
-    if (handleHideTimerRef.current) { clearTimeout(handleHideTimerRef.current); handleHideTimerRef.current = null; }
     if (bottomHideTimerRef.current) { clearTimeout(bottomHideTimerRef.current); bottomHideTimerRef.current = null; }
     setShowControls(false);
-    setShowHandle(false);
     setShowBottomControls(false);
   }, []);
 
-  // 윈도우 바깥에서 진입 시에도 호버 감지 (onMouseMove만으로는 외부→내부 진입 미감지)
+  // 윈도우 바깥에서 진입 시에도 하단 슬라이더 호버 감지
   const handleMouseEnter = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    // 상단 60px 이내면 핸들 + 컨트롤 모두 표시 (넉넉한 영역)
-    if (y < 60) {
-      setShowHandle(true);
-      setShowControls(true);
-    }
     if (y > rect.height - 48 && x > rect.width * 0.4) setShowBottomControls(true);
   }, []);
 
@@ -358,6 +323,18 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     : widgetId.startsWith('ep-part-') ? { label: '파트별 상세', component: <EpSinglePartWidget /> }
     : undefined);
 
+  // EP 위젯: 에피소드 번호/이름을 포함한 동적 레이블
+  const epNum = useAppStore((s) => s.episodeDashboardEp);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const displayLabel = useMemo(() => {
+    if (!widgetMeta) return '';
+    if (widgetId.startsWith('ep-') && epNum !== null) {
+      const epName = episodeTitles[epNum] || `EP.${String(epNum).padStart(2, '0')}`;
+      return `${epName} — ${widgetMeta.label.replace(/^EP /, '')}`;
+    }
+    return widgetMeta.label;
+  }, [widgetId, widgetMeta, epNum, episodeTitles]);
+
   const handleClose = useCallback(() => {
     window.electronAPI?.widgetClosePopup?.(widgetId);
   }, [widgetId]);
@@ -445,7 +422,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           <div className="flex items-center justify-center gap-1.5 px-2 h-full w-full">
             <BarChart3 size={12} className="text-text-secondary shrink-0" />
             <span className="text-[11px] text-text-primary font-medium leading-none truncate">
-              {widgetMeta.label}
+              {displayLabel}
             </span>
           </div>
         </div>
@@ -556,77 +533,73 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         }}
       />
 
-      {/* ── 상단 드래그 핸들 ── */}
+      {/* ── 상단 타이틀 바 (드래그 핸들 + 제목 + 컨트롤 통합) ── */}
       <div
-        className="shrink-0 relative z-20 flex items-center justify-center"
+        className="shrink-0 relative z-20 flex items-center gap-2 px-3 select-none"
         style={{
           WebkitAppRegion: 'drag',
-          height: '28px',
-          cursor: showHandle ? 'grab' : 'default',
-        } as React.CSSProperties}
-      >
-        <div
-          className="flex items-center justify-center rounded-full"
-          style={{
-            width: '48px',
-            height: '6px',
-            background: 'rgba(255, 255, 255, 0.2)',
-            opacity: showHandle ? 1 : 0,
-            transition: 'opacity 0.2s ease',
-          }}
-        />
-      </div>
-
-      {/* ── 상단 컨트롤 (핀/최소화/닫기) — 항상 렌더링, opacity로 전환 ── */}
-      {/* no-drag 영역이 항상 존재해야 drag region이 마우스 이벤트를 삼키지 않음 */}
-      <div
-        className="absolute top-0 right-0 z-30 flex items-center gap-2 px-2.5"
-        style={{
-          WebkitAppRegion: 'no-drag',
-          height: '28px',
-          background: showControls
-            ? 'linear-gradient(90deg, transparent 0%, rgb(var(--color-shadow) / 0.35) 30%, rgb(var(--color-shadow) / 0.5) 100%)'
-            : 'transparent',
-          borderBottomLeftRadius: '8px',
-          opacity: showControls ? 1 : 0,
-          pointerEvents: showControls ? 'auto' : 'none',
-          transition: 'opacity 0.2s ease, background 0.2s ease',
+          height: '36px',
+          cursor: 'grab',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
         } as React.CSSProperties}
         onMouseEnter={() => {
           if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
           setShowControls(true);
         }}
+        onMouseLeave={() => {
+          hideTimerRef.current = setTimeout(() => {
+            setShowControls(false);
+            hideTimerRef.current = null;
+          }, 400);
+        }}
       >
-        {/* AOT 핀 토글 */}
-        <button
-          onClick={handleToggleAOT}
-          className="w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors cursor-pointer"
+        <BarChart3 size={13} className="text-accent/70 shrink-0" />
+        <span className="text-[12px] text-text-primary/70 font-medium truncate">
+          {displayLabel}
+        </span>
+        <div className="flex-1" />
+
+        {/* 컨트롤 (no-drag — 호버 시 표시) */}
+        <div
+          className="flex items-center gap-2"
           style={{
-            background: isAOT ? 'rgba(108, 92, 231, 0.7)' : 'rgba(255,255,255,0.15)',
-          }}
-          title={isAOT ? '항상 위에 표시 (켜짐)' : '항상 위에 표시 (꺼짐)'}
+            WebkitAppRegion: 'no-drag',
+            opacity: showControls ? 1 : 0,
+            pointerEvents: showControls ? 'auto' : 'none',
+            transition: 'opacity 0.2s ease',
+          } as React.CSSProperties}
         >
-          {isAOT
-            ? <Pin size={9} className="text-on-accent" strokeWidth={3} />
-            : <PinOff size={9} className="text-text-primary/60" strokeWidth={2.5} />}
-        </button>
+          {/* AOT 핀 토글 */}
+          <button
+            onClick={handleToggleAOT}
+            className="w-[18px] h-[18px] rounded-full flex items-center justify-center transition-colors cursor-pointer"
+            style={{
+              background: isAOT ? 'rgba(108, 92, 231, 0.7)' : 'rgba(255,255,255,0.15)',
+            }}
+            title={isAOT ? '항상 위에 표시 (켜짐)' : '항상 위에 표시 (꺼짐)'}
+          >
+            {isAOT
+              ? <Pin size={9} className="text-on-accent" strokeWidth={3} />
+              : <PinOff size={9} className="text-text-primary/60" strokeWidth={2.5} />}
+          </button>
 
-        {/* 최소화 (독 모드) */}
-        <button
-          onClick={handleMinimize}
-          className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-yellow-500/70 hover:bg-yellow-500 transition-colors cursor-pointer"
-          title="최소화"
-        >
-          <Minus size={9} className="text-text-primary" strokeWidth={3} />
-        </button>
+          {/* 최소화 (독 모드) */}
+          <button
+            onClick={handleMinimize}
+            className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-yellow-500/70 hover:bg-yellow-500 transition-colors cursor-pointer"
+            title="최소화"
+          >
+            <Minus size={9} className="text-text-primary" strokeWidth={3} />
+          </button>
 
-        {/* 닫기 */}
-        <button
-          onClick={handleClose}
-          className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-0.5"
-        >
-          <X size={9} className="text-text-primary" strokeWidth={3} />
-        </button>
+          {/* 닫기 */}
+          <button
+            onClick={handleClose}
+            className="w-[18px] h-[18px] rounded-full flex items-center justify-center bg-red-500/70 hover:bg-red-500 transition-colors cursor-pointer ml-0.5"
+          >
+            <X size={9} className="text-text-primary" strokeWidth={3} />
+          </button>
+        </div>
       </div>
 
       {/* ── 우하단 슬라이더 (오퍼시티/글래스) — 항상 렌더링, opacity로 전환 ── */}
