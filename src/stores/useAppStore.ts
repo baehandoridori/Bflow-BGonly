@@ -83,6 +83,10 @@ interface AppState {
   setSelectedScenes: (ids: Set<string>) => void;
   clearSelectedScenes: () => void;
 
+  // WelcomeToast 활성 상태 (인사말 표시 타이밍 제어)
+  welcomeActive: boolean;
+  setWelcomeActive: (v: boolean) => void;
+
   // 글로벌 토스트 (유형별 스타일 지원)
   toast: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null;
   setToast: (msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null) => void;
@@ -197,6 +201,9 @@ export const useAppStore = create<AppState>((set) => ({
   }),
   setSelectedScenes: (ids) => set({ selectedSceneIds: ids }),
   clearSelectedScenes: () => set({ selectedSceneIds: new Set<string>() }),
+
+  welcomeActive: false,
+  setWelcomeActive: (v) => set({ welcomeActive: v }),
 
   toast: null,
   setToast: (msg) => set({ toast: msg }),

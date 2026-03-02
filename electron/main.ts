@@ -901,7 +901,7 @@ ipcMain.handle('clipboard:read-image', () => {
 
 // ─── IPC 핸들러: 위젯 팝업 윈도우 ──────────────────────────────
 
-function openWidgetPopup(widgetId: string, widgetTitle: string): { ok: boolean } {
+function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<string, string>): { ok: boolean } {
   // 이미 열린 팝업이면 포커스
   const existing = widgetWindows.get(widgetId);
   if (existing && !existing.isDestroyed()) {
@@ -951,7 +951,11 @@ function openWidgetPopup(widgetId: string, widgetTitle: string): { ok: boolean }
   }
 
   // 같은 앱을 로드하되, 해시로 팝업 모드 + 위젯 ID 전달
-  const hash = `#widget-popup/${encodeURIComponent(widgetId)}`;
+  let hash = `#widget-popup/${encodeURIComponent(widgetId)}`;
+  if (extra && Object.keys(extra).length > 0) {
+    const qs = new URLSearchParams(extra).toString();
+    hash += `?${qs}`;
+  }
   if (process.env.VITE_DEV_SERVER_URL) {
     popupWin.loadURL(`${process.env.VITE_DEV_SERVER_URL}${hash}`);
   } else {
@@ -976,7 +980,7 @@ function openWidgetPopup(widgetId: string, widgetTitle: string): { ok: boolean }
     const b = popupWin.getBounds();
     widgetPositionCache.set(widgetId, {
       x: b.x, y: b.y, width: b.width, height: b.height,
-      opacity: 0.92, alwaysOnTop: initAOT, title: widgetTitle,
+      opacity: 1.0, alwaysOnTop: initAOT, title: widgetTitle,
     });
   }
   saveWidgetPositionsDebounced();
@@ -1063,8 +1067,8 @@ function openWidgetPopup(widgetId: string, widgetTitle: string): { ok: boolean }
   return { ok: true };
 }
 
-ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: string) => {
-  return openWidgetPopup(widgetId, widgetTitle);
+ipcMain.handle('widget:open-popup', (_event, widgetId: string, widgetTitle: string, extra?: Record<string, string>) => {
+  return openWidgetPopup(widgetId, widgetTitle, extra);
 });
 
 ipcMain.handle('widget:set-opacity', (_event, widgetId: string, opacity: number) => {

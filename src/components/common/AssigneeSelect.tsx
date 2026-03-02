@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 interface AssigneeSelectProps {
   value: string;
   onChange: (value: string) => void;
+  onClose?: () => void;
   placeholder?: string;
   className?: string;
 }
@@ -44,7 +45,7 @@ export function getUserColor(name: string): string {
  * Enter 시 드롭다운 맨 위 항목 자동 선택.
  * 드롭다운은 createPortal로 렌더링 (overflow 클리핑 방지).
  */
-export function AssigneeSelect({ value, onChange, placeholder = '담당자', className = '' }: AssigneeSelectProps) {
+export function AssigneeSelect({ value, onChange, onClose, placeholder = '담당자', className = '' }: AssigneeSelectProps) {
   const { users } = useAuthStore();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
@@ -97,11 +98,12 @@ export function AssigneeSelect({ value, onChange, placeholder = '담당자', cla
       ) {
         setOpen(false);
         if (query !== value) onChange(query);
+        onClose?.();
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [open, query, value, onChange]);
+  }, [open, query, value, onChange, onClose]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase();

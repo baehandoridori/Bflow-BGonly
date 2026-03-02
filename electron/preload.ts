@@ -160,8 +160,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('whiteboard:write-shared', data) as Promise<{ ok: boolean; error?: string }>,
 
   // 위젯 팝업 윈도우
-  widgetOpenPopup: (widgetId: string, title: string) =>
-    ipcRenderer.invoke('widget:open-popup', widgetId, title),
+  widgetOpenPopup: (widgetId: string, title: string, extra?: Record<string, string>) =>
+    ipcRenderer.invoke('widget:open-popup', widgetId, title, extra),
   widgetGetSavedState: (widgetId: string) =>
     ipcRenderer.invoke('widget:get-saved-state', widgetId) as Promise<{
       x: number; y: number; width: number; height: number;

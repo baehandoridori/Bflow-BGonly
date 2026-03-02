@@ -331,7 +331,7 @@ export interface ElectronAPI {
     x: number; y: number; width: number; height: number;
     opacity: number; alwaysOnTop: boolean;
   } | null>;
-  widgetOpenPopup?: (widgetId: string, title: string) => Promise<{ ok: boolean }>;
+  widgetOpenPopup?: (widgetId: string, title: string, extra?: Record<string, string>) => Promise<{ ok: boolean }>;
   widgetSetOpacity?: (widgetId: string, opacity: number) => Promise<void>;
   widgetClosePopup?: (widgetId: string) => Promise<void>;
   widgetResize?: (widgetId: string, width: number, height: number) => Promise<void>;

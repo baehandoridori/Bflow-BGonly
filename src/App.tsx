@@ -296,6 +296,7 @@ export default function App() {
       // 사용자가 로그인 폼에서 직접 로그인한 경우 → 스플래시 건너뛰기 + 환영 팝업
       setShowSplash(false);
       setWelcomeUser(currentUser.name);
+      useAppStore.getState().setWelcomeActive(true);
     }
     if (currentUser?.isInitialPassword) {
       setToast('초기 비밀번호(1234)를 사용 중입니다. 비밀번호를 변경해주세요.');
@@ -535,7 +536,7 @@ export default function App() {
 
       {/* 환영 팝업 (로그인 직후) */}
       {welcomeUser && (
-        <WelcomeToast userName={welcomeUser} onDismiss={() => setWelcomeUser(null)} />
+        <WelcomeToast userName={welcomeUser} onDismiss={() => { setWelcomeUser(null); useAppStore.getState().setWelcomeActive(false); }} />
       )}
 
       {/* 종료 대기 오버레이 (Phase 0-5) */}

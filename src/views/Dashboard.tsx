@@ -298,6 +298,7 @@ const DEPT_LAYOUT: Layout[] = [
   { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
   { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
   { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  { i: 'memo', x: 0, y: 45, w: 12, h: 15, minW: 2, minH: 2 },
 ];
 
 /* ── 통합 레이아웃 (24칸 그리드, rowHeight=16px) ── */
@@ -308,6 +309,7 @@ const ALL_LAYOUT: Layout[] = [
   { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
   { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
   { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  { i: 'memo', x: 0, y: 45, w: 12, h: 15, minW: 2, minH: 2 },
 ];
 
 /* ── 에피소드 대시보드 기본 레이아웃 (24칸 그리드) ── */
@@ -568,17 +570,19 @@ export function Dashboard() {
   const episodes = useDataStore((s) => s.episodes);
   const currentUser = useAuthStore((s) => s.currentUser);
 
-  // ── 인사말 토스트 ──
+  // ── 인사말 토스트 (WelcomeToast 완료 후 표시) ──
+  const welcomeActive = useAppStore((s) => s.welcomeActive);
   const [greetingMsg, setGreetingMsg] = useState<string | null>(null);
   useEffect(() => {
     if (!currentUser?.name) return;
+    if (welcomeActive) return; // WelcomeToast 활성 중이면 대기
     const first = isFirstLogin();
     const msg = getGreeting(currentUser.name, first);
     if (first) markFirstLoginShown();
     setGreetingMsg(msg);
     const timer = setTimeout(() => setGreetingMsg(null), first ? 4000 : 3000);
     return () => clearTimeout(timer);
-  }, [currentUser?.name]);
+  }, [currentUser?.name, welcomeActive]);
 
   // 현재 에피소드의 파트 ID 목록 (위젯 피커 2단계용)
   const epPartIds = useMemo(() => {

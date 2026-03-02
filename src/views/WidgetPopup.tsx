@@ -61,7 +61,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
  * 위젯 팝업 윈도우 전용 렌더러
  * Windows Acrylic 네이티브 블러 + CSS 글래스 틴트 + AOT 핀 + 독 모드
  */
-export function WidgetPopup({ widgetId }: { widgetId: string }) {
+export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extraParams?: Record<string, string> }) {
   const [appOpacity, setAppOpacity] = useState(1);
   const [glassIntensity, setGlassIntensity] = useState(0.7);
   const [showControls, setShowControls] = useState(false);
@@ -285,6 +285,12 @@ export function WidgetPopup({ widgetId }: { widgetId: string }) {
         if (!api) { setReady(true); return; }
 
         useAppStore.getState().setDashboardDeptFilter('all');
+
+        // 에피소드 위젯 팝업: URL 파라미터에서 에피소드 번호 복원
+        if (extraParams?.ep) {
+          const epNum = parseInt(extraParams.ep, 10);
+          if (!isNaN(epNum)) useAppStore.getState().setEpisodeDashboardEp(epNum);
+        }
 
         let connected = await checkConnection();
         if (!connected) {

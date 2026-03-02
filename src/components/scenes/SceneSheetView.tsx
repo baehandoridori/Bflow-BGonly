@@ -98,6 +98,7 @@ function SheetEditableCell({
           <AssigneeSelect
             value={draft}
             onChange={(v) => { onSave(sceneIndex, field, v); setEditing(false); }}
+            onClose={() => setEditing(false)}
             className="w-full"
           />
         </td>
