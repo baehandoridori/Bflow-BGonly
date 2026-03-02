@@ -7,7 +7,7 @@ export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' 
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
 export type SortDir = 'asc' | 'desc';
 export type StatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';
-export type SceneViewMode = 'card' | 'table';
+export type SceneViewMode = 'card' | 'table' | 'sheet';
 export type SceneGroupMode = 'flat' | 'layout';
 export type DashboardDeptFilter = Department | 'all';
 

@@ -6,8 +6,10 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Table2, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
+import { HighlightText } from '@/components/common/HighlightText';
+import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 
@@ -556,51 +558,6 @@ interface SceneTableProps {
   onCtrlClick?: (sceneId: string) => void;
 }
 
-/** 검색 하이라이트 CSS — 글로우 애니메이션 */
-const SEARCH_HIGHLIGHT_CSS = `
-@keyframes search-glow-pulse {
-  0%   { box-shadow: 0 0 3px 1px rgba(var(--color-accent), 0.5), 0 0 8px 2px rgba(var(--color-accent), 0.3); }
-  50%  { box-shadow: 0 0 6px 2px rgba(var(--color-accent), 0.7), 0 0 14px 4px rgba(var(--color-accent), 0.4); }
-  100% { box-shadow: 0 0 3px 1px rgba(var(--color-accent), 0.5), 0 0 8px 2px rgba(var(--color-accent), 0.3); }
-}
-.search-highlight-text {
-  background-color: rgba(var(--color-accent), 0.25);
-  color: rgba(var(--color-accent), 1);
-  font-weight: 600;
-  padding: 1px 3px;
-  border-radius: 3px;
-  animation: search-glow-pulse 1.5s ease-in-out infinite;
-  text-decoration: underline;
-  text-decoration-color: rgba(var(--color-accent), 0.5);
-  text-underline-offset: 2px;
-}
-`;
-let searchHighlightCssInjected = false;
-function ensureSearchHighlightCss() {
-  if (searchHighlightCssInjected) return;
-  const el = document.createElement('style');
-  el.textContent = SEARCH_HIGHLIGHT_CSS;
-  document.head.appendChild(el);
-  searchHighlightCssInjected = true;
-}
-
-/** 검색어 하이라이트 — CSS 클래스 기반 글로우 */
-function HighlightText({ text, query }: { text: string; query?: string }) {
-  if (!query || !text) return <>{text}</>;
-  const q = query.toLowerCase();
-  const idx = text.toLowerCase().indexOf(q);
-  if (idx === -1) return <>{text}</>;
-  ensureSearchHighlightCss();
-  return (
-    <>
-      {text.slice(0, idx)}
-      <span className="search-highlight-text">
-        {text.slice(idx, idx + query.length)}
-      </span>
-      {text.slice(idx + query.length)}
-    </>
-  );
-}
 
 function SceneTable({ scenes, allScenes, department, commentCounts, sheetName, onToggle, onDelete, onOpenDetail, searchQuery, selectedSceneIds, onCtrlClick }: SceneTableProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
@@ -2575,6 +2532,16 @@ export function ScenesView() {
             >
               <Table2 size={16} />
             </button>
+            <button
+              onClick={() => setSceneViewMode('sheet')}
+              className={cn(
+                'p-2 transition-colors',
+                sceneViewMode === 'sheet' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
+              )}
+              title="시트 뷰"
+            >
+              <Grid3x3 size={16} />
+            </button>
           </div>
 
           {/* 검색 */}
@@ -2704,6 +2671,22 @@ export function ScenesView() {
                     selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('bg:')).map(id => id.slice(3)))}
                     onCtrlClick={(id) => toggleSelectedScene(`bg:${id}`)}
                   />
+                ) : sceneViewMode === 'sheet' ? (
+                  <SceneSheetView
+                    scenes={sectionScenes}
+                    allScenes={bgPart.scenes}
+                    department="bg"
+                    commentCounts={commentCounts}
+                    sheetName={bgPart.sheetName}
+                    searchQuery={searchQuery}
+                    selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('bg:')).map(id => id.slice(3)))}
+                    sceneGroupMode={sceneGroupMode}
+                    onToggle={(id, stage) => handleToggleForSheet(bgPart.sheetName, id, stage)}
+                    onDelete={(idx) => handleDeleteSceneForSheet(bgPart.sheetName, idx)}
+                    onOpenDetail={(idx) => { setDetailContext({ sheetName: bgPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                    onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(bgPart.sheetName, idx, field, value)}
+                    onCtrlClick={(id) => toggleSelectedScene(`bg:${id}`)}
+                  />
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
                     {sectionScenes.map((scene, idx) => {
@@ -2786,6 +2769,22 @@ export function ScenesView() {
                     selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('act:')).map(id => id.slice(4)))}
                     onCtrlClick={(id) => toggleSelectedScene(`act:${id}`)}
                   />
+                ) : sceneViewMode === 'sheet' ? (
+                  <SceneSheetView
+                    scenes={sectionScenes}
+                    allScenes={actPart.scenes}
+                    department="acting"
+                    commentCounts={commentCounts}
+                    sheetName={actPart.sheetName}
+                    searchQuery={searchQuery}
+                    selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('act:')).map(id => id.slice(4)))}
+                    sceneGroupMode={sceneGroupMode}
+                    onToggle={(id, stage) => handleToggleForSheet(actPart.sheetName, id, stage)}
+                    onDelete={(idx) => handleDeleteSceneForSheet(actPart.sheetName, idx)}
+                    onOpenDetail={(idx) => { setDetailContext({ sheetName: actPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                    onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(actPart.sheetName, idx, field, value)}
+                    onCtrlClick={(id) => toggleSelectedScene(`act:${id}`)}
+                  />
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
                     {sectionScenes.map((scene, idx) => {
@@ -2857,6 +2856,26 @@ export function ScenesView() {
         </div>
       ) : sceneGroupMode === 'layout' && layoutGroups ? (
         /* ── 레이아웃별 그룹 뷰 (P1-4) ── */
+        sceneViewMode === 'sheet' ? (
+          /* 시트 뷰: 전체 씬을 전달하고 내부에서 layout 그룹핑 (rowSpan 병합) */
+          <div className="flex-1 overflow-auto">
+            <SceneSheetView
+              scenes={scenes}
+              allScenes={currentPart?.scenes ?? []}
+              department={effectiveDept}
+              commentCounts={commentCounts}
+              sheetName={currentPart?.sheetName ?? ''}
+              searchQuery={searchQuery}
+              selectedSceneIds={selectedSceneIds}
+              sceneGroupMode="layout"
+              onToggle={handleToggle}
+              onDelete={handleDeleteScene}
+              onOpenDetail={(idx) => setDetailSceneIndex(idx)}
+              onFieldUpdate={handleFieldUpdate}
+              onCtrlClick={(id) => toggleSelectedScene(id)}
+            />
+          </div>
+        ) : (
         <div className="flex-1 overflow-auto flex flex-col gap-4">
           {layoutGroups.map(([layoutKey, groupScenes]) => {
             const groupTotal = groupScenes.length * 4;
@@ -2952,6 +2971,7 @@ export function ScenesView() {
             );
           })}
         </div>
+        )
       ) : sceneViewMode === 'table' ? (
         /* ── 테이블 뷰 (플랫) ── */
         <div className="flex-1 overflow-auto">
@@ -2966,6 +2986,25 @@ export function ScenesView() {
             searchQuery={searchQuery}
             onOpenDetail={(idx) => setDetailSceneIndex(idx)}
             selectedSceneIds={selectedSceneIds}
+            onCtrlClick={(id) => toggleSelectedScene(id)}
+          />
+        </div>
+      ) : sceneViewMode === 'sheet' ? (
+        /* ── 시트 뷰 (플랫) ── */
+        <div className="flex-1 overflow-auto">
+          <SceneSheetView
+            scenes={scenes}
+            allScenes={currentPart?.scenes ?? []}
+            department={effectiveDept}
+            commentCounts={commentCounts}
+            sheetName={currentPart?.sheetName ?? ''}
+            searchQuery={searchQuery}
+            selectedSceneIds={selectedSceneIds}
+            sceneGroupMode="flat"
+            onToggle={handleToggle}
+            onDelete={handleDeleteScene}
+            onOpenDetail={(idx) => setDetailSceneIndex(idx)}
+            onFieldUpdate={handleFieldUpdate}
             onCtrlClick={(id) => toggleSelectedScene(id)}
           />
         </div>
