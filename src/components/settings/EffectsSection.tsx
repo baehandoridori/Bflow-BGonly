@@ -114,7 +114,14 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mouseleave', onMouseLeave);
 
-    const animate = () => {
+    let lastTime = 0;
+    const TARGET_FRAME_MS = 1000 / 60;
+
+    const animate = (timestamp: number) => {
+      const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
+      lastTime = timestamp;
+      const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3);
+
       const ps = particlesRef.current;
       const target = targetRef.current;
       const s = settingsRef.current;
@@ -135,18 +142,19 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
 
       ctx.clearRect(0, 0, PREVIEW_W, PREVIEW_H);
 
-      // 물리 업데이트
+      // 물리 업데이트 (delta-time 정규화)
+      const damp = Math.pow(0.985, dtFactor);
       for (const p of ps) {
         const dmx = p.x - mx;
         const dmy = p.y - my;
         const distMouse = Math.sqrt(dmx * dmx + dmy * dmy);
         if (distMouse < mRadius && distMouse > 1) {
           const force = (1 - distMouse / mRadius) * mForce;
-          p.vx += (dmx / distMouse) * force;
-          p.vy += (dmy / distMouse) * force;
+          p.vx += (dmx / distMouse) * force * dtFactor;
+          p.vy += (dmy / distMouse) * force * dtFactor;
         }
-        p.vx *= 0.985;
-        p.vy *= 0.985;
+        p.vx *= damp;
+        p.vy *= damp;
         const spd = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
         const minSpd = 0.05 * s.speed;
         if (spd < minSpd) {
@@ -154,8 +162,8 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
           p.vx = Math.cos(angle) * minSpd;
           p.vy = Math.sin(angle) * minSpd;
         }
-        p.x += p.vx * s.speed;
-        p.y += p.vy * s.speed;
+        p.x += p.vx * s.speed * dtFactor;
+        p.y += p.vy * s.speed * dtFactor;
         if (p.x < -10) p.x = PREVIEW_W + 10;
         if (p.x > PREVIEW_W + 10) p.x = -10;
         if (p.y < -10) p.y = PREVIEW_H + 10;

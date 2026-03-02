@@ -67,7 +67,8 @@ export async function saveImage(
   return result.url;
 }
 
-/** Electron 클립보드에서 이미지 읽기 → 리사이즈 → 저장 → URL 반환 */
+/** Electron 클립보드에서 이미지 읽기 → 저장 → URL 반환
+ *  Electron 메인 프로세스에서 이미 리사이즈+JPEG 인코딩 완료 → 재인코딩 불필요 */
 export async function pasteImageFromClipboard(
   sheetName: string,
   sceneId: string,
@@ -76,6 +77,5 @@ export async function pasteImageFromClipboard(
   const dataUrl = await window.electronAPI.clipboardReadImage();
   if (!dataUrl) return null;
 
-  const resized = await resizeDataUrl(dataUrl);
-  return saveImage(resized, sheetName, sceneId, imageType);
+  return saveImage(dataUrl, sheetName, sceneId, imageType);
 }

@@ -887,7 +887,15 @@ ipcMain.handle('image:get-dir', () => {
 ipcMain.handle('clipboard:read-image', () => {
   const image = clipboard.readImage();
   if (image.isEmpty()) return null;
-  const buffer = image.toJPEG(80);
+  // 메인 프로세스에서 리사이즈 완료 → 렌더러에서 재인코딩 불필요
+  const size = image.getSize();
+  const maxSize = 800;
+  let target = image;
+  if (size.width > maxSize || size.height > maxSize) {
+    const ratio = Math.min(maxSize / size.width, maxSize / size.height);
+    target = image.resize({ width: Math.round(size.width * ratio), height: Math.round(size.height * ratio) });
+  }
+  const buffer = target.toJPEG(80);
   return `data:image/jpeg;base64,${buffer.toString('base64')}`;
 });
 

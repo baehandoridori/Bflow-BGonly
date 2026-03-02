@@ -110,8 +110,15 @@ function DashboardPlexus() {
     window.addEventListener('mousemove', onMouse, { passive: true });
 
     let running = true;
-    const animate = () => {
+    let lastTime = 0;
+    const TARGET_FRAME_MS = 1000 / 60;
+
+    const animate = (timestamp: number) => {
       if (!running) return;
+      const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
+      lastTime = timestamp;
+      const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3);
+
       const { w, h } = sizeRef.current;
       ctx.clearRect(0, 0, w, h);
 
@@ -145,16 +152,17 @@ function DashboardPlexus() {
       const pts = ptsRef.current;
       const dc = cfgRef.current;
 
-      // 업데이트 위치
+      // 업데이트 위치 (delta-time 정규화)
+      const damp = Math.pow(0.992, dtFactor);
       for (const p of pts) {
         const dx = p.x - mx; const dy = p.y - my;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < dc.mouseRadius && dist > 1) {
           const force = (1 - dist / dc.mouseRadius) * dc.mouseForce;
-          p.vx += (dx / dist) * force; p.vy += (dy / dist) * force;
+          p.vx += (dx / dist) * force * dtFactor; p.vy += (dy / dist) * force * dtFactor;
         }
-        p.vx *= 0.992; p.vy *= 0.992;
-        p.x += p.vx * dc.speed; p.y += p.vy * dc.speed;
+        p.vx *= damp; p.vy *= damp;
+        p.x += p.vx * dc.speed * dtFactor; p.y += p.vy * dc.speed * dtFactor;
         if (p.x < -30) p.x = w + 30; if (p.x > w + 30) p.x = -30;
         if (p.y < -30) p.y = h + 30; if (p.y > h + 30) p.y = -30;
       }
