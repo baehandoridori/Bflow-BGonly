@@ -144,7 +144,7 @@ export function AssigneeSelect({ value, onChange, onClose, placeholder = '담당
             setQuery(selected);
             setOpen(false);
           }
-          if (e.key === 'Escape') setOpen(false);
+          if (e.key === 'Escape') { setOpen(false); onClose?.(); }
         }}
         placeholder={placeholder}
         className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent transition-colors"

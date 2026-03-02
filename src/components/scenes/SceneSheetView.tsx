@@ -69,16 +69,31 @@ function SheetEditableCell({
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
   const cellRef = useRef<HTMLTableCellElement>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   useEffect(() => { setDraft(value); }, [value]);
 
-  // 편집 모드 진입 시 포커스
+  // BUG-1 fix: isEditing이 해제될 때(언마운트 포함) 자동 commit
+  useEffect(() => {
+    if (!isEditing) return;
+    return () => {
+      if (draftRef.current !== valueRef.current) {
+        onSave(sceneIndex, field, draftRef.current);
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing]);
+
+  // 편집 모드 진입 시 포커스 (BUG-2 fix: initialChar 있으면 select 건너뜀)
   useEffect(() => {
     if (isEditing && type === 'text' && inputRef.current) {
       inputRef.current.focus();
-      inputRef.current.select();
+      if (initialChar == null) inputRef.current.select();
     }
-  }, [isEditing, type]);
+  }, [isEditing, type, initialChar]);
 
   // initialChar로 편집 시작 시 draft 초기화
   useEffect(() => {
@@ -315,7 +330,7 @@ export function SceneSheetView({
   const [isDragging, setIsDragging] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
 
-  const maxRow = displayScenes.length - 1;
+  const maxRow = Math.max(0, displayScenes.length - 1);
   const maxCol = EDITABLE_FIELDS.length - 1;
 
   // 선택 범위 계산
@@ -333,12 +348,13 @@ export function SceneSheetView({
     return set;
   }, [anchor, rangeEnd]);
 
-  // scenes 변경 시 선택 초기화
+  // scenes 변경 시 선택 초기화 (편집 중이면 보호)
   useEffect(() => {
+    if (editingCell) return;
     setAnchor(null);
     setRangeEnd(null);
-    setEditingCell(null);
     setInitialEditChar(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenes]);
 
   // 테이블 외부 클릭 시 선택 해제
@@ -478,7 +494,7 @@ export function SceneSheetView({
       if (scene) {
         const fieldName = EDITABLE_FIELDS[anchor.col];
         const val = (fieldName === 'memo' ? scene.memo : scene.assignee) || '';
-        navigator.clipboard.writeText(val);
+        navigator.clipboard.writeText(val).catch(() => {});
       }
       return;
     }
@@ -498,7 +514,7 @@ export function SceneSheetView({
           const fieldName = EDITABLE_FIELDS[c];
           onFieldUpdate(globalIdx, fieldName, trimmed);
         }
-      });
+      }).catch(() => {});
       return;
     }
 
