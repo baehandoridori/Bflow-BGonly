@@ -407,8 +407,11 @@ export function VacationView() {
     if (!force) {
       const cache = useAppStore.getState().vacationCache;
       if (cache && cache.userName === currentUser.name && Date.now() - cache.lastFetch < 300_000) {
-        setVacStatus(cache.status);
-        setVacLog(cache.log);
+        // mutation guard 기간에는 캐시도 적용하지 않음 (낙관적 값 유지)
+        if (Date.now() - mutationTimeRef.current > 30_000) {
+          setVacStatus(cache.status);
+          setVacLog(cache.log);
+        }
         return;
       }
     }
@@ -418,10 +421,10 @@ export function VacationView() {
         fetchVacationStatus(currentUser.name),
         fetchVacationLog(currentUser.name, new Date().getFullYear(), 20),
       ]);
-      setVacStatus(status);
-      setVacLog(log);
-      // 변경(등록/삭제) 직후 30초간은 캐시 저장 안 함 (Google Sheets 전파 대기)
+      // 변경(등록/삭제) 직후 30초간은 낙관적 상태 유지 (서버 데이터가 아직 stale일 수 있음)
       if (Date.now() - mutationTimeRef.current > 30_000) {
+        setVacStatus(status);
+        setVacLog(log);
         setVacationCache({ userName: currentUser.name, status, log, lastFetch: Date.now() });
       }
     } catch {
@@ -533,54 +536,110 @@ export function VacationView() {
     return () => document.removeEventListener('mousedown', handler);
   }, [dahyuDropdownOpen]);
 
+  /** 낙관적 일수 계산 */
+  const calcDays = (type: string, start: string, end: string): number => {
+    if (type === '오전반차' || type === '오후반차') return 0.5;
+    const s = new Date(start), e = new Date(end);
+    return Math.max(1, Math.round((e.getTime() - s.getTime()) / 86400000) + 1);
+  };
+
   const handleCancelVacation = async (rowIndex: number) => {
     if (!currentUser) return;
     setCancellingRow(rowIndex);
 
-    // 낙관적 업데이트
+    // 낙관적 로그 업데이트
     const prevLog = [...vacLog];
+    const prevStatus = vacStatus ? { ...vacStatus } : null;
+    const prevEvents = [...allEvents];
     setVacLog((prev) => prev.map((e) =>
       e.rowIndex === rowIndex ? { ...e, state: '취소' } : e,
     ));
 
-    setSyncing(true);
+    // 낙관적 상태 업데이트 (일수 복원)
+    const entry = vacLog.find(e => e.rowIndex === rowIndex);
+    if (entry && vacStatus) {
+      const days = typeof entry.days === 'number' ? entry.days : parseFloat(String(entry.days)) || 1;
+      const isAnnual = entry.type === '연차' || entry.type === '오전반차' || entry.type === '오후반차';
+      const isDahyu = entry.type === '대체휴가';
+      setVacStatus(prev => prev ? {
+        ...prev,
+        usedDays: isAnnual ? prev.usedDays - days : prev.usedDays,
+        remainingDays: isAnnual ? prev.remainingDays + days : prev.remainingDays,
+        altVacationUsed: isDahyu ? prev.altVacationUsed - days : prev.altVacationUsed,
+        altVacationNet: isDahyu ? prev.altVacationNet + days : prev.altVacationNet,
+        validUseCount: (prev.validUseCount ?? 1) - 1,
+      } : prev);
+
+      // 캘린더에서 해당 이벤트 제거
+      setAllEvents(prev => prev.filter(ev =>
+        !(ev.name === currentUser.name && ev.startDate === entry.startDate && ev.endDate === entry.endDate && ev.type === entry.type),
+      ));
+    }
+
+    // 스피너 즉시 해제, 백그라운드 API 호출
     mutationTimeRef.current = Date.now();
+    setCancellingRow(null);
+    setSyncing(false);
+
     try {
       const result = await cancelVacationRequest(currentUser.name, rowIndex);
       if (result.ok && result.success) {
         setToast({ message: '휴가가 취소되었습니다', type: 'success' });
         invalidateVacationCache();
-        // Google Sheets 처리 대기 후 재조회
-        await new Promise((r) => setTimeout(r, 2500));
-        await Promise.all([loadMyData(true), loadEvents()]);
+        // 8초 후 실제 데이터 갱신 (GAS 전파 대기)
+        setTimeout(async () => {
+          try { await Promise.all([loadMyData(true), loadEvents()]); } catch { /* silent */ }
+        }, 8000);
       } else {
+        // 롤백
         setVacLog(prevLog);
-        setToast({ message: result.error || '취소 실패', type: 'error' });
+        setVacStatus(prevStatus);
+        setAllEvents(prevEvents);
+        setToast({ message: '취소 실패: ' + (result.error || '알 수 없는 오류'), type: 'critical' });
       }
     } catch (err) {
+      // 롤백
       setVacLog(prevLog);
-      setToast({ message: err instanceof Error ? err.message : '취소 실패', type: 'error' });
-    } finally {
-      setCancellingRow(null);
-      setSyncing(false);
+      setVacStatus(prevStatus);
+      setAllEvents(prevEvents);
+      setToast({ message: '취소 실패: ' + (err instanceof Error ? err.message : '알 수 없는 오류'), type: 'critical' });
     }
   };
 
-  const handleVacSubmitStart = () => {
-    setSyncing(true);
+  const handleVacSubmitStart = (data: { type: string; startDate: string; endDate: string }) => {
     mutationTimeRef.current = Date.now();
+
+    // 낙관적 상태 업데이트
+    if (vacStatus) {
+      const days = calcDays(data.type, data.startDate, data.endDate);
+      const isAnnual = data.type === '연차' || data.type === '오전반차' || data.type === '오후반차';
+      const isDahyu = data.type === '대체휴가';
+      setVacStatus(prev => prev ? {
+        ...prev,
+        usedDays: isAnnual ? prev.usedDays + days : prev.usedDays,
+        remainingDays: isAnnual ? prev.remainingDays - days : prev.remainingDays,
+        overuse: isAnnual ? (prev.remainingDays - days) < 0 : prev.overuse,
+        altVacationUsed: isDahyu ? prev.altVacationUsed + days : prev.altVacationUsed,
+        altVacationNet: isDahyu ? prev.altVacationNet - days : prev.altVacationNet,
+        specialVacationUsed: data.type === '특별휴가' ? prev.specialVacationUsed + 1 : prev.specialVacationUsed,
+        totalUseCount: prev.totalUseCount + 1,
+        validUseCount: (prev.validUseCount ?? 0) + 1,
+      } : prev);
+    }
+
+    // 캘린더에 낙관적 이벤트 추가
+    if (currentUser) {
+      setAllEvents(prev => [...prev, { name: currentUser.name, type: data.type, startDate: data.startDate, endDate: data.endDate }]);
+    }
   };
 
   const handleVacSuccess = async () => {
-    // syncing은 이미 onSubmitStart에서 true — 여기서는 데이터 갱신만
     invalidateVacationCache();
-    // Google Sheets 처리 대기 후 재조회
-    await new Promise((r) => setTimeout(r, 2500));
+    // 30초 guard 해제 → 서버 데이터로 상태 갱신
+    mutationTimeRef.current = 0;
     try {
       await Promise.all([loadMyData(true), loadEvents()]);
-    } finally {
-      setSyncing(false);
-    }
+    } catch { /* silent */ }
   };
 
   const remainingColor = vacStatus
@@ -1097,7 +1156,12 @@ export function VacationView() {
           userName={currentUser.name}
           initialDate={selectedDate ?? undefined}
           onSubmitStart={handleVacSubmitStart}
-          onSubmitEnd={() => setSyncing(false)}
+          onSubmitEnd={() => {
+            // 실패 → guard 해제 → 서버 데이터로 낙관적 상태 복원
+            mutationTimeRef.current = 0;
+            loadMyData(true);
+            loadEvents();
+          }}
           onSuccess={handleVacSuccess}
         />
       )}

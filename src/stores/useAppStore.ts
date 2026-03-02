@@ -84,8 +84,8 @@ interface AppState {
   clearSelectedScenes: () => void;
 
   // 글로벌 토스트 (유형별 스타일 지원)
-  toast: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null;
-  setToast: (msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null) => void;
+  toast: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null;
+  setToast: (msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null) => void;
 
   // 테마
   themeId: string;

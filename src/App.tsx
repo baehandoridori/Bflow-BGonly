@@ -42,18 +42,18 @@ export default function App() {
   // 토스트 상태 (글로벌 스토어 기반)
   const storeToast = useAppStore((s) => s.toast);
   const setStoreToast = useAppStore((s) => s.setToast);
-  const [localToast, setLocalToast] = useState<string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null>(null);
+  const [localToast, setLocalToast] = useState<string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null>(null);
   const toast = storeToast || localToast;
-  const setToast = useCallback((msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' } | null) => {
+  const setToast = useCallback((msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null) => {
     setLocalToast(msg);
     if (msg) setStoreToast(null); // 로컬 우선
   }, [setStoreToast]);
 
-  // 글로벌 스토어 토스트 자동 제거 (유형별 시간: error/warning 5초, 나머지 3초)
+  // 글로벌 스토어 토스트 자동 제거 (유형별 시간: critical 10초, error/warning 5초, 나머지 3초)
   useEffect(() => {
     if (!storeToast) return;
     const toastType = typeof storeToast === 'string' ? 'info' : (storeToast.type || 'info');
-    const duration = (toastType === 'error' || toastType === 'warning') ? 5000 : 3000;
+    const duration = toastType === 'critical' ? 10000 : (toastType === 'error' || toastType === 'warning') ? 5000 : 3000;
     const timer = setTimeout(() => setStoreToast(null), duration);
     return () => clearTimeout(timer);
   }, [storeToast, setStoreToast]);
@@ -500,25 +500,36 @@ export default function App() {
       {toast && (() => {
         const msg = typeof toast === 'string' ? toast : toast.message;
         const type = typeof toast === 'string' ? 'info' : (toast.type || 'info');
-        const borderColor = type === 'success' ? 'border-emerald-500/40'
-          : type === 'error' ? 'border-red-500/40'
-          : type === 'warning' ? 'border-amber-500/40'
+        const isCritical = type === 'critical';
+        const effectiveType = isCritical ? 'error' : type;
+        const borderColor = effectiveType === 'success' ? 'border-emerald-500/40'
+          : effectiveType === 'error' ? 'border-red-500/40'
+          : effectiveType === 'warning' ? 'border-amber-500/40'
           : 'border-bg-border';
-        const bgColor = type === 'success' ? 'bg-emerald-500/10'
-          : type === 'error' ? 'bg-red-500/10'
-          : type === 'warning' ? 'bg-amber-500/10'
+        const bgColor = effectiveType === 'success' ? 'bg-emerald-500/10'
+          : effectiveType === 'error' ? 'bg-red-500/10'
+          : effectiveType === 'warning' ? 'bg-amber-500/10'
           : 'bg-bg-card';
-        const textColor = type === 'success' ? 'text-emerald-300'
-          : type === 'error' ? 'text-red-300'
-          : type === 'warning' ? 'text-amber-300'
+        const textColor = effectiveType === 'success' ? 'text-emerald-300'
+          : effectiveType === 'error' ? 'text-red-300'
+          : effectiveType === 'warning' ? 'text-amber-300'
           : 'text-text-primary';
         return (
-          <div
-            className={`fixed top-4 left-1/2 -translate-x-1/2 z-[10000] ${bgColor} border ${borderColor} rounded-xl px-5 py-3 shadow-2xl text-sm ${textColor} animate-slide-down backdrop-blur-sm cursor-pointer`}
-            onClick={() => { setLocalToast(null); setStoreToast(null); }}
-          >
-            {msg}
-          </div>
+          <>
+            {/* critical 토스트: 반투명 블러 오버레이 */}
+            {isCritical && (
+              <div
+                className="fixed inset-0 z-[9999] bg-black/30 backdrop-blur-[2px] animate-fade-in cursor-pointer"
+                onClick={() => { setLocalToast(null); setStoreToast(null); }}
+              />
+            )}
+            <div
+              className={`fixed top-4 left-1/2 -translate-x-1/2 z-[10000] ${bgColor} border ${borderColor} rounded-xl px-5 py-3 shadow-2xl text-sm ${textColor} animate-slide-down backdrop-blur-sm cursor-pointer`}
+              onClick={() => { setLocalToast(null); setStoreToast(null); }}
+            >
+              {msg}
+            </div>
+          </>
         );
       })()}
 
