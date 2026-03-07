@@ -73,16 +73,20 @@ function SheetEditableCell({
   draftRef.current = draft;
   const valueRef = useRef(value);
   valueRef.current = value;
+  const cancelledRef = useRef(false);
 
   useEffect(() => { setDraft(value); }, [value]);
 
   // BUG-1 fix: isEditing이 해제될 때(언마운트 포함) 자동 commit
+  // Escape 취소 시에는 cancelledRef로 저장 방지
   useEffect(() => {
     if (!isEditing) return;
+    cancelledRef.current = false;
     return () => {
-      if (draftRef.current !== valueRef.current) {
+      if (!cancelledRef.current && draftRef.current !== valueRef.current) {
         onSave(sceneIndex, field, draftRef.current);
       }
+      cancelledRef.current = false;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing]);
@@ -111,6 +115,7 @@ function SheetEditableCell({
   }, [isEditing, type]);
 
   const commit = useCallback(() => {
+    if (cancelledRef.current) { cancelledRef.current = false; return; }
     if (draft !== value) onSave(sceneIndex, field, draft);
     onStopEditing();
   }, [draft, value, onSave, sceneIndex, field, onStopEditing]);
@@ -142,7 +147,7 @@ function SheetEditableCell({
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === 'Enter') commit();
-            if (e.key === 'Escape') { setDraft(value); onStopEditing(); }
+            if (e.key === 'Escape') { cancelledRef.current = true; setDraft(value); onStopEditing(); }
             // 편집 중 키 이벤트가 테이블까지 전파되지 않도록
             e.stopPropagation();
           }}

@@ -94,7 +94,7 @@ export function AssigneeSelect({ value, onChange, onClose, placeholder = '담당
       const target = e.target as Node;
       if (
         ref.current && !ref.current.contains(target) &&
-        listRef.current && !listRef.current.contains(target)
+        (!listRef.current || !listRef.current.contains(target))
       ) {
         setOpen(false);
         if (query !== value) onChange(query);
