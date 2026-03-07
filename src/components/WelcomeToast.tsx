@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface WelcomeToastProps {
-  userName: string;
+  userName?: string;
+  message?: string;
   onDismiss: () => void;
 }
 
-export function WelcomeToast({ userName, onDismiss }: WelcomeToastProps) {
+export function WelcomeToast({ userName, message, onDismiss }: WelcomeToastProps) {
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
@@ -89,26 +90,39 @@ export function WelcomeToast({ userName, onDismiss }: WelcomeToastProps) {
               </div>
 
               <p className="text-sm tracking-wide whitespace-nowrap">
-                <motion.span
-                  className="font-semibold"
-                  style={{
-                    color: 'rgb(var(--color-accent))',
-                    textShadow: '0 0 16px rgb(var(--color-accent) / 0.4)',
-                  }}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.15, duration: 0.4, ease: 'easeOut' }}
-                >
-                  {userName}
-                </motion.span>
-                <motion.span
-                  className="text-text-primary/90"
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.25, duration: 0.4, ease: 'easeOut' }}
-                >
-                  님! 어서오세요
-                </motion.span>
+                {message ? (
+                  <motion.span
+                    className="text-text-primary/90"
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.15, duration: 0.4, ease: 'easeOut' }}
+                  >
+                    {message}
+                  </motion.span>
+                ) : (
+                  <>
+                    <motion.span
+                      className="font-semibold"
+                      style={{
+                        color: 'rgb(var(--color-accent))',
+                        textShadow: '0 0 16px rgb(var(--color-accent) / 0.4)',
+                      }}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.15, duration: 0.4, ease: 'easeOut' }}
+                    >
+                      {userName}
+                    </motion.span>
+                    <motion.span
+                      className="text-text-primary/90"
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.25, duration: 0.4, ease: 'easeOut' }}
+                    >
+                      님! 어서오세요
+                    </motion.span>
+                  </>
+                )}
               </p>
             </div>
           </div>

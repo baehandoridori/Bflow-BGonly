@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext } from 'react';
-import { StickyNote, Type, Eye, Pencil } from 'lucide-react';
+import { StickyNote, Type, Eye, Pencil, Plus, X } from 'lucide-react';
 import { Widget, WidgetIdContext, IsPopupContext } from './Widget';
 
 const MEMO_FILE = 'memo.json';
@@ -8,16 +8,46 @@ const DEFAULT_FONT_SIZE = 14;
 const MIN_FONT_SIZE = 10;
 const MAX_FONT_SIZE = 24;
 
-interface MemoData {
+interface MemoTab {
+  id: string;
+  title: string;
   content: string;
+}
+
+interface MemoData {
+  tabs: MemoTab[];
+  activeTabId: string;
   fontSize: number;
 }
 
-type MemoStore = Record<string, MemoData>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MemoStore = Record<string, any>;
 
 function getMemoKey(widgetId: string | null): string {
   if (!widgetId || widgetId === 'memo') return 'memo';
   return widgetId;
+}
+
+/** 기존 { content, fontSize } → 신규 { tabs, activeTabId, fontSize } 마이그레이션 */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function migrateMemoData(raw: any): MemoData {
+  if (raw && 'tabs' in raw && Array.isArray(raw.tabs)) {
+    return raw as MemoData;
+  }
+  // 레거시 형식
+  return {
+    tabs: [{ id: 'default', title: '메모 1', content: raw?.content ?? '' }],
+    activeTabId: 'default',
+    fontSize: raw?.fontSize ?? DEFAULT_FONT_SIZE,
+  };
+}
+
+function makeDefaultMemoData(): MemoData {
+  return {
+    tabs: [{ id: 'default', title: '메모 1', content: '' }],
+    activeTabId: 'default',
+    fontSize: DEFAULT_FONT_SIZE,
+  };
 }
 
 /* ── 간단한 마크다운 렌더러 ── */
@@ -101,6 +131,87 @@ function SimpleMarkdown({ content, fontSize }: { content: string; fontSize: numb
   return <div>{elements}</div>;
 }
 
+/* ── 탭 바 ── */
+
+function MemoTabBar({
+  tabs,
+  activeTabId,
+  onSelect,
+  onAdd,
+  onRename,
+  onDelete,
+}: {
+  tabs: MemoTab[];
+  activeTabId: string;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+  onRename: (id: string, newTitle: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+
+  return (
+    <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-bg-border/20 overflow-x-auto shrink-0 scrollbar-none">
+      {tabs.map((tab) => {
+        const isActive = tab.id === activeTabId;
+
+        if (editingId === tab.id) {
+          return (
+            <input
+              key={tab.id}
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              onBlur={() => { onRename(tab.id, editTitle || tab.title); setEditingId(null); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { onRename(tab.id, editTitle || tab.title); setEditingId(null); }
+                if (e.key === 'Escape') setEditingId(null);
+              }}
+              className="bg-accent/10 border-b border-accent text-[11px] text-text-primary outline-none w-16 px-1.5 py-0.5 rounded-t-md"
+              autoFocus
+              onClick={(e) => e.stopPropagation()}
+            />
+          );
+        }
+
+        return (
+          <div
+            key={tab.id}
+            className={`group relative flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md transition-colors whitespace-nowrap cursor-pointer select-none ${
+              isActive
+                ? 'bg-accent/15 text-accent font-medium'
+                : 'text-text-secondary/60 hover:text-text-primary hover:bg-accent/5'
+            }`}
+            onClick={() => onSelect(tab.id)}
+            onDoubleClick={() => {
+              setEditingId(tab.id);
+              setEditTitle(tab.title);
+            }}
+          >
+            <span>{tab.title}</span>
+            {tabs.length > 1 && (
+              <button
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 cursor-pointer"
+                onClick={(e) => { e.stopPropagation(); onDelete(tab.id); }}
+                title="탭 삭제"
+              >
+                <X size={9} />
+              </button>
+            )}
+          </div>
+        );
+      })}
+      <button
+        onClick={onAdd}
+        className="px-1.5 py-0.5 text-text-secondary/40 hover:text-accent hover:bg-accent/10 rounded-md transition-colors cursor-pointer text-sm shrink-0"
+        title="새 탭"
+      >
+        <Plus size={12} />
+      </button>
+    </div>
+  );
+}
+
 /* ── 메모 위젯 ── */
 
 export function MemoWidget() {
@@ -108,16 +219,15 @@ export function MemoWidget() {
   const isPopup = useContext(IsPopupContext);
   const memoKey = getMemoKey(widgetId);
 
-  const [content, setContent] = useState('');
-  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  const [memoData, setMemoData] = useState<MemoData>(makeDefaultMemoData);
   const [loaded, setLoaded] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const contentRef = useRef(content);
-  const fontSizeRef = useRef(fontSize);
-  contentRef.current = content;
-  fontSizeRef.current = fontSize;
+  const memoDataRef = useRef(memoData);
+  memoDataRef.current = memoData;
+
+  const activeTab = memoData.tabs.find((t) => t.id === memoData.activeTabId) ?? memoData.tabs[0];
 
   // 로드
   useEffect(() => {
@@ -125,8 +235,7 @@ export function MemoWidget() {
       try {
         const store = (await window.electronAPI?.readSettings(MEMO_FILE)) as MemoStore | null;
         if (store && store[memoKey]) {
-          setContent(store[memoKey].content ?? '');
-          setFontSize(store[memoKey].fontSize ?? DEFAULT_FONT_SIZE);
+          setMemoData(migrateMemoData(store[memoKey]));
         }
       } catch (err) {
         console.error('[MemoWidget] 로드 실패:', err);
@@ -136,14 +245,13 @@ export function MemoWidget() {
   }, [memoKey]);
 
   // 저장 (debounce) + 다른 윈도우에 시그널
-  const save = useCallback((newContent: string, newFontSize: number) => {
+  const save = useCallback((data: MemoData) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       try {
         const store = ((await window.electronAPI?.readSettings(MEMO_FILE)) ?? {}) as MemoStore;
-        store[memoKey] = { content: newContent, fontSize: newFontSize };
+        store[memoKey] = data;
         await window.electronAPI?.writeSettings(MEMO_FILE, store);
-        // 다른 윈도우에 변경 알림 (storage 이벤트는 다른 윈도우에서만 발생)
         localStorage.setItem('memo-sync', `${memoKey}:${Date.now()}`);
       } catch (err) {
         console.error('[MemoWidget] 저장 실패:', err);
@@ -161,8 +269,7 @@ export function MemoWidget() {
         try {
           const store = (await window.electronAPI?.readSettings(MEMO_FILE)) as MemoStore | null;
           if (store && store[memoKey]) {
-            setContent(store[memoKey].content ?? '');
-            setFontSize(store[memoKey].fontSize ?? DEFAULT_FONT_SIZE);
+            setMemoData(migrateMemoData(store[memoKey]));
           }
         } catch { /* ignore */ }
       })();
@@ -176,12 +283,11 @@ export function MemoWidget() {
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
-        const fc = contentRef.current;
-        const ff = fontSizeRef.current;
+        const data = memoDataRef.current;
         (async () => {
           try {
             const store = ((await window.electronAPI?.readSettings(MEMO_FILE)) ?? {}) as MemoStore;
-            store[memoKey] = { content: fc, fontSize: ff };
+            store[memoKey] = data;
             await window.electronAPI?.writeSettings(MEMO_FILE, store);
             localStorage.setItem('memo-sync', `${memoKey}:${Date.now()}`);
           } catch { /* ignore */ }
@@ -190,17 +296,71 @@ export function MemoWidget() {
     };
   }, [memoKey]);
 
+  // ── 탭 관리 핸들러 ──
+
+  const handleSelectTab = useCallback((id: string) => {
+    const updated = { ...memoData, activeTabId: id };
+    setMemoData(updated);
+    save(updated);
+  }, [memoData, save]);
+
+  const handleAddTab = useCallback(() => {
+    const newId = `tab-${Date.now()}`;
+    const newTab: MemoTab = {
+      id: newId,
+      title: `메모 ${memoData.tabs.length + 1}`,
+      content: '',
+    };
+    const updated: MemoData = {
+      ...memoData,
+      tabs: [...memoData.tabs, newTab],
+      activeTabId: newId,
+    };
+    setMemoData(updated);
+    save(updated);
+  }, [memoData, save]);
+
+  const handleRenameTab = useCallback((id: string, newTitle: string) => {
+    const updated: MemoData = {
+      ...memoData,
+      tabs: memoData.tabs.map((t) => (t.id === id ? { ...t, title: newTitle } : t)),
+    };
+    setMemoData(updated);
+    save(updated);
+  }, [memoData, save]);
+
+  const handleDeleteTab = useCallback((id: string) => {
+    if (memoData.tabs.length <= 1) return;
+    const idx = memoData.tabs.findIndex((t) => t.id === id);
+    const newTabs = memoData.tabs.filter((t) => t.id !== id);
+    const newActiveId = id === memoData.activeTabId
+      ? newTabs[Math.min(idx, newTabs.length - 1)].id
+      : memoData.activeTabId;
+    const updated: MemoData = { ...memoData, tabs: newTabs, activeTabId: newActiveId };
+    setMemoData(updated);
+    save(updated);
+  }, [memoData, save]);
+
+  // ── 콘텐츠/폰트 변경 ──
+
   const handleContentChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
-    setContent(val);
-    save(val, fontSizeRef.current);
-  }, [save]);
+    const updated: MemoData = {
+      ...memoData,
+      tabs: memoData.tabs.map((t) =>
+        t.id === memoData.activeTabId ? { ...t, content: val } : t,
+      ),
+    };
+    setMemoData(updated);
+    save(updated);
+  }, [memoData, save]);
 
   const handleFontSizeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const val = Number(e.target.value);
-    setFontSize(val);
-    save(contentRef.current, val);
-  }, [save]);
+    const updated: MemoData = { ...memoData, fontSize: val };
+    setMemoData(updated);
+    save(updated);
+  }, [memoData, save]);
 
   // 컨트롤 바 (미리보기 토글 + 글자 크기 슬라이더)
   const controls = (
@@ -218,29 +378,41 @@ export function MemoWidget() {
         min={MIN_FONT_SIZE}
         max={MAX_FONT_SIZE}
         step={1}
-        value={fontSize}
+        value={memoData.fontSize}
         onChange={handleFontSizeChange}
         className="w-14 h-1 cursor-pointer"
-        title={`글자 크기: ${fontSize}px`}
+        title={`글자 크기: ${memoData.fontSize}px`}
       />
       <span className="text-[10px] text-text-secondary/40 tabular-nums w-5 text-right">
-        {fontSize}
+        {memoData.fontSize}
       </span>
     </div>
+  );
+
+  const tabBar = (
+    <MemoTabBar
+      tabs={memoData.tabs}
+      activeTabId={memoData.activeTabId}
+      onSelect={handleSelectTab}
+      onAdd={handleAddTab}
+      onRename={handleRenameTab}
+      onDelete={handleDeleteTab}
+    />
   );
 
   const memoContent = loaded ? (
     previewMode ? (
       <div className="w-full h-full overflow-auto cursor-text" onClick={() => setPreviewMode(false)}>
-        <SimpleMarkdown content={content} fontSize={fontSize} />
+        <SimpleMarkdown content={activeTab?.content ?? ''} fontSize={memoData.fontSize} />
       </div>
     ) : (
       <textarea
-        value={content}
+        key={activeTab?.id}
+        value={activeTab?.content ?? ''}
         onChange={handleContentChange}
         placeholder="메모를 입력하세요... (- 목록, 1. 번호목록, **굵게**, *기울임*)"
         className="w-full h-full bg-transparent text-text-primary resize-none outline-none placeholder:text-text-secondary/30 leading-relaxed"
-        style={{ fontSize: `${fontSize}px`, minHeight: isPopup ? '100%' : '80px' }}
+        style={{ fontSize: `${memoData.fontSize}px`, minHeight: isPopup ? '100%' : '80px' }}
         spellCheck={false}
       />
     )
@@ -259,6 +431,7 @@ export function MemoWidget() {
           <span className="text-xs font-medium text-text-primary/70">메모</span>
           <div className="ml-auto">{controls}</div>
         </div>
+        {tabBar}
         <div className="flex-1 overflow-auto p-4">
           {memoContent}
         </div>
@@ -268,6 +441,7 @@ export function MemoWidget() {
 
   return (
     <Widget title="메모" icon={<StickyNote size={15} />} headerRight={controls}>
+      {tabBar}
       {memoContent}
     </Widget>
   );
