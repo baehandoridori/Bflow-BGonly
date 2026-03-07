@@ -34,6 +34,9 @@ import {
   deleteUserFromSheets,
   addScenes,
   bulkUpdateCells,
+  readRevisionsFromSheets,
+  addRevisionToSheets,
+  updateRevisionInSheets,
 } from './sheets';
 import type { SheetUser } from './sheets';
 import type { BatchAction } from './sheets';
@@ -723,6 +726,44 @@ ipcMain.handle('sheets:edit-comment', async (
 ipcMain.handle('sheets:delete-comment', async (_event, commentId: string) => {
   try {
     await deleteCommentFromSheets(commentId);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+// ─── IPC 핸들러: _COMP_REVISIONS (컴포지팅 리비전) ──────────
+
+ipcMain.handle('sheets:read-revisions', async () => {
+  try {
+    const data = await readRevisionsFromSheets();
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg, data: [] };
+  }
+});
+
+ipcMain.handle('sheets:add-revision', async (
+  _event, id: string, sceneKey: string, revisionNo: number, status: string,
+  description: string, imageUrl: string, department: string,
+  requesterId: string, requesterName: string, assignee: string, createdAt: string,
+) => {
+  try {
+    await addRevisionToSheets(id, sceneKey, revisionNo, status, description, imageUrl, department, requesterId, requesterName, assignee, createdAt);
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+});
+
+ipcMain.handle('sheets:update-revision', async (
+  _event, id: string, updates: Record<string, string>,
+) => {
+  try {
+    await updateRevisionInSheets(id, updates);
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

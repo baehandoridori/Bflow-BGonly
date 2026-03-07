@@ -10,6 +10,8 @@ import { ArrowUpDown, LayoutGrid, Table2, Layers, List, ChevronUp, ChevronDown, 
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
+import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
+import { useRevisionStore } from '@/stores/useRevisionStore';
 
 /* ── 라쏘 드래그 선택 훅 ── */
 interface LassoRect { x: number; y: number; w: number; h: number }
@@ -371,6 +373,7 @@ interface SceneCardProps {
   isSelected?: boolean;
   searchQuery?: string;
   commentCount?: number;
+  revisionCount?: number;
   selectionId?: string;  // 'all' 모드에서 부서 접두사 포함된 고유 ID (라쏘/선택용)
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
@@ -380,7 +383,7 @@ interface SceneCardProps {
   onShiftClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, selectionId, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, revisionCount = 0, selectionId, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
@@ -454,6 +457,16 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             >
               <MessageCircle size={11} fill="currentColor" />
               <span className="text-[11px] font-bold leading-none">{commentCount}</span>
+            </span>
+          )}
+          {revisionCount > 0 && (
+            <span
+              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full"
+              style={{ backgroundColor: 'rgba(253, 203, 110, 0.2)', color: '#FDCB6E' }}
+              title={`리비전 ${revisionCount}건`}
+            >
+              <Film size={11} />
+              <span className="text-[11px] font-bold leading-none">{revisionCount}</span>
             </span>
           )}
           <button
@@ -1253,6 +1266,7 @@ export function ScenesView() {
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const setEpisodes = useDataStore((s) => s.setEpisodes);
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery, selectedDepartment } = useAppStore();
+  const revisionCountByScene = useRevisionStore((s) => s.revisionCountByScene);
   const { sortKey, sortDir, statusFilter, sceneViewMode, sceneGroupMode } = useAppStore();
   const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment } = useAppStore();
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
@@ -1318,9 +1332,14 @@ export function ScenesView() {
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
 
-  // 댓글 모드 설정 (항상 시트 모드)
+  // 리비전 초기 로드
+  const loadRevisions = useRevisionStore((s) => s.loadRevisions);
+
+  // 댓글 + 리비전 모드 설정 (항상 시트 모드)
   useEffect(() => {
     setCommentsSheetsMode(true);
+    setRevisionsSheetsMode(true);
+    loadRevisions();
     return () => { invalidatePartCache(); };
   }, []);
 
@@ -2721,6 +2740,7 @@ export function ScenesView() {
                           selectionId={`bg:${scene.sceneId}`}
                           searchQuery={searchQuery}
                           commentCount={commentCounts[`${bgPart.sheetName}:${scene.no}`] ?? 0}
+                          revisionCount={revisionCountByScene[buildSceneKey(bgPart.sheetName, scene.sceneId)] ?? 0}
                           onToggle={(id, stage) => handleToggleForSheet(bgPart.sheetName, id, stage)}
                           onDelete={(si) => handleDeleteSceneForSheet(bgPart.sheetName, si)}
                           onOpenDetail={() => { setDetailContext({ sheetName: bgPart.sheetName, sceneIndex: sIdx }); setDetailSceneIndex(sIdx); }}
@@ -2803,6 +2823,7 @@ export function ScenesView() {
                           selectionId={`act:${scene.sceneId}`}
                           searchQuery={searchQuery}
                           commentCount={commentCounts[`${actPart.sheetName}:${scene.no}`] ?? 0}
+                          revisionCount={revisionCountByScene[buildSceneKey(actPart.sheetName, scene.sceneId)] ?? 0}
                           onToggle={(id, stage) => handleToggleForSheet(actPart.sheetName, id, stage)}
                           onDelete={(si) => handleDeleteSceneForSheet(actPart.sheetName, si)}
                           onOpenDetail={() => { setDetailContext({ sheetName: actPart.sheetName, sceneIndex: sIdx }); setDetailSceneIndex(sIdx); }}
@@ -2920,6 +2941,7 @@ export function ScenesView() {
                           isSelected={selectedSceneIds.has(scene.sceneId)}
                           searchQuery={searchQuery}
                           commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
+                          revisionCount={revisionCountByScene[buildSceneKey(currentPart?.sheetName ?? '', scene.sceneId)] ?? 0}
                           onToggle={handleToggle}
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -2986,6 +3008,7 @@ export function ScenesView() {
                 isSelected={selectedSceneIds.has(scene.sceneId)}
                 searchQuery={searchQuery}
                 commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
+                revisionCount={revisionCountByScene[buildSceneKey(currentPart?.sheetName ?? '', scene.sceneId)] ?? 0}
                 onToggle={handleToggle}
                 onDelete={handleDeleteScene}
                 onOpenDetail={() => setDetailSceneIndex(sIdx)}

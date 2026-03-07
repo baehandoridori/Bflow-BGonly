@@ -11,6 +11,7 @@ import { TeamView } from '@/views/TeamView';
 import { CalendarView } from '@/views/CalendarView';
 import { ScheduleView } from '@/views/ScheduleView';
 import { VacationView } from '@/views/VacationView';
+import CompositingView from '@/views/CompositingView';
 import { SettingsView } from '@/views/SettingsView';
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
@@ -395,6 +396,8 @@ export default function App() {
         return <ScheduleView />;
       case 'vacation':
         return <VacationView />;
+      case 'compositing':
+        return <CompositingView />;
       case 'settings':
         return <SettingsView />;
       default:

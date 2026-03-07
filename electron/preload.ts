@@ -118,6 +118,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsDeleteComment: (commentId: string) =>
     ipcRenderer.invoke('sheets:delete-comment', commentId),
 
+  // _COMP_REVISIONS (컴포지팅 리비전)
+  sheetsReadRevisions: () =>
+    ipcRenderer.invoke('sheets:read-revisions'),
+  sheetsAddRevision: (
+    id: string, sceneKey: string, revisionNo: number, status: string,
+    description: string, imageUrl: string, department: string,
+    requesterId: string, requesterName: string, assignee: string, createdAt: string,
+  ) =>
+    ipcRenderer.invoke('sheets:add-revision', id, sceneKey, revisionNo, status,
+      description, imageUrl, department, requesterId, requesterName, assignee, createdAt),
+  sheetsUpdateRevision: (id: string, updates: Record<string, string>) =>
+    ipcRenderer.invoke('sheets:update-revision', id, updates),
+
   // _REGISTRY (Phase 0-2: 에피소드/파트 중앙 관리)
   sheetsReadRegistry: () =>
     ipcRenderer.invoke('sheets:read-registry'),

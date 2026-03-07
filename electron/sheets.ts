@@ -523,6 +523,55 @@ export async function deleteCommentFromSheets(commentId: string): Promise<void> 
   await gasGet({ action: 'deleteComment', commentId });
 }
 
+// ─── _COMP_REVISIONS (컴포지팅 리비전) ────────────────────────
+
+export interface SheetRevision {
+  id: string;
+  sceneKey: string;
+  revisionNo: number;
+  status: string;
+  description: string;
+  imageUrl: string;
+  department: string;
+  requesterId: string;
+  requesterName: string;
+  assignee: string;
+  resolvedBy: string;
+  resolvedNote: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string;
+}
+
+export async function readRevisionsFromSheets(): Promise<SheetRevision[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+  const res = await gasFetchWithRetry(`${webAppUrl}?action=readRevisions`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json() as { ok: boolean; data?: SheetRevision[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '리비전 읽기 실패');
+  return json.data ?? [];
+}
+
+export async function addRevisionToSheets(
+  id: string, sceneKey: string, revisionNo: number, status: string,
+  description: string, imageUrl: string, department: string,
+  requesterId: string, requesterName: string, assignee: string, createdAt: string,
+): Promise<void> {
+  await gasGet({
+    action: 'addRevision', id, sceneKey, revisionNo: String(revisionNo), status,
+    description, imageUrl, department,
+    requesterId, requesterName, assignee, createdAt,
+  });
+}
+
+export async function updateRevisionInSheets(
+  id: string, updates: Record<string, string>,
+): Promise<void> {
+  await gasGet({
+    action: 'updateRevision', id, ...updates,
+  });
+}
+
 // ─── 이미지 업로드 (Drive에 저장 → URL 반환) ──────────────────
 
 export async function uploadImage(

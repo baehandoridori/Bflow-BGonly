@@ -73,6 +73,28 @@ export interface Scene {
   completedAt?: string;  // 완료 시각 (ISO 8601)
 }
 
+// ─── 컴포지팅 리비전 ─────────────────────────
+
+export type RevisionStatus = 'open' | 'in_progress' | 'resolved';
+
+export interface CompRevision {
+  id: string;
+  sceneKey: string;        // "EP01:A:a001" (에피소드:파트:씬ID)
+  revisionNo: number;      // 씬별 자동 증가 (Rev.1, Rev.2, ...)
+  status: RevisionStatus;
+  description: string;
+  imageUrl?: string;
+  department?: 'bg' | 'acting';
+  requesterId: string;
+  requesterName: string;
+  assignee?: string;
+  resolvedBy?: string;
+  resolvedNote?: string;
+  createdAt: string;       // ISO 8601
+  updatedAt: string;
+  resolvedAt?: string;
+}
+
 // ─── 사용자 & 인증 ─────────────────────────
 
 export interface AppUser {
@@ -308,6 +330,10 @@ export interface ElectronAPI {
   sheetsAddComment: (commentId: string, sheetName: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<SheetsUpdateResult>;
   sheetsEditComment: (commentId: string, text: string, mentions: string[]) => Promise<SheetsUpdateResult>;
   sheetsDeleteComment: (commentId: string) => Promise<SheetsUpdateResult>;
+  // _COMP_REVISIONS (컴포지팅 리비전)
+  sheetsReadRevisions: () => Promise<{ ok: boolean; data: { id: string; sceneKey: string; revisionNo: number; status: string; description: string; imageUrl: string; department: string; requesterId: string; requesterName: string; assignee: string; resolvedBy: string; resolvedNote: string; createdAt: string; updatedAt: string; resolvedAt: string }[]; error?: string }>;
+  sheetsAddRevision: (id: string, sceneKey: string, revisionNo: number, status: string, description: string, imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<SheetsUpdateResult>;
+  sheetsUpdateRevision: (id: string, updates: Record<string, string>) => Promise<SheetsUpdateResult>;
   // _REGISTRY (Phase 0-2)
   sheetsReadRegistry: () => Promise<{ ok: boolean; data: RegistryEntry[]; error?: string }>;
   sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<SheetsUpdateResult>;

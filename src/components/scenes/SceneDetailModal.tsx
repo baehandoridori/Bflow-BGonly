@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageCircle,
+  Film,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
@@ -20,7 +21,10 @@ import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { CommentPanel } from './CommentPanel';
+import { RevisionPanel } from './RevisionPanel';
 import { getComments } from '@/services/commentService';
+import { useRevisionStore } from '@/stores/useRevisionStore';
+import { buildSceneKey } from '@/services/revisionService';
 
 // ─── 타입 ──────────────────────────────────────────
 
@@ -306,12 +310,16 @@ export function SceneDetailModal({
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [showRevisions, setShowRevisions] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
+  const [revisionCount, setRevisionCount] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState<'storyboard' | 'guide' | null>(null);
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const sceneKey = `${sheetName}:${scene.no}`;
+  const revisionSceneKey = buildSceneKey(sheetName, scene.sceneId);
+  const openRevCount = useRevisionStore((s) => s.getOpenCount(revisionSceneKey));
 
   // 댓글 수 로드
   useEffect(() => {
@@ -770,7 +778,7 @@ export function SceneDetailModal({
               )}
             </motion.div>
 
-            {/* ── 말풍선 탭 버튼 — 의견 모달 열리면 접힘 ── */}
+            {/* ── 사이드 탭 버튼들 — 패널 열리면 해당 버튼 접힘 ── */}
             <AnimatePresence>
               {!showComments && (
                 <motion.button
@@ -779,13 +787,35 @@ export function SceneDetailModal({
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
                   transition={{ delay: 0.15, duration: 0.2 }}
-                  onClick={() => setShowComments(true)}
+                  onClick={() => { setShowComments(true); setShowRevisions(false); }}
                   className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:bg-accent/30 hover:text-accent transition-all cursor-pointer"
                   title="의견"
                 >
                   <MessageCircle size={18} />
                   {commentCount > 0 && (
                     <span className="text-[11px] font-bold leading-none">{commentCount}</span>
+                  )}
+                </motion.button>
+              )}
+            </AnimatePresence>
+
+            {/* ── 컴포지팅 리비전 탭 버튼 ── */}
+            <AnimatePresence>
+              {!showRevisions && (
+                <motion.button
+                  key="revision-tab"
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
+                  transition={{ delay: 0.2, duration: 0.2 }}
+                  onClick={() => { setShowRevisions(true); setShowComments(false); }}
+                  className="absolute -right-11 top-36 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer"
+                  style={openRevCount > 0 ? { backgroundColor: 'rgba(253, 203, 110, 0.15)' } : {}}
+                  title="컴포지팅 리비전"
+                >
+                  <Film size={18} />
+                  {openRevCount > 0 && (
+                    <span className="text-[11px] font-bold leading-none" style={{ color: '#FDCB6E' }}>{openRevCount}</span>
                   )}
                 </motion.button>
               )}
@@ -825,6 +855,47 @@ export function SceneDetailModal({
                 <CommentPanel
                   sceneKey={sceneKey}
                   onCountChange={setCommentCount}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── 컴포지팅 리비전 패널 ── */}
+          <AnimatePresence>
+            {showRevisions && (
+              <motion.div
+                key="revision-panel"
+                initial={{ opacity: 0, x: 30, scaleX: 0.9 }}
+                animate={{ opacity: 1, x: 0, scaleX: 1 }}
+                exit={{ opacity: 0, x: 30, scaleX: 0.9 }}
+                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                style={{ transformOrigin: 'left center' }}
+                className="absolute left-full top-0 ml-3 w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col"
+              >
+                {/* 패널 헤더 */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Film size={14} style={{ color: '#FDCB6E' }} />
+                    <h3 className="text-sm font-medium text-text-primary">컴포지팅</h3>
+                    {revisionCount > 0 && (
+                      <span className="text-[11px] px-1.5 py-0.5 rounded-full font-medium" style={{ color: '#FDCB6E', backgroundColor: 'rgba(253, 203, 110, 0.15)' }}>
+                        {revisionCount}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setShowRevisions(false)}
+                    className="p-1 text-text-secondary hover:text-text-primary rounded transition-colors cursor-pointer"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                {/* 패널 바디 */}
+                <RevisionPanel
+                  sheetName={sheetName}
+                  sceneId={scene.sceneId}
+                  department={department}
+                  onCountChange={setRevisionCount}
                 />
               </motion.div>
             )}
