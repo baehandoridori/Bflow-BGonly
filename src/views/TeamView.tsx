@@ -41,23 +41,25 @@ function buildTeamData(
 ): TeamMemberData[] {
   // 중복 사용자 제거 (동일 ID)
   const uniqueUsers = Array.from(new Map(users.map((u) => [u.id, u])).values());
-  // 씬 → 담당자 맵핑
+  // 씬 → 담당자 맵핑 (다중 담당자 쉼표 구분 지원)
   const sceneMap = new Map<string, SceneRef[]>();
   for (const ep of episodes) {
     for (const part of ep.parts) {
       for (const scene of part.scenes) {
-        const name = scene.assignee || '';
-        if (!name) continue;
-        const refs = sceneMap.get(name) || [];
-        refs.push({
-          scene,
-          episodeNumber: ep.episodeNumber,
-          episodeTitle: episodeTitles[ep.episodeNumber] || ep.title,
-          partId: part.partId,
-          department: part.department,
-          sheetName: part.sheetName,
-        });
-        sceneMap.set(name, refs);
+        if (!scene.assignee) continue;
+        const names = scene.assignee.split(',').map(s => s.trim()).filter(Boolean);
+        for (const name of names) {
+          const refs = sceneMap.get(name) || [];
+          refs.push({
+            scene,
+            episodeNumber: ep.episodeNumber,
+            episodeTitle: episodeTitles[ep.episodeNumber] || ep.title,
+            partId: part.partId,
+            department: part.department,
+            sheetName: part.sheetName,
+          });
+          sceneMap.set(name, refs);
+        }
       }
     }
   }

@@ -37,17 +37,21 @@ function buildAssigneeData(episodes: Episode[], episodeTitles: Record<number, st
   for (const ep of episodes) {
     for (const part of ep.parts) {
       for (const scene of part.scenes) {
-        const name = scene.assignee || '미배정';
-        const refs = map.get(name) || [];
-        refs.push({
-          scene,
-          episodeTitle: episodeTitles[ep.episodeNumber] || ep.title,
-          episodeNumber: ep.episodeNumber,
-          partId: part.partId,
-          department: part.department,
-          sheetName: part.sheetName,
-        });
-        map.set(name, refs);
+        const names = scene.assignee
+          ? scene.assignee.split(',').map(s => s.trim()).filter(Boolean)
+          : ['미배정'];
+        for (const name of names) {
+          const refs = map.get(name) || [];
+          refs.push({
+            scene,
+            episodeTitle: episodeTitles[ep.episodeNumber] || ep.title,
+            episodeNumber: ep.episodeNumber,
+            partId: part.partId,
+            department: part.department,
+            sheetName: part.sheetName,
+          });
+          map.set(name, refs);
+        }
       }
     }
   }

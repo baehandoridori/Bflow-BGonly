@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 import { ExternalLink } from 'lucide-react';
+import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 
 /** Dashboard에서 각 위젯을 래핑하여 widgetId를 전달하는 Context */
@@ -37,7 +38,12 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
 
   const handlePopout = () => {
     if (!widgetId) return;
-    window.electronAPI?.widgetOpenPopup?.(widgetId, title);
+    const extra: Record<string, string> = {};
+    const epNum = useAppStore.getState().episodeDashboardEp;
+    if (epNum !== null && widgetId.startsWith('ep-')) {
+      extra.ep = String(epNum);
+    }
+    window.electronAPI?.widgetOpenPopup?.(widgetId, title, extra);
   };
 
   // 팝업 모드: 헤더/외곽 없이 콘텐츠만 표시

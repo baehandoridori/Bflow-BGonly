@@ -175,8 +175,15 @@ function PlexusBackground() {
     window.addEventListener('mousemove', onMouse, { passive: true });
 
     let running = true;
-    const animate = () => {
+    let lastTime = 0;
+    const TARGET_FRAME_MS = 1000 / 60;
+
+    const animate = (timestamp: number) => {
       if (!running) return;
+      const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
+      lastTime = timestamp;
+      const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3); // cap at 3x (최소 ~20fps)
+
       const { w, h } = sizeRef.current;
       const particles = particlesRef.current;
 
@@ -223,17 +230,18 @@ function PlexusBackground() {
       const cfgSpeed = cfg.speed;
       const cfgConnDist = cfg.connectionDist;
 
-      // 물리 업데이트 (가상 캔버스 좌표)
+      // 물리 업데이트 (가상 캔버스 좌표, delta-time 정규화)
       for (const p of particles) {
         const dmx = p.x - mx;
         const dmy = p.y - my;
         const distMouse = Math.sqrt(dmx * dmx + dmy * dmy);
         if (distMouse < cfgMouseR && distMouse > 1) {
           const force = (1 - distMouse / cfgMouseR) * cfgMouseF * p.z;
-          p.vx += (dmx / distMouse) * force;
-          p.vy += (dmy / distMouse) * force;
+          p.vx += (dmx / distMouse) * force * dtFactor;
+          p.vy += (dmy / distMouse) * force * dtFactor;
         }
-        p.vx *= 0.98; p.vy *= 0.98;
+        const damp = Math.pow(0.98, dtFactor);
+        p.vx *= damp; p.vy *= damp;
         const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
         const minSpeed = p.baseSpeed * p.z * 0.15 * cfgSpeed;
         if (speed < minSpeed) {
@@ -241,7 +249,7 @@ function PlexusBackground() {
           p.vx = Math.cos(angle) * minSpeed;
           p.vy = Math.sin(angle) * minSpeed;
         }
-        p.x += p.vx * cfgSpeed; p.y += p.vy * cfgSpeed;
+        p.x += p.vx * cfgSpeed * dtFactor; p.y += p.vy * cfgSpeed * dtFactor;
         // 가상 캔버스 경계에서 래핑
         const margin = 50;
         if (p.x < -margin) p.x = VIRTUAL_W + margin;

@@ -1,9 +1,10 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider, type Layouts, type Layout } from 'react-grid-layout';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { OverallProgressWidget } from '@/components/widgets/OverallProgressWidget';
 import { StageBarsWidget } from '@/components/widgets/StageBarsWidget';
 import { AssigneeCardsWidget } from '@/components/widgets/AssigneeCardsWidget';
@@ -110,8 +111,15 @@ function DashboardPlexus() {
     window.addEventListener('mousemove', onMouse, { passive: true });
 
     let running = true;
-    const animate = () => {
+    let lastTime = 0;
+    const TARGET_FRAME_MS = 1000 / 60;
+
+    const animate = (timestamp: number) => {
       if (!running) return;
+      const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
+      lastTime = timestamp;
+      const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3);
+
       const { w, h } = sizeRef.current;
       ctx.clearRect(0, 0, w, h);
 
@@ -145,16 +153,17 @@ function DashboardPlexus() {
       const pts = ptsRef.current;
       const dc = cfgRef.current;
 
-      // 업데이트 위치
+      // 업데이트 위치 (delta-time 정규화)
+      const damp = Math.pow(0.992, dtFactor);
       for (const p of pts) {
         const dx = p.x - mx; const dy = p.y - my;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist < dc.mouseRadius && dist > 1) {
           const force = (1 - dist / dc.mouseRadius) * dc.mouseForce;
-          p.vx += (dx / dist) * force; p.vy += (dy / dist) * force;
+          p.vx += (dx / dist) * force * dtFactor; p.vy += (dy / dist) * force * dtFactor;
         }
-        p.vx *= 0.992; p.vy *= 0.992;
-        p.x += p.vx * dc.speed; p.y += p.vy * dc.speed;
+        p.vx *= damp; p.vy *= damp;
+        p.x += p.vx * dc.speed * dtFactor; p.y += p.vy * dc.speed * dtFactor;
         if (p.x < -30) p.x = w + 30; if (p.x > w + 30) p.x = -30;
         if (p.y < -30) p.y = h + 30; if (p.y > h + 30) p.y = -30;
       }
@@ -275,6 +284,11 @@ function getWidgetComponent(id: string, isEpMode: boolean): React.ReactNode | un
   return WIDGET_MAP[id];
 }
 
+/* ── 삭제 불가 기본 위젯 ── */
+const PROTECTED_WIDGETS = new Set([
+  'overall-progress', 'stage-bars', 'assignee-cards', 'episode-summary',
+]);
+
 /* ── 부서별 레이아웃 (24칸 그리드, rowHeight=16px) ── */
 const DEPT_LAYOUT: Layout[] = [
   { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
@@ -283,6 +297,7 @@ const DEPT_LAYOUT: Layout[] = [
   { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
   { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
   { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  { i: 'memo', x: 0, y: 45, w: 12, h: 15, minW: 2, minH: 2 },
 ];
 
 /* ── 통합 레이아웃 (24칸 그리드, rowHeight=16px) ── */
@@ -293,6 +308,7 @@ const ALL_LAYOUT: Layout[] = [
   { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
   { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
   { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  { i: 'memo', x: 0, y: 45, w: 12, h: 15, minW: 2, minH: 2 },
 ];
 
 /* ── 에피소드 대시보드 기본 레이아웃 (24칸 그리드) ── */
@@ -551,6 +567,7 @@ export function Dashboard() {
   const [showEpSwitcher, setShowEpSwitcher] = useState(false);
   const isEpMode = episodeDashboardEp !== null;
   const episodes = useDataStore((s) => s.episodes);
+  const currentUser = useAuthStore((s) => s.currentUser);
 
   // 현재 에피소드의 파트 ID 목록 (위젯 피커 2단계용)
   const epPartIds = useMemo(() => {
@@ -575,14 +592,46 @@ export function Dashboard() {
   const settleTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const isActive = draggingId !== null || resizingId !== null;
 
+  // 쓰레기통 드래그-투-딜리트
+  const trashRef = useRef<HTMLDivElement>(null);
+  const [trashHover, setTrashHover] = useState(false);
+  const [trashProtected, setTrashProtected] = useState(false);
+  const trashHoverRef = useRef(false);
+  trashHoverRef.current = trashHover;
+
+  // 드래그 중 마우스 위치 → 쓰레기통 호버 감지
+  useEffect(() => {
+    if (!draggingId) {
+      setTrashHover(false);
+      setTrashProtected(false);
+      return;
+    }
+    const onMove = (e: MouseEvent) => {
+      if (!trashRef.current) return;
+      const rect = trashRef.current.getBoundingClientRect();
+      const inZone = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+      setTrashHover(inZone);
+      setTrashProtected(inZone && PROTECTED_WIDGETS.has(draggingId));
+    };
+    window.addEventListener('mousemove', onMove, { passive: true });
+    return () => window.removeEventListener('mousemove', onMove);
+  }, [draggingId]);
+
   // 드래그 콜백
   const handleDragStart = useCallback((_layout: Layout[], oldItem: Layout) => {
     setDraggingId(oldItem.i);
     setHoveredId(null);
   }, []);
 
+  const removeWidgetRef = useRef<(id: string) => void>(() => {});
   const handleDragStop = useCallback((_layout: Layout[], oldItem: Layout) => {
+    // 쓰레기통 영역에 드롭 시 삭제 (보호 위젯 제외)
+    if (trashHoverRef.current && !PROTECTED_WIDGETS.has(oldItem.i)) {
+      removeWidgetRef.current(oldItem.i);
+    }
     setDraggingId(null);
+    setTrashHover(false);
+    setTrashProtected(false);
     setSettlingId(oldItem.i);
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     settleTimerRef.current = setTimeout(() => setSettlingId(null), 450);
@@ -695,6 +744,7 @@ export function Dashboard() {
       saveLayout(newLayout);
     }
   }, [widgetLayout, allWidgetLayout, episodeWidgetLayout, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, dashboardFilter, isEpMode]);
+  removeWidgetRef.current = handleRemoveWidget;
 
   const handleAddWidget = useCallback((widgetId: string) => {
     const current = isEpMode
@@ -1117,6 +1167,47 @@ export function Dashboard() {
             y={chartMenu.y}
             onClose={closeChartMenu}
           />
+        )}
+      </AnimatePresence>
+
+      {/* 쓰레기통 드롭 영역 — 드래그 중에만 표시 */}
+      <AnimatePresence>
+        {draggingId && (
+          <motion.div
+            ref={trashRef}
+            initial={{ opacity: 0, scale: 0.8, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 20 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-5 py-3 rounded-2xl pointer-events-auto"
+            style={{
+              background: trashProtected
+                ? 'rgba(253, 203, 110, 0.25)'
+                : trashHover
+                  ? 'rgba(255, 107, 107, 0.3)'
+                  : 'rgb(var(--color-bg-card) / 0.85)',
+              border: trashProtected
+                ? '1.5px solid rgba(253, 203, 110, 0.5)'
+                : trashHover
+                  ? '1.5px solid rgba(255, 107, 107, 0.6)'
+                  : '1px solid rgb(var(--color-bg-border) / 0.5)',
+              backdropFilter: 'blur(16px)',
+              boxShadow: trashHover
+                ? '0 8px 32px rgba(255, 107, 107, 0.2)'
+                : '0 4px 16px rgba(0,0,0,0.3)',
+              transition: 'background 0.15s, border 0.15s, box-shadow 0.15s',
+            }}
+          >
+            <Trash2
+              size={18}
+              className={trashProtected ? 'text-yellow-400' : trashHover ? 'text-red-400' : 'text-text-secondary/60'}
+              style={{ transition: 'color 0.15s' }}
+            />
+            <span className={`text-xs font-medium ${trashProtected ? 'text-yellow-400' : trashHover ? 'text-red-400' : 'text-text-secondary/60'}`}
+              style={{ transition: 'color 0.15s' }}>
+              {trashProtected ? '기본 위젯은 삭제 불가' : trashHover ? '놓으면 삭제' : '여기에 놓으면 삭제'}
+            </span>
+          </motion.div>
         )}
       </AnimatePresence>
 

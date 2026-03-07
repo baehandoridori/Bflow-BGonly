@@ -80,15 +80,21 @@ export function calcDashboardStats(episodes: Episode[], department?: Department)
     };
   });
 
-  // 담당자별 통계 (부분 진행률 반영)
+  // 담당자별 통계 (부분 진행률 반영, 다중 담당자 쉼표 구분 지원)
   const assigneeMap = new Map<string, { total: number; completed: number; progressSum: number }>();
   for (const scene of allScenes) {
-    const name = scene.assignee || '미배정';
-    const entry = assigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
-    entry.total++;
-    if (isFullyDone(scene)) entry.completed++;
-    entry.progressSum += sceneProgress(scene);
-    assigneeMap.set(name, entry);
+    const names = scene.assignee
+      ? scene.assignee.split(',').map(s => s.trim()).filter(Boolean)
+      : ['미배정'];
+    const prog = sceneProgress(scene);
+    const done = isFullyDone(scene);
+    for (const name of names) {
+      const entry = assigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
+      entry.total++;
+      if (done) entry.completed++;
+      entry.progressSum += prog;
+      assigneeMap.set(name, entry);
+    }
   }
 
   const assigneeStats: AssigneeStats[] = Array.from(assigneeMap.entries()).map(
@@ -207,15 +213,21 @@ export function calcEpisodeDetailStats(episodes: Episode[], epNum: number): Epis
     return { partId, bgPct, actPct, combinedPct, bgScenes: bgScenes.length, actScenes: actScenes.length, bgStages, actStages };
   });
 
-  // 담당자별 통계 (전체)
+  // 담당자별 통계 (전체, 다중 담당자 쉼표 구분 지원)
   const assigneeMap = new Map<string, { total: number; completed: number; progressSum: number }>();
   for (const scene of allScenes) {
-    const name = scene.assignee || '미배정';
-    const entry = assigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
-    entry.total++;
-    if (isFullyDone(scene)) entry.completed++;
-    entry.progressSum += sceneProgress(scene);
-    assigneeMap.set(name, entry);
+    const names = scene.assignee
+      ? scene.assignee.split(',').map(s => s.trim()).filter(Boolean)
+      : ['미배정'];
+    const prog = sceneProgress(scene);
+    const done = isFullyDone(scene);
+    for (const name of names) {
+      const entry = assigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
+      entry.total++;
+      if (done) entry.completed++;
+      entry.progressSum += prog;
+      assigneeMap.set(name, entry);
+    }
   }
   const perAssignee = Array.from(assigneeMap.entries()).map(([name, data]) => ({
     name,
@@ -230,12 +242,18 @@ export function calcEpisodeDetailStats(episodes: Episode[], epNum: number): Epis
     const deptScenes = ep.parts.filter((p) => p.department === dept).flatMap((p) => p.scenes);
     const deptAssigneeMap = new Map<string, { total: number; completed: number; progressSum: number }>();
     for (const scene of deptScenes) {
-      const name = scene.assignee || '미배정';
-      const entry = deptAssigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
-      entry.total++;
-      if (isFullyDone(scene)) entry.completed++;
-      entry.progressSum += sceneProgress(scene);
-      deptAssigneeMap.set(name, entry);
+      const names = scene.assignee
+        ? scene.assignee.split(',').map(s => s.trim()).filter(Boolean)
+        : ['미배정'];
+      const prog = sceneProgress(scene);
+      const done = isFullyDone(scene);
+      for (const name of names) {
+        const entry = deptAssigneeMap.get(name) || { total: 0, completed: 0, progressSum: 0 };
+        entry.total++;
+        if (done) entry.completed++;
+        entry.progressSum += prog;
+        deptAssigneeMap.set(name, entry);
+      }
     }
     perDeptAssignee[dept] = Array.from(deptAssigneeMap.entries()).map(([name, data]) => ({
       name,

@@ -26,6 +26,7 @@ import { applyTheme, getPreset, getLightColors } from '@/themes';
 import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
 import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
+import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_WEB_APP_URL, DEFAULT_VACATION_URL } from '@/config';
 
@@ -85,6 +86,8 @@ export default function App() {
   const [loadingSplashDone, setLoadingSplashDone] = useState(false);
   // 환영 팝업: 로그인 직후에만 표시
   const [welcomeUser, setWelcomeUser] = useState<string | null>(null);
+  // 시간대별 인사말 토스트 (WelcomeToast 스타일로 하단 표시)
+  const [greetingToast, setGreetingToast] = useState<string | null>(null);
 
   // 데이터 로드 함수 — Apps Script 웹 앱에서 데이터 읽기
   const loadData = useCallback(async () => {
@@ -355,6 +358,19 @@ export default function App() {
     };
   }, [loadData]);
 
+  // 자동 로그인: 스플래시 종료 후 시간대별 인사 표시
+  // welcomeUser가 있으면 수동 로그인이므로 건너뜀 (WelcomeToast onDismiss에서 처리)
+  const autoGreetShownRef = useRef(false);
+  useEffect(() => {
+    if (autoGreetShownRef.current) return;
+    if (!authReady || !currentUser || showSplash || welcomeUser) return;
+    autoGreetShownRef.current = true;
+    const first = isFirstLogin();
+    const msg = getGreeting(currentUser.name, first);
+    if (first) markFirstLoginShown();
+    setGreetingToast(msg);
+  }, [authReady, currentUser, showSplash, welcomeUser]);
+
   // ── 글로벌 단축키 (Phase 8-2) ──
   useGlobalShortcuts({ onReload: loadData });
 
@@ -538,7 +554,19 @@ export default function App() {
 
       {/* 환영 팝업 (로그인 직후) */}
       {welcomeUser && (
-        <WelcomeToast userName={welcomeUser} onDismiss={() => setWelcomeUser(null)} />
+        <WelcomeToast userName={welcomeUser} onDismiss={() => {
+          setWelcomeUser(null);
+          // 수동 로그인: "어서오세요" 사라진 후 시간대별 인사 표시
+          const first = isFirstLogin();
+          const msg = getGreeting(currentUser.name, first);
+          if (first) markFirstLoginShown();
+          setGreetingToast(msg);
+        }} />
+      )}
+
+      {/* 시간대별 인사말 토스트 (WelcomeToast 스타일) */}
+      {greetingToast && !welcomeUser && (
+        <WelcomeToast message={greetingToast} onDismiss={() => setGreetingToast(null)} />
       )}
 
       {/* 종료 대기 오버레이 (Phase 0-5) */}

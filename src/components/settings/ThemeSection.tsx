@@ -202,7 +202,7 @@ const WB_BG_PRESETS = [
   { id: 'black',     color: '#0F1117', label: '블랙' },
 ] as const;
 
-const DEFAULT_WB_BG = '#FFFFFF';
+const DEFAULT_WB_BG = '#1A1D27';
 
 function WhiteboardBgSection() {
   const [bgColor, setBgColor] = useState(DEFAULT_WB_BG);

@@ -13,11 +13,11 @@ export function WhiteboardWidget() {
   const [modalOpen, setModalOpen] = useState(false);
   const [data, setData] = useState<WhiteboardData | null>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
-  const [bgColor, setBgColor] = useState('#FFFFFF');
+  const [bgColor, setBgColor] = useState('#1A1D27');
 
   useEffect(() => {
     loadPreferences().then((prefs) => {
-      setBgColor(prefs?.whiteboardBgColor ?? '#FFFFFF');
+      setBgColor(prefs?.whiteboardBgColor ?? '#1A1D27');
     });
   }, []);
 

@@ -388,16 +388,20 @@ export function SpotlightSearch() {
       }
     }
 
-    // ── 담당자 검색 ──
+    // ── 담당자 검색 (다중 담당자 쉼표 구분 지원) ──
     const assigneeMap = new Map<string, { total: number; progressSum: number }>();
     for (const ep of episodes) {
       for (const part of ep.parts) {
         for (const scene of part.scenes) {
           if (!scene.assignee) continue;
-          const entry = assigneeMap.get(scene.assignee) || { total: 0, progressSum: 0 };
-          entry.total++;
-          entry.progressSum += sceneProgress(scene);
-          assigneeMap.set(scene.assignee, entry);
+          const names = scene.assignee.split(',').map(s => s.trim()).filter(Boolean);
+          const prog = sceneProgress(scene);
+          for (const name of names) {
+            const entry = assigneeMap.get(name) || { total: 0, progressSum: 0 };
+            entry.total++;
+            entry.progressSum += prog;
+            assigneeMap.set(name, entry);
+          }
         }
       }
     }
