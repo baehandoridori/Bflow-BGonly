@@ -20,7 +20,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
 import { getUserColor } from '@/components/common/AssigneeSelect';
 import { resizeBlob } from '@/utils/imageUtils';
-import type { CompRevision, RevisionStatus, RevisionPriority, Episode, Part, Scene } from '@/types';
+import type { CompRevision, RevisionStatus, RevisionPriority, Episode } from '@/types';
 
 // ─── 상수 ───────────────────────────────────
 
@@ -50,6 +50,28 @@ function getInitials(name: string): string {
 function parseSceneKey(sceneKey: string): { ep: string; part: string; sceneId: string } {
   const [ep, part, sceneId] = sceneKey.split(':');
   return { ep: ep || '', part: part || '', sceneId: sceneId || '' };
+}
+
+// ─── 시간 포맷 ───────────────────────────────
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = now.getTime() - d.getTime();
+  const min = Math.floor(diff / 60000);
+  const hr = Math.floor(diff / 3600000);
+  const day = Math.floor(diff / 86400000);
+  if (min < 1) return '방금';
+  if (min < 60) return `${min}분 전`;
+  if (hr < 24) return `${hr}시간 전`;
+  if (day < 7) return `${day}일 전`;
+  return d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' }) + ' ' + d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDateTime(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' }) + ' ' + d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
 }
 
 // ─── 씬 정보 매핑 타입 ──────────────────────
@@ -227,9 +249,13 @@ function StatusDropdown({
 
 function RevisionItem({
   revision,
+  isSelected,
+  onSelect,
   onStatusChange,
 }: {
   revision: CompRevision;
+  isSelected: boolean;
+  onSelect: () => void;
   onStatusChange: (status: RevisionStatus, note?: string) => void;
 }) {
   const [showResolveNote, setShowResolveNote] = useState(false);
@@ -257,7 +283,10 @@ function RevisionItem({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -8 }}
       transition={{ duration: 0.2 }}
-      className="flex items-start gap-3 px-4 py-2.5 ml-12 mr-4 rounded-lg hover:bg-white/[0.02] transition-colors group"
+      onClick={onSelect}
+      className={`flex items-start gap-3 px-4 py-2.5 rounded-lg transition-colors group cursor-pointer ${
+        isSelected ? 'bg-accent/[0.08]' : 'hover:bg-white/[0.02]'
+      }`}
     >
       {/* 요청자 아바타 */}
       <Avatar name={revision.requesterName} size={28} />
@@ -299,7 +328,11 @@ function RevisionItem({
               <textarea
                 value={resolveNote}
                 onChange={(e) => setResolveNote(e.target.value)}
-                placeholder="해결 메모 (선택)"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleResolve(); }
+                  if (e.key === 'Escape') { setShowResolveNote(false); setResolveNote(''); }
+                }}
+                placeholder="해결 메모 (선택, Enter로 전송)"
                 className="w-full px-3 py-1.5 text-xs bg-bg-primary rounded-lg border border-bg-border text-text-primary placeholder:text-text-secondary/50 resize-none focus:outline-none focus:ring-1 focus:ring-accent/50"
                 rows={2}
                 autoFocus
@@ -544,19 +577,23 @@ function AddRevisionForm({
 function SceneRow({
   group,
   expanded,
+  selectedRevisionId,
   onToggle,
+  onSelectRevision,
   onStatusChange,
 }: {
   group: SceneGroup;
   expanded: boolean;
+  selectedRevisionId: string | null;
   onToggle: () => void;
+  onSelectRevision: (rev: CompRevision) => void;
   onStatusChange: (revId: string, sceneKey: string, status: RevisionStatus, note?: string) => void;
 }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const { info, revisions, openCount, uniqueRequesters } = group;
 
-  // 씬 번호 포맷
-  const sceneLabel = `S${String(info.sceneNo).padStart(2, '0')}`;
+  // 씬 ID 표시 (a001, SC001 등 원본 그대로)
+  const sceneLabel = info.sceneId || `S${String(info.sceneNo).padStart(2, '0')}`;
 
   return (
     <div className="border-b border-bg-border/40 last:border-b-0">
@@ -616,7 +653,14 @@ function SceneRow({
             transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
             className="overflow-hidden"
           >
-            <div className="pb-2">
+            {/* 세로 가이드라인 + 리비전 아이템들 */}
+            <div className="relative pb-2 ml-8">
+              {/* 세로 가이드라인 */}
+              <div
+                className="absolute left-5 top-0 bottom-2 w-px"
+                style={{ backgroundColor: 'rgb(var(--color-bg-border) / 0.5)' }}
+              />
+
               {/* 리비전 아이템들 */}
               {[...revisions]
                 .sort((a, b) => {
@@ -630,6 +674,8 @@ function SceneRow({
                   <RevisionItem
                     key={rev.id}
                     revision={rev}
+                    isSelected={rev.id === selectedRevisionId}
+                    onSelect={() => onSelectRevision(rev)}
                     onStatusChange={(status, note) =>
                       onStatusChange(rev.id, rev.sceneKey, status, note)
                     }
@@ -651,7 +697,7 @@ function SceneRow({
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="ml-12 mr-4 mb-2"
+                    className="ml-4 mr-4 mb-2"
                   >
                     <button
                       onClick={(e) => { e.stopPropagation(); setShowAddForm(true); }}
@@ -712,6 +758,223 @@ function EpisodeFilter({
   );
 }
 
+// ─── 피드백 상세 패널 ────────────────────────
+
+function DetailPanel({
+  revision,
+  sceneInfo,
+  onClose,
+  onStatusChange,
+}: {
+  revision: CompRevision;
+  sceneInfo: SceneInfo | null;
+  onClose: () => void;
+  onStatusChange: (status: RevisionStatus, note?: string) => void;
+}) {
+  const [showResolveNote, setShowResolveNote] = useState(false);
+  const [resolveNote, setResolveNote] = useState('');
+
+  const handleResolve = () => {
+    onStatusChange('resolved', resolveNote);
+    setShowResolveNote(false);
+    setResolveNote('');
+  };
+
+  const handleStatusSelect = (status: RevisionStatus) => {
+    if (status === 'resolved') {
+      setShowResolveNote(true);
+      return;
+    }
+    onStatusChange(status);
+  };
+
+  const { ep, part, sceneId } = parseSceneKey(revision.sceneKey);
+
+  return (
+    <motion.div
+      initial={{ width: 0, opacity: 0 }}
+      animate={{ width: 340, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
+      className="shrink-0 border-l border-bg-border overflow-hidden h-full"
+    >
+      <div className="w-[340px] h-full overflow-y-auto">
+        <div className="p-5">
+          {/* 헤더 */}
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-sm font-semibold text-text-primary">피드백 상세</h3>
+            <button
+              onClick={onClose}
+              className="p-1 text-text-secondary hover:text-text-primary rounded-lg hover:bg-bg-border/50 transition-colors cursor-pointer"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* 상태 + 우선순위 뱃지 */}
+          <div className="flex items-center gap-2 mb-5">
+            <span
+              className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5"
+              style={{ color: STATUS_CONFIG[revision.status].color, backgroundColor: STATUS_CONFIG[revision.status].bg }}
+            >
+              {revision.status === 'open' && <Circle size={10} fill="currentColor" />}
+              {revision.status === 'in_progress' && <Clock size={10} />}
+              {revision.status === 'resolved' && <Check size={10} />}
+              {STATUS_CONFIG[revision.status].label}
+            </span>
+            <span
+              className="inline-flex items-center text-[11px] font-medium rounded-full px-2 py-0.5"
+              style={{ color: PRIORITY_CONFIG[revision.priority].color, backgroundColor: PRIORITY_CONFIG[revision.priority].bg }}
+            >
+              {revision.priority === 'urgent' && <AlertTriangle size={10} className="mr-0.5" />}
+              {PRIORITY_CONFIG[revision.priority].label}
+            </span>
+          </div>
+
+          {/* 요청자 정보 */}
+          <div className="flex items-center gap-3 mb-5">
+            <Avatar name={revision.requesterName} size={36} />
+            <div>
+              <p className="text-sm font-medium text-text-primary">{revision.requesterName}</p>
+              <p className="text-[11px] text-text-secondary">{formatDateTime(revision.createdAt)}</p>
+            </div>
+          </div>
+
+          {/* 설명 카드 */}
+          <div
+            className="rounded-xl p-4 mb-5 border border-bg-border/60"
+            style={{ background: 'rgba(26, 29, 39, 0.8)' }}
+          >
+            <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+              {revision.description}
+            </p>
+          </div>
+
+          {/* 이미지 */}
+          {revision.imageUrl && (
+            <div className="mb-5">
+              <img
+                src={revision.imageUrl}
+                alt="첨부"
+                className="rounded-xl max-h-48 w-full object-contain border border-bg-border/40"
+              />
+            </div>
+          )}
+
+          {/* 메타 정보 */}
+          <div className="space-y-3 mb-5">
+            {revision.frameNo && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">프레임</span>
+                <span className="text-xs font-bold text-text-primary font-mono">{revision.frameNo}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-text-secondary">씬</span>
+              <span className="text-xs font-bold text-text-primary">{sceneInfo?.sceneId || sceneId}</span>
+            </div>
+            {revision.department && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">파트</span>
+                <span className="text-xs text-text-primary">{revision.department === 'bg' ? 'BG' : '액팅'}</span>
+              </div>
+            )}
+            {revision.assignee && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">담당</span>
+                <span className="text-xs text-text-primary">{revision.assignee}</span>
+              </div>
+            )}
+          </div>
+
+          {/* 해결 정보 */}
+          {revision.status === 'resolved' && (
+            <div
+              className="rounded-xl p-4 mb-5 border"
+              style={{ borderColor: STATUS_CONFIG.resolved.color + '40', backgroundColor: STATUS_CONFIG.resolved.bg }}
+            >
+              <div className="flex items-center gap-2 mb-1.5">
+                <Check size={14} style={{ color: STATUS_CONFIG.resolved.color }} />
+                <span className="text-xs font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>해결됨</span>
+              </div>
+              {revision.resolvedBy && (
+                <p className="text-xs text-text-secondary mb-1">
+                  {revision.resolvedBy} · {revision.resolvedAt ? formatDateTime(revision.resolvedAt) : ''}
+                </p>
+              )}
+              {revision.resolvedNote && (
+                <p className="text-xs text-text-primary">{revision.resolvedNote}</p>
+              )}
+            </div>
+          )}
+
+          {/* 해결 메모 입력 */}
+          <AnimatePresence>
+            {showResolveNote && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mb-4 overflow-hidden"
+              >
+                <textarea
+                  value={resolveNote}
+                  onChange={(e) => setResolveNote(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleResolve(); }
+                    if (e.key === 'Escape') { setShowResolveNote(false); setResolveNote(''); }
+                  }}
+                  placeholder="해결 메모 (선택, Enter로 전송)"
+                  className="w-full px-3 py-2 text-sm bg-bg-primary rounded-xl border border-bg-border text-text-primary placeholder:text-text-secondary/50 resize-none focus:outline-none focus:ring-1 focus:ring-accent/50"
+                  rows={2}
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2 mt-2">
+                  <button
+                    onClick={() => { setShowResolveNote(false); setResolveNote(''); }}
+                    className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary cursor-pointer"
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={handleResolve}
+                    className="px-4 py-1.5 text-xs font-medium rounded-lg text-white cursor-pointer"
+                    style={{ backgroundColor: STATUS_CONFIG.resolved.color }}
+                  >
+                    해결
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* 상태 변경 버튼 */}
+          {revision.status !== 'resolved' && !showResolveNote && (
+            <button
+              onClick={() => handleStatusSelect('resolved')}
+              className="w-full flex items-center justify-center gap-2 py-3 text-sm font-medium rounded-xl text-white transition-all cursor-pointer hover:opacity-90"
+              style={{ backgroundColor: STATUS_CONFIG.resolved.color }}
+            >
+              <Check size={16} />
+              해결 완료로 변경
+            </button>
+          )}
+          {revision.status === 'open' && (
+            <button
+              onClick={() => handleStatusSelect('in_progress')}
+              className="w-full flex items-center justify-center gap-2 py-2.5 mt-2 text-xs font-medium rounded-xl border transition-all cursor-pointer"
+              style={{ borderColor: STATUS_CONFIG.in_progress.color + '40', color: STATUS_CONFIG.in_progress.color }}
+            >
+              <Clock size={14} />
+              진행 시작
+            </button>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── 메인 뷰 ─────────────────────────────────
 
 export default function CompositingView() {
@@ -724,6 +987,13 @@ export default function CompositingView() {
   const [statusFilter, setStatusFilter] = useState<'all' | RevisionStatus>('all');
   const [myTasksOnly, setMyTasksOnly] = useState(false);
   const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set());
+  const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
+
+  // 선택된 리비전 객체
+  const selectedRevision = useMemo(
+    () => selectedRevisionId ? revisions.find(r => r.id === selectedRevisionId) ?? null : null,
+    [revisions, selectedRevisionId],
+  );
 
   useEffect(() => {
     setRevisionsSheetsMode(sheetsConnected);
@@ -752,6 +1022,12 @@ export default function CompositingView() {
     }
     return map;
   }, [episodes]);
+
+  // 선택된 리비전의 씬 정보
+  const selectedRevisionSceneInfo = useMemo(
+    () => selectedRevision ? sceneInfoMap.get(selectedRevision.sceneKey) ?? null : null,
+    [selectedRevision, sceneInfoMap],
+  );
 
   // 씬 그룹 빌드
   const sceneGroups = useMemo(() => {
@@ -911,6 +1187,11 @@ export default function CompositingView() {
     }
   }, [expandedScenes.size, sceneGroups]);
 
+  // 리비전 선택
+  const handleSelectRevision = useCallback((rev: CompRevision) => {
+    setSelectedRevisionId(prev => prev === rev.id ? null : rev.id);
+  }, []);
+
   // 상태 변경
   const handleStatusChange = async (revId: string, sceneKey: string, status: RevisionStatus, note?: string) => {
     await updateStatus(revId, sceneKey, status, {
@@ -920,103 +1201,123 @@ export default function CompositingView() {
   };
 
   return (
-    <div className="h-full flex flex-col">
-      {/* 헤더 */}
-      <div className="shrink-0 px-6 pt-6 pb-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold text-text-primary">씬 타임라인</h1>
-            <span className="text-xs text-text-secondary">
-              {stats.totalScenes}개 씬 &middot; {stats.totalRevisions}개 피드백
-            </span>
+    <div className="h-full flex">
+      {/* 좌측: 씬 타임라인 */}
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        {/* 헤더 */}
+        <div className="shrink-0 px-6 pt-6 pb-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h1 className="text-lg font-semibold text-text-primary">씬 타임라인</h1>
+              <span className="text-xs text-text-secondary">
+                {stats.totalScenes}개 씬 &middot; {stats.totalRevisions}개 피드백
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleAll}
+                className="px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors cursor-pointer"
+              >
+                {expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          {/* 에피소드 필터 */}
+          <EpisodeFilter episodes={episodes} selected={selectedEp} onSelect={setSelectedEp} />
+
+          {/* 필터 바 */}
+          <div className="flex items-center gap-3">
+            {/* 상태 필터 */}
+            <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary/50">
+              {([
+                { key: 'all' as const, label: '전체' },
+                { key: 'open' as const, label: '대기' },
+                { key: 'in_progress' as const, label: '진행중' },
+                { key: 'resolved' as const, label: '해결' },
+              ]).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setStatusFilter(key)}
+                  className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
+                    statusFilter === key
+                      ? 'bg-accent/20 text-accent shadow-sm'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* 내 할 일 */}
             <button
-              onClick={toggleAll}
-              className="px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors cursor-pointer"
+              onClick={() => setMyTasksOnly(!myTasksOnly)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg border transition-all cursor-pointer ${
+                myTasksOnly
+                  ? 'border-accent bg-accent/10 text-accent'
+                  : 'border-bg-border text-text-secondary hover:text-text-primary'
+              }`}
             >
-              {expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
+              <ListFilter size={12} />
+              내 할 일
             </button>
+
+            {stats.totalOpen > 0 && (
+              <span
+                className="text-[11px] font-medium rounded-full px-2.5 py-1"
+                style={{ color: '#FDCB6E', backgroundColor: 'rgba(253, 203, 110, 0.12)' }}
+              >
+                {stats.totalOpen}건 미해결
+              </span>
+            )}
           </div>
         </div>
 
-        {/* 에피소드 필터 */}
-        <EpisodeFilter episodes={episodes} selected={selectedEp} onSelect={setSelectedEp} />
-
-        {/* 필터 바 */}
-        <div className="flex items-center gap-3">
-          {/* 상태 필터 */}
-          <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary/50">
-            {([
-              { key: 'all' as const, label: '전체' },
-              { key: 'open' as const, label: '대기' },
-              { key: 'in_progress' as const, label: '진행중' },
-              { key: 'resolved' as const, label: '해결' },
-            ]).map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => setStatusFilter(key)}
-                className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
-                  statusFilter === key
-                    ? 'bg-accent/20 text-accent shadow-sm'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* 내 할 일 */}
-          <button
-            onClick={() => setMyTasksOnly(!myTasksOnly)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg border transition-all cursor-pointer ${
-              myTasksOnly
-                ? 'border-accent bg-accent/10 text-accent'
-                : 'border-bg-border text-text-secondary hover:text-text-primary'
-            }`}
-          >
-            <ListFilter size={12} />
-            내 할 일
-          </button>
-
-          {stats.totalOpen > 0 && (
-            <span
-              className="text-[11px] font-medium rounded-full px-2.5 py-1"
-              style={{ color: '#FDCB6E', backgroundColor: 'rgba(253, 203, 110, 0.12)' }}
-            >
-              {stats.totalOpen}건 미해결
-            </span>
+        {/* 씬 타임라인 목록 */}
+        <div className="flex-1 overflow-y-auto">
+          {isLoading && revisions.length === 0 ? (
+            <div className="flex items-center justify-center py-16 text-text-secondary/50 text-sm">
+              로딩 중...
+            </div>
+          ) : sceneGroups.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-text-secondary/50">
+              <Filter size={32} className="mb-3" />
+              <p className="text-sm">피드백이 있는 씬이 없습니다</p>
+              <p className="text-xs mt-1">씬 상세에서 수정 요청을 등록해보세요</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-bg-border/20">
+              {sceneGroups.map((group) => (
+                <SceneRow
+                  key={group.sceneKey}
+                  group={group}
+                  expanded={expandedScenes.has(group.sceneKey)}
+                  selectedRevisionId={selectedRevisionId}
+                  onToggle={() => toggleScene(group.sceneKey)}
+                  onSelectRevision={handleSelectRevision}
+                  onStatusChange={handleStatusChange}
+                />
+              ))}
+            </div>
           )}
         </div>
       </div>
 
-      {/* 씬 타임라인 목록 */}
-      <div className="flex-1 overflow-y-auto">
-        {isLoading && revisions.length === 0 ? (
-          <div className="flex items-center justify-center py-16 text-text-secondary/50 text-sm">
-            로딩 중...
-          </div>
-        ) : sceneGroups.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-text-secondary/50">
-            <Filter size={32} className="mb-3" />
-            <p className="text-sm">피드백이 있는 씬이 없습니다</p>
-            <p className="text-xs mt-1">씬 상세에서 수정 요청을 등록해보세요</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-bg-border/20">
-            {sceneGroups.map((group) => (
-              <SceneRow
-                key={group.sceneKey}
-                group={group}
-                expanded={expandedScenes.has(group.sceneKey)}
-                onToggle={() => toggleScene(group.sceneKey)}
-                onStatusChange={handleStatusChange}
-              />
-            ))}
-          </div>
+      {/* 우측: 피드백 상세 패널 */}
+      <AnimatePresence>
+        {selectedRevision && (
+          <DetailPanel
+            key={selectedRevision.id}
+            revision={selectedRevision}
+            sceneInfo={selectedRevisionSceneInfo}
+            onClose={() => setSelectedRevisionId(null)}
+            onStatusChange={(status, note) =>
+              handleStatusChange(selectedRevision.id, selectedRevision.sceneKey, status, note)
+            }
+          />
         )}
-      </div>
+      </AnimatePresence>
     </div>
   );
 }
