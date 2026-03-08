@@ -12,6 +12,7 @@ import {
   ListFilter,
   ImagePlus,
   X,
+  FolderOpen,
 } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -50,6 +51,38 @@ function getInitials(name: string): string {
 function parseSceneKey(sceneKey: string): { ep: string; part: string; sceneId: string } {
   const [ep, part, sceneId] = sceneKey.split(':');
   return { ep: ep || '', part: part || '', sceneId: sceneId || '' };
+}
+
+/** 텍스트에서 G: 로 시작하는 경로를 분리 */
+function parsePathsFromText(text: string): { description: string; paths: string[] } {
+  // G:로 시작하는 경로 패턴: G:\로 시작해서 공백이나 줄바꿈 전까지
+  const pathRegex = /G:\\[^\s\n]+/g;
+  const paths: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pathRegex.exec(text)) !== null) {
+    paths.push(match[0]);
+  }
+  // 경로를 제거한 나머지 텍스트
+  const description = text.replace(pathRegex, '').replace(/\n{2,}/g, '\n').trim();
+  return { description, paths };
+}
+
+/** 경로 뱃지 컴포넌트 */
+function PathBadge({ path }: { path: string }) {
+  // 경로의 마지막 부분(파일명 또는 폴더명)만 표시
+  const segments = path.replace(/\\/g, '/').split('/');
+  const shortName = segments[segments.length - 1] || segments[segments.length - 2] || path;
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[11px] font-mono rounded px-1.5 py-0.5 max-w-full cursor-default"
+      style={{ color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.1)', border: '1px solid rgba(116, 185, 255, 0.2)' }}
+      title={path}
+    >
+      <FolderOpen size={10} className="shrink-0" />
+      <span className="truncate">{shortName}</span>
+    </span>
+  );
 }
 
 // ─── 시간 포맷 ───────────────────────────────
@@ -261,6 +294,7 @@ function RevisionItem({
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const isResolved = revision.status === 'resolved';
+  const { description: descText, paths } = parsePathsFromText(revision.description);
 
   const handleStatusSelect = (status: RevisionStatus) => {
     if (status === 'resolved') {
@@ -284,10 +318,15 @@ function RevisionItem({
       exit={{ opacity: 0, x: -8 }}
       transition={{ duration: 0.2 }}
       onClick={onSelect}
-      className={`flex items-start gap-3 px-4 py-2.5 rounded-lg transition-colors group cursor-pointer ${
+      className={`relative flex items-start gap-3 pl-10 pr-4 py-2.5 rounded-lg transition-colors group cursor-pointer ${
         isSelected ? 'bg-accent/[0.08]' : 'hover:bg-white/[0.02]'
       }`}
     >
+      {/* 트리 가지 (가로 커넥터) */}
+      <div
+        className="absolute left-[22px] top-[18px] w-3 h-px bg-bg-border/50"
+      />
+
       {/* 요청자 아바타 */}
       <Avatar name={revision.requesterName} size={28} />
 
@@ -306,8 +345,15 @@ function RevisionItem({
             isResolved ? 'line-through text-text-secondary/50' : 'text-text-primary'
           }`}
         >
-          {revision.description}
+          {descText || revision.description}
         </p>
+
+        {/* 경로 뱃지 */}
+        {paths.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {paths.map((p, i) => <PathBadge key={i} path={p} />)}
+          </div>
+        )}
 
         {/* 해결 메모 */}
         {isResolved && revision.resolvedNote && (
@@ -641,8 +687,7 @@ function SceneRow({
             <div className="relative pb-2 ml-8">
               {/* 세로 가이드라인 */}
               <div
-                className="absolute left-5 top-0 bottom-2 w-px"
-                style={{ backgroundColor: 'rgb(var(--color-bg-border) / 0.5)' }}
+                className="absolute left-[22px] top-0 bottom-2 w-px bg-bg-border/50"
               />
 
               {/* 리비전 아이템들 */}
@@ -757,6 +802,7 @@ function DetailPanel({
 }) {
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
+  const { description: descText, paths: detailPaths } = parsePathsFromText(revision.description);
 
   const handleResolve = () => {
     onStatusChange('resolved', resolveNote);
@@ -830,8 +876,24 @@ function DetailPanel({
             style={{ background: 'rgba(26, 29, 39, 0.8)' }}
           >
             <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
-              {revision.description}
+              {descText || revision.description}
             </p>
+            {detailPaths.length > 0 && (
+              <div className="flex flex-col gap-1.5 mt-3 pt-3 border-t border-bg-border/40">
+                <span className="text-[10px] text-text-secondary/60 font-medium uppercase tracking-wider">경로</span>
+                {detailPaths.map((p, i) => (
+                  <span
+                    key={i}
+                    className="flex items-center gap-1.5 text-xs font-mono rounded-lg px-2.5 py-1.5"
+                    style={{ color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.08)', border: '1px solid rgba(116, 185, 255, 0.15)' }}
+                    title={p}
+                  >
+                    <FolderOpen size={12} className="shrink-0" />
+                    <span className="break-all">{p}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 이미지 */}
