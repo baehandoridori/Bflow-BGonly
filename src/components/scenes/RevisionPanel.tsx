@@ -278,7 +278,6 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
 
   const [showForm, setShowForm] = useState(false);
   const [description, setDescription] = useState('');
-  const [selectedDept, setSelectedDept] = useState<'bg' | 'acting'>(department);
   const [priority, setPriority] = useState<RevisionPriority>('normal');
   const [frameNo, setFrameNo] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -327,7 +326,7 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
         priority,
         frameNo: frameNo.trim() || undefined,
         imageUrl: imagePreview || undefined,
-        department: selectedDept,
+        department,
         requesterId: currentUser.id,
         requesterName: currentUser.name,
       });
@@ -385,23 +384,8 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
               className="overflow-hidden"
             >
               <div className="px-4 py-3 space-y-3">
-                {/* 파트 + 우선순위 + 프레임 */}
+                {/* 우선순위 + 프레임 */}
                 <div className="flex items-center gap-2 flex-wrap">
-                  <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
-                    {(['bg', 'acting'] as const).map((d) => (
-                      <button
-                        key={d}
-                        onClick={() => setSelectedDept(d)}
-                        className={`px-3 py-1 text-xs rounded-md font-medium transition-all cursor-pointer ${
-                          selectedDept === d
-                            ? 'bg-accent/20 text-accent shadow-sm'
-                            : 'text-text-secondary hover:text-text-primary'
-                        }`}
-                      >
-                        {d === 'bg' ? 'BG' : '액팅'}
-                      </button>
-                    ))}
-                  </div>
                   <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
                     {(['urgent', 'high', 'normal'] as const).map((p) => {
                       const cfgMap: Record<RevisionPriority, { label: string; color: string; bg: string }> = {

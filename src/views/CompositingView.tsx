@@ -396,7 +396,6 @@ function AddRevisionForm({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<RevisionPriority>('normal');
   const [frameNo, setFrameNo] = useState('');
-  const [selectedDept, setSelectedDept] = useState<'bg' | 'acting'>(department);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -435,7 +434,7 @@ function AddRevisionForm({
         priority,
         frameNo: frameNo.trim() || undefined,
         imageUrl: imagePreview || undefined,
-        department: selectedDept,
+        department,
         requesterId: currentUser.id,
         requesterName: currentUser.name,
       });
@@ -460,23 +459,8 @@ function AddRevisionForm({
         style={{ background: 'rgba(26, 29, 39, 0.8)', backdropFilter: 'blur(12px)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 파트 + 우선순위 선택 */}
+        {/* 우선순위 선택 */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
-            {(['bg', 'acting'] as const).map((d) => (
-              <button
-                key={d}
-                onClick={() => setSelectedDept(d)}
-                className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
-                  selectedDept === d
-                    ? 'bg-accent/20 text-accent shadow-sm'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                {d === 'bg' ? 'BG' : '액팅'}
-              </button>
-            ))}
-          </div>
           <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
             {(['urgent', 'high', 'normal'] as const).map((p) => {
               const cfg = PRIORITY_CONFIG[p];
