@@ -76,13 +76,16 @@ export interface Scene {
 // ─── 컴포지팅 리비전 ─────────────────────────
 
 export type RevisionStatus = 'open' | 'in_progress' | 'resolved';
+export type RevisionPriority = 'urgent' | 'high' | 'normal';
 
 export interface CompRevision {
   id: string;
   sceneKey: string;        // "EP01:A:a001" (에피소드:파트:씬ID)
   revisionNo: number;      // 씬별 자동 증가 (Rev.1, Rev.2, ...)
   status: RevisionStatus;
+  priority: RevisionPriority;
   description: string;
+  frameNo?: string;        // 프레임 번호 (예: "F024")
   imageUrl?: string;
   department?: 'bg' | 'acting';
   requesterId: string;

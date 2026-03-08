@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { resizeBlob } from '@/utils/imageUtils';
-import type { CompRevision, RevisionStatus } from '@/types';
+import type { CompRevision, RevisionPriority, RevisionStatus } from '@/types';
 
 // ─── 상수 ───────────────────────────────────
 
@@ -154,6 +154,20 @@ function RevisionCard({
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-bold text-text-secondary">Rev.{revision.revisionNo}</span>
           <StatusBadge status={revision.status} />
+          {revision.priority && revision.priority !== 'normal' && (
+            <span
+              className="text-[10px] font-medium rounded px-1 py-0.5"
+              style={{
+                color: revision.priority === 'urgent' ? '#FF6B6B' : '#E17055',
+                backgroundColor: revision.priority === 'urgent' ? 'rgba(255, 107, 107, 0.15)' : 'rgba(225, 112, 85, 0.15)',
+              }}
+            >
+              {revision.priority === 'urgent' ? '긴급' : '높음'}
+            </span>
+          )}
+          {revision.frameNo && (
+            <span className="text-[10px] text-text-secondary/60 font-mono">{revision.frameNo}</span>
+          )}
           {revision.department && (
             <span className="text-[10px] text-text-secondary/70 uppercase">
               {revision.department === 'bg' ? 'BG' : 'ACT'}
@@ -265,6 +279,8 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
   const [showForm, setShowForm] = useState(false);
   const [description, setDescription] = useState('');
   const [selectedDept, setSelectedDept] = useState<'bg' | 'acting'>(department);
+  const [priority, setPriority] = useState<RevisionPriority>('normal');
+  const [frameNo, setFrameNo] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -308,12 +324,16 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
     try {
       await createRevision(sceneKey, {
         description: description.trim(),
+        priority,
+        frameNo: frameNo.trim() || undefined,
         imageUrl: imagePreview || undefined,
         department: selectedDept,
-        requesterId: currentUser.userId,
-        requesterName: currentUser.userName,
+        requesterId: currentUser.id,
+        requesterName: currentUser.name,
       });
       setDescription('');
+      setPriority('normal');
+      setFrameNo('');
       setImagePreview(null);
       setShowForm(false);
     } catch (err) {
@@ -325,7 +345,7 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
 
   const handleStatusChange = async (revId: string, status: RevisionStatus, note?: string) => {
     await updateStatus(revId, sceneKey, status, {
-      resolvedBy: currentUser?.userName,
+      resolvedBy: currentUser?.name,
       resolvedNote: note,
     });
   };
@@ -365,21 +385,51 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
               className="overflow-hidden"
             >
               <div className="px-4 py-3 space-y-3">
-                {/* 파트 선택 */}
-                <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
-                  {(['bg', 'acting'] as const).map((d) => (
-                    <button
-                      key={d}
-                      onClick={() => setSelectedDept(d)}
-                      className={`px-3 py-1 text-xs rounded-md font-medium transition-all cursor-pointer ${
-                        selectedDept === d
-                          ? 'bg-accent/20 text-accent shadow-sm'
-                          : 'text-text-secondary hover:text-text-primary'
-                      }`}
-                    >
-                      {d === 'bg' ? 'BG' : '액팅'}
-                    </button>
-                  ))}
+                {/* 파트 + 우선순위 + 프레임 */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
+                    {(['bg', 'acting'] as const).map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => setSelectedDept(d)}
+                        className={`px-3 py-1 text-xs rounded-md font-medium transition-all cursor-pointer ${
+                          selectedDept === d
+                            ? 'bg-accent/20 text-accent shadow-sm'
+                            : 'text-text-secondary hover:text-text-primary'
+                        }`}
+                      >
+                        {d === 'bg' ? 'BG' : '액팅'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
+                    {(['urgent', 'high', 'normal'] as const).map((p) => {
+                      const cfgMap: Record<RevisionPriority, { label: string; color: string; bg: string }> = {
+                        urgent: { label: '긴급', color: '#FF6B6B', bg: 'rgba(255, 107, 107, 0.15)' },
+                        high: { label: '높음', color: '#E17055', bg: 'rgba(225, 112, 85, 0.15)' },
+                        normal: { label: '보통', color: '#74B9FF', bg: 'rgba(116, 185, 255, 0.15)' },
+                      };
+                      const cfg = cfgMap[p];
+                      return (
+                        <button
+                          key={p}
+                          onClick={() => setPriority(p)}
+                          className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
+                            priority === p ? 'shadow-sm' : 'text-text-secondary hover:text-text-primary'
+                          }`}
+                          style={priority === p ? { color: cfg.color, backgroundColor: cfg.bg } : undefined}
+                        >
+                          {cfg.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <input
+                    value={frameNo}
+                    onChange={(e) => setFrameNo(e.target.value)}
+                    placeholder="F000"
+                    className="w-16 px-2 py-1 text-[11px] bg-bg-primary rounded-md border border-bg-border text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-1 focus:ring-accent/50 font-mono"
+                  />
                 </div>
 
                 {/* 설명 입력 */}

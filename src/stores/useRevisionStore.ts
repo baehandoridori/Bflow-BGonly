@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CompRevision, RevisionStatus } from '@/types';
+import type { CompRevision, RevisionPriority, RevisionStatus } from '@/types';
 import * as revisionService from '@/services/revisionService';
 
 interface RevisionState {
@@ -16,6 +16,8 @@ interface RevisionState {
     sceneKey: string,
     data: {
       description: string;
+      priority?: RevisionPriority;
+      frameNo?: string;
       imageUrl?: string;
       department?: 'bg' | 'acting';
       requesterId: string;

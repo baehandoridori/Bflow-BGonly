@@ -8,7 +8,7 @@
  * sceneKey 형식: "EP01:A:a001" (에피소드:파트:씬ID — 시트명 비의존)
  */
 
-import type { CompRevision, RevisionStatus } from '../types';
+import type { CompRevision, RevisionPriority, RevisionStatus } from '../types';
 
 const REVISIONS_FILE = 'revisions.json';
 
@@ -55,13 +55,17 @@ function rowToRevision(row: {
   requesterId: string; requesterName: string; assignee: string;
   resolvedBy: string; resolvedNote: string;
   createdAt: string; updatedAt: string; resolvedAt: string;
+  priority?: string; frameNo?: string;
 }): CompRevision {
+  const p = row.priority as RevisionPriority | undefined;
   return {
     id: row.id,
     sceneKey: row.sceneKey,
     revisionNo: Number(row.revisionNo) || 0,
     status: (row.status as RevisionStatus) || 'open',
+    priority: (p === 'urgent' || p === 'high' || p === 'normal') ? p : 'normal',
     description: row.description || '',
+    frameNo: row.frameNo || undefined,
     imageUrl: row.imageUrl || undefined,
     department: (row.department === 'bg' || row.department === 'acting') ? row.department : undefined,
     requesterId: row.requesterId || '',
@@ -135,6 +139,8 @@ export async function createRevision(
   sceneKey: string,
   data: {
     description: string;
+    priority?: RevisionPriority;
+    frameNo?: string;
     imageUrl?: string;
     department?: 'bg' | 'acting';
     requesterId: string;
@@ -144,6 +150,7 @@ export async function createRevision(
 ): Promise<CompRevision> {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
+  const priority = data.priority || 'normal';
 
   if (sheetsMode) {
     const store = await loadAllRevisions();
@@ -153,7 +160,9 @@ export async function createRevision(
       sceneKey,
       revisionNo,
       status: 'open',
+      priority,
       description: data.description,
+      frameNo: data.frameNo,
       imageUrl: data.imageUrl,
       department: data.department,
       requesterId: data.requesterId,
@@ -168,6 +177,11 @@ export async function createRevision(
       data.description, data.imageUrl || '', data.department || '',
       data.requesterId, data.requesterName, data.assignee || '', now,
     );
+
+    // 새 필드는 sheetsUpdateRevision으로 추가 저장
+    const extra: Record<string, string> = { priority };
+    if (data.frameNo) extra.frameNo = data.frameNo;
+    await window.electronAPI.sheetsUpdateRevision(id, extra).catch(() => {});
 
     // 캐시 업데이트
     if (!store[sceneKey]) store[sceneKey] = [];
@@ -184,7 +198,9 @@ export async function createRevision(
     sceneKey,
     revisionNo,
     status: 'open',
+    priority,
     description: data.description,
+    frameNo: data.frameNo,
     imageUrl: data.imageUrl,
     department: data.department,
     requesterId: data.requesterId,
