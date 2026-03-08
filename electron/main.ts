@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell } from 'electron';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
@@ -327,6 +327,24 @@ ipcMain.handle('users:write', (_event, data: unknown) => {
 
 ipcMain.handle('settings:get-path', () => getDataPath());
 
+// 파일탐색기에서 경로 열기
+ipcMain.handle('shell:show-item', async (_event, filePath: string) => {
+  try {
+    // 파일이면 해당 파일 선택 상태로 폴더 열기, 폴더면 폴더 열기
+    if (fs.existsSync(filePath)) {
+      shell.showItemInFolder(filePath);
+    } else {
+      // 존재하지 않으면 상위 폴더 열기 시도
+      const dir = path.dirname(filePath);
+      if (fs.existsSync(dir)) {
+        shell.openPath(dir);
+      }
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
 
 ipcMain.handle('settings:read', async (_event, fileName: string) => {
   const filePath = path.join(getDataPath(), fileName);

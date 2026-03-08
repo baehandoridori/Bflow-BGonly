@@ -55,33 +55,53 @@ function parseSceneKey(sceneKey: string): { ep: string; part: string; sceneId: s
 
 /** 텍스트에서 G: 로 시작하는 경로를 분리 */
 function parsePathsFromText(text: string): { description: string; paths: string[] } {
-  // G:로 시작하는 경로 패턴: G:\로 시작해서 공백이나 줄바꿈 전까지
-  const pathRegex = /G:\\[^\s\n]+/g;
+  // 각 줄에서 G:\로 시작하는 부분을 경로로 인식 (공백 포함, 줄 끝까지)
+  const lines = text.split('\n');
   const paths: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = pathRegex.exec(text)) !== null) {
-    paths.push(match[0]);
+  const descLines: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // 줄 전체가 G:\로 시작하면 경로
+    if (/^G:\\/i.test(trimmed)) {
+      paths.push(trimmed);
+    } else if (trimmed.includes('G:\\')) {
+      // 줄 중간에 G:\가 있으면 그 앞은 설명, 뒤는 경로
+      const idx = trimmed.indexOf('G:\\');
+      const before = trimmed.slice(0, idx).trim();
+      const pathPart = trimmed.slice(idx).trim();
+      if (before) descLines.push(before);
+      paths.push(pathPart);
+    } else {
+      descLines.push(line);
+    }
   }
-  // 경로를 제거한 나머지 텍스트
-  const description = text.replace(pathRegex, '').replace(/\n{2,}/g, '\n').trim();
+
+  const description = descLines.join('\n').trim();
   return { description, paths };
 }
 
-/** 경로 뱃지 컴포넌트 */
-function PathBadge({ path }: { path: string }) {
+/** 경로 뱃지 컴포넌트 (클릭 시 파일탐색기 열기) */
+function PathBadge({ path: filePath }: { path: string }) {
   // 경로의 마지막 부분(파일명 또는 폴더명)만 표시
-  const segments = path.replace(/\\/g, '/').split('/');
-  const shortName = segments[segments.length - 1] || segments[segments.length - 2] || path;
+  const segments = filePath.replace(/\\/g, '/').split('/');
+  const shortName = segments[segments.length - 1] || segments[segments.length - 2] || filePath;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.electronAPI?.shellShowItem?.(filePath);
+  };
 
   return (
-    <span
-      className="inline-flex items-center gap-1 text-[11px] font-mono rounded px-1.5 py-0.5 max-w-full cursor-default"
+    <button
+      onClick={handleClick}
+      className="inline-flex items-center gap-1 text-[11px] font-mono rounded px-1.5 py-0.5 max-w-full cursor-pointer transition-all hover:brightness-125"
       style={{ color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.1)', border: '1px solid rgba(116, 185, 255, 0.2)' }}
-      title={path}
+      title={`${filePath}\n(클릭하면 파일탐색기에서 열기)`}
     >
       <FolderOpen size={10} className="shrink-0" />
       <span className="truncate">{shortName}</span>
-    </span>
+    </button>
   );
 }
 
@@ -882,15 +902,16 @@ function DetailPanel({
               <div className="flex flex-col gap-1.5 mt-3 pt-3 border-t border-bg-border/40">
                 <span className="text-[10px] text-text-secondary/60 font-medium uppercase tracking-wider">경로</span>
                 {detailPaths.map((p, i) => (
-                  <span
+                  <button
                     key={i}
-                    className="flex items-center gap-1.5 text-xs font-mono rounded-lg px-2.5 py-1.5"
+                    onClick={() => window.electronAPI?.shellShowItem?.(p)}
+                    className="flex items-center gap-1.5 text-xs font-mono rounded-lg px-2.5 py-1.5 text-left cursor-pointer transition-all hover:brightness-125"
                     style={{ color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.08)', border: '1px solid rgba(116, 185, 255, 0.15)' }}
-                    title={p}
+                    title={`${p}\n(클릭하면 파일탐색기에서 열기)`}
                   >
                     <FolderOpen size={12} className="shrink-0" />
                     <span className="break-all">{p}</span>
-                  </span>
+                  </button>
                 ))}
               </div>
             )}

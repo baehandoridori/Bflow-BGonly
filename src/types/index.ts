@@ -269,6 +269,7 @@ export interface SheetsConfig {
 
 export interface ElectronAPI {
   getDataPath: () => Promise<string>;
+  shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
 
   // 사용자 파일 (exe 옆 또는 test-data/ 옆, base64 인코딩 JSON)
   usersRead: () => Promise<UsersFile | null>;

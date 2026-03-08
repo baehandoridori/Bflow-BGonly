@@ -4,6 +4,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 앱 설정
   getDataPath: () => ipcRenderer.invoke('settings:get-path'),
 
+  // 파일탐색기에서 경로 열기
+  shellShowItem: (filePath: string) =>
+    ipcRenderer.invoke('shell:show-item', filePath) as Promise<{ ok: boolean; error?: string }>,
+
   // 사용자 파일 (base64 인코딩 JSON — exe 옆 또는 test-data/)
   usersRead: () => ipcRenderer.invoke('users:read'),
   usersWrite: (data: unknown) => ipcRenderer.invoke('users:write', data),
