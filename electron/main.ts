@@ -13,6 +13,7 @@ import {
   deleteScene,
   updateSceneField,
   uploadImage,
+  readAllMetadata,
   readMetadata,
   writeMetadata,
   softDeletePart,
@@ -234,16 +235,30 @@ function animateBounds(
   });
 }
 
-/** 모든 윈도우(메인 + 위젯 팝업)에 sheet:changed 이벤트 브로드캐스트 */
-function broadcastSheetChanged(excludeWebContentsId?: number): void {
+/** 모든 윈도우(메인 + 위젯 팝업)에 sheet:changed 이벤트 브로드캐스트 (delta 페이로드 포함) */
+function broadcastSheetChanged(excludeWebContentsId?: number, delta?: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.webContents.id !== excludeWebContentsId) {
-      mainWindow.webContents.send('sheet:changed');
+      mainWindow.webContents.send('sheet:changed', delta);
     }
   }
   for (const [, win] of widgetWindows) {
     if (!win.isDestroyed() && win.webContents.id !== excludeWebContentsId) {
-      win.webContents.send('sheet:changed');
+      win.webContents.send('sheet:changed', delta);
+    }
+  }
+}
+
+/** 스냅샷 릴레이: 보낸 창 제외 모든 창에 전체 데이터 전달 */
+function broadcastSnapshotRelay(excludeWebContentsId: number, data: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.webContents.id !== excludeWebContentsId) {
+      mainWindow.webContents.send('sheet:snapshot-relay', data);
+    }
+  }
+  for (const [, win] of widgetWindows) {
+    if (!win.isDestroyed() && win.webContents.id !== excludeWebContentsId) {
+      win.webContents.send('sheet:snapshot-relay', data);
     }
   }
 }
@@ -520,6 +535,16 @@ ipcMain.handle(
 
 // ─── IPC 핸들러: METADATA ───────────────────────────────────
 
+ipcMain.handle('sheets:read-all-metadata', async () => {
+  try {
+    const data = await readAllMetadata();
+    return { ok: true, data };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, data: [], error: msg };
+  }
+});
+
 ipcMain.handle('sheets:read-metadata', async (_event, type: string, key: string) => {
   try {
     const data = await readMetadata(type, key);
@@ -791,9 +816,15 @@ ipcMain.handle('sheets:update-revision', async (
 
 // ─── IPC 핸들러: 데이터 변경 브로드캐스트 (라이브 모드) ──────
 
-ipcMain.handle('sheets:notify-change', (event) => {
-  // 호출한 윈도우를 제외한 모든 윈도우에 sheet:changed 전송
-  broadcastSheetChanged(event.sender.id);
+ipcMain.handle('sheets:notify-change', (event, delta?: unknown) => {
+  // 호출한 윈도우를 제외한 모든 윈도우에 sheet:changed + delta 전송
+  broadcastSheetChanged(event.sender.id, delta);
+  return { ok: true };
+});
+
+// 스냅샷 릴레이: 구조적 변경 후 최신 데이터를 다른 창에 직접 전달
+ipcMain.handle('sheets:relay-snapshot', (event, data: unknown) => {
+  broadcastSnapshotRelay(event.sender.id, data);
   return { ok: true };
 });
 

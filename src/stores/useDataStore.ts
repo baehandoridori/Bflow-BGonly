@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Episode, Scene, DashboardStats, Department } from '@/types';
+import type { Episode, Scene, DashboardStats, Department, Stage } from '@/types';
 import { calcDashboardStats } from '@/utils/calcStats';
 
 interface DataState {
@@ -34,6 +34,10 @@ interface DataState {
     sceneId: string,
     stage: keyof Pick<Scene, 'lo' | 'done' | 'review' | 'png'>
   ) => void;
+  // 명시적 값 적용 (delta 수신용 — 토글이 아니라 값 직접 세팅)
+  setSceneStageValue: (sheetName: string, sceneId: string, stage: Stage, value: boolean) => void;
+  setSceneFieldBySceneId: (sheetName: string, sceneId: string, field: string, value: string) => void;
+
   addEpisodeOptimistic: (episodeNumber: number, department?: Department) => void;
   addPartOptimistic: (episodeNumber: number, partId: string, department?: Department) => void;
   addSceneOptimistic: (sheetName: string, sceneId: string, assignee: string, memo: string) => void;
@@ -80,6 +84,44 @@ export const useDataStore = create<DataState>((set, get) => ({
           scenes: part.scenes.map((scene) => {
             if (scene.sceneId !== sceneId) return scene;
             return { ...scene, [stage]: !scene[stage] };
+          }),
+        };
+      }),
+    }));
+    set(applyUpdate(get, episodes));
+  },
+
+  setSceneStageValue: (sheetName, sceneId, stage, value) => {
+    const episodes = get().episodes.map((ep) => ({
+      ...ep,
+      parts: ep.parts.map((part) => {
+        if (part.sheetName !== sheetName) return part;
+        return {
+          ...part,
+          scenes: part.scenes.map((scene) => {
+            if (scene.sceneId !== sceneId) return scene;
+            return { ...scene, [stage]: value };
+          }),
+        };
+      }),
+    }));
+    set(applyUpdate(get, episodes));
+  },
+
+  setSceneFieldBySceneId: (sheetName, sceneId, field, value) => {
+    const episodes = get().episodes.map((ep) => ({
+      ...ep,
+      parts: ep.parts.map((part) => {
+        if (part.sheetName !== sheetName) return part;
+        return {
+          ...part,
+          scenes: part.scenes.map((scene) => {
+            if (scene.sceneId !== sceneId) return scene;
+            if (field === 'lo' || field === 'done' || field === 'review' || field === 'png') {
+              return { ...scene, [field]: value === 'true' };
+            }
+            if (field === 'no') return { ...scene, no: parseInt(value, 10) || 0 };
+            return { ...scene, [field]: value };
           }),
         };
       }),

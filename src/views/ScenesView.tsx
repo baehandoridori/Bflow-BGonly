@@ -1354,8 +1354,9 @@ export function ScenesView() {
         } catch { /* 아카이빙 목록 갱신 실패는 무시 */ }
       }
 
-      // 위젯 팝업에 데이터 변경 알림
-      window.electronAPI?.sheetsNotifyChange?.();
+      // 다른 창에 스냅샷 릴레이 (full readAll 대신 데이터 직접 전달)
+      const { episodeTitles, episodeMemos } = useDataStore.getState();
+      window.electronAPI?.sheetsRelaySnapshot?.({ episodes: eps, episodeTitles, episodeMemos });
     } catch (err) {
       console.error('[백그라운드 동기화 실패]', err);
     }
@@ -1681,7 +1682,13 @@ export function ScenesView() {
     toggleQueueRef.current = toggleQueueRef.current.then(async () => {
       try {
         await updateSheetCell(sheetName, sceneIndex, stage, newValue);
-        window.electronAPI?.sheetsNotifyChange?.();
+        window.electronAPI?.sheetsNotifyChange?.({
+          type: 'toggle',
+          sheetName,
+          sceneId,
+          field: stage,
+          value: newValue,
+        });
       } catch (err) {
         console.error('[토글 실패]', err);
         toggleSceneStage(sheetName, sceneId, stage);
@@ -1715,7 +1722,8 @@ export function ScenesView() {
       await bulkUpdateCells(sheetName, updates.map((u) => ({
         rowIndex: u.sceneIndex, stage: u.stage, value: u.newValue,
       })));
-      window.electronAPI?.sheetsNotifyChange?.();
+      // 복수 변경이므로 snapshot relay로 다른 창에 전달
+      syncInBackground();
     } catch (err) {
       console.error('[일괄 토글 실패]', err);
       updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
@@ -1967,9 +1975,20 @@ export function ScenesView() {
     const prevEpisodes = useDataStore.getState().episodes;
     updateSceneFieldOptimistic(sheetName, sceneIndex, field, value);
 
+    // 씬 ID 조회 (delta 전송용)
+    const part = useDataStore.getState().episodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === sheetName);
+    const sceneId = part?.scenes[sceneIndex]?.sceneId ?? '';
+
     try {
       await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
-      syncInBackground();
+      window.electronAPI?.sheetsNotifyChange?.({
+        type: 'field-update',
+        sheetName,
+        sceneId,
+        sceneIndex,
+        field,
+        value,
+      });
     } catch (err) {
       setEpisodes(prevEpisodes);
       handleSheetError(err, '수정');
@@ -2085,11 +2104,10 @@ export function ScenesView() {
       // Phase 0-2: _REGISTRY 기반 아카이빙 (탭 이름 변경 없이 status만 변경)
       const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
       await archiveEpisodeViaRegistryInSheets(epNum, archivedBy, memo);
-      // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화
+      // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화 (snapshot relay가 다른 창에 전달)
       setTimeout(() => {
         archiveGuardRef.current = false;
         syncInBackground();
-        window.electronAPI?.sheetsNotifyChange?.();
       }, 5000);
     } catch (err) {
       // 롤백: 활성 목록 + 아카이브 목록 모두 원복
@@ -2126,11 +2144,10 @@ export function ScenesView() {
       // Phase 0-2: _REGISTRY 기반 복원 (탭 이름 변경 없이 status만 변경)
       const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
       await unarchiveEpisodeViaRegistryInSheets(epNum);
-      // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화
+      // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화 (snapshot relay가 다른 창에 전달)
       setTimeout(() => {
         archiveGuardRef.current = false;
         syncInBackground();
-        window.electronAPI?.sheetsNotifyChange?.();
       }, 5000);
     } catch (err) {
       // 롤백

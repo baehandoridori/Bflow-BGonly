@@ -126,6 +126,10 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
       if (!store[sceneKey]) store[sceneKey] = [];
       store[sceneKey].push(comment);
     }
+    // 다른 창에 댓글 변경 알림
+    window.electronAPI?.sheetsNotifyChange?.({
+      type: 'comment', sheetName, sceneId, commentAction: 'add',
+    });
     return;
   }
   const all = await loadLocalAll();
@@ -140,6 +144,7 @@ export async function updateComment(
   const editedAt = new Date().toISOString();
 
   if (sheetsMode) {
+    const { sheetName, sceneId } = parseSceneKey(sceneKey);
     await window.electronAPI.sheetsEditComment(commentId, text, mentions);
     // 캐시 업데이트
     sheetPartCache.forEach((store) => {
@@ -148,6 +153,10 @@ export async function updateComment(
         const idx = list.findIndex(c => c.id === commentId);
         if (idx >= 0) list[idx] = { ...list[idx], text, mentions, editedAt };
       }
+    });
+    // 다른 창에 댓글 변경 알림
+    window.electronAPI?.sheetsNotifyChange?.({
+      type: 'comment', sheetName, sceneId, commentAction: 'edit',
     });
     return;
   }
@@ -162,6 +171,7 @@ export async function updateComment(
 
 export async function deleteComment(sceneKey: string, commentId: string): Promise<void> {
   if (sheetsMode) {
+    const { sheetName, sceneId } = parseSceneKey(sceneKey);
     await window.electronAPI.sheetsDeleteComment(commentId);
     // 캐시에서 제거
     sheetPartCache.forEach((store) => {
@@ -170,6 +180,10 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
         store[sceneKey] = list.filter(c => c.id !== commentId);
         if (store[sceneKey].length === 0) delete store[sceneKey];
       }
+    });
+    // 다른 창에 댓글 변경 알림
+    window.electronAPI?.sheetsNotifyChange?.({
+      type: 'comment', sheetName, sceneId, commentAction: 'delete',
     });
     return;
   }

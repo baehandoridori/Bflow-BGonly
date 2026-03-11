@@ -243,6 +243,57 @@ export interface RegistryEntry {
   updatedAt: string;
 }
 
+// ─── 동기화 델타 (창 간 IPC 페이로드) ────────
+
+export interface SheetDeltaToggle {
+  type: 'toggle';
+  sheetName: string;
+  sceneId: string;
+  field: Stage;
+  value: boolean;
+}
+export interface SheetDeltaFieldUpdate {
+  type: 'field-update';
+  sheetName: string;
+  sceneId: string;
+  sceneIndex: number;
+  field: string;
+  value: string;
+}
+export interface SheetDeltaComment {
+  type: 'comment';
+  sheetName: string;
+  sceneId: string;
+  commentAction: 'add' | 'edit' | 'delete';
+}
+export interface SheetDeltaSnapshot {
+  type: 'snapshot';
+}
+export interface SheetDeltaFull {
+  type: 'full';
+}
+export type SheetDelta =
+  | SheetDeltaToggle
+  | SheetDeltaFieldUpdate
+  | SheetDeltaComment
+  | SheetDeltaSnapshot
+  | SheetDeltaFull;
+
+export interface SnapshotRelayData {
+  episodes: Episode[];
+  episodeTitles: Record<number, string>;
+  episodeMemos: Record<number, string>;
+}
+
+// ─── 메타데이터 항목 ────────────────────────
+
+export interface MetadataEntry {
+  type: string;
+  key: string;
+  value: string;
+  updatedAt: string;
+}
+
 // ─── Google Sheets 연동 타입 ─────────────────
 
 export interface SheetsConnectResult {
@@ -276,7 +327,7 @@ export interface ElectronAPI {
   usersWrite: (data: UsersFile) => Promise<boolean>;
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
-  onSheetChanged: (callback: () => void) => () => void;
+  onSheetChanged: (callback: (delta?: SheetDelta) => void) => () => void;
   onRetryNotify?: (callback: (message: string) => void) => () => void;
   onSavingBeforeQuit?: (callback: (pendingCount: number) => void) => () => void;
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
@@ -343,7 +394,12 @@ export interface ElectronAPI {
   sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<SheetsUpdateResult>;
   sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 데이터 변경 브로드캐스트
-  sheetsNotifyChange?: () => Promise<{ ok: boolean }>;
+  sheetsNotifyChange?: (delta?: SheetDelta) => Promise<{ ok: boolean }>;
+  // 스냅샷 릴레이 (같은 PC 내 다른 창에 전체 데이터 전달)
+  onSnapshotRelay?: (callback: (data: SnapshotRelayData) => void) => () => void;
+  sheetsRelaySnapshot?: (data: SnapshotRelayData) => Promise<{ ok: boolean }>;
+  // 메타데이터 일괄 로딩
+  sheetsReadAllMetadata?: () => Promise<{ ok: boolean; data: MetadataEntry[]; error?: string }>;
   // 휴가 관리 (vacation-repo WebApi)
   vacationConnect: (webAppUrl: string) => Promise<{ ok: boolean; error: string | null }>;
   vacationIsConnected: () => Promise<boolean>;

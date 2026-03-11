@@ -150,30 +150,9 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     });
   }, [widgetId]);
 
-  // 실시간 데이터 동기화: sheet:changed 이벤트 + 주기적 폴링 (30초)
+  // 실시간 데이터 동기화: 델타 기반 부분 업데이트 + 120초 emergency fallback
   useEffect(() => {
     if (!ready) return;
-
-    const loadEpMetadata = async (episodes: Episode[]) => {
-      const [titleResults, memoResults] = await Promise.all([
-        Promise.all(episodes.map((ep) =>
-          readMetadataFromSheets('episode-title', String(ep.episodeNumber))
-            .then((d) => [ep.episodeNumber, d?.value] as const)
-            .catch(() => [ep.episodeNumber, undefined] as const),
-        )),
-        Promise.all(episodes.map((ep) =>
-          readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
-            .then((d) => [ep.episodeNumber, d?.value] as const)
-            .catch(() => [ep.episodeNumber, undefined] as const),
-        )),
-      ]);
-      const titles: Record<number, string> = {};
-      const memos: Record<number, string> = {};
-      for (const [num, val] of titleResults) if (val) titles[num] = val;
-      for (const [num, val] of memoResults) if (val) memos[num] = val;
-      useDataStore.getState().setEpisodeTitles(titles);
-      useDataStore.getState().setEpisodeMemos(memos);
-    };
 
     let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -186,7 +165,22 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         if (connected) {
           const episodes = await readAllFromSheets();
           useDataStore.getState().setEpisodes(episodes);
-          loadEpMetadata(episodes).catch(() => {});
+          // 메타데이터 일괄 로딩 (readAllMetadata 사용 가능하면)
+          if (api.sheetsReadAllMetadata) {
+            try {
+              const res = await api.sheetsReadAllMetadata();
+              if (res.ok && res.data) {
+                const titles: Record<number, string> = {};
+                const memos: Record<number, string> = {};
+                for (const m of res.data) {
+                  if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
+                  if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
+                }
+                useDataStore.getState().setEpisodeTitles(titles);
+                useDataStore.getState().setEpisodeMemos(memos);
+              }
+            } catch { /* 메타데이터 로딩 실패는 무시 */ }
+          }
         } else {
           // 재연결 시도
           const cfg = await loadSheetsConfig();
@@ -196,7 +190,6 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
             if (result.ok) {
               const episodes = await readAllFromSheets();
               useDataStore.getState().setEpisodes(episodes);
-              loadEpMetadata(episodes).catch(() => {});
             }
           }
         }
@@ -208,7 +201,23 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       }
     };
 
-    const cleanupEvent = window.electronAPI?.onSheetChanged?.(() => {
+    // 델타 기반 sheet:changed 리스너 — 토글/필드는 즉시 적용, 나머지는 full reload
+    const cleanupEvent = window.electronAPI?.onSheetChanged?.((delta?: unknown) => {
+      const d = delta as import('@/types').SheetDelta | undefined;
+
+      if (d?.type === 'toggle') {
+        useDataStore.getState().setSceneStageValue(d.sheetName, d.sceneId, d.field, d.value);
+        return;
+      }
+      if (d?.type === 'field-update') {
+        useDataStore.getState().setSceneFieldBySceneId(d.sheetName, d.sceneId, d.field, d.value);
+        return;
+      }
+      if (d?.type === 'comment') {
+        import('@/services/commentService').then((cs) => cs.invalidatePartCache(d.sheetName));
+        return;
+      }
+      // full reload (디바운스)
       if (_reloadCooldown) {
         if (reloadTimer) clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => { reloadData(); }, _COOLDOWN_MS + 500);
@@ -217,13 +226,23 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       reloadData();
     });
 
-    const pollInterval = setInterval(() => {
+    // 스냅샷 릴레이 수신 — 다른 창에서 보낸 전체 데이터 직접 적용
+    const cleanupSnapshot = window.electronAPI?.onSnapshotRelay?.((data: unknown) => {
+      const d = data as import('@/types').SnapshotRelayData;
+      if (d?.episodes) useDataStore.getState().setEpisodes(d.episodes);
+      if (d?.episodeTitles) useDataStore.getState().setEpisodeTitles(d.episodeTitles);
+      if (d?.episodeMemos) useDataStore.getState().setEpisodeMemos(d.episodeMemos);
+    });
+
+    // Emergency fallback: 120초마다 full reload (delta/relay 누락 방지)
+    const emergencyPoll = setInterval(() => {
       if (!_reloadCooldown) reloadData();
-    }, 30_000);
+    }, 120_000);
 
     return () => {
       cleanupEvent?.();
-      clearInterval(pollInterval);
+      cleanupSnapshot?.();
+      clearInterval(emergencyPoll);
       if (reloadTimer) clearTimeout(reloadTimer);
     };
   }, [ready]);

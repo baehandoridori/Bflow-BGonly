@@ -17,10 +17,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeSettings: (fileName: string, data: unknown) =>
     ipcRenderer.invoke('settings:write', fileName, data),
 
-  // 실시간 동기화: 다른 사용자가 시트 파일을 변경했을 때 알림
-  onSheetChanged: (callback: () => void) => {
-    ipcRenderer.on('sheet:changed', callback);
-    return () => ipcRenderer.removeListener('sheet:changed', callback);
+  // 실시간 동기화: 다른 창이 시트를 변경했을 때 델타 알림
+  onSheetChanged: (callback: (delta?: unknown) => void) => {
+    const handler = (_event: unknown, delta?: unknown) => callback(delta);
+    ipcRenderer.on('sheet:changed', handler);
+    return () => ipcRenderer.removeListener('sheet:changed', handler);
   },
 
   // 재시도 알림: 동기화 재시도 시 토스트 표시용
@@ -144,7 +145,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('sheets:unarchive-episode-via-registry', episodeNumber),
 
   // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
-  sheetsNotifyChange: () => ipcRenderer.invoke('sheets:notify-change'),
+  sheetsNotifyChange: (delta?: unknown) => ipcRenderer.invoke('sheets:notify-change', delta),
+
+  // 스냅샷 릴레이 (같은 PC 내 다른 창에 전체 데이터 전달)
+  onSnapshotRelay: (callback: (data: unknown) => void) => {
+    const handler = (_event: unknown, data: unknown) => callback(data);
+    ipcRenderer.on('sheet:snapshot-relay', handler);
+    return () => ipcRenderer.removeListener('sheet:snapshot-relay', handler);
+  },
+  sheetsRelaySnapshot: (data: unknown) =>
+    ipcRenderer.invoke('sheets:relay-snapshot', data),
+
+  // 메타데이터 일괄 로딩
+  sheetsReadAllMetadata: () =>
+    ipcRenderer.invoke('sheets:read-all-metadata'),
 
   // 휴가 관리 (vacation-repo WebApi)
   vacationConnect: (webAppUrl: string) =>

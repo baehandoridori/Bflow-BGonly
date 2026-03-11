@@ -350,6 +350,18 @@ export async function updateSceneField(
 
 // ─── 메타데이터 CRUD ─────────────────────────────────────────
 
+export async function readAllMetadata(): Promise<{ type: string; key: string; value: string; updatedAt: string }[]> {
+  if (!webAppUrl) throw new Error('Sheets 미연결');
+
+  const qs = new URLSearchParams({ action: 'readAllMetadata' });
+  const res = await gasFetchWithRetry(`${webAppUrl}?${qs}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const json = await res.json() as { ok: boolean; data?: { type: string; key: string; value: string; updatedAt: string }[]; error?: string };
+  if (!json.ok) throw new Error(json.error ?? '메타데이터 일괄 읽기 실패');
+  return json.data ?? [];
+}
+
 export async function readMetadata(type: string, key: string): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
   if (!webAppUrl) throw new Error('Sheets 미연결');
 

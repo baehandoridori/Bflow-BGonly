@@ -133,6 +133,9 @@ function executeAction(action, params) {
     case 'readMetadata':
       return readMetadata(params.type, params.key);
 
+    case 'readAllMetadata':
+      return readAllMetadataFromSheet();
+
     case 'writeMetadata':
       writeMetadata(params.type, params.key, params.value || '');
       return null;
@@ -1127,6 +1130,28 @@ function ensureMetadataSheet() {
   sheet.getRange(1, 1, 1, METADATA_HEADERS.length).setFontWeight('bold').setBackground('#F3E5F5');
   sheet.hideSheet();
   return sheet;
+}
+
+/**
+ * 모든 메타데이터를 한 번에 읽는다 (2N 개별 호출 대체).
+ * @return {Array<{ type: string, key: string, value: string, updatedAt: string }>}
+ */
+function readAllMetadataFromSheet() {
+  var sheet = ensureMetadataSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+  var result = [];
+  for (var i = 0; i < data.length; i++) {
+    result.push({
+      type: String(data[i][0]),
+      key: String(data[i][1]),
+      value: String(data[i][2]),
+      updatedAt: String(data[i][3])
+    });
+  }
+  return result;
 }
 
 /**

@@ -112,30 +112,44 @@ export default function App() {
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
 
-      // 에피소드 제목/메모를 병렬로 일괄 로드 (초기 렌더 딜레이 제거)
-      const titlePromises = episodes.map((ep) =>
-        readMetadataFromSheets('episode-title', String(ep.episodeNumber))
-          .then((d) => [ep.episodeNumber, d?.value] as const)
-          .catch(() => [ep.episodeNumber, undefined] as const),
-      );
-      const memoPromises = episodes.map((ep) =>
-        readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
-          .then((d) => [ep.episodeNumber, d?.value] as const)
-          .catch(() => [ep.episodeNumber, undefined] as const),
-      );
-      const [titleResults, memoResults] = await Promise.all([
-        Promise.all(titlePromises),
-        Promise.all(memoPromises),
-      ]);
-      const titles: Record<number, string> = {};
-      const memos: Record<number, string> = {};
-      for (const [num, val] of titleResults) if (val) titles[num] = val;
-      for (const [num, val] of memoResults) if (val) memos[num] = val;
-      setEpisodeTitles(titles);
-      setEpisodeMemos(memos);
-
-      // 위젯 팝업 윈도우에 데이터 변경 알림
-      window.electronAPI?.sheetsNotifyChange?.();
+      // 에피소드 제목/메모를 일괄 로드 (readAllMetadata 1회 호출로 2N 개별 호출 대체)
+      try {
+        if (window.electronAPI?.sheetsReadAllMetadata) {
+          const metaRes = await window.electronAPI.sheetsReadAllMetadata();
+          if (metaRes.ok && metaRes.data) {
+            const titles: Record<number, string> = {};
+            const memos: Record<number, string> = {};
+            for (const m of metaRes.data) {
+              if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
+              if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
+            }
+            setEpisodeTitles(titles);
+            setEpisodeMemos(memos);
+          }
+        } else {
+          // fallback: 개별 호출 (readAllMetadata 미지원 시)
+          const titlePromises = episodes.map((ep) =>
+            readMetadataFromSheets('episode-title', String(ep.episodeNumber))
+              .then((d) => [ep.episodeNumber, d?.value] as const)
+              .catch(() => [ep.episodeNumber, undefined] as const),
+          );
+          const memoPromises = episodes.map((ep) =>
+            readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
+              .then((d) => [ep.episodeNumber, d?.value] as const)
+              .catch(() => [ep.episodeNumber, undefined] as const),
+          );
+          const [titleResults, memoResults] = await Promise.all([
+            Promise.all(titlePromises),
+            Promise.all(memoPromises),
+          ]);
+          const titles: Record<number, string> = {};
+          const memos: Record<number, string> = {};
+          for (const [num, val] of titleResults) if (val) titles[num] = val;
+          for (const [num, val] of memoResults) if (val) memos[num] = val;
+          setEpisodeTitles(titles);
+          setEpisodeMemos(memos);
+        }
+      } catch { /* 메타데이터 로드 실패는 무시 — 기본 제목 사용 */ }
     } catch (err) {
       console.error('[동기화 실패]', err);
       setSyncError(String(err));
@@ -340,15 +354,32 @@ export default function App() {
     loadData();
   }, [authReady, loadData]);
 
-  // 실시간 동기화: 다른 사용자가 시트를 변경하면 리로드 (디바운스 적용)
+  // 실시간 동기화: 델타 기반 부분 업데이트 또는 full reload (디바운스 적용)
   useEffect(() => {
     if (!window.electronAPI?.onSheetChanged) return;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const cleanup = window.electronAPI.onSheetChanged(() => {
-      // 연속 변경 시 마지막 변경 후 300ms 뒤에 리로드 (배치 쓰기 보호)
+    const cleanup = window.electronAPI.onSheetChanged((delta?: unknown) => {
+      const d = delta as import('@/types').SheetDelta | undefined;
+
+      // 토글 delta → 해당 셀만 즉시 업데이트 (readAll 없음)
+      if (d?.type === 'toggle') {
+        useDataStore.getState().setSceneStageValue(d.sheetName, d.sceneId, d.field, d.value);
+        return;
+      }
+      // 필드 업데이트 delta → 해당 필드만 즉시 업데이트
+      if (d?.type === 'field-update') {
+        useDataStore.getState().setSceneFieldBySceneId(d.sheetName, d.sceneId, d.field, d.value);
+        return;
+      }
+      // 댓글 delta → 캐시 무효화만 (readAll 호출 안 함)
+      if (d?.type === 'comment') {
+        import('@/services/commentService').then((cs) => cs.invalidatePartCache(d.sheetName));
+        return;
+      }
+      // 'full', 'snapshot', 또는 delta 없음 → 기존 full reload
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        console.log('[동기화] 다른 사용자의 변경 감지 → 데이터 리로드');
+        console.log('[동기화] full reload 트리거');
         loadData();
       }, 300);
     });
@@ -357,6 +388,24 @@ export default function App() {
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [loadData]);
+
+  // 스냅샷 릴레이: 다른 창에서 보낸 전체 데이터 직접 적용
+  useEffect(() => {
+    if (!window.electronAPI?.onSnapshotRelay) return;
+    const cleanup = window.electronAPI.onSnapshotRelay((data: unknown) => {
+      const d = data as import('@/types').SnapshotRelayData;
+      if (d?.episodes) {
+        useDataStore.getState().setEpisodes(d.episodes);
+      }
+      if (d?.episodeTitles) {
+        useDataStore.getState().setEpisodeTitles(d.episodeTitles);
+      }
+      if (d?.episodeMemos) {
+        useDataStore.getState().setEpisodeMemos(d.episodeMemos);
+      }
+    });
+    return () => { cleanup?.(); };
+  }, []);
 
   // 자동 로그인: 스플래시 종료 후 시간대별 인사 표시
   // welcomeUser가 있으면 수동 로그인이므로 건너뜀 (WelcomeToast onDismiss에서 처리)
