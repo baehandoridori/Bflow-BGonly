@@ -776,9 +776,38 @@ export function MyTasksWidget() {
   const allViews = [DEFAULT_VIEW, ...customViews];
   const activeView = allViews.find((v) => v.id === activeViewId) ?? DEFAULT_VIEW;
 
-  useEffect(() => { saveViews(customViews); }, [customViews]);
-  useEffect(() => { saveAssignedTodos(assignedTodos); }, [assignedTodos]);
-  useEffect(() => { saveAssignedSceneKeys(assignedSceneKeys); }, [assignedSceneKeys]);
+  // 외부(IPC)에서 받은 변경인지 추적 — true이면 브로드캐스트 스킵
+  const _fromExternal = useRef(false);
+
+  const broadcastTodoChange = useCallback(() => {
+    if (_fromExternal.current) return;
+    if (isPopup) {
+      import('@/views/WidgetPopup').then(({ notifySheetChangeWithCooldown: _ }) => {
+        // 팝업에서는 쿨다운 없이 직접 notify (todo는 시트 변경이 아님)
+        window.electronAPI?.sheetsNotifyChange?.({ type: 'todo' } as import('@/types').SheetDeltaTodo);
+      });
+    } else {
+      window.electronAPI?.sheetsNotifyChange?.({ type: 'todo' } as import('@/types').SheetDeltaTodo);
+    }
+  }, [isPopup]);
+
+  useEffect(() => { saveViews(customViews); broadcastTodoChange(); }, [customViews]);
+  useEffect(() => { saveAssignedTodos(assignedTodos); broadcastTodoChange(); }, [assignedTodos]);
+  useEffect(() => { saveAssignedSceneKeys(assignedSceneKeys); broadcastTodoChange(); }, [assignedSceneKeys]);
+
+  // 다른 창에서 할일이 변경되면 localStorage에서 다시 읽기
+  useEffect(() => {
+    const handler = () => {
+      _fromExternal.current = true;
+      setCustomViews(loadViews());
+      setAssignedTodos(loadAssignedTodos());
+      setAssignedSceneKeys(loadAssignedSceneKeys());
+      // 다음 tick에서 플래그 해제 (save effect가 동기적으로 실행되므로)
+      requestAnimationFrame(() => { _fromExternal.current = false; });
+    };
+    window.addEventListener('bflow:todos-changed', handler);
+    return () => window.removeEventListener('bflow:todos-changed', handler);
+  }, []);
 
   // 전체 평탄화
   const allFlat: FlatScene[] = useMemo(() => {

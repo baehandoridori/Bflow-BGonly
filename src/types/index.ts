@@ -272,12 +272,16 @@ export interface SheetDeltaSnapshot {
 export interface SheetDeltaFull {
   type: 'full';
 }
+export interface SheetDeltaTodo {
+  type: 'todo';
+}
 export type SheetDelta =
   | SheetDeltaToggle
   | SheetDeltaFieldUpdate
   | SheetDeltaComment
   | SheetDeltaSnapshot
-  | SheetDeltaFull;
+  | SheetDeltaFull
+  | SheetDeltaTodo;
 
 export interface SnapshotRelayData {
   episodes: Episode[];

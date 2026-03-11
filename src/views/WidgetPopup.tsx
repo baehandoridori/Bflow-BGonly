@@ -217,6 +217,11 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         import('@/services/commentService').then((cs) => cs.invalidatePartCache(d.sheetName));
         return;
       }
+      // 할일 delta → localStorage 기반이므로 DOM 이벤트로 위젯에 전달 (readAll 불필요)
+      if (d?.type === 'todo') {
+        window.dispatchEvent(new Event('bflow:todos-changed'));
+        return;
+      }
       // full reload (디바운스)
       if (_reloadCooldown) {
         if (reloadTimer) clearTimeout(reloadTimer);

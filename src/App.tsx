@@ -376,6 +376,11 @@ export default function App() {
         import('@/services/commentService').then((cs) => cs.invalidatePartCache(d.sheetName));
         return;
       }
+      // 할일 delta → localStorage 기반이므로 DOM 이벤트로 위젯에 전달 (readAll 불필요)
+      if (d?.type === 'todo') {
+        window.dispatchEvent(new Event('bflow:todos-changed'));
+        return;
+      }
       // 'full', 'snapshot', 또는 delta 없음 → 기존 full reload
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
