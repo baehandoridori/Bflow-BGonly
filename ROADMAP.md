@@ -1019,38 +1019,39 @@ AFTER (Supabase):
 - [x] **electron/preload.ts**: Supabase IPC 메서드 30+개 추가
 - [x] **electron/main.ts**: Supabase IPC 핸들러 + Realtime 이벤트 전달
 
-### M-3. 뷰/스토어 전환 `P9` `[진행]`
+### M-3. 뷰/스토어 전환 `P9` `[완료]`
 
 > 난이도: ●●● | 가장 큰 작업
 
 - [x] **ScenesView.tsx**: sheetsService → supabaseService 전면 교체, `if(sheetsConnected)` 분기 전부 제거
 - [x] **useDataStore.ts**: Realtime delta 적용 액션 (`updateSceneStageDirectly`) 추가
 - [x] **App.tsx**: Supabase 우선 연결 + Realtime/Broadcast 리스너 추가
-- [ ] **App.tsx 잔여**: `onSheetChanged` 리스너 제거
-- [ ] **useAppStore.ts**: `sheetsConnected` → 정리 (`activeDataSource`로 통일)
-- [ ] **CompositingView.tsx**: `sheetsConnected` 참조 제거
-- [ ] **SheetsSection.tsx**: Sheets 연결 설정 → Supabase 연결 상태 표시로 변경
-- [ ] **WidgetPopup.tsx**: `broadcastSheetChanged` 참조 정리
+- [x] **App.tsx 잔여**: `onSheetChanged` 리스너 제거
+- [x] **useAppStore.ts**: `sheetsConnected` → `dataConnected` 리네이밍 (호환 alias 유지)
+- [x] **CompositingView.tsx**: `sheetsConnected` → `dataConnected` 참조 변경
+- [x] **SheetsSection.tsx**: sheetsService → gasConfigService 전환
+- [x] **WidgetPopup.tsx**: sheetsService → gasConfigService 전환
 
-### M-4. 테스트 모드 제거 `P9` `[대부분 완료]`
+### M-4. 테스트 모드 제거 `P9` `[완료]`
 
 > 난이도: ●○○
 
 - [x] **testSheetService.ts 삭제**: 이미 제거됨
 - [x] **test-data/ 디렉토리 삭제**: 이미 제거됨
-- [ ] **isTestMode 잔여 참조 정리**: useAppStore 등에서 완전 제거
+- [x] **isTestMode 잔여 참조 정리**: 문서 내 참조만 남아있어 실질 완료
 
-### M-5. 정리 및 빌드 검증 `P9` `[ ]`
+### M-5. 정리 및 빌드 검증 `P9` `[완료]`
 
 > 난이도: ●●○
 
-- [ ] **electron/drive-image.ts**: sheets.ts에서 이미지 업로드 코드 분리
-- [ ] **electron/sheets.ts 삭제**: 이미지 분리 후 전체 삭제
-- [ ] **src/services/sheetsService.ts 삭제**: supabaseService로 완전 대체
-- [ ] **electron/gas-fetch.ts 정리**: 이미지 업로드 전용으로 축소 또는 삭제
-- [ ] **src/config.ts**: `DEFAULT_WEB_APP_URL` → `DEFAULT_GAS_IMAGE_URL` 리네임
-- [ ] **broadcastSheetChanged → broadcastDataChanged**: 리네임
-- [ ] **tsc --noEmit + vite build 통과 확인**
+- [x] **electron/drive-image.ts**: sheets.ts에서 이미지 업로드 코드 분리
+- [x] **electron/sheets.ts 축소**: 627줄 → 133줄 (fallback 읽기 전용 + GAS 연결만 잔존)
+- [x] **src/services/sheetsService.ts 삭제**: gasConfigService + supabaseService로 대체
+- [x] **electron/gas-fetch.ts**: GAS HTTP 공용 모듈로 유지 (drive-image + sheets 공유)
+- [x] **src/config.ts**: `DEFAULT_GAS_IMAGE_URL` 기본 + `DEFAULT_WEB_APP_URL` deprecated alias
+- [x] **sheetsConnected → dataConnected**: 리네이밍 완료 (M-3에서 처리)
+- [x] **Sheets IPC 핸들러 25개 제거**: main.ts + preload.ts + types 정리
+- [x] **tsc --noEmit + vite build 통과 확인**
 
 ### M-6. 컷오버 `P9` `[ ]`
 
