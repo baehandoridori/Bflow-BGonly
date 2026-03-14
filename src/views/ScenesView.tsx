@@ -354,8 +354,8 @@ import {
   batchToSheets,
   batchActions,
   bulkUpdateCells,
-} from '@/services/sheetsService';
-import type { BatchAction } from '@/services/sheetsService';
+} from '@/services/supabaseService';
+import type { BatchAction } from '@/services/supabaseService';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
@@ -1328,7 +1328,7 @@ export function ScenesView() {
   const syncInBackground = async () => {
     const myVersion = ++syncVersionRef.current;
     try {
-      const { readAllFromSheets, readArchivedFromSheets } = await import('@/services/sheetsService');
+      const { readAllFromSheets, readArchivedFromSheets } = await import('@/services/supabaseService');
       const eps = await readAllFromSheets();
 
       // 버전 체크: 이 sync 이후에 새 sync가 시작되었으면 결과 폐기
@@ -1451,7 +1451,7 @@ export function ScenesView() {
   useEffect(() => {
     const loadArchived = async () => {
       try {
-        const { readArchivedFromSheets } = await import('@/services/sheetsService');
+        const { readArchivedFromSheets } = await import('@/services/supabaseService');
         const list = await readArchivedFromSheets();
         // 아카이브 가드 활성화 상태면 낙관적 상태 보호
         if (archiveGuardRef.current) return;
@@ -1937,7 +1937,7 @@ export function ScenesView() {
 
     setBulkAddLoading(true);
     try {
-      const { addScenesToSheets } = await import('@/services/sheetsService');
+      const { addScenesToSheets } = await import('@/services/supabaseService');
       await addScenesToSheets(targetSheet, scenesToAdd);
       // 서버 성공 후 전체 동기화 완료까지 대기 (데이터 없음 깜빡임 방지)
       await syncInBackground();
@@ -2102,7 +2102,7 @@ export function ScenesView() {
 
     try {
       // Phase 0-2: _REGISTRY 기반 아카이빙 (탭 이름 변경 없이 status만 변경)
-      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/supabaseService');
       await archiveEpisodeViaRegistryInSheets(epNum, archivedBy, memo);
       // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화 (snapshot relay가 다른 창에 전달)
       setTimeout(() => {
@@ -2142,7 +2142,7 @@ export function ScenesView() {
 
     try {
       // Phase 0-2: _REGISTRY 기반 복원 (탭 이름 변경 없이 status만 변경)
-      const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/supabaseService');
       await unarchiveEpisodeViaRegistryInSheets(epNum);
       // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화 (snapshot relay가 다른 창에 전달)
       setTimeout(() => {

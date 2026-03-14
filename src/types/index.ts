@@ -58,6 +58,7 @@ export const STAGE_COLORS: Record<Stage, string> = {
 // ─── 씬 ──────────────────────────────────────
 
 export interface Scene {
+  id?: string;   // Supabase UUID (Sheets 모드에서는 undefined)
   no: number;
   sceneId: string;
   memo: string;
@@ -125,6 +126,7 @@ export interface AuthSession {
 // ─── 파트 & 에피소드 ─────────────────────────
 
 export interface Part {
+  id?: string;    // Supabase UUID (Sheets 모드에서는 undefined)
   partId: string; // 'A', 'B', 'C', 'D'
   department: Department; // 'bg' | 'acting'
   sheetName: string; // 'EP01_A_BG' or 'EP01_A' (legacy = bg)

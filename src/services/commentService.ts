@@ -69,18 +69,47 @@ function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string }
 export async function loadPartComments(sheetName: string): Promise<CommentsStore> {
   if (sheetPartCache.has(sheetName)) return sheetPartCache.get(sheetName)!;
 
-  const result = await window.electronAPI.sheetsReadComments(sheetName);
-  if (!result.ok) {
-    console.warn('[댓글] 시트 로드 실패:', result.error);
-    return {};
+  // Supabase: sheetName → part UUID 해석 (스토어에서 조회)
+  let partUuid: string | undefined;
+  try {
+    const { useDataStore } = await import('../stores/useDataStore');
+    const part = useDataStore.getState().episodes
+      .flatMap((ep) => ep.parts)
+      .find((p) => p.sheetName === sheetName);
+    partUuid = part?.id;
+  } catch { /* 무시 */ }
+
+  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string | null }[] = [];
+
+  if (partUuid) {
+    // Supabase 경로
+    try {
+      rawComments = (await window.electronAPI.supabaseReadComments(partUuid)) as typeof rawComments;
+    } catch (err) {
+      console.warn('[댓글] Supabase 로드 실패, Sheets fallback:', err);
+    }
+  }
+
+  // Supabase 실패 시 Sheets fallback
+  if (rawComments.length === 0 && !partUuid) {
+    try {
+      const result = await window.electronAPI.sheetsReadComments(sheetName);
+      if (result.ok) {
+        rawComments = (result.data ?? []).map((c) => ({
+          id: c.commentId, partId: '', sceneId: c.sceneId,
+          userId: c.userId, userName: c.userName, text: c.text,
+          mentions: c.mentions ?? [], createdAt: c.createdAt, editedAt: c.editedAt || null,
+        }));
+      }
+    } catch { /* fallback도 실패 */ }
   }
 
   const store: CommentsStore = {};
-  for (const c of result.data ?? []) {
-    const key = `${c.sheetName}:${c.sceneId}`;
+  for (const c of rawComments) {
+    const key = `${sheetName}:${c.sceneId}`;
     if (!store[key]) store[key] = [];
     store[key].push({
-      id: c.commentId,
+      id: c.id,
       userId: c.userId,
       userName: c.userName,
       text: c.text,
@@ -115,8 +144,18 @@ export async function getComments(sceneKey: string): Promise<SceneComment[]> {
 export async function addComment(sceneKey: string, comment: SceneComment): Promise<void> {
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
-    await window.electronAPI.sheetsAddComment(
-      comment.id, sheetName, sceneId,
+    // Supabase: sheetName → part UUID 해석
+    let partUuid = '';
+    try {
+      const { useDataStore } = await import('../stores/useDataStore');
+      const part = useDataStore.getState().episodes
+        .flatMap((ep) => ep.parts)
+        .find((p) => p.sheetName === sheetName);
+      partUuid = part?.id || '';
+    } catch { /* 무시 */ }
+
+    await window.electronAPI.supabaseAddComment(
+      comment.id, partUuid, sceneId,
       comment.userId, comment.userName, comment.text,
       comment.mentions, comment.createdAt,
     );
@@ -145,7 +184,7 @@ export async function updateComment(
 
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
-    await window.electronAPI.sheetsEditComment(commentId, text, mentions);
+    await window.electronAPI.supabaseEditComment(commentId, text, mentions);
     // 캐시 업데이트
     sheetPartCache.forEach((store) => {
       const list = store[sceneKey];
@@ -172,7 +211,7 @@ export async function updateComment(
 export async function deleteComment(sceneKey: string, commentId: string): Promise<void> {
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
-    await window.electronAPI.sheetsDeleteComment(commentId);
+    await window.electronAPI.supabaseDeleteComment(commentId);
     // 캐시에서 제거
     sheetPartCache.forEach((store) => {
       const list = store[sceneKey];

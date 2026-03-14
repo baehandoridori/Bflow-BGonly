@@ -22,7 +22,8 @@ import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWid
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
-import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig, readMetadataFromSheets } from '@/services/sheetsService';
+import { readAllFromSheets, checkConnection, readMetadataFromSheets } from '@/services/supabaseService';
+import { connectSheets, loadSheetsConfig } from '@/services/sheetsService';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import type { Episode } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
@@ -165,22 +166,19 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         if (connected) {
           const episodes = await readAllFromSheets();
           useDataStore.getState().setEpisodes(episodes);
-          // 메타데이터 일괄 로딩 (readAllMetadata 사용 가능하면)
-          if (api.sheetsReadAllMetadata) {
-            try {
-              const res = await api.sheetsReadAllMetadata();
-              if (res.ok && res.data) {
-                const titles: Record<number, string> = {};
-                const memos: Record<number, string> = {};
-                for (const m of res.data) {
-                  if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
-                  if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
-                }
-                useDataStore.getState().setEpisodeTitles(titles);
-                useDataStore.getState().setEpisodeMemos(memos);
-              }
-            } catch { /* 메타데이터 로딩 실패는 무시 */ }
-          }
+          // 메타데이터 일괄 로딩 (Supabase)
+          try {
+            const { readAllMetadataFromSupabase } = await import('@/services/supabaseService');
+            const metaList = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
+            const titles: Record<number, string> = {};
+            const memos: Record<number, string> = {};
+            for (const m of metaList) {
+              if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
+              if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
+            }
+            useDataStore.getState().setEpisodeTitles(titles);
+            useDataStore.getState().setEpisodeMemos(memos);
+          } catch { /* 메타데이터 로딩 실패는 무시 */ }
         } else {
           // 재연결 시도
           const cfg = await loadSheetsConfig();

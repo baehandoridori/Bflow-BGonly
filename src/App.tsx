@@ -19,6 +19,8 @@ import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
+import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent } from '@/services/supabaseService';
+import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
@@ -89,12 +91,35 @@ export default function App() {
   // 시간대별 인사말 토스트 (WelcomeToast 스타일로 하단 표시)
   const [greetingToast, setGreetingToast] = useState<string | null>(null);
 
-  // 데이터 로드 함수 — Apps Script 웹 앱에서 데이터 읽기
+  // 데이터 로드 함수 — Supabase에서 데이터 읽기 (Sheets fallback)
   const loadData = useCallback(async () => {
     setSyncing(true);
     setSyncError(null);
     try {
-      // 연결 확인 + 재연결 시도
+      // Supabase 우선 시도
+      const sbConn = await testSupabaseConnection();
+      if (sbConn.ok) {
+        const episodes = await readAllFromSupabase();
+        setEpisodes(episodes);
+        setLastSyncTime(Date.now());
+
+        // 메타데이터 로드 (Supabase)
+        try {
+          const metaList = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
+          const titles: Record<number, string> = {};
+          const memos: Record<number, string> = {};
+          for (const m of metaList) {
+            if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
+            if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
+          }
+          setEpisodeTitles(titles);
+          setEpisodeMemos(memos);
+        } catch { /* 메타데이터 로드 실패는 무시 */ }
+        return;
+      }
+
+      // Supabase 실패 → Sheets fallback
+      console.warn('[Supabase] 연결 실패, Sheets fallback 시도');
       const connected = await checkConnection();
       if (!connected) {
         const cfg = await loadSheetsConfig();
@@ -104,7 +129,7 @@ export default function App() {
           if (!result.ok) throw new Error('시트 연결 실패');
           setSheetsConnected(true);
         } else {
-          throw new Error('시트 URL 미설정');
+          throw new Error('데이터 소스 연결 실패');
         }
       }
 
@@ -112,7 +137,7 @@ export default function App() {
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
 
-      // 에피소드 제목/메모를 일괄 로드 (readAllMetadata 1회 호출로 2N 개별 호출 대체)
+      // 메타데이터 로드 (Sheets)
       try {
         if (window.electronAPI?.sheetsReadAllMetadata) {
           const metaRes = await window.electronAPI.sheetsReadAllMetadata();
@@ -126,30 +151,8 @@ export default function App() {
             setEpisodeTitles(titles);
             setEpisodeMemos(memos);
           }
-        } else {
-          // fallback: 개별 호출 (readAllMetadata 미지원 시)
-          const titlePromises = episodes.map((ep) =>
-            readMetadataFromSheets('episode-title', String(ep.episodeNumber))
-              .then((d) => [ep.episodeNumber, d?.value] as const)
-              .catch(() => [ep.episodeNumber, undefined] as const),
-          );
-          const memoPromises = episodes.map((ep) =>
-            readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
-              .then((d) => [ep.episodeNumber, d?.value] as const)
-              .catch(() => [ep.episodeNumber, undefined] as const),
-          );
-          const [titleResults, memoResults] = await Promise.all([
-            Promise.all(titlePromises),
-            Promise.all(memoPromises),
-          ]);
-          const titles: Record<number, string> = {};
-          const memos: Record<number, string> = {};
-          for (const [num, val] of titleResults) if (val) titles[num] = val;
-          for (const [num, val] of memoResults) if (val) memos[num] = val;
-          setEpisodeTitles(titles);
-          setEpisodeMemos(memos);
         }
-      } catch { /* 메타데이터 로드 실패는 무시 — 기본 제목 사용 */ }
+      } catch { /* 메타데이터 로드 실패는 무시 */ }
     } catch (err) {
       console.error('[동기화 실패]', err);
       setSyncError(String(err));
@@ -268,20 +271,28 @@ export default function App() {
           }
         }
 
-        // 저장된 Sheets 설정이 있으면 자동 연결 시도 (모드 무관)
-        // 설정이 없으면 config.ts의 DEFAULT_WEB_APP_URL을 fallback으로 사용
-        const config = await loadSheetsConfig();
-        const urlToConnect = config?.webAppUrl || DEFAULT_WEB_APP_URL;
-        if (urlToConnect) {
-          const effectiveConfig = config ?? { webAppUrl: urlToConnect };
-          setSheetsConfig(effectiveConfig);
-          const result = await connectSheets(urlToConnect);
-          if (result.ok) {
-            setSheetsConnected(true);
-            setUsersSheetsMode(true);
-            console.log('[Sheets] 자동 연결 성공');
-            // Phase 0-4: 로컬 users.dat를 _USERS 탭으로 마이그레이션 (비동기)
-            migrateUsersToSheets().catch(() => {});
+        // Supabase 연결 확인 (항상 시도)
+        const sbConn = await testSupabaseConnection();
+        if (sbConn.ok) {
+          console.log('[Supabase] 연결 성공');
+          setSheetsConnected(true); // 기존 UI 호환: 연결 상태 표시에 재사용
+          setUsersSheetsMode(true); // 사용자 서비스도 Supabase로 전환 (호환)
+        }
+
+        // Sheets fallback 연결 (Supabase 실패 시에만)
+        if (!sbConn.ok) {
+          const config = await loadSheetsConfig();
+          const urlToConnect = config?.webAppUrl || DEFAULT_WEB_APP_URL;
+          if (urlToConnect) {
+            const effectiveConfig = config ?? { webAppUrl: urlToConnect };
+            setSheetsConfig(effectiveConfig);
+            const result = await connectSheets(urlToConnect);
+            if (result.ok) {
+              setSheetsConnected(true);
+              setUsersSheetsMode(true);
+              console.log('[Sheets] fallback 연결 성공');
+              migrateUsersToSheets().catch(() => {});
+            }
           }
         }
 
@@ -390,6 +401,31 @@ export default function App() {
     });
     return () => {
       cleanup?.();
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, [loadData]);
+
+  // Supabase Realtime: DB 변경 감지 → 데이터 리로드
+  useEffect(() => {
+    if (!window.electronAPI?.onSupabaseRealtime) return;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = onSupabaseRealtimeEvent((event: SupabaseRealtimeEvent) => {
+      const { table, payload } = event;
+      // scenes 테이블 UPDATE → 체크박스 토글일 가능성 높음 → 바로 리로드
+      // 그 외 변경 → 디바운스 full reload
+      if (table === 'comments') {
+        // 댓글 변경은 캐시 무효화만
+        import('@/services/commentService').then((cs) => cs.invalidatePartCache());
+        return;
+      }
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        console.log(`[Supabase Realtime] ${table} ${payload?.eventType} → reload`);
+        loadData();
+      }, 300);
+    });
+    return () => {
+      cleanup();
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [loadData]);

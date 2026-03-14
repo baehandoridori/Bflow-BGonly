@@ -923,7 +923,7 @@ export function MyTasksWidget() {
     }
 
     try {
-      const { updateSheetCell, updateSceneFieldInSheets } = await import('@/services/sheetsService');
+      const { updateSheetCell, updateSceneFieldInSheets } = await import('@/services/supabaseService');
       await updateSheetCell(sheetName, sceneIndex, stage, newValue);
       if (completedBy) {
         await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
@@ -942,7 +942,7 @@ export function MyTasksWidget() {
     updateSceneFieldOptimistic(sheetName, sceneIndex, field, value);
 
     try {
-      const { updateSceneFieldInSheets } = await import('@/services/sheetsService');
+      const { updateSceneFieldInSheets } = await import('@/services/supabaseService');
       await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
       notifyChange();
     } catch (err) {

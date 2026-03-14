@@ -150,6 +150,208 @@ export async function writeMetadataToSupabase(type: string, key: string, value: 
   await window.electronAPI.supabaseWriteMetadata(type, key, value);
 }
 
+// ═══════════════════════════════════════════════════════
+// sheetsService 호환 래퍼 — ScenesView 등에서 import만 바꾸면 동작
+// 기존 API: (sheetName, rowIndex, ...) → 내부에서 UUID 해석
+// ═══════════════════════════════════════════════════════
+
+import { useDataStore } from '../stores/useDataStore';
+
+/** sheetName + sceneIndex → scene UUID 조회 (스토어에서) */
+function resolveSceneUuid(sheetName: string, sceneIndex: number): string {
+  const episodes = useDataStore.getState().episodes;
+  const part = episodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === sheetName);
+  const scene = part?.scenes[sceneIndex];
+  if (!scene?.id) throw new Error(`씬 UUID를 찾을 수 없음: ${sheetName}[${sceneIndex}]`);
+  return scene.id;
+}
+
+/** sheetName + sceneId (human) → scene UUID */
+function resolveSceneUuidBySceneId(sheetName: string, sceneId: string): string {
+  const episodes = useDataStore.getState().episodes;
+  const part = episodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === sheetName);
+  const scene = part?.scenes.find((s) => s.sceneId === sceneId);
+  if (!scene?.id) throw new Error(`씬 UUID를 찾을 수 없음: ${sheetName}:${sceneId}`);
+  return scene.id;
+}
+
+// ─── sheetsService 호환 함수들 ──────────────────
+
+/** updateSheetCell 호환 */
+export async function updateSheetCell(
+  sheetName: string, rowIndex: number, stage: string, value: boolean,
+): Promise<void> {
+  const uuid = resolveSceneUuid(sheetName, rowIndex);
+  await window.electronAPI.supabaseUpdateSceneStage(uuid, stage, value);
+}
+
+/** bulkUpdateCells 호환 */
+export async function bulkUpdateCells(
+  sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[],
+): Promise<void> {
+  const mapped = updates.map((u) => ({
+    sceneUuid: resolveSceneUuid(sheetName, u.rowIndex),
+    stage: u.stage,
+    value: u.value,
+  }));
+  await window.electronAPI.supabaseBulkUpdateSceneStages(mapped);
+}
+
+/** addEpisodeToSheets 호환 */
+export async function addEpisodeToSheets(episodeNumber: number, department?: string): Promise<void> {
+  await window.electronAPI.supabaseAddEpisode(episodeNumber, department);
+}
+
+/** addPartToSheets 호환 */
+export async function addPartToSheets(episodeNumber: number, partId: string, department?: string): Promise<void> {
+  await window.electronAPI.supabaseAddPart(episodeNumber, partId, department);
+}
+
+/** addSceneToSheets 호환 */
+export async function addSceneToSheets(sheetName: string, sceneId: string, assignee: string, memo: string): Promise<void> {
+  await window.electronAPI.supabaseAddScene(sheetName, sceneId, assignee, memo);
+}
+
+/** addScenesToSheets 호환 */
+export async function addScenesToSheets(sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]): Promise<void> {
+  await window.electronAPI.supabaseAddScenes(sheetName, scenes);
+}
+
+/** deleteSceneFromSheets 호환 (rowIndex → UUID) */
+export async function deleteSceneFromSheets(sheetName: string, rowIndex: number): Promise<void> {
+  const uuid = resolveSceneUuid(sheetName, rowIndex);
+  await window.electronAPI.supabaseDeleteScene(uuid);
+}
+
+/** updateSceneFieldInSheets 호환 (rowIndex → UUID) */
+export async function updateSceneFieldInSheets(sheetName: string, rowIndex: number, field: string, value: string): Promise<void> {
+  const uuid = resolveSceneUuid(sheetName, rowIndex);
+  await window.electronAPI.supabaseUpdateSceneField(uuid, field, value);
+}
+
+/** softDeletePartInSheets 호환 */
+export async function softDeletePartInSheets(sheetName: string): Promise<void> {
+  await window.electronAPI.supabaseSoftDeletePart(sheetName);
+}
+
+/** softDeleteEpisodeInSheets 호환 */
+export async function softDeleteEpisodeInSheets(episodeNumber: number): Promise<void> {
+  await window.electronAPI.supabaseSoftDeleteEpisode(episodeNumber);
+}
+
+/** archiveEpisodeViaRegistryInSheets 호환 */
+export async function archiveEpisodeViaRegistryInSheets(episodeNumber: number, archivedBy: string, archiveMemo: string): Promise<void> {
+  await window.electronAPI.supabaseArchiveEpisode(episodeNumber, archivedBy, archiveMemo);
+}
+
+/** unarchiveEpisodeViaRegistryInSheets 호환 */
+export async function unarchiveEpisodeViaRegistryInSheets(episodeNumber: number): Promise<void> {
+  await window.electronAPI.supabaseUnarchiveEpisode(episodeNumber);
+}
+
+/** readArchivedFromSheets 호환 */
+export async function readArchivedFromSheets(): Promise<{ episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; archiveMemo?: string }[]> {
+  const data = (await window.electronAPI.supabaseReadArchived()) as { episodeNumber: number; title: string; partCount?: number; archivedBy?: string; archivedAt?: string; archiveMemo?: string }[];
+  return data.map((d) => ({ ...d, partCount: d.partCount ?? 0 }));
+}
+
+/** writeMetadataToSheets 호환 */
+export async function writeMetadataToSheets(type: string, key: string, value: string): Promise<void> {
+  await window.electronAPI.supabaseWriteMetadata(type, key, value);
+}
+
+/** readMetadataFromSheets 호환 */
+export async function readMetadataFromSheets(type: string, key: string): Promise<{ type: string; key: string; value: string; updatedAt: string } | null> {
+  const data = await window.electronAPI.supabaseReadMetadata(type, key);
+  return data as { type: string; key: string; value: string; updatedAt: string } | null;
+}
+
+/** readAllFromSheets 호환 */
+export async function readAllFromSheets(): Promise<Episode[]> {
+  return readAllFromSupabase();
+}
+
+// ─── batchToSheets / batchActions 호환 ──────────
+
+export interface BatchAction {
+  action: string;
+  params: Record<string, string>;
+}
+
+/** batchActions 빌더 — sheetsService와 동일한 인터페이스 */
+export const batchActions = {
+  addEpisode: (episodeNumber: number, department?: string): BatchAction => ({
+    action: 'addEpisode',
+    params: { episodeNumber: String(episodeNumber), ...(department ? { department } : {}) },
+  }),
+  addPart: (episodeNumber: number, partId: string, department?: string): BatchAction => ({
+    action: 'addPart',
+    params: { episodeNumber: String(episodeNumber), partId, ...(department ? { department } : {}) },
+  }),
+  writeMetadata: (type: string, key: string, value: string): BatchAction => ({
+    action: 'writeMetadata',
+    params: { type, key, value },
+  }),
+  deleteScene: (sheetName: string, rowIndex: number): BatchAction => ({
+    action: 'deleteScene',
+    params: { sheetName, rowIndex: String(rowIndex) },
+  }),
+  updateSceneField: (sheetName: string, rowIndex: number, field: string, value: string): BatchAction => ({
+    action: 'updateSceneField',
+    params: { sheetName, rowIndex: String(rowIndex), field, value },
+  }),
+  archiveEpisode: (episodeNumber: number): BatchAction => ({
+    action: 'archiveEpisode',
+    params: { episodeNumber: String(episodeNumber) },
+  }),
+  softDeleteEpisode: (episodeNumber: number): BatchAction => ({
+    action: 'softDeleteEpisode',
+    params: { episodeNumber: String(episodeNumber) },
+  }),
+};
+
+/** batchToSheets 호환 — 각 액션을 개별 Supabase 호출로 실행 */
+export async function batchToSheets(actions: BatchAction[]): Promise<{ ok: boolean }> {
+  for (const act of actions) {
+    const p = act.params;
+    switch (act.action) {
+      case 'addEpisode':
+        await window.electronAPI.supabaseAddEpisode(Number(p.episodeNumber), p.department);
+        break;
+      case 'addPart':
+        await window.electronAPI.supabaseAddPart(Number(p.episodeNumber), p.partId, p.department);
+        break;
+      case 'writeMetadata':
+        await window.electronAPI.supabaseWriteMetadata(p.type, p.key, p.value);
+        break;
+      case 'deleteScene': {
+        const uuid = resolveSceneUuid(p.sheetName, Number(p.rowIndex));
+        await window.electronAPI.supabaseDeleteScene(uuid);
+        break;
+      }
+      case 'updateSceneField': {
+        const uuid = resolveSceneUuid(p.sheetName, Number(p.rowIndex));
+        await window.electronAPI.supabaseUpdateSceneField(uuid, p.field, p.value);
+        break;
+      }
+      case 'archiveEpisode':
+        await window.electronAPI.supabaseArchiveEpisode(Number(p.episodeNumber), '', '');
+        break;
+      case 'softDeleteEpisode':
+        await window.electronAPI.supabaseSoftDeleteEpisode(Number(p.episodeNumber));
+        break;
+    }
+  }
+  return { ok: true };
+}
+
+// ─── checkConnection 호환 ───────────────────────
+
+export async function checkConnection(): Promise<boolean> {
+  const result = await testSupabaseConnection();
+  return result.ok;
+}
+
 // ─── Realtime 이벤트 구독 ───────────────────────
 
 export interface SupabaseRealtimeEvent {

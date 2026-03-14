@@ -82,14 +82,32 @@ function rowToRevision(row: {
 export async function loadAllRevisions(): Promise<RevisionsStore> {
   if (sheetsCache) return sheetsCache;
 
-  const result = await window.electronAPI.sheetsReadRevisions();
-  if (!result.ok) {
-    console.warn('[리비전] 시트 로드 실패:', result.error);
-    return {};
+  let rows: {
+    id: string; sceneKey: string; revisionNo: number; status: string;
+    description: string; imageUrl: string; department: string;
+    requesterId: string; requesterName: string; assignee: string;
+    resolvedBy: string; resolvedNote: string;
+    createdAt: string; updatedAt: string; resolvedAt: string;
+    priority?: string; frameNo?: string;
+  }[] = [];
+
+  try {
+    // Supabase 우선
+    const rawData = await window.electronAPI.supabaseReadRevisions();
+    rows = (rawData as typeof rows) ?? [];
+  } catch {
+    // Sheets fallback
+    try {
+      const result = await window.electronAPI.sheetsReadRevisions();
+      if (result.ok) rows = result.data ?? [];
+    } catch (err) {
+      console.warn('[리비전] 로드 실패:', err);
+      return {};
+    }
   }
 
   const store: RevisionsStore = {};
-  for (const row of result.data ?? []) {
+  for (const row of rows) {
     const rev = rowToRevision(row);
     if (!store[rev.sceneKey]) store[rev.sceneKey] = [];
     store[rev.sceneKey].push(rev);
@@ -172,16 +190,12 @@ export async function createRevision(
       updatedAt: now,
     };
 
-    await window.electronAPI.sheetsAddRevision(
-      id, sceneKey, revisionNo, 'open',
-      data.description, data.imageUrl || '', data.department || '',
+    // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
+    await window.electronAPI.supabaseAddRevision(
+      id, '', sceneKey, revisionNo, 'open', priority,
+      data.description, data.frameNo || '', data.imageUrl || '', data.department || '',
       data.requesterId, data.requesterName, data.assignee || '', now,
     );
-
-    // 새 필드는 sheetsUpdateRevision으로 추가 저장
-    const extra: Record<string, string> = { priority };
-    if (data.frameNo) extra.frameNo = data.frameNo;
-    await window.electronAPI.sheetsUpdateRevision(id, extra).catch(() => {});
 
     // 캐시 업데이트
     if (!store[sceneKey]) store[sceneKey] = [];
@@ -232,7 +246,7 @@ export async function updateRevisionStatus(
   }
 
   if (sheetsMode) {
-    await window.electronAPI.sheetsUpdateRevision(id, updates);
+    await window.electronAPI.supabaseUpdateRevision(id, updates);
     // 캐시 업데이트
     if (sheetsCache) {
       const list = sheetsCache[sceneKey];

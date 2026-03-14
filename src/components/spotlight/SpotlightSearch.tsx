@@ -8,7 +8,7 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
 import { getEvents } from '@/services/calendarService';
-import { readMetadataFromSheets } from '@/services/sheetsService';
+import { readMetadataFromSheets } from '@/services/supabaseService';
 import type { CalendarEvent } from '@/types/calendar';
 
 /* ────────────────────────────────────────────────

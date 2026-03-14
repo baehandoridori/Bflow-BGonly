@@ -181,6 +181,7 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
       parts: epParts.map((p) => {
         const partScenes = scenesByPart.get(p.id) || [];
         return {
+          id: p.id,
           partId: p.part_id,
           department: p.department,
           sheetName: makeSheetName(ep.episode_number, p.part_id, p.department),

@@ -311,7 +311,7 @@ export function EpisodeView() {
   useEffect(() => {
     const loadArchived = async () => {
       try {
-        const { readArchivedFromSheets } = await import('@/services/sheetsService');
+        const { readArchivedFromSheets } = await import('@/services/supabaseService');
         const list = await readArchivedFromSheets();
         const enriched: typeof archivedEpisodes = [];
         for (const item of list) {
@@ -385,7 +385,7 @@ export function EpisodeView() {
     ]);
 
     try {
-      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
+      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/supabaseService');
       await archiveEpisodeViaRegistryInSheets(epNum, currentUser?.name ?? '알 수 없음', memo);
       // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 알림
       setTimeout(() => {
@@ -414,7 +414,7 @@ export function EpisodeView() {
     setEpisodes([...episodes, { episodeNumber: epNum, title: tempTitle, parts: [] }]);
 
     try {
-      const { unarchiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/sheetsService');
+      const { unarchiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/supabaseService');
       await unarchiveEpisodeViaRegistryInSheets(epNum);
       // 낙관적 상태를 신뢰 — 서버 처리 후(3초) 실제 데이터로 교체
       setTimeout(async () => {
