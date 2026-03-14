@@ -18,6 +18,10 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
           },
+          resolve: {
+            conditions: ['node', 'import', 'require', 'default'],
+            mainFields: ['module', 'main', 'jsnext:main', 'jsnext'],
+          },
         },
       },
       {
