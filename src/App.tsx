@@ -484,10 +484,51 @@ export default function App() {
     return () => window.removeEventListener('bflow:revisions-invalidated', handler);
   }, []);
 
-  // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (30초 간격)
+  // Supabase Broadcast: 다른 사용자의 쓰기 직후 즉시 delta 수신 (Publication 설정 불필요)
+  useEffect(() => {
+    if (!window.electronAPI?.onSupabaseBroadcast) return;
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = window.electronAPI.onSupabaseBroadcast((raw: unknown) => {
+      const data = raw as { event: string; payload: Record<string, unknown> };
+      if (!data?.event) return;
+
+      if (data.event === 'scene-update') {
+        // 체크박스 토글 → UUID로 즉시 반영
+        const { sceneUuid, stage, value } = data.payload as { sceneUuid: string; stage: string; value: boolean };
+        if (sceneUuid && stage != null && value != null) {
+          useDataStore.getState().updateSceneByUuid(sceneUuid, { [stage]: value });
+          return;
+        }
+      }
+
+      if (data.event === 'scene-field-update') {
+        // 필드 변경 → UUID로 즉시 반영
+        const { sceneUuid, field, value } = data.payload as { sceneUuid: string; field: string; value: string };
+        if (sceneUuid && field) {
+          useDataStore.getState().updateSceneByUuid(sceneUuid, { [field]: value });
+          return;
+        }
+      }
+
+      if (data.event === 'data-change') {
+        // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload
+        if (reloadTimer) clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(() => {
+          console.log('[Broadcast] 구조 변경 감지 → reload');
+          loadData();
+        }, 300);
+      }
+    });
+    return () => {
+      cleanup();
+      if (reloadTimer) clearTimeout(reloadTimer);
+    };
+  }, [loadData]);
+
+  // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (5초 간격)
   useEffect(() => {
     if (!authReady) return;
-    const POLL_INTERVAL = 30_000;
+    const POLL_INTERVAL = 5_000;
     const timer = setInterval(() => {
       loadData();
     }, POLL_INTERVAL);

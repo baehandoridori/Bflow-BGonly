@@ -124,6 +124,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('supabase:status', handler);
     return () => ipcRenderer.removeListener('supabase:status', handler);
   },
+  // Broadcast 이벤트 수신 (즉시 동기화용)
+  onSupabaseBroadcast: (callback: (event: unknown) => void) => {
+    const handler = (_event: unknown, data: unknown) => callback(data);
+    ipcRenderer.on('supabase:broadcast-event', handler);
+    return () => ipcRenderer.removeListener('supabase:broadcast-event', handler);
+  },
 
   // Google Sheets 연동 (Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) =>

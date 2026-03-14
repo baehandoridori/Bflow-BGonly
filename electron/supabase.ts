@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange } from './broadcast';
 
 // ─── Supabase 클라이언트 (하드코딩 — 의사결정 #환경변수 참조) ───
 
@@ -227,6 +228,7 @@ export async function addEpisode(
   }));
   const { error: partErr } = await supabase.from('parts').insert(partRows);
   throwIfError(partErr);
+  broadcastDataChange('episodes', 'INSERT');
 }
 
 /** 에피소드 소프트 삭제 */
@@ -236,6 +238,7 @@ export async function softDeleteEpisode(episodeNumber: number): Promise<void> {
     .update({ status: 'deleted', updated_at: new Date().toISOString() })
     .eq('episode_number', episodeNumber);
   throwIfError(error);
+  broadcastDataChange('episodes', 'DELETE');
 }
 
 /** 에피소드 아카이빙 */
@@ -321,6 +324,7 @@ export async function addPart(
   }));
   const { error } = await supabase.from('parts').insert(rows);
   throwIfError(error);
+  broadcastDataChange('parts', 'INSERT');
 }
 
 /** 파트 소프트 삭제 (sheetName으로 식별 — 호환용) */
@@ -332,6 +336,7 @@ export async function softDeletePart(sheetName: string): Promise<void> {
     .update({ status: 'deleted', updated_at: new Date().toISOString() })
     .eq('id', partUuid);
   throwIfError(error);
+  broadcastDataChange('parts', 'DELETE');
 }
 
 // ═══════════════════════════════════════════════
@@ -365,6 +370,7 @@ export async function addScene(
     memo,
   });
   throwIfError(error);
+  broadcastDataChange('scenes', 'INSERT');
 }
 
 /** 씬 대량 추가 */
@@ -392,12 +398,14 @@ export async function addScenes(
   }));
   const { error } = await supabase.from('scenes').insert(rows);
   throwIfError(error);
+  broadcastDataChange('scenes', 'INSERT');
 }
 
 /** 씬 삭제 (UUID로 삭제) */
 export async function deleteScene(sceneUuid: string): Promise<void> {
   const { error } = await supabase.from('scenes').delete().eq('id', sceneUuid);
   throwIfError(error);
+  broadcastDataChange('scenes', 'DELETE');
 }
 
 /** 씬 체크박스 토글 */
@@ -414,6 +422,8 @@ export async function updateSceneStage(
   if (updatedBy) update.updated_by = updatedBy;
   const { error } = await supabase.from('scenes').update(update).eq('id', sceneUuid);
   throwIfError(error);
+  // DB 저장 성공 → 즉시 broadcast로 다른 클라이언트에 전파
+  broadcastSceneUpdate(sceneUuid, stage, value);
 }
 
 /** 대량 씬 체크박스 토글 (부분 실패 허용) */
@@ -458,6 +468,7 @@ export async function updateSceneField(
     .update({ [dbField]: value, updated_at: new Date().toISOString() })
     .eq('id', sceneUuid);
   throwIfError(error);
+  broadcastSceneFieldUpdate(sceneUuid, field, value);
 }
 
 // ═══════════════════════════════════════════════

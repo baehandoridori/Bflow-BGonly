@@ -421,6 +421,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
+import { setupBroadcast } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
   readAllEpisodes as sbReadAllEpisodes,
@@ -578,6 +579,7 @@ ipcMain.handle('supabase:write-metadata', wrapIpc(async (_e: unknown, type: stri
 
 // ─── Realtime 구독 (앱 시작 시 자동 설정) ───
 function startSupabaseRealtime() {
+  // 1) postgres_changes 기반 (기존)
   setupRealtimeSubscription({
     onSceneChange: (payload) => broadcastSupabaseEvent('scenes', payload),
     onCommentChange: (payload) => broadcastSupabaseEvent('comments', payload),
@@ -592,6 +594,17 @@ function startSupabaseRealtime() {
         if (!win.isDestroyed()) win.webContents.send('supabase:status', status);
       }
     },
+  });
+
+  // 2) Broadcast 기반 즉시 동기화 (Publication 설정 불필요)
+  setupBroadcast((event, payload) => {
+    const broadcastEvent = { event, payload };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('supabase:broadcast-event', broadcastEvent);
+    }
+    for (const win of widgetWindows.values()) {
+      if (!win.isDestroyed()) win.webContents.send('supabase:broadcast-event', broadcastEvent);
+    }
   });
 }
 

@@ -473,6 +473,7 @@ export interface ElectronAPI {
   supabaseWriteMetadata: (type: string, key: string, value: string) => Promise<void>;
   onSupabaseRealtime: (callback: (event: unknown) => void) => () => void;
   onSupabaseStatus: (callback: (status: string) => void) => () => void;
+  onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;
 }
 
 declare global {

@@ -275,10 +275,35 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       reloadData();
     });
 
+    // Supabase Broadcast: 즉시 동기화 (Publication 설정 불필요)
+    const cleanupBroadcast = window.electronAPI?.onSupabaseBroadcast?.((raw: unknown) => {
+      const data = raw as { event: string; payload: Record<string, unknown> };
+      if (!data?.event) return;
+
+      if (data.event === 'scene-update') {
+        const { sceneUuid, stage, value } = data.payload as { sceneUuid: string; stage: string; value: boolean };
+        if (sceneUuid && stage != null && value != null) {
+          useDataStore.getState().updateSceneByUuid(sceneUuid, { [stage]: value });
+          return;
+        }
+      }
+      if (data.event === 'scene-field-update') {
+        const { sceneUuid, field, value } = data.payload as { sceneUuid: string; field: string; value: string };
+        if (sceneUuid && field) {
+          useDataStore.getState().updateSceneByUuid(sceneUuid, { [field]: value });
+          return;
+        }
+      }
+      if (data.event === 'data-change') {
+        reloadData();
+      }
+    });
+
     return () => {
       cleanupEvent?.();
       cleanupSnapshot?.();
       cleanupRealtime?.();
+      cleanupBroadcast?.();
       clearInterval(emergencyPoll);
       if (reloadTimer) clearTimeout(reloadTimer);
     };
