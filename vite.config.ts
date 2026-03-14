@@ -17,9 +17,6 @@ export default defineConfig({
         vite: {
           build: {
             outDir: 'dist-electron',
-            rollupOptions: {
-              external: ['@supabase/supabase-js'],
-            },
           },
         },
       },
