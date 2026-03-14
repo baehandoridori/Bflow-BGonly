@@ -5,42 +5,13 @@ import fs from 'fs';
 import {
   initSheets,
   isConnected,
-  readAllEpisodes,
-  updateSceneStage,
-  addEpisode,
-  addPart,
-  addScene,
-  deleteScene,
-  updateSceneField,
   readAllMetadata,
-  readMetadata,
-  writeMetadata,
-  softDeletePart,
-  softDeleteEpisode,
-  archiveEpisode,
-  unarchiveEpisode,
-  readArchivedEpisodes,
-  gasBatch,
-  readRegistry,
-  archiveEpisodeViaRegistry,
-  unarchiveEpisodeViaRegistry,
   readCommentsForPart,
-  addCommentToSheets,
-  editCommentInSheets,
-  deleteCommentFromSheets,
-  readUsersFromSheets,
-  addUserToSheets,
-  updateUserInSheets,
-  deleteUserFromSheets,
-  addScenes,
-  bulkUpdateCells,
   readRevisionsFromSheets,
-  addRevisionToSheets,
-  updateRevisionInSheets,
+  setRetryNotifyCallback,
+  getPendingOpsCount,
+  waitForAllPendingOps,
 } from './sheets';
-import type { SheetUser } from './sheets';
-import type { BatchAction } from './sheets';
-import { setRetryNotifyCallback, getPendingOpsCount, waitForAllPendingOps } from './sheets';
 import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-image';
 import {
   initVacation,
@@ -635,91 +606,6 @@ ipcMain.handle('sheets:is-connected', () => {
   return isConnected();
 });
 
-ipcMain.handle('sheets:read-all', async () => {
-  try {
-    const episodes = await readAllEpisodes();
-    return { ok: true, data: episodes };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg, data: null };
-  }
-});
-
-ipcMain.handle(
-  'sheets:update-cell',
-  async (
-    _event,
-    sheetName: string,
-    rowIndex: number,
-    stage: string,
-    value: boolean
-  ) => {
-    try {
-      await updateSceneStage(sheetName, rowIndex, stage, value);
-      return { ok: true };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: msg };
-    }
-  }
-);
-
-ipcMain.handle('sheets:add-episode', async (_event, episodeNumber: number, department?: string) => {
-  try {
-    await addEpisode(episodeNumber, (department as 'bg' | 'acting') || 'bg');
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:add-part', async (_event, episodeNumber: number, partId: string, department?: string) => {
-  try {
-    await addPart(episodeNumber, partId, (department as 'bg' | 'acting') || 'bg');
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle(
-  'sheets:add-scene',
-  async (_event, sheetName: string, sceneId: string, assignee: string, memo: string) => {
-    try {
-      await addScene(sheetName, sceneId, assignee, memo);
-      return { ok: true };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: msg };
-    }
-  }
-);
-
-ipcMain.handle('sheets:delete-scene', async (_event, sheetName: string, rowIndex: number) => {
-  try {
-    await deleteScene(sheetName, rowIndex);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle(
-  'sheets:update-scene-field',
-  async (_event, sheetName: string, rowIndex: number, field: string, value: string) => {
-    try {
-      await updateSceneField(sheetName, rowIndex, field, value);
-      return { ok: true };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: msg };
-    }
-  }
-);
-
 ipcMain.handle(
   'sheets:upload-image',
   async (_event, sheetName: string, sceneId: string, imageType: string, base64Data: string) => {
@@ -745,191 +631,7 @@ ipcMain.handle('sheets:read-all-metadata', async () => {
   }
 });
 
-ipcMain.handle('sheets:read-metadata', async (_event, type: string, key: string) => {
-  try {
-    const data = await readMetadata(type, key);
-    return { ok: true, data };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:write-metadata', async (_event, type: string, key: string, value: string) => {
-  try {
-    await writeMetadata(type, key, value);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:soft-delete-part', async (_event, sheetName: string) => {
-  try {
-    await softDeletePart(sheetName);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:soft-delete-episode', async (_event, episodeNumber: number) => {
-  try {
-    await softDeleteEpisode(episodeNumber);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:read-archived', async () => {
-  try {
-    const data = await readArchivedEpisodes();
-    return { ok: true, data };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg, data: [] };
-  }
-});
-
-ipcMain.handle('sheets:archive-episode', async (_event, episodeNumber: number) => {
-  try {
-    await archiveEpisode(episodeNumber);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:unarchive-episode', async (_event, episodeNumber: number) => {
-  try {
-    await unarchiveEpisode(episodeNumber);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: 배치 요청 (Phase 0) ────────────────────────
-
-ipcMain.handle('sheets:batch', async (_event, actions: BatchAction[]) => {
-  try {
-    const result = await gasBatch(actions);
-    return result;
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: 대량 셀 업데이트 (다중 씬 체크박스 토글) ─────
-
-ipcMain.handle('sheets:bulk-update-cells', async (_event, sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) => {
-  try {
-    await bulkUpdateCells(sheetName, updates);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: _REGISTRY (Phase 0-2) ───────────────────────
-
-ipcMain.handle('sheets:read-registry', async () => {
-  try {
-    const data = await readRegistry();
-    return { ok: true, data };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg, data: [] };
-  }
-});
-
-ipcMain.handle('sheets:archive-episode-via-registry', async (
-  _event, episodeNumber: number, archivedBy: string, archiveMemo: string
-) => {
-  try {
-    await archiveEpisodeViaRegistry(episodeNumber, archivedBy, archiveMemo);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:unarchive-episode-via-registry', async (_event, episodeNumber: number) => {
-  try {
-    await unarchiveEpisodeViaRegistry(episodeNumber);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: 대량 씬 추가 (Phase 0-5) ────────────────────
-
-ipcMain.handle('sheets:add-scenes', async (
-  _event, sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]
-) => {
-  try {
-    await addScenes(sheetName, scenes);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: _USERS (Phase 0-4) ──────────────────────────
-
-ipcMain.handle('sheets:read-users', async () => {
-  try {
-    const data = await readUsersFromSheets();
-    return { ok: true, data };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg, data: [] };
-  }
-});
-
-ipcMain.handle('sheets:add-user', async (_event, user: SheetUser) => {
-  try {
-    await addUserToSheets(user);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:update-user', async (_event, userId: string, updates: Record<string, string>) => {
-  try {
-    await updateUserInSheets(userId, updates);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:delete-user', async (_event, userId: string) => {
-  try {
-    await deleteUserFromSheets(userId);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: _COMMENTS (Phase 0-3) ───────────────────────
+// ─── IPC 핸들러: _COMMENTS fallback (Supabase 장애 시) ──────
 
 ipcMain.handle('sheets:read-comments', async (_event, sheetName: string) => {
   try {
@@ -941,42 +643,7 @@ ipcMain.handle('sheets:read-comments', async (_event, sheetName: string) => {
   }
 });
 
-ipcMain.handle('sheets:add-comment', async (
-  _event, commentId: string, sheetName: string, sceneId: string,
-  userId: string, userName: string, text: string, mentions: string[], createdAt: string
-) => {
-  try {
-    await addCommentToSheets(commentId, sheetName, sceneId, userId, userName, text, mentions, createdAt);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:edit-comment', async (
-  _event, commentId: string, text: string, mentions: string[]
-) => {
-  try {
-    await editCommentInSheets(commentId, text, mentions);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:delete-comment', async (_event, commentId: string) => {
-  try {
-    await deleteCommentFromSheets(commentId);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: _COMP_REVISIONS (컴포지팅 리비전) ──────────
+// ─── IPC 핸들러: _COMP_REVISIONS fallback (Supabase 장애 시) ──
 
 ipcMain.handle('sheets:read-revisions', async () => {
   try {
@@ -985,32 +652,6 @@ ipcMain.handle('sheets:read-revisions', async () => {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: msg, data: [] };
-  }
-});
-
-ipcMain.handle('sheets:add-revision', async (
-  _event, id: string, sceneKey: string, revisionNo: number, status: string,
-  description: string, imageUrl: string, department: string,
-  requesterId: string, requesterName: string, assignee: string, createdAt: string,
-) => {
-  try {
-    await addRevisionToSheets(id, sceneKey, revisionNo, status, description, imageUrl, department, requesterId, requesterName, assignee, createdAt);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:update-revision', async (
-  _event, id: string, updates: Record<string, string>,
-) => {
-  try {
-    await updateRevisionInSheets(id, updates);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
   }
 });
 

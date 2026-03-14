@@ -137,102 +137,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('supabase:broadcast-event', handler);
   },
 
-  // Google Sheets 연동 (Apps Script 웹 앱)
+  // GAS 연결 (이미지 업로드용 Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) =>
     ipcRenderer.invoke('sheets:connect', webAppUrl),
   sheetsIsConnected: () => ipcRenderer.invoke('sheets:is-connected'),
-  sheetsReadAll: () => ipcRenderer.invoke('sheets:read-all'),
-  sheetsUpdateCell: (
-    sheetName: string,
-    rowIndex: number,
-    stage: string,
-    value: boolean
-  ) =>
-    ipcRenderer.invoke('sheets:update-cell', sheetName, rowIndex, stage, value),
-  sheetsAddEpisode: (episodeNumber: number, department?: string) =>
-    ipcRenderer.invoke('sheets:add-episode', episodeNumber, department),
-  sheetsAddPart: (episodeNumber: number, partId: string, department?: string) =>
-    ipcRenderer.invoke('sheets:add-part', episodeNumber, partId, department),
-  sheetsAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) =>
-    ipcRenderer.invoke('sheets:add-scene', sheetName, sceneId, assignee, memo),
-  sheetsDeleteScene: (sheetName: string, rowIndex: number) =>
-    ipcRenderer.invoke('sheets:delete-scene', sheetName, rowIndex),
-  sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) =>
-    ipcRenderer.invoke('sheets:update-scene-field', sheetName, rowIndex, field, value),
+
+  // 이미지 업로드 (GAS → Google Drive)
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) =>
     ipcRenderer.invoke('sheets:upload-image', sheetName, sceneId, imageType, base64Data),
 
-  // METADATA 시트 관련
-  sheetsReadMetadata: (type: string, key: string) =>
-    ipcRenderer.invoke('sheets:read-metadata', type, key),
-  sheetsWriteMetadata: (type: string, key: string, value: string) =>
-    ipcRenderer.invoke('sheets:write-metadata', type, key, value),
-  sheetsSoftDeletePart: (sheetName: string) =>
-    ipcRenderer.invoke('sheets:soft-delete-part', sheetName),
-  sheetsSoftDeleteEpisode: (episodeNumber: number) =>
-    ipcRenderer.invoke('sheets:soft-delete-episode', episodeNumber),
-
-  // 아카이빙
-  sheetsReadArchived: () =>
-    ipcRenderer.invoke('sheets:read-archived'),
-  sheetsArchiveEpisode: (episodeNumber: number) =>
-    ipcRenderer.invoke('sheets:archive-episode', episodeNumber),
-  sheetsUnarchiveEpisode: (episodeNumber: number) =>
-    ipcRenderer.invoke('sheets:unarchive-episode', episodeNumber),
-
-  // 배치 요청 (Phase 0: 여러 작업을 한 번에)
-  sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
-    ipcRenderer.invoke('sheets:batch', actions),
-
-  // 대량 셀 업데이트 (다중 씬 체크박스 토글)
-  sheetsBulkUpdateCells: (sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) =>
-    ipcRenderer.invoke('sheets:bulk-update-cells', sheetName, updates),
-
-  // 대량 씬 추가 (Phase 0-5)
-  sheetsAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) =>
-    ipcRenderer.invoke('sheets:add-scenes', sheetName, scenes),
-
-  // _USERS (Phase 0-4: 사용자 동기화)
-  sheetsReadUsers: () =>
-    ipcRenderer.invoke('sheets:read-users'),
-  sheetsAddUser: (user: unknown) =>
-    ipcRenderer.invoke('sheets:add-user', user),
-  sheetsUpdateUser: (userId: string, updates: Record<string, string>) =>
-    ipcRenderer.invoke('sheets:update-user', userId, updates),
-  sheetsDeleteUser: (userId: string) =>
-    ipcRenderer.invoke('sheets:delete-user', userId),
-
-  // _COMMENTS (Phase 0-3: 댓글 동기화)
+  // Sheets fallback (Supabase 장애 시)
   sheetsReadComments: (sheetName: string) =>
     ipcRenderer.invoke('sheets:read-comments', sheetName),
-  sheetsAddComment: (commentId: string, sheetName: string, sceneId: string,
-    userId: string, userName: string, text: string, mentions: string[], createdAt: string) =>
-    ipcRenderer.invoke('sheets:add-comment', commentId, sheetName, sceneId, userId, userName, text, mentions, createdAt),
-  sheetsEditComment: (commentId: string, text: string, mentions: string[]) =>
-    ipcRenderer.invoke('sheets:edit-comment', commentId, text, mentions),
-  sheetsDeleteComment: (commentId: string) =>
-    ipcRenderer.invoke('sheets:delete-comment', commentId),
-
-  // _COMP_REVISIONS (컴포지팅 리비전)
   sheetsReadRevisions: () =>
     ipcRenderer.invoke('sheets:read-revisions'),
-  sheetsAddRevision: (
-    id: string, sceneKey: string, revisionNo: number, status: string,
-    description: string, imageUrl: string, department: string,
-    requesterId: string, requesterName: string, assignee: string, createdAt: string,
-  ) =>
-    ipcRenderer.invoke('sheets:add-revision', id, sceneKey, revisionNo, status,
-      description, imageUrl, department, requesterId, requesterName, assignee, createdAt),
-  sheetsUpdateRevision: (id: string, updates: Record<string, string>) =>
-    ipcRenderer.invoke('sheets:update-revision', id, updates),
-
-  // _REGISTRY (Phase 0-2: 에피소드/파트 중앙 관리)
-  sheetsReadRegistry: () =>
-    ipcRenderer.invoke('sheets:read-registry'),
-  sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) =>
-    ipcRenderer.invoke('sheets:archive-episode-via-registry', episodeNumber, archivedBy, archiveMemo),
-  sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) =>
-    ipcRenderer.invoke('sheets:unarchive-episode-via-registry', episodeNumber),
+  sheetsReadAllMetadata: () =>
+    ipcRenderer.invoke('sheets:read-all-metadata'),
 
   // 데이터 변경 알림 (다른 윈도우에 data:changed 브로드캐스트)
   dataNotifyChange: (delta?: unknown) => ipcRenderer.invoke('data:notify-change', delta),
@@ -247,10 +167,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   sheetsRelaySnapshot: (data: unknown) =>
     ipcRenderer.invoke('sheets:relay-snapshot', data),
-
-  // 메타데이터 일괄 로딩
-  sheetsReadAllMetadata: () =>
-    ipcRenderer.invoke('sheets:read-all-metadata'),
 
   // 휴가 관리 (vacation-repo WebApi)
   vacationConnect: (webAppUrl: string) =>

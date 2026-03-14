@@ -342,64 +342,14 @@ export interface ElectronAPI {
   imageDelete: (fileName: string) => Promise<boolean>;
   imageGetDir: () => Promise<string>;
   clipboardReadImage: () => Promise<string | null>;
-  // Google Sheets 연동 (Apps Script 웹 앱)
+  // GAS 연결 (이미지 업로드용 Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) => Promise<SheetsConnectResult>;
   sheetsIsConnected: () => Promise<boolean>;
-  sheetsReadAll: () => Promise<SheetsReadResult>;
-  sheetsUpdateCell: (
-    sheetName: string,
-    rowIndex: number,
-    stage: string,
-    value: boolean
-  ) => Promise<SheetsUpdateResult>;
-  // CRUD
-  sheetsAddEpisode: (episodeNumber: number, department?: string) => Promise<SheetsUpdateResult>;
-  sheetsAddPart: (episodeNumber: number, partId: string, department?: string) => Promise<SheetsUpdateResult>;
-  sheetsAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<SheetsUpdateResult>;
-  sheetsDeleteScene: (sheetName: string, rowIndex: number) => Promise<SheetsUpdateResult>;
-  sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) => Promise<SheetsUpdateResult>;
+  // 이미지 업로드 (GAS → Google Drive)
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
-  // METADATA 시트
-  sheetsReadMetadata: (type: string, key: string) => Promise<{ ok: boolean; data?: { type: string; key: string; value: string; updatedAt: string } | null; error?: string }>;
-  sheetsWriteMetadata: (type: string, key: string, value: string) => Promise<SheetsUpdateResult>;
-  sheetsSoftDeletePart: (sheetName: string) => Promise<SheetsUpdateResult>;
-  sheetsSoftDeleteEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
-  // 아카이빙
-  sheetsReadArchived: () => Promise<{ ok: boolean; data: { episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; archiveMemo?: string }[]; error?: string }>;
-  sheetsArchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
-  sheetsUnarchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
-  // 배치 요청 (Phase 0)
-  sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
-    Promise<{
-      ok: boolean;
-      results?: { ok: boolean; data?: unknown }[];
-      error?: string;
-      failedAt?: number;
-      failedAction?: string;
-    }>;
-  // 대량 셀 업데이트 (다중 씬 체크박스 토글)
-  sheetsBulkUpdateCells: (sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) =>
-    Promise<SheetsUpdateResult>;
-  // 대량 씬 추가 (Phase 0-5)
-  sheetsAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<SheetsUpdateResult>;
-  // _USERS (Phase 0-4)
-  sheetsReadUsers: () => Promise<{ ok: boolean; data: AppUser[]; error?: string }>;
-  sheetsAddUser: (user: AppUser) => Promise<SheetsUpdateResult>;
-  sheetsUpdateUser: (userId: string, updates: Record<string, string>) => Promise<SheetsUpdateResult>;
-  sheetsDeleteUser: (userId: string) => Promise<SheetsUpdateResult>;
-  // _COMMENTS (Phase 0-3)
+  // Sheets fallback (Supabase 장애 시)
   sheetsReadComments: (sheetName: string) => Promise<{ ok: boolean; data: { commentId: string; sheetName: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string }[]; error?: string }>;
-  sheetsAddComment: (commentId: string, sheetName: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<SheetsUpdateResult>;
-  sheetsEditComment: (commentId: string, text: string, mentions: string[]) => Promise<SheetsUpdateResult>;
-  sheetsDeleteComment: (commentId: string) => Promise<SheetsUpdateResult>;
-  // _COMP_REVISIONS (컴포지팅 리비전)
   sheetsReadRevisions: () => Promise<{ ok: boolean; data: { id: string; sceneKey: string; revisionNo: number; status: string; description: string; imageUrl: string; department: string; requesterId: string; requesterName: string; assignee: string; resolvedBy: string; resolvedNote: string; createdAt: string; updatedAt: string; resolvedAt: string }[]; error?: string }>;
-  sheetsAddRevision: (id: string, sceneKey: string, revisionNo: number, status: string, description: string, imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<SheetsUpdateResult>;
-  sheetsUpdateRevision: (id: string, updates: Record<string, string>) => Promise<SheetsUpdateResult>;
-  // _REGISTRY (Phase 0-2)
-  sheetsReadRegistry: () => Promise<{ ok: boolean; data: RegistryEntry[]; error?: string }>;
-  sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<SheetsUpdateResult>;
-  sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 데이터 변경 브로드캐스트
   dataNotifyChange?: (delta?: SheetDelta) => Promise<{ ok: boolean }>;
   sheetsNotifyChange?: (delta?: SheetDelta) => Promise<{ ok: boolean }>;
