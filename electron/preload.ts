@@ -17,11 +17,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeSettings: (fileName: string, data: unknown) =>
     ipcRenderer.invoke('settings:write', fileName, data),
 
-  // 실시간 동기화: 다른 창이 시트를 변경했을 때 델타 알림
+  // 실시간 동기화: 다른 창이 데이터를 변경했을 때 델타 알림
+  onDataChanged: (callback: (delta?: unknown) => void) => {
+    const handler = (_event: unknown, delta?: unknown) => callback(delta);
+    ipcRenderer.on('data:changed', handler);
+    return () => ipcRenderer.removeListener('data:changed', handler);
+  },
+  // 호환성 alias (레거시)
   onSheetChanged: (callback: (delta?: unknown) => void) => {
     const handler = (_event: unknown, delta?: unknown) => callback(delta);
-    ipcRenderer.on('sheet:changed', handler);
-    return () => ipcRenderer.removeListener('sheet:changed', handler);
+    ipcRenderer.on('data:changed', handler);
+    return () => ipcRenderer.removeListener('data:changed', handler);
   },
 
   // 재시도 알림: 동기화 재시도 시 토스트 표시용
@@ -228,8 +234,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) =>
     ipcRenderer.invoke('sheets:unarchive-episode-via-registry', episodeNumber),
 
-  // 데이터 변경 알림 (다른 윈도우에 sheet:changed 브로드캐스트)
-  sheetsNotifyChange: (delta?: unknown) => ipcRenderer.invoke('sheets:notify-change', delta),
+  // 데이터 변경 알림 (다른 윈도우에 data:changed 브로드캐스트)
+  dataNotifyChange: (delta?: unknown) => ipcRenderer.invoke('data:notify-change', delta),
+  // 호환성 alias (레거시)
+  sheetsNotifyChange: (delta?: unknown) => ipcRenderer.invoke('data:notify-change', delta),
 
   // 스냅샷 릴레이 (같은 PC 내 다른 창에 전체 데이터 전달)
   onSnapshotRelay: (callback: (data: unknown) => void) => {

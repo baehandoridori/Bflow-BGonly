@@ -370,45 +370,7 @@ export default function App() {
     loadData();
   }, [authReady, loadData]);
 
-  // 실시간 동기화: 델타 기반 부분 업데이트 또는 full reload (디바운스 적용)
-  useEffect(() => {
-    if (!window.electronAPI?.onSheetChanged) return;
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const cleanup = window.electronAPI.onSheetChanged((delta?: unknown) => {
-      const d = delta as import('@/types').SheetDelta | undefined;
-
-      // 토글 delta → 해당 셀만 즉시 업데이트 (readAll 없음)
-      if (d?.type === 'toggle') {
-        useDataStore.getState().setSceneStageValue(d.sheetName, d.sceneId, d.field, d.value);
-        return;
-      }
-      // 필드 업데이트 delta → 해당 필드만 즉시 업데이트
-      if (d?.type === 'field-update') {
-        useDataStore.getState().setSceneFieldBySceneId(d.sheetName, d.sceneId, d.field, d.value);
-        return;
-      }
-      // 댓글 delta → 캐시 무효화만 (readAll 호출 안 함)
-      if (d?.type === 'comment') {
-        invalidatePartCache(d.sheetName);
-        return;
-      }
-      // 할일 delta → localStorage 기반이므로 DOM 이벤트로 위젯에 전달 (readAll 불필요)
-      if (d?.type === 'todo') {
-        window.dispatchEvent(new Event('bflow:todos-changed'));
-        return;
-      }
-      // 'full', 'snapshot', 또는 delta 없음 → 기존 full reload
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        console.log('[동기화] full reload 트리거');
-        loadData();
-      }, 300);
-    });
-    return () => {
-      cleanup?.();
-      if (debounceTimer) clearTimeout(debounceTimer);
-    };
-  }, [loadData]);
+  // onSheetChanged 리스너 삭제됨 — Supabase Realtime이 대체 (M-3)
 
   // Supabase Realtime: DB 변경 감지 → delta 직접 적용 또는 full reload
   useEffect(() => {

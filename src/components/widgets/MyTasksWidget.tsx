@@ -752,13 +752,13 @@ export function MyTasksWidget() {
   const isPopup = useContext(IsPopupContext);
   const widgetId = useContext(WidgetIdContext);
 
-  // 시트 변경 알림: 팝업에서는 쿨다운 래퍼, 대시보드에서는 직접 호출
+  // 데이터 변경 알림: 팝업에서는 쿨다운 래퍼, 대시보드에서는 직접 호출
   const notifyChange = useCallback(async () => {
     if (isPopup) {
-      const { notifySheetChangeWithCooldown } = await import('@/views/WidgetPopup');
-      return notifySheetChangeWithCooldown();
+      const { notifyDataChangeWithCooldown } = await import('@/views/WidgetPopup');
+      return notifyDataChangeWithCooldown();
     }
-    return window.electronAPI?.sheetsNotifyChange?.();
+    return window.electronAPI?.dataNotifyChange?.();
   }, [isPopup]);
 
   // 뷰 관리
@@ -782,12 +782,12 @@ export function MyTasksWidget() {
   const broadcastTodoChange = useCallback(() => {
     if (_fromExternal.current) return;
     if (isPopup) {
-      import('@/views/WidgetPopup').then(({ notifySheetChangeWithCooldown: _ }) => {
-        // 팝업에서는 쿨다운 없이 직접 notify (todo는 시트 변경이 아님)
-        window.electronAPI?.sheetsNotifyChange?.({ type: 'todo' } as import('@/types').SheetDeltaTodo);
+      import('@/views/WidgetPopup').then(() => {
+        // 팝업에서는 쿨다운 없이 직접 notify (todo는 데이터 변경이 아님)
+        window.electronAPI?.dataNotifyChange?.({ type: 'todo' } as import('@/types').SheetDeltaTodo);
       });
     } else {
-      window.electronAPI?.sheetsNotifyChange?.({ type: 'todo' } as import('@/types').SheetDeltaTodo);
+      window.electronAPI?.dataNotifyChange?.({ type: 'todo' } as import('@/types').SheetDeltaTodo);
     }
   }, [isPopup]);
 

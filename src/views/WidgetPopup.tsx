@@ -31,16 +31,18 @@ import type { Episode } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
 import { DEFAULT_WEB_APP_URL } from '@/config';
 
-// 모듈 레벨 쿨다운: sheetsNotifyChange 호출 시 자체 변경 감지
+// 모듈 레벨 쿨다운: dataNotifyChange 호출 시 자체 변경 감지
 let _reloadCooldown = false;
 const _COOLDOWN_MS = 3000;
 
-/** 팝업 위젯에서 시트 변경 알림 시 이 래퍼를 사용 (쿨다운 자동 적용) */
-export function notifySheetChangeWithCooldown() {
+/** 팝업 위젯에서 데이터 변경 알림 시 이 래퍼를 사용 (쿨다운 자동 적용) */
+export function notifyDataChangeWithCooldown() {
   _reloadCooldown = true;
   setTimeout(() => { _reloadCooldown = false; }, _COOLDOWN_MS);
-  return window.electronAPI?.sheetsNotifyChange?.();
+  return window.electronAPI?.dataNotifyChange?.();
 }
+/** @deprecated notifyDataChangeWithCooldown 사용 */
+export const notifySheetChangeWithCooldown = notifyDataChangeWithCooldown;
 
 const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNode }> = {
   'overall-progress': { label: '전체 진행률', component: <OverallProgressWidget /> },
@@ -201,35 +203,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       }
     };
 
-    // 델타 기반 sheet:changed 리스너 — 토글/필드는 즉시 적용, 나머지는 full reload
-    const cleanupEvent = window.electronAPI?.onSheetChanged?.((delta?: unknown) => {
-      const d = delta as import('@/types').SheetDelta | undefined;
-
-      if (d?.type === 'toggle') {
-        useDataStore.getState().setSceneStageValue(d.sheetName, d.sceneId, d.field, d.value);
-        return;
-      }
-      if (d?.type === 'field-update') {
-        useDataStore.getState().setSceneFieldBySceneId(d.sheetName, d.sceneId, d.field, d.value);
-        return;
-      }
-      if (d?.type === 'comment') {
-        invalidatePartCache(d.sheetName);
-        return;
-      }
-      // 할일 delta → localStorage 기반이므로 DOM 이벤트로 위젯에 전달 (readAll 불필요)
-      if (d?.type === 'todo') {
-        window.dispatchEvent(new Event('bflow:todos-changed'));
-        return;
-      }
-      // full reload (디바운스)
-      if (_reloadCooldown) {
-        if (reloadTimer) clearTimeout(reloadTimer);
-        reloadTimer = setTimeout(() => { reloadData(); }, _COOLDOWN_MS + 500);
-        return;
-      }
-      reloadData();
-    });
+    // onSheetChanged 리스너 삭제됨 — Supabase Realtime이 대체 (M-3)
 
     // 스냅샷 릴레이 수신 — 다른 창에서 보낸 전체 데이터 직접 적용
     const cleanupSnapshot = window.electronAPI?.onSnapshotRelay?.((data: unknown) => {
@@ -300,7 +274,6 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     });
 
     return () => {
-      cleanupEvent?.();
       cleanupSnapshot?.();
       cleanupRealtime?.();
       cleanupBroadcast?.();

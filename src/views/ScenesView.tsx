@@ -1682,7 +1682,7 @@ export function ScenesView() {
     toggleQueueRef.current = toggleQueueRef.current.then(async () => {
       try {
         await updateSheetCell(sheetName, sceneIndex, stage, newValue);
-        window.electronAPI?.sheetsNotifyChange?.({
+        window.electronAPI?.dataNotifyChange?.({
           type: 'toggle',
           sheetName,
           sceneId,
@@ -1981,7 +1981,7 @@ export function ScenesView() {
 
     try {
       await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
-      window.electronAPI?.sheetsNotifyChange?.({
+      window.electronAPI?.dataNotifyChange?.({
         type: 'field-update',
         sheetName,
         sceneId,

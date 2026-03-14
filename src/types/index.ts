@@ -333,6 +333,7 @@ export interface ElectronAPI {
   usersWrite: (data: UsersFile) => Promise<boolean>;
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
+  onDataChanged: (callback: (delta?: SheetDelta) => void) => () => void;
   onSheetChanged: (callback: (delta?: SheetDelta) => void) => () => void;
   onRetryNotify?: (callback: (message: string) => void) => () => void;
   onSavingBeforeQuit?: (callback: (pendingCount: number) => void) => () => void;
@@ -400,6 +401,7 @@ export interface ElectronAPI {
   sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<SheetsUpdateResult>;
   sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) => Promise<SheetsUpdateResult>;
   // 데이터 변경 브로드캐스트
+  dataNotifyChange?: (delta?: SheetDelta) => Promise<{ ok: boolean }>;
   sheetsNotifyChange?: (delta?: SheetDelta) => Promise<{ ok: boolean }>;
   // 스냅샷 릴레이 (같은 PC 내 다른 창에 전체 데이터 전달)
   onSnapshotRelay?: (callback: (data: SnapshotRelayData) => void) => () => void;

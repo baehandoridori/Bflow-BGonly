@@ -168,7 +168,7 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
       store[sceneKey].push(comment);
     }
     // 다른 창에 댓글 변경 알림
-    window.electronAPI?.sheetsNotifyChange?.({
+    window.electronAPI?.dataNotifyChange?.({
       type: 'comment', sheetName, sceneId, commentAction: 'add',
     });
     return;
@@ -196,7 +196,7 @@ export async function updateComment(
       }
     });
     // 다른 창에 댓글 변경 알림
-    window.electronAPI?.sheetsNotifyChange?.({
+    window.electronAPI?.dataNotifyChange?.({
       type: 'comment', sheetName, sceneId, commentAction: 'edit',
     });
     return;
@@ -223,7 +223,7 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
       }
     });
     // 다른 창에 댓글 변경 알림
-    window.electronAPI?.sheetsNotifyChange?.({
+    window.electronAPI?.dataNotifyChange?.({
       type: 'comment', sheetName, sceneId, commentAction: 'delete',
     });
     return;
