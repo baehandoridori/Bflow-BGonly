@@ -24,6 +24,8 @@ import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
 import { readAllFromSheets, checkConnection, readMetadataFromSheets } from '@/services/supabaseService';
 import { connectSheets, loadSheetsConfig } from '@/services/sheetsService';
+import { invalidatePartCache } from '@/services/commentService';
+import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import type { Episode } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
@@ -212,7 +214,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         return;
       }
       if (d?.type === 'comment') {
-        import('@/services/commentService').then((cs) => cs.invalidatePartCache(d.sheetName));
+        invalidatePartCache(d.sheetName);
         return;
       }
       // 할일 delta → localStorage 기반이므로 DOM 이벤트로 위젯에 전달 (readAll 불필요)
@@ -242,9 +244,41 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       if (!_reloadCooldown) reloadData();
     }, 120_000);
 
+    // Supabase Realtime: DB 변경 감지 → delta 직접 적용 또는 full reload
+    const cleanupRealtime = window.electronAPI?.onSupabaseRealtime?.((event: unknown) => {
+      const { table, payload } = event as import('@/services/supabaseService').SupabaseRealtimeEvent;
+
+      if (table === 'comments') {
+        invalidatePartCache();
+        return;
+      }
+
+      if (table === 'scenes' && payload?.eventType === 'UPDATE' && payload?.new) {
+        const delta = extractSceneDelta(payload.new);
+        if (delta) {
+          const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
+          if (applied) return;
+        }
+      }
+
+      if (table === 'comp_revisions') {
+        window.dispatchEvent(new Event('bflow:revisions-invalidated'));
+        return;
+      }
+
+      // 그 외 → 디바운스 full reload
+      if (_reloadCooldown) {
+        if (reloadTimer) clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(() => { reloadData(); }, _COOLDOWN_MS + 500);
+        return;
+      }
+      reloadData();
+    });
+
     return () => {
       cleanupEvent?.();
       cleanupSnapshot?.();
+      cleanupRealtime?.();
       clearInterval(emergencyPoll);
       if (reloadTimer) clearTimeout(reloadTimer);
     };

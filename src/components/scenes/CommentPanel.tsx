@@ -57,11 +57,18 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
 
   useEffect(() => { loadComments(); }, [loadComments]);
 
-  // 다른 PC에서 댓글 변경 시 자동 리로드
+  // 다른 PC에서 댓글 변경 시 자동 리로드 (300ms 디바운스로 중복 방지)
   useEffect(() => {
-    const handler = () => { loadComments(); };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const handler = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { loadComments(); }, 300);
+    };
     window.addEventListener('bflow:comments-invalidated', handler);
-    return () => window.removeEventListener('bflow:comments-invalidated', handler);
+    return () => {
+      window.removeEventListener('bflow:comments-invalidated', handler);
+      if (timer) clearTimeout(timer);
+    };
   }, [loadComments]);
 
   // 새 댓글 시 스크롤

@@ -226,19 +226,24 @@ export const useDataStore = create<DataState>((set, get) => ({
   },
 
   updateSceneByUuid: (uuid, fields) => {
-    let found = false;
-    const episodes = get().episodes.map((ep) => ({
-      ...ep,
-      parts: ep.parts.map((part) => ({
-        ...part,
-        scenes: part.scenes.map((scene) => {
-          if (scene.id !== uuid) return scene;
-          found = true;
-          return { ...scene, ...fields };
-        }),
-      })),
-    }));
-    if (found) set(applyUpdate(get, episodes));
-    return found;
+    const oldEpisodes = get().episodes;
+    for (let ei = 0; ei < oldEpisodes.length; ei++) {
+      const ep = oldEpisodes[ei];
+      for (let pi = 0; pi < ep.parts.length; pi++) {
+        const part = ep.parts[pi];
+        const si = part.scenes.findIndex((s) => s.id === uuid);
+        if (si < 0) continue;
+        // 변경된 branch만 새 참조 생성
+        const newScenes = [...part.scenes];
+        newScenes[si] = { ...newScenes[si], ...fields };
+        const newParts = [...ep.parts];
+        newParts[pi] = { ...part, scenes: newScenes };
+        const newEpisodes = [...oldEpisodes];
+        newEpisodes[ei] = { ...ep, parts: newParts };
+        set(applyUpdate(get, newEpisodes));
+        return true;
+      }
+    }
+    return false;
   },
 }));

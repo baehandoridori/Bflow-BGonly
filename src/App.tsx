@@ -21,6 +21,9 @@ import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
 import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
+import { invalidatePartCache } from '@/services/commentService';
+import { invalidateRevisionsCache } from '@/services/revisionService';
+import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
@@ -386,7 +389,7 @@ export default function App() {
       }
       // 댓글 delta → 캐시 무효화만 (readAll 호출 안 함)
       if (d?.type === 'comment') {
-        import('@/services/commentService').then((cs) => cs.invalidatePartCache(d.sheetName));
+        invalidatePartCache(d.sheetName);
         return;
       }
       // 할일 delta → localStorage 기반이므로 DOM 이벤트로 위젯에 전달 (readAll 불필요)
@@ -416,30 +419,24 @@ export default function App() {
 
       // 댓글 변경 → 캐시 무효화 (CommentPanel이 이벤트 수신하여 리로드)
       if (table === 'comments') {
-        import('@/services/commentService').then((cs) => cs.invalidatePartCache());
+        invalidatePartCache();
         return;
       }
 
-      // scenes UPDATE → 체크박스/필드 변경일 가능성 높음 → delta 직접 적용 (full reload 없이 즉시)
+      // scenes UPDATE → delta 직접 적용 (full reload 없이 즉시)
       if (table === 'scenes' && payload?.eventType === 'UPDATE' && payload?.new) {
-        const row = payload.new as Record<string, unknown>;
-        const uuid = row.id as string;
-        if (uuid) {
-          const fields: Record<string, unknown> = {};
-          if (typeof row.lo === 'boolean') fields.lo = row.lo;
-          if (typeof row.done === 'boolean') fields.done = row.done;
-          if (typeof row.review === 'boolean') fields.review = row.review;
-          if (typeof row.png === 'boolean') fields.png = row.png;
-          if (typeof row.assignee === 'string') fields.assignee = row.assignee;
-          if (typeof row.memo === 'string') fields.memo = row.memo;
-          if (typeof row.scene_number === 'string') fields.sceneId = row.scene_number;
-          if (typeof row.layout === 'string') fields.layoutId = row.layout;
-          if (typeof row.storyboard_url === 'string') fields.storyboardUrl = row.storyboard_url;
-          if (typeof row.guide_url === 'string') fields.guideUrl = row.guide_url;
-          if (typeof row.sort_order === 'number') fields.no = row.sort_order;
-          const applied = useDataStore.getState().updateSceneByUuid(uuid, fields as Partial<import('@/types').Scene>);
-          if (applied) return; // delta 적용 성공 → full reload 불필요
+        const delta = extractSceneDelta(payload.new);
+        if (delta) {
+          const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
+          if (applied) return;
         }
+      }
+
+      // 리비전 변경 → 캐시 무효화 + 스토어 리로드 신호
+      if (table === 'comp_revisions') {
+        invalidateRevisionsCache();
+        window.dispatchEvent(new Event('bflow:revisions-invalidated'));
+        return;
       }
 
       // 그 외 (INSERT, DELETE, 구조 변경 등) → 디바운스 full reload
@@ -471,6 +468,20 @@ export default function App() {
       }
     });
     return () => { cleanup?.(); };
+  }, []);
+
+  // Realtime 리비전 변경 → useRevisionStore 리로드
+  useEffect(() => {
+    const handler = () => {
+      import('@/stores/useRevisionStore').then(({ useRevisionStore }) => {
+        // 이미 로드된 적이 있을 때만 리로드 (아직 한번도 안 열었으면 스킵)
+        if (useRevisionStore.getState().lastLoadTime) {
+          useRevisionStore.getState().loadRevisions();
+        }
+      });
+    };
+    window.addEventListener('bflow:revisions-invalidated', handler);
+    return () => window.removeEventListener('bflow:revisions-invalidated', handler);
   }, []);
 
   // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (30초 간격)
