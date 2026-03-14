@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange } from './broadcast';
 
 // ─── Supabase 클라이언트 (하드코딩 — 의사결정 #환경변수 참조) ───
@@ -7,7 +8,20 @@ const SUPABASE_URL = 'https://mpqifkpxalwxgcrddchv.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wcWlma3B4YWx3eGdjcmRkY2h2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM0ODEzNjIsImV4cCI6MjA4OTA1NzM2Mn0.vkaColwt60z1fpxFP2FDSDSdomLSgpGK44xwZe-Gvio';
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  realtime: {
+    params: {
+      eventsPerSecond: 10,
+    },
+  },
+  global: {
+    headers: { 'X-Client-Info': 'bflow-electron' },
+  },
+});
+
+// Node.js(Electron main)에는 글로벌 WebSocket이 없으므로 ws 패키지를 주입
+// @ts-expect-error — globalThis.WebSocket 타입 불일치 (ws vs browser WebSocket)
+globalThis.WebSocket = WebSocket;
 
 // ─── 타입 ──────────────────────────────────────
 
