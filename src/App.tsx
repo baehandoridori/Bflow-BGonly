@@ -19,7 +19,7 @@ import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
-import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent } from '@/services/supabaseService';
+import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
@@ -449,6 +449,28 @@ export default function App() {
     });
     return () => { cleanup?.(); };
   }, []);
+
+  // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (30초 간격)
+  useEffect(() => {
+    if (!authReady) return;
+    const POLL_INTERVAL = 30_000;
+    const timer = setInterval(() => {
+      loadData();
+    }, POLL_INTERVAL);
+    return () => clearInterval(timer);
+  }, [authReady, loadData]);
+
+  // Supabase Realtime 연결 상태 모니터링: 재연결 시 즉시 동기화
+  useEffect(() => {
+    if (!window.electronAPI?.onSupabaseStatus) return;
+    const cleanup = onSupabaseStatusChange((status: string) => {
+      if (status === 'SUBSCRIBED') {
+        // Realtime 재연결 완료 → 놓친 변경사항 즉시 동기화
+        loadData();
+      }
+    });
+    return () => { cleanup?.(); };
+  }, [loadData]);
 
   // 자동 로그인: 스플래시 종료 후 시간대별 인사 표시
   // welcomeUser가 있으면 수동 로그인이므로 건너뜀 (WelcomeToast onDismiss에서 처리)
