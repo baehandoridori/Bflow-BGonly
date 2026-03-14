@@ -1,9 +1,9 @@
 # ROADMAP.md — Bflow 프로덕션 현황 관리 도구 개발 로드맵
 
-> **최종 갱신**: 2026-02-27 (Phase 8-0~8-1, 8-3~8-5 완료 반영)
+> **최종 갱신**: 2026-03-14 (Phase 9 Supabase 마이그레이션 진행 반영)
 > **프로젝트**: Bflow (Studio JBBJ 프로덕션 진행 현황 대시보드)
 > **담당**: Claude × 한솔 (Studio JBBJ)
-> **현재 상태**: Phase 0 (0-4 제외) 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7 완료, Phase 8-0~8-1, 8-3~8-5 완료
+> **현재 상태**: Phase 0 (0-4 제외) 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7 완료, Phase 8-0~8-1, 8-3~8-5 완료, Phase 9 M-0, M-2 완료 + M-3 부분 완료
 
 ---
 
@@ -32,6 +32,7 @@ Phase 5: 커스터마이징           ░░░░░░░░░░ 미착수
 Phase 6: 멀티 부서 확장        ████████░░ Step 1~4 완료 ✅ (Step 5 대기)
 Phase 7: 대시보드 UX 혁신      ██████████ 7-1~7-5, 7-2 AOT 위치저장 완료 ✅
 Phase 8: 설정 개인화            ████████░░ 8-0~8-1, 8-3~8-5 완료 ✅ (8-2, 8-6 대기)
+Phase 9: Supabase 마이그레이션  ██████░░░░ M-0, M-2 완료, M-3 부분 완료 (M-1, M-4~M-6 대기)
 ```
 
 ---
@@ -962,6 +963,112 @@ Electron 구현:
 
 ---
 
+## Phase 9: Supabase 마이그레이션 — Google Sheets → Supabase `[진행]` `[중요]`
+
+> **목표**: Google Sheets(GAS) 기반 데이터 저장소를 Supabase(PostgreSQL + Realtime)로 전면 전환.
+> **영향도**: 앱 전체 데이터 흐름의 근본적 전환. 실시간 크로스 머신 동기화 실현.
+> **상태**: M-0, M-2 완료, M-3 부분 완료 (ScenesView 전환 완료, 나머지 뷰 잔여)
+> **착수 결정**: 2026-03-13 — 실시간 동기화 + GAS 유지보수 부담 해소를 위해 진행
+> **상세 계획서**: `DEVLOG/supabase-migration-plan.md` (767줄, 모든 의사결정/스키마/롤백 계획 포함)
+
+### 핵심 아키텍처 변경
+
+```
+BEFORE (Google Sheets):
+  렌더러 → IPC → 메인(sheets.ts) → HTTP → GAS(Code.gs) → Google Sheets
+  동기화: 폴링 기반 (주기적 full reload)
+
+AFTER (Supabase):
+  렌더러 → IPC → 메인(supabase.ts) → Supabase API → PostgreSQL
+  동기화: Realtime WebSocket (즉시 push, ~100ms)
+  이미지: GAS 유지 (이미지 업로드만 기존 경로)
+```
+
+### M-0. Supabase 프로젝트 준비 `P9` `[완료]`
+
+> 난이도: ●○○ | 완료일: 2026-03-13
+
+- [x] **Supabase 프로젝트 생성**: Cloud 무료 플랜 (500MB DB, 200 동시 Realtime)
+- [x] **스키마 생성**: episodes, parts, scenes, comments, comp_revisions, users, metadata (7개 테이블)
+- [x] **RLS 정책**: anon key 전체 접근 (내부 팀 전용)
+- [x] **Realtime 활성화**: scenes, comments, comp_revisions, episodes, parts
+
+### M-1. 마이그레이션 스크립트 `P9` `[ ]`
+
+> 난이도: ●●○ | 상태: 미착수
+
+- [ ] **sheets-to-json.ts**: GAS에서 전체 활성 에피소드 데이터 추출
+- [ ] **json-to-supabase.ts**: JSON → Supabase INSERT (아카이브 제외, 활성 데이터만)
+- [ ] **verify-migration.ts**: 데이터 정합성 검증 (씬 수, 체크박스 값 비교)
+
+### M-2. Supabase 클라이언트 구현 `P9` `[완료]`
+
+> 난이도: ●●○ | 완료일: 2026-03-14
+
+- [x] **electron/supabase.ts** (802줄): 클라이언트 초기화 + 전체 CRUD 함수
+  - Episodes: readAll, add, softDelete, archive, unarchive
+  - Parts: add, softDelete
+  - Scenes: add, addBulk, delete, updateStage, bulkUpdate, updateField
+  - Users: read, add, update, delete
+  - Comments: read, add, edit, delete
+  - CompRevisions: readAll, add, update
+  - Metadata: readAll, read, write
+- [x] **electron/realtime.ts** (147줄): Realtime 구독 + 지수 백오프 자동 재연결 (최대 10회)
+- [x] **electron/broadcast.ts** (82줄): Broadcast 채널로 즉시 delta 전파
+- [x] **src/services/supabaseService.ts** (374줄): IPC 래퍼 (기존 sheetsService와 1:1 호환)
+- [x] **electron/preload.ts**: Supabase IPC 메서드 30+개 추가
+- [x] **electron/main.ts**: Supabase IPC 핸들러 + Realtime 이벤트 전달
+
+### M-3. 뷰/스토어 전환 `P9` `[진행]`
+
+> 난이도: ●●● | 가장 큰 작업
+
+- [x] **ScenesView.tsx**: sheetsService → supabaseService 전면 교체, `if(sheetsConnected)` 분기 전부 제거
+- [x] **useDataStore.ts**: Realtime delta 적용 액션 (`updateSceneStageDirectly`) 추가
+- [x] **App.tsx**: Supabase 우선 연결 + Realtime/Broadcast 리스너 추가
+- [ ] **App.tsx 잔여**: `onSheetChanged` 리스너 제거
+- [ ] **useAppStore.ts**: `sheetsConnected` → 정리 (`activeDataSource`로 통일)
+- [ ] **CompositingView.tsx**: `sheetsConnected` 참조 제거
+- [ ] **SheetsSection.tsx**: Sheets 연결 설정 → Supabase 연결 상태 표시로 변경
+- [ ] **WidgetPopup.tsx**: `broadcastSheetChanged` 참조 정리
+
+### M-4. 테스트 모드 제거 `P9` `[대부분 완료]`
+
+> 난이도: ●○○
+
+- [x] **testSheetService.ts 삭제**: 이미 제거됨
+- [x] **test-data/ 디렉토리 삭제**: 이미 제거됨
+- [ ] **isTestMode 잔여 참조 정리**: useAppStore 등에서 완전 제거
+
+### M-5. 정리 및 빌드 검증 `P9` `[ ]`
+
+> 난이도: ●●○
+
+- [ ] **electron/drive-image.ts**: sheets.ts에서 이미지 업로드 코드 분리
+- [ ] **electron/sheets.ts 삭제**: 이미지 분리 후 전체 삭제
+- [ ] **src/services/sheetsService.ts 삭제**: supabaseService로 완전 대체
+- [ ] **electron/gas-fetch.ts 정리**: 이미지 업로드 전용으로 축소 또는 삭제
+- [ ] **src/config.ts**: `DEFAULT_WEB_APP_URL` → `DEFAULT_GAS_IMAGE_URL` 리네임
+- [ ] **broadcastSheetChanged → broadcastDataChanged**: 리네임
+- [ ] **tsc --noEmit + vite build 통과 확인**
+
+### M-6. 컷오버 `P9` `[ ]`
+
+> 난이도: ●○○ | 반나절 다운타임 (퇴근 후 or 주말)
+
+- [ ] **팀 공지**: 앱 사용 중단 안내
+- [ ] **마이그레이션 실행**: sheets-to-json → json-to-supabase → verify
+- [ ] **새 빌드 배포**: 공유 드라이브에 복사
+- [ ] **검증**: 체크박스 토글, 댓글, 에피소드/씬 CRUD 테스트
+- [ ] **팀 공지**: 사용 재개 (문제 시 이전 빌드로 롤백)
+
+### 미정 사항
+
+- **인증 시스템**: Supabase Auth vs 현행 유지 (구현 전 한솔님과 확인, `DEVLOG/supabase-migration-plan.md` 섹션 9 참조)
+- **Keep-alive**: 무료 플랜 7일 미사용 시 자동 정지 — 연휴 대비 방안 필요
+
+---
+
 ## 구현 우선순위 총정리
 
 > **2026-02-27 기준**: Phase 0-1~0-3 완료. 나머지 안정화 + 미완료 기능 진행.
@@ -1018,6 +1125,18 @@ Electron 구현:
 | 12 | **스플래시 건너뛰기** | P8 | ●○○ | 8-4 ✅ 완료 |
 | 13 | **로그인 자동저장** | P8 | ●○○ | 8-5 ✅ 완료 |
 | 14 | 키보드 단축키 커스텀 | P8 | ●●○ | 8-2 대기 |
+
+### Phase 9 (Supabase 마이그레이션) — 진행 현황
+
+| 순위 | 항목 | 세부 | 난이도 | 상태 |
+|------|------|------|--------|------|
+| 1 | M-0. Supabase 프로젝트 준비 | 스키마 + RLS + Realtime 활성화 | ●○○ | ✅ 완료 |
+| 2 | M-2. 클라이언트 구현 | supabase.ts + realtime.ts + broadcast.ts + IPC | ●●○ | ✅ 완료 |
+| 3 | M-3. 뷰/스토어 전환 | ScenesView 완료, 나머지 뷰 잔여 | ●●● | 🔶 진행 중 |
+| 4 | M-4. 테스트 모드 제거 | testSheetService/test-data 삭제됨, isTestMode 잔여 | ●○○ | 🔶 대부분 완료 |
+| 5 | M-1. 마이그레이션 스크립트 | sheets→JSON→Supabase 변환 + 검증 | ●●○ | 미착수 |
+| 6 | M-5. 정리 및 빌드 검증 | sheets.ts 삭제, drive-image.ts 분리 | ●●○ | 미착수 |
+| 7 | M-6. 컷오버 | 반나절 다운타임, 실제 데이터 마이그레이션 + 배포 | ●○○ | 미착수 |
 
 ---
 

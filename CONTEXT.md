@@ -1,7 +1,7 @@
 # CONTEXT.md — B flow 세션 컨텍스트 가이드
 
 > **용도**: 새 Claude 세션이 이 레포에서 작업할 때 빠르게 파악하기 위한 가이드.
-> **최종 갱신**: 2026-02-24
+> **최종 갱신**: 2026-03-14
 > **반드시 함께 읽을 문서**: `CLAUDE.md` (필수 규칙), `ROADMAP.md` (전체 개발 계획)
 
 ---
@@ -23,30 +23,40 @@
 
 ## 2. 아키텍처 한눈에 보기
 
+> **전환 중**: Google Sheets → Supabase 마이그레이션 진행 중 (Phase 9).
+> ScenesView는 Supabase 전환 완료, 일부 뷰에 Sheets 코드 잔존.
+
 ```
 ┌─ Electron 앱 ─────────────────────────────────────────────────┐
 │                                                                │
 │  ┌─ 렌더러 (React + Zustand) ──────────────────────┐          │
 │  │  Views: ScenesView, Dashboard, EpisodeView, ...  │          │
 │  │  Stores: useDataStore, useAppStore               │          │
-│  │  Services: sheetsService.ts (IPC 래퍼)           │          │
+│  │  Services: supabaseService.ts (IPC 래퍼)         │          │
 │  └──────────────┬───────────────────────────────────┘          │
 │                 │ IPC (preload.ts)                              │
 │  ┌──────────────▼───────────────────────────────────┐          │
 │  │  메인 프로세스 (electron/main.ts)                  │          │
-│  │  └─ sheets.ts: gasFetch() → HTTP 요청             │          │
+│  │  ├─ supabase.ts: CRUD 함수 (802줄)                │          │
+│  │  ├─ realtime.ts: WebSocket 구독 + 자동 재연결      │          │
+│  │  ├─ broadcast.ts: 즉시 delta 전파                  │          │
+│  │  └─ sheets.ts: GAS 통신 (이미지 업로드용 잔존)      │          │
 │  └──────────────┬───────────────────────────────────┘          │
 └─────────────────┼──────────────────────────────────────────────┘
-                  │ HTTP (GET/POST)
-    ┌─────────────▼─────────────────┐
-    │  Google Apps Script (Code.gs) │
-    │  (스프레드시트에 바인딩됨)      │
-    └─────────────┬─────────────────┘
                   │
-    ┌─────────────▼─────────────────┐
-    │  Google Sheets (데이터 SSOT)   │
-    │  시트 이름: EP01_A_BG, EP01_A_ACT │
-    └───────────────────────────────┘
+    ┌─────────────▼─────────────────────────┐
+    │  Supabase (PostgreSQL + Realtime)      │
+    │  테이블: episodes, parts, scenes,       │
+    │          comments, comp_revisions,      │
+    │          users, metadata               │
+    └─────────────┬─────────────────────────┘
+                  │ WebSocket (Realtime)
+                  └─→ 변경 즉시 push (~100ms)
+
+    ┌─────────────────────────────────┐
+    │  Google Apps Script (Code.gs)   │
+    │  → 이미지 업로드만 담당          │
+    └─────────────────────────────────┘
 ```
 
 ### 핵심 데이터 흐름
@@ -54,20 +64,21 @@
 ```
 체크박스 클릭
   → useDataStore.toggleSceneStage() [즉시 UI 반영 = 낙관적 업데이트]
-  → sheetsService.updateSheetCell() [IPC → main → HTTP → GAS → Sheets]
-  → 실패 시: syncInBackground()로 Sheets에서 재로딩하여 UI 복원
+  → supabaseService.updateSceneField() [IPC → main → Supabase API]
+  → 실패 시: 해당 필드만 롤백 (세밀한 롤백)
+  → 다른 사용자: Realtime WebSocket으로 즉시 수신 → delta 적용
 ```
 
-### 두 가지 모드 (분기 기준: `sheetsConnected` 불리언)
+### 데이터 소스 (전환 중)
 
-| | 라이브 모드 | 테스트 모드 |
-|--|-----------|-----------|
-| **데이터** | Google Sheets | `test-data/sheets.json` |
-| **서비스** | `sheetsService.ts` | `testSheetService.ts` |
-| **활성화** | Sheets 연결 시 | `--test-mode` 또는 `TEST_MODE=1` |
-| **분기 위치** | `ScenesView.tsx` 17개소+ | `if(sheetsConnected)` 패턴 |
+| | Supabase (신규) | Google Sheets (레거시) |
+|--|----------------|----------------------|
+| **데이터** | PostgreSQL (Supabase) | Google Sheets |
+| **서비스** | `supabaseService.ts` | `sheetsService.ts` (잔존) |
+| **동기화** | Realtime WebSocket (즉시) | 폴링 기반 (주기적 reload) |
+| **상태** | ScenesView 등 주요 뷰 전환 완료 | 일부 뷰에 잔존 (M-3 진행 중) |
 
-> **참고**: 테스트 모드 제거가 로드맵 Phase 0-4에 선택적 항목으로 있음.
+> **참고**: 테스트 모드(testSheetService.ts, test-data/)는 이미 제거됨.
 
 ---
 
@@ -77,14 +88,17 @@
 
 | 파일 | 줄 수 | 역할 | 비고 |
 |------|-------|------|------|
-| `src/views/ScenesView.tsx` | ~2980 | **메인 뷰** — 씬 CRUD, 체크박스, 필터, 정렬 | 가장 큰 파일, 모든 동작의 허브 |
-| `src/stores/useDataStore.ts` | ~200 | 에피소드/씬 상태 + 낙관적 업데이트 함수 | `toggleSceneStage`, `addEpisodeOptimistic` 등 |
-| `src/stores/useAppStore.ts` | ~160 | UI 상태 (뷰, 필터, 연결상태, 테마) | `sheetsConnected`, `isTestMode` 등 |
-| `electron/sheets.ts` | ~336 | **GAS HTTP 통신** — `gasFetch()`, `gasGet()` | 리다이렉트 핸들링 포함 |
-| `electron/main.ts` | ~900 | Electron 메인 프로세스, IPC 핸들러 전체 | 파일워처, 윈도우 관리 |
-| `src/services/sheetsService.ts` | ~156 | 렌더러→IPC 래퍼 (라이브 모드) | `addEpisodeToSheets`, `updateSheetCell` 등 |
-| `src/services/testSheetService.ts` | ~372 | 로컬 JSON 파일 조작 (테스트 모드) | `readTestSheet`, `addTestScene` 등 |
-| `apps-script/Code.gs` | ~700+ | **Google Apps Script** — doGet/doPost | Sheets 직접 조작, 이미지 업로드 |
+| `src/views/ScenesView.tsx` | ~2980 | **메인 뷰** — 씬 CRUD, 체크박스, 필터, 정렬 | 가장 큰 파일, Supabase 전환 완료 |
+| `src/stores/useDataStore.ts` | ~200 | 에피소드/씬 상태 + 낙관적 업데이트 함수 | Realtime delta 적용 액션 포함 |
+| `src/stores/useAppStore.ts` | ~160 | UI 상태 (뷰, 필터, 연결상태, 테마) | `activeDataSource`, `sheetsConnected`(정리 예정) |
+| `electron/supabase.ts` | ~802 | **Supabase CRUD** — 전체 데이터 조작 | 클라이언트 초기화 + 모든 테이블 CRUD |
+| `electron/realtime.ts` | ~147 | **Realtime 구독** — WebSocket 이벤트 처리 | 자동 재연결 (지수 백오프, 최대 10회) |
+| `electron/broadcast.ts` | ~82 | **Broadcast** — 즉시 delta 전파 | 다중 클라이언트 간 빠른 동기화 |
+| `electron/main.ts` | ~900 | Electron 메인 프로세스, IPC 핸들러 전체 | Supabase + Sheets 양쪽 핸들러 |
+| `src/services/supabaseService.ts` | ~374 | 렌더러→IPC 래퍼 (Supabase) | 기존 sheetsService와 1:1 호환 |
+| `electron/sheets.ts` | ~336 | GAS HTTP 통신 (레거시, 정리 예정) | 이미지 업로드 코드 분리 후 삭제 예정 |
+| `src/services/sheetsService.ts` | ~156 | 렌더러→IPC 래퍼 (레거시, 정리 예정) | M-5에서 삭제 예정 |
+| `apps-script/Code.gs` | ~700+ | **Google Apps Script** | 이미지 업로드만 유지 |
 
 ### UI 컴포넌트
 
@@ -110,26 +124,31 @@
 
 ---
 
-## 4. 현재 진행 상태 (2026-02-24)
+## 4. 현재 진행 상태 (2026-03-14)
 
 ### 완료된 기능
 
+- Phase 0: 긴급 안정화 (0-1~0-3, 0-5~0-6 완료)
 - Phase 1: 씬 관리 (정렬, 필터, 레이아웃 그룹핑, 연속 입력)
 - Phase 2: 이미지 업로드/비교 뷰, 완료 애니메이션
 - Phase 4-1~4-3: 에피소드/타임라인/인원별 뷰
 - Phase 6 Step 1~4: BG+액팅 멀티 부서 (타입, 데이터, UI, 대시보드)
-- Phase 7-1,3~5: 위젯 편집, 동기부여 메시지, UI 폴리시, 스포트라이트
+- Phase 7-1~7-5: 위젯 편집, 동기부여 메시지, UI 폴리시, 스포트라이트, AOT 위치저장
+- Phase 8-0~8-1, 8-3~8-5: 설정 탭, 글꼴 크기, 플렉서스 제어, 스플래시, 로그인 자동저장
+- Phase 9 M-0, M-2: Supabase 프로젝트 준비 + 클라이언트 구현 완료
 
-### 다음 착수 — Phase 0: 긴급 안정화 (ROADMAP.md 참조)
+### 현재 진행 중 — Phase 9: Supabase 마이그레이션
 
-**핵심 문제**: 1동작=1HTTP 요청 구조로 인한 부분 실패/롤백 이슈
+**핵심 목표**: Google Sheets → Supabase 전환으로 실시간 크로스 머신 동기화 실현
 
-| 순위 | 항목 | 설명 |
-|------|------|------|
-| **1** | **배치 엔드포인트 (0-1)** | GAS `batch` action으로 복수 동작 원자적 처리 |
-| **2** | **낙관적 롤백 보강 (0-2)** | 아카이브 등 복합 동작 실패 시 UI 상태 완전 복원 |
-| **3** | **재시도 로직 (0-3)** | HTTP 실패 시 지수 백오프 자동 재시도 |
-| 4 | 테스트 모드 제거 (0-4) | 선택적 — 코드 간소화 |
+| 순위 | 항목 | 설명 | 상태 |
+|------|------|------|------|
+| **1** | **M-3. 뷰/스토어 전환** | ScenesView 완료, 나머지 뷰 잔여 | 🔶 진행 중 |
+| **2** | **M-1. 마이그레이션 스크립트** | sheets→JSON→Supabase 변환 | 미착수 |
+| **3** | **M-5. 정리 및 빌드 검증** | sheets.ts 삭제, drive-image.ts 분리 | 미착수 |
+| **4** | **M-6. 컷오버** | 반나절 다운타임, 실제 마이그레이션 | 미착수 |
+
+> **상세 계획서**: `DEVLOG/supabase-migration-plan.md` (767줄)
 
 ---
 
@@ -144,61 +163,51 @@
 
 ### 패턴 규칙
 
-1. **낙관적 업데이트**: 모든 데이터 변경은 `store.xxxOptimistic()` → 서비스 호출 → 실패 시 `syncInBackground()`
-2. **테스트 모드 동등성**: 새 기능은 `if(sheetsConnected)` 양쪽 경로 모두 구현 (0-4에서 폐지 전까지)
+1. **낙관적 업데이트**: 모든 데이터 변경은 `store.xxxOptimistic()` → supabaseService 호출 → 실패 시 해당 필드만 롤백
+2. **Supabase 단일 경로**: 새 기능은 `supabaseService` 경유로만 구현 (Sheets 분기 추가 금지)
 3. **서비스 레이어 분리**: 뷰에서 직접 API 호출 금지, 반드시 `services/` 경유
-4. **Apps Script 변경 시**: Code.gs 수정 후 GAS 웹 앱 **재배포** 필요 (사용자가 직접)
+4. **IPC 구조 유지**: 렌더러에서 직접 Supabase 호출 금지, 반드시 IPC → 메인 → Supabase
+5. **Realtime**: `syncInBackground()` 대신 Realtime delta로 다른 클라이언트 동기화
 
 ### ScenesView.tsx 작업 시 주의
 
-이 파일은 ~2980줄로 앱의 **핵심 허브**. 거의 모든 CRUD가 여기에 있음.
+이 파일은 ~2980줄로 앱의 **핵심 허브**. Supabase 전환 완료.
 
 ```
-패턴:
+패턴 (Supabase):
   handleXxx = async () => {
     // ① 낙관적 업데이트 (store)
     xxxOptimistic(...)
 
-    // ② 서버 동기화 (분기)
+    // ② Supabase 동기화
     try {
-      if (sheetsConnected) {
-        await xxxToSheets(...)
-      } else {
-        await xxxTest(...)
-      }
-      syncInBackground()
+      await supabaseService.xxx(...)
+      // syncInBackground 불필요 — Realtime이 다른 클라이언트에 전파
     } catch (err) {
-      alert(err)
-      syncInBackground()  // ← 주의: 낙관적 상태 롤백 누락 가능
+      rollbackXxx(...)  // 실패 시 해당 필드만 명시적 롤백
     }
   }
 ```
 
 ---
 
-## 6. 알려진 이슈 & PR 리뷰 사항
+## 6. 알려진 이슈 & 주의사항
 
-### 확인된 이슈 (2026-02-24)
+### 확인된 이슈 (2026-03-14)
 
 | 이슈 | 위치 | 심각도 | 상태 |
 |------|------|--------|------|
-| 복수 동작 부분 실패 | `sheets.ts` 전체 | 높음 | Phase 0-1에서 해결 예정 |
-| 아카이브 롤백 누락 | `ScenesView.tsx:1930-1933` | 중간 | Phase 0-2에서 해결 예정 |
-| commentService 캐시 참조 | `commentService.ts:39` | 낮음 | **수정 완료** (복사본 반환) |
-| 테스트 마이그레이션 비결정적 | `testSheetService.ts:43-46` | 매우 낮음 | 테스트 모드 전용, 미수정 |
+| 복수 동작 부분 실패 | `sheets.ts` (레거시) | ~~높음~~ | ✅ Phase 0-1 배치로 해결, Supabase 전환 후 무관 |
+| 아카이브 롤백 누락 | `ScenesView.tsx` | ~~중간~~ | ✅ Phase 0-2에서 해결 |
+| Sheets 코드 잔존 | App.tsx, useAppStore 등 | 낮음 | Phase 9 M-3에서 정리 중 |
+| Supabase 무료 플랜 7일 정지 | 운영 | 중간 | 연휴 시 keep-alive 필요 |
+| 인증 시스템 미정 | 전체 | 낮음 | 현행 유지 vs Supabase Auth (한솔님과 확인 필요) |
 
-### 코덱스(Codex) 리뷰 검증 결과
+### Supabase 전환 관련 주의사항
 
-**리뷰 1 — commentService 캐시 참조 (수정 완료)**
-- `getComments()`가 캐시 배열 참조를 직접 반환 → 복사본으로 수정됨
-
-**리뷰 2 — 아카이브 낙관적 롤백 (Phase 0-2로 편입)**
-- catch에서 `archivedEpisodes` 롤백 안 함 → 유령 아카이브 가능
-- Phase 0 배치 엔드포인트로 근본 해결 + 롤백 로직 보강 병행
-
-**리뷰 3 — 테스트 마이그레이션 Math.random() (미수정)**
-- 최초 1회 마이그레이션에서만 발생, 이후 저장 시 결정적으로 고정됨
-- 테스트 모드 전용이라 실질적 영향 없음 → 수정 불필요
+1. **레거시 코드 잔존**: `sheetsConnected`, `onSheetChanged`, `broadcastSheetChanged` 등이 일부 파일에 남아있음 → M-3/M-5에서 정리 예정
+2. **이미지 업로드**: GAS 경유 유지 (Supabase Storage 아님). `sheets.ts`에서 이미지 코드를 `drive-image.ts`로 분리 후 삭제 예정
+3. **IPC 구조**: 렌더러 → IPC → 메인(supabase.ts) → Supabase API. 렌더러에서 직접 Supabase 호출 금지
 
 ---
 
@@ -207,6 +216,7 @@
 ```
 Electron 28 + React 18 + TypeScript + Vite
 Tailwind CSS + Framer Motion + Zustand + react-grid-layout
+@supabase/supabase-js (PostgreSQL + Realtime WebSocket)
 ```
 
 ```bash
@@ -263,9 +273,11 @@ npm run build        # tsc + vite build + electron-builder
 | 문서 | 용도 |
 |------|------|
 | `CLAUDE.md` | 필수 규칙, 프로젝트 개요 |
-| `ROADMAP.md` | 전체 개발 로드맵 (Phase 0~7) |
+| `ROADMAP.md` | 전체 개발 로드맵 (Phase 0~9) |
+| `DEVLOG/supabase-migration-plan.md` | Supabase 마이그레이션 상세 계획서 (767줄) |
+| `DEVLOG/supabase-init.sql` | Supabase DB 스키마 초기화 SQL |
 | `tasks/lessons.md` | 과거 실수/패턴 기록 |
-| `apps-script/Code.gs` | Google Apps Script 서버 코드 |
+| `apps-script/Code.gs` | Google Apps Script (이미지 업로드 전용) |
 | `/home/user/Bflow/` | Bflow 원본 레포 (참고 전용, 수정 금지) |
 
 ---
