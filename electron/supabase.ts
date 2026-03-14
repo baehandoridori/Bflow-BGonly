@@ -272,6 +272,7 @@ export async function archiveEpisode(
     })
     .eq('episode_number', episodeNumber);
   throwIfError(error);
+  broadcastDataChange('episodes', 'UPDATE');
 }
 
 /** 에피소드 아카이빙 해제 */
@@ -287,6 +288,7 @@ export async function unarchiveEpisode(episodeNumber: number): Promise<void> {
     })
     .eq('episode_number', episodeNumber);
   throwIfError(error);
+  broadcastDataChange('episodes', 'UPDATE');
 }
 
 /** 아카이브된 에피소드 목록 */
