@@ -35,27 +35,42 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'scenes' },
-      callbacks.onSceneChange,
+      (payload) => {
+        console.log('[Realtime] scenes 이벤트 수신:', payload.eventType, payload.new && (payload.new as Record<string, unknown>).id);
+        callbacks.onSceneChange(payload);
+      },
     )
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'comments' },
-      callbacks.onCommentChange,
+      (payload) => {
+        console.log('[Realtime] comments 이벤트 수신:', payload.eventType);
+        callbacks.onCommentChange(payload);
+      },
     )
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'comp_revisions' },
-      callbacks.onRevisionChange,
+      (payload) => {
+        console.log('[Realtime] comp_revisions 이벤트 수신:', payload.eventType);
+        callbacks.onRevisionChange(payload);
+      },
     )
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'episodes' },
-      callbacks.onEpisodeChange,
+      (payload) => {
+        console.log('[Realtime] episodes 이벤트 수신:', payload.eventType);
+        callbacks.onEpisodeChange(payload);
+      },
     )
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'parts' },
-      callbacks.onPartChange,
+      (payload) => {
+        console.log('[Realtime] parts 이벤트 수신:', payload.eventType);
+        callbacks.onPartChange(payload);
+      },
     );
 }
 

@@ -416,6 +416,7 @@ export default function App() {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const cleanup = onSupabaseRealtimeEvent((event: SupabaseRealtimeEvent) => {
       const { table, payload } = event;
+      console.log(`[App Realtime] 이벤트 수신: table=${table}, type=${payload?.eventType}`);
 
       // 댓글 변경 → 캐시 무효화 (CommentPanel이 이벤트 수신하여 리로드)
       if (table === 'comments') {
@@ -491,6 +492,7 @@ export default function App() {
     const cleanup = window.electronAPI.onSupabaseBroadcast((raw: unknown) => {
       const data = raw as { event: string; payload: Record<string, unknown> };
       if (!data?.event) return;
+      console.log(`[App Broadcast] 이벤트 수신: ${data.event}`, data.payload);
 
       if (data.event === 'scene-update') {
         // 체크박스 토글 → UUID로 즉시 반영
