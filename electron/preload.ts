@@ -47,9 +47,83 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clipboardReadImage: () =>
     ipcRenderer.invoke('clipboard:read-image') as Promise<string | null>,
 
-  // Supabase
+  // ─── Supabase ──────────────────────────────────
   supabaseTestConnection: () =>
     ipcRenderer.invoke('supabase:test-connection') as Promise<{ ok: boolean; error?: string }>,
+  supabaseReadAll: () =>
+    ipcRenderer.invoke('supabase:read-all'),
+  supabaseAddEpisode: (episodeNumber: number, department?: string) =>
+    ipcRenderer.invoke('supabase:add-episode', episodeNumber, department),
+  supabaseSoftDeleteEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('supabase:soft-delete-episode', episodeNumber),
+  supabaseArchiveEpisode: (episodeNumber: number, archivedBy: string, archiveMemo: string) =>
+    ipcRenderer.invoke('supabase:archive-episode', episodeNumber, archivedBy, archiveMemo),
+  supabaseUnarchiveEpisode: (episodeNumber: number) =>
+    ipcRenderer.invoke('supabase:unarchive-episode', episodeNumber),
+  supabaseReadArchived: () =>
+    ipcRenderer.invoke('supabase:read-archived'),
+  supabaseAddPart: (episodeNumber: number, partId: string, department?: string) =>
+    ipcRenderer.invoke('supabase:add-part', episodeNumber, partId, department),
+  supabaseSoftDeletePart: (sheetName: string) =>
+    ipcRenderer.invoke('supabase:soft-delete-part', sheetName),
+  supabaseAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) =>
+    ipcRenderer.invoke('supabase:add-scene', sheetName, sceneId, assignee, memo),
+  supabaseAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) =>
+    ipcRenderer.invoke('supabase:add-scenes', sheetName, scenes),
+  supabaseDeleteScene: (sceneUuid: string) =>
+    ipcRenderer.invoke('supabase:delete-scene', sceneUuid),
+  supabaseUpdateSceneStage: (sceneUuid: string, stage: string, value: boolean, updatedBy?: string) =>
+    ipcRenderer.invoke('supabase:update-scene-stage', sceneUuid, stage, value, updatedBy),
+  supabaseBulkUpdateSceneStages: (updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) =>
+    ipcRenderer.invoke('supabase:bulk-update-scene-stages', updates, updatedBy),
+  supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string) =>
+    ipcRenderer.invoke('supabase:update-scene-field', sceneUuid, field, value),
+  supabaseReadUsers: () =>
+    ipcRenderer.invoke('supabase:read-users'),
+  supabaseAddUser: (user: unknown) =>
+    ipcRenderer.invoke('supabase:add-user', user),
+  supabaseUpdateUser: (userId: string, updates: Record<string, string>) =>
+    ipcRenderer.invoke('supabase:update-user', userId, updates),
+  supabaseDeleteUser: (userId: string) =>
+    ipcRenderer.invoke('supabase:delete-user', userId),
+  supabaseReadComments: (partUuid: string) =>
+    ipcRenderer.invoke('supabase:read-comments', partUuid),
+  supabaseAddComment: (commentId: string, partUuid: string, sceneId: string,
+    userId: string, userName: string, text: string, mentions: string[], createdAt: string) =>
+    ipcRenderer.invoke('supabase:add-comment', commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt),
+  supabaseEditComment: (commentId: string, text: string, mentions: string[]) =>
+    ipcRenderer.invoke('supabase:edit-comment', commentId, text, mentions),
+  supabaseDeleteComment: (commentId: string) =>
+    ipcRenderer.invoke('supabase:delete-comment', commentId),
+  supabaseReadRevisions: () =>
+    ipcRenderer.invoke('supabase:read-revisions'),
+  supabaseAddRevision: (
+    id: string, partUuid: string, sceneId: string, revisionNo: number, status: string,
+    priority: string, description: string, frameNo: string, imageUrl: string,
+    department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
+  ) =>
+    ipcRenderer.invoke('supabase:add-revision', id, partUuid, sceneId, revisionNo, status,
+      priority, description, frameNo, imageUrl, department, requesterId, requesterName, assignee, createdAt),
+  supabaseUpdateRevision: (id: string, updates: Record<string, string>) =>
+    ipcRenderer.invoke('supabase:update-revision', id, updates),
+  supabaseReadAllMetadata: () =>
+    ipcRenderer.invoke('supabase:read-all-metadata'),
+  supabaseReadMetadata: (type: string, key: string) =>
+    ipcRenderer.invoke('supabase:read-metadata', type, key),
+  supabaseWriteMetadata: (type: string, key: string, value: string) =>
+    ipcRenderer.invoke('supabase:write-metadata', type, key, value),
+
+  // Realtime 이벤트 수신 (메인 프로세스 → 렌더러)
+  onSupabaseRealtime: (callback: (event: unknown) => void) => {
+    const handler = (_event: unknown, data: unknown) => callback(data);
+    ipcRenderer.on('supabase:realtime-event', handler);
+    return () => ipcRenderer.removeListener('supabase:realtime-event', handler);
+  },
+  onSupabaseStatus: (callback: (status: string) => void) => {
+    const handler = (_event: unknown, status: string) => callback(status);
+    ipcRenderer.on('supabase:status', handler);
+    return () => ipcRenderer.removeListener('supabase:status', handler);
+  },
 
   // Google Sheets 연동 (Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) =>

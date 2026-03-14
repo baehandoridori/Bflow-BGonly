@@ -421,11 +421,174 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { testConnection as supabaseTestConnection } from './supabase';
+import {
+  testConnection as supabaseTestConnection,
+  readAllEpisodes as sbReadAllEpisodes,
+  addEpisode as sbAddEpisode,
+  softDeleteEpisode as sbSoftDeleteEpisode,
+  archiveEpisode as sbArchiveEpisode,
+  unarchiveEpisode as sbUnarchiveEpisode,
+  readArchivedEpisodes as sbReadArchived,
+  addPart as sbAddPart,
+  softDeletePart as sbSoftDeletePart,
+  addScene as sbAddScene,
+  addScenes as sbAddScenes,
+  deleteScene as sbDeleteScene,
+  updateSceneStage as sbUpdateSceneStage,
+  bulkUpdateSceneStages as sbBulkUpdateSceneStages,
+  updateSceneField as sbUpdateSceneField,
+  readUsers as sbReadUsers,
+  addUser as sbAddUser,
+  updateUser as sbUpdateUser,
+  deleteUser as sbDeleteUser,
+  readCommentsForPart as sbReadComments,
+  addComment as sbAddComment,
+  editComment as sbEditComment,
+  deleteComment as sbDeleteComment,
+  readAllRevisions as sbReadRevisions,
+  addRevision as sbAddRevision,
+  updateRevision as sbUpdateRevision,
+  readAllMetadata as sbReadAllMetadata,
+  readMetadata as sbReadMetadata,
+  writeMetadata as sbWriteMetadata,
+} from './supabase';
+import type { SupabaseUser } from './supabase';
+import { setupRealtimeSubscription, teardownRealtime } from './realtime';
 
+// 연결 테스트
 ipcMain.handle('supabase:test-connection', async () => {
   return supabaseTestConnection();
 });
+
+// ─── Episodes ───
+ipcMain.handle('supabase:read-all', async () => {
+  return sbReadAllEpisodes();
+});
+ipcMain.handle('supabase:add-episode', async (_e, episodeNumber: number, department?: string) => {
+  await sbAddEpisode(episodeNumber, department);
+});
+ipcMain.handle('supabase:soft-delete-episode', async (_e, episodeNumber: number) => {
+  await sbSoftDeleteEpisode(episodeNumber);
+});
+ipcMain.handle('supabase:archive-episode', async (_e, episodeNumber: number, archivedBy: string, archiveMemo: string) => {
+  await sbArchiveEpisode(episodeNumber, archivedBy, archiveMemo);
+});
+ipcMain.handle('supabase:unarchive-episode', async (_e, episodeNumber: number) => {
+  await sbUnarchiveEpisode(episodeNumber);
+});
+ipcMain.handle('supabase:read-archived', async () => {
+  return sbReadArchived();
+});
+
+// ─── Parts ───
+ipcMain.handle('supabase:add-part', async (_e, episodeNumber: number, partId: string, department?: string) => {
+  await sbAddPart(episodeNumber, partId, department);
+});
+ipcMain.handle('supabase:soft-delete-part', async (_e, sheetName: string) => {
+  await sbSoftDeletePart(sheetName);
+});
+
+// ─── Scenes ───
+ipcMain.handle('supabase:add-scene', async (_e, sheetName: string, sceneId: string, assignee: string, memo: string) => {
+  await sbAddScene(sheetName, sceneId, assignee, memo);
+});
+ipcMain.handle('supabase:add-scenes', async (_e, sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => {
+  await sbAddScenes(sheetName, scenes);
+});
+ipcMain.handle('supabase:delete-scene', async (_e, sceneUuid: string) => {
+  await sbDeleteScene(sceneUuid);
+});
+ipcMain.handle('supabase:update-scene-stage', async (_e, sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => {
+  await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
+});
+ipcMain.handle('supabase:bulk-update-scene-stages', async (_e, updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => {
+  await sbBulkUpdateSceneStages(updates, updatedBy);
+});
+ipcMain.handle('supabase:update-scene-field', async (_e, sceneUuid: string, field: string, value: string) => {
+  await sbUpdateSceneField(sceneUuid, field, value);
+});
+
+// ─── Users ───
+ipcMain.handle('supabase:read-users', async () => {
+  return sbReadUsers();
+});
+ipcMain.handle('supabase:add-user', async (_e, user: SupabaseUser) => {
+  await sbAddUser(user);
+});
+ipcMain.handle('supabase:update-user', async (_e, userId: string, updates: Record<string, string>) => {
+  await sbUpdateUser(userId, updates);
+});
+ipcMain.handle('supabase:delete-user', async (_e, userId: string) => {
+  await sbDeleteUser(userId);
+});
+
+// ─── Comments ───
+ipcMain.handle('supabase:read-comments', async (_e, partUuid: string) => {
+  return sbReadComments(partUuid);
+});
+ipcMain.handle('supabase:add-comment', async (_e, commentId: string, partUuid: string, sceneId: string,
+  userId: string, userName: string, text: string, mentions: string[], createdAt: string) => {
+  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt);
+});
+ipcMain.handle('supabase:edit-comment', async (_e, commentId: string, text: string, mentions: string[]) => {
+  await sbEditComment(commentId, text, mentions);
+});
+ipcMain.handle('supabase:delete-comment', async (_e, commentId: string) => {
+  await sbDeleteComment(commentId);
+});
+
+// ─── Revisions ───
+ipcMain.handle('supabase:read-revisions', async () => {
+  return sbReadRevisions();
+});
+ipcMain.handle('supabase:add-revision', async (_e, id: string, partUuid: string, sceneId: string,
+  revisionNo: number, status: string, priority: string, description: string, frameNo: string,
+  imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => {
+  await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, requesterId, requesterName, assignee, createdAt);
+});
+ipcMain.handle('supabase:update-revision', async (_e, id: string, updates: Record<string, string>) => {
+  await sbUpdateRevision(id, updates);
+});
+
+// ─── Metadata ───
+ipcMain.handle('supabase:read-all-metadata', async () => {
+  return sbReadAllMetadata();
+});
+ipcMain.handle('supabase:read-metadata', async (_e, type: string, key: string) => {
+  return sbReadMetadata(type, key);
+});
+ipcMain.handle('supabase:write-metadata', async (_e, type: string, key: string, value: string) => {
+  await sbWriteMetadata(type, key, value);
+});
+
+// ─── Realtime 구독 (앱 시작 시 자동 설정) ───
+function startSupabaseRealtime() {
+  setupRealtimeSubscription({
+    onSceneChange: (payload) => broadcastSupabaseEvent('scenes', payload),
+    onCommentChange: (payload) => broadcastSupabaseEvent('comments', payload),
+    onRevisionChange: (payload) => broadcastSupabaseEvent('comp_revisions', payload),
+    onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
+    onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
+    onStatusChange: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('supabase:status', status);
+      }
+      for (const win of widgetWindows.values()) {
+        if (!win.isDestroyed()) win.webContents.send('supabase:status', status);
+      }
+    },
+  });
+}
+
+function broadcastSupabaseEvent(table: string, payload: unknown) {
+  const event = { table, payload };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('supabase:realtime-event', event);
+  }
+  for (const win of widgetWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('supabase:realtime-event', event);
+  }
+}
 
 // ─── IPC 핸들러: Google Sheets 연동 (Apps Script 웹 앱) ─────
 
@@ -1417,6 +1580,9 @@ app.whenReady().then(() => {
 
   createWindow();
 
+  // Supabase Realtime 구독 시작
+  startSupabaseRealtime();
+
   // 저장된 위젯 자동 복원 (Phase 0-6)
   if (widgetPositionCache.size > 0 && mainWindow) {
     mainWindow.webContents.on('did-finish-load', () => {
@@ -1451,6 +1617,9 @@ app.whenReady().then(() => {
 app.on('before-quit', (e) => {
   if (isQuitting) return;
   isQuitting = true;
+
+  // Supabase Realtime 정리
+  teardownRealtime();
 
   // 위젯 위치 즉시 저장 (closed 이벤트보다 먼저 실행)
   saveWidgetPositionsSync();

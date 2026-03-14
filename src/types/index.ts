@@ -438,6 +438,39 @@ export interface ElectronAPI {
   // 화이트보드 (공유 드라이브 파일 접근)
   whiteboardReadShared: () => Promise<{ ok: boolean; data: import('./whiteboard').WhiteboardData | null; error?: string }>;
   whiteboardWriteShared: (data: import('./whiteboard').WhiteboardData) => Promise<{ ok: boolean; error?: string }>;
+
+  // ─── Supabase ──────────────────────────────────
+  supabaseTestConnection: () => Promise<{ ok: boolean; error?: string }>;
+  supabaseReadAll: () => Promise<unknown[]>;
+  supabaseAddEpisode: (episodeNumber: number, department?: string) => Promise<void>;
+  supabaseSoftDeleteEpisode: (episodeNumber: number) => Promise<void>;
+  supabaseArchiveEpisode: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<void>;
+  supabaseUnarchiveEpisode: (episodeNumber: number) => Promise<void>;
+  supabaseReadArchived: () => Promise<unknown[]>;
+  supabaseAddPart: (episodeNumber: number, partId: string, department?: string) => Promise<void>;
+  supabaseSoftDeletePart: (sheetName: string) => Promise<void>;
+  supabaseAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<void>;
+  supabaseAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<void>;
+  supabaseDeleteScene: (sceneUuid: string) => Promise<void>;
+  supabaseUpdateSceneStage: (sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => Promise<void>;
+  supabaseBulkUpdateSceneStages: (updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => Promise<void>;
+  supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string) => Promise<void>;
+  supabaseReadUsers: () => Promise<unknown[]>;
+  supabaseAddUser: (user: unknown) => Promise<void>;
+  supabaseUpdateUser: (userId: string, updates: Record<string, string>) => Promise<void>;
+  supabaseDeleteUser: (userId: string) => Promise<void>;
+  supabaseReadComments: (partUuid: string) => Promise<unknown[]>;
+  supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<void>;
+  supabaseEditComment: (commentId: string, text: string, mentions: string[]) => Promise<void>;
+  supabaseDeleteComment: (commentId: string) => Promise<void>;
+  supabaseReadRevisions: () => Promise<unknown[]>;
+  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<void>;
+  supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
+  supabaseReadAllMetadata: () => Promise<unknown[]>;
+  supabaseReadMetadata: (type: string, key: string) => Promise<unknown>;
+  supabaseWriteMetadata: (type: string, key: string, value: string) => Promise<void>;
+  onSupabaseRealtime: (callback: (event: unknown) => void) => () => void;
+  onSupabaseStatus: (callback: (status: string) => void) => () => void;
 }
 
 declare global {
