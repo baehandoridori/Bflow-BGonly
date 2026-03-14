@@ -524,6 +524,7 @@ export async function addUser(user: SupabaseUser): Promise<void> {
     is_initial_password: user.isInitialPassword,
   });
   throwIfError(error);
+  broadcastDataChange('users', 'INSERT');
 }
 
 /** 사용자 업데이트 */
@@ -543,12 +544,14 @@ export async function updateUser(
   }
   const { error } = await supabase.from('users').update(dbUpdates).eq('id', userId);
   throwIfError(error);
+  broadcastDataChange('users', 'UPDATE');
 }
 
 /** 사용자 삭제 */
 export async function deleteUser(userId: string): Promise<void> {
   const { error } = await supabase.from('users').delete().eq('id', userId);
   throwIfError(error);
+  broadcastDataChange('users', 'DELETE');
 }
 
 // ═══════════════════════════════════════════════
@@ -598,6 +601,7 @@ export async function addComment(
     created_at: createdAt,
   });
   throwIfError(error);
+  broadcastDataChange('comments', 'INSERT');
 }
 
 /** 댓글 수정 */
@@ -611,12 +615,14 @@ export async function editComment(
     .update({ text, mentions, edited_at: new Date().toISOString() })
     .eq('id', commentId);
   throwIfError(error);
+  broadcastDataChange('comments', 'UPDATE');
 }
 
 /** 댓글 삭제 */
 export async function deleteComment(commentId: string): Promise<void> {
   const { error } = await supabase.from('comments').delete().eq('id', commentId);
   throwIfError(error);
+  broadcastDataChange('comments', 'DELETE');
 }
 
 // ═══════════════════════════════════════════════
@@ -667,6 +673,7 @@ export async function addRevision(
     created_at: createdAt,
   });
   throwIfError(error);
+  broadcastDataChange('comp_revisions', 'INSERT');
 }
 
 /** 리비전 업데이트 */
@@ -686,6 +693,7 @@ export async function updateRevision(
   }
   const { error } = await supabase.from('comp_revisions').update(dbUpdates).eq('id', id);
   throwIfError(error);
+  broadcastDataChange('comp_revisions', 'UPDATE');
 }
 
 function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string } {
@@ -755,6 +763,7 @@ export async function writeMetadata(type: string, key: string, value: string): P
       { onConflict: 'type,key' },
     );
   throwIfError(error);
+  broadcastDataChange('metadata', 'UPSERT');
 }
 
 // ═══════════════════════════════════════════════

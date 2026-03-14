@@ -1,5 +1,5 @@
 import { useOthersMapped, useUpdateMyPresence } from '@liveblocks/react';
-import { useCallback } from 'react';
+import { useCallback, useRef, memo } from 'react';
 
 // ─── 사용자별 커서 색상 ─────────────────────────────────────
 
@@ -39,6 +39,47 @@ interface CursorsOverlayProps {
   panY: number;
 }
 
+/** 개별 커서 — memo로 동일 props일 때 리렌더링 방지 */
+const RemoteCursor = memo(function RemoteCursor({
+  connectionId,
+  x,
+  y,
+  userName,
+  zoom,
+  panX,
+  panY,
+}: {
+  connectionId: number;
+  x: number;
+  y: number;
+  userName: string;
+  zoom: number;
+  panX: number;
+  panY: number;
+}) {
+  const screenX = x * zoom + panX;
+  const screenY = y * zoom + panY;
+  const color = getCursorColor(connectionId);
+
+  return (
+    <div
+      className="absolute transition-transform duration-75"
+      style={{
+        transform: `translate(${screenX}px, ${screenY}px)`,
+        willChange: 'transform',
+      }}
+    >
+      <CursorIcon color={color} />
+      <span
+        className="absolute left-4 top-3 px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
+        style={{ backgroundColor: color, color: '#000' }}
+      >
+        {userName || '익명'}
+      </span>
+    </div>
+  );
+});
+
 /**
  * 다른 사용자의 실시간 커서를 표시하는 오버레이.
  * RoomProvider 안에서만 렌더링됨 (공유 탭).
@@ -55,32 +96,17 @@ export function CursorsOverlay({ zoom, panX, panY }: CursorsOverlayProps) {
     <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 50 }}>
       {others.map(([connectionId, presence]) => {
         if (!presence.cursor) return null;
-
-        // 캔버스 논리 좌표 → 화면 좌표
-        const screenX = presence.cursor.x * zoom + panX;
-        const screenY = presence.cursor.y * zoom + panY;
-        const color = getCursorColor(connectionId);
-
         return (
-          <div
+          <RemoteCursor
             key={connectionId}
-            className="absolute transition-transform duration-75"
-            style={{
-              transform: `translate(${screenX}px, ${screenY}px)`,
-              willChange: 'transform',
-            }}
-          >
-            <CursorIcon color={color} />
-            <span
-              className="absolute left-4 top-3 px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
-              style={{
-                backgroundColor: color,
-                color: '#000',
-              }}
-            >
-              {presence.userName || '익명'}
-            </span>
-          </div>
+            connectionId={connectionId}
+            x={presence.cursor.x}
+            y={presence.cursor.y}
+            userName={presence.userName as string}
+            zoom={zoom}
+            panX={panX}
+            panY={panY}
+          />
         );
       })}
     </div>
@@ -95,9 +121,14 @@ export function CursorsOverlay({ zoom, panX, panY }: CursorsOverlayProps) {
  */
 export function useCursorUpdater() {
   const updateMyPresence = useUpdateMyPresence();
+  const lastSentRef = useRef(0);
 
   const updateCursor = useCallback(
     (canvasX: number, canvasY: number) => {
+      const now = performance.now();
+      // 16ms(60fps) 스로틀링 — Presence 업데이트 빈도 제한
+      if (now - lastSentRef.current < 16) return;
+      lastSentRef.current = now;
       updateMyPresence({ cursor: { x: canvasX, y: canvasY } });
     },
     [updateMyPresence],
