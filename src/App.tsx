@@ -18,7 +18,8 @@ import { LoginScreen } from '@/components/auth/LoginScreen';
 import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
-import { loadSheetsConfig, connectSheets, checkConnection, readAllFromSheets, readMetadataFromSheets } from '@/services/sheetsService';
+import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
+import { readAllFromSheets } from '@/services/supabaseService';
 import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
@@ -36,7 +37,7 @@ import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_WEB_APP_URL, DEFAULT_VACATION_URL } from '@/config';
 
 export default function App() {
-  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected, setActiveDataSource } = useAppStore();
+  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setDataConnected, setGasConfig, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected, setActiveDataSource } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -125,14 +126,14 @@ export default function App() {
       // Supabase 실패 → Sheets fallback
       setActiveDataSource('sheets');
       console.warn('[Supabase] 연결 실패, Sheets fallback 시도');
-      const connected = await checkConnection();
+      const connected = await checkGasConnection();
       if (!connected) {
-        const cfg = await loadSheetsConfig();
+        const cfg = await loadGasConfig();
         const url = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
         if (url) {
-          const result = await connectSheets(url);
+          const result = await connectGas(url);
           if (!result.ok) throw new Error('시트 연결 실패');
-          setSheetsConnected(true);
+          setDataConnected(true);
         } else {
           throw new Error('데이터 소스 연결 실패');
         }
@@ -164,7 +165,7 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setSheetsConnected, setActiveDataSource]);
+  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setDataConnected, setActiveDataSource]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {
@@ -280,20 +281,20 @@ export default function App() {
         const sbConn = await testSupabaseConnection();
         if (sbConn.ok) {
           console.log('[Supabase] 연결 성공');
-          setSheetsConnected(true); // 기존 UI 호환: 연결 상태 표시에 재사용
-          setUsersSheetsMode(true); // 사용자 서비스도 Supabase로 전환 (호환)
+          setDataConnected(true);
+          setUsersSheetsMode(true); // 사용자 서비스도 IPC 모드 활성화
         }
 
         // Sheets fallback 연결 (Supabase 실패 시에만)
         if (!sbConn.ok) {
-          const config = await loadSheetsConfig();
+          const config = await loadGasConfig();
           const urlToConnect = config?.webAppUrl || DEFAULT_WEB_APP_URL;
           if (urlToConnect) {
             const effectiveConfig = config ?? { webAppUrl: urlToConnect };
-            setSheetsConfig(effectiveConfig);
-            const result = await connectSheets(urlToConnect);
+            setGasConfig(effectiveConfig);
+            const result = await connectGas(urlToConnect);
             if (result.ok) {
-              setSheetsConnected(true);
+              setDataConnected(true);
               setUsersSheetsMode(true);
               console.log('[Sheets] fallback 연결 성공');
               migrateUsersToSheets().catch(() => {});

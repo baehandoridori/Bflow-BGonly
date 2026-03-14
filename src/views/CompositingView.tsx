@@ -1046,7 +1046,7 @@ function DetailPanel({
 
 export default function CompositingView() {
   const { currentUser } = useAuthStore();
-  const sheetsConnected = useAppStore((s) => s.sheetsConnected);
+  const dataConnected = useAppStore((s) => s.dataConnected);
   const episodes = useDataStore((s) => s.episodes);
   const { revisions, loadRevisions, updateStatus, isLoading } = useRevisionStore();
 
@@ -1063,9 +1063,9 @@ export default function CompositingView() {
   );
 
   useEffect(() => {
-    setRevisionsSheetsMode(sheetsConnected);
+    setRevisionsSheetsMode(dataConnected);
     loadRevisions();
-  }, [sheetsConnected, loadRevisions]);
+  }, [dataConnected, loadRevisions]);
 
   // 씬 정보 맵 빌드 (에피소드 데이터 + 리비전 sceneKey 매칭)
   const sceneInfoMap = useMemo(() => {

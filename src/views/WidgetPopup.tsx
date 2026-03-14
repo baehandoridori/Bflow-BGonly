@@ -23,7 +23,7 @@ import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
 import { readAllFromSheets, checkConnection, readMetadataFromSheets } from '@/services/supabaseService';
-import { connectSheets, loadSheetsConfig } from '@/services/sheetsService';
+import { connectGas, loadGasConfig } from '@/services/gasConfigService';
 import { invalidatePartCache } from '@/services/commentService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
@@ -185,10 +185,10 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           } catch { /* 메타데이터 로딩 실패는 무시 */ }
         } else {
           // 재연결 시도
-          const cfg = await loadSheetsConfig();
+          const cfg = await loadGasConfig();
           const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
           if (urlToConnect) {
-            const result = await connectSheets(urlToConnect);
+            const result = await connectGas(urlToConnect);
             if (result.ok) {
               const episodes = await readAllFromSheets();
               useDataStore.getState().setEpisodes(episodes);
@@ -313,14 +313,14 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
 
         let connected = await checkConnection();
         if (!connected) {
-          const cfg = await loadSheetsConfig();
+          const cfg = await loadGasConfig();
           const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
           if (urlToConnect) {
-            const result = await connectSheets(urlToConnect);
+            const result = await connectGas(urlToConnect);
             connected = result.ok;
           }
         }
-        useAppStore.getState().setSheetsConnected(connected);
+        useAppStore.getState().setDataConnected(connected);
 
         // 휴가 API 자동 연결
         const vacConfig = await loadVacationConfig();

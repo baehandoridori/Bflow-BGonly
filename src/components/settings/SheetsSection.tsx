@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { Database, Palmtree } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import {
-  loadSheetsConfig,
-  saveSheetsConfig,
-  connectSheets,
-  checkConnection,
-} from '@/services/sheetsService';
+  loadGasConfig,
+  saveGasConfig,
+  connectGas,
+  checkGasConnection,
+} from '@/services/gasConfigService';
 import {
   loadVacationConfig,
   saveVacationConfig,
@@ -18,7 +18,7 @@ import { SettingsSection } from './SettingsSection';
 
 export function SheetsSection() {
   const {
-    sheetsConnected, setSheetsConnected, setSheetsConfig,
+    dataConnected, setDataConnected, setGasConfig,
     vacationConnected, setVacationConnected, setVacationConfig,
   } = useAppStore();
 
@@ -35,12 +35,12 @@ export function SheetsSection() {
 
   useEffect(() => {
     async function load() {
-      const config = await loadSheetsConfig();
+      const config = await loadGasConfig();
       if (config) {
         setWebAppUrl(config.webAppUrl);
       }
-      const connected = await checkConnection();
-      setSheetsConnected(connected);
+      const connected = await checkGasConnection();
+      setDataConnected(connected);
 
       // 휴가 설정 로드 + 자동 연결
       const vacConfig = await loadVacationConfig();
@@ -65,17 +65,17 @@ export function SheetsSection() {
     setIsConnecting(true);
     setConnectError(null);
     try {
-      const result = await connectSheets(webAppUrl);
+      const result = await connectGas(webAppUrl);
       if (result.ok) {
-        setSheetsConnected(true);
+        setDataConnected(true);
         setConnectError(null);
       } else {
-        setSheetsConnected(false);
+        setDataConnected(false);
         setConnectError(result.error ?? '연결 실패');
       }
     } catch (err) {
       setConnectError(String(err));
-      setSheetsConnected(false);
+      setDataConnected(false);
     } finally {
       setIsConnecting(false);
     }
@@ -83,8 +83,8 @@ export function SheetsSection() {
 
   const handleSave = async () => {
     const config = { webAppUrl };
-    await saveSheetsConfig(config);
-    setSheetsConfig(config);
+    await saveGasConfig(config);
+    setGasConfig(config);
     setSaveMessage('저장 완료');
     setTimeout(() => setSaveMessage(null), 2000);
   };
@@ -129,12 +129,12 @@ export function SheetsSection() {
       action={
         <span
           className={`px-2.5 py-1 rounded-md text-xs font-medium ${
-            sheetsConnected
+            dataConnected
               ? 'bg-stage-png/20 text-stage-png'
               : 'bg-bg-primary text-text-secondary'
           }`}
         >
-          {sheetsConnected ? '연결됨' : '미연결'}
+          {dataConnected ? '연결됨' : '미연결'}
         </span>
       }
     >
