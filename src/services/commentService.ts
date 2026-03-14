@@ -123,10 +123,12 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
   return store;
 }
 
-/** 파트 캐시 무효화 */
+/** 파트 캐시 무효화 + 컴포넌트에 리로드 신호 전달 */
 export function invalidatePartCache(sheetName?: string): void {
   if (sheetName) sheetPartCache.delete(sheetName);
   else sheetPartCache.clear();
+  // CommentPanel 등 구독 컴포넌트에 다시 불러오라는 신호
+  window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
 }
 
 // ─── 통합 API ───────────────────────────────────

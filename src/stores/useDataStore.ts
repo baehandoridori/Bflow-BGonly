@@ -45,6 +45,8 @@ interface DataState {
   updateSceneFieldOptimistic: (sheetName: string, rowIndex: number, field: string, value: string) => void;
   deletePartOptimistic: (sheetName: string) => void;
   deleteEpisodeOptimistic: (episodeNumber: number) => void;
+  /** Supabase UUID로 씬 필드 직접 업데이트 (Realtime delta용) */
+  updateSceneByUuid: (uuid: string, fields: Partial<Scene>) => boolean;
 }
 
 function applyUpdate(get: () => DataState, episodes: Episode[]) {
@@ -221,5 +223,22 @@ export const useDataStore = create<DataState>((set, get) => ({
   deleteEpisodeOptimistic: (episodeNumber) => {
     const episodes = get().episodes.filter((ep) => ep.episodeNumber !== episodeNumber);
     set(applyUpdate(get, episodes));
+  },
+
+  updateSceneByUuid: (uuid, fields) => {
+    let found = false;
+    const episodes = get().episodes.map((ep) => ({
+      ...ep,
+      parts: ep.parts.map((part) => ({
+        ...part,
+        scenes: part.scenes.map((scene) => {
+          if (scene.id !== uuid) return scene;
+          found = true;
+          return { ...scene, ...fields };
+        }),
+      })),
+    }));
+    if (found) set(applyUpdate(get, episodes));
+    return found;
   },
 }));

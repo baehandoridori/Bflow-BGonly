@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Send, Pencil, Trash2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -48,12 +48,21 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // 댓글 로드
-  useEffect(() => {
+  const loadComments = useCallback(() => {
     getComments(sceneKey).then((data) => {
       setComments(data);
       onCountChange?.(data.length);
     });
   }, [sceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { loadComments(); }, [loadComments]);
+
+  // 다른 PC에서 댓글 변경 시 자동 리로드
+  useEffect(() => {
+    const handler = () => { loadComments(); };
+    window.addEventListener('bflow:comments-invalidated', handler);
+    return () => window.removeEventListener('bflow:comments-invalidated', handler);
+  }, [loadComments]);
 
   // 새 댓글 시 스크롤
   useEffect(() => {

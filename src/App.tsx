@@ -407,19 +407,42 @@ export default function App() {
     };
   }, [loadData]);
 
-  // Supabase Realtime: DB 변경 감지 → 데이터 리로드
+  // Supabase Realtime: DB 변경 감지 → delta 직접 적용 또는 full reload
   useEffect(() => {
     if (!window.electronAPI?.onSupabaseRealtime) return;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const cleanup = onSupabaseRealtimeEvent((event: SupabaseRealtimeEvent) => {
       const { table, payload } = event;
-      // scenes 테이블 UPDATE → 체크박스 토글일 가능성 높음 → 바로 리로드
-      // 그 외 변경 → 디바운스 full reload
+
+      // 댓글 변경 → 캐시 무효화 (CommentPanel이 이벤트 수신하여 리로드)
       if (table === 'comments') {
-        // 댓글 변경은 캐시 무효화만
         import('@/services/commentService').then((cs) => cs.invalidatePartCache());
         return;
       }
+
+      // scenes UPDATE → 체크박스/필드 변경일 가능성 높음 → delta 직접 적용 (full reload 없이 즉시)
+      if (table === 'scenes' && payload?.eventType === 'UPDATE' && payload?.new) {
+        const row = payload.new as Record<string, unknown>;
+        const uuid = row.id as string;
+        if (uuid) {
+          const fields: Record<string, unknown> = {};
+          if (typeof row.lo === 'boolean') fields.lo = row.lo;
+          if (typeof row.done === 'boolean') fields.done = row.done;
+          if (typeof row.review === 'boolean') fields.review = row.review;
+          if (typeof row.png === 'boolean') fields.png = row.png;
+          if (typeof row.assignee === 'string') fields.assignee = row.assignee;
+          if (typeof row.memo === 'string') fields.memo = row.memo;
+          if (typeof row.scene_number === 'string') fields.sceneId = row.scene_number;
+          if (typeof row.layout === 'string') fields.layoutId = row.layout;
+          if (typeof row.storyboard_url === 'string') fields.storyboardUrl = row.storyboard_url;
+          if (typeof row.guide_url === 'string') fields.guideUrl = row.guide_url;
+          if (typeof row.sort_order === 'number') fields.no = row.sort_order;
+          const applied = useDataStore.getState().updateSceneByUuid(uuid, fields as Partial<import('@/types').Scene>);
+          if (applied) return; // delta 적용 성공 → full reload 불필요
+        }
+      }
+
+      // 그 외 (INSERT, DELETE, 구조 변경 등) → 디바운스 full reload
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         console.log(`[Supabase Realtime] ${table} ${payload?.eventType} → reload`);
