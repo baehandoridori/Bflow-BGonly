@@ -651,11 +651,12 @@ export async function updateRevision(
   throwIfError(error);
 }
 
-function mapRevision(r: Record<string, unknown>): SupabaseRevision {
+function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string } {
   return {
     id: r.id as string,
     partId: r.part_id as string,
     sceneId: r.scene_id as string,
+    sceneKey: (r.scene_id as string) || '',  // scene_id에 sceneKey 저장 (호환용)
     revisionNo: r.revision_no as number,
     status: (r.status as string) || 'open',
     priority: (r.priority as string) || 'normal',
