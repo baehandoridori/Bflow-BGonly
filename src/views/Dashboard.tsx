@@ -348,7 +348,21 @@ function WidgetPicker({
   partIds: string[];
 }) {
   const [expandedPartType, setExpandedPartType] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [adjustedPos, setAdjustedPos] = useState<{ right?: boolean; bottom?: boolean }>({});
   const hasContent = hiddenWidgets.length > 0 || (isEpMode && partIds.length > 0);
+
+  // 렌더 후 화면 경계 확인 → 넘치면 위치 조정
+  useEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const adj: { right?: boolean; bottom?: boolean } = {};
+    if (rect.right > window.innerWidth - 8) adj.right = true;
+    if (rect.bottom > window.innerHeight - 8) adj.bottom = true;
+    if (adj.right || adj.bottom) setAdjustedPos(adj);
+  }, [expandedPartType]);
+
   if (!hasContent) return null;
 
   const menuStyle = {
@@ -359,11 +373,16 @@ function WidgetPicker({
 
   return (
     <motion.div
+      ref={menuRef}
       initial={{ opacity: 0, y: -8, scale: 0.96 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: -8, scale: 0.96 }}
       transition={{ duration: 0.15 }}
-      className="absolute top-full left-0 mt-2 z-50 min-w-[200px]"
+      className={cn(
+        'absolute z-50 min-w-[200px]',
+        adjustedPos.bottom ? 'bottom-full mb-2' : 'top-full mt-2',
+        adjustedPos.right ? 'right-0' : 'left-0',
+      )}
     >
       <div className="rounded-xl overflow-hidden py-1.5" style={menuStyle}>
         <div className="px-3 py-1.5 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
