@@ -19,22 +19,30 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: node_modules 확인 및 설치
-if not exist "node_modules" (
-    echo [설치] npm 패키지를 설치합니다...
+:: 패키지 설치 (node_modules가 없거나 새 패키지가 추가된 경우)
+echo [확인] npm 패키지 동기화 중...
+call npm install --prefer-offline --no-audit --no-fund >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [재시도] 전체 설치를 시도합니다...
     call npm install
     if %errorlevel% neq 0 (
         echo [오류] npm install 실패
         pause
         exit /b 1
     )
-    echo.
 )
+echo [완료] 패키지 준비 완료
+echo.
 
 :: test-data 폴더 생성
 if not exist "test-data" (
     mkdir test-data
     echo [생성] test-data 폴더를 만들었습니다.
+)
+
+:: 이전 빌드 캐시 삭제 (stale build 방지)
+if exist "dist-electron" (
+    rmdir /s /q dist-electron >nul 2>&1
 )
 
 echo [실행] 개발 서버를 시작합니다...

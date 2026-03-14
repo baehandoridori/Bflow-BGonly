@@ -18,14 +18,6 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
           },
-          resolve: {
-            alias: {
-              '@supabase/supabase-js': path.resolve(
-                __dirname,
-                'node_modules/@supabase/supabase-js/dist/index.mjs',
-              ),
-            },
-          },
         },
       },
       {
