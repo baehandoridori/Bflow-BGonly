@@ -125,7 +125,7 @@ export function SheetsSection() {
   return (
     <SettingsSection
       icon={<Database size={18} className="text-accent" />}
-      title="Google Sheets 연동"
+      title="데이터 서버 연동"
       action={
         <span
           className={`px-2.5 py-1 rounded-md text-xs font-medium ${
@@ -138,10 +138,10 @@ export function SheetsSection() {
         </span>
       }
     >
-      {/* Apps Script 웹 앱 URL */}
+      {/* 이미지 업로드 서버 URL */}
       <div className="mb-4">
         <label className="block text-xs text-text-secondary mb-1.5">
-          Apps Script 웹 앱 URL
+          이미지 업로드 서버 URL
         </label>
         <input
           type="text"
@@ -151,7 +151,7 @@ export function SheetsSection() {
           className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/40 focus:outline-none focus:border-accent"
         />
         <p className="text-[11px] text-text-secondary/60 mt-1">
-          스프레드시트의 Apps Script를 배포한 후 받은 URL을 입력하세요
+          이미지 업로드용 Apps Script 웹 앱 URL을 입력하세요
         </p>
       </div>
 

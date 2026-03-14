@@ -389,7 +389,7 @@ export function EpisodeView() {
       await archiveEpisodeViaRegistryInSheets(epNum, currentUser?.name ?? '알 수 없음', memo);
       // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 알림
       setTimeout(() => {
-        window.electronAPI?.sheetsNotifyChange?.();
+        window.electronAPI?.dataNotifyChange?.();
       }, 3000);
     } catch (err) {
       // 롤백
@@ -421,7 +421,7 @@ export function EpisodeView() {
         try {
           const eps = await readAllFromSheets();
           setEpisodes(eps);
-          window.electronAPI?.sheetsNotifyChange?.();
+          window.electronAPI?.dataNotifyChange?.();
         } catch { /* 다음 폴링 사이클에서 자연 동기화 */ }
       }, 3000);
     } catch (err) {
