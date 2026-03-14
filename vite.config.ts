@@ -19,8 +19,12 @@ export default defineConfig({
             outDir: 'dist-electron',
           },
           resolve: {
-            conditions: ['node', 'import', 'require', 'default'],
-            mainFields: ['module', 'main', 'jsnext:main', 'jsnext'],
+            alias: {
+              '@supabase/supabase-js': path.resolve(
+                __dirname,
+                'node_modules/@supabase/supabase-js/dist/index.mjs',
+              ),
+            },
           },
         },
       },
