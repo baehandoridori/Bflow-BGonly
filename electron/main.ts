@@ -455,111 +455,126 @@ import {
 import type { SupabaseUser } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
 
+// ─── Supabase IPC 에러 래퍼 ───
+function wrapIpc<T extends unknown[], R>(
+  fn: (...args: T) => Promise<R>,
+): (...args: T) => Promise<R> {
+  return async (...args: T) => {
+    try {
+      return await fn(...args);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Supabase IPC]', msg);
+      throw new Error(msg);
+    }
+  };
+}
+
 // 연결 테스트
-ipcMain.handle('supabase:test-connection', async () => {
+ipcMain.handle('supabase:test-connection', wrapIpc(async () => {
   return supabaseTestConnection();
-});
+}));
 
 // ─── Episodes ───
-ipcMain.handle('supabase:read-all', async () => {
+ipcMain.handle('supabase:read-all', wrapIpc(async () => {
   return sbReadAllEpisodes();
-});
-ipcMain.handle('supabase:add-episode', async (_e, episodeNumber: number, department?: string) => {
+}));
+ipcMain.handle('supabase:add-episode', wrapIpc(async (_e: unknown, episodeNumber: number, department?: string) => {
   await sbAddEpisode(episodeNumber, department);
-});
-ipcMain.handle('supabase:soft-delete-episode', async (_e, episodeNumber: number) => {
+}));
+ipcMain.handle('supabase:soft-delete-episode', wrapIpc(async (_e: unknown, episodeNumber: number) => {
   await sbSoftDeleteEpisode(episodeNumber);
-});
-ipcMain.handle('supabase:archive-episode', async (_e, episodeNumber: number, archivedBy: string, archiveMemo: string) => {
+}));
+ipcMain.handle('supabase:archive-episode', wrapIpc(async (_e: unknown, episodeNumber: number, archivedBy: string, archiveMemo: string) => {
   await sbArchiveEpisode(episodeNumber, archivedBy, archiveMemo);
-});
-ipcMain.handle('supabase:unarchive-episode', async (_e, episodeNumber: number) => {
+}));
+ipcMain.handle('supabase:unarchive-episode', wrapIpc(async (_e: unknown, episodeNumber: number) => {
   await sbUnarchiveEpisode(episodeNumber);
-});
-ipcMain.handle('supabase:read-archived', async () => {
+}));
+ipcMain.handle('supabase:read-archived', wrapIpc(async () => {
   return sbReadArchived();
-});
+}));
 
 // ─── Parts ───
-ipcMain.handle('supabase:add-part', async (_e, episodeNumber: number, partId: string, department?: string) => {
+ipcMain.handle('supabase:add-part', wrapIpc(async (_e: unknown, episodeNumber: number, partId: string, department?: string) => {
   await sbAddPart(episodeNumber, partId, department);
-});
-ipcMain.handle('supabase:soft-delete-part', async (_e, sheetName: string) => {
+}));
+ipcMain.handle('supabase:soft-delete-part', wrapIpc(async (_e: unknown, sheetName: string) => {
   await sbSoftDeletePart(sheetName);
-});
+}));
 
 // ─── Scenes ───
-ipcMain.handle('supabase:add-scene', async (_e, sheetName: string, sceneId: string, assignee: string, memo: string) => {
+ipcMain.handle('supabase:add-scene', wrapIpc(async (_e: unknown, sheetName: string, sceneId: string, assignee: string, memo: string) => {
   await sbAddScene(sheetName, sceneId, assignee, memo);
-});
-ipcMain.handle('supabase:add-scenes', async (_e, sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => {
+}));
+ipcMain.handle('supabase:add-scenes', wrapIpc(async (_e: unknown, sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => {
   await sbAddScenes(sheetName, scenes);
-});
-ipcMain.handle('supabase:delete-scene', async (_e, sceneUuid: string) => {
+}));
+ipcMain.handle('supabase:delete-scene', wrapIpc(async (_e: unknown, sceneUuid: string) => {
   await sbDeleteScene(sceneUuid);
-});
-ipcMain.handle('supabase:update-scene-stage', async (_e, sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => {
+}));
+ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => {
   await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
-});
-ipcMain.handle('supabase:bulk-update-scene-stages', async (_e, updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => {
+}));
+ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => {
   await sbBulkUpdateSceneStages(updates, updatedBy);
-});
-ipcMain.handle('supabase:update-scene-field', async (_e, sceneUuid: string, field: string, value: string) => {
+}));
+ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneUuid: string, field: string, value: string) => {
   await sbUpdateSceneField(sceneUuid, field, value);
-});
+}));
 
 // ─── Users ───
-ipcMain.handle('supabase:read-users', async () => {
+ipcMain.handle('supabase:read-users', wrapIpc(async () => {
   return sbReadUsers();
-});
-ipcMain.handle('supabase:add-user', async (_e, user: SupabaseUser) => {
+}));
+ipcMain.handle('supabase:add-user', wrapIpc(async (_e: unknown, user: SupabaseUser) => {
   await sbAddUser(user);
-});
-ipcMain.handle('supabase:update-user', async (_e, userId: string, updates: Record<string, string>) => {
+}));
+ipcMain.handle('supabase:update-user', wrapIpc(async (_e: unknown, userId: string, updates: Record<string, string>) => {
   await sbUpdateUser(userId, updates);
-});
-ipcMain.handle('supabase:delete-user', async (_e, userId: string) => {
+}));
+ipcMain.handle('supabase:delete-user', wrapIpc(async (_e: unknown, userId: string) => {
   await sbDeleteUser(userId);
-});
+}));
 
 // ─── Comments ───
-ipcMain.handle('supabase:read-comments', async (_e, partUuid: string) => {
+ipcMain.handle('supabase:read-comments', wrapIpc(async (_e: unknown, partUuid: string) => {
   return sbReadComments(partUuid);
-});
-ipcMain.handle('supabase:add-comment', async (_e, commentId: string, partUuid: string, sceneId: string,
+}));
+ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string) => {
   await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt);
-});
-ipcMain.handle('supabase:edit-comment', async (_e, commentId: string, text: string, mentions: string[]) => {
+}));
+ipcMain.handle('supabase:edit-comment', wrapIpc(async (_e: unknown, commentId: string, text: string, mentions: string[]) => {
   await sbEditComment(commentId, text, mentions);
-});
-ipcMain.handle('supabase:delete-comment', async (_e, commentId: string) => {
+}));
+ipcMain.handle('supabase:delete-comment', wrapIpc(async (_e: unknown, commentId: string) => {
   await sbDeleteComment(commentId);
-});
+}));
 
 // ─── Revisions ───
-ipcMain.handle('supabase:read-revisions', async () => {
+ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
   return sbReadRevisions();
-});
-ipcMain.handle('supabase:add-revision', async (_e, id: string, partUuid: string, sceneId: string,
+}));
+ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, partUuid: string, sceneId: string,
   revisionNo: number, status: string, priority: string, description: string, frameNo: string,
   imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => {
   await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, requesterId, requesterName, assignee, createdAt);
-});
-ipcMain.handle('supabase:update-revision', async (_e, id: string, updates: Record<string, string>) => {
+}));
+ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   await sbUpdateRevision(id, updates);
-});
+}));
 
 // ─── Metadata ───
-ipcMain.handle('supabase:read-all-metadata', async () => {
+ipcMain.handle('supabase:read-all-metadata', wrapIpc(async () => {
   return sbReadAllMetadata();
-});
-ipcMain.handle('supabase:read-metadata', async (_e, type: string, key: string) => {
+}));
+ipcMain.handle('supabase:read-metadata', wrapIpc(async (_e: unknown, type: string, key: string) => {
   return sbReadMetadata(type, key);
-});
-ipcMain.handle('supabase:write-metadata', async (_e, type: string, key: string, value: string) => {
+}));
+ipcMain.handle('supabase:write-metadata', wrapIpc(async (_e: unknown, type: string, key: string, value: string) => {
   await sbWriteMetadata(type, key, value);
-});
+}));
 
 // ─── Realtime 구독 (앱 시작 시 자동 설정) ───
 function startSupabaseRealtime() {

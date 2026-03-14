@@ -2,10 +2,11 @@
 -- B flow — Supabase 초기 테이블 생성 SQL
 -- Supabase 대시보드 → SQL Editor → New query 에서 실행
 -- 작성일: 2026-03-14
+-- 참고: IF NOT EXISTS 사용으로 재실행 시에도 안전
 -- ============================================================
 
 -- 1. episodes
-CREATE TABLE episodes (
+CREATE TABLE IF NOT EXISTS episodes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   episode_number INTEGER NOT NULL,
   title TEXT,
@@ -21,7 +22,7 @@ CREATE TABLE episodes (
 );
 
 -- 2. parts (→ episodes)
-CREATE TABLE parts (
+CREATE TABLE IF NOT EXISTS parts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   episode_id UUID NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
   part_id TEXT NOT NULL,
@@ -34,7 +35,7 @@ CREATE TABLE parts (
 );
 
 -- 3. scenes (→ parts) + updated_by 컬럼 (자기 변경 필터링용)
-CREATE TABLE scenes (
+CREATE TABLE IF NOT EXISTS scenes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   part_id UUID NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
   scene_number TEXT NOT NULL,
@@ -55,11 +56,11 @@ CREATE TABLE scenes (
   UNIQUE(part_id, scene_number)
 );
 
-CREATE INDEX idx_scenes_part_id ON scenes(part_id);
-CREATE INDEX idx_scenes_assignee ON scenes(assignee);
+CREATE INDEX IF NOT EXISTS idx_scenes_part_id ON scenes(part_id);
+CREATE INDEX IF NOT EXISTS idx_scenes_assignee ON scenes(assignee);
 
 -- 4. comments (→ parts, scenes)
-CREATE TABLE comments (
+CREATE TABLE IF NOT EXISTS comments (
   id TEXT PRIMARY KEY,
   part_id UUID NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
   scene_id TEXT NOT NULL,
@@ -71,10 +72,10 @@ CREATE TABLE comments (
   edited_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_comments_part_scene ON comments(part_id, scene_id);
+CREATE INDEX IF NOT EXISTS idx_comments_part_scene ON comments(part_id, scene_id);
 
 -- 5. comp_revisions (→ parts)
-CREATE TABLE comp_revisions (
+CREATE TABLE IF NOT EXISTS comp_revisions (
   id TEXT PRIMARY KEY,
   part_id UUID NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
   scene_id TEXT NOT NULL,
@@ -95,10 +96,10 @@ CREATE TABLE comp_revisions (
   resolved_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_comp_revisions_part_scene ON comp_revisions(part_id, scene_id);
+CREATE INDEX IF NOT EXISTS idx_comp_revisions_part_scene ON comp_revisions(part_id, scene_id);
 
 -- 6. users
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   role TEXT DEFAULT 'user',
@@ -111,7 +112,7 @@ CREATE TABLE users (
 );
 
 -- 7. metadata
-CREATE TABLE metadata (
+CREATE TABLE IF NOT EXISTS metadata (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   type TEXT NOT NULL,
   key TEXT NOT NULL,
@@ -124,35 +125,83 @@ CREATE TABLE metadata (
 -- ============================================================
 -- RLS 정책: 초기 개발 단계에서는 anon key로 전체 접근 허용
 -- (Supabase Auth 연동 완료 후 authenticated 전용으로 강화)
+-- DO NOTHING 패턴: 이미 존재하면 무시
 -- ============================================================
 
 ALTER TABLE episodes ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "allow_all" ON episodes FOR ALL USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'episodes' AND policyname = 'allow_all') THEN
+    CREATE POLICY "allow_all" ON episodes FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
 
 ALTER TABLE parts ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "allow_all" ON parts FOR ALL USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'parts' AND policyname = 'allow_all') THEN
+    CREATE POLICY "allow_all" ON parts FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
 
 ALTER TABLE scenes ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "allow_all" ON scenes FOR ALL USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'scenes' AND policyname = 'allow_all') THEN
+    CREATE POLICY "allow_all" ON scenes FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
 
 ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "allow_all" ON comments FOR ALL USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'comments' AND policyname = 'allow_all') THEN
+    CREATE POLICY "allow_all" ON comments FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
 
 ALTER TABLE comp_revisions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "allow_all" ON comp_revisions FOR ALL USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'comp_revisions' AND policyname = 'allow_all') THEN
+    CREATE POLICY "allow_all" ON comp_revisions FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
 
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "allow_all" ON users FOR ALL USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'users' AND policyname = 'allow_all') THEN
+    CREATE POLICY "allow_all" ON users FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
 
 ALTER TABLE metadata ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "allow_all" ON metadata FOR ALL USING (true) WITH CHECK (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'metadata' AND policyname = 'allow_all') THEN
+    CREATE POLICY "allow_all" ON metadata FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
 
 -- ============================================================
--- Realtime 활성화 (Supabase 대시보드에서도 수동으로 켤 수 있음)
+-- Realtime 활성화 (이미 추가되어 있으면 에러 무시)
 -- ============================================================
 
-ALTER PUBLICATION supabase_realtime ADD TABLE scenes;
-ALTER PUBLICATION supabase_realtime ADD TABLE comments;
-ALTER PUBLICATION supabase_realtime ADD TABLE comp_revisions;
-ALTER PUBLICATION supabase_realtime ADD TABLE episodes;
-ALTER PUBLICATION supabase_realtime ADD TABLE parts;
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE scenes;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE comments;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE comp_revisions;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE episodes;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE parts;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;

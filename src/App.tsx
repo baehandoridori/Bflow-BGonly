@@ -33,7 +33,7 @@ import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_WEB_APP_URL, DEFAULT_VACATION_URL } from '@/config';
 
 export default function App() {
-  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected } = useAppStore();
+  const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setSheetsConnected, setSheetsConfig, sheetsConfig, sheetsConnected, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected, setActiveDataSource } = useAppStore();
   const { setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos } = useDataStore();
   const {
     currentUser, setCurrentUser,
@@ -99,6 +99,7 @@ export default function App() {
       // Supabase 우선 시도
       const sbConn = await testSupabaseConnection();
       if (sbConn.ok) {
+        setActiveDataSource('supabase');
         const episodes = await readAllFromSupabase();
         setEpisodes(episodes);
         setLastSyncTime(Date.now());
@@ -119,6 +120,7 @@ export default function App() {
       }
 
       // Supabase 실패 → Sheets fallback
+      setActiveDataSource('sheets');
       console.warn('[Supabase] 연결 실패, Sheets fallback 시도');
       const connected = await checkConnection();
       if (!connected) {
@@ -159,7 +161,7 @@ export default function App() {
     } finally {
       setSyncing(false);
     }
-  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setSheetsConnected]);
+  }, [setEpisodes, setSyncing, setLastSyncTime, setSyncError, setEpisodeTitles, setEpisodeMemos, setSheetsConnected, setActiveDataSource]);
 
   // 초기 로드 + 인증 세션 복원
   useEffect(() => {

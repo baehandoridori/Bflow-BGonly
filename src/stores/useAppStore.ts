@@ -11,12 +11,18 @@ export type SceneViewMode = 'card' | 'table' | 'sheet';
 export type SceneGroupMode = 'flat' | 'layout';
 export type DashboardDeptFilter = Department | 'all';
 
+export type DataSource = 'supabase' | 'sheets' | null;
+
 interface AppState {
   // Google Sheets 연결 상태
   sheetsConnected: boolean;
   sheetsConfig: SheetsConfig | null;
   setSheetsConnected: (v: boolean) => void;
   setSheetsConfig: (config: SheetsConfig | null) => void;
+
+  // 활성 데이터 소스 표시
+  activeDataSource: DataSource;
+  setActiveDataSource: (source: DataSource) => void;
 
   // 현재 뷰
   currentView: ViewMode;
@@ -136,6 +142,9 @@ export const useAppStore = create<AppState>((set) => ({
   sheetsConfig: null,
   setSheetsConnected: (v) => set({ sheetsConnected: v }),
   setSheetsConfig: (config) => set({ sheetsConfig: config }),
+
+  activeDataSource: null,
+  setActiveDataSource: (source) => set({ activeDataSource: source }),
 
   currentView: 'dashboard',
   previousView: null,

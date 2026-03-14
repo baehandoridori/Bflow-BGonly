@@ -1,4 +1,4 @@
-import { RefreshCw, Sun, Moon } from 'lucide-react';
+import { RefreshCw, Sun, Moon, Database, FileSpreadsheet } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
@@ -10,6 +10,7 @@ interface HeaderProps {
 
 export function Header({ onRefresh }: HeaderProps) {
   const { currentView, colorMode, toggleColorMode } = useAppStore();
+  const activeDataSource = useAppStore((s) => s.activeDataSource);
   const episodeDashboardEp = useAppStore((s) => s.episodeDashboardEp);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const { isSyncing, lastSyncTime } = useDataStore();
@@ -40,6 +41,21 @@ export function Header({ onRefresh }: HeaderProps) {
 
       {/* 오른쪽: 액션 버튼들 */}
       <div className="flex items-center gap-3">
+        {/* 데이터 소스 표시 */}
+        {activeDataSource && (
+          <span
+            className={cn(
+              'inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium',
+              activeDataSource === 'supabase'
+                ? 'bg-emerald-500/15 text-emerald-400'
+                : 'bg-amber-500/15 text-amber-400',
+            )}
+          >
+            {activeDataSource === 'supabase' ? <Database size={11} /> : <FileSpreadsheet size={11} />}
+            {activeDataSource === 'supabase' ? 'Supabase' : 'Sheets (fallback)'}
+          </span>
+        )}
+
         {/* 동기화 상태 */}
         <span className="text-xs text-text-secondary">{lastSyncLabel}</span>
 

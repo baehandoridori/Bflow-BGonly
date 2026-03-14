@@ -416,15 +416,25 @@ export async function updateSceneStage(
   throwIfError(error);
 }
 
-/** 대량 씬 체크박스 토글 */
+/** 대량 씬 체크박스 토글 (부분 실패 허용) */
 export async function bulkUpdateSceneStages(
   updates: { sceneUuid: string; stage: string; value: boolean }[],
   updatedBy?: string,
 ): Promise<void> {
-  // Supabase는 개별 UPDATE — 병렬로 실행
-  await Promise.all(
+  const results = await Promise.allSettled(
     updates.map((u) => updateSceneStage(u.sceneUuid, u.stage, u.value, updatedBy)),
   );
+  const failures = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+  if (failures.length > 0) {
+    const total = updates.length;
+    const failedCount = failures.length;
+    const firstReason = failures[0].reason instanceof Error
+      ? failures[0].reason.message
+      : String(failures[0].reason);
+    throw new Error(
+      `${total}개 중 ${failedCount}개 업데이트 실패: ${firstReason}`,
+    );
+  }
 }
 
 /** 씬 필드 업데이트 (memo, assignee, sceneId 등) */
