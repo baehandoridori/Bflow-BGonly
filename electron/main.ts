@@ -12,7 +12,6 @@ import {
   addScene,
   deleteScene,
   updateSceneField,
-  uploadImage,
   readAllMetadata,
   readMetadata,
   writeMetadata,
@@ -42,6 +41,7 @@ import {
 import type { SheetUser } from './sheets';
 import type { BatchAction } from './sheets';
 import { setRetryNotifyCallback, getPendingOpsCount, waitForAllPendingOps } from './sheets';
+import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-image';
 import {
   initVacation,
   isVacationConnected,
@@ -236,15 +236,15 @@ function animateBounds(
 }
 
 /** 모든 윈도우(메인 + 위젯 팝업)에 sheet:changed 이벤트 브로드캐스트 (delta 페이로드 포함) */
-function broadcastSheetChanged(excludeWebContentsId?: number, delta?: unknown): void {
+function broadcastDataChanged(excludeWebContentsId?: number, delta?: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.webContents.id !== excludeWebContentsId) {
-      mainWindow.webContents.send('sheet:changed', delta);
+      mainWindow.webContents.send('data:changed', delta);
     }
   }
   for (const [, win] of widgetWindows) {
     if (!win.isDestroyed() && win.webContents.id !== excludeWebContentsId) {
-      win.webContents.send('sheet:changed', delta);
+      win.webContents.send('data:changed', delta);
     }
   }
 }
@@ -623,6 +623,7 @@ function broadcastSupabaseEvent(table: string, payload: unknown) {
 ipcMain.handle('sheets:connect', async (_event, webAppUrl: string) => {
   try {
     const ok = await initSheets(webAppUrl);
+    if (ok) setImageUploadUrl(webAppUrl); // 이미지 업로드용 URL도 동일하게 설정
     return { ok, error: ok ? null : '연결 실패 — URL을 확인해주세요' };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -723,7 +724,7 @@ ipcMain.handle(
   'sheets:upload-image',
   async (_event, sheetName: string, sceneId: string, imageType: string, base64Data: string) => {
     try {
-      const result = await uploadImage(sheetName, sceneId, imageType, base64Data);
+      const result = await driveUploadImage(sheetName, sceneId, imageType, base64Data);
       return { ok: true, url: result.url };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1015,9 +1016,13 @@ ipcMain.handle('sheets:update-revision', async (
 
 // ─── IPC 핸들러: 데이터 변경 브로드캐스트 (라이브 모드) ──────
 
+// 호환성: 기존 채널도 유지
 ipcMain.handle('sheets:notify-change', (event, delta?: unknown) => {
-  // 호출한 윈도우를 제외한 모든 윈도우에 sheet:changed + delta 전송
-  broadcastSheetChanged(event.sender.id, delta);
+  broadcastDataChanged(event.sender.id, delta);
+  return { ok: true };
+});
+ipcMain.handle('data:notify-change', (event, delta?: unknown) => {
+  broadcastDataChanged(event.sender.id, delta);
   return { ok: true };
 });
 
