@@ -419,6 +419,14 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
   }
 });
 
+// ─── IPC 핸들러: Supabase ────────────────────────────────────
+
+import { testConnection as supabaseTestConnection } from './supabase';
+
+ipcMain.handle('supabase:test-connection', async () => {
+  return supabaseTestConnection();
+});
+
 // ─── IPC 핸들러: Google Sheets 연동 (Apps Script 웹 앱) ─────
 
 ipcMain.handle('sheets:connect', async (_event, webAppUrl: string) => {

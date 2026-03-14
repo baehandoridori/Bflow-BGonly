@@ -17,6 +17,7 @@
   "dependencies": {
     "@liveblocks/client": "^3.14.1",
     "@liveblocks/react": "^3.14.1",
+    "@supabase/supabase-js": "^2.99.1",
     "clsx": "^2.1.0",
     "framer-motion": "^10.18.0",
     "lucide-react": "^0.303.0",

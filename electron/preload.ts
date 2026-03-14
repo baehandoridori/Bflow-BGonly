@@ -47,6 +47,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clipboardReadImage: () =>
     ipcRenderer.invoke('clipboard:read-image') as Promise<string | null>,
 
+  // Supabase
+  supabaseTestConnection: () =>
+    ipcRenderer.invoke('supabase:test-connection') as Promise<{ ok: boolean; error?: string }>,
+
   // Google Sheets 연동 (Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) =>
     ipcRenderer.invoke('sheets:connect', webAppUrl),
