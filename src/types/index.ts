@@ -20,7 +20,7 @@ export const DEPARTMENT_CONFIGS: Record<Department, DepartmentConfig> = {
     label: '배경',
     shortLabel: 'BG',
     stageLabels: { lo: 'LO', done: '완료', review: '검수', png: 'PNG' },
-    stageColors: { lo: '#7C9AEF', done: '#A78BFA', review: '#F0B866', png: '#5EC4B6' },
+    stageColors: { lo: '#C4BCFA', done: '#A599F5', review: '#8677EF', png: '#6C5CE7' },
     color: '#6C5CE7',
   },
   acting: {
@@ -28,7 +28,7 @@ export const DEPARTMENT_CONFIGS: Record<Department, DepartmentConfig> = {
     label: '액팅',
     shortLabel: 'ACT',
     stageLabels: { lo: '1원화', done: '2원화', review: '동화', png: '최종' },
-    stageColors: { lo: '#F0917E', done: '#D98EC0', review: '#EDBE5A', png: '#5BB8D4' },
+    stageColors: { lo: '#F5BEB3', done: '#EDA293', review: '#E58A76', png: '#E17055' },
     color: '#E17055',
   },
 };
@@ -49,10 +49,10 @@ export const STAGE_LABELS: Record<Stage, string> = {
 
 /** BG 기본 단계 컬러 (부서별 컬러는 DEPARTMENT_CONFIGS[dept].stageColors) */
 export const STAGE_COLORS: Record<Stage, string> = {
-  lo: '#7C9AEF',
-  done: '#A78BFA',
-  review: '#F0B866',
-  png: '#5EC4B6',
+  lo: '#C4BCFA',
+  done: '#A599F5',
+  review: '#8677EF',
+  png: '#6C5CE7',
 };
 
 // ─── 씬 ──────────────────────────────────────

@@ -20,16 +20,16 @@ module.exports = {
         overlay: 'rgb(var(--color-overlay) / <alpha-value>)',
         'on-accent': 'rgb(var(--color-on-accent) / <alpha-value>)',
         stage: {
-          lo: '#7C9AEF',
-          done: '#A78BFA',
-          review: '#F0B866',
-          png: '#5EC4B6',
+          lo: '#C4BCFA',
+          done: '#A599F5',
+          review: '#8677EF',
+          png: '#6C5CE7',
         },
         status: {
-          high: '#5EC4B6',
-          mid: '#F0B866',
+          high: '#6C5CE7',
+          mid: '#A599F5',
           low: '#E17055',
-          none: '#F0917E',
+          none: '#F5BEB3',
         },
       },
       keyframes: {

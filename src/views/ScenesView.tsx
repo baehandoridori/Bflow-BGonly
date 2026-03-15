@@ -388,7 +388,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
 
-  const borderColor = pct >= 100 ? '#5EC4B6' : pct >= 50 ? '#F0B866' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
+  const borderColor = pct >= 100 ? '#6C5CE7' : pct >= 50 ? '#A599F5' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -462,7 +462,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
           {revisionCount > 0 && (
             <span
               className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full"
-              style={{ backgroundColor: 'rgba(240, 184, 102, 0.2)', color: '#F0B866' }}
+              style={{ backgroundColor: 'rgba(108, 92, 231, 0.2)', color: '#A599F5' }}
               title={`리비전 ${revisionCount}건`}
             >
               <Film size={11} />
@@ -1227,6 +1227,7 @@ export function ScenesView() {
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
   const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
+  const sidebarExpanded = useAppStore((s) => s.sidebarExpanded);
   const currentUser = useAuthStore((s) => s.currentUser);
 
   // 글로우 CSS 주입 + 하이라이트 자동 해제 (3.6초 후)
@@ -2835,6 +2836,7 @@ export function ScenesView() {
             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
             onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
             onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+            onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onCtrlClick={(id) => {
               if (bgPart) toggleSelectedScene(`bg:${id}`);
               if (actPart) toggleSelectedScene(`act:${id}`);
@@ -3158,8 +3160,10 @@ export function ScenesView() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl shadow-2xl shadow-black/40"
+            className="fixed bottom-6 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl shadow-2xl shadow-black/40"
             style={{
+              left: `calc((100vw + ${sidebarExpanded ? 132 : 64}px) / 2)`,
+              transform: 'translateX(-50%)',
               background: 'rgb(var(--color-bg-card) / 0.95)',
               border: '1px solid rgb(var(--color-accent) / 0.3)',
               backdropFilter: 'blur(12px)',
