@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Bell, Volume2, MapPin, Clock } from 'lucide-react';
+import { Bell, Volume2, MapPin, Eye, MessageSquare, RefreshCw } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { SettingsSection } from './SettingsSection';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
@@ -27,6 +27,40 @@ function NotiToggle({ label, description, checked, onChange }: {
           checked ? 'translate-x-4' : 'translate-x-0.5',
         )} />
       </button>
+    </div>
+  );
+}
+
+/** 인라인 토스트 미리보기 (Sonner 랜딩페이지 스타일) */
+function ToastPreviewCard({ title, description, actionLabel }: {
+  title: string; description: string; actionLabel?: string;
+}) {
+  return (
+    <div
+      className="rounded-lg px-3.5 py-2.5 flex items-center gap-3"
+      style={{
+        background: 'rgba(26, 29, 39, 0.85)',
+        backdropFilter: 'blur(20px) saturate(1.6)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255,255,255,0.04) inset',
+      }}
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-medium text-[#E8E8EE] leading-snug">{title}</p>
+        <p className="text-[12px] text-[#8B8DA3] mt-0.5 leading-relaxed truncate">{description}</p>
+      </div>
+      {actionLabel && (
+        <span
+          className="shrink-0 text-[12px] font-medium px-3 py-1 rounded-md"
+          style={{
+            background: 'rgba(108, 92, 231, 0.15)',
+            color: '#A29BFE',
+            border: '1px solid rgba(108, 92, 231, 0.3)',
+          }}
+        >
+          {actionLabel}
+        </span>
+      )}
     </div>
   );
 }
@@ -213,17 +247,54 @@ export function NotificationSection() {
           </div>
         </div>
 
-        {/* 미리보기 버튼 */}
-        <button
-          onClick={() => {
-            sonnerToast.success('알림 미리보기입니다!', {
-              description: '이 위치와 시간으로 알림이 표시됩니다.',
-            });
-          }}
-          className="w-full text-[11px] text-accent hover:text-accent/80 bg-accent/5 hover:bg-accent/10 rounded-lg py-2 transition-colors cursor-pointer border border-accent/10"
-        >
-          미리보기
-        </button>
+      </div>
+
+      {/* ════════════ 미리보기 ════════════ */}
+      <div className="w-full bg-bg-primary/40 rounded-xl border border-bg-border/30 p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Eye size={15} className="text-emerald-400" />
+          <span className="text-[13px] font-semibold text-text-primary">미리보기</span>
+        </div>
+
+        {/* 인라인 토스트 미리보기 */}
+        <div className="space-y-2 mb-3">
+          <ToastPreviewCard
+            title="a001 — PNG ✓"
+            description="다른 사용자가 내 씬의 단계를 변경했습니다"
+            actionLabel="씬 보기"
+          />
+          <ToastPreviewCard
+            title="김작가님이 댓글을 남겼습니다"
+            description="a012 — 수정 부탁드려요~"
+          />
+        </div>
+
+        {/* 실제 토스트 발사 버튼 */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              sonnerToast('a001 — PNG ✓', {
+                description: '다른 사용자가 내 씬의 단계를 변경했습니다',
+                action: { label: '씬 보기', onClick: () => {} },
+              });
+            }}
+            className="flex-1 flex items-center justify-center gap-1.5 text-[11px] text-accent hover:text-accent/80 bg-accent/5 hover:bg-accent/10 rounded-lg py-2 transition-colors cursor-pointer border border-accent/10"
+          >
+            <RefreshCw size={11} />
+            씬 변경 알림
+          </button>
+          <button
+            onClick={() => {
+              sonnerToast('김작가님이 댓글을 남겼습니다', {
+                description: 'a012 — 수정 부탁드려요~',
+              });
+            }}
+            className="flex-1 flex items-center justify-center gap-1.5 text-[11px] text-accent hover:text-accent/80 bg-accent/5 hover:bg-accent/10 rounded-lg py-2 transition-colors cursor-pointer border border-accent/10"
+          >
+            <MessageSquare size={11} />
+            댓글 알림
+          </button>
+        </div>
       </div>
     </SettingsSection>
   );

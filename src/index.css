@@ -348,10 +348,39 @@ input[type="range"]::-webkit-slider-thumb {
   to { opacity: 0; transform: scale(0.95); }
 }
 
-/* 커스텀 토스트 도트 펄스 */
-@keyframes bflow-dot-ping {
-  0%   { transform: scale(1); opacity: 0.6; }
-  100% { transform: scale(2.5); opacity: 0; }
+/* ─── Sonner 액션 버튼 (씬 보기) ─── */
+[data-sonner-toast] [data-button] {
+  background: rgba(108, 92, 231, 0.15) !important;
+  color: #A29BFE !important;
+  border: 1px solid rgba(108, 92, 231, 0.3) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 4px 12px !important;
+  border-radius: 6px !important;
+  white-space: nowrap !important;
+  transition: background 0.15s, border-color 0.15s !important;
+}
+[data-sonner-toast] [data-button]:hover {
+  background: rgba(108, 92, 231, 0.25) !important;
+  border-color: rgba(108, 92, 231, 0.5) !important;
+}
+
+/* ─── Sonner 닫기 버튼 ─── */
+[data-sonner-toast] [data-close-button] {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #8B8DA3 !important;
+  transition: background 0.15s, color 0.15s !important;
+}
+[data-sonner-toast] [data-close-button]:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #E8E8EE !important;
+}
+
+/* ─── Sonner description 텍스트 ─── */
+[data-sonner-toast] [data-description] {
+  color: #8B8DA3 !important;
+  font-size: 12px !important;
 }
 
 /* 접근성: 모션 감소 설정 존중 */
