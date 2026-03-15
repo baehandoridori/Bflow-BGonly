@@ -604,7 +604,7 @@ export async function addComment(
     created_at: createdAt,
   });
   throwIfError(error);
-  broadcastCommentAdded(sceneId, userName, userId, text);
+  broadcastCommentAdded(sceneId, userName, userId, text, mentions);
 }
 
 /** 댓글 수정 */

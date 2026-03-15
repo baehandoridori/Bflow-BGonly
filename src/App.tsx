@@ -450,22 +450,31 @@ export default function App() {
       if (table === 'comments') {
         invalidatePartCache();
 
-        // INSERT 이벤트: 다른 사용자가 내 씬에 댓글을 달았을 때 알림
+        // INSERT 이벤트: 다른 사용자가 내 씬에 댓글 / @멘션 시 알림
         if (payload?.eventType === 'INSERT' && payload?.new) {
-          const newComment = payload.new as { scene_id?: string; user_name?: string; user_id?: string; text?: string };
+          const newComment = payload.new as { scene_id?: string; user_name?: string; user_id?: string; text?: string; mentions?: string[] };
           const me = useAuthStore.getState().currentUser;
           if (me && newComment.user_id && newComment.user_id !== me.id && newComment.scene_id) {
-            // scene_id로 씬 찾기 (씬의 sceneId 필드 = 댓글의 scene_id)
-            const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
-            const scene = allScenes.find(s => s.sceneId === newComment.scene_id);
-            if (scene && scene.assignee === me.name) {
-              const notiSettings = notiSettingsRef.current;
-              if (notiSettings.commentNotify !== false) {
+            const notiSettings = notiSettingsRef.current;
+            if (notiSettings.commentNotify !== false) {
+              const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
+              const scene = allScenes.find(s => s.sceneId === newComment.scene_id);
+              const isMentioned = Array.isArray(newComment.mentions) && newComment.mentions.includes(me.name);
+              const isAssignee = scene && scene.assignee === me.name;
+
+              if (isMentioned) {
+                dispatchNotification({
+                  type: 'comment',
+                  title: `${newComment.user_name || '누군가'}님이 나를 태그했습니다`,
+                  body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
+                  metadata: scene ? { sceneId: scene.id, sceneName: scene.sceneId } : undefined,
+                }, notiSettings);
+              } else if (isAssignee) {
                 dispatchNotification({
                   type: 'comment',
                   title: `${newComment.user_name || '누군가'}님이 댓글을 남겼습니다`,
                   body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
-                  metadata: { sceneId: scene.id, sceneName: scene.sceneId },
+                  metadata: { sceneId: scene!.id, sceneName: scene!.sceneId },
                 }, notiSettings);
               }
             }
@@ -601,21 +610,34 @@ export default function App() {
         // 댓글 추가 broadcast → 캐시 무효화 + 알림
         invalidatePartCache();
         window.dispatchEvent(new Event('bflow:comments-invalidated'));
-        const { sceneId: commentSceneId, userName: commentUserName, userId: commentUserId, text: commentText } = data.payload as {
-          sceneId?: string; userName?: string; userId?: string; text?: string;
+        const { sceneId: commentSceneId, userName: commentUserName, userId: commentUserId, text: commentText, mentions: commentMentions } = data.payload as {
+          sceneId?: string; userName?: string; userId?: string; text?: string; mentions?: string[];
         };
         const me = useAuthStore.getState().currentUser;
         if (me && commentUserId && commentUserId !== me.id && commentSceneId) {
-          const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
-          const scene = allScenes.find(s => s.sceneId === commentSceneId);
-          if (scene && scene.assignee === me.name) {
-            const notiSettings = notiSettingsRef.current;
-            if (notiSettings.commentNotify !== false) {
+          const notiSettings = notiSettingsRef.current;
+          if (notiSettings.commentNotify === false) { /* 알림 끔 */ }
+          else {
+            const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
+            const scene = allScenes.find(s => s.sceneId === commentSceneId);
+            const isMentioned = Array.isArray(commentMentions) && commentMentions.includes(me.name);
+            const isAssignee = scene && scene.assignee === me.name;
+
+            if (isMentioned) {
+              // @멘션된 경우: 씬 담당 여부와 무관하게 알림
+              dispatchNotification({
+                type: 'comment',
+                title: `${commentUserName || '누군가'}님이 나를 태그했습니다`,
+                body: commentText ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText) : undefined,
+                metadata: scene ? { sceneId: scene.id, sceneName: scene.sceneId } : undefined,
+              }, notiSettings);
+            } else if (isAssignee) {
+              // 내 씬에 댓글이 달린 경우
               dispatchNotification({
                 type: 'comment',
                 title: `${commentUserName || '누군가'}님이 댓글을 남겼습니다`,
                 body: commentText ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText) : undefined,
-                metadata: { sceneId: scene.id, sceneName: scene.sceneId },
+                metadata: { sceneId: scene!.id, sceneName: scene!.sceneId },
               }, notiSettings);
             }
           }

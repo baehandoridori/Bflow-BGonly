@@ -83,12 +83,13 @@ export function broadcastCommentAdded(
   userName: string,
   userId: string,
   text: string,
+  mentions?: string[],
 ): void {
   if (!broadcastChannel) return;
   broadcastChannel.send({
     type: 'broadcast',
     event: 'comment-added',
-    payload: { sceneId, userName, userId, text, ts: Date.now() },
+    payload: { sceneId, userName, userId, text, mentions: mentions ?? [], ts: Date.now() },
   });
 }
 
