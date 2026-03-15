@@ -110,9 +110,14 @@ export interface UserPreferences {
 
   // 알림 설정
   notifications?: {
-    sceneChange?: boolean;   // 내 씬 변경 알림
-    syncComplete?: boolean;  // 동기화 완료 알림
-    sound?: boolean;         // 알림 소리
+    sceneChange?: boolean;      // 내 씬 변경 알림 (기본 true)
+    commentNotify?: boolean;    // 내 씬 댓글 알림 (기본 true)
+    syncComplete?: boolean;     // 동기화 완료 알림 (기본 false)
+    sound?: boolean;            // 알림 소리 (추후 구현)
+    osNotification?: boolean;   // OS 네이티브 알림 (기본 true)
+    toastPosition?: 'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right';
+    toastDuration?: number;     // ms (3000 | 5000 | 7000 | 10000)
+    slackWebhookUrl?: string;   // Slack 웹훅 URL (추후 연동)
   };
 
   // 사이드바

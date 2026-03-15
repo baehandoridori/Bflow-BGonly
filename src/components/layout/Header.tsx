@@ -3,6 +3,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { UserMenu } from '@/components/auth/UserMenu';
+import { NotificationBell } from '@/components/NotificationPanel';
 
 interface HeaderProps {
   onRefresh: () => void;
@@ -80,6 +81,9 @@ export function Header({ onRefresh }: HeaderProps) {
         >
           {colorMode === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
         </button>
+
+        {/* 알림 벨 */}
+        <NotificationBell />
 
         {/* 구분선 */}
         <div className="w-px h-6 bg-bg-border" />

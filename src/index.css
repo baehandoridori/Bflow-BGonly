@@ -317,6 +317,50 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
+/* ─── Sonner 토스트 글래스모피즘 스타일 ─── */
+[data-sonner-toaster] [data-sonner-toast] {
+  --normal-bg: rgba(26, 29, 39, 0.85);
+  --normal-border: rgba(255, 255, 255, 0.08);
+  --normal-text: #E8E8EE;
+}
+
+/* 타입별 좌측 액센트 바 */
+[data-sonner-toast][data-type="success"] {
+  border-left: 3px solid #00B894 !important;
+  --normal-border: rgba(0, 184, 148, 0.2);
+}
+[data-sonner-toast][data-type="error"] {
+  border-left: 3px solid #FF6B6B !important;
+  --normal-border: rgba(255, 107, 107, 0.2);
+}
+[data-sonner-toast][data-type="warning"] {
+  border-left: 3px solid #FDCB6E !important;
+  --normal-border: rgba(253, 203, 110, 0.2);
+}
+[data-sonner-toast][data-type="info"] {
+  border-left: 3px solid rgb(var(--color-accent)) !important;
+  --normal-border: rgba(108, 92, 231, 0.2);
+}
+
+/* 상단 빛 반사 효과 */
+[data-sonner-toast]::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  opacity: 0.2;
+  background: linear-gradient(90deg, transparent 10%, rgba(255,255,255,0.5) 50%, transparent 90%);
+  pointer-events: none;
+}
+
+/* Sonner 내부 아이콘 색상 */
+[data-sonner-toast][data-type="success"] [data-icon] { color: #00B894; }
+[data-sonner-toast][data-type="error"] [data-icon] { color: #FF6B6B; }
+[data-sonner-toast][data-type="warning"] [data-icon] { color: #FDCB6E; }
+[data-sonner-toast][data-type="info"] [data-icon] { color: rgb(var(--color-accent)); }
+
 /* 접근성: 모션 감소 설정 존중 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

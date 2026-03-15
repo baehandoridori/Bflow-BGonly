@@ -89,7 +89,7 @@ interface AppState {
   setSelectedScenes: (ids: Set<string>) => void;
   clearSelectedScenes: () => void;
 
-  // 글로벌 토스트 (유형별 스타일 지원)
+  // [레거시] 글로벌 토스트 — Sonner toast()로 전환 완료, 호환용 유지
   toast: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null;
   setToast: (msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null) => void;
 

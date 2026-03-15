@@ -39,12 +39,13 @@ export function broadcastSceneUpdate(
   sceneUuid: string,
   stage: string,
   value: boolean,
+  senderId?: string,
 ): void {
   if (!broadcastChannel) return;
   broadcastChannel.send({
     type: 'broadcast',
     event: 'scene-update',
-    payload: { sceneUuid, stage, value, ts: Date.now() },
+    payload: { sceneUuid, stage, value, senderId, ts: Date.now() },
   });
 }
 
@@ -53,22 +54,23 @@ export function broadcastSceneFieldUpdate(
   sceneUuid: string,
   field: string,
   value: string,
+  senderId?: string,
 ): void {
   if (!broadcastChannel) return;
   broadcastChannel.send({
     type: 'broadcast',
     event: 'scene-field-update',
-    payload: { sceneUuid, field, value, ts: Date.now() },
+    payload: { sceneUuid, field, value, senderId, ts: Date.now() },
   });
 }
 
 /** 구조적 변경 (에피소드/파트/씬 추가·삭제 등) broadcast 전송 */
-export function broadcastDataChange(table: string, action: string): void {
+export function broadcastDataChange(table: string, action: string, senderId?: string): void {
   if (!broadcastChannel) return;
   broadcastChannel.send({
     type: 'broadcast',
     event: 'data-change',
-    payload: { table, action, ts: Date.now() },
+    payload: { table, action, senderId, ts: Date.now() },
   });
 }
 

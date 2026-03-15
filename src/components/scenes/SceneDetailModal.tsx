@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { toast as sonnerToast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -398,7 +399,7 @@ export function SceneDetailModal({
           } catch (err) {
             console.error('[Ctrl+V 실패]', err);
             setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-            alert(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
+            sonnerToast.error(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
           } finally {
             setImageLoading(null);
           }
@@ -442,7 +443,7 @@ export function SceneDetailModal({
         } catch (err) {
           console.error('[파일 선택 실패]', err);
           setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-          alert(`이미지 저장 실패: ${err instanceof Error ? err.message : err}`);
+          sonnerToast.error(`이미지 저장 실패: ${err instanceof Error ? err.message : err}`);
         } finally {
           setImageLoading(null);
         }
@@ -459,7 +460,7 @@ export function SceneDetailModal({
         // 클립보드에서 이미지 읽기 → 즉시 프리뷰
         const dataUrl = await window.electronAPI.clipboardReadImage();
         if (!dataUrl) {
-          alert('클립보드에 이미지가 없습니다.');
+          sonnerToast.error('클립보드에 이미지가 없습니다.');
           setImageLoading(null);
           return;
         }
@@ -480,7 +481,7 @@ export function SceneDetailModal({
       } catch (err) {
         console.error('[클립보드 붙여넣기 실패]', err);
         setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-        alert(`클립보드 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
+        sonnerToast.error(`클립보드 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
       } finally {
         setImageLoading(null);
       }
@@ -517,7 +518,7 @@ export function SceneDetailModal({
           } catch (err) {
             console.error('[Ctrl+V 실패]', err);
             setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-            alert(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
+            sonnerToast.error(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
           } finally {
             setImageLoading(null);
           }
@@ -552,7 +553,7 @@ export function SceneDetailModal({
       } catch (err) {
         console.error('[드롭 실패]', err);
         setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-        alert(`이미지 드롭 실패: ${err instanceof Error ? err.message : err}`);
+        sonnerToast.error(`이미지 드롭 실패: ${err instanceof Error ? err.message : err}`);
       } finally {
         setImageLoading(null);
       }

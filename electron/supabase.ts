@@ -439,7 +439,7 @@ export async function updateSceneStage(
   const { error } = await supabase.from('scenes').update(update).eq('id', sceneUuid);
   throwIfError(error);
   // DB 저장 성공 → 즉시 broadcast로 다른 클라이언트에 전파
-  broadcastSceneUpdate(sceneUuid, stage, value);
+  broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
 }
 
 /** 대량 씬 체크박스 토글 (부분 실패 허용) */

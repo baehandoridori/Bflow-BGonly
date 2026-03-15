@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification } from 'electron';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
@@ -618,6 +618,24 @@ ipcMain.handle(
     }
   }
 );
+
+// ─── IPC 핸들러: 네이티브 알림 ─────────────────────────────
+ipcMain.handle('notification:show-native', (_e: unknown, title: string, body: string) => {
+  // 앱 포커스 상태면 스킵 (인앱 토스트만 표시)
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
+    return;
+  }
+  if (Notification.isSupported()) {
+    const noti = new Notification({ title, body });
+    noti.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+    noti.show();
+  }
+});
 
 // ─── IPC 핸들러: METADATA ───────────────────────────────────
 

@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
+import { toast as sonnerToast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Film, ChevronRight, Archive, RotateCcw, Folder, Pencil } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
@@ -396,7 +397,7 @@ export function EpisodeView() {
       const prevEps = [...episodes, { episodeNumber: epNum, title: epTitle, parts: ep.parts }];
       setEpisodes(prevEps);
       setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
-      alert(`아카이빙 실패: ${err}`);
+      sonnerToast.error(`아카이빙 실패: ${err}`);
     }
   };
 
@@ -428,7 +429,7 @@ export function EpisodeView() {
       // 롤백
       setEpisodes(prevEps);
       setArchivedEpisodes(prevArchivedEps);
-      alert(`복원 실패: ${err}`);
+      sonnerToast.error(`복원 실패: ${err}`);
     }
   };
 

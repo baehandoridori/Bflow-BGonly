@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { toast as sonnerToast } from 'sonner';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
@@ -754,9 +755,9 @@ function AddFormImageSlot({
           return;
         }
       }
-      alert('클립보드에 이미지가 없습니다.');
+      sonnerToast.error('클립보드에 이미지가 없습니다.');
     } catch {
-      alert('클립보드 읽기 실패');
+      sonnerToast.error('클립보드 읽기 실패');
     }
   };
 
@@ -1788,9 +1789,9 @@ export function ScenesView() {
       setEpisodeTitles(prevTitles);
       const msg = String(err);
       if (msg.includes('Unknown action')) {
-        alert(`에피소드 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
+        sonnerToast.error(`에피소드 추가 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
       } else {
-        alert(`에피소드 추가 실패: ${err}`);
+        sonnerToast.error(`에피소드 추가 실패: ${err}`);
       }
       syncInBackground();
     }
@@ -1800,16 +1801,16 @@ export function ScenesView() {
   const handleSheetError = (err: unknown, actionName: string) => {
     const msg = String(err);
     if (msg.includes('Unknown action')) {
-      alert(`${actionName} 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
+      sonnerToast.error(`${actionName} 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
     } else {
-      alert(`${actionName} 실패: ${err}`);
+      sonnerToast.error(`${actionName} 실패: ${err}`);
     }
   };
 
   const handleAddPart = async () => {
     if (!currentEp) return;
     if (nextPartId > 'Z') {
-      alert('파트는 Z까지만 가능합니다');
+      sonnerToast.error('파트는 Z까지만 가능합니다');
       return;
     }
 
@@ -1821,7 +1822,7 @@ export function ScenesView() {
       const bgSheet = `EP${pad}_${nextPartId}_BG`;
       const actSheet = `EP${pad}_${nextPartId}_ACT`;
       if (allParts.some((p) => p.sheetName === bgSheet || p.sheetName === actSheet)) {
-        alert(`${nextPartId}파트는 이미 존재합니다.`);
+        sonnerToast.error(`${nextPartId}파트는 이미 존재합니다.`);
         return;
       }
 
@@ -1851,7 +1852,7 @@ export function ScenesView() {
     const deptSuffix = effectiveDept === 'bg' ? '_BG' : '_ACT';
     const expectedSheetName = `EP${pad}_${nextPartId}${deptSuffix}`;
     if (allParts.some((p) => p.sheetName === expectedSheetName)) {
-      alert(`${nextPartId}파트(${effectiveDept === 'bg' ? 'BG' : '액팅'})는 이미 존재합니다.`);
+      sonnerToast.error(`${nextPartId}파트(${effectiveDept === 'bg' ? 'BG' : '액팅'})는 이미 존재합니다.`);
       return;
     }
 
@@ -1942,7 +1943,7 @@ export function ScenesView() {
       // 서버 성공 후 전체 동기화 완료까지 대기 (데이터 없음 깜빡임 방지)
       await syncInBackground();
     } catch (err) {
-      alert(`대량 씬 추가 실패: ${err}`);
+      sonnerToast.error(`대량 씬 추가 실패: ${err}`);
     } finally {
       setBulkAddLoading(false);
     }
@@ -2114,7 +2115,7 @@ export function ScenesView() {
       archiveGuardRef.current = false;
       setEpisodes(prevEpisodes);
       setArchivedEpisodes(prevArchivedEpisodes);
-      alert(`아카이빙 실패: ${err}`);
+      sonnerToast.error(`아카이빙 실패: ${err}`);
     }
   };
 
@@ -2153,7 +2154,7 @@ export function ScenesView() {
       // 롤백
       archiveGuardRef.current = false;
       setArchivedEpisodes(prevArchivedEpisodes);
-      alert(`복원 실패: ${err}`);
+      sonnerToast.error(`복원 실패: ${err}`);
     }
   };
 

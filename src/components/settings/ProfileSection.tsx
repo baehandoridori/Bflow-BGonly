@@ -3,8 +3,9 @@ import {
   User, Calendar, Briefcase, KeyRound, AlertTriangle, Clock,
   CheckCircle2, ListTodo, ChevronRight, Palmtree, CircleDashed,
   LayoutDashboard, Bell, Volume2, Plus, X, Loader2, RefreshCw,
-  ChevronDown,
+  ChevronDown, MessageSquare, Monitor, MapPin,
 } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
 import { SettingsSection } from './SettingsSection';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -287,8 +288,12 @@ export function ProfileSection() {
   // ─ 기본 시작 뷰 / 알림 설정 ─
   const [defaultViewState, setDefaultViewState] = useState<string>('dashboard');
   const [notiSceneChange, setNotiSceneChange] = useState(true);
+  const [notiCommentNotify, setNotiCommentNotify] = useState(true);
   const [notiSyncComplete, setNotiSyncComplete] = useState(false);
   const [notiSound, setNotiSound] = useState(true);
+  const [notiOsNotification, setNotiOsNotification] = useState(true);
+  const [toastPosition, setToastPosition] = useState<string>('bottom-right');
+  const [toastDuration, setToastDuration] = useState<number>(3000);
   const prefsLoaded = useRef(false);
 
   useEffect(() => {
@@ -298,8 +303,12 @@ export function ProfileSection() {
       if (prefs?.defaultView) setDefaultViewState(prefs.defaultView);
       if (prefs?.notifications) {
         setNotiSceneChange(prefs.notifications.sceneChange ?? true);
+        setNotiCommentNotify(prefs.notifications.commentNotify ?? true);
         setNotiSyncComplete(prefs.notifications.syncComplete ?? false);
         setNotiSound(prefs.notifications.sound ?? true);
+        setNotiOsNotification(prefs.notifications.osNotification ?? true);
+        if (prefs.notifications.toastPosition) setToastPosition(prefs.notifications.toastPosition);
+        if (prefs.notifications.toastDuration) setToastDuration(prefs.notifications.toastDuration);
       }
     });
   }, []);
@@ -314,13 +323,24 @@ export function ProfileSection() {
     persistPref({ defaultView: view });
   }, [persistPref]);
 
-  const handleNotiToggle = useCallback((key: 'sceneChange' | 'syncComplete' | 'sound', value: boolean) => {
-    if (key === 'sceneChange') setNotiSceneChange(value);
-    else if (key === 'syncComplete') setNotiSyncComplete(value);
-    else setNotiSound(value);
-    const next = { sceneChange: notiSceneChange, syncComplete: notiSyncComplete, sound: notiSound, [key]: value };
+  const persistNoti = useCallback((patch: Record<string, unknown>) => {
+    const next = {
+      sceneChange: notiSceneChange, commentNotify: notiCommentNotify,
+      syncComplete: notiSyncComplete, sound: notiSound,
+      osNotification: notiOsNotification, toastPosition, toastDuration,
+      ...patch,
+    };
     persistPref({ notifications: next });
-  }, [persistPref, notiSceneChange, notiSyncComplete, notiSound]);
+  }, [persistPref, notiSceneChange, notiCommentNotify, notiSyncComplete, notiSound, notiOsNotification, toastPosition, toastDuration]);
+
+  const handleNotiToggle = useCallback((key: string, value: boolean) => {
+    if (key === 'sceneChange') setNotiSceneChange(value);
+    else if (key === 'commentNotify') setNotiCommentNotify(value);
+    else if (key === 'syncComplete') setNotiSyncComplete(value);
+    else if (key === 'sound') setNotiSound(value);
+    else if (key === 'osNotification') setNotiOsNotification(value);
+    persistNoti({ [key]: value });
+  }, [persistNoti]);
 
   if (!currentUser) return null;
 
@@ -724,9 +744,15 @@ export function ProfileSection() {
         <div className="space-y-2.5">
           <NotiToggle
             label="내 씬 변경 알림"
-            description="배정된 씬이 변경되면 알려줍니다"
+            description="배정된 씬의 단계가 변경되면 알려줍니다"
             checked={notiSceneChange}
             onChange={(v) => handleNotiToggle('sceneChange', v)}
+          />
+          <NotiToggle
+            label="내 씬 댓글 알림"
+            description="배정된 씬에 댓글이 달리면 알려줍니다"
+            checked={notiCommentNotify}
+            onChange={(v) => handleNotiToggle('commentNotify', v)}
           />
           <NotiToggle
             label="동기화 완료 알림"
@@ -734,6 +760,14 @@ export function ProfileSection() {
             checked={notiSyncComplete}
             onChange={(v) => handleNotiToggle('syncComplete', v)}
           />
+          <NotiToggle
+            label="OS 데스크톱 알림"
+            description="앱이 백그라운드일 때 시스템 알림을 표시합니다"
+            checked={notiOsNotification}
+            onChange={(v) => handleNotiToggle('osNotification', v)}
+          />
+
+          {/* 알림 소리 토글 */}
           <div className="flex items-center justify-between pt-1 border-t border-bg-border/15">
             <div className="flex items-center gap-2">
               <Volume2 size={13} className="text-text-secondary/50" />
@@ -750,6 +784,88 @@ export function ProfileSection() {
                 'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200',
                 notiSound ? 'translate-x-4' : 'translate-x-0.5',
               )} />
+            </button>
+          </div>
+
+          {/* 토스트 위치 선택 */}
+          <div className="pt-2 border-t border-bg-border/15">
+            <div className="flex items-center gap-2 mb-2">
+              <MapPin size={13} className="text-text-secondary/50" />
+              <span className="text-[12px] text-text-secondary/70">토스트 표시 위치</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {([
+                { value: 'top-left', label: '↖ 좌상' },
+                { value: 'top-center', label: '↑ 중상' },
+                { value: 'top-right', label: '↗ 우상' },
+                { value: 'bottom-left', label: '↙ 좌하' },
+                { value: 'bottom-center', label: '↓ 중하' },
+                { value: 'bottom-right', label: '↘ 우하' },
+              ] as const).map((pos) => (
+                <button
+                  key={pos.value}
+                  onClick={() => {
+                    setToastPosition(pos.value);
+                    persistNoti({ toastPosition: pos.value });
+                    window.dispatchEvent(new CustomEvent('bflow:toast-settings-changed', { detail: { toastPosition: pos.value } }));
+                  }}
+                  className={cn(
+                    'text-[10px] px-2 py-1.5 rounded-lg border transition-all duration-200 cursor-pointer',
+                    toastPosition === pos.value
+                      ? 'bg-accent/20 border-accent/40 text-accent font-semibold'
+                      : 'bg-bg-card/30 border-bg-border/20 text-text-secondary/60 hover:border-bg-border/40',
+                  )}
+                >
+                  {pos.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 토스트 표시 시간 */}
+          <div className="pt-2 border-t border-bg-border/15">
+            <div className="flex items-center gap-2 mb-2">
+              <Clock size={13} className="text-text-secondary/50" />
+              <span className="text-[12px] text-text-secondary/70">토스트 표시 시간</span>
+            </div>
+            <div className="flex gap-1.5">
+              {([
+                { value: 3000, label: '3초' },
+                { value: 5000, label: '5초' },
+                { value: 7000, label: '7초' },
+                { value: 10000, label: '10초' },
+              ] as const).map((dur) => (
+                <button
+                  key={dur.value}
+                  onClick={() => {
+                    setToastDuration(dur.value);
+                    persistNoti({ toastDuration: dur.value });
+                    window.dispatchEvent(new CustomEvent('bflow:toast-settings-changed', { detail: { toastDuration: dur.value } }));
+                  }}
+                  className={cn(
+                    'flex-1 text-[11px] px-2 py-1.5 rounded-lg border transition-all duration-200 cursor-pointer',
+                    toastDuration === dur.value
+                      ? 'bg-accent/20 border-accent/40 text-accent font-semibold'
+                      : 'bg-bg-card/30 border-bg-border/20 text-text-secondary/60 hover:border-bg-border/40',
+                  )}
+                >
+                  {dur.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 미리보기 버튼 */}
+          <div className="pt-2 border-t border-bg-border/15">
+            <button
+              onClick={() => {
+                sonnerToast.success('알림 미리보기입니다!', {
+                  description: '이 위치와 시간으로 알림이 표시됩니다.',
+                });
+              }}
+              className="w-full text-[11px] text-accent hover:text-accent/80 bg-accent/5 hover:bg-accent/10 rounded-lg py-2 transition-colors cursor-pointer border border-accent/10"
+            >
+              미리보기
             </button>
           </div>
         </div>

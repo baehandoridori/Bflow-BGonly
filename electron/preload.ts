@@ -44,6 +44,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => { ipcRenderer.removeListener('app:saving-before-quit', handler); };
   },
 
+  // 네이티브 알림 (OS 데스크톱 알림)
+  showNativeNotification: (title: string, body: string) =>
+    ipcRenderer.invoke('notification:show-native', title, body),
+
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
   imageSave: (fileName: string, base64Data: string) =>
     ipcRenderer.invoke('image:save', fileName, base64Data) as Promise<string>,
