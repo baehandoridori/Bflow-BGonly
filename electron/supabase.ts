@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
-import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange } from './broadcast';
+import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastCommentAdded } from './broadcast';
 
 // ─── Supabase 클라이언트 (하드코딩 — 의사결정 #환경변수 참조) ───
 
@@ -468,6 +468,7 @@ export async function updateSceneField(
   sceneUuid: string,
   field: string,
   value: string,
+  senderId?: string,
 ): Promise<void> {
   // 필드명 매핑 (camelCase → snake_case)
   const fieldMap: Record<string, string> = {
@@ -479,12 +480,14 @@ export async function updateSceneField(
     layoutId: 'layout',
   };
   const dbField = fieldMap[field] || field;
+  const update: Record<string, unknown> = { [dbField]: value, updated_at: new Date().toISOString() };
+  if (senderId) update.updated_by = senderId;
   const { error } = await supabase
     .from('scenes')
-    .update({ [dbField]: value, updated_at: new Date().toISOString() })
+    .update(update)
     .eq('id', sceneUuid);
   throwIfError(error);
-  broadcastSceneFieldUpdate(sceneUuid, field, value);
+  broadcastSceneFieldUpdate(sceneUuid, field, value, senderId);
 }
 
 // ═══════════════════════════════════════════════
@@ -601,7 +604,7 @@ export async function addComment(
     created_at: createdAt,
   });
   throwIfError(error);
-  broadcastDataChange('comments', 'INSERT');
+  broadcastCommentAdded(sceneId, userName, userId, text);
 }
 
 /** 댓글 수정 */

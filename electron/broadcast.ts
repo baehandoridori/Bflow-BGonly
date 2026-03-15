@@ -23,6 +23,9 @@ export function setupBroadcast(onReceive: BroadcastListener): () => void {
     })
     .on('broadcast', { event: 'data-change' }, ({ payload }) => {
       listener?.('data-change', payload as Record<string, unknown>);
+    })
+    .on('broadcast', { event: 'comment-added' }, ({ payload }) => {
+      listener?.('comment-added', payload as Record<string, unknown>);
     });
 
   broadcastChannel.subscribe((status) => {
@@ -71,6 +74,21 @@ export function broadcastDataChange(table: string, action: string, senderId?: st
     type: 'broadcast',
     event: 'data-change',
     payload: { table, action, senderId, ts: Date.now() },
+  });
+}
+
+/** 댓글 추가 broadcast 전송 */
+export function broadcastCommentAdded(
+  sceneId: string,
+  userName: string,
+  userId: string,
+  text: string,
+): void {
+  if (!broadcastChannel) return;
+  broadcastChannel.send({
+    type: 'broadcast',
+    event: 'comment-added',
+    payload: { sceneId, userName, userId, text, ts: Date.now() },
   });
 }
 

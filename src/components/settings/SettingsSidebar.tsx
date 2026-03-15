@@ -1,11 +1,12 @@
 import {
   Palette, Type, Keyboard, Sparkles, Monitor,
-  KeyRound, Database, HelpCircle, UserCircle,
+  KeyRound, Database, HelpCircle, UserCircle, Bell,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 export type SettingsTabId =
   | 'profile'
+  | 'notification'
   | 'theme'
   | 'font'
   | 'shortcuts'
@@ -24,8 +25,9 @@ interface Tab {
 }
 
 const TABS: Tab[] = [
-  { id: 'profile',    label: '내 정보',  icon: <UserCircle size={16} />, separator: true },
-  { id: 'theme',      label: '외관',     icon: <Palette size={16} /> },
+  { id: 'profile',      label: '내 정보',  icon: <UserCircle size={16} /> },
+  { id: 'notification', label: '알림',    icon: <Bell size={16} />, separator: true },
+  { id: 'theme',        label: '외관',    icon: <Palette size={16} /> },
   { id: 'font',       label: '글꼴',     icon: <Type size={16} /> },
   { id: 'shortcuts',  label: '단축키',   icon: <Keyboard size={16} /> },
   { id: 'effects',    label: '효과',     icon: <Sparkles size={16} /> },

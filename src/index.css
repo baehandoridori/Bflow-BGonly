@@ -361,6 +361,56 @@ input[type="range"]::-webkit-slider-thumb {
 [data-sonner-toast][data-type="warning"] [data-icon] { color: #FDCB6E; }
 [data-sonner-toast][data-type="info"] [data-icon] { color: rgb(var(--color-accent)); }
 
+/* ─── Sonner 토스트: 스르륵 슬라이드 인 애니메이션 ─── */
+[data-sonner-toaster] [data-sonner-toast][data-mounted="true"] {
+  animation: bflow-toast-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes bflow-toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 상단 위치일 때는 위에서 아래로 */
+[data-sonner-toaster][data-y-position="top"] [data-sonner-toast][data-mounted="true"] {
+  animation: bflow-toast-slide-in-top 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes bflow-toast-slide-in-top {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── 호버 시 스택 부드럽게 펼침 ─── */
+[data-sonner-toaster]:hover [data-sonner-toast] {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* 토스트 닫힐 때 부드러운 페이드 아웃 */
+[data-sonner-toast][data-removed="true"] {
+  animation: bflow-toast-fade-out 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+}
+
+@keyframes bflow-toast-fade-out {
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+}
+
 /* 접근성: 모션 감소 설정 존중 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

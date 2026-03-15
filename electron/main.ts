@@ -491,8 +491,8 @@ ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneU
 ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => {
   await sbBulkUpdateSceneStages(updates, updatedBy);
 }));
-ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneUuid: string, field: string, value: string) => {
-  await sbUpdateSceneField(sceneUuid, field, value);
+ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneUuid: string, field: string, value: string, senderId?: string) => {
+  await sbUpdateSceneField(sceneUuid, field, value, senderId);
 }));
 
 // ─── Users ───

@@ -178,22 +178,22 @@ function resolveSceneUuidBySceneId(sheetName: string, sceneId: string): string {
 
 /** 체크박스 셀 업데이트 (sheetName + rowIndex → UUID 변환) */
 export async function updateCell(
-  sheetName: string, rowIndex: number, stage: string, value: boolean,
+  sheetName: string, rowIndex: number, stage: string, value: boolean, updatedBy?: string,
 ): Promise<void> {
   const uuid = resolveSceneUuid(sheetName, rowIndex);
-  await window.electronAPI.supabaseUpdateSceneStage(uuid, stage, value);
+  await window.electronAPI.supabaseUpdateSceneStage(uuid, stage, value, updatedBy);
 }
 
 /** 다건 체크박스 업데이트 */
 export async function bulkUpdateCells(
-  sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[],
+  sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[], updatedBy?: string,
 ): Promise<void> {
   const mapped = updates.map((u) => ({
     sceneUuid: resolveSceneUuid(sheetName, u.rowIndex),
     stage: u.stage,
     value: u.value,
   }));
-  await window.electronAPI.supabaseBulkUpdateSceneStages(mapped);
+  await window.electronAPI.supabaseBulkUpdateSceneStages(mapped, updatedBy);
 }
 
 /** 에피소드 추가 */

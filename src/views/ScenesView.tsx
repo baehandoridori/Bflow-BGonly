@@ -1682,7 +1682,7 @@ export function ScenesView() {
     // API 호출을 큐에 넣어 순차 실행 (race condition 방지)
     toggleQueueRef.current = toggleQueueRef.current.then(async () => {
       try {
-        await updateCell(sheetName, sceneIndex, stage, newValue);
+        await updateCell(sheetName, sceneIndex, stage, newValue, currentUser?.id);
         window.electronAPI?.dataNotifyChange?.({
           type: 'toggle',
           sheetName,

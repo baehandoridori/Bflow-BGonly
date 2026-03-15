@@ -924,7 +924,7 @@ export function MyTasksWidget() {
 
     try {
       const { updateCell, updateSceneField } = await import('@/services/supabaseService');
-      await updateCell(sheetName, sceneIndex, stage, newValue);
+      await updateCell(sheetName, sceneIndex, stage, newValue, currentUser?.id);
       if (completedBy) {
         await updateSceneField(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
         await updateSceneField(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});

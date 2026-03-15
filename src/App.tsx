@@ -98,7 +98,7 @@ export default function App() {
     return () => { cleanup?.(); };
   }, []);
 
-  // 토스트 설정 변경 실시간 반영 (ProfileSection에서 이벤트 발생)
+  // 토스트 설정 변경 실시간 반영 (NotificationSection에서 이벤트 발생)
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -107,6 +107,21 @@ export default function App() {
     };
     window.addEventListener('bflow:toast-settings-changed', handler);
     return () => window.removeEventListener('bflow:toast-settings-changed', handler);
+  }, []);
+
+  // 알림 설정 변경 실시간 반영 (NotificationSection에서 이벤트 발생)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail) {
+        notiSettingsRef.current = {
+          ...notiSettingsRef.current,
+          ...detail,
+        };
+      }
+    };
+    window.addEventListener('bflow:noti-settings-changed', handler);
+    return () => window.removeEventListener('bflow:noti-settings-changed', handler);
   }, []);
 
   // 알림 설정 ref (broadcast 핸들러에서 최신값 참조용)
@@ -582,6 +597,32 @@ export default function App() {
         }
       }
 
+      if (data.event === 'comment-added') {
+        // 댓글 추가 broadcast → 캐시 무효화 + 알림
+        invalidatePartCache();
+        window.dispatchEvent(new Event('bflow:comments-invalidated'));
+        const { sceneId: commentSceneId, userName: commentUserName, userId: commentUserId, text: commentText } = data.payload as {
+          sceneId?: string; userName?: string; userId?: string; text?: string;
+        };
+        const me = useAuthStore.getState().currentUser;
+        if (me && commentUserId && commentUserId !== me.id && commentSceneId) {
+          const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
+          const scene = allScenes.find(s => s.sceneId === commentSceneId);
+          if (scene && scene.assignee === me.name) {
+            const notiSettings = notiSettingsRef.current;
+            if (notiSettings.commentNotify !== false) {
+              dispatchNotification({
+                type: 'comment',
+                title: `${commentUserName || '누군가'}님이 댓글을 남겼습니다`,
+                body: commentText ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText) : undefined,
+                metadata: { sceneId: scene.id, sceneName: scene.sceneId },
+              }, notiSettings);
+            }
+          }
+        }
+        return;
+      }
+
       if (data.event === 'data-change') {
         // 구조적 변경 (씬/파트/에피소드 추가/삭제) → 디바운스 full reload
         if (reloadTimer) clearTimeout(reloadTimer);
@@ -776,7 +817,7 @@ export default function App() {
       {/* 관리자: 사용자 관리 모달 */}
       {showUserManager && <UserManagerModal />}
 
-      {/* Sonner 토스트 — 글래스모피즘 스타일 */}
+      {/* Sonner 토스트 — 글래스모피즘 + 스르륵 애니메이션 + 호버 펼침 */}
       <Toaster
         theme="dark"
         position={toastPosition}
@@ -799,7 +840,8 @@ export default function App() {
           },
         }}
         gap={8}
-        visibleToasts={4}
+        visibleToasts={5}
+        expand={false}
       />
 
       {/* 환영 팝업 (로그인 직후) */}

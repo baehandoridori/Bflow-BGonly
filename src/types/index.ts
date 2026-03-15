@@ -410,7 +410,7 @@ export interface ElectronAPI {
   supabaseDeleteScene: (sceneUuid: string) => Promise<void>;
   supabaseUpdateSceneStage: (sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => Promise<void>;
   supabaseBulkUpdateSceneStages: (updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => Promise<void>;
-  supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string) => Promise<void>;
+  supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) => Promise<void>;
   supabaseReadUsers: () => Promise<unknown[]>;
   supabaseAddUser: (user: unknown) => Promise<void>;
   supabaseUpdateUser: (userId: string, updates: Record<string, string>) => Promise<void>;

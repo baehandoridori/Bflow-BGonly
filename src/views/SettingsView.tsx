@@ -8,6 +8,7 @@ import { StartupSection } from '@/components/settings/StartupSection';
 import { EffectsSection } from '@/components/settings/EffectsSection';
 import { LoginSection } from '@/components/settings/LoginSection';
 import { ProfileSection } from '@/components/settings/ProfileSection';
+import { NotificationSection } from '@/components/settings/NotificationSection';
 import { ShortcutsSection } from '@/components/settings/ShortcutsSection';
 import { loadPreferences } from '@/services/settingsService';
 import {
@@ -43,6 +44,8 @@ export function SettingsView() {
     switch (activeTab) {
       case 'profile':
         return <ProfileSection />;
+      case 'notification':
+        return <NotificationSection />;
       case 'theme':
         return <ThemeSection />;
       case 'font':

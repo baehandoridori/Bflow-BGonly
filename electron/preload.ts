@@ -86,8 +86,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:update-scene-stage', sceneUuid, stage, value, updatedBy),
   supabaseBulkUpdateSceneStages: (updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) =>
     ipcRenderer.invoke('supabase:bulk-update-scene-stages', updates, updatedBy),
-  supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string) =>
-    ipcRenderer.invoke('supabase:update-scene-field', sceneUuid, field, value),
+  supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) =>
+    ipcRenderer.invoke('supabase:update-scene-field', sceneUuid, field, value, senderId),
   supabaseReadUsers: () =>
     ipcRenderer.invoke('supabase:read-users'),
   supabaseAddUser: (user: unknown) =>
