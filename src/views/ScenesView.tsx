@@ -1932,7 +1932,69 @@ export function ScenesView() {
   };
 
   const handleAddScene = async (sceneId: string, assignee: string, memo: string, layoutId: string, images?: { storyboard?: string; guide?: string }, skipSync?: boolean) => {
-    // 'all' 모드에서 addTargetSheet가 지정되면 해당 시트에 추가
+    // 전체 모드: BG+ACT 양쪽 동시 추가
+    if (addTargetSheet === '__both__') {
+      const sheets = [bgPart?.sheetName, actPart?.sheetName].filter(Boolean) as string[];
+      if (sheets.length === 0) return;
+
+      const prevEpisodes = useDataStore.getState().episodes;
+
+      for (const sheet of sheets) {
+        addSceneOptimistic(sheet, sceneId, assignee, memo);
+      }
+
+      try {
+        await Promise.all(sheets.map((sheet) => addScene(sheet, sceneId, assignee, memo)));
+        syncInBackground();
+      } catch (err) {
+        setEpisodes(prevEpisodes);
+        handleSheetError(err, '씬 추가');
+        syncInBackground();
+        return;
+      }
+
+      // layoutId / images: 양쪽 모두 적용
+      if (layoutId) {
+        for (const sheet of sheets) {
+          const latestPart = useDataStore.getState().episodes
+            .flatMap((ep) => ep.parts)
+            .find((p) => p.sheetName === sheet);
+          const latestIndex = latestPart?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
+          if (latestIndex >= 0) {
+            updateSceneFieldOptimistic(sheet, latestIndex, 'layoutId', layoutId);
+            updateSceneField(sheet, latestIndex, 'layoutId', layoutId).catch(() => {});
+          }
+        }
+      }
+
+      if (images?.storyboard || images?.guide) {
+        (async () => {
+          try {
+            const { saveImage } = await import('@/utils/imageUtils');
+            for (const sheet of sheets) {
+              const latestPart2 = useDataStore.getState().episodes
+                .flatMap((ep) => ep.parts)
+                .find((p) => p.sheetName === sheet);
+              const latestIndex = latestPart2?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
+              if (latestIndex < 0) continue;
+              if (images.storyboard) {
+                const url = await saveImage(images.storyboard, sheet, sceneId, 'storyboard');
+                handleFieldUpdateForSheet(sheet, latestIndex, 'storyboardUrl', url);
+              }
+              if (images.guide) {
+                const url = await saveImage(images.guide, sheet, sceneId, 'guide');
+                handleFieldUpdateForSheet(sheet, latestIndex, 'guideUrl', url);
+              }
+            }
+          } catch (err) {
+            console.error('[씬 추가 이미지 업로드 실패]', err);
+          }
+        })();
+      }
+      return;
+    }
+
+    // 개별 모드: 기존 로직
     const targetSheet = addTargetSheet ?? currentPart?.sheetName;
     if (!targetSheet) return;
 
@@ -1991,14 +2053,33 @@ export function ScenesView() {
 
   // Phase 0-5: 대량 씬 추가 (5개 이상 — 서버 확인 후 반영)
   const handleBulkAddScenes = async (scenesToAdd: { sceneId: string; assignee: string; memo: string }[]) => {
+    if (scenesToAdd.length === 0) return;
+
+    // 전체 모드: BG+ACT 양쪽 동시 대량 추가
+    if (addTargetSheet === '__both__') {
+      const sheets = [bgPart?.sheetName, actPart?.sheetName].filter(Boolean) as string[];
+      if (sheets.length === 0) return;
+
+      setBulkAddLoading(true);
+      try {
+        const { addScenes } = await import('@/services/supabaseService');
+        await Promise.all(sheets.map((sheet) => addScenes(sheet, scenesToAdd)));
+        await syncInBackground();
+      } catch (err) {
+        sonnerToast.error(`대량 씬 추가 실패: ${err}`);
+      } finally {
+        setBulkAddLoading(false);
+      }
+      return;
+    }
+
     const targetSheet = addTargetSheet ?? currentPart?.sheetName;
-    if (!targetSheet || scenesToAdd.length === 0) return;
+    if (!targetSheet) return;
 
     setBulkAddLoading(true);
     try {
       const { addScenes } = await import('@/services/supabaseService');
       await addScenes(targetSheet, scenesToAdd);
-      // 서버 성공 후 전체 동기화 완료까지 대기 (데이터 없음 깜빡임 방지)
       await syncInBackground();
     } catch (err) {
       sonnerToast.error(`대량 씬 추가 실패: ${err}`);
@@ -2689,28 +2770,14 @@ export function ScenesView() {
             + 씬 추가
           </button>
         )}
-        {/* 씬 추가 버튼 (전체 모드: 부서별) */}
-        {selectedDepartment === 'all' && (
-          <div className="flex items-center gap-2">
-            {bgPart && (
-              <button
-                onClick={() => { setAddTargetSheet(bgPart.sheetName); setShowAddScene(true); }}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer"
-                style={{ backgroundColor: `${DEPARTMENT_CONFIGS.bg.color}20`, color: DEPARTMENT_CONFIGS.bg.color, border: `1px solid ${DEPARTMENT_CONFIGS.bg.color}40` }}
-              >
-                + BG 씬
-              </button>
-            )}
-            {actPart && (
-              <button
-                onClick={() => { setAddTargetSheet(actPart.sheetName); setShowAddScene(true); }}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer"
-                style={{ backgroundColor: `${DEPARTMENT_CONFIGS.acting.color}20`, color: DEPARTMENT_CONFIGS.acting.color, border: `1px solid ${DEPARTMENT_CONFIGS.acting.color}40` }}
-              >
-                + ACT 씬
-              </button>
-            )}
-          </div>
+        {/* 씬 추가 버튼 (전체 모드: BG+ACT 동시 추가) */}
+        {selectedDepartment === 'all' && (bgPart || actPart) && (
+          <button
+            onClick={() => { setAddTargetSheet('__both__'); setShowAddScene(true); }}
+            className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 shadow-sm shadow-accent/20 transition-colors cursor-pointer"
+          >
+            + 씬 추가
+          </button>
         )}
       </div>
 
@@ -2718,6 +2785,12 @@ export function ScenesView() {
       {showAddScene && (
         <AddSceneForm
           existingSceneIds={(() => {
+            if (addTargetSheet === '__both__') {
+              // 전체 모드: BG+ACT 양쪽 씬ID 합집합
+              const bgIds = (bgPart?.scenes ?? []).map((s) => s.sceneId);
+              const actIds = (actPart?.scenes ?? []).map((s) => s.sceneId);
+              return [...new Set([...bgIds, ...actIds])];
+            }
             const targetPart = allParts.find((p) => p.sheetName === addTargetSheet);
             return (targetPart?.scenes ?? currentPart?.scenes ?? []).map((s) => s.sceneId);
           })()}
