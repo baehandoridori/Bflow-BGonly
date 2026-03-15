@@ -13,6 +13,7 @@ import { HighlightText } from '@/components/common/HighlightText';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneTable } from '@/components/scenes/UnifiedSceneTable';
+import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
@@ -2808,48 +2809,28 @@ export function ScenesView() {
         </div>
       )}
 
-      {/* ─── 'all' 모드: 통합 뷰 (카드/테이블) + 시트 폴백 ─── */}
+      {/* ─── 'all' 모드: 통합 뷰 (카드/테이블/시트) ─── */}
       {selectedDepartment === 'all' ? (
-        sceneViewMode === 'sheet' ? (
-          /* 시트 뷰: 기존 분리 렌더링 유지 (복잡도 높아 추후 통합) */
-          <div className="flex-1 flex flex-col gap-6">
-            {bgPart && (
-              <SceneSheetView
-                scenes={bgScenes}
-                allScenes={bgPart.scenes}
-                department="bg"
-                commentCounts={commentCounts}
-                sheetName={bgPart.sheetName}
-                searchQuery={searchQuery}
-                selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('bg:')).map(id => id.slice(3)))}
-                sceneGroupMode={sceneGroupMode}
-                onToggle={(id, stage) => handleToggleForSheet(bgPart.sheetName, id, stage)}
-                onDelete={(idx) => handleDeleteSceneForSheet(bgPart.sheetName, idx)}
-                onOpenDetail={(idx) => { setDetailContext({ sheetName: bgPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(bgPart.sheetName, idx, field, value)}
-                onCtrlClick={(id) => toggleSelectedScene(`bg:${id}`)}
-              />
-            )}
-            {actPart && (
-              <SceneSheetView
-                scenes={actScenes}
-                allScenes={actPart.scenes}
-                department="acting"
-                commentCounts={commentCounts}
-                sheetName={actPart.sheetName}
-                searchQuery={searchQuery}
-                selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('act:')).map(id => id.slice(4)))}
-                sceneGroupMode={sceneGroupMode}
-                onToggle={(id, stage) => handleToggleForSheet(actPart.sheetName, id, stage)}
-                onDelete={(idx) => handleDeleteSceneForSheet(actPart.sheetName, idx)}
-                onOpenDetail={(idx) => { setDetailContext({ sheetName: actPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(actPart.sheetName, idx, field, value)}
-                onCtrlClick={(id) => toggleSelectedScene(`act:${id}`)}
-              />
-            )}
-          </div>
-        ) : mergedScenes.length === 0 ? (
+        mergedScenes.length === 0 ? (
           <div className="text-sm text-text-secondary/50 text-center py-8">표시할 씬이 없습니다</div>
+        ) : sceneViewMode === 'sheet' ? (
+          /* 통합 시트 뷰 */
+          <UnifiedSceneSheetView
+            mergedScenes={mergedScenes}
+            bgSheetName={bgPart?.sheetName ?? null}
+            actSheetName={actPart?.sheetName ?? null}
+            commentCounts={commentCounts}
+            searchQuery={searchQuery}
+            selectedSceneIds={selectedSceneIds}
+            sceneGroupMode={sceneGroupMode}
+            onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+            onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+            onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+            onCtrlClick={(id) => {
+              if (bgPart) toggleSelectedScene(`bg:${id}`);
+              if (actPart) toggleSelectedScene(`act:${id}`);
+            }}
+          />
         ) : sceneViewMode === 'table' ? (
           /* 통합 테이블 뷰 */
           <UnifiedSceneTable
