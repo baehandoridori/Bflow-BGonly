@@ -13,7 +13,7 @@ import {
   connectVacation,
   checkVacationConnection,
 } from '@/services/vacationService';
-import { DEFAULT_WEB_APP_URL, DEFAULT_VACATION_URL } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { SettingsSection } from './SettingsSection';
 
 export function SheetsSection() {
@@ -22,7 +22,7 @@ export function SheetsSection() {
     vacationConnected, setVacationConnected, setVacationConfig,
   } = useAppStore();
 
-  const [webAppUrl, setWebAppUrl] = useState(DEFAULT_WEB_APP_URL || '');
+  const [webAppUrl, setWebAppUrl] = useState(DEFAULT_GAS_IMAGE_URL || '');
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);

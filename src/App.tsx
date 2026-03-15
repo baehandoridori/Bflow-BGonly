@@ -19,7 +19,7 @@ import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
 import { UserManagerModal } from '@/components/auth/UserManagerModal';
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
-import { readAllFromSheets } from '@/services/supabaseService';
+import { readAll } from '@/services/supabaseService';
 import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
 import type { SupabaseRealtimeEvent } from '@/services/supabaseService';
 import { invalidatePartCache } from '@/services/commentService';
@@ -34,7 +34,7 @@ import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
-import { DEFAULT_WEB_APP_URL, DEFAULT_VACATION_URL } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 
 export default function App() {
   const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setDataConnected, setGasConfig, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected, setActiveDataSource } = useAppStore();
@@ -129,7 +129,7 @@ export default function App() {
       const connected = await checkGasConnection();
       if (!connected) {
         const cfg = await loadGasConfig();
-        const url = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+        const url = cfg?.webAppUrl || DEFAULT_GAS_IMAGE_URL;
         if (url) {
           const result = await connectGas(url);
           if (!result.ok) throw new Error('시트 연결 실패');
@@ -139,7 +139,7 @@ export default function App() {
         }
       }
 
-      const episodes = await readAllFromSheets();
+      const episodes = await readAll();
       setEpisodes(episodes);
       setLastSyncTime(Date.now());
 
@@ -288,7 +288,7 @@ export default function App() {
         // Sheets fallback 연결 (Supabase 실패 시에만)
         if (!sbConn.ok) {
           const config = await loadGasConfig();
-          const urlToConnect = config?.webAppUrl || DEFAULT_WEB_APP_URL;
+          const urlToConnect = config?.webAppUrl || DEFAULT_GAS_IMAGE_URL;
           if (urlToConnect) {
             const effectiveConfig = config ?? { webAppUrl: urlToConnect };
             setGasConfig(effectiveConfig);

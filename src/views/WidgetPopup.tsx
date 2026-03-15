@@ -22,14 +22,14 @@ import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWid
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
-import { readAllFromSheets, checkConnection, readMetadataFromSheets } from '@/services/supabaseService';
+import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
 import { invalidatePartCache } from '@/services/commentService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import type { Episode } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
-import { DEFAULT_WEB_APP_URL } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 
 // 모듈 레벨 쿨다운: dataNotifyChange 호출 시 자체 변경 감지
 let _reloadCooldown = false;
@@ -41,8 +41,6 @@ export function notifyDataChangeWithCooldown() {
   setTimeout(() => { _reloadCooldown = false; }, _COOLDOWN_MS);
   return window.electronAPI?.dataNotifyChange?.();
 }
-/** @deprecated notifyDataChangeWithCooldown 사용 */
-export const notifySheetChangeWithCooldown = notifyDataChangeWithCooldown;
 
 const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNode }> = {
   'overall-progress': { label: '전체 진행률', component: <OverallProgressWidget /> },
@@ -168,7 +166,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
 
         const connected = await checkConnection();
         if (connected) {
-          const episodes = await readAllFromSheets();
+          const episodes = await readAll();
           useDataStore.getState().setEpisodes(episodes);
           // 메타데이터 일괄 로딩 (Supabase)
           try {
@@ -186,11 +184,11 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         } else {
           // 재연결 시도
           const cfg = await loadGasConfig();
-          const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+          const urlToConnect = cfg?.webAppUrl || DEFAULT_GAS_IMAGE_URL;
           if (urlToConnect) {
             const result = await connectGas(urlToConnect);
             if (result.ok) {
-              const episodes = await readAllFromSheets();
+              const episodes = await readAll();
               useDataStore.getState().setEpisodes(episodes);
             }
           }
@@ -314,7 +312,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         let connected = await checkConnection();
         if (!connected) {
           const cfg = await loadGasConfig();
-          const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+          const urlToConnect = cfg?.webAppUrl || DEFAULT_GAS_IMAGE_URL;
           if (urlToConnect) {
             const result = await connectGas(urlToConnect);
             connected = result.ok;
@@ -332,17 +330,17 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         }
 
         if (connected) {
-          const loadedEpisodes = await readAllFromSheets();
+          const loadedEpisodes = await readAll();
           useDataStore.getState().setEpisodes(loadedEpisodes);
 
           const [titleResults, memoResults] = await Promise.all([
             Promise.all(loadedEpisodes.map((ep) =>
-              readMetadataFromSheets('episode-title', String(ep.episodeNumber))
+              readMetadata('episode-title', String(ep.episodeNumber))
                 .then((d) => [ep.episodeNumber, d?.value] as const)
                 .catch(() => [ep.episodeNumber, undefined] as const),
             )),
             Promise.all(loadedEpisodes.map((ep) =>
-              readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
+              readMetadata('episode-memo', String(ep.episodeNumber))
                 .then((d) => [ep.episodeNumber, d?.value] as const)
                 .catch(() => [ep.episodeNumber, undefined] as const),
             )),

@@ -341,17 +341,17 @@ function PartCompleteOverlay() {
   );
 }
 import {
-  updateSheetCell,
-  addEpisodeToSheets,
-  addPartToSheets,
-  addSceneToSheets,
-  deleteSceneFromSheets,
-  updateSceneFieldInSheets,
-  writeMetadataToSheets,
-  readMetadataFromSheets,
-  softDeletePartInSheets,
-  softDeleteEpisodeInSheets,
-  batchToSheets,
+  updateCell,
+  addEpisode,
+  addPart,
+  addScene,
+  deleteScene,
+  updateSceneField,
+  writeMetadata,
+  readMetadata,
+  softDeletePart,
+  softDeleteEpisode,
+  batchExecute,
   batchActions,
   bulkUpdateCells,
 } from '@/services/supabaseService';
@@ -1328,8 +1328,8 @@ export function ScenesView() {
   const syncInBackground = async () => {
     const myVersion = ++syncVersionRef.current;
     try {
-      const { readAllFromSheets, readArchivedFromSheets } = await import('@/services/supabaseService');
-      const eps = await readAllFromSheets();
+      const { readAll, readArchived } = await import('@/services/supabaseService');
+      const eps = await readAll();
 
       // 버전 체크: 이 sync 이후에 새 sync가 시작되었으면 결과 폐기
       if (syncVersionRef.current !== myVersion) return;
@@ -1339,7 +1339,7 @@ export function ScenesView() {
       // 아카이빙 가드: 아카이빙/해제 작업 진행 중이면 archived 목록 갱신 스킵
       if (!archiveGuardRef.current) {
         try {
-          const archivedList = await readArchivedFromSheets();
+          const archivedList = await readArchived();
           // 다시 한번 버전+가드 체크 (비동기 응답 사이에 상태가 바뀌었을 수 있음)
           if (syncVersionRef.current === myVersion && !archiveGuardRef.current) {
             setArchivedEpisodes(archivedList.map((item) => ({
@@ -1435,7 +1435,7 @@ export function ScenesView() {
       const memos: Record<string, string> = {};
       for (const part of parts) {
         try {
-          const data = await readMetadataFromSheets('part-memo', part.sheetName);
+          const data = await readMetadata('part-memo', part.sheetName);
           if (data?.value) memos[part.sheetName] = data.value;
         } catch { /* 무시 */ }
       }
@@ -1451,8 +1451,8 @@ export function ScenesView() {
   useEffect(() => {
     const loadArchived = async () => {
       try {
-        const { readArchivedFromSheets } = await import('@/services/supabaseService');
-        const list = await readArchivedFromSheets();
+        const { readArchived } = await import('@/services/supabaseService');
+        const list = await readArchived();
         // 아카이브 가드 활성화 상태면 낙관적 상태 보호
         if (archiveGuardRef.current) return;
         const enriched = list.map((item) => ({
@@ -1681,7 +1681,7 @@ export function ScenesView() {
     // API 호출을 큐에 넣어 순차 실행 (race condition 방지)
     toggleQueueRef.current = toggleQueueRef.current.then(async () => {
       try {
-        await updateSheetCell(sheetName, sceneIndex, stage, newValue);
+        await updateCell(sheetName, sceneIndex, stage, newValue);
         window.electronAPI?.dataNotifyChange?.({
           type: 'toggle',
           sheetName,
@@ -1780,7 +1780,7 @@ export function ScenesView() {
       if (epName) {
         actions.push(batchActions.writeMetadata('episode-title', String(nextEpisodeNumber), epName));
       }
-      await batchToSheets(actions);
+      await batchExecute(actions);
       syncInBackground();
     } catch (err) {
       // 롤백
@@ -1833,7 +1833,7 @@ export function ScenesView() {
       setSelectedPart(nextPartId);
 
       try {
-        await batchToSheets([
+        await batchExecute([
           batchActions.addPart(currentEp.episodeNumber, nextPartId, 'bg'),
           batchActions.addPart(currentEp.episodeNumber, nextPartId, 'acting'),
         ]);
@@ -1862,7 +1862,7 @@ export function ScenesView() {
     setSelectedPart(nextPartId);
 
     try {
-      await addPartToSheets(currentEp.episodeNumber, nextPartId, effectiveDept);
+      await addPart(currentEp.episodeNumber, nextPartId, effectiveDept);
       syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
@@ -1885,7 +1885,7 @@ export function ScenesView() {
     addSceneOptimistic(targetSheet, sceneId, assignee, memo);
 
     try {
-      await addSceneToSheets(targetSheet, sceneId, assignee, memo);
+      await addScene(targetSheet, sceneId, assignee, memo);
       if (!skipSync) syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
@@ -1901,7 +1901,7 @@ export function ScenesView() {
       const latestIndex = latestPart?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
       if (latestIndex >= 0) {
         updateSceneFieldOptimistic(targetSheet, latestIndex, 'layoutId', layoutId);
-        updateSceneFieldInSheets(targetSheet, latestIndex, 'layoutId', layoutId).catch(() => {});
+        updateSceneField(targetSheet, latestIndex, 'layoutId', layoutId).catch(() => {});
       }
     }
 
@@ -1937,8 +1937,8 @@ export function ScenesView() {
 
     setBulkAddLoading(true);
     try {
-      const { addScenesToSheets } = await import('@/services/supabaseService');
-      await addScenesToSheets(targetSheet, scenesToAdd);
+      const { addScenes } = await import('@/services/supabaseService');
+      await addScenes(targetSheet, scenesToAdd);
       // 서버 성공 후 전체 동기화 완료까지 대기 (데이터 없음 깜빡임 방지)
       await syncInBackground();
     } catch (err) {
@@ -1956,7 +1956,7 @@ export function ScenesView() {
     deleteSceneOptimistic(sheetName, sceneIndex);
 
     try {
-      await deleteSceneFromSheets(sheetName, sceneIndex);
+      await deleteScene(sheetName, sceneIndex);
       syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
@@ -1980,7 +1980,7 @@ export function ScenesView() {
     const sceneId = part?.scenes[sceneIndex]?.sceneId ?? '';
 
     try {
-      await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
+      await updateSceneField(sheetName, sceneIndex, field, value);
       window.electronAPI?.dataNotifyChange?.({
         type: 'field-update',
         sheetName,
@@ -2015,7 +2015,7 @@ export function ScenesView() {
     setSelectedPart(null);
 
     try {
-      await softDeletePartInSheets(sheetName);
+      await softDeletePart(sheetName);
       syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
@@ -2030,7 +2030,7 @@ export function ScenesView() {
     setPartMemos((prev) => ({ ...prev, [sheetName]: memo }));
     setEditingPartMemo(null);
     try {
-      await writeMetadataToSheets('part-memo', sheetName, memo);
+      await writeMetadata('part-memo', sheetName, memo);
     } catch (err) {
       console.warn('[파트 메모] 시트 저장 실패', err);
     }
@@ -2051,7 +2051,7 @@ export function ScenesView() {
     setEpEditOpen(false);
 
     try {
-      await softDeleteEpisodeInSheets(currentEp.episodeNumber);
+      await softDeleteEpisode(currentEp.episodeNumber);
       syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
@@ -2102,8 +2102,8 @@ export function ScenesView() {
 
     try {
       // Phase 0-2: _REGISTRY 기반 아카이빙 (탭 이름 변경 없이 status만 변경)
-      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/supabaseService');
-      await archiveEpisodeViaRegistryInSheets(epNum, archivedBy, memo);
+      const { archiveEpisode } = await import('@/services/supabaseService');
+      await archiveEpisode(epNum, archivedBy, memo);
       // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화 (snapshot relay가 다른 창에 전달)
       setTimeout(() => {
         archiveGuardRef.current = false;
@@ -2142,8 +2142,8 @@ export function ScenesView() {
 
     try {
       // Phase 0-2: _REGISTRY 기반 복원 (탭 이름 변경 없이 status만 변경)
-      const { unarchiveEpisodeViaRegistryInSheets } = await import('@/services/supabaseService');
-      await unarchiveEpisodeViaRegistryInSheets(epNum);
+      const { unarchiveEpisode } = await import('@/services/supabaseService');
+      await unarchiveEpisode(epNum);
       // 서버가 완전히 처리할 시간(5초)을 준 후 가드 해제 + 동기화 (snapshot relay가 다른 창에 전달)
       setTimeout(() => {
         archiveGuardRef.current = false;
@@ -2179,8 +2179,8 @@ export function ScenesView() {
 
     // 저장
     try {
-      await writeMetadataToSheets('episode-title', key, title.trim());
-      await writeMetadataToSheets('episode-memo', key, memo);
+      await writeMetadata('episode-title', key, title.trim());
+      await writeMetadata('episode-memo', key, memo);
     } catch (err) {
       console.warn('[에피소드 메타] 시트 저장 실패', err);
     }
@@ -3204,7 +3204,7 @@ export function ScenesView() {
                     const actions = partEntries.flatMap(({ sheetName, indices }) =>
                       indices.map((idx) => batchActions.deleteScene(sheetName, idx))
                     );
-                    await batchToSheets(actions);
+                    await batchExecute(actions);
                     syncInBackground();
                   } catch (err) {
                     console.error('[일괄 삭제 실패]', err);
@@ -3308,7 +3308,7 @@ export function ScenesView() {
 
                   // Phase 0: 배치로 한 번에 전송
                   if (batchActionList.length > 0) {
-                    batchToSheets(batchActionList)
+                    batchExecute(batchActionList)
                       .then(() => syncInBackground())
                       .catch((err) => {
                         console.error('[일괄 편집 실패]', err);

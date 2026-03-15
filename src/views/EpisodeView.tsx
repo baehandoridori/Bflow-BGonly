@@ -311,8 +311,8 @@ export function EpisodeView() {
   useEffect(() => {
     const loadArchived = async () => {
       try {
-        const { readArchivedFromSheets } = await import('@/services/supabaseService');
-        const list = await readArchivedFromSheets();
+        const { readArchived } = await import('@/services/supabaseService');
+        const list = await readArchived();
         const enriched: typeof archivedEpisodes = [];
         for (const item of list) {
           enriched.push({
@@ -385,8 +385,8 @@ export function EpisodeView() {
     ]);
 
     try {
-      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/supabaseService');
-      await archiveEpisodeViaRegistryInSheets(epNum, currentUser?.name ?? '알 수 없음', memo);
+      const { archiveEpisode } = await import('@/services/supabaseService');
+      await archiveEpisode(epNum, currentUser?.name ?? '알 수 없음', memo);
       // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 알림
       setTimeout(() => {
         window.electronAPI?.dataNotifyChange?.();
@@ -414,12 +414,12 @@ export function EpisodeView() {
     setEpisodes([...episodes, { episodeNumber: epNum, title: tempTitle, parts: [] }]);
 
     try {
-      const { unarchiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/supabaseService');
-      await unarchiveEpisodeViaRegistryInSheets(epNum);
+      const { unarchiveEpisode, readAll } = await import('@/services/supabaseService');
+      await unarchiveEpisode(epNum);
       // 낙관적 상태를 신뢰 — 서버 처리 후(3초) 실제 데이터로 교체
       setTimeout(async () => {
         try {
-          const eps = await readAllFromSheets();
+          const eps = await readAll();
           setEpisodes(eps);
           window.electronAPI?.dataNotifyChange?.();
         } catch { /* 다음 폴링 사이클에서 자연 동기화 */ }

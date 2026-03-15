@@ -71,14 +71,12 @@
 
 ### 데이터 소스 (전환 중)
 
-| | Supabase (신규) | Google Sheets (레거시) |
-|--|----------------|----------------------|
-| **데이터** | PostgreSQL (Supabase) | Google Sheets |
-| **서비스** | `supabaseService.ts` | `sheetsService.ts` (잔존) |
-| **동기화** | Realtime WebSocket (즉시) | 폴링 기반 (주기적 reload) |
-| **상태** | ScenesView 등 주요 뷰 전환 완료 | 일부 뷰에 잔존 (M-3 진행 중) |
-
-> **참고**: 테스트 모드(testSheetService.ts, test-data/)는 이미 제거됨.
+| | Supabase (현재) |
+|--|----------------|
+| **데이터** | PostgreSQL (Supabase) |
+| **서비스** | `supabaseService.ts` |
+| **동기화** | Realtime WebSocket (즉시) |
+| **상태** | 전체 뷰 전환 완료, 레거시 Sheets 코드 정리 완료 |
 
 ---
 
@@ -90,14 +88,13 @@
 |------|-------|------|------|
 | `src/views/ScenesView.tsx` | ~2980 | **메인 뷰** — 씬 CRUD, 체크박스, 필터, 정렬 | 가장 큰 파일, Supabase 전환 완료 |
 | `src/stores/useDataStore.ts` | ~200 | 에피소드/씬 상태 + 낙관적 업데이트 함수 | Realtime delta 적용 액션 포함 |
-| `src/stores/useAppStore.ts` | ~160 | UI 상태 (뷰, 필터, 연결상태, 테마) | `activeDataSource`, `sheetsConnected`(정리 예정) |
+| `src/stores/useAppStore.ts` | ~160 | UI 상태 (뷰, 필터, 연결상태, 테마) | `activeDataSource`, `dataConnected` |
 | `electron/supabase.ts` | ~802 | **Supabase CRUD** — 전체 데이터 조작 | 클라이언트 초기화 + 모든 테이블 CRUD |
 | `electron/realtime.ts` | ~147 | **Realtime 구독** — WebSocket 이벤트 처리 | 자동 재연결 (지수 백오프, 최대 10회) |
 | `electron/broadcast.ts` | ~82 | **Broadcast** — 즉시 delta 전파 | 다중 클라이언트 간 빠른 동기화 |
 | `electron/main.ts` | ~900 | Electron 메인 프로세스, IPC 핸들러 전체 | Supabase + Sheets 양쪽 핸들러 |
-| `src/services/supabaseService.ts` | ~374 | 렌더러→IPC 래퍼 (Supabase) | 기존 sheetsService와 1:1 호환 |
-| `electron/sheets.ts` | ~336 | GAS HTTP 통신 (레거시, 정리 예정) | 이미지 업로드 코드 분리 후 삭제 예정 |
-| `src/services/sheetsService.ts` | ~156 | 렌더러→IPC 래퍼 (레거시, 정리 예정) | M-5에서 삭제 예정 |
+| `src/services/supabaseService.ts` | ~374 | 렌더러→IPC 래퍼 (Supabase) | 고수준 API (sheetName→UUID 변환) 포함 |
+| `electron/sheets.ts` | ~336 | GAS HTTP 통신 | 이미지 업로드 + 메타데이터 읽기 |
 | `apps-script/Code.gs` | ~700+ | **Google Apps Script** | 이미지 업로드만 유지 |
 
 ### UI 컴포넌트
@@ -120,7 +117,7 @@
 |------|------|
 | `src/types/index.ts` | **모든 타입 정의** — Episode, Part, Scene, Stage, Department |
 | `src/utils/calcStats.ts` | 진행률 계산 유틸 |
-| `src/config.ts` | 기본 설정값 (DEFAULT_WEB_APP_URL 등) |
+| `src/config.ts` | 기본 설정값 (DEFAULT_GAS_IMAGE_URL 등) |
 
 ---
 
@@ -199,13 +196,13 @@
 |------|------|--------|------|
 | 복수 동작 부분 실패 | `sheets.ts` (레거시) | ~~높음~~ | ✅ Phase 0-1 배치로 해결, Supabase 전환 후 무관 |
 | 아카이브 롤백 누락 | `ScenesView.tsx` | ~~중간~~ | ✅ Phase 0-2에서 해결 |
-| Sheets 코드 잔존 | App.tsx, useAppStore 등 | 낮음 | Phase 9 M-3에서 정리 중 |
+| ~~Sheets 코드 잔존~~ | ~~App.tsx, useAppStore 등~~ | ~~낮음~~ | ✅ 레거시 네이밍 정리 완료 |
 | Supabase 무료 플랜 7일 정지 | 운영 | 중간 | 연휴 시 keep-alive 필요 |
 | 인증 시스템 미정 | 전체 | 낮음 | 현행 유지 vs Supabase Auth (한솔님과 확인 필요) |
 
 ### Supabase 전환 관련 주의사항
 
-1. **레거시 코드 잔존**: `sheetsConnected`, `onSheetChanged`, `broadcastSheetChanged` 등이 일부 파일에 남아있음 → M-3/M-5에서 정리 예정
+1. **레거시 네이밍 정리 완료**: `sheetsConnected` → `dataConnected`, `DEFAULT_WEB_APP_URL` → `DEFAULT_GAS_IMAGE_URL`, supabaseService 내 `*InSheets`/`*ToSheets` 함수명 정리 완료
 2. **이미지 업로드**: GAS 경유 유지 (Supabase Storage 아님). `sheets.ts`에서 이미지 코드를 `drive-image.ts`로 분리 후 삭제 예정
 3. **IPC 구조**: 렌더러 → IPC → 메인(supabase.ts) → Supabase API. 렌더러에서 직접 Supabase 호출 금지
 

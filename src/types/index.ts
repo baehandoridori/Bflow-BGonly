@@ -39,7 +39,7 @@ export type Stage = 'lo' | 'done' | 'review' | 'png';
 
 export const STAGES: Stage[] = ['lo', 'done', 'review', 'png'];
 
-/** @deprecated — 부서별 라벨은 DEPARTMENT_CONFIGS[dept].stageLabels 사용 */
+/** BG 기본 단계 라벨 (부서별 라벨은 DEPARTMENT_CONFIGS[dept].stageLabels) */
 export const STAGE_LABELS: Record<Stage, string> = {
   lo: 'LO',
   done: '완료',
@@ -47,7 +47,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   png: 'PNG',
 };
 
-/** @deprecated — 부서별 컬러는 DEPARTMENT_CONFIGS[dept].stageColors 사용 */
+/** BG 기본 단계 컬러 (부서별 컬러는 DEPARTMENT_CONFIGS[dept].stageColors) */
 export const STAGE_COLORS: Record<Stage, string> = {
   lo: '#74B9FF',
   done: '#A29BFE',

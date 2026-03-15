@@ -114,16 +114,14 @@ function doPost(e) {
 
 > 난이도: ●●○ | 코드 간소화 — 필요시 진행
 
-**현황 분석 (2026-02-24):**
-- 테스트 모드: 로컬 JSON 파일로 동작 (개발용)
-- 라이브 모드: Google Sheets + Apps Script (운영용)
-- 분기 기준: `sheetsConnected` 불리언 (ScenesView.tsx 17개소+)
-- 영향 범위: `testSheetService.ts` (372줄 전체), `main.ts` 파일 워처 (~50줄)
+**현황 분석 (2026-02-24 → 2026-03-15 정리 완료):**
+- ~~테스트 모드~~ 제거 완료
+- ~~Sheets 분기~~ 제거 완료 (`sheetsConnected` → `dataConnected`, 호환 alias 제거)
+- Supabase 단일 경로로 전환 완료
 
-**제거 시 효과:**
-- ScenesView.tsx의 17개+ `if(sheetsConnected)` 분기 제거 → 코드 대폭 단순화
-- testSheetService.ts 372줄 삭제
-- 유지보수 부담 경감 (새 기능마다 두 경로 구현 불필요)
+**제거 효과 (달성됨):**
+- ScenesView.tsx의 `if(sheetsConnected)` 분기 전부 제거 → 코드 단순화
+- testSheetService.ts 삭제, 레거시 네이밍(`*InSheets`/`*ToSheets`) 정리 완료
 
 **제거 시 잃는 것:**
 - 인터넷/Sheets 없이 로컬 테스트 불가
@@ -1027,7 +1025,7 @@ AFTER (Supabase):
 - [x] **useDataStore.ts**: Realtime delta 적용 액션 (`updateSceneStageDirectly`) 추가
 - [x] **App.tsx**: Supabase 우선 연결 + Realtime/Broadcast 리스너 추가
 - [x] **App.tsx 잔여**: `onSheetChanged` 리스너 제거
-- [x] **useAppStore.ts**: `sheetsConnected` → `dataConnected` 리네이밍 (호환 alias 유지)
+- [x] **useAppStore.ts**: `sheetsConnected` → `dataConnected` 리네이밍 완료 (호환 alias 제거 완료)
 - [x] **CompositingView.tsx**: `sheetsConnected` → `dataConnected` 참조 변경
 - [x] **SheetsSection.tsx**: sheetsService → gasConfigService 전환
 - [x] **WidgetPopup.tsx**: sheetsService → gasConfigService 전환
@@ -1048,8 +1046,10 @@ AFTER (Supabase):
 - [x] **electron/sheets.ts 축소**: 627줄 → 133줄 (fallback 읽기 전용 + GAS 연결만 잔존)
 - [x] **src/services/sheetsService.ts 삭제**: gasConfigService + supabaseService로 대체
 - [x] **electron/gas-fetch.ts**: GAS HTTP 공용 모듈로 유지 (drive-image + sheets 공유)
-- [x] **src/config.ts**: `DEFAULT_GAS_IMAGE_URL` 기본 + `DEFAULT_WEB_APP_URL` deprecated alias
-- [x] **sheetsConnected → dataConnected**: 리네이밍 완료 (M-3에서 처리)
+- [x] **src/config.ts**: `DEFAULT_GAS_IMAGE_URL` 단일 사용 (`DEFAULT_WEB_APP_URL` deprecated alias 제거 완료)
+- [x] **sheetsConnected → dataConnected**: 리네이밍 완료 + 호환 alias 제거 완료
+- [x] **supabaseService.ts**: 레거시 Sheets 네이밍 정리 (`*InSheets`/`*ToSheets` → 깨끗한 이름으로 변경)
+- [x] **호출처 6개 파일 일괄 업데이트**: ScenesView, EpisodeView, WidgetPopup, App, MyTasksWidget, SpotlightSearch
 - [x] **Sheets IPC 핸들러 25개 제거**: main.ts + preload.ts + types 정리
 - [x] **tsc --noEmit + vite build 통과 확인**
 

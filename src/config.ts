@@ -14,9 +14,6 @@
 // 예시: 'https://script.google.com/macros/s/AKfycb.../exec'
 export const DEFAULT_GAS_IMAGE_URL = 'https://script.google.com/macros/s/AKfycbwse8JuJug4dx8-zVdnoRizlp03lwbSKc9YOH2-40PAEX5tWGKMzC3WJx6zIvNEc9PC/exec';
 
-/** @deprecated DEFAULT_GAS_IMAGE_URL 사용 */
-export const DEFAULT_WEB_APP_URL = DEFAULT_GAS_IMAGE_URL;
-
 // ─── 휴가 관리 Apps Script 웹 앱 기본 URL ──────────────────
 export const DEFAULT_VACATION_URL = 'https://script.google.com/macros/s/AKfycbx82kD3CV_0saumS9i1EDfin_GRLNemL5FOeUHgp5diZn6Mt91mduRTBImiwHtutfHI/exec';
 

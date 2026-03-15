@@ -923,11 +923,11 @@ export function MyTasksWidget() {
     }
 
     try {
-      const { updateSheetCell, updateSceneFieldInSheets } = await import('@/services/supabaseService');
-      await updateSheetCell(sheetName, sceneIndex, stage, newValue);
+      const { updateCell, updateSceneField } = await import('@/services/supabaseService');
+      await updateCell(sheetName, sceneIndex, stage, newValue);
       if (completedBy) {
-        await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
-        await updateSceneFieldInSheets(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
+        await updateSceneField(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
+        await updateSceneField(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
       }
       notifyChange();
     } catch (err) {
@@ -942,8 +942,8 @@ export function MyTasksWidget() {
     updateSceneFieldOptimistic(sheetName, sceneIndex, field, value);
 
     try {
-      const { updateSceneFieldInSheets } = await import('@/services/supabaseService');
-      await updateSceneFieldInSheets(sheetName, sceneIndex, field, value);
+      const { updateSceneField } = await import('@/services/supabaseService');
+      await updateSceneField(sheetName, sceneIndex, field, value);
       notifyChange();
     } catch (err) {
       console.error('[MyTasks 편집 실패]', err);

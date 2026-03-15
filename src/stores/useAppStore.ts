@@ -20,12 +20,6 @@ interface AppState {
   setDataConnected: (v: boolean) => void;
   setGasConfig: (config: SheetsConfig | null) => void;
 
-  // 호환성 alias (deprecated)
-  sheetsConnected: boolean;
-  sheetsConfig: SheetsConfig | null;
-  setSheetsConnected: (v: boolean) => void;
-  setSheetsConfig: (config: SheetsConfig | null) => void;
-
   // 활성 데이터 소스 표시
   activeDataSource: DataSource;
   setActiveDataSource: (source: DataSource) => void;
@@ -146,14 +140,8 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   dataConnected: false,
   gasConfig: null,
-  setDataConnected: (v) => set({ dataConnected: v, sheetsConnected: v }),
-  setGasConfig: (config) => set({ gasConfig: config, sheetsConfig: config }),
-
-  // 호환성 alias (deprecated — dataConnected/gasConfig 사용 권장)
-  sheetsConnected: false,
-  sheetsConfig: null,
-  setSheetsConnected: (v) => set({ sheetsConnected: v, dataConnected: v }),
-  setSheetsConfig: (config) => set({ sheetsConfig: config, gasConfig: config }),
+  setDataConnected: (v) => set({ dataConnected: v }),
+  setGasConfig: (config) => set({ gasConfig: config }),
 
   activeDataSource: null,
   setActiveDataSource: (source) => set({ activeDataSource: source }),
