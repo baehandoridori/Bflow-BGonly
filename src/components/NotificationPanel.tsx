@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Bell, Check, Trash2, MessageSquare, RefreshCw, Award } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
@@ -103,8 +104,7 @@ export function NotificationBell() {
 // ─── 드롭다운 패널 ───────────────────────────────────
 function NotificationDropdown() {
   const { notifications, markAllAsRead, clearAll, setPanelOpen, unreadCount } = useNotificationStore();
-  const setView = useAppStore((s) => s.setView);
-  const setSelectedEpisode = useAppStore((s) => s.setSelectedEpisode);
+  const { setView, setSelectedEpisode, setHighlightSceneId } = useAppStore();
   const ref = useRef<HTMLDivElement>(null);
 
   // 외부 클릭 닫기
@@ -114,7 +114,6 @@ function NotificationDropdown() {
         setPanelOpen(false);
       }
     };
-    // 약간 지연시켜서 토글 클릭과 충돌 방지
     const timer = setTimeout(() => document.addEventListener('mousedown', handler), 50);
     return () => {
       clearTimeout(timer);
@@ -123,12 +122,24 @@ function NotificationDropdown() {
   }, [setPanelOpen]);
 
   const handleNavigate = (n: AppNotification) => {
-    if (n.metadata?.episodeId) {
-      // 해당 에피소드의 씬 뷰로 이동
-      const epNum = parseInt(n.metadata.episodeName?.replace(/\D/g, '') || '0');
-      if (epNum > 0) {
-        setSelectedEpisode(epNum);
-        setView('scenes');
+    const sceneId = n.metadata?.sceneId;
+    const sceneName = n.metadata?.sceneName;
+    if (sceneId || sceneName) {
+      // 씬 UUID/이름으로 에피소드를 찾아서 이동
+      const episodes = useDataStore.getState().episodes;
+      for (const ep of episodes) {
+        for (const part of ep.parts) {
+          const found = part.scenes.find(s =>
+            (sceneId && s.id === sceneId) || (sceneName && s.sceneId === sceneName),
+          );
+          if (found) {
+            setSelectedEpisode(ep.episodeNumber);
+            setHighlightSceneId(found.sceneId);
+            setView('scenes');
+            setPanelOpen(false);
+            return;
+          }
+        }
       }
     }
     setPanelOpen(false);

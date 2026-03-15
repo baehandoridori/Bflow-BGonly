@@ -842,6 +842,7 @@ export default function App() {
         gap={8}
         visibleToasts={5}
         expand={false}
+        closeButton
       />
 
       {/* 환영 팝업 (로그인 직후) */}

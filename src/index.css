@@ -322,6 +322,7 @@ input[type="range"]::-webkit-slider-thumb {
   --normal-bg: rgba(26, 29, 39, 0.85);
   --normal-border: rgba(255, 255, 255, 0.08);
   --normal-text: #E8E8EE;
+  overflow: hidden;
 }
 
 /* 타입별 좌측 액센트 바 */
@@ -342,7 +343,7 @@ input[type="range"]::-webkit-slider-thumb {
   --normal-border: rgba(108, 92, 231, 0.2);
 }
 
-/* 상단 빛 반사 효과 */
+/* 상단 빛 반사 효과 (overflow:hidden으로 클리핑) */
 [data-sonner-toast]::before {
   content: '';
   position: absolute;
@@ -353,6 +354,7 @@ input[type="range"]::-webkit-slider-thumb {
   opacity: 0.2;
   background: linear-gradient(90deg, transparent 10%, rgba(255,255,255,0.5) 50%, transparent 90%);
   pointer-events: none;
+  z-index: 1;
 }
 
 /* Sonner 내부 아이콘 색상 */
@@ -361,53 +363,61 @@ input[type="range"]::-webkit-slider-thumb {
 [data-sonner-toast][data-type="warning"] [data-icon] { color: #FDCB6E; }
 [data-sonner-toast][data-type="info"] [data-icon] { color: rgb(var(--color-accent)); }
 
-/* ─── Sonner 토스트: 스르륵 슬라이드 인 애니메이션 ─── */
+/* ─── Sonner 액션 버튼 스타일 ─── */
+[data-sonner-toast] [data-button] {
+  background: rgba(var(--color-accent), 0.15) !important;
+  color: rgb(var(--color-accent)) !important;
+  border: 1px solid rgba(var(--color-accent), 0.25) !important;
+  font-size: 11px !important;
+  padding: 3px 10px !important;
+  border-radius: 6px !important;
+  transition: all 0.15s ease !important;
+  cursor: pointer !important;
+}
+[data-sonner-toast] [data-button]:hover {
+  background: rgba(var(--color-accent), 0.25) !important;
+}
+
+/* ─── Sonner 닫기(X) 버튼 스타일 ─── */
+[data-sonner-toast] [data-close-button] {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #8B8DA3 !important;
+  transition: all 0.15s ease !important;
+  width: 18px !important;
+  height: 18px !important;
+}
+[data-sonner-toast] [data-close-button]:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #E8E8EE !important;
+}
+
+/* ─── Sonner 토스트: 스르륵 슬라이드 인 (opacity만, transform은 Sonner에 위임) ─── */
 [data-sonner-toaster] [data-sonner-toast][data-mounted="true"] {
-  animation: bflow-toast-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: bflow-toast-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes bflow-toast-slide-in {
-  from {
-    opacity: 0;
-    transform: translateY(16px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-/* 상단 위치일 때는 위에서 아래로 */
-[data-sonner-toaster][data-y-position="top"] [data-sonner-toast][data-mounted="true"] {
-  animation: bflow-toast-slide-in-top 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes bflow-toast-slide-in-top {
-  from {
-    opacity: 0;
-    transform: translateY(-16px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+@keyframes bflow-toast-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 /* ─── 호버 시 스택 부드럽게 펼침 ─── */
-[data-sonner-toaster]:hover [data-sonner-toast] {
+[data-sonner-toaster] [data-sonner-toast] {
   transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              height 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 /* 토스트 닫힐 때 부드러운 페이드 아웃 */
 [data-sonner-toast][data-removed="true"] {
-  animation: bflow-toast-fade-out 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+  animation: bflow-toast-fade-out 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
 }
 
 @keyframes bflow-toast-fade-out {
   to {
     opacity: 0;
-    transform: translateY(-8px) scale(0.95);
+    transform: scale(0.95);
   }
 }
 

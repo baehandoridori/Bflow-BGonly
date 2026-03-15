@@ -1,5 +1,7 @@
 import { toast as sonnerToast } from 'sonner';
 import { useNotificationStore, type NotificationType } from '@/stores/useNotificationStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
 
 // ─── 알림 디스패치 ───────────────────────────────────
 export interface NotifyPayload {
@@ -16,20 +18,46 @@ export interface NotificationSettings {
   sound?: boolean;
 }
 
+/** 씬 UUID로 해당 에피소드 번호를 찾아 씬 뷰로 이동 */
+function navigateToScene(sceneUuid?: string, sceneName?: string) {
+  if (!sceneUuid && !sceneName) return;
+  const episodes = useDataStore.getState().episodes;
+  for (const ep of episodes) {
+    for (const part of ep.parts) {
+      const found = part.scenes.find(s =>
+        (sceneUuid && s.id === sceneUuid) || (sceneName && s.sceneId === sceneName),
+      );
+      if (found) {
+        useAppStore.getState().setSelectedEpisode(ep.episodeNumber);
+        useAppStore.getState().setHighlightSceneId(found.sceneId);
+        useAppStore.getState().setView('scenes');
+        return;
+      }
+    }
+  }
+}
+
 /**
  * 알림을 디스패치합니다.
- * 1. Sonner 토스트 표시
+ * 1. Sonner 토스트 표시 (클릭 시 씬 이동)
  * 2. 알림 스토어에 히스토리 추가
  * 3. OS 네이티브 알림 (앱 비활성 시)
- * 4. [추후] Slack 웹훅
  */
 export function dispatchNotification(payload: NotifyPayload, settings?: NotificationSettings) {
-  // 1. Sonner 토스트
+  // 1. Sonner 토스트 (클릭 시 해당 씬으로 이동)
   const toastFn = payload.type === 'milestone' ? sonnerToast.success
     : payload.type === 'system' ? sonnerToast.info
     : sonnerToast.info;
+
+  const sceneId = payload.metadata?.sceneId as string | undefined;
+  const sceneName = payload.metadata?.sceneName as string | undefined;
+
   toastFn(payload.title, {
     description: payload.body,
+    action: (sceneId || sceneName) ? {
+      label: '씬 보기',
+      onClick: () => navigateToScene(sceneId, sceneName),
+    } : undefined,
   });
 
   // 2. 알림 스토어에 추가
@@ -44,10 +72,6 @@ export function dispatchNotification(payload: NotifyPayload, settings?: Notifica
   if (settings?.osNotification !== false) {
     window.electronAPI?.showNativeNotification?.(payload.title, payload.body || '');
   }
-
-  // 4. [추후] 사운드 재생 — settings?.sound
-
-  // 5. [추후] Slack 웹훅
 }
 
 // ─── Slack 웹훅 인터페이스 (추후 구현) ─────────────────
