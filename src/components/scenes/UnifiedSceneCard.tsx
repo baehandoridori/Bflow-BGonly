@@ -76,7 +76,6 @@ export function UnifiedSceneCard({
         isSelected && 'scene-card-selected',
       )}
       style={{
-        borderLeft: `4px solid ${bgScene && actScene ? '#6C5CE7' : bgScene ? DEPARTMENT_CONFIGS.bg.color : DEPARTMENT_CONFIGS.acting.color}`,
         boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
         overflow: 'visible',
       }}
@@ -98,36 +97,36 @@ export function UnifiedSceneCard({
         )}
 
         {/* ── 헤더: 씬 ID + 전체 진행률 배지 ── */}
-        <div className="px-4 pt-3.5 pb-1 flex items-center justify-between">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm font-mono text-text-secondary/60">
+        <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-sm font-mono text-text-secondary/50">
               #{primaryScene.sceneId ? (primaryScene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || primaryScene.no) : primaryScene.no}
             </span>
-            <span className="text-sm font-mono font-bold text-text-primary truncate">
+            <span className="text-[15px] font-mono font-bold text-text-primary truncate">
               <HighlightText text={primaryScene.sceneId || '(씬번호 없음)'} query={searchQuery} />
             </span>
             {layoutId && (
-              <span className="text-[11px] italic text-text-secondary/60 shrink-0">
+              <span className="text-[11px] italic text-text-secondary/50 shrink-0">
                 L#{layoutId}
               </span>
             )}
           </div>
           <div className="flex items-center gap-1.5">
             {(bgCommentCount + actCommentCount) > 0 && (
-              <span className="flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-0.5 rounded-full" title={`의견 ${bgCommentCount + actCommentCount}개`}>
+              <span className="flex items-center gap-0.5 bg-accent/15 text-accent px-1.5 py-0.5 rounded-full" title={`의견 ${bgCommentCount + actCommentCount}개`}>
                 <MessageCircle size={10} fill="currentColor" />
                 <span className="text-[10px] font-bold">{bgCommentCount + actCommentCount}</span>
               </span>
             )}
-            <span className="bg-[#282830] text-text-secondary px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap">
-              진행률 <span className="text-text-primary">{combinedPct}%</span>
+            <span className="bg-[#282830] text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
+              {combinedPct}%
             </span>
           </div>
         </div>
 
         {/* ── 이미지 썸네일 ── */}
         {hasImages && (
-          <div className="mx-4 mt-1 mb-1 flex gap-px rounded-lg overflow-hidden bg-bg-border">
+          <div className="mx-4 mt-0.5 mb-1 flex gap-px rounded-lg overflow-hidden bg-bg-border">
             {primaryScene.storyboardUrl && (
               <img src={primaryScene.storyboardUrl} alt="SB" className="flex-1 h-20 object-contain bg-bg-primary min-w-0" draggable={false} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
             )}
@@ -147,7 +146,7 @@ export function UnifiedSceneCard({
         )}
 
         {/* ── BG/ACT 부서 섹션 ── */}
-        <div className="px-4 pt-3 flex flex-col gap-3 mt-auto">
+        <div className="px-4 pt-2 flex flex-col gap-2.5 mt-auto">
           <DeptSection
             dept="bg"
             scene={bgScene}
@@ -171,7 +170,7 @@ export function UnifiedSceneCard({
         </div>
 
         {/* ── Confetti ── */}
-        <div className="px-4 pb-3.5 pt-1 relative overflow-visible">
+        <div className="px-4 pb-3 pt-1 relative overflow-visible">
           <Confetti active={celebrating} onComplete={onCelebrationEnd} />
         </div>
     </motion.div>
@@ -208,9 +207,9 @@ function DeptSection({
           <span className="text-xs font-semibold text-text-secondary">{cfg.shortLabel}</span>
           <span className="text-[11px] text-text-secondary/50 italic">(미등록)</span>
         </div>
-        <div className="flex rounded-lg bg-[#282830] p-1 gap-1">
+        <div className="flex rounded-lg bg-[#1E1E28] p-1 gap-0.5">
           {STAGES.map((stage) => (
-            <div key={stage} className="flex-1 text-center py-1.5 text-[11px] font-medium text-text-secondary/40 rounded-md">
+            <div key={stage} className="flex-1 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md">
               {cfg.stageLabels[stage]}
             </div>
           ))}
@@ -224,20 +223,22 @@ function DeptSection({
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cfg.color }} />
-          <span className="text-xs font-semibold text-text-secondary">{cfg.shortLabel}</span>
-          <span className="text-xs text-text-primary">
+          <span className="text-xs font-semibold" style={{ color: cfg.color }}>{cfg.shortLabel}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-text-secondary">
             {searchQuery ? <HighlightText text={scene.assignee || '-'} query={searchQuery} /> : (scene.assignee || '-')}
           </span>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(sheetName, sceneIndex); }}
+            className="opacity-0 group-hover:opacity-100 text-[11px] text-text-secondary hover:text-red-400 transition-opacity cursor-pointer"
+            title={`${cfg.shortLabel} 씬 삭제`}
+          >
+            ×
+          </button>
         </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDelete(sheetName, sceneIndex); }}
-          className="opacity-0 group-hover:opacity-100 text-[11px] text-text-secondary hover:text-red-400 transition-opacity"
-          title={`${cfg.shortLabel} 씬 삭제`}
-        >
-          ×
-        </button>
       </div>
-      <div className="flex rounded-lg bg-[#282830] p-1 gap-1">
+      <div className="flex rounded-lg bg-[#1E1E28] p-1 gap-0.5">
         {STAGES.map((stage, i) => {
           const isDone = scene[stage];
           const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
@@ -247,14 +248,14 @@ function DeptSection({
               key={stage}
               onClick={(e) => { e.stopPropagation(); onToggle(sheetName, sceneId, stage); }}
               className={cn(
-                'flex-1 text-center py-1.5 text-[11px] font-medium rounded-md transition-all cursor-pointer',
-                !isDone && 'text-text-secondary hover:text-text-primary hover:bg-white/5',
+                'flex-1 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
+                !isDone && 'text-text-secondary/50 hover:text-text-primary hover:bg-white/5',
               )}
               style={
                 isDone
                   ? isCurrent
-                    ? { backgroundColor: cfg.color, color: '#fff', fontWeight: 600, boxShadow: `0 2px 8px ${cfg.color}4D` }
-                    : { backgroundColor: `${cfg.color}25`, color: cfg.color }
+                    ? { backgroundColor: cfg.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${cfg.color}40` }
+                    : { backgroundColor: `${cfg.color}20`, color: cfg.color }
                   : undefined
               }
               title={cfg.stageLabels[stage]}

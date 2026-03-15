@@ -289,6 +289,20 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
     loadRevisions();
   }, [loadRevisions]);
 
+  // Realtime 이벤트 리스너 — 다른 사용자 변경 시 자동 갱신
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const handler = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { loadRevisions(); }, 300);
+    };
+    window.addEventListener('bflow:revisions-invalidated', handler);
+    return () => {
+      window.removeEventListener('bflow:revisions-invalidated', handler);
+      if (timer) clearTimeout(timer);
+    };
+  }, [loadRevisions]);
+
   useEffect(() => {
     onCountChange?.(getOpenCount(sceneKey));
   }, [sceneKey, revisions.length, getOpenCount, onCountChange]);
