@@ -76,8 +76,7 @@ export function UnifiedSceneCard({
         isSelected && 'scene-card-selected',
       )}
       style={{
-        borderLeft: '4px solid',
-        borderImage: `linear-gradient(to bottom, ${DEPARTMENT_CONFIGS.bg.color}, ${DEPARTMENT_CONFIGS.acting.color}) 1`,
+        borderLeft: `4px solid ${bgScene && actScene ? '#6C5CE7' : bgScene ? DEPARTMENT_CONFIGS.bg.color : DEPARTMENT_CONFIGS.acting.color}`,
         boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
         overflow: 'visible',
       }}
@@ -101,11 +100,10 @@ export function UnifiedSceneCard({
         {/* ── 헤더: 씬 ID + 전체 진행률 배지 ── */}
         <div className="px-4 pt-3.5 pb-1 flex items-center justify-between">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-sm font-mono font-bold text-text-primary">
-              <span className="text-text-secondary/60">#</span>
-              {primaryScene.sceneId ? (primaryScene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || primaryScene.no) : primaryScene.no}
+            <span className="text-sm font-mono text-text-secondary/60">
+              #{primaryScene.sceneId ? (primaryScene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || primaryScene.no) : primaryScene.no}
             </span>
-            <span className="text-sm font-semibold text-text-primary truncate">
+            <span className="text-sm font-mono font-bold text-text-primary truncate">
               <HighlightText text={primaryScene.sceneId || '(씬번호 없음)'} query={searchQuery} />
             </span>
             {layoutId && (
@@ -115,16 +113,10 @@ export function UnifiedSceneCard({
             )}
           </div>
           <div className="flex items-center gap-1.5">
-            {bgCommentCount > 0 && (
-              <span className="flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-0.5 rounded-full" title={`BG 의견 ${bgCommentCount}개`}>
+            {(bgCommentCount + actCommentCount) > 0 && (
+              <span className="flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-0.5 rounded-full" title={`의견 ${bgCommentCount + actCommentCount}개`}>
                 <MessageCircle size={10} fill="currentColor" />
-                <span className="text-[10px] font-bold">{bgCommentCount}</span>
-              </span>
-            )}
-            {actCommentCount > 0 && (
-              <span className="flex items-center gap-0.5 px-1 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(225,112,85,0.2)', color: '#E17055' }} title={`ACT 의견 ${actCommentCount}개`}>
-                <MessageCircle size={10} fill="currentColor" />
-                <span className="text-[10px] font-bold">{actCommentCount}</span>
+                <span className="text-[10px] font-bold">{bgCommentCount + actCommentCount}</span>
               </span>
             )}
             <span className="bg-[#282830] text-text-secondary px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap">

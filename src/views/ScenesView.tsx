@@ -438,11 +438,10 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       {/* ── 상단: 씬 ID + 담당자 ── */}
       <div className="px-4 pt-3 pb-1 flex items-center justify-between">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-sm font-mono font-bold text-text-primary">
-            <span className="text-text-secondary/60">#</span>
-            {scene.sceneId ? (scene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || scene.no) : scene.no}
+          <span className="text-sm font-mono text-text-secondary/60">
+            #{scene.sceneId ? (scene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || scene.no) : scene.no}
           </span>
-          <span className="text-sm font-semibold text-text-primary truncate">
+          <span className="text-sm font-mono font-bold text-text-primary truncate">
             <HighlightText text={scene.sceneId || '(씬번호 없음)'} query={searchQuery} />
           </span>
           {scene.layoutId && (
@@ -796,7 +795,7 @@ function AddFormImageSlot({
       <div className="flex flex-col gap-1">
         <span className="text-[11px] text-text-secondary">{label}</span>
         <div className="relative group">
-          <img src={base64} alt={label} className="h-20 rounded border border-bg-border object-cover" draggable={false} />
+          <img src={base64} alt={label} className="h-28 w-32 rounded-lg border border-bg-border object-cover" draggable={false} />
           <button
             onClick={() => onSetBase64('')}
             className="absolute top-0.5 right-0.5 w-4 h-4 bg-overlay/60 text-on-accent rounded-full text-[11px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
@@ -818,10 +817,10 @@ function AddFormImageSlot({
         onPaste={handlePaste}
         onBlur={() => setPhase('idle')}
         className={cn(
-          'flex flex-col items-center justify-center gap-1 h-20 w-28 rounded-lg border-2 border-dashed cursor-pointer outline-none transition-all text-center',
+          'flex flex-col items-center justify-center gap-1.5 h-28 w-32 rounded-lg border-2 border-dashed cursor-pointer outline-none transition-all duration-300 text-center',
           phase === 'paste-hint'
-            ? 'border-accent bg-accent/10'
-            : 'border-bg-border hover:border-text-secondary/30',
+            ? 'border-accent bg-accent/10 shadow-[0_0_12px_rgba(108,92,231,0.3)]'
+            : 'border-bg-border hover:border-accent/50 hover:shadow-[0_0_12px_rgba(108,92,231,0.2)]',
         )}
       >
         {phase === 'paste-hint' ? (
@@ -1126,7 +1125,7 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
               'px-5 py-1.5 text-white text-xs font-medium rounded-lg transition-all',
               isDuplicate || !prefix || (bulkMode && !bulkEnd)
                 ? 'bg-gray-600 cursor-not-allowed opacity-50'
-                : 'bg-[#10B981] hover:bg-[#10B981]/90 shadow-sm shadow-[#10B981]/25 hover:shadow-md hover:shadow-[#10B981]/30',
+                : 'bg-accent hover:bg-accent/90 shadow-sm shadow-accent/25 hover:shadow-md hover:shadow-accent/30',
             )}
           >
             {bulkMode ? `일괄 추가` : '+ 추가'}
@@ -1692,6 +1691,24 @@ export function ScenesView() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
   }, [bgScenes, actScenes, bgPart, actPart, selectedDepartment, sortKey, sortDir]);
+
+  // 전체뷰 레이아웃 그룹핑
+  const mergedLayoutGroups = useMemo(() => {
+    if (selectedDepartment !== 'all' || sceneGroupMode !== 'layout') return null;
+    const groups = new Map<string, MergedScene[]>();
+    for (const ms of mergedScenes) {
+      const lid = ((ms.bgScene?.layoutId || ms.actScene?.layoutId) || '').trim();
+      const key = lid || '미분류';
+      const arr = groups.get(key) || [];
+      arr.push(ms);
+      groups.set(key, arr);
+    }
+    return Array.from(groups.entries()).sort((a, b) => {
+      if (a[0] === '미분류') return 1;
+      if (b[0] === '미분류') return -1;
+      return a[0].localeCompare(b[0], undefined, { numeric: true });
+    });
+  }, [mergedScenes, selectedDepartment, sceneGroupMode]);
 
   // 담당자 목록 (현재 파트 기준)
   const assignees = Array.from(
@@ -2455,8 +2472,10 @@ export function ScenesView() {
         </motion.button>
       )}
 
-      {/* 필터 바 */}
-      <div className="flex flex-wrap items-center gap-3 bg-bg-card border border-bg-border rounded-xl p-3">
+      {/* 필터 바 — 2줄 구조 */}
+      <div className="flex flex-col gap-2 bg-bg-card border border-bg-border rounded-xl p-3">
+        {/* 1줄: 필수 네비게이션 (부서 + 에피소드 + 파트) */}
+        <div className="flex flex-wrap items-center gap-3">
         {/* 부서 탭 */}
         <div className="flex bg-bg-primary rounded-lg p-0.5 border border-bg-border">
           {/* 전체 탭 */}
@@ -2621,6 +2640,10 @@ export function ScenesView() {
           </>
         )}
 
+        </div>
+
+        {/* 2줄: 보기 설정 (담당자 + 상태 필터 + 정렬 + 뷰모드 + 검색) */}
+        <div className="flex flex-wrap items-center gap-3 bg-bg-primary/30 rounded-lg px-3 py-2">
         {/* 담당자 필터 */}
         <GlassDropdown
           options={[
@@ -2758,6 +2781,7 @@ export function ScenesView() {
             className="bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/50 w-40"
           />
         </div>
+        </div>
       </div>
 
       {/* 진행도 + 씬 목록 영역 */}
@@ -2810,24 +2834,49 @@ export function ScenesView() {
         )}
       </div>
 
-      {/* 씬 추가 폼 */}
-      {showAddScene && (
-        <AddSceneForm
-          existingSceneIds={(() => {
-            if (addTargetSheet === '__both__') {
-              // 전체 모드: BG+ACT 양쪽 씬ID 합집합
-              const bgIds = (bgPart?.scenes ?? []).map((s) => s.sceneId);
-              const actIds = (actPart?.scenes ?? []).map((s) => s.sceneId);
-              return [...new Set([...bgIds, ...actIds])];
-            }
-            const targetPart = allParts.find((p) => p.sheetName === addTargetSheet);
-            return (targetPart?.scenes ?? currentPart?.scenes ?? []).map((s) => s.sceneId);
-          })()}
-          onSubmit={handleAddScene}
-          onBulkSubmit={handleBulkAddScenes}
-          onCancel={() => { setShowAddScene(false); setAddTargetSheet(null); }}
-        />
-      )}
+      {/* 씬 추가 드로어 */}
+      <AnimatePresence>
+        {showAddScene && (
+          <>
+            {/* 백드롭 */}
+            <motion.div
+              key="add-scene-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 z-30 bg-overlay/40 backdrop-blur-sm"
+              onClick={() => { setShowAddScene(false); setAddTargetSheet(null); }}
+            />
+            {/* 드로어 패널 */}
+            <motion.div
+              key="add-scene-drawer"
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="fixed inset-y-0 right-0 z-40 w-[440px] bg-bg-card border-l border-bg-border shadow-2xl overflow-y-auto"
+            >
+              <div className="p-5">
+                <AddSceneForm
+                  existingSceneIds={(() => {
+                    if (addTargetSheet === '__both__') {
+                      const bgIds = (bgPart?.scenes ?? []).map((s) => s.sceneId);
+                      const actIds = (actPart?.scenes ?? []).map((s) => s.sceneId);
+                      return [...new Set([...bgIds, ...actIds])];
+                    }
+                    const targetPart = allParts.find((p) => p.sheetName === addTargetSheet);
+                    return (targetPart?.scenes ?? currentPart?.scenes ?? []).map((s) => s.sceneId);
+                  })()}
+                  onSubmit={handleAddScene}
+                  onBulkSubmit={handleBulkAddScenes}
+                  onCancel={() => { setShowAddScene(false); setAddTargetSheet(null); }}
+                />
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* 대량 씬 추가 로딩 오버레이 (Phase 0-5) */}
       {bulkAddLoading && (
@@ -2880,34 +2929,81 @@ export function ScenesView() {
           />
         ) : (
           /* 통합 카드 뷰 */
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {mergedScenes.map((m) => {
-              const primary = m.bgScene ?? m.actScene;
-              if (!primary) return null;
-              return (
-                <UnifiedSceneCard
-                  key={m.sceneId}
-                  merged={m}
-                  bgSheetName={bgPart?.sheetName ?? null}
-                  actSheetName={actPart?.sheetName ?? null}
-                  celebrating={celebratingId === m.sceneId}
-                  isHighlighted={highlightSceneId === m.sceneId}
-                  isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
-                  searchQuery={searchQuery}
-                  bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
-                  actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
-                  onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
-                  onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
-                  onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                  onCelebrationEnd={clearCelebration}
-                  onSelect={() => {
-                    if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
-                    if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
-                  }}
-                />
-              );
-            })}
-          </div>
+          mergedLayoutGroups ? (
+            /* 레이아웃별 그룹 */
+            <div className="flex flex-col gap-6">
+              {mergedLayoutGroups.map(([layoutKey, group]) => (
+                <div key={layoutKey}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Layers size={14} className="text-text-secondary/50" />
+                    <span className="text-sm font-semibold text-text-primary">
+                      {layoutKey === '미분류' ? '미분류' : `L#${layoutKey}`}
+                    </span>
+                    <span className="text-[11px] text-text-secondary/40">{group.length}개</span>
+                    <div className="flex-1 h-px bg-bg-border/30" />
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                    {group.map((m) => {
+                      const primary = m.bgScene ?? m.actScene;
+                      if (!primary) return null;
+                      return (
+                        <UnifiedSceneCard
+                          key={m.sceneId}
+                          merged={m}
+                          bgSheetName={bgPart?.sheetName ?? null}
+                          actSheetName={actPart?.sheetName ?? null}
+                          celebrating={celebratingId === m.sceneId}
+                          isHighlighted={highlightSceneId === m.sceneId}
+                          isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
+                          searchQuery={searchQuery}
+                          bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                          actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                          onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+                          onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+                          onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                          onCelebrationEnd={clearCelebration}
+                          onSelect={() => {
+                            if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
+                            if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* 플랫 카드 뷰 */
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+              {mergedScenes.map((m) => {
+                const primary = m.bgScene ?? m.actScene;
+                if (!primary) return null;
+                return (
+                  <UnifiedSceneCard
+                    key={m.sceneId}
+                    merged={m}
+                    bgSheetName={bgPart?.sheetName ?? null}
+                    actSheetName={actPart?.sheetName ?? null}
+                    celebrating={celebratingId === m.sceneId}
+                    isHighlighted={highlightSceneId === m.sceneId}
+                    isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
+                    searchQuery={searchQuery}
+                    bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                    actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                    onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+                    onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+                    onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                    onCelebrationEnd={clearCelebration}
+                    onSelect={() => {
+                      if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
+                      if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )
         )
       ) : (
       /* ─── 개별 모드: 기존 렌더링 ─── */

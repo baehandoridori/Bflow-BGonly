@@ -152,7 +152,7 @@ export function AssigneeSelect({ value, onChange, onClose, placeholder = '담당
       {open && filtered.length > 0 && dropdownPos && createPortal(
         <div
           ref={listRef}
-          className="bg-bg-card border border-bg-border rounded-lg shadow-xl max-h-40 overflow-auto"
+          className="bg-bg-card border border-bg-border rounded-lg shadow-xl max-h-80 overflow-auto"
           style={{
             position: 'fixed',
             top: dropdownPos.top,

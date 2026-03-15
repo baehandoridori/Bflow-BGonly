@@ -678,7 +678,7 @@ export default function App() {
   // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (5초 간격)
   useEffect(() => {
     if (!authReady) return;
-    const POLL_INTERVAL = 5_000;
+    const POLL_INTERVAL = 15_000;
     const timer = setInterval(() => {
       loadData();
     }, POLL_INTERVAL);

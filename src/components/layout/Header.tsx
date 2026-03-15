@@ -1,4 +1,4 @@
-import { RefreshCw, Sun, Moon, Database, FileSpreadsheet } from 'lucide-react';
+import { RefreshCw, Sun, Moon, Database, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
@@ -42,23 +42,37 @@ export function Header({ onRefresh }: HeaderProps) {
 
       {/* 오른쪽: 액션 버튼들 */}
       <div className="flex items-center gap-3">
-        {/* 데이터 소스 표시 */}
+        {/* 데이터 소스 뱃지 (아이콘만) */}
         {activeDataSource && (
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium',
+          <div className="flex items-center gap-2 mr-1" title={`현재 연결: ${activeDataSource}`}>
+            <span className={cn(
+              'flex items-center justify-center w-6 h-6 rounded-md',
               activeDataSource === 'supabase'
-                ? 'bg-emerald-500/15 text-emerald-400'
-                : 'bg-amber-500/15 text-amber-400',
-            )}
-          >
-            {activeDataSource === 'supabase' ? <Database size={11} /> : <FileSpreadsheet size={11} />}
-            {activeDataSource === 'supabase' ? 'Supabase' : 'Sheets (fallback)'}
-          </span>
+                ? 'bg-emerald-500/10 text-emerald-500'
+                : 'bg-amber-500/10 text-amber-500'
+            )}>
+              {activeDataSource === 'supabase' ? <Database size={14} /> : <FileSpreadsheet size={14} />}
+            </span>
+          </div>
         )}
 
-        {/* 동기화 상태 */}
-        <span className="text-xs text-text-secondary">{lastSyncLabel}</span>
+        {/* 동기화 상태 (인디케이터) */}
+        <div
+          className="flex items-center gap-2 text-xs text-text-secondary mr-1"
+          title={lastSyncLabel}
+        >
+          {isSyncing ? (
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+              동기화 중...
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={14} className="text-emerald-500" />
+              최신 상태
+            </span>
+          )}
+        </div>
 
         {/* 새로고침 */}
         <button
@@ -66,7 +80,7 @@ export function Header({ onRefresh }: HeaderProps) {
           disabled={isSyncing}
           title="데이터 새로고침"
           className={cn(
-            'p-2 rounded-lg hover:bg-bg-border/50 transition-colors',
+            'p-2 rounded-lg hover:bg-bg-border/50 transition-colors text-text-secondary hover:text-text-primary',
             isSyncing && 'animate-spin text-accent'
           )}
         >

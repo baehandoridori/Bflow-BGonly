@@ -463,10 +463,13 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
         pct >= 100 ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
       )}
     >
-      {/* 씬 정보 */}
+      {/* 씬 정보 — 2줄 구조 */}
       <div className="flex flex-col min-w-0 flex-1 gap-0.5">
+        {/* 1줄: 컨텍스트 (에피소드 > 파트) */}
+        <span className="text-[11px] text-text-secondary/40">{epLabel} &gt; {flat.partId}</span>
+        {/* 2줄: #번호 sceneId */}
         <div className="flex items-center gap-1">
-          <span className="text-[12px] font-mono font-bold text-accent shrink-0">#{sceneNum}</span>
+          <span className="text-[12px] font-mono text-accent shrink-0">#{sceneNum}</span>
           {editingField === 'memo' ? (
             <input
               ref={inputRef}
@@ -478,60 +481,41 @@ const EditableSceneRow = forwardRef<HTMLDivElement, EditableSceneRowProps>(funct
             />
           ) : (
             <span
-              className="text-[13px] text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
+              className="text-[14px] font-semibold text-text-primary truncate cursor-pointer hover:text-accent transition-colors"
               onDoubleClick={() => startEdit('memo', s.memo)}
               title="더블클릭하여 메모 편집"
             >
               {s.memo || s.sceneId}
             </span>
           )}
-          <span className="text-[9px] text-text-secondary/30 shrink-0">{epLabel} · {flat.partId}</span>
-        </div>
-        {/* 담당자 */}
-        <div className="flex items-center gap-1">
-          {editingField === 'assignee' ? (
-            <input
-              ref={inputRef}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={commitEdit}
-              onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
-              className="text-[10px] text-text-secondary bg-bg-primary border border-accent/30 rounded px-1 py-0 outline-none w-16"
-            />
-          ) : (
-            <span
-              className="text-[10px] text-text-secondary/40 cursor-pointer hover:text-text-secondary transition-colors"
-              onDoubleClick={() => startEdit('assignee', s.assignee)}
-              title="더블클릭하여 담당자 편집"
-            >
-              {s.assignee || '미배정'}
-            </span>
-          )}
         </div>
       </div>
 
-      {/* 단계 체크박스 */}
-      <div className="flex items-center gap-0.5 shrink-0">
-        {STAGES.map((stage) => {
+      {/* 미니 프로세스 트랙 */}
+      <div className="flex bg-bg-primary rounded-md p-0.5 border border-bg-border gap-0.5 shrink-0">
+        {STAGES.map((stage, i) => {
           const checked = s[stage];
           const color = deptCfg.stageColors[stage];
+          const isCurrent = checked && (i === STAGES.length - 1 || !s[STAGES[i + 1]]);
+          const label = deptCfg.stageLabels[stage][0];
           return (
             <button
               key={stage}
               onClick={() => onToggle(flat, stage)}
               title={deptCfg.stageLabels[stage]}
               className={cn(
-                'w-5 h-5 rounded text-[7px] font-bold flex items-center justify-center cursor-pointer transition-all',
-                checked
-                  ? 'text-white shadow-sm'
-                  : 'border text-text-secondary/30 hover:text-text-secondary/60',
+                'w-6 h-6 rounded text-[11px] font-medium flex items-center justify-center cursor-pointer transition-all',
+                !checked && 'text-text-secondary/40 hover:text-text-secondary/70',
               )}
-              style={checked
-                ? { backgroundColor: color, borderColor: color }
-                : { borderColor: `${color}40` }
+              style={
+                isCurrent
+                  ? { backgroundColor: color, color: '#000', fontWeight: 700 }
+                  : checked
+                  ? { backgroundColor: `${color}25`, color }
+                  : undefined
               }
             >
-              {checked ? <Check size={10} /> : deptCfg.stageLabels[stage][0]}
+              {label}
             </button>
           );
         })}
@@ -587,8 +571,8 @@ function PersonalTodoContent({
         </div>
       )}
 
-      {/* 개인 라벨 (씬 번호 자리) */}
-      <span className="text-[12px] font-bold text-accent shrink-0">개인</span>
+      {/* 개인 라벨 */}
+      <span className="text-[11px] font-bold text-accent shrink-0">::ᅠ개인</span>
 
       {/* 제목/메모 */}
       <div className="flex flex-col min-w-0 flex-1 gap-0.5">
@@ -617,10 +601,10 @@ function PersonalTodoContent({
       <button
         onClick={() => onToggle(todo.id)}
         className={cn(
-          'w-5 h-5 rounded border flex items-center justify-center cursor-pointer transition-all shrink-0',
+          'w-5 h-5 rounded-md border-2 flex items-center justify-center cursor-pointer transition-all shrink-0',
           todo.completed
             ? 'bg-green-500 border-green-500 text-white'
-            : 'border-bg-border/50 hover:border-accent/50',
+            : 'border-bg-border/50 hover:border-accent',
         )}
       >
         {todo.completed && <Check size={10} />}
@@ -1170,7 +1154,7 @@ export function MyTasksWidget() {
                       <ChevronDown size={10} />
                     </motion.div>
                     <span className="font-medium">완료된 항목</span>
-                    <span className="text-[9px] tabular-nums bg-green-500/10 text-green-400/70 px-1.5 py-0 rounded-full">
+                    <span className="text-[9px] tabular-nums bg-bg-primary text-text-secondary/50 border border-bg-border px-1.5 py-0 rounded-full">
                       {doneScenes.length + donePersonalTodos.length}
                     </span>
                     <div className="flex-1 h-px bg-bg-border/15 ml-1" />
@@ -1206,7 +1190,7 @@ export function MyTasksWidget() {
         {/* 할일 추가 버튼 */}
         <button
           onClick={() => setShowPicker(true)}
-          className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[11px] text-accent border border-accent/20 rounded-lg hover:bg-accent/5 cursor-pointer transition-colors mt-1"
+          className="flex items-center justify-center gap-1.5 w-full py-1.5 text-[11px] text-text-secondary/50 border border-dashed border-bg-border rounded-lg hover:border-accent hover:text-accent hover:bg-accent/5 cursor-pointer transition-colors mt-1"
         >
           <Plus size={11} />
           내 할일 추가
