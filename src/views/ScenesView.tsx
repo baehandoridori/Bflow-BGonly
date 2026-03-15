@@ -1800,7 +1800,7 @@ export function ScenesView() {
   };
 
   // 일괄 토글: 선택된 씬들의 특정 단계를 단일 API 호출로 처리
-  const handleBulkToggle = async (sceneIds: Set<string>, stage: Stage) => {
+  const handleBulkToggle = async (sceneIds: Set<string>, stage: Stage, onlyDept?: 'bg' | 'acting') => {
     if (selectedDepartment === 'all') {
       // 'all' 모드: 복합 키(bg:id / act:id) 파싱 → 부서별 분리 처리
       const bgIds: string[] = [];
@@ -1809,8 +1809,8 @@ export function ScenesView() {
         if (id.startsWith('bg:')) bgIds.push(id.slice(3));
         else if (id.startsWith('act:')) actIds.push(id.slice(4));
       });
-      if (bgIds.length > 0 && bgPart) await bulkToggleForSheet(bgPart.sheetName, bgIds, stage);
-      if (actIds.length > 0 && actPart) await bulkToggleForSheet(actPart.sheetName, actIds, stage);
+      if ((!onlyDept || onlyDept === 'bg') && bgIds.length > 0 && bgPart) await bulkToggleForSheet(bgPart.sheetName, bgIds, stage);
+      if ((!onlyDept || onlyDept === 'acting') && actIds.length > 0 && actPart) await bulkToggleForSheet(actPart.sheetName, actIds, stage);
       return;
     }
     if (!currentPart) return;
@@ -3183,7 +3183,7 @@ export function ScenesView() {
                   {STAGES.map((stage) => (
                     <button
                       key={`bg-${stage}`}
-                      onClick={() => handleBulkToggle(selectedSceneIds, stage)}
+                      onClick={() => handleBulkToggle(selectedSceneIds, stage, 'bg')}
                       className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap"
                       style={{
                         backgroundColor: `${DEPARTMENT_CONFIGS.bg.stageColors[stage]}20`,
@@ -3202,7 +3202,7 @@ export function ScenesView() {
                   {STAGES.map((stage) => (
                     <button
                       key={`act-${stage}`}
-                      onClick={() => handleBulkToggle(selectedSceneIds, stage)}
+                      onClick={() => handleBulkToggle(selectedSceneIds, stage, 'acting')}
                       className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap"
                       style={{
                         backgroundColor: `${DEPARTMENT_CONFIGS.acting.stageColors[stage]}20`,
