@@ -3175,7 +3175,7 @@ export function ScenesView() {
 
             {/* 일괄 스테이지 토글 */}
             {selectedDepartment === 'all' ? (
-              <>
+              <div className="flex flex-col gap-1">
                 {/* BG 스테이지 */}
                 <div className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: DEPARTMENT_CONFIGS.bg.color }} />
@@ -3195,7 +3195,6 @@ export function ScenesView() {
                     </button>
                   ))}
                 </div>
-                <div className="w-px h-5 bg-bg-border shrink-0" />
                 {/* ACT 스테이지 */}
                 <div className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: DEPARTMENT_CONFIGS.acting.color }} />
@@ -3215,7 +3214,7 @@ export function ScenesView() {
                     </button>
                   ))}
                 </div>
-              </>
+              </div>
             ) : (
               STAGES.map((stage) => (
                 <button
