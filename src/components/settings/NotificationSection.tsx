@@ -31,33 +31,18 @@ function NotiToggle({ label, description, checked, onChange }: {
   );
 }
 
-/** 인라인 토스트 미리보기 (Sonner 랜딩페이지 스타일) */
+/** 인라인 토스트 미리보기 (Sonner 랜딩페이지 스타일, 테마 연동) */
 function ToastPreviewCard({ title, description, actionLabel }: {
   title: string; description: string; actionLabel?: string;
 }) {
   return (
-    <div
-      className="rounded-lg px-3.5 py-2.5 flex items-center gap-3"
-      style={{
-        background: 'rgba(26, 29, 39, 0.85)',
-        backdropFilter: 'blur(20px) saturate(1.6)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255,255,255,0.04) inset',
-      }}
-    >
+    <div className="rounded-lg px-3.5 py-2.5 flex items-center gap-3 bg-bg-card/90 backdrop-blur-xl border border-bg-border/35 shadow-lg">
       <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-medium text-[#E8E8EE] leading-snug">{title}</p>
-        <p className="text-[12px] text-[#8B8DA3] mt-0.5 leading-relaxed truncate">{description}</p>
+        <p className="text-[13px] font-medium text-text-primary leading-snug">{title}</p>
+        <p className="text-[12px] text-text-secondary mt-0.5 leading-relaxed truncate">{description}</p>
       </div>
       {actionLabel && (
-        <span
-          className="shrink-0 text-[12px] font-medium px-3 py-1 rounded-md"
-          style={{
-            background: 'rgba(108, 92, 231, 0.15)',
-            color: '#A29BFE',
-            border: '1px solid rgba(108, 92, 231, 0.3)',
-          }}
-        >
+        <span className="shrink-0 text-[12px] font-medium px-3 py-1 rounded-md bg-accent/12 text-accent-sub border border-accent/25">
           {actionLabel}
         </span>
       )}
