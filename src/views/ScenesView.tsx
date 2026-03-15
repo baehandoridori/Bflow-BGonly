@@ -407,11 +407,16 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
     <motion.div
       data-scene-id={selectionId ?? scene.sceneId}
       className={cn(
-        'bg-bg-card border border-bg-border rounded-lg flex flex-col group relative cursor-pointer hover:border-text-secondary/30 transition-colors',
+        'rounded-xl flex flex-col group relative cursor-pointer transition-all duration-200 hover:-translate-y-0.5',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
       )}
-      style={{ borderLeftWidth: 3, borderLeftColor: borderColor, overflow: 'visible' }}
+      style={{
+        padding: '1px',
+        background: deptConfig.color,
+        boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        overflow: 'visible',
+      }}
       onClick={handleClick}
       onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
       ref={isHighlighted ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
@@ -421,6 +426,8 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
       } : {})}
     >
+      {/* 카드 내부 */}
+      <div className="bg-bg-card rounded-[11px] flex flex-col flex-1 relative" style={{ overflow: 'visible' }}>
       {/* 하이라이트 배경 오버레이 */}
       {isHighlighted && <div className="scene-highlight-bg" />}
 
@@ -431,22 +438,24 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         </div>
       )}
 
-      {/* ── 상단: 씬 정보 ── */}
-      <div className="px-2.5 pt-2 pb-1 flex items-center justify-between">
-        <div className="flex items-center gap-1 min-w-0">
-          <span className="text-xs font-mono font-bold text-accent shrink-0">
-            #{scene.sceneId ? (scene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || scene.no) : scene.no}
+      {/* ── 상단: 씬 ID + 담당자 ── */}
+      <div className="px-4 pt-3 pb-1 flex items-center justify-between">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-sm font-mono font-bold text-text-primary">
+            <span className="text-text-secondary/60">#</span>
+            {scene.sceneId ? (scene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || scene.no) : scene.no}
           </span>
-          <span className="text-xs text-text-primary truncate">
+          <span className="text-sm font-semibold text-text-primary truncate">
             <HighlightText text={scene.sceneId || '(씬번호 없음)'} query={searchQuery} />
           </span>
           {scene.layoutId && (
-            <span className="text-[11px] italic text-text-secondary/70 shrink-0">
-              - L#{scene.layoutId}
+            <span className="text-[11px] italic text-text-secondary/60 shrink-0">
+              L#{scene.layoutId}
             </span>
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: deptConfig.color }} />
           <span className="text-xs font-medium text-text-primary truncate max-w-[80px]">
             <HighlightText text={scene.assignee || ''} query={searchQuery} />
           </span>
@@ -481,7 +490,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 
       {/* ── 가운데: 이미지 썸네일 ── */}
       {hasImages ? (
-        <div className="flex gap-px bg-bg-border overflow-hidden">
+        <div className="mx-4 mt-1 mb-1 flex gap-px rounded-lg overflow-hidden bg-bg-border">
           {scene.storyboardUrl && (
             <img
               src={scene.storyboardUrl}
@@ -507,38 +516,43 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 
       {/* ── 메모 ── */}
       {scene.memo && (
-        <div className="px-2.5 py-1 border-t border-bg-border/30">
+        <div className="mx-4 mt-1">
           <p className="text-[11px] text-amber-400/70 leading-relaxed line-clamp-2">
             <HighlightText text={scene.memo} query={searchQuery} />
           </p>
         </div>
       )}
 
-      {/* ── 하단: 체크박스 + 진행 바 ── */}
-      <div className="px-2.5 pt-1.5 pb-2 flex flex-col gap-1.5 mt-auto">
-        <div className="flex gap-1">
-          {STAGES.map((stage) => (
-            <button
-              key={stage}
-              onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
-              className={cn(
-                'flex-1 py-0.5 rounded text-[11px] font-medium transition-all text-center',
-                scene[stage]
-                  ? 'text-bg-primary'
-                  : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary'
-              )}
-              style={
-                scene[stage]
-                  ? { backgroundColor: deptConfig.stageColors[stage] }
-                  : undefined
-              }
-            >
-              {scene[stage] ? '✓' : ''}{deptConfig.stageLabels[stage]}
-            </button>
-          ))}
+      {/* ── 하단: 프로세스 트랙 ── */}
+      <div className="px-4 pt-2.5 pb-3 mt-auto">
+        <div className="flex rounded-lg bg-[#282830] p-1 gap-1">
+          {STAGES.map((stage, i) => {
+            const isDone = scene[stage];
+            const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
+
+            return (
+              <button
+                key={stage}
+                onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
+                className={cn(
+                  'flex-1 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
+                  !isDone && 'text-text-secondary hover:text-text-primary hover:bg-white/5',
+                )}
+                style={
+                  isDone
+                    ? isCurrent
+                      ? { backgroundColor: deptConfig.stageColors[stage], color: '#fff', fontWeight: 600, boxShadow: `0 2px 8px ${deptConfig.stageColors[stage]}4D` }
+                      : { backgroundColor: `${deptConfig.stageColors[stage]}25`, color: deptConfig.stageColors[stage] }
+                    : undefined
+                }
+              >
+                {deptConfig.stageLabels[stage]}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="relative h-1 bg-bg-primary rounded-full overflow-visible">
+        <div className="relative h-1 bg-bg-primary rounded-full overflow-visible mt-2">
           <div
             className="h-full rounded-full transition-all duration-700 ease-out"
             style={{
@@ -548,6 +562,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
           />
           <Confetti active={celebrating} onComplete={onCelebrationEnd} />
         </div>
+      </div>
       </div>
     </motion.div>
   );

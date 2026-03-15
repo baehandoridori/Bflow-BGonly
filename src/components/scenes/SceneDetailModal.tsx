@@ -637,44 +637,61 @@ export function SceneDetailModal({
                     </button>
                   </div>
                 )}
-                <span className="text-lg font-mono font-bold text-accent">
+                <span className="text-lg font-mono font-bold" style={{ color: deptConfig.color }}>
                   #{scene.no}
                 </span>
-                <span className="text-lg font-semibold text-text-primary">
+                <span className="text-lg font-semibold text-text-primary flex-1">
                   {scene.sceneId || '(씬번호 없음)'}
                 </span>
                 {/* 진행률 */}
-                <div className="flex items-center gap-2 ml-auto mr-2">
-                  <div className="w-20 h-1.5 bg-bg-primary rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-300"
-                      style={{
-                        width: `${pct}%`,
-                        backgroundColor:
-                          pct >= 100
-                            ? '#00B894'
-                            : pct >= 50
-                              ? '#FDCB6E'
-                              : '#E17055',
-                      }}
-                    />
-                  </div>
-                  <span className="text-xs font-mono text-text-secondary">
-                    {Math.round(pct)}%
-                  </span>
-                </div>
+                <span className="text-sm font-mono text-text-secondary mr-2">
+                  {Math.round(pct)}%
+                </span>
                 <button
                   onClick={onClose}
-                  className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-primary rounded-lg transition-colors"
+                  className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-primary rounded-lg transition-colors cursor-pointer"
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="px-6 py-5 flex flex-col gap-6">
+              <div className="px-6 py-5 flex flex-col gap-8">
+                {/* ── 진행 단계 (프로세스 트랙) ── */}
+                <section>
+                  <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4">
+                    진행 단계
+                  </h3>
+                  <div className="flex rounded-lg bg-[#22222A] p-1.5 gap-1.5 mx-4 border border-bg-border/50">
+                    {STAGES.map((stage, i) => {
+                      const isDone = scene[stage];
+                      const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
+
+                      return (
+                        <button
+                          key={stage}
+                          onClick={() => onToggle(scene.sceneId, stage)}
+                          className={cn(
+                            'flex-1 py-2.5 rounded-md text-sm font-medium transition-all cursor-pointer',
+                            !isDone && 'text-text-secondary hover:text-text-primary hover:bg-white/5',
+                          )}
+                          style={
+                            isDone
+                              ? isCurrent
+                                ? { backgroundColor: deptConfig.color, color: '#fff', fontWeight: 600, boxShadow: `0 2px 8px ${deptConfig.color}4D` }
+                                : { backgroundColor: `${deptConfig.color}18`, color: deptConfig.color }
+                              : undefined
+                          }
+                        >
+                          {deptConfig.stageLabels[stage]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
                 {/* ── 속성 섹션 ── */}
                 <section>
-                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary/50 mb-2 px-4">
+                  <h3 className="text-xs font-semibold text-text-secondary mb-2 px-4">
                     속성
                   </h3>
                   <div className="bg-bg-primary/30 rounded-xl border border-bg-border/50 divide-y divide-bg-border/30">
@@ -742,38 +759,9 @@ export function SceneDetailModal({
                   </div>
                 </section>
 
-                {/* ── 진행 단계 ── */}
-                <section>
-                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
-                    진행 단계
-                  </h3>
-                  <div className="flex gap-3 px-4">
-                    {STAGES.map((stage) => (
-                      <button
-                        key={stage}
-                        onClick={() => onToggle(scene.sceneId, stage)}
-                        className={cn(
-                          'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all',
-                          scene[stage]
-                            ? 'text-bg-primary shadow-md'
-                            : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary',
-                        )}
-                        style={
-                          scene[stage]
-                            ? { backgroundColor: deptConfig.stageColors[stage] }
-                            : undefined
-                        }
-                      >
-                        {scene[stage] ? '✓ ' : ''}
-                        {deptConfig.stageLabels[stage]}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
                 {/* ── 이미지 섹션 ── */}
                 <section>
-                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
+                  <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4">
                     이미지
                   </h3>
                   <div className="flex flex-col gap-5 px-4">
