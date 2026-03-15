@@ -854,26 +854,15 @@ export default function App() {
       {/* 관리자: 사용자 관리 모달 */}
       {showUserManager && <UserManagerModal />}
 
-      {/* Sonner 토스트 — 글래스모피즘 + 스르륵 애니메이션 + 호버 펼침 */}
+      {/* Sonner 토스트 — 테마 색상 연동 + 스르륵 애니메이션 + 호버 펼침 */}
       <Toaster
-        theme="dark"
+        theme={colorMode === 'light' ? 'light' : 'dark'}
         position={toastPosition}
         duration={toastDuration}
         toastOptions={{
+          className: 'bflow-toast',
           style: {
-            background: 'rgba(26, 29, 39, 0.85)',
-            backdropFilter: 'blur(20px) saturate(1.6)',
-            WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            boxShadow: '0 24px 48px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.04) inset',
-            color: '#E8E8EE',
             fontSize: '13px',
-          },
-          classNames: {
-            success: 'sonner-success',
-            error: 'sonner-error',
-            warning: 'sonner-warning',
-            info: 'sonner-info',
           },
         }}
         gap={8}
