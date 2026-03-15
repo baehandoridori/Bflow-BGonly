@@ -991,13 +991,10 @@ AFTER (Supabase):
 - [x] **RLS 정책**: anon key 전체 접근 (내부 팀 전용)
 - [x] **Realtime 활성화**: scenes, comments, comp_revisions, episodes, parts
 
-### M-1. 마이그레이션 스크립트 `P9` `[ ]`
+### M-1. 마이그레이션 스크립트 `P9` `[스킵]`
 
-> 난이도: ●●○ | 상태: 미착수
-
-- [ ] **sheets-to-json.ts**: GAS에서 전체 활성 에피소드 데이터 추출
-- [ ] **json-to-supabase.ts**: JSON → Supabase INSERT (아카이브 제외, 활성 데이터만)
-- [ ] **verify-migration.ts**: 데이터 정합성 검증 (씬 수, 체크박스 값 비교)
+> 기존 Sheets 데이터를 옮기지 않고 새로 시작하기로 결정 (2026-03-15)
+> 사용자 계정도 새로 만들기로 함 → 스크립트 불필요
 
 ### M-2. Supabase 클라이언트 구현 `P9` `[완료]`
 
@@ -1013,7 +1010,7 @@ AFTER (Supabase):
   - Metadata: readAll, read, write
 - [x] **electron/realtime.ts** (147줄): Realtime 구독 + 지수 백오프 자동 재연결 (최대 10회)
 - [x] **electron/broadcast.ts** (82줄): Broadcast 채널로 즉시 delta 전파
-- [x] **src/services/supabaseService.ts** (374줄): IPC 래퍼 (기존 sheetsService와 1:1 호환)
+- [x] **src/services/supabaseService.ts** (374줄): IPC 래퍼 + 고수준 API (sheetName→UUID 변환)
 - [x] **electron/preload.ts**: Supabase IPC 메서드 30+개 추가
 - [x] **electron/main.ts**: Supabase IPC 핸들러 + Realtime 이벤트 전달
 
@@ -1053,15 +1050,17 @@ AFTER (Supabase):
 - [x] **Sheets IPC 핸들러 25개 제거**: main.ts + preload.ts + types 정리
 - [x] **tsc --noEmit + vite build 통과 확인**
 
-### M-6. 컷오버 `P9` `[ ]`
+### M-6. 컷오버 `P9` `[준비 완료]`
 
-> 난이도: ●○○ | 반나절 다운타임 (퇴근 후 or 주말)
+> 난이도: ●○○ | 데이터 이관 없이 새로 시작 (다운타임 불필요)
+> Supabase DB 테이블 7개 확인 완료 (2026-03-15)
 
-- [ ] **팀 공지**: 앱 사용 중단 안내
-- [ ] **마이그레이션 실행**: sheets-to-json → json-to-supabase → verify
-- [ ] **새 빌드 배포**: 공유 드라이브에 복사
-- [ ] **검증**: 체크박스 토글, 댓글, 에피소드/씬 CRUD 테스트
-- [ ] **팀 공지**: 사용 재개 (문제 시 이전 빌드로 롤백)
+- [x] **Supabase DB 스키마 확인**: 7개 테이블 존재 확인
+- [x] **앱 코드 Supabase 전환**: 완료 (M-2~M-5)
+- [ ] **새 빌드 생성**: `npm run build` (Electron 패키징)
+- [ ] **공유 드라이브 배포**: 빌드 결과물 복사
+- [ ] **팀 공지**: 새 앱 사용 안내 (계정 새로 만들기)
+- [ ] **검증**: 에피소드/씬 추가, 체크박스 토글, 댓글, Realtime 동기화 테스트
 
 ### 미정 사항
 
