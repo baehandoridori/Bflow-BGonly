@@ -74,6 +74,16 @@ export interface Scene {
   completedAt?: string;  // 완료 시각 (ISO 8601)
 }
 
+// ─── 통합 씬 (BG + ACT 머지) ─────────────────
+
+export interface MergedScene {
+  sceneId: string;
+  bgScene: Scene | null;
+  actScene: Scene | null;
+  bgSceneIndex: number;   // bgPart.scenes 내 인덱스 (-1 if absent)
+  actSceneIndex: number;   // actPart.scenes 내 인덱스 (-1 if absent)
+}
+
 // ─── 컴포지팅 리비전 ─────────────────────────
 
 export type RevisionStatus = 'open' | 'in_progress' | 'resolved';

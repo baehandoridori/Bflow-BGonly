@@ -29,6 +29,15 @@ export function isNotStarted(scene: Scene): boolean {
   return !scene.lo && !scene.done && !scene.review && !scene.png;
 }
 
+/** 진행률에 따른 그라데이션 CSS */
+export function progressGradient(pct: number): string {
+  if (pct >= 100) return 'linear-gradient(90deg, rgba(0,184,148,1) 0%, rgba(46,213,174,1) 40%, rgba(85,239,196,1) 100%)';
+  if (pct >= 75) return 'linear-gradient(90deg, rgba(253,203,110,1) 0%, rgba(129,194,129,1) 50%, rgba(0,184,148,1) 100%)';
+  if (pct >= 50) return 'linear-gradient(90deg, rgba(225,112,85,1) 0%, rgba(239,158,98,1) 50%, rgba(253,203,110,1) 100%)';
+  if (pct >= 25) return 'linear-gradient(90deg, rgba(255,107,107,1) 0%, rgba(240,110,96,1) 35%, rgba(225,112,85,1) 65%, rgba(253,203,110,1) 100%)';
+  return 'linear-gradient(90deg, rgba(255,107,107,1) 0%, rgba(240,110,96,1) 50%, rgba(225,112,85,1) 100%)';
+}
+
 /** 에피소드 배열 → 전체 대시보드 통계 (department 필터 옵션) */
 export function calcDashboardStats(episodes: Episode[], department?: Department): DashboardStats {
   const filteredEpisodes = department

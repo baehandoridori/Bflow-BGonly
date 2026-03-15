@@ -4,13 +4,15 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
-import type { Scene, Stage, Department, ScenesDeptFilter } from '@/types';
-import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
+import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene } from '@/types';
+import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Table2, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { HighlightText } from '@/components/common/HighlightText';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
+import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
+import { UnifiedSceneTable } from '@/components/scenes/UnifiedSceneTable';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
@@ -152,13 +154,7 @@ function ensureGlowCss() {
 }
 
 /* ── 진행률 기반 그라데이션 (중간값 추가로 밴딩 방지) ── */
-function progressGradient(pct: number): string {
-  if (pct >= 100) return 'linear-gradient(90deg, rgba(0,184,148,1) 0%, rgba(46,213,174,1) 40%, rgba(85,239,196,1) 100%)';
-  if (pct >= 75) return 'linear-gradient(90deg, rgba(253,203,110,1) 0%, rgba(129,194,129,1) 50%, rgba(0,184,148,1) 100%)';
-  if (pct >= 50) return 'linear-gradient(90deg, rgba(225,112,85,1) 0%, rgba(239,158,98,1) 50%, rgba(253,203,110,1) 100%)';
-  if (pct >= 25) return 'linear-gradient(90deg, rgba(255,107,107,1) 0%, rgba(240,110,96,1) 35%, rgba(225,112,85,1) 65%, rgba(253,203,110,1) 100%)';
-  return 'linear-gradient(90deg, rgba(255,107,107,1) 0%, rgba(240,110,96,1) 50%, rgba(225,112,85,1) 100%)';
-}
+// progressGradient → @/utils/calcStats 에서 import
 
 /*
  * 보케 RGB 팔레트 — rgba() 사용으로 밴딩 방지
@@ -1606,6 +1602,68 @@ export function ScenesView() {
   // 'all' 모드: 합산 진행률
   const allModeScenes = useMemo(() => [...bgScenes, ...actScenes], [bgScenes, actScenes]);
 
+  // 'all' 모드: BG+ACT 씬 머지 (동일 sceneId 매칭)
+  const mergedScenes = useMemo((): MergedScene[] => {
+    if (selectedDepartment !== 'all') return [];
+    const map = new Map<string, MergedScene>();
+
+    bgScenes.forEach((scene) => {
+      map.set(scene.sceneId, {
+        sceneId: scene.sceneId,
+        bgScene: scene, actScene: null,
+        bgSceneIndex: bgPart?.scenes.indexOf(scene) ?? -1,
+        actSceneIndex: -1,
+      });
+    });
+
+    actScenes.forEach((scene) => {
+      const existing = map.get(scene.sceneId);
+      if (existing) {
+        existing.actScene = scene;
+        existing.actSceneIndex = actPart?.scenes.indexOf(scene) ?? -1;
+      } else {
+        map.set(scene.sceneId, {
+          sceneId: scene.sceneId,
+          bgScene: null, actScene: scene,
+          bgSceneIndex: -1,
+          actSceneIndex: actPart?.scenes.indexOf(scene) ?? -1,
+        });
+      }
+    });
+
+    // 정렬: primary scene (BG 우선) 기준
+    return Array.from(map.values()).sort((a, b) => {
+      const aScene = a.bgScene ?? a.actScene;
+      const bScene = b.bgScene ?? b.actScene;
+      if (!aScene || !bScene) return 0;
+      let cmp = 0;
+      switch (sortKey) {
+        case 'no': {
+          const aNum = parseInt(aScene.sceneId?.match(/\d+$/)?.[0] || '0', 10) || aScene.no;
+          const bNum = parseInt(bScene.sceneId?.match(/\d+$/)?.[0] || '0', 10) || bScene.no;
+          cmp = aNum - bNum;
+          break;
+        }
+        case 'assignee': cmp = (aScene.assignee || '').localeCompare(bScene.assignee || ''); break;
+        case 'progress': {
+          const aPct = ((a.bgScene ? sceneProgress(a.bgScene) : 0) + (a.actScene ? sceneProgress(a.actScene) : 0)) / ((a.bgScene ? 1 : 0) + (a.actScene ? 1 : 0) || 1);
+          const bPct = ((b.bgScene ? sceneProgress(b.bgScene) : 0) + (b.actScene ? sceneProgress(b.actScene) : 0)) / ((b.bgScene ? 1 : 0) + (b.actScene ? 1 : 0) || 1);
+          cmp = aPct - bPct;
+          break;
+        }
+        case 'incomplete': {
+          const aLeft = (a.bgScene ? 4 - [a.bgScene.lo, a.bgScene.done, a.bgScene.review, a.bgScene.png].filter(Boolean).length : 0)
+            + (a.actScene ? 4 - [a.actScene.lo, a.actScene.done, a.actScene.review, a.actScene.png].filter(Boolean).length : 0);
+          const bLeft = (b.bgScene ? 4 - [b.bgScene.lo, b.bgScene.done, b.bgScene.review, b.bgScene.png].filter(Boolean).length : 0)
+            + (b.actScene ? 4 - [b.actScene.lo, b.actScene.done, b.actScene.review, b.actScene.png].filter(Boolean).length : 0);
+          cmp = bLeft - aLeft;
+          break;
+        }
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [bgScenes, actScenes, bgPart, actPart, selectedDepartment, sortKey, sortDir]);
+
   // 담당자 목록 (현재 파트 기준)
   const assignees = Array.from(
     new Set(
@@ -2631,6 +2689,29 @@ export function ScenesView() {
             + 씬 추가
           </button>
         )}
+        {/* 씬 추가 버튼 (전체 모드: 부서별) */}
+        {selectedDepartment === 'all' && (
+          <div className="flex items-center gap-2">
+            {bgPart && (
+              <button
+                onClick={() => { setAddTargetSheet(bgPart.sheetName); setShowAddScene(true); }}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                style={{ backgroundColor: `${DEPARTMENT_CONFIGS.bg.color}20`, color: DEPARTMENT_CONFIGS.bg.color, border: `1px solid ${DEPARTMENT_CONFIGS.bg.color}40` }}
+              >
+                + BG 씬
+              </button>
+            )}
+            {actPart && (
+              <button
+                onClick={() => { setAddTargetSheet(actPart.sheetName); setShowAddScene(true); }}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                style={{ backgroundColor: `${DEPARTMENT_CONFIGS.acting.color}20`, color: DEPARTMENT_CONFIGS.acting.color, border: `1px solid ${DEPARTMENT_CONFIGS.acting.color}40` }}
+              >
+                + ACT 씬
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 씬 추가 폼 */}
@@ -2654,207 +2735,97 @@ export function ScenesView() {
         </div>
       )}
 
-      {/* ─── 'all' 모드: 이중 부서 섹션 렌더링 ─── */}
+      {/* ─── 'all' 모드: 통합 뷰 (카드/테이블) + 시트 폴백 ─── */}
       {selectedDepartment === 'all' ? (
-        <div className="flex-1 flex flex-col gap-6">
-          {/* BG 섹션 */}
-          {(() => {
-            const deptCfg = DEPARTMENT_CONFIGS['bg'];
-            const sectionScenes = bgScenes;
-            const sectionPct = sectionScenes.length > 0
-              ? Math.round(sectionScenes.reduce((sum, s) => sum + [s.lo, s.done, s.review, s.png].filter(Boolean).length, 0) / (sectionScenes.length * 4) * 100)
-              : 0;
-
-            return (
-              <div className="flex flex-col gap-3">
-                {/* 부서 섹션 헤더 */}
-                <div className="flex items-center gap-3 bg-bg-card border border-bg-border rounded-lg px-4 py-2.5">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: deptCfg.color }} />
-                  <span className="text-sm font-bold text-text-primary">{deptCfg.label} ({deptCfg.shortLabel})</span>
-                  <span className="text-xs text-text-secondary">{sectionScenes.length}씬</span>
-                  <div className="flex-1 h-1.5 bg-bg-primary rounded-full overflow-hidden ml-2">
-                    <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${sectionPct}%`, background: progressGradient(sectionPct) }} />
-                  </div>
-                  <span className="text-xs font-mono text-text-secondary">{sectionPct}%</span>
-                  {bgPart && (
-                    <button
-                      onClick={() => { setAddTargetSheet(bgPart.sheetName); setShowAddScene(true); }}
-                      className="px-3 py-1 text-xs font-medium rounded-lg transition-colors"
-                      style={{ backgroundColor: `${deptCfg.color}20`, color: deptCfg.color, border: `1px solid ${deptCfg.color}40` }}
-                    >
-                      + 씬 추가
-                    </button>
-                  )}
-                </div>
-
-                {/* BG 씬 목록 */}
-                {!bgPart ? (
-                  <div className="flex items-center gap-2 px-4 py-6 bg-bg-card/30 border border-bg-border/50 rounded-lg text-text-secondary/50">
-                    <span className="text-sm">배경 파트가 아직 추가되지 않았습니다</span>
-                  </div>
-                ) : sectionScenes.length === 0 ? (
-                  <div className="text-sm text-text-secondary/50 text-center py-4">표시할 씬이 없습니다</div>
-                ) : sceneViewMode === 'table' ? (
-                  <SceneTable
-                    scenes={sectionScenes}
-                    allScenes={bgPart.scenes}
-                    department="bg"
-                    commentCounts={commentCounts}
-                    sheetName={bgPart.sheetName}
-                    onToggle={(id, stage) => handleToggleForSheet(bgPart.sheetName, id, stage)}
-                    onDelete={(idx) => handleDeleteSceneForSheet(bgPart.sheetName, idx)}
-                    searchQuery={searchQuery}
-                    onOpenDetail={(idx) => { setDetailContext({ sheetName: bgPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                    selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('bg:')).map(id => id.slice(3)))}
-                    onCtrlClick={(id) => toggleSelectedScene(`bg:${id}`)}
-                  />
-                ) : sceneViewMode === 'sheet' ? (
-                  <SceneSheetView
-                    scenes={sectionScenes}
-                    allScenes={bgPart.scenes}
-                    department="bg"
-                    commentCounts={commentCounts}
-                    sheetName={bgPart.sheetName}
-                    searchQuery={searchQuery}
-                    selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('bg:')).map(id => id.slice(3)))}
-                    sceneGroupMode={sceneGroupMode}
-                    onToggle={(id, stage) => handleToggleForSheet(bgPart.sheetName, id, stage)}
-                    onDelete={(idx) => handleDeleteSceneForSheet(bgPart.sheetName, idx)}
-                    onOpenDetail={(idx) => { setDetailContext({ sheetName: bgPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                    onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(bgPart.sheetName, idx, field, value)}
-                    onCtrlClick={(id) => toggleSelectedScene(`bg:${id}`)}
-                  />
-                ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
-                    {sectionScenes.map((scene, idx) => {
-                      const rawIdx = bgPart.scenes.indexOf(scene);
-                      const sIdx = rawIdx >= 0 ? rawIdx : idx;
-                      return (
-                        <SceneCard
-                          key={`bg-${scene.sceneId}-${idx}`}
-                          scene={scene}
-                          sceneIndex={sIdx}
-                          celebrating={celebratingId === scene.sceneId}
-                          department="bg"
-                          isHighlighted={highlightSceneId === scene.sceneId}
-                          isSelected={selectedSceneIds.has(`bg:${scene.sceneId}`)}
-                          selectionId={`bg:${scene.sceneId}`}
-                          searchQuery={searchQuery}
-                          commentCount={commentCounts[`${bgPart.sheetName}:${scene.no}`] ?? 0}
-                          revisionCount={revisionCountByScene[buildSceneKey(bgPart.sheetName, scene.sceneId)] ?? 0}
-                          onToggle={(id, stage) => handleToggleForSheet(bgPart.sheetName, id, stage)}
-                          onDelete={(si) => handleDeleteSceneForSheet(bgPart.sheetName, si)}
-                          onOpenDetail={() => { setDetailContext({ sheetName: bgPart.sheetName, sceneIndex: sIdx }); setDetailSceneIndex(sIdx); }}
-                          onCelebrationEnd={clearCelebration}
-                          onCtrlClick={() => toggleSelectedScene(`bg:${scene.sceneId}`)}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* ACT 섹션 */}
-          {(() => {
-            const deptCfg = DEPARTMENT_CONFIGS['acting'];
-            const sectionScenes = actScenes;
-            const sectionPct = sectionScenes.length > 0
-              ? Math.round(sectionScenes.reduce((sum, s) => sum + [s.lo, s.done, s.review, s.png].filter(Boolean).length, 0) / (sectionScenes.length * 4) * 100)
-              : 0;
-
-            return (
-              <div className="flex flex-col gap-3">
-                {/* 부서 섹션 헤더 */}
-                <div className="flex items-center gap-3 bg-bg-card border border-bg-border rounded-lg px-4 py-2.5">
-                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: deptCfg.color }} />
-                  <span className="text-sm font-bold text-text-primary">{deptCfg.label} ({deptCfg.shortLabel})</span>
-                  <span className="text-xs text-text-secondary">{sectionScenes.length}씬</span>
-                  <div className="flex-1 h-1.5 bg-bg-primary rounded-full overflow-hidden ml-2">
-                    <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${sectionPct}%`, background: progressGradient(sectionPct) }} />
-                  </div>
-                  <span className="text-xs font-mono text-text-secondary">{sectionPct}%</span>
-                  {actPart && (
-                    <button
-                      onClick={() => { setAddTargetSheet(actPart.sheetName); setShowAddScene(true); }}
-                      className="px-3 py-1 text-xs font-medium rounded-lg transition-colors"
-                      style={{ backgroundColor: `${deptCfg.color}20`, color: deptCfg.color, border: `1px solid ${deptCfg.color}40` }}
-                    >
-                      + 씬 추가
-                    </button>
-                  )}
-                </div>
-
-                {/* ACT 씬 목록 */}
-                {!actPart ? (
-                  <div className="flex items-center gap-2 px-4 py-6 bg-bg-card/30 border border-bg-border/50 rounded-lg text-text-secondary/50">
-                    <span className="text-sm">액팅 파트가 아직 추가되지 않았습니다</span>
-                  </div>
-                ) : sectionScenes.length === 0 ? (
-                  <div className="text-sm text-text-secondary/50 text-center py-4">표시할 씬이 없습니다</div>
-                ) : sceneViewMode === 'table' ? (
-                  <SceneTable
-                    scenes={sectionScenes}
-                    allScenes={actPart.scenes}
-                    department="acting"
-                    commentCounts={commentCounts}
-                    sheetName={actPart.sheetName}
-                    onToggle={(id, stage) => handleToggleForSheet(actPart.sheetName, id, stage)}
-                    onDelete={(idx) => handleDeleteSceneForSheet(actPart.sheetName, idx)}
-                    searchQuery={searchQuery}
-                    onOpenDetail={(idx) => { setDetailContext({ sheetName: actPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                    selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('act:')).map(id => id.slice(4)))}
-                    onCtrlClick={(id) => toggleSelectedScene(`act:${id}`)}
-                  />
-                ) : sceneViewMode === 'sheet' ? (
-                  <SceneSheetView
-                    scenes={sectionScenes}
-                    allScenes={actPart.scenes}
-                    department="acting"
-                    commentCounts={commentCounts}
-                    sheetName={actPart.sheetName}
-                    searchQuery={searchQuery}
-                    selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('act:')).map(id => id.slice(4)))}
-                    sceneGroupMode={sceneGroupMode}
-                    onToggle={(id, stage) => handleToggleForSheet(actPart.sheetName, id, stage)}
-                    onDelete={(idx) => handleDeleteSceneForSheet(actPart.sheetName, idx)}
-                    onOpenDetail={(idx) => { setDetailContext({ sheetName: actPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                    onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(actPart.sheetName, idx, field, value)}
-                    onCtrlClick={(id) => toggleSelectedScene(`act:${id}`)}
-                  />
-                ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
-                    {sectionScenes.map((scene, idx) => {
-                      const rawIdx = actPart.scenes.indexOf(scene);
-                      const sIdx = rawIdx >= 0 ? rawIdx : idx;
-                      return (
-                        <SceneCard
-                          key={`act-${scene.sceneId}-${idx}`}
-                          scene={scene}
-                          sceneIndex={sIdx}
-                          celebrating={celebratingId === scene.sceneId}
-                          department="acting"
-                          isHighlighted={highlightSceneId === scene.sceneId}
-                          isSelected={selectedSceneIds.has(`act:${scene.sceneId}`)}
-                          selectionId={`act:${scene.sceneId}`}
-                          searchQuery={searchQuery}
-                          commentCount={commentCounts[`${actPart.sheetName}:${scene.no}`] ?? 0}
-                          revisionCount={revisionCountByScene[buildSceneKey(actPart.sheetName, scene.sceneId)] ?? 0}
-                          onToggle={(id, stage) => handleToggleForSheet(actPart.sheetName, id, stage)}
-                          onDelete={(si) => handleDeleteSceneForSheet(actPart.sheetName, si)}
-                          onOpenDetail={() => { setDetailContext({ sheetName: actPart.sheetName, sceneIndex: sIdx }); setDetailSceneIndex(sIdx); }}
-                          onCelebrationEnd={clearCelebration}
-                          onCtrlClick={() => toggleSelectedScene(`act:${scene.sceneId}`)}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
+        sceneViewMode === 'sheet' ? (
+          /* 시트 뷰: 기존 분리 렌더링 유지 (복잡도 높아 추후 통합) */
+          <div className="flex-1 flex flex-col gap-6">
+            {bgPart && (
+              <SceneSheetView
+                scenes={bgScenes}
+                allScenes={bgPart.scenes}
+                department="bg"
+                commentCounts={commentCounts}
+                sheetName={bgPart.sheetName}
+                searchQuery={searchQuery}
+                selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('bg:')).map(id => id.slice(3)))}
+                sceneGroupMode={sceneGroupMode}
+                onToggle={(id, stage) => handleToggleForSheet(bgPart.sheetName, id, stage)}
+                onDelete={(idx) => handleDeleteSceneForSheet(bgPart.sheetName, idx)}
+                onOpenDetail={(idx) => { setDetailContext({ sheetName: bgPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(bgPart.sheetName, idx, field, value)}
+                onCtrlClick={(id) => toggleSelectedScene(`bg:${id}`)}
+              />
+            )}
+            {actPart && (
+              <SceneSheetView
+                scenes={actScenes}
+                allScenes={actPart.scenes}
+                department="acting"
+                commentCounts={commentCounts}
+                sheetName={actPart.sheetName}
+                searchQuery={searchQuery}
+                selectedSceneIds={new Set([...selectedSceneIds].filter(id => id.startsWith('act:')).map(id => id.slice(4)))}
+                sceneGroupMode={sceneGroupMode}
+                onToggle={(id, stage) => handleToggleForSheet(actPart.sheetName, id, stage)}
+                onDelete={(idx) => handleDeleteSceneForSheet(actPart.sheetName, idx)}
+                onOpenDetail={(idx) => { setDetailContext({ sheetName: actPart.sheetName, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(actPart.sheetName, idx, field, value)}
+                onCtrlClick={(id) => toggleSelectedScene(`act:${id}`)}
+              />
+            )}
+          </div>
+        ) : mergedScenes.length === 0 ? (
+          <div className="text-sm text-text-secondary/50 text-center py-8">표시할 씬이 없습니다</div>
+        ) : sceneViewMode === 'table' ? (
+          /* 통합 테이블 뷰 */
+          <UnifiedSceneTable
+            mergedScenes={mergedScenes}
+            bgSheetName={bgPart?.sheetName ?? null}
+            actSheetName={actPart?.sheetName ?? null}
+            searchQuery={searchQuery}
+            bgCommentCounts={commentCounts}
+            actCommentCounts={commentCounts}
+            selectedSceneIds={selectedSceneIds}
+            onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+            onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+            onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+            onSelect={(id) => {
+              if (bgPart) toggleSelectedScene(`bg:${id}`);
+              if (actPart) toggleSelectedScene(`act:${id}`);
+            }}
+          />
+        ) : (
+          /* 통합 카드 뷰 */
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {mergedScenes.map((m) => {
+              const primary = m.bgScene ?? m.actScene;
+              if (!primary) return null;
+              return (
+                <UnifiedSceneCard
+                  key={m.sceneId}
+                  merged={m}
+                  bgSheetName={bgPart?.sheetName ?? null}
+                  actSheetName={actPart?.sheetName ?? null}
+                  celebrating={celebratingId === m.sceneId}
+                  isHighlighted={highlightSceneId === m.sceneId}
+                  isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
+                  searchQuery={searchQuery}
+                  bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                  actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                  onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+                  onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+                  onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                  onCelebrationEnd={clearCelebration}
+                  onSelect={() => {
+                    if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
+                    if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
+                  }}
+                />
+              );
+            })}
+          </div>
+        )
       ) : (
       /* ─── 개별 모드: 기존 렌더링 ─── */
       <>
