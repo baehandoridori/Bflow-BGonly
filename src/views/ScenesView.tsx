@@ -388,7 +388,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const pct = sceneProgress(scene);
   const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
 
-  const borderColor = pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
+  const borderColor = pct >= 100 ? '#5EC4B6' : pct >= 50 ? '#F0B866' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -462,7 +462,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
           {revisionCount > 0 && (
             <span
               className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full"
-              style={{ backgroundColor: 'rgba(253, 203, 110, 0.2)', color: '#FDCB6E' }}
+              style={{ backgroundColor: 'rgba(240, 184, 102, 0.2)', color: '#F0B866' }}
               title={`리비전 ${revisionCount}건`}
             >
               <Film size={11} />
@@ -1308,7 +1308,16 @@ export function ScenesView() {
   // 라쏘 드래그 선택
   const gridRef = useRef<HTMLDivElement>(null);
   const getSceneIdFromEl = useCallback((el: Element) => el.getAttribute('data-scene-id'), []);
-  const handleLassoChange = useCallback((ids: Set<string>) => setSelectedScenes(ids), [setSelectedScenes]);
+  const handleLassoChange = useCallback((ids: Set<string>) => {
+    if (selectedDepartment === 'all') {
+      // 전체 모드: sceneId → bg:sceneId + act:sceneId 양쪽 접두사 추가
+      const prefixed = new Set<string>();
+      ids.forEach((id) => { prefixed.add(`bg:${id}`); prefixed.add(`act:${id}`); });
+      setSelectedScenes(prefixed);
+    } else {
+      setSelectedScenes(ids);
+    }
+  }, [setSelectedScenes, selectedDepartment]);
   const isCardView = sceneViewMode === 'card';
   const { lassoRect } = useLassoSelection(
     gridRef,
@@ -1318,8 +1327,8 @@ export function ScenesView() {
     isCardView,
   );
 
-  // 파트/에피소드 변경 시 선택 초기화
-  useEffect(() => { clearSelectedScenes(); }, [selectedEpisode, selectedPart, selectedDepartment, clearSelectedScenes]);
+  // 파트/에피소드/뷰모드 변경 시 선택 초기화
+  useEffect(() => { clearSelectedScenes(); }, [selectedEpisode, selectedPart, selectedDepartment, sceneViewMode, clearSelectedScenes]);
 
   // 백그라운드 동기화: 낙관적 업데이트 후 서버와 싱크
   // 동기화 매니저: 버전 카운터로 오래된 응답 폐기 + 아카이브 가드로 낙관적 상태 보호

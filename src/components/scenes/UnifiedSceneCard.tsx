@@ -49,7 +49,7 @@ export function UnifiedSceneCard({
   const presentCount = (bgScene ? 1 : 0) + (actScene ? 1 : 0);
   const combinedPct = presentCount > 0 ? Math.round((bgPct + actPct) / presentCount) : 0;
 
-  const borderColor = combinedPct >= 100 ? '#00B894' : combinedPct >= 50 ? '#FDCB6E' : combinedPct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
+  const borderColor = combinedPct >= 100 ? '#5EC4B6' : combinedPct >= 50 ? '#F0B866' : combinedPct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
 
   const hasImages = !!(primaryScene.storyboardUrl || primaryScene.guideUrl);
   const layoutId = bgScene?.layoutId || actScene?.layoutId;
