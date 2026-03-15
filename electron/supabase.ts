@@ -633,7 +633,7 @@ export async function deleteComment(commentId: string): Promise<void> {
 // ═══════════════════════════════════════════════
 
 /** 모든 리비전 읽기 */
-export async function readAllRevisions(): Promise<SupabaseRevision[]> {
+export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey: string })[]> {
   const { data, error } = await supabase
     .from('comp_revisions')
     .select('*')
