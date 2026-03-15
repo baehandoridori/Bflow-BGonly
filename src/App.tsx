@@ -127,6 +127,15 @@ export default function App() {
   // 알림 설정 ref (broadcast 핸들러에서 최신값 참조용)
   const notiSettingsRef = useRef<NotificationSettings>({ sceneChange: true, commentNotify: true, osNotification: true });
 
+  // 알림 중복 방지 (broadcast + postgres_changes 동시 도착 시)
+  const recentNotiKeysRef = useRef<Set<string>>(new Set());
+  const dedupeNotification = useCallback((key: string): boolean => {
+    if (recentNotiKeysRef.current.has(key)) return false; // 이미 처리됨
+    recentNotiKeysRef.current.add(key);
+    setTimeout(() => recentNotiKeysRef.current.delete(key), 3000);
+    return true; // 처리 가능
+  }, []);
+
   // 테마 초기화 완료 가드 (init에서 로드 전까지 저장 방지)
   const themeInitRef = useRef(false);
 
@@ -455,27 +464,31 @@ export default function App() {
           const newComment = payload.new as { scene_id?: string; user_name?: string; user_id?: string; text?: string; mentions?: string[] };
           const me = useAuthStore.getState().currentUser;
           if (me && newComment.user_id && newComment.user_id !== me.id && newComment.scene_id) {
-            const notiSettings = notiSettingsRef.current;
-            if (notiSettings.commentNotify !== false) {
-              const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
-              const scene = allScenes.find(s => s.sceneId === newComment.scene_id);
-              const isMentioned = Array.isArray(newComment.mentions) && newComment.mentions.includes(me.name);
-              const isAssignee = scene && scene.assignee === me.name;
+            const dedupeKey = `comment:${newComment.user_id}:${newComment.scene_id}`;
+            if (!dedupeNotification(dedupeKey)) { /* 이미 broadcast로 처리됨 */ }
+            else {
+              const notiSettings = notiSettingsRef.current;
+              if (notiSettings.commentNotify !== false) {
+                const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
+                const scene = allScenes.find(s => s.sceneId === newComment.scene_id);
+                const isMentioned = Array.isArray(newComment.mentions) && newComment.mentions.includes(me.name);
+                const isAssignee = scene && scene.assignee === me.name;
 
-              if (isMentioned) {
-                dispatchNotification({
-                  type: 'comment',
-                  title: `${newComment.user_name || '누군가'}님이 나를 태그했습니다`,
-                  body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
-                  metadata: scene ? { sceneId: scene.id, sceneName: scene.sceneId } : undefined,
-                }, notiSettings);
-              } else if (isAssignee) {
-                dispatchNotification({
-                  type: 'comment',
-                  title: `${newComment.user_name || '누군가'}님이 댓글을 남겼습니다`,
-                  body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
-                  metadata: { sceneId: scene!.id, sceneName: scene!.sceneId },
-                }, notiSettings);
+                if (isMentioned) {
+                  dispatchNotification({
+                    type: 'comment',
+                    title: `${newComment.user_name || '누군가'}님이 나를 태그했습니다`,
+                    body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
+                    metadata: scene ? { sceneId: scene.id, sceneName: scene.sceneId } : undefined,
+                  }, notiSettings);
+                } else if (isAssignee) {
+                  dispatchNotification({
+                    type: 'comment',
+                    title: `${newComment.user_name || '누군가'}님이 댓글을 남겼습니다`,
+                    body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
+                    metadata: { sceneId: scene!.id, sceneName: scene!.sceneId },
+                  }, notiSettings);
+                }
               }
             }
           }
@@ -615,9 +628,11 @@ export default function App() {
         };
         const me = useAuthStore.getState().currentUser;
         if (me && commentUserId && commentUserId !== me.id && commentSceneId) {
-          const notiSettings = notiSettingsRef.current;
-          if (notiSettings.commentNotify === false) { /* 알림 끔 */ }
+          const dedupeKey = `comment:${commentUserId}:${commentSceneId}`;
+          if (!dedupeNotification(dedupeKey)) { /* 이미 Realtime으로 처리됨 */ }
+          else if (notiSettingsRef.current.commentNotify === false) { /* 알림 끔 */ }
           else {
+            const notiSettings = notiSettingsRef.current;
             const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
             const scene = allScenes.find(s => s.sceneId === commentSceneId);
             const isMentioned = Array.isArray(commentMentions) && commentMentions.includes(me.name);
