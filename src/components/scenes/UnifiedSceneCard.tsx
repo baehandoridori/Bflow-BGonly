@@ -171,7 +171,7 @@ export function UnifiedSceneCard({
       )}
 
       {/* ── BG/ACT 부서별 단계 행 ── */}
-      <div className="px-2.5 pt-1.5 pb-1 flex flex-col gap-1 mt-auto">
+      <div className="px-1.5 pt-1.5 pb-1 flex flex-col gap-1 mt-auto">
         <DeptStageRow
           dept="bg"
           scene={bgScene}
@@ -242,22 +242,23 @@ function DeptStageRow({
   }
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5">
       <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: cfg.color }} />
-      <span className="text-[10px] text-text-secondary font-medium w-5 shrink-0">{cfg.shortLabel}</span>
+      <span className="text-[10px] text-text-secondary font-medium shrink-0">{cfg.shortLabel}</span>
       {STAGES.map((stage) => (
         <button
           key={stage}
           onClick={(e) => { e.stopPropagation(); onToggle(sheetName, sceneId, stage); }}
           className={cn(
-            'flex-1 py-0.5 rounded text-[10px] font-medium transition-all text-center',
+            'flex-1 min-w-0 py-0.5 rounded text-[10px] font-medium transition-all text-center whitespace-nowrap overflow-hidden',
             scene[stage]
               ? 'text-bg-primary'
               : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary'
           )}
           style={scene[stage] ? { backgroundColor: cfg.stageColors[stage] } : undefined}
+          title={cfg.stageLabels[stage]}
         >
-          {scene[stage] ? '✓' : ''}{cfg.stageLabels[stage]}
+          {cfg.stageLabels[stage]}
         </button>
       ))}
       <button

@@ -3183,20 +3183,63 @@ export function ScenesView() {
             </div>
 
             {/* 일괄 스테이지 토글 */}
-            {STAGES.map((stage) => (
-              <button
-                key={stage}
-                onClick={() => handleBulkToggle(selectedSceneIds, stage)}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
-                style={{
-                  backgroundColor: `${deptConfig.stageColors[stage]}20`,
-                  color: deptConfig.stageColors[stage],
-                  border: `1px solid ${deptConfig.stageColors[stage]}40`,
-                }}
-              >
-                {deptConfig.stageLabels[stage]}
-              </button>
-            ))}
+            {selectedDepartment === 'all' ? (
+              <>
+                {/* BG 스테이지 */}
+                <div className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: DEPARTMENT_CONFIGS.bg.color }} />
+                  <span className="text-[10px] text-text-secondary mr-0.5">{DEPARTMENT_CONFIGS.bg.shortLabel}</span>
+                  {STAGES.map((stage) => (
+                    <button
+                      key={`bg-${stage}`}
+                      onClick={() => handleBulkToggle(selectedSceneIds, stage)}
+                      className="px-2 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                      style={{
+                        backgroundColor: `${DEPARTMENT_CONFIGS.bg.stageColors[stage]}20`,
+                        color: DEPARTMENT_CONFIGS.bg.stageColors[stage],
+                        border: `1px solid ${DEPARTMENT_CONFIGS.bg.stageColors[stage]}40`,
+                      }}
+                    >
+                      {DEPARTMENT_CONFIGS.bg.stageLabels[stage]}
+                    </button>
+                  ))}
+                </div>
+                {/* ACT 스테이지 */}
+                <div className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: DEPARTMENT_CONFIGS.acting.color }} />
+                  <span className="text-[10px] text-text-secondary mr-0.5">{DEPARTMENT_CONFIGS.acting.shortLabel}</span>
+                  {STAGES.map((stage) => (
+                    <button
+                      key={`act-${stage}`}
+                      onClick={() => handleBulkToggle(selectedSceneIds, stage)}
+                      className="px-2 py-1 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                      style={{
+                        backgroundColor: `${DEPARTMENT_CONFIGS.acting.stageColors[stage]}20`,
+                        color: DEPARTMENT_CONFIGS.acting.stageColors[stage],
+                        border: `1px solid ${DEPARTMENT_CONFIGS.acting.stageColors[stage]}40`,
+                      }}
+                    >
+                      {DEPARTMENT_CONFIGS.acting.stageLabels[stage]}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              STAGES.map((stage) => (
+                <button
+                  key={stage}
+                  onClick={() => handleBulkToggle(selectedSceneIds, stage)}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                  style={{
+                    backgroundColor: `${deptConfig.stageColors[stage]}20`,
+                    color: deptConfig.stageColors[stage],
+                    border: `1px solid ${deptConfig.stageColors[stage]}40`,
+                  }}
+                >
+                  {deptConfig.stageLabels[stage]}
+                </button>
+              ))
+            )}
 
             <div className="w-px h-6 bg-bg-border" />
 
