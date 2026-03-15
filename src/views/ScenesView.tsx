@@ -1722,7 +1722,7 @@ export function ScenesView() {
     try {
       await bulkUpdateCells(sheetName, updates.map((u) => ({
         rowIndex: u.sceneIndex, stage: u.stage, value: u.newValue,
-      })));
+      })), currentUser?.id);
       // 복수 변경이므로 snapshot relay로 다른 창에 전달
       syncInBackground();
     } catch (err) {
