@@ -407,13 +407,12 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
     <motion.div
       data-scene-id={selectionId ?? scene.sceneId}
       className={cn(
-        'rounded-xl flex flex-col group relative cursor-pointer transition-all duration-200 hover:-translate-y-0.5',
+        'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:border-text-secondary/30',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
       )}
       style={{
-        padding: '1px',
-        background: deptConfig.color,
+        borderLeft: `4px solid ${deptConfig.color}`,
         boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
         overflow: 'visible',
       }}
@@ -426,8 +425,6 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
       } : {})}
     >
-      {/* 카드 내부 */}
-      <div className="bg-bg-card rounded-[11px] flex flex-col flex-1 relative" style={{ overflow: 'visible' }}>
       {/* 하이라이트 배경 오버레이 */}
       {isHighlighted && <div className="scene-highlight-bg" />}
 
@@ -562,7 +559,6 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
           />
           <Confetti active={celebrating} onComplete={onCelebrationEnd} />
         </div>
-      </div>
       </div>
     </motion.div>
   );
@@ -947,186 +943,194 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
   };
 
   return (
-    <div className="bg-bg-card border border-bg-border rounded-xl p-4 flex flex-col gap-4 shadow-lg shadow-accent/5">
-      {/* ── 접두사 세그먼트 컨트롤 ── */}
-      <div className="flex items-center gap-3">
-        <span className="text-[11px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">접두사</span>
-        <div className="flex items-center gap-2">
-          {/* 세그먼트 라디오 (pill 스타일) */}
-          <div className="flex bg-bg-primary rounded-lg p-0.5 border border-bg-border">
-            {(['alphabet', 'sc', 'custom'] as PrefixMode[]).map((mode) => {
-              const labels: Record<PrefixMode, string> = { alphabet: 'A-X', sc: 'SC', custom: '커스텀' };
-              const isActive = prefixMode === mode;
-              return (
-                <button
-                  key={mode}
-                  onClick={() => updatePrefix(mode)}
+    <div className="bg-bg-card border border-bg-border rounded-xl p-5 flex flex-col gap-5 shadow-lg shadow-accent/5">
+      {/* ── 타이틀 ── */}
+      <h3 className="text-sm font-bold text-text-primary">새 씬 추가</h3>
+
+      {/* ── 메인 영역: 좌(입력) + 우(이미지) ── */}
+      <div className="grid grid-cols-[1fr_auto] gap-6">
+        {/* 좌측: 입력 필드들 */}
+        <div className="flex flex-col gap-4">
+          {/* 접두사 & 씬 번호 행 */}
+          <div>
+            <span className="text-[11px] text-text-secondary font-medium mb-2 block">접두사 & 씬 번호</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* 세그먼트 라디오 */}
+              <div className="flex bg-bg-primary rounded-lg p-0.5 border border-bg-border">
+                {(['alphabet', 'sc', 'custom'] as PrefixMode[]).map((mode) => {
+                  const labels: Record<PrefixMode, string> = { alphabet: 'A-X', sc: 'SC', custom: '커스텀' };
+                  const isActive = prefixMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      onClick={() => updatePrefix(mode)}
+                      className={cn(
+                        'px-3 py-1 text-xs rounded-md transition-all duration-200 font-medium',
+                        isActive
+                          ? 'bg-accent text-white shadow-sm shadow-accent/30'
+                          : 'text-text-secondary hover:text-text-primary',
+                      )}
+                    >
+                      {labels[mode]}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* 접두사 값 */}
+              {prefixMode === 'alphabet' && (
+                <div className="relative">
+                  <select
+                    value={alphaPrefix}
+                    onChange={(e) => { setAlphaPrefix(e.target.value); setNumber(suggestNextNumber(e.target.value, existingSceneIds)); }}
+                    className="appearance-none bg-bg-primary border border-bg-border rounded-lg pl-3 pr-7 py-1 text-sm text-text-primary font-mono cursor-pointer hover:border-accent/50 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all w-14"
+                  >
+                    {ALPHABET_PREFIXES.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary/50 pointer-events-none" />
+                </div>
+              )}
+              {prefixMode === 'sc' && (
+                <span className="px-3 py-1 text-sm text-accent font-mono font-bold bg-accent/10 rounded-lg border border-accent/20">sc</span>
+              )}
+              {prefixMode === 'custom' && (
+                <input
+                  autoFocus
+                  value={customPrefix}
+                  onChange={(e) => { setCustomPrefix(e.target.value); setNumber(suggestNextNumber(e.target.value, existingSceneIds)); }}
+                  onKeyDown={handleKeyDown}
+                  placeholder="접두사 입력"
+                  className="w-24 bg-bg-primary border border-bg-border rounded-lg px-3 py-1 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                />
+              )}
+
+              {/* 번호 입력 */}
+              <div className="relative flex items-center">
+                <input
+                  value={number}
+                  onChange={(e) => setNumber(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="001"
                   className={cn(
-                    'px-3 py-1 text-xs rounded-md transition-all duration-200 font-medium',
-                    isActive
-                      ? 'bg-accent text-white shadow-sm shadow-accent/30'
-                      : 'text-text-secondary hover:text-text-primary',
+                    'w-20 bg-bg-primary border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono font-bold placeholder:text-text-secondary/45 pr-8 focus:ring-1 focus:ring-accent/20 outline-none transition-all',
+                    isDuplicate ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-bg-border focus:border-accent'
                   )}
-                >
-                  {labels[mode]}
-                </button>
-              );
-            })}
-          </div>
+                />
+                <div className="absolute right-1 top-1 bottom-1 flex flex-col gap-px">
+                  <button onClick={() => stepNumber(1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
+                    <ChevronUp size={10} />
+                  </button>
+                  <button onClick={() => stepNumber(-1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
+                    <ChevronDown size={10} />
+                  </button>
+                </div>
+              </div>
 
-          {/* 접두사 값 선택/입력 */}
-          {prefixMode === 'alphabet' && (
-            <div className="relative">
-              <select
-                value={alphaPrefix}
-                onChange={(e) => { setAlphaPrefix(e.target.value); setNumber(suggestNextNumber(e.target.value, existingSceneIds)); }}
-                className="appearance-none bg-bg-primary border border-bg-border rounded-lg pl-3 pr-7 py-1 text-sm text-text-primary font-mono cursor-pointer hover:border-accent/50 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all w-14"
-              >
-                {ALPHABET_PREFIXES.map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-              <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary/50 pointer-events-none" />
-            </div>
-          )}
-          {prefixMode === 'sc' && (
-            <span className="px-3 py-1 text-sm text-accent font-mono font-bold bg-accent/10 rounded-lg border border-accent/20">sc</span>
-          )}
-          {prefixMode === 'custom' && (
-            <input
-              autoFocus
-              value={customPrefix}
-              onChange={(e) => { setCustomPrefix(e.target.value); setNumber(suggestNextNumber(e.target.value, existingSceneIds)); }}
-              onKeyDown={handleKeyDown}
-              placeholder="접두사 입력"
-              className="w-24 bg-bg-primary border border-bg-border rounded-lg px-3 py-1 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
-            />
-          )}
-
-          {/* 미리보기 뱃지 */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-accent/10 border border-accent/20 rounded-lg">
-            <span className="text-[11px] text-accent/60">ID</span>
-            <span className="text-xs text-accent font-mono font-bold">{sceneId}</span>
-            {isDuplicate && (
-              <span className="text-[11px] text-red-400 bg-red-500/10 px-1.5 rounded">중복</span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── 2열 레이아웃: 왼쪽 이미지 / 오른쪽 정보 ── */}
-      <div className="grid grid-cols-[auto_1fr] gap-4">
-        {/* 왼쪽: 이미지 슬롯 */}
-        {!bulkMode && (
-          <div className="flex gap-2">
-            <AddFormImageSlot label="스토리보드" base64={sbImage} onSetBase64={setSbImage} />
-            <AddFormImageSlot label="가이드" base64={guideImage} onSetBase64={setGuideImage} />
-          </div>
-        )}
-        {bulkMode && <div />}
-
-        {/* 오른쪽: 번호 + 담당자 + 메모 + 레이아웃 */}
-        <div className="flex flex-col gap-3">
-          {/* 번호 행 */}
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">번호</span>
-            <div className="relative flex items-center">
-              <input
-                value={number}
-                onChange={(e) => setNumber(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="001"
+              {/* 일괄 생성 토글 */}
+              <button
+                onClick={() => setBulkMode(!bulkMode)}
                 className={cn(
-                  'w-20 bg-bg-primary border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 pr-8 focus:ring-1 focus:ring-accent/20 outline-none transition-all',
-                  isDuplicate ? 'border-red-500 focus:border-red-500 focus:ring-red-500/20' : 'border-bg-border focus:border-accent'
+                  'px-2 py-1 text-[11px] rounded-md font-medium transition-colors cursor-pointer',
+                  bulkMode ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border',
                 )}
-              />
-              <div className="absolute right-1 top-1 bottom-1 flex flex-col gap-px">
-                <button onClick={() => stepNumber(1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
-                  <ChevronUp size={10} />
-                </button>
-                <button onClick={() => stepNumber(-1)} className="flex-1 px-0.5 rounded-sm text-text-secondary/50 hover:text-accent hover:bg-accent/10 transition-all" tabIndex={-1}>
-                  <ChevronDown size={10} />
-                </button>
+              >
+                일괄
+              </button>
+              {bulkMode && (
+                <>
+                  <span className="text-text-secondary/40 text-xs">~</span>
+                  <input
+                    value={bulkEnd}
+                    onChange={(e) => setBulkEnd(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="끝번호"
+                    className="w-20 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                  />
+                </>
+              )}
+
+              {/* ID 미리보기 뱃지 */}
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-accent/10 border border-accent/20 rounded-lg">
+                <span className="text-[11px] text-accent/60">ID</span>
+                <span className="text-xs text-accent font-mono font-bold">{sceneId}</span>
+                {isDuplicate && (
+                  <span className="text-[11px] text-red-400 bg-red-500/10 px-1.5 rounded">중복</span>
+                )}
               </div>
             </div>
-
-            {/* 일괄 생성 토글 */}
-            <button
-              onClick={() => setBulkMode(!bulkMode)}
-              className={cn(
-                'px-2 py-1 text-[11px] rounded-md font-medium transition-colors cursor-pointer',
-                bulkMode ? 'bg-accent/20 text-accent border border-accent/30' : 'text-text-secondary/50 hover:text-text-primary border border-bg-border',
-              )}
-            >
-              일괄
-            </button>
-            {bulkMode && (
-              <>
-                <span className="text-text-secondary/40 text-xs">~</span>
-                <input
-                  value={bulkEnd}
-                  onChange={(e) => setBulkEnd(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="끝번호"
-                  className="w-20 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
-                />
-              </>
-            )}
-
-            <div className="w-px h-6 bg-bg-border" />
-
-            <AssigneeSelect
-              value={assignee}
-              onChange={setAssignee}
-              placeholder="담당자"
-              className="w-24"
-            />
           </div>
 
-          {/* 메모 + 레이아웃 행 */}
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] uppercase tracking-widest text-text-secondary/60 font-medium w-14 shrink-0">정보</span>
+          {/* 담당자 + 레이아웃 ID (2열) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <span className="text-[11px] text-text-secondary font-medium mb-1.5 block">담당자</span>
+              <AssigneeSelect
+                value={assignee}
+                onChange={setAssignee}
+                placeholder="담당자 검색 또는 입력"
+                className="w-full"
+              />
+            </div>
+            <div>
+              <span className="text-[11px] text-text-secondary font-medium mb-1.5 block">레이아웃 ID (선택)</span>
+              <input
+                value={layoutId}
+                onChange={(e) => setLayoutId(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="레이아웃 ID"
+                className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+              />
+            </div>
+          </div>
+
+          {/* 메모 (전체 폭) */}
+          <div>
+            <span className="text-[11px] text-text-secondary font-medium mb-1.5 block">메모 (선택)</span>
             <input
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="메모 (선택)"
-              className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
-            />
-            <input
-              value={layoutId}
-              onChange={(e) => setLayoutId(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="레이아웃 ID (선택)"
-              className="w-36 bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+              placeholder="이 씬에 대한 메모를 입력하세요"
+              className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary placeholder:text-text-secondary/45 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
             />
           </div>
+        </div>
 
-          {/* 하단 버튼 */}
-          <div className="flex gap-2 items-center justify-end">
-            <span className="text-[11px] text-text-secondary/50">
-              Enter 추가 · Esc 취소
-            </span>
-            <button
-              onClick={onCancel}
-              className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary border border-bg-border hover:border-text-secondary/30 rounded-lg transition-all"
-            >
-              취소
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={isDuplicate || !prefix || (bulkMode && !bulkEnd)}
-              className={cn(
-                'px-5 py-1.5 text-white text-xs font-medium rounded-lg transition-all',
-                isDuplicate || !prefix || (bulkMode && !bulkEnd)
-                  ? 'bg-gray-600 cursor-not-allowed opacity-50'
-                  : 'bg-accent hover:bg-accent/90 shadow-sm shadow-accent/25 hover:shadow-md hover:shadow-accent/30',
-              )}
-            >
-              {bulkMode ? `일괄 추가` : '+ 추가'}
-            </button>
+        {/* 우측: 이미지 슬롯 */}
+        {!bulkMode && (
+          <div className="flex gap-3">
+            <AddFormImageSlot label="스토리보드" base64={sbImage} onSetBase64={setSbImage} />
+            <AddFormImageSlot label="가이드" base64={guideImage} onSetBase64={setGuideImage} />
           </div>
+        )}
+      </div>
+
+      {/* ── 하단 버튼 ── */}
+      <div className="flex items-center justify-between border-t border-bg-border/50 pt-4">
+        <span className="text-[11px] text-text-secondary/50">
+          Enter: 추가 · Esc: 취소
+        </span>
+        <div className="flex gap-2">
+          <button
+            onClick={onCancel}
+            className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary transition-all cursor-pointer"
+          >
+            취소
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isDuplicate || !prefix || (bulkMode && !bulkEnd)}
+            className={cn(
+              'px-5 py-1.5 text-white text-xs font-medium rounded-lg transition-all',
+              isDuplicate || !prefix || (bulkMode && !bulkEnd)
+                ? 'bg-gray-600 cursor-not-allowed opacity-50'
+                : 'bg-[#10B981] hover:bg-[#10B981]/90 shadow-sm shadow-[#10B981]/25 hover:shadow-md hover:shadow-[#10B981]/30',
+            )}
+          >
+            {bulkMode ? `일괄 추가` : '+ 추가'}
+          </button>
         </div>
       </div>
     </div>

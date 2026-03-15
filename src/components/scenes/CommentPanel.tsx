@@ -27,6 +27,15 @@ function formatTime(iso: string): string {
   return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
 }
 
+function formatTimeShort(iso: string): string {
+  const d = new Date(iso);
+  const h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, '0');
+  const ampm = h < 12 ? '오전' : '오후';
+  const h12 = h % 12 || 12;
+  return `${ampm} ${h12}:${m}`;
+}
+
 // ─── 메인 컴포넌트 ───────────────────────────
 
 interface CommentPanelProps {
@@ -214,8 +223,8 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* 댓글 목록 */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
+      {/* 댓글 목록 — 채팅 스타일 */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0">
         {comments.length === 0 ? (
           <div className="text-center py-10">
             <p className="text-text-secondary text-xs">아직 의견이 없습니다</p>
@@ -227,41 +236,41 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
             const isEditing = editingId === comment.id;
             return (
               <div key={comment.id} className="group">
-                <div className="flex items-start gap-2">
-                  {/* 아바타 */}
-                  <div
-                    className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5"
-                    style={{
-                      backgroundColor: isOwn
-                        ? 'rgb(var(--color-accent) / 0.2)'
-                        : 'rgb(var(--color-bg-border))',
-                    }}
-                  >
-                    <span
-                      className="text-[11px] font-bold"
-                      style={{ color: isOwn ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))' }}
-                    >
-                      {comment.userName.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-text-primary">
+                {/* 메타: 이름 + 시간 */}
+                <div className={`flex items-center gap-2 mb-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                  {isOwn ? (
+                    <>
+                      <span className="text-[11px] text-text-secondary/50">
+                        {formatTimeShort(comment.createdAt)}
+                      </span>
+                      <span className="text-xs font-semibold text-text-primary">
+                        {comment.userName}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-xs font-semibold text-text-primary">
                         {comment.userName}
                       </span>
                       <span className="text-[11px] text-text-secondary/50">
-                        {formatTime(comment.createdAt)}
+                        {formatTimeShort(comment.createdAt)}
                       </span>
-                      {comment.editedAt && (
-                        <span className="text-[11px] text-text-secondary/30 italic">수정됨</span>
-                      )}
-                    </div>
+                    </>
+                  )}
+                  {comment.editedAt && (
+                    <span className="text-[11px] text-text-secondary/30 italic">수정됨</span>
+                  )}
+                </div>
+
+                {/* 말풍선 */}
+                <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                  <div className="max-w-[85%] relative group/bubble">
                     {isEditing ? (
-                      <div className="mt-1">
+                      <div>
                         <textarea
                           value={editText}
                           onChange={(e) => setEditText(e.target.value)}
-                          className="w-full bg-bg-primary border border-bg-border rounded-lg px-2 py-1.5 text-xs text-text-primary resize-none focus:outline-none focus:border-accent"
+                          className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary resize-none focus:outline-none focus:border-accent min-w-[200px]"
                           rows={2}
                           autoFocus
                           onKeyDown={(e) => {
@@ -288,30 +297,37 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
                         </div>
                       </div>
                     ) : (
-                      <p className="text-xs text-text-secondary mt-0.5 break-words leading-relaxed">
+                      <div
+                        className="rounded-xl px-3.5 py-2.5 text-xs leading-relaxed break-words"
+                        style={{
+                          backgroundColor: isOwn ? 'rgba(16, 185, 129, 0.18)' : '#2A2A35',
+                          color: 'rgb(var(--color-text-primary))',
+                        }}
+                      >
                         {renderText(comment.text)}
-                      </p>
+                      </div>
+                    )}
+
+                    {/* 수정/삭제 (자기 댓글만) — 호버 시 표시 */}
+                    {isOwn && !isEditing && (
+                      <div className={`absolute top-0 ${isOwn ? '-left-14' : '-right-14'} flex gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity`}>
+                        <button
+                          onClick={() => { setEditingId(comment.id); setEditText(comment.text); }}
+                          className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+                          title="수정"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(comment.id)}
+                          className="p-1 rounded hover:bg-status-none/20 text-text-secondary hover:text-status-none transition-colors cursor-pointer"
+                          title="삭제"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     )}
                   </div>
-                  {/* 수정/삭제 (자기 댓글만) */}
-                  {isOwn && !isEditing && (
-                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      <button
-                        onClick={() => { setEditingId(comment.id); setEditText(comment.text); }}
-                        className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
-                        title="수정"
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(comment.id)}
-                        className="p-1 rounded hover:bg-status-none/20 text-text-secondary hover:text-status-none transition-colors cursor-pointer"
-                        title="삭제"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  )}
                 </div>
               </div>
             );
@@ -343,9 +359,9 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
             ref={inputRef}
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
-            placeholder="의견을 입력하세요... (@로 태그)"
-            className="flex-1 bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent"
-            rows={2}
+            placeholder="댓글 입력..."
+            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent"
+            rows={1}
             onKeyDown={(e) => {
               // @멘션 드롭다운 키보드 탐색
               if (showMentions && filteredUsers.length > 0) {
@@ -379,12 +395,12 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
           <button
             onClick={handleSubmit}
             disabled={!input.trim() || submitting}
-            className="p-2.5 rounded-lg bg-accent hover:bg-accent/80 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-colors cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-[#10B981] hover:bg-[#10B981]/80 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors cursor-pointer"
           >
             {submitting ? (
               <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             ) : (
-              <Send size={14} />
+              '전송'
             )}
           </button>
         </div>

@@ -70,14 +70,14 @@ export function UnifiedSceneCard({
     <motion.div
       data-scene-id={sceneId}
       className={cn(
-        'rounded-xl flex flex-col group relative cursor-pointer transition-all duration-200',
-        'hover:-translate-y-0.5',
+        'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer transition-all duration-200',
+        'hover:-translate-y-0.5 hover:border-text-secondary/30',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
       )}
       style={{
-        padding: '1px',
-        background: `linear-gradient(to bottom, ${DEPARTMENT_CONFIGS.bg.color}, ${DEPARTMENT_CONFIGS.acting.color})`,
+        borderLeft: '4px solid',
+        borderImage: `linear-gradient(to bottom, ${DEPARTMENT_CONFIGS.bg.color}, ${DEPARTMENT_CONFIGS.acting.color}) 1`,
         boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
         overflow: 'visible',
       }}
@@ -90,8 +90,6 @@ export function UnifiedSceneCard({
         transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] },
       } : {})}
     >
-      {/* 카드 내부 (그라데이션 보더 안쪽) */}
-      <div className="bg-bg-card rounded-[11px] flex flex-col flex-1 relative" style={{ overflow: 'visible' }}>
         {isHighlighted && <div className="scene-highlight-bg" />}
 
         {isSelected && (
@@ -184,7 +182,6 @@ export function UnifiedSceneCard({
         <div className="px-4 pb-3.5 pt-1 relative overflow-visible">
           <Confetti active={celebrating} onComplete={onCelebrationEnd} />
         </div>
-      </div>
     </motion.div>
   );
 }

@@ -321,7 +321,6 @@ export function SceneDetailModal({
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
-  const [showComments, setShowComments] = useState(false);
   const [showRevisions, setShowRevisions] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
   const [revisionCount, setRevisionCount] = useState(0);
@@ -588,11 +587,9 @@ export function SceneDetailModal({
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        {/* 모달 래퍼 — 댓글 패널은 absolute로 배치하여 레이아웃 점프 방지 */}
+        {/* 모달 래퍼 — 좌: 본체 + 우: 댓글 패널 (항상 표시) */}
         <motion.div
-          className="relative"
-          animate={{ x: showComments ? -160 : 0 }}
-          transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+          className="relative flex gap-3"
           onClick={(e) => e.stopPropagation()}
         >
             {/* 모달 본체 */}
@@ -840,27 +837,6 @@ export function SceneDetailModal({
               )}
             </motion.div>
 
-            {/* ── 사이드 탭 버튼들 — 패널 열리면 해당 버튼 접힘 ── */}
-            <AnimatePresence>
-              {!showComments && (
-                <motion.button
-                  key="comment-tab"
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
-                  transition={{ delay: 0.15, duration: 0.2 }}
-                  onClick={() => { setShowComments(true); setShowRevisions(false); }}
-                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:bg-accent/30 hover:text-accent transition-all cursor-pointer"
-                  title="의견"
-                >
-                  <MessageCircle size={18} />
-                  {commentCount > 0 && (
-                    <span className="text-[11px] font-bold leading-none">{commentCount}</span>
-                  )}
-                </motion.button>
-              )}
-            </AnimatePresence>
-
             {/* ── 컴포지팅 리비전 탭 버튼 ── */}
             <AnimatePresence>
               {!showRevisions && (
@@ -870,8 +846,8 @@ export function SceneDetailModal({
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
                   transition={{ delay: 0.2, duration: 0.2 }}
-                  onClick={() => { setShowRevisions(true); setShowComments(false); }}
-                  className="absolute -right-11 top-36 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer"
+                  onClick={() => setShowRevisions(true)}
+                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer"
                   style={openRevCount > 0 ? { backgroundColor: 'rgba(253, 203, 110, 0.15)' } : {}}
                   title="컴포지팅 리비전"
                 >
@@ -883,46 +859,7 @@ export function SceneDetailModal({
               )}
             </AnimatePresence>
 
-          {/* ── 댓글 패널 — absolute 배치로 레이아웃 점프 방지 ── */}
-          <AnimatePresence>
-            {showComments && (
-              <motion.div
-                key="comment-panel"
-                initial={{ opacity: 0, x: 30, scaleX: 0.9 }}
-                animate={{ opacity: 1, x: 0, scaleX: 1 }}
-                exit={{ opacity: 0, x: 30, scaleX: 0.9 }}
-                transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                style={{ transformOrigin: 'left center' }}
-                className="absolute left-full top-0 ml-3 w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col"
-              >
-                {/* 패널 헤더 */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border shrink-0">
-                  <div className="flex items-center gap-2">
-                    <MessageCircle size={14} className="text-accent" />
-                    <h3 className="text-sm font-medium text-text-primary">의견</h3>
-                    {commentCount > 0 && (
-                      <span className="text-[11px] bg-accent/20 text-accent px-1.5 py-0.5 rounded-full font-medium">
-                        {commentCount}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setShowComments(false)}
-                    className="p-1 text-text-secondary hover:text-text-primary rounded transition-colors cursor-pointer"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-                {/* 패널 바디 */}
-                <CommentPanel
-                  sceneKey={sceneKey}
-                  onCountChange={setCommentCount}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* ── 컴포지팅 리비전 패널 ── */}
+          {/* ── 컴포지팅 리비전 패널 (사이드 토글) ── */}
           <AnimatePresence>
             {showRevisions && (
               <motion.div
@@ -934,7 +871,6 @@ export function SceneDetailModal({
                 style={{ transformOrigin: 'left center' }}
                 className="absolute left-full top-0 ml-3 w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col"
               >
-                {/* 패널 헤더 */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border shrink-0">
                   <div className="flex items-center gap-2">
                     <Film size={14} style={{ color: '#FDCB6E' }} />
@@ -952,7 +888,6 @@ export function SceneDetailModal({
                     <X size={14} />
                   </button>
                 </div>
-                {/* 패널 바디 */}
                 <RevisionPanel
                   sheetName={sheetName}
                   sceneId={scene.sceneId}
@@ -962,6 +897,23 @@ export function SceneDetailModal({
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* ── 댓글 패널 — 항상 표시 ── */}
+          <motion.div
+            key="comment-panel"
+            initial={{ opacity: 0, x: 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.25, delay: 0.1 }}
+            className="w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col shrink-0"
+          >
+            <div className="px-4 py-3 border-b border-bg-border shrink-0">
+              <h3 className="text-sm font-medium text-text-primary">댓글 및 활동</h3>
+            </div>
+            <CommentPanel
+              sceneKey={sceneKey}
+              onCountChange={setCommentCount}
+            />
+          </motion.div>
         </motion.div>
       </motion.div>
 
