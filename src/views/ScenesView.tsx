@@ -7,12 +7,11 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Table2, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { HighlightText } from '@/components/common/HighlightText';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
-import { UnifiedSceneTable } from '@/components/scenes/UnifiedSceneTable';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
@@ -554,112 +553,6 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         <Confetti active={celebrating} onComplete={onCelebrationEnd} />
       </div>
     </motion.div>
-  );
-}
-
-// ─── 테이블 뷰 ──────────────────────────────────────────────────
-
-interface SceneTableProps {
-  scenes: Scene[];
-  allScenes: Scene[];
-  department: Department;
-  commentCounts: Record<string, number>;
-  sheetName: string;
-  onToggle: (sceneId: string, stage: Stage) => void;
-  onDelete: (sceneIndex: number) => void;
-  onOpenDetail: (sceneIndex: number) => void;
-  searchQuery?: string;
-  selectedSceneIds?: Set<string>;
-  onCtrlClick?: (sceneId: string) => void;
-}
-
-
-function SceneTable({ scenes, allScenes, department, commentCounts, sheetName, onToggle, onDelete, onOpenDetail, searchQuery, selectedSceneIds, onCtrlClick }: SceneTableProps) {
-  const deptConfig = DEPARTMENT_CONFIGS[department];
-  return (
-    <div className="overflow-auto rounded-lg border border-bg-border">
-      <table className="w-full text-sm table-fixed">
-        <thead>
-          <tr className="bg-bg-card border-b border-bg-border text-text-secondary text-xs">
-            <th className="w-14 px-2 py-2 text-left font-medium">No</th>
-            <th className="w-24 px-2 py-2 text-left font-medium">씬번호</th>
-            <th className="w-20 px-2 py-2 text-left font-medium">담당자</th>
-            <th className="w-20 px-2 py-2 text-left font-medium">레이아웃</th>
-            <th className="px-2 py-2 text-left font-medium">메모</th>
-            {STAGES.map((s) => (
-              <th key={s} className="w-14 px-1 py-2 text-center font-medium">{deptConfig.stageLabels[s]}</th>
-            ))}
-            <th className="w-14 px-2 py-2 text-center font-medium">진행</th>
-            <th className="w-8 px-1 py-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {scenes.map((scene) => {
-            const pct = sceneProgress(scene);
-            const idx = allScenes.indexOf(scene);
-            return (
-              <tr
-                key={`${scene.sceneId}-${idx}`}
-                className={cn(
-                  'border-b border-bg-border/50 hover:bg-bg-card/50 group cursor-pointer transition-colors',
-                  searchQuery && 'bg-accent/10 border-l-2 border-l-accent/60',
-                  selectedSceneIds?.has(scene.sceneId) && 'bg-accent/10',
-                )}
-                onClick={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
-                    onCtrlClick(scene.sceneId);
-                  } else {
-                    onOpenDetail(idx);
-                  }
-                }}
-              >
-                <td className="px-2 py-2 font-mono text-accent text-xs">
-                  <span className="flex items-center gap-1">
-                    #{scene.no}
-                    {(() => { const cc = commentCounts[`${sheetName}:${scene.no}`]; return cc > 0 ? <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full"><MessageCircle size={10} fill="currentColor" /><span className="text-[11px] font-bold">{cc}</span></span> : null; })()}
-                  </span>
-                </td>
-                <td className="px-2 py-2 text-text-primary text-xs truncate"><HighlightText text={scene.sceneId || '-'} query={searchQuery} /></td>
-                <td className="px-2 py-2 text-text-secondary text-xs truncate"><HighlightText text={scene.assignee || '-'} query={searchQuery} /></td>
-                <td className="px-2 py-2 text-text-secondary font-mono text-xs truncate">{scene.layoutId ? `#${scene.layoutId}` : '-'}</td>
-                <td className="px-2 py-2 text-text-secondary text-xs truncate"><HighlightText text={scene.memo || '-'} query={searchQuery} /></td>
-                {STAGES.map((stage) => (
-                  <td key={stage} className="px-1 py-2 text-center">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
-                      className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto"
-                      style={
-                        scene[stage]
-                          ? { backgroundColor: deptConfig.stageColors[stage], color: 'rgb(var(--color-bg-primary))' }
-                          : { border: '1px solid #2D3041' }
-                      }
-                    >
-                      {scene[stage] ? '✓' : ''}
-                    </button>
-                  </td>
-                ))}
-                <td className="px-2 py-2 text-center">
-                  <span className={cn(
-                    'text-xs font-mono',
-                    pct >= 100 ? 'text-green-400' : pct >= 50 ? 'text-yellow-400' : 'text-text-secondary'
-                  )}>
-                    {Math.round(pct)}%
-                  </span>
-                </td>
-                <td className="px-1 py-2">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onDelete(idx); }}
-                    className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400"
-                  >
-                    ×
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
   );
 }
 
@@ -2747,16 +2640,6 @@ export function ScenesView() {
               <LayoutGrid size={16} />
             </button>
             <button
-              onClick={() => setSceneViewMode('table')}
-              className={cn(
-                'p-2 transition-colors',
-                sceneViewMode === 'table' ? 'bg-accent/20 text-accent' : 'text-text-secondary hover:text-text-primary'
-              )}
-              title="테이블 뷰"
-            >
-              <Table2 size={16} />
-            </button>
-            <button
               onClick={() => setSceneViewMode('sheet')}
               className={cn(
                 'p-2 transition-colors',
@@ -2899,24 +2782,6 @@ export function ScenesView() {
             onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onCtrlClick={(id) => {
-              if (bgPart) toggleSelectedScene(`bg:${id}`);
-              if (actPart) toggleSelectedScene(`act:${id}`);
-            }}
-          />
-        ) : sceneViewMode === 'table' ? (
-          /* 통합 테이블 뷰 */
-          <UnifiedSceneTable
-            mergedScenes={mergedScenes}
-            bgSheetName={bgPart?.sheetName ?? null}
-            actSheetName={actPart?.sheetName ?? null}
-            searchQuery={searchQuery}
-            bgCommentCounts={commentCounts}
-            actCommentCounts={commentCounts}
-            selectedSceneIds={selectedSceneIds}
-            onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
-            onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
-            onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-            onSelect={(id) => {
               if (bgPart) toggleSelectedScene(`bg:${id}`);
               if (actPart) toggleSelectedScene(`act:${id}`);
             }}
@@ -3092,22 +2957,7 @@ export function ScenesView() {
                 </div>
 
                 {/* 그룹 내 씬들 */}
-                {sceneViewMode === 'table' ? (
-                  <SceneTable
-                    scenes={groupScenes}
-                    allScenes={currentPart?.scenes ?? []}
-                    department={effectiveDept}
-                    commentCounts={commentCounts}
-                    sheetName={currentPart?.sheetName ?? ''}
-                    onToggle={handleToggle}
-                    onDelete={handleDeleteScene}
-                    searchQuery={searchQuery}
-                    onOpenDetail={(idx) => setDetailSceneIndex(idx)}
-                    selectedSceneIds={selectedSceneIds}
-                    onCtrlClick={(id) => toggleSelectedScene(id)}
-                  />
-                ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
                     {groupScenes.map((scene, idx) => {
                       const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
                       const sIdx = rawIdx >= 0 ? rawIdx : idx;
@@ -3150,29 +3000,11 @@ export function ScenesView() {
                       );
                     })}
                   </div>
-                )}
               </div>
             );
           })}
         </div>
         )
-      ) : sceneViewMode === 'table' ? (
-        /* ── 테이블 뷰 (플랫) ── */
-        <div className="flex-1 overflow-auto">
-          <SceneTable
-            scenes={scenes}
-            allScenes={currentPart?.scenes ?? []}
-            department={effectiveDept}
-            commentCounts={commentCounts}
-            sheetName={currentPart?.sheetName ?? ''}
-            onToggle={handleToggle}
-            onDelete={handleDeleteScene}
-            searchQuery={searchQuery}
-            onOpenDetail={(idx) => setDetailSceneIndex(idx)}
-            selectedSceneIds={selectedSceneIds}
-            onCtrlClick={(id) => toggleSelectedScene(id)}
-          />
-        </div>
       ) : sceneViewMode === 'sheet' ? (
         /* ── 시트 뷰 (플랫) ── */
         <div className="flex-1 overflow-auto">
