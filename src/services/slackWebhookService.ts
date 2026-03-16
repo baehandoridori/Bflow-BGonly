@@ -22,7 +22,8 @@ interface MentionWebhookParams {
 export async function sendMentionWebhook(params: MentionWebhookParams): Promise<void> {
   const { commentText, episodeLabel, sceneId, partLabel, authorSlackId, targetSlackId } = params;
   try {
-    await window.electronAPI.sendSlackWebhook({
+    console.log('[SlackWebhook] 전송 시도:', { episodeLabel, sceneId, authorSlackId, targetSlackId });
+    const result = await window.electronAPI.sendSlackWebhook({
       comment: commentText,
       EP: episodeLabel,
       time: formatKoreanTime(new Date()),
@@ -31,6 +32,7 @@ export async function sendMentionWebhook(params: MentionWebhookParams): Promise<
       name_target: targetSlackId,
       part: partLabel,
     });
+    console.log('[SlackWebhook] 전송 성공:', result);
   } catch (err) {
     console.error('[SlackWebhook] 전송 실패:', err);
   }

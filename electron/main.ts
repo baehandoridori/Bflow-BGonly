@@ -552,12 +552,15 @@ ipcMain.handle('supabase:write-metadata', wrapIpc(async (_e: unknown, type: stri
 const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/triggers/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';
 
 ipcMain.handle('slack:send-webhook', wrapIpc(async (_e: unknown, payload: Record<string, string>) => {
+  console.log('[Slack Webhook] 요청 페이로드:', JSON.stringify(payload));
   const res = await fetch(SLACK_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`Slack webhook failed: ${res.status}`);
+  const body = await res.text();
+  console.log('[Slack Webhook] 응답:', res.status, body);
+  if (!res.ok) throw new Error(`Slack webhook failed: ${res.status} — ${body}`);
   return { ok: true };
 }));
 

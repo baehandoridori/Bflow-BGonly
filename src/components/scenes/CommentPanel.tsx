@@ -112,6 +112,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
       await addComment(sceneKey, comment);
 
       // 슬랙 웹훅: 멘션된 사용자에게 알림 전송 (fire-and-forget)
+      console.log('[댓글 웹훅] mentions:', mentions, 'currentUser.slackId:', currentUser.slackId);
       if (mentions.length > 0 && currentUser.slackId) {
         const [sheetName, sceneId] = sceneKey.split(':');
         const parts = sheetName.match(/^EP(\d+)_([A-Z])_/);
