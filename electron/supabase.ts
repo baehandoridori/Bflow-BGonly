@@ -717,7 +717,7 @@ export async function updateRevision(
     status: 'status', priority: 'priority', description: 'description',
     frameNo: 'frame_no', imageUrl: 'image_url', assignee: 'assignee',
     resolvedBy: 'resolved_by', resolvedNote: 'resolved_note',
-    resolvedAt: 'resolved_at',
+    resolvedAt: 'resolved_at', updatedAt: 'updated_at',
   };
   for (const [k, v] of Object.entries(updates)) {
     dbUpdates[fieldMap[k] || k] = v;
