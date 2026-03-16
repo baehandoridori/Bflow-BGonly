@@ -133,6 +133,9 @@ function executeAction(action, params) {
     case 'readMetadata':
       return readMetadata(params.type, params.key);
 
+    case 'readAllMetadata':
+      return readAllMetadataFromSheet();
+
     case 'writeMetadata':
       writeMetadata(params.type, params.key, params.value || '');
       return null;
@@ -204,6 +207,22 @@ function executeAction(action, params) {
 
     case 'deleteComment':
       deleteCommentFromSheet(params.commentId);
+      return null;
+
+    // 컴포지팅 리비전 관련 액션
+    case 'readRevisions':
+      return readRevisions();
+
+    case 'addRevision':
+      addRevisionToSheet(
+        params.id, params.sceneKey, parseInt(params.revisionNo, 10), params.status,
+        params.description, params.imageUrl, params.department,
+        params.requesterId, params.requesterName, params.assignee, params.createdAt
+      );
+      return null;
+
+    case 'updateRevision':
+      updateRevisionInSheet(params.id, params);
       return null;
 
     // Phase 0-4: _USERS 관련 액션
@@ -1114,6 +1133,28 @@ function ensureMetadataSheet() {
 }
 
 /**
+ * 모든 메타데이터를 한 번에 읽는다 (2N 개별 호출 대체).
+ * @return {Array<{ type: string, key: string, value: string, updatedAt: string }>}
+ */
+function readAllMetadataFromSheet() {
+  var sheet = ensureMetadataSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+  var result = [];
+  for (var i = 0; i < data.length; i++) {
+    result.push({
+      type: String(data[i][0]),
+      key: String(data[i][1]),
+      value: String(data[i][2]),
+      updatedAt: String(data[i][3])
+    });
+  }
+  return result;
+}
+
+/**
  * 메타데이터를 읽는다.
  * @param {string} type  메타데이터 유형 (예: 'part-memo', 'deleted', 'episode-memo')
  * @param {string} key   키 (예: sheetName 또는 episodeNumber)
@@ -1720,4 +1761,81 @@ function deleteUserFromSheet(userId) {
       return;
     }
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 컴포지팅 리비전: _COMP_REVISIONS 탭
+// ═══════════════════════════════════════════════════════════════
+
+var REVISIONS_SHEET_NAME = '_COMP_REVISIONS';
+var REVISIONS_HEADERS = ['id', 'sceneKey', 'revisionNo', 'status', 'description', 'imageUrl', 'department', 'requesterId', 'requesterName', 'assignee', 'resolvedBy', 'resolvedNote', 'createdAt', 'updatedAt', 'resolvedAt'];
+
+function ensureRevisionsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(REVISIONS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(REVISIONS_SHEET_NAME);
+    sheet.appendRow(REVISIONS_HEADERS);
+    sheet.getRange(1, 1, 1, REVISIONS_HEADERS.length).setFontWeight('bold');
+  }
+  return sheet;
+}
+
+/**
+ * 전체 리비전을 읽어온다.
+ */
+function readRevisions() {
+  var sheet = ensureRevisionsSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REVISIONS_HEADERS.length).getValues();
+  var results = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var obj = {};
+    for (var j = 0; j < REVISIONS_HEADERS.length; j++) {
+      obj[REVISIONS_HEADERS[j]] = String(row[j] || '');
+    }
+    obj.revisionNo = parseInt(obj.revisionNo, 10) || 0;
+    results.push(obj);
+  }
+  return results;
+}
+
+/**
+ * 리비전을 추가한다.
+ */
+function addRevisionToSheet(id, sceneKey, revisionNo, status, description, imageUrl, department, requesterId, requesterName, assignee, createdAt) {
+  var sheet = ensureRevisionsSheet();
+  sheet.appendRow([
+    id, sceneKey, revisionNo, status, description, imageUrl || '',
+    department || '', requesterId, requesterName, assignee || '',
+    '', '', createdAt, createdAt, ''
+  ]);
+}
+
+/**
+ * 리비전을 업데이트한다.
+ */
+function updateRevisionInSheet(id, params) {
+  var sheet = ensureRevisionsSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('리비전을 찾을 수 없습니다');
+
+  var data = sheet.getRange(2, 1, lastRow - 1, REVISIONS_HEADERS.length).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === id) {
+      var rowNum = i + 2;
+      for (var key in params) {
+        if (key === 'id' || key === 'action') continue;
+        var colIndex = REVISIONS_HEADERS.indexOf(key);
+        if (colIndex >= 0) {
+          sheet.getRange(rowNum, colIndex + 1).setValue(params[key]);
+        }
+      }
+      return;
+    }
+  }
+  throw new Error('리비전을 찾을 수 없습니다: ' + id);
 }

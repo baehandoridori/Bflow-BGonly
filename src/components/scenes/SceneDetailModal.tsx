@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { toast as sonnerToast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -11,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageCircle,
+  Film,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
@@ -20,7 +22,10 @@ import { AssigneeSelect, getUserColor } from '@/components/common/AssigneeSelect
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { CommentPanel } from './CommentPanel';
+import { RevisionPanel } from './RevisionPanel';
 import { getComments } from '@/services/commentService';
+import { useRevisionStore } from '@/stores/useRevisionStore';
+import { buildSceneKey } from '@/services/revisionService';
 
 // ─── 타입 ──────────────────────────────────────────
 
@@ -82,16 +87,21 @@ function PropertyRow({ label, value, placeholder, onSave }: PropertyRowProps) {
               if (e.key === 'Enter') commit();
               if (e.key === 'Escape') { setDraft(value); setEditing(false); }
             }}
-            className="w-full bg-bg-primary border border-accent/50 rounded-md px-2.5 py-1 text-sm text-text-primary outline-none focus:border-accent"
+            className="w-full bg-bg-primary border border-accent/50 rounded-md px-2.5 py-1 text-sm text-text-primary outline-none focus:border-accent transition-shadow focus:shadow-[0_0_8px_rgba(108,92,231,0.4)]"
           />
         ) : (
-          <span className="text-sm text-text-primary">
-            {value || (
-              <span className="text-text-secondary/50 italic">
-                {placeholder ?? '비어 있음'}
-              </span>
-            )}
-          </span>
+          <div
+            onClick={() => setEditing(true)}
+            className="w-full rounded-md px-2.5 py-1 border border-transparent cursor-pointer transition-all duration-200 hover:border-accent/30 hover:bg-accent/5 hover:shadow-[0_0_8px_rgba(108,92,231,0.15)]"
+          >
+            <span className="text-sm text-text-primary">
+              {value || (
+                <span className="text-text-secondary/50 italic">
+                  {placeholder ?? '비어 있음'}
+                </span>
+              )}
+            </span>
+          </div>
         )}
       </div>
       {!editing && (
@@ -122,6 +132,7 @@ interface ImageSlotProps {
   label: string;
   url: string;
   loading: boolean;
+  uploading?: boolean;
   onPickFile: () => void;
   onPasteClipboard: () => void;
   onRemove: () => void;
@@ -134,6 +145,7 @@ function ImageSlot({
   label,
   url,
   loading,
+  uploading,
   onPickFile,
   onPasteClipboard,
   onRemove,
@@ -198,6 +210,15 @@ function ImageSlot({
                 }
               }}
             />
+            {/* 업로드 중 오버레이 */}
+            {uploading && (
+              <div className="absolute inset-0 bg-overlay/40 rounded-xl flex items-center justify-center">
+                <div className="flex items-center gap-2 text-sm text-white bg-black/40 px-3 py-1.5 rounded-lg backdrop-blur-sm">
+                  <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  업로드중...
+                </div>
+              </div>
+            )}
             {/* 호버 오버레이 — 아이콘 확대 */}
             <div className="absolute inset-0 bg-overlay/0 group-hover:bg-overlay/50 transition-colors rounded-xl flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100">
               <button
@@ -305,13 +326,19 @@ export function SceneDetailModal({
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
-  const [showComments, setShowComments] = useState(false);
+  const [showRevisions, setShowRevisions] = useState(false);
   const [commentCount, setCommentCount] = useState(0);
+  const [revisionCount, setRevisionCount] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState<'storyboard' | 'guide' | null>(null);
+
+  // 이미지 즉시 프리뷰용 낙관적 URL (업로드 중 base64 표시)
+  const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const sceneKey = `${sheetName}:${scene.no}`;
+  const revisionSceneKey = buildSceneKey(sheetName, scene.sceneId);
+  const openRevCount = useRevisionStore((s) => s.getOpenCount(revisionSceneKey));
 
   // 댓글 수 로드
   useEffect(() => {
@@ -360,19 +387,23 @@ export function SceneDetailModal({
           try {
             setImageLoading(imageType);
             const base64 = await resizeBlob(blob);
+            // 즉시 프리뷰: base64를 낙관적으로 표시
+            setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
             const { saveImage: si } = await import('@/utils/imageUtils');
             const url = await si(
               base64,
               sheetName,
               scene.sceneId || String(scene.no),
               imageType,
-  
+
             );
             const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
             onFieldUpdate(sceneIndex, field, url);
+            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
           } catch (err) {
             console.error('[Ctrl+V 실패]', err);
-            alert(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
+            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+            sonnerToast.error(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
           } finally {
             setImageLoading(null);
           }
@@ -400,6 +431,8 @@ export function SceneDetailModal({
             '@/utils/imageUtils'
           );
           const base64 = await rb(file);
+          // 즉시 프리뷰
+          setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
           const url = await si(
             base64,
             sheetName,
@@ -410,9 +443,11 @@ export function SceneDetailModal({
           const field =
             imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
           onFieldUpdate(sceneIndex, field, url);
+          setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
         } catch (err) {
           console.error('[파일 선택 실패]', err);
-          alert(`이미지 저장 실패: ${err instanceof Error ? err.message : err}`);
+          setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+          sonnerToast.error(`이미지 저장 실패: ${err instanceof Error ? err.message : err}`);
         } finally {
           setImageLoading(null);
         }
@@ -426,23 +461,31 @@ export function SceneDetailModal({
     async (imageType: 'storyboard' | 'guide') => {
       try {
         setImageLoading(imageType);
-        const url = await pasteImageFromClipboard(
-          sheetName,
-          scene.sceneId || String(scene.no),
-          imageType,
-
-        );
-        if (!url) {
-          alert('클립보드에 이미지가 없습니다.');
+        // 클립보드에서 이미지 읽기 → 즉시 프리뷰
+        const dataUrl = await window.electronAPI.clipboardReadImage();
+        if (!dataUrl) {
+          sonnerToast.error('클립보드에 이미지가 없습니다.');
           setImageLoading(null);
           return;
         }
+        // 즉시 프리뷰 표시
+        setPreviewUrls((prev) => ({ ...prev, [imageType]: dataUrl }));
+        // 백그라운드 업로드
+        const { saveImage: si } = await import('@/utils/imageUtils');
+        const url = await si(
+          dataUrl,
+          sheetName,
+          scene.sceneId || String(scene.no),
+          imageType,
+        );
         const field =
           imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
         onFieldUpdate(sceneIndex, field, url);
+        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
       } catch (err) {
         console.error('[클립보드 붙여넣기 실패]', err);
-        alert(`클립보드 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
+        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+        sonnerToast.error(`클립보드 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
       } finally {
         setImageLoading(null);
       }
@@ -462,20 +505,24 @@ export function SceneDetailModal({
           try {
             setImageLoading(imageType);
             const base64 = await resizeBlob(blob);
+            // 즉시 프리뷰
+            setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
             const { saveImage: si } = await import('@/utils/imageUtils');
             const url = await si(
               base64,
               sheetName,
               scene.sceneId || String(scene.no),
               imageType,
-  
+
             );
             const field =
               imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
             onFieldUpdate(sceneIndex, field, url);
+            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
           } catch (err) {
             console.error('[Ctrl+V 실패]', err);
-            alert(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
+            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+            sonnerToast.error(`이미지 붙여넣기 실패: ${err instanceof Error ? err.message : err}`);
           } finally {
             setImageLoading(null);
           }
@@ -493,6 +540,8 @@ export function SceneDetailModal({
       try {
         setImageLoading(imageType);
         const base64 = await resizeBlob(file);
+        // 즉시 프리뷰
+        setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
         const { saveImage: si } = await import('@/utils/imageUtils');
         const url = await si(
           base64,
@@ -504,9 +553,11 @@ export function SceneDetailModal({
         const field =
           imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
         onFieldUpdate(sceneIndex, field, url);
+        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
       } catch (err) {
         console.error('[드롭 실패]', err);
-        alert(`이미지 드롭 실패: ${err instanceof Error ? err.message : err}`);
+        setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+        sonnerToast.error(`이미지 드롭 실패: ${err instanceof Error ? err.message : err}`);
       } finally {
         setImageLoading(null);
       }
@@ -541,11 +592,9 @@ export function SceneDetailModal({
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        {/* 모달 래퍼 — 댓글 패널은 absolute로 배치하여 레이아웃 점프 방지 */}
+        {/* 모달 래퍼 — 좌: 본체 + 우: 댓글 패널 (항상 표시) */}
         <motion.div
-          className="relative"
-          animate={{ x: showComments ? -160 : 0 }}
-          transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+          className="relative flex gap-3"
           onClick={(e) => e.stopPropagation()}
         >
             {/* 모달 본체 */}
@@ -590,44 +639,61 @@ export function SceneDetailModal({
                     </button>
                   </div>
                 )}
-                <span className="text-lg font-mono font-bold text-accent">
+                <span className="text-lg font-mono font-bold" style={{ color: deptConfig.color }}>
                   #{scene.no}
                 </span>
-                <span className="text-lg font-semibold text-text-primary">
+                <span className="text-lg font-semibold text-text-primary flex-1">
                   {scene.sceneId || '(씬번호 없음)'}
                 </span>
                 {/* 진행률 */}
-                <div className="flex items-center gap-2 ml-auto mr-2">
-                  <div className="w-20 h-1.5 bg-bg-primary rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-300"
-                      style={{
-                        width: `${pct}%`,
-                        backgroundColor:
-                          pct >= 100
-                            ? '#00B894'
-                            : pct >= 50
-                              ? '#FDCB6E'
-                              : '#E17055',
-                      }}
-                    />
-                  </div>
-                  <span className="text-xs font-mono text-text-secondary">
-                    {Math.round(pct)}%
-                  </span>
-                </div>
+                <span className="text-sm font-mono text-text-secondary mr-2">
+                  {Math.round(pct)}%
+                </span>
                 <button
                   onClick={onClose}
-                  className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-primary rounded-lg transition-colors"
+                  className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-primary rounded-lg transition-colors cursor-pointer"
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="px-6 py-5 flex flex-col gap-6">
+              <div className="px-6 py-5 flex flex-col gap-8">
+                {/* ── 진행 단계 (프로세스 트랙) ── */}
+                <section>
+                  <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4">
+                    진행 단계
+                  </h3>
+                  <div className="flex rounded-lg bg-[#22222A] p-1.5 gap-1.5 mx-4 border border-bg-border/50">
+                    {STAGES.map((stage, i) => {
+                      const isDone = scene[stage];
+                      const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
+
+                      return (
+                        <button
+                          key={stage}
+                          onClick={() => onToggle(scene.sceneId, stage)}
+                          className={cn(
+                            'flex-1 py-2.5 rounded-md text-sm font-medium transition-all cursor-pointer',
+                            !isDone && 'text-text-secondary hover:text-text-primary hover:bg-white/5',
+                          )}
+                          style={
+                            isDone
+                              ? isCurrent
+                                ? { backgroundColor: deptConfig.color, color: '#fff', fontWeight: 600, boxShadow: `0 2px 8px ${deptConfig.color}4D` }
+                                : { backgroundColor: `${deptConfig.color}18`, color: deptConfig.color }
+                              : undefined
+                          }
+                        >
+                          {deptConfig.stageLabels[stage]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
                 {/* ── 속성 섹션 ── */}
                 <section>
-                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary/50 mb-2 px-4">
+                  <h3 className="text-xs font-semibold text-text-secondary mb-2 px-4">
                     속성
                   </h3>
                   <div className="bg-bg-primary/30 rounded-xl border border-bg-border/50 divide-y divide-bg-border/30">
@@ -695,45 +761,17 @@ export function SceneDetailModal({
                   </div>
                 </section>
 
-                {/* ── 진행 단계 ── */}
-                <section>
-                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
-                    진행 단계
-                  </h3>
-                  <div className="flex gap-3 px-4">
-                    {STAGES.map((stage) => (
-                      <button
-                        key={stage}
-                        onClick={() => onToggle(scene.sceneId, stage)}
-                        className={cn(
-                          'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all',
-                          scene[stage]
-                            ? 'text-bg-primary shadow-md'
-                            : 'bg-bg-primary text-text-secondary border border-bg-border hover:border-text-secondary',
-                        )}
-                        style={
-                          scene[stage]
-                            ? { backgroundColor: deptConfig.stageColors[stage] }
-                            : undefined
-                        }
-                      >
-                        {scene[stage] ? '✓ ' : ''}
-                        {deptConfig.stageLabels[stage]}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
                 {/* ── 이미지 섹션 ── */}
                 <section>
-                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-secondary/50 mb-3 px-4">
+                  <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4">
                     이미지
                   </h3>
                   <div className="flex flex-col gap-5 px-4">
                     <ImageSlot
                       label="스토리보드"
-                      url={scene.storyboardUrl}
-                      loading={imageLoading === 'storyboard'}
+                      url={previewUrls.storyboard || scene.storyboardUrl}
+                      loading={imageLoading === 'storyboard' && !previewUrls.storyboard}
+                      uploading={!!previewUrls.storyboard}
                       onPickFile={() => pickFile('storyboard')}
                       onPasteClipboard={() => pasteClipboard('storyboard')}
                       onRemove={() => setDeleteConfirm('storyboard')}
@@ -743,8 +781,9 @@ export function SceneDetailModal({
                     />
                     <ImageSlot
                       label="가이드"
-                      url={scene.guideUrl}
-                      loading={imageLoading === 'guide'}
+                      url={previewUrls.guide || scene.guideUrl}
+                      loading={imageLoading === 'guide' && !previewUrls.guide}
+                      uploading={!!previewUrls.guide}
                       onPickFile={() => pickFile('guide')}
                       onPasteClipboard={() => pasteClipboard('guide')}
                       onRemove={() => setDeleteConfirm('guide')}
@@ -803,32 +842,33 @@ export function SceneDetailModal({
               )}
             </motion.div>
 
-            {/* ── 말풍선 탭 버튼 — 의견 모달 열리면 접힘 ── */}
+            {/* ── 컴포지팅 리비전 탭 버튼 ── */}
             <AnimatePresence>
-              {!showComments && (
+              {!showRevisions && (
                 <motion.button
-                  key="comment-tab"
+                  key="revision-tab"
                   initial={{ opacity: 0, x: -8 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
-                  transition={{ delay: 0.15, duration: 0.2 }}
-                  onClick={() => setShowComments(true)}
-                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:bg-accent/30 hover:text-accent transition-all cursor-pointer"
-                  title="의견"
+                  transition={{ delay: 0.2, duration: 0.2 }}
+                  onClick={() => setShowRevisions(true)}
+                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer"
+                  style={openRevCount > 0 ? { backgroundColor: 'rgba(253, 203, 110, 0.15)' } : {}}
+                  title="컴포지팅 리비전"
                 >
-                  <MessageCircle size={18} />
-                  {commentCount > 0 && (
-                    <span className="text-[11px] font-bold leading-none">{commentCount}</span>
+                  <Film size={18} />
+                  {openRevCount > 0 && (
+                    <span className="text-[11px] font-bold leading-none" style={{ color: '#FDCB6E' }}>{openRevCount}</span>
                   )}
                 </motion.button>
               )}
             </AnimatePresence>
 
-          {/* ── 댓글 패널 — absolute 배치로 레이아웃 점프 방지 ── */}
+          {/* ── 컴포지팅 리비전 패널 (사이드 토글) ── */}
           <AnimatePresence>
-            {showComments && (
+            {showRevisions && (
               <motion.div
-                key="comment-panel"
+                key="revision-panel"
                 initial={{ opacity: 0, x: 30, scaleX: 0.9 }}
                 animate={{ opacity: 1, x: 0, scaleX: 1 }}
                 exit={{ opacity: 0, x: 30, scaleX: 0.9 }}
@@ -836,32 +876,49 @@ export function SceneDetailModal({
                 style={{ transformOrigin: 'left center' }}
                 className="absolute left-full top-0 ml-3 w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col"
               >
-                {/* 패널 헤더 */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border shrink-0">
                   <div className="flex items-center gap-2">
-                    <MessageCircle size={14} className="text-accent" />
-                    <h3 className="text-sm font-medium text-text-primary">의견</h3>
-                    {commentCount > 0 && (
-                      <span className="text-[11px] bg-accent/20 text-accent px-1.5 py-0.5 rounded-full font-medium">
-                        {commentCount}
+                    <Film size={14} style={{ color: '#FDCB6E' }} />
+                    <h3 className="text-sm font-medium text-text-primary">컴포지팅</h3>
+                    {revisionCount > 0 && (
+                      <span className="text-[11px] px-1.5 py-0.5 rounded-full font-medium" style={{ color: '#FDCB6E', backgroundColor: 'rgba(253, 203, 110, 0.15)' }}>
+                        {revisionCount}
                       </span>
                     )}
                   </div>
                   <button
-                    onClick={() => setShowComments(false)}
+                    onClick={() => setShowRevisions(false)}
                     className="p-1 text-text-secondary hover:text-text-primary rounded transition-colors cursor-pointer"
                   >
                     <X size={14} />
                   </button>
                 </div>
-                {/* 패널 바디 */}
-                <CommentPanel
-                  sceneKey={sceneKey}
-                  onCountChange={setCommentCount}
+                <RevisionPanel
+                  sheetName={sheetName}
+                  sceneId={scene.sceneId}
+                  department={department}
+                  onCountChange={setRevisionCount}
                 />
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* ── 댓글 패널 — 항상 표시 ── */}
+          <motion.div
+            key="comment-panel"
+            initial={{ opacity: 0, x: 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.25, delay: 0.1 }}
+            className="w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col shrink-0"
+          >
+            <div className="px-4 py-3 border-b border-bg-border shrink-0">
+              <h3 className="text-sm font-medium text-text-primary">댓글 및 활동</h3>
+            </div>
+            <CommentPanel
+              sceneKey={sceneKey}
+              onCountChange={setCommentCount}
+            />
+          </motion.div>
         </motion.div>
       </motion.div>
 

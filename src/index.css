@@ -317,6 +317,80 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
+/* ─── Sonner 토스트 — 테마 색상 연동 ─── */
+[data-sonner-toaster] [data-sonner-toast].bflow-toast {
+  --normal-bg: rgb(var(--color-bg-card) / 0.92);
+  --normal-border: rgb(var(--color-bg-border) / 0.35);
+  --normal-text: rgb(var(--color-text-primary));
+  background: rgb(var(--color-bg-card) / 0.92) !important;
+  border: 1px solid rgb(var(--color-bg-border) / 0.35) !important;
+  color: rgb(var(--color-text-primary)) !important;
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  box-shadow:
+    0 8px 32px rgb(var(--color-shadow) / var(--shadow-alpha)),
+    0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset !important;
+}
+
+/* ─── 호버 시 스택 부드럽게 펼침 ─── */
+[data-sonner-toaster] [data-sonner-toast] {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              height 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* 스르륵 슬라이드 인 */
+[data-sonner-toaster] [data-sonner-toast][data-mounted="true"] {
+  animation: bflow-toast-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes bflow-toast-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 닫힐 때 페이드 아웃 */
+[data-sonner-toast][data-removed="true"] {
+  animation: bflow-toast-fade-out 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+}
+@keyframes bflow-toast-fade-out {
+  to { opacity: 0; transform: scale(0.95); }
+}
+
+/* ─── Sonner 액션 버튼 (씬 보기) — 테마 액센트 ─── */
+[data-sonner-toast] [data-button] {
+  background: rgb(var(--color-accent) / 0.12) !important;
+  color: rgb(var(--color-accent-sub)) !important;
+  border: 1px solid rgb(var(--color-accent) / 0.25) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 4px 12px !important;
+  border-radius: 6px !important;
+  white-space: nowrap !important;
+  transition: background 0.15s, border-color 0.15s !important;
+}
+[data-sonner-toast] [data-button]:hover {
+  background: rgb(var(--color-accent) / 0.22) !important;
+  border-color: rgb(var(--color-accent) / 0.45) !important;
+}
+
+/* ─── Sonner 닫기 버튼 ─── */
+[data-sonner-toast] [data-close-button] {
+  background: rgb(var(--color-bg-border) / 0.2) !important;
+  border: 1px solid rgb(var(--color-bg-border) / 0.3) !important;
+  color: rgb(var(--color-text-secondary)) !important;
+  transition: background 0.15s, color 0.15s !important;
+}
+[data-sonner-toast] [data-close-button]:hover {
+  background: rgb(var(--color-bg-border) / 0.4) !important;
+  color: rgb(var(--color-text-primary)) !important;
+}
+
+/* ─── Sonner description 텍스트 ─── */
+[data-sonner-toast] [data-description] {
+  color: rgb(var(--color-text-secondary)) !important;
+  font-size: 12px !important;
+}
+
 /* 접근성: 모션 감소 설정 존중 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

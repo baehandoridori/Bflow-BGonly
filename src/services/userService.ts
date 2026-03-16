@@ -37,9 +37,10 @@ const SEED_USER: AppUser = {
 export async function loadUsers(): Promise<AppUser[]> {
   if (sheetsMode) {
     try {
-      const result = await window.electronAPI.sheetsReadUsers();
-      if (result.ok && result.data.length > 0) {
-        return result.data.map(u => ({
+      const rawUsers = await window.electronAPI.supabaseReadUsers();
+      const users = rawUsers as AppUser[];
+      if (users.length > 0) {
+        return users.map(u => ({
           ...u,
           hireDate: u.hireDate || undefined,
           birthday: u.birthday || undefined,
@@ -89,7 +90,7 @@ export async function addUser(
 
   if (sheetsMode) {
     try {
-      await window.electronAPI.sheetsAddUser(newUser);
+      await window.electronAPI.supabaseAddUser(newUser);
     } catch (err) {
       console.error('[사용자] 시트 추가 실패:', err);
     }
@@ -109,7 +110,7 @@ export async function addUser(
 export async function deleteUser(userId: string): Promise<void> {
   if (sheetsMode) {
     try {
-      await window.electronAPI.sheetsDeleteUser(userId);
+      await window.electronAPI.supabaseDeleteUser(userId);
     } catch (err) {
       console.error('[사용자] 시트 삭제 실패:', err);
     }
@@ -135,7 +136,7 @@ export async function changePassword(
   // 시트에도 반영
   if (sheetsMode) {
     try {
-      await window.electronAPI.sheetsUpdateUser(userId, {
+      await window.electronAPI.supabaseUpdateUser(userId, {
         password: newPw,
         isInitialPassword: 'false',
       });
@@ -212,23 +213,23 @@ export async function migrateUsersToSheets(): Promise<void> {
   if (!sheetsMode) return;
 
   try {
-    // 시트에 이미 사용자가 있는지 확인
-    const sheetResult = await window.electronAPI.sheetsReadUsers();
-    if (sheetResult.ok && sheetResult.data.length > 0) return; // 이미 있으면 무시
+    // Supabase에 이미 사용자가 있는지 확인
+    const existingUsers = (await window.electronAPI.supabaseReadUsers()) as AppUser[];
+    if (existingUsers.length > 0) return; // 이미 있으면 무시
 
     // 로컬 사용자 로드
     const data = await window.electronAPI.usersRead();
     if (!data || !Array.isArray(data.users) || data.users.length === 0) return;
 
-    // 시트에 하나씩 추가
+    // Supabase에 하나씩 추가
     for (const user of data.users) {
       try {
-        await window.electronAPI.sheetsAddUser(user);
+        await window.electronAPI.supabaseAddUser(user);
       } catch (err) {
         console.warn('[마이그레이션] 사용자 추가 실패:', user.name, err);
       }
     }
-    console.log(`[마이그레이션] ${data.users.length}명의 사용자를 _USERS 탭으로 이전 완료`);
+    console.log(`[마이그레이션] ${data.users.length}명의 사용자를 Supabase로 이전 완료`);
   } catch (err) {
     console.error('[마이그레이션] 사용자 마이그레이션 실패:', err);
   }

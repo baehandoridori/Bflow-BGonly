@@ -123,6 +123,10 @@ export function useWhiteboardEngine(): WhiteboardEngine {
     stroke: WhiteboardStroke;
   } | null>(null);
 
+  // OffscreenCanvas 재사용 (매 프레임 새로 생성하지 않음)
+  const offscreenRef = useRef<OffscreenCanvas | null>(null);
+  const offscreenSizeRef = useRef({ w: 0, h: 0 });
+
   // 최신 state를 ref로 유지 (콜백 내에서 사용)
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -336,13 +340,21 @@ export function useWhiteboardEngine(): WhiteboardEngine {
     // 레이어 순서대로 렌더링
     const sortedLayers = [...s.layers].sort((a, b) => a.order - b.order);
 
+    // OffscreenCanvas 재사용 (필요할 때만 재생성)
+    const offW = s.layers.length > 0 ? 1920 : width;
+    const offH = s.layers.length > 0 ? 1080 : height;
+    if (!offscreenRef.current || offscreenSizeRef.current.w !== offW || offscreenSizeRef.current.h !== offH) {
+      offscreenRef.current = new OffscreenCanvas(offW, offH);
+      offscreenSizeRef.current = { w: offW, h: offH };
+    }
+    const offscreen = offscreenRef.current;
+    const offCtx = offscreen.getContext('2d');
+
     for (const layer of sortedLayers) {
       if (!layer.visible) continue;
 
-      // OffscreenCanvas로 레이어별 렌더링
-      const offscreen = new OffscreenCanvas(s.layers.length > 0 ? 1920 : width, s.layers.length > 0 ? 1080 : height);
-      const offCtx = offscreen.getContext('2d');
       if (!offCtx) continue;
+      offCtx.clearRect(0, 0, offW, offH);
 
       const layerStrokes = s.strokes.filter((st) => st.layerId === layer.id);
       for (const stroke of layerStrokes) {

@@ -22,21 +22,24 @@ import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWid
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
-import { readAllFromSheets, checkConnection, connectSheets, loadSheetsConfig, readMetadataFromSheets } from '@/services/sheetsService';
+import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
+import { connectGas, loadGasConfig } from '@/services/gasConfigService';
+import { invalidatePartCache } from '@/services/commentService';
+import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import type { Episode } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
-import { DEFAULT_WEB_APP_URL } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 
-// 모듈 레벨 쿨다운: sheetsNotifyChange 호출 시 자체 변경 감지
+// 모듈 레벨 쿨다운: dataNotifyChange 호출 시 자체 변경 감지
 let _reloadCooldown = false;
 const _COOLDOWN_MS = 3000;
 
-/** 팝업 위젯에서 시트 변경 알림 시 이 래퍼를 사용 (쿨다운 자동 적용) */
-export function notifySheetChangeWithCooldown() {
+/** 팝업 위젯에서 데이터 변경 알림 시 이 래퍼를 사용 (쿨다운 자동 적용) */
+export function notifyDataChangeWithCooldown() {
   _reloadCooldown = true;
   setTimeout(() => { _reloadCooldown = false; }, _COOLDOWN_MS);
-  return window.electronAPI?.sheetsNotifyChange?.();
+  return window.electronAPI?.dataNotifyChange?.();
 }
 
 const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNode }> = {
@@ -150,30 +153,9 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     });
   }, [widgetId]);
 
-  // 실시간 데이터 동기화: sheet:changed 이벤트 + 주기적 폴링 (30초)
+  // 실시간 데이터 동기화: 델타 기반 부분 업데이트 + 120초 emergency fallback
   useEffect(() => {
     if (!ready) return;
-
-    const loadEpMetadata = async (episodes: Episode[]) => {
-      const [titleResults, memoResults] = await Promise.all([
-        Promise.all(episodes.map((ep) =>
-          readMetadataFromSheets('episode-title', String(ep.episodeNumber))
-            .then((d) => [ep.episodeNumber, d?.value] as const)
-            .catch(() => [ep.episodeNumber, undefined] as const),
-        )),
-        Promise.all(episodes.map((ep) =>
-          readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
-            .then((d) => [ep.episodeNumber, d?.value] as const)
-            .catch(() => [ep.episodeNumber, undefined] as const),
-        )),
-      ]);
-      const titles: Record<number, string> = {};
-      const memos: Record<number, string> = {};
-      for (const [num, val] of titleResults) if (val) titles[num] = val;
-      for (const [num, val] of memoResults) if (val) memos[num] = val;
-      useDataStore.getState().setEpisodeTitles(titles);
-      useDataStore.getState().setEpisodeMemos(memos);
-    };
 
     let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -184,19 +166,30 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
 
         const connected = await checkConnection();
         if (connected) {
-          const episodes = await readAllFromSheets();
+          const episodes = await readAll();
           useDataStore.getState().setEpisodes(episodes);
-          loadEpMetadata(episodes).catch(() => {});
+          // 메타데이터 일괄 로딩 (Supabase)
+          try {
+            const { readAllMetadataFromSupabase } = await import('@/services/supabaseService');
+            const metaList = (await readAllMetadataFromSupabase()) as { type: string; key: string; value: string }[];
+            const titles: Record<number, string> = {};
+            const memos: Record<number, string> = {};
+            for (const m of metaList) {
+              if (m.type === 'episode-title' && m.value) titles[Number(m.key)] = m.value;
+              if (m.type === 'episode-memo' && m.value) memos[Number(m.key)] = m.value;
+            }
+            useDataStore.getState().setEpisodeTitles(titles);
+            useDataStore.getState().setEpisodeMemos(memos);
+          } catch { /* 메타데이터 로딩 실패는 무시 */ }
         } else {
           // 재연결 시도
-          const cfg = await loadSheetsConfig();
-          const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+          const cfg = await loadGasConfig();
+          const urlToConnect = cfg?.webAppUrl || DEFAULT_GAS_IMAGE_URL;
           if (urlToConnect) {
-            const result = await connectSheets(urlToConnect);
+            const result = await connectGas(urlToConnect);
             if (result.ok) {
-              const episodes = await readAllFromSheets();
+              const episodes = await readAll();
               useDataStore.getState().setEpisodes(episodes);
-              loadEpMetadata(episodes).catch(() => {});
             }
           }
         }
@@ -208,7 +201,44 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       }
     };
 
-    const cleanupEvent = window.electronAPI?.onSheetChanged?.(() => {
+    // onSheetChanged 리스너 삭제됨 — Supabase Realtime이 대체 (M-3)
+
+    // 스냅샷 릴레이 수신 — 다른 창에서 보낸 전체 데이터 직접 적용
+    const cleanupSnapshot = window.electronAPI?.onSnapshotRelay?.((data: unknown) => {
+      const d = data as import('@/types').SnapshotRelayData;
+      if (d?.episodes) useDataStore.getState().setEpisodes(d.episodes);
+      if (d?.episodeTitles) useDataStore.getState().setEpisodeTitles(d.episodeTitles);
+      if (d?.episodeMemos) useDataStore.getState().setEpisodeMemos(d.episodeMemos);
+    });
+
+    // Emergency fallback: 120초마다 full reload (delta/relay 누락 방지)
+    const emergencyPoll = setInterval(() => {
+      if (!_reloadCooldown) reloadData();
+    }, 120_000);
+
+    // Supabase Realtime: DB 변경 감지 → delta 직접 적용 또는 full reload
+    const cleanupRealtime = window.electronAPI?.onSupabaseRealtime?.((event: unknown) => {
+      const { table, payload } = event as import('@/services/supabaseService').SupabaseRealtimeEvent;
+
+      if (table === 'comments') {
+        invalidatePartCache();
+        return;
+      }
+
+      if (table === 'scenes' && payload?.eventType === 'UPDATE' && payload?.new) {
+        const delta = extractSceneDelta(payload.new);
+        if (delta) {
+          const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
+          if (applied) return;
+        }
+      }
+
+      if (table === 'comp_revisions') {
+        window.dispatchEvent(new Event('bflow:revisions-invalidated'));
+        return;
+      }
+
+      // 그 외 → 디바운스 full reload
       if (_reloadCooldown) {
         if (reloadTimer) clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => { reloadData(); }, _COOLDOWN_MS + 500);
@@ -217,13 +247,35 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       reloadData();
     });
 
-    const pollInterval = setInterval(() => {
-      if (!_reloadCooldown) reloadData();
-    }, 30_000);
+    // Supabase Broadcast: 즉시 동기화 (Publication 설정 불필요)
+    const cleanupBroadcast = window.electronAPI?.onSupabaseBroadcast?.((raw: unknown) => {
+      const data = raw as { event: string; payload: Record<string, unknown> };
+      if (!data?.event) return;
+
+      if (data.event === 'scene-update') {
+        const { sceneUuid, stage, value } = data.payload as { sceneUuid: string; stage: string; value: boolean };
+        if (sceneUuid && stage != null && value != null) {
+          useDataStore.getState().updateSceneByUuid(sceneUuid, { [stage]: value });
+          return;
+        }
+      }
+      if (data.event === 'scene-field-update') {
+        const { sceneUuid, field, value } = data.payload as { sceneUuid: string; field: string; value: string };
+        if (sceneUuid && field) {
+          useDataStore.getState().updateSceneByUuid(sceneUuid, { [field]: value });
+          return;
+        }
+      }
+      if (data.event === 'data-change') {
+        reloadData();
+      }
+    });
 
     return () => {
-      cleanupEvent?.();
-      clearInterval(pollInterval);
+      cleanupSnapshot?.();
+      cleanupRealtime?.();
+      cleanupBroadcast?.();
+      clearInterval(emergencyPoll);
       if (reloadTimer) clearTimeout(reloadTimer);
     };
   }, [ready]);
@@ -259,14 +311,14 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
 
         let connected = await checkConnection();
         if (!connected) {
-          const cfg = await loadSheetsConfig();
-          const urlToConnect = cfg?.webAppUrl || DEFAULT_WEB_APP_URL;
+          const cfg = await loadGasConfig();
+          const urlToConnect = cfg?.webAppUrl || DEFAULT_GAS_IMAGE_URL;
           if (urlToConnect) {
-            const result = await connectSheets(urlToConnect);
+            const result = await connectGas(urlToConnect);
             connected = result.ok;
           }
         }
-        useAppStore.getState().setSheetsConnected(connected);
+        useAppStore.getState().setDataConnected(connected);
 
         // 휴가 API 자동 연결
         const vacConfig = await loadVacationConfig();
@@ -278,17 +330,17 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         }
 
         if (connected) {
-          const loadedEpisodes = await readAllFromSheets();
+          const loadedEpisodes = await readAll();
           useDataStore.getState().setEpisodes(loadedEpisodes);
 
           const [titleResults, memoResults] = await Promise.all([
             Promise.all(loadedEpisodes.map((ep) =>
-              readMetadataFromSheets('episode-title', String(ep.episodeNumber))
+              readMetadata('episode-title', String(ep.episodeNumber))
                 .then((d) => [ep.episodeNumber, d?.value] as const)
                 .catch(() => [ep.episodeNumber, undefined] as const),
             )),
             Promise.all(loadedEpisodes.map((ep) =>
-              readMetadataFromSheets('episode-memo', String(ep.episodeNumber))
+              readMetadata('episode-memo', String(ep.episodeNumber))
                 .then((d) => [ep.episodeNumber, d?.value] as const)
                 .catch(() => [ep.episodeNumber, undefined] as const),
             )),

@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
+import { toast as sonnerToast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Film, ChevronRight, Archive, RotateCcw, Folder, Pencil } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
@@ -311,8 +312,8 @@ export function EpisodeView() {
   useEffect(() => {
     const loadArchived = async () => {
       try {
-        const { readArchivedFromSheets } = await import('@/services/sheetsService');
-        const list = await readArchivedFromSheets();
+        const { readArchived } = await import('@/services/supabaseService');
+        const list = await readArchived();
         const enriched: typeof archivedEpisodes = [];
         for (const item of list) {
           enriched.push({
@@ -385,18 +386,18 @@ export function EpisodeView() {
     ]);
 
     try {
-      const { archiveEpisodeViaRegistryInSheets } = await import('@/services/sheetsService');
-      await archiveEpisodeViaRegistryInSheets(epNum, currentUser?.name ?? '알 수 없음', memo);
+      const { archiveEpisode } = await import('@/services/supabaseService');
+      await archiveEpisode(epNum, currentUser?.name ?? '알 수 없음', memo);
       // 낙관적 상태를 신뢰 — 서버가 완전히 처리할 시간(3초)을 준 후 알림
       setTimeout(() => {
-        window.electronAPI?.sheetsNotifyChange?.();
+        window.electronAPI?.dataNotifyChange?.();
       }, 3000);
     } catch (err) {
       // 롤백
       const prevEps = [...episodes, { episodeNumber: epNum, title: epTitle, parts: ep.parts }];
       setEpisodes(prevEps);
       setArchivedEpisodes((prev) => prev.filter((a) => a.episodeNumber !== epNum));
-      alert(`아카이빙 실패: ${err}`);
+      sonnerToast.error(`아카이빙 실패: ${err}`);
     }
   };
 
@@ -414,21 +415,21 @@ export function EpisodeView() {
     setEpisodes([...episodes, { episodeNumber: epNum, title: tempTitle, parts: [] }]);
 
     try {
-      const { unarchiveEpisodeViaRegistryInSheets, readAllFromSheets } = await import('@/services/sheetsService');
-      await unarchiveEpisodeViaRegistryInSheets(epNum);
+      const { unarchiveEpisode, readAll } = await import('@/services/supabaseService');
+      await unarchiveEpisode(epNum);
       // 낙관적 상태를 신뢰 — 서버 처리 후(3초) 실제 데이터로 교체
       setTimeout(async () => {
         try {
-          const eps = await readAllFromSheets();
+          const eps = await readAll();
           setEpisodes(eps);
-          window.electronAPI?.sheetsNotifyChange?.();
+          window.electronAPI?.dataNotifyChange?.();
         } catch { /* 다음 폴링 사이클에서 자연 동기화 */ }
       }, 3000);
     } catch (err) {
       // 롤백
       setEpisodes(prevEps);
       setArchivedEpisodes(prevArchivedEps);
-      alert(`복원 실패: ${err}`);
+      sonnerToast.error(`복원 실패: ${err}`);
     }
   };
 

@@ -2,7 +2,7 @@
 
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
-> **현재 상태**: Phase 0-1~0-3 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, Phase 8-0~8-1, 8-3~8-5 완료
+> **현재 상태**: Phase 0-1~0-3 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, Phase 8-0~8-1, 8-3~8-5 완료, Phase 9 M-0~M-5 완료, M-6 준비 완료 (빌드/배포만 남음)
 > **로드맵**: `ROADMAP.md` 참조 | **세션 가이드**: `CONTEXT.md` 참조
 >
 > **이력**: 원래 BG(배경) 전용 현황판(`Bflow-BGonly`)으로 시작했으나, 액팅까지 포함한 통합 앱이 되면서 정식 명칭 **B flow**로 전환됨. 레포 이름(`Bflow-BGonly`)과 `app.name`은 기존 사용자 데이터 경로(`%APPDATA%\Bflow-BGonly\`) 호환을 위해 유지.
@@ -16,17 +16,18 @@
    - 파일 수정, 커밋, 푸시 일절 금지
    - 모든 개발은 반드시 `Bflow-BGonly` 레포에서만 진행
 2. **빌드 검증**: 코드 변경 후 반드시 `tsc --noEmit` + `vite build` 통과 확인
-3. **낙관적 업데이트 패턴**: 모든 데이터 변경은 즉시 UI 반영 → 백그라운드 동기화
-4. **테스트 모드 동등성**: 모든 기능은 테스트 모드에서도 100% 동작해야 함
+3. **낙관적 업데이트 패턴**: 모든 데이터 변경은 즉시 UI 반영 → Supabase 동기화 → 실패 시 롤백
+4. **Supabase 단일 경로**: 새 기능은 `supabaseService` 경유로만 구현 (Sheets 분기 추가 금지)
+5. **IPC 구조 유지**: 렌더러에서 직접 Supabase 호출 금지, 반드시 IPC → 메인 → Supabase
 
 ---
 
 ## 프로젝트 개요
 
 Studio JBBJ 팀(~20명)이 에피소드별 BG/액팅 씬의 진행 상황을 실시간 추적하는 Electron 앱.
-Google Sheets를 단일 진실의 원천(SSOT)으로 사용. 여러 사용자가 동시에 앱을 열어두고 협업.
+Supabase(PostgreSQL + Realtime)를 SSOT로 사용 (Google Sheets에서 전환 중). 여러 사용자가 동시에 앱을 열어두고 협업.
 
-**동기화**: 체크박스 토글 → 로컬 즉시 반영(낙관적) → Google Sheets 저장 → 실패 시 롤백 + 재시도. 다른 사용자 변경은 주기적 폴링으로 감지.
+**동기화**: 체크박스 토글 → 로컬 즉시 반영(낙관적) → Supabase 저장 → 실패 시 롤백. 다른 사용자 변경은 Realtime WebSocket으로 즉시 수신 (~100ms).
 
 ---
 
@@ -38,18 +39,19 @@ Google Sheets를 단일 진실의 원천(SSOT)으로 사용. 여러 사용자가
 | 배포 | `G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\` |
 | 개인 설정 | `%APPDATA%\Bflow-BGonly\` (layout.json, preferences.json) |
 
-**데이터**: 씬/에피소드/체크박스 → Google Sheets, 위젯 레이아웃/개인 설정 → %APPDATA% 로컬 파일
+**데이터**: 씬/에피소드/체크박스 → Supabase (PostgreSQL), 이미지 → Google Drive (GAS 경유), 위젯 레이아웃/개인 설정 → %APPDATA% 로컬 파일
 
 ### 제약 사항
 
 - **한글 경로 인코딩**: 배포 경로에 한글 포함 → Node.js `path` 모듈 사용, 경로 하드코딩 금지
-- **동시 편집 충돌**: Last-Write-Wins 전략 (Google Sheets 기본 동작). 폴링 주기로 충돌 창 최소화
+- **동시 편집 충돌**: Last-Write-Wins 전략. Realtime으로 충돌 창 최소화 (~100ms 전파)
+- **Supabase 무료 플랜**: 7일 미사용 시 자동 정지 — 연휴 시 keep-alive 필요
 
 ---
 
 ## 기술 스택
 
-Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + googleapis
+Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + @supabase/supabase-js + googleapis (이미지 전용)
 
 ### 디자인 토큰
 
@@ -95,8 +97,10 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 ## 참조 문서
 
 - **`CONTEXT.md`** — 세션 컨텍스트 가이드 (아키텍처, 파일 맵, 알려진 이슈, 스킬 활용법)
-- **`ROADMAP.md`** — 전체 개발 로드맵 (Phase 0~7, 기능별 상세 스펙)
+- **`ROADMAP.md`** — 전체 개발 로드맵 (Phase 0~9, 기능별 상세 스펙)
 - `tasks/lessons.md` — 과거 실수/패턴 기록 (세션 시작 시 검토)
+- `DEVLOG/supabase-migration-plan.md` — Supabase 마이그레이션 상세 계획서
+- `DEVLOG/supabase-init.sql` — Supabase DB 스키마 초기화 SQL
 - `BG_DASHBOARD_PLAN.md` — 초기 구현 계획서
 - Bflow 원본 (`/home/user/Bflow`) — 패턴 참고만 (읽기 전용, 수정 금지)
 
@@ -110,5 +114,5 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 ---
 
-*문서 버전: 2026-02-26*
+*문서 버전: 2026-03-14*
 *작성: Claude × 한솔 (Studio JBBJ)*

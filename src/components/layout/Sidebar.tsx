@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback } from 'react';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Settings, PanelLeft } from 'lucide-react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, Settings, PanelLeft } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
+import { useRevisionStore } from '@/stores/useRevisionStore';
 import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
@@ -16,6 +17,7 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'calendar', label: '타임라인', icon: <GanttChart size={20} /> },
   { id: 'schedule', label: '캘린더', icon: <CalendarDays size={20} /> },
   { id: 'vacation', label: '휴가', icon: <Palmtree size={20} /> },
+  { id: 'compositing', label: '컴포지팅', icon: <Clapperboard size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 
@@ -160,6 +162,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
 
 export function Sidebar() {
   const { currentView, setView, sidebarExpanded, toggleSidebarExpanded } = useAppStore();
+  const totalOpenRevisions = useRevisionStore((s) => Object.values(s.revisionCountByScene).reduce((a, b) => a + b, 0));
   const [showSplash, setShowSplash] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -232,7 +235,14 @@ export function Sidebar() {
             )}
           >
             {/* 아이콘: 항상 w-12 내 중앙 → 펼침/접힘 무관 동일 위치 */}
-            <span className="shrink-0 w-12 flex justify-center">{item.icon}</span>
+            <span className="shrink-0 w-12 flex justify-center relative">
+              {item.icon}
+              {item.id === 'compositing' && totalOpenRevisions > 0 && (
+                <span className="absolute -top-1 -right-0.5 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1" style={{ backgroundColor: '#FDCB6E', color: '#1A1D27' }}>
+                  {totalOpenRevisions}
+                </span>
+              )}
+            </span>
             <span
               className="text-sm font-medium whitespace-nowrap overflow-hidden"
               style={{

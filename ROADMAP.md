@@ -1,9 +1,9 @@
 # ROADMAP.md — Bflow 프로덕션 현황 관리 도구 개발 로드맵
 
-> **최종 갱신**: 2026-02-27 (Phase 8-0~8-1, 8-3~8-5 완료 반영)
+> **최종 갱신**: 2026-03-14 (Phase 9 Supabase 마이그레이션 진행 반영)
 > **프로젝트**: Bflow (Studio JBBJ 프로덕션 진행 현황 대시보드)
 > **담당**: Claude × 한솔 (Studio JBBJ)
-> **현재 상태**: Phase 0 (0-4 제외) 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7 완료, Phase 8-0~8-1, 8-3~8-5 완료
+> **현재 상태**: Phase 0 (0-4 제외) 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7 완료, Phase 8-0~8-1, 8-3~8-5 완료, Phase 9 M-0, M-2 완료 + M-3 부분 완료
 
 ---
 
@@ -32,6 +32,7 @@ Phase 5: 커스터마이징           ░░░░░░░░░░ 미착수
 Phase 6: 멀티 부서 확장        ████████░░ Step 1~4 완료 ✅ (Step 5 대기)
 Phase 7: 대시보드 UX 혁신      ██████████ 7-1~7-5, 7-2 AOT 위치저장 완료 ✅
 Phase 8: 설정 개인화            ████████░░ 8-0~8-1, 8-3~8-5 완료 ✅ (8-2, 8-6 대기)
+Phase 9: Supabase 마이그레이션  ██████░░░░ M-0, M-2 완료, M-3 부분 완료 (M-1, M-4~M-6 대기)
 ```
 
 ---
@@ -113,16 +114,14 @@ function doPost(e) {
 
 > 난이도: ●●○ | 코드 간소화 — 필요시 진행
 
-**현황 분석 (2026-02-24):**
-- 테스트 모드: 로컬 JSON 파일로 동작 (개발용)
-- 라이브 모드: Google Sheets + Apps Script (운영용)
-- 분기 기준: `sheetsConnected` 불리언 (ScenesView.tsx 17개소+)
-- 영향 범위: `testSheetService.ts` (372줄 전체), `main.ts` 파일 워처 (~50줄)
+**현황 분석 (2026-02-24 → 2026-03-15 정리 완료):**
+- ~~테스트 모드~~ 제거 완료
+- ~~Sheets 분기~~ 제거 완료 (`sheetsConnected` → `dataConnected`, 호환 alias 제거)
+- Supabase 단일 경로로 전환 완료
 
-**제거 시 효과:**
-- ScenesView.tsx의 17개+ `if(sheetsConnected)` 분기 제거 → 코드 대폭 단순화
-- testSheetService.ts 372줄 삭제
-- 유지보수 부담 경감 (새 기능마다 두 경로 구현 불필요)
+**제거 효과 (달성됨):**
+- ScenesView.tsx의 `if(sheetsConnected)` 분기 전부 제거 → 코드 단순화
+- testSheetService.ts 삭제, 레거시 네이밍(`*InSheets`/`*ToSheets`) 정리 완료
 
 **제거 시 잃는 것:**
 - 인터넷/Sheets 없이 로컬 테스트 불가
@@ -680,10 +679,23 @@ UI 전환:
     + 대시보드 "통합" 탭 (dashboardDeptFilter)
     + 에피소드 요약 부서별 분리 뷰
   Step 5: 컴포지팅 (필요 시) ← 향후 결정
+  Step 6: 씬 뷰 — 전체 뷰 (BG+액팅 통합) ← 계획
 
   ※ 액팅 파이프라인 단계는 초기에 4단계 하드코딩 후,
      Phase 5-1(커스텀 단계)에서 동적으로 변경 가능하게 확장 예정.
 ```
+
+### 6-6. 씬 뷰 — 전체 뷰 (BG + 액팅 통합) `P6` `[ ]`
+
+> 난이도: ●●○ | 상태: 향후 계획
+> 핵심: 씬 뷰의 "전체" 탭에서 배경과 액팅 진행률을 한눈에 통합 표시
+
+- [ ] **통합 씬 카드**: 동일 씬번호의 BG 진행률(%)과 액팅 진행률(%)을 나란히 표시
+  - 예: `a001` — BG: 75% | ACT: 50%
+  - 두 부서 진행률을 각각의 색상 바로 시각화
+- [ ] **부서별 개별 보기 옵션**: 현재처럼 BG 따로, 액팅 따로 토글해서 볼 수 있도록 옵션으로 유지
+  - 전체(통합) / BG만 / 액팅만 3가지 모드 전환
+- [ ] **필터/정렬**: 통합 뷰에서도 기존 필터/정렬 그대로 동작
 
 ---
 
@@ -949,6 +961,114 @@ Electron 구현:
 
 ---
 
+## Phase 9: Supabase 마이그레이션 — Google Sheets → Supabase `[진행]` `[중요]`
+
+> **목표**: Google Sheets(GAS) 기반 데이터 저장소를 Supabase(PostgreSQL + Realtime)로 전면 전환.
+> **영향도**: 앱 전체 데이터 흐름의 근본적 전환. 실시간 크로스 머신 동기화 실현.
+> **상태**: M-0, M-2 완료, M-3 부분 완료 (ScenesView 전환 완료, 나머지 뷰 잔여)
+> **착수 결정**: 2026-03-13 — 실시간 동기화 + GAS 유지보수 부담 해소를 위해 진행
+> **상세 계획서**: `DEVLOG/supabase-migration-plan.md` (767줄, 모든 의사결정/스키마/롤백 계획 포함)
+
+### 핵심 아키텍처 변경
+
+```
+BEFORE (Google Sheets):
+  렌더러 → IPC → 메인(sheets.ts) → HTTP → GAS(Code.gs) → Google Sheets
+  동기화: 폴링 기반 (주기적 full reload)
+
+AFTER (Supabase):
+  렌더러 → IPC → 메인(supabase.ts) → Supabase API → PostgreSQL
+  동기화: Realtime WebSocket (즉시 push, ~100ms)
+  이미지: GAS 유지 (이미지 업로드만 기존 경로)
+```
+
+### M-0. Supabase 프로젝트 준비 `P9` `[완료]`
+
+> 난이도: ●○○ | 완료일: 2026-03-13
+
+- [x] **Supabase 프로젝트 생성**: Cloud 무료 플랜 (500MB DB, 200 동시 Realtime)
+- [x] **스키마 생성**: episodes, parts, scenes, comments, comp_revisions, users, metadata (7개 테이블)
+- [x] **RLS 정책**: anon key 전체 접근 (내부 팀 전용)
+- [x] **Realtime 활성화**: scenes, comments, comp_revisions, episodes, parts
+
+### M-1. 마이그레이션 스크립트 `P9` `[스킵]`
+
+> 기존 Sheets 데이터를 옮기지 않고 새로 시작하기로 결정 (2026-03-15)
+> 사용자 계정도 새로 만들기로 함 → 스크립트 불필요
+
+### M-2. Supabase 클라이언트 구현 `P9` `[완료]`
+
+> 난이도: ●●○ | 완료일: 2026-03-14
+
+- [x] **electron/supabase.ts** (802줄): 클라이언트 초기화 + 전체 CRUD 함수
+  - Episodes: readAll, add, softDelete, archive, unarchive
+  - Parts: add, softDelete
+  - Scenes: add, addBulk, delete, updateStage, bulkUpdate, updateField
+  - Users: read, add, update, delete
+  - Comments: read, add, edit, delete
+  - CompRevisions: readAll, add, update
+  - Metadata: readAll, read, write
+- [x] **electron/realtime.ts** (147줄): Realtime 구독 + 지수 백오프 자동 재연결 (최대 10회)
+- [x] **electron/broadcast.ts** (82줄): Broadcast 채널로 즉시 delta 전파
+- [x] **src/services/supabaseService.ts** (374줄): IPC 래퍼 + 고수준 API (sheetName→UUID 변환)
+- [x] **electron/preload.ts**: Supabase IPC 메서드 30+개 추가
+- [x] **electron/main.ts**: Supabase IPC 핸들러 + Realtime 이벤트 전달
+
+### M-3. 뷰/스토어 전환 `P9` `[완료]`
+
+> 난이도: ●●● | 가장 큰 작업
+
+- [x] **ScenesView.tsx**: sheetsService → supabaseService 전면 교체, `if(sheetsConnected)` 분기 전부 제거
+- [x] **useDataStore.ts**: Realtime delta 적용 액션 (`updateSceneStageDirectly`) 추가
+- [x] **App.tsx**: Supabase 우선 연결 + Realtime/Broadcast 리스너 추가
+- [x] **App.tsx 잔여**: `onSheetChanged` 리스너 제거
+- [x] **useAppStore.ts**: `sheetsConnected` → `dataConnected` 리네이밍 완료 (호환 alias 제거 완료)
+- [x] **CompositingView.tsx**: `sheetsConnected` → `dataConnected` 참조 변경
+- [x] **SheetsSection.tsx**: sheetsService → gasConfigService 전환
+- [x] **WidgetPopup.tsx**: sheetsService → gasConfigService 전환
+
+### M-4. 테스트 모드 제거 `P9` `[완료]`
+
+> 난이도: ●○○
+
+- [x] **testSheetService.ts 삭제**: 이미 제거됨
+- [x] **test-data/ 디렉토리 삭제**: 이미 제거됨
+- [x] **isTestMode 잔여 참조 정리**: 문서 내 참조만 남아있어 실질 완료
+
+### M-5. 정리 및 빌드 검증 `P9` `[완료]`
+
+> 난이도: ●●○
+
+- [x] **electron/drive-image.ts**: sheets.ts에서 이미지 업로드 코드 분리
+- [x] **electron/sheets.ts 축소**: 627줄 → 133줄 (fallback 읽기 전용 + GAS 연결만 잔존)
+- [x] **src/services/sheetsService.ts 삭제**: gasConfigService + supabaseService로 대체
+- [x] **electron/gas-fetch.ts**: GAS HTTP 공용 모듈로 유지 (drive-image + sheets 공유)
+- [x] **src/config.ts**: `DEFAULT_GAS_IMAGE_URL` 단일 사용 (`DEFAULT_WEB_APP_URL` deprecated alias 제거 완료)
+- [x] **sheetsConnected → dataConnected**: 리네이밍 완료 + 호환 alias 제거 완료
+- [x] **supabaseService.ts**: 레거시 Sheets 네이밍 정리 (`*InSheets`/`*ToSheets` → 깨끗한 이름으로 변경)
+- [x] **호출처 6개 파일 일괄 업데이트**: ScenesView, EpisodeView, WidgetPopup, App, MyTasksWidget, SpotlightSearch
+- [x] **Sheets IPC 핸들러 25개 제거**: main.ts + preload.ts + types 정리
+- [x] **tsc --noEmit + vite build 통과 확인**
+
+### M-6. 컷오버 `P9` `[준비 완료]`
+
+> 난이도: ●○○ | 데이터 이관 없이 새로 시작 (다운타임 불필요)
+> Supabase DB 테이블 7개 확인 완료 (2026-03-15)
+
+- [x] **Supabase DB 스키마 확인**: 7개 테이블 존재 확인
+- [x] **앱 코드 Supabase 전환**: 완료 (M-2~M-5)
+- [ ] **새 빌드 생성**: `npm run build` (Electron 패키징)
+- [ ] **공유 드라이브 배포**: 빌드 결과물 복사
+- [ ] **팀 공지**: 새 앱 사용 안내 (계정 새로 만들기)
+- [ ] **검증**: 에피소드/씬 추가, 체크박스 토글, 댓글, Realtime 동기화 테스트
+
+### 미정 사항
+
+- **인증 시스템**: Supabase Auth vs 현행 유지 (구현 전 한솔님과 확인, `DEVLOG/supabase-migration-plan.md` 섹션 9 참조)
+- **Keep-alive**: 무료 플랜 7일 미사용 시 자동 정지 — 연휴 대비 방안 필요
+
+---
+
 ## 구현 우선순위 총정리
 
 > **2026-02-27 기준**: Phase 0-1~0-3 완료. 나머지 안정화 + 미완료 기능 진행.
@@ -1005,6 +1125,18 @@ Electron 구현:
 | 12 | **스플래시 건너뛰기** | P8 | ●○○ | 8-4 ✅ 완료 |
 | 13 | **로그인 자동저장** | P8 | ●○○ | 8-5 ✅ 완료 |
 | 14 | 키보드 단축키 커스텀 | P8 | ●●○ | 8-2 대기 |
+
+### Phase 9 (Supabase 마이그레이션) — 진행 현황
+
+| 순위 | 항목 | 세부 | 난이도 | 상태 |
+|------|------|------|--------|------|
+| 1 | M-0. Supabase 프로젝트 준비 | 스키마 + RLS + Realtime 활성화 | ●○○ | ✅ 완료 |
+| 2 | M-2. 클라이언트 구현 | supabase.ts + realtime.ts + broadcast.ts + IPC | ●●○ | ✅ 완료 |
+| 3 | M-3. 뷰/스토어 전환 | ScenesView 완료, 나머지 뷰 잔여 | ●●● | 🔶 진행 중 |
+| 4 | M-4. 테스트 모드 제거 | testSheetService/test-data 삭제됨, isTestMode 잔여 | ●○○ | 🔶 대부분 완료 |
+| 5 | M-1. 마이그레이션 스크립트 | sheets→JSON→Supabase 변환 + 검증 | ●●○ | 미착수 |
+| 6 | M-5. 정리 및 빌드 검증 | sheets.ts 삭제, drive-image.ts 분리 | ●●○ | 미착수 |
+| 7 | M-6. 컷오버 | 반나절 다운타임, 실제 데이터 마이그레이션 + 배포 | ●○○ | 미착수 |
 
 ---
 

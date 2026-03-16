@@ -3,20 +3,26 @@ import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptF
 import type { ThemeColors } from '@/themes';
 import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
 
-export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'settings';
+export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'compositing' | 'settings';
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
 export type SortDir = 'asc' | 'desc';
 export type StatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';
-export type SceneViewMode = 'card' | 'table' | 'sheet';
+export type SceneViewMode = 'card' | 'sheet';
 export type SceneGroupMode = 'flat' | 'layout';
 export type DashboardDeptFilter = Department | 'all';
 
+export type DataSource = 'supabase' | 'sheets' | null;
+
 interface AppState {
-  // Google Sheets 연결 상태
-  sheetsConnected: boolean;
-  sheetsConfig: SheetsConfig | null;
-  setSheetsConnected: (v: boolean) => void;
-  setSheetsConfig: (config: SheetsConfig | null) => void;
+  // 데이터 소스 연결 상태 (Supabase 또는 GAS)
+  dataConnected: boolean;
+  gasConfig: SheetsConfig | null;
+  setDataConnected: (v: boolean) => void;
+  setGasConfig: (config: SheetsConfig | null) => void;
+
+  // 활성 데이터 소스 표시
+  activeDataSource: DataSource;
+  setActiveDataSource: (source: DataSource) => void;
 
   // 현재 뷰
   currentView: ViewMode;
@@ -83,7 +89,7 @@ interface AppState {
   setSelectedScenes: (ids: Set<string>) => void;
   clearSelectedScenes: () => void;
 
-  // 글로벌 토스트 (유형별 스타일 지원)
+  // [레거시] 글로벌 토스트 — Sonner toast()로 전환 완료, 호환용 유지
   toast: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null;
   setToast: (msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null) => void;
 
@@ -121,6 +127,10 @@ interface AppState {
   setVacationCache: (cache: { userName: string; status: VacationStatus | null; log: VacationLogEntry[]; lastFetch: number } | null) => void;
   invalidateVacationCache: () => void;
 
+  // 딥링크 (bflow://scene/... → 씬 상세 모달 자동 오픈)
+  pendingDeepLink: { sheetName: string; sceneId: string } | null;
+  setPendingDeepLink: (link: { sheetName: string; sceneId: string } | null) => void;
+
   // 설정 탭 (외부에서 특정 탭으로 이동 시 사용)
   settingsTab: string | null;
   setSettingsTab: (tab: string | null) => void;
@@ -132,10 +142,13 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  sheetsConnected: false,
-  sheetsConfig: null,
-  setSheetsConnected: (v) => set({ sheetsConnected: v }),
-  setSheetsConfig: (config) => set({ sheetsConfig: config }),
+  dataConnected: false,
+  gasConfig: null,
+  setDataConnected: (v) => set({ dataConnected: v }),
+  setGasConfig: (config) => set({ gasConfig: config }),
+
+  activeDataSource: null,
+  setActiveDataSource: (source) => set({ activeDataSource: source }),
 
   currentView: 'dashboard',
   previousView: null,
@@ -232,6 +245,9 @@ export const useAppStore = create<AppState>((set) => ({
   vacationCache: null,
   setVacationCache: (cache) => set({ vacationCache: cache }),
   invalidateVacationCache: () => set({ vacationCache: null }),
+
+  pendingDeepLink: null,
+  setPendingDeepLink: (link) => set({ pendingDeepLink: link }),
 
   settingsTab: null,
   setSettingsTab: (tab) => set({ settingsTab: tab }),

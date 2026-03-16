@@ -8,7 +8,7 @@ import { DEPARTMENT_CONFIGS } from '@/types';
 import type { Episode } from '@/types';
 import { cn } from '@/utils/cn';
 import { getEvents } from '@/services/calendarService';
-import { readMetadataFromSheets } from '@/services/sheetsService';
+import { readMetadata } from '@/services/supabaseService';
 import type { CalendarEvent } from '@/types/calendar';
 
 /* ────────────────────────────────────────────────
@@ -118,7 +118,7 @@ export function SpotlightSearch() {
       for (const ep of episodes) {
         for (const part of ep.parts) {
           try {
-            const data = await readMetadataFromSheets('part-memo', part.sheetName);
+            const data = await readMetadata('part-memo', part.sheetName);
             if (data?.value) memos[part.sheetName] = data.value;
           } catch { /* 무시 */ }
         }

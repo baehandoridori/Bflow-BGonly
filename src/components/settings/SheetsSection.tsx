@@ -2,27 +2,27 @@ import { useState, useEffect } from 'react';
 import { Database, Palmtree } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import {
-  loadSheetsConfig,
-  saveSheetsConfig,
-  connectSheets,
-  checkConnection,
-} from '@/services/sheetsService';
+  loadGasConfig,
+  saveGasConfig,
+  connectGas,
+  checkGasConnection,
+} from '@/services/gasConfigService';
 import {
   loadVacationConfig,
   saveVacationConfig,
   connectVacation,
   checkVacationConnection,
 } from '@/services/vacationService';
-import { DEFAULT_WEB_APP_URL, DEFAULT_VACATION_URL } from '@/config';
+import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { SettingsSection } from './SettingsSection';
 
 export function SheetsSection() {
   const {
-    sheetsConnected, setSheetsConnected, setSheetsConfig,
+    dataConnected, setDataConnected, setGasConfig,
     vacationConnected, setVacationConnected, setVacationConfig,
   } = useAppStore();
 
-  const [webAppUrl, setWebAppUrl] = useState(DEFAULT_WEB_APP_URL || '');
+  const [webAppUrl, setWebAppUrl] = useState(DEFAULT_GAS_IMAGE_URL || '');
   const [connectError, setConnectError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -35,12 +35,12 @@ export function SheetsSection() {
 
   useEffect(() => {
     async function load() {
-      const config = await loadSheetsConfig();
+      const config = await loadGasConfig();
       if (config) {
         setWebAppUrl(config.webAppUrl);
       }
-      const connected = await checkConnection();
-      setSheetsConnected(connected);
+      const connected = await checkGasConnection();
+      setDataConnected(connected);
 
       // 휴가 설정 로드 + 자동 연결
       const vacConfig = await loadVacationConfig();
@@ -65,17 +65,17 @@ export function SheetsSection() {
     setIsConnecting(true);
     setConnectError(null);
     try {
-      const result = await connectSheets(webAppUrl);
+      const result = await connectGas(webAppUrl);
       if (result.ok) {
-        setSheetsConnected(true);
+        setDataConnected(true);
         setConnectError(null);
       } else {
-        setSheetsConnected(false);
+        setDataConnected(false);
         setConnectError(result.error ?? '연결 실패');
       }
     } catch (err) {
       setConnectError(String(err));
-      setSheetsConnected(false);
+      setDataConnected(false);
     } finally {
       setIsConnecting(false);
     }
@@ -83,8 +83,8 @@ export function SheetsSection() {
 
   const handleSave = async () => {
     const config = { webAppUrl };
-    await saveSheetsConfig(config);
-    setSheetsConfig(config);
+    await saveGasConfig(config);
+    setGasConfig(config);
     setSaveMessage('저장 완료');
     setTimeout(() => setSaveMessage(null), 2000);
   };
@@ -125,23 +125,23 @@ export function SheetsSection() {
   return (
     <SettingsSection
       icon={<Database size={18} className="text-accent" />}
-      title="Google Sheets 연동"
+      title="데이터 서버 연동"
       action={
         <span
           className={`px-2.5 py-1 rounded-md text-xs font-medium ${
-            sheetsConnected
+            dataConnected
               ? 'bg-stage-png/20 text-stage-png'
               : 'bg-bg-primary text-text-secondary'
           }`}
         >
-          {sheetsConnected ? '연결됨' : '미연결'}
+          {dataConnected ? '연결됨' : '미연결'}
         </span>
       }
     >
-      {/* Apps Script 웹 앱 URL */}
+      {/* 이미지 업로드 서버 URL */}
       <div className="mb-4">
         <label className="block text-xs text-text-secondary mb-1.5">
-          Apps Script 웹 앱 URL
+          이미지 업로드 서버 URL
         </label>
         <input
           type="text"
@@ -151,7 +151,7 @@ export function SheetsSection() {
           className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/40 focus:outline-none focus:border-accent"
         />
         <p className="text-[11px] text-text-secondary/60 mt-1">
-          스프레드시트의 Apps Script를 배포한 후 받은 URL을 입력하세요
+          이미지 업로드용 Apps Script 웹 앱 URL을 입력하세요
         </p>
       </div>
 

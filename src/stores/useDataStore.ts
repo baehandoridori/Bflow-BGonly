@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Episode, Scene, DashboardStats, Department } from '@/types';
+import type { Episode, Scene, DashboardStats, Department, Stage } from '@/types';
 import { calcDashboardStats } from '@/utils/calcStats';
 
 interface DataState {
@@ -34,6 +34,10 @@ interface DataState {
     sceneId: string,
     stage: keyof Pick<Scene, 'lo' | 'done' | 'review' | 'png'>
   ) => void;
+  // 명시적 값 적용 (delta 수신용 — 토글이 아니라 값 직접 세팅)
+  setSceneStageValue: (sheetName: string, sceneId: string, stage: Stage, value: boolean) => void;
+  setSceneFieldBySceneId: (sheetName: string, sceneId: string, field: string, value: string) => void;
+
   addEpisodeOptimistic: (episodeNumber: number, department?: Department) => void;
   addPartOptimistic: (episodeNumber: number, partId: string, department?: Department) => void;
   addSceneOptimistic: (sheetName: string, sceneId: string, assignee: string, memo: string) => void;
@@ -41,6 +45,12 @@ interface DataState {
   updateSceneFieldOptimistic: (sheetName: string, rowIndex: number, field: string, value: string) => void;
   deletePartOptimistic: (sheetName: string) => void;
   deleteEpisodeOptimistic: (episodeNumber: number) => void;
+  /** Supabase UUID로 씬 필드 직접 업데이트 (Realtime delta용) */
+  updateSceneByUuid: (uuid: string, fields: Partial<Scene>) => boolean;
+  /** UUID로 씬 검색 (새 배열 미생성, O(n) loop) */
+  findSceneByUuid: (uuid: string) => Scene | undefined;
+  /** sceneId(사용자 지정 ID)로 씬 검색 */
+  findSceneBySceneId: (sceneId: string) => Scene | undefined;
 }
 
 function applyUpdate(get: () => DataState, episodes: Episode[]) {
@@ -71,19 +81,66 @@ export const useDataStore = create<DataState>((set, get) => ({
   setSyncError: (err) => set({ syncError: err }),
 
   toggleSceneStage: (sheetName, sceneId, stage) => {
-    const episodes = get().episodes.map((ep) => ({
-      ...ep,
-      parts: ep.parts.map((part) => {
-        if (part.sheetName !== sheetName) return part;
-        return {
-          ...part,
-          scenes: part.scenes.map((scene) => {
-            if (scene.sceneId !== sceneId) return scene;
-            return { ...scene, [stage]: !scene[stage] };
-          }),
-        };
-      }),
-    }));
+    const episodes = get().episodes.map((ep) => {
+      if (!ep.parts.some((p) => p.sheetName === sheetName)) return ep;
+      return {
+        ...ep,
+        parts: ep.parts.map((part) => {
+          if (part.sheetName !== sheetName) return part;
+          return {
+            ...part,
+            scenes: part.scenes.map((scene) => {
+              if (scene.sceneId !== sceneId) return scene;
+              return { ...scene, [stage]: !scene[stage] };
+            }),
+          };
+        }),
+      };
+    });
+    set(applyUpdate(get, episodes));
+  },
+
+  setSceneStageValue: (sheetName, sceneId, stage, value) => {
+    const episodes = get().episodes.map((ep) => {
+      if (!ep.parts.some((p) => p.sheetName === sheetName)) return ep;
+      return {
+        ...ep,
+        parts: ep.parts.map((part) => {
+          if (part.sheetName !== sheetName) return part;
+          return {
+            ...part,
+            scenes: part.scenes.map((scene) => {
+              if (scene.sceneId !== sceneId) return scene;
+              return { ...scene, [stage]: value };
+            }),
+          };
+        }),
+      };
+    });
+    set(applyUpdate(get, episodes));
+  },
+
+  setSceneFieldBySceneId: (sheetName, sceneId, field, value) => {
+    const episodes = get().episodes.map((ep) => {
+      if (!ep.parts.some((p) => p.sheetName === sheetName)) return ep;
+      return {
+        ...ep,
+        parts: ep.parts.map((part) => {
+          if (part.sheetName !== sheetName) return part;
+          return {
+            ...part,
+            scenes: part.scenes.map((scene) => {
+              if (scene.sceneId !== sceneId) return scene;
+              if (field === 'lo' || field === 'done' || field === 'review' || field === 'png') {
+                return { ...scene, [field]: value === 'true' };
+              }
+              if (field === 'no') return { ...scene, no: parseInt(value, 10) || 0 };
+              return { ...scene, [field]: value };
+            }),
+          };
+        }),
+      };
+    });
     set(applyUpdate(get, episodes));
   },
 
@@ -179,5 +236,47 @@ export const useDataStore = create<DataState>((set, get) => ({
   deleteEpisodeOptimistic: (episodeNumber) => {
     const episodes = get().episodes.filter((ep) => ep.episodeNumber !== episodeNumber);
     set(applyUpdate(get, episodes));
+  },
+
+  findSceneByUuid: (uuid) => {
+    for (const ep of get().episodes) {
+      for (const part of ep.parts) {
+        const scene = part.scenes.find((s) => s.id === uuid);
+        if (scene) return scene;
+      }
+    }
+    return undefined;
+  },
+
+  findSceneBySceneId: (sceneId) => {
+    for (const ep of get().episodes) {
+      for (const part of ep.parts) {
+        const scene = part.scenes.find((s) => s.sceneId === sceneId);
+        if (scene) return scene;
+      }
+    }
+    return undefined;
+  },
+
+  updateSceneByUuid: (uuid, fields) => {
+    const oldEpisodes = get().episodes;
+    for (let ei = 0; ei < oldEpisodes.length; ei++) {
+      const ep = oldEpisodes[ei];
+      for (let pi = 0; pi < ep.parts.length; pi++) {
+        const part = ep.parts[pi];
+        const si = part.scenes.findIndex((s) => s.id === uuid);
+        if (si < 0) continue;
+        // 변경된 branch만 새 참조 생성
+        const newScenes = [...part.scenes];
+        newScenes[si] = { ...newScenes[si], ...fields };
+        const newParts = [...ep.parts];
+        newParts[pi] = { ...part, scenes: newScenes };
+        const newEpisodes = [...oldEpisodes];
+        newEpisodes[ei] = { ...ep, parts: newParts };
+        set(applyUpdate(get, newEpisodes));
+        return true;
+      }
+    }
+    return false;
   },
 }));

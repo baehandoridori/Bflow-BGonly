@@ -1,43 +1,18 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification } from 'electron';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
 import {
   initSheets,
   isConnected,
-  readAllEpisodes,
-  updateSceneStage,
-  addEpisode,
-  addPart,
-  addScene,
-  deleteScene,
-  updateSceneField,
-  uploadImage,
-  readMetadata,
-  writeMetadata,
-  softDeletePart,
-  softDeleteEpisode,
-  archiveEpisode,
-  unarchiveEpisode,
-  readArchivedEpisodes,
-  gasBatch,
-  readRegistry,
-  archiveEpisodeViaRegistry,
-  unarchiveEpisodeViaRegistry,
+  readAllMetadata,
   readCommentsForPart,
-  addCommentToSheets,
-  editCommentInSheets,
-  deleteCommentFromSheets,
-  readUsersFromSheets,
-  addUserToSheets,
-  updateUserInSheets,
-  deleteUserFromSheets,
-  addScenes,
-  bulkUpdateCells,
+  readRevisionsFromSheets,
+  setRetryNotifyCallback,
+  getPendingOpsCount,
+  waitForAllPendingOps,
 } from './sheets';
-import type { SheetUser } from './sheets';
-import type { BatchAction } from './sheets';
-import { setRetryNotifyCallback, getPendingOpsCount, waitForAllPendingOps } from './sheets';
+import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-image';
 import {
   initVacation,
   isVacationConnected,
@@ -231,16 +206,30 @@ function animateBounds(
   });
 }
 
-/** 모든 윈도우(메인 + 위젯 팝업)에 sheet:changed 이벤트 브로드캐스트 */
-function broadcastSheetChanged(excludeWebContentsId?: number): void {
+/** 모든 윈도우(메인 + 위젯 팝업)에 sheet:changed 이벤트 브로드캐스트 (delta 페이로드 포함) */
+function broadcastDataChanged(excludeWebContentsId?: number, delta?: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.webContents.id !== excludeWebContentsId) {
-      mainWindow.webContents.send('sheet:changed');
+      mainWindow.webContents.send('data:changed', delta);
     }
   }
   for (const [, win] of widgetWindows) {
     if (!win.isDestroyed() && win.webContents.id !== excludeWebContentsId) {
-      win.webContents.send('sheet:changed');
+      win.webContents.send('data:changed', delta);
+    }
+  }
+}
+
+/** 스냅샷 릴레이: 보낸 창 제외 모든 창에 전체 데이터 전달 */
+function broadcastSnapshotRelay(excludeWebContentsId: number, data: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.webContents.id !== excludeWebContentsId) {
+      mainWindow.webContents.send('sheet:snapshot-relay', data);
+    }
+  }
+  for (const [, win] of widgetWindows) {
+    if (!win.isDestroyed() && win.webContents.id !== excludeWebContentsId) {
+      win.webContents.send('sheet:snapshot-relay', data);
     }
   }
 }
@@ -258,9 +247,12 @@ function ensureDir(dirPath: string): void {
 }
 
 function getAppRoot(): string {
-  return app.isPackaged
-    ? path.dirname(app.getPath('exe'))
-    : process.cwd();
+  if (app.isPackaged) {
+    return path.dirname(app.getPath('exe'));
+  }
+  // 개발 모드: 딥링크로 앱이 시작되면 cwd가 C:\WINDOWS\system32가 될 수 있으므로
+  // __dirname 기준으로 프로젝트 루트를 찾는다 (electron/ → 상위)
+  return path.resolve(__dirname, '..');
 }
 
 // ─── 윈도우 생성 ──────────────────────────────────────────────
@@ -324,6 +316,24 @@ ipcMain.handle('users:write', (_event, data: unknown) => {
 
 ipcMain.handle('settings:get-path', () => getDataPath());
 
+// 파일탐색기에서 경로 열기
+ipcMain.handle('shell:show-item', async (_event, filePath: string) => {
+  try {
+    // 파일이면 해당 파일 선택 상태로 폴더 열기, 폴더면 폴더 열기
+    if (fs.existsSync(filePath)) {
+      shell.showItemInFolder(filePath);
+    } else {
+      // 존재하지 않으면 상위 폴더 열기 시도
+      const dir = path.dirname(filePath);
+      if (fs.existsSync(dir)) {
+        shell.openPath(dir);
+      }
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
 
 ipcMain.handle('settings:read', async (_event, fileName: string) => {
   const filePath = path.join(getDataPath(), fileName);
@@ -383,11 +393,227 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
   }
 });
 
+// ─── IPC 핸들러: Supabase ────────────────────────────────────
+
+import { setupBroadcast } from './broadcast';
+import {
+  testConnection as supabaseTestConnection,
+  readAllEpisodes as sbReadAllEpisodes,
+  addEpisode as sbAddEpisode,
+  softDeleteEpisode as sbSoftDeleteEpisode,
+  archiveEpisode as sbArchiveEpisode,
+  unarchiveEpisode as sbUnarchiveEpisode,
+  readArchivedEpisodes as sbReadArchived,
+  addPart as sbAddPart,
+  softDeletePart as sbSoftDeletePart,
+  addScene as sbAddScene,
+  addScenes as sbAddScenes,
+  deleteScene as sbDeleteScene,
+  updateSceneStage as sbUpdateSceneStage,
+  bulkUpdateSceneStages as sbBulkUpdateSceneStages,
+  updateSceneField as sbUpdateSceneField,
+  readUsers as sbReadUsers,
+  addUser as sbAddUser,
+  updateUser as sbUpdateUser,
+  deleteUser as sbDeleteUser,
+  readCommentsForPart as sbReadComments,
+  addComment as sbAddComment,
+  editComment as sbEditComment,
+  deleteComment as sbDeleteComment,
+  readAllRevisions as sbReadRevisions,
+  addRevision as sbAddRevision,
+  updateRevision as sbUpdateRevision,
+  readAllMetadata as sbReadAllMetadata,
+  readMetadata as sbReadMetadata,
+  writeMetadata as sbWriteMetadata,
+} from './supabase';
+import type { SupabaseUser } from './supabase';
+import { setupRealtimeSubscription, teardownRealtime } from './realtime';
+
+// ─── Supabase IPC 에러 래퍼 ───
+function wrapIpc<T extends unknown[], R>(
+  fn: (...args: T) => Promise<R>,
+): (...args: T) => Promise<R> {
+  return async (...args: T) => {
+    try {
+      return await fn(...args);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Supabase IPC]', msg);
+      throw new Error(msg);
+    }
+  };
+}
+
+// 연결 테스트
+ipcMain.handle('supabase:test-connection', wrapIpc(async () => {
+  return supabaseTestConnection();
+}));
+
+// ─── Episodes ───
+ipcMain.handle('supabase:read-all', wrapIpc(async () => {
+  return sbReadAllEpisodes();
+}));
+ipcMain.handle('supabase:add-episode', wrapIpc(async (_e: unknown, episodeNumber: number, department?: string) => {
+  await sbAddEpisode(episodeNumber, department);
+}));
+ipcMain.handle('supabase:soft-delete-episode', wrapIpc(async (_e: unknown, episodeNumber: number) => {
+  await sbSoftDeleteEpisode(episodeNumber);
+}));
+ipcMain.handle('supabase:archive-episode', wrapIpc(async (_e: unknown, episodeNumber: number, archivedBy: string, archiveMemo: string) => {
+  await sbArchiveEpisode(episodeNumber, archivedBy, archiveMemo);
+}));
+ipcMain.handle('supabase:unarchive-episode', wrapIpc(async (_e: unknown, episodeNumber: number) => {
+  await sbUnarchiveEpisode(episodeNumber);
+}));
+ipcMain.handle('supabase:read-archived', wrapIpc(async () => {
+  return sbReadArchived();
+}));
+
+// ─── Parts ───
+ipcMain.handle('supabase:add-part', wrapIpc(async (_e: unknown, episodeNumber: number, partId: string, department?: string) => {
+  await sbAddPart(episodeNumber, partId, department);
+}));
+ipcMain.handle('supabase:soft-delete-part', wrapIpc(async (_e: unknown, sheetName: string) => {
+  await sbSoftDeletePart(sheetName);
+}));
+
+// ─── Scenes ───
+ipcMain.handle('supabase:add-scene', wrapIpc(async (_e: unknown, sheetName: string, sceneId: string, assignee: string, memo: string) => {
+  await sbAddScene(sheetName, sceneId, assignee, memo);
+}));
+ipcMain.handle('supabase:add-scenes', wrapIpc(async (_e: unknown, sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => {
+  await sbAddScenes(sheetName, scenes);
+}));
+ipcMain.handle('supabase:delete-scene', wrapIpc(async (_e: unknown, sceneUuid: string) => {
+  await sbDeleteScene(sceneUuid);
+}));
+ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => {
+  await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
+}));
+ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => {
+  await sbBulkUpdateSceneStages(updates, updatedBy);
+}));
+ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneUuid: string, field: string, value: string, senderId?: string) => {
+  await sbUpdateSceneField(sceneUuid, field, value, senderId);
+}));
+
+// ─── Users ───
+ipcMain.handle('supabase:read-users', wrapIpc(async () => {
+  return sbReadUsers();
+}));
+ipcMain.handle('supabase:add-user', wrapIpc(async (_e: unknown, user: SupabaseUser) => {
+  await sbAddUser(user);
+}));
+ipcMain.handle('supabase:update-user', wrapIpc(async (_e: unknown, userId: string, updates: Record<string, string>) => {
+  await sbUpdateUser(userId, updates);
+}));
+ipcMain.handle('supabase:delete-user', wrapIpc(async (_e: unknown, userId: string) => {
+  await sbDeleteUser(userId);
+}));
+
+// ─── Comments ───
+ipcMain.handle('supabase:read-comments', wrapIpc(async (_e: unknown, partUuid: string) => {
+  return sbReadComments(partUuid);
+}));
+ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
+  userId: string, userName: string, text: string, mentions: string[], createdAt: string) => {
+  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt);
+}));
+ipcMain.handle('supabase:edit-comment', wrapIpc(async (_e: unknown, commentId: string, text: string, mentions: string[]) => {
+  await sbEditComment(commentId, text, mentions);
+}));
+ipcMain.handle('supabase:delete-comment', wrapIpc(async (_e: unknown, commentId: string) => {
+  await sbDeleteComment(commentId);
+}));
+
+// ─── Revisions ───
+ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
+  return sbReadRevisions();
+}));
+ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, partUuid: string, sceneId: string,
+  revisionNo: number, status: string, priority: string, description: string, frameNo: string,
+  imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => {
+  await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, requesterId, requesterName, assignee, createdAt);
+}));
+ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
+  await sbUpdateRevision(id, updates);
+}));
+
+// ─── Metadata ───
+ipcMain.handle('supabase:read-all-metadata', wrapIpc(async () => {
+  return sbReadAllMetadata();
+}));
+ipcMain.handle('supabase:read-metadata', wrapIpc(async (_e: unknown, type: string, key: string) => {
+  return sbReadMetadata(type, key);
+}));
+ipcMain.handle('supabase:write-metadata', wrapIpc(async (_e: unknown, type: string, key: string, value: string) => {
+  await sbWriteMetadata(type, key, value);
+}));
+
+// ─── Slack Webhook ───
+const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/triggers/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';
+
+ipcMain.handle('slack:send-webhook', wrapIpc(async (_e: unknown, payload: Record<string, string>) => {
+  console.log('[Slack Webhook] 요청 페이로드:', JSON.stringify(payload));
+  const res = await fetch(SLACK_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.text();
+  console.log('[Slack Webhook] 응답:', res.status, body);
+  if (!res.ok) throw new Error(`Slack webhook failed: ${res.status} — ${body}`);
+  return { ok: true };
+}));
+
+// ─── Realtime 구독 (앱 시작 시 자동 설정) ───
+function startSupabaseRealtime() {
+  // 1) postgres_changes 기반 (기존)
+  setupRealtimeSubscription({
+    onSceneChange: (payload) => broadcastSupabaseEvent('scenes', payload),
+    onCommentChange: (payload) => broadcastSupabaseEvent('comments', payload),
+    onRevisionChange: (payload) => broadcastSupabaseEvent('comp_revisions', payload),
+    onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
+    onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
+    onStatusChange: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('supabase:status', status);
+      }
+      for (const win of widgetWindows.values()) {
+        if (!win.isDestroyed()) win.webContents.send('supabase:status', status);
+      }
+    },
+  });
+
+  // 2) Broadcast 기반 즉시 동기화 (Publication 설정 불필요)
+  setupBroadcast((event, payload) => {
+    const broadcastEvent = { event, payload };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('supabase:broadcast-event', broadcastEvent);
+    }
+    for (const win of widgetWindows.values()) {
+      if (!win.isDestroyed()) win.webContents.send('supabase:broadcast-event', broadcastEvent);
+    }
+  });
+}
+
+function broadcastSupabaseEvent(table: string, payload: unknown) {
+  const event = { table, payload };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('supabase:realtime-event', event);
+  }
+  for (const win of widgetWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('supabase:realtime-event', event);
+  }
+}
+
 // ─── IPC 핸들러: Google Sheets 연동 (Apps Script 웹 앱) ─────
 
 ipcMain.handle('sheets:connect', async (_event, webAppUrl: string) => {
   try {
     const ok = await initSheets(webAppUrl);
+    if (ok) setImageUploadUrl(webAppUrl); // 이미지 업로드용 URL도 동일하게 설정
     return { ok, error: ok ? null : '연결 실패 — URL을 확인해주세요' };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -399,96 +625,11 @@ ipcMain.handle('sheets:is-connected', () => {
   return isConnected();
 });
 
-ipcMain.handle('sheets:read-all', async () => {
-  try {
-    const episodes = await readAllEpisodes();
-    return { ok: true, data: episodes };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg, data: null };
-  }
-});
-
-ipcMain.handle(
-  'sheets:update-cell',
-  async (
-    _event,
-    sheetName: string,
-    rowIndex: number,
-    stage: string,
-    value: boolean
-  ) => {
-    try {
-      await updateSceneStage(sheetName, rowIndex, stage, value);
-      return { ok: true };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: msg };
-    }
-  }
-);
-
-ipcMain.handle('sheets:add-episode', async (_event, episodeNumber: number, department?: string) => {
-  try {
-    await addEpisode(episodeNumber, (department as 'bg' | 'acting') || 'bg');
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:add-part', async (_event, episodeNumber: number, partId: string, department?: string) => {
-  try {
-    await addPart(episodeNumber, partId, (department as 'bg' | 'acting') || 'bg');
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle(
-  'sheets:add-scene',
-  async (_event, sheetName: string, sceneId: string, assignee: string, memo: string) => {
-    try {
-      await addScene(sheetName, sceneId, assignee, memo);
-      return { ok: true };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: msg };
-    }
-  }
-);
-
-ipcMain.handle('sheets:delete-scene', async (_event, sheetName: string, rowIndex: number) => {
-  try {
-    await deleteScene(sheetName, rowIndex);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle(
-  'sheets:update-scene-field',
-  async (_event, sheetName: string, rowIndex: number, field: string, value: string) => {
-    try {
-      await updateSceneField(sheetName, rowIndex, field, value);
-      return { ok: true };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: msg };
-    }
-  }
-);
-
 ipcMain.handle(
   'sheets:upload-image',
   async (_event, sheetName: string, sceneId: string, imageType: string, base64Data: string) => {
     try {
-      const result = await uploadImage(sheetName, sceneId, imageType, base64Data);
+      const result = await driveUploadImage(sheetName, sceneId, imageType, base64Data);
       return { ok: true, url: result.url };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -497,193 +638,37 @@ ipcMain.handle(
   }
 );
 
+// ─── IPC 핸들러: 네이티브 알림 ─────────────────────────────
+ipcMain.handle('notification:show-native', (_e: unknown, title: string, body: string) => {
+  // 앱 포커스 상태면 스킵 (인앱 토스트만 표시)
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) {
+    return;
+  }
+  if (Notification.isSupported()) {
+    const noti = new Notification({ title, body });
+    noti.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+    noti.show();
+  }
+});
+
 // ─── IPC 핸들러: METADATA ───────────────────────────────────
 
-ipcMain.handle('sheets:read-metadata', async (_event, type: string, key: string) => {
+ipcMain.handle('sheets:read-all-metadata', async () => {
   try {
-    const data = await readMetadata(type, key);
+    const data = await readAllMetadata();
     return { ok: true, data };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
+    return { ok: false, data: [], error: msg };
   }
 });
 
-ipcMain.handle('sheets:write-metadata', async (_event, type: string, key: string, value: string) => {
-  try {
-    await writeMetadata(type, key, value);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:soft-delete-part', async (_event, sheetName: string) => {
-  try {
-    await softDeletePart(sheetName);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:soft-delete-episode', async (_event, episodeNumber: number) => {
-  try {
-    await softDeleteEpisode(episodeNumber);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:read-archived', async () => {
-  try {
-    const data = await readArchivedEpisodes();
-    return { ok: true, data };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg, data: [] };
-  }
-});
-
-ipcMain.handle('sheets:archive-episode', async (_event, episodeNumber: number) => {
-  try {
-    await archiveEpisode(episodeNumber);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:unarchive-episode', async (_event, episodeNumber: number) => {
-  try {
-    await unarchiveEpisode(episodeNumber);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: 배치 요청 (Phase 0) ────────────────────────
-
-ipcMain.handle('sheets:batch', async (_event, actions: BatchAction[]) => {
-  try {
-    const result = await gasBatch(actions);
-    return result;
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: 대량 셀 업데이트 (다중 씬 체크박스 토글) ─────
-
-ipcMain.handle('sheets:bulk-update-cells', async (_event, sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) => {
-  try {
-    await bulkUpdateCells(sheetName, updates);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: _REGISTRY (Phase 0-2) ───────────────────────
-
-ipcMain.handle('sheets:read-registry', async () => {
-  try {
-    const data = await readRegistry();
-    return { ok: true, data };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg, data: [] };
-  }
-});
-
-ipcMain.handle('sheets:archive-episode-via-registry', async (
-  _event, episodeNumber: number, archivedBy: string, archiveMemo: string
-) => {
-  try {
-    await archiveEpisodeViaRegistry(episodeNumber, archivedBy, archiveMemo);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:unarchive-episode-via-registry', async (_event, episodeNumber: number) => {
-  try {
-    await unarchiveEpisodeViaRegistry(episodeNumber);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: 대량 씬 추가 (Phase 0-5) ────────────────────
-
-ipcMain.handle('sheets:add-scenes', async (
-  _event, sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]
-) => {
-  try {
-    await addScenes(sheetName, scenes);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: _USERS (Phase 0-4) ──────────────────────────
-
-ipcMain.handle('sheets:read-users', async () => {
-  try {
-    const data = await readUsersFromSheets();
-    return { ok: true, data };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg, data: [] };
-  }
-});
-
-ipcMain.handle('sheets:add-user', async (_event, user: SheetUser) => {
-  try {
-    await addUserToSheets(user);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:update-user', async (_event, userId: string, updates: Record<string, string>) => {
-  try {
-    await updateUserInSheets(userId, updates);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:delete-user', async (_event, userId: string) => {
-  try {
-    await deleteUserFromSheets(userId);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-// ─── IPC 핸들러: _COMMENTS (Phase 0-3) ───────────────────────
+// ─── IPC 핸들러: _COMMENTS fallback (Supabase 장애 시) ──────
 
 ipcMain.handle('sheets:read-comments', async (_event, sheetName: string) => {
   try {
@@ -695,46 +680,33 @@ ipcMain.handle('sheets:read-comments', async (_event, sheetName: string) => {
   }
 });
 
-ipcMain.handle('sheets:add-comment', async (
-  _event, commentId: string, sheetName: string, sceneId: string,
-  userId: string, userName: string, text: string, mentions: string[], createdAt: string
-) => {
-  try {
-    await addCommentToSheets(commentId, sheetName, sceneId, userId, userName, text, mentions, createdAt);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
+// ─── IPC 핸들러: _COMP_REVISIONS fallback (Supabase 장애 시) ──
 
-ipcMain.handle('sheets:edit-comment', async (
-  _event, commentId: string, text: string, mentions: string[]
-) => {
+ipcMain.handle('sheets:read-revisions', async () => {
   try {
-    await editCommentInSheets(commentId, text, mentions);
-    return { ok: true };
+    const data = await readRevisionsFromSheets();
+    return { ok: true, data };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
-  }
-});
-
-ipcMain.handle('sheets:delete-comment', async (_event, commentId: string) => {
-  try {
-    await deleteCommentFromSheets(commentId);
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: msg };
+    return { ok: false, error: msg, data: [] };
   }
 });
 
 // ─── IPC 핸들러: 데이터 변경 브로드캐스트 (라이브 모드) ──────
 
-ipcMain.handle('sheets:notify-change', (event) => {
-  // 호출한 윈도우를 제외한 모든 윈도우에 sheet:changed 전송
-  broadcastSheetChanged(event.sender.id);
+// 호환성: 기존 채널도 유지
+ipcMain.handle('sheets:notify-change', (event, delta?: unknown) => {
+  broadcastDataChanged(event.sender.id, delta);
+  return { ok: true };
+});
+ipcMain.handle('data:notify-change', (event, delta?: unknown) => {
+  broadcastDataChanged(event.sender.id, delta);
+  return { ok: true };
+});
+
+// 스냅샷 릴레이: 구조적 변경 후 최신 데이터를 다른 창에 직접 전달
+ipcMain.handle('sheets:relay-snapshot', (event, data: unknown) => {
+  broadcastSnapshotRelay(event.sender.id, data);
   return { ok: true };
 });
 
@@ -1274,9 +1246,138 @@ ipcMain.handle('widget:get-saved-state', (_event, widgetId: string) => {
   return widgetPositionCache.get(widgetId) ?? null;
 });
 
+// ─── 딥링크 (bflow:// 커스텀 프로토콜) ──────────────────────
+// URL 형식: bflow://scene/<sheetName>/<sceneId>
+// 예: bflow://scene/EP01_A_BG/a003  또는  bflow://scene/EP01_A_BG/12
+//
+// 동작 방식 (빌드 모드):
+//   1) 앱이 실행 중 → second-instance 이벤트로 URL 수신 → 기존 창 포커스 + 씬 모달 오픈
+//   2) 앱이 꺼져 있음 → OS가 앱 실행 + argv로 URL 전달 → 로드 완료 후 씬 모달 오픈
+//
+// 동작 방식 (개발 모드):
+//   second-instance가 불안정할 수 있으므로, 파일 기반 폴백 추가:
+//   - 두 번째 인스턴스가 deeplink.txt 파일에 URL 기록 후 종료
+//   - 첫 번째 인스턴스가 파일 감시(fs.watch)로 URL 읽어서 처리
+//
+// 테스트: cmd에서 start bflow://scene/EP01_A_BG/a003
+//   ※ 빌드 후에는 설치된 exe가 자동 등록됨
+
+const PROTOCOL = 'bflow';
+const DEEPLINK_FILE = path.join(app.getPath('userData'), 'deeplink.txt');
+
+let pendingDeepLink: string | null = null;
+
+function parseDeepLink(url: string): { sheetName: string; sceneId: string } | null {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== `${PROTOCOL}:`) return null;
+    if (u.host !== 'scene') return null;
+    const segments = u.pathname.replace(/^\/+/, '').split('/');
+    if (segments.length < 2) return null;
+    return { sheetName: decodeURIComponent(segments[0]), sceneId: decodeURIComponent(segments[1]) };
+  } catch {
+    return null;
+  }
+}
+
+function sendDeepLinkToRenderer(url: string): void {
+  const parsed = parseDeepLink(url);
+  if (!parsed) return;
+  console.log('[DeepLink] 전달:', parsed);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('deep-link', parsed);
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    pendingDeepLink = url;
+  }
+}
+
+/** 딥링크 파일에 URL 기록 (두 번째 인스턴스 → 첫 번째 인스턴스 전달용) */
+function writeDeepLinkFile(url: string): void {
+  try {
+    const dir = path.dirname(DEEPLINK_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(DEEPLINK_FILE, url, 'utf-8');
+  } catch (err) {
+    console.error('[DeepLink] 파일 쓰기 실패:', err);
+  }
+}
+
+/** 딥링크 파일 감시 시작 (첫 번째 인스턴스에서 호출) */
+/** 딥링크 파일 폴링 감시 시작 (500ms 주기) */
+function watchDeepLinkFile(): void {
+  // 기존 파일 정리
+  try { fs.unlinkSync(DEEPLINK_FILE); } catch { /* 없으면 무시 */ }
+
+  setInterval(() => {
+    try {
+      if (!fs.existsSync(DEEPLINK_FILE)) return;
+      const url = fs.readFileSync(DEEPLINK_FILE, 'utf-8').trim();
+      fs.unlinkSync(DEEPLINK_FILE);
+      if (url) {
+        console.log('[DeepLink] 파일에서 URL 감지:', url);
+        sendDeepLinkToRenderer(url);
+      }
+    } catch { /* 파일 경합 무시 */ }
+  }, 500);
+}
+
+// 싱글 인스턴스 + 딥링크 전달
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  // 두 번째 인스턴스: 딥링크 파일만 기록하고 조용히 종료
+  // requestSingleInstanceLock()이 false를 반환하면 argv는 이미 첫 번째 인스턴스로 전달됨
+  // 파일 기록은 second-instance IPC가 유실될 경우의 폴백
+  const deepLinkUrl = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+  if (deepLinkUrl) writeDeepLinkFile(deepLinkUrl);
+  // ★ ready 이전에 quit/exit하면 Windows가 "프로그램 실패"로 인식 → 비프음 재생
+  // ready까지 기다린 후 조용히 종료해야 비프음 방지
+  app.on('ready', () => setTimeout(() => app.exit(0), 50));
+} else {
+  // ★ 프로토콜 등록은 첫 번째 인스턴스에서만!
+  // 두 번째 인스턴스에서 호출하면 cwd가 system32일 때 레지스트리가 깨짐
+  if (process.env.VITE_DEV_SERVER_URL) {
+    const success = app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
+      path.resolve(__dirname, '..'),
+    ]);
+    console.log(`[DeepLink] 개발 모드 프로토콜 등록: ${success ? '성공' : '실패'}`);
+  } else {
+    app.setAsDefaultProtocolClient(PROTOCOL);
+  }
+
+  // 첫 번째 인스턴스: second-instance 이벤트 + 파일 감시
+  app.on('second-instance', (_event, argv) => {
+    console.log('[DeepLink] second-instance argv:', argv);
+    const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+    console.log('[DeepLink] 추출된 URL:', deepLinkUrl ?? '(없음)');
+    if (deepLinkUrl) sendDeepLinkToRenderer(deepLinkUrl);
+
+    // sendDeepLinkToRenderer가 이미 show/focus하지만, URL 없는 경우에도 창 활성화
+    if (mainWindow && !deepLinkUrl) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+
+  // 파일 기반 폴백: second-instance가 안 먹힐 경우 대비
+  watchDeepLinkFile();
+}
+
+// macOS: open-url 이벤트
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  sendDeepLinkToRenderer(url);
+});
+
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
 
 app.whenReady().then(() => {
+  // 두 번째 인스턴스면 초기화하지 않고 종료
+  if (!gotTheLock) return;
+
   // 위젯 위치 캐시 로드 (Phase 0-6)
   loadWidgetPositions();
 
@@ -1319,13 +1420,26 @@ app.whenReady().then(() => {
 
   createWindow();
 
-  // 저장된 위젯 자동 복원 (Phase 0-6)
-  if (widgetPositionCache.size > 0 && mainWindow) {
+  // Supabase Realtime 구독 시작
+  startSupabaseRealtime();
+
+  // 저장된 위젯 자동 복원 (Phase 0-6) + 보류 딥링크 전달
+  if (mainWindow) {
     mainWindow.webContents.on('did-finish-load', () => {
-      for (const [widgetId, state] of widgetPositionCache) {
-        const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
-        openWidgetPopup(widgetId, title);
+      if (widgetPositionCache.size > 0) {
+        for (const [widgetId, state] of widgetPositionCache) {
+          const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
+          openWidgetPopup(widgetId, title);
+        }
       }
+      // 앱 시작 시 보류된 딥링크 전달
+      if (pendingDeepLink) {
+        sendDeepLinkToRenderer(pendingDeepLink);
+        pendingDeepLink = null;
+      }
+      // Windows: 프로세스 argv에서 딥링크 확인 (프로토콜 핸들러로 앱이 시작된 경우)
+      const argDeepLink = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+      if (argDeepLink) sendDeepLinkToRenderer(argDeepLink);
     });
   }
 
@@ -1353,6 +1467,9 @@ app.whenReady().then(() => {
 app.on('before-quit', (e) => {
   if (isQuitting) return;
   isQuitting = true;
+
+  // Supabase Realtime 정리
+  teardownRealtime();
 
   // 위젯 위치 즉시 저장 (closed 이벤트보다 먼저 실행)
   saveWidgetPositionsSync();

@@ -263,7 +263,7 @@ function SheetProgressCell({ pct }: { pct: number }) {
             className="h-full rounded-full transition-all duration-500 ease-out"
             style={{
               width: `${pct}%`,
-              background: pct >= 100 ? '#00B894' : pct >= 50 ? '#FDCB6E' : '#74B9FF',
+              background: pct >= 100 ? '#6C5CE7' : pct >= 50 ? '#A599F5' : '#C4BCFA',
             }}
           />
         </div>

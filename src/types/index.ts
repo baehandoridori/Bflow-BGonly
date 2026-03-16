@@ -20,7 +20,7 @@ export const DEPARTMENT_CONFIGS: Record<Department, DepartmentConfig> = {
     label: '배경',
     shortLabel: 'BG',
     stageLabels: { lo: 'LO', done: '완료', review: '검수', png: 'PNG' },
-    stageColors: { lo: '#74B9FF', done: '#A29BFE', review: '#FDCB6E', png: '#00B894' },
+    stageColors: { lo: '#C4BCFA', done: '#A599F5', review: '#8677EF', png: '#6C5CE7' },
     color: '#6C5CE7',
   },
   acting: {
@@ -28,7 +28,7 @@ export const DEPARTMENT_CONFIGS: Record<Department, DepartmentConfig> = {
     label: '액팅',
     shortLabel: 'ACT',
     stageLabels: { lo: '1원화', done: '2원화', review: '동화', png: '최종' },
-    stageColors: { lo: '#FF6B6B', done: '#FF9FF3', review: '#FECA57', png: '#48DBFB' },
+    stageColors: { lo: '#F5BEB3', done: '#EDA293', review: '#E58A76', png: '#E17055' },
     color: '#E17055',
   },
 };
@@ -39,7 +39,7 @@ export type Stage = 'lo' | 'done' | 'review' | 'png';
 
 export const STAGES: Stage[] = ['lo', 'done', 'review', 'png'];
 
-/** @deprecated — 부서별 라벨은 DEPARTMENT_CONFIGS[dept].stageLabels 사용 */
+/** BG 기본 단계 라벨 (부서별 라벨은 DEPARTMENT_CONFIGS[dept].stageLabels) */
 export const STAGE_LABELS: Record<Stage, string> = {
   lo: 'LO',
   done: '완료',
@@ -47,17 +47,18 @@ export const STAGE_LABELS: Record<Stage, string> = {
   png: 'PNG',
 };
 
-/** @deprecated — 부서별 컬러는 DEPARTMENT_CONFIGS[dept].stageColors 사용 */
+/** BG 기본 단계 컬러 (부서별 컬러는 DEPARTMENT_CONFIGS[dept].stageColors) */
 export const STAGE_COLORS: Record<Stage, string> = {
-  lo: '#74B9FF',
-  done: '#A29BFE',
-  review: '#FDCB6E',
-  png: '#00B894',
+  lo: '#C4BCFA',
+  done: '#A599F5',
+  review: '#8677EF',
+  png: '#6C5CE7',
 };
 
 // ─── 씬 ──────────────────────────────────────
 
 export interface Scene {
+  id?: string;   // Supabase UUID (Sheets 모드에서는 undefined)
   no: number;
   sceneId: string;
   memo: string;
@@ -71,6 +72,41 @@ export interface Scene {
   png: boolean;
   completedBy?: string;  // 모든 단계 완료한 사용자 이름
   completedAt?: string;  // 완료 시각 (ISO 8601)
+}
+
+// ─── 통합 씬 (BG + ACT 머지) ─────────────────
+
+export interface MergedScene {
+  sceneId: string;
+  bgScene: Scene | null;
+  actScene: Scene | null;
+  bgSceneIndex: number;   // bgPart.scenes 내 인덱스 (-1 if absent)
+  actSceneIndex: number;   // actPart.scenes 내 인덱스 (-1 if absent)
+}
+
+// ─── 컴포지팅 리비전 ─────────────────────────
+
+export type RevisionStatus = 'open' | 'in_progress' | 'resolved';
+export type RevisionPriority = 'urgent' | 'high' | 'normal';
+
+export interface CompRevision {
+  id: string;
+  sceneKey: string;        // "EP01:A:a001" (에피소드:파트:씬ID)
+  revisionNo: number;      // 씬별 자동 증가 (Rev.1, Rev.2, ...)
+  status: RevisionStatus;
+  priority: RevisionPriority;
+  description: string;
+  frameNo?: string;        // 프레임 번호 (예: "F024")
+  imageUrl?: string;
+  department?: 'bg' | 'acting';
+  requesterId: string;
+  requesterName: string;
+  assignee?: string;
+  resolvedBy?: string;
+  resolvedNote?: string;
+  createdAt: string;       // ISO 8601
+  updatedAt: string;
+  resolvedAt?: string;
 }
 
 // ─── 사용자 & 인증 ─────────────────────────
@@ -100,6 +136,7 @@ export interface AuthSession {
 // ─── 파트 & 에피소드 ─────────────────────────
 
 export interface Part {
+  id?: string;    // Supabase UUID (Sheets 모드에서는 undefined)
   partId: string; // 'A', 'B', 'C', 'D'
   department: Department; // 'bg' | 'acting'
   sheetName: string; // 'EP01_A_BG' or 'EP01_A' (legacy = bg)
@@ -218,6 +255,61 @@ export interface RegistryEntry {
   updatedAt: string;
 }
 
+// ─── 동기화 델타 (창 간 IPC 페이로드) ────────
+
+export interface SheetDeltaToggle {
+  type: 'toggle';
+  sheetName: string;
+  sceneId: string;
+  field: Stage;
+  value: boolean;
+}
+export interface SheetDeltaFieldUpdate {
+  type: 'field-update';
+  sheetName: string;
+  sceneId: string;
+  sceneIndex: number;
+  field: string;
+  value: string;
+}
+export interface SheetDeltaComment {
+  type: 'comment';
+  sheetName: string;
+  sceneId: string;
+  commentAction: 'add' | 'edit' | 'delete';
+}
+export interface SheetDeltaSnapshot {
+  type: 'snapshot';
+}
+export interface SheetDeltaFull {
+  type: 'full';
+}
+export interface SheetDeltaTodo {
+  type: 'todo';
+}
+export type SheetDelta =
+  | SheetDeltaToggle
+  | SheetDeltaFieldUpdate
+  | SheetDeltaComment
+  | SheetDeltaSnapshot
+  | SheetDeltaFull
+  | SheetDeltaTodo;
+
+export interface SnapshotRelayData {
+  episodes: Episode[];
+  episodeTitles: Record<number, string>;
+  episodeMemos: Record<number, string>;
+}
+
+// ─── 메타데이터 항목 ────────────────────────
+
+export interface MetadataEntry {
+  type: string;
+  key: string;
+  value: string;
+  updatedAt: string;
+}
+
 // ─── Google Sheets 연동 타입 ─────────────────
 
 export interface SheetsConnectResult {
@@ -244,76 +336,40 @@ export interface SheetsConfig {
 
 export interface ElectronAPI {
   getDataPath: () => Promise<string>;
+  shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
 
   // 사용자 파일 (exe 옆 또는 test-data/ 옆, base64 인코딩 JSON)
   usersRead: () => Promise<UsersFile | null>;
   usersWrite: (data: UsersFile) => Promise<boolean>;
   readSettings: (fileName: string) => Promise<unknown | null>;
   writeSettings: (fileName: string, data: unknown) => Promise<boolean>;
-  onSheetChanged: (callback: () => void) => () => void;
+  onDataChanged: (callback: (delta?: SheetDelta) => void) => () => void;
+  onSheetChanged: (callback: (delta?: SheetDelta) => void) => () => void;
   onRetryNotify?: (callback: (message: string) => void) => () => void;
   onSavingBeforeQuit?: (callback: (pendingCount: number) => void) => () => void;
+  // 네이티브 알림
+  showNativeNotification?: (title: string, body: string) => Promise<void>;
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
   imageSave: (fileName: string, base64Data: string) => Promise<string>;
   imageDelete: (fileName: string) => Promise<boolean>;
   imageGetDir: () => Promise<string>;
   clipboardReadImage: () => Promise<string | null>;
-  // Google Sheets 연동 (Apps Script 웹 앱)
+  // GAS 연결 (이미지 업로드용 Apps Script 웹 앱)
   sheetsConnect: (webAppUrl: string) => Promise<SheetsConnectResult>;
   sheetsIsConnected: () => Promise<boolean>;
-  sheetsReadAll: () => Promise<SheetsReadResult>;
-  sheetsUpdateCell: (
-    sheetName: string,
-    rowIndex: number,
-    stage: string,
-    value: boolean
-  ) => Promise<SheetsUpdateResult>;
-  // CRUD
-  sheetsAddEpisode: (episodeNumber: number, department?: string) => Promise<SheetsUpdateResult>;
-  sheetsAddPart: (episodeNumber: number, partId: string, department?: string) => Promise<SheetsUpdateResult>;
-  sheetsAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<SheetsUpdateResult>;
-  sheetsDeleteScene: (sheetName: string, rowIndex: number) => Promise<SheetsUpdateResult>;
-  sheetsUpdateSceneField: (sheetName: string, rowIndex: number, field: string, value: string) => Promise<SheetsUpdateResult>;
+  // 이미지 업로드 (GAS → Google Drive)
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
-  // METADATA 시트
-  sheetsReadMetadata: (type: string, key: string) => Promise<{ ok: boolean; data?: { type: string; key: string; value: string; updatedAt: string } | null; error?: string }>;
-  sheetsWriteMetadata: (type: string, key: string, value: string) => Promise<SheetsUpdateResult>;
-  sheetsSoftDeletePart: (sheetName: string) => Promise<SheetsUpdateResult>;
-  sheetsSoftDeleteEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
-  // 아카이빙
-  sheetsReadArchived: () => Promise<{ ok: boolean; data: { episodeNumber: number; title: string; partCount: number; archivedBy?: string; archivedAt?: string; archiveMemo?: string }[]; error?: string }>;
-  sheetsArchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
-  sheetsUnarchiveEpisode: (episodeNumber: number) => Promise<SheetsUpdateResult>;
-  // 배치 요청 (Phase 0)
-  sheetsBatch: (actions: { action: string; params: Record<string, string> }[]) =>
-    Promise<{
-      ok: boolean;
-      results?: { ok: boolean; data?: unknown }[];
-      error?: string;
-      failedAt?: number;
-      failedAction?: string;
-    }>;
-  // 대량 셀 업데이트 (다중 씬 체크박스 토글)
-  sheetsBulkUpdateCells: (sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[]) =>
-    Promise<SheetsUpdateResult>;
-  // 대량 씬 추가 (Phase 0-5)
-  sheetsAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<SheetsUpdateResult>;
-  // _USERS (Phase 0-4)
-  sheetsReadUsers: () => Promise<{ ok: boolean; data: AppUser[]; error?: string }>;
-  sheetsAddUser: (user: AppUser) => Promise<SheetsUpdateResult>;
-  sheetsUpdateUser: (userId: string, updates: Record<string, string>) => Promise<SheetsUpdateResult>;
-  sheetsDeleteUser: (userId: string) => Promise<SheetsUpdateResult>;
-  // _COMMENTS (Phase 0-3)
+  // Sheets fallback (Supabase 장애 시)
   sheetsReadComments: (sheetName: string) => Promise<{ ok: boolean; data: { commentId: string; sheetName: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string }[]; error?: string }>;
-  sheetsAddComment: (commentId: string, sheetName: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<SheetsUpdateResult>;
-  sheetsEditComment: (commentId: string, text: string, mentions: string[]) => Promise<SheetsUpdateResult>;
-  sheetsDeleteComment: (commentId: string) => Promise<SheetsUpdateResult>;
-  // _REGISTRY (Phase 0-2)
-  sheetsReadRegistry: () => Promise<{ ok: boolean; data: RegistryEntry[]; error?: string }>;
-  sheetsArchiveEpisodeViaRegistry: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<SheetsUpdateResult>;
-  sheetsUnarchiveEpisodeViaRegistry: (episodeNumber: number) => Promise<SheetsUpdateResult>;
+  sheetsReadRevisions: () => Promise<{ ok: boolean; data: { id: string; sceneKey: string; revisionNo: number; status: string; description: string; imageUrl: string; department: string; requesterId: string; requesterName: string; assignee: string; resolvedBy: string; resolvedNote: string; createdAt: string; updatedAt: string; resolvedAt: string }[]; error?: string }>;
   // 데이터 변경 브로드캐스트
-  sheetsNotifyChange?: () => Promise<{ ok: boolean }>;
+  dataNotifyChange?: (delta?: SheetDelta) => Promise<{ ok: boolean }>;
+  sheetsNotifyChange?: (delta?: SheetDelta) => Promise<{ ok: boolean }>;
+  // 스냅샷 릴레이 (같은 PC 내 다른 창에 전체 데이터 전달)
+  onSnapshotRelay?: (callback: (data: SnapshotRelayData) => void) => () => void;
+  sheetsRelaySnapshot?: (data: SnapshotRelayData) => Promise<{ ok: boolean }>;
+  // 메타데이터 일괄 로딩
+  sheetsReadAllMetadata?: () => Promise<{ ok: boolean; data: MetadataEntry[]; error?: string }>;
   // 휴가 관리 (vacation-repo WebApi)
   vacationConnect: (webAppUrl: string) => Promise<{ ok: boolean; error: string | null }>;
   vacationIsConnected: () => Promise<boolean>;
@@ -348,6 +404,44 @@ export interface ElectronAPI {
   // 화이트보드 (공유 드라이브 파일 접근)
   whiteboardReadShared: () => Promise<{ ok: boolean; data: import('./whiteboard').WhiteboardData | null; error?: string }>;
   whiteboardWriteShared: (data: import('./whiteboard').WhiteboardData) => Promise<{ ok: boolean; error?: string }>;
+
+  // ─── Supabase ──────────────────────────────────
+  supabaseTestConnection: () => Promise<{ ok: boolean; error?: string }>;
+  supabaseReadAll: () => Promise<unknown[]>;
+  supabaseAddEpisode: (episodeNumber: number, department?: string) => Promise<void>;
+  supabaseSoftDeleteEpisode: (episodeNumber: number) => Promise<void>;
+  supabaseArchiveEpisode: (episodeNumber: number, archivedBy: string, archiveMemo: string) => Promise<void>;
+  supabaseUnarchiveEpisode: (episodeNumber: number) => Promise<void>;
+  supabaseReadArchived: () => Promise<unknown[]>;
+  supabaseAddPart: (episodeNumber: number, partId: string, department?: string) => Promise<void>;
+  supabaseSoftDeletePart: (sheetName: string) => Promise<void>;
+  supabaseAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<void>;
+  supabaseAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<void>;
+  supabaseDeleteScene: (sceneUuid: string) => Promise<void>;
+  supabaseUpdateSceneStage: (sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => Promise<void>;
+  supabaseBulkUpdateSceneStages: (updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => Promise<void>;
+  supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) => Promise<void>;
+  supabaseReadUsers: () => Promise<unknown[]>;
+  supabaseAddUser: (user: unknown) => Promise<void>;
+  supabaseUpdateUser: (userId: string, updates: Record<string, string>) => Promise<void>;
+  supabaseDeleteUser: (userId: string) => Promise<void>;
+  supabaseReadComments: (partUuid: string) => Promise<unknown[]>;
+  supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<void>;
+  supabaseEditComment: (commentId: string, text: string, mentions: string[]) => Promise<void>;
+  supabaseDeleteComment: (commentId: string) => Promise<void>;
+  supabaseReadRevisions: () => Promise<unknown[]>;
+  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<void>;
+  supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
+  supabaseReadAllMetadata: () => Promise<unknown[]>;
+  supabaseReadMetadata: (type: string, key: string) => Promise<unknown>;
+  supabaseWriteMetadata: (type: string, key: string, value: string) => Promise<void>;
+  onSupabaseRealtime: (callback: (event: unknown) => void) => () => void;
+  onSupabaseStatus: (callback: (status: string) => void) => () => void;
+  onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;
+  // 슬랙 웹훅
+  sendSlackWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;
+  // 딥링크
+  onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => () => void;
 }
 
 declare global {

@@ -2,8 +2,8 @@ import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import {
   User, Calendar, Briefcase, KeyRound, AlertTriangle, Clock,
   CheckCircle2, ListTodo, ChevronRight, Palmtree, CircleDashed,
-  LayoutDashboard, Bell, Volume2, Plus, X, Loader2, RefreshCw,
-  ChevronDown,
+  LayoutDashboard, Plus, X, Loader2, RefreshCw,
+  ChevronDown, MessageSquare, Monitor,
 } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -71,32 +71,6 @@ function StatBlock({ label, value, accent }: { label: string; value: string | nu
     <div className="text-center flex-1">
       <p className={cn('text-xl font-bold', accent || 'text-text-primary')}>{value}</p>
       <p className="text-[10px] text-text-secondary/50 mt-0.5">{label}</p>
-    </div>
-  );
-}
-
-/** 알림 토글 행 */
-function NotiToggle({ label, description, checked, onChange }: {
-  label: string; description: string; checked: boolean; onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between">
-      <div className="min-w-0">
-        <p className="text-[12px] font-medium text-text-primary">{label}</p>
-        <p className="text-[10px] text-text-secondary/40">{description}</p>
-      </div>
-      <button
-        onClick={() => onChange(!checked)}
-        className={cn(
-          'relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer shrink-0 ml-3',
-          checked ? 'bg-accent' : 'bg-bg-border/50',
-        )}
-      >
-        <div className={cn(
-          'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200',
-          checked ? 'translate-x-4' : 'translate-x-0.5',
-        )} />
-      </button>
     </div>
   );
 }
@@ -284,11 +258,8 @@ export function ProfileSection() {
     : 'text-red-400'
     : 'text-text-secondary';
 
-  // ─ 기본 시작 뷰 / 알림 설정 ─
+  // ─ 기본 시작 뷰 ─
   const [defaultViewState, setDefaultViewState] = useState<string>('dashboard');
-  const [notiSceneChange, setNotiSceneChange] = useState(true);
-  const [notiSyncComplete, setNotiSyncComplete] = useState(false);
-  const [notiSound, setNotiSound] = useState(true);
   const prefsLoaded = useRef(false);
 
   useEffect(() => {
@@ -296,11 +267,6 @@ export function ProfileSection() {
     prefsLoaded.current = true;
     loadPreferences().then((prefs) => {
       if (prefs?.defaultView) setDefaultViewState(prefs.defaultView);
-      if (prefs?.notifications) {
-        setNotiSceneChange(prefs.notifications.sceneChange ?? true);
-        setNotiSyncComplete(prefs.notifications.syncComplete ?? false);
-        setNotiSound(prefs.notifications.sound ?? true);
-      }
     });
   }, []);
 
@@ -313,14 +279,6 @@ export function ProfileSection() {
     setDefaultViewState(view);
     persistPref({ defaultView: view });
   }, [persistPref]);
-
-  const handleNotiToggle = useCallback((key: 'sceneChange' | 'syncComplete' | 'sound', value: boolean) => {
-    if (key === 'sceneChange') setNotiSceneChange(value);
-    else if (key === 'syncComplete') setNotiSyncComplete(value);
-    else setNotiSound(value);
-    const next = { sceneChange: notiSceneChange, syncComplete: notiSyncComplete, sound: notiSound, [key]: value };
-    persistPref({ notifications: next });
-  }, [persistPref, notiSceneChange, notiSyncComplete, notiSound]);
 
   if (!currentUser) return null;
 
@@ -715,45 +673,6 @@ export function ProfileSection() {
         </div>
       </div>
 
-      {/* ════════════ 알림 설정 ════════════ */}
-      <div className="w-full bg-bg-primary/40 rounded-xl border border-bg-border/30 p-4 mb-3">
-        <div className="flex items-center gap-2 mb-3">
-          <Bell size={15} className="text-amber-400" />
-          <span className="text-[13px] font-semibold text-text-primary">알림 설정</span>
-        </div>
-        <div className="space-y-2.5">
-          <NotiToggle
-            label="내 씬 변경 알림"
-            description="배정된 씬이 변경되면 알려줍니다"
-            checked={notiSceneChange}
-            onChange={(v) => handleNotiToggle('sceneChange', v)}
-          />
-          <NotiToggle
-            label="동기화 완료 알림"
-            description="데이터 동기화가 완료되면 알려줍니다"
-            checked={notiSyncComplete}
-            onChange={(v) => handleNotiToggle('syncComplete', v)}
-          />
-          <div className="flex items-center justify-between pt-1 border-t border-bg-border/15">
-            <div className="flex items-center gap-2">
-              <Volume2 size={13} className="text-text-secondary/50" />
-              <span className="text-[12px] text-text-secondary/70">알림 소리</span>
-            </div>
-            <button
-              onClick={() => handleNotiToggle('sound', !notiSound)}
-              className={cn(
-                'relative w-9 h-5 rounded-full transition-colors duration-200 cursor-pointer',
-                notiSound ? 'bg-accent' : 'bg-bg-border/50',
-              )}
-            >
-              <div className={cn(
-                'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200',
-                notiSound ? 'translate-x-4' : 'translate-x-0.5',
-              )} />
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* ════════════ 추가 정보 카드 ════════════ */}
       {currentUser.slackId && (
