@@ -548,6 +548,19 @@ ipcMain.handle('supabase:write-metadata', wrapIpc(async (_e: unknown, type: stri
   await sbWriteMetadata(type, key, value);
 }));
 
+// ─── Slack Webhook ───
+const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/triggers/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';
+
+ipcMain.handle('slack:send-webhook', wrapIpc(async (_e: unknown, payload: Record<string, string>) => {
+  const res = await fetch(SLACK_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`Slack webhook failed: ${res.status}`);
+  return { ok: true };
+}));
+
 // ─── Realtime 구독 (앱 시작 시 자동 설정) ───
 function startSupabaseRealtime() {
   // 1) postgres_changes 기반 (기존)

@@ -1015,13 +1015,21 @@ export function MyTasksWidget() {
       ));
     }
   };
-  const removePersonalTodo = (todoId: string) => {
+  const removePersonalTodo = async (todoId: string) => {
+    // 낙관적: 목록에서 즉시 제거
     if (activeView.id === DEFAULT_VIEW.id) {
       setAssignedTodos((prev) => prev.filter((t) => t.id !== todoId));
     } else {
       setCustomViews((prev) => prev.map((v) =>
         v.id === activeViewId ? { ...v, personalTodos: v.personalTodos.filter((t) => t.id !== todoId) } : v,
       ));
+    }
+    // 캘린더 이벤트도 삭제 (없으면 no-op)
+    try {
+      const { deleteEvent } = await import('@/services/calendarService');
+      await deleteEvent(`cal_${todoId}`);
+    } catch (err) {
+      console.error('[MyTasks] 캘린더 이벤트 삭제 실패:', err);
     }
   };
   const reorderPendingTodos = (reordered: PersonalTodo[]) => {

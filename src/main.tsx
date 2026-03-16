@@ -4,6 +4,12 @@ import App from './App';
 import { WidgetPopup } from './views/WidgetPopup';
 import './index.css';
 
+// 브라우저 개발 환경: electronAPI가 없으면 mock 설치
+if (!window.electronAPI && import.meta.env.DEV) {
+  const { installDevElectronAPI } = await import('./mocks/devElectronAPI');
+  installDevElectronAPI();
+}
+
 // 해시로 위젯 팝업 모드 감지: #widget-popup/{widgetId}?key=val
 const hash = window.location.hash;
 const popupMatch = hash.match(/^#widget-popup\/([^?]+)(\?.*)?$/);

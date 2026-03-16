@@ -16,6 +16,24 @@ export function EpisodeSummaryWidget() {
   const stats = useMemo(() => calcDashboardStats(episodes, dept), [episodes, dept]);
   const episodeStats = stats.episodeStats;
 
+  const episodeAssignees = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    episodes.forEach(ep => {
+      const names = new Set<string>();
+      ep.parts.forEach(part => {
+        if (dept && part.department !== dept) return;
+        part.scenes.forEach(scene => {
+          scene.assignee?.split(',').forEach(n => {
+            const trimmed = n.trim();
+            if (trimmed) names.add(trimmed);
+          });
+        });
+      });
+      map[ep.episodeNumber] = [...names].sort();
+    });
+    return map;
+  }, [episodes, dept]);
+
   // 통합 모드: 부서별 에피소드 통계
   const deptEpisodeStats = useMemo(() => {
     if (!isAll) return null;
@@ -104,6 +122,13 @@ export function EpisodeSummaryWidget() {
                     </div>
                   ))}
                 </div>
+              )}
+              {/* 참여 팀원 */}
+              {episodeAssignees[ep.episodeNumber]?.length > 0 && (
+                <p className="text-[10px] text-text-secondary/50 mt-2 leading-relaxed truncate"
+                   title={`thanks to_${episodeAssignees[ep.episodeNumber].join(', ')}`}>
+                  thanks to_{episodeAssignees[ep.episodeNumber].join(', ')}
+                </p>
               )}
             </div>
           );

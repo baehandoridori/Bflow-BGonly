@@ -122,6 +122,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:read-metadata', type, key),
   supabaseWriteMetadata: (type: string, key: string, value: string) =>
     ipcRenderer.invoke('supabase:write-metadata', type, key, value),
+  // 슬랙 웹훅
+  sendSlackWebhook: (payload: Record<string, string>) =>
+    ipcRenderer.invoke('slack:send-webhook', payload),
 
   // Realtime 이벤트 수신 (메인 프로세스 → 렌더러)
   onSupabaseRealtime: (callback: (event: unknown) => void) => {

@@ -10,6 +10,7 @@ import {
   extractMentions,
 } from '@/services/commentService';
 import type { SceneComment } from '@/services/commentService';
+import { sendMentionWebhook } from '@/services/slackWebhookService';
 
 // ─── 시간 포맷 ───────────────────────────────
 
@@ -109,6 +110,28 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
 
     try {
       await addComment(sceneKey, comment);
+
+      // 슬랙 웹훅: 멘션된 사용자에게 알림 전송 (fire-and-forget)
+      if (mentions.length > 0 && currentUser.slackId) {
+        const [sheetName, sceneId] = sceneKey.split(':');
+        const parts = sheetName.match(/^EP(\d+)_([A-Z])_/);
+        const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : sheetName;
+        const partLabel = parts ? `${parts[2]}파트` : '';
+
+        for (const mentionedName of mentions) {
+          const target = users.find(u => u.name === mentionedName);
+          if (target?.slackId && target.slackId !== currentUser.slackId) {
+            sendMentionWebhook({
+              commentText: comment.text,
+              episodeLabel: epLabel,
+              sceneId: sceneId || '',
+              partLabel,
+              authorSlackId: currentUser.slackId,
+              targetSlackId: target.slackId,
+            });
+          }
+        }
+      }
     } catch (err) {
       // 롤백
       console.error('[댓글 추가 실패]', err);

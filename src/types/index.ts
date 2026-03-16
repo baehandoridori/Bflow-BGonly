@@ -438,6 +438,8 @@ export interface ElectronAPI {
   onSupabaseRealtime: (callback: (event: unknown) => void) => () => void;
   onSupabaseStatus: (callback: (status: string) => void) => () => void;
   onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;
+  // 슬랙 웹훅
+  sendSlackWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;
 }
 
 declare global {
