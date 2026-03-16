@@ -1246,11 +1246,28 @@ ipcMain.handle('widget:get-saved-state', (_event, widgetId: string) => {
 // ─── 딥링크 (bflow:// 커스텀 프로토콜) ──────────────────────
 // URL 형식: bflow://scene/<sheetName>/<sceneId>
 // 예: bflow://scene/EP01_A_BG/a003
+//
+// 동작 방식:
+//   1) 앱이 실행 중 → second-instance 이벤트로 URL 수신 → 기존 창 포커스 + 씬 모달 오픈
+//   2) 앱이 꺼져 있음 → OS가 앱 실행 + argv로 URL 전달 → 로드 완료 후 씬 모달 오픈
+//
+// 개발 모드 테스트:
+//   프로토콜 등록 후 브라우저/탐색기에서 bflow://scene/EP01_A_BG/a003 입력
+//   또는: start bflow://scene/EP01_A_BG/a003  (cmd에서)
+//   ※ 개발 모드에서는 electron.exe 경로 + start-dev.bat 인자로 등록됨
+//   ※ 빌드 후에는 설치된 exe가 자동 등록됨
 
 const PROTOCOL = 'bflow';
 
-// 개발 모드가 아닐 때만 프로토콜 등록 (packaged 앱)
-if (!process.env.VITE_DEV_SERVER_URL) {
+// 개발 모드: electron.exe 경로를 직접 지정해서 프로토콜 등록
+// 빌드 모드: Electron이 자동으로 현재 exe 경로 사용
+if (process.env.VITE_DEV_SERVER_URL) {
+  // 개발 모드 — process.execPath = node_modules/.../electron.exe
+  // argv에 "." (현재 디렉토리)을 넘겨서 electron이 앱을 찾을 수 있게 함
+  app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
+    path.resolve(process.cwd()),
+  ]);
+} else {
   app.setAsDefaultProtocolClient(PROTOCOL);
 }
 
@@ -1276,11 +1293,13 @@ function sendDeepLinkToRenderer(url: string): void {
   if (!parsed) return;
   console.log('[DeepLink] 전달:', parsed);
   if (mainWindow && !mainWindow.isDestroyed()) {
+    // 앱이 실행 중 → 기존 창 포커스 + 씬 모달 오픈
     mainWindow.webContents.send('deep-link', parsed);
+    if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
   } else {
-    // 앱이 아직 준비 안 됨 → 보류
+    // 앱이 아직 준비 안 됨 → 보류 (로드 완료 후 전달)
     pendingDeepLink = url;
   }
 }
@@ -1288,16 +1307,18 @@ function sendDeepLinkToRenderer(url: string): void {
 // 싱글 인스턴스: 이미 실행 중이면 딥링크 URL을 기존 인스턴스로 전달
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
+  // 이미 다른 인스턴스가 실행 중 → 그쪽에 URL 전달 후 종료
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
-    // Windows: argv의 마지막이 bflow:// URL
+    // Windows: argv에서 bflow:// URL 찾기
     const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
     if (deepLinkUrl) sendDeepLinkToRenderer(deepLinkUrl);
 
     // 기존 창 포커스
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
       mainWindow.focus();
     }
   });
