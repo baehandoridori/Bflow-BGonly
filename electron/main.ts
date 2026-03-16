@@ -247,9 +247,12 @@ function ensureDir(dirPath: string): void {
 }
 
 function getAppRoot(): string {
-  return app.isPackaged
-    ? path.dirname(app.getPath('exe'))
-    : process.cwd();
+  if (app.isPackaged) {
+    return path.dirname(app.getPath('exe'));
+  }
+  // 개발 모드: 딥링크로 앱이 시작되면 cwd가 C:\WINDOWS\system32가 될 수 있으므로
+  // __dirname 기준으로 프로젝트 루트를 찾는다 (electron/ → 상위)
+  return path.resolve(__dirname, '..');
 }
 
 // ─── 윈도우 생성 ──────────────────────────────────────────────
@@ -1331,13 +1334,11 @@ function watchDeepLinkFile(): void {
 // 싱글 인스턴스 + 딥링크 전달
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
-  // 두 번째 인스턴스: argv에서 딥링크 추출 → 파일로 전달 후 종료
+  // 두 번째 인스턴스: 창을 띄우지 않고 딥링크만 전달 후 즉시 종료
+  // app.quit()보다 process.exit()가 더 빠르게 종료되어 소리/창 깜빡임 방지
   const deepLinkUrl = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
-  if (deepLinkUrl) {
-    console.log('[DeepLink] 두 번째 인스턴스 → 파일 전달:', deepLinkUrl);
-    writeDeepLinkFile(deepLinkUrl);
-  }
-  app.quit();
+  if (deepLinkUrl) writeDeepLinkFile(deepLinkUrl);
+  process.exit(0);
 } else {
   // 첫 번째 인스턴스: second-instance 이벤트 + 파일 감시
   app.on('second-instance', (_event, argv) => {
