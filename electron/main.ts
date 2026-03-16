@@ -1245,25 +1245,26 @@ ipcMain.handle('widget:get-saved-state', (_event, widgetId: string) => {
 
 // ─── 딥링크 (bflow:// 커스텀 프로토콜) ──────────────────────
 // URL 형식: bflow://scene/<sheetName>/<sceneId>
-// 예: bflow://scene/EP01_A_BG/a003
+// 예: bflow://scene/EP01_A_BG/a003  또는  bflow://scene/EP01_A_BG/12
 //
-// 동작 방식:
+// 동작 방식 (빌드 모드):
 //   1) 앱이 실행 중 → second-instance 이벤트로 URL 수신 → 기존 창 포커스 + 씬 모달 오픈
 //   2) 앱이 꺼져 있음 → OS가 앱 실행 + argv로 URL 전달 → 로드 완료 후 씬 모달 오픈
 //
-// 개발 모드 테스트:
-//   프로토콜 등록 후 브라우저/탐색기에서 bflow://scene/EP01_A_BG/a003 입력
-//   또는: start bflow://scene/EP01_A_BG/a003  (cmd에서)
-//   ※ 개발 모드에서는 electron.exe 경로 + start-dev.bat 인자로 등록됨
+// 동작 방식 (개발 모드):
+//   second-instance가 불안정할 수 있으므로, 파일 기반 폴백 추가:
+//   - 두 번째 인스턴스가 deeplink.txt 파일에 URL 기록 후 종료
+//   - 첫 번째 인스턴스가 파일 감시(fs.watch)로 URL 읽어서 처리
+//
+// 테스트: cmd에서 start bflow://scene/EP01_A_BG/a003
 //   ※ 빌드 후에는 설치된 exe가 자동 등록됨
 
 const PROTOCOL = 'bflow';
+const DEEPLINK_FILE = path.join(app.getPath('userData'), 'deeplink.txt');
 
 // 개발 모드: electron.exe 경로를 직접 지정해서 프로토콜 등록
 // 빌드 모드: Electron이 자동으로 현재 exe 경로 사용
 if (process.env.VITE_DEV_SERVER_URL) {
-  // 개발 모드 — process.execPath = node_modules/.../electron.exe
-  // argv에 "." (현재 디렉토리)을 넘겨서 electron이 앱을 찾을 수 있게 함
   const success = app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
     path.resolve(process.cwd()),
   ]);
@@ -1277,11 +1278,9 @@ if (process.env.VITE_DEV_SERVER_URL) {
 let pendingDeepLink: string | null = null;
 
 function parseDeepLink(url: string): { sheetName: string; sceneId: string } | null {
-  // bflow://scene/EP01_A_BG/a003
   try {
     const u = new URL(url);
     if (u.protocol !== `${PROTOCOL}:`) return null;
-    // host = "scene", pathname = "/EP01_A_BG/a003"
     if (u.host !== 'scene') return null;
     const segments = u.pathname.replace(/^\/+/, '').split('/');
     if (segments.length < 2) return null;
@@ -1296,37 +1295,70 @@ function sendDeepLinkToRenderer(url: string): void {
   if (!parsed) return;
   console.log('[DeepLink] 전달:', parsed);
   if (mainWindow && !mainWindow.isDestroyed()) {
-    // 앱이 실행 중 → 기존 창 포커스 + 씬 모달 오픈
     mainWindow.webContents.send('deep-link', parsed);
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
   } else {
-    // 앱이 아직 준비 안 됨 → 보류 (로드 완료 후 전달)
     pendingDeepLink = url;
   }
 }
 
-// 싱글 인스턴스: 이미 실행 중이면 딥링크 URL을 기존 인스턴스로 전달
+/** 딥링크 파일에 URL 기록 (두 번째 인스턴스 → 첫 번째 인스턴스 전달용) */
+function writeDeepLinkFile(url: string): void {
+  try { fs.writeFileSync(DEEPLINK_FILE, url, 'utf-8'); } catch { /* 무시 */ }
+}
+
+/** 딥링크 파일 감시 시작 (첫 번째 인스턴스에서 호출) */
+function watchDeepLinkFile(): void {
+  // 기존 파일 정리
+  try { fs.unlinkSync(DEEPLINK_FILE); } catch { /* 없으면 무시 */ }
+
+  try {
+    // userData 폴더 감시
+    fs.watch(app.getPath('userData'), (_eventType, filename) => {
+      if (filename !== 'deeplink.txt') return;
+      try {
+        const url = fs.readFileSync(DEEPLINK_FILE, 'utf-8').trim();
+        if (url) {
+          console.log('[DeepLink] 파일에서 URL 감지:', url);
+          sendDeepLinkToRenderer(url);
+          fs.unlinkSync(DEEPLINK_FILE);
+        }
+      } catch { /* 이미 삭제됨 */ }
+    });
+  } catch (err) {
+    console.warn('[DeepLink] 파일 감시 실패:', err);
+  }
+}
+
+// 싱글 인스턴스 + 딥링크 전달
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
-  // 이미 다른 인스턴스가 실행 중 → 그쪽에 URL 전달 후 종료
+  // 두 번째 인스턴스: argv에서 딥링크 추출 → 파일로 전달 후 종료
+  const deepLinkUrl = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+  if (deepLinkUrl) {
+    console.log('[DeepLink] 두 번째 인스턴스 → 파일 전달:', deepLinkUrl);
+    writeDeepLinkFile(deepLinkUrl);
+  }
   app.quit();
 } else {
+  // 첫 번째 인스턴스: second-instance 이벤트 + 파일 감시
   app.on('second-instance', (_event, argv) => {
     console.log('[DeepLink] second-instance argv:', argv);
-    // Windows: argv에서 bflow:// URL 찾기
     const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
     console.log('[DeepLink] 추출된 URL:', deepLinkUrl ?? '(없음)');
     if (deepLinkUrl) sendDeepLinkToRenderer(deepLinkUrl);
 
-    // 기존 창 포커스
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
     }
   });
+
+  // 파일 기반 폴백: second-instance가 안 먹힐 경우 대비
+  watchDeepLinkFile();
 }
 
 // macOS: open-url 이벤트

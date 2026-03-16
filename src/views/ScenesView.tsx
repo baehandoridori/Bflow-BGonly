@@ -1325,6 +1325,7 @@ export function ScenesView() {
   const [detailContext, setDetailContext] = useState<{ sheetName: string; sceneIndex: number } | null>(null);
 
   // 딥링크 처리: bflow://scene/sheetName/sceneId → 해당 씬 모달 자동 오픈
+  // sceneId는 씬번호(예: a003) 또는 씬 인덱스(예: 12) 모두 지원
   const pendingDeepLink = useAppStore((s) => s.pendingDeepLink);
   const setPendingDeepLink = useAppStore((s) => s.setPendingDeepLink);
   useEffect(() => {
@@ -1335,7 +1336,12 @@ export function ScenesView() {
     for (const ep of episodes) {
       for (const part of ep.parts) {
         if (part.sheetName === sheetName) {
-          const sceneIndex = part.scenes.findIndex((s) => s.sceneId === sceneId);
+          // 1차: scene.sceneId (씬번호, 예: a003) 매칭
+          let sceneIndex = part.scenes.findIndex((s) => s.sceneId === sceneId);
+          // 2차: scene.no (인덱스) 매칭 — 댓글 sceneKey가 sheetName:no 형식
+          if (sceneIndex < 0) {
+            sceneIndex = part.scenes.findIndex((s) => String(s.no) === sceneId);
+          }
           console.log('[DeepLink] 매칭 시트:', part.sheetName, '씬 인덱스:', sceneIndex);
           if (sceneIndex >= 0) {
             setSelectedEpisode(ep.episodeNumber);
