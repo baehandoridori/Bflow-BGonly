@@ -376,6 +376,18 @@ export default function App() {
           }
         }
 
+        // Supabase/Sheets 연결 후 사용자 목록 재로드 + 세션 재복원
+        // (위에서 sheetsMode=false 상태로 로컬 users.dat를 읽었으므로,
+        //  Supabase 사용자 ID와 달라 세션 복원이 실패할 수 있음)
+        if (useAppStore.getState().dataConnected && !useAuthStore.getState().currentUser) {
+          const freshUsers = await loadUsers();
+          setUsers(freshUsers);
+          if (rememberMe) {
+            const { user: freshUser } = await loadSession();
+            if (freshUser) setCurrentUser(freshUser);
+          }
+        }
+
         // 휴가 API 자동 연결 (저장된 URL 또는 기본 URL로 시도)
         const vacConfig = await loadVacationConfig();
         const vacUrlToConnect = vacConfig?.webAppUrl || DEFAULT_VACATION_URL;

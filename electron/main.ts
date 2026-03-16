@@ -1309,7 +1309,13 @@ function sendDeepLinkToRenderer(url: string): void {
 
 /** 딥링크 파일에 URL 기록 (두 번째 인스턴스 → 첫 번째 인스턴스 전달용) */
 function writeDeepLinkFile(url: string): void {
-  try { fs.writeFileSync(DEEPLINK_FILE, url, 'utf-8'); } catch { /* 무시 */ }
+  try {
+    const dir = path.dirname(DEEPLINK_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(DEEPLINK_FILE, url, 'utf-8');
+  } catch (err) {
+    console.error('[DeepLink] 파일 쓰기 실패:', err);
+  }
 }
 
 /** 딥링크 파일 감시 시작 (첫 번째 인스턴스에서 호출) */
@@ -1334,11 +1340,12 @@ function watchDeepLinkFile(): void {
 // 싱글 인스턴스 + 딥링크 전달
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
-  // 두 번째 인스턴스: 창을 띄우지 않고 딥링크만 전달 후 즉시 종료
-  // app.quit()보다 process.exit()가 더 빠르게 종료되어 소리/창 깜빡임 방지
+  // 두 번째 인스턴스: 딥링크 파일만 기록하고 조용히 종료
+  // requestSingleInstanceLock()이 false를 반환하면 argv는 이미 첫 번째 인스턴스로 전달됨
+  // 파일 기록은 second-instance IPC가 유실될 경우의 폴백
   const deepLinkUrl = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
   if (deepLinkUrl) writeDeepLinkFile(deepLinkUrl);
-  process.exit(0);
+  app.quit();
 } else {
   // 첫 번째 인스턴스: second-instance 이벤트 + 파일 감시
   app.on('second-instance', (_event, argv) => {
@@ -1347,7 +1354,8 @@ if (!gotTheLock) {
     console.log('[DeepLink] 추출된 URL:', deepLinkUrl ?? '(없음)');
     if (deepLinkUrl) sendDeepLinkToRenderer(deepLinkUrl);
 
-    if (mainWindow) {
+    // sendDeepLinkToRenderer가 이미 show/focus하지만, URL 없는 경우에도 창 활성화
+    if (mainWindow && !deepLinkUrl) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
@@ -1367,6 +1375,9 @@ app.on('open-url', (event, url) => {
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
 
 app.whenReady().then(() => {
+  // 두 번째 인스턴스면 초기화하지 않고 종료
+  if (!gotTheLock) return;
+
   // 위젯 위치 캐시 로드 (Phase 0-6)
   loadWidgetPositions();
 
