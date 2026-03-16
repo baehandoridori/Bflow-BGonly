@@ -642,6 +642,28 @@ export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey
   return (data || []).map(mapRevision);
 }
 
+/** sceneKey (EP01:A:a001) → part UUID 역조회 */
+async function resolvePartUuid(sceneKey: string, department: string): Promise<string> {
+  // sceneKey 형식: "EP01:A:a001"
+  const parts = sceneKey.split(':');
+  const epStr = parts[0] || ''; // "EP01"
+  const partLetter = parts[1] || ''; // "A"
+  const epNum = parseInt(epStr.replace(/\D/g, ''), 10);
+  if (!epNum || !partLetter) throw new Error(`잘못된 sceneKey 형식: ${sceneKey}`);
+
+  // episodes → parts 조인으로 UUID 조회
+  const { data, error } = await supabase
+    .from('parts')
+    .select('id, episodes!inner(episode_number)')
+    .eq('episodes.episode_number', epNum)
+    .eq('part_id', partLetter)
+    .eq('department', department || 'bg')
+    .limit(1)
+    .single();
+  if (error || !data) throw new Error(`파트 UUID 조회 실패 (sceneKey=${sceneKey}, dept=${department}): ${error?.message}`);
+  return data.id as string;
+}
+
 /** 리비전 추가 */
 export async function addRevision(
   id: string,
@@ -659,9 +681,15 @@ export async function addRevision(
   assignee: string,
   createdAt: string,
 ): Promise<void> {
+  // partUuid가 비어있으면 sceneId(=sceneKey)에서 역조회
+  let resolvedPartUuid = partUuid;
+  if (!resolvedPartUuid) {
+    resolvedPartUuid = await resolvePartUuid(sceneId, department);
+  }
+
   const { error } = await supabase.from('comp_revisions').insert({
     id,
-    part_id: partUuid,
+    part_id: resolvedPartUuid,
     scene_id: sceneId,
     revision_no: revisionNo,
     status,

@@ -82,10 +82,14 @@ function scheduleRetry(): void {
     return;
   }
 
+  // 이미 예약된 재시도가 있으면 중복 방지
+  if (retryTimer) return;
+
   const delay = getRetryDelay();
   console.log(`[Realtime] ${delay / 1000}초 후 재연결 시도 (${retryCount + 1}/${MAX_RETRIES})`);
 
   retryTimer = setTimeout(() => {
+    retryTimer = null;
     retryCount++;
     if (savedCallbacks) {
       reconnect(savedCallbacks);
@@ -100,9 +104,13 @@ function reconnect(callbacks: RealtimeCallbacks): void {
     channel = null;
   }
 
-  channel = createChannel(callbacks);
+  const newChannel = createChannel(callbacks);
+  channel = newChannel;
 
-  channel.subscribe((status) => {
+  newChannel.subscribe((status) => {
+    // 이미 교체된 채널의 콜백은 무시 (stale 방지)
+    if (channel !== newChannel) return;
+
     console.log(`[Realtime] 구독 상태: ${status}`);
     callbacks.onStatusChange(status);
 
@@ -113,6 +121,9 @@ function reconnect(callbacks: RealtimeCallbacks): void {
         clearTimeout(retryTimer);
         retryTimer = null;
       }
+    } else if (status === 'TIMED_OUT') {
+      // 타임아웃 — CLOSED로 이어지므로 여기서는 로그만
+      console.log('[Realtime] 연결 시간 초과, CLOSED 전환 대기...');
     } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
       // 연결 끊김 — 재시도 스케줄
       scheduleRetry();
