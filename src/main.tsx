@@ -1,5 +1,5 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 import App from './App';
 import { WidgetPopup } from './views/WidgetPopup';
 import './index.css';
@@ -11,12 +11,12 @@ const popupParams = popupMatch?.[2]
   ? Object.fromEntries(new URLSearchParams(popupMatch[2]))
   : {};
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
     {popupMatch ? (
       <WidgetPopup widgetId={decodeURIComponent(popupMatch[1])} extraParams={popupParams} />
     ) : (
       <App />
     )}
-  </React.StrictMode>
+  </StrictMode>
 );
