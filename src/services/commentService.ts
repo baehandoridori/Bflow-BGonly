@@ -81,17 +81,19 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
 
   let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string | null }[] = [];
 
+  let supabaseFailed = false;
   if (partUuid) {
     // Supabase 경로
     try {
       rawComments = (await window.electronAPI.supabaseReadComments(partUuid)) as typeof rawComments;
     } catch (err) {
       console.warn('[댓글] Supabase 로드 실패, Sheets fallback:', err);
+      supabaseFailed = true;
     }
   }
 
-  // Supabase 실패 시 Sheets fallback
-  if (rawComments.length === 0 && !partUuid) {
+  // Supabase 실패 또는 partUuid 없을 때 Sheets fallback
+  if (rawComments.length === 0 && (!partUuid || supabaseFailed)) {
     try {
       const result = await window.electronAPI.sheetsReadComments(sheetName);
       if (result.ok) {
