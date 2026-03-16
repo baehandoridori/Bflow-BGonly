@@ -1264,9 +1264,12 @@ const PROTOCOL = 'bflow';
 if (process.env.VITE_DEV_SERVER_URL) {
   // 개발 모드 — process.execPath = node_modules/.../electron.exe
   // argv에 "." (현재 디렉토리)을 넘겨서 electron이 앱을 찾을 수 있게 함
-  app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
+  const success = app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
     path.resolve(process.cwd()),
   ]);
+  console.log(`[DeepLink] 개발 모드 프로토콜 등록: ${success ? '성공' : '실패'}`);
+  console.log(`[DeepLink]   execPath: ${process.execPath}`);
+  console.log(`[DeepLink]   cwd arg:  ${path.resolve(process.cwd())}`);
 } else {
   app.setAsDefaultProtocolClient(PROTOCOL);
 }
@@ -1311,8 +1314,10 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
+    console.log('[DeepLink] second-instance argv:', argv);
     // Windows: argv에서 bflow:// URL 찾기
     const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+    console.log('[DeepLink] 추출된 URL:', deepLinkUrl ?? '(없음)');
     if (deepLinkUrl) sendDeepLinkToRenderer(deepLinkUrl);
 
     // 기존 창 포커스

@@ -1330,11 +1330,13 @@ export function ScenesView() {
   useEffect(() => {
     if (!pendingDeepLink) return;
     const { sheetName, sceneId } = pendingDeepLink;
+    console.log('[DeepLink] ScenesView 처리:', { sheetName, sceneId, episodeCount: episodes.length });
 
     for (const ep of episodes) {
       for (const part of ep.parts) {
         if (part.sheetName === sheetName) {
           const sceneIndex = part.scenes.findIndex((s) => s.sceneId === sceneId);
+          console.log('[DeepLink] 매칭 시트:', part.sheetName, '씬 인덱스:', sceneIndex);
           if (sceneIndex >= 0) {
             setSelectedEpisode(ep.episodeNumber);
             setDetailContext({ sheetName, sceneIndex });
@@ -1345,6 +1347,7 @@ export function ScenesView() {
       }
     }
     console.warn('[DeepLink] 씬을 찾을 수 없음:', pendingDeepLink);
+    console.warn('[DeepLink] 전체 시트:', episodes.flatMap(ep => ep.parts.map(p => p.sheetName)));
     setPendingDeepLink(null);
   }, [pendingDeepLink, episodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
