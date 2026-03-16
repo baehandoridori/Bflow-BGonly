@@ -1310,26 +1310,22 @@ function writeDeepLinkFile(url: string): void {
 }
 
 /** 딥링크 파일 감시 시작 (첫 번째 인스턴스에서 호출) */
+/** 딥링크 파일 폴링 감시 시작 (500ms 주기) */
 function watchDeepLinkFile(): void {
   // 기존 파일 정리
   try { fs.unlinkSync(DEEPLINK_FILE); } catch { /* 없으면 무시 */ }
 
-  try {
-    // userData 폴더 감시
-    fs.watch(app.getPath('userData'), (_eventType, filename) => {
-      if (filename !== 'deeplink.txt') return;
-      try {
-        const url = fs.readFileSync(DEEPLINK_FILE, 'utf-8').trim();
-        if (url) {
-          console.log('[DeepLink] 파일에서 URL 감지:', url);
-          sendDeepLinkToRenderer(url);
-          fs.unlinkSync(DEEPLINK_FILE);
-        }
-      } catch { /* 이미 삭제됨 */ }
-    });
-  } catch (err) {
-    console.warn('[DeepLink] 파일 감시 실패:', err);
-  }
+  setInterval(() => {
+    try {
+      if (!fs.existsSync(DEEPLINK_FILE)) return;
+      const url = fs.readFileSync(DEEPLINK_FILE, 'utf-8').trim();
+      fs.unlinkSync(DEEPLINK_FILE);
+      if (url) {
+        console.log('[DeepLink] 파일에서 URL 감지:', url);
+        sendDeepLinkToRenderer(url);
+      }
+    } catch { /* 파일 경합 무시 */ }
+  }, 500);
 }
 
 // 싱글 인스턴스 + 딥링크 전달
