@@ -13,6 +13,7 @@ import {
   ImagePlus,
   X,
   FolderOpen,
+  Undo2,
 } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -434,11 +435,20 @@ function RevisionItem({
         </span>
       )}
 
-      {/* 상태 변경 (미해결만) */}
-      {!isResolved && (
+      {/* 상태 변경 */}
+      {!isResolved ? (
         <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           <StatusDropdown currentStatus={revision.status} onSelect={handleStatusSelect} />
         </div>
+      ) : (
+        <button
+          onClick={(e) => { e.stopPropagation(); handleStatusSelect('open'); }}
+          className="shrink-0 opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 px-2 py-1 text-[11px] text-text-secondary hover:text-accent rounded-md hover:bg-accent/10 transition-all cursor-pointer"
+          title="되돌리기"
+        >
+          <Undo2 size={11} />
+          되돌리기
+        </button>
       )}
 
       {/* 우선순위 뱃지 */}
@@ -966,9 +976,19 @@ function DetailPanel({
               className="rounded-xl p-4 mb-5 border"
               style={{ borderColor: STATUS_CONFIG.resolved.color + '40', backgroundColor: STATUS_CONFIG.resolved.bg }}
             >
-              <div className="flex items-center gap-2 mb-1.5">
-                <Check size={14} style={{ color: STATUS_CONFIG.resolved.color }} />
-                <span className="text-xs font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>해결됨</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-2">
+                  <Check size={14} style={{ color: STATUS_CONFIG.resolved.color }} />
+                  <span className="text-xs font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>해결됨</span>
+                </div>
+                <button
+                  onClick={() => onStatusChange('open')}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-text-secondary hover:text-accent rounded-md hover:bg-accent/10 transition-all cursor-pointer"
+                  title="되돌리기"
+                >
+                  <Undo2 size={11} />
+                  되돌리기
+                </button>
               </div>
               {revision.resolvedBy && (
                 <p className="text-xs text-text-secondary mb-1">

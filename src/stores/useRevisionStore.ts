@@ -97,7 +97,9 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     get().updateRevisionOptimistic(id, sceneKey, {
       status,
       updatedAt: now,
-      ...(status === 'resolved' ? { resolvedAt: now, resolvedBy: extra?.resolvedBy, resolvedNote: extra?.resolvedNote } : {}),
+      ...(status === 'resolved'
+        ? { resolvedAt: now, resolvedBy: extra?.resolvedBy, resolvedNote: extra?.resolvedNote }
+        : { resolvedAt: undefined, resolvedBy: undefined, resolvedNote: undefined }),
     });
 
     try {
