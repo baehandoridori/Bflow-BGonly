@@ -1265,19 +1265,6 @@ ipcMain.handle('widget:get-saved-state', (_event, widgetId: string) => {
 const PROTOCOL = 'bflow';
 const DEEPLINK_FILE = path.join(app.getPath('userData'), 'deeplink.txt');
 
-// 개발 모드: electron.exe 경로를 직접 지정해서 프로토콜 등록
-// 빌드 모드: Electron이 자동으로 현재 exe 경로 사용
-if (process.env.VITE_DEV_SERVER_URL) {
-  const success = app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
-    path.resolve(process.cwd()),
-  ]);
-  console.log(`[DeepLink] 개발 모드 프로토콜 등록: ${success ? '성공' : '실패'}`);
-  console.log(`[DeepLink]   execPath: ${process.execPath}`);
-  console.log(`[DeepLink]   cwd arg:  ${path.resolve(process.cwd())}`);
-} else {
-  app.setAsDefaultProtocolClient(PROTOCOL);
-}
-
 let pendingDeepLink: string | null = null;
 
 function parseDeepLink(url: string): { sheetName: string; sceneId: string } | null {
@@ -1349,6 +1336,17 @@ if (!gotTheLock) {
   // ready까지 기다린 후 조용히 종료해야 비프음 방지
   app.on('ready', () => setTimeout(() => app.exit(0), 50));
 } else {
+  // ★ 프로토콜 등록은 첫 번째 인스턴스에서만!
+  // 두 번째 인스턴스에서 호출하면 cwd가 system32일 때 레지스트리가 깨짐
+  if (process.env.VITE_DEV_SERVER_URL) {
+    const success = app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
+      path.resolve(__dirname, '..'),
+    ]);
+    console.log(`[DeepLink] 개발 모드 프로토콜 등록: ${success ? '성공' : '실패'}`);
+  } else {
+    app.setAsDefaultProtocolClient(PROTOCOL);
+  }
+
   // 첫 번째 인스턴스: second-instance 이벤트 + 파일 감시
   app.on('second-instance', (_event, argv) => {
     console.log('[DeepLink] second-instance argv:', argv);
