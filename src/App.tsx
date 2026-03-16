@@ -128,11 +128,18 @@ export default function App() {
   const notiSettingsRef = useRef<NotificationSettings>({ sceneChange: true, commentNotify: true, osNotification: true });
 
   // 알림 중복 방지 (broadcast + postgres_changes 동시 도착 시)
+  const MAX_DEDUP_KEYS = 200;
   const recentNotiKeysRef = useRef<Set<string>>(new Set());
   const dedupeNotification = useCallback((key: string): boolean => {
-    if (recentNotiKeysRef.current.has(key)) return false; // 이미 처리됨
-    recentNotiKeysRef.current.add(key);
-    setTimeout(() => recentNotiKeysRef.current.delete(key), 3000);
+    const set = recentNotiKeysRef.current;
+    if (set.has(key)) return false; // 이미 처리됨
+    set.add(key);
+    // 크기 상한 초과 시 가장 오래된 키 제거 (Set은 삽입 순서 유지)
+    if (set.size > MAX_DEDUP_KEYS) {
+      const first = set.values().next().value;
+      if (first !== undefined) set.delete(first);
+    }
+    setTimeout(() => set.delete(key), 3000);
     return true; // 처리 가능
   }, []);
 
@@ -481,8 +488,7 @@ export default function App() {
             else {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.commentNotify !== false) {
-                const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
-                const scene = allScenes.find(s => s.sceneId === newComment.scene_id);
+                const scene = useDataStore.getState().findSceneBySceneId(newComment.scene_id!);
                 const isMentioned = Array.isArray(newComment.mentions) && newComment.mentions.includes(me.name);
                 const isAssignee = scene && scene.assignee === me.name;
 
@@ -587,7 +593,7 @@ export default function App() {
           // 알림: 타인이 내 씬을 변경한 경우
           const me = useAuthStore.getState().currentUser;
           if (me && senderId && senderId !== me.id) {
-            const scene = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes)).find(s => s.id === sceneUuid);
+            const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
             if (scene && scene.assignee === me.name) {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.sceneChange !== false) {
@@ -614,7 +620,7 @@ export default function App() {
           // 알림: 타인이 내 씬의 필드를 변경한 경우 (담당자 변경 등)
           const me = useAuthStore.getState().currentUser;
           if (me && senderId && senderId !== me.id) {
-            const scene = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes)).find(s => s.id === sceneUuid);
+            const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
             if (scene && scene.assignee === me.name) {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.sceneChange !== false) {
@@ -645,8 +651,7 @@ export default function App() {
           else if (notiSettingsRef.current.commentNotify === false) { /* 알림 끔 */ }
           else {
             const notiSettings = notiSettingsRef.current;
-            const allScenes = useDataStore.getState().episodes.flatMap(ep => ep.parts.flatMap(p => p.scenes));
-            const scene = allScenes.find(s => s.sceneId === commentSceneId);
+            const scene = useDataStore.getState().findSceneBySceneId(commentSceneId!);
             const isMentioned = Array.isArray(commentMentions) && commentMentions.includes(me.name);
             const isAssignee = scene && scene.assignee === me.name;
 

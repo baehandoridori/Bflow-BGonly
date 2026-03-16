@@ -6,30 +6,8 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { resizeBlob } from '@/utils/imageUtils';
 import type { CompRevision, RevisionPriority, RevisionStatus } from '@/types';
-
-// ─── 상수 ───────────────────────────────────
-
-const STATUS_CONFIG: Record<RevisionStatus, { label: string; color: string; bg: string }> = {
-  open: { label: '대기', color: '#FDCB6E', bg: 'rgba(253, 203, 110, 0.15)' },
-  in_progress: { label: '진행중', color: '#74B9FF', bg: 'rgba(116, 185, 255, 0.15)' },
-  resolved: { label: '해결', color: '#00B894', bg: 'rgba(0, 184, 148, 0.15)' },
-};
-
-// ─── 시간 포맷 ───────────────────────────────
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  const min = Math.floor(diff / 60000);
-  const hr = Math.floor(diff / 3600000);
-  const day = Math.floor(diff / 86400000);
-  if (min < 1) return '방금';
-  if (min < 60) return `${min}분 전`;
-  if (hr < 24) return `${hr}시간 전`;
-  if (day < 7) return `${day}일 전`;
-  return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
-}
+import { formatTime } from '@/utils/formatTime';
+import { STATUS_CONFIG, PRIORITY_CONFIG } from '@/constants/revision';
 
 // ─── 상태 뱃지 ───────────────────────────────
 
@@ -402,12 +380,7 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
                     {(['urgent', 'high', 'normal'] as const).map((p) => {
-                      const cfgMap: Record<RevisionPriority, { label: string; color: string; bg: string }> = {
-                        urgent: { label: '긴급', color: '#FF6B6B', bg: 'rgba(255, 107, 107, 0.15)' },
-                        high: { label: '높음', color: '#E17055', bg: 'rgba(225, 112, 85, 0.15)' },
-                        normal: { label: '보통', color: '#74B9FF', bg: 'rgba(116, 185, 255, 0.15)' },
-                      };
-                      const cfg = cfgMap[p];
+                      const cfg = PRIORITY_CONFIG[p];
                       return (
                         <button
                           key={p}

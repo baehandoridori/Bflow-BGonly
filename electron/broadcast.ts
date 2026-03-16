@@ -1,5 +1,6 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { createRetryManager } from './retry-utils';
 
 // ─── Supabase Broadcast 채널 ────────────────────
 // postgres_changes와 달리 Publication 설정이 필요 없음.
@@ -10,16 +11,7 @@ let broadcastConnected = false;
 type BroadcastListener = (event: string, payload: Record<string, unknown>) => void;
 let listener: BroadcastListener | null = null;
 
-// 재연결 관련
-let retryTimer: ReturnType<typeof setTimeout> | null = null;
-let retryCount = 0;
-const MAX_RETRIES = 10;
-const BASE_DELAY_MS = 2_000;
-const MAX_DELAY_MS = 60_000;
-
-function getRetryDelay(): number {
-  return Math.min(BASE_DELAY_MS * 2 ** retryCount, MAX_DELAY_MS);
-}
+const retry = createRetryManager('Broadcast');
 
 function createChannel(onReceive: BroadcastListener): RealtimeChannel {
   return supabase
@@ -40,20 +32,9 @@ function createChannel(onReceive: BroadcastListener): RealtimeChannel {
 
 function scheduleBroadcastRetry(): void {
   if (!listener) return;
-  if (retryCount >= MAX_RETRIES) {
-    console.error(`[Broadcast] 최대 재시도 횟수(${MAX_RETRIES}) 초과 — 재연결 중단`);
-    return;
-  }
-  if (retryTimer) return; // 이미 예약됨
-
-  const delay = getRetryDelay();
-  console.log(`[Broadcast] ${delay / 1000}초 후 재연결 시도 (${retryCount + 1}/${MAX_RETRIES})`);
-
-  retryTimer = setTimeout(() => {
-    retryTimer = null;
-    retryCount++;
+  retry.schedule(() => {
     if (listener) reconnectBroadcast(listener);
-  }, delay);
+  });
 }
 
 function reconnectBroadcast(onReceive: BroadcastListener): void {
@@ -74,11 +55,7 @@ function reconnectBroadcast(onReceive: BroadcastListener): void {
 
     if (status === 'SUBSCRIBED') {
       broadcastConnected = true;
-      retryCount = 0;
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = null;
-      }
+      retry.reset();
     } else if (status === 'TIMED_OUT') {
       broadcastConnected = false;
       // CLOSED로 전환 대기
@@ -92,7 +69,7 @@ function reconnectBroadcast(onReceive: BroadcastListener): void {
 /** Broadcast 채널 초기화 + 수신 콜백 등록 */
 export function setupBroadcast(onReceive: BroadcastListener): () => void {
   listener = onReceive;
-  retryCount = 0;
+  retry.reset();
 
   reconnectBroadcast(onReceive);
 
@@ -150,10 +127,7 @@ export function broadcastCommentAdded(
 /** Broadcast 채널 해제 */
 export function teardownBroadcast(): void {
   listener = null;
-  if (retryTimer) {
-    clearTimeout(retryTimer);
-    retryTimer = null;
-  }
+  retry.clear();
   if (broadcastChannel) {
     supabase.removeChannel(broadcastChannel);
     broadcastChannel = null;

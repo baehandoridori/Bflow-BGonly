@@ -1,5 +1,6 @@
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { createRetryManager } from './retry-utils';
 
 // ─── Realtime 구독 관리 ────────────────────────
 // 모든 테이블 변경을 하나의 채널로 구독 (무료 플랜 연결 수 절약)
@@ -17,17 +18,7 @@ export interface RealtimeCallbacks {
 
 let channel: RealtimeChannel | null = null;
 let savedCallbacks: RealtimeCallbacks | null = null;
-let retryTimer: ReturnType<typeof setTimeout> | null = null;
-let retryCount = 0;
-const MAX_RETRIES = 10;
-const BASE_DELAY_MS = 2_000;
-const MAX_DELAY_MS = 60_000;
-
-function getRetryDelay(): number {
-  // 지수 백오프: 2s, 4s, 8s, 16s, 32s, 60s (cap)
-  const delay = Math.min(BASE_DELAY_MS * 2 ** retryCount, MAX_DELAY_MS);
-  return delay;
-}
+const retry = createRetryManager('Realtime');
 
 function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
   return supabase
@@ -76,25 +67,11 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
 
 function scheduleRetry(): void {
   if (!savedCallbacks) return;
-  if (retryCount >= MAX_RETRIES) {
-    console.error(`[Realtime] 최대 재시도 횟수(${MAX_RETRIES}) 초과 — 재연결 중단`);
-    savedCallbacks.onStatusChange('CLOSED');
-    return;
-  }
-
-  // 이미 예약된 재시도가 있으면 중복 방지
-  if (retryTimer) return;
-
-  const delay = getRetryDelay();
-  console.log(`[Realtime] ${delay / 1000}초 후 재연결 시도 (${retryCount + 1}/${MAX_RETRIES})`);
-
-  retryTimer = setTimeout(() => {
-    retryTimer = null;
-    retryCount++;
-    if (savedCallbacks) {
-      reconnect(savedCallbacks);
-    }
-  }, delay);
+  const cbs = savedCallbacks;
+  retry.schedule(() => {
+    if (savedCallbacks) reconnect(savedCallbacks);
+    else cbs.onStatusChange('CLOSED');
+  });
 }
 
 function reconnect(callbacks: RealtimeCallbacks): void {
@@ -116,11 +93,7 @@ function reconnect(callbacks: RealtimeCallbacks): void {
 
     if (status === 'SUBSCRIBED') {
       // 연결 성공 — 재시도 카운터 초기화
-      retryCount = 0;
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = null;
-      }
+      retry.reset();
     } else if (status === 'TIMED_OUT') {
       // 타임아웃 — CLOSED로 이어지므로 여기서는 로그만
       console.log('[Realtime] 연결 시간 초과, CLOSED 전환 대기...');
@@ -134,7 +107,7 @@ function reconnect(callbacks: RealtimeCallbacks): void {
 /** Realtime 구독 시작 (자동 재연결 포함) */
 export function setupRealtimeSubscription(callbacks: RealtimeCallbacks): () => void {
   savedCallbacks = callbacks;
-  retryCount = 0;
+  retry.reset();
 
   reconnect(callbacks);
 
@@ -147,10 +120,7 @@ export function setupRealtimeSubscription(callbacks: RealtimeCallbacks): () => v
 /** Realtime 구독 해제 */
 export function teardownRealtime(): void {
   savedCallbacks = null;
-  if (retryTimer) {
-    clearTimeout(retryTimer);
-    retryTimer = null;
-  }
+  retry.clear();
   if (channel) {
     supabase.removeChannel(channel);
     channel = null;

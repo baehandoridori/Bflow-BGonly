@@ -23,20 +23,8 @@ import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionServic
 import { getUserColor } from '@/components/common/AssigneeSelect';
 import { resizeBlob } from '@/utils/imageUtils';
 import type { CompRevision, RevisionStatus, RevisionPriority, Episode } from '@/types';
-
-// ─── 상수 ───────────────────────────────────
-
-const STATUS_CONFIG: Record<RevisionStatus, { label: string; color: string; bg: string }> = {
-  open: { label: '대기', color: '#FDCB6E', bg: 'rgba(253, 203, 110, 0.15)' },
-  in_progress: { label: '진행중', color: '#74B9FF', bg: 'rgba(116, 185, 255, 0.15)' },
-  resolved: { label: '해결', color: '#00B894', bg: 'rgba(0, 184, 148, 0.15)' },
-};
-
-const PRIORITY_CONFIG: Record<RevisionPriority, { label: string; color: string; bg: string }> = {
-  urgent: { label: '긴급', color: '#FF6B6B', bg: 'rgba(255, 107, 107, 0.15)' },
-  high: { label: '높음', color: '#E17055', bg: 'rgba(225, 112, 85, 0.15)' },
-  normal: { label: '보통', color: '#74B9FF', bg: 'rgba(116, 185, 255, 0.15)' },
-};
+import { formatDateTime } from '@/utils/formatTime';
+import { STATUS_CONFIG, PRIORITY_CONFIG } from '@/constants/revision';
 
 // ─── 유틸 ───────────────────────────────────
 
@@ -109,27 +97,6 @@ function PathBadge({ path: filePath, resolved }: { path: string; resolved?: bool
   );
 }
 
-// ─── 시간 포맷 ───────────────────────────────
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  const min = Math.floor(diff / 60000);
-  const hr = Math.floor(diff / 3600000);
-  const day = Math.floor(diff / 86400000);
-  if (min < 1) return '방금';
-  if (min < 60) return `${min}분 전`;
-  if (hr < 24) return `${hr}시간 전`;
-  if (day < 7) return `${day}일 전`;
-  return d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' }) + ' ' + d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatDateTime(iso: string): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return d.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' }) + ' ' + d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-}
 
 // ─── 씬 정보 매핑 타입 ──────────────────────
 

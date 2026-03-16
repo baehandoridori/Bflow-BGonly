@@ -47,6 +47,10 @@ interface DataState {
   deleteEpisodeOptimistic: (episodeNumber: number) => void;
   /** Supabase UUID로 씬 필드 직접 업데이트 (Realtime delta용) */
   updateSceneByUuid: (uuid: string, fields: Partial<Scene>) => boolean;
+  /** UUID로 씬 검색 (새 배열 미생성, O(n) loop) */
+  findSceneByUuid: (uuid: string) => Scene | undefined;
+  /** sceneId(사용자 지정 ID)로 씬 검색 */
+  findSceneBySceneId: (sceneId: string) => Scene | undefined;
 }
 
 function applyUpdate(get: () => DataState, episodes: Episode[]) {
@@ -77,57 +81,66 @@ export const useDataStore = create<DataState>((set, get) => ({
   setSyncError: (err) => set({ syncError: err }),
 
   toggleSceneStage: (sheetName, sceneId, stage) => {
-    const episodes = get().episodes.map((ep) => ({
-      ...ep,
-      parts: ep.parts.map((part) => {
-        if (part.sheetName !== sheetName) return part;
-        return {
-          ...part,
-          scenes: part.scenes.map((scene) => {
-            if (scene.sceneId !== sceneId) return scene;
-            return { ...scene, [stage]: !scene[stage] };
-          }),
-        };
-      }),
-    }));
+    const episodes = get().episodes.map((ep) => {
+      if (!ep.parts.some((p) => p.sheetName === sheetName)) return ep;
+      return {
+        ...ep,
+        parts: ep.parts.map((part) => {
+          if (part.sheetName !== sheetName) return part;
+          return {
+            ...part,
+            scenes: part.scenes.map((scene) => {
+              if (scene.sceneId !== sceneId) return scene;
+              return { ...scene, [stage]: !scene[stage] };
+            }),
+          };
+        }),
+      };
+    });
     set(applyUpdate(get, episodes));
   },
 
   setSceneStageValue: (sheetName, sceneId, stage, value) => {
-    const episodes = get().episodes.map((ep) => ({
-      ...ep,
-      parts: ep.parts.map((part) => {
-        if (part.sheetName !== sheetName) return part;
-        return {
-          ...part,
-          scenes: part.scenes.map((scene) => {
-            if (scene.sceneId !== sceneId) return scene;
-            return { ...scene, [stage]: value };
-          }),
-        };
-      }),
-    }));
+    const episodes = get().episodes.map((ep) => {
+      if (!ep.parts.some((p) => p.sheetName === sheetName)) return ep;
+      return {
+        ...ep,
+        parts: ep.parts.map((part) => {
+          if (part.sheetName !== sheetName) return part;
+          return {
+            ...part,
+            scenes: part.scenes.map((scene) => {
+              if (scene.sceneId !== sceneId) return scene;
+              return { ...scene, [stage]: value };
+            }),
+          };
+        }),
+      };
+    });
     set(applyUpdate(get, episodes));
   },
 
   setSceneFieldBySceneId: (sheetName, sceneId, field, value) => {
-    const episodes = get().episodes.map((ep) => ({
-      ...ep,
-      parts: ep.parts.map((part) => {
-        if (part.sheetName !== sheetName) return part;
-        return {
-          ...part,
-          scenes: part.scenes.map((scene) => {
-            if (scene.sceneId !== sceneId) return scene;
-            if (field === 'lo' || field === 'done' || field === 'review' || field === 'png') {
-              return { ...scene, [field]: value === 'true' };
-            }
-            if (field === 'no') return { ...scene, no: parseInt(value, 10) || 0 };
-            return { ...scene, [field]: value };
-          }),
-        };
-      }),
-    }));
+    const episodes = get().episodes.map((ep) => {
+      if (!ep.parts.some((p) => p.sheetName === sheetName)) return ep;
+      return {
+        ...ep,
+        parts: ep.parts.map((part) => {
+          if (part.sheetName !== sheetName) return part;
+          return {
+            ...part,
+            scenes: part.scenes.map((scene) => {
+              if (scene.sceneId !== sceneId) return scene;
+              if (field === 'lo' || field === 'done' || field === 'review' || field === 'png') {
+                return { ...scene, [field]: value === 'true' };
+              }
+              if (field === 'no') return { ...scene, no: parseInt(value, 10) || 0 };
+              return { ...scene, [field]: value };
+            }),
+          };
+        }),
+      };
+    });
     set(applyUpdate(get, episodes));
   },
 
@@ -223,6 +236,26 @@ export const useDataStore = create<DataState>((set, get) => ({
   deleteEpisodeOptimistic: (episodeNumber) => {
     const episodes = get().episodes.filter((ep) => ep.episodeNumber !== episodeNumber);
     set(applyUpdate(get, episodes));
+  },
+
+  findSceneByUuid: (uuid) => {
+    for (const ep of get().episodes) {
+      for (const part of ep.parts) {
+        const scene = part.scenes.find((s) => s.id === uuid);
+        if (scene) return scene;
+      }
+    }
+    return undefined;
+  },
+
+  findSceneBySceneId: (sceneId) => {
+    for (const ep of get().episodes) {
+      for (const part of ep.parts) {
+        const scene = part.scenes.find((s) => s.sceneId === sceneId);
+        if (scene) return scene;
+      }
+    }
+    return undefined;
   },
 
   updateSceneByUuid: (uuid, fields) => {

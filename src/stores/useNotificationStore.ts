@@ -26,9 +26,23 @@ export interface AppNotification {
 const MAX_NOTIFICATIONS = 50;
 const NOTIFICATIONS_FILE = 'notifications.json';
 
+/** notifications 배열에서 unreadCount 파생 */
+function countUnread(notifications: AppNotification[]): number {
+  return notifications.filter((x) => !x.isRead).length;
+}
+
+/** notifications 변경 시 unreadCount 함께 set */
+function setNotifications(
+  set: (partial: Partial<NotificationState>) => void,
+  notifications: AppNotification[],
+) {
+  set({ notifications, unreadCount: countUnread(notifications) });
+}
+
 interface NotificationState {
   notifications: AppNotification[];
-  unreadCount: number;
+  /** 파생 상태: notifications에서 계산 */
+  readonly unreadCount: number;
   panelOpen: boolean;
 
   // 액션
@@ -65,10 +79,8 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       isRead: false,
       createdAt: new Date().toISOString(),
     };
-    const prev = get().notifications;
-    const next = [notification, ...prev].slice(0, MAX_NOTIFICATIONS);
-    const unreadCount = next.filter((x) => !x.isRead).length;
-    set({ notifications: next, unreadCount });
+    const next = [notification, ...get().notifications].slice(0, MAX_NOTIFICATIONS);
+    setNotifications(set, next);
     persistToDisk(next);
   },
 
@@ -76,19 +88,18 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const next = get().notifications.map((n) =>
       n.id === id ? { ...n, isRead: true } : n
     );
-    const unreadCount = next.filter((x) => !x.isRead).length;
-    set({ notifications: next, unreadCount });
+    setNotifications(set, next);
     persistToDisk(next);
   },
 
   markAllAsRead: () => {
     const next = get().notifications.map((n) => ({ ...n, isRead: true }));
-    set({ notifications: next, unreadCount: 0 });
+    setNotifications(set, next);
     persistToDisk(next);
   },
 
   clearAll: () => {
-    set({ notifications: [], unreadCount: 0 });
+    setNotifications(set, []);
     persistToDisk([]);
   },
 
@@ -100,8 +111,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       const data = await window.electronAPI?.readSettings?.(NOTIFICATIONS_FILE);
       if (Array.isArray(data)) {
         const notifications = data.slice(0, MAX_NOTIFICATIONS) as AppNotification[];
-        const unreadCount = notifications.filter((x) => !x.isRead).length;
-        set({ notifications, unreadCount });
+        setNotifications(set, notifications);
       }
     } catch {
       // 파일 없으면 무시
