@@ -67,11 +67,13 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
 
 function scheduleRetry(): void {
   if (!savedCallbacks) return;
-  const cbs = savedCallbacks;
-  retry.schedule(() => {
+  const scheduled = retry.schedule(() => {
     if (savedCallbacks) reconnect(savedCallbacks);
-    else cbs.onStatusChange('CLOSED');
   });
+  // 최대 재시도 초과 → 영구 실패 알림
+  if (!scheduled) {
+    savedCallbacks.onStatusChange('CLOSED');
+  }
 }
 
 function reconnect(callbacks: RealtimeCallbacks): void {
