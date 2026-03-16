@@ -126,6 +126,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendSlackWebhook: (payload: Record<string, string>) =>
     ipcRenderer.invoke('slack:send-webhook', payload),
 
+  // 딥링크 수신 (bflow://scene/...)
+  onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => {
+    const handler = (_event: unknown, data: { sheetName: string; sceneId: string }) => callback(data);
+    ipcRenderer.on('deep-link', handler);
+    return () => ipcRenderer.removeListener('deep-link', handler);
+  },
+
   // Realtime 이벤트 수신 (메인 프로세스 → 렌더러)
   onSupabaseRealtime: (callback: (event: unknown) => void) => {
     const handler = (_event: unknown, data: unknown) => callback(data);

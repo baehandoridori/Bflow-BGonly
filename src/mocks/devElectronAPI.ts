@@ -129,6 +129,7 @@ export function installDevElectronAPI(): void {
       console.log('[DEV 슬랙 웹훅] 페이로드:', JSON.stringify(payload, null, 2));
       return { ok: true };
     },
+    onDeepLink: noop,
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;

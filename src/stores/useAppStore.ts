@@ -127,6 +127,10 @@ interface AppState {
   setVacationCache: (cache: { userName: string; status: VacationStatus | null; log: VacationLogEntry[]; lastFetch: number } | null) => void;
   invalidateVacationCache: () => void;
 
+  // 딥링크 (bflow://scene/... → 씬 상세 모달 자동 오픈)
+  pendingDeepLink: { sheetName: string; sceneId: string } | null;
+  setPendingDeepLink: (link: { sheetName: string; sceneId: string } | null) => void;
+
   // 설정 탭 (외부에서 특정 탭으로 이동 시 사용)
   settingsTab: string | null;
   setSettingsTab: (tab: string | null) => void;
@@ -241,6 +245,9 @@ export const useAppStore = create<AppState>((set) => ({
   vacationCache: null,
   setVacationCache: (cache) => set({ vacationCache: cache }),
   invalidateVacationCache: () => set({ vacationCache: null }),
+
+  pendingDeepLink: null,
+  setPendingDeepLink: (link) => set({ pendingDeepLink: link }),
 
   settingsTab: null,
   setSettingsTab: (tab) => set({ settingsTab: tab }),

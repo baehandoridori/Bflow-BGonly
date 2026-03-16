@@ -15,14 +15,21 @@ interface MentionWebhookParams {
   episodeLabel: string;
   sceneId: string;
   partLabel: string;
+  sheetName: string;
   authorSlackId: string;
   targetSlackId: string;
 }
 
+/** bflow:// 딥링크 URL 생성 */
+export function buildDeepLink(sheetName: string, sceneId: string): string {
+  return `bflow://scene/${encodeURIComponent(sheetName)}/${encodeURIComponent(sceneId)}`;
+}
+
 export async function sendMentionWebhook(params: MentionWebhookParams): Promise<void> {
-  const { commentText, episodeLabel, sceneId, partLabel, authorSlackId, targetSlackId } = params;
+  const { commentText, episodeLabel, sceneId, partLabel, sheetName, authorSlackId, targetSlackId } = params;
   try {
-    console.log('[SlackWebhook] 전송 시도:', { episodeLabel, sceneId, authorSlackId, targetSlackId });
+    const deepLink = buildDeepLink(sheetName, sceneId);
+    console.log('[SlackWebhook] 전송 시도:', { episodeLabel, sceneId, deepLink, authorSlackId, targetSlackId });
     const result = await window.electronAPI.sendSlackWebhook({
       comment: commentText,
       EP: episodeLabel,
@@ -31,6 +38,7 @@ export async function sendMentionWebhook(params: MentionWebhookParams): Promise<
       name_my: authorSlackId,
       name_target: targetSlackId,
       part: partLabel,
+      deep_link: deepLink,
     });
     console.log('[SlackWebhook] 전송 성공:', result);
   } catch (err) {

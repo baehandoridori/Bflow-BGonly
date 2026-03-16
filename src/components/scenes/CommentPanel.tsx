@@ -127,6 +127,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
               episodeLabel: epLabel,
               sceneId: sceneId || '',
               partLabel,
+              sheetName,
               authorSlackId: currentUser.slackId,
               targetSlackId: target.slackId,
             });

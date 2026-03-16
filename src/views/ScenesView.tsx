@@ -1324,6 +1324,30 @@ export function ScenesView() {
   // 상세 모달 컨텍스트: sheetName + sceneIndex 추적
   const [detailContext, setDetailContext] = useState<{ sheetName: string; sceneIndex: number } | null>(null);
 
+  // 딥링크 처리: bflow://scene/sheetName/sceneId → 해당 씬 모달 자동 오픈
+  const pendingDeepLink = useAppStore((s) => s.pendingDeepLink);
+  const setPendingDeepLink = useAppStore((s) => s.setPendingDeepLink);
+  useEffect(() => {
+    if (!pendingDeepLink) return;
+    const { sheetName, sceneId } = pendingDeepLink;
+
+    for (const ep of episodes) {
+      for (const part of ep.parts) {
+        if (part.sheetName === sheetName) {
+          const sceneIndex = part.scenes.findIndex((s) => s.sceneId === sceneId);
+          if (sceneIndex >= 0) {
+            setSelectedEpisode(ep.episodeNumber);
+            setDetailContext({ sheetName, sceneIndex });
+            setPendingDeepLink(null);
+            return;
+          }
+        }
+      }
+    }
+    console.warn('[DeepLink] 씬을 찾을 수 없음:', pendingDeepLink);
+    setPendingDeepLink(null);
+  }, [pendingDeepLink, episodes]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 댓글 카운트 로드 (currentPart 또는 bgPart/actPart 정의 후)
   useEffect(() => {
     const sheetsToLoad = selectedDepartment === 'all'

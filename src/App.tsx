@@ -732,6 +732,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [isAdminMode, setAdminMode, setShowUserManager]);
 
+  // 딥링크 수신 (bflow://scene/...) → 씬 뷰로 이동
+  const { setPendingDeepLink } = useAppStore();
+  useEffect(() => {
+    if (!window.electronAPI?.onDeepLink) return;
+    const cleanup = window.electronAPI.onDeepLink((data) => {
+      console.log('[DeepLink] 수신:', data);
+      setPendingDeepLink(data);
+      useAppStore.getState().setView('scenes');
+    });
+    return cleanup;
+  }, [setPendingDeepLink]);
+
   // 뷰 렌더링
   const renderView = () => {
     switch (currentView) {

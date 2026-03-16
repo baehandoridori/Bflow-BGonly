@@ -1243,6 +1243,72 @@ ipcMain.handle('widget:get-saved-state', (_event, widgetId: string) => {
   return widgetPositionCache.get(widgetId) ?? null;
 });
 
+// ─── 딥링크 (bflow:// 커스텀 프로토콜) ──────────────────────
+// URL 형식: bflow://scene/<sheetName>/<sceneId>
+// 예: bflow://scene/EP01_A_BG/a003
+
+const PROTOCOL = 'bflow';
+
+// 개발 모드가 아닐 때만 프로토콜 등록 (packaged 앱)
+if (!process.env.VITE_DEV_SERVER_URL) {
+  app.setAsDefaultProtocolClient(PROTOCOL);
+}
+
+let pendingDeepLink: string | null = null;
+
+function parseDeepLink(url: string): { sheetName: string; sceneId: string } | null {
+  // bflow://scene/EP01_A_BG/a003
+  try {
+    const u = new URL(url);
+    if (u.protocol !== `${PROTOCOL}:`) return null;
+    // host = "scene", pathname = "/EP01_A_BG/a003"
+    if (u.host !== 'scene') return null;
+    const segments = u.pathname.replace(/^\/+/, '').split('/');
+    if (segments.length < 2) return null;
+    return { sheetName: decodeURIComponent(segments[0]), sceneId: decodeURIComponent(segments[1]) };
+  } catch {
+    return null;
+  }
+}
+
+function sendDeepLinkToRenderer(url: string): void {
+  const parsed = parseDeepLink(url);
+  if (!parsed) return;
+  console.log('[DeepLink] 전달:', parsed);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('deep-link', parsed);
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    // 앱이 아직 준비 안 됨 → 보류
+    pendingDeepLink = url;
+  }
+}
+
+// 싱글 인스턴스: 이미 실행 중이면 딥링크 URL을 기존 인스턴스로 전달
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    // Windows: argv의 마지막이 bflow:// URL
+    const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+    if (deepLinkUrl) sendDeepLinkToRenderer(deepLinkUrl);
+
+    // 기존 창 포커스
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
+// macOS: open-url 이벤트
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  sendDeepLinkToRenderer(url);
+});
+
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
 
 app.whenReady().then(() => {
@@ -1291,13 +1357,23 @@ app.whenReady().then(() => {
   // Supabase Realtime 구독 시작
   startSupabaseRealtime();
 
-  // 저장된 위젯 자동 복원 (Phase 0-6)
-  if (widgetPositionCache.size > 0 && mainWindow) {
+  // 저장된 위젯 자동 복원 (Phase 0-6) + 보류 딥링크 전달
+  if (mainWindow) {
     mainWindow.webContents.on('did-finish-load', () => {
-      for (const [widgetId, state] of widgetPositionCache) {
-        const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
-        openWidgetPopup(widgetId, title);
+      if (widgetPositionCache.size > 0) {
+        for (const [widgetId, state] of widgetPositionCache) {
+          const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
+          openWidgetPopup(widgetId, title);
+        }
       }
+      // 앱 시작 시 보류된 딥링크 전달
+      if (pendingDeepLink) {
+        sendDeepLinkToRenderer(pendingDeepLink);
+        pendingDeepLink = null;
+      }
+      // Windows: 프로세스 argv에서 딥링크 확인 (프로토콜 핸들러로 앱이 시작된 경우)
+      const argDeepLink = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
+      if (argDeepLink) sendDeepLinkToRenderer(argDeepLink);
     });
   }
 
