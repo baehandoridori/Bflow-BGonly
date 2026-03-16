@@ -87,16 +87,21 @@ function PropertyRow({ label, value, placeholder, onSave }: PropertyRowProps) {
               if (e.key === 'Enter') commit();
               if (e.key === 'Escape') { setDraft(value); setEditing(false); }
             }}
-            className="w-full bg-bg-primary border border-accent/50 rounded-md px-2.5 py-1 text-sm text-text-primary outline-none focus:border-accent"
+            className="w-full bg-bg-primary border border-accent/50 rounded-md px-2.5 py-1 text-sm text-text-primary outline-none focus:border-accent transition-shadow focus:shadow-[0_0_8px_rgba(108,92,231,0.4)]"
           />
         ) : (
-          <span className="text-sm text-text-primary">
-            {value || (
-              <span className="text-text-secondary/50 italic">
-                {placeholder ?? '비어 있음'}
-              </span>
-            )}
-          </span>
+          <div
+            onClick={() => setEditing(true)}
+            className="w-full rounded-md px-2.5 py-1 border border-transparent cursor-pointer transition-all duration-200 hover:border-accent/30 hover:bg-accent/5 hover:shadow-[0_0_8px_rgba(108,92,231,0.15)]"
+          >
+            <span className="text-sm text-text-primary">
+              {value || (
+                <span className="text-text-secondary/50 italic">
+                  {placeholder ?? '비어 있음'}
+                </span>
+              )}
+            </span>
+          </div>
         )}
       </div>
       {!editing && (
