@@ -1345,7 +1345,9 @@ if (!gotTheLock) {
   // 파일 기록은 second-instance IPC가 유실될 경우의 폴백
   const deepLinkUrl = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
   if (deepLinkUrl) writeDeepLinkFile(deepLinkUrl);
-  app.quit();
+  // ★ ready 이전에 quit/exit하면 Windows가 "프로그램 실패"로 인식 → 비프음 재생
+  // ready까지 기다린 후 조용히 종료해야 비프음 방지
+  app.on('ready', () => setTimeout(() => app.exit(0), 50));
 } else {
   // 첫 번째 인스턴스: second-instance 이벤트 + 파일 감시
   app.on('second-instance', (_event, argv) => {
