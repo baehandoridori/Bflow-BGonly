@@ -82,7 +82,7 @@ function parsePathsFromText(text: string): { description: string; paths: string[
 }
 
 /** 경로 뱃지 컴포넌트 (클릭 시 파일탐색기 열기) */
-function PathBadge({ path: filePath }: { path: string }) {
+function PathBadge({ path: filePath, resolved }: { path: string; resolved?: boolean }) {
   // 경로의 마지막 부분(파일명 또는 폴더명)만 표시
   const segments = filePath.replace(/\\/g, '/').split('/');
   const shortName = segments[segments.length - 1] || segments[segments.length - 2] || filePath;
@@ -96,7 +96,10 @@ function PathBadge({ path: filePath }: { path: string }) {
     <button
       onClick={handleClick}
       className="inline-flex items-center gap-1 text-[11px] font-mono rounded px-1.5 py-0.5 max-w-full cursor-pointer transition-all hover:brightness-125"
-      style={{ color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.1)', border: '1px solid rgba(116, 185, 255, 0.2)' }}
+      style={resolved
+        ? { color: '#6B7280', backgroundColor: 'rgba(107, 114, 128, 0.1)', border: '1px solid rgba(107, 114, 128, 0.2)' }
+        : { color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.1)', border: '1px solid rgba(116, 185, 255, 0.2)' }
+      }
       title={`${filePath}\n(클릭하면 파일탐색기에서 열기)`}
     >
       <FolderOpen size={10} className="shrink-0" />
@@ -371,7 +374,7 @@ function RevisionItem({
         {/* 경로 뱃지 */}
         {paths.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1">
-            {paths.map((p, i) => <PathBadge key={i} path={p} />)}
+            {paths.map((p, i) => <PathBadge key={i} path={p} resolved={isResolved} />)}
           </div>
         )}
 
@@ -906,7 +909,10 @@ function DetailPanel({
                     key={i}
                     onClick={() => window.electronAPI?.shellShowItem?.(p)}
                     className="flex items-center gap-1.5 text-xs font-mono rounded-lg px-2.5 py-1.5 text-left cursor-pointer transition-all hover:brightness-125"
-                    style={{ color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.08)', border: '1px solid rgba(116, 185, 255, 0.15)' }}
+                    style={revision.status === 'resolved'
+                      ? { color: '#6B7280', backgroundColor: 'rgba(107, 114, 128, 0.08)', border: '1px solid rgba(107, 114, 128, 0.15)' }
+                      : { color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.08)', border: '1px solid rgba(116, 185, 255, 0.15)' }
+                    }
                     title={`${p}\n(클릭하면 파일탐색기에서 열기)`}
                   >
                     <FolderOpen size={12} className="shrink-0" />
