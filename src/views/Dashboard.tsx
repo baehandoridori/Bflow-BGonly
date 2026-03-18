@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider, type Layouts, type Layout } from 'react-grid-layout';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check, Trash2 } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check, Trash2, RotateCcw, PieChart, BarChart3, Users, LayoutGrid, GitCompareArrows, Calendar as CalendarIcon, CheckSquare, StickyNote, Presentation, Palmtree, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -23,6 +23,7 @@ import { EpAssigneeCardsWidget } from '@/components/widgets/episode/EpAssigneeCa
 import { EpPartProgressWidget } from '@/components/widgets/episode/EpPartProgressWidget';
 import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptComparisonWidget';
 import { EpSinglePartWidget, parsePartWidgetId } from '@/components/widgets/episode/EpSinglePartWidget';
+import { EpFullDeptProgressWidget } from '@/components/widgets/episode/EpFullDeptProgressWidget';
 import { ChartTypeContextMenu, getWidgetSupportedCharts, useChartContextMenu } from '@/components/widgets/ChartTypeContextMenu';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
@@ -222,40 +223,48 @@ function DashboardPlexus() {
 }
 
 /* ── 위젯 메타데이터 ── */
+type WidgetCategory = 'progress' | 'tool' | 'etc';
+const CATEGORY_LABELS: Record<WidgetCategory, string> = { progress: '진행률', tool: '도구', etc: '기타' };
+const CATEGORY_ORDER: WidgetCategory[] = ['progress', 'tool', 'etc'];
+
 interface WidgetMeta {
   id: string;
   label: string;
   component: React.ReactNode;
   deptOnly?: boolean; // 부서별 탭에서만 표시
   allOnly?: boolean;  // 통합 탭에서만 표시
+  category: WidgetCategory;
+  icon: LucideIcon;
 }
 
 const ALL_WIDGETS: WidgetMeta[] = [
-  { id: 'overall-progress', label: '전체 진행률', component: <OverallProgressWidget /> },
-  { id: 'stage-bars', label: '단계별 진행률', component: <StageBarsWidget />, deptOnly: true },
-  { id: 'assignee-cards', label: '담당자별 현황', component: <AssigneeCardsWidget /> },
-  { id: 'episode-summary', label: '에피소드 요약', component: <EpisodeSummaryWidget /> },
-  { id: 'dept-comparison', label: '부서별 비교', component: <DepartmentComparisonWidget />, allOnly: true },
-  { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
-  { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
-  { id: 'vacation-today', label: '휴가자 현황', component: <VacationWidget /> },
-  { id: 'memo', label: '메모', component: <MemoWidget /> },
-  { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget /> },
+  { id: 'overall-progress', label: '전체 진행률', component: <OverallProgressWidget />, category: 'progress', icon: PieChart },
+  { id: 'stage-bars', label: '단계별 진행률', component: <StageBarsWidget />, deptOnly: true, category: 'progress', icon: BarChart3 },
+  { id: 'assignee-cards', label: '담당자별 현황', component: <AssigneeCardsWidget />, category: 'progress', icon: Users },
+  { id: 'episode-summary', label: '에피소드 요약', component: <EpisodeSummaryWidget />, category: 'progress', icon: LayoutGrid },
+  { id: 'dept-comparison', label: '부서별 비교', component: <DepartmentComparisonWidget />, allOnly: true, category: 'progress', icon: GitCompareArrows },
+  { id: 'calendar', label: '캘린더', component: <CalendarWidget />, category: 'tool', icon: CalendarIcon },
+  { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget />, category: 'tool', icon: CheckSquare },
+  { id: 'vacation-today', label: '휴가자 현황', component: <VacationWidget />, category: 'etc', icon: Palmtree },
+  { id: 'memo', label: '메모', component: <MemoWidget />, category: 'tool', icon: StickyNote },
+  { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget />, category: 'tool', icon: Presentation },
 ];
 
 const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]));
 
 /* ── 에피소드 대시보드 전용 위젯 ── */
 const EP_WIDGETS: WidgetMeta[] = [
-  { id: 'ep-overall-progress', label: 'EP 통합 진행률', component: <EpOverallProgressWidget /> },
-  { id: 'ep-stage-bars', label: 'EP 단계별 진행률', component: <EpStageBarsWidget /> },
-  { id: 'ep-assignee-cards', label: 'EP 담당자별 현황', component: <EpAssigneeCardsWidget /> },
-  { id: 'ep-part-progress', label: 'EP 파트별 진행률', component: <EpPartProgressWidget /> },
-  { id: 'ep-dept-comparison', label: 'EP 부서별 비교', component: <EpDeptComparisonWidget />, allOnly: true },
-  { id: 'calendar', label: '캘린더', component: <CalendarWidget /> },
-  { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget /> },
-  { id: 'memo', label: '메모', component: <MemoWidget /> },
-  { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget /> },
+  { id: 'ep-overall-progress', label: 'EP 통합 진행률', component: <EpOverallProgressWidget />, category: 'progress', icon: PieChart },
+  { id: 'ep-stage-bars', label: 'EP 단계별 진행률', component: <EpStageBarsWidget />, category: 'progress', icon: BarChart3 },
+  { id: 'ep-assignee-cards', label: 'EP 담당자별 현황', component: <EpAssigneeCardsWidget />, category: 'progress', icon: Users },
+  { id: 'ep-part-progress', label: 'EP 파트별 진행률', component: <EpPartProgressWidget />, category: 'progress', icon: LayoutGrid },
+  { id: 'ep-dept-comparison', label: 'EP 부서별 비교', component: <EpDeptComparisonWidget />, allOnly: true, category: 'progress', icon: GitCompareArrows },
+  { id: 'ep-full-bg-progress', label: 'EP 전체 BG 진행률', component: <EpFullDeptProgressWidget dept="bg" />, category: 'progress', icon: BarChart3 },
+  { id: 'ep-full-act-progress', label: 'EP 전체 ACT 진행률', component: <EpFullDeptProgressWidget dept="acting" />, category: 'progress', icon: BarChart3 },
+  { id: 'calendar', label: '캘린더', component: <CalendarWidget />, category: 'tool', icon: CalendarIcon },
+  { id: 'my-tasks', label: '내 할일', component: <MyTasksWidget />, category: 'tool', icon: CheckSquare },
+  { id: 'memo', label: '메모', component: <MemoWidget />, category: 'tool', icon: StickyNote },
+  { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget />, category: 'tool', icon: Presentation },
 ];
 
 const EP_WIDGET_MAP = Object.fromEntries(EP_WIDGETS.map((w) => [w.id, w.component]));
@@ -284,10 +293,8 @@ function getWidgetComponent(id: string, isEpMode: boolean): React.ReactNode | un
   return WIDGET_MAP[id];
 }
 
-/* ── 삭제 불가 기본 위젯 ── */
-const PROTECTED_WIDGETS = new Set([
-  'overall-progress', 'stage-bars', 'assignee-cards', 'episode-summary',
-]);
+/* 중복 배치 허용 위젯 (캘린더/메모는 고유 ID 생성) */
+const MULTI_INSTANCE_WIDGETS = new Set(['calendar', 'memo']);
 
 /* ── 부서별 레이아웃 (24칸 그리드, rowHeight=16px) ── */
 const DEPT_LAYOUT: Layout[] = [
@@ -333,15 +340,17 @@ const PART_WIDGET_TYPES: PartWidgetType[] = [
   { deptKey: 'all', label: '파트 전체 진행률' },
 ];
 
-/* ── 위젯 추가 팝오버 ── */
+/* ── 위젯 추가 팝오버 (카테고리 + 아이콘) ── */
 function WidgetPicker({
-  hiddenWidgets,
+  widgets,
+  visibleIds,
   onAdd,
   onClose,
   isEpMode,
   partIds,
 }: {
-  hiddenWidgets: WidgetMeta[];
+  widgets: WidgetMeta[];
+  visibleIds: Set<string>;
   onAdd: (id: string) => void;
   onClose: () => void;
   isEpMode: boolean;
@@ -350,7 +359,6 @@ function WidgetPicker({
   const [expandedPartType, setExpandedPartType] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = useState<{ right?: boolean; bottom?: boolean }>({});
-  const hasContent = hiddenWidgets.length > 0 || (isEpMode && partIds.length > 0);
 
   // 렌더 후 화면 경계 확인 → 넘치면 위치 조정
   useEffect(() => {
@@ -363,7 +371,15 @@ function WidgetPicker({
     if (adj.right || adj.bottom) setAdjustedPos(adj);
   }, [expandedPartType]);
 
-  if (!hasContent) return null;
+  // 카테고리별 그룹핑
+  const grouped = useMemo(() => {
+    const map = new Map<WidgetCategory, WidgetMeta[]>();
+    for (const cat of CATEGORY_ORDER) map.set(cat, []);
+    for (const w of widgets) {
+      map.get(w.category)!.push(w);
+    }
+    return map;
+  }, [widgets]);
 
   const menuStyle = {
     backgroundColor: 'rgb(var(--color-bg-card) / 0.92)',
@@ -379,7 +395,7 @@ function WidgetPicker({
       exit={{ opacity: 0, y: -8, scale: 0.96 }}
       transition={{ duration: 0.15 }}
       className={cn(
-        'absolute z-50 min-w-[200px]',
+        'absolute z-50 min-w-[240px] max-h-[70vh] overflow-y-auto',
         adjustedPos.bottom ? 'bottom-full mb-2' : 'top-full mt-2',
         adjustedPos.right ? 'right-0' : 'left-0',
       )}
@@ -388,26 +404,48 @@ function WidgetPicker({
         <div className="px-3 py-1.5 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
           위젯 추가
         </div>
-        {/* 일반 위젯 목록 */}
-        {hiddenWidgets.map((w) => (
-          <button
-            key={w.id}
-            onClick={() => onAdd(w.id)}
-            className={cn(
-              'w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer',
-              'text-text-primary/80 hover:bg-accent/12 hover:text-text-primary',
-              'transition-colors duration-75',
-            )}
-          >
-            <Plus size={14} className="text-accent/60 shrink-0" />
-            <span>{w.label}</span>
-          </button>
-        ))}
+
+        {/* 카테고리별 위젯 목록 */}
+        {CATEGORY_ORDER.map((cat) => {
+          const items = grouped.get(cat);
+          if (!items || items.length === 0) return null;
+          return (
+            <div key={cat}>
+              <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1 text-[10px] font-bold text-accent/50 uppercase tracking-widest">
+                <span>{CATEGORY_LABELS[cat]}</span>
+                <div className="flex-1 h-px bg-bg-border/30" />
+              </div>
+              {items.map((w) => {
+                const isPlaced = !MULTI_INSTANCE_WIDGETS.has(w.id) && visibleIds.has(w.id);
+                const Icon = w.icon;
+                return (
+                  <button
+                    key={w.id}
+                    onClick={() => onAdd(w.id)}
+                    className={cn(
+                      'w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm cursor-pointer',
+                      'hover:bg-accent/12 transition-colors duration-75',
+                      isPlaced ? 'text-text-secondary/50' : 'text-text-primary/80 hover:text-text-primary',
+                    )}
+                  >
+                    <Icon size={15} className={isPlaced ? 'text-text-secondary/30 shrink-0' : 'text-accent/50 shrink-0'} />
+                    <span className="flex-1">{w.label}</span>
+                    {isPlaced && <Check size={13} className="text-accent/40 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
 
         {/* 파트 전용 위젯 (EP 모드 + 파트 존재 시) */}
         {isEpMode && partIds.length > 0 && (
           <>
             <div className="mx-2 my-1 border-t border-bg-border/40" />
+            <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1 text-[10px] font-bold text-accent/50 uppercase tracking-widest">
+              <span>파트별</span>
+              <div className="flex-1 h-px bg-bg-border/30" />
+            </div>
             {PART_WIDGET_TYPES.map((pt) => {
               const isExpanded = expandedPartType === pt.deptKey;
               return (
@@ -415,12 +453,12 @@ function WidgetPicker({
                   <button
                     onClick={() => setExpandedPartType(isExpanded ? null : pt.deptKey)}
                     className={cn(
-                      'w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer',
+                      'w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm cursor-pointer',
                       'text-text-primary/80 hover:bg-accent/12 hover:text-text-primary',
                       'transition-colors duration-75',
                     )}
                   >
-                    <ChevronRight size={14} className={cn('text-accent/60 shrink-0 transition-transform duration-150', isExpanded && 'rotate-90')} />
+                    <ChevronRight size={14} className={cn('text-accent/50 shrink-0 transition-transform duration-150', isExpanded && 'rotate-90')} />
                     <span>{pt.label}</span>
                   </button>
                   <AnimatePresence>
@@ -614,15 +652,14 @@ export function Dashboard() {
   // 쓰레기통 드래그-투-딜리트
   const trashRef = useRef<HTMLDivElement>(null);
   const [trashHover, setTrashHover] = useState(false);
-  const [trashProtected, setTrashProtected] = useState(false);
   const trashHoverRef = useRef(false);
   trashHoverRef.current = trashHover;
+  const skipNextLayoutChangeRef = useRef(false);
 
   // 드래그 중 마우스 위치 → 쓰레기통 호버 감지
   useEffect(() => {
     if (!draggingId) {
       setTrashHover(false);
-      setTrashProtected(false);
       return;
     }
     const onMove = (e: MouseEvent) => {
@@ -630,7 +667,6 @@ export function Dashboard() {
       const rect = trashRef.current.getBoundingClientRect();
       const inZone = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
       setTrashHover(inZone);
-      setTrashProtected(inZone && PROTECTED_WIDGETS.has(draggingId));
     };
     window.addEventListener('mousemove', onMove, { passive: true });
     return () => window.removeEventListener('mousemove', onMove);
@@ -644,13 +680,13 @@ export function Dashboard() {
 
   const removeWidgetRef = useRef<(id: string) => void>(() => {});
   const handleDragStop = useCallback((_layout: Layout[], oldItem: Layout) => {
-    // 쓰레기통 영역에 드롭 시 삭제 (보호 위젯 제외)
-    if (trashHoverRef.current && !PROTECTED_WIDGETS.has(oldItem.i)) {
+    // 쓰레기통 영역에 드롭 시 삭제
+    if (trashHoverRef.current) {
+      skipNextLayoutChangeRef.current = true;
       removeWidgetRef.current(oldItem.i);
     }
     setDraggingId(null);
     setTrashHover(false);
-    setTrashProtected(false);
     setSettlingId(oldItem.i);
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     settleTimerRef.current = setTimeout(() => setSettlingId(null), 450);
@@ -714,22 +750,24 @@ export function Dashboard() {
 
   const currentLayout = layouts.lg ?? defaultLayout;
 
-  // 현재 숨겨진 위젯 목록 (캘린더 위젯은 항상 추가 가능)
+  // 위젯 추가 목록: 모든 위젯 표시 (이미 배치된 건 체크 표시로 구분)
   const widgetPool = isEpMode ? EP_WIDGETS : ALL_WIDGETS;
-  const hiddenWidgets = useMemo(() => {
-    const visibleIds = new Set(currentLayout.map((l) => l.i));
+  const visibleIds = useMemo(() => new Set(currentLayout.map((l) => l.i)), [currentLayout]);
+  const addableWidgets = useMemo(() => {
     return widgetPool.filter((w) => {
-      // 캘린더/메모 위젯은 중복 배치 허용 → 항상 추가 가능
-      if (w.id === 'calendar' || w.id === 'memo') return true;
-      if (visibleIds.has(w.id)) return false;
       if (dashboardFilter === 'all' && w.deptOnly) return false;
       if (dashboardFilter !== 'all' && w.allOnly) return false;
       return true;
     });
-  }, [currentLayout, dashboardFilter, widgetPool]);
+  }, [dashboardFilter, widgetPool]);
 
   const handleLayoutChange = useCallback(
     (_current: Layout[], allLayouts: Layouts) => {
+      // 위젯 삭제 직후 onLayoutChange가 삭제 전 레이아웃으로 덮어쓰는 race condition 방지
+      if (skipNextLayoutChangeRef.current) {
+        skipNextLayoutChangeRef.current = false;
+        return;
+      }
       const newLayout = allLayouts.lg ?? _current;
       if (isEpMode) {
         setEpisodeWidgetLayout(newLayout);
@@ -771,10 +809,11 @@ export function Dashboard() {
       : dashboardFilter === 'all'
         ? (allWidgetLayout ?? ALL_LAYOUT)
         : (widgetLayout ?? DEPT_LAYOUT);
+    const currentIds = new Set(current.map((l) => l.i));
+    // 중복 배치 허용이 아닌 위젯이 이미 있으면 무시
+    if (!MULTI_INSTANCE_WIDGETS.has(widgetId) && currentIds.has(widgetId)) return;
     // 캘린더/메모 위젯은 고유 ID로 중복 배치 허용
-    const actualId = widgetId === 'calendar' ? `calendar-${Date.now()}`
-      : widgetId === 'memo' ? `memo-${Date.now()}`
-      : widgetId;
+    const actualId = MULTI_INSTANCE_WIDGETS.has(widgetId) ? `${widgetId}-${Date.now()}` : widgetId;
     // 맨 아래에 추가
     const maxY = current.reduce((max, l) => Math.max(max, l.y + l.h), 0);
     const newItem: Layout = { i: actualId, x: 0, y: maxY, w: 8, h: 15, minW: 2, minH: 2 };
@@ -791,6 +830,21 @@ export function Dashboard() {
     }
     setShowPicker(false);
   }, [widgetLayout, allWidgetLayout, episodeWidgetLayout, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, dashboardFilter, isEpMode]);
+
+  const handleResetLayout = useCallback(() => {
+    const defaultLay = isEpMode ? EP_LAYOUT
+      : dashboardFilter === 'all' ? ALL_LAYOUT : DEPT_LAYOUT;
+    if (isEpMode) {
+      setEpisodeWidgetLayout(defaultLay);
+      saveLayout(defaultLay, 'episode');
+    } else if (dashboardFilter === 'all') {
+      setAllWidgetLayout(defaultLay);
+      saveLayout(defaultLay, 'all');
+    } else {
+      setWidgetLayout(defaultLay);
+      saveLayout(defaultLay);
+    }
+  }, [setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, dashboardFilter, isEpMode]);
 
   return (
     <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
@@ -1010,35 +1064,47 @@ export function Dashboard() {
           )}
         </div>
 
-        {/* 위젯 추가 */}
+        {/* 위젯 추가 + 레이아웃 초기화 */}
         <div className="relative flex items-center gap-2">
-          {hiddenWidgets.length > 0 && (
-            <div className="relative">
-              <button
-                onClick={() => setShowPicker(!showPicker)}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer',
-                  'bg-accent/10 text-accent hover:bg-accent/20',
-                  'transition-colors duration-150',
-                  'border border-accent/20',
-                )}
-              >
-                <Plus size={14} />
-                위젯 추가
-              </button>
-              <AnimatePresence>
-                {showPicker && (
-                  <WidgetPicker
-                    hiddenWidgets={hiddenWidgets}
-                    onAdd={handleAddWidget}
-                    onClose={() => setShowPicker(false)}
-                    isEpMode={isEpMode}
-                    partIds={epPartIds}
-                  />
-                )}
-              </AnimatePresence>
-            </div>
-          )}
+          <div className="relative">
+            <button
+              onClick={() => setShowPicker(!showPicker)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium cursor-pointer',
+                'bg-accent/10 text-accent hover:bg-accent/20',
+                'transition-colors duration-150',
+                'border border-accent/20',
+              )}
+            >
+              <Plus size={14} />
+              위젯 추가
+            </button>
+            <AnimatePresence>
+              {showPicker && (
+                <WidgetPicker
+                  widgets={addableWidgets}
+                  visibleIds={visibleIds}
+                  onAdd={handleAddWidget}
+                  onClose={() => setShowPicker(false)}
+                  isEpMode={isEpMode}
+                  partIds={epPartIds}
+                />
+              )}
+            </AnimatePresence>
+          </div>
+          <button
+            onClick={handleResetLayout}
+            className={cn(
+              'flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg font-medium cursor-pointer',
+              'bg-text-secondary/5 text-text-secondary/60 hover:bg-text-secondary/10 hover:text-text-primary/80',
+              'transition-colors duration-150',
+              'border border-text-secondary/10',
+            )}
+            title="기본 레이아웃으로 초기화"
+          >
+            <RotateCcw size={13} />
+            초기화
+          </button>
         </div>
       </div>
 
@@ -1189,42 +1255,41 @@ export function Dashboard() {
         )}
       </AnimatePresence>
 
-      {/* 쓰레기통 드롭 영역 — 드래그 중에만 표시 */}
+      {/* 쓰레기통 드롭 영역 — 드래그 중에만 표시 (확대된 영역) */}
       <AnimatePresence>
         {draggingId && (
           <motion.div
             ref={trashRef}
             initial={{ opacity: 0, scale: 0.8, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
+            animate={{ opacity: 1, scale: trashHover ? 1.08 : 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: 20 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-5 py-3 rounded-2xl pointer-events-auto"
+            className="fixed bottom-6 right-6 z-50 flex flex-col items-center justify-center gap-1.5 rounded-2xl pointer-events-auto"
             style={{
-              background: trashProtected
-                ? 'rgba(253, 203, 110, 0.25)'
-                : trashHover
-                  ? 'rgba(255, 107, 107, 0.3)'
-                  : 'rgb(var(--color-bg-card) / 0.85)',
-              border: trashProtected
-                ? '1.5px solid rgba(253, 203, 110, 0.5)'
-                : trashHover
-                  ? '1.5px solid rgba(255, 107, 107, 0.6)'
-                  : '1px solid rgb(var(--color-bg-border) / 0.5)',
+              width: 100,
+              height: 90,
+              padding: '16px 20px',
+              background: trashHover
+                ? 'rgba(255, 107, 107, 0.3)'
+                : 'rgb(var(--color-bg-card) / 0.85)',
+              border: trashHover
+                ? '2px dashed rgba(255, 107, 107, 0.7)'
+                : '2px dashed rgb(var(--color-bg-border) / 0.5)',
               backdropFilter: 'blur(16px)',
               boxShadow: trashHover
-                ? '0 8px 32px rgba(255, 107, 107, 0.2)'
+                ? '0 8px 32px rgba(255, 107, 107, 0.25)'
                 : '0 4px 16px rgba(0,0,0,0.3)',
-              transition: 'background 0.15s, border 0.15s, box-shadow 0.15s',
+              transition: 'background 0.15s, border 0.15s, box-shadow 0.15s, transform 0.15s',
             }}
           >
             <Trash2
-              size={18}
-              className={trashProtected ? 'text-yellow-400' : trashHover ? 'text-red-400' : 'text-text-secondary/60'}
+              size={22}
+              className={trashHover ? 'text-red-400' : 'text-text-secondary/50'}
               style={{ transition: 'color 0.15s' }}
             />
-            <span className={`text-xs font-medium ${trashProtected ? 'text-yellow-400' : trashHover ? 'text-red-400' : 'text-text-secondary/60'}`}
+            <span className={`text-[11px] font-medium ${trashHover ? 'text-red-400' : 'text-text-secondary/50'}`}
               style={{ transition: 'color 0.15s' }}>
-              {trashProtected ? '기본 위젯은 삭제 불가' : trashHover ? '놓으면 삭제' : '여기에 놓으면 삭제'}
+              {trashHover ? '놓으면 삭제' : '삭제'}
             </span>
           </motion.div>
         )}
