@@ -1266,9 +1266,10 @@ export function Dashboard() {
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className="fixed bottom-6 right-6 z-50 flex flex-col items-center justify-center gap-1.5 rounded-2xl pointer-events-auto"
             style={{
-              width: 100,
+              minWidth: 110,
               height: 90,
-              padding: '16px 20px',
+              padding: '16px 24px',
+              whiteSpace: 'nowrap' as const,
               background: trashHover
                 ? 'rgba(255, 107, 107, 0.3)'
                 : 'rgb(var(--color-bg-card) / 0.85)',
