@@ -130,6 +130,8 @@ const WIDGET_CHART_TYPES: Record<string, ChartType[]> = {
   'ep-stage-bars': ['horizontal-bar', 'vertical-bar'],
   'ep-dept-comparison': ['horizontal-bar', 'vertical-bar', 'donut'],
   'ep-part-progress': ['horizontal-bar', 'vertical-bar'],
+  'ep-full-bg-progress': ['horizontal-bar', 'donut'],
+  'ep-full-act-progress': ['horizontal-bar', 'donut'],
 };
 
 export function getWidgetSupportedCharts(widgetId: string): ChartType[] {

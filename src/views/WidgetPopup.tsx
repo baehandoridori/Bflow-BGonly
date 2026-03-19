@@ -18,6 +18,7 @@ import { EpStageBarsWidget } from '@/components/widgets/episode/EpStageBarsWidge
 import { EpAssigneeCardsWidget } from '@/components/widgets/episode/EpAssigneeCardsWidget';
 import { EpPartProgressWidget } from '@/components/widgets/episode/EpPartProgressWidget';
 import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptComparisonWidget';
+import { EpFullDeptProgressWidget } from '@/components/widgets/episode/EpFullDeptProgressWidget';
 import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadTheme } from '@/services/settingsService';
@@ -58,6 +59,8 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
   'ep-assignee-cards': { label: 'EP 담당자별 현황', component: <EpAssigneeCardsWidget /> },
   'ep-part-progress': { label: 'EP 파트별 진행률', component: <EpPartProgressWidget /> },
   'ep-dept-comparison': { label: 'EP 부서별 비교', component: <EpDeptComparisonWidget /> },
+  'ep-full-bg-progress': { label: 'EP 전체 BG 진행률', component: <EpFullDeptProgressWidget dept="bg" /> },
+  'ep-full-act-progress': { label: 'EP 전체 ACT 진행률', component: <EpFullDeptProgressWidget dept="acting" /> },
 };
 
 /**
