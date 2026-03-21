@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   CalendarDays, ChevronLeft, ChevronRight, Plus, X, Filter,
   Trash2, ExternalLink, GripVertical, Clock, MapPin, FileText, Pencil,
-  Palmtree, Settings,
+  Palmtree, Settings, CheckSquare,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
@@ -22,6 +22,15 @@ import type {
 import { EVENT_COLORS } from '@/types/calendar';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { VACATION_COLOR } from '@/types/vacation';
+import { MiniCalendar } from '@/components/calendar/MiniCalendar';
+// EventCreateTooltip removed — drag/click now opens full EventCreateModal
+import { EventSidePanel } from '@/components/calendar/EventSidePanel';
+import { EventQuickEdit } from '@/components/calendar/EventQuickEdit';
+import WeekScrollView, { generateYearWeeks, findWeekIndexForDate } from '@/components/calendar/WeekScrollView';
+import WeekSidebar from '@/components/calendar/WeekSidebar';
+import DayScrollView from '@/components/calendar/DayScrollView';
+import DaySidebar from '@/components/calendar/DaySidebar';
+import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 
 /* ═══════════════════════════════════════════════════
    유틸리티
@@ -131,7 +140,7 @@ function layoutEventBars(
 
 function EventBarChip({
   bar, compact, onClick, onDragStart, isDragging, isGhost,
-  hoveredEventId, onHover,
+  hoveredEventId, onHover, onContextMenu,
 }: {
   bar: EventBar;
   compact?: boolean;
@@ -141,6 +150,7 @@ function EventBarChip({
   isGhost?: boolean;
   hoveredEventId?: string | null;
   onHover?: (id: string | null) => void;
+  onContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
 }) {
   const ev = bar.event;
   const hex = ev.color || EVENT_COLORS[0];
@@ -172,9 +182,9 @@ function EventBarChip({
     const relX = e.clientX - rect.left;
     const relRight = rect.width - relX;
     let mode: DragMode;
-    if (bar.isStart && relX <= 8) {
+    if (bar.isStart && relX <= 12) {
       mode = 'resize-start';
-    } else if (bar.isEnd && relRight <= 8) {
+    } else if (bar.isEnd && relRight <= 12) {
       mode = 'resize-end';
     } else {
       mode = 'move';
@@ -245,8 +255,10 @@ function EventBarChip({
       onMouseEnter={handleEnter}
       onMouseMove={handleMove}
       onMouseLeave={handleLeave}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(ev, e) : undefined}
+      data-event-id={ev.id}
       className={cn(
-        'absolute text-left z-10',
+        'absolute text-left z-10 calendar-event-bar',
         isGhost ? 'pointer-events-none opacity-50' : 'transition-all duration-150',
         !isGhost && isHovered && 'brightness-110 scale-[1.02] z-20',
         isDragging ? 'opacity-40' : '',
@@ -258,6 +270,7 @@ function EventBarChip({
         top: `${bar.row * (compact ? 23 : 28) + (compact ? 28 : 36)}px`,
         height: compact ? '22px' : '26px',
         cursor: ev.isReadOnly ? 'pointer' : isDragging ? 'grabbing' : 'grab',
+        transition: isGhost ? 'left 0.12s ease-out, width 0.12s ease-out, top 0.12s ease-out' : undefined,
       }}
     >
       <div
@@ -283,17 +296,18 @@ function EventBarChip({
       >
         {/* 리사이즈 핸들 (왼쪽) */}
         {bar.isStart && !isGhost && !ev.isReadOnly && (
-          <div className="absolute left-0 top-0 w-[8px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
+          <div className="absolute left-0 top-0 w-[12px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
             style={{ backgroundColor: `${hex}40` }}
           />
         )}
         {!bar.isStart && <span className="text-[9px] mr-0.5 opacity-60">◂</span>}
         {ev.type === 'vacation' && <Palmtree size={10} className="shrink-0 mr-1 opacity-80" />}
+        {(ev.linkedTodoId || ev.id.startsWith('cal_')) && <CheckSquare size={9} className="shrink-0 mr-1 opacity-70" />}
         <span className="truncate">{ev.title}</span>
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
         {/* 리사이즈 핸들 (오른쪽) */}
         {bar.isEnd && !isGhost && !ev.isReadOnly && (
-          <div className="absolute right-0 top-0 w-[8px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
+          <div className="absolute right-0 top-0 w-[12px] h-full cursor-col-resize opacity-0 group-hover/bar:opacity-100 transition-opacity"
             style={{ backgroundColor: `${hex}40` }}
           />
         )}
@@ -538,12 +552,14 @@ function EventDetailModal({
 
 function EventCreateModal({
   initialDate,
+  initialEndDate,
   editEvent,
   episodes,
   onClose,
   onSave,
 }: {
   initialDate?: string;
+  initialEndDate?: string;
   editEvent?: CalendarEvent;
   episodes: { episodeNumber: number; title: string; parts: { partId: string; sheetName: string; department: string; scenes: { sceneId: string; no: number }[] }[] }[];
   onClose: () => void;
@@ -558,7 +574,7 @@ function EventCreateModal({
   const [title, setTitle] = useState(editEvent?.title ?? '');
   const [memo, setMemo] = useState(editEvent?.memo ?? '');
   const [startDate, setStartDate] = useState(editEvent?.startDate ?? initialDate ?? today);
-  const [endDate, setEndDate] = useState(editEvent?.endDate ?? initialDate ?? today);
+  const [endDate, setEndDate] = useState(editEvent?.endDate ?? initialEndDate ?? initialDate ?? today);
   const [color, setColor] = useState<string>(editEvent?.color ?? EVENT_COLORS[0]);
   const [evType, setEvType] = useState<CalendarEventType>(editEvent?.type ?? 'custom');
 
@@ -631,19 +647,26 @@ function EventCreateModal({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
-      onClick={onClose}
-    >
+    <>
+      {/* 배경 클릭으로 닫기 (반투명 오버레이 없음) */}
       <motion.div
-        initial={{ opacity: 0, scale: 0.93, y: 12 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.93, y: 12 }}
-        transition={{ duration: 0.2 }}
-        className="bg-bg-card rounded-2xl shadow-2xl border border-bg-border w-[28rem] max-h-[85vh] overflow-y-auto"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 0.01 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-40"
+        onClick={onClose}
+      />
+      <motion.div
+        initial={{ opacity: 0, x: 40 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: 40 }}
+        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        className="absolute right-0 top-0 bottom-0 z-50 w-[24rem] max-h-full overflow-y-auto border-l border-bg-border"
+        style={{
+          background: 'rgba(26, 29, 39, 0.97)',
+          backdropFilter: 'blur(16px)',
+          boxShadow: '-8px 0 32px rgba(0,0,0,0.4)',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 헤더 */}
@@ -676,10 +699,10 @@ function EventCreateModal({
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 pr-10 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
+                  className="w-full bg-bg-card border border-accent/40 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 date-picker-hidden"
                   style={{ colorScheme: colorMode }}
                 />
-                <CalendarDays size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+                <CalendarDays size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
               </div>
             </div>
             <div className="flex-1">
@@ -689,10 +712,10 @@ function EventCreateModal({
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full bg-bg-card border-2 border-accent/40 rounded-xl px-4 py-3 pr-10 text-base font-medium text-text-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 date-picker-hidden"
+                  className="w-full bg-bg-card border border-accent/40 rounded-lg px-3 py-2 pr-8 text-sm font-medium text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 date-picker-hidden"
                   style={{ colorScheme: colorMode }}
                 />
-                <CalendarDays size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+                <CalendarDays size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
               </div>
             </div>
           </div>
@@ -810,7 +833,7 @@ function EventCreateModal({
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </>
   );
 }
 
@@ -829,6 +852,15 @@ function CalendarGrid({
   onDragStart,
   dragPreview,
   isDragging,
+  onCellMouseDown,
+  isDateInDragRange,
+  onEventContextMenu,
+  focusWeekIndex,
+  onWheel,
+  monthKey,
+  monthDirection = 0,
+  focusedDate,
+  pulseDate,
 }: {
   weeks: Date[][];
   events: CalendarEvent[];
@@ -840,6 +872,15 @@ function CalendarGrid({
   onDragStart?: (eventId: string, mode: DragMode, anchorDate: string) => void;
   dragPreview?: DragPreview | null;
   isDragging?: boolean;
+  onCellMouseDown?: (e: React.MouseEvent, date: string) => void;
+  isDateInDragRange?: (date: string) => boolean;
+  focusWeekIndex?: number;
+  onWheel?: (e: React.WheelEvent) => void;
+  onEventContextMenu?: (ev: CalendarEvent, e: React.MouseEvent) => void;
+  monthKey?: string;
+  monthDirection?: number;
+  focusedDate?: string | null;
+  pulseDate?: string | null;
 }) {
   const [overflow, setOverflow] = useState<{ date: string; rect: DOMRect } | null>(null);
   const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
@@ -855,7 +896,7 @@ function CalendarGrid({
   }, [events, dragPreview]);
 
   return (
-    <>
+    <div className="flex flex-col flex-1 h-full min-h-0" onWheel={onWheel}>
       {/* 요일 헤더 */}
       <div className="grid grid-cols-7 mb-0.5 border-b border-bg-border/25">
         {WEEKDAYS.map((day, i) => (
@@ -871,16 +912,26 @@ function CalendarGrid({
         ))}
       </div>
 
-      {/* 주별 행 */}
-      <div className="flex flex-col rounded-xl overflow-hidden border border-bg-border/30">
+      {/* 주별 행 — flex-1로 화면 꽉 채움, 동적 행 수에 따라 균등 분배 */}
+      <AnimatePresence mode="popLayout" initial={false}>
+      <motion.div
+        key={monthKey || 'default'}
+        initial={{ opacity: 0, y: monthDirection > 0 ? 30 : -30 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: monthDirection > 0 ? -30 : 30 }}
+        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        className="flex flex-col flex-1 min-h-0 rounded-xl overflow-hidden border border-bg-border/30"
+      >
         {weeks.map((week, wi) => {
           const bars = layoutEventBars(displayEvents, week[0], 7);
           const maxRow = bars.length > 0 ? Math.max(...bars.map((b) => b.row)) + 1 : 0;
-          const visibleRows = Math.min(maxRow, maxVisibleBars);
-          const rowHeight = Math.max(68 + visibleRows * 32 + 20, 164);
-
+          // 현재 주 하이라이트
+          const isCurrentWeek = week.some((d) => fmtDate(d) === today);
           return (
-            <div key={wi} className="relative grid grid-cols-7" style={{ minHeight: rowHeight }}>
+            <div
+              key={wi}
+              className={cn("relative grid grid-cols-7 flex-1 min-h-0", isCurrentWeek && 'bg-accent/[0.03]')}
+            >
               {/* 날짜 셀 배경 */}
               {week.map((day, di) => {
                 const dateStr = fmtDate(day);
@@ -897,6 +948,9 @@ function CalendarGrid({
                   dragPreview.newStartDate <= dateStr && dragPreview.newEndDate >= dateStr
                 );
 
+                const isInDragRange = isDateInDragRange?.(dateStr) ?? false;
+                const isFocused = focusedDate === dateStr;
+
                 return (
                   <div
                     key={di}
@@ -906,10 +960,25 @@ function CalendarGrid({
                       isCurMonth ? 'hover:bg-bg-border/15' : 'opacity-30',
                       isToday && 'bg-accent/5',
                       isDropTarget && 'bg-accent/10',
+                      isInDragRange && 'bg-accent/15 border-accent/30',
+                      isFocused && 'ring-2 ring-inset ring-accent/60 bg-accent/8 z-10',
                     )}
-                    style={{ minHeight: rowHeight }}
                     onClick={() => { if (!isDragging) onDateClick(dateStr); }}
+                    onMouseDown={onCellMouseDown ? (e) => onCellMouseDown(e, dateStr) : undefined}
                   >
+                    {/* 드래그 중 가상 이벤트 바 */}
+                    {isInDragRange && (
+                      <div
+                        className="absolute left-0.5 right-0.5 rounded-sm pointer-events-none"
+                        style={{
+                          top: `${(Math.max(maxRow, 0)) * 28 + 36}px`,
+                          height: '24px',
+                          background: 'linear-gradient(135deg, rgba(108,92,231,0.3) 0%, rgba(108,92,231,0.15) 100%)',
+                          border: '1px dashed rgba(108,92,231,0.6)',
+                          borderLeft: di === 0 || !isDateInDragRange?.(fmtDate(addDays(day, -1))) ? '3px solid #6C5CE7' : '1px dashed rgba(108,92,231,0.6)',
+                        }}
+                      />
+                    )}
                     {/* 날짜 번호 */}
                     <div className="p-2">
                       <span
@@ -925,6 +994,16 @@ function CalendarGrid({
                         {day.getDate()}
                       </span>
                     </div>
+                    {/* 펄스 애니메이션 (navigate-to-date) */}
+                    {dateStr === pulseDate && (
+                      <motion.div
+                        className="absolute inset-0 rounded-lg border-2 border-accent pointer-events-none"
+                        style={{ boxShadow: '0 0 12px 4px rgba(108, 92, 231, 0.4), 0 0 24px 8px rgba(108, 92, 231, 0.15)' }}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: [0, 1, 0.6, 1, 0], scale: [0.9, 1.03, 1, 1.02, 1] }}
+                        transition={{ duration: 2, ease: 'easeInOut' }}
+                      />
+                    )}
 
                     {/* 오버플로우 뱃지 */}
                     {overflowCount > 0 && (
@@ -956,13 +1035,15 @@ function CalendarGrid({
                     isGhost={barIsDragging}
                     hoveredEventId={hoveredEventId}
                     onHover={setHoveredEventId}
+                    onContextMenu={onEventContextMenu}
                   />
                 );
               })}
             </div>
           );
         })}
-      </div>
+      </motion.div>
+      </AnimatePresence>
 
       {/* 오버플로우 팝업 */}
       <AnimatePresence>
@@ -981,7 +1062,7 @@ function CalendarGrid({
           </>
         )}
       </AnimatePresence>
-    </>
+    </div>
   );
 }
 
@@ -1057,6 +1138,75 @@ function TodayView({
 }
 
 /* ═══════════════════════════════════════════════════
+   캘린더 → 할일 역동기화 헬퍼
+   ═══════════════════════════════════════════════════ */
+
+function syncCalendarToTodo(todoId: string, calEvent: CalendarEvent) {
+  // Update in localStorage — check both assignedTodos and customView todos
+  const key1 = 'bflow_assigned_personal_todos';
+  const stored1 = localStorage.getItem(key1);
+  if (stored1) {
+    const todos = JSON.parse(stored1) as any[];
+    const idx = todos.findIndex((t: any) => t.id === todoId);
+    if (idx >= 0) {
+      todos[idx] = { ...todos[idx], title: calEvent.title, memo: calEvent.memo, startDate: calEvent.startDate, endDate: calEvent.endDate };
+      localStorage.setItem(key1, JSON.stringify(todos));
+      window.dispatchEvent(new Event('bflow:todos-changed'));
+      return;
+    }
+  }
+
+  // Also check custom views
+  const key2 = 'bflow_my_task_views';
+  const stored2 = localStorage.getItem(key2);
+  if (stored2) {
+    const views = JSON.parse(stored2) as any[];
+    for (const view of views) {
+      if (!view.personalTodos) continue;
+      const idx = view.personalTodos.findIndex((t: any) => t.id === todoId);
+      if (idx >= 0) {
+        view.personalTodos[idx] = { ...view.personalTodos[idx], title: calEvent.title, memo: calEvent.memo, startDate: calEvent.startDate, endDate: calEvent.endDate };
+        localStorage.setItem(key2, JSON.stringify(views));
+        window.dispatchEvent(new Event('bflow:todos-changed'));
+        return;
+      }
+    }
+  }
+}
+
+function unlinkTodoFromCalendar(todoId: string) {
+  // Set addToCalendar = false on the todo (don't delete the todo itself)
+  const key1 = 'bflow_assigned_personal_todos';
+  const stored1 = localStorage.getItem(key1);
+  if (stored1) {
+    const todos = JSON.parse(stored1) as any[];
+    const idx = todos.findIndex((t: any) => t.id === todoId);
+    if (idx >= 0) {
+      todos[idx] = { ...todos[idx], addToCalendar: false };
+      localStorage.setItem(key1, JSON.stringify(todos));
+      window.dispatchEvent(new Event('bflow:todos-changed'));
+      return;
+    }
+  }
+
+  const key2 = 'bflow_my_task_views';
+  const stored2 = localStorage.getItem(key2);
+  if (stored2) {
+    const views = JSON.parse(stored2) as any[];
+    for (const view of views) {
+      if (!view.personalTodos) continue;
+      const idx = view.personalTodos.findIndex((t: any) => t.id === todoId);
+      if (idx >= 0) {
+        view.personalTodos[idx] = { ...view.personalTodos[idx], addToCalendar: false };
+        localStorage.setItem(key2, JSON.stringify(views));
+        window.dispatchEvent(new Event('bflow:todos-changed'));
+        return;
+      }
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════
    메인 ScheduleView
    ═══════════════════════════════════════════════════ */
 
@@ -1076,17 +1226,47 @@ export function ScheduleView() {
   const [editEvent, setEditEvent] = useState<CalendarEvent | null>(null);
   const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null);
 
+  // ─── 새 컴포넌트 상태 ───
+  // Side panel state (replaces detailEvent modal)
+  const [panelEvent, setPanelEvent] = useState<CalendarEvent | null>(null);
+
+  // 월간 뷰 휠 — 디바운스 타이머
+  const wheelTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Quick edit state (right-click)
+  const [quickEdit, setQuickEdit] = useState<{
+    event: CalendarEvent; position: { x: number; y: number };
+  } | null>(null);
+
+  // Week scroll view state — 연도 기준 절대 인덱스
+  const [activeWeekIndex, setActiveWeekIndex] = useState(() => {
+    const now = new Date();
+    const yearWeeks = generateYearWeeks(now.getFullYear());
+    return findWeekIndexForDate(yearWeeks, fmtDate(now));
+  });
+
+  // Day scroll view state — 연도 내 일 인덱스 (0-based)
+  const [activeDayIndex, setActiveDayIndex] = useState(() => {
+    const now = new Date();
+    const jan1 = new Date(now.getFullYear(), 0, 1, 12, 0, 0, 0);
+    return Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0).getTime() - jan1.getTime()) / 86400000);
+  });
+
   // 날짜 상태
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
+  const [monthDir, setMonthDir] = useState(0); // 월 슬라이드 방향
   const [weekOffset, setWeekOffset] = useState(0); // 주/2주 뷰 오프셋
 
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
 
-  // 이벤트 로드
+  // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
     getEvents().then(setEvents);
+    const refresh = () => getEvents().then(setEvents);
+    window.addEventListener('bflow:calendar-changed', refresh);
+    return () => window.removeEventListener('bflow:calendar-changed', refresh);
   }, []);
 
   // 휴가 이벤트 로드
@@ -1149,8 +1329,8 @@ export function ScheduleView() {
       for (let d = 1; d <= lastDay.getDate(); d++) {
         days.push(new Date(year, month, d, 12, 0, 0, 0));
       }
-      // 다음 달 (6행 채우기)
-      while (days.length < 42) {
+      // 다음 달 (현재 주 완성까지만 — 동적 행)
+      while (days.length % 7 !== 0) {
         days.push(addDays(days[days.length - 1], 1));
       }
 
@@ -1161,22 +1341,14 @@ export function ScheduleView() {
       return result;
     }
 
-    if (viewMode === 'week' || viewMode === '2week') {
-      const todayDate = new Date();
-      todayDate.setHours(12, 0, 0, 0);
-      const todayDow = todayDate.getDay();
-      const weekStart = addDays(todayDate, -todayDow + weekOffset * 7);
-      const numWeeks = viewMode === '2week' ? 2 : 1;
+    if (viewMode === 'week') {
+      // 주간 뷰: 전체 연도 주 배열 (사이드바용)
+      return generateYearWeeks(year);
+    }
 
-      const result: Date[][] = [];
-      for (let w = 0; w < numWeeks; w++) {
-        const week: Date[] = [];
-        for (let d = 0; d < 7; d++) {
-          week.push(addDays(weekStart, w * 7 + d));
-        }
-        result.push(week);
-      }
-      return result;
+    if (viewMode === '2week') {
+      // 2주 뷰도 전체 연도 주 배열 사용 (사이드바 + activeWeekIndex 통일)
+      return generateYearWeeks(year);
     }
 
     return [];
@@ -1185,27 +1357,50 @@ export function ScheduleView() {
   // 네비게이션
   const goToPrev = () => {
     if (viewMode === 'month') {
+      setMonthDir(-1);
       if (month === 0) { setYear(year - 1); setMonth(11); }
       else setMonth(month - 1);
+    } else if (viewMode === 'week' || viewMode === '2week') {
+      const step = viewMode === '2week' ? 2 : 1;
+      setActiveWeekIndex((idx: number) => Math.max(0, idx - step));
     } else {
-      setWeekOffset(weekOffset - (viewMode === '2week' ? 2 : 1));
+      setActiveDayIndex((idx: number) => Math.max(0, idx - 1));
     }
   };
 
   const goToNext = () => {
     if (viewMode === 'month') {
+      setMonthDir(1);
       if (month === 11) { setYear(year + 1); setMonth(0); }
       else setMonth(month + 1);
+    } else if (viewMode === 'week' || viewMode === '2week') {
+      const step = viewMode === '2week' ? 2 : 1;
+      setActiveWeekIndex((idx: number) => Math.min(generateYearWeeks(year).length - 1, idx + step));
     } else {
-      setWeekOffset(weekOffset + (viewMode === '2week' ? 2 : 1));
+      setActiveDayIndex((idx: number) => Math.min((new Date(year, 1, 29).getDate() === 29 ? 365 : 364), idx + 1));
     }
   };
 
   const goToToday = () => {
     const now = new Date();
+    const todayStr = fmtDate(now);
     setYear(now.getFullYear());
     setMonth(now.getMonth());
     setWeekOffset(0);
+    // 주간 뷰: 오늘이 속한 주로 이동
+    const yearWeeks = generateYearWeeks(now.getFullYear());
+    setActiveWeekIndex(findWeekIndexForDate(yearWeeks, todayStr));
+    // 일간 뷰: 오늘로 초기화 (양쪽 모두 정오로 정규화)
+    const jan1 = new Date(now.getFullYear(), 0, 1, 12, 0, 0, 0);
+    const todayNoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0);
+    setActiveDayIndex(Math.floor((todayNoon.getTime() - jan1.getTime()) / 86400000));
+    // 월간 뷰: 오늘 날짜에 펄스 애니메이션 (모달 트리거 방지)
+    if (viewMode === 'month') {
+      setPulseDate(todayStr);
+      setFocusedDate(todayStr);
+      setTimeout(() => { setPulseDate(null); }, 2500);
+    }
+    // 주간/2주: showCreate 트리거하지 않음
   };
 
   // 이벤트 CRUD
@@ -1220,7 +1415,7 @@ export function ScheduleView() {
         createdAt: new Date().toISOString(),
       };
       await addEvent(ev);
-      setEvents((prev) => [...prev, ev]);
+      // bflow:calendar-changed 구독이 자동 refresh하므로 수동 추가 불필요
       setShowCreate(false);
       setCreateDate(undefined);
     } finally {
@@ -1232,28 +1427,49 @@ export function ScheduleView() {
     if (!editEvent) return;
     const updates = { ...data };
     await updateEvent(editEvent.id, updates);
+    const updatedEvent = { ...editEvent, ...updates };
     setEvents((prev) => prev.map((e) => (e.id === editEvent.id ? { ...e, ...updates } : e)));
+    // 캘린더 → 할일 역동기화
+    if (updatedEvent.linkedTodoId || updatedEvent.id.startsWith('cal_')) {
+      const todoId = updatedEvent.linkedTodoId || updatedEvent.id.replace(/^cal_/, '');
+      syncCalendarToTodo(todoId, updatedEvent);
+    }
     setEditEvent(null);
     setShowCreate(false);
   }, [editEvent]);
 
   const handleDeleteEvent = useCallback(async (id: string) => {
+    // 삭제 전에 이벤트 정보 저장 (할일 연결 해제용)
+    const deletingEvent = events.find(e => e.id === id);
     await deleteEvent(id);
     setEvents((prev) => prev.filter((e) => e.id !== id));
+    // 할일 연결된 이벤트인 경우 addToCalendar = false 처리 (할일 자체는 유지)
+    if (deletingEvent) {
+      if (deletingEvent.linkedTodoId || deletingEvent.id.startsWith('cal_')) {
+        const todoId = deletingEvent.linkedTodoId || deletingEvent.id.replace(/^cal_/, '');
+        unlinkTodoFromCalendar(todoId);
+      }
+    }
+  }, [events]);
+
+  // 날짜 클릭 → 툴팁으로 이벤트 생성 (드래그 훅이 처리하므로 기존 모달은 열지 않음)
+  const handleDateClick = useCallback((_date: string) => {
+    // 드래그 훅의 onDragComplete가 상세 편집 모달을 직접 열므로
+    // 여기서는 아무것도 하지 않음 (이중 모달 방지)
   }, []);
 
-  // 날짜 클릭 → 이벤트 생성
-  const handleDateClick = useCallback((date: string) => {
-    setCreateDate(date);
-    setShowCreate(true);
+  // 이벤트 클릭 → 사이드패널 토글 (같은 이벤트 재클릭 시 닫기)
+  const handleEventClick = useCallback((ev: CalendarEvent) => {
+    setPanelEvent(prev => prev?.id === ev.id ? null : ev);
   }, []);
 
   // 이벤트에서 해당 뷰로 이동
   const handleNavigate = useCallback((ev: CalendarEvent) => {
-    // 휴가 이벤트 → 설정(프로필)으로 이동
+    // 휴가 이벤트 → 휴가 탭으로 이동
     if (ev.type === 'vacation') {
-      setView('settings');
+      setView('vacation');
       setDetailEvent(null);
+      setPanelEvent(null);
       return;
     }
     if (ev.linkedEpisode != null) {
@@ -1280,7 +1496,16 @@ export function ScheduleView() {
   // 드래그&드롭
   const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {
     await updateEvent(eventId, { startDate: newStart, endDate: newEnd });
-    setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, startDate: newStart, endDate: newEnd } : e)));
+    setEvents((prev) => {
+      const updated = prev.map((e) => (e.id === eventId ? { ...e, startDate: newStart, endDate: newEnd } : e));
+      // sync to todo if linked
+      const ev = updated.find((e) => e.id === eventId);
+      if (ev && (ev.linkedTodoId || ev.id.startsWith('cal_'))) {
+        const todoId = ev.linkedTodoId || ev.id.replace(/^cal_/, '');
+        syncCalendarToTodo(todoId, ev);
+      }
+      return updated;
+    });
   }, []);
 
   const { isDragging, preview: dragPreview, startDrag } = useCalendarDnD(handleEventDragDone, handleEventDragDone);
@@ -1291,6 +1516,246 @@ export function ScheduleView() {
     startDrag(eventId, mode, ev.startDate, ev.endDate, 0, anchorDate);
   }, [allEvents, startDrag]);
 
+  // ─── 드래그-투-크리에이트: 시작/종료 날짜 상태 ───
+  const [createEndDate, setCreateEndDate] = useState<string | undefined>();
+
+  // 드래그 완료 후 모달이 열려 있는 동안 선택 범위를 유지하기 위한 상태
+  const [persistedDateRange, setPersistedDateRange] = useState<{ startDate: string; endDate: string } | null>(null);
+
+  // 키보드 네비게이션용 포커스 날짜 (월간 뷰 전용)
+  const [focusedDate, setFocusedDate] = useState<string | null>(null);
+
+  // navigate-to-date 펄스 애니메이션용
+  const [pulseDate, setPulseDate] = useState<string | null>(null);
+
+  // 오늘 버튼 하이라이트 (persistedDateRange와 분리)
+  // todayHighlight 제거됨 — pulseDate로 통합
+
+  const { dragState, handleCellMouseDown, isDateInRange } = useCalendarDragCreate({
+    onDragComplete: (startDate, endDate, _anchorEl) => {
+      // 드래그/클릭 완료 → 상세 편집 모달 열기 (시작일+종료일 프리필)
+      setCreateDate(startDate);
+      setCreateEndDate(endDate);
+      setEditEvent(null);
+      setShowCreate(true);
+      // 모달이 열려 있는 동안 하이라이트 유지
+      setPersistedDateRange({ startDate, endDate });
+    },
+  });
+
+  // showCreate가 닫히면 persisted range 초기화
+  useEffect(() => {
+    if (!showCreate) setPersistedDateRange(null);
+  }, [showCreate]);
+
+  // 캘린더 키보드 네비게이션 (모든 뷰)
+  useEffect(() => {
+    if (showCreate || quickEdit) return;
+
+    const handler = (e: KeyboardEvent) => {
+      // input/textarea에 포커스 있으면 무시
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      // 패널이 열려 있을 때 Escape만 처리
+      if (panelEvent && e.key === 'Escape') {
+        setPanelEvent(null);
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        setFocusedDate(null);
+        return;
+      }
+
+      // 주간/2주 뷰: 방향키로 주 이동 (휠과 동일하게 activeWeekIndex 변경)
+      if (viewMode === 'week' || viewMode === '2week') {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          e.stopPropagation();
+          setActiveWeekIndex((idx: number) => Math.max(0, idx - 1));
+          return;
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          e.stopPropagation();
+          setActiveWeekIndex((idx: number) => Math.min(generateYearWeeks(year).length - 1, idx + 1));
+          return;
+        }
+        return;
+      }
+
+      // 일간 뷰: 방향키로 일 이동
+      if (viewMode === 'today') {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          e.stopPropagation();
+          setActiveDayIndex((o: number) => Math.max(0, o - 1));
+          return;
+        }
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          e.stopPropagation();
+          setActiveDayIndex((o: number) => Math.min((new Date(year, 1, 29).getDate() === 29 ? 365 : 364), o + 1));
+          return;
+        }
+        return;
+      }
+
+      // 월간 뷰: 방향키로 날짜 이동
+      const arrows: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+      const delta = arrows[e.key];
+
+      if (delta !== undefined) {
+        e.preventDefault();
+        e.stopPropagation();
+        setFocusedDate((prev) => {
+          // 포커스 없으면 현재 보이는 달의 1일부터 시작 (오늘로 점프 방지)
+          const base = prev ? parseDate(prev) : new Date(year, month, 1, 12, 0, 0, 0);
+          const next = addDays(base, delta);
+          const nextStr = fmtDate(next);
+          // 월이 변경되면 자동으로 이동
+          if (next.getMonth() !== month || next.getFullYear() !== year) {
+            setYear(next.getFullYear());
+            setMonth(next.getMonth());
+            setMonthDir(delta > 0 ? 1 : -1);
+          }
+          return nextStr;
+        });
+        return;
+      }
+
+      if (e.key === 'Enter' && focusedDate) {
+        e.preventDefault();
+        e.stopPropagation();
+        setCreateDate(focusedDate);
+        setCreateEndDate(focusedDate);
+        setEditEvent(null);
+        setShowCreate(true);
+        setPersistedDateRange({ startDate: focusedDate, endDate: focusedDate });
+      }
+    };
+
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [viewMode, showCreate, quickEdit, panelEvent, focusedDate, month, year]);
+
+  // 뷰 모드 변경 시 포커스 초기화
+  useEffect(() => {
+    setFocusedDate(null);
+  }, [viewMode]);
+
+  // 외부에서 날짜 이동 요청 수신 (MyTasksWidget 등)
+  const navigateTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.date) {
+        // 이전 타이머 정리
+        navigateTimersRef.current.forEach(clearTimeout);
+        navigateTimersRef.current = [];
+
+        const dateStr = detail.date as string;
+        const d = parseDate(dateStr);
+        setYear(d.getFullYear());
+        setMonth(d.getMonth());
+        setPersistedDateRange({ startDate: dateStr, endDate: dateStr });
+        // 주간/일간 뷰에서도 해당 날짜로 이동
+        const yearWeeks = generateYearWeeks(d.getFullYear());
+        const weekIdx = findWeekIndexForDate(yearWeeks, dateStr);
+        if (weekIdx >= 0) setActiveWeekIndex(weekIdx);
+        // 일간 뷰: 연초 기준 일수 계산
+        const yearStart = new Date(d.getFullYear(), 0, 1);
+        const dayIdx = Math.floor((d.getTime() - yearStart.getTime()) / 86400000);
+        setActiveDayIndex(dayIdx);
+        setPulseDate(dateStr);
+        // 3초 후 하이라이트 및 펄스 해제
+        navigateTimersRef.current.push(
+          setTimeout(() => { setPersistedDateRange(null); setPulseDate(null); }, 3000)
+        );
+        // 해당 날짜의 연동된 이벤트를 사이드패널에 표시
+        if (detail.todoId) {
+          navigateTimersRef.current.push(
+            setTimeout(() => {
+              const linkedEvent = events.find(ev =>
+                ev.linkedTodoId === detail.todoId || ev.id === `cal_${detail.todoId}`
+              );
+              if (linkedEvent) setPanelEvent(linkedEvent);
+            }, 100)
+          );
+        }
+      }
+    };
+    window.addEventListener('bflow:navigate-to-date', handler);
+    return () => {
+      window.removeEventListener('bflow:navigate-to-date', handler);
+      navigateTimersRef.current.forEach(clearTimeout);
+    };
+  }, [events]);
+
+  // 드래그 범위 OR 모달 열림 시 persisted 범위를 통합 체크
+  const isDateInHighlightRange = useCallback((date: string): boolean => {
+    if (isDateInRange(date)) return true;
+    if (persistedDateRange && date >= persistedDateRange.startDate && date <= persistedDateRange.endDate) return true;
+    // 오늘 버튼 하이라이트 (별도 상태)
+    if (date === pulseDate) return true;
+    return false;
+  }, [isDateInRange, persistedDateRange, pulseDate]);
+
+  // ─── 사이드 패널 / 퀵 에디트 핸들러 ───
+  const handleUpdateEventDirect = useCallback(async (id: string, updates: Partial<CalendarEvent>) => {
+    // 빈 문자열 날짜 방지: 기존 값 유지
+    if ('startDate' in updates && !updates.startDate) delete updates.startDate;
+    if ('endDate' in updates && !updates.endDate) delete updates.endDate;
+    // endDate < startDate 방지: 자동 swap
+    if (updates.startDate && updates.endDate && updates.endDate < updates.startDate) {
+      [updates.startDate, updates.endDate] = [updates.endDate, updates.startDate];
+    }
+    await updateEvent(id, updates);
+    setEvents(prev => {
+      const updated = prev.map(e => e.id === id ? { ...e, ...updates } : e);
+      // 캘린더 → 할일 역동기화 (최신 상태에서 참조)
+      const ev = prev.find(e => e.id === id);
+      if (ev) {
+        const updatedEvent = { ...ev, ...updates };
+        if (updatedEvent.linkedTodoId || updatedEvent.id.startsWith('cal_')) {
+          const todoId = updatedEvent.linkedTodoId || updatedEvent.id.replace(/^cal_/, '');
+          syncCalendarToTodo(todoId, updatedEvent);
+        }
+      }
+      return updated;
+    });
+    // 사이드패널에 표시 중인 이벤트도 갱신
+    setPanelEvent(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
+  }, []);
+
+  const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
+    const newEv: CalendarEvent = {
+      ...event,
+      id: crypto.randomUUID(),
+      title: `${event.title} (복사)`,
+      createdAt: new Date().toISOString(),
+      // 연결 정보 모두 제거: 완전 독립 이벤트로 복제
+      linkedTodoId: undefined,
+      isReadOnly: false,
+      type: 'custom',
+      linkedEpisode: undefined,
+      linkedSheetName: undefined,
+      linkedSceneId: undefined,
+      linkedDepartment: undefined,
+      linkedPart: undefined,
+    };
+    await addEvent(newEv);
+    // bflow:calendar-changed 구독이 자동 refresh
+  }, []);
+
+  // 이벤트 우클릭 → QuickEdit
+  const handleEventContextMenu = useCallback((ev: CalendarEvent, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setQuickEdit({ event: ev, position: { x: e.clientX, y: e.clientY } });
+  }, []);
+
   // 헤더 라벨
   const headerLabel = useMemo(() => {
     if (viewMode === 'month') return `${year}년 ${month + 1}월`;
@@ -1298,21 +1763,96 @@ export function ScheduleView() {
       const d = new Date();
       return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
     }
-    if (weeks.length > 0) {
-      const first = weeks[0][0];
-      const last = weeks[weeks.length - 1][6];
+    // 주간/2주간: activeWeekIndex 기준으로 현재 보이는 범위 표시
+    if (weeks.length > 0 && activeWeekIndex < weeks.length) {
+      if (viewMode === '2week') {
+        const startWeek = weeks[activeWeekIndex];
+        const endIdx = Math.min(activeWeekIndex + 1, weeks.length - 1);
+        const endWeek = weeks[endIdx];
+        const first = startWeek[0];
+        const last = endWeek[6];
+        return `${first.getMonth() + 1}/${first.getDate()} — ${last.getMonth() + 1}/${last.getDate()}`;
+      }
+      const activeWeek = weeks[activeWeekIndex];
+      const first = activeWeek[0];
+      const last = activeWeek[6];
       return `${first.getMonth() + 1}/${first.getDate()} — ${last.getMonth() + 1}/${last.getDate()}`;
     }
     return '';
-  }, [viewMode, year, month, weeks]);
+  }, [viewMode, year, month, weeks, activeWeekIndex]);
 
   // 최대 바 행 수
   const maxBars = viewMode === 'month' ? 3 : viewMode === '2week' ? 5 : 8;
 
+  // 사이드바 상태
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   return (
-    <div className="flex flex-col gap-3 h-full">
+    <div className="flex h-full">
+      {/* ═══ 좌측 사이드바 ═══ */}
+      <div
+        className="flex-shrink-0 border-r border-bg-border/30 transition-all duration-250 overflow-hidden"
+        style={{
+          width: sidebarOpen ? 180 : 40,
+          transition: 'width 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+        }}
+      >
+        {sidebarOpen ? (
+          <div className="w-[180px] h-full flex flex-col p-2">
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-accent hover:bg-accent/10 rounded-md cursor-pointer mb-2 self-end"
+            >
+              <ChevronLeft size={12} />
+              접기
+            </button>
+            {viewMode === 'today' ? (
+              <DaySidebar
+                activeDayIndex={activeDayIndex}
+                onDaySelect={setActiveDayIndex}
+                events={filteredEvents}
+                year={year}
+              />
+            ) : (viewMode === 'week' || viewMode === '2week') ? (
+              <WeekSidebar
+                weeks={weeks}
+                events={filteredEvents}
+                today={today}
+                activeWeekIndex={activeWeekIndex}
+                onWeekSelect={setActiveWeekIndex}
+                currentMonth={month}
+                currentYear={year}
+              />
+            ) : (
+              <MiniCalendar
+                currentMonth={new Date(year, month, 1)}
+                onMonthChange={(d) => { setYear(d.getFullYear()); setMonth(d.getMonth()); }}
+                onDateSelect={(dateStr) => {
+                  setCreateDate(dateStr);
+                  setShowCreate(true);
+                }}
+                events={filteredEvents}
+                selectedDate={createDate}
+              />
+            )}
+          </div>
+        ) : (
+          <div className="w-[40px] h-full flex flex-col items-center pt-3">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-1.5 text-accent hover:bg-accent/10 rounded-md cursor-pointer"
+              title="사이드바 펼치기"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ═══ 메인 영역 ═══ */}
+      <div className="flex-1 flex flex-col gap-3 min-w-0 relative overflow-hidden">
       {/* ═══ 헤더 ═══ */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="flex items-center justify-between flex-wrap gap-2 px-3 pt-2">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-bold text-text-primary flex items-center gap-2">
             <CalendarDays size={20} className="text-accent" />
@@ -1431,7 +1971,7 @@ export function ScheduleView() {
       </div>
 
       {/* ═══ 이벤트 수 통계 ═══ */}
-      <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-1">
+      <div className="flex items-center gap-4 text-sm text-text-secondary/50 px-4">
         <span>전체 {allEvents.length}개</span>
         <span className="text-bg-border/50">·</span>
         <span>이번 달 {allEvents.filter((e) => {
@@ -1449,25 +1989,81 @@ export function ScheduleView() {
       </div>
 
       {/* ═══ 캘린더 본체 ═══ */}
-      <div className="flex-1 overflow-auto">
-        {viewMode === 'today' ? (
-          <div className="bg-bg-card rounded-xl border border-bg-border/40 p-4">
-            <TodayView events={filteredEvents} today={today} onEventClick={setDetailEvent} />
-          </div>
-        ) : (
-          <CalendarGrid
-            weeks={weeks}
-            events={filteredEvents}
-            today={today}
-            currentMonth={month}
-            maxVisibleBars={maxBars}
-            onDateClick={handleDateClick}
-            onEventClick={setDetailEvent}
-            onDragStart={handleBarDragStart}
-            dragPreview={dragPreview}
-            isDragging={isDragging}
-          />
-        )}
+      <div className="flex-1 flex flex-col overflow-hidden px-3 pb-2">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={viewMode}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="flex-1 flex flex-col overflow-hidden"
+          >
+            {viewMode === 'today' ? (
+              <DayScrollView
+                events={filteredEvents}
+                activeDayIndex={activeDayIndex}
+                onActiveDayChange={setActiveDayIndex}
+                onEventClick={handleEventClick}
+                onDateClick={(dateStr) => {
+                  setCreateDate(dateStr);
+                  setCreateEndDate(dateStr);
+                  setEditEvent(null);
+                  setShowCreate(true);
+                }}
+                year={year}
+              />
+            ) : viewMode === 'week' || viewMode === '2week' ? (
+              <WeekScrollView
+                currentMonth={month}
+                currentYear={year}
+                events={filteredEvents}
+                today={today}
+                onEventClick={handleEventClick}
+                onDateClick={(dateStr) => {
+                  setCreateDate(dateStr);
+                  setCreateEndDate(dateStr);
+                  setEditEvent(null);
+                  setShowCreate(true);
+                }}
+                activeWeekIndex={activeWeekIndex}
+                onWeekChange={setActiveWeekIndex}
+                mode={viewMode === '2week' ? '2week' : 'week'}
+              />
+            ) : (
+              <CalendarGrid
+                weeks={weeks}
+                events={filteredEvents}
+                today={today}
+                currentMonth={month}
+                maxVisibleBars={maxBars}
+                onDateClick={handleDateClick}
+                onEventClick={handleEventClick}
+                onDragStart={handleBarDragStart}
+                dragPreview={dragPreview}
+                isDragging={isDragging}
+                onCellMouseDown={handleCellMouseDown}
+                isDateInDragRange={isDateInHighlightRange}
+                onEventContextMenu={handleEventContextMenu}
+                monthKey={`${year}-${month}`}
+                monthDirection={monthDir}
+                focusedDate={focusedDate}
+                pulseDate={pulseDate}
+                onWheel={(e) => {
+                  if (viewMode !== 'month') return;
+                  // 디바운스된 월 이동 (휠 아래=다음달, 위=이전달)
+                  clearTimeout(wheelTimerRef.current);
+                  const dir = e.deltaY > 0 ? 1 : -1;
+                  setMonthDir(dir);
+                  wheelTimerRef.current = setTimeout(() => {
+                    if (dir > 0) goToNext();
+                    else goToPrev();
+                  }, 150);
+                }}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       {/* ═══ 모달들 ═══ */}
@@ -1476,26 +2072,50 @@ export function ScheduleView() {
           <EventCreateModal
             key={editEvent ? `edit-${editEvent.id}` : 'create'}
             initialDate={createDate}
+            initialEndDate={createEndDate}
             editEvent={editEvent ?? undefined}
             episodes={episodes}
-            onClose={() => { setShowCreate(false); setCreateDate(undefined); setEditEvent(null); }}
+            onClose={() => { setShowCreate(false); setCreateDate(undefined); setCreateEndDate(undefined); setEditEvent(null); }}
             onSave={editEvent ? handleUpdateEvent : handleAddEvent}
           />
         )}
       </AnimatePresence>
 
+      {/* ═══ EventSidePanel (replaces EventDetailModal) ═══ */}
       <AnimatePresence>
-        {detailEvent && (
-          <EventDetailModal
-            key="detail"
-            event={detailEvent}
-            onClose={() => setDetailEvent(null)}
-            onDelete={handleDeleteEvent}
+        {panelEvent && (
+          <EventSidePanel
+            key={`panel-${panelEvent.id}`}
+            event={panelEvent}
+            onClose={() => setPanelEvent(null)}
+            onDelete={(id) => { handleDeleteEvent(id); setPanelEvent(null); }}
+            onUpdate={handleUpdateEventDirect}
             onNavigate={handleNavigate}
-            onEdit={(ev) => { setEditEvent(ev); setShowCreate(true); }}
           />
         )}
       </AnimatePresence>
+
+      {/* ═══ EventQuickEdit (right-click popup) ═══ */}
+      {quickEdit && (
+        <EventQuickEdit
+          key={quickEdit.event.id}
+          event={quickEdit.event}
+          position={quickEdit.position}
+          onClose={() => setQuickEdit(null)}
+          onUpdateColor={(id, color) => {
+            handleUpdateEventDirect(id, { color });
+            // 패널 이벤트도 업데이트
+            setPanelEvent(prev => prev && prev.id === id ? { ...prev, color } : prev);
+          }}
+          onUpdate={(id, updates) => {
+            handleUpdateEventDirect(id, updates);
+            setPanelEvent(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
+          }}
+          onDelete={(id) => { handleDeleteEvent(id); setPanelEvent(prev => prev?.id === id ? null : prev); }}
+          onDuplicate={handleDuplicateEvent}
+        />
+      )}
+      </div>{/* 메인 영역 끝 */}
     </div>
   );
 }

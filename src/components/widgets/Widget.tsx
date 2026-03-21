@@ -46,11 +46,21 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
     window.electronAPI?.widgetOpenPopup?.(widgetId, title, extra);
   };
 
-  // 팝업 모드: 헤더/외곽 없이 콘텐츠만 표시
+  // 팝업 모드: 외곽 없이 미니 헤더 + 콘텐츠 표시
   if (isPopup) {
     return (
       <div className={cn('flex flex-col h-full', className)}>
-        <div className="flex-1 overflow-auto p-4">{children}</div>
+        {/* 팝업에서도 headerRight 표시 (뷰 모드 전환 등) */}
+        {headerRight && (
+          <div className="flex items-center justify-between px-4 pt-3 pb-1 shrink-0">
+            <div className="flex items-center gap-1.5 text-text-secondary/60">
+              {icon}
+              <span className="text-xs font-semibold">{title}</span>
+            </div>
+            <div className="flex items-center">{headerRight}</div>
+          </div>
+        )}
+        <div className="flex-1 overflow-auto p-4 pt-2">{children}</div>
       </div>
     );
   }

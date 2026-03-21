@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useContext, useRef, forwardRef } from 'react';
-import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, ChevronRight, PartyPopper, GripVertical, Calendar } from 'lucide-react';
+import { CheckSquare, Plus, X, Search, Check, ListFilter, Pencil, ChevronDown, ChevronRight, PartyPopper, GripVertical, Calendar, CalendarDays } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { Widget, IsPopupContext, WidgetIdContext } from './Widget';
 import { useDataStore } from '@/stores/useDataStore';
@@ -9,6 +9,7 @@ import { useDashboardEpisodes } from '@/hooks/useDashboardEpisodes';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Stage, Scene, Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
+import { updateEvent as updateCalEvent, deleteEvent as deleteCalEvent, addEvent as addCalEvent, findEventByTodoId } from '@/services/calendarService';
 
 /* ─── 타입 ──────────────────────────────────── */
 
@@ -550,18 +551,72 @@ function PersonalTodoContent({
   todo,
   onToggle,
   onRemove,
+  onUpdate,
   showDragHandle,
+  isHighlighted,
 }: {
   todo: PersonalTodo;
   onToggle: (id: string) => void;
   onRemove: (id: string) => void;
+  isHighlighted?: boolean;
+  onUpdate: (id: string, updates: Partial<PersonalTodo>) => void;
   showDragHandle?: boolean;
 }) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editTitle, setEditTitle] = useState(todo.title);
+  const [editingDates, setEditingDates] = useState(false);
+  const [editStart, setEditStart] = useState(todo.startDate ?? '');
+  const [editEnd, setEditEnd] = useState(todo.endDate ?? '');
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const { setView } = useAppStore();
+
+  // 캘린더 뷰로 이동 (뷰 전환 후 마운트 대기)
+  const navigateToCalendar = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setView('schedule');
+    if (todo.startDate) {
+      // ScheduleView 마운트 후 이벤트 디스패치 (300ms 대기)
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('bflow:navigate-to-date', { detail: { date: todo.startDate, todoId: todo.id } }));
+      }, 300);
+    }
+  };
+
+  // 타이틀 편집 커밋
+  const commitTitle = () => {
+    setEditingTitle(false);
+    const trimmed = editTitle.trim();
+    if (trimmed && trimmed !== todo.title) {
+      onUpdate(todo.id, { title: trimmed });
+    } else {
+      setEditTitle(todo.title);
+    }
+  };
+
+  // 날짜 편집 커밋
+  const commitDates = () => {
+    setEditingDates(false);
+    if (editStart !== (todo.startDate ?? '') || editEnd !== (todo.endDate ?? '')) {
+      onUpdate(todo.id, {
+        startDate: editStart || undefined,
+        endDate: editEnd || undefined,
+      });
+    }
+  };
+
+  // addToCalendar 토글
+  const toggleCalendarLink = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onUpdate(todo.id, { addToCalendar: !todo.addToCalendar });
+  };
+
   return (
     <div
+      ref={isHighlighted ? (el: HTMLDivElement | null) => { el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } : undefined}
       className={cn(
         'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
         todo.completed ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
+        isHighlighted && 'ring-1 ring-accent/60 bg-accent/10 animate-pulse',
       )}
     >
       {/* 드래그 핸들 */}
@@ -574,19 +629,61 @@ function PersonalTodoContent({
       {/* 개인 라벨 */}
       <span className="text-[11px] font-bold text-accent shrink-0">::ᅠ개인</span>
 
+      {/* 캘린더 연동 아이콘 */}
+      {todo.addToCalendar && (
+        <button
+          onClick={navigateToCalendar}
+          className="shrink-0 text-accent hover:text-accent/80 cursor-pointer transition-colors"
+          title="캘린더에서 보기"
+        >
+          <CalendarDays size={12} />
+        </button>
+      )}
+
       {/* 제목/메모 */}
       <div className="flex flex-col min-w-0 flex-1 gap-0.5">
-        <span className={cn(
-          'text-[13px] text-text-primary truncate',
-          todo.completed && 'line-through text-text-secondary/50',
-        )}>
-          {todo.title}
-        </span>
+        {editingTitle ? (
+          <input
+            ref={titleInputRef}
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => { if (e.key === 'Enter') commitTitle(); if (e.key === 'Escape') { setEditTitle(todo.title); setEditingTitle(false); } }}
+            className="text-[13px] text-text-primary bg-bg-border/20 rounded px-1 py-0.5 outline-none border border-accent/40 w-full"
+            autoFocus
+          />
+        ) : (
+          <span
+            className={cn(
+              'text-[13px] text-text-primary truncate cursor-text hover:bg-bg-border/10 rounded px-0.5',
+              todo.completed && 'line-through text-text-secondary/50',
+            )}
+            onClick={() => { if (!todo.completed) { setEditTitle(todo.title); setEditingTitle(true); } }}
+            title="클릭하여 편집"
+          >
+            {todo.title}
+          </span>
+        )}
         {todo.memo && (
           <span className="text-[11px] text-text-secondary/50 truncate">{todo.memo}</span>
         )}
-        {(todo.startDate || todo.endDate) && (
-          <div className="flex items-center gap-1 text-[9px] text-text-secondary/40">
+        {editingDates ? (
+          <div className="flex items-center gap-1 text-[9px]" onClick={(e) => e.stopPropagation()}>
+            <input type="date" value={editStart} onChange={(e) => setEditStart(e.target.value)}
+              className="bg-bg-border/20 text-text-primary rounded px-1 py-0.5 outline-none border border-accent/40 text-[9px]" />
+            <span className="text-text-secondary/40">~</span>
+            <input type="date" value={editEnd} onChange={(e) => setEditEnd(e.target.value)}
+              className="bg-bg-border/20 text-text-primary rounded px-1 py-0.5 outline-none border border-accent/40 text-[9px]" />
+            <button onClick={commitDates} className="text-accent hover:text-accent/80 cursor-pointer"><Check size={10} /></button>
+            <button onClick={() => { setEditStart(todo.startDate ?? ''); setEditEnd(todo.endDate ?? ''); setEditingDates(false); }}
+              className="text-text-secondary/40 hover:text-text-secondary cursor-pointer"><X size={10} /></button>
+          </div>
+        ) : (todo.startDate || todo.endDate) ? (
+          <div
+            className="flex items-center gap-1 text-[9px] text-text-secondary/40 cursor-text hover:text-text-secondary/60"
+            onClick={() => { if (!todo.completed) { setEditStart(todo.startDate ?? ''); setEditEnd(todo.endDate ?? ''); setEditingDates(true); } }}
+            title="클릭하여 날짜 편집"
+          >
             <Calendar size={8} />
             <span>
               {todo.startDate && new Date(todo.startDate + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
@@ -594,8 +691,29 @@ function PersonalTodoContent({
               {todo.endDate && new Date(todo.endDate + 'T00:00:00').toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
             </span>
           </div>
-        )}
+        ) : !todo.completed ? (
+          <button
+            onClick={() => { setEditStart(''); setEditEnd(''); setEditingDates(true); }}
+            className="text-[9px] text-text-secondary/30 hover:text-text-secondary/50 cursor-pointer flex items-center gap-0.5"
+          >
+            <Calendar size={8} /> 날짜 추가
+          </button>
+        ) : null}
       </div>
+
+      {/* 캘린더 연동 토글 */}
+      <button
+        onClick={toggleCalendarLink}
+        className={cn(
+          'p-1 rounded cursor-pointer transition-all shrink-0',
+          todo.addToCalendar
+            ? 'text-accent bg-accent/10 hover:bg-accent/20'
+            : 'text-text-secondary/20 hover:text-text-secondary/50 opacity-0 group-hover:opacity-100',
+        )}
+        title={todo.addToCalendar ? '캘린더 연동 해제' : '캘린더에 추가'}
+      >
+        <CalendarDays size={12} />
+      </button>
 
       {/* 체크박스 (오른쪽) */}
       <button
@@ -999,6 +1117,7 @@ export function MyTasksWidget() {
           endDate,
           createdBy: currentUser?.name ?? '알 수 없음',
           createdAt: new Date().toISOString(),
+          linkedTodoId: todo.id,
         });
       } catch (err) {
         console.error('[MyTasks] 캘린더 이벤트 추가 실패:', err);
@@ -1043,6 +1162,160 @@ export function MyTasksWidget() {
       ));
     }
   };
+
+  // ─── 개인 할일 업데이트 (인라인 편집 + 캘린더 동기화) ─────────────────────
+  const updatePersonalTodo = useCallback(async (todoId: string, updates: Partial<PersonalTodo>) => {
+    // 현재 todo 찾기
+    const allTodos = activeView.id === DEFAULT_VIEW.id ? assignedTodos : activeView.personalTodos;
+    const oldTodo = allTodos.find((t) => t.id === todoId);
+    if (!oldTodo) return;
+
+    const newTodo = { ...oldTodo, ...updates };
+
+    // 낙관적 UI 업데이트
+    const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? newTodo : t);
+    if (activeView.id === DEFAULT_VIEW.id) {
+      setAssignedTodos(updater);
+    } else {
+      setCustomViews((prev) => prev.map((v) =>
+        v.id === activeViewId ? { ...v, personalTodos: updater(v.personalTodos) } : v,
+      ));
+    }
+
+    // 캘린더 동기화
+    const calEventId = `cal_${todoId}`;
+    try {
+      if (updates.addToCalendar !== undefined) {
+        if (updates.addToCalendar && !oldTodo.addToCalendar) {
+          // 캘린더 연동 ON → 이벤트 생성 (날짜 없으면 오늘로 fallback + 할일에도 저장)
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const startDate = newTodo.startDate || newTodo.endDate || todayStr;
+          const endDate = newTodo.endDate || newTodo.startDate || startDate;
+          if (!newTodo.startDate || !newTodo.endDate) {
+            // 할일 자체에도 fallback 날짜 저장
+            const dateUpdates: Partial<PersonalTodo> = {};
+            if (!newTodo.startDate) dateUpdates.startDate = startDate;
+            if (!newTodo.endDate) dateUpdates.endDate = endDate;
+            Object.assign(newTodo, dateUpdates);
+          }
+          await addCalEvent({
+            id: calEventId,
+            title: newTodo.title,
+            memo: newTodo.memo,
+            color: '#6C5CE7',
+            type: 'custom',
+            startDate,
+            endDate,
+            createdBy: currentUser?.name ?? '알 수 없음',
+            createdAt: new Date().toISOString(),
+            linkedTodoId: todoId,
+          });
+        } else if (!updates.addToCalendar && oldTodo.addToCalendar) {
+          // 캘린더 연동 OFF → 이벤트 삭제
+          await deleteCalEvent(calEventId);
+        }
+      } else if (newTodo.addToCalendar) {
+        // 날짜가 비워졌으면 캘린더 연동 해제
+        if (!newTodo.startDate && !newTodo.endDate) {
+          await deleteCalEvent(calEventId);
+          Object.assign(newTodo, { addToCalendar: false });
+        } else {
+          // addToCalendar이 이미 true인 상태에서 title/date 변경 → 이벤트 업데이트
+          const calUpdates: Record<string, string> = {};
+          if (updates.title !== undefined) calUpdates.title = updates.title;
+          // 날짜: 비워진 경우 다른 쪽 날짜로 채움 (캘린더 이벤트는 항상 날짜 필요)
+          const todayFallback = new Date().toISOString().slice(0, 10);
+          if ('startDate' in updates) calUpdates.startDate = updates.startDate || newTodo.endDate || todayFallback;
+          if ('endDate' in updates) calUpdates.endDate = updates.endDate || newTodo.startDate || todayFallback;
+          if (Object.keys(calUpdates).length > 0) {
+            await updateCalEvent(calEventId, calUpdates);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[MyTasks] 캘린더 동기화 실패:', err);
+    }
+  }, [activeView, activeViewId, assignedTodos, currentUser, setAssignedTodos, setCustomViews]);
+
+  // ─── 캘린더 변경 리스너 (역방향 동기화) ─────────────────────
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.eventId) return;
+      const eventId = detail.eventId as string;
+
+      // todo 연결 이벤트만 처리 (cal_ptodo_* 또는 cal_로 시작)
+      if (!eventId.startsWith('cal_ptodo_') && !eventId.startsWith('cal_')) return;
+
+      const todoId = eventId.replace(/^cal_/, '');
+
+      if (detail.action === 'delete') {
+        // 캘린더 이벤트 삭제됨 → todo의 addToCalendar 플래그만 해제 (todo 자체는 유지)
+        const updater = (todos: PersonalTodo[]) =>
+          todos.map((t) => t.id === todoId ? { ...t, addToCalendar: false } : t);
+        setAssignedTodos(updater);
+        setCustomViews((prev) => prev.map((v) => ({
+          ...v,
+          personalTodos: v.personalTodos.map((t) => t.id === todoId ? { ...t, addToCalendar: false } : t),
+        })));
+      }
+
+      if (detail.action === 'update') {
+        // 캘린더 이벤트 업데이트됨 → todo에 title/dates 역동기화
+        const calEvent = await findEventByTodoId(todoId);
+        if (calEvent) {
+          const updater = (todos: PersonalTodo[]) =>
+            todos.map((t) => t.id === todoId ? {
+              ...t,
+              title: calEvent.title,
+              startDate: calEvent.startDate,
+              endDate: calEvent.endDate,
+            } : t);
+          setAssignedTodos(updater);
+          setCustomViews((prev) => prev.map((v) => ({
+            ...v,
+            personalTodos: v.personalTodos.map((t) => t.id === todoId ? {
+              ...t,
+              title: calEvent.title,
+              startDate: calEvent.startDate,
+              endDate: calEvent.endDate,
+            } : t),
+          })));
+        }
+      }
+    };
+    window.addEventListener('bflow:calendar-changed', handler);
+    return () => window.removeEventListener('bflow:calendar-changed', handler);
+  }, [setAssignedTodos, setCustomViews]);
+
+  // 캘린더 → 할일 네비게이션: 해당 할일이 속한 탭으로 전환 + 하이라이트
+  const [highlightTodoId, setHighlightTodoId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const todoId = (e as CustomEvent).detail?.todoId;
+      if (!todoId) return;
+      // 해당 할일이 속한 뷰 찾아서 전환
+      const defaultHas = assignedTodos.some((t) => t.id === todoId);
+      if (defaultHas) {
+        setActiveViewId(DEFAULT_VIEW.id);
+      } else {
+        const targetView = allViews.find((v) =>
+          v.personalTodos?.some((t) => t.id === todoId)
+        );
+        if (targetView) setActiveViewId(targetView.id);
+      }
+      // 하이라이트
+      setHighlightTodoId(todoId);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => setHighlightTodoId(null), 3000);
+    };
+    window.addEventListener('bflow:navigate-to-todo', handler);
+    return () => {
+      window.removeEventListener('bflow:navigate-to-todo', handler);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, [assignedTodos, allViews]);
 
   // assigned 뷰에서 수동 추가된 씬 키 Set
   const assignedSceneKeySet = useMemo(() => new Set(assignedSceneKeys), [assignedSceneKeys]);
@@ -1141,7 +1414,7 @@ export function MyTasksWidget() {
                 <Reorder.Group axis="y" values={pendingPersonalTodos} onReorder={reorderPendingTodos} className="list-none p-0 m-0">
                   {pendingPersonalTodos.map((todo) => (
                     <Reorder.Item key={todo.id} value={todo} className="list-none">
-                      <PersonalTodoContent todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} showDragHandle />
+                      <PersonalTodoContent todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onUpdate={updatePersonalTodo} showDragHandle isHighlighted={highlightTodoId === todo.id} />
                     </Reorder.Item>
                   ))}
                 </Reorder.Group>
@@ -1183,7 +1456,7 @@ export function MyTasksWidget() {
                             {doneScenes.map(renderRow)}
                           </AnimatePresence>
                           {donePersonalTodos.map((todo) => (
-                            <PersonalTodoContent key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} />
+                            <PersonalTodoContent key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onUpdate={updatePersonalTodo} isHighlighted={highlightTodoId === todo.id} />
                           ))}
                         </div>
                       </motion.div>

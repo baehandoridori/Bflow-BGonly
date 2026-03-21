@@ -9,6 +9,11 @@ const FILE_NAME = 'calendar-events.json';
 
 let cache: CalendarStore | null = null;
 
+/** 캘린더 변경 브로드캐스트 (할일 위젯 등 구독자에게 알림) */
+function broadcastCalendarChange(detail?: { eventId?: string; action?: 'add' | 'update' | 'delete' }) {
+  window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail }));
+}
+
 export async function loadAllEvents(): Promise<CalendarStore> {
   if (cache) return cache;
   try {
@@ -34,6 +39,7 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
   try {
     await window.electronAPI.writeSettings(FILE_NAME, next);
     cache = next;
+    broadcastCalendarChange({ eventId: event.id, action: 'add' });
   } catch (err) {
     console.error('[calendarService] addEvent 저장 실패:', err);
     throw err;
@@ -46,6 +52,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   try {
     await window.electronAPI.writeSettings(FILE_NAME, next);
     cache = next;
+    broadcastCalendarChange({ eventId: eventId, action: 'update' });
   } catch (err) {
     console.error('[calendarService] updateEvent 저장 실패:', err);
     throw err;
@@ -58,10 +65,17 @@ export async function deleteEvent(eventId: string): Promise<void> {
   try {
     await window.electronAPI.writeSettings(FILE_NAME, next);
     cache = next;
+    broadcastCalendarChange({ eventId: eventId, action: 'delete' });
   } catch (err) {
     console.error('[calendarService] deleteEvent 저장 실패:', err);
     throw err;
   }
+}
+
+/** linkedTodoId로 캘린더 이벤트 찾기 */
+export async function findEventByTodoId(todoId: string): Promise<CalendarEvent | undefined> {
+  const all = await loadAllEvents();
+  return all.find((e) => e.linkedTodoId === todoId || e.id === `cal_${todoId}`);
 }
 
 /** 날짜 범위 내 이벤트 필터 */
