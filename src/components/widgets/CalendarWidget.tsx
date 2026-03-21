@@ -444,7 +444,7 @@ export function CalendarWidget() {
                       </div>
                     )}
                     {/* 연속 이벤트 시작일에 바 표시 */}
-                    {day.isCurrentMonth && (() => {
+                    {(() => {
                       const startingHere = filteredEvents.filter(
                         (e) => e.startDate !== e.endDate && (e.startDate === day.dateStr || (day.dow === 0 && e.startDate < day.dateStr && e.endDate >= day.dateStr)),
                       );

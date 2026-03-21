@@ -1376,7 +1376,7 @@ export function ScheduleView() {
       const step = viewMode === '2week' ? 2 : 1;
       setActiveWeekIndex((idx: number) => Math.min(generateYearWeeks(year).length - 1, idx + step));
     } else {
-      setActiveDayIndex((idx: number) => Math.min(365, idx + 1));
+      setActiveDayIndex((idx: number) => Math.min((new Date(year, 1, 29).getDate() === 29 ? 365 : 364), idx + 1));
     }
   };
 
@@ -1594,7 +1594,7 @@ export function ScheduleView() {
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
           e.preventDefault();
           e.stopPropagation();
-          setActiveDayIndex((o: number) => Math.min(365, o + 1));
+          setActiveDayIndex((o: number) => Math.min((new Date(year, 1, 29).getDate() === 29 ? 365 : 364), o + 1));
           return;
         }
         return;
@@ -1654,7 +1654,7 @@ export function ScheduleView() {
         navigateTimersRef.current = [];
 
         const dateStr = detail.date as string;
-        const d = new Date(dateStr);
+        const d = parseDate(dateStr);
         setYear(d.getFullYear());
         setMonth(d.getMonth());
         setPersistedDateRange({ startDate: dateStr, endDate: dateStr });
@@ -1702,6 +1702,10 @@ export function ScheduleView() {
 
   // ─── 사이드 패널 / 퀵 에디트 핸들러 ───
   const handleUpdateEventDirect = useCallback(async (id: string, updates: Partial<CalendarEvent>) => {
+    // endDate < startDate 방지: 자동 swap
+    if (updates.startDate && updates.endDate && updates.endDate < updates.startDate) {
+      [updates.startDate, updates.endDate] = [updates.endDate, updates.startDate];
+    }
     await updateEvent(id, updates);
     setEvents(prev => {
       const updated = prev.map(e => e.id === id ? { ...e, ...updates } : e);
