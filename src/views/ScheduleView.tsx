@@ -256,8 +256,9 @@ function EventBarChip({
       onMouseMove={handleMove}
       onMouseLeave={handleLeave}
       onContextMenu={onContextMenu ? (e) => onContextMenu(ev, e) : undefined}
+      data-event-id={ev.id}
       className={cn(
-        'absolute text-left z-10',
+        'absolute text-left z-10 calendar-event-bar',
         isGhost ? 'pointer-events-none opacity-50' : 'transition-all duration-150',
         !isGhost && isHovered && 'brightness-110 scale-[1.02] z-20',
         isDragging ? 'opacity-40' : '',
@@ -1702,6 +1703,9 @@ export function ScheduleView() {
 
   // ─── 사이드 패널 / 퀵 에디트 핸들러 ───
   const handleUpdateEventDirect = useCallback(async (id: string, updates: Partial<CalendarEvent>) => {
+    // 빈 문자열 날짜 방지: 기존 값 유지
+    if ('startDate' in updates && !updates.startDate) delete updates.startDate;
+    if ('endDate' in updates && !updates.endDate) delete updates.endDate;
     // endDate < startDate 방지: 자동 swap
     if (updates.startDate && updates.endDate && updates.endDate < updates.startDate) {
       [updates.startDate, updates.endDate] = [updates.endDate, updates.startDate];
@@ -1753,13 +1757,23 @@ export function ScheduleView() {
       const d = new Date();
       return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
     }
-    if (weeks.length > 0) {
-      const first = weeks[0][0];
-      const last = weeks[weeks.length - 1][6];
+    // 주간/2주간: activeWeekIndex 기준으로 현재 보이는 범위 표시
+    if (weeks.length > 0 && activeWeekIndex < weeks.length) {
+      if (viewMode === '2week') {
+        const startWeek = weeks[activeWeekIndex];
+        const endIdx = Math.min(activeWeekIndex + 1, weeks.length - 1);
+        const endWeek = weeks[endIdx];
+        const first = startWeek[0];
+        const last = endWeek[6];
+        return `${first.getMonth() + 1}/${first.getDate()} — ${last.getMonth() + 1}/${last.getDate()}`;
+      }
+      const activeWeek = weeks[activeWeekIndex];
+      const first = activeWeek[0];
+      const last = activeWeek[6];
       return `${first.getMonth() + 1}/${first.getDate()} — ${last.getMonth() + 1}/${last.getDate()}`;
     }
     return '';
-  }, [viewMode, year, month, weeks]);
+  }, [viewMode, year, month, weeks, activeWeekIndex]);
 
   // 최대 바 행 수
   const maxBars = viewMode === 'month' ? 3 : viewMode === '2week' ? 5 : 8;
