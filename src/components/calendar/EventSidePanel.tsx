@@ -137,7 +137,7 @@ export function EventSidePanel({
 
   const isVacation = event.type === 'vacation' || event.isReadOnly;
   const hasLinkedScene = event.type !== 'custom' && event.type !== 'vacation';
-  const hasLinkedTodo = !!(event.linkedTodoId || event.id.startsWith('cal_ptodo_'));
+  const hasLinkedTodo = !!(event.linkedTodoId || event.id.startsWith('cal_'));
   const dday = calcDDay(event.endDate);
 
   // 연결 정보 텍스트

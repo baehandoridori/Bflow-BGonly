@@ -301,7 +301,7 @@ function EventBarChip({
         )}
         {!bar.isStart && <span className="text-[9px] mr-0.5 opacity-60">◂</span>}
         {ev.type === 'vacation' && <Palmtree size={10} className="shrink-0 mr-1 opacity-80" />}
-        {(ev.linkedTodoId || ev.id.startsWith('cal_ptodo_')) && <CheckSquare size={9} className="shrink-0 mr-1 opacity-70" />}
+        {(ev.linkedTodoId || ev.id.startsWith('cal_')) && <CheckSquare size={9} className="shrink-0 mr-1 opacity-70" />}
         <span className="truncate">{ev.title}</span>
         {!bar.isEnd && <span className="text-[9px] ml-auto pl-0.5 opacity-60 shrink-0">▸</span>}
         {/* 리사이즈 핸들 (오른쪽) */}
@@ -1260,9 +1260,12 @@ export function ScheduleView() {
   const today = fmtDate(new Date());
   const vacationConnected = useAppStore((s) => s.vacationConnected);
 
-  // 이벤트 로드
+  // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
     getEvents().then(setEvents);
+    const refresh = () => getEvents().then(setEvents);
+    window.addEventListener('bflow:calendar-changed', refresh);
+    return () => window.removeEventListener('bflow:calendar-changed', refresh);
   }, []);
 
   // 휴가 이벤트 로드
@@ -1343,20 +1346,8 @@ export function ScheduleView() {
     }
 
     if (viewMode === '2week') {
-      const todayDate = new Date();
-      todayDate.setHours(12, 0, 0, 0);
-      const todayDow = todayDate.getDay();
-      const weekStart = addDays(todayDate, -todayDow + weekOffset * 7);
-
-      const result: Date[][] = [];
-      for (let w = 0; w < 2; w++) {
-        const week: Date[] = [];
-        for (let d = 0; d < 7; d++) {
-          week.push(addDays(weekStart, w * 7 + d));
-        }
-        result.push(week);
-      }
-      return result;
+      // 2주 뷰도 전체 연도 주 배열 사용 (사이드바 + activeWeekIndex 통일)
+      return generateYearWeeks(year);
     }
 
     return [];
@@ -1368,8 +1359,11 @@ export function ScheduleView() {
       setMonthDir(-1);
       if (month === 0) { setYear(year - 1); setMonth(11); }
       else setMonth(month - 1);
+    } else if (viewMode === 'week' || viewMode === '2week') {
+      const step = viewMode === '2week' ? 2 : 1;
+      setActiveWeekIndex((idx: number) => Math.max(0, idx - step));
     } else {
-      setWeekOffset(weekOffset - (viewMode === '2week' ? 2 : 1));
+      setActiveDayIndex((idx: number) => Math.max(0, idx - 1));
     }
   };
 
@@ -1378,8 +1372,11 @@ export function ScheduleView() {
       setMonthDir(1);
       if (month === 11) { setYear(year + 1); setMonth(0); }
       else setMonth(month + 1);
+    } else if (viewMode === 'week' || viewMode === '2week') {
+      const step = viewMode === '2week' ? 2 : 1;
+      setActiveWeekIndex((idx: number) => Math.min(52, idx + step));
     } else {
-      setWeekOffset(weekOffset + (viewMode === '2week' ? 2 : 1));
+      setActiveDayIndex((idx: number) => Math.min(365, idx + 1));
     }
   };
 
@@ -1501,8 +1498,8 @@ export function ScheduleView() {
       const updated = prev.map((e) => (e.id === eventId ? { ...e, startDate: newStart, endDate: newEnd } : e));
       // sync to todo if linked
       const ev = updated.find((e) => e.id === eventId);
-      if (ev && (ev.linkedTodoId || ev.id.startsWith('cal_ptodo_'))) {
-        const todoId = ev.linkedTodoId || ev.id.replace(/^cal_ptodo_/, '');
+      if (ev && (ev.linkedTodoId || ev.id.startsWith('cal_'))) {
+        const todoId = ev.linkedTodoId || ev.id.replace(/^cal_(ptodo_)?/, '');
         syncCalendarToTodo(todoId, ev);
       }
       return updated;
