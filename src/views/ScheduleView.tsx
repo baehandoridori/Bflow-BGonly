@@ -1413,7 +1413,7 @@ export function ScheduleView() {
         createdAt: new Date().toISOString(),
       };
       await addEvent(ev);
-      setEvents((prev) => [...prev, ev]);
+      // bflow:calendar-changed 구독이 자동 refresh하므로 수동 추가 불필요
       setShowCreate(false);
       setCreateDate(undefined);
     } finally {
@@ -1658,6 +1658,14 @@ export function ScheduleView() {
         setYear(d.getFullYear());
         setMonth(d.getMonth());
         setPersistedDateRange({ startDate: dateStr, endDate: dateStr });
+        // 주간/일간 뷰에서도 해당 날짜로 이동
+        const yearWeeks = generateYearWeeks(d.getFullYear());
+        const weekIdx = findWeekIndexForDate(yearWeeks, dateStr);
+        if (weekIdx >= 0) setActiveWeekIndex(weekIdx);
+        // 일간 뷰: 연초 기준 일수 계산
+        const yearStart = new Date(d.getFullYear(), 0, 1);
+        const dayIdx = Math.floor((d.getTime() - yearStart.getTime()) / 86400000);
+        setActiveDayIndex(dayIdx);
         setPulseDate(dateStr);
         // 3초 후 하이라이트 및 펄스 해제
         navigateTimersRef.current.push(
@@ -1722,7 +1730,7 @@ export function ScheduleView() {
       type: event.type === 'vacation' ? 'custom' : event.type,
     };
     await addEvent(newEv);
-    setEvents(prev => [...prev, newEv]);
+    // bflow:calendar-changed 구독이 자동 refresh
   }, []);
 
   // 이벤트 우클릭 → QuickEdit

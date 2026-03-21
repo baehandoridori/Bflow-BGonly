@@ -1187,9 +1187,17 @@ export function MyTasksWidget() {
     try {
       if (updates.addToCalendar !== undefined) {
         if (updates.addToCalendar && !oldTodo.addToCalendar) {
-          // 캘린더 연동 ON → 이벤트 생성
-          const startDate = newTodo.startDate || newTodo.endDate || new Date().toISOString().slice(0, 10);
+          // 캘린더 연동 ON → 이벤트 생성 (날짜 없으면 오늘로 fallback + 할일에도 저장)
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const startDate = newTodo.startDate || newTodo.endDate || todayStr;
           const endDate = newTodo.endDate || newTodo.startDate || startDate;
+          if (!newTodo.startDate || !newTodo.endDate) {
+            // 할일 자체에도 fallback 날짜 저장
+            const dateUpdates: Partial<PersonalTodo> = {};
+            if (!newTodo.startDate) dateUpdates.startDate = startDate;
+            if (!newTodo.endDate) dateUpdates.endDate = endDate;
+            Object.assign(newTodo, dateUpdates);
+          }
           await addCalEvent({
             id: calEventId,
             title: newTodo.title,
