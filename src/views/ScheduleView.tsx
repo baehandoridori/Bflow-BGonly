@@ -1374,7 +1374,7 @@ export function ScheduleView() {
       else setMonth(month + 1);
     } else if (viewMode === 'week' || viewMode === '2week') {
       const step = viewMode === '2week' ? 2 : 1;
-      setActiveWeekIndex((idx: number) => Math.min(52, idx + step));
+      setActiveWeekIndex((idx: number) => Math.min(generateYearWeeks(year).length - 1, idx + step));
     } else {
       setActiveDayIndex((idx: number) => Math.min(365, idx + 1));
     }
@@ -1577,7 +1577,7 @@ export function ScheduleView() {
         if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
           e.preventDefault();
           e.stopPropagation();
-          setActiveWeekIndex((idx: number) => Math.min(52, idx + 1));
+          setActiveWeekIndex((idx: number) => Math.min(generateYearWeeks(year).length - 1, idx + 1));
           return;
         }
         return;
@@ -1716,6 +1716,8 @@ export function ScheduleView() {
       }
       return updated;
     });
+    // 사이드패널에 표시 중인 이벤트도 갱신
+    setPanelEvent(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
   }, []);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {

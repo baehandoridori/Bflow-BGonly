@@ -409,7 +409,10 @@ export function EventSidePanel({
                   onClick={() => {
                     const todoId = event.linkedTodoId || event.id.replace(/^cal_/, '');
                     setView('dashboard');
-                    window.dispatchEvent(new CustomEvent('bflow:navigate-to-todo', { detail: { todoId } }));
+                    // 대시보드 마운트 대기 후 네비게이션 이벤트 디스패치
+                    setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent('bflow:navigate-to-todo', { detail: { todoId } }));
+                    }, 300);
                     onClose();
                   }}
                   className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#A29BFE]/15 text-[#A29BFE] hover:bg-[#A29BFE]/25 transition-colors cursor-pointer"
