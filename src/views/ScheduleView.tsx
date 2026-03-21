@@ -1499,7 +1499,7 @@ export function ScheduleView() {
       // sync to todo if linked
       const ev = updated.find((e) => e.id === eventId);
       if (ev && (ev.linkedTodoId || ev.id.startsWith('cal_'))) {
-        const todoId = ev.linkedTodoId || ev.id.replace(/^cal_(ptodo_)?/, '');
+        const todoId = ev.linkedTodoId || ev.id.replace(/^cal_/, '');
         syncCalendarToTodo(todoId, ev);
       }
       return updated;
@@ -1711,7 +1711,16 @@ export function ScheduleView() {
   }, []);
 
   const handleDuplicateEvent = useCallback(async (event: CalendarEvent) => {
-    const newEv = { ...event, id: crypto.randomUUID(), title: `${event.title} (복사)`, createdAt: new Date().toISOString() };
+    const newEv: CalendarEvent = {
+      ...event,
+      id: crypto.randomUUID(),
+      title: `${event.title} (복사)`,
+      createdAt: new Date().toISOString(),
+      // 연결 정보 제거: 독립 이벤트로 복제
+      linkedTodoId: undefined,
+      isReadOnly: false,
+      type: event.type === 'vacation' ? 'custom' : event.type,
+    };
     await addEvent(newEv);
     setEvents(prev => [...prev, newEv]);
   }, []);

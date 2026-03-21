@@ -553,10 +553,12 @@ function PersonalTodoContent({
   onRemove,
   onUpdate,
   showDragHandle,
+  isHighlighted,
 }: {
   todo: PersonalTodo;
   onToggle: (id: string) => void;
   onRemove: (id: string) => void;
+  isHighlighted?: boolean;
   onUpdate: (id: string, updates: Partial<PersonalTodo>) => void;
   showDragHandle?: boolean;
 }) {
@@ -610,9 +612,11 @@ function PersonalTodoContent({
 
   return (
     <div
+      ref={isHighlighted ? (el: HTMLDivElement | null) => { el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } : undefined}
       className={cn(
         'flex items-center gap-1.5 px-2 py-1.5 rounded-lg transition-colors group',
         todo.completed ? 'bg-green-500/5 opacity-60' : 'hover:bg-bg-border/8',
+        isHighlighted && 'ring-1 ring-accent/60 bg-accent/10 animate-pulse',
       )}
     >
       {/* 드래그 핸들 */}
@@ -1268,6 +1272,21 @@ export function MyTasksWidget() {
     return () => window.removeEventListener('bflow:calendar-changed', handler);
   }, [setAssignedTodos, setCustomViews]);
 
+  // 캘린더 → 할일 네비게이션: 해당 할일 하이라이트
+  const [highlightTodoId, setHighlightTodoId] = useState<string | null>(null);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const todoId = (e as CustomEvent).detail?.todoId;
+      if (!todoId) return;
+      setHighlightTodoId(todoId);
+      // 3초 후 하이라이트 해제
+      const timer = setTimeout(() => setHighlightTodoId(null), 3000);
+      return () => clearTimeout(timer);
+    };
+    window.addEventListener('bflow:navigate-to-todo', handler);
+    return () => window.removeEventListener('bflow:navigate-to-todo', handler);
+  }, []);
+
   // assigned 뷰에서 수동 추가된 씬 키 Set
   const assignedSceneKeySet = useMemo(() => new Set(assignedSceneKeys), [assignedSceneKeys]);
 
@@ -1365,7 +1384,7 @@ export function MyTasksWidget() {
                 <Reorder.Group axis="y" values={pendingPersonalTodos} onReorder={reorderPendingTodos} className="list-none p-0 m-0">
                   {pendingPersonalTodos.map((todo) => (
                     <Reorder.Item key={todo.id} value={todo} className="list-none">
-                      <PersonalTodoContent todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onUpdate={updatePersonalTodo} showDragHandle />
+                      <PersonalTodoContent todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onUpdate={updatePersonalTodo} showDragHandle isHighlighted={highlightTodoId === todo.id} />
                     </Reorder.Item>
                   ))}
                 </Reorder.Group>
@@ -1407,7 +1426,7 @@ export function MyTasksWidget() {
                             {doneScenes.map(renderRow)}
                           </AnimatePresence>
                           {donePersonalTodos.map((todo) => (
-                            <PersonalTodoContent key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onUpdate={updatePersonalTodo} />
+                            <PersonalTodoContent key={todo.id} todo={todo} onToggle={togglePersonalTodo} onRemove={removePersonalTodo} onUpdate={updatePersonalTodo} isHighlighted={highlightTodoId === todo.id} />
                           ))}
                         </div>
                       </motion.div>
