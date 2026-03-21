@@ -46,6 +46,9 @@ export interface CalendarEvent {
   linkedSceneId?: string;
   linkedDepartment?: 'bg' | 'acting';
 
+  // 할일 연결 (type === 'custom' && id starts with 'cal_')
+  linkedTodoId?: string;     // 연결된 PersonalTodo ID
+
   // 휴가 전용 필드 (type === 'vacation')
   vacationType?: string;     // 연차, 오전반차, 오후반차, 대체휴가, 특별휴가
   vacationUserName?: string; // 휴가 사용자 이름

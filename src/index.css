@@ -99,20 +99,51 @@ body.theme-ready *::after {
     box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ─── 스크롤바 (테마 반응형) ─── */
+/* ─── 스크롤바 (테마 반응형, 다크 UI 통일) ─── */
+/* Firefox scrollbar-color (html+body에 적용, 자식은 inherit) */
+html, body {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-bg-border) / 0.4) transparent;
+}
+
+/* Webkit (Electron/Chrome) 전역 스크롤바 */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: rgb(var(--color-bg-primary));
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(var(--color-bg-border));
-  border-radius: 3px;
+  background: rgb(var(--color-bg-border) / 0.4);
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--color-accent) / 0.5);
+  background: rgb(var(--color-accent) / 0.4);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 스크롤바 자동 숨김: 호버 시에만 표시 */
+.scrollbar-auto {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-bg-border) / 0.3) transparent;
+}
+.scrollbar-auto::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.scrollbar-auto:hover::-webkit-scrollbar-thumb {
+  background: rgb(var(--color-bg-border) / 0.5);
+}
+
+/* 스크롤바 완전 숨김 (콘텐츠는 스크롤 가능) */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 /* ─── 텍스트 선택 (테마 반응형) ─── */

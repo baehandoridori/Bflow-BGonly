@@ -103,10 +103,6 @@ export function useCalendarDnD(
       if (!hoverDate) return;
 
       const deltaDays = daysBetweenDates(state.anchorDate, hoverDate);
-      if (deltaDays === 0 && previewRef.current) {
-        // 같은 날짜이면 프리뷰 변경 불필요
-        return;
-      }
 
       let newStart: string;
       let newEnd: string;
@@ -158,15 +154,23 @@ export function useCalendarDnD(
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
 
-    // 드래그 중 텍스트 선택 방지
+    // 드래그 중 텍스트 선택 방지 + 이벤트 바 pointer-events 차단
     document.body.style.userSelect = 'none';
     document.body.style.cursor = dragState.mode === 'move' ? 'grabbing' : 'col-resize';
+    // 모든 이벤트 바에 pointer-events: none 적용 (elementFromPoint가 날짜 셀을 찾도록)
+    if (!document.getElementById('dnd-pointer-block')) {
+      const style = document.createElement('style');
+      style.id = 'dnd-pointer-block';
+      style.textContent = '.calendar-event-bar, [data-event-id] { pointer-events: none !important; }';
+      document.head.appendChild(style);
+    }
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
+      document.getElementById('dnd-pointer-block')?.remove();
     };
   }, [dragState, onEventMove, onEventResize]);
 
