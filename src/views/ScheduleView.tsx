@@ -1735,10 +1735,15 @@ export function ScheduleView() {
       id: crypto.randomUUID(),
       title: `${event.title} (복사)`,
       createdAt: new Date().toISOString(),
-      // 연결 정보 제거: 독립 이벤트로 복제
+      // 연결 정보 모두 제거: 완전 독립 이벤트로 복제
       linkedTodoId: undefined,
       isReadOnly: false,
-      type: event.type === 'vacation' ? 'custom' : event.type,
+      type: 'custom',
+      linkedEpisode: undefined,
+      linkedSheetName: undefined,
+      linkedSceneId: undefined,
+      linkedDepartment: undefined,
+      linkedPart: undefined,
     };
     await addEvent(newEv);
     // bflow:calendar-changed 구독이 자동 refresh

@@ -1221,10 +1221,12 @@ export function MyTasksWidget() {
           Object.assign(newTodo, { addToCalendar: false });
         } else {
           // addToCalendar이 이미 true인 상태에서 title/date 변경 → 이벤트 업데이트
-          const calUpdates: Record<string, string | undefined> = {};
+          const calUpdates: Record<string, string> = {};
           if (updates.title !== undefined) calUpdates.title = updates.title;
-          if (updates.startDate !== undefined) calUpdates.startDate = updates.startDate;
-          if (updates.endDate !== undefined) calUpdates.endDate = updates.endDate;
+          // 날짜: 비워진 경우 다른 쪽 날짜로 채움 (캘린더 이벤트는 항상 날짜 필요)
+          const todayFallback = new Date().toISOString().slice(0, 10);
+          if ('startDate' in updates) calUpdates.startDate = updates.startDate || newTodo.endDate || todayFallback;
+          if ('endDate' in updates) calUpdates.endDate = updates.endDate || newTodo.startDate || todayFallback;
           if (Object.keys(calUpdates).length > 0) {
             await updateCalEvent(calEventId, calUpdates);
           }
@@ -1286,20 +1288,34 @@ export function MyTasksWidget() {
     return () => window.removeEventListener('bflow:calendar-changed', handler);
   }, [setAssignedTodos, setCustomViews]);
 
-  // 캘린더 → 할일 네비게이션: 해당 할일 하이라이트
+  // 캘린더 → 할일 네비게이션: 해당 할일이 속한 탭으로 전환 + 하이라이트
   const [highlightTodoId, setHighlightTodoId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const handler = (e: Event) => {
       const todoId = (e as CustomEvent).detail?.todoId;
       if (!todoId) return;
+      // 해당 할일이 속한 뷰 찾아서 전환
+      const defaultHas = assignedTodos.some((t) => t.id === todoId);
+      if (defaultHas) {
+        setActiveViewId(DEFAULT_VIEW.id);
+      } else {
+        const targetView = allViews.find((v) =>
+          v.personalTodos?.some((t) => t.id === todoId)
+        );
+        if (targetView) setActiveViewId(targetView.id);
+      }
+      // 하이라이트
       setHighlightTodoId(todoId);
-      // 3초 후 하이라이트 해제
-      const timer = setTimeout(() => setHighlightTodoId(null), 3000);
-      return () => clearTimeout(timer);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => setHighlightTodoId(null), 3000);
     };
     window.addEventListener('bflow:navigate-to-todo', handler);
-    return () => window.removeEventListener('bflow:navigate-to-todo', handler);
-  }, []);
+    return () => {
+      window.removeEventListener('bflow:navigate-to-todo', handler);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, [assignedTodos, allViews]);
 
   // assigned 뷰에서 수동 추가된 씬 키 Set
   const assignedSceneKeySet = useMemo(() => new Set(assignedSceneKeys), [assignedSceneKeys]);
