@@ -1390,9 +1390,10 @@ export function ScheduleView() {
     // 주간 뷰: 오늘이 속한 주로 이동
     const yearWeeks = generateYearWeeks(now.getFullYear());
     setActiveWeekIndex(findWeekIndexForDate(yearWeeks, todayStr));
-    // 일간 뷰: 오늘로 초기화
+    // 일간 뷰: 오늘로 초기화 (양쪽 모두 정오로 정규화)
     const jan1 = new Date(now.getFullYear(), 0, 1, 12, 0, 0, 0);
-    setActiveDayIndex(Math.floor((now.getTime() - jan1.getTime()) / 86400000));
+    const todayNoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0);
+    setActiveDayIndex(Math.floor((todayNoon.getTime() - jan1.getTime()) / 86400000));
     // 월간 뷰: 오늘 날짜에 펄스 애니메이션 (모달 트리거 방지)
     if (viewMode === 'month') {
       setPulseDate(todayStr);
@@ -1609,8 +1610,8 @@ export function ScheduleView() {
         e.preventDefault();
         e.stopPropagation();
         setFocusedDate((prev) => {
-          const base = prev ? parseDate(prev) : new Date();
-          base.setHours(12, 0, 0, 0);
+          // 포커스 없으면 현재 보이는 달의 1일부터 시작 (오늘로 점프 방지)
+          const base = prev ? parseDate(prev) : new Date(year, month, 1, 12, 0, 0, 0);
           const next = addDays(base, delta);
           const nextStr = fmtDate(next);
           // 월이 변경되면 자동으로 이동
@@ -2092,6 +2093,7 @@ export function ScheduleView() {
       {/* ═══ EventQuickEdit (right-click popup) ═══ */}
       {quickEdit && (
         <EventQuickEdit
+          key={quickEdit.event.id}
           event={quickEdit.event}
           position={quickEdit.position}
           onClose={() => setQuickEdit(null)}
