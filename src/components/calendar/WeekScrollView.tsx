@@ -141,6 +141,15 @@ export default function WeekScrollView({
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (wheelTimer.current) return;
+      // 스크롤 가능한 이벤트 리스트 내부에서는 주 이동 차단
+      const target = e.target as HTMLElement;
+      const scrollable = target.closest('[data-scroll-events]') as HTMLElement | null;
+      if (scrollable && scrollable.scrollHeight > scrollable.clientHeight) {
+        const { scrollTop, scrollHeight, clientHeight } = scrollable;
+        const atTop = scrollTop <= 0 && e.deltaY < 0;
+        const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && e.deltaY > 0;
+        if (!atTop && !atBottom) return;
+      }
       const dir = e.deltaY > 0 ? 1 : -1;
       const next = Math.max(0, Math.min(allWeeks.length - 1, activeWeekIndex + dir));
       if (next !== activeWeekIndex) onWeekChange(next);
@@ -381,7 +390,7 @@ function ActiveWeek({
           </span>
         </div>
       ) : (
-        <div className="flex flex-col gap-2 flex-1 overflow-y-auto mt-2">
+        <div data-scroll-events className="flex flex-col gap-2 flex-1 overflow-y-auto mt-2">
           {events.map((ev) => (
             <EventCard
               key={ev.id}

@@ -94,6 +94,15 @@ export default function DayScrollView({
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (wheelTimer.current) return;
+      // 스크롤 가능한 이벤트 리스트 내부에서는 날짜 이동 차단
+      const target = e.target as HTMLElement;
+      const scrollable = target.closest('[data-scroll-events]') as HTMLElement | null;
+      if (scrollable && scrollable.scrollHeight > scrollable.clientHeight) {
+        const { scrollTop, scrollHeight, clientHeight } = scrollable;
+        const atTop = scrollTop <= 0 && e.deltaY < 0;
+        const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && e.deltaY > 0;
+        if (!atTop && !atBottom) return; // 리스트 내 스크롤 우선
+      }
       const dir = e.deltaY > 0 ? 1 : -1;
       const next = Math.max(0, Math.min(maxDay, activeDayIndex + dir));
       if (next !== activeDayIndex) onActiveDayChange(next);
@@ -251,7 +260,7 @@ function ActiveDay({
           </span>
         </div>
       ) : (
-        <div className="flex flex-col gap-2 flex-1 overflow-y-auto">
+        <div data-scroll-events className="flex flex-col gap-2 flex-1 overflow-y-auto">
           {events.map((ev) => (
             <DayEventCard
               key={ev.id}

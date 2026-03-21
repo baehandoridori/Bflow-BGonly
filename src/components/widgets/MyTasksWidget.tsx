@@ -1215,13 +1215,19 @@ export function MyTasksWidget() {
           await deleteCalEvent(calEventId);
         }
       } else if (newTodo.addToCalendar) {
-        // addToCalendar이 이미 true인 상태에서 title/date 변경 → 이벤트 업데이트
-        const calUpdates: Record<string, string | undefined> = {};
-        if (updates.title !== undefined) calUpdates.title = updates.title;
-        if (updates.startDate !== undefined) calUpdates.startDate = updates.startDate;
-        if (updates.endDate !== undefined) calUpdates.endDate = updates.endDate;
-        if (Object.keys(calUpdates).length > 0) {
-          await updateCalEvent(calEventId, calUpdates);
+        // 날짜가 비워졌으면 캘린더 연동 해제
+        if (!newTodo.startDate && !newTodo.endDate) {
+          await deleteCalEvent(calEventId);
+          Object.assign(newTodo, { addToCalendar: false });
+        } else {
+          // addToCalendar이 이미 true인 상태에서 title/date 변경 → 이벤트 업데이트
+          const calUpdates: Record<string, string | undefined> = {};
+          if (updates.title !== undefined) calUpdates.title = updates.title;
+          if (updates.startDate !== undefined) calUpdates.startDate = updates.startDate;
+          if (updates.endDate !== undefined) calUpdates.endDate = updates.endDate;
+          if (Object.keys(calUpdates).length > 0) {
+            await updateCalEvent(calEventId, calUpdates);
+          }
         }
       }
     } catch (err) {
