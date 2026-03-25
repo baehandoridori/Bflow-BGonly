@@ -27,6 +27,15 @@ B flow의 로컬 전용 데이터(할일, 메모, 캘린더, 이미지 캐시)�
 - ~20명 동시 사용자
 - Electron 데스크탑 앱 (공개 URL 없음 → Edge Function을 webhook 수신자로 활용)
 
+### 보안 정책
+
+B flow는 Supabase Auth를 사용하지 않고 자체 로그인(users 테이블)을 사용한다.
+따라서 RLS 기반 `auth.uid()` 접근 제어가 불가하다.
+
+**결정**: RLS는 비활성화하고, 앱 레벨에서 user_id 필터링으로 접근 제어한다.
+~20명 내부 도구이고 anon key는 앱에 내장되어 있으므로, 이 수준의 보안이 적절하다.
+(기존 episodes/scenes/comments 테이블도 동일한 방식이다.)
+
 ---
 
 ## 1. 할일 (MyTasks) — localStorage → Supabase
@@ -41,7 +50,7 @@ B flow의 로컬 전용 데이터(할일, 메모, 캘린더, 이미지 캐시)�
 ```sql
 CREATE TABLE personal_todos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id),
+  user_id TEXT NOT NULL REFERENCES users(id),  -- users.id는 TEXT 타입
   title TEXT NOT NULL,
   memo TEXT DEFAULT '',
   completed BOOLEAN DEFAULT false,
@@ -53,8 +62,20 @@ CREATE TABLE personal_todos (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 커스텀 뷰 + 할당된 씬 키도 함께 저장
+CREATE TABLE task_views (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  views JSONB NOT NULL DEFAULT '[]',     -- TaskView[] (이름, 씬 키 목록)
+  assigned_scene_keys JSONB DEFAULT '[]', -- 할당된 씬 키 배열
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE INDEX idx_personal_todos_user ON personal_todos(user_id);
+CREATE INDEX idx_task_views_user ON task_views(user_id);
 ```
+
+> **참고**: 기존 `users` 테이블의 `id`는 `TEXT` 타입이므로 FK도 `TEXT`로 맞춘다.
 
 ### 데이터 흐름
 
@@ -71,16 +92,22 @@ MyTasksWidget
 
 ### 마이그레이션
 
-- 최초 실행 시 `localStorage`의 기존 할일을 Supabase로 자동 이관
-- 이관 완료 후 localStorage 키 삭제
-- 이관 대상 키: `bflow_assigned_personal_todos`, `bflow_my_task_views`, `bflow_assigned_scene_keys`
+마이그레이션은 멱등성(idempotency)을 보장해야 한다:
+
+1. `localStorage`에 `bflow_migration_todos_done` 플래그 확인
+2. 플래그 없으면 마이그레이션 시작:
+   - `bflow_assigned_personal_todos` → Supabase `personal_todos` (upsert로 중복 방지)
+   - `bflow_my_task_views` + `bflow_assigned_scene_keys` → Supabase `task_views` (upsert)
+3. 모든 upsert 성공 확인 후 `bflow_migration_todos_done = true` 설정
+4. 성공 후 원본 localStorage 키 삭제
+5. **사용자 미인증 시**: 마이그레이션을 로그인 후로 연기
 
 ### 수정 대상 파일
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `electron/supabase.ts` | personal_todos CRUD 함수 추가 |
-| `electron/main.ts` | IPC 핸들러 추가 (`supabase:loadTodos`, `supabase:saveTodo`, `supabase:deleteTodo`) |
+| `electron/supabase.ts` | personal_todos + task_views CRUD 함수 추가 |
+| `electron/main.ts` | IPC 핸들러 추가 (`supabase:loadTodos`, `supabase:saveTodo`, `supabase:deleteTodo`, `supabase:loadTaskViews`, `supabase:saveTaskViews`) |
 | `src/services/supabaseService.ts` | IPC 래퍼 함수 추가 |
 | `src/components/widgets/MyTasksWidget.tsx` | localStorage → supabaseService 호출로 교체, 마이그레이션 로직 |
 
@@ -98,17 +125,20 @@ MyTasksWidget
 ```sql
 CREATE TABLE memos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id),
+  user_id TEXT NOT NULL REFERENCES users(id),  -- users.id는 TEXT 타입
+  widget_id TEXT NOT NULL,                      -- 위젯 인스턴스 ID (여러 메모 위젯 지원)
   tabs JSONB NOT NULL DEFAULT '[]',
   active_tab_id TEXT,
   font_size INT DEFAULT 14,
-  updated_at TIMESTAMPTZ DEFAULT now()
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, widget_id)                    -- 사용자+위젯 조합 유니크
 );
 
 CREATE INDEX idx_memos_user ON memos(user_id);
 ```
 
-- 사용자당 1개 row (현재 구조와 동일 — 위젯 하나에 여러 탭)
+- 사용자당 위젯 인스턴스별 1개 row (대시보드에 메모 위젯을 여러 개 배치 가능)
+- `widget_id`: 위젯 고유 ID (기존 `getMemoKey()` → `memo_{widgetId}` 패턴)
 - `tabs` JSONB: `[{"id": "...", "title": "탭1", "content": "메모 내용..."}]`
 - 개인 전용 (공유 메모가 필요하면 화이트보드 활용)
 
@@ -124,12 +154,17 @@ MemoWidget
 
 - 낙관적 업데이트 패턴
 - 저장 타이밍: 탭 전환/내용 변경 시 디바운스(1~2초) 후 자동 저장 + 앱 종료 시
+- 디바운스 발동 시점의 최신 로컬 상태를 저장 (스케줄 시점 상태가 아님)
 - Realtime 구독 불필요 (개인 데이터)
+- 앱에서 `updated_at`을 매 저장 시 명시적으로 설정 (기존 패턴과 동일)
 
 ### 마이그레이션
 
-- 최초 실행 시 `memo.json`이 존재하면 Supabase로 자동 이관
-- 이관 완료 후 로컬 파일은 백업으로 유지 (삭제하지 않음)
+멱등성 보장:
+1. `memo.json` 존재 확인
+2. `memo.json` 내부의 모든 위젯 키(`memo_{widgetId}`)를 순회하여 각각 Supabase에 upsert
+3. 모든 upsert 성공 후 `memo.json`을 `memo.json.bak`으로 이름 변경 (백업)
+4. 실패 시 원본 유지, 다음 앱 실행 시 재시도
 
 ### 수정 대상 파일
 
@@ -183,9 +218,26 @@ GCal 변경 → Google Push Notification
 ```
 
 - 기존 `googleapis` 의존성 활용
-- Google Cloud Console에서 OAuth2 Client ID 생성 필요 (Desktop App 타입)
 - 스코프: `https://www.googleapis.com/auth/calendar`
 - 팀원 각자 개인 Gmail 계정으로 인증
+
+### OAuth2 사전 준비 (Google Cloud Console)
+
+1. **Google Cloud 프로젝트**: 기존 B flow용 프로젝트 사용 (이미지 GAS 연동에 사용 중인 프로젝트)
+2. **OAuth consent screen**: External 타입 (개인 Gmail 사용)
+   - 앱 이름: "B flow"
+   - 테스트 모드로 운영 (팀원 이메일을 테스트 사용자로 등록)
+   - 프로덕션 게시 시 Google 인증 필요하나, ~20명 테스트 모드로 충분
+3. **OAuth2 Client ID**: Desktop App 타입으로 생성
+4. **Client ID/Secret 저장**: 앱에 하드코딩 (기존 Supabase anon key와 동일 방식)
+   - `electron/googleCalendar.ts`에 상수로 정의
+
+### 팀 캘린더 설정
+
+- 팀 공유 Google Calendar은 이미 존재 (팀에서 사용 중)
+- 모든 팀원이 팀 캘린더에 **쓰기 권한**이 있어야 함
+- 캘린더 소유자가 팀원들에게 "일정 변경 권한" 부여 (Google Calendar 설정에서)
+- B flow 앱 설정에서 팀 캘린더 ID를 드롭다운으로 선택 (OAuth 인증 후 접근 가능한 캘린더 목록 제공)
 
 ### 이벤트 타입 → GCal 매핑
 
@@ -216,6 +268,28 @@ GCal 변경 → Google Push Notification
 - Edge Function이 Supabase Realtime Broadcast로 해당 사용자에게 전파
 - Electron 클라이언트가 Broadcast 수신 → incremental sync 실행 (syncToken 기반)
 - Watch 채널은 7일마다 자동 갱신
+
+**Edge Function Webhook 상세**:
+
+```
+[Webhook URL]
+https://<project-ref>.supabase.co/functions/v1/gcal-webhook
+
+[수신 시 처리]
+1. X-Goog-Channel-Token 헤더로 채널 검증 (등록 시 설정한 토큰과 일치 확인)
+2. X-Goog-Resource-ID로 어떤 캘린더의 변경인지 식별
+3. Supabase Realtime Broadcast로 해당 사용자에게 알림 전송
+   - 채널명: 'gcal-sync'
+   - 이벤트: 'calendar-changed'
+   - payload: { userId, calendarId, resourceId }
+4. 200 OK 응답 (Google은 비-200 시 지수 백오프 재시도)
+```
+
+**Watch 채널 관리**:
+- 앱 시작 시 Watch 채널 등록 (만료 전이면 스킵)
+- 만료 시간을 `%APPDATA%/gcal-watch-state.json`에 저장
+- 만료 3시간 전에 자동 갱신 시도
+- Watch 등록 시 `token` 파라미터에 userId를 포함하여 Edge Function에서 사용자 식별
 
 **앱 시작 시**:
 - 전체 동기화 1회 수행 (syncToken 획득)
@@ -273,11 +347,17 @@ GCal 변경 → Google Push Notification
 - 초과 시 가장 오래된 캐시부터 자동 삭제 (Drive에 원본이 있는 것만)
 - Drive URL이 있는 이미지는 삭제해도 필요 시 재다운로드
 
+**메타데이터 저장**:
+- `%APPDATA%/Bflow-BGonly/images/manifest.json`에 이미지별 상태 기록
+- 형식: `{ "filename.png": { "driveUrl": "...", "uploadedAt": "...", "size": 12345 } }`
+- Drive URL이 있는 이미지만 캐시 삭제 대상
+- manifest에 없거나 driveUrl이 없는 이미지 = 아직 업로드 안 됨 → 삭제하지 않음
+
 ### 수정 대상 파일
 
 | 파일 | 변경 내용 |
 |------|----------|
-| `electron/main.ts` | `image:save` 핸들러에 Drive 업로드 보장 로직 추가 |
+| `electron/main.ts` | `image:save` 핸들러에 Drive 업로드 보장 로직 추가, manifest.json 관리 |
 | `electron/main.ts` | 캐시 크기 확인 + 자동 정리 로직 추가 |
 
 ---
