@@ -122,6 +122,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:read-metadata', type, key),
   supabaseWriteMetadata: (type: string, key: string, value: string) =>
     ipcRenderer.invoke('supabase:write-metadata', type, key, value),
+  // ─── Personal Todos / Task Views ──────────────────
+  supabaseReadTodos: (userId: string) => ipcRenderer.invoke('supabase:read-todos', userId),
+  supabaseUpsertTodo: (userId: string, todo: unknown) => ipcRenderer.invoke('supabase:upsert-todo', userId, todo),
+  supabaseDeleteTodo: (todoId: string) => ipcRenderer.invoke('supabase:delete-todo', todoId),
+  supabaseReadTaskViews: (userId: string) => ipcRenderer.invoke('supabase:read-task-views', userId),
+  supabaseUpsertTaskViews: (userId: string, views: unknown[], sceneKeys: unknown[]) =>
+    ipcRenderer.invoke('supabase:upsert-task-views', userId, views, sceneKeys),
+
   // 슬랙 웹훅
   sendSlackWebhook: (payload: Record<string, string>) =>
     ipcRenderer.invoke('slack:send-webhook', payload),

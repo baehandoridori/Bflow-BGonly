@@ -426,6 +426,11 @@ import {
   readAllMetadata as sbReadAllMetadata,
   readMetadata as sbReadMetadata,
   writeMetadata as sbWriteMetadata,
+  readTodos as sbReadTodos,
+  upsertTodo as sbUpsertTodo,
+  deleteTodo as sbDeleteTodo,
+  readTaskViews as sbReadTaskViews,
+  upsertTaskViews as sbUpsertTaskViews,
 } from './supabase';
 import type { SupabaseUser } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -549,6 +554,28 @@ ipcMain.handle('supabase:read-metadata', wrapIpc(async (_e: unknown, type: strin
 }));
 ipcMain.handle('supabase:write-metadata', wrapIpc(async (_e: unknown, type: string, key: string, value: string) => {
   await sbWriteMetadata(type, key, value);
+}));
+
+// ─── Personal Todos IPC ──────────────────────────────
+
+ipcMain.handle('supabase:read-todos', wrapIpc(async (_e: unknown, userId: string) => {
+  return sbReadTodos(userId);
+}));
+
+ipcMain.handle('supabase:upsert-todo', wrapIpc(async (_e: unknown, userId: string, todo: unknown) => {
+  return sbUpsertTodo(userId, todo as Parameters<typeof sbUpsertTodo>[1]);
+}));
+
+ipcMain.handle('supabase:delete-todo', wrapIpc(async (_e: unknown, todoId: string) => {
+  return sbDeleteTodo(todoId);
+}));
+
+ipcMain.handle('supabase:read-task-views', wrapIpc(async (_e: unknown, userId: string) => {
+  return sbReadTaskViews(userId);
+}));
+
+ipcMain.handle('supabase:upsert-task-views', wrapIpc(async (_e: unknown, userId: string, views: unknown[], sceneKeys: unknown[]) => {
+  return sbUpsertTaskViews(userId, views, sceneKeys);
 }));
 
 // ─── Slack Webhook ───

@@ -442,6 +442,13 @@ export interface ElectronAPI {
   sendSlackWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;
   // 딥링크
   onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => () => void;
+
+  // ─── Personal Todos / Task Views ──────────────────
+  supabaseReadTodos: (userId: string) => Promise<any[]>;
+  supabaseUpsertTodo: (userId: string, todo: unknown) => Promise<string>;
+  supabaseDeleteTodo: (todoId: string) => Promise<void>;
+  supabaseReadTaskViews: (userId: string) => Promise<any>;
+  supabaseUpsertTaskViews: (userId: string, views: unknown[], sceneKeys: unknown[]) => Promise<void>;
 }
 
 declare global {
