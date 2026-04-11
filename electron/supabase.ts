@@ -831,3 +831,121 @@ async function resolvePartId(sheetName: string): Promise<string | null> {
 
   return part?.id || null;
 }
+
+// ─── Personal Todos ──────────────────────────────
+
+export interface SupabaseTodo {
+  id: string;
+  userId: string;
+  title: string;
+  memo: string;
+  completed: boolean;
+  startDate: string | null;
+  endDate: string | null;
+  addToCalendar: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function readTodos(userId: string): Promise<SupabaseTodo[]> {
+  const { data, error } = await supabase
+    .from('personal_todos')
+    .select('*')
+    .eq('user_id', userId)
+    .order('sort_order');
+  throwIfError(error);
+  return (data || []).map((r) => ({
+    id: r.id,
+    userId: r.user_id,
+    title: r.title,
+    memo: r.memo || '',
+    completed: r.completed,
+    startDate: r.start_date,
+    endDate: r.end_date,
+    addToCalendar: r.add_to_calendar,
+    sortOrder: r.sort_order ?? 0,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+}
+
+export async function upsertTodo(
+  userId: string,
+  todo: {
+    id?: string;
+    title: string;
+    memo: string;
+    completed: boolean;
+    startDate?: string | null;
+    endDate?: string | null;
+    addToCalendar?: boolean;
+    sortOrder?: number;
+    createdAt?: string;
+  },
+): Promise<string> {
+  const now = new Date().toISOString();
+  const row = {
+    ...(todo.id ? { id: todo.id } : {}),
+    user_id: userId,
+    title: todo.title,
+    memo: todo.memo,
+    completed: todo.completed,
+    start_date: todo.startDate ?? null,
+    end_date: todo.endDate ?? null,
+    add_to_calendar: todo.addToCalendar ?? false,
+    sort_order: todo.sortOrder ?? 0,
+    created_at: todo.createdAt ?? now,
+    updated_at: now,
+  };
+  const { data, error } = await supabase
+    .from('personal_todos')
+    .upsert(row, { onConflict: 'id' })
+    .select('id')
+    .single();
+  throwIfError(error);
+  return data!.id;
+}
+
+export async function deleteTodo(todoId: string): Promise<void> {
+  const { error } = await supabase
+    .from('personal_todos')
+    .delete()
+    .eq('id', todoId);
+  throwIfError(error);
+}
+
+// ─── Task Views ──────────────────────────────
+
+export async function readTaskViews(userId: string): Promise<{ views: unknown[]; assignedSceneKeys: unknown[] } | null> {
+  const { data, error } = await supabase
+    .from('task_views')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) return null;
+  return {
+    views: data.views || [],
+    assignedSceneKeys: data.assigned_scene_keys || [],
+  };
+}
+
+export async function upsertTaskViews(
+  userId: string,
+  views: unknown[],
+  assignedSceneKeys: unknown[],
+): Promise<void> {
+  const { error } = await supabase
+    .from('task_views')
+    .upsert(
+      {
+        user_id: userId,
+        views,
+        assigned_scene_keys: assignedSceneKeys,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' },
+    );
+  throwIfError(error);
+}
