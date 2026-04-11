@@ -421,3 +421,7 @@ export async function upsertMemo(
 ): Promise<void> {
   return window.electronAPI.supabaseUpsertMemo(userId, widgetId, memoData);
 }
+
+export async function readAllMemos(userId: string) {
+  return window.electronAPI.supabaseReadAllMemos(userId);
+}
