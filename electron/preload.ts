@@ -129,6 +129,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supabaseReadTaskViews: (userId: string) => ipcRenderer.invoke('supabase:read-task-views', userId),
   supabaseUpsertTaskViews: (userId: string, views: unknown[], sceneKeys: unknown[]) =>
     ipcRenderer.invoke('supabase:upsert-task-views', userId, views, sceneKeys),
+  supabaseReadMemo: (userId: string, widgetId: string) =>
+    ipcRenderer.invoke('supabase:read-memo', userId, widgetId),
+  supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) =>
+    ipcRenderer.invoke('supabase:upsert-memo', userId, widgetId, data),
+  supabaseReadAllMemos: (userId: string) =>
+    ipcRenderer.invoke('supabase:read-all-memos', userId),
 
   // 슬랙 웹훅
   sendSlackWebhook: (payload: Record<string, string>) =>

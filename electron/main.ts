@@ -431,6 +431,9 @@ import {
   deleteTodo as sbDeleteTodo,
   readTaskViews as sbReadTaskViews,
   upsertTaskViews as sbUpsertTaskViews,
+  readMemo as sbReadMemo,
+  upsertMemo as sbUpsertMemo,
+  readAllMemos as sbReadAllMemos,
 } from './supabase';
 import type { SupabaseUser } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -576,6 +579,20 @@ ipcMain.handle('supabase:read-task-views', wrapIpc(async (_e: unknown, userId: s
 
 ipcMain.handle('supabase:upsert-task-views', wrapIpc(async (_e: unknown, userId: string, views: unknown[], sceneKeys: unknown[]) => {
   return sbUpsertTaskViews(userId, views, sceneKeys);
+}));
+
+// ─── Memos IPC ──────────────────────────────
+
+ipcMain.handle('supabase:read-memo', wrapIpc(async (_e: unknown, userId: string, widgetId: string) => {
+  return sbReadMemo(userId, widgetId);
+}));
+
+ipcMain.handle('supabase:upsert-memo', wrapIpc(async (_e: unknown, userId: string, widgetId: string, memoData: unknown) => {
+  return sbUpsertMemo(userId, widgetId, memoData as Parameters<typeof sbUpsertMemo>[2]);
+}));
+
+ipcMain.handle('supabase:read-all-memos', wrapIpc(async (_e: unknown, userId: string) => {
+  return sbReadAllMemos(userId);
 }));
 
 // ─── Slack Webhook ───

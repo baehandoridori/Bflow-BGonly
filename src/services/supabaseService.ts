@@ -407,3 +407,17 @@ export async function upsertTaskViews(
 ): Promise<void> {
   return window.electronAPI.supabaseUpsertTaskViews(userId, views, assignedSceneKeys);
 }
+
+// ─── Memos ──────────────────────────────
+
+export async function readMemo(userId: string, widgetId: string) {
+  return window.electronAPI.supabaseReadMemo(userId, widgetId);
+}
+
+export async function upsertMemo(
+  userId: string,
+  widgetId: string,
+  memoData: { tabs: unknown[]; activeTabId: string | null; fontSize: number },
+): Promise<void> {
+  return window.electronAPI.supabaseUpsertMemo(userId, widgetId, memoData);
+}

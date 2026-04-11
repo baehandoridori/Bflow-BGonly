@@ -449,6 +449,10 @@ export interface ElectronAPI {
   supabaseDeleteTodo: (todoId: string) => Promise<void>;
   supabaseReadTaskViews: (userId: string) => Promise<any>;
   supabaseUpsertTaskViews: (userId: string, views: unknown[], sceneKeys: unknown[]) => Promise<void>;
+  // ─── Memos ───────────────────────────────
+  supabaseReadMemo: (userId: string, widgetId: string) => Promise<any>;
+  supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) => Promise<void>;
+  supabaseReadAllMemos: (userId: string) => Promise<any[]>;
 }
 
 declare global {
