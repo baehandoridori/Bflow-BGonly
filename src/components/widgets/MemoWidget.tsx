@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useContext } from 'react';
 import { StickyNote, Type, Eye, Pencil, Plus, X } from 'lucide-react';
 import { Widget, WidgetIdContext, IsPopupContext } from './Widget';
+import * as supabaseService from '@/services/supabaseService';
+import { useAuthStore } from '@/stores/useAuthStore';
 
 const MEMO_FILE = 'memo.json';
+const MEMO_MIGRATION_KEY = 'bflow_migration_memo_done';
 const SAVE_DEBOUNCE_MS = 500;
 const DEFAULT_FONT_SIZE = 14;
 const MIN_FONT_SIZE = 10;
@@ -19,9 +22,6 @@ interface MemoData {
   activeTabId: string;
   fontSize: number;
 }
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type MemoStore = Record<string, any>;
 
 function getMemoKey(widgetId: string | null): string {
   if (!widgetId || widgetId === 'memo') return 'memo';
@@ -131,6 +131,41 @@ function SimpleMarkdown({ content, fontSize }: { content: string; fontSize: numb
   return <div>{elements}</div>;
 }
 
+/* ── memo.json → Supabase 마이그레이션 ── */
+
+async function migrateMemoToSupabase(userId: string): Promise<void> {
+  if (localStorage.getItem(MEMO_MIGRATION_KEY)) return;
+
+  try {
+    const store = await window.electronAPI?.readSettings(MEMO_FILE);
+    if (!store || typeof store !== 'object') {
+      localStorage.setItem(MEMO_MIGRATION_KEY, 'true');
+      return;
+    }
+
+    for (const [key, value] of Object.entries(store)) {
+      if (!value || typeof value !== 'object') continue;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = value as any;
+      await supabaseService.upsertMemo(userId, key, {
+        tabs: data.tabs || [],
+        activeTabId: data.activeTabId || null,
+        fontSize: data.fontSize ?? 14,
+      });
+    }
+
+    localStorage.setItem(MEMO_MIGRATION_KEY, 'true');
+
+    try {
+      await window.electronAPI?.writeSettings('memo.json.bak', store);
+    } catch { /* 백업 실패는 무시 */ }
+
+    console.log('[MemoWidget] memo.json → Supabase 마이그레이션 완료');
+  } catch (err) {
+    console.error('[MemoWidget] 마이그레이션 실패 (다음 실행 시 재시도):', err);
+  }
+}
+
 /* ── 탭 바 ── */
 
 function MemoTabBar({
@@ -229,13 +264,17 @@ export function MemoWidget() {
 
   const activeTab = memoData.tabs.find((t) => t.id === memoData.activeTabId) ?? memoData.tabs[0];
 
-  // 로드
+  // 로드 (Supabase)
   useEffect(() => {
     (async () => {
       try {
-        const store = (await window.electronAPI?.readSettings(MEMO_FILE)) as MemoStore | null;
-        if (store && store[memoKey]) {
-          setMemoData(migrateMemoData(store[memoKey]));
+        const userId = useAuthStore.getState().currentUser?.id;
+        if (userId) {
+          await migrateMemoToSupabase(userId);
+          const remote = await supabaseService.readMemo(userId, memoKey);
+          if (remote) {
+            setMemoData(migrateMemoData(remote));
+          }
         }
       } catch (err) {
         console.error('[MemoWidget] 로드 실패:', err);
@@ -244,14 +283,18 @@ export function MemoWidget() {
     })();
   }, [memoKey]);
 
-  // 저장 (debounce) + 다른 윈도우에 시그널
+  // 저장 (debounce, Supabase)
   const save = useCallback((data: MemoData) => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       try {
-        const store = ((await window.electronAPI?.readSettings(MEMO_FILE)) ?? {}) as MemoStore;
-        store[memoKey] = data;
-        await window.electronAPI?.writeSettings(MEMO_FILE, store);
+        const userId = useAuthStore.getState().currentUser?.id;
+        if (!userId) return;
+        await supabaseService.upsertMemo(userId, memoKey, {
+          tabs: data.tabs,
+          activeTabId: data.activeTabId,
+          fontSize: data.fontSize,
+        });
         localStorage.setItem('memo-sync', `${memoKey}:${Date.now()}`);
       } catch (err) {
         console.error('[MemoWidget] 저장 실패:', err);
@@ -267,9 +310,11 @@ export function MemoWidget() {
       if (changedKey !== memoKey) return;
       (async () => {
         try {
-          const store = (await window.electronAPI?.readSettings(MEMO_FILE)) as MemoStore | null;
-          if (store && store[memoKey]) {
-            setMemoData(migrateMemoData(store[memoKey]));
+          const userId = useAuthStore.getState().currentUser?.id;
+          if (!userId) return;
+          const remote = await supabaseService.readMemo(userId, memoKey);
+          if (remote) {
+            setMemoData(migrateMemoData(remote));
           }
         } catch { /* ignore */ }
       })();
@@ -286,9 +331,13 @@ export function MemoWidget() {
         const data = memoDataRef.current;
         (async () => {
           try {
-            const store = ((await window.electronAPI?.readSettings(MEMO_FILE)) ?? {}) as MemoStore;
-            store[memoKey] = data;
-            await window.electronAPI?.writeSettings(MEMO_FILE, store);
+            const userId = useAuthStore.getState().currentUser?.id;
+            if (!userId) return;
+            await supabaseService.upsertMemo(userId, memoKey, {
+              tabs: data.tabs,
+              activeTabId: data.activeTabId,
+              fontSize: data.fontSize,
+            });
             localStorage.setItem('memo-sync', `${memoKey}:${Date.now()}`);
           } catch { /* ignore */ }
         })();
