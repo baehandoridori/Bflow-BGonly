@@ -949,3 +949,65 @@ export async function upsertTaskViews(
     );
   throwIfError(error);
 }
+
+// ─── Memos ──────────────────────────────
+
+export async function readMemo(userId: string, widgetId: string): Promise<{
+  tabs: unknown[];
+  activeTabId: string | null;
+  fontSize: number;
+} | null> {
+  const { data, error } = await supabase
+    .from('memos')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('widget_id', widgetId)
+    .maybeSingle();
+  throwIfError(error);
+  if (!data) return null;
+  return {
+    tabs: data.tabs || [],
+    activeTabId: data.active_tab_id,
+    fontSize: data.font_size ?? 14,
+  };
+}
+
+export async function upsertMemo(
+  userId: string,
+  widgetId: string,
+  memoData: { tabs: unknown[]; activeTabId: string | null; fontSize: number },
+): Promise<void> {
+  const { error } = await supabase
+    .from('memos')
+    .upsert(
+      {
+        user_id: userId,
+        widget_id: widgetId,
+        tabs: memoData.tabs,
+        active_tab_id: memoData.activeTabId,
+        font_size: memoData.fontSize,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,widget_id' },
+    );
+  throwIfError(error);
+}
+
+export async function readAllMemos(userId: string): Promise<Array<{
+  widgetId: string;
+  tabs: unknown[];
+  activeTabId: string | null;
+  fontSize: number;
+}>> {
+  const { data, error } = await supabase
+    .from('memos')
+    .select('*')
+    .eq('user_id', userId);
+  throwIfError(error);
+  return (data || []).map((r) => ({
+    widgetId: r.widget_id,
+    tabs: r.tabs || [],
+    activeTabId: r.active_tab_id,
+    fontSize: r.font_size ?? 14,
+  }));
+}
