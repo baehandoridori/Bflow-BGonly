@@ -58,3 +58,22 @@ export interface CalendarEvent {
 
 /** 이벤트 저장소 */
 export type CalendarStore = CalendarEvent[];
+
+/** Google Calendar 연동 설정 */
+export interface GCalSettings {
+  teamCalendarId: string | null;     // 팀 공유 캘린더 ID
+  personalCalendarId: string | null; // 개인 캘린더 ID (보통 'primary')
+  lastSyncAt: string | null;         // 마지막 동기화 시각
+}
+
+/** GCal 이벤트의 extendedProperties에 저장하는 B flow 메타데이터 */
+export interface BflowEventMeta {
+  bflow_type: CalendarEventType;
+  bflow_linked_episode?: string;
+  bflow_linked_part?: string;
+  bflow_linked_scene_id?: string;
+  bflow_department?: 'bg' | 'acting';
+  bflow_linked_todo_id?: string;
+  bflow_vacation_type?: string;
+  bflow_vacation_user?: string;
+}
