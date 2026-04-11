@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Database, Palmtree } from 'lucide-react';
+import { Database, Palmtree, Calendar } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import {
   loadGasConfig,
@@ -13,6 +13,9 @@ import {
   connectVacation,
   checkVacationConnection,
 } from '@/services/vacationService';
+import * as gcalService from '@/services/googleCalendarService';
+import { getGCalSettings, saveGCalSettings, syncAll } from '@/services/calendarService';
+import type { GCalSettings } from '@/types/calendar';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { SettingsSection } from './SettingsSection';
 
@@ -32,6 +35,15 @@ export function SheetsSection() {
   const [vacationError, setVacationError] = useState<string | null>(null);
   const [isVacationConnecting, setIsVacationConnecting] = useState(false);
   const [vacationSaveMessage, setVacationSaveMessage] = useState<string | null>(null);
+
+  // Google Calendar 상태
+  const [gcalAuth, setGcalAuth] = useState(false);
+  const [gcalConnecting, setGcalConnecting] = useState(false);
+  const [gcalError, setGcalError] = useState<string | null>(null);
+  const [calendars, setCalendars] = useState<Array<{ id: string; summary: string; primary: boolean }>>([]);
+  const [gcalSettings, setGcalSettingsState] = useState<GCalSettings>({ teamCalendarId: null, personalCalendarId: null, lastSyncAt: null });
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -53,6 +65,17 @@ export function SheetsSection() {
         const vacConnected = await checkVacationConnection();
         setVacationConnected(vacConnected);
       }
+
+      // Google Calendar 설정 로드
+      try {
+        const authed = await gcalService.isAuthenticated();
+        setGcalAuth(authed);
+        if (authed) {
+          const cals = await gcalService.listCalendars();
+          setCalendars(cals);
+        }
+        setGcalSettingsState(getGCalSettings());
+      } catch { /* GCal not configured yet */ }
     }
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -120,6 +143,61 @@ export function SheetsSection() {
     setVacationConfig(config);
     setVacationSaveMessage('저장 완료');
     setTimeout(() => setVacationSaveMessage(null), 2000);
+  };
+
+  // ─── Google Calendar 핸들러 ─────
+  const handleGcalConnect = async () => {
+    setGcalConnecting(true);
+    setGcalError(null);
+    try {
+      await gcalService.startAuth();
+      const authed = await gcalService.isAuthenticated();
+      setGcalAuth(authed);
+      if (authed) {
+        const cals = await gcalService.listCalendars();
+        setCalendars(cals);
+      }
+    } catch (err) {
+      setGcalError(String(err));
+    } finally {
+      setGcalConnecting(false);
+    }
+  };
+
+  const handleGcalDisconnect = async () => {
+    try {
+      await gcalService.signOut();
+      setGcalAuth(false);
+      setCalendars([]);
+      const cleared: GCalSettings = { teamCalendarId: null, personalCalendarId: null, lastSyncAt: null };
+      saveGCalSettings(cleared);
+      setGcalSettingsState(cleared);
+    } catch (err) {
+      setGcalError(String(err));
+    }
+  };
+
+  const handleCalendarSelect = (calId: string) => {
+    const updated: GCalSettings = { ...gcalSettings, teamCalendarId: calId || null };
+    saveGCalSettings(updated);
+    setGcalSettingsState(updated);
+  };
+
+  const handleGcalSync = async () => {
+    setIsSyncing(true);
+    setSyncMessage(null);
+    try {
+      await syncAll();
+      const updated: GCalSettings = { ...gcalSettings, lastSyncAt: new Date().toISOString() };
+      saveGCalSettings(updated);
+      setGcalSettingsState(updated);
+      setSyncMessage('동기화 완료');
+      setTimeout(() => setSyncMessage(null), 2000);
+    } catch (err) {
+      setGcalError(String(err));
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   return (
@@ -238,6 +316,82 @@ export function SheetsSection() {
             <span className="self-center text-xs text-stage-png">{vacationSaveMessage}</span>
           )}
         </div>
+      </div>
+
+      {/* ═══════ Google Calendar 연동 ═══════ */}
+      <div className="border-t border-bg-border/20 mt-5 pt-5">
+        <div className="flex items-center gap-2 mb-3">
+          <Calendar size={15} className="text-blue-400" />
+          <span className="text-[13px] font-semibold text-text-primary">Google Calendar</span>
+          <span
+            className={`ml-auto px-2 py-0.5 rounded-md text-[10px] font-medium ${
+              gcalAuth
+                ? 'bg-blue-500/20 text-blue-400'
+                : 'bg-bg-primary text-text-secondary/50'
+            }`}
+          >
+            {gcalAuth ? '연결됨' : '미연결'}
+          </span>
+        </div>
+
+        {!gcalAuth ? (
+          <button
+            onClick={handleGcalConnect}
+            disabled={gcalConnecting}
+            className="px-4 py-2 bg-blue-500 hover:bg-blue-500/80 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm text-white font-medium transition-colors cursor-pointer"
+          >
+            {gcalConnecting ? '연결 중...' : 'Google 계정 연결'}
+          </button>
+        ) : (
+          <>
+            <div className="mb-4">
+              <label className="block text-xs text-text-secondary mb-1.5">팀 캘린더</label>
+              <select
+                value={gcalSettings.teamCalendarId || ''}
+                onChange={(e) => handleCalendarSelect(e.target.value)}
+                className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-blue-400"
+              >
+                <option value="">캘린더를 선택하세요</option>
+                {calendars.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.summary}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {gcalSettings.lastSyncAt && (
+              <p className="text-[11px] text-text-secondary/60 mb-3">
+                마지막 동기화: {new Date(gcalSettings.lastSyncAt).toLocaleString('ko-KR')}
+              </p>
+            )}
+
+            <div className="flex gap-2 flex-wrap items-center">
+              <button
+                onClick={handleGcalSync}
+                disabled={isSyncing || !gcalSettings.teamCalendarId}
+                className="px-4 py-2 bg-blue-500 hover:bg-blue-500/80 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm text-white font-medium transition-colors cursor-pointer"
+              >
+                {isSyncing ? '동기화 중...' : '지금 동기화'}
+              </button>
+              <button
+                onClick={handleGcalDisconnect}
+                className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 rounded-lg text-sm text-red-400 font-medium transition-colors cursor-pointer"
+              >
+                연결 해제
+              </button>
+              {syncMessage && (
+                <span className="self-center text-xs text-blue-400">{syncMessage}</span>
+              )}
+            </div>
+          </>
+        )}
+
+        {gcalError && (
+          <div className="mt-3 px-3 py-2 bg-status-none/10 border border-status-none/30 rounded-lg text-xs text-status-none">
+            {gcalError}
+          </div>
+        )}
       </div>
     </SettingsSection>
   );
