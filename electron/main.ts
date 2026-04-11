@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification } from 'electron';
+import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
@@ -593,6 +594,48 @@ ipcMain.handle('supabase:upsert-memo', wrapIpc(async (_e: unknown, userId: strin
 
 ipcMain.handle('supabase:read-all-memos', wrapIpc(async (_e: unknown, userId: string) => {
   return sbReadAllMemos(userId);
+}));
+
+// ─── Google Calendar IPC ──────────────────────────────
+
+ipcMain.handle('gcal:is-authenticated', wrapIpc(async () => {
+  return gcal.isAuthenticated();
+}));
+
+ipcMain.handle('gcal:start-auth', wrapIpc(async () => {
+  await gcal.startAuth();
+}));
+
+ipcMain.handle('gcal:sign-out', wrapIpc(async () => {
+  gcal.signOut();
+}));
+
+ipcMain.handle('gcal:list-calendars', wrapIpc(async () => {
+  return gcal.listCalendars();
+}));
+
+ipcMain.handle('gcal:full-sync', wrapIpc(async (_e: unknown, calendarId: string) => {
+  return gcal.fullSync(calendarId);
+}));
+
+ipcMain.handle('gcal:incremental-sync', wrapIpc(async (_e: unknown, calendarId: string) => {
+  return gcal.incrementalSync(calendarId);
+}));
+
+ipcMain.handle('gcal:insert-event', wrapIpc(async (_e: unknown, calendarId: string, input: unknown) => {
+  return gcal.insertEvent(calendarId, input as gcal.GCalEventInput);
+}));
+
+ipcMain.handle('gcal:update-event', wrapIpc(async (_e: unknown, calendarId: string, eventId: string, input: unknown) => {
+  return gcal.updateEvent(calendarId, eventId, input as Partial<gcal.GCalEventInput>);
+}));
+
+ipcMain.handle('gcal:delete-event', wrapIpc(async (_e: unknown, calendarId: string, eventId: string) => {
+  return gcal.deleteEvent(calendarId, eventId);
+}));
+
+ipcMain.handle('gcal:ensure-watch', wrapIpc(async (_e: unknown, calendarId: string, userId: string) => {
+  return gcal.ensureWatch(calendarId, userId);
 }));
 
 // ─── Slack Webhook ───
@@ -1463,6 +1506,9 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // Google Calendar 토큰 복원
+  gcal.restoreTokens();
 
   // Supabase Realtime 구독 시작
   startSupabaseRealtime();

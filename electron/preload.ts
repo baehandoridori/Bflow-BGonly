@@ -220,6 +220,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   vacationDeleteDahyu: (rowIndices: number[]) =>
     ipcRenderer.invoke('vacation:delete-dahyu', rowIndices),
 
+  // ─── Google Calendar ──────────────────────────────
+  gcalIsAuthenticated: () => ipcRenderer.invoke('gcal:is-authenticated'),
+  gcalStartAuth: () => ipcRenderer.invoke('gcal:start-auth'),
+  gcalSignOut: () => ipcRenderer.invoke('gcal:sign-out'),
+  gcalListCalendars: () => ipcRenderer.invoke('gcal:list-calendars'),
+  gcalFullSync: (calendarId: string) => ipcRenderer.invoke('gcal:full-sync', calendarId),
+  gcalIncrementalSync: (calendarId: string) => ipcRenderer.invoke('gcal:incremental-sync', calendarId),
+  gcalInsertEvent: (calendarId: string, input: unknown) => ipcRenderer.invoke('gcal:insert-event', calendarId, input),
+  gcalUpdateEvent: (calendarId: string, eventId: string, input: unknown) => ipcRenderer.invoke('gcal:update-event', calendarId, eventId, input),
+  gcalDeleteEvent: (calendarId: string, eventId: string) => ipcRenderer.invoke('gcal:delete-event', calendarId, eventId),
+  gcalEnsureWatch: (calendarId: string, userId: string) => ipcRenderer.invoke('gcal:ensure-watch', calendarId, userId),
+
   // 화이트보드 (공유 드라이브 파일)
   whiteboardReadShared: () =>
     ipcRenderer.invoke('whiteboard:read-shared') as Promise<{ ok: boolean; data: unknown; error?: string }>,

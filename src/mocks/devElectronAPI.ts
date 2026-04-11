@@ -142,6 +142,18 @@ export function installDevElectronAPI(): void {
       return { ok: true };
     },
     onDeepLink: noop,
+
+    // ─── Google Calendar mock ───
+    gcalIsAuthenticated: async () => false,
+    gcalStartAuth: async () => {},
+    gcalSignOut: async () => {},
+    gcalListCalendars: async () => [],
+    gcalFullSync: async () => [],
+    gcalIncrementalSync: async () => ({ updated: [], deleted: [] }),
+    gcalInsertEvent: async () => '',
+    gcalUpdateEvent: async () => {},
+    gcalDeleteEvent: async () => {},
+    gcalEnsureWatch: async () => {},
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;

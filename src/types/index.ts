@@ -453,6 +453,18 @@ export interface ElectronAPI {
   supabaseReadMemo: (userId: string, widgetId: string) => Promise<any>;
   supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) => Promise<void>;
   supabaseReadAllMemos: (userId: string) => Promise<any[]>;
+
+  // ─── Google Calendar ──────────────────────────────
+  gcalIsAuthenticated: () => Promise<boolean>;
+  gcalStartAuth: () => Promise<void>;
+  gcalSignOut: () => Promise<void>;
+  gcalListCalendars: () => Promise<Array<{ id: string; summary: string; primary: boolean }>>;
+  gcalFullSync: (calendarId: string) => Promise<any[]>;
+  gcalIncrementalSync: (calendarId: string) => Promise<{ updated: any[]; deleted: string[] }>;
+  gcalInsertEvent: (calendarId: string, input: unknown) => Promise<string>;
+  gcalUpdateEvent: (calendarId: string, eventId: string, input: unknown) => Promise<void>;
+  gcalDeleteEvent: (calendarId: string, eventId: string) => Promise<void>;
+  gcalEnsureWatch: (calendarId: string, userId: string) => Promise<void>;
 }
 
 declare global {
