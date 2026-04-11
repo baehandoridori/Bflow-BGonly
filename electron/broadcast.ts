@@ -7,6 +7,7 @@ import { createRetryManager } from './retry-utils';
 // 쓰기 후 즉시 다른 클라이언트에 delta를 전파하여 지연 제거.
 
 let broadcastChannel: RealtimeChannel | null = null;
+let gcalChannel: RealtimeChannel | null = null;
 let broadcastConnected = false;
 type BroadcastListener = (event: string, payload: Record<string, unknown>) => void;
 let listener: BroadcastListener | null = null;
@@ -27,6 +28,9 @@ function createChannel(onReceive: BroadcastListener): RealtimeChannel {
     })
     .on('broadcast', { event: 'comment-added' }, ({ payload }) => {
       onReceive('comment-added', payload as Record<string, unknown>);
+    })
+    .on('broadcast', { event: 'calendar-changed' }, ({ payload }) => {
+      onReceive('calendar-changed', payload as Record<string, unknown>);
     });
 }
 
@@ -72,6 +76,13 @@ export function setupBroadcast(onReceive: BroadcastListener): () => void {
   retry.reset();
 
   reconnectBroadcast(onReceive);
+
+  // gcal-sync 채널: GCal webhook → Supabase → 렌더러 파이프라인
+  gcalChannel = supabase.channel('gcal-sync')
+    .on('broadcast', { event: 'calendar-changed' }, ({ payload }) => {
+      onReceive('calendar-changed', payload as Record<string, unknown>);
+    })
+    .subscribe();
 
   return () => {
     teardownBroadcast();
@@ -132,5 +143,9 @@ export function teardownBroadcast(): void {
     supabase.removeChannel(broadcastChannel);
     broadcastChannel = null;
     broadcastConnected = false;
+  }
+  if (gcalChannel) {
+    supabase.removeChannel(gcalChannel);
+    gcalChannel = null;
   }
 }
