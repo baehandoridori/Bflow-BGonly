@@ -10,6 +10,7 @@ import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Stage, Scene, Episode, Department } from '@/types';
 import { cn } from '@/utils/cn';
 import { updateEvent as updateCalEvent, deleteEvent as deleteCalEvent, addEvent as addCalEvent, findEventByTodoId } from '@/services/calendarService';
+import * as supabaseService from '@/services/supabaseService';
 
 /* ─── 타입 ──────────────────────────────────── */
 
@@ -57,6 +58,7 @@ function scenePct(s: Scene): number {
 const VIEWS_KEY = 'bflow_my_task_views';
 const ASSIGNED_TODOS_KEY = 'bflow_assigned_personal_todos';
 const ASSIGNED_SCENES_KEY = 'bflow_assigned_scene_keys';
+const MIGRATION_DONE_KEY = 'bflow_migration_todos_done';
 
 function loadViews(): TaskView[] {
   try {
@@ -90,6 +92,114 @@ function loadAssignedSceneKeys(): SceneKey[] {
 }
 function saveAssignedSceneKeys(keys: SceneKey[]) {
   localStorage.setItem(ASSIGNED_SCENES_KEY, JSON.stringify(keys));
+}
+
+/* ─── Supabase 기반 로드/저장 함수 ──────────── */
+
+async function loadTodosFromSupabase(userId: string): Promise<PersonalTodo[]> {
+  try {
+    const rows = await supabaseService.readTodos(userId);
+    return rows.map((r: any) => ({
+      id: r.id,
+      title: r.title,
+      memo: r.memo,
+      completed: r.completed,
+      createdAt: r.createdAt,
+      startDate: r.startDate ?? undefined,
+      endDate: r.endDate ?? undefined,
+      addToCalendar: r.addToCalendar,
+    }));
+  } catch (err) {
+    console.error('[MyTasks] Supabase 할일 로드 실패:', err);
+    return [];
+  }
+}
+
+async function saveTodoToSupabase(userId: string, todo: PersonalTodo, sortOrder?: number): Promise<void> {
+  await supabaseService.upsertTodo(userId, {
+    id: todo.id,
+    title: todo.title,
+    memo: todo.memo,
+    completed: todo.completed,
+    startDate: todo.startDate ?? null,
+    endDate: todo.endDate ?? null,
+    addToCalendar: todo.addToCalendar,
+    sortOrder: sortOrder ?? 0,
+    createdAt: todo.createdAt,
+  });
+}
+
+async function deleteTodoFromSupabase(todoId: string): Promise<void> {
+  await supabaseService.deleteTodo(todoId);
+}
+
+async function loadTaskViewsFromSupabase(userId: string): Promise<{
+  views: TaskView[];
+  sceneKeys: SceneKey[];
+}> {
+  try {
+    const data = await supabaseService.readTaskViews(userId);
+    if (!data) return { views: [], sceneKeys: [] };
+    return {
+      views: (data.views as TaskView[]).map((v) => ({ ...v, personalTodos: v.personalTodos ?? [] })),
+      sceneKeys: data.assignedSceneKeys as SceneKey[],
+    };
+  } catch (err) {
+    console.error('[MyTasks] Supabase 뷰 로드 실패:', err);
+    return { views: [], sceneKeys: [] };
+  }
+}
+
+async function saveTaskViewsToSupabase(
+  userId: string,
+  views: TaskView[],
+  sceneKeys: SceneKey[],
+): Promise<void> {
+  await supabaseService.upsertTaskViews(userId, views, sceneKeys);
+}
+
+async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
+  if (localStorage.getItem(MIGRATION_DONE_KEY)) return;
+
+  console.log('[MyTasks] localStorage → Supabase 마이그레이션 시작');
+
+  try {
+    const rawTodos = localStorage.getItem(ASSIGNED_TODOS_KEY);
+    if (rawTodos) {
+      const todos: PersonalTodo[] = JSON.parse(rawTodos);
+      for (let i = 0; i < todos.length; i++) {
+        const todo = todos[i];
+        await supabaseService.upsertTodo(userId, {
+          id: todo.id,
+          title: todo.title,
+          memo: todo.memo,
+          completed: todo.completed,
+          startDate: todo.startDate ?? null,
+          endDate: todo.endDate ?? null,
+          addToCalendar: todo.addToCalendar,
+          sortOrder: i,
+          createdAt: todo.createdAt,
+        });
+      }
+    }
+
+    const rawViews = localStorage.getItem(VIEWS_KEY);
+    const rawSceneKeys = localStorage.getItem(ASSIGNED_SCENES_KEY);
+    const views = rawViews ? JSON.parse(rawViews) : [];
+    const sceneKeys = rawSceneKeys ? JSON.parse(rawSceneKeys) : [];
+    if (views.length > 0 || sceneKeys.length > 0) {
+      await supabaseService.upsertTaskViews(userId, views, sceneKeys);
+    }
+
+    localStorage.setItem(MIGRATION_DONE_KEY, 'true');
+    localStorage.removeItem(ASSIGNED_TODOS_KEY);
+    localStorage.removeItem(VIEWS_KEY);
+    localStorage.removeItem(ASSIGNED_SCENES_KEY);
+
+    console.log('[MyTasks] 마이그레이션 완료');
+  } catch (err) {
+    console.error('[MyTasks] 마이그레이션 실패 (다음 실행 시 재시도):', err);
+  }
 }
 
 /* ─── 할 일 추가 모달 (작업 + 개인) ──────────── */
@@ -864,16 +974,19 @@ export function MyTasksWidget() {
   }, [isPopup]);
 
   // 뷰 관리
-  const [customViews, setCustomViews] = useState<TaskView[]>(() => loadViews());
+  const [customViews, setCustomViews] = useState<TaskView[]>([]);
   const [activeViewId, setActiveViewId] = useState(DEFAULT_VIEW.id);
   const [showPicker, setShowPicker] = useState(false);
   const [filterDone, setFilterDone] = useState(false);
   const [showDone, setShowDone] = useState(false);
 
   // assigned 뷰 전용 개인 할일 (DEFAULT_VIEW는 상수이므로 별도 관리)
-  const [assignedTodos, setAssignedTodos] = useState<PersonalTodo[]>(() => loadAssignedTodos());
+  const [assignedTodos, setAssignedTodos] = useState<PersonalTodo[]>([]);
   // assigned 뷰에서 수동으로 추가한 씬 키
-  const [assignedSceneKeys, setAssignedSceneKeys] = useState<SceneKey[]>(() => loadAssignedSceneKeys());
+  const [assignedSceneKeys, setAssignedSceneKeys] = useState<SceneKey[]>([]);
+
+  // Supabase 초기화 완료 여부 (save effect에서 초기화 전 저장 방지)
+  const _supabaseInitialized = useRef(false);
 
   const allViews = [DEFAULT_VIEW, ...customViews];
   const activeView = allViews.find((v) => v.id === activeViewId) ?? DEFAULT_VIEW;
@@ -893,23 +1006,70 @@ export function MyTasksWidget() {
     }
   }, [isPopup]);
 
-  useEffect(() => { saveViews(customViews); broadcastTodoChange(); }, [customViews]);
-  useEffect(() => { saveAssignedTodos(assignedTodos); broadcastTodoChange(); }, [assignedTodos]);
-  useEffect(() => { saveAssignedSceneKeys(assignedSceneKeys); broadcastTodoChange(); }, [assignedSceneKeys]);
+  // Supabase 초기화: 마이그레이션 후 데이터 로드
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const userId = currentUser.id;
+    (async () => {
+      await migrateLocalStorageToSupabase(userId);
+      const [todos, viewsData] = await Promise.all([
+        loadTodosFromSupabase(userId),
+        loadTaskViewsFromSupabase(userId),
+      ]);
+      _fromExternal.current = true;
+      setAssignedTodos(todos);
+      setCustomViews(viewsData.views);
+      setAssignedSceneKeys(viewsData.sceneKeys);
+      requestAnimationFrame(() => {
+        _fromExternal.current = false;
+        _supabaseInitialized.current = true;
+      });
+    })();
+  }, [currentUser?.id]);
 
-  // 다른 창에서 할일이 변경되면 localStorage에서 다시 읽기
+  // Supabase 저장: 상태 변경 시 Supabase에 반영
+  useEffect(() => {
+    if (!_supabaseInitialized.current || !currentUser?.id) return;
+    if (_fromExternal.current) return;
+    const userId = currentUser.id;
+    saveTaskViewsToSupabase(userId, customViews, assignedSceneKeys).catch((err) =>
+      console.error('[MyTasks] 뷰/씬키 저장 실패:', err),
+    );
+    broadcastTodoChange();
+  }, [customViews, assignedSceneKeys]);
+
+  useEffect(() => {
+    if (!_supabaseInitialized.current || !currentUser?.id) return;
+    if (_fromExternal.current) return;
+    const userId = currentUser.id;
+    // assignedTodos 전체를 재저장 (순서 포함)
+    assignedTodos.forEach((todo, i) => {
+      saveTodoToSupabase(userId, todo, i).catch((err) =>
+        console.error('[MyTasks] 할일 저장 실패:', err),
+      );
+    });
+    broadcastTodoChange();
+  }, [assignedTodos]);
+
+  // 다른 창에서 할일이 변경되면 Supabase에서 다시 읽기
   useEffect(() => {
     const handler = () => {
+      if (!currentUser?.id) return;
+      const userId = currentUser.id;
       _fromExternal.current = true;
-      setCustomViews(loadViews());
-      setAssignedTodos(loadAssignedTodos());
-      setAssignedSceneKeys(loadAssignedSceneKeys());
-      // 다음 tick에서 플래그 해제 (save effect가 동기적으로 실행되므로)
-      requestAnimationFrame(() => { _fromExternal.current = false; });
+      Promise.all([
+        loadTodosFromSupabase(userId),
+        loadTaskViewsFromSupabase(userId),
+      ]).then(([todos, viewsData]) => {
+        setAssignedTodos(todos);
+        setCustomViews(viewsData.views);
+        setAssignedSceneKeys(viewsData.sceneKeys);
+        requestAnimationFrame(() => { _fromExternal.current = false; });
+      });
     };
     window.addEventListener('bflow:todos-changed', handler);
     return () => window.removeEventListener('bflow:todos-changed', handler);
-  }, []);
+  }, [currentUser?.id]);
 
   // 전체 평탄화
   const allFlat: FlatScene[] = useMemo(() => {
@@ -1095,11 +1255,29 @@ export function MyTasksWidget() {
   // ─── 개인 할일 조작 ─────────────────────
   const addPersonalTodo = async (todo: PersonalTodo) => {
     if (activeView.id === DEFAULT_VIEW.id) {
-      setAssignedTodos((prev) => [...prev, todo]);
+      setAssignedTodos((prev) => {
+        const newList = [...prev, todo];
+        // Supabase 저장 (낙관적: 상태 반영 후 비동기 저장)
+        if (currentUser?.id) {
+          saveTodoToSupabase(currentUser.id, todo, newList.length - 1).catch((err) =>
+            console.error('[MyTasks] 할일 추가 저장 실패:', err),
+          );
+        }
+        return newList;
+      });
     } else {
-      setCustomViews((prev) => prev.map((v) =>
-        v.id === activeViewId ? { ...v, personalTodos: [...v.personalTodos, todo] } : v,
-      ));
+      setCustomViews((prev) => {
+        const newViews = prev.map((v) =>
+          v.id === activeViewId ? { ...v, personalTodos: [...v.personalTodos, todo] } : v,
+        );
+        // Supabase 저장
+        if (currentUser?.id) {
+          saveTaskViewsToSupabase(currentUser.id, newViews, assignedSceneKeys).catch((err) =>
+            console.error('[MyTasks] 뷰 할일 추가 저장 실패:', err),
+          );
+        }
+        return newViews;
+      });
     }
     // 캘린더 연동: addToCalendar가 true이고 날짜가 있으면 캘린더 이벤트 생성
     if (todo.addToCalendar && (todo.startDate || todo.endDate)) {
@@ -1127,21 +1305,53 @@ export function MyTasksWidget() {
   const togglePersonalTodo = (todoId: string) => {
     const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? { ...t, completed: !t.completed } : t);
     if (activeView.id === DEFAULT_VIEW.id) {
-      setAssignedTodos(updater);
+      setAssignedTodos((prev) => {
+        const newList = updater(prev);
+        // Supabase 저장
+        const updated = newList.find((t) => t.id === todoId);
+        if (updated && currentUser?.id) {
+          saveTodoToSupabase(currentUser.id, updated, newList.indexOf(updated)).catch((err) =>
+            console.error('[MyTasks] 할일 토글 저장 실패:', err),
+          );
+        }
+        return newList;
+      });
     } else {
-      setCustomViews((prev) => prev.map((v) =>
-        v.id === activeViewId ? { ...v, personalTodos: updater(v.personalTodos) } : v,
-      ));
+      setCustomViews((prev) => {
+        const newViews = prev.map((v) =>
+          v.id === activeViewId ? { ...v, personalTodos: updater(v.personalTodos) } : v,
+        );
+        if (currentUser?.id) {
+          saveTaskViewsToSupabase(currentUser.id, newViews, assignedSceneKeys).catch((err) =>
+            console.error('[MyTasks] 뷰 할일 토글 저장 실패:', err),
+          );
+        }
+        return newViews;
+      });
     }
   };
   const removePersonalTodo = async (todoId: string) => {
     // 낙관적: 목록에서 즉시 제거
     if (activeView.id === DEFAULT_VIEW.id) {
       setAssignedTodos((prev) => prev.filter((t) => t.id !== todoId));
+      // Supabase 삭제
+      if (currentUser?.id) {
+        deleteTodoFromSupabase(todoId).catch((err) =>
+          console.error('[MyTasks] 할일 삭제 실패:', err),
+        );
+      }
     } else {
-      setCustomViews((prev) => prev.map((v) =>
-        v.id === activeViewId ? { ...v, personalTodos: v.personalTodos.filter((t) => t.id !== todoId) } : v,
-      ));
+      setCustomViews((prev) => {
+        const newViews = prev.map((v) =>
+          v.id === activeViewId ? { ...v, personalTodos: v.personalTodos.filter((t) => t.id !== todoId) } : v,
+        );
+        if (currentUser?.id) {
+          saveTaskViewsToSupabase(currentUser.id, newViews, assignedSceneKeys).catch((err) =>
+            console.error('[MyTasks] 뷰 할일 삭제 저장 실패:', err),
+          );
+        }
+        return newViews;
+      });
     }
     // 캘린더 이벤트도 삭제 (없으면 no-op)
     try {
@@ -1156,10 +1366,27 @@ export function MyTasksWidget() {
     const newList = [...reordered, ...completed];
     if (activeView.id === DEFAULT_VIEW.id) {
       setAssignedTodos(newList);
+      // Supabase: 순서 변경 저장 (debounce 없이 바로 저장)
+      if (currentUser?.id) {
+        const userId = currentUser.id;
+        newList.forEach((todo, i) => {
+          saveTodoToSupabase(userId, todo, i).catch((err) =>
+            console.error('[MyTasks] 할일 순서 저장 실패:', err),
+          );
+        });
+      }
     } else {
-      setCustomViews((prev) => prev.map((v) =>
-        v.id === activeViewId ? { ...v, personalTodos: newList } : v,
-      ));
+      setCustomViews((prev) => {
+        const newViews = prev.map((v) =>
+          v.id === activeViewId ? { ...v, personalTodos: newList } : v,
+        );
+        if (currentUser?.id) {
+          saveTaskViewsToSupabase(currentUser.id, newViews, assignedSceneKeys).catch((err) =>
+            console.error('[MyTasks] 뷰 할일 순서 저장 실패:', err),
+          );
+        }
+        return newViews;
+      });
     }
   };
 
@@ -1172,14 +1399,30 @@ export function MyTasksWidget() {
 
     const newTodo = { ...oldTodo, ...updates };
 
-    // 낙관적 UI 업데이트
+    // 낙관적 UI 업데이트 + Supabase 저장
     const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? newTodo : t);
     if (activeView.id === DEFAULT_VIEW.id) {
-      setAssignedTodos(updater);
+      setAssignedTodos((prev) => {
+        const newList = updater(prev);
+        if (currentUser?.id) {
+          saveTodoToSupabase(currentUser.id, newTodo, newList.indexOf(newTodo)).catch((err) =>
+            console.error('[MyTasks] 할일 업데이트 저장 실패:', err),
+          );
+        }
+        return newList;
+      });
     } else {
-      setCustomViews((prev) => prev.map((v) =>
-        v.id === activeViewId ? { ...v, personalTodos: updater(v.personalTodos) } : v,
-      ));
+      setCustomViews((prev) => {
+        const newViews = prev.map((v) =>
+          v.id === activeViewId ? { ...v, personalTodos: updater(v.personalTodos) } : v,
+        );
+        if (currentUser?.id) {
+          saveTaskViewsToSupabase(currentUser.id, newViews, assignedSceneKeys).catch((err) =>
+            console.error('[MyTasks] 뷰 할일 업데이트 저장 실패:', err),
+          );
+        }
+        return newViews;
+      });
     }
 
     // 캘린더 동기화
@@ -1251,36 +1494,62 @@ export function MyTasksWidget() {
 
       if (detail.action === 'delete') {
         // 캘린더 이벤트 삭제됨 → todo의 addToCalendar 플래그만 해제 (todo 자체는 유지)
-        const updater = (todos: PersonalTodo[]) =>
+        const calUpdater = (todos: PersonalTodo[]) =>
           todos.map((t) => t.id === todoId ? { ...t, addToCalendar: false } : t);
-        setAssignedTodos(updater);
-        setCustomViews((prev) => prev.map((v) => ({
-          ...v,
-          personalTodos: v.personalTodos.map((t) => t.id === todoId ? { ...t, addToCalendar: false } : t),
-        })));
+        setAssignedTodos((prev) => {
+          const newList = calUpdater(prev);
+          const updated = newList.find((t) => t.id === todoId);
+          if (updated && currentUser?.id) {
+            saveTodoToSupabase(currentUser.id, updated, newList.indexOf(updated)).catch(() => {});
+          }
+          return newList;
+        });
+        setCustomViews((prev) => {
+          const newViews = prev.map((v) => ({
+            ...v,
+            personalTodos: v.personalTodos.map((t) => t.id === todoId ? { ...t, addToCalendar: false } : t),
+          }));
+          if (currentUser?.id) {
+            saveTaskViewsToSupabase(currentUser.id, newViews, assignedSceneKeys).catch(() => {});
+          }
+          return newViews;
+        });
       }
 
       if (detail.action === 'update') {
         // 캘린더 이벤트 업데이트됨 → todo에 title/dates 역동기화
         const calEvent = await findEventByTodoId(todoId);
         if (calEvent) {
-          const updater = (todos: PersonalTodo[]) =>
+          const calUpdater = (todos: PersonalTodo[]) =>
             todos.map((t) => t.id === todoId ? {
               ...t,
               title: calEvent.title,
               startDate: calEvent.startDate,
               endDate: calEvent.endDate,
             } : t);
-          setAssignedTodos(updater);
-          setCustomViews((prev) => prev.map((v) => ({
-            ...v,
-            personalTodos: v.personalTodos.map((t) => t.id === todoId ? {
-              ...t,
-              title: calEvent.title,
-              startDate: calEvent.startDate,
-              endDate: calEvent.endDate,
-            } : t),
-          })));
+          setAssignedTodos((prev) => {
+            const newList = calUpdater(prev);
+            const updated = newList.find((t) => t.id === todoId);
+            if (updated && currentUser?.id) {
+              saveTodoToSupabase(currentUser.id, updated, newList.indexOf(updated)).catch(() => {});
+            }
+            return newList;
+          });
+          setCustomViews((prev) => {
+            const newViews = prev.map((v) => ({
+              ...v,
+              personalTodos: v.personalTodos.map((t) => t.id === todoId ? {
+                ...t,
+                title: calEvent.title,
+                startDate: calEvent.startDate,
+                endDate: calEvent.endDate,
+              } : t),
+            }));
+            if (currentUser?.id) {
+              saveTaskViewsToSupabase(currentUser.id, newViews, assignedSceneKeys).catch(() => {});
+            }
+            return newViews;
+          });
         }
       }
     };

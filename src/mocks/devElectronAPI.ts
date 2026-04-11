@@ -124,6 +124,13 @@ export function installDevElectronAPI(): void {
     onSupabaseStatus: noop,
     onSupabaseBroadcast: noop,
 
+    // ─── Personal Todos / Task Views mock ───
+    supabaseReadTodos: async () => [],
+    supabaseUpsertTodo: async () => 'mock-id',
+    supabaseDeleteTodo: async () => {},
+    supabaseReadTaskViews: async () => null,
+    supabaseUpsertTaskViews: async () => {},
+
     // ─── 슬랙 웹훅 (콘솔 로그) ───
     sendSlackWebhook: async (payload: Record<string, string>) => {
       console.log('[DEV 슬랙 웹훅] 페이로드:', JSON.stringify(payload, null, 2));
