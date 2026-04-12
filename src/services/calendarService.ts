@@ -24,7 +24,15 @@ function toCalendarEvent(gcalEvent: any, _calendarId: string): CalendarEvent {
   const meta = (gcalEvent.extendedProperties?.private || {}) as Partial<BflowEventMeta>;
   const isAllDay = !!gcalEvent.start?.date;
   const startDate = isAllDay ? gcalEvent.start.date : gcalEvent.start?.dateTime?.slice(0, 10);
-  const endDate = isAllDay ? gcalEvent.end.date : gcalEvent.end?.dateTime?.slice(0, 10);
+  let endDate = isAllDay ? gcalEvent.end?.date : gcalEvent.end?.dateTime?.slice(0, 10);
+
+  // GCal 종일 이벤트는 종료일이 exclusive (3/25~3/26 = 3/25 하루)
+  // B flow는 inclusive 종료일을 사용하므로 하루 빼기
+  if (isAllDay && endDate) {
+    const d = new Date(endDate);
+    d.setDate(d.getDate() - 1);
+    endDate = d.toISOString().slice(0, 10);
+  }
 
   return {
     id: gcalEvent.id,
@@ -45,6 +53,13 @@ function toCalendarEvent(gcalEvent: any, _calendarId: string): CalendarEvent {
     vacationUserName: meta.bflow_vacation_user,
     isReadOnly: !meta.bflow_type, // B flow에서 만들지 않은 이벤트는 읽기 전용
   };
+}
+
+/** 종일 이벤트 종료일 보정: inclusive 날짜에 하루 추가 (GCal exclusive → B flow inclusive) */
+function addOneDay(dateStr: string): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 /** B flow CalendarEvent → GCal extendedProperties */
@@ -122,16 +137,33 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
   const calId = getTargetCalendar(event.type);
   if (!calId) throw new Error('캘린더가 설정되지 않았습니다');
 
-  const gcalId = await gcalService.insertEvent(calId, {
-    summary: event.title,
-    description: event.memo,
-    startDate: event.startDate,
-    endDate: event.endDate,
-    extendedProperties: toBflowMeta(event),
-  });
+  // 낙관적 업데이트: 캐시 먼저 업데이트
+  const tempId = `temp_${Date.now()}`;
+  const tempEvent = { ...event, id: tempId };
+  eventCache.push(tempEvent);
+  broadcastCalendarChange({ eventId: tempId, action: 'add' });
 
-  eventCache.push({ ...event, id: gcalId });
-  broadcastCalendarChange({ eventId: gcalId, action: 'add' });
+  try {
+    // GCal 종일 이벤트 종료일 보정 (B flow inclusive → GCal exclusive)
+    const isAllDay = event.startDate.length === 10;
+    const gcalEndDate = isAllDay && event.endDate ? addOneDay(event.endDate) : event.endDate;
+    const gcalId = await gcalService.insertEvent(calId, {
+      summary: event.title,
+      description: event.memo,
+      startDate: event.startDate,
+      endDate: gcalEndDate,
+      extendedProperties: toBflowMeta(event),
+    });
+    // 성공: temp ID를 실제 ID로 교체
+    const idx = eventCache.findIndex((e) => e.id === tempId);
+    if (idx >= 0) eventCache[idx] = { ...tempEvent, id: gcalId };
+    broadcastCalendarChange({ eventId: gcalId, action: 'update' });
+  } catch (err) {
+    // 실패: 롤백
+    eventCache = eventCache.filter((e) => e.id !== tempId);
+    broadcastCalendarChange();
+    throw err;
+  }
 }
 
 export async function updateEvent(eventId: string, updates: Partial<CalendarEvent>): Promise<void> {
@@ -141,16 +173,30 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   const calId = getTargetCalendar(existing.type);
   if (!calId) return;
 
-  await gcalService.updateEvent(calId, eventId, {
-    summary: updates.title,
-    description: updates.memo,
-    startDate: updates.startDate,
-    endDate: updates.endDate,
-    extendedProperties: toBflowMeta({ ...existing, ...updates }),
-  });
-
+  // 낙관적 업데이트: 캐시 먼저 업데이트
+  const previous = { ...existing };
   eventCache = eventCache.map((e) => (e.id === eventId ? { ...e, ...updates } : e));
   broadcastCalendarChange({ eventId, action: 'update' });
+
+  try {
+    // GCal 종일 이벤트 종료일 보정 (B flow inclusive → GCal exclusive)
+    const effectiveStart = updates.startDate ?? existing.startDate;
+    const effectiveEnd = updates.endDate ?? existing.endDate;
+    const isAllDay = effectiveStart.length === 10;
+    const gcalEndDate = isAllDay && effectiveEnd ? addOneDay(effectiveEnd) : effectiveEnd;
+    await gcalService.updateEvent(calId, eventId, {
+      summary: updates.title,
+      description: updates.memo,
+      startDate: updates.startDate,
+      endDate: gcalEndDate,
+      extendedProperties: toBflowMeta({ ...existing, ...updates }),
+    });
+  } catch (err) {
+    // 실패: 롤백
+    eventCache = eventCache.map((e) => (e.id === eventId ? previous : e));
+    broadcastCalendarChange({ eventId, action: 'update' });
+    throw err;
+  }
 }
 
 export async function deleteEvent(eventId: string): Promise<void> {
@@ -160,9 +206,18 @@ export async function deleteEvent(eventId: string): Promise<void> {
   const calId = getTargetCalendar(existing.type);
   if (!calId) return;
 
-  await gcalService.deleteEvent(calId, eventId);
+  // 낙관적 업데이트: 캐시 먼저 업데이트
   eventCache = eventCache.filter((e) => e.id !== eventId);
   broadcastCalendarChange({ eventId, action: 'delete' });
+
+  try {
+    await gcalService.deleteEvent(calId, eventId);
+  } catch (err) {
+    // 실패: 롤백
+    eventCache = [...eventCache, existing];
+    broadcastCalendarChange({ eventId, action: 'add' });
+    throw err;
+  }
 }
 
 function broadcastCalendarChange(detail?: { eventId?: string; action?: 'add' | 'update' | 'delete' }) {

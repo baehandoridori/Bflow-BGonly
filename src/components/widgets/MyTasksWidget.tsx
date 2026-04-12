@@ -60,6 +60,7 @@ const ASSIGNED_TODOS_KEY = 'bflow_assigned_personal_todos';
 const ASSIGNED_SCENES_KEY = 'bflow_assigned_scene_keys';
 const MIGRATION_DONE_KEY = 'bflow_migration_todos_done';
 
+// 아래 localStorage 함수들은 마이그레이션 전용 (정상 운영 시 Supabase 사용)
 function loadViews(): TaskView[] {
   try {
     const raw = localStorage.getItem(VIEWS_KEY);

@@ -718,11 +718,14 @@ ipcMain.handle(
     try {
       const result = await driveUploadImage(sheetName, sceneId, imageType, base64Data);
 
-      // Drive 업로드 성공 시 manifest 갱신
-      const driveKey = `${sheetName}/${sceneId}/${imageType}`;
+      // Drive 업로드 성공 시 manifest 갱신 (파일명 키는 GAS 네이밍 규칙과 일치)
+      const typeSuffix = imageType === 'storyboard' ? 'sb' : 'guide';
+      const mimeMatch = base64Data.match(/^data:(image\/(\w+));base64,/);
+      const ext = mimeMatch?.[2] === 'png' ? '.png' : '.jpg';
+      const manifestKey = `${sheetName}_${sceneId}_${typeSuffix}${ext}`;
       const manifest = loadImageManifest();
-      manifest[driveKey] = {
-        ...(manifest[driveKey] ?? { size: 0 }),
+      manifest[manifestKey] = {
+        ...(manifest[manifestKey] ?? { size: 0 }),
         driveUrl: result.url,
         uploadedAt: new Date().toISOString(),
       };
@@ -1649,6 +1652,9 @@ app.whenReady().then(() => {
 app.on('before-quit', (e) => {
   if (isQuitting) return;
   isQuitting = true;
+
+  // GCal Watch 채널 중지
+  gcal.stopAllWatches().catch(() => {});
 
   // Supabase Realtime 정리
   teardownRealtime();

@@ -10,7 +10,7 @@ import { google, calendar_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import http from 'http';
 import { URL } from 'url';
-import { shell, app } from 'electron';
+import { shell, app, safeStorage } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -30,7 +30,8 @@ const WATCH_STATE_FILE = 'gcal-watch-state.json';
 // ─── Edge Function webhook URL ──────────────────────────────
 // TODO: Supabase 프로젝트 배포 후 실제 URL로 교체
 const WEBHOOK_URL = 'https://mpqifkpxalwxgcrddchv.supabase.co/functions/v1/gcal-webhook';
-const WEBHOOK_TOKEN = 'bflow-gcal-webhook-secret'; // Edge Function과 공유하는 검증 토큰
+// TODO: 프로덕션 배포 시 Supabase GCAL_WEBHOOK_TOKEN secret과 동기화 필요
+const WEBHOOK_TOKEN = 'bflow-gcal-wh-f9a3c7e1d2b4';
 
 function getDataPath(): string {
   return app.getPath('userData');
@@ -50,6 +51,34 @@ function writeJsonFile(fileName: string, data: unknown): void {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
+/** 암호화 파일 쓰기 (민감 데이터용) */
+function writeEncryptedFile(fileName: string, data: unknown): void {
+  const filePath = path.join(getDataPath(), fileName);
+  const json = JSON.stringify(data);
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(json);
+    fs.writeFileSync(filePath, encrypted);
+  } else {
+    // Fallback: 암호화 불가 시 평문 저장
+    fs.writeFileSync(filePath, json, 'utf-8');
+  }
+}
+
+/** 암호화 파일 읽기 (민감 데이터용) */
+function readEncryptedFile<T>(fileName: string): T | null {
+  try {
+    const filePath = path.join(getDataPath(), fileName);
+    const raw = fs.readFileSync(filePath);
+    if (safeStorage.isEncryptionAvailable()) {
+      const decrypted = safeStorage.decryptString(raw);
+      return JSON.parse(decrypted);
+    }
+    return JSON.parse(raw.toString('utf-8'));
+  } catch {
+    return null;
+  }
+}
+
 // ─── OAuth2 클라이언트 ──────────────────────────────
 
 let oauth2Client: OAuth2Client | null = null;
@@ -59,8 +88,8 @@ function getOAuth2Client(): OAuth2Client {
   if (!oauth2Client) {
     oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
     oauth2Client.on('tokens', (tokens) => {
-      const saved = readJsonFile<Record<string, unknown>>(TOKENS_FILE) || {};
-      writeJsonFile(TOKENS_FILE, { ...saved, ...tokens });
+      const saved = readEncryptedFile<Record<string, unknown>>(TOKENS_FILE) || {};
+      writeEncryptedFile(TOKENS_FILE, { ...saved, ...tokens });
     });
   }
   return oauth2Client;
@@ -75,7 +104,7 @@ function getCalendarApi(): calendar_v3.Calendar {
 
 /** 저장된 토큰 복원. 성공 시 true */
 export function restoreTokens(): boolean {
-  const tokens = readJsonFile<Record<string, unknown>>(TOKENS_FILE);
+  const tokens = readEncryptedFile<Record<string, unknown>>(TOKENS_FILE);
   if (tokens) {
     getOAuth2Client().setCredentials(tokens);
     return true;
@@ -112,7 +141,7 @@ export function startAuth(): Promise<void> {
 
           const { tokens } = await client.getToken(code);
           client.setCredentials(tokens);
-          writeJsonFile(TOKENS_FILE, tokens);
+          writeEncryptedFile(TOKENS_FILE, tokens);
           calendarApi = null; // 재생성 강제
 
           resolve();
@@ -121,6 +150,14 @@ export function startAuth(): Promise<void> {
         res.writeHead(500);
         res.end('Authentication failed');
         server.close();
+        reject(err);
+      }
+    });
+
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        reject(new Error(`포트 ${LOOPBACK_PORT}이(가) 이미 사용 중입니다. 다른 앱을 확인해 주세요.`));
+      } else {
         reject(err);
       }
     });
