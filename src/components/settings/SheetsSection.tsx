@@ -177,8 +177,8 @@ export function SheetsSection() {
     }
   };
 
-  const handleCalendarSelect = (calId: string) => {
-    const updated: GCalSettings = { ...gcalSettings, teamCalendarId: calId || null };
+  const handleCalendarSelect = (field: 'teamCalendarId' | 'personalCalendarId', calId: string) => {
+    const updated: GCalSettings = { ...gcalSettings, [field]: calId || null };
     saveGCalSettings(updated);
     setGcalSettingsState(updated);
   };
@@ -348,7 +348,7 @@ export function SheetsSection() {
               <label className="block text-xs text-text-secondary mb-1.5">팀 캘린더</label>
               <select
                 value={gcalSettings.teamCalendarId || ''}
-                onChange={(e) => handleCalendarSelect(e.target.value)}
+                onChange={(e) => handleCalendarSelect('teamCalendarId', e.target.value)}
                 className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-blue-400"
               >
                 <option value="">캘린더를 선택하세요</option>
@@ -358,6 +358,28 @@ export function SheetsSection() {
                   </option>
                 ))}
               </select>
+              <p className="text-[11px] text-text-secondary/60 mt-1">
+                에피소드·파트·씬·휴가 일정이 저장될 캘린더
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs text-text-secondary mb-1.5">개인 캘린더</label>
+              <select
+                value={gcalSettings.personalCalendarId || ''}
+                onChange={(e) => handleCalendarSelect('personalCalendarId', e.target.value)}
+                className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-blue-400"
+              >
+                <option value="">기본 캘린더 (primary)</option>
+                {calendars.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.summary}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-text-secondary/60 mt-1">
+                개인 할일 일정이 저장될 캘린더 (미선택 시 Google 기본 캘린더)
+              </p>
             </div>
 
             {gcalSettings.lastSyncAt && (

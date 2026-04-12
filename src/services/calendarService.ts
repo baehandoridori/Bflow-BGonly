@@ -79,8 +79,8 @@ function toBflowMeta(event: Partial<CalendarEvent>): Record<string, string> {
 /** 이벤트 타입에 따라 대상 캘린더 결정 */
 function getTargetCalendar(type: CalendarEventType): string | null {
   const settings = getGCalSettings();
-  if (type === 'custom') return settings.personalCalendarId;
-  return settings.teamCalendarId; // episode, part, scene, vacation
+  if (type === 'custom') return settings.personalCalendarId || 'primary';
+  return settings.teamCalendarId || settings.personalCalendarId || 'primary';
 }
 
 // ─── 공개 API (기존 인터페이스 유지) ──────────────────────────
