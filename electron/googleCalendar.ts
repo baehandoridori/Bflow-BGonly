@@ -17,8 +17,8 @@ import crypto from 'crypto';
 
 // ─── 설정 ──────────────────────────────
 
-const CLIENT_ID = 'YOUR_CLIENT_ID';        // TODO: Google Cloud Console에서 발급
-const CLIENT_SECRET = 'YOUR_CLIENT_SECRET'; // TODO: Google Cloud Console에서 발급
+const CLIENT_ID = '117212248614-7lb5o1n41chsr4hst6eejq0ijhvj6hh2.apps.googleusercontent.com';
+const CLIENT_SECRET = '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';
 const LOOPBACK_PORT = 8089;
 const REDIRECT_URI = `http://127.0.0.1:${LOOPBACK_PORT}/oauth2callback`;
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
