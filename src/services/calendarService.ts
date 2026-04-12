@@ -4,19 +4,94 @@
  */
 import type { CalendarEvent, CalendarEventType, BflowEventMeta, GCalSettings } from '@/types/calendar';
 import * as gcalService from './googleCalendarService';
+import { readMetadata, writeMetadata } from './supabaseService';
 
-const GCAL_SETTINGS_KEY = 'bflow_gcal_settings';
+// teamCalendarId는 Supabase metadata에 저장 (팀 전체 공유)
+// personalCalendarId, lastSyncAt은 로컬에만 저장 (사용자별)
+const OLD_SETTINGS_KEY = 'bflow_gcal_settings';
+const GCAL_LOCAL_SETTINGS_KEY = 'bflow_gcal_local_settings';
 
-export function getGCalSettings(): GCalSettings {
-  try {
-    const raw = localStorage.getItem(GCAL_SETTINGS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return { teamCalendarId: null, personalCalendarId: null, lastSyncAt: null };
+interface GCalLocalSettings {
+  personalCalendarId: string | null;
+  lastSyncAt: string | null;
 }
 
+function getLocalSettings(): GCalLocalSettings {
+  try {
+    const raw = localStorage.getItem(GCAL_LOCAL_SETTINGS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return { personalCalendarId: null, lastSyncAt: null };
+}
+
+function saveLocalSettings(settings: GCalLocalSettings): void {
+  localStorage.setItem(GCAL_LOCAL_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+/** 로컬 설정 일부 업데이트 (personalCalendarId, lastSyncAt) */
+export function saveLocalGCalSettings(settings: Partial<GCalLocalSettings>): void {
+  const current = getLocalSettings();
+  saveLocalSettings({ ...current, ...settings });
+}
+
+let cachedTeamCalendarId: string | null | undefined = undefined; // undefined = 아직 로드 안 됨
+
+/** 구 localStorage 전용 설정 → 새 구조로 마이그레이션 */
+async function migrateOldSettings(): Promise<void> {
+  const old = localStorage.getItem(OLD_SETTINGS_KEY);
+  if (!old) return;
+  try {
+    const parsed = JSON.parse(old);
+    if (parsed.teamCalendarId) {
+      await writeMetadata('gcal', 'teamCalendarId', parsed.teamCalendarId);
+      cachedTeamCalendarId = parsed.teamCalendarId;
+    }
+    saveLocalSettings({
+      personalCalendarId: parsed.personalCalendarId || null,
+      lastSyncAt: parsed.lastSyncAt || null,
+    });
+    localStorage.removeItem(OLD_SETTINGS_KEY);
+  } catch { /* ignore */ }
+}
+
+export async function getGCalSettings(): Promise<GCalSettings> {
+  // 구 설정 마이그레이션 (있으면)
+  await migrateOldSettings();
+
+  // teamCalendarId: Supabase metadata에서 로드 (캐시 활용)
+  if (cachedTeamCalendarId === undefined) {
+    try {
+      const meta = await readMetadata('gcal', 'teamCalendarId');
+      cachedTeamCalendarId = meta?.value || null;
+    } catch {
+      cachedTeamCalendarId = null;
+    }
+  }
+
+  const local = getLocalSettings();
+  return {
+    teamCalendarId: cachedTeamCalendarId ?? null,
+    personalCalendarId: local.personalCalendarId,
+    lastSyncAt: local.lastSyncAt,
+  };
+}
+
+/** 팀 캘린더 ID를 Supabase에 저장 (팀 전체 공유) */
+export async function saveTeamCalendarId(calId: string | null): Promise<void> {
+  cachedTeamCalendarId = calId;
+  await writeMetadata('gcal', 'teamCalendarId', calId || '');
+}
+
+/** 하위 호환: 기존 saveGCalSettings 시그니처 유지 (로컬 부분 즉시 저장, 팀 ID는 비동기) */
 export function saveGCalSettings(settings: GCalSettings): void {
-  localStorage.setItem(GCAL_SETTINGS_KEY, JSON.stringify(settings));
+  saveLocalSettings({
+    personalCalendarId: settings.personalCalendarId,
+    lastSyncAt: settings.lastSyncAt,
+  });
+  if (settings.teamCalendarId !== cachedTeamCalendarId) {
+    cachedTeamCalendarId = settings.teamCalendarId;
+    writeMetadata('gcal', 'teamCalendarId', settings.teamCalendarId || '').catch(console.error);
+  }
 }
 
 /** GCal 이벤트 → B flow CalendarEvent 변환 */
@@ -77,8 +152,8 @@ function toBflowMeta(event: Partial<CalendarEvent>): Record<string, string> {
 }
 
 /** 이벤트 타입에 따라 대상 캘린더 결정 */
-function getTargetCalendar(type: CalendarEventType): string | null {
-  const settings = getGCalSettings();
+async function getTargetCalendar(type: CalendarEventType): Promise<string | null> {
+  const settings = await getGCalSettings();
   if (type === 'custom') return settings.personalCalendarId || 'primary';
   return settings.teamCalendarId || settings.personalCalendarId || 'primary';
 }
@@ -88,16 +163,16 @@ function getTargetCalendar(type: CalendarEventType): string | null {
 let eventCache: CalendarEvent[] = [];
 
 export async function loadAllEvents(): Promise<CalendarEvent[]> {
-  return eventCache;
+  return [...eventCache];
 }
 
 export async function getEvents(): Promise<CalendarEvent[]> {
-  return eventCache;
+  return [...eventCache];
 }
 
 /** 전체 동기화 (앱 시작 시 호출) */
 export async function syncAll(): Promise<CalendarEvent[]> {
-  const settings = getGCalSettings();
+  const settings = await getGCalSettings();
   const events: CalendarEvent[] = [];
 
   for (const calId of [settings.teamCalendarId, settings.personalCalendarId]) {
@@ -113,7 +188,7 @@ export async function syncAll(): Promise<CalendarEvent[]> {
 
 /** Incremental 동기화 (webhook 알림 시 호출) */
 export async function syncIncremental(): Promise<void> {
-  const settings = getGCalSettings();
+  const settings = await getGCalSettings();
 
   for (const calId of [settings.teamCalendarId, settings.personalCalendarId]) {
     if (!calId) continue;
@@ -134,7 +209,7 @@ export async function syncIncremental(): Promise<void> {
 }
 
 export async function addEvent(event: CalendarEvent): Promise<void> {
-  const calId = getTargetCalendar(event.type);
+  const calId = await getTargetCalendar(event.type);
   if (!calId) throw new Error('캘린더가 설정되지 않았습니다');
 
   // 낙관적 업데이트: 캐시 먼저 업데이트
@@ -170,7 +245,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   const existing = eventCache.find((e) => e.id === eventId);
   if (!existing) return;
 
-  const calId = getTargetCalendar(existing.type);
+  const calId = await getTargetCalendar(existing.type);
   if (!calId) return;
 
   // 낙관적 업데이트: 캐시 먼저 업데이트
@@ -203,7 +278,7 @@ export async function deleteEvent(eventId: string): Promise<void> {
   const existing = eventCache.find((e) => e.id === eventId);
   if (!existing) return;
 
-  const calId = getTargetCalendar(existing.type);
+  const calId = await getTargetCalendar(existing.type);
   if (!calId) return;
 
   // 낙관적 업데이트: 캐시 먼저 업데이트

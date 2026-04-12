@@ -14,7 +14,7 @@ import {
   checkVacationConnection,
 } from '@/services/vacationService';
 import * as gcalService from '@/services/googleCalendarService';
-import { getGCalSettings, saveGCalSettings, syncAll } from '@/services/calendarService';
+import { getGCalSettings, saveGCalSettings, saveTeamCalendarId, syncAll } from '@/services/calendarService';
 import type { GCalSettings } from '@/types/calendar';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { SettingsSection } from './SettingsSection';
@@ -74,7 +74,7 @@ export function SheetsSection() {
           const cals = await gcalService.listCalendars();
           setCalendars(cals);
         }
-        setGcalSettingsState(getGCalSettings());
+        setGcalSettingsState(await getGCalSettings());
       } catch { /* GCal not configured yet */ }
     }
     load();
@@ -179,8 +179,14 @@ export function SheetsSection() {
 
   const handleCalendarSelect = (field: 'teamCalendarId' | 'personalCalendarId', calId: string) => {
     const updated: GCalSettings = { ...gcalSettings, [field]: calId || null };
-    saveGCalSettings(updated);
-    setGcalSettingsState(updated);
+    if (field === 'teamCalendarId') {
+      // 팀 캘린더는 Supabase에 저장 (비동기, 실패 시 콘솔 에러)
+      saveTeamCalendarId(calId || null).catch(console.error);
+      setGcalSettingsState(updated);
+    } else {
+      saveGCalSettings(updated);
+      setGcalSettingsState(updated);
+    }
   };
 
   const handleGcalSync = async () => {

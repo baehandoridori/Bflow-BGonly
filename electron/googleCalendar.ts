@@ -104,7 +104,11 @@ function getCalendarApi(): calendar_v3.Calendar {
 
 /** 저장된 토큰 복원. 성공 시 true */
 export function restoreTokens(): boolean {
-  const tokens = readEncryptedFile<Record<string, unknown>>(TOKENS_FILE);
+  // 암호화 파일 먼저 시도, 실패 시 평문 JSON fallback (구 버전 호환)
+  let tokens = readEncryptedFile<Record<string, unknown>>(TOKENS_FILE);
+  if (!tokens) {
+    tokens = readJsonFile<Record<string, unknown>>(TOKENS_FILE);
+  }
   if (tokens) {
     getOAuth2Client().setCredentials(tokens);
     return true;

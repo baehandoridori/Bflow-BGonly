@@ -3,7 +3,8 @@ import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Filter, Settings2
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/utils/cn';
 import { useAppStore } from '@/stores/useAppStore';
-import { getEvents, getEventsForDate } from '@/services/calendarService';
+import { getEvents, getEventsForDate, syncAll } from '@/services/calendarService';
+import * as gcalService from '@/services/googleCalendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
 import type { CalendarEvent, CalendarFilter } from '@/types/calendar';
 import { VACATION_COLOR } from '@/types/vacation';
@@ -95,7 +96,17 @@ export function CalendarWidget() {
   const today = fmtDate(new Date());
 
   useEffect(() => {
-    getEvents().then(setEvents);
+    // 초기 로드: 인증된 경우 전체 동기화 후 캐시 반영
+    (async () => {
+      try {
+        const authed = await gcalService.isAuthenticated();
+        if (authed) {
+          await syncAll();
+        }
+      } catch { /* GCal 미연결 시 무시 */ }
+      getEvents().then(setEvents);
+    })();
+
     const refresh = () => getEvents().then(setEvents);
     window.addEventListener('bflow:calendar-changed', refresh);
     return () => window.removeEventListener('bflow:calendar-changed', refresh);
