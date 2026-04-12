@@ -96,20 +96,24 @@ export function CalendarWidget() {
   const today = fmtDate(new Date());
 
   useEffect(() => {
+    let cancelled = false;
     // 초기 로드: 인증된 경우 전체 동기화 후 캐시 반영
     (async () => {
       try {
         const authed = await gcalService.isAuthenticated();
-        if (authed) {
+        if (authed && !cancelled) {
           await syncAll();
         }
       } catch { /* GCal 미연결 시 무시 */ }
-      getEvents().then(setEvents);
+      if (!cancelled) getEvents().then(setEvents);
     })();
 
     const refresh = () => getEvents().then(setEvents);
     window.addEventListener('bflow:calendar-changed', refresh);
-    return () => window.removeEventListener('bflow:calendar-changed', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bflow:calendar-changed', refresh);
+    };
   }, []);
 
   // 휴가 이벤트 로드

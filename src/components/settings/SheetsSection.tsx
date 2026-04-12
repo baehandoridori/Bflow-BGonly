@@ -36,8 +36,8 @@ export function SheetsSection() {
   const [isVacationConnecting, setIsVacationConnecting] = useState(false);
   const [vacationSaveMessage, setVacationSaveMessage] = useState<string | null>(null);
 
-  // Google Calendar 상태
-  const [gcalAuth, setGcalAuth] = useState(false);
+  // Google Calendar 상태 (localStorage 캐시로 깜빡임 방지)
+  const [gcalAuth, setGcalAuth] = useState(() => localStorage.getItem('bflow_gcal_authed') === 'true');
   const [gcalConnecting, setGcalConnecting] = useState(false);
   const [gcalError, setGcalError] = useState<string | null>(null);
   const [calendars, setCalendars] = useState<Array<{ id: string; summary: string; primary: boolean }>>([]);
@@ -69,7 +69,7 @@ export function SheetsSection() {
       // Google Calendar 설정 로드
       try {
         const authed = await gcalService.isAuthenticated();
-        setGcalAuth(authed);
+        setGcalAuth(authed); localStorage.setItem('bflow_gcal_authed', String(authed));
         if (authed) {
           const cals = await gcalService.listCalendars();
           setCalendars(cals);
@@ -152,7 +152,7 @@ export function SheetsSection() {
     try {
       await gcalService.startAuth();
       const authed = await gcalService.isAuthenticated();
-      setGcalAuth(authed);
+      setGcalAuth(authed); localStorage.setItem('bflow_gcal_authed', String(authed));
       if (authed) {
         const cals = await gcalService.listCalendars();
         setCalendars(cals);
@@ -167,7 +167,7 @@ export function SheetsSection() {
   const handleGcalDisconnect = async () => {
     try {
       await gcalService.signOut();
-      setGcalAuth(false);
+      setGcalAuth(false); localStorage.setItem('bflow_gcal_authed', 'false');
       setCalendars([]);
       const cleared: GCalSettings = { teamCalendarId: null, personalCalendarId: null, lastSyncAt: null };
       saveGCalSettings(cleared);

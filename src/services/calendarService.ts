@@ -173,12 +173,23 @@ export async function getEvents(): Promise<CalendarEvent[]> {
 /** 전체 동기화 (앱 시작 시 호출) */
 export async function syncAll(): Promise<CalendarEvent[]> {
   const settings = await getGCalSettings();
+  const seen = new Set<string>();
   const events: CalendarEvent[] = [];
 
-  for (const calId of [settings.teamCalendarId, settings.personalCalendarId]) {
-    if (!calId) continue;
+  // 팀/개인 캘린더 목록 (중복 제거)
+  const calIds = new Set<string>();
+  if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
+  if (settings.personalCalendarId) calIds.add(settings.personalCalendarId);
+  if (calIds.size === 0) calIds.add('primary');
+
+  for (const calId of calIds) {
     const gcalEvents = await gcalService.fullSync(calId);
-    events.push(...gcalEvents.map((e: any) => toCalendarEvent(e, calId)));
+    for (const e of gcalEvents) {
+      if (e.id && !seen.has(e.id)) {
+        seen.add(e.id);
+        events.push(toCalendarEvent(e, calId));
+      }
+    }
   }
 
   eventCache = events;
@@ -190,8 +201,13 @@ export async function syncAll(): Promise<CalendarEvent[]> {
 export async function syncIncremental(): Promise<void> {
   const settings = await getGCalSettings();
 
-  for (const calId of [settings.teamCalendarId, settings.personalCalendarId]) {
-    if (!calId) continue;
+  // 팀/개인 캘린더 목록 (중복 제거)
+  const calIds = new Set<string>();
+  if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
+  if (settings.personalCalendarId) calIds.add(settings.personalCalendarId);
+  if (calIds.size === 0) calIds.add('primary');
+
+  for (const calId of calIds) {
     const { updated, deleted } = await gcalService.incrementalSync(calId);
 
     // 삭제
