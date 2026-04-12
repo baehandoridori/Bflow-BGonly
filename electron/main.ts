@@ -717,6 +717,17 @@ ipcMain.handle(
   async (_event, sheetName: string, sceneId: string, imageType: string, base64Data: string) => {
     try {
       const result = await driveUploadImage(sheetName, sceneId, imageType, base64Data);
+
+      // Drive 업로드 성공 시 manifest 갱신
+      const driveKey = `${sheetName}/${sceneId}/${imageType}`;
+      const manifest = loadImageManifest();
+      manifest[driveKey] = {
+        ...(manifest[driveKey] ?? { size: 0 }),
+        driveUrl: result.url,
+        uploadedAt: new Date().toISOString(),
+      };
+      saveImageManifest(manifest);
+
       return { ok: true, url: result.url };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -905,6 +916,77 @@ ipcMain.handle('vacation:delete-dahyu', async (_event, rowIndices: number[]) => 
   }
 });
 
+// ─── 이미지 캐시 manifest ────────────────────────────
+
+const IMAGES_DIR = path.join(getDataPath(), 'images');
+
+interface ImageManifest {
+  [filename: string]: {
+    driveUrl?: string;
+    uploadedAt?: string;
+    size: number;
+  };
+}
+
+function loadImageManifest(): ImageManifest {
+  try {
+    const manifestPath = path.join(IMAGES_DIR, 'manifest.json');
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveImageManifest(manifest: ImageManifest): void {
+  ensureDir(IMAGES_DIR);
+  const manifestPath = path.join(IMAGES_DIR, 'manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+}
+
+/** 앱 시작 시 캐시 크기 확인 + Drive 백업된 오래된 파일 자동 정리 */
+function cleanupImageCache(maxSizeMB: number = 500): void {
+  if (!fs.existsSync(IMAGES_DIR)) return;
+
+  const manifest = loadImageManifest();
+
+  const files = fs.readdirSync(IMAGES_DIR)
+    .filter((f) => f !== 'manifest.json')
+    .map((f) => {
+      const filePath = path.join(IMAGES_DIR, f);
+      try {
+        const stat = fs.statSync(filePath);
+        return { name: f, path: filePath, stat };
+      } catch {
+        return null;
+      }
+    })
+    .filter((f): f is NonNullable<typeof f> => f !== null)
+    .sort((a, b) => a.stat.mtimeMs - b.stat.mtimeMs); // 오래된 것 먼저
+
+  let totalSize = files.reduce((sum, f) => sum + f.stat.size, 0);
+  const maxSize = maxSizeMB * 1024 * 1024;
+
+  if (totalSize <= maxSize) return;
+
+  console.log(`[ImageCache] 캐시 크기 ${(totalSize / 1024 / 1024).toFixed(1)}MB > ${maxSizeMB}MB, 정리 시작`);
+
+  for (const file of files) {
+    if (totalSize <= maxSize) break;
+
+    const meta = manifest[file.name];
+    if (meta?.driveUrl) {
+      // Drive에 원본이 있으면 삭제 가능
+      fs.unlinkSync(file.path);
+      delete manifest[file.name];
+      totalSize -= file.stat.size;
+      console.log(`[ImageCache] 삭제: ${file.name} (Drive 백업 있음)`);
+    }
+  }
+
+  saveImageManifest(manifest);
+  console.log(`[ImageCache] 정리 완료, 현재 크기: ${(totalSize / 1024 / 1024).toFixed(1)}MB`);
+}
+
 // ─── IPC 핸들러: 이미지 파일 저장 ────────────────────────────
 
 ipcMain.handle(
@@ -920,6 +1002,13 @@ ipcMain.handle(
     const buffer = Buffer.from(match[1], 'base64');
     const filePath = path.join(imagesDir, fileName);
     fs.writeFileSync(filePath, buffer);
+
+    // manifest에 기록
+    const manifest = loadImageManifest();
+    manifest[fileName] = {
+      size: buffer.length,
+    };
+    saveImageManifest(manifest);
 
     return `bflow-img://local/${encodeURIComponent(fileName)}`;
   }
@@ -1467,6 +1556,9 @@ app.whenReady().then(() => {
 
   // 위젯 위치 캐시 로드 (Phase 0-6)
   loadWidgetPositions();
+
+  // 이미지 캐시 정리 (500MB 초과 시 Drive 백업된 파일 자동 삭제)
+  cleanupImageCache();
 
   // bflow-img:// 프로토콜 핸들러: userData/images/ 폴더에서 이미지 서빙
   // standard URL이므로 hostname은 소문자로 변환됨 → pathname에 파일명 보관
