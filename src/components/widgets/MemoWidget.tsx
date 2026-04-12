@@ -162,7 +162,12 @@ async function migrateMemoToSupabase(userId: string): Promise<void> {
 
     console.log('[MemoWidget] memo.json → Supabase 마이그레이션 완료');
   } catch (err) {
-    console.error('[MemoWidget] 마이그레이션 실패 (다음 실행 시 재시도):', err);
+    const msg = String(err);
+    if (msg.includes('foreign key constraint') || msg.includes('violates')) {
+      console.warn('[MemoWidget] 마이그레이션 스킵: 사용자가 Supabase에 존재하지 않음 (재로그인 필요)');
+    } else {
+      console.error('[MemoWidget] 마이그레이션 실패 (다음 실행 시 재시도):', err);
+    }
   }
 }
 

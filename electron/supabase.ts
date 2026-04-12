@@ -885,8 +885,10 @@ export async function upsertTodo(
   },
 ): Promise<string> {
   const now = new Date().toISOString();
+  // UUID 형식 검증: 기존 localStorage ID (ptodo_*)는 UUID가 아니므로 새 ID 생성
+  const isValidUuid = todo.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(todo.id);
   const row = {
-    ...(todo.id ? { id: todo.id } : {}),
+    ...(isValidUuid ? { id: todo.id } : {}),
     user_id: userId,
     title: todo.title,
     memo: todo.memo,

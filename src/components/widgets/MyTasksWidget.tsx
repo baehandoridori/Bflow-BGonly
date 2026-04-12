@@ -171,7 +171,7 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
       for (let i = 0; i < todos.length; i++) {
         const todo = todos[i];
         await supabaseService.upsertTodo(userId, {
-          id: todo.id,
+          // id를 전달하지 않음: 기존 localStorage ID(ptodo_*)는 UUID가 아니므로 새로 생성
           title: todo.title,
           memo: todo.memo,
           completed: todo.completed,
@@ -199,7 +199,12 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
 
     console.log('[MyTasks] 마이그레이션 완료');
   } catch (err) {
-    console.error('[MyTasks] 마이그레이션 실패 (다음 실행 시 재시도):', err);
+    const msg = String(err);
+    if (msg.includes('foreign key constraint') || msg.includes('violates')) {
+      console.warn('[MyTasks] 마이그레이션 스킵: 사용자가 Supabase에 존재하지 않음 (재로그인 필요)');
+    } else {
+      console.error('[MyTasks] 마이그레이션 실패 (다음 실행 시 재시도):', err);
+    }
   }
 }
 
