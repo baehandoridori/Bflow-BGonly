@@ -1,6 +1,6 @@
 {
   "name": "bflow",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -20,6 +20,7 @@
     "@supabase/supabase-js": "^2.99.1",
     "clsx": "^2.1.0",
     "framer-motion": "^10.18.0",
+    "googleapis": "^171.4.0",
     "lucide-react": "^0.303.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
