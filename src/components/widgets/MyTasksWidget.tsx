@@ -1287,16 +1287,22 @@ export function MyTasksWidget() {
   // ─── 개인 할일 조작 ─────────────────────
   const addPersonalTodo = async (todo: PersonalTodo) => {
     if (activeView.id === DEFAULT_VIEW.id) {
-      setAssignedTodos((prev) => {
-        const newList = [...prev, todo];
-        // Supabase 저장 (낙관적: 상태 반영 후 비동기 저장)
-        if (currentUser?.id) {
-          saveTodoToSupabase(currentUser.id, todo, newList.length - 1).catch((err) =>
-            console.error('[MyTasks] 할일 추가 저장 실패:', err),
-          );
-        }
-        return newList;
-      });
+      // _fromExternal 플래그로 useEffect 재저장 방지 (여기서 직접 저장하므로)
+      _fromExternal.current = true;
+      setAssignedTodos((prev) => [...prev, todo]);
+      requestAnimationFrame(() => { _fromExternal.current = false; });
+      // Supabase 저장 (낙관적: 상태 반영 후 비동기 저장)
+      if (currentUser?.id) {
+        saveTodoToSupabase(currentUser.id, todo, assignedTodos.length).then((returnedId) => {
+          if (returnedId && returnedId !== todo.id) {
+            _fromExternal.current = true;
+            setAssignedTodos((prev) => prev.map((t) => t.id === todo.id ? { ...t, id: returnedId } : t));
+            requestAnimationFrame(() => { _fromExternal.current = false; });
+          }
+        }).catch((err) =>
+          console.error('[MyTasks] 할일 추가 저장 실패:', err),
+        );
+      }
     } else {
       setCustomViews((prev) => {
         const newViews = prev.map((v) =>
@@ -1519,10 +1525,22 @@ export function MyTasksWidget() {
       if (!detail?.eventId) return;
       const eventId = detail.eventId as string;
 
-      // todo 연결 이벤트만 처리 (cal_ptodo_* 또는 cal_로 시작)
-      if (!eventId.startsWith('cal_ptodo_') && !eventId.startsWith('cal_')) return;
-
-      const todoId = eventId.replace(/^cal_/, '');
+      // todo 연결 이벤트 확인:
+      // 1) cal_xxx 형식의 로컬 ID
+      // 2) Google ID → linkedTodoId로 역추적
+      let todoId: string | null = null;
+      if (eventId.startsWith('cal_')) {
+        todoId = eventId.replace(/^cal_/, '');
+      } else {
+        // Google ID → findEventByTodoId 로 연결된 할일 찾기
+        const { findEventByTodoId: findByTodo } = await import('@/services/calendarService');
+        // eventCache에서 이 ID의 이벤트가 linkedTodoId를 갖고 있는지 확인
+        const { getEvents: fetchEvents } = await import('@/services/calendarService');
+        const allEvents = await fetchEvents();
+        const matched = allEvents.find((ev) => ev.id === eventId && ev.linkedTodoId);
+        if (matched?.linkedTodoId) todoId = matched.linkedTodoId;
+      }
+      if (!todoId) return;
 
       if (detail.action === 'delete') {
         // 캘린더 이벤트 삭제됨 → todo의 addToCalendar 플래그만 해제 (todo 자체는 유지)
