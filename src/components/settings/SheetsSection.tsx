@@ -180,12 +180,15 @@ export function SheetsSection() {
   const handleCalendarSelect = (field: 'teamCalendarId' | 'personalCalendarId', calId: string) => {
     const updated: GCalSettings = { ...gcalSettings, [field]: calId || null };
     if (field === 'teamCalendarId') {
-      // 팀 캘린더는 Supabase에 저장 (비동기, 실패 시 콘솔 에러)
       saveTeamCalendarId(calId || null).catch(console.error);
       setGcalSettingsState(updated);
     } else {
       saveGCalSettings(updated);
       setGcalSettingsState(updated);
+    }
+    // Watch 채널 등록 (실시간 동기화용)
+    if (calId) {
+      gcalService.ensureWatch(calId, 'bflow').catch(() => {})
     }
   };
 

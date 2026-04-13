@@ -194,6 +194,15 @@ export async function syncAll(): Promise<CalendarEvent[]> {
 
   eventCache = events;
   broadcastCalendarChange();
+
+  // Watch 채널 등록 (실시간 동기화용)
+  // 비동기로 실행 — sync 완료를 블로킹하지 않음
+  for (const calId of calIds) {
+    gcalService.ensureWatch(calId, 'bflow').catch((err) =>
+      console.warn('[Calendar] Watch 등록 실패 (수동 동기화는 가능):', err),
+    );
+  }
+
   return events;
 }
 
@@ -224,15 +233,36 @@ export async function syncIncremental(): Promise<void> {
   broadcastCalendarChange();
 }
 
+// ─── 로컬 ID ↔ GCal ID 매핑 (할일 등 cal_* ID 호환용) ──────────────────
+
+const localToGcalId = new Map<string, string>();
+
+/** 로컬 ID(cal_xxx) 또는 GCal ID로 캐시에서 이벤트 찾기 */
+function resolveEvent(eventId: string): CalendarEvent | undefined {
+  // 직접 매칭
+  const direct = eventCache.find((e) => e.id === eventId);
+  if (direct) return direct;
+  // 로컬 ID → GCal ID 매핑으로 재시도
+  const gcalId = localToGcalId.get(eventId);
+  if (gcalId) return eventCache.find((e) => e.id === gcalId);
+  // linkedTodoId로 폴백 (cal_xxx → todoId 추출)
+  if (eventId.startsWith('cal_')) {
+    const todoId = eventId.slice(4);
+    return eventCache.find((e) => e.linkedTodoId === todoId);
+  }
+  return undefined;
+}
+
 export async function addEvent(event: CalendarEvent): Promise<void> {
   const calId = await getTargetCalendar(event.type);
   if (!calId) throw new Error('캘린더가 설정되지 않았습니다');
 
-  // 낙관적 업데이트: 캐시 먼저 업데이트
-  const tempId = `temp_${Date.now()}`;
-  const tempEvent = { ...event, id: tempId };
-  eventCache.push(tempEvent);
-  broadcastCalendarChange({ eventId: tempId, action: 'add' });
+  // caller가 제공한 로컬 ID 보존 (cal_xxx 등)
+  const localId = event.id;
+
+  // 낙관적 업데이트: 로컬 ID로 캐시에 먼저 추가
+  eventCache.push({ ...event });
+  broadcastCalendarChange({ eventId: localId, action: 'add' });
 
   try {
     // GCal 종일 이벤트 종료일 보정 (B flow inclusive → GCal exclusive)
@@ -245,37 +275,40 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
       endDate: gcalEndDate,
       extendedProperties: toBflowMeta(event),
     });
-    // 성공: temp ID를 실제 ID로 교체
-    const idx = eventCache.findIndex((e) => e.id === tempId);
-    if (idx >= 0) eventCache[idx] = { ...tempEvent, id: gcalId };
+    // 성공: 로컬 ID → GCal ID 매핑 등록 + 캐시 ID 교체
+    if (localId !== gcalId) {
+      localToGcalId.set(localId, gcalId);
+    }
+    const idx = eventCache.findIndex((e) => e.id === localId);
+    if (idx >= 0) eventCache[idx] = { ...eventCache[idx], id: gcalId };
     broadcastCalendarChange({ eventId: gcalId, action: 'update' });
   } catch (err) {
     // 실패: 롤백
-    eventCache = eventCache.filter((e) => e.id !== tempId);
+    eventCache = eventCache.filter((e) => e.id !== localId);
     broadcastCalendarChange();
     throw err;
   }
 }
 
 export async function updateEvent(eventId: string, updates: Partial<CalendarEvent>): Promise<void> {
-  const existing = eventCache.find((e) => e.id === eventId);
+  const existing = resolveEvent(eventId);
   if (!existing) return;
+  const actualId = existing.id; // GCal ID (캐시에 저장된 실제 ID)
 
   const calId = await getTargetCalendar(existing.type);
   if (!calId) return;
 
   // 낙관적 업데이트: 캐시 먼저 업데이트
   const previous = { ...existing };
-  eventCache = eventCache.map((e) => (e.id === eventId ? { ...e, ...updates } : e));
-  broadcastCalendarChange({ eventId, action: 'update' });
+  eventCache = eventCache.map((e) => (e.id === actualId ? { ...e, ...updates } : e));
+  broadcastCalendarChange({ eventId: actualId, action: 'update' });
 
   try {
-    // GCal 종일 이벤트 종료일 보정 (B flow inclusive → GCal exclusive)
     const effectiveStart = updates.startDate ?? existing.startDate;
     const effectiveEnd = updates.endDate ?? existing.endDate;
     const isAllDay = effectiveStart.length === 10;
     const gcalEndDate = isAllDay && effectiveEnd ? addOneDay(effectiveEnd) : effectiveEnd;
-    await gcalService.updateEvent(calId, eventId, {
+    await gcalService.updateEvent(calId, actualId, {
       summary: updates.title,
       description: updates.memo,
       startDate: updates.startDate,
@@ -284,29 +317,32 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     });
   } catch (err) {
     // 실패: 롤백
-    eventCache = eventCache.map((e) => (e.id === eventId ? previous : e));
-    broadcastCalendarChange({ eventId, action: 'update' });
+    eventCache = eventCache.map((e) => (e.id === actualId ? previous : e));
+    broadcastCalendarChange({ eventId: actualId, action: 'update' });
     throw err;
   }
 }
 
 export async function deleteEvent(eventId: string): Promise<void> {
-  const existing = eventCache.find((e) => e.id === eventId);
+  const existing = resolveEvent(eventId);
   if (!existing) return;
+  const actualId = existing.id; // GCal ID
 
   const calId = await getTargetCalendar(existing.type);
   if (!calId) return;
 
   // 낙관적 업데이트: 캐시 먼저 업데이트
-  eventCache = eventCache.filter((e) => e.id !== eventId);
-  broadcastCalendarChange({ eventId, action: 'delete' });
+  eventCache = eventCache.filter((e) => e.id !== actualId);
+  // 매핑도 정리
+  localToGcalId.delete(eventId);
+  broadcastCalendarChange({ eventId: actualId, action: 'delete' });
 
   try {
-    await gcalService.deleteEvent(calId, eventId);
+    await gcalService.deleteEvent(calId, actualId);
   } catch (err) {
     // 실패: 롤백
     eventCache = [...eventCache, existing];
-    broadcastCalendarChange({ eventId, action: 'add' });
+    broadcastCalendarChange({ eventId: actualId, action: 'add' });
     throw err;
   }
 }
