@@ -17,8 +17,19 @@ import crypto from 'crypto';
 
 // ─── 설정 ──────────────────────────────
 
-const CLIENT_ID = '117212248614-7lb5o1n41chsr4hst6eejq0ijhvj6hh2.apps.googleusercontent.com';
-const CLIENT_SECRET = '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';
+// OAuth2 자격 증명은 gcal-credentials.json에서 로드 (Push Protection 대응)
+function loadGCalCredentials(): { clientId: string; clientSecret: string } {
+  const credPath = path.join(getDataPath(), 'gcal-credentials.json');
+  try {
+    const creds = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+    return { clientId: creds.clientId || '', clientSecret: creds.clientSecret || '' };
+  } catch {
+    return { clientId: '', clientSecret: '' };
+  }
+}
+const _creds = loadGCalCredentials();
+const CLIENT_ID = _creds.clientId;
+const CLIENT_SECRET = _creds.clientSecret;
 const LOOPBACK_PORT = 8089;
 const REDIRECT_URI = `http://127.0.0.1:${LOOPBACK_PORT}/oauth2callback`;
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
@@ -124,6 +135,12 @@ export function isAuthenticated(): boolean {
 
 /** OAuth2 인증 시작 (시스템 브라우저 열기) */
 export function startAuth(): Promise<void> {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    return Promise.reject(new Error(
+      'Google Calendar 자격 증명이 설정되지 않았습니다.\n' +
+      `${getDataPath()}/gcal-credentials.json 파일에 clientId, clientSecret을 설정해 주세요.`
+    ));
+  }
   const client = getOAuth2Client();
   const authorizeUrl = client.generateAuthUrl({
     access_type: 'offline',
