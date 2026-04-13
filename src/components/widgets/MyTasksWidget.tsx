@@ -116,8 +116,9 @@ async function loadTodosFromSupabase(userId: string): Promise<PersonalTodo[]> {
   }
 }
 
-async function saveTodoToSupabase(userId: string, todo: PersonalTodo, sortOrder?: number): Promise<void> {
-  await supabaseService.upsertTodo(userId, {
+/** Supabase에 할일 저장. 서버에서 확정된 UUID를 반환 (로컬 ID가 ptodo_* 등이면 새 UUID 생성) */
+async function saveTodoToSupabase(userId: string, todo: PersonalTodo, sortOrder?: number): Promise<string> {
+  return supabaseService.upsertTodo(userId, {
     id: todo.id,
     title: todo.title,
     memo: todo.memo,
@@ -1062,8 +1063,17 @@ export function MyTasksWidget() {
     if (_fromExternal.current) return;
     const userId = currentUser.id;
     // assignedTodos 전체를 재저장 (순서 포함)
+    // 반환된 UUID가 기존 ID와 다르면 로컬 state 갱신 (ptodo_* → UUID 전환)
     assignedTodos.forEach((todo, i) => {
-      saveTodoToSupabase(userId, todo, i).catch((err) => {
+      saveTodoToSupabase(userId, todo, i).then((returnedId) => {
+        if (returnedId && returnedId !== todo.id) {
+          _fromExternal.current = true;
+          setAssignedTodos((prev) =>
+            prev.map((t) => (t.id === todo.id ? { ...t, id: returnedId } : t)),
+          );
+          requestAnimationFrame(() => { _fromExternal.current = false; });
+        }
+      }).catch((err) => {
         const msg = String(err);
         if (!msg.includes('foreign key constraint')) {
           console.error('[MyTasks] 할일 저장 실패:', err);

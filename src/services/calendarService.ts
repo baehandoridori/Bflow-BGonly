@@ -95,7 +95,7 @@ export function saveGCalSettings(settings: GCalSettings): void {
 }
 
 /** GCal 이벤트 → B flow CalendarEvent 변환 */
-function toCalendarEvent(gcalEvent: any, _calendarId: string): CalendarEvent {
+function toCalendarEvent(gcalEvent: any, calendarId: string): CalendarEvent {
   const meta = (gcalEvent.extendedProperties?.private || {}) as Partial<BflowEventMeta>;
   const isAllDay = !!gcalEvent.start?.date;
   const startDate = isAllDay ? gcalEvent.start.date : gcalEvent.start?.dateTime?.slice(0, 10);
@@ -127,6 +127,7 @@ function toCalendarEvent(gcalEvent: any, _calendarId: string): CalendarEvent {
     vacationType: meta.bflow_vacation_type,
     vacationUserName: meta.bflow_vacation_user,
     isReadOnly: !meta.bflow_type, // B flow에서 만들지 않은 이벤트는 읽기 전용
+    sourceCalendarId: calendarId,
   };
 }
 
@@ -260,8 +261,8 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
   // caller가 제공한 로컬 ID 보존 (cal_xxx 등)
   const localId = event.id;
 
-  // 낙관적 업데이트: 로컬 ID로 캐시에 먼저 추가
-  eventCache.push({ ...event });
+  // 낙관적 업데이트: 로컬 ID로 캐시에 먼저 추가 + 원본 캘린더 ID 기록
+  eventCache.push({ ...event, sourceCalendarId: calId });
   broadcastCalendarChange({ eventId: localId, action: 'add' });
 
   try {
@@ -295,7 +296,8 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   if (!existing) return;
   const actualId = existing.id; // GCal ID (캐시에 저장된 실제 ID)
 
-  const calId = await getTargetCalendar(existing.type);
+  // 원본 캘린더 ID 우선 사용 (캘린더 설정 변경 후에도 올바른 캘린더에서 수정)
+  const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
   if (!calId) return;
 
   // 낙관적 업데이트: 캐시 먼저 업데이트
@@ -328,7 +330,8 @@ export async function deleteEvent(eventId: string): Promise<void> {
   if (!existing) return;
   const actualId = existing.id; // GCal ID
 
-  const calId = await getTargetCalendar(existing.type);
+  // 원본 캘린더 ID 우선 사용
+  const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
   if (!calId) return;
 
   // 낙관적 업데이트: 캐시 먼저 업데이트

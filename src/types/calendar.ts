@@ -54,6 +54,9 @@ export interface CalendarEvent {
   vacationUserName?: string; // 휴가 사용자 이름
   vacationRowIndex?: number; // Vacation Log 행 번호 (취소용)
   isReadOnly?: boolean;      // 드래그/편집 불가 (휴가 이벤트)
+
+  // GCal 연동: 이벤트가 저장된 원본 캘린더 ID (수정/삭제 시 사용)
+  sourceCalendarId?: string;
 }
 
 /** 이벤트 저장소 */
