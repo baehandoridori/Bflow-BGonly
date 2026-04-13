@@ -1038,9 +1038,12 @@ export function MyTasksWidget() {
     if (!_supabaseInitialized.current || !currentUser?.id) return;
     if (_fromExternal.current) return;
     const userId = currentUser.id;
-    saveTaskViewsToSupabase(userId, customViews, assignedSceneKeys).catch((err) =>
-      console.error('[MyTasks] 뷰/씬키 저장 실패:', err),
-    );
+    saveTaskViewsToSupabase(userId, customViews, assignedSceneKeys).catch((err) => {
+      const msg = String(err);
+      if (!msg.includes('foreign key constraint')) {
+        console.error('[MyTasks] 뷰/씬키 저장 실패:', err);
+      }
+    });
     broadcastTodoChange();
   }, [customViews, assignedSceneKeys]);
 
@@ -1050,9 +1053,12 @@ export function MyTasksWidget() {
     const userId = currentUser.id;
     // assignedTodos 전체를 재저장 (순서 포함)
     assignedTodos.forEach((todo, i) => {
-      saveTodoToSupabase(userId, todo, i).catch((err) =>
-        console.error('[MyTasks] 할일 저장 실패:', err),
-      );
+      saveTodoToSupabase(userId, todo, i).catch((err) => {
+        const msg = String(err);
+        if (!msg.includes('foreign key constraint')) {
+          console.error('[MyTasks] 할일 저장 실패:', err);
+        }
+      });
     });
     broadcastTodoChange();
   }, [assignedTodos]);

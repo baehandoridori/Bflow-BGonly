@@ -302,7 +302,10 @@ export function MemoWidget() {
         });
         localStorage.setItem('memo-sync', `${memoKey}:${Date.now()}`);
       } catch (err) {
-        console.error('[MemoWidget] 저장 실패:', err);
+        const msg = String(err);
+        if (!msg.includes('foreign key constraint')) {
+          console.error('[MemoWidget] 저장 실패:', err);
+        }
       }
     }, SAVE_DEBOUNCE_MS);
   }, [memoKey]);
