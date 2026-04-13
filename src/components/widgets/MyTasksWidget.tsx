@@ -168,10 +168,16 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
     const rawTodos = localStorage.getItem(ASSIGNED_TODOS_KEY);
     if (rawTodos) {
       const todos: PersonalTodo[] = JSON.parse(rawTodos);
+      // 이미 마이그레이션된 항목 추적 (재시도 시 중복 방지)
+      const migratedKey = 'bflow_migration_todos_migrated_indices';
+      const migratedSet = new Set<number>(
+        JSON.parse(localStorage.getItem(migratedKey) || '[]'),
+      );
+
       for (let i = 0; i < todos.length; i++) {
+        if (migratedSet.has(i)) continue; // 이미 마이그레이션된 항목 스킵
         const todo = todos[i];
         await supabaseService.upsertTodo(userId, {
-          // id를 전달하지 않음: 기존 localStorage ID(ptodo_*)는 UUID가 아니므로 새로 생성
           title: todo.title,
           memo: todo.memo,
           completed: todo.completed,
@@ -181,7 +187,11 @@ async function migrateLocalStorageToSupabase(userId: string): Promise<void> {
           sortOrder: i,
           createdAt: todo.createdAt,
         });
+        migratedSet.add(i);
+        localStorage.setItem(migratedKey, JSON.stringify([...migratedSet]));
       }
+
+      localStorage.removeItem(migratedKey); // 완료 후 추적 키 제거
     }
 
     const rawViews = localStorage.getItem(VIEWS_KEY);

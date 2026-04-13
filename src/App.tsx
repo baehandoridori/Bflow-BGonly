@@ -685,6 +685,15 @@ export default function App() {
           loadData();
         }, 300);
       }
+
+      if (data.event === 'calendar-changed') {
+        // GCal webhook → incremental sync
+        import('@/services/calendarService').then(({ syncIncremental }) => {
+          syncIncremental().catch((err) =>
+            console.warn('[Broadcast] 캘린더 incremental sync 실패:', err),
+          );
+        });
+      }
     });
     return () => {
       cleanup();

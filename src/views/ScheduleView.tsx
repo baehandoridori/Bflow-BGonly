@@ -1263,10 +1263,24 @@ export function ScheduleView() {
 
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
-    getEvents().then(setEvents);
+    let cancelled = false;
+    // cold cache 방어: 캐시가 비어있으면 syncAll 시도
+    (async () => {
+      const cached = await getEvents();
+      if (cached.length === 0) {
+        try {
+          const { isAuthenticated } = await import('@/services/googleCalendarService');
+          if (await isAuthenticated()) {
+            const { syncAll } = await import('@/services/calendarService');
+            await syncAll();
+          }
+        } catch { /* GCal 미연결 시 무시 */ }
+      }
+      if (!cancelled) getEvents().then(setEvents);
+    })();
     const refresh = () => getEvents().then(setEvents);
     window.addEventListener('bflow:calendar-changed', refresh);
-    return () => window.removeEventListener('bflow:calendar-changed', refresh);
+    return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', refresh); };
   }, []);
 
   // 휴가 이벤트 로드

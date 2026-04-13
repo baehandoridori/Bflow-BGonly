@@ -1653,8 +1653,8 @@ app.on('before-quit', (e) => {
   if (isQuitting) return;
   isQuitting = true;
 
-  // GCal Watch 채널 중지
-  gcal.stopAllWatches().catch(() => {});
+  // GCal Watch 채널 중지 (5초 타임아웃)
+  const watchCleanup = gcal.stopAllWatches().catch(() => {});
 
   // Supabase Realtime 정리
   teardownRealtime();
@@ -1665,21 +1665,25 @@ app.on('before-quit', (e) => {
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
   const totalPending = sheetsPending + vacPending;
-  if (totalPending > 0) {
+  if (totalPending > 0 || watchCleanup) {
     e.preventDefault();
 
-    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
+    if (totalPending > 0) {
+      console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
+    }
 
     // 메인 윈도우에 "저장 중" 알림
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    if (totalPending > 0 && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:saving-before-quit', totalPending);
     }
 
-    // 시트 15초 + 휴가 60초 대기 후 종료
+    // Watch 정리 + 시트 15초 + 휴가 60초 대기 후 종료
+    const watchWithTimeout = Promise.race([watchCleanup, new Promise<void>((r) => setTimeout(r, 5000))]);
     Promise.all([
-      waitForAllPendingOps(15000),
-      waitForVacPendingOps(60000),
-    ]).then(([sheetsDone, vacDone]) => {
+      watchWithTimeout,
+      totalPending > 0 ? waitForAllPendingOps(15000) : Promise.resolve(true),
+      totalPending > 0 ? waitForVacPendingOps(60000) : Promise.resolve(true),
+    ]).then(([, sheetsDone, vacDone]) => {
       if (!sheetsDone || !vacDone) {
         console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
       }
