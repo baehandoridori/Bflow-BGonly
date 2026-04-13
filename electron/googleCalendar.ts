@@ -194,8 +194,13 @@ export function startAuth(): Promise<void> {
   });
 }
 
-/** 인증 해제 */
-export function signOut(): void {
+/** 인증 해제 (Watch 채널도 정리) */
+export async function signOut(): Promise<void> {
+  // Watch 채널 먼저 중지 (토큰 삭제 전에 해야 API 호출 가능)
+  try {
+    await stopAllWatches();
+  } catch { /* 이미 만료되었거나 인증 없을 수 있음 */ }
+
   const tokenPath = path.join(getDataPath(), TOKENS_FILE);
   if (fs.existsSync(tokenPath)) fs.unlinkSync(tokenPath);
   oauth2Client = null;

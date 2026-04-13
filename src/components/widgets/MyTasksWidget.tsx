@@ -1010,6 +1010,8 @@ export function MyTasksWidget() {
 
   // 외부(IPC)에서 받은 변경인지 추적 — true이면 브로드캐스트 스킵
   const _fromExternal = useRef(false);
+  // ptodo_* → UUID 매핑 (비동기 ID 교체 진행 중일 때 삭제 등에서 사용)
+  const _pendingIdMap = useRef(new Map<string, string>());
 
   const broadcastTodoChange = useCallback(() => {
     if (_fromExternal.current) return;
@@ -1067,6 +1069,7 @@ export function MyTasksWidget() {
     assignedTodos.forEach((todo, i) => {
       saveTodoToSupabase(userId, todo, i).then((returnedId) => {
         if (returnedId && returnedId !== todo.id) {
+          _pendingIdMap.current.set(todo.id, returnedId);
           _fromExternal.current = true;
           setAssignedTodos((prev) =>
             prev.map((t) => (t.id === todo.id ? { ...t, id: returnedId } : t)),
@@ -1295,6 +1298,7 @@ export function MyTasksWidget() {
       if (currentUser?.id) {
         saveTodoToSupabase(currentUser.id, todo, assignedTodos.length).then((returnedId) => {
           if (returnedId && returnedId !== todo.id) {
+            _pendingIdMap.current.set(todo.id, returnedId);
             _fromExternal.current = true;
             setAssignedTodos((prev) => prev.map((t) => t.id === todo.id ? { ...t, id: returnedId } : t));
             requestAnimationFrame(() => { _fromExternal.current = false; });
@@ -1370,11 +1374,15 @@ export function MyTasksWidget() {
   };
   const removePersonalTodo = async (todoId: string) => {
     // 낙관적: 목록에서 즉시 제거
+    // ID 매핑 확인: ptodo_* → UUID 교체가 진행 중이면 서버 UUID로 삭제
+    const resolvedId = _pendingIdMap.current.get(todoId) || todoId;
+    _pendingIdMap.current.delete(todoId);
+
     if (activeView.id === DEFAULT_VIEW.id) {
-      setAssignedTodos((prev) => prev.filter((t) => t.id !== todoId));
+      setAssignedTodos((prev) => prev.filter((t) => t.id !== todoId && t.id !== resolvedId));
       // Supabase 삭제
       if (currentUser?.id) {
-        deleteTodoFromSupabase(todoId).catch((err) =>
+        deleteTodoFromSupabase(resolvedId).catch((err) =>
           console.error('[MyTasks] 할일 삭제 실패:', err),
         );
       }

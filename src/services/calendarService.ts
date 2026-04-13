@@ -363,5 +363,12 @@ export function getEventsForDate(events: CalendarEvent[], date: string): Calenda
 }
 
 export async function findEventByTodoId(todoId: string): Promise<CalendarEvent | undefined> {
+  // cold cache 방어: 캐시가 비어있으면 sync 시도
+  if (eventCache.length === 0) {
+    try {
+      const authed = await gcalService.isAuthenticated();
+      if (authed) await syncAll();
+    } catch { /* 무시 */ }
+  }
   return eventCache.find((e) => e.linkedTodoId === todoId);
 }

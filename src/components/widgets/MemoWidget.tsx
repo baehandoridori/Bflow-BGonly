@@ -257,6 +257,7 @@ function MemoTabBar({
 export function MemoWidget() {
   const widgetId = useContext(WidgetIdContext);
   const isPopup = useContext(IsPopupContext);
+  const currentUserId = useAuthStore((s) => s.currentUser?.id);
   const memoKey = getMemoKey(widgetId);
 
   const [memoData, setMemoData] = useState<MemoData>(makeDefaultMemoData);
@@ -269,16 +270,18 @@ export function MemoWidget() {
 
   const activeTab = memoData.tabs.find((t) => t.id === memoData.activeTabId) ?? memoData.tabs[0];
 
-  // 로드 (Supabase)
+  // 로드 (Supabase) — 사용자 전환 시에도 재로드
   useEffect(() => {
     (async () => {
       try {
-        const userId = useAuthStore.getState().currentUser?.id;
-        if (userId) {
-          await migrateMemoToSupabase(userId);
-          const remote = await supabaseService.readMemo(userId, memoKey);
+        if (currentUserId) {
+          await migrateMemoToSupabase(currentUserId);
+          const remote = await supabaseService.readMemo(currentUserId, memoKey);
           if (remote) {
             setMemoData(migrateMemoData(remote));
+          } else {
+            // 사용자 전환 시 이전 데이터 초기화
+            setMemoData(makeDefaultMemoData());
           }
         }
       } catch (err) {
@@ -286,7 +289,7 @@ export function MemoWidget() {
       }
       setLoaded(true);
     })();
-  }, [memoKey]);
+  }, [memoKey, currentUserId]);
 
   // 저장 (debounce, Supabase)
   const save = useCallback((data: MemoData) => {
