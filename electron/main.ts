@@ -607,7 +607,7 @@ ipcMain.handle('gcal:start-auth', wrapIpc(async () => {
 }));
 
 ipcMain.handle('gcal:sign-out', wrapIpc(async () => {
-  gcal.signOut();
+  await gcal.signOut();
 }));
 
 ipcMain.handle('gcal:list-calendars', wrapIpc(async () => {

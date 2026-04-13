@@ -334,7 +334,7 @@ export async function incrementalSync(
     let newSyncToken: string | undefined;
 
     do {
-      const res = await cal.events.list({ calendarId, syncToken, pageToken });
+      const res = await cal.events.list({ calendarId, syncToken, pageToken, singleEvents: true, maxResults: 250 });
       changes.push(...(res.data.items || []));
       pageToken = res.data.nextPageToken || undefined;
       newSyncToken = res.data.nextSyncToken || undefined;

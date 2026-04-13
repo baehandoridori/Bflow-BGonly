@@ -1296,12 +1296,22 @@ export function MyTasksWidget() {
       requestAnimationFrame(() => { _fromExternal.current = false; });
       // Supabase 저장 (낙관적: 상태 반영 후 비동기 저장)
       if (currentUser?.id) {
-        saveTodoToSupabase(currentUser.id, todo, assignedTodos.length).then((returnedId) => {
+        saveTodoToSupabase(currentUser.id, todo, assignedTodos.length).then(async (returnedId) => {
           if (returnedId && returnedId !== todo.id) {
             _pendingIdMap.current.set(todo.id, returnedId);
             _fromExternal.current = true;
             setAssignedTodos((prev) => prev.map((t) => t.id === todo.id ? { ...t, id: returnedId } : t));
             requestAnimationFrame(() => { _fromExternal.current = false; });
+            // 캘린더 이벤트의 linkedTodoId도 갱신 (old ID → new UUID)
+            if (todo.addToCalendar) {
+              try {
+                const { findEventByTodoId, updateEvent } = await import('@/services/calendarService');
+                const calEvent = await findEventByTodoId(todo.id);
+                if (calEvent) {
+                  await updateEvent(calEvent.id, { linkedTodoId: returnedId });
+                }
+              } catch { /* 캘린더 미연결 시 무시 */ }
+            }
           }
         }).catch((err) =>
           console.error('[MyTasks] 할일 추가 저장 실패:', err),
