@@ -170,12 +170,33 @@ async function getTargetCalendar(type: CalendarEventType): Promise<string | null
 // ─── 공개 API (기존 인터페이스 유지) ──────────────────────────
 
 let eventCache: CalendarEvent[] = [];
+let legacyLoaded = false;
+
+/** 기존 calendar-events.json에서 로컬 이벤트 로드 (GCal 전환 전 데이터 보존) */
+async function loadLegacyEvents(): Promise<void> {
+  if (legacyLoaded) return;
+  legacyLoaded = true;
+  try {
+    const data = await window.electronAPI.readSettings('calendar-events.json');
+    if (Array.isArray(data) && data.length > 0) {
+      // GCal sync로 채워진 이벤트와 중복되지 않도록 ID 기반 머지
+      const existingIds = new Set(eventCache.map((e) => e.id));
+      const legacy = (data as CalendarEvent[]).filter((e) => !existingIds.has(e.id));
+      if (legacy.length > 0) {
+        eventCache = [...eventCache, ...legacy];
+        console.log(`[Calendar] 기존 로컬 이벤트 ${legacy.length}개 로드`);
+      }
+    }
+  } catch { /* 파일 없거나 읽기 실패 — 무시 */ }
+}
 
 export async function loadAllEvents(): Promise<CalendarEvent[]> {
+  if (eventCache.length === 0) await loadLegacyEvents();
   return [...eventCache];
 }
 
 export async function getEvents(): Promise<CalendarEvent[]> {
+  if (eventCache.length === 0) await loadLegacyEvents();
   return [...eventCache];
 }
 
