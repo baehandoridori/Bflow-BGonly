@@ -238,8 +238,16 @@ export async function syncIncremental(): Promise<void> {
 
 const localToGcalId = new Map<string, string>();
 
-/** 로컬 ID(cal_xxx) 또는 GCal ID로 캐시에서 이벤트 찾기 */
-function resolveEvent(eventId: string): CalendarEvent | undefined {
+/** 로컬 ID(cal_xxx) 또는 GCal ID로 캐시에서 이벤트 찾기 (cold cache 시 sync 시도) */
+async function resolveEvent(eventId: string): Promise<CalendarEvent | undefined> {
+  // cold cache 방어: 캐시가 비어있으면 sync 시도
+  if (eventCache.length === 0) {
+    try {
+      const authed = await gcalService.isAuthenticated();
+      if (authed) await syncAll();
+    } catch { /* 무시 */ }
+  }
+
   // 직접 매칭
   const direct = eventCache.find((e) => e.id === eventId);
   if (direct) return direct;
@@ -292,7 +300,7 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
 }
 
 export async function updateEvent(eventId: string, updates: Partial<CalendarEvent>): Promise<void> {
-  const existing = resolveEvent(eventId);
+  const existing = await resolveEvent(eventId);
   if (!existing) return;
   const actualId = existing.id; // GCal ID (캐시에 저장된 실제 ID)
 
@@ -326,7 +334,7 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
 }
 
 export async function deleteEvent(eventId: string): Promise<void> {
-  const existing = resolveEvent(eventId);
+  const existing = await resolveEvent(eventId);
   if (!existing) return;
   const actualId = existing.id; // GCal ID
 

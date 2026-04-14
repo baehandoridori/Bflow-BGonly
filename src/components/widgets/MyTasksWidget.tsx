@@ -1012,6 +1012,8 @@ export function MyTasksWidget() {
   const _fromExternal = useRef(false);
   // ptodo_* → UUID 매핑 (비동기 ID 교체 진행 중일 때 삭제 등에서 사용)
   const _pendingIdMap = useRef(new Map<string, string>());
+  // 서버 응답 전에 삭제된 할일 ID (UUID 반환 시 서버에서도 삭제)
+  const _deletedBeforeSync = useRef(new Set<string>());
 
   const broadcastTodoChange = useCallback(() => {
     if (_fromExternal.current) return;
@@ -1298,6 +1300,12 @@ export function MyTasksWidget() {
       if (currentUser?.id) {
         saveTodoToSupabase(currentUser.id, todo, assignedTodos.length).then(async (returnedId) => {
           if (returnedId && returnedId !== todo.id) {
+            // 서버 응답 전에 이미 삭제되었으면 → 서버에서도 삭제
+            if (_deletedBeforeSync.current.has(todo.id)) {
+              _deletedBeforeSync.current.delete(todo.id);
+              deleteTodoFromSupabase(returnedId).catch(() => {});
+              return;
+            }
             _pendingIdMap.current.set(todo.id, returnedId);
             _fromExternal.current = true;
             setAssignedTodos((prev) => prev.map((t) => t.id === todo.id ? { ...t, id: returnedId } : t));
@@ -1387,6 +1395,10 @@ export function MyTasksWidget() {
     // ID 매핑 확인: ptodo_* → UUID 교체가 진행 중이면 서버 UUID로 삭제
     const resolvedId = _pendingIdMap.current.get(todoId) || todoId;
     _pendingIdMap.current.delete(todoId);
+    // 매핑이 아직 안 됐으면 (서버 응답 전) → 나중에 UUID 반환 시 삭제하도록 등록
+    if (resolvedId === todoId && todoId.startsWith('ptodo_')) {
+      _deletedBeforeSync.current.add(todoId);
+    }
 
     if (activeView.id === DEFAULT_VIEW.id) {
       setAssignedTodos((prev) => prev.filter((t) => t.id !== todoId && t.id !== resolvedId));
