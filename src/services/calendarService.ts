@@ -222,7 +222,10 @@ export async function syncAll(): Promise<CalendarEvent[]> {
     }
   }
 
-  eventCache = events;
+  // legacy 로컬 이벤트 보존: GCal에 없는 로컬 전용 이벤트는 유지
+  // (sourceCalendarId가 없는 이벤트 = 기존 calendar-events.json에서 온 것)
+  const legacyEvents = eventCache.filter((e) => !e.sourceCalendarId && !seen.has(e.id));
+  eventCache = [...events, ...legacyEvents];
   broadcastCalendarChange();
 
   // Watch 채널 등록 (실시간 동기화용)
