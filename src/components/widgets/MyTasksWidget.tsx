@@ -289,7 +289,7 @@ function AddTaskModal({
   const handleAddPersonalTodo = () => {
     if (!todoTitle.trim()) return;
     onAddPersonalTodo({
-      id: `ptodo_${Date.now()}`,
+      id: crypto.randomUUID(),
       title: todoTitle.trim(),
       memo: todoMemo.trim(),
       completed: false,
