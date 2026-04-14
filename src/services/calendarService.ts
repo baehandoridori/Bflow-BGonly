@@ -202,6 +202,9 @@ export async function getEvents(): Promise<CalendarEvent[]> {
 
 /** 전체 동기화 (앱 시작 시 호출) */
 export async function syncAll(): Promise<CalendarEvent[]> {
+  // legacy 로컬 이벤트를 먼저 로드 (syncAll이 getEvents보다 먼저 호출될 수 있으므로)
+  await loadLegacyEvents();
+
   const settings = await getGCalSettings();
   const seen = new Set<string>();
   const events: CalendarEvent[] = [];
