@@ -103,10 +103,9 @@ function toCalendarEvent(gcalEvent: any, calendarId: string): CalendarEvent {
 
   // GCal 종일 이벤트는 종료일이 exclusive (3/25~3/26 = 3/25 하루)
   // B flow는 inclusive 종료일을 사용하므로 하루 빼기
+  // UTC 기반 문자열 연산으로 DST 영향 없음
   if (isAllDay && endDate) {
-    const d = new Date(endDate);
-    d.setDate(d.getDate() - 1);
-    endDate = d.toISOString().slice(0, 10);
+    endDate = subtractOneDay(endDate);
   }
 
   return {
@@ -131,11 +130,20 @@ function toCalendarEvent(gcalEvent: any, calendarId: string): CalendarEvent {
   };
 }
 
-/** 종일 이벤트 종료일 보정: inclusive 날짜에 하루 추가 (GCal exclusive → B flow inclusive) */
+/** 날짜 문자열에서 하루 빼기 (UTC 기반, DST 안전) */
+function subtractOneDay(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const utc = Date.UTC(y, m - 1, d - 1);
+  const r = new Date(utc);
+  return `${r.getUTCFullYear()}-${String(r.getUTCMonth() + 1).padStart(2, '0')}-${String(r.getUTCDate()).padStart(2, '0')}`;
+}
+
+/** 날짜 문자열에서 하루 더하기 (UTC 기반, DST 안전) */
 function addOneDay(dateStr: string): string {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const utc = Date.UTC(y, m - 1, d + 1);
+  const r = new Date(utc);
+  return `${r.getUTCFullYear()}-${String(r.getUTCMonth() + 1).padStart(2, '0')}-${String(r.getUTCDate()).padStart(2, '0')}`;
 }
 
 /** B flow CalendarEvent → GCal extendedProperties */
@@ -218,16 +226,23 @@ export async function syncIncremental(): Promise<void> {
   if (calIds.size === 0) calIds.add('primary');
 
   for (const calId of calIds) {
-    const { updated, deleted } = await gcalService.incrementalSync(calId);
+    const { updated, deleted, isFullSync } = await gcalService.incrementalSync(calId);
 
-    // 삭제
-    eventCache = eventCache.filter((e) => !deleted.includes(e.id));
-    // 업데이트/추가
-    for (const gcalEvent of updated) {
-      const converted = toCalendarEvent(gcalEvent, calId);
-      const idx = eventCache.findIndex((e) => e.id === converted.id);
-      if (idx >= 0) eventCache[idx] = converted;
-      else eventCache.push(converted);
+    if (isFullSync) {
+      // fullSync 폴백: 해당 캘린더의 캐시를 완전히 교체 (삭제된 이벤트 제거)
+      eventCache = eventCache.filter((e) => e.sourceCalendarId !== calId);
+      for (const gcalEvent of updated) {
+        eventCache.push(toCalendarEvent(gcalEvent, calId));
+      }
+    } else {
+      // 일반 incremental: 삭제 + 머지
+      eventCache = eventCache.filter((e) => !deleted.includes(e.id));
+      for (const gcalEvent of updated) {
+        const converted = toCalendarEvent(gcalEvent, calId);
+        const idx = eventCache.findIndex((e) => e.id === converted.id);
+        if (idx >= 0) eventCache[idx] = converted;
+        else eventCache.push(converted);
+      }
     }
   }
 

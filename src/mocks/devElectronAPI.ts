@@ -149,7 +149,7 @@ export function installDevElectronAPI(): void {
     gcalSignOut: async () => {},
     gcalListCalendars: async () => [],
     gcalFullSync: async () => [],
-    gcalIncrementalSync: async () => ({ updated: [], deleted: [] }),
+    gcalIncrementalSync: async () => ({ updated: [], deleted: [], isFullSync: false }),
     gcalInsertEvent: async () => '',
     gcalUpdateEvent: async () => {},
     gcalDeleteEvent: async () => {},

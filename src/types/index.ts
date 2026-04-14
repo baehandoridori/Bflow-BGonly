@@ -460,7 +460,7 @@ export interface ElectronAPI {
   gcalSignOut: () => Promise<void>;
   gcalListCalendars: () => Promise<Array<{ id: string; summary: string; primary: boolean }>>;
   gcalFullSync: (calendarId: string) => Promise<any[]>;
-  gcalIncrementalSync: (calendarId: string) => Promise<{ updated: any[]; deleted: string[] }>;
+  gcalIncrementalSync: (calendarId: string) => Promise<{ updated: any[]; deleted: string[]; isFullSync: boolean }>;
   gcalInsertEvent: (calendarId: string, input: unknown) => Promise<string>;
   gcalUpdateEvent: (calendarId: string, eventId: string, input: unknown) => Promise<void>;
   gcalDeleteEvent: (calendarId: string, eventId: string) => Promise<void>;

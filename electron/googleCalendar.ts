@@ -315,16 +315,16 @@ export async function fullSync(calendarId: string): Promise<calendar_v3.Schema$E
   return allEvents;
 }
 
-/** Incremental 동기화 (변경분만) */
+/** Incremental 동기화 (변경분만). isFullSync=true면 fullSync 폴백 발생 — 캐시 교체 필요 */
 export async function incrementalSync(
   calendarId: string,
-): Promise<{ updated: calendar_v3.Schema$Event[]; deleted: string[] }> {
+): Promise<{ updated: calendar_v3.Schema$Event[]; deleted: string[]; isFullSync: boolean }> {
   const state = loadSyncState();
   const syncToken = state[calendarId];
 
   if (!syncToken) {
     const events = await fullSync(calendarId);
-    return { updated: events, deleted: [] };
+    return { updated: events, deleted: [], isFullSync: true };
   }
 
   try {
@@ -348,12 +348,12 @@ export async function incrementalSync(
     const deleted = changes.filter((e) => e.status === 'cancelled').map((e) => e.id!);
     const updated = changes.filter((e) => e.status !== 'cancelled');
 
-    return { updated, deleted };
+    return { updated, deleted, isFullSync: false };
   } catch (err: any) {
     if (err?.code === 410) {
       // syncToken 만료 → full sync
       const events = await fullSync(calendarId);
-      return { updated: events, deleted: [] };
+      return { updated: events, deleted: [], isFullSync: true };
     }
     throw err;
   }

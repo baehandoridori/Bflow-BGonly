@@ -1296,6 +1296,8 @@ export function MyTasksWidget() {
       _fromExternal.current = true;
       setAssignedTodos((prev) => [...prev, todo]);
       requestAnimationFrame(() => { _fromExternal.current = false; });
+      // 다른 창에 할일 추가 알림 (effect가 _fromExternal로 스킵되므로 수동 호출)
+      broadcastTodoChange();
       // Supabase 저장 (낙관적: 상태 반영 후 비동기 저장)
       if (currentUser?.id) {
         saveTodoToSupabase(currentUser.id, todo, assignedTodos.length).then(async (returnedId) => {
