@@ -17,19 +17,25 @@ import crypto from 'crypto';
 
 // ─── 설정 ──────────────────────────────
 
-// OAuth2 자격 증명은 gcal-credentials.json에서 로드 (Push Protection 대응)
-function loadGCalCredentials(): { clientId: string; clientSecret: string } {
+// OAuth2 자격 증명은 gcal-credentials.json에서 lazy 로드
+// (import 시점에는 app.name이 아직 설정되지 않아 getDataPath()가 잘못된 경로를 반환할 수 있음)
+let _cachedCreds: { clientId: string; clientSecret: string } | null = null;
+
+function getCredentials(): { clientId: string; clientSecret: string } {
+  if (_cachedCreds) return _cachedCreds;
   const credPath = path.join(getDataPath(), 'gcal-credentials.json');
   try {
     const creds = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
-    return { clientId: creds.clientId || '', clientSecret: creds.clientSecret || '' };
+    _cachedCreds = { clientId: creds.clientId || '', clientSecret: creds.clientSecret || '' };
   } catch {
-    return { clientId: '', clientSecret: '' };
+    _cachedCreds = { clientId: '', clientSecret: '' };
   }
+  return _cachedCreds;
 }
-const _creds = loadGCalCredentials();
-const CLIENT_ID = _creds.clientId;
-const CLIENT_SECRET = _creds.clientSecret;
+
+// lazy getter (실제 사용 시점에 로드)
+function getClientId(): string { return getCredentials().clientId; }
+function getClientSecret(): string { return getCredentials().clientSecret; }
 const LOOPBACK_PORT = 8089;
 const REDIRECT_URI = `http://127.0.0.1:${LOOPBACK_PORT}/oauth2callback`;
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
@@ -97,7 +103,7 @@ let calendarApi: calendar_v3.Calendar | null = null;
 
 function getOAuth2Client(): OAuth2Client {
   if (!oauth2Client) {
-    oauth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+    oauth2Client = new google.auth.OAuth2(getClientId(), getClientSecret(), REDIRECT_URI);
     oauth2Client.on('tokens', (tokens) => {
       const saved = readEncryptedFile<Record<string, unknown>>(TOKENS_FILE) || {};
       writeEncryptedFile(TOKENS_FILE, { ...saved, ...tokens });
@@ -135,7 +141,7 @@ export function isAuthenticated(): boolean {
 
 /** OAuth2 인증 시작 (시스템 브라우저 열기) */
 export function startAuth(): Promise<void> {
-  if (!CLIENT_ID || !CLIENT_SECRET) {
+  if (!getClientId() || !getClientSecret()) {
     return Promise.reject(new Error(
       'Google Calendar 자격 증명이 설정되지 않았습니다.\n' +
       `${getDataPath()}/gcal-credentials.json 파일에 clientId, clientSecret을 설정해 주세요.`

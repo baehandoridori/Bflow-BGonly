@@ -186,10 +186,10 @@ export async function syncAll(): Promise<CalendarEvent[]> {
   const events: CalendarEvent[] = [];
 
   // 팀/개인 캘린더 목록 (중복 제거)
+  // personalCalendarId가 미설정이면 'primary' 폴백 (getTargetCalendar과 일치)
   const calIds = new Set<string>();
   if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
-  if (settings.personalCalendarId) calIds.add(settings.personalCalendarId);
-  if (calIds.size === 0) calIds.add('primary');
+  calIds.add(settings.personalCalendarId || 'primary');
 
   for (const calId of calIds) {
     const gcalEvents = await gcalService.fullSync(calId);
@@ -219,11 +219,10 @@ export async function syncAll(): Promise<CalendarEvent[]> {
 export async function syncIncremental(): Promise<void> {
   const settings = await getGCalSettings();
 
-  // 팀/개인 캘린더 목록 (중복 제거)
+  // 팀/개인 캘린더 목록 (중복 제거, getTargetCalendar과 일치)
   const calIds = new Set<string>();
   if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
-  if (settings.personalCalendarId) calIds.add(settings.personalCalendarId);
-  if (calIds.size === 0) calIds.add('primary');
+  calIds.add(settings.personalCalendarId || 'primary');
 
   for (const calId of calIds) {
     const { updated, deleted, isFullSync } = await gcalService.incrementalSync(calId);

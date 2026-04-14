@@ -1591,8 +1591,12 @@ export function MyTasksWidget() {
             ...v,
             personalTodos: v.personalTodos.map((t) => t.id === todoId ? { ...t, addToCalendar: false } : t),
           }));
-          if (currentUser?.id) {
-            saveTaskViewsToSupabase(currentUser.id, newViews, assignedSceneKeys).catch(() => {});
+          // 최신 state 참조를 위해 useAuthStore.getState() 사용 (stale closure 방지)
+          const userId = useAuthStore.getState().currentUser?.id;
+          if (userId) {
+            // assignedSceneKeys도 최신 값 필요 — setAssignedSceneKeys의 콜백에서 가져올 수 없으므로
+            // prev에서 참조하지 않고 별도 저장은 effect에 위임
+            saveTaskViewsToSupabase(userId, newViews, assignedSceneKeys).catch(() => {});
           }
           return newViews;
         });
@@ -1627,8 +1631,9 @@ export function MyTasksWidget() {
                 endDate: calEvent.endDate,
               } : t),
             }));
-            if (currentUser?.id) {
-              saveTaskViewsToSupabase(currentUser.id, newViews, assignedSceneKeys).catch(() => {});
+            const uid = useAuthStore.getState().currentUser?.id;
+            if (uid) {
+              saveTaskViewsToSupabase(uid, newViews, assignedSceneKeys).catch(() => {});
             }
             return newViews;
           });
@@ -1637,7 +1642,7 @@ export function MyTasksWidget() {
     };
     window.addEventListener('bflow:calendar-changed', handler);
     return () => window.removeEventListener('bflow:calendar-changed', handler);
-  }, [setAssignedTodos, setCustomViews]);
+  }, [setAssignedTodos, setCustomViews, assignedSceneKeys]);
 
   // 캘린더 → 할일 네비게이션: 해당 할일이 속한 탭으로 전환 + 하이라이트
   const [highlightTodoId, setHighlightTodoId] = useState<string | null>(null);
