@@ -1554,7 +1554,23 @@ export function MyTasksWidget() {
   useEffect(() => {
     const handler = async (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (!detail?.eventId) return;
+
+      // eventId 없음 = syncIncremental 후 전체 변경 알림 → 할일-연결 이벤트 일괄 역동기화
+      if (!detail?.eventId) {
+        const { getEvents: fetchEvents } = await import('@/services/calendarService');
+        const allEvents = await fetchEvents();
+        const linkedEvents = allEvents.filter((ev) => ev.linkedTodoId);
+        for (const calEvent of linkedEvents) {
+          const tid = calEvent.linkedTodoId!;
+          setAssignedTodos((prev) => prev.map((t) => {
+            if (t.id !== tid) return t;
+            const changed = t.title !== calEvent.title || t.startDate !== calEvent.startDate || t.endDate !== calEvent.endDate;
+            return changed ? { ...t, title: calEvent.title, startDate: calEvent.startDate, endDate: calEvent.endDate } : t;
+          }));
+        }
+        return;
+      }
+
       const eventId = detail.eventId as string;
 
       // todo 연결 이벤트 확인:
@@ -1564,9 +1580,6 @@ export function MyTasksWidget() {
       if (eventId.startsWith('cal_')) {
         todoId = eventId.replace(/^cal_/, '');
       } else {
-        // Google ID → findEventByTodoId 로 연결된 할일 찾기
-        const { findEventByTodoId: findByTodo } = await import('@/services/calendarService');
-        // eventCache에서 이 ID의 이벤트가 linkedTodoId를 갖고 있는지 확인
         const { getEvents: fetchEvents } = await import('@/services/calendarService');
         const allEvents = await fetchEvents();
         const matched = allEvents.find((ev) => ev.id === eventId && ev.linkedTodoId);

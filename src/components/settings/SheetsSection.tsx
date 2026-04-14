@@ -400,7 +400,7 @@ export function SheetsSection() {
             <div className="flex gap-2 flex-wrap items-center">
               <button
                 onClick={handleGcalSync}
-                disabled={isSyncing || !gcalSettings.teamCalendarId}
+                disabled={isSyncing}
                 className="px-4 py-2 bg-blue-500 hover:bg-blue-500/80 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm text-white font-medium transition-colors cursor-pointer"
               >
                 {isSyncing ? '동기화 중...' : '지금 동기화'}
