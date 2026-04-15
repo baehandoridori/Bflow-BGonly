@@ -14,7 +14,7 @@ import {
   checkVacationConnection,
 } from '@/services/vacationService';
 import * as gcalService from '@/services/googleCalendarService';
-import { getGCalSettings, saveGCalSettings, saveTeamCalendarId, syncAll } from '@/services/calendarService';
+import { getGCalSettings, saveGCalSettings, saveLocalGCalSettings, saveTeamCalendarId, syncAll } from '@/services/calendarService';
 import type { GCalSettings } from '@/types/calendar';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { SettingsSection } from './SettingsSection';
@@ -169,9 +169,10 @@ export function SheetsSection() {
       await gcalService.signOut();
       setGcalAuth(false); localStorage.setItem('bflow_gcal_authed', 'false');
       setCalendars([]);
-      const cleared: GCalSettings = { teamCalendarId: null, personalCalendarId: null, lastSyncAt: null };
-      saveGCalSettings(cleared);
-      setGcalSettingsState(cleared);
+      // 로컬 전용 값만 초기화 — teamCalendarId는 Supabase 공유 값이므로 건드리지 않음
+      // (다른 팀원의 팀 캘린더 설정을 날리지 않도록)
+      saveLocalGCalSettings({ personalCalendarId: null, lastSyncAt: null });
+      setGcalSettingsState((prev) => ({ ...prev, personalCalendarId: null, lastSyncAt: null }));
     } catch (err) {
       setGcalError(String(err));
     }
