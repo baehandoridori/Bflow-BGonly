@@ -107,14 +107,22 @@ function readEncryptedFile<T>(fileName: string): T | null {
 
 let oauth2Client: OAuth2Client | null = null;
 let calendarApi: calendar_v3.Calendar | null = null;
+let _clientIdUsed = '';
+let _clientSecretUsed = '';
 
 function getOAuth2Client(): OAuth2Client {
-  if (!oauth2Client) {
-    oauth2Client = new google.auth.OAuth2(getClientId(), getClientSecret(), REDIRECT_URI);
+  const currentId = getClientId();
+  const currentSecret = getClientSecret();
+  // 자격증명이 바뀌었으면 클라이언트 재생성 (빈 값 → 유효한 값 전환 등)
+  if (!oauth2Client || _clientIdUsed !== currentId || _clientSecretUsed !== currentSecret) {
+    oauth2Client = new google.auth.OAuth2(currentId, currentSecret, REDIRECT_URI);
     oauth2Client.on('tokens', (tokens) => {
       const saved = readEncryptedFile<Record<string, unknown>>(TOKENS_FILE) || {};
       writeEncryptedFile(TOKENS_FILE, { ...saved, ...tokens });
     });
+    _clientIdUsed = currentId;
+    _clientSecretUsed = currentSecret;
+    calendarApi = null; // 캘린더 API도 재생성 강제
   }
   return oauth2Client;
 }

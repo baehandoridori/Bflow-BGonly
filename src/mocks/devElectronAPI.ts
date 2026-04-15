@@ -150,7 +150,7 @@ export function installDevElectronAPI(): void {
     gcalListCalendars: async () => [],
     gcalFullSync: async () => [],
     gcalIncrementalSync: async () => ({ updated: [], deleted: [], isFullSync: false }),
-    gcalInsertEvent: async () => '',
+    gcalInsertEvent: async () => (typeof crypto !== 'undefined' && crypto.randomUUID ? `mock_${crypto.randomUUID()}` : `mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
     gcalUpdateEvent: async () => {},
     gcalDeleteEvent: async () => {},
     gcalEnsureWatch: async () => {},
