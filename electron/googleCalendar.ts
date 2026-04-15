@@ -19,18 +19,25 @@ import crypto from 'crypto';
 
 // OAuth2 자격 증명은 gcal-credentials.json에서 lazy 로드
 // (import 시점에는 app.name이 아직 설정되지 않아 getDataPath()가 잘못된 경로를 반환할 수 있음)
+// 유효한 값일 때만 캐시 — 빈 값이면 다음 호출에서 재시도하여 파일이 나중에 추가되어도 복구 가능
 let _cachedCreds: { clientId: string; clientSecret: string } | null = null;
 
 function getCredentials(): { clientId: string; clientSecret: string } {
-  if (_cachedCreds) return _cachedCreds;
+  if (_cachedCreds && _cachedCreds.clientId && _cachedCreds.clientSecret) {
+    return _cachedCreds;
+  }
   const credPath = path.join(getDataPath(), 'gcal-credentials.json');
   try {
     const creds = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
-    _cachedCreds = { clientId: creds.clientId || '', clientSecret: creds.clientSecret || '' };
+    const next = { clientId: creds.clientId || '', clientSecret: creds.clientSecret || '' };
+    // 유효한 값일 때만 캐시
+    if (next.clientId && next.clientSecret) {
+      _cachedCreds = next;
+    }
+    return next;
   } catch {
-    _cachedCreds = { clientId: '', clientSecret: '' };
+    return { clientId: '', clientSecret: '' };
   }
-  return _cachedCreds;
 }
 
 // lazy getter (실제 사용 시점에 로드)

@@ -257,8 +257,13 @@ export async function syncIncremental(): Promise<void> {
     if (isFullSync) {
       // fullSync 폴백: 해당 캘린더의 캐시를 완전히 교체 (삭제된 이벤트 제거)
       eventCache = eventCache.filter((e) => e.sourceCalendarId !== calId);
+      // ID 기반 중복 제거 (팀/개인 캘린더에 같은 이벤트가 있을 수 있음)
+      const seenIds = new Set(eventCache.map((e) => e.id));
       for (const gcalEvent of updated) {
-        eventCache.push(toCalendarEvent(gcalEvent, calId));
+        if (gcalEvent.id && !seenIds.has(gcalEvent.id)) {
+          seenIds.add(gcalEvent.id);
+          eventCache.push(toCalendarEvent(gcalEvent, calId));
+        }
       }
     } else {
       // 일반 incremental: 삭제 + 머지
