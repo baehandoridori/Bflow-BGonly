@@ -32,6 +32,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
   const [mentionIndex, setMentionIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const mentionDropdownRef = useRef<HTMLDivElement>(null);
 
   // 댓글 로드
   const loadComments = useCallback(() => {
@@ -62,6 +63,15 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [comments.length]);
 
+  // 멘션 드롭다운 활성 항목 스크롤
+  useEffect(() => {
+    if (!showMentions) return;
+    const container = mentionDropdownRef.current;
+    if (!container) return;
+    const items = container.querySelectorAll('button');
+    items[mentionIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [mentionIndex, showMentions]);
+
   // 댓글 작성 (낙관적 업데이트 + 중복 방지)
   const handleSubmit = async () => {
     if (!input.trim() || !currentUser || submitting) return;
@@ -82,6 +92,9 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
     setComments(next);
     onCountChange?.(next.length);
     setInput('');
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
     setShowMentions(false);
 
     try {
@@ -176,6 +189,11 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
       }
     }
     setShowMentions(false);
+    const ta = inputRef.current;
+    if (ta) {
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.min(ta.scrollHeight, 96)}px`;
+    }
   };
 
   // @멘션 삽입
@@ -340,7 +358,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
       <div className="px-4 py-3 border-t border-bg-border relative">
         {/* @멘션 자동완성 */}
         {showMentions && filteredUsers.length > 0 && (
-          <div className="absolute bottom-full left-4 right-4 mb-1 bg-bg-card border border-bg-border rounded-lg shadow-lg max-h-32 overflow-y-auto z-10">
+          <div ref={mentionDropdownRef} className="absolute bottom-full left-4 right-4 mb-1 bg-bg-card border border-bg-border rounded-lg shadow-lg max-h-32 overflow-y-auto z-10">
             {filteredUsers.map((user, i) => (
               <button
                 key={user.id}
@@ -361,8 +379,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
             placeholder="댓글 입력..."
-            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent"
-            rows={1}
+            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-24 overflow-y-auto"
             onKeyDown={(e) => {
               // @멘션 드롭다운 키보드 탐색
               if (showMentions && filteredUsers.length > 0) {

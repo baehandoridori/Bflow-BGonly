@@ -97,7 +97,7 @@ function saveAssignedSceneKeys(keys: SceneKey[]) {
 
 /* ─── Supabase 기반 로드/저장 함수 ──────────── */
 
-async function loadTodosFromSupabase(userId: string): Promise<PersonalTodo[]> {
+async function loadTodosFromSupabase(userId: string): Promise<PersonalTodo[] | null> {
   try {
     const rows = await supabaseService.readTodos(userId);
     return rows.map((r: any) => ({
@@ -112,7 +112,7 @@ async function loadTodosFromSupabase(userId: string): Promise<PersonalTodo[]> {
     }));
   } catch (err) {
     console.error('[MyTasks] Supabase 할일 로드 실패:', err);
-    return [];
+    return null;
   }
 }
 
@@ -138,7 +138,7 @@ async function deleteTodoFromSupabase(todoId: string): Promise<void> {
 async function loadTaskViewsFromSupabase(userId: string): Promise<{
   views: TaskView[];
   sceneKeys: SceneKey[];
-}> {
+} | null> {
   try {
     const data = await supabaseService.readTaskViews(userId);
     if (!data) return { views: [], sceneKeys: [] };
@@ -148,7 +148,7 @@ async function loadTaskViewsFromSupabase(userId: string): Promise<{
     };
   } catch (err) {
     console.error('[MyTasks] Supabase 뷰 로드 실패:', err);
-    return { views: [], sceneKeys: [] };
+    return null;
   }
 }
 
@@ -1037,6 +1037,10 @@ export function MyTasksWidget() {
         loadTodosFromSupabase(userId),
         loadTaskViewsFromSupabase(userId),
       ]);
+      if (todos === null || viewsData === null) {
+        console.warn('[MyTasks] 초기 로드 실패 — 서버 데이터 덮어쓰기 방지를 위해 초기화 건너뜀');
+        return;
+      }
       _fromExternal.current = true;
       setAssignedTodos(todos);
       setCustomViews(viewsData.views);
@@ -1098,6 +1102,11 @@ export function MyTasksWidget() {
         loadTodosFromSupabase(userId),
         loadTaskViewsFromSupabase(userId),
       ]).then(([todos, viewsData]) => {
+        if (todos === null || viewsData === null) {
+          console.warn('[MyTasks] 크로스 창 리로드 실패 — 서버 데이터 덮어쓰기 방지를 위해 상태 갱신 건너뜀');
+          _fromExternal.current = false;
+          return;
+        }
         setAssignedTodos(todos);
         setCustomViews(viewsData.views);
         setAssignedSceneKeys(viewsData.sceneKeys);
