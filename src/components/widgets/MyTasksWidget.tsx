@@ -1560,13 +1560,19 @@ export function MyTasksWidget() {
         const { getEvents: fetchEvents } = await import('@/services/calendarService');
         const allEvents = await fetchEvents();
         const linkedEvents = allEvents.filter((ev) => ev.linkedTodoId);
+        const todoUpdater = (t: PersonalTodo, calEvent: { title: string; startDate: string; endDate: string }) => {
+          const changed = t.title !== calEvent.title || t.startDate !== calEvent.startDate || t.endDate !== calEvent.endDate;
+          return changed ? { ...t, title: calEvent.title, startDate: calEvent.startDate, endDate: calEvent.endDate } : t;
+        };
         for (const calEvent of linkedEvents) {
           const tid = calEvent.linkedTodoId!;
-          setAssignedTodos((prev) => prev.map((t) => {
-            if (t.id !== tid) return t;
-            const changed = t.title !== calEvent.title || t.startDate !== calEvent.startDate || t.endDate !== calEvent.endDate;
-            return changed ? { ...t, title: calEvent.title, startDate: calEvent.startDate, endDate: calEvent.endDate } : t;
-          }));
+          // 기본 뷰 할일
+          setAssignedTodos((prev) => prev.map((t) => t.id === tid ? todoUpdater(t, calEvent) : t));
+          // 커스텀 뷰 할일
+          setCustomViews((prev) => prev.map((v) => ({
+            ...v,
+            personalTodos: v.personalTodos.map((t) => t.id === tid ? todoUpdater(t, calEvent) : t),
+          })));
         }
         return;
       }
