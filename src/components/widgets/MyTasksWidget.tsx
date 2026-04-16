@@ -1008,15 +1008,15 @@ export function MyTasksWidget() {
   const allViews = [DEFAULT_VIEW, ...customViews];
   const activeView = allViews.find((v) => v.id === activeViewId) ?? DEFAULT_VIEW;
 
-  // 외부(IPC)에서 받은 변경인지 추적 — true이면 브로드캐스트 스킵
-  const _fromExternal = useRef(false);
+  // 외부(IPC)에서 받은 변경인지 추적 — 0 초과이면 브로드캐스트 스킵 (카운터로 중첩 안전)
+  const _externalDepth = useRef(0);
   // ptodo_* → UUID 매핑 (비동기 ID 교체 진행 중일 때 삭제 등에서 사용)
   const _pendingIdMap = useRef(new Map<string, string>());
   // 서버 응답 전에 삭제된 할일 ID (UUID 반환 시 서버에서도 삭제)
   const _deletedBeforeSync = useRef(new Set<string>());
 
   const broadcastTodoChange = useCallback(() => {
-    if (_fromExternal.current) return;
+    if (_externalDepth.current > 0) return;
     if (isPopup) {
       import('@/views/WidgetPopup').then(() => {
         // 팝업에서는 쿨다운 없이 직접 notify (todo는 데이터 변경이 아님)
@@ -1033,11 +1033,11 @@ export function MyTasksWidget() {
     // 사용자 전환 시 이전 사용자 상태가 새 사용자 ID로 저장되는 것을 방지
     // save effect가 로드 완료 전에 실행되지 않도록 초기화 플래그를 즉시 해제
     _supabaseInitialized.current = false;
-    _fromExternal.current = true;
+    _externalDepth.current++;
     setAssignedTodos([]);
     setCustomViews([]);
     setAssignedSceneKeys([]);
-    requestAnimationFrame(() => { _fromExternal.current = false; });
+    requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
     const userId = currentUser.id;
     (async () => {
       await migrateLocalStorageToSupabase(userId);
@@ -1049,12 +1049,12 @@ export function MyTasksWidget() {
         console.warn('[MyTasks] 초기 로드 실패 — 서버 데이터 덮어쓰기 방지를 위해 초기화 건너뜀');
         return;
       }
-      _fromExternal.current = true;
+      _externalDepth.current++;
       setAssignedTodos(todos);
       setCustomViews(viewsData.views);
       setAssignedSceneKeys(viewsData.sceneKeys);
       requestAnimationFrame(() => {
-        _fromExternal.current = false;
+        _externalDepth.current = Math.max(0, _externalDepth.current - 1);
         _supabaseInitialized.current = true;
       });
     })();
@@ -1063,7 +1063,7 @@ export function MyTasksWidget() {
   // Supabase 저장: 상태 변경 시 Supabase에 반영
   useEffect(() => {
     if (!_supabaseInitialized.current || !currentUser?.id) return;
-    if (_fromExternal.current) return;
+    if (_externalDepth.current > 0) return;
     const userId = currentUser.id;
     saveTaskViewsToSupabase(userId, customViews, assignedSceneKeys).catch((err) => {
       const msg = String(err);
@@ -1076,7 +1076,7 @@ export function MyTasksWidget() {
 
   useEffect(() => {
     if (!_supabaseInitialized.current || !currentUser?.id) return;
-    if (_fromExternal.current) return;
+    if (_externalDepth.current > 0) return;
     const userId = currentUser.id;
     // assignedTodos 전체를 재저장 (순서 포함)
     // 반환된 UUID가 기존 ID와 다르면 로컬 state 갱신 (ptodo_* → UUID 전환)
@@ -1084,11 +1084,11 @@ export function MyTasksWidget() {
       saveTodoToSupabase(userId, todo, i).then((returnedId) => {
         if (returnedId && returnedId !== todo.id) {
           _pendingIdMap.current.set(todo.id, returnedId);
-          _fromExternal.current = true;
+          _externalDepth.current++;
           setAssignedTodos((prev) =>
             prev.map((t) => (t.id === todo.id ? { ...t, id: returnedId } : t)),
           );
-          requestAnimationFrame(() => { _fromExternal.current = false; });
+          requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
         }
       }).catch((err) => {
         const msg = String(err);
@@ -1105,24 +1105,32 @@ export function MyTasksWidget() {
     const handler = () => {
       if (!currentUser?.id) return;
       const userId = currentUser.id;
-      _fromExternal.current = true;
+      _externalDepth.current++;
       Promise.all([
         loadTodosFromSupabase(userId),
         loadTaskViewsFromSupabase(userId),
       ]).then(([todos, viewsData]) => {
         if (todos === null || viewsData === null) {
           console.warn('[MyTasks] 크로스 창 리로드 실패 — 서버 데이터 덮어쓰기 방지를 위해 상태 갱신 건너뜀');
-          _fromExternal.current = false;
+          _externalDepth.current = Math.max(0, _externalDepth.current - 1);
           return;
         }
         setAssignedTodos(todos);
         setCustomViews(viewsData.views);
         setAssignedSceneKeys(viewsData.sceneKeys);
-        requestAnimationFrame(() => { _fromExternal.current = false; });
+        requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
       });
     };
     window.addEventListener('bflow:todos-changed', handler);
-    return () => window.removeEventListener('bflow:todos-changed', handler);
+    const ipcCleanup = window.electronAPI?.onDataChanged?.((delta) => {
+      if (delta && (delta as any).type === 'todo') {
+        handler();
+      }
+    });
+    return () => {
+      window.removeEventListener('bflow:todos-changed', handler);
+      ipcCleanup?.();
+    };
   }, [currentUser?.id]);
 
   // 전체 평탄화
@@ -1309,11 +1317,11 @@ export function MyTasksWidget() {
   // ─── 개인 할일 조작 ─────────────────────
   const addPersonalTodo = async (todo: PersonalTodo) => {
     if (activeView.id === DEFAULT_VIEW.id) {
-      // _fromExternal 플래그로 useEffect 재저장 방지 (여기서 직접 저장하므로)
-      _fromExternal.current = true;
+      // _externalDepth 카운터로 useEffect 재저장 방지 (여기서 직접 저장하므로)
+      _externalDepth.current++;
       setAssignedTodos((prev) => [...prev, todo]);
-      requestAnimationFrame(() => { _fromExternal.current = false; });
-      // 다른 창에 할일 추가 알림 (effect가 _fromExternal로 스킵되므로 수동 호출)
+      requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
+      // 다른 창에 할일 추가 알림 (effect가 _externalDepth로 스킵되므로 수동 호출)
       broadcastTodoChange();
       // Supabase 저장 (낙관적: 상태 반영 후 비동기 저장)
       if (currentUser?.id) {
@@ -1326,9 +1334,9 @@ export function MyTasksWidget() {
               return;
             }
             _pendingIdMap.current.set(todo.id, returnedId);
-            _fromExternal.current = true;
+            _externalDepth.current++;
             setAssignedTodos((prev) => prev.map((t) => t.id === todo.id ? { ...t, id: returnedId } : t));
-            requestAnimationFrame(() => { _fromExternal.current = false; });
+            requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
             // 캘린더 이벤트의 linkedTodoId도 갱신 (old ID → new UUID)
             if (todo.addToCalendar) {
               try {
@@ -1384,8 +1392,8 @@ export function MyTasksWidget() {
   const togglePersonalTodo = (todoId: string) => {
     const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? { ...t, completed: !t.completed } : t);
     if (activeView.id === DEFAULT_VIEW.id) {
-      // _fromExternal로 catch-all effect 억제 (여기서 직접 저장하므로)
-      _fromExternal.current = true;
+      // _externalDepth 카운터로 catch-all effect 억제 (여기서 직접 저장하므로)
+      _externalDepth.current++;
       setAssignedTodos((prev) => {
         const newList = updater(prev);
         // Supabase 저장
@@ -1397,7 +1405,7 @@ export function MyTasksWidget() {
         }
         return newList;
       });
-      requestAnimationFrame(() => { _fromExternal.current = false; });
+      requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
     } else {
       setCustomViews((prev) => {
         const newViews = prev.map((v) =>
@@ -1455,10 +1463,10 @@ export function MyTasksWidget() {
     const completed = activePersonalTodos.filter((t) => t.completed);
     const newList = [...reordered, ...completed];
     if (activeView.id === DEFAULT_VIEW.id) {
-      // _fromExternal로 catch-all effect 억제 (전체 저장을 여기서 직접 처리하므로)
-      _fromExternal.current = true;
+      // _externalDepth 카운터로 catch-all effect 억제 (전체 저장을 여기서 직접 처리하므로)
+      _externalDepth.current++;
       setAssignedTodos(newList);
-      requestAnimationFrame(() => { _fromExternal.current = false; });
+      requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
       // Supabase: 순서 변경 저장 (debounce 없이 바로 저장)
       if (currentUser?.id) {
         const userId = currentUser.id;
@@ -1495,8 +1503,8 @@ export function MyTasksWidget() {
     // 낙관적 UI 업데이트 + Supabase 저장
     const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? newTodo : t);
     if (activeView.id === DEFAULT_VIEW.id) {
-      // _fromExternal로 catch-all effect 억제 (여기서 직접 저장하므로)
-      _fromExternal.current = true;
+      // _externalDepth 카운터로 catch-all effect 억제 (여기서 직접 저장하므로)
+      _externalDepth.current++;
       setAssignedTodos((prev) => {
         const newList = updater(prev);
         if (currentUser?.id) {
@@ -1506,7 +1514,7 @@ export function MyTasksWidget() {
         }
         return newList;
       });
-      requestAnimationFrame(() => { _fromExternal.current = false; });
+      requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
     } else {
       setCustomViews((prev) => {
         const newViews = prev.map((v) =>
@@ -1623,8 +1631,8 @@ export function MyTasksWidget() {
         // 캘린더 이벤트 삭제됨 → todo의 addToCalendar 플래그만 해제 (todo 자체는 유지)
         const calUpdater = (todos: PersonalTodo[]) =>
           todos.map((t) => t.id === todoId ? { ...t, addToCalendar: false } : t);
-        // _fromExternal로 catch-all effect 억제 (여기서 직접 저장하므로)
-        _fromExternal.current = true;
+        // _externalDepth 카운터로 catch-all effect 억제 (여기서 직접 저장하므로)
+        _externalDepth.current++;
         setAssignedTodos((prev) => {
           const newList = calUpdater(prev);
           const updated = newList.find((t) => t.id === todoId);
@@ -1633,7 +1641,7 @@ export function MyTasksWidget() {
           }
           return newList;
         });
-        requestAnimationFrame(() => { _fromExternal.current = false; });
+        requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
         setCustomViews((prev) => {
           const newViews = prev.map((v) => ({
             ...v,
@@ -1661,8 +1669,8 @@ export function MyTasksWidget() {
               startDate: calEvent.startDate,
               endDate: calEvent.endDate,
             } : t);
-          // _fromExternal로 catch-all effect 억제 (여기서 직접 저장하므로)
-          _fromExternal.current = true;
+          // _externalDepth 카운터로 catch-all effect 억제 (여기서 직접 저장하므로)
+          _externalDepth.current++;
           setAssignedTodos((prev) => {
             const newList = calUpdater(prev);
             const updated = newList.find((t) => t.id === todoId);
@@ -1671,7 +1679,7 @@ export function MyTasksWidget() {
             }
             return newList;
           });
-          requestAnimationFrame(() => { _fromExternal.current = false; });
+          requestAnimationFrame(() => { _externalDepth.current = Math.max(0, _externalDepth.current - 1); });
           setCustomViews((prev) => {
             const newViews = prev.map((v) => ({
               ...v,
