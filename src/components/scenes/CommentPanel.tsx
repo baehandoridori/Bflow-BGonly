@@ -178,6 +178,12 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
   // @멘션 감지
   const handleInputChange = (text: string) => {
     setInput(text);
+    // Auto-grow textarea (모든 키 입력 시 실행 — 멘션 드롭다운 중에도)
+    const ta = inputRef.current;
+    if (ta) {
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.min(ta.scrollHeight, 96)}px`;
+    }
     const lastAt = text.lastIndexOf('@');
     if (lastAt >= 0) {
       const afterAt = text.slice(lastAt + 1);
@@ -189,11 +195,6 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
       }
     }
     setShowMentions(false);
-    const ta = inputRef.current;
-    if (ta) {
-      ta.style.height = 'auto';
-      ta.style.height = `${Math.min(ta.scrollHeight, 96)}px`;
-    }
   };
 
   // @멘션 삽입

@@ -1030,6 +1030,14 @@ export function MyTasksWidget() {
   // Supabase 초기화: 마이그레이션 후 데이터 로드
   useEffect(() => {
     if (!currentUser?.id) return;
+    // 사용자 전환 시 이전 사용자 상태가 새 사용자 ID로 저장되는 것을 방지
+    // save effect가 로드 완료 전에 실행되지 않도록 초기화 플래그를 즉시 해제
+    _supabaseInitialized.current = false;
+    _fromExternal.current = true;
+    setAssignedTodos([]);
+    setCustomViews([]);
+    setAssignedSceneKeys([]);
+    requestAnimationFrame(() => { _fromExternal.current = false; });
     const userId = currentUser.id;
     (async () => {
       await migrateLocalStorageToSupabase(userId);
@@ -1376,6 +1384,8 @@ export function MyTasksWidget() {
   const togglePersonalTodo = (todoId: string) => {
     const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? { ...t, completed: !t.completed } : t);
     if (activeView.id === DEFAULT_VIEW.id) {
+      // _fromExternal로 catch-all effect 억제 (여기서 직접 저장하므로)
+      _fromExternal.current = true;
       setAssignedTodos((prev) => {
         const newList = updater(prev);
         // Supabase 저장
@@ -1387,6 +1397,7 @@ export function MyTasksWidget() {
         }
         return newList;
       });
+      requestAnimationFrame(() => { _fromExternal.current = false; });
     } else {
       setCustomViews((prev) => {
         const newViews = prev.map((v) =>
@@ -1444,7 +1455,10 @@ export function MyTasksWidget() {
     const completed = activePersonalTodos.filter((t) => t.completed);
     const newList = [...reordered, ...completed];
     if (activeView.id === DEFAULT_VIEW.id) {
+      // _fromExternal로 catch-all effect 억제 (전체 저장을 여기서 직접 처리하므로)
+      _fromExternal.current = true;
       setAssignedTodos(newList);
+      requestAnimationFrame(() => { _fromExternal.current = false; });
       // Supabase: 순서 변경 저장 (debounce 없이 바로 저장)
       if (currentUser?.id) {
         const userId = currentUser.id;
@@ -1481,6 +1495,8 @@ export function MyTasksWidget() {
     // 낙관적 UI 업데이트 + Supabase 저장
     const updater = (todos: PersonalTodo[]) => todos.map((t) => t.id === todoId ? newTodo : t);
     if (activeView.id === DEFAULT_VIEW.id) {
+      // _fromExternal로 catch-all effect 억제 (여기서 직접 저장하므로)
+      _fromExternal.current = true;
       setAssignedTodos((prev) => {
         const newList = updater(prev);
         if (currentUser?.id) {
@@ -1490,6 +1506,7 @@ export function MyTasksWidget() {
         }
         return newList;
       });
+      requestAnimationFrame(() => { _fromExternal.current = false; });
     } else {
       setCustomViews((prev) => {
         const newViews = prev.map((v) =>
@@ -1606,6 +1623,8 @@ export function MyTasksWidget() {
         // 캘린더 이벤트 삭제됨 → todo의 addToCalendar 플래그만 해제 (todo 자체는 유지)
         const calUpdater = (todos: PersonalTodo[]) =>
           todos.map((t) => t.id === todoId ? { ...t, addToCalendar: false } : t);
+        // _fromExternal로 catch-all effect 억제 (여기서 직접 저장하므로)
+        _fromExternal.current = true;
         setAssignedTodos((prev) => {
           const newList = calUpdater(prev);
           const updated = newList.find((t) => t.id === todoId);
@@ -1614,6 +1633,7 @@ export function MyTasksWidget() {
           }
           return newList;
         });
+        requestAnimationFrame(() => { _fromExternal.current = false; });
         setCustomViews((prev) => {
           const newViews = prev.map((v) => ({
             ...v,
@@ -1641,6 +1661,8 @@ export function MyTasksWidget() {
               startDate: calEvent.startDate,
               endDate: calEvent.endDate,
             } : t);
+          // _fromExternal로 catch-all effect 억제 (여기서 직접 저장하므로)
+          _fromExternal.current = true;
           setAssignedTodos((prev) => {
             const newList = calUpdater(prev);
             const updated = newList.find((t) => t.id === todoId);
@@ -1649,6 +1671,7 @@ export function MyTasksWidget() {
             }
             return newList;
           });
+          requestAnimationFrame(() => { _fromExternal.current = false; });
           setCustomViews((prev) => {
             const newViews = prev.map((v) => ({
               ...v,
