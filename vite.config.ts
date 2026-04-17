@@ -46,11 +46,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
-          'vendor-supabase': ['@supabase/supabase-js'],
-          'vendor-grid': ['react-grid-layout'],
+          'vendor-grid': ['react-grid-layout', 'clsx'],
           'vendor-motion': ['framer-motion'],
-          'vendor-ui': ['lucide-react', 'sonner', 'clsx'],
+          'vendor-ui': ['lucide-react', 'sonner'],
         },
       },
     },

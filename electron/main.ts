@@ -1862,6 +1862,7 @@ app.whenReady().then(() => {
 
   // 메인 로드 30초 타임아웃 (좀비 방지).
   // Task 2.3의 did-finish-load 핸들러에서 clearTimeout + 해제 처리.
+  // 공유 드라이브 최초 로드/캐시 워밍 감안한 여유 타임아웃
   const MAIN_LOAD_TIMEOUT_MS = 30_000;
   loadTimeoutId = setTimeout(() => {
     if (mainLoadedOk) {
@@ -1873,6 +1874,7 @@ app.whenReady().then(() => {
     try {
       dialog.showErrorBox('B flow', '앱 로드에 실패했습니다. 다시 실행해주세요.');
     } catch {/* ignore */}
+    try { console.timeEnd('splash-to-main'); } catch {/* ignore */}
     isQuitting = true;
     app.quit();
   }, MAIN_LOAD_TIMEOUT_MS);
