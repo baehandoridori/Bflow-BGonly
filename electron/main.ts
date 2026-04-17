@@ -1259,12 +1259,7 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
     widgetWindows.delete(widgetId);
     widgetOriginalBounds.delete(widgetId);
     rebuildTrayMenu(); // 트레이 체크박스 갱신
-    // 사용자가 명시적으로 닫으면 캐시 삭제 (자동 복원 안 함)
-    // 앱 종료 중이면 캐시 유지 (before-quit에서 이미 저장됨)
-    if (!isQuitting) {
-      widgetPositionCache.delete(widgetId);
-      saveWidgetPositionsDebounced();
-    }
+    // 캐시는 항상 유지 → 다음 실행 시 자동 복원 (spec 결정사항)
     // 독 스택에서 제거 + 나머지 재배치
     const dockIdx = dockedWidgetIds.indexOf(widgetId);
     if (dockIdx >= 0) {
