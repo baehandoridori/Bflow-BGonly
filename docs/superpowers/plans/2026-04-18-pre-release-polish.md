@@ -889,58 +889,41 @@ git commit -m "feat(electron): 스플래시 윈도우 생성/종료 유틸 추�
 **Files:**
 - Modify: `electron/main.ts:262-287` (`createWindow`)
 
-- [ ] **Step 1: `BrowserWindow`에 `show: false` 추가 + `did-finish-load` 이벤트 추가**
+- [ ] **Step 1: 기존 `BrowserWindow` options 객체에 `show: false,` 한 줄만 추가 (다른 webPreferences 필드·기존 이벤트 핸들러 건드리지 않음)**
+
+`electron/main.ts:263-275`의 기존 `new BrowserWindow({...})` 블록에서 `backgroundColor` 바로 아래에 `show: false,` 한 줄 추가:
 
 ```typescript
-function createWindow(): void {
-  mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 800,
-    minHeight: 600,
-    title: 'B flow',
-    backgroundColor: '#0F1117',
-    show: false, // ← 스플래시 숨기기 전까진 hidden
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
-  }
-
-  // 메인 로드 완료 → 스플래시 닫고 메인 창 show
-  mainWindow.webContents.once('did-finish-load', () => {
-    mainLoadedOk = true;
-    closeSplash();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-    try { console.timeEnd('splash-to-main'); } catch {/* 이미 종료됨 */}
-  });
-
-  // 창 X 핸들러 (Task 1.9에서 추가된 것 유지)
-  mainWindow.on('close', (e) => {
-    if (!isQuitting && !trayFailed) {
-      e.preventDefault();
-      mainWindow?.hide();
-      showTrayHintOnce().catch(() => {/* ignore */});
-      return;
-    }
-  });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
-}
+// Edit target (precise anchor):
+//   backgroundColor: '#0F1117',
+// 의 바로 다음 줄에 삽입:
+    show: false,
 ```
+
+**주의**: `webPreferences`, `preload`, `minWidth`, `minHeight`, `title` 등 기존 옵션 전체는 수정 금지. 기존에 있는 이벤트 리스너(`did-fail-load` 등)도 그대로 둠.
+
+- [ ] **Step 2: `did-finish-load` 이벤트 핸들러 추가 (Task 2.4의 타임아웃 해제도 이 핸들러에서 처리)**
+
+`mainWindow.loadURL`/`loadFile` 호출 이후, `mainWindow.on('close', ...)` 핸들러 바로 위에 추가:
+
+```typescript
+// 메인 로드 완료 → 스플래시 닫고 메인 창 show
+mainWindow.webContents.once('did-finish-load', () => {
+  mainLoadedOk = true;
+  if (loadTimeoutId) {
+    clearTimeout(loadTimeoutId); // Task 2.4에서 설정한 타임아웃 해제
+    loadTimeoutId = null;
+  }
+  closeSplash();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  try { console.timeEnd('splash-to-main'); } catch {/* 이미 종료됨 */}
+});
+```
+
+**주의**: `loadTimeoutId`는 Task 2.4 Step 1에서 모듈 스코프 변수로 선언 예정 (`let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;`). Task 2.3은 이 변수를 사용하는 `did-finish-load` 블록까지만 작성.
 
 - [ ] **Step 2: tsc 검증**
 
@@ -970,48 +953,44 @@ git commit -m "feat(electron): 메인 창 show:false + did-finish-load로 스플
 import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog } from 'electron';
 ```
 
-- [ ] **Step 1: `app.whenReady()` 블록에서 측정 로그 시작 + 타임아웃 설정**
+- [ ] **Step 1: 모듈 스코프에 `loadTimeoutId` 변수 추가** (Task 1.1 전역 변수 블록 근처)
 
 ```typescript
-app.whenReady().then(() => {
-  console.time('splash-to-main'); // 측정 시작
-
-  createSplashWindow(); // 1. 가장 먼저 스플래시
-  createTray();          // 2. 트레이 (경량)
-  createWindow();        // 3. 메인 창 (숨김 상태로 로드 시작)
-
-  // 메인 로드 30초 타임아웃 (좀비 방지)
-  const MAIN_LOAD_TIMEOUT_MS = 30_000;
-  const loadTimeout = setTimeout(() => {
-    if (mainLoadedOk) return;
-    console.error('[메인 로드] 30초 타임아웃 — 에러 다이얼로그 후 종료');
-    closeSplash();
-    try {
-      dialog.showErrorBox('B flow', '앱 로드에 실패했습니다. 다시 실행해주세요.');
-    } catch {/* ignore */}
-    isQuitting = true;
-    app.quit();
-  }, MAIN_LOAD_TIMEOUT_MS);
-
-  // 로드 완료 시 타임아웃 해제
-  if (mainWindow) {
-    mainWindow.webContents.once('did-finish-load', () => {
-      clearTimeout(loadTimeout);
-    });
-  }
-
-  // Google Calendar 토큰 복원
-  gcal.restoreTokens();
-
-  // Supabase Realtime 구독 시작
-  startSupabaseRealtime();
-
-  // 기존 자동 위젯 복원 등 나머지 로직 (변경 없음, 그대로 유지)
-  // ...
-});
+let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
 ```
 
-**주의**: 기존 `app.whenReady().then(() => { ... })` 블록의 다른 내용(위젯 복원 등)은 그대로 유지. 위 코드는 블록 시작부에만 신규 호출 추가.
+- [ ] **Step 2: `app.whenReady()` 블록 시작부에 측정 로그 + 타임아웃 설정 추가**
+
+기존 `app.whenReady().then(() => { ... })` 블록의 `createWindow()` 호출 **앞**에 다음을 삽입. 기존 내용(`gcal.restoreTokens()`, `startSupabaseRealtime()`, 위젯 복원 등)은 모두 그대로 유지:
+
+```typescript
+console.time('splash-to-main'); // 측정 시작
+
+createSplashWindow(); // 1. 가장 먼저 스플래시
+// (기존) createTray();   -- Task 1.11에서 이미 추가됨
+// (기존) createWindow(); -- 아래 유지
+
+// 메인 로드 30초 타임아웃 (좀비 방지).
+// Task 2.3의 did-finish-load 핸들러에서 clearTimeout + 해제 처리.
+const MAIN_LOAD_TIMEOUT_MS = 30_000;
+loadTimeoutId = setTimeout(() => {
+  if (mainLoadedOk) {
+    loadTimeoutId = null;
+    return;
+  }
+  console.error('[메인 로드] 30초 타임아웃 — 에러 다이얼로그 후 종료');
+  closeSplash();
+  try {
+    dialog.showErrorBox('B flow', '앱 로드에 실패했습니다. 다시 실행해주세요.');
+  } catch {/* ignore */}
+  isQuitting = true;
+  app.quit();
+}, MAIN_LOAD_TIMEOUT_MS);
+```
+
+**주의**:
+1. 기존 `createTray()` (Task 1.11) 호출 앞에 `createSplashWindow()`를 두어 스플래시가 트레이보다 먼저 뜨도록 순서 유지.
+2. 타임아웃 해제는 Task 2.3의 `did-finish-load` 핸들러에서 `clearTimeout(loadTimeoutId)`로 처리 — 여기서는 별도의 `.once('did-finish-load', ...)` 등록하지 않음 (리스너 중복 방지).
 
 - [ ] **Step 2: tsc 검증**
 
@@ -1131,26 +1110,21 @@ git commit -m "perf(vite): manualChunks로 성격별 vendor 번들 분리"
 
 - [ ] **Step 1: 9개 뷰 import를 `React.lazy`로 변경**
 
-기존 `src/App.tsx:6-15`:
+기존 `src/App.tsx:6-15`의 10개 뷰 import 라인을 모두 삭제하고, 아래 lazy 선언으로 교체. **App.tsx의 non-view import(`useEffect`, `MainLayout`, `useAppStore`, `useDataStore`, 서비스·유틸 등)는 전부 그대로 보존**.
+
+기존 `src/App.tsx:1`의 react import에 `lazy`, `Suspense`를 추가:
+
 ```typescript
-import { Dashboard } from '@/views/Dashboard';
-import { ScenesView } from '@/views/ScenesView';
-import { EpisodeView } from '@/views/EpisodeView';
-import { AssigneeView } from '@/views/AssigneeView';
-import { TeamView } from '@/views/TeamView';
-import { CalendarView } from '@/views/CalendarView';
-import { ScheduleView } from '@/views/ScheduleView';
-import { VacationView } from '@/views/VacationView';
-import CompositingView from '@/views/CompositingView';
-import { SettingsView } from '@/views/SettingsView';
+// BEFORE:
+import { useEffect, useCallback, useState, useRef } from 'react';
+
+// AFTER:
+import { lazy, Suspense, useEffect, useCallback, useState, useRef } from 'react';
 ```
 
-변경 (`lazy`로 래핑. `default` vs named export 주의):
+이어서 `src/App.tsx:6-15`의 10개 뷰 import 블록만 아래로 교체. 나머지 import는 건드리지 않음:
 
 ```typescript
-import { lazy, Suspense, useEffect, useCallback, useState, useRef } from 'react';
-// ... 기타 import
-
 // 뷰 lazy 로딩 — 초기 번들에서 제외
 const Dashboard = lazy(() => import('@/views/Dashboard').then(m => ({ default: m.Dashboard })));
 const ScenesView = lazy(() => import('@/views/ScenesView').then(m => ({ default: m.ScenesView })));
@@ -1267,22 +1241,33 @@ git commit -m "perf(renderer): 인증 모달 lazy 로딩"
 
 ---
 
-### Task 2.9: 설정 섹션 lazy 로딩 (선택, 범위 조정)
+### Task 2.9: 설정 섹션 lazy 로딩 (조건부)
 
 **Files:**
-- Modify: `src/views/SettingsView.tsx` (존재 시) 또는 설정 섹션 관련 파일
+- Modify: `src/views/SettingsView.tsx` (존재/구조 확인 후 결정)
 
-- [ ] **Step 1: SettingsView 내부 구조 확인**
+- [ ] **Step 1: SettingsView 존재 및 섹션 구조 확인**
 
-```bash
-# 파일 존재 여부 및 import 구조 Read
+```
+Grep pattern "export (const|function|default) \\w*SettingsView" path "src/views" output_mode content
+Grep pattern "ThemeSection|SheetsSection|NotificationSection" path "src/views/SettingsView.tsx" output_mode content -n
 ```
 
-- [ ] **Step 2: 섹션별 `lazy` 적용**
+판단 기준:
+- **탭 기반(조건부 렌더)**: `{activeTab === 'theme' && <ThemeSection />}` 형태가 보이면 → Step 2로 진행해 lazy 적용.
+- **동시 렌더**: 모든 섹션을 한 번에 나열하는 구조 → lazy가 의미 없음. **이 Task 전체를 스킵**하고 Task 2.10으로.
+- **파일 미존재 또는 다른 구조**: 역시 스킵.
 
-`SettingsView` 안에서 각 section(`ThemeSection`, `SheetsSection`, `NotificationSection`, `StartupSection`, `ShortcutsSection`, `EffectsSection`, `ProfileSection`, `LoginSection`, `FontSizeSection`, `GuideSection`)을 `lazy` 처리하고 활성 탭만 렌더하도록 `Suspense` 추가.
+- [ ] **Step 2 (탭 기반일 때만): 섹션별 `lazy` 적용**
 
-**주의**: 현재 SettingsView가 이미 탭 기반 렌더링이면 각 탭의 섹션만 마운트하므로 lazy 적용이 쉬움. 동시에 모두 렌더하는 구조면 lazy가 의미 없으므로 스킵하고 Task 2.10으로.
+```typescript
+import { lazy, Suspense } from 'react';
+const ThemeSection = lazy(() => import('@/components/settings/ThemeSection').then(m => ({ default: m.ThemeSection })));
+const SheetsSection = lazy(() => import('@/components/settings/SheetsSection').then(m => ({ default: m.SheetsSection })));
+// ... 10개 섹션 동일 패턴
+```
+
+각 섹션 사용처를 `<Suspense fallback={null}>…</Suspense>`로 감쌈.
 
 - [ ] **Step 3: 빌드 검증 + 커밋 (변경이 있었을 때만)**
 
@@ -1307,11 +1292,16 @@ npm run build
 
 - [ ] **Step 2: portable exe 수동 실행 검증**
 
-`dist/BFLOW.exe` 더블클릭 → 다음을 확인:
+`BFLOW.exe --enable-logging` 실행 (또는 별도 터미널에서 `BFLOW.exe` 실행 후 stdout 확인):
 - 더블클릭 후 빠르게 스플래시 등장
 - 스플래시 → 메인 창 전환 부드러움
-- 콘솔 로그로 `splash-to-main` 시간 < 3000ms (이상적으로 < 1500ms)
+- 콘솔 로그로 `splash-to-main: XXXXms` 확인 (목표 < 3000ms, 이상적으로 < 1500ms)
 - 메인 창에서 뷰 전환 시 짧은 스피너 → 로드 완료
+
+**실패 시 진단 가이드**:
+- 스플래시 자체가 안 뜸 → Task 2.1(splash.html)/Task 2.2(createSplashWindow)/Task 2.4 Step 2(createSplashWindow 호출 순서) 재확인
+- 스플래시는 뜨는데 3000ms 넘어감 → `splash-to-main` 로그 확인, Task 2.6 청크 분리 / Task 2.7 lazy 적용 범위 검토
+- 스플래시 뜬 채 멈춤 (메인 창 안 뜸) → Task 2.3 `did-finish-load` 핸들러 + Task 2.4 타임아웃 경로 동작 확인 (30초 후 에러 다이얼로그 떠야 함)
 
 - [ ] **Step 3: 이상 없으면 Chunk 2 커밋 병합 확인**
 
@@ -1502,26 +1492,57 @@ const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
 /**
  * 저장된 커스텀 테마 필드들을 검증/마이그레이션.
- * - 새 포맷(hex)이 유효하면 그대로 사용
- * - 구포맷(customThemeColors triplet)만 있으면 hex 역산
- * - 둘 다 실패 시 null 반환 → 호출부는 기본 프리셋으로 폴백
+ * 부분적 유효성도 허용하여 사용자가 저장한 hex를 최대한 보존.
+ *
+ * 우선순위:
+ * 1. 두 hex 모두 유효 → 둘 다 사용
+ * 2. 한 hex만 유효 → 유효한 쪽은 유지, 나머지는 triplet에서 역산 (없으면 그 값을 sub로 복제)
+ * 3. 둘 다 hex 무효 → triplet 양쪽 모두 역산
+ * 4. triplet도 없거나 실패 → null (호출부는 DEFAULT_THEME_ID로 폴백)
  */
 export function sanitizeCustomHex(input: {
   customAccentHex?: string | null;
   customSubHex?: string | null;
   customThemeColors?: ThemeColors | null;
 }): { accent: string; sub: string } | null {
-  const a = input.customAccentHex;
-  const s = input.customSubHex;
-  if (a && HEX_RE.test(a) && s && HEX_RE.test(s)) {
-    return { accent: a, sub: s };
-  }
+  const aValid = !!(input.customAccentHex && HEX_RE.test(input.customAccentHex));
+  const sValid = !!(input.customSubHex && HEX_RE.test(input.customSubHex));
   const c = input.customThemeColors;
+
+  // Case 1: 둘 다 hex 유효
+  if (aValid && sValid) {
+    return { accent: input.customAccentHex!, sub: input.customSubHex! };
+  }
+
+  // Case 2/3: triplet으로 보강
+  let tripletAccent: string | null = null;
+  let tripletSub: string | null = null;
   if (c?.accent && c?.accentSub) {
     try {
-      return { accent: rgbToHex(c.accent), sub: rgbToHex(c.accentSub) };
+      tripletAccent = rgbToHex(c.accent);
+      tripletSub = rgbToHex(c.accentSub);
     } catch {/* triplet 파싱 실패 */}
   }
+
+  // Case 2a: accent hex만 유효
+  if (aValid) {
+    return {
+      accent: input.customAccentHex!,
+      sub: tripletSub ?? input.customAccentHex!, // sub 복구 불가 시 accent와 동일
+    };
+  }
+  // Case 2b: sub hex만 유효
+  if (sValid) {
+    return {
+      accent: tripletAccent ?? input.customSubHex!,
+      sub: input.customSubHex!,
+    };
+  }
+  // Case 3: 둘 다 hex 무효 → triplet 시도
+  if (tripletAccent && tripletSub) {
+    return { accent: tripletAccent, sub: tripletSub };
+  }
+  // Case 4: 전부 실패
   return null;
 }
 ```
@@ -1589,13 +1610,18 @@ if (savedTheme) {
       customThemeColors: savedTheme.customColors ?? null,
     });
     if (!customHex) {
-      // 손상 → 기본 프리셋으로 폴백 (조용히)
       console.warn('[테마] 커스텀 테마 데이터 손상 → 기본 프리셋으로 폴백');
     }
   }
 
+  // 실제 적용할 테마 ID (커스텀 복구 실패 시 기본 프리셋으로 강제)
+  const effectiveThemeId =
+    savedTheme.themeId === 'custom' && !customHex
+      ? DEFAULT_THEME_ID
+      : savedTheme.themeId;
+
   // CSS 적용
-  if (savedTheme.themeId === 'custom' && customHex) {
+  if (effectiveThemeId === 'custom' && customHex) {
     const colors = deriveThemeFromAccent(customHex.accent, customHex.sub, savedMode);
     applyTheme(colors, savedMode);
     themeInitRef.current = true;
@@ -1604,8 +1630,8 @@ if (savedTheme) {
     setCustomThemeColors(colors);
     useAppStore.getState().setCustomAccentHex(customHex.accent);
     useAppStore.getState().setCustomSubHex(customHex.sub);
-    // 구포맷만 있던 경우 새 포맷으로 저장
-    if (!savedTheme.customAccentHex || !savedTheme.customSubHex) {
+    // 구포맷만 있거나 sanitize로 보강된 경우 새 포맷으로 재저장
+    if (savedTheme.customAccentHex !== customHex.accent || savedTheme.customSubHex !== customHex.sub) {
       saveTheme({
         themeId: 'custom',
         customColors: colors,
@@ -1615,16 +1641,23 @@ if (savedTheme) {
       });
     }
   } else if (savedMode === 'light') {
-    applyTheme(getLightColors(savedTheme.themeId), savedMode);
+    applyTheme(getLightColors(effectiveThemeId), savedMode);
     themeInitRef.current = true;
-    setThemeId(savedTheme.themeId);
+    setThemeId(effectiveThemeId);
     setColorMode(savedMode);
   } else {
-    const preset = getPreset(savedTheme.themeId);
+    const preset = getPreset(effectiveThemeId);
     if (preset) {
       applyTheme(preset.colors, savedMode);
       themeInitRef.current = true;
-      setThemeId(savedTheme.themeId);
+      setThemeId(effectiveThemeId);
+      setColorMode(savedMode);
+    } else {
+      // 완전 손상 (프리셋 ID도 유효하지 않음) → 최종 폴백
+      const fallback = getPreset(DEFAULT_THEME_ID)!;
+      applyTheme(fallback.colors, savedMode);
+      themeInitRef.current = true;
+      setThemeId(DEFAULT_THEME_ID);
       setColorMode(savedMode);
     }
   }
@@ -1633,7 +1666,7 @@ if (savedTheme) {
 }
 ```
 
-추가 import 필요: `deriveThemeFromAccent`, `sanitizeCustomHex` from `@/themes`.
+추가 import 필요: `deriveThemeFromAccent`, `sanitizeCustomHex`, `DEFAULT_THEME_ID` from `@/themes`.
 
 - [ ] **Step 2: tsc 검증 + 커밋**
 
@@ -1645,28 +1678,52 @@ git commit -m "feat(theme): 앱 초기화 시 커스텀 테마 마이그레이�
 
 ---
 
-### Task 3.7: `App.tsx`의 테마 저장 `useEffect` 수정
+### Task 3.7: `App.tsx`의 테마 적용 `useEffect` 단일 교체
 
 **Files:**
 - Modify: `src/App.tsx:442-458` (테마 변경 시 CSS 적용 + 저장)
 
-- [ ] **Step 1: `customThemeColors`와 hex 둘 다 저장하도록 조정**
+> **주의**: 기존 플랜의 Task 3.8(colorMode 재파생)은 이 Task로 병합됨. 기존 `useEffect` 하나를 아래 버전으로 완전 교체하는 **단일 편집**으로 처리. 두 번 덮어쓰지 말 것.
+
+- [ ] **Step 1: 기존 useEffect를 다음 단일 버전으로 교체**
+
+의도: `[themeId, customThemeColors, colorMode]` 세 의존성을 모두 포함하고, 진입 시 **한 번에** 다음 분기를 타도록 함.
+- `themeId === 'custom'`이고 hex 두 개가 모두 있으면 → hex 기반 `deriveThemeFromAccent` 호출 (colorMode만 바뀐 경우도 여기서 자동 처리)
+- `themeId === 'custom'`이고 hex가 없지만 `customThemeColors`만 있으면 → 기존 colors 그대로 `applyTheme`
+- 그 외 → 프리셋 경로
 
 ```typescript
 useEffect(() => {
   if (!themeInitRef.current) return;
-  const { customAccentHex, customSubHex } = useAppStore.getState();
+  const { customAccentHex, customSubHex, setCustomThemeColors } = useAppStore.getState();
 
-  if (themeId === 'custom' && customThemeColors) {
-    applyTheme(customThemeColors, colorMode);
-    saveTheme({
-      themeId,
-      customColors: customThemeColors,
-      colorMode,
-      customAccentHex: customAccentHex ?? undefined,
-      customSubHex: customSubHex ?? undefined,
-    });
-  } else if (colorMode === 'light') {
+  if (themeId === 'custom') {
+    // Case A: hex 두 개 모두 유효 → 현재 colorMode로 재파생
+    if (customAccentHex && customSubHex) {
+      const colors = deriveThemeFromAccent(customAccentHex, customSubHex, colorMode);
+      applyTheme(colors, colorMode);
+      setCustomThemeColors(colors);
+      saveTheme({
+        themeId,
+        customColors: colors,
+        colorMode,
+        customAccentHex,
+        customSubHex,
+      });
+      return;
+    }
+    // Case B: hex 없이 customThemeColors만 (마이그레이션 과도기)
+    if (customThemeColors) {
+      applyTheme(customThemeColors, colorMode);
+      saveTheme({ themeId, customColors: customThemeColors, colorMode });
+      return;
+    }
+    // Case C: 아무것도 없음 — themeInitRef가 true면 오지 않아야 함. 안전망만.
+    return;
+  }
+
+  // 프리셋 경로
+  if (colorMode === 'light') {
     applyTheme(getLightColors(themeId), colorMode);
     saveTheme({ themeId, colorMode });
   } else {
@@ -1679,62 +1736,34 @@ useEffect(() => {
 }, [themeId, customThemeColors, colorMode]);
 ```
 
-- [ ] **Step 2: tsc 검증 + 커밋**
+**deps array 설명**:
+- `themeId`/`colorMode`: 프리셋↔커스텀 전환, 다크↔라이트 전환 시 재실행
+- `customThemeColors`: 사용자가 "적용" 버튼으로 새 customAccent를 설정한 경우 (`setCustomThemeColors`가 이 배열을 갱신 → effect 재실행 → Case A에서 최신 hex로 재파생)
+
+`customAccentHex`/`customSubHex`는 `useAppStore.getState()`로 읽어 stale closure 회피.
+
+- [ ] **Step 2: tsc 검증 + 수동 검증 + 커밋**
 
 ```bash
 npx tsc --noEmit
+npm run electron:dev
+```
+
+수동 검증:
+1. 커스텀 테마 적용 (accent #E11D48) → 전체 톤 변경 확인
+2. 다크/라이트 토글 → 배경이 accent hue 기반으로 자동 재생성되는지 확인
+3. 새 커스텀 accent(#814D41)로 재적용 → 톤 즉시 바뀜
+
+```bash
 git add src/App.tsx
-git commit -m "feat(theme): 저장 시 customAccentHex/customSubHex 함께 영속화"
+git commit -m "feat(theme): 커스텀 테마 colorMode 전환 시 hex 기반 자동 재파생 (단일 useEffect)"
 ```
 
 ---
 
-### Task 3.8: `App.tsx`의 colorMode 변경 시 커스텀 재파생
+### Task 3.8: (Task 3.7로 병합됨 — 이 Task는 스킵)
 
-**Files:**
-- Modify: `src/App.tsx` (Task 3.7과 같은 useEffect 또는 별도 hook)
-
-- [ ] **Step 1: colorMode가 바뀔 때 커스텀 테마면 hex로 재파생**
-
-Task 3.7의 useEffect 시작부에 추가:
-
-```typescript
-useEffect(() => {
-  if (!themeInitRef.current) return;
-  const { customAccentHex, customSubHex, setCustomThemeColors } = useAppStore.getState();
-
-  // 커스텀 테마에서 colorMode만 바뀐 경우: hex 기반 재파생
-  if (themeId === 'custom' && customAccentHex && customSubHex) {
-    const colors = deriveThemeFromAccent(customAccentHex, customSubHex, colorMode);
-    applyTheme(colors, colorMode);
-    setCustomThemeColors(colors);
-    saveTheme({ themeId, customColors: colors, colorMode, customAccentHex, customSubHex });
-    return;
-  }
-
-  // 기존 로직 (프리셋 테마)
-  if (colorMode === 'light') {
-    applyTheme(getLightColors(themeId), colorMode);
-    saveTheme({ themeId, colorMode });
-  } else {
-    const preset = getPreset(themeId);
-    if (preset) {
-      applyTheme(preset.colors, colorMode);
-      saveTheme({ themeId, colorMode });
-    }
-  }
-}, [themeId, colorMode]); // customThemeColors 의존성 제거 — 재파생은 여기서 담당
-```
-
-**주의**: Task 3.7의 useEffect와 합쳐야 할 수도 있음. 실제 파일 구조에 따라 의존성 배열과 분기 조정.
-
-- [ ] **Step 2: tsc 검증 + 커밋**
-
-```bash
-npx tsc --noEmit
-git add src/App.tsx
-git commit -m "feat(theme): colorMode 전환 시 커스텀 테마 hex 기반 재파생"
-```
+Task 3.7의 단일 useEffect 교체로 colorMode 재파생 로직이 통합됨. 별도의 Task 3.8 없음. 다음 Task는 Task 3.9로 바로 이어짐.
 
 ---
 
