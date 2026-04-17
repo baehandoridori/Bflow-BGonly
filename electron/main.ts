@@ -453,6 +453,7 @@ function createWindow(): void {
     minHeight: 600,
     title: 'B flow',
     backgroundColor: '#0F1117',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -466,6 +467,21 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  // 메인 로드 완료 → 스플래시 닫고 메인 창 show
+  mainWindow.webContents.once('did-finish-load', () => {
+    mainLoadedOk = true;
+    if (loadTimeoutId) {
+      clearTimeout(loadTimeoutId); // Task 2.4에서 설정한 타임아웃 해제
+      loadTimeoutId = null;
+    }
+    closeSplash();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    try { console.timeEnd('splash-to-main'); } catch {/* 이미 종료됨 */}
+  });
 
   mainWindow.on('close', (e) => {
     if (!isQuitting && !trayFailed) {
