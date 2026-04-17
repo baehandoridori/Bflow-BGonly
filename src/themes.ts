@@ -170,6 +170,28 @@ export function hslToRgb(h: number, s: number, l: number): string {
   return `${r} ${g} ${b}`;
 }
 
+/**
+ * accent hex 두 개로부터 7색 ThemeColors 전체를 생성.
+ * 배경·보더·텍스트 5색은 accent hue 기반 HSL 계단 공식으로 파생.
+ */
+export function deriveThemeFromAccent(
+  accentHex: string,
+  accentSubHex: string,
+  mode: 'dark' | 'light',
+): ThemeColors {
+  const { h } = rgbToHsl(hexToRgb(accentHex));
+  const dark = mode === 'dark';
+  return {
+    bgPrimary:     dark ? hslToRgb(h, 20, 5)  : hslToRgb(h, 15, 88),
+    bgCard:        dark ? hslToRgb(h, 22, 9)  : hslToRgb(h, 10, 99),
+    bgBorder:      dark ? hslToRgb(h, 20, 16) : hslToRgb(h, 25, 70),
+    textPrimary:   dark ? hslToRgb(h, 15, 92) : hslToRgb(h, 30, 12),
+    textSecondary: dark ? hslToRgb(h, 15, 59) : hslToRgb(h, 25, 28),
+    accent:        hexToRgb(accentHex),
+    accentSub:     hexToRgb(accentSubHex),
+  };
+}
+
 /** 프리셋 ID로 찾기 */
 export function getPreset(id: string): ThemePreset | undefined {
   return THEME_PRESETS.find(p => p.id === id);
