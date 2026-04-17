@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification } from 'electron';
+import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import fs from 'fs';
@@ -13,6 +14,7 @@ import {
   waitForAllPendingOps,
 } from './sheets';
 import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-image';
+import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage } from './storage';
 import {
   initVacation,
   isVacationConnected,
@@ -426,6 +428,14 @@ import {
   readAllMetadata as sbReadAllMetadata,
   readMetadata as sbReadMetadata,
   writeMetadata as sbWriteMetadata,
+  readTodos as sbReadTodos,
+  upsertTodo as sbUpsertTodo,
+  deleteTodo as sbDeleteTodo,
+  readTaskViews as sbReadTaskViews,
+  upsertTaskViews as sbUpsertTaskViews,
+  readMemo as sbReadMemo,
+  upsertMemo as sbUpsertMemo,
+  readAllMemos as sbReadAllMemos,
 } from './supabase';
 import type { SupabaseUser } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -551,6 +561,84 @@ ipcMain.handle('supabase:write-metadata', wrapIpc(async (_e: unknown, type: stri
   await sbWriteMetadata(type, key, value);
 }));
 
+// ─── Personal Todos IPC ──────────────────────────────
+
+ipcMain.handle('supabase:read-todos', wrapIpc(async (_e: unknown, userId: string) => {
+  return sbReadTodos(userId);
+}));
+
+ipcMain.handle('supabase:upsert-todo', wrapIpc(async (_e: unknown, userId: string, todo: unknown) => {
+  return sbUpsertTodo(userId, todo as Parameters<typeof sbUpsertTodo>[1]);
+}));
+
+ipcMain.handle('supabase:delete-todo', wrapIpc(async (_e: unknown, todoId: string) => {
+  return sbDeleteTodo(todoId);
+}));
+
+ipcMain.handle('supabase:read-task-views', wrapIpc(async (_e: unknown, userId: string) => {
+  return sbReadTaskViews(userId);
+}));
+
+ipcMain.handle('supabase:upsert-task-views', wrapIpc(async (_e: unknown, userId: string, views: unknown[], sceneKeys: unknown[]) => {
+  return sbUpsertTaskViews(userId, views, sceneKeys);
+}));
+
+// ─── Memos IPC ──────────────────────────────
+
+ipcMain.handle('supabase:read-memo', wrapIpc(async (_e: unknown, userId: string, widgetId: string) => {
+  return sbReadMemo(userId, widgetId);
+}));
+
+ipcMain.handle('supabase:upsert-memo', wrapIpc(async (_e: unknown, userId: string, widgetId: string, memoData: unknown) => {
+  return sbUpsertMemo(userId, widgetId, memoData as Parameters<typeof sbUpsertMemo>[2]);
+}));
+
+ipcMain.handle('supabase:read-all-memos', wrapIpc(async (_e: unknown, userId: string) => {
+  return sbReadAllMemos(userId);
+}));
+
+// ─── Google Calendar IPC ──────────────────────────────
+
+ipcMain.handle('gcal:is-authenticated', wrapIpc(async () => {
+  return gcal.isAuthenticated();
+}));
+
+ipcMain.handle('gcal:start-auth', wrapIpc(async () => {
+  await gcal.startAuth();
+}));
+
+ipcMain.handle('gcal:sign-out', wrapIpc(async () => {
+  await gcal.signOut();
+}));
+
+ipcMain.handle('gcal:list-calendars', wrapIpc(async () => {
+  return gcal.listCalendars();
+}));
+
+ipcMain.handle('gcal:full-sync', wrapIpc(async (_e: unknown, calendarId: string) => {
+  return gcal.fullSync(calendarId);
+}));
+
+ipcMain.handle('gcal:incremental-sync', wrapIpc(async (_e: unknown, calendarId: string) => {
+  return gcal.incrementalSync(calendarId);
+}));
+
+ipcMain.handle('gcal:insert-event', wrapIpc(async (_e: unknown, calendarId: string, input: unknown) => {
+  return gcal.insertEvent(calendarId, input as gcal.GCalEventInput);
+}));
+
+ipcMain.handle('gcal:update-event', wrapIpc(async (_e: unknown, calendarId: string, eventId: string, input: unknown) => {
+  return gcal.updateEvent(calendarId, eventId, input as Partial<gcal.GCalEventInput>);
+}));
+
+ipcMain.handle('gcal:delete-event', wrapIpc(async (_e: unknown, calendarId: string, eventId: string) => {
+  return gcal.deleteEvent(calendarId, eventId);
+}));
+
+ipcMain.handle('gcal:ensure-watch', wrapIpc(async (_e: unknown, calendarId: string, userId: string) => {
+  return gcal.ensureWatch(calendarId, userId);
+}));
+
 // ─── Slack Webhook ───
 const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/triggers/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';
 
@@ -630,12 +718,42 @@ ipcMain.handle(
   async (_event, sheetName: string, sceneId: string, imageType: string, base64Data: string) => {
     try {
       const result = await driveUploadImage(sheetName, sceneId, imageType, base64Data);
+
+      // Drive 업로드 성공 시 manifest 갱신 (파일명 키는 GAS 네이밍 규칙과 일치)
+      const typeSuffix = imageType === 'storyboard' ? 'sb' : 'guide';
+      const mimeMatch = base64Data.match(/^data:(image\/(\w+));base64,/);
+      const ext = mimeMatch?.[2] === 'png' ? '.png' : '.jpg';
+      const manifestKey = `${sheetName}_${sceneId}_${typeSuffix}${ext}`;
+      const manifest = loadImageManifest();
+      manifest[manifestKey] = {
+        ...(manifest[manifestKey] ?? { size: 0 }),
+        driveUrl: result.url,
+        uploadedAt: new Date().toISOString(),
+      };
+      saveImageManifest(manifest);
+
       return { ok: true, url: result.url };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { ok: false, error: msg };
     }
   }
+);
+
+// ─── Supabase Storage IPC ──────────────────────────────
+
+ipcMain.handle(
+  'storage:upload-image',
+  async (_event, sheetName: string, sceneId: string, imageType: 'storyboard' | 'guide', base64Data: string) => {
+    return storageUploadImage(sheetName, sceneId, imageType, base64Data);
+  },
+);
+
+ipcMain.handle(
+  'storage:delete-image',
+  async (_event, url: string) => {
+    await storageDeleteImage(url);
+  },
 );
 
 // ─── IPC 핸들러: 네이티브 알림 ─────────────────────────────
@@ -818,6 +936,77 @@ ipcMain.handle('vacation:delete-dahyu', async (_event, rowIndices: number[]) => 
   }
 });
 
+// ─── 이미지 캐시 manifest ────────────────────────────
+
+const IMAGES_DIR = path.join(getDataPath(), 'images');
+
+interface ImageManifest {
+  [filename: string]: {
+    driveUrl?: string;
+    uploadedAt?: string;
+    size: number;
+  };
+}
+
+function loadImageManifest(): ImageManifest {
+  try {
+    const manifestPath = path.join(IMAGES_DIR, 'manifest.json');
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveImageManifest(manifest: ImageManifest): void {
+  ensureDir(IMAGES_DIR);
+  const manifestPath = path.join(IMAGES_DIR, 'manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+}
+
+/** 앱 시작 시 캐시 크기 확인 + Drive 백업된 오래된 파일 자동 정리 */
+function cleanupImageCache(maxSizeMB: number = 500): void {
+  if (!fs.existsSync(IMAGES_DIR)) return;
+
+  const manifest = loadImageManifest();
+
+  const files = fs.readdirSync(IMAGES_DIR)
+    .filter((f) => f !== 'manifest.json')
+    .map((f) => {
+      const filePath = path.join(IMAGES_DIR, f);
+      try {
+        const stat = fs.statSync(filePath);
+        return { name: f, path: filePath, stat };
+      } catch {
+        return null;
+      }
+    })
+    .filter((f): f is NonNullable<typeof f> => f !== null)
+    .sort((a, b) => a.stat.mtimeMs - b.stat.mtimeMs); // 오래된 것 먼저
+
+  let totalSize = files.reduce((sum, f) => sum + f.stat.size, 0);
+  const maxSize = maxSizeMB * 1024 * 1024;
+
+  if (totalSize <= maxSize) return;
+
+  console.log(`[ImageCache] 캐시 크기 ${(totalSize / 1024 / 1024).toFixed(1)}MB > ${maxSizeMB}MB, 정리 시작`);
+
+  for (const file of files) {
+    if (totalSize <= maxSize) break;
+
+    const meta = manifest[file.name];
+    if (meta?.driveUrl) {
+      // Drive에 원본이 있으면 삭제 가능
+      fs.unlinkSync(file.path);
+      delete manifest[file.name];
+      totalSize -= file.stat.size;
+      console.log(`[ImageCache] 삭제: ${file.name} (Drive 백업 있음)`);
+    }
+  }
+
+  saveImageManifest(manifest);
+  console.log(`[ImageCache] 정리 완료, 현재 크기: ${(totalSize / 1024 / 1024).toFixed(1)}MB`);
+}
+
 // ─── IPC 핸들러: 이미지 파일 저장 ────────────────────────────
 
 ipcMain.handle(
@@ -833,6 +1022,13 @@ ipcMain.handle(
     const buffer = Buffer.from(match[1], 'base64');
     const filePath = path.join(imagesDir, fileName);
     fs.writeFileSync(filePath, buffer);
+
+    // manifest에 기록
+    const manifest = loadImageManifest();
+    manifest[fileName] = {
+      size: buffer.length,
+    };
+    saveImageManifest(manifest);
 
     return `bflow-img://local/${encodeURIComponent(fileName)}`;
   }
@@ -1381,6 +1577,9 @@ app.whenReady().then(() => {
   // 위젯 위치 캐시 로드 (Phase 0-6)
   loadWidgetPositions();
 
+  // 이미지 캐시 정리 (500MB 초과 시 Drive 백업된 파일 자동 삭제)
+  cleanupImageCache();
+
   // bflow-img:// 프로토콜 핸들러: userData/images/ 폴더에서 이미지 서빙
   // standard URL이므로 hostname은 소문자로 변환됨 → pathname에 파일명 보관
   protocol.handle('bflow-img', (request) => {
@@ -1419,6 +1618,9 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // Google Calendar 토큰 복원
+  gcal.restoreTokens();
 
   // Supabase Realtime 구독 시작
   startSupabaseRealtime();
@@ -1468,6 +1670,9 @@ app.on('before-quit', (e) => {
   if (isQuitting) return;
   isQuitting = true;
 
+  // GCal Watch 채널 중지 (5초 타임아웃)
+  const watchCleanup = gcal.stopAllWatches().catch(() => {});
+
   // Supabase Realtime 정리
   teardownRealtime();
 
@@ -1477,21 +1682,25 @@ app.on('before-quit', (e) => {
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
   const totalPending = sheetsPending + vacPending;
-  if (totalPending > 0) {
+  if (totalPending > 0 || watchCleanup) {
     e.preventDefault();
 
-    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
+    if (totalPending > 0) {
+      console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
+    }
 
     // 메인 윈도우에 "저장 중" 알림
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    if (totalPending > 0 && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:saving-before-quit', totalPending);
     }
 
-    // 시트 15초 + 휴가 60초 대기 후 종료
+    // Watch 정리 + 시트 15초 + 휴가 60초 대기 후 종료
+    const watchWithTimeout = Promise.race([watchCleanup, new Promise<void>((r) => setTimeout(r, 5000))]);
     Promise.all([
-      waitForAllPendingOps(15000),
-      waitForVacPendingOps(60000),
-    ]).then(([sheetsDone, vacDone]) => {
+      watchWithTimeout,
+      totalPending > 0 ? waitForAllPendingOps(15000) : Promise.resolve(true),
+      totalPending > 0 ? waitForVacPendingOps(60000) : Promise.resolve(true),
+    ]).then(([, sheetsDone, vacDone]) => {
       if (!sheetsDone || !vacDone) {
         console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
       }

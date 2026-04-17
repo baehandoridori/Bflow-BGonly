@@ -49,7 +49,7 @@ export function Widget({ title, widgetId: propId, icon, headerRight, children, c
   // 팝업 모드: 외곽 없이 미니 헤더 + 콘텐츠 표시
   if (isPopup) {
     return (
-      <div className={cn('flex flex-col h-full', className)}>
+      <div className={cn('flex flex-col h-full overflow-hidden', className)}>
         {/* 팝업에서도 headerRight 표시 (뷰 모드 전환 등) */}
         {headerRight && (
           <div className="flex items-center justify-between px-4 pt-3 pb-1 shrink-0">

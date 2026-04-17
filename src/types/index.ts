@@ -359,6 +359,14 @@ export interface ElectronAPI {
   sheetsIsConnected: () => Promise<boolean>;
   // 이미지 업로드 (GAS → Google Drive)
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  // ─── Supabase Storage ──────────────────────────
+  storageUploadImage: (
+    sheetName: string,
+    sceneId: string,
+    imageType: string,
+    base64Data: string,
+  ) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  storageDeleteImage: (url: string) => Promise<void>;
   // Sheets fallback (Supabase 장애 시)
   sheetsReadComments: (sheetName: string) => Promise<{ ok: boolean; data: { commentId: string; sheetName: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string }[]; error?: string }>;
   sheetsReadRevisions: () => Promise<{ ok: boolean; data: { id: string; sceneKey: string; revisionNo: number; status: string; description: string; imageUrl: string; department: string; requesterId: string; requesterName: string; assignee: string; resolvedBy: string; resolvedNote: string; createdAt: string; updatedAt: string; resolvedAt: string }[]; error?: string }>;
@@ -442,6 +450,29 @@ export interface ElectronAPI {
   sendSlackWebhook: (payload: Record<string, string>) => Promise<{ ok: boolean }>;
   // 딥링크
   onDeepLink: (callback: (data: { sheetName: string; sceneId: string }) => void) => () => void;
+
+  // ─── Personal Todos / Task Views ──────────────────
+  supabaseReadTodos: (userId: string) => Promise<any[]>;
+  supabaseUpsertTodo: (userId: string, todo: unknown) => Promise<string>;
+  supabaseDeleteTodo: (todoId: string) => Promise<void>;
+  supabaseReadTaskViews: (userId: string) => Promise<any>;
+  supabaseUpsertTaskViews: (userId: string, views: unknown[], sceneKeys: unknown[]) => Promise<void>;
+  // ─── Memos ───────────────────────────────
+  supabaseReadMemo: (userId: string, widgetId: string) => Promise<any>;
+  supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) => Promise<void>;
+  supabaseReadAllMemos: (userId: string) => Promise<any[]>;
+
+  // ─── Google Calendar ──────────────────────────────
+  gcalIsAuthenticated: () => Promise<boolean>;
+  gcalStartAuth: () => Promise<void>;
+  gcalSignOut: () => Promise<void>;
+  gcalListCalendars: () => Promise<Array<{ id: string; summary: string; primary: boolean }>>;
+  gcalFullSync: (calendarId: string) => Promise<any[]>;
+  gcalIncrementalSync: (calendarId: string) => Promise<{ updated: any[]; deleted: string[]; isFullSync: boolean }>;
+  gcalInsertEvent: (calendarId: string, input: unknown) => Promise<string>;
+  gcalUpdateEvent: (calendarId: string, eventId: string, input: unknown) => Promise<void>;
+  gcalDeleteEvent: (calendarId: string, eventId: string) => Promise<void>;
+  gcalEnsureWatch: (calendarId: string, userId: string) => Promise<void>;
 }
 
 declare global {

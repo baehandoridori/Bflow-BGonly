@@ -371,3 +371,57 @@ export function onSupabaseRealtimeEvent(callback: (event: SupabaseRealtimeEvent)
 export function onSupabaseStatusChange(callback: (status: string) => void): () => void {
   return window.electronAPI.onSupabaseStatus(callback);
 }
+
+// ─── Personal Todos ──────────────────────────────
+
+export async function readTodos(userId: string) {
+  return window.electronAPI.supabaseReadTodos(userId);
+}
+
+export async function upsertTodo(userId: string, todo: {
+  id?: string;
+  title: string;
+  memo: string;
+  completed: boolean;
+  startDate?: string | null;
+  endDate?: string | null;
+  addToCalendar?: boolean;
+  sortOrder?: number;
+  createdAt?: string;
+}): Promise<string> {
+  return window.electronAPI.supabaseUpsertTodo(userId, todo);
+}
+
+export async function deleteTodo(todoId: string): Promise<void> {
+  return window.electronAPI.supabaseDeleteTodo(todoId);
+}
+
+export async function readTaskViews(userId: string) {
+  return window.electronAPI.supabaseReadTaskViews(userId);
+}
+
+export async function upsertTaskViews(
+  userId: string,
+  views: unknown[],
+  assignedSceneKeys: unknown[],
+): Promise<void> {
+  return window.electronAPI.supabaseUpsertTaskViews(userId, views, assignedSceneKeys);
+}
+
+// ─── Memos ──────────────────────────────
+
+export async function readMemo(userId: string, widgetId: string) {
+  return window.electronAPI.supabaseReadMemo(userId, widgetId);
+}
+
+export async function upsertMemo(
+  userId: string,
+  widgetId: string,
+  memoData: { tabs: unknown[]; activeTabId: string | null; fontSize: number },
+): Promise<void> {
+  return window.electronAPI.supabaseUpsertMemo(userId, widgetId, memoData);
+}
+
+export async function readAllMemos(userId: string) {
+  return window.electronAPI.supabaseReadAllMemos(userId);
+}

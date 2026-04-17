@@ -4,6 +4,8 @@
  * GAS → Drive 업로드 → https:// URL
  */
 
+import * as storageService from '@/services/storageService';
+
 /** File/Blob → 리사이즈 JPEG base64 data URL */
 export function resizeBlob(
   file: File | Blob,
@@ -55,7 +57,7 @@ export async function saveImage(
   sceneId: string,
   imageType: 'storyboard' | 'guide',
 ): Promise<string> {
-  const result = await window.electronAPI.sheetsUploadImage(
+  const result = await storageService.uploadImage(
     sheetName,
     sceneId,
     imageType,

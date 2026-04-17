@@ -122,6 +122,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:read-metadata', type, key),
   supabaseWriteMetadata: (type: string, key: string, value: string) =>
     ipcRenderer.invoke('supabase:write-metadata', type, key, value),
+  // ─── Personal Todos / Task Views ──────────────────
+  supabaseReadTodos: (userId: string) => ipcRenderer.invoke('supabase:read-todos', userId),
+  supabaseUpsertTodo: (userId: string, todo: unknown) => ipcRenderer.invoke('supabase:upsert-todo', userId, todo),
+  supabaseDeleteTodo: (todoId: string) => ipcRenderer.invoke('supabase:delete-todo', todoId),
+  supabaseReadTaskViews: (userId: string) => ipcRenderer.invoke('supabase:read-task-views', userId),
+  supabaseUpsertTaskViews: (userId: string, views: unknown[], sceneKeys: unknown[]) =>
+    ipcRenderer.invoke('supabase:upsert-task-views', userId, views, sceneKeys),
+  supabaseReadMemo: (userId: string, widgetId: string) =>
+    ipcRenderer.invoke('supabase:read-memo', userId, widgetId),
+  supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) =>
+    ipcRenderer.invoke('supabase:upsert-memo', userId, widgetId, data),
+  supabaseReadAllMemos: (userId: string) =>
+    ipcRenderer.invoke('supabase:read-all-memos', userId),
+
   // 슬랙 웹훅
   sendSlackWebhook: (payload: Record<string, string>) =>
     ipcRenderer.invoke('slack:send-webhook', payload),
@@ -159,6 +173,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 이미지 업로드 (GAS → Google Drive)
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) =>
     ipcRenderer.invoke('sheets:upload-image', sheetName, sceneId, imageType, base64Data),
+
+  // ─── Supabase Storage ──────────────────────────────
+  storageUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) =>
+    ipcRenderer.invoke('storage:upload-image', sheetName, sceneId, imageType, base64Data),
+  storageDeleteImage: (url: string) => ipcRenderer.invoke('storage:delete-image', url),
 
   // Sheets fallback (Supabase 장애 시)
   sheetsReadComments: (sheetName: string) =>
@@ -205,6 +224,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('vacation:read-dahyu-list'),
   vacationDeleteDahyu: (rowIndices: number[]) =>
     ipcRenderer.invoke('vacation:delete-dahyu', rowIndices),
+
+  // ─── Google Calendar ──────────────────────────────
+  gcalIsAuthenticated: () => ipcRenderer.invoke('gcal:is-authenticated'),
+  gcalStartAuth: () => ipcRenderer.invoke('gcal:start-auth'),
+  gcalSignOut: () => ipcRenderer.invoke('gcal:sign-out'),
+  gcalListCalendars: () => ipcRenderer.invoke('gcal:list-calendars'),
+  gcalFullSync: (calendarId: string) => ipcRenderer.invoke('gcal:full-sync', calendarId),
+  gcalIncrementalSync: (calendarId: string) => ipcRenderer.invoke('gcal:incremental-sync', calendarId),
+  gcalInsertEvent: (calendarId: string, input: unknown) => ipcRenderer.invoke('gcal:insert-event', calendarId, input),
+  gcalUpdateEvent: (calendarId: string, eventId: string, input: unknown) => ipcRenderer.invoke('gcal:update-event', calendarId, eventId, input),
+  gcalDeleteEvent: (calendarId: string, eventId: string) => ipcRenderer.invoke('gcal:delete-event', calendarId, eventId),
+  gcalEnsureWatch: (calendarId: string, userId: string) => ipcRenderer.invoke('gcal:ensure-watch', calendarId, userId),
 
   // 화이트보드 (공유 드라이브 파일)
   whiteboardReadShared: () =>

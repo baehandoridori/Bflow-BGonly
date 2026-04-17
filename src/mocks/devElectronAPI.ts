@@ -62,6 +62,8 @@ export function installDevElectronAPI(): void {
     sheetsConnect: async () => ({ ok: false, error: 'DEV mock' }),
     sheetsIsConnected: async () => false,
     sheetsUploadImage: async () => ({ ok: false, error: 'DEV mock' }),
+    storageUploadImage: async () => ({ ok: true, url: 'mock://image' }),
+    storageDeleteImage: async () => {},
     sheetsReadComments: async () => ({ ok: true, data: [] }),
     sheetsReadRevisions: async () => ({ ok: true, data: [] }),
 
@@ -124,12 +126,36 @@ export function installDevElectronAPI(): void {
     onSupabaseStatus: noop,
     onSupabaseBroadcast: noop,
 
+    // ─── Personal Todos / Task Views mock ───
+    supabaseReadTodos: async () => [],
+    supabaseUpsertTodo: async () => 'mock-id',
+    supabaseDeleteTodo: async () => {},
+    supabaseReadTaskViews: async () => null,
+    supabaseUpsertTaskViews: async () => {},
+
+    // ─── Memos mock ───
+    supabaseReadMemo: async () => null,
+    supabaseUpsertMemo: async () => {},
+    supabaseReadAllMemos: async () => [],
+
     // ─── 슬랙 웹훅 (콘솔 로그) ───
     sendSlackWebhook: async (payload: Record<string, string>) => {
       console.log('[DEV 슬랙 웹훅] 페이로드:', JSON.stringify(payload, null, 2));
       return { ok: true };
     },
     onDeepLink: noop,
+
+    // ─── Google Calendar mock ───
+    gcalIsAuthenticated: async () => false,
+    gcalStartAuth: async () => {},
+    gcalSignOut: async () => {},
+    gcalListCalendars: async () => [],
+    gcalFullSync: async () => [],
+    gcalIncrementalSync: async () => ({ updated: [], deleted: [], isFullSync: false }),
+    gcalInsertEvent: async () => (typeof crypto !== 'undefined' && crypto.randomUUID ? `mock_${crypto.randomUUID()}` : `mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+    gcalUpdateEvent: async () => {},
+    gcalDeleteEvent: async () => {},
+    gcalEnsureWatch: async () => {},
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;

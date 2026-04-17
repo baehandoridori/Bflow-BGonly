@@ -1141,68 +1141,111 @@ function TodayView({
    캘린더 → 할일 역동기화 헬퍼
    ═══════════════════════════════════════════════════ */
 
-function syncCalendarToTodo(todoId: string, calEvent: CalendarEvent) {
-  // Update in localStorage — check both assignedTodos and customView todos
-  const key1 = 'bflow_assigned_personal_todos';
-  const stored1 = localStorage.getItem(key1);
-  if (stored1) {
-    const todos = JSON.parse(stored1) as any[];
-    const idx = todos.findIndex((t: any) => t.id === todoId);
-    if (idx >= 0) {
-      todos[idx] = { ...todos[idx], title: calEvent.title, memo: calEvent.memo, startDate: calEvent.startDate, endDate: calEvent.endDate };
-      localStorage.setItem(key1, JSON.stringify(todos));
+async function syncCalendarToTodo(todoId: string, calEvent: CalendarEvent) {
+  const userId = useAuthStore.getState().currentUser?.id;
+  if (!userId) return;
+
+  const supabaseService = await import('@/services/supabaseService');
+
+  // 1) 기본 뷰의 할일(personal_todos)에서 찾기
+  try {
+    const todos = await supabaseService.readTodos(userId);
+    const matched = todos.find((t: any) => t.id === todoId);
+    if (matched) {
+      await supabaseService.upsertTodo(userId, {
+        id: matched.id,
+        title: calEvent.title,
+        memo: calEvent.memo,
+        completed: matched.completed,
+        startDate: calEvent.startDate || null,
+        endDate: calEvent.endDate || null,
+        addToCalendar: matched.addToCalendar,
+        sortOrder: matched.sortOrder,
+        createdAt: matched.createdAt,
+      });
       window.dispatchEvent(new Event('bflow:todos-changed'));
+      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: { eventId: calEvent.id, action: 'update' } }));
       return;
     }
+  } catch (err) {
+    console.warn('[ScheduleView] 할일 역동기화 실패:', err);
   }
 
-  // Also check custom views
-  const key2 = 'bflow_my_task_views';
-  const stored2 = localStorage.getItem(key2);
-  if (stored2) {
-    const views = JSON.parse(stored2) as any[];
+  // 2) 커스텀 뷰의 personalTodos에서 찾기 → task_views에 저장
+  try {
+    const viewsData = await supabaseService.readTaskViews(userId);
+    if (!viewsData) return;
+    const views = viewsData.views as any[];
+    let mutated = false;
     for (const view of views) {
       if (!view.personalTodos) continue;
       const idx = view.personalTodos.findIndex((t: any) => t.id === todoId);
       if (idx >= 0) {
         view.personalTodos[idx] = { ...view.personalTodos[idx], title: calEvent.title, memo: calEvent.memo, startDate: calEvent.startDate, endDate: calEvent.endDate };
-        localStorage.setItem(key2, JSON.stringify(views));
-        window.dispatchEvent(new Event('bflow:todos-changed'));
-        return;
+        mutated = true;
+        break;
       }
     }
+    if (mutated) {
+      await supabaseService.upsertTaskViews(userId, views, viewsData.assignedSceneKeys as any[]);
+      window.dispatchEvent(new Event('bflow:todos-changed'));
+      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: { eventId: calEvent.id, action: 'update' } }));
+    }
+  } catch (err) {
+    console.warn('[ScheduleView] 뷰 할일 역동기화 실패:', err);
   }
 }
 
-function unlinkTodoFromCalendar(todoId: string) {
-  // Set addToCalendar = false on the todo (don't delete the todo itself)
-  const key1 = 'bflow_assigned_personal_todos';
-  const stored1 = localStorage.getItem(key1);
-  if (stored1) {
-    const todos = JSON.parse(stored1) as any[];
-    const idx = todos.findIndex((t: any) => t.id === todoId);
-    if (idx >= 0) {
-      todos[idx] = { ...todos[idx], addToCalendar: false };
-      localStorage.setItem(key1, JSON.stringify(todos));
+async function unlinkTodoFromCalendar(todoId: string) {
+  const userId = useAuthStore.getState().currentUser?.id;
+  if (!userId) return;
+
+  const supabaseService = await import('@/services/supabaseService');
+
+  // 1) 기본 뷰의 할일
+  try {
+    const todos = await supabaseService.readTodos(userId);
+    const matched = todos.find((t: any) => t.id === todoId);
+    if (matched) {
+      await supabaseService.upsertTodo(userId, {
+        id: matched.id,
+        title: matched.title,
+        memo: matched.memo,
+        completed: matched.completed,
+        startDate: matched.startDate,
+        endDate: matched.endDate,
+        addToCalendar: false,
+        sortOrder: matched.sortOrder,
+        createdAt: matched.createdAt,
+      });
       window.dispatchEvent(new Event('bflow:todos-changed'));
       return;
     }
+  } catch (err) {
+    console.warn('[ScheduleView] 할일 링크 해제 실패:', err);
   }
 
-  const key2 = 'bflow_my_task_views';
-  const stored2 = localStorage.getItem(key2);
-  if (stored2) {
-    const views = JSON.parse(stored2) as any[];
+  // 2) 커스텀 뷰
+  try {
+    const viewsData = await supabaseService.readTaskViews(userId);
+    if (!viewsData) return;
+    const views = viewsData.views as any[];
+    let mutated = false;
     for (const view of views) {
       if (!view.personalTodos) continue;
       const idx = view.personalTodos.findIndex((t: any) => t.id === todoId);
       if (idx >= 0) {
         view.personalTodos[idx] = { ...view.personalTodos[idx], addToCalendar: false };
-        localStorage.setItem(key2, JSON.stringify(views));
-        window.dispatchEvent(new Event('bflow:todos-changed'));
-        return;
+        mutated = true;
+        break;
       }
     }
+    if (mutated) {
+      await supabaseService.upsertTaskViews(userId, views, viewsData.assignedSceneKeys as any[]);
+      window.dispatchEvent(new Event('bflow:todos-changed'));
+    }
+  } catch (err) {
+    console.warn('[ScheduleView] 뷰 할일 링크 해제 실패:', err);
   }
 }
 
@@ -1263,10 +1306,24 @@ export function ScheduleView() {
 
   // 이벤트 로드 + 외부 변경 구독 (할일 위젯 등에서 수정 시 즉시 반영)
   useEffect(() => {
-    getEvents().then(setEvents);
+    let cancelled = false;
+    // cold cache 방어: 캐시가 비어있으면 syncAll 시도
+    (async () => {
+      const cached = await getEvents();
+      if (cached.length === 0) {
+        try {
+          const { isAuthenticated } = await import('@/services/googleCalendarService');
+          if (await isAuthenticated()) {
+            const { syncAll } = await import('@/services/calendarService');
+            await syncAll();
+          }
+        } catch { /* GCal 미연결 시 무시 */ }
+      }
+      if (!cancelled) getEvents().then(setEvents);
+    })();
     const refresh = () => getEvents().then(setEvents);
     window.addEventListener('bflow:calendar-changed', refresh);
-    return () => window.removeEventListener('bflow:calendar-changed', refresh);
+    return () => { cancelled = true; window.removeEventListener('bflow:calendar-changed', refresh); };
   }, []);
 
   // 휴가 이벤트 로드
