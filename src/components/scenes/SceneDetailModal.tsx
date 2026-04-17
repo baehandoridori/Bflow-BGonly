@@ -578,7 +578,7 @@ export function SceneDetailModal({
       onFieldUpdate(sceneIndex, field, '');
       setDeleteConfirm(null);
     },
-    [sceneIndex, onFieldUpdate, deleteConfirm, scene],
+    [sceneIndex, onFieldUpdate, deleteConfirm, scene.storyboardUrl, scene.guideUrl],
   );
 
   // 씬 네비게이션 도트 표시 여부 (2개 이상일 때만)

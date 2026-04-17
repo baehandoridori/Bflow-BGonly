@@ -13,16 +13,18 @@ const MAX_PX = 800;
 const JPEG_QUALITY = 80;
 const SAFE_SIZE_BYTES = 500 * 1024; // 500KB 이상이면 안전망 resize 고려
 
-/** sheetName 예: "EP01_A_BG" → { ep: "EP01", partId: "A" } */
-function parseSheetName(sheetName: string): { ep: string; partId: string } {
-  const m = sheetName.match(/^(EP\d+)_([A-Z])_/);
+/** sheetName 예: "EP01_A_BG" → { ep: "EP01", partId: "A", dept: "BG" } */
+function parseSheetName(sheetName: string): { ep: string; partId: string; dept: string } {
+  const m = sheetName.match(/^(EP\d+)_([A-Z])_(BG|ACT)$/);
   if (!m) throw new Error(`Invalid sheetName: ${sheetName}`);
-  return { ep: m[1], partId: m[2] };
+  return { ep: m[1], partId: m[2], dept: m[3] };
 }
 
 function buildPath(sheetName: string, sceneId: string, imageType: string): string {
-  const { ep, partId } = parseSheetName(sheetName);
-  return `${ep}/${partId}/${sceneId}/${imageType}_${Date.now()}.jpg`;
+  const { ep, partId, dept } = parseSheetName(sheetName);
+  // 8자리 hex random suffix로 같은 ms 내 충돌 방지
+  const uniq = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return `${ep}/${partId}/${dept}/${sceneId}/${imageType}_${uniq}.jpg`;
 }
 
 /** public URL → storage 경로 추출 */
