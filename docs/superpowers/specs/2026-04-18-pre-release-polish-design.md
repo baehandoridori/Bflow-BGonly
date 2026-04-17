@@ -249,7 +249,7 @@ async function showTrayHintOnce(): Promise<void> {
 | `createTray()` | 트레이 아이콘·툴팁·이벤트 바인딩. 앱 시작 시 1회 호출 |
 | `rebuildTrayMenu()` | 위젯 상태/Supabase 상태 변화 시 재호출되어 메뉴·툴팁 최신화 |
 | `toggleWidget(id, title)` | 트레이에서 위젯 on/off. 내부적으로 `openWidgetPopup` 또는 `widgetWindows.get(id).close()` |
-| `getSupabaseStatusLabel()` | 현재 realtime 상태를 사람이 읽을 수 있는 문자열로 |
+| `humanizeStatus(raw)` | Supabase 원시 상태 문자열(`'SUBSCRIBED'`/`'CHANNEL_ERROR'` 등)을 사람이 읽을 수 있는 한글 문자열로 변환. `lastSupabaseStatus` 갱신에만 사용 |
 | 기존 `loadWidgetPositions()` | 변경 없음. 이미 앱 시작 시 호출됨 (main.ts:1578) |
 | 기존 자동 복원 루프 (main.ts:1631) | 변경 없음. `widgetPositionCache` 내용대로 `openWidgetPopup` 호출 |
 
@@ -319,7 +319,7 @@ async function showTrayHintOnce(): Promise<void> {
 
 **구현 포인트**:
 
-- 새 파일 `public/splash.html` — 인라인 CSS, 외부 의존성 0. `opening_image_cropped.png`를 중앙 고정 표시.
+- 새 파일 `public/splash/splash.html` — 인라인 CSS, 외부 의존성 0. 같은 폴더의 `opening_image_cropped.png`를 상대 경로(`./opening_image_cropped.png`)로 참조. 경로 일원화 목적으로 `public/splash/` 하위에 배치 → `package.json` `files`의 `public/splash/**` 한 줄로 스플래시 에셋+HTML 모두 커버.
 - `electron/main.ts`에 `createSplashWindow()` 신설: `width:300, height:300, frame:false, transparent:true, alwaysOnTop:true, resizable:false, skipTaskbar:true, show:true, closable:false`. (`closable:false`로 사용자가 스플래시를 닫을 수 없게 해 좀비 상태 방지)
 - `app.whenReady()`에서 **트레이 생성 직후, createWindow 직전**에 스플래시 생성.
 - `mainWindow = new BrowserWindow({ show: false, ... })` — 기존엔 기본 show:true였음.
@@ -610,7 +610,7 @@ function sanitizeCustomHex(
 - [ ] `console.timeEnd('splash-to-main')` 로그가 스플래시 표시부터 메인 show까지의 시간을 찍는다.
 - [ ] 스플래시 → 메인 창 전환이 부드럽다 (깜빡임 없음).
 - [ ] 메인 창이 30초 안에 로드되지 않는 극단 시나리오에서 에러 다이얼로그가 뜨고 앱이 종료된다.
-- [ ] `vite build` 결과 `dist/assets/`에 `vendor-react`, `vendor-supabase`, `vendor-charts`, `vendor-ui` 번들이 분리되어 있다.
+- [ ] `vite build` 결과 `dist/assets/`에 `vendor-react`, `vendor-supabase`, `vendor-grid`, `vendor-motion`, `vendor-ui` 번들이 분리되어 있다.
 - [ ] 초기 화면이 Dashboard일 때 Schedule/Episode 뷰 번들은 로드되지 않는다 (DevTools Network).
 - [ ] Scene 상세 모달 열기 전까진 `SceneDetailModal.tsx` 번들이 요청되지 않는다.
 - [ ] 빌드 크기가 이전 대비 감소하지 않아도 무방 (파일 분할만 해도 병렬 로드 이득).
@@ -652,7 +652,7 @@ function sanitizeCustomHex(
 |---|---|
 | `electron/main.ts` | 트레이 생성/메뉴/이벤트, Supabase 상태 콜백에서 `rebuildTrayMenu` 호출, mainWindow close 차단 + `trayFailed` 폴백, 위젯 캐시 삭제 로직 제거, window-all-closed 수정, process exit 안전망, app.whenReady 재정렬, 스플래시 윈도우 + 30초 타임아웃 + 측정 로그, 커맨드라인 스위치 추가 |
 | `electron/preload.ts` | 변경 없음 (기존 IPC로 충분) |
-| `public/splash.html` | 신규 — 스플래시 2단계 부팅용 |
+| `public/splash/splash.html` | 신규 — 스플래시 2단계 부팅용. `public/splash/` 하위에 배치해 기존 이미지와 함께 `public/splash/**` files 규칙 한 줄로 커버 |
 | `package.json` | `build.files`에 `public/splash/**` 추가 |
 | `vite.config.ts` | manualChunks 설정 (성격별 vendor 분리) |
 | `src/App.tsx` | 뷰/모달 lazy 로딩 래핑 |
