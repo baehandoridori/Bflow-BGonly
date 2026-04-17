@@ -58,6 +58,24 @@ let lastSupabaseStatus = '연결 중...';
 let splashWin: BrowserWindow | null = null;
 let mainLoadedOk = false;
 
+/** 아이콘 경로 해석: dev(electron/)와 prod(dist-electron/) + app.getAppPath() 순회 */
+function resolveTrayIconPath(): string {
+  const candidates = [
+    path.join(__dirname, '../public/splash/opening_image_cropped.png'),
+    path.join(app.getAppPath(), 'public/splash/opening_image_cropped.png'),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch { /* ignore */ }
+  }
+  return '';
+}
+
+/** 1x1 투명 PNG — 아이콘 로드 완전 실패 시 최후 폴백 */
+const EMPTY_ICON_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
 // ─── 위젯 위치 영속화 (Phase 0-6) ─────────────────────────────
 const WIDGET_POS_FILE = 'widget-positions.json';
 
