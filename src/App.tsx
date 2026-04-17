@@ -489,10 +489,35 @@ export default function App() {
   // 테마 변경 시: CSS 적용 + appdata 저장 (초기화 완료 후에만 저장)
   useEffect(() => {
     if (!themeInitRef.current) return; // init()에서 테마 로드 전까지 저장 방지
-    if (themeId === 'custom' && customThemeColors) {
-      applyTheme(customThemeColors, colorMode);
-      saveTheme({ themeId, customColors: customThemeColors, colorMode });
-    } else if (colorMode === 'light') {
+    const { customAccentHex, customSubHex, setCustomThemeColors } = useAppStore.getState();
+
+    if (themeId === 'custom') {
+      // Case A: hex 두 개 모두 유효 → 현재 colorMode로 재파생
+      if (customAccentHex && customSubHex) {
+        const colors = deriveThemeFromAccent(customAccentHex, customSubHex, colorMode);
+        applyTheme(colors, colorMode);
+        setCustomThemeColors(colors);
+        saveTheme({
+          themeId,
+          customColors: colors,
+          colorMode,
+          customAccentHex,
+          customSubHex,
+        });
+        return;
+      }
+      // Case B: hex 없이 customThemeColors만 (마이그레이션 과도기)
+      if (customThemeColors) {
+        applyTheme(customThemeColors, colorMode);
+        saveTheme({ themeId, customColors: customThemeColors, colorMode });
+        return;
+      }
+      // Case C: 아무것도 없음 — themeInitRef가 true면 오지 않아야 함. 안전망만.
+      return;
+    }
+
+    // 프리셋 경로
+    if (colorMode === 'light') {
       applyTheme(getLightColors(themeId), colorMode);
       saveTheme({ themeId, colorMode });
     } else {
