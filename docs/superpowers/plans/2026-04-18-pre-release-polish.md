@@ -61,9 +61,11 @@ import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer,
 
 변경:
 ```typescript
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 ```
+
+**주의**: `dialog`는 Chunk 2 Task 2.4에서 도입 (타임아웃 에러박스 용). Chunk 1에서는 import하지 않음.
 
 - [ ] **Step 2: 전역 변수 블록에 트레이·상태 플래그 추가**
 
@@ -96,11 +98,11 @@ git commit -m "chore(electron): 트레이/다이얼로그/스플래시용 import
 ### Task 1.2: 트레이 아이콘 경로 해석 + 1x1 폴백 이미지 유틸
 
 **Files:**
-- Modify: `electron/main.ts` (기존 `let isQuitting` 변수 직후에 신규 블록 삽입)
+- Modify: `electron/main.ts` (Task 1.1 블록 바로 다음 줄)
 
 - [ ] **Step 1: `resolveTrayIconPath()` + `EMPTY_ICON_B64` 상수 추가**
 
-`electron/main.ts`의 전역 변수 선언들 바로 아래(Task 1.1에서 추가한 변수 다음 줄)에 삽입:
+`electron/main.ts`에서 Task 1.1에서 추가한 전역 변수(`let mainLoadedOk = false;`) 바로 다음 줄에 삽입:
 
 ```typescript
 /** 아이콘 경로 해석: dev(electron/)와 prod(dist-electron/) + app.getAppPath() 순회 */
@@ -141,8 +143,18 @@ git commit -m "feat(electron): 트레이 아이콘 경로 해석 유틸 + 빈 �
 
 ### Task 1.3: `humanizeStatus` + `showMainWindow` + `toggleWidget` 헬퍼 추가
 
+> **주의**: 이 Task는 Task 1.4와 **한 덩어리**로 취급. Task 1.3 단독으로는 `rebuildTrayMenu` 미정의 에러가 발생하므로, Task 1.4 완료 전까지 STOP 하지 말 것. 중간 검증·커밋 생략.
+
 **Files:**
 - Modify: `electron/main.ts` (Task 1.2 블록 아래)
+
+**Step 0: `openWidgetPopup` 시그니처 사전 확인**
+
+```
+Grep pattern "function openWidgetPopup|openWidgetPopup\s*\(" path "electron/main.ts" output_mode content
+```
+
+기대: `function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: ...)` 형태. 시그니처가 다르면 Task 1.3의 `toggleWidget` 호출을 실제 시그니처에 맞게 조정.
 
 - [ ] **Step 1: 3개 헬퍼 함수 추가**
 
@@ -270,11 +282,15 @@ git commit -m "feat(electron): 트레이 메뉴 구성 + createTray 구현 (3단
 ### Task 1.5: Supabase 상태 콜백에서 `rebuildTrayMenu` 호출
 
 **Files:**
-- Modify: `electron/main.ts:667-670` 부근 (기존 Supabase 상태 콜백)
+- Modify: `electron/main.ts` (문자열 `mainWindow.webContents.send('supabase:status'`가 포함된 콜백)
 
-- [ ] **Step 1: 기존 콜백을 찾아 `lastSupabaseStatus` 갱신 + `rebuildTrayMenu()` 호출 추가**
+- [ ] **Step 1: 해당 콜백 위치 문자열 검색으로 특정**
 
-`electron/main.ts` 안에서 `mainWindow.webContents.send('supabase:status', status)` 패턴을 포함한 콜백 위치를 찾아(현재 main.ts:667-669 부근), 콜백 진입부에서:
+```
+Grep pattern "supabase:status" path "electron/main.ts" output_mode content -n
+```
+
+매칭된 함수/콜백 내부에서 `lastSupabaseStatus` 갱신 + `rebuildTrayMenu()` 호출 추가:
 
 ```typescript
 // 기존 콜백 예시:
@@ -316,12 +332,12 @@ git commit -m "feat(electron): Supabase 상태 변화 시 트레이 메뉴/툴�
 ### Task 1.6: 위젯 open/close 시 `rebuildTrayMenu` 호출
 
 **Files:**
-- Modify: `electron/main.ts` (openWidgetPopup 내부 widgetWindows.set 직후)
-- Modify: `electron/main.ts` (popupWin.on('closed') 핸들러 내부)
+- Modify: `electron/main.ts` (`openWidgetPopup` 내부 `widgetWindows.set` 직후)
+- Modify: `electron/main.ts` (`popupWin.on('closed', ...)` 핸들러 내부)
 
 - [ ] **Step 1: `widgetWindows.set(widgetId, popupWin)` 직후에 `rebuildTrayMenu()` 호출 추가**
 
-`electron/main.ts:1141` 부근:
+문자열 `widgetWindows.set(widgetId, popupWin)` 검색하여 해당 라인 바로 다음에 삽입:
 ```typescript
 widgetWindows.set(widgetId, popupWin);
 rebuildTrayMenu(); // 트레이 체크박스 갱신
@@ -329,7 +345,7 @@ rebuildTrayMenu(); // 트레이 체크박스 갱신
 
 - [ ] **Step 2: `popupWin.on('closed')` 핸들러 내 `widgetWindows.delete` 직후에 `rebuildTrayMenu()` 호출 추가**
 
-`electron/main.ts:1156-1172` 부근:
+`popupWin.on('closed'` 문자열 검색하여 해당 블록 안에서 `widgetWindows.delete(widgetId)` 다음 줄에 삽입:
 ```typescript
 popupWin.on('closed', () => {
   widgetWindows.delete(widgetId);
@@ -358,36 +374,33 @@ git commit -m "feat(electron): 위젯 open/close 시 트레이 메뉴 갱신"
 ### Task 1.7: 위젯 캐시 삭제 로직 제거 (핵심 버그 수정)
 
 **Files:**
-- Modify: `electron/main.ts:1156-1164` (popupWin.on('closed') 핸들러)
+- Modify: `electron/main.ts` (`popupWin.on('closed', ...)` 핸들러)
 
-- [ ] **Step 1: `if (!isQuitting) { widgetPositionCache.delete(...); saveWidgetPositionsDebounced(); }` 블록 삭제**
+- [ ] **Step 1: `if (!isQuitting) { widgetPositionCache.delete(...); saveWidgetPositionsDebounced(); }` 3줄 블록을 삭제 (독 스택 제거 코드는 온전히 유지)**
 
-`electron/main.ts` 해당 핸들러에서:
-
+`popupWin.on('closed'` 블록 내 아래 3줄만 정확히 삭제:
 ```typescript
-// BEFORE:
-popupWin.on('closed', () => {
-  widgetWindows.delete(widgetId);
-  widgetOriginalBounds.delete(widgetId);
-  rebuildTrayMenu();
-  if (!isQuitting) {                           // ← 이 블록
-    widgetPositionCache.delete(widgetId);      // ← 전체를
-    saveWidgetPositionsDebounced();             // ← 삭제
-  }
-  // 독 스택에서 제거 + 나머지 재배치
-  const dockIdx = dockedWidgetIds.indexOf(widgetId);
-  // ... 이하 유지
-});
+if (!isQuitting) {
+  widgetPositionCache.delete(widgetId);
+  saveWidgetPositionsDebounced();
+}
+```
 
-// AFTER:
+주변 코드(`widgetWindows.delete`, `widgetOriginalBounds.delete`, `rebuildTrayMenu()`, `const dockIdx = dockedWidgetIds.indexOf(widgetId)` 이하 독 스택 제거/재배치 블록 전체)는 **건드리지 않음**. 삭제 대상은 정확히 위 3줄뿐.
+
+**최종 상태 예시**:
+```typescript
 popupWin.on('closed', () => {
   widgetWindows.delete(widgetId);
   widgetOriginalBounds.delete(widgetId);
-  rebuildTrayMenu();
+  rebuildTrayMenu(); // Task 1.6에서 추가
   // 캐시는 항상 유지 → 다음 실행 시 자동 복원 (spec 결정사항)
-  // 독 스택에서 제거 + 나머지 재배치
   const dockIdx = dockedWidgetIds.indexOf(widgetId);
-  // ... 이하 유지
+  if (dockIdx >= 0) {
+    dockedWidgetIds.splice(dockIdx, 1);
+    if (expandedDockWidgetId === widgetId) expandedDockWidgetId = null;
+    repositionAllDocked();
+  }
 });
 ```
 
@@ -410,17 +423,26 @@ git commit -m "fix(electron): 위젯 개별 X 닫기 시 위치 캐시 유지 (�
 
 **Files:**
 - Modify: `electron/main.ts` (전역 함수 블록, Task 1.4 `createTray` 위)
-- Modify: `electron/storage.ts` 또는 `electron/main.ts`의 기존 preferences 헬퍼 (loadPreferences/savePreferences 존재 여부 확인)
 
-- [ ] **Step 1: `loadPreferences`/`savePreferences`가 main에서 접근 가능한지 확인**
+- [ ] **Step 0: 필요한 기존 유틸 존재 여부 확인**
 
-```bash
-cd "C:\Bflow-BGonly\.claude\worktrees\ecstatic-lumiere-42f79a"
+```
+Grep pattern "function getDataPath|function ensureDir|function getAppRoot" path "electron/main.ts" output_mode content
 ```
 
-`Grep pattern "loadPreferences|savePreferences" path "electron"` 실행해 파일·함수 시그니처 확인.
+기대: `getDataPath()` / `ensureDir()` 둘 다 이미 존재 (main.ts 상단 유틸 블록). 존재 시 그대로 재사용. 부재 시 다음 폴백 작성:
 
-- [ ] **Step 2: 메인 프로세스에서 preferences.json을 읽고 쓰는 최소 헬퍼 추가 (없으면)**
+```typescript
+// 폴백 (getDataPath/ensureDir 부재 시 주입)
+function getDataPath(): string {
+  return app.getPath('userData'); // %APPDATA%/Bflow-BGonly/
+}
+function ensureDir(p: string): void {
+  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+}
+```
+
+- [ ] **Step 1: 메인 프로세스에서 preferences.json을 읽고 쓰는 최소 헬퍼 추가**
 
 `electron/main.ts` 상단의 `getUsersFilePath` 아래 부근에 추가:
 
@@ -448,7 +470,7 @@ async function writePreferences(patch: Record<string, unknown>): Promise<void> {
 
 **주의**: 기존에 동일 기능을 하는 함수가 이미 있다면 그것을 재사용. (렌더러 쪽 `settingsService.ts`는 IPC 경유 → 메인 프로세스는 별도 파일 I/O 필요)
 
-- [ ] **Step 3: `showTrayHintOnce()` 추가**
+- [ ] **Step 2: `showTrayHintOnce()` 추가**
 
 ```typescript
 async function showTrayHintOnce(): Promise<void> {
@@ -482,13 +504,13 @@ async function showTrayHintOnce(): Promise<void> {
 }
 ```
 
-- [ ] **Step 4: tsc 검증**
+- [ ] **Step 3: tsc 검증**
 
 ```bash
 npx tsc --noEmit
 ```
 
-- [ ] **Step 5: 커밋**
+- [ ] **Step 4: 커밋**
 
 ```bash
 git add electron/main.ts
@@ -504,35 +526,22 @@ git commit -m "feat(electron): 트레이 최소화 최초 1회 안내 (Notificat
 
 - [ ] **Step 1: `mainWindow.on('closed', ...)` 위에 `mainWindow.on('close', ...)` 추가**
 
+**Chunk 1 범위에서는 `show: false` 옵션을 추가하지 않음** — Chunk 2 Task 2.3에서 스플래시 도입과 함께 변경. 여기서는 기존 `BrowserWindow` 옵션 그대로 유지하고, 핸들러 2개만 추가:
+
 ```typescript
-function createWindow(): void {
-  mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    // ... 기존 옵션
-    show: false, // ← 스플래시 표시 중엔 숨김. Task 2.4에서 show() 타이밍 변경
-  });
+// 기존 createWindow 함수의 mainWindow.on('closed', ...) 바로 위에 아래를 추가
+mainWindow.on('close', (e) => {
+  if (!isQuitting && !trayFailed) {
+    e.preventDefault();
+    mainWindow?.hide();
+    showTrayHintOnce().catch(() => {/* ignore */});
+    return;
+  }
+  // isQuitting === true || trayFailed === true인 경우 기본 동작 허용
+});
 
-  // ... 기존 loadURL/loadFile
-
-  // 창 X 버튼 → 트레이로 숨김 (트레이 실패 시 실제 종료로 폴백)
-  mainWindow.on('close', (e) => {
-    if (!isQuitting && !trayFailed) {
-      e.preventDefault();
-      mainWindow?.hide();
-      showTrayHintOnce().catch(() => {/* ignore */});
-      return;
-    }
-    // isQuitting === true || trayFailed === true인 경우 기본 동작 허용
-  });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
-}
+// (기존 mainWindow.on('closed', () => { mainWindow = null; }); 는 유지)
 ```
-
-**주의**: `show: false`는 Task 2.4 스플래시 도입 시 함께 적용하므로, Chunk 1 작업 시엔 `show` 옵션 미지정(기본 true)으로 두고 Chunk 2에서 변경.
 
 - [ ] **Step 2: tsc 검증**
 
@@ -607,7 +616,7 @@ createTray();        // 먼저 트레이 준비 (실패해도 앱은 계속)
 createWindow();
 ```
 
-- [ ] **Step 2: tsc 검증 + Step 3: 개발 실행 검증**
+- [ ] **Step 2: tsc 검증 + Step 3: 개발 실행 정상 경로 검증**
 
 ```bash
 npx tsc --noEmit
@@ -621,7 +630,25 @@ npm run electron:dev
 - 트레이 좌클릭 or '열기' → 메인 창 복원
 - 트레이 '종료' → 앱 완전 종료, 트레이 아이콘 소거
 
-수동 검증 중 문제 발견 시 Task 1.1~1.11 해당 스텝으로 돌아가 수정.
+**증상 → 원인 Task 매트릭스** (문제 발견 시 해당 Task 재확인):
+
+| 증상 | 원인 Task |
+|---|---|
+| 트레이 아이콘 미표시 | Task 1.4 (createTray), Task 1.11 (whenReady 호출) |
+| 우클릭 메뉴 미노출 or 잘못됨 | Task 1.4 (rebuildTrayMenu) |
+| 위젯 서브메뉴 체크박스 안 맞음 | Task 1.6 (open/close 시 rebuildTrayMenu) |
+| 창 X 눌렀는데 앱이 실제로 종료됨 | Task 1.9 (close 핸들러), Task 1.10 (window-all-closed) |
+| 트레이 '종료'가 동작 안 함 | Task 1.4 (종료 메뉴 click 핸들러) |
+| 위젯 개별 X 닫았는데 재시작 시 복원 안 됨 | Task 1.7 (캐시 삭제 로직 제거 누락) |
+| Notification이 안 뜸 | Task 1.8 (showTrayHintOnce) — 다만 OS 차단 환경은 정상 |
+| Supabase 상태 툴팁 미반영 | Task 1.5 (콜백 수정) |
+
+- [ ] **Step 3.5: `trayFailed` 폴백 시나리오 검증 (좀비 방지 필수 확인)**
+
+1. `npm run electron:dev` 종료 상태에서 `public/splash/opening_image_cropped.png` 파일명을 일시 변경 (예: `.png.bak`).
+2. 다시 `npm run electron:dev` 실행 → 콘솔에 `[트레이] 생성 실패` 로그가 나오고 트레이 아이콘 없음 확인.
+3. 메인 창 X 클릭 → 실제 종료 확인 (숨어서 좀비가 되면 안 됨).
+4. 파일명 원복 후 재실행해서 정상 동작 복원 확인.
 
 - [ ] **Step 4: 커밋**
 
@@ -636,6 +663,14 @@ git commit -m "feat(electron): app.whenReady에서 트레이 초기화 수행"
 
 **Files:**
 - Modify: `electron/main.ts` (전역 스코프, `app.on('before-quit')` 근처)
+
+- [ ] **Step 0: `saveWidgetPositionsSync` 존재 확인**
+
+```
+Grep pattern "function saveWidgetPositionsSync" path "electron/main.ts" output_mode content -n
+```
+
+기대: `function saveWidgetPositionsSync(): void` 존재 (main.ts:103). 부재 시 `saveWidgetPositionsDebounced`가 내부에 timer clear + 동기 저장 흐름을 포함하는지 확인 후 대안으로 사용.
 
 - [ ] **Step 1: `process.on('exit')` 등록**
 
@@ -679,9 +714,18 @@ git commit -m "feat(electron): process exit 시 위젯 위치 최종 안전망 �
 npm run build:vite
 ```
 
-기대: tsc + vite build 성공. (electron-builder는 이후 Chunk 전체 완료 시 검증)
+기대: tsc + vite build 성공.
 
-- [ ] **Step 3: 커밋**
+- [ ] **Step 3: electron-builder --dir 모드로 파일 포함 확인 (선택)**
+
+```bash
+npx electron-builder --dir
+ls dist/win-unpacked/resources/app/public/splash/
+```
+
+기대: `opening_image_cropped.png`가 포함되어 있음. 없으면 `files` 패턴 재확인.
+
+- [ ] **Step 4: 커밋**
 
 ```bash
 git add package.json
@@ -916,7 +960,15 @@ git commit -m "feat(electron): 메인 창 show:false + did-finish-load로 스플
 ### Task 2.4: 30초 타임아웃 + `console.time` 측정 로그
 
 **Files:**
+- Modify: `electron/main.ts:1` (import에 `dialog` 추가)
 - Modify: `electron/main.ts` (`app.whenReady().then(...)` 블록)
+
+- [ ] **Step 0: `dialog` import 추가**
+
+`electron/main.ts:1`의 import 라인에 `dialog` 추가:
+```typescript
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog } from 'electron';
+```
 
 - [ ] **Step 1: `app.whenReady()` 블록에서 측정 로그 시작 + 타임아웃 설정**
 
