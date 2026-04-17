@@ -37,8 +37,6 @@
       "dist/**/*",
       "dist-electron/**/*",
       "node_modules/**/*",
-      "!node_modules/**/{*.md,*.markdown,LICENSE*,license*,CHANGELOG*,changelog*}",
-      "!node_modules/**/{test,tests,__tests__,example,examples,docs,doc}/**",
       "package.json"
     ],
     "win": {
