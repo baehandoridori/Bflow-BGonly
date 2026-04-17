@@ -23,6 +23,7 @@ DB(Supabase)에는 Drive URL만 저장됩니다.
 - Supabase Free 플랜 유지 (Storage 1GB)
 - 기존 Google Drive 이미지 마이그레이션은 **하지 않음** (정식 빌드 시 데이터 계승 없음)
 - 기존 업로드 UX(클립보드 붙여넣기, 파일 선택) 유지
+- 기존 IPC 시그니처 호환 유지 (`sheetName, sceneId, imageType, base64` 형태)
 
 ---
 
@@ -31,13 +32,19 @@ DB(Supabase)에는 Drive URL만 저장됩니다.
 ```
 사용자가 이미지 첨부
   ↓
-[renderer] storageService.uploadImage(sceneKey, type, base64)
+[renderer]
+  - 클립보드 버튼 → window.electronAPI.clipboardReadImage() (main에서 800px 리사이즈 완료)
+  - 파일 선택/드래그/Ctrl+V → imageUtils.resizeBlob() (Canvas API로 800px JPEG 변환)
+  ↓
+storageService.uploadImage(sheetName, sceneId, imageType, base64)
   ↓ IPC 'storage:upload-image'
 [main] electron/storage.ts
-  ↓ ① nativeImage로 800px 리사이즈 + JPEG 80% 변환 (~200KB)
-  ↓ ② Supabase Storage 'scene-images' 버킷에 업로드
+  ↓ ① base64 → Buffer
+  ↓ ② 안전망: 버퍼가 크거나 크기 정보가 충분하면 nativeImage로 재측정 후 필요 시만 resize
+  ↓    (이미 렌더러에서 변환됐으면 double-resize 없이 그대로 사용)
+  ↓ ③ Supabase Storage 'scene-images' 버킷에 업로드
   ↓    경로: EP01/A/a001/storyboard_<timestamp>.jpg
-  ↓ ③ public URL 반환
+  ↓ ④ public URL 반환
 [renderer] DB 업데이트: scenes.storyboard_url = <public URL>
 [UI] <img src="<public URL>"> 로 즉시 표시 (프록시 불필요)
 ```
@@ -47,10 +54,11 @@ DB(Supabase)에는 Drive URL만 저장됩니다.
   - 속도: ~50-150ms (네이티브 C++ 기반, sharp와 동급)
   - 외부 dependency 추가 0개
   - 기존 `clipboard:read-image` 핸들러에서 이미 사용 중인 검증된 API
+- **이중 변환 방지**: 렌더러에서 이미 resize된 경우 main에서는 그대로 업로드 (단, 크기가 의심스러울 때만 안전망 resize)
+- **API 시그니처**: 기존 `sheetsUploadImage(sheetName, sceneId, imageType, base64)`와 동일 — 호출부 최소 수정
 - **버킷 접근**: Public 버킷 (URL 기반 조회)
-  - RLS로 anon 키가 업로드/삭제/읽기 가능
-- **파일 경로**: 계층 구조 `{EP}/{part}/{sceneId}/{type}_{timestamp}.jpg`
-- **삭제 시점**: 사용자가 UI에서 명시적으로 지울 때만 (씬/에피소드 아카이빙 시에도 이미지 유지)
+- **파일 경로**: 계층 구조 `{EP}/{part}/{sceneId}/{type}_{timestamp}.jpg` — `sheetName`에서 EP/part 추출
+- **삭제 시점**: 사용자가 UI에서 명시적으로 지울 때만
 
 ---
 
@@ -60,7 +68,7 @@ DB(Supabase)에는 Drive URL만 저장됩니다.
 
 | 파일 | 역할 |
 |------|------|
-| `electron/storage.ts` | Supabase Storage 업로드/삭제 + nativeImage 변환 헬퍼 |
+| `electron/storage.ts` | Supabase Storage 업로드/삭제 + nativeImage 안전망 변환 헬퍼 |
 | `src/services/storageService.ts` | 렌더러 IPC 래퍼 |
 
 ### 수정 파일
@@ -71,93 +79,144 @@ DB(Supabase)에는 Drive URL만 저장됩니다.
 | `electron/preload.ts` | `storageUploadImage`, `storageDeleteImage` expose |
 | `src/types/index.ts` | ElectronAPI 인터페이스에 신규 메서드 추가 |
 | `src/mocks/devElectronAPI.ts` | mock 스텁 추가 |
-| 씬 모달 이미지 업로드 호출부 | `sheetsUploadImage` → `storageUploadImage` 교체 |
+| `src/utils/imageUtils.ts` | `sheetsUploadImage` → `storageUploadImage` 교체 (renderer resize는 유지) |
+| `src/components/scenes/SceneDetailModal.tsx` | 클립보드 버튼 경로의 업로드 호출 변경 |
 
-### Supabase 설정 (Dashboard + SQL)
+### Supabase Dashboard + SQL 설정
 
 1. Storage 버킷 `scene-images` 생성 (Public)
-2. RLS 정책:
-   - `INSERT`, `UPDATE`, `DELETE`, `SELECT` 모두 anon 허용 (기존 테이블 정책과 일치)
+2. RLS 정책 (Storage는 public이어도 `INSERT`/`DELETE`에 명시적 정책 필요):
+
+```sql
+-- anon key 업로드 허용
+CREATE POLICY "scene_images_anon_insert" ON storage.objects
+  FOR INSERT TO anon
+  WITH CHECK (bucket_id = 'scene-images');
+
+-- anon key 삭제 허용
+CREATE POLICY "scene_images_anon_delete" ON storage.objects
+  FOR DELETE TO anon
+  USING (bucket_id = 'scene-images');
+
+-- SELECT는 public 버킷이라 자동 허용됨
+```
 
 ---
 
-## 데이터 흐름
+## 구현 세부
 
-### 업로드
+### 경로 구성 헬퍼
 
 ```typescript
-// src/services/storageService.ts (신규)
-export async function uploadImage(
-  sceneKey: { episodeNumber: number; partId: string; sceneId: string },
-  imageType: 'storyboard' | 'guide',
-  base64Data: string,
-): Promise<{ url: string }> {
-  return window.electronAPI.storageUploadImage(sceneKey, imageType, base64Data);
+// electron/storage.ts
+/** sheetName 예: "EP01_A_BG" → { ep: "EP01", partId: "A" } */
+function parseSheetName(sheetName: string): { ep: string; partId: string } {
+  const m = sheetName.match(/^(EP\d+)_([A-Z])_/);
+  if (!m) throw new Error(`Invalid sheetName: ${sheetName}`);
+  return { ep: m[1], partId: m[2] };
+}
+
+function buildPath(sheetName: string, sceneId: string, imageType: string): string {
+  const { ep, partId } = parseSheetName(sheetName);
+  return `${ep}/${partId}/${sceneId}/${imageType}_${Date.now()}.jpg`;
+}
+
+/** public URL → storage 경로 추출 */
+function extractPathFromPublicUrl(url: string): string | null {
+  const m = url.match(/\/storage\/v1\/object\/public\/scene-images\/(.+)$/);
+  return m ? m[1] : null;
 }
 ```
 
+### 업로드 핵심 로직
+
 ```typescript
-// electron/storage.ts (신규)
+// electron/storage.ts
 import { nativeImage } from 'electron';
 import { supabase } from './supabase';
 
 const BUCKET = 'scene-images';
+const MAX_PX = 800;
+const JPEG_QUALITY = 80;
+const SAFE_SIZE_BYTES = 500 * 1024; // 500KB 이상이면 안전망 resize 고려
 
-function resizeToJpeg(base64Data: string, maxSize = 800, quality = 80): Buffer {
-  const image = nativeImage.createFromDataURL(base64Data);
+/** base64 → 필요 시 resize된 JPEG Buffer */
+function toBuffer(base64Data: string): Buffer {
+  const match = base64Data.match(/^data:(image\/\w+);base64,(.+)$/);
+  if (!match) throw new Error('Invalid base64 image data');
+  let buffer = Buffer.from(match[2], 'base64');
+
+  // 안전망: 이미 작으면 그대로 사용 (renderer에서 이미 처리된 경우)
+  if (buffer.length <= SAFE_SIZE_BYTES) return buffer;
+
+  // 크면 nativeImage로 크기 확인 후 필요할 때만 resize
+  const image = nativeImage.createFromBuffer(buffer);
   const { width, height } = image.getSize();
-  if (width === 0 || height === 0) throw new Error('Invalid image data');
-  let target = image;
-  if (width > maxSize || height > maxSize) {
-    const ratio = Math.min(maxSize / width, maxSize / height);
-    target = image.resize({
+  if (width === 0 || height === 0) {
+    throw new Error('Image decode failed');
+  }
+  if (width > MAX_PX || height > MAX_PX) {
+    const ratio = Math.min(MAX_PX / width, MAX_PX / height);
+    const resized = image.resize({
       width: Math.round(width * ratio),
       height: Math.round(height * ratio),
     });
+    return resized.toJPEG(JPEG_QUALITY);
   }
-  return target.toJPEG(quality);
-}
-
-function buildPath(sceneKey: SceneKey, imageType: string): string {
-  const ep = `EP${String(sceneKey.episodeNumber).padStart(2, '0')}`;
-  return `${ep}/${sceneKey.partId}/${sceneKey.sceneId}/${imageType}_${Date.now()}.jpg`;
+  // 크기는 작은데 파일만 큰 경우 (PNG 등) — JPEG 인코딩만
+  return image.toJPEG(JPEG_QUALITY);
 }
 
 export async function uploadImage(
-  sceneKey: SceneKey,
+  sheetName: string,
+  sceneId: string,
   imageType: 'storyboard' | 'guide',
   base64Data: string,
-): Promise<{ url: string }> {
-  const buffer = resizeToJpeg(base64Data);
-  const path = buildPath(sceneKey, imageType);
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, buffer, { contentType: 'image/jpeg', upsert: false });
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-  return { url: data.publicUrl };
+): Promise<{ ok: boolean; url?: string; error?: string }> {
+  try {
+    const buffer = toBuffer(base64Data);
+    const path = buildPath(sheetName, sceneId, imageType);
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, buffer, { contentType: 'image/jpeg', upsert: false });
+    if (error) throw error;
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    return { ok: true, url: data.publicUrl };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
 }
 
 export async function deleteImage(url: string): Promise<void> {
   const path = extractPathFromPublicUrl(url);
-  if (!path) return;
+  if (!path) return; // 비-Supabase URL은 무시 (legacy drive URL 등)
   const { error } = await supabase.storage.from(BUCKET).remove([path]);
   if (error) console.warn('[Storage] 삭제 실패:', error.message);
 }
 ```
 
-### 조회
-
-public URL을 `<img src>`에 직접 사용. 변환/프록시 불필요.
-기존 `sanitizeImageUrl()`은 HTTPS URL을 그대로 통과시키므로 호환됨.
-
-### 삭제
+### 렌더러 서비스
 
 ```typescript
-// 사용자가 씬 이미지 X 버튼 클릭
-storageService.deleteImage(scene.storyboardUrl)
-  .then(() => { supabaseService.updateSceneField(sceneUuid, 'storyboard_url', ''); });
+// src/services/storageService.ts (신규)
+export async function uploadImage(
+  sheetName: string,
+  sceneId: string,
+  imageType: 'storyboard' | 'guide',
+  base64Data: string,
+): Promise<{ ok: boolean; url?: string; error?: string }> {
+  return window.electronAPI.storageUploadImage(sheetName, sceneId, imageType, base64Data);
+}
+
+export async function deleteImage(url: string): Promise<void> {
+  return window.electronAPI.storageDeleteImage(url);
+}
 ```
+
+### 호출부 교체
+
+`src/utils/imageUtils.ts`의 `saveImage()` 함수 — 기존에 `sheetsUploadImage`를 호출하던 부분만 `storageUploadImage`로 교체. Renderer의 `resizeBlob()`/`resizeDataUrl()` 로직은 유지 (IPC 페이로드 절감). 시그니처가 동일하므로 호출부는 한 줄 변경.
 
 ---
 
@@ -165,10 +224,26 @@ storageService.deleteImage(scene.storyboardUrl)
 
 | 상황 | 대응 |
 |------|------|
-| nativeImage 변환 실패 (손상된 이미지) | 명확한 에러 반환 → 사용자에게 "이미지 파일이 올바르지 않습니다" 알림 |
-| Storage 업로드 실패 (네트워크/용량) | 에러 전파 → UI에서 재시도 버튼 또는 에러 토스트 |
-| Storage 삭제 실패 | 경고 로그만 남기고 DB URL은 비움 (orphan 파일은 수동 정리 가능) |
-| 존재하지 않는 URL 삭제 | no-op (에러 무시) |
+| base64 파싱 실패 | `{ ok: false, error: 'Invalid base64' }` 반환 → UI 에러 토스트 |
+| nativeImage decode 실패 | 명확한 에러 메시지 → "이미지 파일이 손상되었거나 지원되지 않는 형식입니다" |
+| Storage 업로드 실패 (네트워크/용량) | 에러 전파 → UI 토스트 + 재시도 버튼 |
+| Storage 삭제 실패 | 경고 로그 + DB URL은 비움 (orphan 파일은 수동 정리 가능) |
+| 존재하지 않는 URL 삭제 | no-op |
+| 비-Supabase URL 삭제 시도 | no-op (legacy drive URL 보호) |
+
+### 알려진 한계 (트레이드오프)
+
+1. **업로드 성공 후 DB 저장 실패 시 orphan 파일**
+   - 업로드는 성공했는데 `updateSceneField`가 실패하면 Storage에 파일이 남고 DB엔 참조 없음.
+   - 20명 내부 도구에서 흔치 않음. 수동 대시보드 정리로 대응.
+
+2. **동시 업로드 시 Last-Write-Wins**
+   - 두 사용자가 같은 씬에 동시 업로드 → timestamp 다르므로 둘 다 성공, DB는 나중 URL만 보관, 먼저 URL의 파일은 orphan.
+   - 기존 씬 데이터 동기화 정책(LWW)과 일관.
+
+3. **Public URL CDN TTL**
+   - 삭제 후에도 CDN 캐시에 남아 최대 ~1시간 동안 기존 URL로 조회 가능.
+   - 내부 도구에서는 문제 없음.
 
 ---
 
@@ -189,9 +264,14 @@ storageService.deleteImage(scene.storyboardUrl)
    - 앱 재시작 후 해당 씬 열기
    - ✅ 기대: public URL로 즉시 표시 (drive-img:// 프록시 없이)
 
-4. **용량 초과 시뮬레이션**
-   - Supabase 대시보드에서 용량 근접 상태 확인
-   - ✅ 기대: 업로드 실패 시 명확한 에러 메시지
+4. **Legacy Drive URL 호환**
+   - DB에 기존 `drive-img://` URL이 있는 씬 조회
+   - ✅ 기대: 기존 프록시로 정상 표시 (호환 유지)
+
+5. **파일 크기 시나리오**
+   - 10KB 작은 JPEG 업로드 → 재압축 없이 그대로 저장
+   - 20MB 거대 PNG 업로드 → 800px로 resize되어 ~200KB 저장
+   - 손상된 base64 → 명확한 에러
 
 ### 빌드 검증
 ```bash
@@ -205,11 +285,12 @@ npx vite build
 
 | 리스크 | 확률 | 심각도 | 완화책 |
 |--------|------|--------|--------|
-| **Free 1GB 용량 초과** | 중 | 중 | 변환으로 장당 ~200KB → 5,000장 여유. 프로 플랜($25/월) 업그레이드로 100GB |
-| **Supabase 정지** | 낮음 | 높음 | DB도 이미 Supabase 의존 — 신규 리스크 아님. keep-alive로 예방 |
-| **Public 버킷 노출** | 낮음 | 낮음 | 내부 도구 + URL 추측 어려움 (timestamp+경로). 민감 이미지 아님 |
-| **기존 GAS 코드 잔존** | 낮음 | 낮음 | `sheets:upload-image` 핸들러는 당분간 유지 — 다른 경로 없어졌는지 확인 후 제거 |
-| **대용량 이미지 메모리** | 낮음 | 낮음 | nativeImage는 Chromium 기반 — 일반적인 이미지(<20MB) 문제없음 |
+| **Free 1GB 용량** | 중 | 중 | 장당 ~200KB 기준 ~5,000장 한계. 800MB 도달 시 모니터링 알림. 프로($25/월) 업그레이드로 100GB |
+| **Supabase 정지** | 낮음 | 높음 | DB도 이미 의존 — 신규 리스크 아님. keep-alive로 예방 |
+| **Public 버킷 URL 노출** | 낮음 | 낮음 | 내부 도구 + 경로+timestamp 추측 어려움. 민감 이미지 아님 |
+| **대용량 이미지 메모리** | 낮음 | 낮음 | nativeImage는 Chromium 기반. 일반(<20MB) 이미지 문제없음 |
+| **Storage RLS 누락** | 중 | 높음 | 설치 단계에 RLS SQL 실행 필수 — 누락 시 403 |
+| **Upload 성공+DB 실패 orphan** | 낮음 | 낮음 | 수동 대시보드 정리 |
 
 ---
 
@@ -233,6 +314,7 @@ npx vite build
 
 ## 검증 기준
 
+- [ ] Storage 버킷 + RLS SQL 적용 완료
 - [ ] 씬 이미지 붙여넣기 → Supabase Storage 업로드 성공
 - [ ] DB에 public URL 저장됨
 - [ ] 재접속 후 이미지 조회 정상
