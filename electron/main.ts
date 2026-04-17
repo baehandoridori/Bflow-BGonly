@@ -14,6 +14,7 @@ import {
   waitForAllPendingOps,
 } from './sheets';
 import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-image';
+import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage } from './storage';
 import {
   initVacation,
   isVacationConnected,
@@ -737,6 +738,22 @@ ipcMain.handle(
       return { ok: false, error: msg };
     }
   }
+);
+
+// ─── Supabase Storage IPC ──────────────────────────────
+
+ipcMain.handle(
+  'storage:upload-image',
+  async (_event, sheetName: string, sceneId: string, imageType: 'storyboard' | 'guide', base64Data: string) => {
+    return storageUploadImage(sheetName, sceneId, imageType, base64Data);
+  },
+);
+
+ipcMain.handle(
+  'storage:delete-image',
+  async (_event, url: string) => {
+    await storageDeleteImage(url);
+  },
 );
 
 // ─── IPC 핸들러: 네이티브 알림 ─────────────────────────────

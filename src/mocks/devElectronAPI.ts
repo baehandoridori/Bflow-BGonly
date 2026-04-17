@@ -62,6 +62,8 @@ export function installDevElectronAPI(): void {
     sheetsConnect: async () => ({ ok: false, error: 'DEV mock' }),
     sheetsIsConnected: async () => false,
     sheetsUploadImage: async () => ({ ok: false, error: 'DEV mock' }),
+    storageUploadImage: async () => ({ ok: true, url: 'mock://image' }),
+    storageDeleteImage: async () => {},
     sheetsReadComments: async () => ({ ok: true, data: [] }),
     sheetsReadRevisions: async () => ({ ok: true, data: [] }),
 

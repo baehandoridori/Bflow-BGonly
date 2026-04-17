@@ -174,6 +174,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) =>
     ipcRenderer.invoke('sheets:upload-image', sheetName, sceneId, imageType, base64Data),
 
+  // ─── Supabase Storage ──────────────────────────────
+    storageUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) =>
+      ipcRenderer.invoke('storage:upload-image', sheetName, sceneId, imageType, base64Data),
+    storageDeleteImage: (url: string) => ipcRenderer.invoke('storage:delete-image', url),
+
   // Sheets fallback (Supabase 장애 시)
   sheetsReadComments: (sheetName: string) =>
     ipcRenderer.invoke('sheets:read-comments', sheetName),

@@ -359,6 +359,14 @@ export interface ElectronAPI {
   sheetsIsConnected: () => Promise<boolean>;
   // 이미지 업로드 (GAS → Google Drive)
   sheetsUploadImage: (sheetName: string, sceneId: string, imageType: string, base64Data: string) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  // ─── Supabase Storage ──────────────────────────
+  storageUploadImage: (
+    sheetName: string,
+    sceneId: string,
+    imageType: string,
+    base64Data: string,
+  ) => Promise<{ ok: boolean; url?: string; error?: string }>;
+  storageDeleteImage: (url: string) => Promise<void>;
   // Sheets fallback (Supabase 장애 시)
   sheetsReadComments: (sheetName: string) => Promise<{ ok: boolean; data: { commentId: string; sheetName: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string }[]; error?: string }>;
   sheetsReadRevisions: () => Promise<{ ok: boolean; data: { id: string; sceneKey: string; revisionNo: number; status: string; description: string; imageUrl: string; department: string; requesterId: string; requesterName: string; assignee: string; resolvedBy: string; resolvedNote: string; createdAt: string; updatedAt: string; resolvedAt: string }[]; error?: string }>;
