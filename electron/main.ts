@@ -131,6 +131,36 @@ function rebuildTrayMenu(): void {
   tray.setToolTip(`B flow • ${status}`);
 }
 
+async function showTrayHintOnce(): Promise<void> {
+  const prefs = await readPreferences();
+  if (prefs.trayFirstMinimizeSeen) return;
+
+  let shown = false;
+  if (Notification.isSupported()) {
+    try {
+      new Notification({
+        title: 'B flow',
+        body: '트레이로 숨겨졌습니다. 트레이 아이콘 우클릭 → 종료로 완전히 닫을 수 있습니다.',
+      }).show();
+      shown = true;
+    } catch { /* ignore */ }
+  }
+
+  if (!shown && tray && !tray.isDestroyed() && process.platform === 'win32') {
+    try {
+      tray.displayBalloon({
+        title: 'B flow',
+        content: '트레이에 숨겨졌습니다. 트레이 메뉴 종료로 완전히 닫을 수 있습니다.',
+      });
+      shown = true;
+    } catch { /* ignore */ }
+  }
+
+  if (shown) {
+    await writePreferences({ trayFirstMinimizeSeen: true });
+  }
+}
+
 function createTray(): void {
   try {
     const iconPath = resolveTrayIconPath();
@@ -389,6 +419,26 @@ function createWindow(): void {
 
 function getUsersFilePath(): string {
   return path.join(getAppRoot(), 'users.dat');
+}
+
+function getPreferencesFilePath(): string {
+  return path.join(getDataPath(), 'preferences.json');
+}
+
+async function readPreferences(): Promise<Record<string, unknown>> {
+  try {
+    const raw = await fs.promises.readFile(getPreferencesFilePath(), 'utf-8');
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+async function writePreferences(patch: Record<string, unknown>): Promise<void> {
+  const prev = await readPreferences();
+  const next = { ...prev, ...patch };
+  ensureDir(path.dirname(getPreferencesFilePath()));
+  await fs.promises.writeFile(getPreferencesFilePath(), JSON.stringify(next, null, 2), 'utf-8');
 }
 
 ipcMain.handle('users:read', () => {
