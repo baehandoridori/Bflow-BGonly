@@ -128,9 +128,18 @@ export function ThemeSection() {
               : 'border-bg-border hover:border-accent/40 hover:bg-bg-border/30 border-dashed',
           )}
         >
-          <div className="w-full h-10 rounded-lg flex items-center justify-center bg-bg-border/50">
-            <Palette size={20} className="text-text-secondary" />
-          </div>
+          {themeId === 'custom' && customThemeColors ? (
+            <div
+              className="w-full h-10 rounded-lg"
+              style={{
+                background: `linear-gradient(135deg, rgb(${customThemeColors.bgCard}) 0%, rgb(${customThemeColors.accent}) 50%, rgb(${customThemeColors.accentSub}) 100%)`,
+              }}
+            />
+          ) : (
+            <div className="w-full h-10 rounded-lg flex items-center justify-center bg-bg-border/50">
+              <Palette size={20} className="text-text-secondary" />
+            </div>
+          )}
           <span className="text-xs text-text-primary font-medium">커스텀</span>
           <span className="text-[11px] text-text-secondary">Custom</span>
           {themeId === 'custom' && (
