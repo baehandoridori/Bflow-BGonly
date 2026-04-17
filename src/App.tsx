@@ -528,12 +528,22 @@ export default function App() {
     // 프리셋 경로
     if (colorMode === 'light') {
       applyTheme(getLightColors(themeId), colorMode);
-      saveTheme({ themeId, colorMode });
+      saveTheme({
+        themeId,
+        colorMode,
+        customAccentHex: customAccentHex ?? undefined,
+        customSubHex: customSubHex ?? undefined,
+      });
     } else {
       const preset = getPreset(themeId);
       if (preset) {
         applyTheme(preset.colors, colorMode);
-        saveTheme({ themeId, colorMode });
+        saveTheme({
+          themeId,
+          colorMode,
+          customAccentHex: customAccentHex ?? undefined,
+          customSubHex: customSubHex ?? undefined,
+        });
       }
     }
   }, [themeId, customThemeColors, colorMode]);

@@ -162,7 +162,7 @@ export function hslToRgb(h: number, s: number, l: number): string {
   else if (hP < 3) [r1, g1, b1] = [0, c, x];
   else if (hP < 4) [r1, g1, b1] = [0, x, c];
   else if (hP < 5) [r1, g1, b1] = [x, 0, c];
-  else if (hP < 6) [r1, g1, b1] = [c, 0, x];
+  else if (hP <= 6) [r1, g1, b1] = [c, 0, x];
   const m = lN - c / 2;
   const r = Math.round((r1 + m) * 255);
   const g = Math.round((g1 + m) * 255);

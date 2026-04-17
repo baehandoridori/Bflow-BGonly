@@ -144,8 +144,8 @@ async function showTrayHintOnce(): Promise<void> {
   if (showTrayHintInFlight) return;
   showTrayHintInFlight = true;
   try {
-    const prefs = await readPreferences();
-    if (prefs.trayFirstMinimizeSeen) return;
+    const state = await readAppState();
+    if (state.trayFirstMinimizeSeen) return;
 
     let shown = false;
     if (Notification.isSupported()) {
@@ -171,7 +171,7 @@ async function showTrayHintOnce(): Promise<void> {
     }
 
     if (shown) {
-      await writePreferences({ trayFirstMinimizeSeen: true });
+      await writeAppState({ trayFirstMinimizeSeen: true });
     }
   } finally {
     showTrayHintInFlight = false;
@@ -514,6 +514,10 @@ function getPreferencesFilePath(): string {
   return path.join(getDataPath(), 'preferences.json');
 }
 
+function getAppStateFilePath(): string {
+  return path.join(getDataPath(), 'app-state.json');
+}
+
 async function readPreferences(): Promise<Record<string, unknown>> {
   try {
     const raw = await fs.promises.readFile(getPreferencesFilePath(), 'utf-8');
@@ -528,6 +532,22 @@ async function writePreferences(patch: Record<string, unknown>): Promise<void> {
   const next = { ...prev, ...patch };
   ensureDir(path.dirname(getPreferencesFilePath()));
   await fs.promises.writeFile(getPreferencesFilePath(), JSON.stringify(next, null, 2), 'utf-8');
+}
+
+async function readAppState(): Promise<Record<string, unknown>> {
+  try {
+    const raw = await fs.promises.readFile(getAppStateFilePath(), 'utf-8');
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeAppState(patch: Record<string, unknown>): Promise<void> {
+  const prev = await readAppState();
+  const next = { ...prev, ...patch };
+  ensureDir(path.dirname(getAppStateFilePath()));
+  await fs.promises.writeFile(getAppStateFilePath(), JSON.stringify(next, null, 2), 'utf-8');
 }
 
 ipcMain.handle('users:read', () => {
