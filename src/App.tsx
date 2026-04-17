@@ -29,7 +29,7 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { applyTheme, getPreset, getLightColors } from '@/themes';
+import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, DEFAULT_THEME_ID } from '@/themes';
 import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
 import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
@@ -323,20 +323,66 @@ export default function App() {
         const savedTheme = await loadTheme();
         if (savedTheme) {
           const savedMode = savedTheme.colorMode ?? 'dark';
-          if (savedTheme.customColors) {
-            applyTheme(savedTheme.customColors, savedMode);
-          } else if (savedMode === 'light') {
-            applyTheme(getLightColors(savedTheme.themeId), savedMode);
-          } else {
-            const preset = getPreset(savedTheme.themeId);
-            if (preset) applyTheme(preset.colors, savedMode);
+
+          // 커스텀 테마 마이그레이션
+          let customHex: { accent: string; sub: string } | null = null;
+          if (savedTheme.themeId === 'custom') {
+            customHex = sanitizeCustomHex({
+              customAccentHex: savedTheme.customAccentHex,
+              customSubHex: savedTheme.customSubHex,
+              customThemeColors: savedTheme.customColors ?? null,
+            });
+            if (!customHex) {
+              console.warn('[테마] 커스텀 테마 데이터 손상 → 기본 프리셋으로 폴백');
+            }
           }
-          // 가드를 먼저 열고 → 상태 변경 (useEffect가 실행될 때 가드가 이미 true)
-          themeInitRef.current = true;
-          setThemeId(savedTheme.themeId);
-          setColorMode(savedMode);
-          if (savedTheme.customColors) {
-            setCustomThemeColors(savedTheme.customColors);
+
+          // 실제 적용할 테마 ID (커스텀 복구 실패 시 기본 프리셋으로 강제)
+          const effectiveThemeId =
+            savedTheme.themeId === 'custom' && !customHex
+              ? DEFAULT_THEME_ID
+              : savedTheme.themeId;
+
+          // CSS 적용
+          if (effectiveThemeId === 'custom' && customHex) {
+            const colors = deriveThemeFromAccent(customHex.accent, customHex.sub, savedMode);
+            applyTheme(colors, savedMode);
+            themeInitRef.current = true;
+            setThemeId('custom');
+            setColorMode(savedMode);
+            setCustomThemeColors(colors);
+            useAppStore.getState().setCustomAccentHex(customHex.accent);
+            useAppStore.getState().setCustomSubHex(customHex.sub);
+            // 구포맷만 있거나 sanitize로 보강된 경우 새 포맷으로 재저장
+            if (savedTheme.customAccentHex !== customHex.accent || savedTheme.customSubHex !== customHex.sub) {
+              saveTheme({
+                themeId: 'custom',
+                customColors: colors,
+                colorMode: savedMode,
+                customAccentHex: customHex.accent,
+                customSubHex: customHex.sub,
+              });
+            }
+          } else if (savedMode === 'light') {
+            applyTheme(getLightColors(effectiveThemeId), savedMode);
+            themeInitRef.current = true;
+            setThemeId(effectiveThemeId);
+            setColorMode(savedMode);
+          } else {
+            const preset = getPreset(effectiveThemeId);
+            if (preset) {
+              applyTheme(preset.colors, savedMode);
+              themeInitRef.current = true;
+              setThemeId(effectiveThemeId);
+              setColorMode(savedMode);
+            } else {
+              // 완전 손상 (프리셋 ID도 유효하지 않음) → 최종 폴백
+              const fallback = getPreset(DEFAULT_THEME_ID)!;
+              applyTheme(fallback.colors, savedMode);
+              themeInitRef.current = true;
+              setThemeId(DEFAULT_THEME_ID);
+              setColorMode(savedMode);
+            }
           }
         } else {
           // 저장된 테마 없음 → 기본 테마 유지, 이후 변경부터 저장 허용
