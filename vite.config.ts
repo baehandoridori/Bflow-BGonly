@@ -18,7 +18,7 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
-              external: ['ws', 'bufferutil', 'utf-8-validate'],
+              external: ['ws', 'bufferutil', 'utf-8-validate', 'googleapis', 'google-auth-library'],
             },
           },
         },

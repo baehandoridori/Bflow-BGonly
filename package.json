@@ -28,6 +28,24 @@
     "sonner": "^2.0.7",
     "zustand": "^4.5.2"
   },
+  "build": {
+    "appId": "com.studiojbbj.bflow",
+    "productName": "BFLOW",
+    "asar": false,
+    "npmRebuild": false,
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable"
+    },
+    "portable": {
+      "artifactName": "BFLOW.exe"
+    }
+  },
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
