@@ -192,6 +192,64 @@ export function deriveThemeFromAccent(
   };
 }
 
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * 저장된 커스텀 테마 필드들을 검증/마이그레이션.
+ * 부분적 유효성도 허용하여 사용자가 저장한 hex를 최대한 보존.
+ *
+ * 우선순위:
+ * 1. 두 hex 모두 유효 → 둘 다 사용
+ * 2. 한 hex만 유효 → 유효한 쪽은 유지, 나머지는 triplet에서 역산 (없으면 그 값을 sub로 복제)
+ * 3. 둘 다 hex 무효 → triplet 양쪽 모두 역산
+ * 4. triplet도 없거나 실패 → null (호출부는 DEFAULT_THEME_ID로 폴백)
+ */
+export function sanitizeCustomHex(input: {
+  customAccentHex?: string | null;
+  customSubHex?: string | null;
+  customThemeColors?: ThemeColors | null;
+}): { accent: string; sub: string } | null {
+  const aValid = !!(input.customAccentHex && HEX_RE.test(input.customAccentHex));
+  const sValid = !!(input.customSubHex && HEX_RE.test(input.customSubHex));
+  const c = input.customThemeColors;
+
+  // Case 1: 둘 다 hex 유효
+  if (aValid && sValid) {
+    return { accent: input.customAccentHex!, sub: input.customSubHex! };
+  }
+
+  // Case 2/3: triplet으로 보강
+  let tripletAccent: string | null = null;
+  let tripletSub: string | null = null;
+  if (c?.accent && c?.accentSub) {
+    try {
+      tripletAccent = rgbToHex(c.accent);
+      tripletSub = rgbToHex(c.accentSub);
+    } catch {/* triplet 파싱 실패 */}
+  }
+
+  // Case 2a: accent hex만 유효
+  if (aValid) {
+    return {
+      accent: input.customAccentHex!,
+      sub: tripletSub ?? input.customAccentHex!, // sub 복구 불가 시 accent와 동일
+    };
+  }
+  // Case 2b: sub hex만 유효
+  if (sValid) {
+    return {
+      accent: tripletAccent ?? input.customSubHex!,
+      sub: input.customSubHex!,
+    };
+  }
+  // Case 3: 둘 다 hex 무효 → triplet 시도
+  if (tripletAccent && tripletSub) {
+    return { accent: tripletAccent, sub: tripletSub };
+  }
+  // Case 4: 전부 실패
+  return null;
+}
+
 /** 프리셋 ID로 찾기 */
 export function getPreset(id: string): ThemePreset | undefined {
   return THEME_PRESETS.find(p => p.id === id);
