@@ -36,6 +36,7 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "public/splash/**",
       "node_modules/**/*",
       "package.json"
     ],
