@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Palette, Check, Sun, Moon, Paintbrush } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
-import { THEME_PRESETS, rgbToHex, hexToRgb, getPreset, getLightColors } from '@/themes';
-import type { ThemeColors } from '@/themes';
+import { THEME_PRESETS, rgbToHex, getPreset, getLightColors, deriveThemeFromAccent } from '@/themes';
 import { cn } from '@/utils/cn';
 import { SettingsSection } from './SettingsSection';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
@@ -11,6 +10,7 @@ export function ThemeSection() {
   const {
     themeId, customThemeColors, colorMode,
     setThemeId, setCustomThemeColors, setColorMode,
+    setCustomAccentHex, setCustomSubHex,
   } = useAppStore();
 
   const [editingCustom, setEditingCustom] = useState(false);
@@ -31,13 +31,9 @@ export function ThemeSection() {
   };
 
   const handleCustomApply = () => {
-    const base = getPreset(themeId === 'custom' ? 'violet' : themeId)?.colors
-      ?? THEME_PRESETS[0].colors;
-    const colors: ThemeColors = {
-      ...base,
-      accent: hexToRgb(customAccent),
-      accentSub: hexToRgb(customSub),
-    };
+    const colors = deriveThemeFromAccent(customAccent, customSub, colorMode);
+    setCustomAccentHex(customAccent);
+    setCustomSubHex(customSub);
     setThemeId('custom');
     setCustomThemeColors(colors);
     setEditingCustom(false);
