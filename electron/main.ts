@@ -1869,7 +1869,10 @@ app.on('before-quit', (e) => {
 });
 
 app.on('window-all-closed', () => {
-  if (!isQuitting) {
-    app.quit();
+  // 트레이가 살아있고 사용자가 종료 의사를 표시하지 않은 경우: 백그라운드 유지
+  if (!isQuitting && tray && !tray.isDestroyed()) {
+    return;
   }
+  // 트레이 실패 or isQuitting: 정상 종료 흐름
+  app.quit();
 });
