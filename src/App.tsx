@@ -820,7 +820,7 @@ export default function App() {
         <div className="relative" style={{ width: 'min(420px, 75vmin)', aspectRatio: '672 / 592' }}>
           <video
             autoPlay muted playsInline preload="auto"
-            src="/splash/opening_video.mp4"
+            src="./splash/opening_video.mp4"
             className="absolute object-cover"
             style={{
               inset: '-10%', width: '120%', height: '120%',

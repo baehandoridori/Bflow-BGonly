@@ -80,7 +80,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
   // 이미지 프리로드
   useEffect(() => {
     const img = new Image();
-    img.src = '/splash/opening_image_cropped.png';
+    img.src = './splash/opening_image_cropped.png';
   }, []);
 
   // ESC로 닫기
@@ -155,7 +155,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
             muted
             playsInline
             preload="auto"
-            src="/splash/opening_video.mp4"
+            src="./splash/opening_video.mp4"
             className="absolute object-cover"
             style={{
               inset: '-10%', width: '120%', height: '120%',
@@ -172,7 +172,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
 
         {/* 이미지 */}
         <img
-          src="/splash/opening_image_cropped.png"
+          src="./splash/opening_image_cropped.png"
           alt="Bflow"
           className="absolute object-cover"
           style={{
