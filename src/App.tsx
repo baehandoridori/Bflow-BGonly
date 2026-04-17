@@ -323,6 +323,7 @@ export default function App() {
         const savedTheme = await loadTheme();
         if (savedTheme) {
           const savedMode = savedTheme.colorMode ?? 'dark';
+          themeInitRef.current = true;
 
           // 커스텀 테마 마이그레이션
           let customHex: { accent: string; sub: string } | null = null;
@@ -347,7 +348,6 @@ export default function App() {
           if (effectiveThemeId === 'custom' && customHex) {
             const colors = deriveThemeFromAccent(customHex.accent, customHex.sub, savedMode);
             applyTheme(colors, savedMode);
-            themeInitRef.current = true;
             setThemeId('custom');
             setColorMode(savedMode);
             setCustomThemeColors(colors);
@@ -365,21 +365,18 @@ export default function App() {
             }
           } else if (savedMode === 'light') {
             applyTheme(getLightColors(effectiveThemeId), savedMode);
-            themeInitRef.current = true;
             setThemeId(effectiveThemeId);
             setColorMode(savedMode);
           } else {
             const preset = getPreset(effectiveThemeId);
             if (preset) {
               applyTheme(preset.colors, savedMode);
-              themeInitRef.current = true;
               setThemeId(effectiveThemeId);
               setColorMode(savedMode);
             } else {
               // 완전 손상 (프리셋 ID도 유효하지 않음) → 최종 폴백
               const fallback = getPreset(DEFAULT_THEME_ID)!;
               applyTheme(fallback.colors, savedMode);
-              themeInitRef.current = true;
               setThemeId(DEFAULT_THEME_ID);
               setColorMode(savedMode);
             }
@@ -496,7 +493,19 @@ export default function App() {
       if (customAccentHex && customSubHex) {
         const colors = deriveThemeFromAccent(customAccentHex, customSubHex, colorMode);
         applyTheme(colors, colorMode);
-        setCustomThemeColors(colors);
+        // 얕은 비교로 동일한 결과면 setState를 건너뛰어 effect 재실행 루프 방지
+        const same =
+          customThemeColors !== null &&
+          customThemeColors.bgPrimary === colors.bgPrimary &&
+          customThemeColors.bgCard === colors.bgCard &&
+          customThemeColors.bgBorder === colors.bgBorder &&
+          customThemeColors.textPrimary === colors.textPrimary &&
+          customThemeColors.textSecondary === colors.textSecondary &&
+          customThemeColors.accent === colors.accent &&
+          customThemeColors.accentSub === colors.accentSub;
+        if (!same) {
+          setCustomThemeColors(colors);
+        }
         saveTheme({
           themeId,
           customColors: colors,

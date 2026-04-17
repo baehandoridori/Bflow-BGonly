@@ -230,6 +230,7 @@ export function sanitizeCustomHex(input: {
 
   // Case 2a: accent hex만 유효
   if (aValid) {
+    console.info('[테마] customSubHex 누락 — triplet에서 복구 또는 accent 복제');
     return {
       accent: input.customAccentHex!,
       sub: tripletSub ?? input.customAccentHex!, // sub 복구 불가 시 accent와 동일
@@ -237,6 +238,7 @@ export function sanitizeCustomHex(input: {
   }
   // Case 2b: sub hex만 유효
   if (sValid) {
+    console.info('[테마] customAccentHex 누락 — triplet에서 복구 또는 sub 복제');
     return {
       accent: tripletAccent ?? input.customSubHex!,
       sub: input.customSubHex!,
@@ -244,6 +246,7 @@ export function sanitizeCustomHex(input: {
   }
   // Case 3: 둘 다 hex 무효 → triplet 시도
   if (tripletAccent && tripletSub) {
+    console.info('[테마] 양쪽 hex 손실 — triplet에서 복구');
     return { accent: tripletAccent, sub: tripletSub };
   }
   // Case 4: 전부 실패
