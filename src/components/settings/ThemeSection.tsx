@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Palette, Check, Sun, Moon, Paintbrush } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { THEME_PRESETS, rgbToHex, getPreset, getLightColors, deriveThemeFromAccent } from '@/themes';
@@ -38,6 +38,15 @@ export function ThemeSection() {
     setCustomThemeColors(colors);
     setEditingCustom(false);
   };
+
+  // 커스텀 편집 중 실시간 배경 3색 프리뷰
+  const previewColors = useMemo(() => {
+    try {
+      return deriveThemeFromAccent(customAccent, customSub, colorMode);
+    } catch {
+      return null;
+    }
+  }, [customAccent, customSub, colorMode]);
 
   return (
     <>
@@ -166,6 +175,22 @@ export function ThemeSection() {
             className="h-8 rounded-lg"
             style={{ background: `linear-gradient(135deg, ${customAccent}, ${customSub})` }}
           />
+          {previewColors && (
+            <div className="flex gap-2 mt-2">
+              <div className="flex-1 flex flex-col items-center gap-1">
+                <div className="w-full h-8 rounded-md" style={{ background: `rgb(${previewColors.bgPrimary})` }} />
+                <span className="text-[10px] text-text-secondary">Primary</span>
+              </div>
+              <div className="flex-1 flex flex-col items-center gap-1">
+                <div className="w-full h-8 rounded-md" style={{ background: `rgb(${previewColors.bgCard})` }} />
+                <span className="text-[10px] text-text-secondary">Card</span>
+              </div>
+              <div className="flex-1 flex flex-col items-center gap-1">
+                <div className="w-full h-8 rounded-md" style={{ background: `rgb(${previewColors.bgBorder})` }} />
+                <span className="text-[10px] text-text-secondary">Border</span>
+              </div>
+            </div>
+          )}
           <div className="flex gap-2">
             <button
               onClick={handleCustomApply}
