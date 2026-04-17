@@ -22,7 +22,7 @@
 | 항목 | 결정 |
 |---|---|
 | 창 X 버튼 | 트레이로 최소화 (메인 창만 숨김, 위젯은 유지) |
-| 트레이 '종료' | 유일한 실제 종료 경로 (`isQuitting = true` 후 `app.quit()`) |
+| 트레이 '종료' | **유일한 GUI 종료 경로** (`isQuitting = true` 후 `app.quit()`). 개발 모드의 `Ctrl+C`·작업관리자 강제 종료·트레이 생성 실패 시 fallback은 예외로 허용 |
 | 트레이 메뉴 | 좌·더블클릭 = 창 열기 / 우클릭 = 열기·위젯 서브메뉴·현재 상태 표시·종료 |
 | 트레이 툴팁 | `'B flow • <상태>'` 실시간 갱신 (Supabase 상태 연동) |
 | 트레이 아이콘 에셋 | `public/splash/opening_image_cropped.png` 재활용 |
@@ -47,16 +47,61 @@
 
 ```typescript
 let tray: Tray | null = null;
+let lastSupabaseStatus: string = '연결 중...';
+
+/** 아이콘 경로 해석: dev(electron/)와 prod(dist-electron/) 모두 커버 */
+function resolveTrayIconPath(): string {
+  // dev: __dirname = <repo>/electron → ../public
+  // prod: __dirname = resources/app/dist-electron → ../public (files 목록에 public/** 포함 필요)
+  // 추가 폴백: app.getAppPath() 기준 경로
+  const candidates = [
+    path.join(__dirname, '../public/splash/opening_image_cropped.png'),
+    path.join(app.getAppPath(), 'public/splash/opening_image_cropped.png'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return ''; // 호출부에서 빈 경로 처리
+}
+
+/** 1x1 투명 PNG (base64) — 아이콘 로드 실패 시 최후 폴백 */
+const EMPTY_ICON_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 function createTray(): void {
-  const iconPath = path.join(__dirname, '../public/splash/opening_image_cropped.png');
-  const image = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
-  tray = new Tray(image);
-  tray.setToolTip('B flow');
-  tray.on('click', showMainWindow);
-  tray.on('double-click', showMainWindow);
-  rebuildTrayMenu(); // 최초 메뉴 빌드
+  try {
+    const iconPath = resolveTrayIconPath();
+    let image = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+    if (image.isEmpty()) {
+      image = nativeImage.createFromBuffer(Buffer.from(EMPTY_ICON_B64, 'base64'));
+    }
+    image = image.resize({ width: 16, height: 16 });
+    tray = new Tray(image);
+    tray.setToolTip('B flow');
+    tray.on('click', showMainWindow);
+    tray.on('double-click', showMainWindow);
+    rebuildTrayMenu();
+  } catch (err) {
+    console.error('[트레이] 생성 실패 — 트레이 없이 실행 (창 X = 실제 종료):', err);
+    tray = null;
+    // 트레이 실패 시 창 X를 실제 종료로 폴백 (사용자가 앱을 끌 수 있도록)
+    trayFailed = true;
+  }
 }
+
+// 전역에 추가
+let trayFailed = false;
+```
+
+**`package.json`의 `files` 목록 확인**: `public/**`가 포함되어 있어야 함. 현재 목록에는 없음 → **신규 추가 필요**:
+```json
+"files": [
+  "dist/**/*",
+  "dist-electron/**/*",
+  "public/splash/**",          // 신규 추가
+  "node_modules/**/*",
+  "package.json"
+]
+```
 
 function rebuildTrayMenu(): void {
   if (!tray) return;
@@ -68,7 +113,7 @@ function rebuildTrayMenu(): void {
       click: () => toggleWidget(id, title),
     }),
   );
-  const status = getSupabaseStatusLabel(); // 예: "실시간 연결됨" / "재연결 중..."
+  const status = lastSupabaseStatus; // 아래 '상태 갱신 다리' 참고
   const menu = Menu.buildFromTemplate([
     { label: '열기', click: showMainWindow },
     { type: 'separator' },
@@ -83,18 +128,36 @@ function rebuildTrayMenu(): void {
 }
 ```
 
+**상태 갱신 다리 (Supabase realtime → 트레이)**
+
+기존 main.ts:667-670에 Supabase 상태를 렌더러로 보내는 콜백이 이미 있음 (`mainWindow.webContents.send('supabase:status', status)`). 이 콜백 내부에서 **동시에** `lastSupabaseStatus`를 갱신하고 `rebuildTrayMenu()` 호출:
+
+```typescript
+// 기존 콜백 수정
+(status: string) => {
+  lastSupabaseStatus = humanizeStatus(status); // 'SUBSCRIBED' → '실시간 연결됨' 등
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('supabase:status', status);
+  }
+  rebuildTrayMenu(); // 트레이 메뉴/툴팁 갱신
+}
+```
+
+위젯 open/close 시점에도 `rebuildTrayMenu()` 호출 (위젯 서브메뉴 체크박스 갱신).
+```
+
 **메인 창 닫기 차단 (`createWindow` 내부에 추가)**
 
 ```typescript
 mainWindow.on('close', (e) => {
-  if (!isQuitting) {
+  if (!isQuitting && !trayFailed) {
     e.preventDefault();
     mainWindow?.hide();
     // 위젯은 건드리지 않음 (요구사항 반영)
     showTrayHintOnce(); // 최초 1회만 안내 Notification
     return;
   }
-  // isQuitting === true인 경우 기본 동작(닫힘) 허용
+  // isQuitting === true이거나 트레이 실패 상태면 기본 동작(닫힘) 허용
 });
 ```
 
@@ -143,15 +206,39 @@ process.on('exit', () => {
 
 **최초 트레이 최소화 안내 (`%APPDATA%/preferences.json` 기록)**
 
+OS가 Notification을 차단(Windows Focus Assist 등)한 경우를 고려해 다단 폴백:
+
 ```typescript
 async function showTrayHintOnce(): Promise<void> {
   const prefs = await loadPreferences();
   if (prefs?.trayFirstMinimizeSeen) return;
-  new Notification({
-    title: 'B flow',
-    body: '트레이로 숨겨졌습니다. 트레이 아이콘 우클릭 → 종료로 완전히 닫을 수 있습니다.',
-  }).show();
-  await savePreferences({ ...prefs, trayFirstMinimizeSeen: true });
+
+  let shown = false;
+  if (Notification.isSupported()) {
+    try {
+      new Notification({
+        title: 'B flow',
+        body: '트레이로 숨겨졌습니다. 트레이 아이콘 우클릭 → 종료로 완전히 닫을 수 있습니다.',
+      }).show();
+      shown = true;
+    } catch {/* ignore */}
+  }
+
+  // Windows 폴백: 트레이 balloon (전부 실패하면 그냥 조용히 진행)
+  if (!shown && tray && process.platform === 'win32') {
+    try {
+      tray.displayBalloon({
+        title: 'B flow',
+        content: '트레이에 숨겨졌습니다. 트레이 메뉴 종료로 완전히 닫을 수 있습니다.',
+      });
+      shown = true;
+    } catch {/* ignore */}
+  }
+
+  // 실제로 안내를 보여줬을 때만 "봤음"으로 기록 (차단 환경 사용자 보호)
+  if (shown) {
+    await savePreferences({ ...prefs, trayFirstMinimizeSeen: true });
+  }
 }
 ```
 
@@ -233,10 +320,41 @@ async function showTrayHintOnce(): Promise<void> {
 **구현 포인트**:
 
 - 새 파일 `public/splash.html` — 인라인 CSS, 외부 의존성 0. `opening_image_cropped.png`를 중앙 고정 표시.
-- `electron/main.ts`에 `createSplashWindow()` 신설: `width:300, height:300, frame:false, transparent:true, alwaysOnTop:true, resizable:false, skipTaskbar:true, show:true`.
+- `electron/main.ts`에 `createSplashWindow()` 신설: `width:300, height:300, frame:false, transparent:true, alwaysOnTop:true, resizable:false, skipTaskbar:true, show:true, closable:false`. (`closable:false`로 사용자가 스플래시를 닫을 수 없게 해 좀비 상태 방지)
 - `app.whenReady()`에서 **트레이 생성 직후, createWindow 직전**에 스플래시 생성.
 - `mainWindow = new BrowserWindow({ show: false, ... })` — 기존엔 기본 show:true였음.
-- `mainWindow.webContents.once('did-finish-load', () => { splashWin?.close(); mainWindow.show(); })`.
+- `mainWindow.webContents.once('did-finish-load', () => { closeSplash(); mainWindow.show(); })`.
+- `closeSplash()`는 `splashWin.destroy()` 래퍼 (`closable:false`인 창은 `close()`가 거부되므로 `destroy()` 사용).
+
+**메인 로드 타임아웃 (좀비 방지)**
+
+메인 창이 30초 내 `did-finish-load`를 내지 못하면 에러 창 띄우고 종료:
+
+```typescript
+const MAIN_LOAD_TIMEOUT_MS = 30_000;
+let mainLoadedOk = false;
+
+const timer = setTimeout(() => {
+  if (mainLoadedOk) return;
+  console.error('[메인 로드] 타임아웃 — 강제 종료');
+  closeSplash();
+  dialog.showErrorBox('B flow', '앱 로드에 실패했습니다. 다시 실행해주세요.');
+  isQuitting = true;
+  app.quit();
+}, MAIN_LOAD_TIMEOUT_MS);
+
+mainWindow.webContents.once('did-finish-load', () => {
+  mainLoadedOk = true;
+  clearTimeout(timer);
+  closeSplash();
+  mainWindow.show();
+  console.timeEnd('splash-to-main'); // 측정용 로그
+});
+
+console.time('splash-to-main'); // createSplashWindow 직후 시작
+```
+
+**측정 방법**: `console.time`/`console.timeEnd`로 스플래시 표시 시점부터 메인 show까지의 ms를 로그에 남김. 배포 portable exe에서도 `--enable-logging` 플래그로 확인 가능. 검증 체크리스트의 "1초 이내"는 이 로그 기준으로 판정.
 
 #### B. 실제 속도: 렌더러 초기 번들 축소 + 초기화 지연
 
@@ -249,13 +367,16 @@ build: {
       manualChunks: {
         'vendor-react': ['react', 'react-dom'],
         'vendor-supabase': ['@supabase/supabase-js'],
-        'vendor-charts': ['react-grid-layout', 'framer-motion'],
+        'vendor-grid': ['react-grid-layout'],
+        'vendor-motion': ['framer-motion'],
         'vendor-ui': ['lucide-react', 'sonner', 'clsx'],
       },
     },
   },
 },
 ```
+
+(공통 vendor를 성격별로 분리. `react-grid-layout`과 `framer-motion`은 서로 무관한 동적 로드 타이밍을 가지므로 분리가 캐시 효율에 유리)
 
 - 초기 HTML 파싱 시 메인 체인 번들이 작아져 첫 페인트 시간 단축.
 - 브라우저 캐시 효율↑ (vendor 번들은 앱 업데이트 후에도 동일 해시).
@@ -406,7 +527,39 @@ const handleCustomApply = () => {
 - 신규 상태: `customAccentHex: string | null`, `customSubHex: string | null`.
 - 신규 액션: `setCustomAccentHex`, `setCustomSubHex`.
 - `setColorMode(mode)` 내부에서 `themeId === 'custom'` && 두 hex 모두 있으면 `deriveThemeFromAccent(accentHex, subHex, mode)` 재호출 → `customThemeColors` 업데이트 + `applyTheme()` 재실행.
-- 저장 포맷: 기존 `customThemeColors`는 유지 (하위 호환). 신규 필드는 `preferences.json`에 추가. 기존 저장분이 두 hex 없으면 `customThemeColors.accent/accentSub`에서 역산.
+
+**마이그레이션 로직 (앱 시작 시 1회, store 초기화 단계)**
+
+```typescript
+const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+function sanitizeCustomHex(
+  saved: Partial<{ customAccentHex: string; customSubHex: string; customThemeColors: ThemeColors }>
+): { accent: string; sub: string } | null {
+  const savedAccent = saved.customAccentHex;
+  const savedSub = saved.customSubHex;
+  // 1순위: 새 포맷 — 유효성 검증
+  if (savedAccent && HEX_RE.test(savedAccent) && savedSub && HEX_RE.test(savedSub)) {
+    return { accent: savedAccent, sub: savedSub };
+  }
+  // 2순위: 구포맷 customThemeColors.accent/accentSub에서 역산
+  if (saved.customThemeColors?.accent && saved.customThemeColors?.accentSub) {
+    try {
+      return {
+        accent: rgbToHex(saved.customThemeColors.accent),
+        sub: rgbToHex(saved.customThemeColors.accentSub),
+      };
+    } catch { /* triplet 파싱 실패 */ }
+  }
+  // 둘 다 실패 → null 반환. 호출부는 커스텀 테마를 비활성화하고 기본 프리셋으로 폴백.
+  return null;
+}
+```
+
+- 마이그레이션 타이밍: `useAppStore` 초기값 계산 단계 (앱 최초 마운트 시 1회). `preferences.json` 로드 직후.
+- 역산 성공 시: `customAccentHex`/`customSubHex`를 즉시 `savePreferences`로 기록해 다음 실행부터 새 포맷 사용.
+- 역산 실패 시: `themeId` = `DEFAULT_THEME_ID`, `customThemeColors` = `null`, 사용자에게는 침묵 (토스트 없음 — 로그만).
+- 저장 포맷: 기존 `customThemeColors`는 유지 (하위 호환). 신규 필드(`customAccentHex`/`customSubHex`)는 `preferences.json`에 추가.
 
 **커스텀 편집 패널 미리보기 (`ThemeSection.tsx`)**
 
@@ -445,14 +598,18 @@ const handleCustomApply = () => {
 - [ ] 우클릭 메뉴에 '열기 / 위젯 서브메뉴 / 상태 / 종료'가 보인다.
 - [ ] 메인 창 X 버튼 → 창만 숨고 앱은 살아있다 (트레이 아이콘 유지, 위젯 유지).
 - [ ] 최초 1회 "트레이로 숨김" Notification이 뜬다. 두 번째부터는 안 뜬다.
+- [ ] Focus Assist 등으로 Notification이 차단된 상태에서는 `trayFirstMinimizeSeen`이 `true`로 저장되지 않아 다음 실행 때 다시 안내 시도한다.
 - [ ] 트레이 '종료' 클릭 → 앱이 완전히 종료된다 (트레이 아이콘 사라짐).
+- [ ] **트레이 생성이 실패하는 시나리오** (아이콘 파일 없음 + 에셋 없음) → `trayFailed=true`로 폴백되어 창 X가 실제 종료로 동작 (앱이 좀비로 남지 않음).
 - [ ] 위젯을 개별 X로 닫고 앱 재시작 → 그 위젯이 마지막 위치/크기/AOT/투명도로 자동 복원된다.
 - [ ] 트레이로 완전 종료 후 재시작 → 열려있던 모든 위젯이 복원된다.
-- [ ] Supabase 연결 상태 변화가 트레이 툴팁·메뉴에 반영된다.
+- [ ] Supabase 연결 상태 변화가 트레이 툴팁·메뉴에 반영된다 (상태 콜백에서 `rebuildTrayMenu` 호출로 검증).
 
 ### 섹션 2 (로딩 속도)
-- [ ] 더블클릭 후 1초 이내에 스플래시 이미지가 화면에 나타난다 (로컬 SSD 기준).
+- [ ] 더블클릭 후 1초 이내에 스플래시 이미지가 화면에 나타난다 (로컬 SSD 기준, `--enable-logging` 플래그로 `console.time('splash-to-main')` 시작 시각과 `app.whenReady()` 시각 차이를 측정하여 < 1000ms 확인).
+- [ ] `console.timeEnd('splash-to-main')` 로그가 스플래시 표시부터 메인 show까지의 시간을 찍는다.
 - [ ] 스플래시 → 메인 창 전환이 부드럽다 (깜빡임 없음).
+- [ ] 메인 창이 30초 안에 로드되지 않는 극단 시나리오에서 에러 다이얼로그가 뜨고 앱이 종료된다.
 - [ ] `vite build` 결과 `dist/assets/`에 `vendor-react`, `vendor-supabase`, `vendor-charts`, `vendor-ui` 번들이 분리되어 있다.
 - [ ] 초기 화면이 Dashboard일 때 Schedule/Episode 뷰 번들은 로드되지 않는다 (DevTools Network).
 - [ ] Scene 상세 모달 열기 전까진 `SceneDetailModal.tsx` 번들이 요청되지 않는다.
@@ -466,6 +623,8 @@ const handleCustomApply = () => {
 - [ ] 다크 ↔ 라이트 토글 시 커스텀 테마 배경도 자동으로 재생성된다.
 - [ ] 프리셋 그리드의 '커스텀' 타일이 다른 프리셋과 동일한 그라디언트 프리뷰로 표시된다.
 - [ ] 앱 재시작 후 커스텀 테마가 그대로 복원된다 (hex 저장 포맷 포함).
+- [ ] **구포맷 마이그레이션**: `customAccentHex`/`customSubHex`가 없고 `customThemeColors`만 있던 기존 사용자 데이터로 시작해도 정상 복원되며, 시작 후 새 포맷으로 `preferences.json`에 기록된다.
+- [ ] **손상된 hex 방어**: `customAccentHex`가 `"garbage"` 같은 잘못된 값이면 자동으로 기본 프리셋으로 폴백하고 로그만 남긴다 (사용자 토스트 없음, 앱 크래시 없음).
 
 ### 회귀 방지
 - [ ] `tsc --noEmit` 통과.
@@ -491,13 +650,14 @@ const handleCustomApply = () => {
 
 | 파일 | 변경 |
 |---|---|
-| `electron/main.ts` | 트레이 생성/메뉴/이벤트, mainWindow close 차단, 위젯 캐시 삭제 로직 제거, window-all-closed 수정, process exit 안전망, app.whenReady 재정렬, 커맨드라인 스위치 추가 |
+| `electron/main.ts` | 트레이 생성/메뉴/이벤트, Supabase 상태 콜백에서 `rebuildTrayMenu` 호출, mainWindow close 차단 + `trayFailed` 폴백, 위젯 캐시 삭제 로직 제거, window-all-closed 수정, process exit 안전망, app.whenReady 재정렬, 스플래시 윈도우 + 30초 타임아웃 + 측정 로그, 커맨드라인 스위치 추가 |
 | `electron/preload.ts` | 변경 없음 (기존 IPC로 충분) |
 | `public/splash.html` | 신규 — 스플래시 2단계 부팅용 |
-| `vite.config.ts` | manualChunks 설정 |
+| `package.json` | `build.files`에 `public/splash/**` 추가 |
+| `vite.config.ts` | manualChunks 설정 (성격별 vendor 분리) |
 | `src/App.tsx` | 뷰/모달 lazy 로딩 래핑 |
 | `src/themes.ts` | `rgbToHsl`, `hslToRgb`, `deriveThemeFromAccent` 추가 |
-| `src/stores/useAppStore.ts` | `customAccentHex`/`customSubHex` 상태, `setColorMode` 재파생 로직 |
+| `src/stores/useAppStore.ts` | `customAccentHex`/`customSubHex` 상태, `setColorMode` 재파생 로직, `sanitizeCustomHex` 마이그레이션 |
 | `src/components/settings/ThemeSection.tsx` | `handleCustomApply` 교체, 실시간 배경 프리뷰 추가 |
 | `src/services/settingsService.ts` | preferences.json에 `trayFirstMinimizeSeen`, `customAccentHex`, `customSubHex` 필드 추가 |
 
