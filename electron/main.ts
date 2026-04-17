@@ -1,4 +1,5 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage } from 'electron';
+import type { MenuItemConstructorOptions } from 'electron';
 import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
 import path from 'path';
@@ -51,6 +52,11 @@ const widgetWindows = new Map<string, BrowserWindow>();
 const widgetOriginalBounds = new Map<string, Electron.Rectangle>();
 const animatingWidgets = new Set<string>();
 let isQuitting = false;
+let tray: Tray | null = null;
+let trayFailed = false;
+let lastSupabaseStatus = '연결 중...';
+let splashWin: BrowserWindow | null = null;
+let mainLoadedOk = false;
 
 // ─── 위젯 위치 영속화 (Phase 0-6) ─────────────────────────────
 const WIDGET_POS_FILE = 'widget-positions.json';
