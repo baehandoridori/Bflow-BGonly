@@ -410,6 +410,16 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
+  mainWindow.on('close', (e) => {
+    if (!isQuitting && !trayFailed) {
+      e.preventDefault();
+      mainWindow?.hide();
+      showTrayHintOnce().catch(() => {/* ignore */});
+      return;
+    }
+    // isQuitting === true || trayFailed === true인 경우 기본 동작 허용
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
