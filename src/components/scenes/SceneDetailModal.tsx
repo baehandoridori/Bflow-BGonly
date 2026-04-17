@@ -18,6 +18,7 @@ import { cn } from '@/utils/cn';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
+import * as storageService from '@/services/storageService';
 import { AssigneeSelect, getUserColor } from '@/components/common/AssigneeSelect';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
@@ -569,10 +570,15 @@ export function SceneDetailModal({
     () => {
       if (!deleteConfirm) return;
       const field = deleteConfirm === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+      // 1) URL 먼저 캡처 (onFieldUpdate가 비우기 전에)
+      const oldUrl = deleteConfirm === 'storyboard' ? scene.storyboardUrl : scene.guideUrl;
+      // 2) Storage 파일 삭제 (비동기, 실패해도 DB는 갱신)
+      if (oldUrl) storageService.deleteImage(oldUrl).catch(() => {/* best-effort */});
+      // 3) DB 필드 비우기
       onFieldUpdate(sceneIndex, field, '');
       setDeleteConfirm(null);
     },
-    [sceneIndex, onFieldUpdate, deleteConfirm],
+    [sceneIndex, onFieldUpdate, deleteConfirm, scene],
   );
 
   // 씬 네비게이션 도트 표시 여부 (2개 이상일 때만)
