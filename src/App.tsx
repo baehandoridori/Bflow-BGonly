@@ -1,18 +1,19 @@
-import { useEffect, useCallback, useState, useRef } from 'react';
+import { lazy, Suspense, useEffect, useCallback, useState, useRef } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { Dashboard } from '@/views/Dashboard';
-import { ScenesView } from '@/views/ScenesView';
-import { EpisodeView } from '@/views/EpisodeView';
-import { AssigneeView } from '@/views/AssigneeView';
-import { TeamView } from '@/views/TeamView';
-import { CalendarView } from '@/views/CalendarView';
-import { ScheduleView } from '@/views/ScheduleView';
-import { VacationView } from '@/views/VacationView';
-import CompositingView from '@/views/CompositingView';
-import { SettingsView } from '@/views/SettingsView';
+// 뷰 lazy 로딩 — 초기 번들에서 제외
+const Dashboard = lazy(() => import('@/views/Dashboard').then(m => ({ default: m.Dashboard })));
+const ScenesView = lazy(() => import('@/views/ScenesView').then(m => ({ default: m.ScenesView })));
+const EpisodeView = lazy(() => import('@/views/EpisodeView').then(m => ({ default: m.EpisodeView })));
+const AssigneeView = lazy(() => import('@/views/AssigneeView').then(m => ({ default: m.AssigneeView })));
+const TeamView = lazy(() => import('@/views/TeamView').then(m => ({ default: m.TeamView })));
+const CalendarView = lazy(() => import('@/views/CalendarView').then(m => ({ default: m.CalendarView })));
+const ScheduleView = lazy(() => import('@/views/ScheduleView').then(m => ({ default: m.ScheduleView })));
+const VacationView = lazy(() => import('@/views/VacationView').then(m => ({ default: m.VacationView })));
+const CompositingView = lazy(() => import('@/views/CompositingView')); // default export
+const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
 import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
@@ -777,30 +778,41 @@ export default function App() {
 
   // 뷰 렌더링
   const renderView = () => {
-    switch (currentView) {
-      case 'dashboard':
-        return <Dashboard />;
-      case 'scenes':
-        return <ScenesView />;
-      case 'episode':
-        return <EpisodeView />;
-      case 'assignee':
-        return <AssigneeView />;
-      case 'team':
-        return <TeamView />;
-      case 'calendar':
-        return <CalendarView />;
-      case 'schedule':
-        return <ScheduleView />;
-      case 'vacation':
-        return <VacationView />;
-      case 'compositing':
-        return <CompositingView />;
-      case 'settings':
-        return <SettingsView />;
-      default:
-        return <Dashboard />;
-    }
+    const view = (() => {
+      switch (currentView) {
+        case 'dashboard':
+          return <Dashboard />;
+        case 'scenes':
+          return <ScenesView />;
+        case 'episode':
+          return <EpisodeView />;
+        case 'assignee':
+          return <AssigneeView />;
+        case 'team':
+          return <TeamView />;
+        case 'calendar':
+          return <CalendarView />;
+        case 'schedule':
+          return <ScheduleView />;
+        case 'vacation':
+          return <VacationView />;
+        case 'compositing':
+          return <CompositingView />;
+        case 'settings':
+          return <SettingsView />;
+        default:
+          return <Dashboard />;
+      }
+    })();
+    return (
+      <Suspense fallback={
+        <div className="flex items-center justify-center h-full w-full">
+          <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        </div>
+      }>
+        {view}
+      </Suspense>
+    );
   };
 
   // 로딩 스플래시 — authReady 후에도 유지, 클릭으로 스킵 가능
