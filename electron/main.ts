@@ -1240,6 +1240,7 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   });
 
   widgetWindows.set(widgetId, popupWin);
+  rebuildTrayMenu(); // 트레이 체크박스 갱신
 
   // 캐시에 title 저장 (자동 재오픈용)
   const existingCache = widgetPositionCache.get(widgetId);
@@ -1257,6 +1258,7 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   popupWin.on('closed', () => {
     widgetWindows.delete(widgetId);
     widgetOriginalBounds.delete(widgetId);
+    rebuildTrayMenu(); // 트레이 체크박스 갱신
     // 사용자가 명시적으로 닫으면 캐시 삭제 (자동 복원 안 함)
     // 앱 종료 중이면 캐시 유지 (before-quit에서 이미 저장됨)
     if (!isQuitting) {
