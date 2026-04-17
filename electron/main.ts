@@ -172,6 +172,52 @@ async function showTrayHintOnce(): Promise<void> {
   }
 }
 
+function resolveSplashHtmlPath(): string {
+  const candidates = [
+    path.join(__dirname, '../public/splash/splash.html'),
+    path.join(app.getAppPath(), 'public/splash/splash.html'),
+  ];
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) return p; } catch {/* ignore */}
+  }
+  return '';
+}
+
+function createSplashWindow(): void {
+  const htmlPath = resolveSplashHtmlPath();
+  if (!htmlPath) {
+    console.warn('[스플래시] HTML 파일을 찾지 못함 — 스플래시 생략');
+    return;
+  }
+  splashWin = new BrowserWindow({
+    width: 300,
+    height: 300,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    closable: false, // 사용자가 닫지 못하게 (좀비 방지)
+    show: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  splashWin.loadFile(htmlPath).catch((err) => {
+    console.error('[스플래시] loadFile 실패:', err);
+  });
+}
+
+function closeSplash(): void {
+  if (splashWin && !splashWin.isDestroyed()) {
+    // closable:false 창은 close() 거부 → destroy() 사용
+    splashWin.destroy();
+  }
+  splashWin = null;
+}
+
 function createTray(): void {
   try {
     const iconPath = resolveTrayIconPath();
