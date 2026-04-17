@@ -1,15 +1,16 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { SettingsSidebar, type SettingsTabId } from '@/components/settings/SettingsSidebar';
-import { ThemeSection } from '@/components/settings/ThemeSection';
-import { FontSizeSection } from '@/components/settings/FontSizeSection';
-import { SheetsSection } from '@/components/settings/SheetsSection';
-import { GuideSection } from '@/components/settings/GuideSection';
-import { StartupSection } from '@/components/settings/StartupSection';
-import { EffectsSection } from '@/components/settings/EffectsSection';
-import { LoginSection } from '@/components/settings/LoginSection';
-import { ProfileSection } from '@/components/settings/ProfileSection';
-import { NotificationSection } from '@/components/settings/NotificationSection';
-import { ShortcutsSection } from '@/components/settings/ShortcutsSection';
+// 설정 섹션 lazy 로딩 — 활성 탭 진입 시에만 로드
+const ThemeSection = lazy(() => import('@/components/settings/ThemeSection').then(m => ({ default: m.ThemeSection })));
+const FontSizeSection = lazy(() => import('@/components/settings/FontSizeSection').then(m => ({ default: m.FontSizeSection })));
+const SheetsSection = lazy(() => import('@/components/settings/SheetsSection').then(m => ({ default: m.SheetsSection })));
+const GuideSection = lazy(() => import('@/components/settings/GuideSection').then(m => ({ default: m.GuideSection })));
+const StartupSection = lazy(() => import('@/components/settings/StartupSection').then(m => ({ default: m.StartupSection })));
+const EffectsSection = lazy(() => import('@/components/settings/EffectsSection').then(m => ({ default: m.EffectsSection })));
+const LoginSection = lazy(() => import('@/components/settings/LoginSection').then(m => ({ default: m.LoginSection })));
+const ProfileSection = lazy(() => import('@/components/settings/ProfileSection').then(m => ({ default: m.ProfileSection })));
+const NotificationSection = lazy(() => import('@/components/settings/NotificationSection').then(m => ({ default: m.NotificationSection })));
+const ShortcutsSection = lazy(() => import('@/components/settings/ShortcutsSection').then(m => ({ default: m.ShortcutsSection })));
 import { loadPreferences } from '@/services/settingsService';
 import {
   type FontScale,
@@ -79,7 +80,9 @@ export function SettingsView() {
       <SettingsSidebar active={activeTab} onChange={setActiveTab} />
       <div className="flex-1 flex flex-col gap-6 min-w-0">
         <h2 className="text-xl font-bold text-text-primary">설정</h2>
-        {renderContent()}
+        <Suspense fallback={null}>
+          {renderContent()}
+        </Suspense>
       </div>
     </div>
   );
