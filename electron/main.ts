@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
@@ -59,6 +59,7 @@ let lastSupabaseStatus = '연결 중...';
 let splashWin: BrowserWindow | null = null;
 // Chunk 2(스플래시 2단계 부팅)에서 사용 예정
 let mainLoadedOk = false;
+let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let showTrayHintInFlight = false;
 
 /** 아이콘 경로 해석: dev(electron/)와 prod(dist-electron/) + app.getAppPath() 순회 */
@@ -1848,8 +1849,28 @@ app.whenReady().then(() => {
     return new Response('Drive image not found', { status: 404 });
   });
 
+  console.time('splash-to-main'); // 측정 시작
+
+  createSplashWindow(); // 1. 가장 먼저 스플래시
   createTray();        // 먼저 트레이 준비 (실패해도 앱은 계속)
   createWindow();
+
+  // 메인 로드 30초 타임아웃 (좀비 방지).
+  // Task 2.3의 did-finish-load 핸들러에서 clearTimeout + 해제 처리.
+  const MAIN_LOAD_TIMEOUT_MS = 30_000;
+  loadTimeoutId = setTimeout(() => {
+    if (mainLoadedOk) {
+      loadTimeoutId = null;
+      return;
+    }
+    console.error('[메인 로드] 30초 타임아웃 — 에러 다이얼로그 후 종료');
+    closeSplash();
+    try {
+      dialog.showErrorBox('B flow', '앱 로드에 실패했습니다. 다시 실행해주세요.');
+    } catch {/* ignore */}
+    isQuitting = true;
+    app.quit();
+  }, MAIN_LOAD_TIMEOUT_MS);
 
   // Google Calendar 토큰 복원
   gcal.restoreTokens();
