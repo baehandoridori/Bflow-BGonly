@@ -35,6 +35,11 @@ import {
 // 앱 이름 설정 — AppData 경로에 영향
 app.name = 'Bflow-BGonly';
 
+// Chromium 성능 스위치 (app.ready 전에 호출)
+app.commandLine.appendSwitch('js-flags', '--nolazy');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+
 // ─── 이미지 커스텀 프로토콜 등록 (app.ready 전에 호출 필수) ──
 protocol.registerSchemesAsPrivileged([
   {
