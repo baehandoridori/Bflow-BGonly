@@ -31,17 +31,12 @@
   "build": {
     "appId": "com.studiojbbj.bflow",
     "productName": "BFLOW",
-    "asarUnpack": [
-      "**/node_modules/googleapis/**",
-      "**/node_modules/googleapis-common/**",
-      "**/node_modules/google-auth-library/**",
-      "**/node_modules/google-logging-utils/**",
-      "**/node_modules/gaxios/**",
-      "**/node_modules/gcp-metadata/**",
-      "**/node_modules/gtoken/**",
-      "**/node_modules/jws/**",
-      "**/node_modules/jwa/**",
-      "**/node_modules/gopd/**"
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "node_modules/**/*",
+      "package.json"
     ],
     "win": {
       "target": "portable"
