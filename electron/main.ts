@@ -1775,6 +1775,7 @@ app.whenReady().then(() => {
     return new Response('Drive image not found', { status: 404 });
   });
 
+  createTray();        // 먼저 트레이 준비 (실패해도 앱은 계속)
   createWindow();
 
   // Google Calendar 토큰 복원
