@@ -290,4 +290,6 @@ export interface ThemeConfig {
   themeId: string;
   customColors?: ThemeColors;
   colorMode?: 'dark' | 'light';
+  customAccentHex?: string;
+  customSubHex?: string;
 }
