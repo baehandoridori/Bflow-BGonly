@@ -76,6 +76,81 @@ function resolveTrayIconPath(): string {
 const EMPTY_ICON_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
+/** Supabase 원시 상태 → 사용자에게 보여줄 한글 라벨 */
+function humanizeStatus(raw: string): string {
+  switch (raw) {
+    case 'SUBSCRIBED': return '실시간 연결됨';
+    case 'CHANNEL_ERROR': return '재연결 중';
+    case 'TIMED_OUT': return '연결 타임아웃';
+    case 'CLOSED': return '연결 끊김';
+    default: return raw || '연결 중';
+  }
+}
+
+/** 메인 창을 보이고 포커스. 숨김 상태면 복원 */
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/** 트레이 위젯 서브메뉴 토글 핸들러 */
+function toggleWidget(widgetId: string, title: string): void {
+  const existing = widgetWindows.get(widgetId);
+  if (existing && !existing.isDestroyed()) {
+    existing.close(); // closed 이벤트가 widgetWindows에서 제거
+  } else {
+    openWidgetPopup(widgetId, title);
+  }
+  // 메뉴 체크박스 상태 갱신
+  rebuildTrayMenu();
+}
+
+function rebuildTrayMenu(): void {
+  if (!tray || tray.isDestroyed()) return;
+  const widgetSubmenu: MenuItemConstructorOptions[] = Object.entries(WIDGET_TITLE_MAP).map(
+    ([id, title]) => ({
+      label: title,
+      type: 'checkbox',
+      checked: widgetWindows.has(id),
+      click: () => toggleWidget(id, title),
+    }),
+  );
+  const status = lastSupabaseStatus;
+  const menu = Menu.buildFromTemplate([
+    { label: '열기', click: showMainWindow },
+    { type: 'separator' },
+    { label: '위젯', submenu: widgetSubmenu },
+    { type: 'separator' },
+    { label: `상태: ${status}`, enabled: false },
+    { type: 'separator' },
+    { label: '종료', click: () => { isQuitting = true; app.quit(); } },
+  ]);
+  tray.setContextMenu(menu);
+  tray.setToolTip(`B flow • ${status}`);
+}
+
+function createTray(): void {
+  try {
+    const iconPath = resolveTrayIconPath();
+    let image = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+    if (image.isEmpty()) {
+      image = nativeImage.createFromBuffer(Buffer.from(EMPTY_ICON_B64, 'base64'));
+    }
+    image = image.resize({ width: 16, height: 16 });
+    tray = new Tray(image);
+    tray.setToolTip('B flow');
+    tray.on('click', showMainWindow);
+    tray.on('double-click', showMainWindow);
+    rebuildTrayMenu();
+  } catch (err) {
+    console.error('[트레이] 생성 실패 — 트레이 없이 실행 (창 X = 실제 종료):', err);
+    tray = null;
+    trayFailed = true;
+  }
+}
+
 // ─── 위젯 위치 영속화 (Phase 0-6) ─────────────────────────────
 const WIDGET_POS_FILE = 'widget-positions.json';
 
