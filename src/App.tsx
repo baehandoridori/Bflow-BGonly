@@ -16,8 +16,8 @@ const CompositingView = lazy(() => import('@/views/CompositingView')); // defaul
 const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
-import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
-import { UserManagerModal } from '@/components/auth/UserManagerModal';
+const PasswordChangeModal = lazy(() => import('@/components/auth/PasswordChangeModal').then(m => ({ default: m.PasswordChangeModal })));
+const UserManagerModal = lazy(() => import('@/components/auth/UserManagerModal').then(m => ({ default: m.UserManagerModal })));
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
 import { readAll } from '@/services/supabaseService';
@@ -904,10 +904,18 @@ export default function App() {
       <GlobalTooltipProvider />
 
       {/* 비밀번호 변경 모달 */}
-      {showPasswordChange && <PasswordChangeModal />}
+      {showPasswordChange && (
+        <Suspense fallback={null}>
+          <PasswordChangeModal />
+        </Suspense>
+      )}
 
       {/* 관리자: 사용자 관리 모달 */}
-      {showUserManager && <UserManagerModal />}
+      {showUserManager && (
+        <Suspense fallback={null}>
+          <UserManagerModal />
+        </Suspense>
+      )}
 
       {/* Sonner 토스트 — 테마 색상 연동 + 스르륵 애니메이션 + 호버 펼침 */}
       <Toaster
