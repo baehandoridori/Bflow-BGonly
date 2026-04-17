@@ -764,12 +764,14 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onStatusChange: (status) => {
+      lastSupabaseStatus = humanizeStatus(status);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('supabase:status', status);
       }
       for (const win of widgetWindows.values()) {
         if (!win.isDestroyed()) win.webContents.send('supabase:status', status);
       }
+      rebuildTrayMenu();
     },
   });
 
