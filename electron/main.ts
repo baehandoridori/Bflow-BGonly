@@ -55,8 +55,11 @@ let isQuitting = false;
 let tray: Tray | null = null;
 let trayFailed = false;
 let lastSupabaseStatus = '연결 중...';
+// Chunk 2(스플래시 2단계 부팅)에서 사용 예정
 let splashWin: BrowserWindow | null = null;
+// Chunk 2(스플래시 2단계 부팅)에서 사용 예정
 let mainLoadedOk = false;
+let showTrayHintInFlight = false;
 
 /** 아이콘 경로 해석: dev(electron/)와 prod(dist-electron/) + app.getAppPath() 순회 */
 function resolveTrayIconPath(): string {
@@ -83,7 +86,7 @@ function humanizeStatus(raw: string): string {
     case 'CHANNEL_ERROR': return '재연결 중';
     case 'TIMED_OUT': return '연결 타임아웃';
     case 'CLOSED': return '연결 끊김';
-    default: return raw || '연결 중';
+    default: return raw || '연결 중...';
   }
 }
 
@@ -132,32 +135,40 @@ function rebuildTrayMenu(): void {
 }
 
 async function showTrayHintOnce(): Promise<void> {
-  const prefs = await readPreferences();
-  if (prefs.trayFirstMinimizeSeen) return;
+  if (showTrayHintInFlight) return;
+  showTrayHintInFlight = true;
+  try {
+    const prefs = await readPreferences();
+    if (prefs.trayFirstMinimizeSeen) return;
 
-  let shown = false;
-  if (Notification.isSupported()) {
-    try {
-      new Notification({
-        title: 'B flow',
-        body: '트레이로 숨겨졌습니다. 트레이 아이콘 우클릭 → 종료로 완전히 닫을 수 있습니다.',
-      }).show();
-      shown = true;
-    } catch { /* ignore */ }
-  }
+    let shown = false;
+    if (Notification.isSupported()) {
+      try {
+        new Notification({
+          title: 'B flow',
+          body: '트레이로 숨겨졌습니다. 트레이 아이콘 우클릭 → 종료로 완전히 닫을 수 있습니다.',
+        }).show();
+        shown = true;
+      } catch { /* ignore */ }
+    }
 
-  if (!shown && tray && !tray.isDestroyed() && process.platform === 'win32') {
-    try {
-      tray.displayBalloon({
-        title: 'B flow',
-        content: '트레이에 숨겨졌습니다. 트레이 메뉴 종료로 완전히 닫을 수 있습니다.',
-      });
-      shown = true;
-    } catch { /* ignore */ }
-  }
+    if (!shown && tray && !tray.isDestroyed() && process.platform === 'win32') {
+      try {
+        tray.displayBalloon({
+          title: 'B flow',
+          content: '트레이에 숨겨졌습니다. 트레이 메뉴 종료로 완전히 닫을 수 있습니다.',
+        });
+        shown = true;
+      } catch (err) {
+        console.warn('[트레이] displayBalloon 실패 — 조용히 폴백 없이 진행:', err);
+      }
+    }
 
-  if (shown) {
-    await writePreferences({ trayFirstMinimizeSeen: true });
+    if (shown) {
+      await writePreferences({ trayFirstMinimizeSeen: true });
+    }
+  } finally {
+    showTrayHintInFlight = false;
   }
 }
 
@@ -413,7 +424,7 @@ function createWindow(): void {
   mainWindow.on('close', (e) => {
     if (!isQuitting && !trayFailed) {
       e.preventDefault();
-      mainWindow?.hide();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
       showTrayHintOnce().catch(() => {/* ignore */});
       return;
     }
@@ -1837,6 +1848,11 @@ app.on('before-quit', (e) => {
 
   // 위젯 위치 즉시 저장 (closed 이벤트보다 먼저 실행)
   saveWidgetPositionsSync();
+
+  if (tray && !tray.isDestroyed()) {
+    tray.destroy();
+    tray = null;
+  }
 
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
