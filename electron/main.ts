@@ -506,6 +506,13 @@ function createWindow(): void {
       mainWindow.show();
       mainWindow.focus();
     }
+    // 재생성 경로 복구: 창 크래시 후 복구된 경우 보류 중인 딥링크 전달
+    // (최초 시작 시엔 app.whenReady의 .once 리스너와 중복이지만, pendingDeepLink를
+    //  null로 세팅하므로 멱등하게 동작)
+    if (pendingDeepLink) {
+      sendDeepLinkToRenderer(pendingDeepLink);
+      pendingDeepLink = null;
+    }
     try { console.timeEnd('splash-to-main'); } catch {/* 이미 종료됨 */}
   });
 
