@@ -60,6 +60,15 @@ export function FontColorSection() {
     })();
   }, []);
 
+  // 테마/컬러모드/커스텀 색상이 변경되면 현재 preset 기준으로 카테고리 색 재계산·적용
+  useEffect(() => {
+    if (preset === 'custom') return; // custom은 사용자가 직접 지정한 값 유지
+    const nextColors = FONT_COLOR_PRESETS[preset].getColors(primary, secondary, accentSub);
+    setColors(nextColors);
+    applyTextColors(nextColors);
+    // preferences 저장은 하지 않음 — 테마 변경은 별도 저장 트리거이고, 여기서는 UI 반영만.
+  }, [preset, primary, secondary, accentSub]);
+
   // 프리셋 변경
   const handlePresetChange = async (p: FontColorPreset) => {
     setPreset(p);
