@@ -30,7 +30,7 @@ import { loadVacationConfig, connectVacation } from '@/services/vacationService'
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, DEFAULT_THEME_ID } from '@/themes';
-import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
+import { applyFontSettings, applyTextColors, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
 import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
@@ -827,6 +827,28 @@ export default function App() {
       if (reloadTimer) clearTimeout(reloadTimer);
     };
   }, [loadData]);
+
+  // 환경설정(글꼴 크기/색상) 변경 브로드캐스트 구독
+  // — 설정 창이 메인 창과 동일하지만, 메인도 자기 자신의 브로드캐스트에 반응해 재적용해야
+  //    여러 창(메인 + 플로팅 위젯 N개) 간 일관성이 유지됨
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onPreferencesChanged?.(() => {
+      loadPreferences().then((prefs) => {
+        if (!prefs) return;
+        applyFontSettings({
+          fontScale: (prefs.fontScale as FontScale) ?? DEFAULT_FONT_SCALE,
+          fontCategoryScales: {
+            heading: prefs.fontCategoryScales?.heading ?? 1,
+            body: prefs.fontCategoryScales?.body ?? 1,
+            caption: prefs.fontCategoryScales?.caption ?? 1,
+            micro: prefs.fontCategoryScales?.micro ?? 1,
+          },
+        });
+        applyTextColors(prefs.fontCategoryColors ?? {});
+      });
+    });
+    return () => { cleanup?.(); };
+  }, []);
 
   // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (5초 간격)
   useEffect(() => {
