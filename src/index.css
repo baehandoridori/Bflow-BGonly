@@ -29,6 +29,20 @@
 [class*="text-\[8px\]"]  { font-size: calc(8px * var(--text-scale) * var(--text-micro-scale)) !important; }
 [class*="text-\[7px\]"]  { font-size: calc(7px * var(--text-scale) * var(--text-micro-scale)) !important; }
 
+/* 글자 카테고리별 색상 — 미지정 시 --color-text-primary 폴백 */
+.text-xl, .text-lg, h1, h2, h3 {
+  color: rgb(var(--color-text-heading, var(--color-text-primary)));
+}
+.text-base, .text-sm {
+  color: rgb(var(--color-text-body, var(--color-text-primary)));
+}
+.text-xs {
+  color: rgb(var(--color-text-caption, var(--color-text-primary)));
+}
+.text-\[11px\], .text-\[10px\], .text-\[9px\] {
+  color: rgb(var(--color-text-micro, var(--color-text-primary)));
+}
+
 /* ─── Liveblocks SDK 자동 삽입 배지 숨기기 ─── */
 #liveblocks-badge { display: none !important; }
 

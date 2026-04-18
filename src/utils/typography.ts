@@ -112,3 +112,69 @@ export function resetFontSettings(): void {
     fontCategoryScales: { ...DEFAULT_CATEGORY_SCALES },
   });
 }
+
+// ─── 카테고리 색상 ─────────────────────────────
+
+export type FontColorPreset = 'theme' | 'high-contrast' | 'soft' | 'mono' | 'custom';
+
+export interface FontCategoryColors {
+  heading?: string;  // RGB triplet "R G B" (예: "232 232 238")
+  body?: string;
+  caption?: string;
+  micro?: string;
+}
+
+export const FONT_COLOR_PRESETS: Record<FontColorPreset, { label: string; getColors: (themePrimary: string, themeSecondary: string, themeAccentSub: string) => FontCategoryColors }> = {
+  theme: {
+    label: '테마 기본',
+    getColors: () => ({}),  // 모두 --color-text-primary 폴백
+  },
+  'high-contrast': {
+    label: '고대비',
+    getColors: (primary, secondary) => ({
+      heading: '255 255 255',
+      body: primary,
+      caption: secondary,
+      micro: secondary,
+    }),
+  },
+  soft: {
+    label: '부드러움',
+    getColors: (primary, secondary, accentSub) => ({
+      heading: accentSub,
+      body: primary,
+      caption: secondary,
+      micro: secondary,
+    }),
+  },
+  mono: {
+    label: '단색',
+    getColors: (primary) => ({
+      heading: primary,
+      body: primary,
+      caption: primary,
+      micro: primary,
+    }),
+  },
+  custom: {
+    label: '사용자 지정',
+    getColors: () => ({}),  // UI에서 직접 세팅
+  },
+};
+
+export function applyTextColors(colors: FontCategoryColors): void {
+  const root = document.documentElement;
+  const set = (key: keyof FontCategoryColors, cssVar: string) => {
+    const val = colors[key];
+    if (val) root.style.setProperty(cssVar, val);
+    else root.style.removeProperty(cssVar);
+  };
+  set('heading', '--color-text-heading');
+  set('body', '--color-text-body');
+  set('caption', '--color-text-caption');
+  set('micro', '--color-text-micro');
+}
+
+export function resetTextColors(): void {
+  applyTextColors({});
+}
