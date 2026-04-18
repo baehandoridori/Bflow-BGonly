@@ -30,6 +30,7 @@ function useLassoSelection(
 ) {
   const [lassoRect, setLassoRect] = useState<LassoRect | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
+  const startScrollRef = useRef<{ top: number; left: number } | null>(null);
   const isDragging = useRef(false);
   const prevIds = useRef<Set<string>>(new Set());
 
@@ -39,48 +40,41 @@ function useLassoSelection(
     if (!container) return;
 
     const onMouseDown = (e: MouseEvent) => {
-      // 버튼/인풋/select/체크박스 위에서는 라쏘 시작 안 함
       const target = e.target as HTMLElement;
-      if (target.closest('button, input, select, textarea, a, [role="button"]')) return;
-      // 사이드바 트리뷰 내부에서는 라쏘 시작 안 함 (사이드바 아래 잉여 공간은 허용)
-      if (target.closest('[data-no-lasso]')) return;
-      // 좌클릭만
+      if (target.closest('button, input, select, textarea, a, [role="button"], [data-no-lasso], [contenteditable="true"]')) return;
       if (e.button !== 0) return;
 
       startRef.current = { x: e.clientX, y: e.clientY };
+      const scrollEl = findScrollParent(target) ?? container;
+      startScrollRef.current = { top: scrollEl.scrollTop, left: scrollEl.scrollLeft };
       isDragging.current = false;
 
       const onMouseMove = (me: MouseEvent) => {
-        if (!startRef.current) return;
-        const dx = me.clientX - startRef.current.x;
-        const dy = me.clientY - startRef.current.y;
-        // 5px 이상 이동해야 라쏘 시작 (클릭과 구분)
-        if (!isDragging.current && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+        if (!startRef.current || !startScrollRef.current) return;
+        const currScroll = findScrollParent(target) ?? container;
+        const scrollDx = currScroll.scrollLeft - startScrollRef.current.left;
+        const scrollDy = currScroll.scrollTop - startScrollRef.current.top;
+        const dx = (me.clientX - startRef.current.x) - scrollDx;
+        const dy = (me.clientY - startRef.current.y) - scrollDy;
+
+        if (!isDragging.current && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
         isDragging.current = true;
 
         const x = Math.min(startRef.current.x, me.clientX);
         const y = Math.min(startRef.current.y, me.clientY);
-        const w = Math.abs(dx);
-        const h = Math.abs(dy);
+        const w = Math.abs(me.clientX - startRef.current.x);
+        const h = Math.abs(me.clientY - startRef.current.y);
         setLassoRect({ x, y, w, h });
 
-        // 실시간으로 겹치는 카드 계산
         const cards = container.querySelectorAll(cardSelector);
         const selected = new Set<string>();
         cards.forEach((card) => {
           const rect = card.getBoundingClientRect();
-          // 교차 판정
-          if (
-            rect.left < x + w &&
-            rect.right > x &&
-            rect.top < y + h &&
-            rect.bottom > y
-          ) {
+          if (rect.left < x + w && rect.right > x && rect.top < y + h && rect.bottom > y) {
             const id = getSceneId(card);
             if (id) selected.add(id);
           }
         });
-        // 변경 시에만 콜백
         if (selected.size !== prevIds.current.size || ![...selected].every((id) => prevIds.current.has(id))) {
           prevIds.current = selected;
           onSelectionChange(selected);
@@ -91,13 +85,13 @@ function useLassoSelection(
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
         if (!isDragging.current) {
-          // 단순 클릭이면 선택 해제 (Ctrl 없으면)
           if (!me.ctrlKey && !me.metaKey) {
             onSelectionChange(new Set());
             prevIds.current = new Set();
           }
         }
         startRef.current = null;
+        startScrollRef.current = null;
         isDragging.current = false;
         setLassoRect(null);
       };
@@ -111,6 +105,18 @@ function useLassoSelection(
   }, [enabled, containerRef, cardSelector, getSceneId, onSelectionChange]);
 
   return { lassoRect, isSelecting: isDragging.current };
+}
+
+// 유틸: 가장 가까운 스크롤 가능 부모
+function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let cur: HTMLElement | null = el;
+  while (cur) {
+    const style = getComputedStyle(cur);
+    const oy = style.overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && cur.scrollHeight > cur.clientHeight) return cur;
+    cur = cur.parentElement;
+  }
+  return null;
 }
 
 /* ── 글로우 하이라이트 CSS 주입 (스포트라이트/인원별 뷰에서 이동 시) ── */

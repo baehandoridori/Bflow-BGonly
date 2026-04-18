@@ -138,7 +138,7 @@ export function UnifiedSceneCard({
 
         {/* ── 메모 ── */}
         {primaryScene.memo && (
-          <div className="mx-4 mt-1">
+          <div className="mx-4 mt-1" data-no-lasso>
             <p className="text-[11px] text-amber-400/70 leading-relaxed line-clamp-1">
               <HighlightText text={primaryScene.memo} query={searchQuery} />
             </p>
