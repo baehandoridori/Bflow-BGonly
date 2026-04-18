@@ -285,4 +285,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('widget:dock-change', handler);
     return () => { ipcRenderer.removeListener('widget:dock-change', handler); };
   },
+
+  // ─── 설정/세션 변경 브로드캐스트 ─────────────────
+  preferencesBroadcastChange: (payload?: unknown) =>
+    ipcRenderer.invoke('preferences:broadcast-change', payload),
+
+  onPreferencesChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('preferences:changed', listener);
+    return () => ipcRenderer.removeListener('preferences:changed', listener);
+  },
+
+  sessionBroadcastChange: (payload?: unknown) =>
+    ipcRenderer.invoke('session:broadcast-change', payload),
+
+  onSessionChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('session:changed', listener);
+    return () => ipcRenderer.removeListener('session:changed', listener);
+  },
 });

@@ -462,6 +462,12 @@ export interface ElectronAPI {
   supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) => Promise<void>;
   supabaseReadAllMemos: (userId: string) => Promise<any[]>;
 
+  // ─── 설정/세션 변경 브로드캐스트 ─────────────────
+  preferencesBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
+  onPreferencesChanged: (cb: (payload: unknown) => void) => () => void;
+  sessionBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
+  onSessionChanged: (cb: (payload: unknown) => void) => () => void;
+
   // ─── Google Calendar ──────────────────────────────
   gcalIsAuthenticated: () => Promise<boolean>;
   gcalStartAuth: () => Promise<void>;

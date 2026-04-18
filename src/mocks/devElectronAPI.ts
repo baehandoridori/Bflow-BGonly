@@ -156,6 +156,12 @@ export function installDevElectronAPI(): void {
     gcalUpdateEvent: async () => {},
     gcalDeleteEvent: async () => {},
     gcalEnsureWatch: async () => {},
+
+    // 설정/세션 변경 브로드캐스트 (mock은 no-op)
+    preferencesBroadcastChange: async () => ({ ok: true }),
+    onPreferencesChanged: noop,
+    sessionBroadcastChange: async () => ({ ok: true }),
+    onSessionChanged: noop,
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;

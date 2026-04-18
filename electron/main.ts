@@ -447,6 +447,16 @@ function broadcastSnapshotRelay(excludeWebContentsId: number, data: unknown): vo
   }
 }
 
+/** 메인 창 + 모든 위젯 창에 동일 이벤트 push */
+function broadcastToAllWindows(channel: string, payload?: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+  for (const win of widgetWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  }
+}
+
 // ─── 유틸리티 ─────────────────────────────────────────────────
 
 function getDataPath(): string {
@@ -1092,6 +1102,17 @@ ipcMain.handle('data:notify-change', (event, delta?: unknown) => {
 // 스냅샷 릴레이: 구조적 변경 후 최신 데이터를 다른 창에 직접 전달
 ipcMain.handle('sheets:relay-snapshot', (event, data: unknown) => {
   broadcastSnapshotRelay(event.sender.id, data);
+  return { ok: true };
+});
+
+// 렌더러 → 메인: "지금 설정 바꿨으니 다른 창에도 알려줘"
+ipcMain.handle('preferences:broadcast-change', (_event, payload: unknown) => {
+  broadcastToAllWindows('preferences:changed', payload);
+  return { ok: true };
+});
+
+ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
+  broadcastToAllWindows('session:changed', payload);
   return { ok: true };
 });
 
