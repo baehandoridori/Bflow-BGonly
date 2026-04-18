@@ -3,6 +3,7 @@ import { SettingsSidebar, type SettingsTabId } from '@/components/settings/Setti
 // 설정 섹션 lazy 로딩 — 활성 탭 진입 시에만 로드
 const ThemeSection = lazy(() => import('@/components/settings/ThemeSection').then(m => ({ default: m.ThemeSection })));
 const FontSizeSection = lazy(() => import('@/components/settings/FontSizeSection').then(m => ({ default: m.FontSizeSection })));
+const FontColorSection = lazy(() => import('@/components/settings/FontColorSection').then(m => ({ default: m.FontColorSection })));
 const SheetsSection = lazy(() => import('@/components/settings/SheetsSection').then(m => ({ default: m.SheetsSection })));
 const GuideSection = lazy(() => import('@/components/settings/GuideSection').then(m => ({ default: m.GuideSection })));
 const StartupSection = lazy(() => import('@/components/settings/StartupSection').then(m => ({ default: m.StartupSection })));
@@ -51,12 +52,15 @@ export function SettingsView() {
         return <ThemeSection />;
       case 'font':
         return (
-          <FontSizeSection
-            fontScale={fontScale}
-            categoryScales={categoryScales}
-            onFontScaleChange={setFontScale}
-            onCategoryScalesChange={setCategoryScales}
-          />
+          <div className="flex flex-col gap-6">
+            <FontSizeSection
+              fontScale={fontScale}
+              categoryScales={categoryScales}
+              onFontScaleChange={setFontScale}
+              onCategoryScalesChange={setCategoryScales}
+            />
+            <FontColorSection />
+          </div>
         );
       case 'sheets':
         return <SheetsSection />;
