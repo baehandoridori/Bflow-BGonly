@@ -38,7 +38,7 @@ import '@/styles/widget-animations.css';
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
 /* ── 대시보드 플렉서스 배경 (연결선 + 그라데이션 조명 + 마우스 반응) ── */
-interface DashPt { x: number; y: number; vx: number; vy: number; size: number; color: [number, number, number]; alpha: number }
+interface DashPt { x: number; y: number; vx: number; vy: number; size: number; colorIdx: number; alpha: number }
 const DEFAULT_DASH_PT_COUNT = 120;
 const DASH_CONNECT_DIST = 140;
 
@@ -96,11 +96,11 @@ function DashboardPlexus() {
       if (ptsRef.current.length === 0 || ptsRef.current.length !== ptCount) {
         const cols = getColors();
         ptsRef.current = Array.from({ length: ptCount }, () => {
-          const c = cols[Math.floor(Math.random() * cols.length)];
+          const colorIdx = Math.floor(Math.random() * cols.length);
           return {
             x: Math.random() * w, y: Math.random() * h,
             vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
-            size: 1.2 + Math.random() * 2.5, color: c, alpha: 0.25 + Math.random() * 0.35,
+            size: 1.2 + Math.random() * 2.5, colorIdx, alpha: 0.25 + Math.random() * 0.35,
           };
         });
       }
@@ -121,6 +121,9 @@ function DashboardPlexus() {
       const delta = lastTime ? timestamp - lastTime : TARGET_FRAME_MS;
       lastTime = timestamp;
       const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3);
+
+      // 매 프레임 최신 팔레트 조회 → 테마 변경 시 즉시 색 반영
+      const palette = getColors();
 
       const { w, h } = sizeRef.current;
       ctx.clearRect(0, 0, w, h);
@@ -154,7 +157,7 @@ function DashboardPlexus() {
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < cDist) {
             const alpha = (1 - dist / cDist) * 0.28;
-            const [r, g, b] = pts[i].color;
+            const [r, g, b] = palette[pts[i].colorIdx % palette.length];
             ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
             ctx.lineWidth = (1 - dist / cDist) * 1.2;
             ctx.beginPath();
@@ -172,7 +175,7 @@ function DashboardPlexus() {
         const dist = Math.sqrt(dx * dx + dy * dy);
         const nearMouse = dist < dc.mouseRadius;
         const glowAlpha = nearMouse ? p.alpha + (1 - dist / dc.mouseRadius) * 0.25 : p.alpha;
-        const [r, g, b] = p.color;
+        const [r, g, b] = palette[p.colorIdx % palette.length];
         // 소프트 글로우
         if (dcGlow > 0.2) {
           const glR = p.size * 5 * dcGlow;

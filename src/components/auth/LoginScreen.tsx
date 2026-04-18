@@ -18,7 +18,7 @@ interface Particle {
   vy: number;
   baseSpeed: number;
   size: number;
-  color: [number, number, number];
+  colorIdx: number;
 }
 
 // RGB ↔ HSL 변환 유틸
@@ -50,7 +50,7 @@ function getPlexusColors(): [number, number, number][] {
   const themeId = useAppStore.getState().themeId;
   const custom = useAppStore.getState().customThemeColors;
   const colors = custom ?? getPreset(themeId)?.colors;
-  if (!colors) return [[108, 92, 231], [162, 155, 254], [116, 185, 255], [0, 184, 148], [85, 239, 196]];
+  if (!colors) return [[108, 92, 231], [162, 155, 254]];
   const parse = (s: string): [number, number, number] => {
     const [r, g, b] = s.split(' ').map(Number);
     return [r, g, b];
@@ -90,13 +90,13 @@ const VIRTUAL_H = 1800;
 function createParticle(_w: number, _h: number, plexusColors?: [number, number, number][]): Particle {
   const z = 0.1 + Math.random() * 0.9;
   const cols = plexusColors ?? getPlexusColors();
-  const color = cols[Math.floor(Math.random() * cols.length)];
+  const colorIdx = Math.floor(Math.random() * cols.length);
   const baseSpeed = 0.12 + Math.random() * 0.35;
   return {
     x: Math.random() * VIRTUAL_W, y: Math.random() * VIRTUAL_H, z,
     vx: (Math.random() - 0.5) * baseSpeed * z,
     vy: (Math.random() - 0.5) * baseSpeed * z,
-    baseSpeed, size: 1.2 + z * 3, color,
+    baseSpeed, size: 1.2 + z * 3, colorIdx,
   };
 }
 
@@ -185,6 +185,9 @@ function PlexusBackground() {
       lastTime = timestamp;
       const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3); // cap at 3x (최소 ~20fps)
 
+      // 매 프레임 최신 팔레트 조회 → 테마 변경 시 즉시 색 반영
+      const palette = getPlexusColors();
+
       const { w, h } = sizeRef.current;
       const particles = particlesRef.current;
 
@@ -261,9 +264,11 @@ function PlexusBackground() {
             const midY = (a.y + b.y) * 0.5;
             const dMid = Math.sqrt((midX - mx) ** 2 + (midY - my) ** 2);
             const glowBoost = dMid < cfgMouseR ? (1 - dMid / cfgMouseR) * 0.4 : 0;
-            const r = Math.round((a.color[0] + b.color[0]) * 0.5);
-            const g = Math.round((a.color[1] + b.color[1]) * 0.5);
-            const bl = Math.round((a.color[2] + b.color[2]) * 0.5);
+            const aCol = palette[a.colorIdx % palette.length];
+            const bCol = palette[b.colorIdx % palette.length];
+            const r = Math.round((aCol[0] + bCol[0]) * 0.5);
+            const g = Math.round((aCol[1] + bCol[1]) * 0.5);
+            const bl = Math.round((aCol[2] + bCol[2]) * 0.5);
             ctx.beginPath();
             ctx.moveTo(a.x - ox, a.y - oy); ctx.lineTo(b.x - ox, b.y - oy);
             ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${Math.min(lineAlpha + glowBoost, 0.75)})`;
@@ -277,7 +282,7 @@ function PlexusBackground() {
       const cfgGlow = cfg.glowIntensity;
       for (const p of sorted) {
         const alpha = 0.35 + p.z * 0.6;
-        const [r, g, b] = p.color;
+        const [r, g, b] = palette[p.colorIdx % palette.length];
         const sx = p.x - ox; // 화면 x
         const sy = p.y - oy; // 화면 y
         const dmx2 = p.x - mx; const dmy2 = p.y - my;
