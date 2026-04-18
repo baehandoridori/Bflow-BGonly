@@ -219,7 +219,12 @@ function createSplashWindow(): void {
 function closeSplash(): void {
   if (splashWin && !splashWin.isDestroyed()) {
     // closable:false 창은 close() 거부 → destroy() 사용
-    splashWin.destroy();
+    // destroy()가 Windows 특정 엣지 케이스에서 throw 가능 → try/catch로 방어
+    try {
+      splashWin.destroy();
+    } catch (err) {
+      console.error('[스플래시] destroy 실패 — 무시하고 진행:', err);
+    }
   }
   splashWin = null;
 }
@@ -1887,12 +1892,17 @@ app.whenReady().then(() => {
   startSupabaseRealtime();
 
   // 저장된 위젯 자동 복원 (Phase 0-6) + 보류 딥링크 전달
+  // .once: 렌더러 재로드(Ctrl+Shift+R, 크래시 복구) 시 재실행 방지 — 사용자가 닫은 위젯 재등장/딥링크 재실행 차단
   if (mainWindow) {
-    mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.once('did-finish-load', () => {
       if (widgetPositionCache.size > 0) {
         for (const [widgetId, state] of widgetPositionCache) {
-          const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
-          openWidgetPopup(widgetId, title);
+          try {
+            const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
+            openWidgetPopup(widgetId, title);
+          } catch (err) {
+            console.error(`[위젯 자동복원] ${widgetId} 실패:`, err);
+          }
         }
       }
       // 앱 시작 시 보류된 딥링크 전달
@@ -1948,15 +1958,13 @@ app.on('before-quit', (e) => {
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
   const totalPending = sheetsPending + vacPending;
-  if (totalPending > 0 || watchCleanup) {
+  if (totalPending > 0) {
     e.preventDefault();
 
-    if (totalPending > 0) {
-      console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
-    }
+    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
 
     // 메인 윈도우에 "저장 중" 알림
-    if (totalPending > 0 && mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:saving-before-quit', totalPending);
     }
 
@@ -1964,8 +1972,8 @@ app.on('before-quit', (e) => {
     const watchWithTimeout = Promise.race([watchCleanup, new Promise<void>((r) => setTimeout(r, 5000))]);
     Promise.all([
       watchWithTimeout,
-      totalPending > 0 ? waitForAllPendingOps(15000) : Promise.resolve(true),
-      totalPending > 0 ? waitForVacPendingOps(60000) : Promise.resolve(true),
+      waitForAllPendingOps(15000),
+      waitForVacPendingOps(60000),
     ]).then(([, sheetsDone, vacDone]) => {
       if (!sheetsDone || !vacDone) {
         console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
@@ -1973,6 +1981,9 @@ app.on('before-quit', (e) => {
       console.log('[종료] 저장 완료, 앱을 종료합니다');
       app.quit();
     });
+  } else {
+    // 대기 중 작업 없음: Watch 정리는 fire-and-forget (종료를 지연시키지 않음)
+    Promise.race([watchCleanup, new Promise<void>((r) => setTimeout(r, 2000))]).catch(() => {});
   }
 });
 

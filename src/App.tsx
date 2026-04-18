@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useCallback, useState, useRef } from 'react';
+import { lazy, Suspense, useEffect, useCallback, useState, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -39,6 +39,20 @@ import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+
+// Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
+// 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
+class LazyErrorBoundary extends Component<{ children: ReactNode; name: string }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: Error, info: ErrorInfo) {
+    console.error(`[LazyErrorBoundary] ${this.props.name} 로드 실패:`, err, info);
+  }
+  render() {
+    if (this.state.hasError) return null; // 모달/뷰가 뜨지 않는 편이 크래시보다 낫다
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setDataConnected, setGasConfig, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected, setActiveDataSource } = useAppStore();
@@ -531,7 +545,10 @@ export default function App() {
         saveTheme({ themeId, customColors: customThemeColors, colorMode });
         return;
       }
-      // Case C: 아무것도 없음 — themeInitRef가 true면 오지 않아야 함. 안전망만.
+      // Case C: themeId=custom이지만 hex/customThemeColors 모두 없음 → 기본 프리셋으로 폴백
+      console.warn('[테마] themeId=custom이지만 색상 데이터 없음 → 기본 프리셋으로 폴백');
+      setThemeId(DEFAULT_THEME_ID);
+      // 이 setThemeId는 effect를 재실행시켜 프리셋 분기로 진입하므로 추가 처리 불필요
       return;
     }
 
@@ -905,13 +922,15 @@ export default function App() {
       }
     })();
     return (
-      <Suspense fallback={
-        <div className="flex items-center justify-center h-full w-full">
-          <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-        </div>
-      }>
-        {view}
-      </Suspense>
+      <LazyErrorBoundary name="View">
+        <Suspense fallback={
+          <div className="flex items-center justify-center h-full w-full">
+            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          </div>
+        }>
+          {view}
+        </Suspense>
+      </LazyErrorBoundary>
     );
   };
 
@@ -1005,16 +1024,20 @@ export default function App() {
 
       {/* 비밀번호 변경 모달 */}
       {showPasswordChange && (
-        <Suspense fallback={null}>
-          <PasswordChangeModal />
-        </Suspense>
+        <LazyErrorBoundary name="PasswordChangeModal">
+          <Suspense fallback={null}>
+            <PasswordChangeModal />
+          </Suspense>
+        </LazyErrorBoundary>
       )}
 
       {/* 관리자: 사용자 관리 모달 */}
       {showUserManager && (
-        <Suspense fallback={null}>
-          <UserManagerModal />
-        </Suspense>
+        <LazyErrorBoundary name="UserManagerModal">
+          <Suspense fallback={null}>
+            <UserManagerModal />
+          </Suspense>
+        </LazyErrorBoundary>
       )}
 
       {/* Sonner 토스트 — 테마 색상 연동 + 스르륵 애니메이션 + 호버 펼침 */}
