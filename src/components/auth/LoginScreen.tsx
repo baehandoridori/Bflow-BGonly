@@ -779,7 +779,7 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
       tabIndex={-1}
     >
-      <GradientBackdrop enabled={plexusSettings.loginGradientEnabled !== false} />
+      <GradientBackdrop enabled={plexusSettings.loginGradientEnabled !== false} intensity="subtle" />
       <PlexusBackground />
 
       <AnimatePresence mode="wait">

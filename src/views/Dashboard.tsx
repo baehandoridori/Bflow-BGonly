@@ -826,7 +826,7 @@ export function Dashboard() {
   return (
     <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
       {/* 그라데이션 배경 (파티클과 독립 토글) */}
-      <GradientBackdrop enabled={plexusSettings.dashboardGradientEnabled !== false} />
+      <GradientBackdrop enabled={plexusSettings.dashboardGradientEnabled !== false} intensity="normal" />
       {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) */}
       <DashboardPlexus />
 
