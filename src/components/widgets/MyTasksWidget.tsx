@@ -1759,6 +1759,16 @@ export function MyTasksWidget() {
     );
   };
 
+  // 플로팅 위젯 창에서 메인 앱 로그인 전 → currentUser가 null인 상태로 렌더될 수 있음
+  // (assigned 뷰는 currentUser.name과 assignee 매칭 → 빈 결과 방지 위해 로딩 표시)
+  if (activeView.type === 'assigned' && !currentUser) {
+    return (
+      <div className="flex items-center justify-center h-full text-xs text-text-secondary/60">
+        사용자 정보 로딩 중...
+      </div>
+    );
+  }
+
   return (
     <Widget
       title="내 할일"

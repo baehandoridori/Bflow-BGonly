@@ -29,7 +29,7 @@ import { connectGas, loadGasConfig } from '@/services/gasConfigService';
 import { invalidatePartCache } from '@/services/commentService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
-import type { Episode } from '@/types';
+import type { Episode, AppUser } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
 import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 
@@ -151,6 +151,15 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       loadPreferences()
         .then((prefs) => { if (prefs) applyPreferencesToDOM(prefs); })
         .catch((err) => console.warn('[설정] 브로드캐스트 재적용 실패', err));
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // 세션 변경 브로드캐스트 구독 — 메인 창 로그인/로그아웃 시 currentUser 즉시 동기화
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onSessionChanged?.((payload) => {
+      const { user } = (payload as { user: AppUser | null }) ?? {};
+      useAuthStore.getState().setCurrentUser(user ?? null);
     });
     return () => { cleanup?.(); };
   }, []);
