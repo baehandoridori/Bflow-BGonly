@@ -1122,10 +1122,15 @@ ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
 // ─── IPC 핸들러: 휴가 pending 상태 파일 I/O + 브로드캐스트 ─────
 
 const PENDING_VACATIONS_FILE = 'pendingVacations.json';
+let pendingSaveChain: Promise<{ ok: boolean }> = Promise.resolve({ ok: true });
+
+function getPendingVacationsPath(): string {
+  return path.join(app.getPath('userData'), PENDING_VACATIONS_FILE);
+}
 
 ipcMain.handle('vacation:pending:load', () => {
   try {
-    const file = path.join(app.getPath('userData'), PENDING_VACATIONS_FILE);
+    const file = getPendingVacationsPath();
     if (!fs.existsSync(file)) return [];
     return JSON.parse(fs.readFileSync(file, 'utf-8'));
   } catch (err) {
@@ -1135,14 +1140,18 @@ ipcMain.handle('vacation:pending:load', () => {
 });
 
 ipcMain.handle('vacation:pending:save', (_e, list: unknown) => {
-  try {
-    const file = path.join(app.getPath('userData'), PENDING_VACATIONS_FILE);
-    fs.writeFileSync(file, JSON.stringify(list ?? []), 'utf-8');
-    return { ok: true };
-  } catch (err) {
-    console.error('[vacation] pending 저장 실패:', err);
-    return { ok: false };
-  }
+  // 저장은 체인으로 직렬화 — 동시 호출 경합 방지
+  pendingSaveChain = pendingSaveChain.then(async () => {
+    try {
+      const file = getPendingVacationsPath();
+      await fs.promises.writeFile(file, JSON.stringify(list ?? []), 'utf-8');
+      return { ok: true };
+    } catch (err) {
+      console.error('[vacation] pending 저장 실패:', err);
+      return { ok: false };
+    }
+  });
+  return pendingSaveChain;
 });
 
 ipcMain.handle('vacation:broadcast-registered', (_e, payload: unknown) => {
