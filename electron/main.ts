@@ -270,6 +270,9 @@ interface SavedWidgetState {
   x: number; y: number; width: number; height: number;
   opacity: number; alwaysOnTop: boolean;
   title?: string;
+  // 위젯 query string용 부가 파라미터 (예: EP 위젯의 ?ep=1).
+  // 재실행 시 유실 방지를 위해 함께 영속화. optional이라 구버전 파일과 호환.
+  extra?: Record<string, string>;
 }
 
 // 위젯 ID → 제목 매핑 (자동 복원 시 title 미저장 파일 호환용)
@@ -1371,6 +1374,10 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   const initHeight = savedPos ? Math.max(200, savedPos.height) : 360;
   const initAOT = savedPos ? savedPos.alwaysOnTop : true;
 
+  // 호출 시점 extra가 우선. 없으면 이전에 저장된 extra 복원.
+  // (EP 위젯 `?ep=1` 등의 query string 파라미터 영속화 — 이슈 ⑨)
+  const effectiveExtra = extra ?? savedPos?.extra;
+
   const popupWin = new BrowserWindow({
     width: initWidth,
     height: initHeight,
@@ -1408,8 +1415,8 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
 
   // 같은 앱을 로드하되, 해시로 팝업 모드 + 위젯 ID 전달
   let hash = `#widget-popup/${encodeURIComponent(widgetId)}`;
-  if (extra && Object.keys(extra).length > 0) {
-    const qs = new URLSearchParams(extra).toString();
+  if (effectiveExtra && Object.keys(effectiveExtra).length > 0) {
+    const qs = new URLSearchParams(effectiveExtra).toString();
     hash += `?${qs}`;
   }
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -1433,11 +1440,14 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   const existingCache = widgetPositionCache.get(widgetId);
   if (existingCache) {
     existingCache.title = widgetTitle;
+    // 명시적 extra가 새로 들어온 경우만 덮어씀 (복원 경로에서는 savedPos?.extra를 유지)
+    if (extra) existingCache.extra = extra;
   } else {
     const b = popupWin.getBounds();
     widgetPositionCache.set(widgetId, {
       x: b.x, y: b.y, width: b.width, height: b.height,
       opacity: 1.0, alwaysOnTop: initAOT, title: widgetTitle,
+      extra: effectiveExtra,
     });
   }
   saveWidgetPositionsDebounced();
@@ -1511,6 +1521,7 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
       opacity: prev?.opacity ?? 0.92,
       alwaysOnTop: prev?.alwaysOnTop ?? true,
       title: prev?.title ?? widgetTitle,
+      extra: prev?.extra ?? effectiveExtra,
     });
     saveWidgetPositionsDebounced();
   };
@@ -1536,6 +1547,7 @@ ipcMain.handle('widget:set-opacity', (_event, widgetId: string, opacity: number)
       widgetPositionCache.set(widgetId, cached);
     } else {
       cached.opacity = clamped;
+      // extra는 기존 값 유지 (별도 변경 없음)
     }
     saveWidgetPositionsDebounced();
   }
@@ -1942,7 +1954,9 @@ app.whenReady().then(() => {
         for (const [widgetId, state] of widgetPositionCache) {
           try {
             const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
-            openWidgetPopup(widgetId, title);
+            // state.extra를 명시적으로 넘기지 않아도 openWidgetPopup 내부에서
+            // savedPos.extra를 자동 복원(effectiveExtra)하지만, 명시 전달로 의도를 분명히 한다.
+            openWidgetPopup(widgetId, title, state.extra);
           } catch (err) {
             console.error(`[위젯 자동복원] ${widgetId} 실패:`, err);
           }
