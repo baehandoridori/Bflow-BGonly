@@ -92,9 +92,15 @@ function humanizeStatus(raw: string): string {
   }
 }
 
-/** 메인 창을 보이고 포커스. 숨김 상태면 복원 */
+/** 메인 창을 보이고 포커스. 숨김 상태면 복원.
+ *  렌더러 크래시 등으로 창이 파괴된 상태에서도 createWindow()로 복구. */
 function showMainWindow(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    console.warn('[창] 메인 창이 없음 — 재생성');
+    mainLoadedOk = false; // 새 로드 사이클 시작
+    createWindow();        // did-finish-load 핸들러에서 자동으로 show + focus
+    return;
+  }
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -1737,7 +1743,10 @@ function sendDeepLinkToRenderer(url: string): void {
     mainWindow.show();
     mainWindow.focus();
   } else {
+    // 메인 창이 파괴된 상태 (렌더러 크래시 등) → pendingDeepLink로 저장하고
+    // showMainWindow()로 창 복구 트리거. 새 창의 did-finish-load 시점에 처리됨.
     pendingDeepLink = url;
+    showMainWindow();
   }
 }
 
@@ -1799,13 +1808,11 @@ if (!gotTheLock) {
     console.log('[DeepLink] second-instance argv:', argv);
     const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
     console.log('[DeepLink] 추출된 URL:', deepLinkUrl ?? '(없음)');
-    if (deepLinkUrl) sendDeepLinkToRenderer(deepLinkUrl);
-
-    // sendDeepLinkToRenderer가 이미 show/focus하지만, URL 없는 경우에도 창 활성화
-    if (mainWindow && !deepLinkUrl) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
+    if (deepLinkUrl) {
+      sendDeepLinkToRenderer(deepLinkUrl);
+    } else {
+      // URL 없는 경우에도 창 활성화 (showMainWindow가 필요 시 재생성까지 책임짐)
+      showMainWindow();
     }
   });
 
