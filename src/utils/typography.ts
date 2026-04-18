@@ -178,3 +178,30 @@ export function applyTextColors(colors: FontCategoryColors): void {
 export function resetTextColors(): void {
   applyTextColors({});
 }
+
+// ─── 저장된 환경설정을 런타임에 적용 ──────────
+
+const VALID_FONT_SCALES: readonly FontScale[] = ['xs', 's', 'm', 'l', 'xl'];
+
+export function isFontScale(v: unknown): v is FontScale {
+  return typeof v === 'string' && (VALID_FONT_SCALES as readonly string[]).includes(v);
+}
+
+/** UserPreferences의 글자 크기/색상 관련 필드를 CSS 변수에 적용 */
+export function applyPreferencesToDOM(prefs: {
+  fontScale?: string;
+  fontCategoryScales?: Partial<FontCategoryScales>;
+  fontCategoryColors?: FontCategoryColors;
+}): void {
+  const scale: FontScale = isFontScale(prefs.fontScale) ? prefs.fontScale : DEFAULT_FONT_SCALE;
+  applyFontSettings({
+    fontScale: scale,
+    fontCategoryScales: {
+      heading: prefs.fontCategoryScales?.heading ?? 1,
+      body: prefs.fontCategoryScales?.body ?? 1,
+      caption: prefs.fontCategoryScales?.caption ?? 1,
+      micro: prefs.fontCategoryScales?.micro ?? 1,
+    },
+  });
+  applyTextColors(prefs.fontCategoryColors ?? {});
+}

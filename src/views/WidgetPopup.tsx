@@ -23,7 +23,7 @@ import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWid
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
 import { loadPreferences, loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
-import { applyFontSettings, applyTextColors, DEFAULT_FONT_SCALE, type FontScale } from '@/utils/typography';
+import { applyPreferencesToDOM } from '@/utils/typography';
 import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
 import { invalidatePartCache } from '@/services/commentService';
@@ -148,19 +148,9 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
   // 환경설정(글꼴 크기/색상) 변경 브로드캐스트 구독 — 메인 창에서 저장되면 즉시 재적용
   useEffect(() => {
     const cleanup = window.electronAPI?.onPreferencesChanged?.(() => {
-      loadPreferences().then((prefs) => {
-        if (!prefs) return;
-        applyFontSettings({
-          fontScale: (prefs.fontScale as FontScale) ?? DEFAULT_FONT_SCALE,
-          fontCategoryScales: {
-            heading: prefs.fontCategoryScales?.heading ?? 1,
-            body: prefs.fontCategoryScales?.body ?? 1,
-            caption: prefs.fontCategoryScales?.caption ?? 1,
-            micro: prefs.fontCategoryScales?.micro ?? 1,
-          },
-        });
-        applyTextColors(prefs.fontCategoryColors ?? {});
-      });
+      loadPreferences()
+        .then((prefs) => { if (prefs) applyPreferencesToDOM(prefs); })
+        .catch((err) => console.warn('[설정] 브로드캐스트 재적용 실패', err));
     });
     return () => { cleanup?.(); };
   }, []);
@@ -324,18 +314,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
 
         // 글꼴 크기/색상 적용 (FOUC 방지: 초기 렌더 전에 CSS 변수 세팅)
         const prefs = await loadPreferences();
-        if (prefs) {
-          applyFontSettings({
-            fontScale: (prefs.fontScale as FontScale) ?? DEFAULT_FONT_SCALE,
-            fontCategoryScales: {
-              heading: prefs.fontCategoryScales?.heading ?? 1,
-              body: prefs.fontCategoryScales?.body ?? 1,
-              caption: prefs.fontCategoryScales?.caption ?? 1,
-              micro: prefs.fontCategoryScales?.micro ?? 1,
-            },
-          });
-          applyTextColors(prefs.fontCategoryColors ?? {});
-        }
+        if (prefs) applyPreferencesToDOM(prefs);
 
         const api = window.electronAPI;
         if (!api) { setReady(true); return; }

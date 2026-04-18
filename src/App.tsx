@@ -30,8 +30,7 @@ import { loadVacationConfig, connectVacation } from '@/services/vacationService'
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, DEFAULT_THEME_ID } from '@/themes';
-import { applyFontSettings, applyTextColors, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
-import type { FontScale } from '@/utils/typography';
+import { applyPreferencesToDOM } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
@@ -274,13 +273,8 @@ export default function App() {
           }
         }
 
-        // 글꼴 크기 적용 (FOUC 방지: 테마보다 먼저 적용)
-        applyFontSettings({
-          fontScale: (savedPrefs?.fontScale as FontScale) ?? DEFAULT_FONT_SCALE,
-          fontCategoryScales: savedPrefs?.fontCategoryScales
-            ? { ...DEFAULT_CATEGORY_SCALES, ...savedPrefs.fontCategoryScales }
-            : undefined,
-        });
+        // 글꼴 크기/색상 적용 (FOUC 방지: 테마보다 먼저 적용)
+        if (savedPrefs) applyPreferencesToDOM(savedPrefs);
 
         // Phase 8-4: 스플래시 건너뛰기
         if (savedPrefs?.skipLoadingSplash) setLoadingSplashDone(true);
@@ -833,19 +827,9 @@ export default function App() {
   //    여러 창(메인 + 플로팅 위젯 N개) 간 일관성이 유지됨
   useEffect(() => {
     const cleanup = window.electronAPI?.onPreferencesChanged?.(() => {
-      loadPreferences().then((prefs) => {
-        if (!prefs) return;
-        applyFontSettings({
-          fontScale: (prefs.fontScale as FontScale) ?? DEFAULT_FONT_SCALE,
-          fontCategoryScales: {
-            heading: prefs.fontCategoryScales?.heading ?? 1,
-            body: prefs.fontCategoryScales?.body ?? 1,
-            caption: prefs.fontCategoryScales?.caption ?? 1,
-            micro: prefs.fontCategoryScales?.micro ?? 1,
-          },
-        });
-        applyTextColors(prefs.fontCategoryColors ?? {});
-      });
+      loadPreferences()
+        .then((prefs) => { if (prefs) applyPreferencesToDOM(prefs); })
+        .catch((err) => console.warn('[설정] 브로드캐스트 재적용 실패', err));
     });
     return () => { cleanup?.(); };
   }, []);
