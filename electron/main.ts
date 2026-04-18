@@ -81,10 +81,6 @@ function resolveTrayIconPath(): string {
   return '';
 }
 
-/** 1x1 투명 PNG — 아이콘 로드 완전 실패 시 최후 폴백 */
-const EMPTY_ICON_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-
 /** Supabase 원시 상태 → 사용자에게 보여줄 한글 라벨 */
 function humanizeStatus(raw: string): string {
   switch (raw) {
@@ -232,9 +228,21 @@ function closeSplash(): void {
 function createTray(): void {
   try {
     const iconPath = resolveTrayIconPath();
-    let image = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+    // 아이콘 파일을 실제로 찾지 못했으면 → 보이지 않는 트레이로 이어져
+    // "앱이 사라진 것처럼" 보일 위험. 트레이 실패로 간주해 창 X = 실제 종료로 폴백.
+    if (!iconPath) {
+      console.error('[트레이] 아이콘 파일을 찾지 못함 — 트레이 없이 실행 (창 X = 실제 종료)');
+      tray = null;
+      trayFailed = true;
+      return;
+    }
+    let image = nativeImage.createFromPath(iconPath);
     if (image.isEmpty()) {
-      image = nativeImage.createFromBuffer(Buffer.from(EMPTY_ICON_B64, 'base64'));
+      // 파일은 존재하지만 디코딩 실패 → 역시 보이지 않는 트레이 위험
+      console.error('[트레이] 아이콘 디코딩 실패 — 트레이 없이 실행 (창 X = 실제 종료):', iconPath);
+      tray = null;
+      trayFailed = true;
+      return;
     }
     image = image.resize({ width: 16, height: 16 });
     tray = new Tray(image);

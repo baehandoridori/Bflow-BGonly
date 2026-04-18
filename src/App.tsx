@@ -922,7 +922,7 @@ export default function App() {
       }
     })();
     return (
-      <LazyErrorBoundary name="View">
+      <LazyErrorBoundary key={currentView} name={`View:${currentView}`}>
         <Suspense fallback={
           <div className="flex items-center justify-center h-full w-full">
             <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
