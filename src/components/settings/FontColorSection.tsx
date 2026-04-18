@@ -42,6 +42,7 @@ export function FontColorSection() {
   const [preset, setPreset] = useState<FontColorPreset>('theme');
   const [colors, setColors] = useState<FontCategoryColors>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   // 테마 기반 폴백 색상 (사용자 커스텀 > 라이트 > 다크 프리셋 > 기본값)
   const themeColors =
@@ -57,17 +58,20 @@ export function FontColorSection() {
       const prefs = await loadPreferences();
       if (prefs?.fontColorPreset) setPreset(prefs.fontColorPreset);
       if (prefs?.fontCategoryColors) setColors(prefs.fontCategoryColors);
+      setHasLoaded(true);
     })();
   }, []);
 
   // 테마/컬러모드/커스텀 색상이 변경되면 현재 preset 기준으로 카테고리 색 재계산·적용
+  // loadPreferences 완료 전에는 skip → 저장된 custom 색이 기본값으로 플래시되는 것 방지
   useEffect(() => {
+    if (!hasLoaded) return;
     if (preset === 'custom') return; // custom은 사용자가 직접 지정한 값 유지
     const nextColors = FONT_COLOR_PRESETS[preset].getColors(primary, secondary, accentSub);
     setColors(nextColors);
     applyTextColors(nextColors);
     // preferences 저장은 하지 않음 — 테마 변경은 별도 저장 트리거이고, 여기서는 UI 반영만.
-  }, [preset, primary, secondary, accentSub]);
+  }, [hasLoaded, preset, primary, secondary, accentSub]);
 
   // 프리셋 변경
   const handlePresetChange = async (p: FontColorPreset) => {
