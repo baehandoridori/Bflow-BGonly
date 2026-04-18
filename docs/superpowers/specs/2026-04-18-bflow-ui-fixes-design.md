@@ -159,6 +159,9 @@ if (prefs) {
 - `mono` — 전부 primary
 - `custom` — 고급 모드 사용자 지정
 
+**기존 사용처 영향 범위**  
+- 구현 플랜 1단계에서 `text-text-primary`, `text-text-secondary`, `text-[11px]`, `text-[10px]`, `text-xs`, `text-sm`, `text-base`, `text-lg`, `text-xl` 등 Tailwind 텍스트 클래스의 현재 사용처를 `grep`으로 집계. 명시적으로 `text-text-*`를 지정한 컴포넌트는 **기존 색 유지**, 미지정 컴포넌트만 신규 CSS 변수 폴백으로 색상이 바뀐다. 회귀 영향을 미리 추정하고 필요 시 명시 클래스를 일부 제거.
+
 **설정 UI**  
 - `FontColorSection.tsx` 신규. `FontSizeSection`과 동일 UX:
   - 프리셋 셀렉터 5종(프리셋 선택 시 개별 색상 자동 적용·잠금).
@@ -178,7 +181,7 @@ if (prefs) {
 `app.setName('Bflow-BGonly')`가 main process 초기화에 명시되지 않으면 userData 경로가 `package.json`의 `productName` 등으로 결정되어 **개발과 빌드 경로가 달라질 수 있다**. 결과적으로 빌드 앱이 `auth.json`을 찾지 못해 세션 복원 실패.
 
 **수정**  
-1. `electron/main.ts` 최상단에 `app.setName('Bflow-BGonly')` 또는 `app.setPath('userData', ...)` 명시(CLAUDE.md 경로 요건 `%APPDATA%\Bflow-BGonly\`).
+1. **선행 체크**: `electron/main.ts`에 이미 `app.setName(...)` 또는 `app.setPath('userData', ...)`가 있는지 먼저 grep. 있으면 이름·경로가 `Bflow-BGonly`와 정확히 일치하는지만 확인. 없으면 `app.setName('Bflow-BGonly')` 추가(CLAUDE.md 경로 요건 `%APPDATA%\Bflow-BGonly\`).
 2. `loadSession` 실패 구간별 로그 추가:
    - auth.json 미존재
    - JSON 파싱 실패
@@ -226,8 +229,9 @@ if (prefs) {
 1. 낙관적 업데이트 — 등록 요청 순간 `useVacationStore`(신규 또는 기존 vacation store)에 `pendingEvents: VacationEvent[]` 추가. `status: 'pending'` 필드로 구분.
 2. `VacationWidget`과 `CalendarWidget` 렌더링 시 pending 이벤트는 **노란색(예: amber-400 배경 + amber 테두리)** 으로 표시.
 3. 영속성 — pending 목록을 `%APPDATA%\Bflow-BGonly\pendingVacations.json`에 저장. 다른 화면 전환/재시작 시에도 유지.
+   - 신규 IPC: `vacation:pending:load` (읽기), `vacation:pending:save` (쓰기). `electron/main.ts`에 파일 I/O 핸들러 추가, `electron/preload.ts`에 `vacationPendingLoad/Save` 노출.
 4. 메인 프로세스에 `vacation:registered` broadcast 채널 추가. API 응답 성공 시 모든 창에 push → 각 창이 `sonner.toast.success('휴가 등록 완료')` 표시 + pending 제거.
-5. 실패 시 `vacation:failed` broadcast → 에러 토스트 + pending을 사용자 수동 재시도 또는 자동 롤백.
+5. 실패 시 `vacation:failed` broadcast → 에러 토스트 + pending을 사용자 수동 재시도 또는 자동 롤백. 30초 타임아웃으로 무한 pending 방지.
 
 **테스트**  
 - 휴가 등록 버튼 클릭 → 즉시 노란색 pending으로 표시.
@@ -313,3 +317,5 @@ if (prefs) {
 - [ ] 글자 카테고리별 색상 프리셋 5종 + 고급 모드 동작
 - [ ] 휴가 등록 pending 상태 + 완료 토스트 전역 전파
 - [ ] EP 위젯 재시작 복원 성공(EP 번호 유지)
+- [ ] 구버전 `widget-positions.json` 로드 시 `extra` 없어도 crash 없음, 이후 저장하면 새 포맷 반영
+- [ ] 구버전 `preferences.json`(fontCategoryColors 미존재)에서도 기본 색상 정상 동작
