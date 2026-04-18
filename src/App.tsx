@@ -502,17 +502,24 @@ export default function App() {
   // (로그인/세션 복원/로그아웃/비밀번호 변경 등 모든 setCurrentUser 경로 공통)
   // 로그인: user truthy → { user } 브로드캐스트
   // 로그아웃: null → { user: null } 명시적 브로드캐스트 (위젯 창이 currentUser를 null로 재설정)
+  // 첫 실행 시 이미 로그인된 사용자(loadSession 복원 등)가 있으면 broadcast —
+  // 플로팅 위젯이 이미 열려 있는 경우 초기 사용자 상태를 전파하기 위함.
   const prevBroadcastUserRef = useRef<typeof currentUser | undefined>(undefined);
   useEffect(() => {
-    // 첫 렌더는 스킵 — 초기값 전파는 위젯 창이 자체적으로 loadSession으로 복원
-    if (prevBroadcastUserRef.current === undefined) {
-      prevBroadcastUserRef.current = currentUser;
+    const prev = prevBroadcastUserRef.current;
+    prevBroadcastUserRef.current = currentUser;
+
+    // 첫 실행: currentUser가 이미 있다면 broadcast (플로팅 위젯이 이미 열려 있을 수 있음)
+    if (prev === undefined) {
+      if (currentUser) {
+        window.electronAPI?.sessionBroadcastChange?.({ user: currentUser });
+      }
       return;
     }
+
     // 동일 사용자면 스킵 (ID 비교)
-    const prev = prevBroadcastUserRef.current;
-    if (prev?.id === currentUser?.id && !!prev === !!currentUser) return;
-    prevBroadcastUserRef.current = currentUser;
+    if (prev?.id === currentUser?.id) return;
+
     window.electronAPI?.sessionBroadcastChange?.({ user: currentUser ?? null });
   }, [currentUser]);
 
