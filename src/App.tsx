@@ -37,6 +37,7 @@ import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { useNotificationStore } from '@/stores/useNotificationStore';
+import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
@@ -859,6 +860,44 @@ export default function App() {
         .catch((err) => console.warn('[설정] 브로드캐스트 재적용 실패', err));
     });
     return () => { cleanup?.(); };
+  }, []);
+
+  // ─── 휴가 등록 완료 브로드캐스트 구독 → Sonner 토스트 ─────
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationRegistered?.((payload) => {
+      const p = payload as { name?: string; type?: string } | undefined;
+      const who = p?.name ? `${p.name} ` : '';
+      const what = p?.type ? ` (${p.type})` : '';
+      sonnerToast.success(`${who}휴가 등록 완료${what}`);
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── 휴가 등록 실패 브로드캐스트 구독 ─────────────
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationFailed?.((payload) => {
+      const p = payload as { name?: string; error?: string } | undefined;
+      const who = p?.name ? `${p.name} ` : '';
+      const err = p?.error ?? '알 수 없는 오류';
+      sonnerToast.error(`${who}휴가 등록 실패: ${err}`, { duration: 10000 });
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── pending 휴가: hydrate + 30초 타임아웃 (메인 창 전용) ────
+  useEffect(() => {
+    useVacationPendingStore.getState().hydrate();
+    const timer = setInterval(async () => {
+      try {
+        const stale = await useVacationPendingStore.getState().clearStale(30_000);
+        for (const p of stale) {
+          sonnerToast.error(`휴가 등록 타임아웃: ${p.name ?? '알 수 없음'} (30초 경과)`, { duration: 10000 });
+        }
+      } catch (err) {
+        console.warn('[vacation:pending] 타임아웃 검사 실패', err);
+      }
+    }, 15_000);
+    return () => clearInterval(timer);
   }, []);
 
   // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (5초 간격)

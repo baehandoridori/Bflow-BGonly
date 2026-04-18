@@ -162,6 +162,14 @@ export function installDevElectronAPI(): void {
     onPreferencesChanged: noop,
     sessionBroadcastChange: async () => ({ ok: true }),
     onSessionChanged: noop,
+
+    // ─── 휴가 pending 상태 + 브로드캐스트 (mock은 no-op) ───
+    vacationPendingLoad: async () => [],
+    vacationPendingSave: async () => ({ ok: true }),
+    vacationBroadcastRegistered: async () => ({ ok: true }),
+    vacationBroadcastFailed: async () => ({ ok: true }),
+    onVacationRegistered: noop,
+    onVacationFailed: noop,
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;

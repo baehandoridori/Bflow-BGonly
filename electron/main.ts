@@ -1119,6 +1119,42 @@ ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
   return { ok: true };
 });
 
+// ─── IPC 핸들러: 휴가 pending 상태 파일 I/O + 브로드캐스트 ─────
+
+const PENDING_VACATIONS_FILE = 'pendingVacations.json';
+
+ipcMain.handle('vacation:pending:load', () => {
+  try {
+    const file = path.join(app.getPath('userData'), PENDING_VACATIONS_FILE);
+    if (!fs.existsSync(file)) return [];
+    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch (err) {
+    console.warn('[vacation] pending 로드 실패:', err);
+    return [];
+  }
+});
+
+ipcMain.handle('vacation:pending:save', (_e, list: unknown) => {
+  try {
+    const file = path.join(app.getPath('userData'), PENDING_VACATIONS_FILE);
+    fs.writeFileSync(file, JSON.stringify(list ?? []), 'utf-8');
+    return { ok: true };
+  } catch (err) {
+    console.error('[vacation] pending 저장 실패:', err);
+    return { ok: false };
+  }
+});
+
+ipcMain.handle('vacation:broadcast-registered', (_e, payload: unknown) => {
+  broadcastToAllWindows('vacation:registered', payload);
+  return { ok: true };
+});
+
+ipcMain.handle('vacation:broadcast-failed', (_e, payload: unknown) => {
+  broadcastToAllWindows('vacation:failed', payload);
+  return { ok: true };
+});
+
 // ─── IPC 핸들러: 휴가 관리 (vacation-repo WebApi) ────────────
 
 ipcMain.handle('vacation:connect', async (_event, webAppUrl: string) => {

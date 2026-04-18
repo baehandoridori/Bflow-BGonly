@@ -5,6 +5,7 @@ import { cn } from '@/utils/cn';
 import { useAppStore } from '@/stores/useAppStore';
 import { submitVacation } from '@/services/vacationService';
 import { VACATION_TYPES, type VacationType } from '@/types/vacation';
+import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 
 interface VacationRegisterModalProps {
   open: boolean;
@@ -87,6 +88,19 @@ export function VacationRegisterModal({
     setToast({ message: '휴가 등록 요청 중...', type: 'info' });
     onClose();
 
+    // 낙관적 pending 이벤트 추가 (위젯/캘린더에 노란색으로 즉시 표시)
+    const pendingId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await useVacationPendingStore.getState().add({
+      name: userName,
+      type,
+      startDate,
+      endDate,
+      reason,
+      status: 'pending',
+      pendingId,
+      createdAt: Date.now(),
+    });
+
     try {
       const result = await submitVacation({
         name: userName,
@@ -97,7 +111,9 @@ export function VacationRegisterModal({
       });
 
       if (result.ok && result.success) {
-        setToast({ message: '휴가가 등록되었습니다', type: 'success' });
+        // pending 제거 → 모든 창에 완료 브로드캐스트
+        await useVacationPendingStore.getState().remove(pendingId);
+        await window.electronAPI?.vacationBroadcastRegistered?.({ name: userName, type });
         invalidateVacationCache();
         // GAS 파이프라인 완전 완료 후 데이터 갱신 (8초 후)
         setTimeout(() => {
@@ -106,11 +122,15 @@ export function VacationRegisterModal({
         }, 8000);
       } else {
         // D3: 등록 실패 상세 알림 — critical 토스트로 강조
-        setToast({ message: '휴가 등록 실패: ' + (result.error || result.state || '알 수 없는 오류'), type: 'critical' });
+        const errorMsg = result.error || result.state || '알 수 없는 오류';
+        await useVacationPendingStore.getState().remove(pendingId);
+        await window.electronAPI?.vacationBroadcastFailed?.({ name: userName, error: errorMsg });
         onSubmitEnd?.();
       }
     } catch (err) {
-      setToast({ message: '휴가 등록 실패: ' + (err instanceof Error ? err.message : String(err)), type: 'critical' });
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await useVacationPendingStore.getState().remove(pendingId);
+      await window.electronAPI?.vacationBroadcastFailed?.({ name: userName, error: errorMsg });
       onSubmitEnd?.();
     }
   };

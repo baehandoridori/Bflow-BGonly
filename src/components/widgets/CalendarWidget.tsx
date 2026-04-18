@@ -8,7 +8,11 @@ import * as gcalService from '@/services/googleCalendarService';
 import { fetchAllVacationEvents } from '@/services/vacationService';
 import type { CalendarEvent, CalendarFilter } from '@/types/calendar';
 import { VACATION_COLOR } from '@/types/vacation';
+import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Widget } from './Widget';
+
+// pending 휴가용 노란색 (amber-400)
+const PENDING_VACATION_COLOR = '#FBBF24';
 
 const WEEKDAYS_SHORT = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -76,6 +80,9 @@ export function CalendarWidget() {
   const vacationConnected = useAppStore((s) => s.vacationConnected);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [vacationEvts, setVacationEvts] = useState<CalendarEvent[]>([]);
+  const pendingVacations = useVacationPendingStore((s) => s.pending);
+  const pendingHydrated = useVacationPendingStore((s) => s.hydrated);
+  const hydratePending = useVacationPendingStore((s) => s.hydrate);
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [viewMode, setViewMode] = useState<WidgetViewMode>('month');
@@ -139,8 +146,31 @@ export function CalendarWidget() {
       .catch(() => setVacationEvts([]));
   }, [vacationConnected]);
 
-  // 통합 이벤트
-  const allEvents = useMemo(() => [...events, ...vacationEvts], [events, vacationEvts]);
+  // pending 휴가를 CalendarEvent 형태로 변환
+  const pendingEvts = useMemo<CalendarEvent[]>(() => {
+    return pendingVacations.map((p) => ({
+      id: `wvac-pending-${p.pendingId}`,
+      title: `${p.name} ${p.type} (등록 중)`,
+      memo: '',
+      color: PENDING_VACATION_COLOR,
+      type: 'vacation' as const,
+      startDate: p.startDate,
+      endDate: p.endDate,
+      createdBy: p.name,
+      createdAt: new Date(p.createdAt).toISOString(),
+      vacationType: p.type,
+      vacationUserName: p.name,
+      isReadOnly: true,
+    }));
+  }, [pendingVacations]);
+
+  // pending 스토어 하이드레이트
+  useEffect(() => {
+    if (!pendingHydrated) { hydratePending(); }
+  }, [pendingHydrated, hydratePending]);
+
+  // 통합 이벤트 (pending 포함)
+  const allEvents = useMemo(() => [...events, ...vacationEvts, ...pendingEvts], [events, vacationEvts, pendingEvts]);
 
   // Wheel scroll navigation for all view modes
   const handleWheel = useCallback((e: WheelEvent) => {

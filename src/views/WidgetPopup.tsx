@@ -29,6 +29,8 @@ import { connectGas, loadGasConfig } from '@/services/gasConfigService';
 import { invalidatePartCache } from '@/services/commentService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
+import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
+import { Toaster, toast as sonnerToast } from 'sonner';
 import type { Episode, AppUser } from '@/types';
 import { getPreset, getLightColors, applyTheme } from '@/themes';
 import { DEFAULT_GAS_IMAGE_URL } from '@/config';
@@ -151,6 +153,33 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       loadPreferences()
         .then((prefs) => { if (prefs) applyPreferencesToDOM(prefs); })
         .catch((err) => console.warn('[설정] 브로드캐스트 재적용 실패', err));
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── 휴가 pending hydrate (팝업에서도 필요) — 30초 타임아웃은 메인 창 전용 ───
+  useEffect(() => {
+    useVacationPendingStore.getState().hydrate();
+  }, []);
+
+  // ─── 휴가 등록 완료 브로드캐스트 구독 → Sonner 토스트 ─────
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationRegistered?.((payload) => {
+      const p = payload as { name?: string; type?: string } | undefined;
+      const who = p?.name ? `${p.name} ` : '';
+      const what = p?.type ? ` (${p.type})` : '';
+      sonnerToast.success(`${who}휴가 등록 완료${what}`);
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── 휴가 등록 실패 브로드캐스트 구독 ─────────────
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationFailed?.((payload) => {
+      const p = payload as { name?: string; error?: string } | undefined;
+      const who = p?.name ? `${p.name} ` : '';
+      const err = p?.error ?? '알 수 없는 오류';
+      sonnerToast.error(`${who}휴가 등록 실패: ${err}`, { duration: 10000 });
     });
     return () => { cleanup?.(); };
   }, []);
@@ -733,6 +762,19 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         </WidgetIdContext.Provider>
         </IsPopupContext.Provider>
       </div>
+
+      {/* Sonner 토스트 (휴가 등록 완료/실패 브로드캐스트 표시용) */}
+      <Toaster
+        theme="dark"
+        position="bottom-right"
+        duration={4000}
+        toastOptions={{
+          className: 'bflow-toast',
+          style: { fontSize: '12px' },
+        }}
+        visibleToasts={3}
+        closeButton
+      />
     </div>
   );
 }

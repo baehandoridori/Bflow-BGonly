@@ -304,4 +304,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('session:changed', listener);
     return () => ipcRenderer.removeListener('session:changed', listener);
   },
+
+  // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────
+  vacationPendingLoad: () =>
+    ipcRenderer.invoke('vacation:pending:load'),
+  vacationPendingSave: (list: unknown) =>
+    ipcRenderer.invoke('vacation:pending:save', list),
+  vacationBroadcastRegistered: (payload?: unknown) =>
+    ipcRenderer.invoke('vacation:broadcast-registered', payload),
+  vacationBroadcastFailed: (payload?: unknown) =>
+    ipcRenderer.invoke('vacation:broadcast-failed', payload),
+
+  onVacationRegistered: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('vacation:registered', listener);
+    return () => ipcRenderer.removeListener('vacation:registered', listener);
+  },
+  onVacationFailed: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('vacation:failed', listener);
+    return () => ipcRenderer.removeListener('vacation:failed', listener);
+  },
 });

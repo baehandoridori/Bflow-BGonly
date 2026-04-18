@@ -468,6 +468,14 @@ export interface ElectronAPI {
   sessionBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
   onSessionChanged: (cb: (payload: unknown) => void) => () => void;
 
+  // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────
+  vacationPendingLoad: () => Promise<unknown>;
+  vacationPendingSave: (list: unknown) => Promise<{ ok: boolean }>;
+  vacationBroadcastRegistered: (payload?: unknown) => Promise<{ ok: boolean }>;
+  vacationBroadcastFailed: (payload?: unknown) => Promise<{ ok: boolean }>;
+  onVacationRegistered: (cb: (payload: unknown) => void) => () => void;
+  onVacationFailed: (cb: (payload: unknown) => void) => () => void;
+
   // ─── Google Calendar ──────────────────────────────
   gcalIsAuthenticated: () => Promise<boolean>;
   gcalStartAuth: () => Promise<void>;
