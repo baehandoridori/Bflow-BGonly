@@ -94,8 +94,10 @@ export interface UserPreferences {
   // Phase 8-3: 플렉서스 애니메이션
   plexus?: {
     loginEnabled?: boolean;
+    loginGradientEnabled?: boolean;
     loginParticleCount?: number;
     dashboardEnabled?: boolean;
+    dashboardGradientEnabled?: boolean;
     dashboardParticleCount?: number;
     speed?: number;
     mouseRadius?: number;

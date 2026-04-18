@@ -7,8 +7,10 @@ import { cn } from '@/utils/cn';
 
 const DEFAULTS = {
   loginEnabled: true,
+  loginGradientEnabled: true,
   loginParticleCount: 666,
   dashboardEnabled: true,
+  dashboardGradientEnabled: true,
   dashboardParticleCount: 120,
   speed: 1.0,
   mouseRadius: 250,
@@ -348,6 +350,28 @@ export function EffectsSection() {
           </div>
         </div>
 
+        <div className="flex items-center justify-between gap-4 mb-1 mt-2">
+          <div>
+            <p className="text-xs font-medium text-text-primary/80">그라데이션 배경</p>
+            <p className="text-[11px] text-text-secondary/60 mt-0.5">파티클과 독립적인 부드러운 조명</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {(plexusSettings.loginGradientEnabled !== false) !== DEFAULTS.loginGradientEnabled && (
+              <button
+                onClick={() => update({ loginGradientEnabled: DEFAULTS.loginGradientEnabled })}
+                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
+                title={`기본값 (${DEFAULTS.loginGradientEnabled ? 'ON' : 'OFF'})`}
+              >
+                <RotateCcw size={11} />
+              </button>
+            )}
+            <Toggle
+              checked={plexusSettings.loginGradientEnabled !== false}
+              onChange={(v) => update({ loginGradientEnabled: v })}
+            />
+          </div>
+        </div>
+
         <MiniPlexusPreview
           particleCount={plexusSettings.loginParticleCount}
           enabled={plexusSettings.loginEnabled}
@@ -386,6 +410,28 @@ export function EffectsSection() {
               </button>
             )}
             <Toggle checked={plexusSettings.dashboardEnabled} onChange={(v) => update({ dashboardEnabled: v })} />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-4 mb-1 mt-2">
+          <div>
+            <p className="text-xs font-medium text-text-primary/80">그라데이션 배경</p>
+            <p className="text-[11px] text-text-secondary/60 mt-0.5">파티클과 독립적인 부드러운 조명</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {(plexusSettings.dashboardGradientEnabled !== false) !== DEFAULTS.dashboardGradientEnabled && (
+              <button
+                onClick={() => update({ dashboardGradientEnabled: DEFAULTS.dashboardGradientEnabled })}
+                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
+                title={`기본값 (${DEFAULTS.dashboardGradientEnabled ? 'ON' : 'OFF'})`}
+              >
+                <RotateCcw size={11} />
+              </button>
+            )}
+            <Toggle
+              checked={plexusSettings.dashboardGradientEnabled !== false}
+              onChange={(v) => update({ dashboardGradientEnabled: v })}
+            />
           </div>
         </div>
 

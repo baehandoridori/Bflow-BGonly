@@ -285,8 +285,10 @@ export default function App() {
           const p = savedPrefs.plexus;
           useAppStore.getState().setPlexusSettings({
             loginEnabled: p.loginEnabled ?? true,
+            loginGradientEnabled: p.loginGradientEnabled ?? true,
             loginParticleCount: p.loginParticleCount ?? 666,
             dashboardEnabled: p.dashboardEnabled ?? true,
+            dashboardGradientEnabled: p.dashboardGradientEnabled ?? true,
             dashboardParticleCount: p.dashboardParticleCount ?? 120,
             speed: p.speed ?? 1.0,
             mouseRadius: p.mouseRadius ?? 250,

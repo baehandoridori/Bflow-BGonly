@@ -25,6 +25,7 @@ import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptCompa
 import { EpSinglePartWidget, parsePartWidgetId } from '@/components/widgets/episode/EpSinglePartWidget';
 import { EpFullDeptProgressWidget } from '@/components/widgets/episode/EpFullDeptProgressWidget';
 import { ChartTypeContextMenu, getWidgetSupportedCharts, useChartContextMenu } from '@/components/widgets/ChartTypeContextMenu';
+import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
@@ -123,31 +124,6 @@ function DashboardPlexus() {
 
       const { w, h } = sizeRef.current;
       ctx.clearRect(0, 0, w, h);
-
-      // ── 배경 그라데이션 조명 (위젯 글래스모피즘을 위한 충분한 밝기) ──
-      const cols = getColors();
-      const [ar, ag, ab] = cols[0];
-      const [sr, sg, sb] = cols[1] ?? cols[0];
-      // 좌상단 글로우 (강)
-      const grd1 = ctx.createRadialGradient(w * 0.12, h * 0.15, 0, w * 0.12, h * 0.15, w * 0.55);
-      grd1.addColorStop(0, `rgba(${ar},${ag},${ab},0.18)`);
-      grd1.addColorStop(0.5, `rgba(${ar},${ag},${ab},0.06)`);
-      grd1.addColorStop(1, `rgba(${ar},${ag},${ab},0)`);
-      ctx.fillStyle = grd1;
-      ctx.fillRect(0, 0, w, h);
-      // 우하단 글로우 (강)
-      const grd2 = ctx.createRadialGradient(w * 0.88, h * 0.85, 0, w * 0.88, h * 0.85, w * 0.55);
-      grd2.addColorStop(0, `rgba(${sr},${sg},${sb},0.15)`);
-      grd2.addColorStop(0.5, `rgba(${sr},${sg},${sb},0.05)`);
-      grd2.addColorStop(1, `rgba(${sr},${sg},${sb},0)`);
-      ctx.fillStyle = grd2;
-      ctx.fillRect(0, 0, w, h);
-      // 중앙 소프트 글로우 (위젯 뒤로 비치는 조명)
-      const grd3 = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.4);
-      grd3.addColorStop(0, `rgba(${(ar + sr) >> 1},${(ag + sg) >> 1},${(ab + sb) >> 1},0.08)`);
-      grd3.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grd3;
-      ctx.fillRect(0, 0, w, h);
 
       const mx = mouseRef.current.x;
       const my = mouseRef.current.y;
@@ -625,6 +601,7 @@ export function Dashboard() {
   const isEpMode = episodeDashboardEp !== null;
   const episodes = useDataStore((s) => s.episodes);
   const currentUser = useAuthStore((s) => s.currentUser);
+  const plexusSettings = useAppStore((s) => s.plexusSettings);
 
   // 현재 에피소드의 파트 ID 목록 (위젯 피커 2단계용)
   const epPartIds = useMemo(() => {
@@ -848,6 +825,8 @@ export function Dashboard() {
 
   return (
     <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
+      {/* 그라데이션 배경 (파티클과 독립 토글) */}
+      <GradientBackdrop enabled={plexusSettings.dashboardGradientEnabled !== false} />
       {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) */}
       <DashboardPlexus />
 

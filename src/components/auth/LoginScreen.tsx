@@ -4,6 +4,7 @@ import { LogIn, ChevronRight } from 'lucide-react';
 import { login } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { getPreset } from '@/themes';
 import { cn } from '@/utils/cn';
 
@@ -198,28 +199,8 @@ function PlexusBackground() {
       ctx.fillStyle = isLight ? '#ECEDF2' : '#12141C';
       ctx.fillRect(0, 0, w, h);
 
-      const tc = getPlexusColors()[0];
-      const ts = getPlexusColors()[2] ?? getPlexusColors()[1];
-
-      // 다크모드에서만 중앙 그라데이션 + 마우스 글로우 + 노이즈 오버레이 적용
+      // 다크모드에서만 노이즈 오버레이 적용 (중앙 그라데이션/마우스 글로우는 GradientBackdrop으로 분리됨)
       if (!isLight) {
-        const cg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.7);
-        cg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.06)`);
-        cg.addColorStop(0.3, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
-        cg.addColorStop(0.6, `rgba(${ts[0]}, ${ts[1]}, ${ts[2]}, 0.015)`);
-        cg.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = cg;
-        ctx.fillRect(0, 0, w, h);
-
-        if (mouseRef.current.x > 0 && mouseRef.current.y > 0) {
-          const mg = ctx.createRadialGradient(mouseRef.current.x, mouseRef.current.y, 0, mouseRef.current.x, mouseRef.current.y, 250);
-          mg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.08)`);
-          mg.addColorStop(0.4, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
-          mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
-          ctx.fillStyle = mg;
-          ctx.fillRect(0, 0, w, h);
-        }
-
         if (noiseRef.current) ctx.drawImage(noiseRef.current, 0, 0);
       }
 
@@ -745,6 +726,7 @@ type Phase = 'landing' | 'ready' | 'transition' | 'login' | 'done';
 export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
   const { setCurrentUser } = useAuthStore();
   const [phase, setPhase] = useState<Phase>('landing');
+  const plexusSettings = useAppStore((s) => s.plexusSettings);
 
   // 텍스트 애니메이션 완료 콜백
   const handleAnimationDone = useCallback(() => {
@@ -797,6 +779,7 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
       tabIndex={-1}
     >
+      <GradientBackdrop enabled={plexusSettings.loginGradientEnabled !== false} />
       <PlexusBackground />
 
       <AnimatePresence mode="wait">

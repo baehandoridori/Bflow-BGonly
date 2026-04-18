@@ -109,8 +109,10 @@ interface AppState {
   // 플렉서스 설정
   plexusSettings: {
     loginEnabled: boolean;
+    loginGradientEnabled: boolean;
     loginParticleCount: number;
     dashboardEnabled: boolean;
+    dashboardGradientEnabled: boolean;
     dashboardParticleCount: number;
     speed: number;           // 0.5-2.0, default 1.0
     mouseRadius: number;     // 100-400, default 250
@@ -232,8 +234,10 @@ export const useAppStore = create<AppState>((set) => ({
 
   plexusSettings: {
     loginEnabled: true,
+    loginGradientEnabled: true,
     loginParticleCount: 666,
     dashboardEnabled: true,
+    dashboardGradientEnabled: true,
     dashboardParticleCount: 120,
     speed: 1.0,
     mouseRadius: 250,
