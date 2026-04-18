@@ -51,9 +51,8 @@ function useLassoSelection(
 
       const onMouseMove = (me: MouseEvent) => {
         if (!startRef.current || !startScrollRef.current) return;
-        const currScroll = findScrollParent(target) ?? container;
-        const scrollDx = currScroll.scrollLeft - startScrollRef.current.left;
-        const scrollDy = currScroll.scrollTop - startScrollRef.current.top;
+        const scrollDx = scrollEl.scrollLeft - startScrollRef.current.left;
+        const scrollDy = scrollEl.scrollTop - startScrollRef.current.top;
         const dx = (me.clientX - startRef.current.x) - scrollDx;
         const dy = (me.clientY - startRef.current.y) - scrollDy;
 
