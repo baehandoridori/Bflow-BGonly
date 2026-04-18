@@ -134,7 +134,7 @@ function rebuildTrayMenu(): void {
     { type: 'separator' },
     { label: `상태: ${status}`, enabled: false },
     { type: 'separator' },
-    { label: '종료', click: () => { isQuitting = true; app.quit(); } },
+    { label: '종료', click: () => { app.quit(); } },
   ]);
   tray.setContextMenu(menu);
   tray.setToolTip(`B flow • ${status}`);
@@ -476,6 +476,7 @@ function createWindow(): void {
 
   // 메인 로드 완료 → 스플래시 닫고 메인 창 show
   mainWindow.webContents.once('did-finish-load', () => {
+    if (isQuitting) return; // 타임아웃으로 이미 종료 중
     mainLoadedOk = true;
     if (loadTimeoutId) {
       clearTimeout(loadTimeoutId); // Task 2.4에서 설정한 타임아웃 해제
@@ -510,28 +511,8 @@ function getUsersFilePath(): string {
   return path.join(getAppRoot(), 'users.dat');
 }
 
-function getPreferencesFilePath(): string {
-  return path.join(getDataPath(), 'preferences.json');
-}
-
 function getAppStateFilePath(): string {
   return path.join(getDataPath(), 'app-state.json');
-}
-
-async function readPreferences(): Promise<Record<string, unknown>> {
-  try {
-    const raw = await fs.promises.readFile(getPreferencesFilePath(), 'utf-8');
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-async function writePreferences(patch: Record<string, unknown>): Promise<void> {
-  const prev = await readPreferences();
-  const next = { ...prev, ...patch };
-  ensureDir(path.dirname(getPreferencesFilePath()));
-  await fs.promises.writeFile(getPreferencesFilePath(), JSON.stringify(next, null, 2), 'utf-8');
 }
 
 async function readAppState(): Promise<Record<string, unknown>> {

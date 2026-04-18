@@ -192,7 +192,7 @@ export function deriveThemeFromAccent(
   };
 }
 
-const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+export const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
 /**
  * 저장된 커스텀 테마 필드들을 검증/마이그레이션.

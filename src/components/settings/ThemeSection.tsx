@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Palette, Check, Sun, Moon, Paintbrush } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
-import { THEME_PRESETS, rgbToHex, getPreset, getLightColors, deriveThemeFromAccent } from '@/themes';
+import { THEME_PRESETS, rgbToHex, getPreset, getLightColors, deriveThemeFromAccent, HEX_RE } from '@/themes';
 import { cn } from '@/utils/cn';
 import { SettingsSection } from './SettingsSection';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
@@ -39,13 +39,10 @@ export function ThemeSection() {
     setEditingCustom(false);
   };
 
-  // 커스텀 편집 중 실시간 배경 3색 프리뷰
+  // 커스텀 편집 중 실시간 배경 3색 프리뷰 (잘못된 hex 입력 시 null → 프리뷰 숨김)
   const previewColors = useMemo(() => {
-    try {
-      return deriveThemeFromAccent(customAccent, customSub, colorMode);
-    } catch {
-      return null;
-    }
+    if (!HEX_RE.test(customAccent) || !HEX_RE.test(customSub)) return null;
+    return deriveThemeFromAccent(customAccent, customSub, colorMode);
   }, [customAccent, customSub, colorMode]);
 
   return (

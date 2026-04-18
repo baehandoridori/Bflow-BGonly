@@ -325,6 +325,11 @@ export default function App() {
           const savedMode = savedTheme.colorMode ?? 'dark';
           themeInitRef.current = true;
 
+          // 프리셋/커스텀 모든 경로에서 hex 복원 (preferences.json 기준)
+          // → 이후 theme-save useEffect가 실행돼도 null로 덮어쓰지 않도록 보장
+          useAppStore.getState().setCustomAccentHex(savedTheme.customAccentHex ?? null);
+          useAppStore.getState().setCustomSubHex(savedTheme.customSubHex ?? null);
+
           // 커스텀 테마 마이그레이션
           let customHex: { accent: string; sub: string } | null = null;
           if (savedTheme.themeId === 'custom') {
@@ -351,8 +356,13 @@ export default function App() {
             setThemeId('custom');
             setColorMode(savedMode);
             setCustomThemeColors(colors);
-            useAppStore.getState().setCustomAccentHex(customHex.accent);
-            useAppStore.getState().setCustomSubHex(customHex.sub);
+            // sanitize로 보강된 경우 스토어도 보강된 hex로 갱신 (위 기본 복원 덮어쓰기)
+            if (customHex.accent !== (savedTheme.customAccentHex ?? null)) {
+              useAppStore.getState().setCustomAccentHex(customHex.accent);
+            }
+            if (customHex.sub !== (savedTheme.customSubHex ?? null)) {
+              useAppStore.getState().setCustomSubHex(customHex.sub);
+            }
             // 구포맷만 있거나 sanitize로 보강된 경우 새 포맷으로 재저장
             if (savedTheme.customAccentHex !== customHex.accent || savedTheme.customSubHex !== customHex.sub) {
               saveTheme({
