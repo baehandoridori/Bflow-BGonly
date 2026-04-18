@@ -179,22 +179,31 @@ export async function logout(): Promise<void> {
 }
 
 export async function loadSession(): Promise<{ session: AuthSession | null; user: AppUser | null }> {
+  let session: AuthSession | null = null;
   try {
-    const session = (await window.electronAPI.readSettings(AUTH_FILE)) as AuthSession | null;
-    if (!session?.userId) return { session: null, user: null };
-
-    // 사용자 파일에서 해당 유저가 아직 존재하는지 확인
-    const users = await loadUsers();
-    const user = users.find((u) => u.id === session.userId) ?? null;
-    if (!user) {
-      // 삭제된 사용자 → 세션 클리어
-      await logout();
-      return { session: null, user: null };
-    }
-    return { session, user };
-  } catch {
+    session = (await window.electronAPI.readSettings(AUTH_FILE)) as AuthSession | null;
+  } catch (err) {
+    console.warn('[auth] auth.json 읽기 실패:', err);
     return { session: null, user: null };
   }
+  if (!session) {
+    console.info('[auth] auth.json 미존재 — 로그인 필요');
+    return { session: null, user: null };
+  }
+  if (!session.userId) {
+    console.warn('[auth] session.userId 누락 — 세션 무효', session);
+    return { session: null, user: null };
+  }
+  const users = await loadUsers();
+  const user = users.find((u) => u.id === session!.userId) ?? null;
+  if (!user) {
+    console.warn('[auth] 세션 userId에 매칭되는 사용자 없음', { sessionUserId: session.userId, userCount: users.length });
+    // 삭제된 사용자 → 세션 클리어
+    await logout();
+    return { session: null, user: null };
+  }
+  console.info('[auth] 세션 복원 성공', { userId: user.id, name: user.name });
+  return { session, user };
 }
 
 export function isInitialPassword(user: AppUser): boolean {

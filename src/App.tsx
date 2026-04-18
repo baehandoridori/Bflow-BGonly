@@ -419,10 +419,14 @@ export default function App() {
 
         // 세션 복원 (Phase 8-5: rememberMe 설정 확인)
         const rememberMe = savedPrefs?.rememberMe !== false; // 기본 true (하위 호환)
+        console.info('[auth] rememberMe =', rememberMe);
         if (rememberMe) {
           const { user } = await loadSession();
           if (user) {
             setCurrentUser(user);
+            console.info('[auth] currentUser 설정 완료');
+          } else {
+            console.info('[auth] 세션 없음 — 로그인 화면 표시');
           }
         }
 
