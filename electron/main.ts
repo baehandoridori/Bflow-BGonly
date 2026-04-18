@@ -1,4 +1,5 @@
-import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog } from 'electron';
+import type { MenuItemConstructorOptions } from 'electron';
 import * as gcal from './googleCalendar';
 import { pathToFileURL } from 'url';
 import path from 'path';
@@ -34,6 +35,11 @@ import {
 // 앱 이름 설정 — AppData 경로에 영향
 app.name = 'Bflow-BGonly';
 
+// Chromium 성능 스위치 (app.ready 전에 호출)
+app.commandLine.appendSwitch('js-flags', '--nolazy');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+
 // ─── 이미지 커스텀 프로토콜 등록 (app.ready 전에 호출 필수) ──
 protocol.registerSchemesAsPrivileged([
   {
@@ -51,6 +57,211 @@ const widgetWindows = new Map<string, BrowserWindow>();
 const widgetOriginalBounds = new Map<string, Electron.Rectangle>();
 const animatingWidgets = new Set<string>();
 let isQuitting = false;
+let tray: Tray | null = null;
+let trayFailed = false;
+let lastSupabaseStatus = '연결 중...';
+// Chunk 2(스플래시 2단계 부팅)에서 사용 예정
+let splashWin: BrowserWindow | null = null;
+// Chunk 2(스플래시 2단계 부팅)에서 사용 예정
+let mainLoadedOk = false;
+let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let showTrayHintInFlight = false;
+
+/** 아이콘 경로 해석: dev(electron/)와 prod(dist-electron/) + app.getAppPath() 순회 */
+function resolveTrayIconPath(): string {
+  const candidates = [
+    path.join(__dirname, '../public/splash/opening_image_cropped.png'),
+    path.join(app.getAppPath(), 'public/splash/opening_image_cropped.png'),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch { /* ignore */ }
+  }
+  return '';
+}
+
+/** Supabase 원시 상태 → 사용자에게 보여줄 한글 라벨 */
+function humanizeStatus(raw: string): string {
+  switch (raw) {
+    case 'SUBSCRIBED': return '실시간 연결됨';
+    case 'CHANNEL_ERROR': return '재연결 중';
+    case 'TIMED_OUT': return '연결 타임아웃';
+    case 'CLOSED': return '연결 끊김';
+    default: return raw || '연결 중...';
+  }
+}
+
+/** 메인 창을 보이고 포커스. 숨김 상태면 복원.
+ *  렌더러 크래시 등으로 창이 파괴된 상태에서도 createWindow()로 복구. */
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    console.warn('[창] 메인 창이 없음 — 재생성');
+    mainLoadedOk = false; // 새 로드 사이클 시작
+    createWindow();        // did-finish-load 핸들러에서 자동으로 show + focus
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/** 트레이 위젯 서브메뉴 토글 핸들러 */
+function toggleWidget(widgetId: string, title: string): void {
+  const existing = widgetWindows.get(widgetId);
+  if (existing && !existing.isDestroyed()) {
+    existing.close(); // closed 이벤트가 widgetWindows에서 제거
+  } else {
+    openWidgetPopup(widgetId, title);
+  }
+  // 메뉴 체크박스 상태 갱신
+  rebuildTrayMenu();
+}
+
+function rebuildTrayMenu(): void {
+  if (!tray || tray.isDestroyed()) return;
+  const widgetSubmenu: MenuItemConstructorOptions[] = Object.entries(WIDGET_TITLE_MAP).map(
+    ([id, title]) => ({
+      label: title,
+      type: 'checkbox',
+      checked: widgetWindows.has(id),
+      click: () => toggleWidget(id, title),
+    }),
+  );
+  const status = lastSupabaseStatus;
+  const menu = Menu.buildFromTemplate([
+    { label: '열기', click: showMainWindow },
+    { type: 'separator' },
+    { label: '위젯', submenu: widgetSubmenu },
+    { type: 'separator' },
+    { label: `상태: ${status}`, enabled: false },
+    { type: 'separator' },
+    { label: '종료', click: () => { app.quit(); } },
+  ]);
+  tray.setContextMenu(menu);
+  tray.setToolTip(`B flow • ${status}`);
+}
+
+async function showTrayHintOnce(): Promise<void> {
+  if (showTrayHintInFlight) return;
+  showTrayHintInFlight = true;
+  try {
+    const state = await readAppState();
+    if (state.trayFirstMinimizeSeen) return;
+
+    let shown = false;
+    if (Notification.isSupported()) {
+      try {
+        new Notification({
+          title: 'B flow',
+          body: '트레이로 숨겨졌습니다. 트레이 아이콘 우클릭 → 종료로 완전히 닫을 수 있습니다.',
+        }).show();
+        shown = true;
+      } catch { /* ignore */ }
+    }
+
+    if (!shown && tray && !tray.isDestroyed() && process.platform === 'win32') {
+      try {
+        tray.displayBalloon({
+          title: 'B flow',
+          content: '트레이에 숨겨졌습니다. 트레이 메뉴 종료로 완전히 닫을 수 있습니다.',
+        });
+        shown = true;
+      } catch (err) {
+        console.warn('[트레이] displayBalloon 실패 — 조용히 폴백 없이 진행:', err);
+      }
+    }
+
+    if (shown) {
+      await writeAppState({ trayFirstMinimizeSeen: true });
+    }
+  } finally {
+    showTrayHintInFlight = false;
+  }
+}
+
+function resolveSplashHtmlPath(): string {
+  const candidates = [
+    path.join(__dirname, '../public/splash/splash.html'),
+    path.join(app.getAppPath(), 'public/splash/splash.html'),
+  ];
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) return p; } catch {/* ignore */}
+  }
+  return '';
+}
+
+function createSplashWindow(): void {
+  const htmlPath = resolveSplashHtmlPath();
+  if (!htmlPath) {
+    console.warn('[스플래시] HTML 파일을 찾지 못함 — 스플래시 생략');
+    return;
+  }
+  splashWin = new BrowserWindow({
+    width: 300,
+    height: 300,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    closable: false, // 사용자가 닫지 못하게 (좀비 방지)
+    show: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  splashWin.loadFile(htmlPath).catch((err) => {
+    console.error('[스플래시] loadFile 실패:', err);
+  });
+}
+
+function closeSplash(): void {
+  if (splashWin && !splashWin.isDestroyed()) {
+    // closable:false 창은 close() 거부 → destroy() 사용
+    // destroy()가 Windows 특정 엣지 케이스에서 throw 가능 → try/catch로 방어
+    try {
+      splashWin.destroy();
+    } catch (err) {
+      console.error('[스플래시] destroy 실패 — 무시하고 진행:', err);
+    }
+  }
+  splashWin = null;
+}
+
+function createTray(): void {
+  try {
+    const iconPath = resolveTrayIconPath();
+    // 아이콘 파일을 실제로 찾지 못했으면 → 보이지 않는 트레이로 이어져
+    // "앱이 사라진 것처럼" 보일 위험. 트레이 실패로 간주해 창 X = 실제 종료로 폴백.
+    if (!iconPath) {
+      console.error('[트레이] 아이콘 파일을 찾지 못함 — 트레이 없이 실행 (창 X = 실제 종료)');
+      tray = null;
+      trayFailed = true;
+      return;
+    }
+    let image = nativeImage.createFromPath(iconPath);
+    if (image.isEmpty()) {
+      // 파일은 존재하지만 디코딩 실패 → 역시 보이지 않는 트레이 위험
+      console.error('[트레이] 아이콘 디코딩 실패 — 트레이 없이 실행 (창 X = 실제 종료):', iconPath);
+      tray = null;
+      trayFailed = true;
+      return;
+    }
+    image = image.resize({ width: 16, height: 16 });
+    tray = new Tray(image);
+    tray.setToolTip('B flow');
+    tray.on('click', showMainWindow);
+    tray.on('double-click', showMainWindow);
+    rebuildTrayMenu();
+  } catch (err) {
+    console.error('[트레이] 생성 실패 — 트레이 없이 실행 (창 X = 실제 종료):', err);
+    tray = null;
+    trayFailed = true;
+  }
+}
 
 // ─── 위젯 위치 영속화 (Phase 0-6) ─────────────────────────────
 const WIDGET_POS_FILE = 'widget-positions.json';
@@ -267,6 +478,7 @@ function createWindow(): void {
     minHeight: 600,
     title: 'B flow',
     backgroundColor: '#0F1117',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -281,6 +493,39 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
+  // 메인 로드 완료 → 스플래시 닫고 메인 창 show
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (isQuitting) return; // 타임아웃으로 이미 종료 중
+    mainLoadedOk = true;
+    if (loadTimeoutId) {
+      clearTimeout(loadTimeoutId); // Task 2.4에서 설정한 타임아웃 해제
+      loadTimeoutId = null;
+    }
+    closeSplash();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    // 재생성 경로 복구: 창 크래시 후 복구된 경우 보류 중인 딥링크 전달
+    // (최초 시작 시엔 app.whenReady의 .once 리스너와 중복이지만, pendingDeepLink를
+    //  null로 세팅하므로 멱등하게 동작)
+    if (pendingDeepLink) {
+      sendDeepLinkToRenderer(pendingDeepLink);
+      pendingDeepLink = null;
+    }
+    try { console.timeEnd('splash-to-main'); } catch {/* 이미 종료됨 */}
+  });
+
+  mainWindow.on('close', (e) => {
+    if (!isQuitting && !trayFailed) {
+      e.preventDefault();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+      showTrayHintOnce().catch(() => {/* ignore */});
+      return;
+    }
+    // isQuitting === true || trayFailed === true인 경우 기본 동작 허용
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -290,6 +535,26 @@ function createWindow(): void {
 
 function getUsersFilePath(): string {
   return path.join(getAppRoot(), 'users.dat');
+}
+
+function getAppStateFilePath(): string {
+  return path.join(getDataPath(), 'app-state.json');
+}
+
+async function readAppState(): Promise<Record<string, unknown>> {
+  try {
+    const raw = await fs.promises.readFile(getAppStateFilePath(), 'utf-8');
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeAppState(patch: Record<string, unknown>): Promise<void> {
+  const prev = await readAppState();
+  const next = { ...prev, ...patch };
+  ensureDir(path.dirname(getAppStateFilePath()));
+  await fs.promises.writeFile(getAppStateFilePath(), JSON.stringify(next, null, 2), 'utf-8');
 }
 
 ipcMain.handle('users:read', () => {
@@ -665,12 +930,14 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onStatusChange: (status) => {
+      lastSupabaseStatus = humanizeStatus(status);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('supabase:status', status);
       }
       for (const win of widgetWindows.values()) {
         if (!win.isDestroyed()) win.webContents.send('supabase:status', status);
       }
+      rebuildTrayMenu();
     },
   });
 
@@ -1139,6 +1406,7 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   });
 
   widgetWindows.set(widgetId, popupWin);
+  rebuildTrayMenu(); // 트레이 체크박스 갱신
 
   // 캐시에 title 저장 (자동 재오픈용)
   const existingCache = widgetPositionCache.get(widgetId);
@@ -1156,12 +1424,8 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   popupWin.on('closed', () => {
     widgetWindows.delete(widgetId);
     widgetOriginalBounds.delete(widgetId);
-    // 사용자가 명시적으로 닫으면 캐시 삭제 (자동 복원 안 함)
-    // 앱 종료 중이면 캐시 유지 (before-quit에서 이미 저장됨)
-    if (!isQuitting) {
-      widgetPositionCache.delete(widgetId);
-      saveWidgetPositionsDebounced();
-    }
+    rebuildTrayMenu(); // 트레이 체크박스 갱신
+    // 캐시는 항상 유지 → 다음 실행 시 자동 복원 (spec 결정사항)
     // 독 스택에서 제거 + 나머지 재배치
     const dockIdx = dockedWidgetIds.indexOf(widgetId);
     if (dockIdx >= 0) {
@@ -1486,7 +1750,10 @@ function sendDeepLinkToRenderer(url: string): void {
     mainWindow.show();
     mainWindow.focus();
   } else {
+    // 메인 창이 파괴된 상태 (렌더러 크래시 등) → pendingDeepLink로 저장하고
+    // showMainWindow()로 창 복구 트리거. 새 창의 did-finish-load 시점에 처리됨.
     pendingDeepLink = url;
+    showMainWindow();
   }
 }
 
@@ -1548,13 +1815,11 @@ if (!gotTheLock) {
     console.log('[DeepLink] second-instance argv:', argv);
     const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
     console.log('[DeepLink] 추출된 URL:', deepLinkUrl ?? '(없음)');
-    if (deepLinkUrl) sendDeepLinkToRenderer(deepLinkUrl);
-
-    // sendDeepLinkToRenderer가 이미 show/focus하지만, URL 없는 경우에도 창 활성화
-    if (mainWindow && !deepLinkUrl) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
+    if (deepLinkUrl) {
+      sendDeepLinkToRenderer(deepLinkUrl);
+    } else {
+      // URL 없는 경우에도 창 활성화 (showMainWindow가 필요 시 재생성까지 책임짐)
+      showMainWindow();
     }
   });
 
@@ -1617,7 +1882,30 @@ app.whenReady().then(() => {
     return new Response('Drive image not found', { status: 404 });
   });
 
+  console.time('splash-to-main'); // 측정 시작
+
+  createSplashWindow(); // 1. 가장 먼저 스플래시
+  createTray();        // 먼저 트레이 준비 (실패해도 앱은 계속)
   createWindow();
+
+  // 메인 로드 30초 타임아웃 (좀비 방지).
+  // Task 2.3의 did-finish-load 핸들러에서 clearTimeout + 해제 처리.
+  // 공유 드라이브 최초 로드/캐시 워밍 감안한 여유 타임아웃
+  const MAIN_LOAD_TIMEOUT_MS = 30_000;
+  loadTimeoutId = setTimeout(() => {
+    if (mainLoadedOk) {
+      loadTimeoutId = null;
+      return;
+    }
+    console.error('[메인 로드] 30초 타임아웃 — 에러 다이얼로그 후 종료');
+    closeSplash();
+    try {
+      dialog.showErrorBox('B flow', '앱 로드에 실패했습니다. 다시 실행해주세요.');
+    } catch {/* ignore */}
+    try { console.timeEnd('splash-to-main'); } catch {/* ignore */}
+    isQuitting = true;
+    app.quit();
+  }, MAIN_LOAD_TIMEOUT_MS);
 
   // Google Calendar 토큰 복원
   gcal.restoreTokens();
@@ -1626,12 +1914,17 @@ app.whenReady().then(() => {
   startSupabaseRealtime();
 
   // 저장된 위젯 자동 복원 (Phase 0-6) + 보류 딥링크 전달
+  // .once: 렌더러 재로드(Ctrl+Shift+R, 크래시 복구) 시 재실행 방지 — 사용자가 닫은 위젯 재등장/딥링크 재실행 차단
   if (mainWindow) {
-    mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.once('did-finish-load', () => {
       if (widgetPositionCache.size > 0) {
         for (const [widgetId, state] of widgetPositionCache) {
-          const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
-          openWidgetPopup(widgetId, title);
+          try {
+            const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
+            openWidgetPopup(widgetId, title);
+          } catch (err) {
+            console.error(`[위젯 자동복원] ${widgetId} 실패:`, err);
+          }
         }
       }
       // 앱 시작 시 보류된 딥링크 전달
@@ -1679,18 +1972,21 @@ app.on('before-quit', (e) => {
   // 위젯 위치 즉시 저장 (closed 이벤트보다 먼저 실행)
   saveWidgetPositionsSync();
 
+  if (tray && !tray.isDestroyed()) {
+    tray.destroy();
+    tray = null;
+  }
+
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
   const totalPending = sheetsPending + vacPending;
-  if (totalPending > 0 || watchCleanup) {
+  if (totalPending > 0) {
     e.preventDefault();
 
-    if (totalPending > 0) {
-      console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
-    }
+    console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
 
     // 메인 윈도우에 "저장 중" 알림
-    if (totalPending > 0 && mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:saving-before-quit', totalPending);
     }
 
@@ -1698,8 +1994,8 @@ app.on('before-quit', (e) => {
     const watchWithTimeout = Promise.race([watchCleanup, new Promise<void>((r) => setTimeout(r, 5000))]);
     Promise.all([
       watchWithTimeout,
-      totalPending > 0 ? waitForAllPendingOps(15000) : Promise.resolve(true),
-      totalPending > 0 ? waitForVacPendingOps(60000) : Promise.resolve(true),
+      waitForAllPendingOps(15000),
+      waitForVacPendingOps(60000),
     ]).then(([, sheetsDone, vacDone]) => {
       if (!sheetsDone || !vacDone) {
         console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
@@ -1707,11 +2003,21 @@ app.on('before-quit', (e) => {
       console.log('[종료] 저장 완료, 앱을 종료합니다');
       app.quit();
     });
+  } else {
+    // 대기 중 작업 없음: Watch 정리는 fire-and-forget (종료를 지연시키지 않음)
+    Promise.race([watchCleanup, new Promise<void>((r) => setTimeout(r, 2000))]).catch(() => {});
   }
 });
 
+process.on('exit', () => {
+  try { saveWidgetPositionsSync(); } catch {/* ignore */}
+});
+
 app.on('window-all-closed', () => {
-  if (!isQuitting) {
-    app.quit();
+  // 트레이가 살아있고 사용자가 종료 의사를 표시하지 않은 경우: 백그라운드 유지
+  if (!isQuitting && tray && !tray.isDestroyed()) {
+    return;
   }
+  // 트레이 실패 or isQuitting: 정상 종료 흐름
+  app.quit();
 });

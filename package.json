@@ -1,6 +1,6 @@
 {
   "name": "bflow",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -36,6 +36,7 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "public/splash/**",
       "node_modules/**/*",
       "package.json"
     ],

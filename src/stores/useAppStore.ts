@@ -96,9 +96,13 @@ interface AppState {
   // 테마
   themeId: string;
   customThemeColors: ThemeColors | null;
+  customAccentHex: string | null;
+  customSubHex: string | null;
   colorMode: 'dark' | 'light';
   setThemeId: (id: string) => void;
   setCustomThemeColors: (colors: ThemeColors | null) => void;
+  setCustomAccentHex: (hex: string | null) => void;
+  setCustomSubHex: (hex: string | null) => void;
   setColorMode: (mode: 'dark' | 'light') => void;
   toggleColorMode: () => void;
 
@@ -216,9 +220,13 @@ export const useAppStore = create<AppState>((set) => ({
 
   themeId: 'violet',
   customThemeColors: null,
+  customAccentHex: null,
+  customSubHex: null,
   colorMode: 'dark',
   setThemeId: (id) => set({ themeId: id }),
   setCustomThemeColors: (colors) => set({ customThemeColors: colors }),
+  setCustomAccentHex: (hex) => set({ customAccentHex: hex }),
+  setCustomSubHex: (hex) => set({ customSubHex: hex }),
   setColorMode: (mode) => set({ colorMode: mode }),
   toggleColorMode: () => set((s) => ({ colorMode: s.colorMode === 'dark' ? 'light' : 'dark' })),
 

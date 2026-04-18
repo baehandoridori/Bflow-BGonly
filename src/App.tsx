@@ -1,22 +1,23 @@
-import { useEffect, useCallback, useState, useRef } from 'react';
+import { lazy, Suspense, useEffect, useCallback, useState, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { Dashboard } from '@/views/Dashboard';
-import { ScenesView } from '@/views/ScenesView';
-import { EpisodeView } from '@/views/EpisodeView';
-import { AssigneeView } from '@/views/AssigneeView';
-import { TeamView } from '@/views/TeamView';
-import { CalendarView } from '@/views/CalendarView';
-import { ScheduleView } from '@/views/ScheduleView';
-import { VacationView } from '@/views/VacationView';
-import CompositingView from '@/views/CompositingView';
-import { SettingsView } from '@/views/SettingsView';
+// 뷰 lazy 로딩 — 초기 번들에서 제외
+const Dashboard = lazy(() => import('@/views/Dashboard').then(m => ({ default: m.Dashboard })));
+const ScenesView = lazy(() => import('@/views/ScenesView').then(m => ({ default: m.ScenesView })));
+const EpisodeView = lazy(() => import('@/views/EpisodeView').then(m => ({ default: m.EpisodeView })));
+const AssigneeView = lazy(() => import('@/views/AssigneeView').then(m => ({ default: m.AssigneeView })));
+const TeamView = lazy(() => import('@/views/TeamView').then(m => ({ default: m.TeamView })));
+const CalendarView = lazy(() => import('@/views/CalendarView').then(m => ({ default: m.CalendarView })));
+const ScheduleView = lazy(() => import('@/views/ScheduleView').then(m => ({ default: m.ScheduleView })));
+const VacationView = lazy(() => import('@/views/VacationView').then(m => ({ default: m.VacationView })));
+const CompositingView = lazy(() => import('@/views/CompositingView')); // default export
+const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
-import { PasswordChangeModal } from '@/components/auth/PasswordChangeModal';
-import { UserManagerModal } from '@/components/auth/UserManagerModal';
+const PasswordChangeModal = lazy(() => import('@/components/auth/PasswordChangeModal').then(m => ({ default: m.PasswordChangeModal })));
+const UserManagerModal = lazy(() => import('@/components/auth/UserManagerModal').then(m => ({ default: m.UserManagerModal })));
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
 import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
 import { readAll } from '@/services/supabaseService';
@@ -28,7 +29,7 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { applyTheme, getPreset, getLightColors } from '@/themes';
+import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, DEFAULT_THEME_ID } from '@/themes';
 import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
 import type { FontScale } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
@@ -38,6 +39,20 @@ import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+
+// Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
+// 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
+class LazyErrorBoundary extends Component<{ children: ReactNode; name: string }, { hasError: boolean }> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: Error, info: ErrorInfo) {
+    console.error(`[LazyErrorBoundary] ${this.props.name} 로드 실패:`, err, info);
+  }
+  render() {
+    if (this.state.hasError) return null; // 모달/뷰가 뜨지 않는 편이 크래시보다 낫다
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const { currentView, setWidgetLayout, setAllWidgetLayout, setEpisodeWidgetLayout, setChartType, setDataConnected, setGasConfig, themeId, customThemeColors, setThemeId, setCustomThemeColors, colorMode, setColorMode, setVacationConnected, setActiveDataSource } = useAppStore();
@@ -322,20 +337,73 @@ export default function App() {
         const savedTheme = await loadTheme();
         if (savedTheme) {
           const savedMode = savedTheme.colorMode ?? 'dark';
-          if (savedTheme.customColors) {
-            applyTheme(savedTheme.customColors, savedMode);
-          } else if (savedMode === 'light') {
-            applyTheme(getLightColors(savedTheme.themeId), savedMode);
-          } else {
-            const preset = getPreset(savedTheme.themeId);
-            if (preset) applyTheme(preset.colors, savedMode);
-          }
-          // 가드를 먼저 열고 → 상태 변경 (useEffect가 실행될 때 가드가 이미 true)
           themeInitRef.current = true;
-          setThemeId(savedTheme.themeId);
-          setColorMode(savedMode);
-          if (savedTheme.customColors) {
-            setCustomThemeColors(savedTheme.customColors);
+
+          // 프리셋/커스텀 모든 경로에서 hex 복원 (preferences.json 기준)
+          // → 이후 theme-save useEffect가 실행돼도 null로 덮어쓰지 않도록 보장
+          useAppStore.getState().setCustomAccentHex(savedTheme.customAccentHex ?? null);
+          useAppStore.getState().setCustomSubHex(savedTheme.customSubHex ?? null);
+
+          // 커스텀 테마 마이그레이션
+          let customHex: { accent: string; sub: string } | null = null;
+          if (savedTheme.themeId === 'custom') {
+            customHex = sanitizeCustomHex({
+              customAccentHex: savedTheme.customAccentHex,
+              customSubHex: savedTheme.customSubHex,
+              customThemeColors: savedTheme.customColors ?? null,
+            });
+            if (!customHex) {
+              console.warn('[테마] 커스텀 테마 데이터 손상 → 기본 프리셋으로 폴백');
+            }
+          }
+
+          // 실제 적용할 테마 ID (커스텀 복구 실패 시 기본 프리셋으로 강제)
+          const effectiveThemeId =
+            savedTheme.themeId === 'custom' && !customHex
+              ? DEFAULT_THEME_ID
+              : savedTheme.themeId;
+
+          // CSS 적용
+          if (effectiveThemeId === 'custom' && customHex) {
+            const colors = deriveThemeFromAccent(customHex.accent, customHex.sub, savedMode);
+            applyTheme(colors, savedMode);
+            setThemeId('custom');
+            setColorMode(savedMode);
+            setCustomThemeColors(colors);
+            // sanitize로 보강된 경우 스토어도 보강된 hex로 갱신 (위 기본 복원 덮어쓰기)
+            if (customHex.accent !== (savedTheme.customAccentHex ?? null)) {
+              useAppStore.getState().setCustomAccentHex(customHex.accent);
+            }
+            if (customHex.sub !== (savedTheme.customSubHex ?? null)) {
+              useAppStore.getState().setCustomSubHex(customHex.sub);
+            }
+            // 구포맷만 있거나 sanitize로 보강된 경우 새 포맷으로 재저장
+            if (savedTheme.customAccentHex !== customHex.accent || savedTheme.customSubHex !== customHex.sub) {
+              saveTheme({
+                themeId: 'custom',
+                customColors: colors,
+                colorMode: savedMode,
+                customAccentHex: customHex.accent,
+                customSubHex: customHex.sub,
+              });
+            }
+          } else if (savedMode === 'light') {
+            applyTheme(getLightColors(effectiveThemeId), savedMode);
+            setThemeId(effectiveThemeId);
+            setColorMode(savedMode);
+          } else {
+            const preset = getPreset(effectiveThemeId);
+            if (preset) {
+              applyTheme(preset.colors, savedMode);
+              setThemeId(effectiveThemeId);
+              setColorMode(savedMode);
+            } else {
+              // 완전 손상 (프리셋 ID도 유효하지 않음) → 최종 폴백
+              const fallback = getPreset(DEFAULT_THEME_ID)!;
+              applyTheme(fallback.colors, savedMode);
+              setThemeId(DEFAULT_THEME_ID);
+              setColorMode(savedMode);
+            }
           }
         } else {
           // 저장된 테마 없음 → 기본 테마 유지, 이후 변경부터 저장 허용
@@ -442,17 +510,67 @@ export default function App() {
   // 테마 변경 시: CSS 적용 + appdata 저장 (초기화 완료 후에만 저장)
   useEffect(() => {
     if (!themeInitRef.current) return; // init()에서 테마 로드 전까지 저장 방지
-    if (themeId === 'custom' && customThemeColors) {
-      applyTheme(customThemeColors, colorMode);
-      saveTheme({ themeId, customColors: customThemeColors, colorMode });
-    } else if (colorMode === 'light') {
+    const { customAccentHex, customSubHex, setCustomThemeColors } = useAppStore.getState();
+
+    if (themeId === 'custom') {
+      // Case A: hex 두 개 모두 유효 → 현재 colorMode로 재파생
+      if (customAccentHex && customSubHex) {
+        const colors = deriveThemeFromAccent(customAccentHex, customSubHex, colorMode);
+        applyTheme(colors, colorMode);
+        // 얕은 비교로 동일한 결과면 setState를 건너뛰어 effect 재실행 루프 방지
+        const same =
+          customThemeColors !== null &&
+          customThemeColors.bgPrimary === colors.bgPrimary &&
+          customThemeColors.bgCard === colors.bgCard &&
+          customThemeColors.bgBorder === colors.bgBorder &&
+          customThemeColors.textPrimary === colors.textPrimary &&
+          customThemeColors.textSecondary === colors.textSecondary &&
+          customThemeColors.accent === colors.accent &&
+          customThemeColors.accentSub === colors.accentSub;
+        if (!same) {
+          setCustomThemeColors(colors);
+        }
+        saveTheme({
+          themeId,
+          customColors: colors,
+          colorMode,
+          customAccentHex,
+          customSubHex,
+        });
+        return;
+      }
+      // Case B: hex 없이 customThemeColors만 (마이그레이션 과도기)
+      if (customThemeColors) {
+        applyTheme(customThemeColors, colorMode);
+        saveTheme({ themeId, customColors: customThemeColors, colorMode });
+        return;
+      }
+      // Case C: themeId=custom이지만 hex/customThemeColors 모두 없음 → 기본 프리셋으로 폴백
+      console.warn('[테마] themeId=custom이지만 색상 데이터 없음 → 기본 프리셋으로 폴백');
+      setThemeId(DEFAULT_THEME_ID);
+      // 이 setThemeId는 effect를 재실행시켜 프리셋 분기로 진입하므로 추가 처리 불필요
+      return;
+    }
+
+    // 프리셋 경로
+    if (colorMode === 'light') {
       applyTheme(getLightColors(themeId), colorMode);
-      saveTheme({ themeId, colorMode });
+      saveTheme({
+        themeId,
+        colorMode,
+        customAccentHex: customAccentHex ?? undefined,
+        customSubHex: customSubHex ?? undefined,
+      });
     } else {
       const preset = getPreset(themeId);
       if (preset) {
         applyTheme(preset.colors, colorMode);
-        saveTheme({ themeId, colorMode });
+        saveTheme({
+          themeId,
+          colorMode,
+          customAccentHex: customAccentHex ?? undefined,
+          customSubHex: customSubHex ?? undefined,
+        });
       }
     }
   }, [themeId, customThemeColors, colorMode]);
@@ -777,30 +895,43 @@ export default function App() {
 
   // 뷰 렌더링
   const renderView = () => {
-    switch (currentView) {
-      case 'dashboard':
-        return <Dashboard />;
-      case 'scenes':
-        return <ScenesView />;
-      case 'episode':
-        return <EpisodeView />;
-      case 'assignee':
-        return <AssigneeView />;
-      case 'team':
-        return <TeamView />;
-      case 'calendar':
-        return <CalendarView />;
-      case 'schedule':
-        return <ScheduleView />;
-      case 'vacation':
-        return <VacationView />;
-      case 'compositing':
-        return <CompositingView />;
-      case 'settings':
-        return <SettingsView />;
-      default:
-        return <Dashboard />;
-    }
+    const view = (() => {
+      switch (currentView) {
+        case 'dashboard':
+          return <Dashboard />;
+        case 'scenes':
+          return <ScenesView />;
+        case 'episode':
+          return <EpisodeView />;
+        case 'assignee':
+          return <AssigneeView />;
+        case 'team':
+          return <TeamView />;
+        case 'calendar':
+          return <CalendarView />;
+        case 'schedule':
+          return <ScheduleView />;
+        case 'vacation':
+          return <VacationView />;
+        case 'compositing':
+          return <CompositingView />;
+        case 'settings':
+          return <SettingsView />;
+        default:
+          return <Dashboard />;
+      }
+    })();
+    return (
+      <LazyErrorBoundary key={currentView} name={`View:${currentView}`}>
+        <Suspense fallback={
+          <div className="flex items-center justify-center h-full w-full">
+            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+          </div>
+        }>
+          {view}
+        </Suspense>
+      </LazyErrorBoundary>
+    );
   };
 
   // 로딩 스플래시 — authReady 후에도 유지, 클릭으로 스킵 가능
@@ -892,10 +1023,22 @@ export default function App() {
       <GlobalTooltipProvider />
 
       {/* 비밀번호 변경 모달 */}
-      {showPasswordChange && <PasswordChangeModal />}
+      {showPasswordChange && (
+        <LazyErrorBoundary name="PasswordChangeModal">
+          <Suspense fallback={null}>
+            <PasswordChangeModal />
+          </Suspense>
+        </LazyErrorBoundary>
+      )}
 
       {/* 관리자: 사용자 관리 모달 */}
-      {showUserManager && <UserManagerModal />}
+      {showUserManager && (
+        <LazyErrorBoundary name="UserManagerModal">
+          <Suspense fallback={null}>
+            <UserManagerModal />
+          </Suspense>
+        </LazyErrorBoundary>
+      )}
 
       {/* Sonner 토스트 — 테마 색상 연동 + 스르륵 애니메이션 + 호버 펼침 */}
       <Toaster

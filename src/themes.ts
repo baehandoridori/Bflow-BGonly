@@ -128,6 +128,131 @@ export function hexToRgb(hex: string): string {
   return `${r} ${g} ${b}`;
 }
 
+/** RGB triplet → HSL (h: 0-360, s/l: 0-100) */
+export function rgbToHsl(triplet: string): { h: number; s: number; l: number } {
+  const [r, g, b] = triplet.split(' ').map(Number).map(v => v / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)); break;
+      case g: h = ((b - r) / d + 2); break;
+      case b: h = ((r - g) / d + 4); break;
+    }
+    h *= 60;
+  }
+  return { h: Math.round(h), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+
+/** HSL (h: 0-360, s/l: 0-100) → RGB triplet */
+export function hslToRgb(h: number, s: number, l: number): string {
+  const sN = s / 100;
+  const lN = l / 100;
+  const c = (1 - Math.abs(2 * lN - 1)) * sN;
+  const hP = h / 60;
+  const x = c * (1 - Math.abs((hP % 2) - 1));
+  let r1 = 0, g1 = 0, b1 = 0;
+  if (0 <= hP && hP < 1) [r1, g1, b1] = [c, x, 0];
+  else if (hP < 2) [r1, g1, b1] = [x, c, 0];
+  else if (hP < 3) [r1, g1, b1] = [0, c, x];
+  else if (hP < 4) [r1, g1, b1] = [0, x, c];
+  else if (hP < 5) [r1, g1, b1] = [x, 0, c];
+  else if (hP <= 6) [r1, g1, b1] = [c, 0, x];
+  const m = lN - c / 2;
+  const r = Math.round((r1 + m) * 255);
+  const g = Math.round((g1 + m) * 255);
+  const b = Math.round((b1 + m) * 255);
+  return `${r} ${g} ${b}`;
+}
+
+/**
+ * accent hex 두 개로부터 7색 ThemeColors 전체를 생성.
+ * 배경·보더·텍스트 5색은 accent hue 기반 HSL 계단 공식으로 파생.
+ */
+export function deriveThemeFromAccent(
+  accentHex: string,
+  accentSubHex: string,
+  mode: 'dark' | 'light',
+): ThemeColors {
+  const { h } = rgbToHsl(hexToRgb(accentHex));
+  const dark = mode === 'dark';
+  return {
+    bgPrimary:     dark ? hslToRgb(h, 20, 5)  : hslToRgb(h, 15, 88),
+    bgCard:        dark ? hslToRgb(h, 22, 9)  : hslToRgb(h, 10, 99),
+    bgBorder:      dark ? hslToRgb(h, 20, 16) : hslToRgb(h, 25, 70),
+    textPrimary:   dark ? hslToRgb(h, 15, 92) : hslToRgb(h, 30, 12),
+    textSecondary: dark ? hslToRgb(h, 15, 59) : hslToRgb(h, 25, 28),
+    accent:        hexToRgb(accentHex),
+    accentSub:     hexToRgb(accentSubHex),
+  };
+}
+
+export const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * 저장된 커스텀 테마 필드들을 검증/마이그레이션.
+ * 부분적 유효성도 허용하여 사용자가 저장한 hex를 최대한 보존.
+ *
+ * 우선순위:
+ * 1. 두 hex 모두 유효 → 둘 다 사용
+ * 2. 한 hex만 유효 → 유효한 쪽은 유지, 나머지는 triplet에서 역산 (없으면 그 값을 sub로 복제)
+ * 3. 둘 다 hex 무효 → triplet 양쪽 모두 역산
+ * 4. triplet도 없거나 실패 → null (호출부는 DEFAULT_THEME_ID로 폴백)
+ */
+export function sanitizeCustomHex(input: {
+  customAccentHex?: string | null;
+  customSubHex?: string | null;
+  customThemeColors?: ThemeColors | null;
+}): { accent: string; sub: string } | null {
+  const aValid = !!(input.customAccentHex && HEX_RE.test(input.customAccentHex));
+  const sValid = !!(input.customSubHex && HEX_RE.test(input.customSubHex));
+  const c = input.customThemeColors;
+
+  // Case 1: 둘 다 hex 유효
+  if (aValid && sValid) {
+    return { accent: input.customAccentHex!, sub: input.customSubHex! };
+  }
+
+  // Case 2/3: triplet으로 보강
+  let tripletAccent: string | null = null;
+  let tripletSub: string | null = null;
+  if (c?.accent && c?.accentSub) {
+    try {
+      tripletAccent = rgbToHex(c.accent);
+      tripletSub = rgbToHex(c.accentSub);
+    } catch {/* triplet 파싱 실패 */}
+  }
+
+  // Case 2a: accent hex만 유효
+  if (aValid) {
+    console.info('[테마] customSubHex 누락 — triplet에서 복구 또는 accent 복제');
+    return {
+      accent: input.customAccentHex!,
+      sub: tripletSub ?? input.customAccentHex!, // sub 복구 불가 시 accent와 동일
+    };
+  }
+  // Case 2b: sub hex만 유효
+  if (sValid) {
+    console.info('[테마] customAccentHex 누락 — triplet에서 복구 또는 sub 복제');
+    return {
+      accent: tripletAccent ?? input.customSubHex!,
+      sub: input.customSubHex!,
+    };
+  }
+  // Case 3: 둘 다 hex 무효 → triplet 시도
+  if (tripletAccent && tripletSub) {
+    console.info('[테마] 양쪽 hex 손실 — triplet에서 복구');
+    return { accent: tripletAccent, sub: tripletSub };
+  }
+  // Case 4: 전부 실패
+  return null;
+}
+
 /** 프리셋 ID로 찾기 */
 export function getPreset(id: string): ThemePreset | undefined {
   return THEME_PRESETS.find(p => p.id === id);
@@ -168,4 +293,6 @@ export interface ThemeConfig {
   themeId: string;
   customColors?: ThemeColors;
   colorMode?: 'dark' | 'light';
+  customAccentHex?: string;
+  customSubHex?: string;
 }

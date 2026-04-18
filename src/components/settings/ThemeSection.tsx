@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Palette, Check, Sun, Moon, Paintbrush } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
-import { THEME_PRESETS, rgbToHex, hexToRgb, getPreset, getLightColors } from '@/themes';
-import type { ThemeColors } from '@/themes';
+import { THEME_PRESETS, rgbToHex, getPreset, getLightColors, deriveThemeFromAccent, HEX_RE } from '@/themes';
 import { cn } from '@/utils/cn';
 import { SettingsSection } from './SettingsSection';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
@@ -11,6 +10,7 @@ export function ThemeSection() {
   const {
     themeId, customThemeColors, colorMode,
     setThemeId, setCustomThemeColors, setColorMode,
+    setCustomAccentHex, setCustomSubHex,
   } = useAppStore();
 
   const [editingCustom, setEditingCustom] = useState(false);
@@ -31,17 +31,19 @@ export function ThemeSection() {
   };
 
   const handleCustomApply = () => {
-    const base = getPreset(themeId === 'custom' ? 'violet' : themeId)?.colors
-      ?? THEME_PRESETS[0].colors;
-    const colors: ThemeColors = {
-      ...base,
-      accent: hexToRgb(customAccent),
-      accentSub: hexToRgb(customSub),
-    };
+    const colors = deriveThemeFromAccent(customAccent, customSub, colorMode);
+    setCustomAccentHex(customAccent);
+    setCustomSubHex(customSub);
     setThemeId('custom');
     setCustomThemeColors(colors);
     setEditingCustom(false);
   };
+
+  // 커스텀 편집 중 실시간 배경 3색 프리뷰 (잘못된 hex 입력 시 null → 프리뷰 숨김)
+  const previewColors = useMemo(() => {
+    if (!HEX_RE.test(customAccent) || !HEX_RE.test(customSub)) return null;
+    return deriveThemeFromAccent(customAccent, customSub, colorMode);
+  }, [customAccent, customSub, colorMode]);
 
   return (
     <>
@@ -123,9 +125,18 @@ export function ThemeSection() {
               : 'border-bg-border hover:border-accent/40 hover:bg-bg-border/30 border-dashed',
           )}
         >
-          <div className="w-full h-10 rounded-lg flex items-center justify-center bg-bg-border/50">
-            <Palette size={20} className="text-text-secondary" />
-          </div>
+          {themeId === 'custom' && customThemeColors ? (
+            <div
+              className="w-full h-10 rounded-lg"
+              style={{
+                background: `linear-gradient(135deg, rgb(${customThemeColors.bgCard}) 0%, rgb(${customThemeColors.accent}) 50%, rgb(${customThemeColors.accentSub}) 100%)`,
+              }}
+            />
+          ) : (
+            <div className="w-full h-10 rounded-lg flex items-center justify-center bg-bg-border/50">
+              <Palette size={20} className="text-text-secondary" />
+            </div>
+          )}
           <span className="text-xs text-text-primary font-medium">커스텀</span>
           <span className="text-[11px] text-text-secondary">Custom</span>
           {themeId === 'custom' && (
@@ -170,6 +181,22 @@ export function ThemeSection() {
             className="h-8 rounded-lg"
             style={{ background: `linear-gradient(135deg, ${customAccent}, ${customSub})` }}
           />
+          {previewColors && (
+            <div className="flex gap-2 mt-2">
+              <div className="flex-1 flex flex-col items-center gap-1">
+                <div className="w-full h-8 rounded-md" style={{ background: `rgb(${previewColors.bgPrimary})` }} />
+                <span className="text-[10px] text-text-secondary">Primary</span>
+              </div>
+              <div className="flex-1 flex flex-col items-center gap-1">
+                <div className="w-full h-8 rounded-md" style={{ background: `rgb(${previewColors.bgCard})` }} />
+                <span className="text-[10px] text-text-secondary">Card</span>
+              </div>
+              <div className="flex-1 flex flex-col items-center gap-1">
+                <div className="w-full h-8 rounded-md" style={{ background: `rgb(${previewColors.bgBorder})` }} />
+                <span className="text-[10px] text-text-secondary">Border</span>
+              </div>
+            </div>
+          )}
           <div className="flex gap-2">
             <button
               onClick={handleCustomApply}
