@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { MessageCircle } from 'lucide-react';
 import { cn } from '@/utils/cn';
@@ -42,6 +43,17 @@ export function UnifiedSceneCard({
 }: UnifiedSceneCardProps) {
   const { sceneId, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
+
+  const cardRootRef = useRef<HTMLDivElement>(null);
+  const prevHighlightedRef = useRef(isHighlighted);
+
+  useEffect(() => {
+    if (isHighlighted && !prevHighlightedRef.current) {
+      cardRootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    prevHighlightedRef.current = isHighlighted;
+  }, [isHighlighted]);
+
   if (!primaryScene) return null;
 
   const bgPct = bgScene ? sceneProgress(bgScene) : 0;
@@ -81,7 +93,7 @@ export function UnifiedSceneCard({
       }}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      ref={isHighlighted ? (el) => el?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
+      ref={cardRootRef}
       {...(isHighlighted ? {
         initial: { scale: 1.06 },
         animate: { scale: 1 },
