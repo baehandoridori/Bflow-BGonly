@@ -373,8 +373,10 @@ export async function deleteEvent(eventId: string): Promise<void> {
 
   // 로컬 전용 이벤트(GCal에 저장되지 않은 legacy 이벤트)는 캐시에서만 제거
   // sourceCalendarId 부재 = GCal과 연동되지 않은 이벤트 (calendarService.ts:229 참고)
-  // cal_ prefix ID도 GCal 저장 전이거나 GCal 동기화가 실패한 로컬 전용 상태
-  const isLocalOnly = !existing.sourceCalendarId || actualId.startsWith('cal_');
+  // 주의: cal_ prefix 가드는 제거됨. in-flight insert 상태(actualId=cal_*, sourceCalendarId=실제)도
+  // GCal 삭제 경로로 진입해야 함. insert가 성공하면 GCal에 고스트 이벤트가 남기 때문.
+  // 404 등 실패 시 catch에서 롤백 처리.
+  const isLocalOnly = !existing.sourceCalendarId;
   if (isLocalOnly) {
     eventCache = eventCache.filter((e) => e.id !== actualId);
     localToGcalId.delete(eventId);
