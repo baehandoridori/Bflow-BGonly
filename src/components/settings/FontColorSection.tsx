@@ -70,7 +70,24 @@ export function FontColorSection() {
     const nextColors = FONT_COLOR_PRESETS[preset].getColors(primary, secondary, accentSub);
     setColors(nextColors);
     applyTextColors(nextColors);
-    // preferences 저장은 하지 않음 — 테마 변경은 별도 저장 트리거이고, 여기서는 UI 반영만.
+    // 재계산된 색상을 디스크에 영속화 — 앱 재시작 후에도 현재 테마 기준 색상 유지
+    // (이전에는 session-only 였기 때문에 재시작 시 stale 색상으로 되돌아감)
+    (async () => {
+      try {
+        const prev = (await loadPreferences()) ?? {};
+        await savePreferences({
+          ...prev,
+          fontColorPreset: preset,
+          fontCategoryColors: nextColors,
+        });
+        window.electronAPI?.preferencesBroadcastChange?.({
+          fontColorPreset: preset,
+          fontCategoryColors: nextColors,
+        });
+      } catch (err) {
+        console.warn('[font-color] 재계산 색상 저장 실패:', err);
+      }
+    })();
   }, [hasLoaded, preset, primary, secondary, accentSub]);
 
   // 프리셋 변경
