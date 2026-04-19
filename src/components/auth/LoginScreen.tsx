@@ -132,7 +132,9 @@ function PlexusBackground() {
     if (!loginEnabled) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false });
+    // alpha: true — canvas 뒤의 <GradientBackdrop />이 비치도록 투명 배경 사용.
+    // (이전 alpha: false + fillRect는 solid fill이라 전역 그라데이션을 가렸음)
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
     const resize = () => {
@@ -198,11 +200,12 @@ function PlexusBackground() {
       const mx = mouseRef.current.x + ox;
       const my = mouseRef.current.y + oy;
 
-      const isLight = useAppStore.getState().colorMode === 'light';
-      ctx.fillStyle = isLight ? '#ECEDF2' : '#12141C';
-      ctx.fillRect(0, 0, w, h);
+      // 투명하게 clear — 전역 <GradientBackdrop />이 캔버스 뒤로 비치도록.
+      // (이전에는 solid fillRect로 테마 배경색을 칠해 그라데이션을 가렸음)
+      ctx.clearRect(0, 0, w, h);
 
       // 다크모드에서만 노이즈 오버레이 적용 (중앙 그라데이션/마우스 글로우는 GradientBackdrop으로 분리됨)
+      const isLight = useAppStore.getState().colorMode === 'light';
       if (!isLight) {
         if (noiseRef.current) ctx.drawImage(noiseRef.current, 0, 0);
       }
