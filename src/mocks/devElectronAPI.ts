@@ -156,6 +156,27 @@ export function installDevElectronAPI(): void {
     gcalUpdateEvent: async () => {},
     gcalDeleteEvent: async () => {},
     gcalEnsureWatch: async () => {},
+
+    // 설정/세션 변경 브로드캐스트 (mock은 no-op)
+    preferencesBroadcastChange: async () => ({ ok: true }),
+    onPreferencesChanged: noop,
+    sessionBroadcastChange: async () => ({ ok: true }),
+    sessionRequestCurrent: async () => ({ ok: true }),
+    onSessionChanged: noop,
+    themeBroadcastChange: async () => ({ ok: true }),
+    onThemeChanged: noop,
+    calendarBroadcastChange: async () => ({ ok: true }),
+    onCalendarChanged: noop,
+
+    // ─── 휴가 pending 상태 + 브로드캐스트 (mock은 no-op) ───
+    vacationPendingLoad: async () => [],
+    vacationPendingSave: async () => ({ ok: true }),
+    vacationBroadcastRegistered: async () => ({ ok: true }),
+    vacationBroadcastFailed: async () => ({ ok: true }),
+    vacationBroadcastPendingChanged: async () => ({ ok: true }),
+    onVacationRegistered: noop,
+    onVacationFailed: noop,
+    onVacationPendingChanged: noop,
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;

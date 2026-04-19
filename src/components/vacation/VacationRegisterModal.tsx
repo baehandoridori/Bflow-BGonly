@@ -5,6 +5,7 @@ import { cn } from '@/utils/cn';
 import { useAppStore } from '@/stores/useAppStore';
 import { submitVacation } from '@/services/vacationService';
 import { VACATION_TYPES, type VacationType } from '@/types/vacation';
+import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 
 interface VacationRegisterModalProps {
   open: boolean;
@@ -87,6 +88,43 @@ export function VacationRegisterModal({
     setToast({ message: '휴가 등록 요청 중...', type: 'info' });
     onClose();
 
+    // 낙관적 pending 이벤트 추가 (위젯/캘린더에 노란색으로 즉시 표시)
+    // pending 저장 실패는 optimistic UI 문제일 뿐 — 실제 등록 API는 계속 진행해야 함
+    const pendingId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let pendingAdded = true;
+    try {
+      await useVacationPendingStore.getState().add({
+        name: userName,
+        type,
+        startDate,
+        endDate,
+        reason,
+        status: 'pending',
+        pendingId,
+        createdAt: Date.now(),
+      });
+    } catch (addErr) {
+      // pending 저장 실패 — optimistic 표시만 생략, 실제 등록은 계속 진행
+      pendingAdded = false;
+      console.warn('[vacation] pending 저장 실패 — 등록은 계속 진행:', addErr);
+      setToast({
+        message: '로컬 캐시 저장 실패 — 등록은 계속 진행됩니다.',
+        type: 'warning',
+      });
+    }
+
+    // pending 제거 헬퍼: 실패해도 후속 broadcast/onSubmitEnd 실행을 막지 않음
+    // (pending-store 쓰기 자체가 실패한 경우 두 번째 remove도 throw할 수 있어 가드 필수)
+    // add 성공 시에만 호출 — add 실패 시 remove할 항목 자체가 없음
+    const safeRemovePending = async (label: string) => {
+      if (!pendingAdded) return;
+      try {
+        await useVacationPendingStore.getState().remove(pendingId);
+      } catch (e) {
+        console.warn(`[vacation] ${label} pending 제거 실패:`, e);
+      }
+    };
+
     try {
       const result = await submitVacation({
         name: userName,
@@ -97,7 +135,12 @@ export function VacationRegisterModal({
       });
 
       if (result.ok && result.success) {
-        setToast({ message: '휴가가 등록되었습니다', type: 'success' });
+        // pending 제거 → 로컬 즉시 피드백 + 다른 창에 완료 브로드캐스트
+        // 로컬 setToast: 현재 창 즉시 피드백 (dev/test 모드 포함).
+        // broadcast는 `excludeSenderId` 적용으로 다른 창만 수신 → 중복 토스트 없음.
+        await safeRemovePending('성공 후');
+        setToast({ message: `${userName} 휴가 등록 완료 (${type})`, type: 'success' });
+        await window.electronAPI?.vacationBroadcastRegistered?.({ name: userName, type });
         invalidateVacationCache();
         // GAS 파이프라인 완전 완료 후 데이터 갱신 (8초 후)
         setTimeout(() => {
@@ -106,11 +149,17 @@ export function VacationRegisterModal({
         }, 8000);
       } else {
         // D3: 등록 실패 상세 알림 — critical 토스트로 강조
-        setToast({ message: '휴가 등록 실패: ' + (result.error || result.state || '알 수 없는 오류'), type: 'critical' });
+        const errorMsg = result.error || result.state || '알 수 없는 오류';
+        await safeRemovePending('실패 응답 후');
+        setToast({ message: `휴가 등록 실패: ${errorMsg}`, type: 'critical' });
+        await window.electronAPI?.vacationBroadcastFailed?.({ name: userName, error: errorMsg });
         onSubmitEnd?.();
       }
     } catch (err) {
-      setToast({ message: '휴가 등록 실패: ' + (err instanceof Error ? err.message : String(err)), type: 'critical' });
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await safeRemovePending('예외 후');
+      setToast({ message: `휴가 등록 실패: ${errorMsg}`, type: 'critical' });
+      await window.electronAPI?.vacationBroadcastFailed?.({ name: userName, error: errorMsg });
       onSubmitEnd?.();
     }
   };

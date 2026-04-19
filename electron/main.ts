@@ -66,6 +66,9 @@ let splashWin: BrowserWindow | null = null;
 let mainLoadedOk = false;
 let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let showTrayHintInFlight = false;
+// 최근 브로드캐스트된 세션 정보 캐시 → 새로 열리는 플로팅 위젯 창에 즉시 전달
+// (메인 프로세스 재시작 시 null로 초기화됨 — 메인 창이 첫 로그인 broadcast를 쏘면 다시 캐싱)
+let lastKnownSession: unknown = null;
 
 /** 아이콘 경로 해석: dev(electron/)와 prod(dist-electron/) + app.getAppPath() 순회 */
 function resolveTrayIconPath(): string {
@@ -270,6 +273,9 @@ interface SavedWidgetState {
   x: number; y: number; width: number; height: number;
   opacity: number; alwaysOnTop: boolean;
   title?: string;
+  // 위젯 query string용 부가 파라미터 (예: EP 위젯의 ?ep=1).
+  // 재실행 시 유실 방지를 위해 함께 영속화. optional이라 구버전 파일과 호환.
+  extra?: Record<string, string>;
 }
 
 // 위젯 ID → 제목 매핑 (자동 복원 시 title 미저장 파일 호환용)
@@ -443,6 +449,26 @@ function broadcastSnapshotRelay(excludeWebContentsId: number, data: unknown): vo
   for (const [, win] of widgetWindows) {
     if (!win.isDestroyed() && win.webContents.id !== excludeWebContentsId) {
       win.webContents.send('sheet:snapshot-relay', data);
+    }
+  }
+}
+
+/** 메인 창 + 모든 위젯 창에 동일 이벤트 push (optional: 송신자 제외) */
+function broadcastToAllWindows(
+  channel: string,
+  payload?: unknown,
+  excludeSenderId?: number,
+): void {
+  if (
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.webContents.id !== excludeSenderId
+  ) {
+    mainWindow.webContents.send(channel, payload);
+  }
+  for (const win of widgetWindows.values()) {
+    if (!win.isDestroyed() && win.webContents.id !== excludeSenderId) {
+      win.webContents.send(channel, payload);
     }
   }
 }
@@ -1095,6 +1121,99 @@ ipcMain.handle('sheets:relay-snapshot', (event, data: unknown) => {
   return { ok: true };
 });
 
+// 렌더러 → 메인: "지금 설정 바꿨으니 다른 창에도 알려줘"
+ipcMain.handle('preferences:broadcast-change', (_event, payload: unknown) => {
+  broadcastToAllWindows('preferences:changed', payload);
+  return { ok: true };
+});
+
+ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
+  lastKnownSession = payload;
+  broadcastToAllWindows('session:changed', payload);
+  return { ok: true };
+});
+
+// 팝업이 onSessionChanged 구독 등록 후 명시적으로 재전송을 요청 — ready-to-show 타이밍 miss 방어.
+// event.sender.send로 요청한 창에만 전송 (broadcast 아님). lastKnownSession이 null이면 무응답.
+ipcMain.handle('session:request-current', (event) => {
+  if (lastKnownSession !== null) {
+    event.sender.send('session:changed', lastKnownSession);
+  }
+  return { ok: true };
+});
+
+ipcMain.handle('theme:broadcast-change', (_event, payload: unknown) => {
+  broadcastToAllWindows('theme:changed', payload);
+  return { ok: true };
+});
+
+// 캘린더 변경 브로드캐스트 — 송신자 제외(자기 프로세스 window event 중복 방지)
+ipcMain.handle('calendar:broadcast-change', (event, payload: unknown) => {
+  broadcastToAllWindows('calendar:changed', payload, event.sender.id);
+  return { ok: true };
+});
+
+// ─── IPC 핸들러: 휴가 pending 상태 파일 I/O + 브로드캐스트 ─────
+
+const PENDING_VACATIONS_FILE = 'pendingVacations.json';
+let pendingSaveChain: Promise<{ ok: boolean }> = Promise.resolve({ ok: true });
+
+function getPendingVacationsPath(): string {
+  return path.join(app.getPath('userData'), PENDING_VACATIONS_FILE);
+}
+
+ipcMain.handle('vacation:pending:load', () => {
+  try {
+    const file = getPendingVacationsPath();
+    if (!fs.existsSync(file)) return [];
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    // 파일이 유효 JSON이지만 배열이 아닌 경우(파손 후 수동 편집 등) downstream crash 방어
+    if (!Array.isArray(parsed)) {
+      console.warn('[vacation] pending 파일이 배열 형태가 아님 — 빈 배열로 fallback');
+      return [];
+    }
+    return parsed;
+  } catch (err) {
+    console.warn('[vacation] pending 로드 실패:', err);
+    return [];
+  }
+});
+
+ipcMain.handle('vacation:pending:save', (_e, list: unknown) => {
+  // 저장은 체인으로 직렬화 — 동시 호출 경합 방지
+  pendingSaveChain = pendingSaveChain.then(async () => {
+    try {
+      const file = getPendingVacationsPath();
+      await fs.promises.writeFile(file, JSON.stringify(list ?? []), 'utf-8');
+      return { ok: true };
+    } catch (err) {
+      console.error('[vacation] pending 저장 실패:', err);
+      return { ok: false };
+    }
+  });
+  return pendingSaveChain;
+});
+
+// 송신자 제외(excludeSenderId): 현재 창은 VacationRegisterModal에서 로컬 setToast로
+// 즉시 피드백하므로, 자기 자신이 broadcast를 받아 Sonner 토스트를 중복 표시하는 것을 방지.
+// dev/test 모드에서도 로컬 setToast가 동작하여 사용자 피드백 보장.
+ipcMain.handle('vacation:broadcast-registered', (event, payload: unknown) => {
+  broadcastToAllWindows('vacation:registered', payload, event.sender.id);
+  return { ok: true };
+});
+
+ipcMain.handle('vacation:broadcast-failed', (event, payload: unknown) => {
+  broadcastToAllWindows('vacation:failed', payload, event.sender.id);
+  return { ok: true };
+});
+
+// pending 상태 변경(add/remove/clearStale) 브로드캐스트 — 다른 창이 hydrate하여 노란색 동기화
+// 송신자 제외(excludeSenderId): 자기 상태를 덮어쓰지 않도록 (이미 set으로 최신)
+ipcMain.handle('vacation:broadcast-pending-changed', (event, payload: unknown) => {
+  broadcastToAllWindows('vacation:pending-changed', payload, event.sender.id);
+  return { ok: true };
+});
+
 // ─── IPC 핸들러: 휴가 관리 (vacation-repo WebApi) ────────────
 
 ipcMain.handle('vacation:connect', async (_event, webAppUrl: string) => {
@@ -1350,6 +1469,10 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   const initHeight = savedPos ? Math.max(200, savedPos.height) : 360;
   const initAOT = savedPos ? savedPos.alwaysOnTop : true;
 
+  // 호출 시점 extra가 우선. 없으면 이전에 저장된 extra 복원.
+  // (EP 위젯 `?ep=1` 등의 query string 파라미터 영속화 — 이슈 ⑨)
+  const effectiveExtra = extra ?? savedPos?.extra;
+
   const popupWin = new BrowserWindow({
     width: initWidth,
     height: initHeight,
@@ -1387,8 +1510,8 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
 
   // 같은 앱을 로드하되, 해시로 팝업 모드 + 위젯 ID 전달
   let hash = `#widget-popup/${encodeURIComponent(widgetId)}`;
-  if (extra && Object.keys(extra).length > 0) {
-    const qs = new URLSearchParams(extra).toString();
+  if (effectiveExtra && Object.keys(effectiveExtra).length > 0) {
+    const qs = new URLSearchParams(effectiveExtra).toString();
     hash += `?${qs}`;
   }
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -1400,8 +1523,13 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   // Acrylic DWM 버그 우회: 생성자의 alwaysOnTop:true는 기본 레벨이라 Acrylic에서 무효.
   // 윈도우 준비 후 'normal' 레벨로 명시적 재설정 (Acrylic에서 'normal'이 실제 topmost)
   popupWin.once('ready-to-show', () => {
-    if (!popupWin.isDestroyed() && initAOT) {
+    if (popupWin.isDestroyed()) return;
+    if (initAOT) {
       popupWin.setAlwaysOnTop(true, 'normal');
+    }
+    // 마지막으로 알려진 세션을 즉시 전달 → 위젯 초기 "사용자 정보 로딩 중..." 상태 해결
+    if (lastKnownSession) {
+      popupWin.webContents.send('session:changed', lastKnownSession);
     }
   });
 
@@ -1412,11 +1540,14 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   const existingCache = widgetPositionCache.get(widgetId);
   if (existingCache) {
     existingCache.title = widgetTitle;
+    // 명시적 extra가 새로 들어온 경우만 덮어씀 (복원 경로에서는 savedPos?.extra를 유지)
+    if (extra) existingCache.extra = extra;
   } else {
     const b = popupWin.getBounds();
     widgetPositionCache.set(widgetId, {
       x: b.x, y: b.y, width: b.width, height: b.height,
       opacity: 1.0, alwaysOnTop: initAOT, title: widgetTitle,
+      extra: effectiveExtra,
     });
   }
   saveWidgetPositionsDebounced();
@@ -1490,6 +1621,7 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
       opacity: prev?.opacity ?? 0.92,
       alwaysOnTop: prev?.alwaysOnTop ?? true,
       title: prev?.title ?? widgetTitle,
+      extra: prev?.extra ?? effectiveExtra,
     });
     saveWidgetPositionsDebounced();
   };
@@ -1515,6 +1647,7 @@ ipcMain.handle('widget:set-opacity', (_event, widgetId: string, opacity: number)
       widgetPositionCache.set(widgetId, cached);
     } else {
       cached.opacity = clamped;
+      // extra는 기존 값 유지 (별도 변경 없음)
     }
     saveWidgetPositionsDebounced();
   }
@@ -1921,7 +2054,9 @@ app.whenReady().then(() => {
         for (const [widgetId, state] of widgetPositionCache) {
           try {
             const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
-            openWidgetPopup(widgetId, title);
+            // state.extra를 명시적으로 넘기지 않아도 openWidgetPopup 내부에서
+            // savedPos.extra를 자동 복원(effectiveExtra)하지만, 명시 전달로 의도를 분명히 한다.
+            openWidgetPopup(widgetId, title, state.extra);
           } catch (err) {
             console.error(`[위젯 자동복원] ${widgetId} 실패:`, err);
           }

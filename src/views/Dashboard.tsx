@@ -37,7 +37,7 @@ import '@/styles/widget-animations.css';
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
 /* ── 대시보드 플렉서스 배경 (연결선 + 그라데이션 조명 + 마우스 반응) ── */
-interface DashPt { x: number; y: number; vx: number; vy: number; size: number; color: [number, number, number]; alpha: number }
+interface DashPt { x: number; y: number; vx: number; vy: number; size: number; colorIdx: number; alpha: number }
 const DEFAULT_DASH_PT_COUNT = 120;
 const DASH_CONNECT_DIST = 140;
 
@@ -95,11 +95,11 @@ function DashboardPlexus() {
       if (ptsRef.current.length === 0 || ptsRef.current.length !== ptCount) {
         const cols = getColors();
         ptsRef.current = Array.from({ length: ptCount }, () => {
-          const c = cols[Math.floor(Math.random() * cols.length)];
+          const colorIdx = Math.floor(Math.random() * cols.length);
           return {
             x: Math.random() * w, y: Math.random() * h,
             vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
-            size: 1.2 + Math.random() * 2.5, color: c, alpha: 0.25 + Math.random() * 0.35,
+            size: 1.2 + Math.random() * 2.5, colorIdx, alpha: 0.25 + Math.random() * 0.35,
           };
         });
       }
@@ -121,33 +121,11 @@ function DashboardPlexus() {
       lastTime = timestamp;
       const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3);
 
+      // 매 프레임 최신 팔레트 조회 → 테마 변경 시 즉시 색 반영
+      const palette = getColors();
+
       const { w, h } = sizeRef.current;
       ctx.clearRect(0, 0, w, h);
-
-      // ── 배경 그라데이션 조명 (위젯 글래스모피즘을 위한 충분한 밝기) ──
-      const cols = getColors();
-      const [ar, ag, ab] = cols[0];
-      const [sr, sg, sb] = cols[1] ?? cols[0];
-      // 좌상단 글로우 (강)
-      const grd1 = ctx.createRadialGradient(w * 0.12, h * 0.15, 0, w * 0.12, h * 0.15, w * 0.55);
-      grd1.addColorStop(0, `rgba(${ar},${ag},${ab},0.18)`);
-      grd1.addColorStop(0.5, `rgba(${ar},${ag},${ab},0.06)`);
-      grd1.addColorStop(1, `rgba(${ar},${ag},${ab},0)`);
-      ctx.fillStyle = grd1;
-      ctx.fillRect(0, 0, w, h);
-      // 우하단 글로우 (강)
-      const grd2 = ctx.createRadialGradient(w * 0.88, h * 0.85, 0, w * 0.88, h * 0.85, w * 0.55);
-      grd2.addColorStop(0, `rgba(${sr},${sg},${sb},0.15)`);
-      grd2.addColorStop(0.5, `rgba(${sr},${sg},${sb},0.05)`);
-      grd2.addColorStop(1, `rgba(${sr},${sg},${sb},0)`);
-      ctx.fillStyle = grd2;
-      ctx.fillRect(0, 0, w, h);
-      // 중앙 소프트 글로우 (위젯 뒤로 비치는 조명)
-      const grd3 = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.4);
-      grd3.addColorStop(0, `rgba(${(ar + sr) >> 1},${(ag + sg) >> 1},${(ab + sb) >> 1},0.08)`);
-      grd3.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grd3;
-      ctx.fillRect(0, 0, w, h);
 
       const mx = mouseRef.current.x;
       const my = mouseRef.current.y;
@@ -178,7 +156,7 @@ function DashboardPlexus() {
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < cDist) {
             const alpha = (1 - dist / cDist) * 0.28;
-            const [r, g, b] = pts[i].color;
+            const [r, g, b] = palette[pts[i].colorIdx % palette.length];
             ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
             ctx.lineWidth = (1 - dist / cDist) * 1.2;
             ctx.beginPath();
@@ -196,7 +174,7 @@ function DashboardPlexus() {
         const dist = Math.sqrt(dx * dx + dy * dy);
         const nearMouse = dist < dc.mouseRadius;
         const glowAlpha = nearMouse ? p.alpha + (1 - dist / dc.mouseRadius) * 0.25 : p.alpha;
-        const [r, g, b] = p.color;
+        const [r, g, b] = palette[p.colorIdx % palette.length];
         // 소프트 글로우
         if (dcGlow > 0.2) {
           const glR = p.size * 5 * dcGlow;
@@ -625,6 +603,7 @@ export function Dashboard() {
   const isEpMode = episodeDashboardEp !== null;
   const episodes = useDataStore((s) => s.episodes);
   const currentUser = useAuthStore((s) => s.currentUser);
+  const plexusSettings = useAppStore((s) => s.plexusSettings);
 
   // 현재 에피소드의 파트 ID 목록 (위젯 피커 2단계용)
   const epPartIds = useMemo(() => {
@@ -848,7 +827,7 @@ export function Dashboard() {
 
   return (
     <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
-      {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) */}
+      {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) — 그라데이션은 App.tsx의 전역 GradientBackdrop이 담당 */}
       <DashboardPlexus />
 
       {/* 부서 탭 + 편집 버튼 */}

@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LogIn, ChevronRight } from 'lucide-react';
+import { LogIn, ChevronRight, AlertTriangle } from 'lucide-react';
 import { login } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { getPreset } from '@/themes';
 import { cn } from '@/utils/cn';
+import { useCapsLockWarning } from '@/hooks/useCapsLockWarning';
 
 // ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
@@ -17,7 +18,7 @@ interface Particle {
   vy: number;
   baseSpeed: number;
   size: number;
-  color: [number, number, number];
+  colorIdx: number;
 }
 
 // RGB ↔ HSL 변환 유틸
@@ -49,7 +50,7 @@ function getPlexusColors(): [number, number, number][] {
   const themeId = useAppStore.getState().themeId;
   const custom = useAppStore.getState().customThemeColors;
   const colors = custom ?? getPreset(themeId)?.colors;
-  if (!colors) return [[108, 92, 231], [162, 155, 254], [116, 185, 255], [0, 184, 148], [85, 239, 196]];
+  if (!colors) return [[108, 92, 231], [162, 155, 254]];
   const parse = (s: string): [number, number, number] => {
     const [r, g, b] = s.split(' ').map(Number);
     return [r, g, b];
@@ -89,13 +90,13 @@ const VIRTUAL_H = 1800;
 function createParticle(_w: number, _h: number, plexusColors?: [number, number, number][]): Particle {
   const z = 0.1 + Math.random() * 0.9;
   const cols = plexusColors ?? getPlexusColors();
-  const color = cols[Math.floor(Math.random() * cols.length)];
+  const colorIdx = Math.floor(Math.random() * cols.length);
   const baseSpeed = 0.12 + Math.random() * 0.35;
   return {
     x: Math.random() * VIRTUAL_W, y: Math.random() * VIRTUAL_H, z,
     vx: (Math.random() - 0.5) * baseSpeed * z,
     vy: (Math.random() - 0.5) * baseSpeed * z,
-    baseSpeed, size: 1.2 + z * 3, color,
+    baseSpeed, size: 1.2 + z * 3, colorIdx,
   };
 }
 
@@ -131,7 +132,9 @@ function PlexusBackground() {
     if (!loginEnabled) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false });
+    // alpha: true — canvas 뒤의 <GradientBackdrop />이 비치도록 투명 배경 사용.
+    // (이전 alpha: false + fillRect는 solid fill이라 전역 그라데이션을 가렸음)
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
     const resize = () => {
@@ -184,6 +187,9 @@ function PlexusBackground() {
       lastTime = timestamp;
       const dtFactor = Math.min(delta / TARGET_FRAME_MS, 3); // cap at 3x (최소 ~20fps)
 
+      // 매 프레임 최신 팔레트 조회 → 테마 변경 시 즉시 색 반영
+      const palette = getPlexusColors();
+
       const { w, h } = sizeRef.current;
       const particles = particlesRef.current;
 
@@ -194,32 +200,13 @@ function PlexusBackground() {
       const mx = mouseRef.current.x + ox;
       const my = mouseRef.current.y + oy;
 
+      // 투명하게 clear — 전역 <GradientBackdrop />이 캔버스 뒤로 비치도록.
+      // (이전에는 solid fillRect로 테마 배경색을 칠해 그라데이션을 가렸음)
+      ctx.clearRect(0, 0, w, h);
+
+      // 다크모드에서만 노이즈 오버레이 적용 (중앙 그라데이션/마우스 글로우는 GradientBackdrop으로 분리됨)
       const isLight = useAppStore.getState().colorMode === 'light';
-      ctx.fillStyle = isLight ? '#ECEDF2' : '#12141C';
-      ctx.fillRect(0, 0, w, h);
-
-      const tc = getPlexusColors()[0];
-      const ts = getPlexusColors()[2] ?? getPlexusColors()[1];
-
-      // 다크모드에서만 중앙 그라데이션 + 마우스 글로우 + 노이즈 오버레이 적용
       if (!isLight) {
-        const cg = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.7);
-        cg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.06)`);
-        cg.addColorStop(0.3, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
-        cg.addColorStop(0.6, `rgba(${ts[0]}, ${ts[1]}, ${ts[2]}, 0.015)`);
-        cg.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = cg;
-        ctx.fillRect(0, 0, w, h);
-
-        if (mouseRef.current.x > 0 && mouseRef.current.y > 0) {
-          const mg = ctx.createRadialGradient(mouseRef.current.x, mouseRef.current.y, 0, mouseRef.current.x, mouseRef.current.y, 250);
-          mg.addColorStop(0, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.08)`);
-          mg.addColorStop(0.4, `rgba(${tc[0]}, ${tc[1]}, ${tc[2]}, 0.03)`);
-          mg.addColorStop(1, 'rgba(0, 0, 0, 0)');
-          ctx.fillStyle = mg;
-          ctx.fillRect(0, 0, w, h);
-        }
-
         if (noiseRef.current) ctx.drawImage(noiseRef.current, 0, 0);
       }
 
@@ -280,9 +267,11 @@ function PlexusBackground() {
             const midY = (a.y + b.y) * 0.5;
             const dMid = Math.sqrt((midX - mx) ** 2 + (midY - my) ** 2);
             const glowBoost = dMid < cfgMouseR ? (1 - dMid / cfgMouseR) * 0.4 : 0;
-            const r = Math.round((a.color[0] + b.color[0]) * 0.5);
-            const g = Math.round((a.color[1] + b.color[1]) * 0.5);
-            const bl = Math.round((a.color[2] + b.color[2]) * 0.5);
+            const aCol = palette[a.colorIdx % palette.length];
+            const bCol = palette[b.colorIdx % palette.length];
+            const r = Math.round((aCol[0] + bCol[0]) * 0.5);
+            const g = Math.round((aCol[1] + bCol[1]) * 0.5);
+            const bl = Math.round((aCol[2] + bCol[2]) * 0.5);
             ctx.beginPath();
             ctx.moveTo(a.x - ox, a.y - oy); ctx.lineTo(b.x - ox, b.y - oy);
             ctx.strokeStyle = `rgba(${r}, ${g}, ${bl}, ${Math.min(lineAlpha + glowBoost, 0.75)})`;
@@ -296,7 +285,7 @@ function PlexusBackground() {
       const cfgGlow = cfg.glowIntensity;
       for (const p of sorted) {
         const alpha = 0.35 + p.z * 0.6;
-        const [r, g, b] = p.color;
+        const [r, g, b] = palette[p.colorIdx % palette.length];
         const sx = p.x - ox; // 화면 x
         const sy = p.y - oy; // 화면 y
         const dmx2 = p.x - mx; const dmy2 = p.y - my;
@@ -585,6 +574,7 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe
   const nameRef = useRef<HTMLInputElement>(null);
   const colorMode = useAppStore((s) => s.colorMode);
   const isLight = colorMode === 'light';
+  const capsLock = useCapsLockWarning();
 
   useEffect(() => {
     const timer = setTimeout(() => nameRef.current?.focus(), 400);
@@ -664,6 +654,8 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={capsLock.onKeyDown}
+          onKeyUp={capsLock.onKeyUp}
           placeholder="비밀번호 입력"
           className={cn(
             'rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/50 transition-all duration-200',
@@ -672,6 +664,12 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe
               : 'bg-white/[0.04] border border-white/[0.08] focus:bg-white/[0.06]',
           )}
         />
+        {capsLock.isCapsLockOn && (
+          <div className="mt-1 text-[11px] text-amber-400 flex items-center gap-1">
+            <AlertTriangle size={12} />
+            Caps Lock이 켜져 있습니다
+          </div>
+        )}
         <p className="text-[11px] text-text-secondary/60 leading-relaxed">
           최초 비밀번호는 1234<br />
           모르겠으면 배씨에게 문의
@@ -792,11 +790,13 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
   return (
     <div
       className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden select-none z-[9998] cursor-pointer"
-      style={{ background: 'rgb(var(--color-bg-primary))' }}
+      // 배경: body의 --color-bg-primary가 깔려있고, 전역 GradientBackdrop이 그 위에 그라데이션을 렌더.
+      // 플렉서스 canvas(PlexusBackground)가 ON일 때는 canvas가 불투명으로 덮음.
       onClick={handleClick}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
       tabIndex={-1}
     >
+      {/* 그라데이션 배경은 App.tsx의 전역 GradientBackdrop이 담당 */}
       <PlexusBackground />
 
       <AnimatePresence mode="wait">

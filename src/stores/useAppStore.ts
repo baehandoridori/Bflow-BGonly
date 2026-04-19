@@ -109,9 +109,12 @@ interface AppState {
   // 플렉서스 설정
   plexusSettings: {
     loginEnabled: boolean;
+    loginGradientEnabled: boolean;
     loginParticleCount: number;
     dashboardEnabled: boolean;
+    dashboardGradientEnabled: boolean;
     dashboardParticleCount: number;
+    globalGradientEnabled: boolean;  // 전역 그라데이션 배경 (모든 뷰 뒤)
     speed: number;           // 0.5-2.0, default 1.0
     mouseRadius: number;     // 100-400, default 250
     mouseForce: number;      // 0.02-0.15, default 0.06
@@ -232,9 +235,12 @@ export const useAppStore = create<AppState>((set) => ({
 
   plexusSettings: {
     loginEnabled: true,
+    loginGradientEnabled: true,
     loginParticleCount: 666,
     dashboardEnabled: true,
+    dashboardGradientEnabled: true,
     dashboardParticleCount: 120,
+    globalGradientEnabled: true,
     speed: 1.0,
     mouseRadius: 250,
     mouseForce: 0.06,

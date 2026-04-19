@@ -29,6 +29,29 @@
 [class*="text-\[8px\]"]  { font-size: calc(8px * var(--text-scale) * var(--text-micro-scale)) !important; }
 [class*="text-\[7px\]"]  { font-size: calc(7px * var(--text-scale) * var(--text-micro-scale)) !important; }
 
+/* 글자 카테고리별 색상 — 미지정 시 --color-text-primary 폴백
+   @layer base 안에 배치 → Tailwind utilities가 언제나 우선 */
+@layer base {
+  /* 전역 배경/텍스트: GradientBackdrop(z:-1)이 그 위에 얹혀 그라데이션 노출됨.
+     MainLayout 등 콘텐츠 컨테이너는 자체 bg를 깔지 말 것. */
+  html, body {
+    background: rgb(var(--color-bg-primary));
+    color: rgb(var(--color-text-primary));
+  }
+  .text-xl, .text-lg, h1, h2, h3 {
+    color: rgb(var(--color-text-heading, var(--color-text-primary)));
+  }
+  .text-base, .text-sm {
+    color: rgb(var(--color-text-body, var(--color-text-primary)));
+  }
+  .text-xs {
+    color: rgb(var(--color-text-caption, var(--color-text-primary)));
+  }
+  .text-\[11px\], .text-\[10px\], .text-\[9px\] {
+    color: rgb(var(--color-text-micro, var(--color-text-primary)));
+  }
+}
+
 /* ─── Liveblocks SDK 자동 삽입 배지 숨기기 ─── */
 #liveblocks-badge { display: none !important; }
 

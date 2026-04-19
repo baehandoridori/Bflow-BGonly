@@ -82,12 +82,24 @@ export interface UserPreferences {
     micro?: number;
   };
 
+  // 글자 카테고리별 색상
+  fontCategoryColors?: {
+    heading?: string;
+    body?: string;
+    caption?: string;
+    micro?: string;
+  };
+  fontColorPreset?: 'theme' | 'high-contrast' | 'soft' | 'mono' | 'custom';
+
   // Phase 8-3: 플렉서스 애니메이션
   plexus?: {
     loginEnabled?: boolean;
+    loginGradientEnabled?: boolean;
     loginParticleCount?: number;
     dashboardEnabled?: boolean;
+    dashboardGradientEnabled?: boolean;
     dashboardParticleCount?: number;
+    globalGradientEnabled?: boolean;
     speed?: number;
     mouseRadius?: number;
     mouseForce?: number;

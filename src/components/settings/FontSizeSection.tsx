@@ -209,6 +209,8 @@ async function persistSettings(
       fontScale,
       fontCategoryScales,
     });
+    // 다른 창(플로팅 위젯 등)에도 즉시 반영
+    window.electronAPI?.preferencesBroadcastChange?.({ fontScale, fontCategoryScales });
   } catch (err) {
     console.error('[설정] 글꼴 설정 저장 실패:', err);
   }

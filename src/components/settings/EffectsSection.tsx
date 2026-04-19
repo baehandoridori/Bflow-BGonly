@@ -7,9 +7,12 @@ import { cn } from '@/utils/cn';
 
 const DEFAULTS = {
   loginEnabled: true,
+  loginGradientEnabled: true,
   loginParticleCount: 666,
   dashboardEnabled: true,
+  dashboardGradientEnabled: true,
   dashboardParticleCount: 120,
+  globalGradientEnabled: true,
   speed: 1.0,
   mouseRadius: 250,
   mouseForce: 0.06,
@@ -294,6 +297,8 @@ function Slider({ label, value, min, max, step, defaultVal, onChange }: {
 async function persistPlexus(plexus: typeof DEFAULTS) {
   const existing = await loadPreferences() ?? {};
   await savePreferences({ ...existing, plexus });
+  // 다른 창(플로팅 위젯 포함)에 실시간 전파
+  window.electronAPI?.preferencesBroadcastChange?.({ plexus });
 }
 
 /* ── 메인 섹션 ── */
@@ -327,6 +332,33 @@ export function EffectsSection() {
         </button>
       }
     >
+      {/* 전체 화면 그라데이션 배경 (모든 뷰 공통) */}
+      <div className="mb-5 pb-4 border-b border-bg-border/30">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-text-primary">전체 화면 그라데이션 배경</p>
+            <p className="text-[11px] text-text-secondary/60 mt-0.5">
+              메인 앱, 로그인 화면, 플로팅 위젯 뒤에 부드러운 조명 배경을 표시합니다.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {(plexusSettings.globalGradientEnabled !== false) !== DEFAULTS.globalGradientEnabled && (
+              <button
+                onClick={() => update({ globalGradientEnabled: DEFAULTS.globalGradientEnabled })}
+                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
+                title={`기본값 (${DEFAULTS.globalGradientEnabled ? 'ON' : 'OFF'})`}
+              >
+                <RotateCcw size={11} />
+              </button>
+            )}
+            <Toggle
+              checked={plexusSettings.globalGradientEnabled !== false}
+              onChange={(v) => update({ globalGradientEnabled: v })}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* 로그인 플렉서스 */}
       <div className="mb-5">
         <div className="flex items-center justify-between gap-4 mb-1">

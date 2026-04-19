@@ -8,7 +8,7 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, onRefresh }: MainLayoutProps) {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-bg-primary">
+    <div className="flex h-screen w-screen overflow-hidden">
       <Sidebar />
       <div className="flex flex-col flex-1 overflow-hidden">
         <Header onRefresh={onRefresh} />

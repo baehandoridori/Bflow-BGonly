@@ -285,4 +285,74 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('widget:dock-change', handler);
     return () => { ipcRenderer.removeListener('widget:dock-change', handler); };
   },
+
+  // ─── 설정/세션 변경 브로드캐스트 ─────────────────
+  preferencesBroadcastChange: (payload?: unknown) =>
+    ipcRenderer.invoke('preferences:broadcast-change', payload),
+
+  onPreferencesChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('preferences:changed', listener);
+    return () => ipcRenderer.removeListener('preferences:changed', listener);
+  },
+
+  sessionBroadcastChange: (payload?: unknown) =>
+    ipcRenderer.invoke('session:broadcast-change', payload),
+
+  // 구독 등록 후 메인에 현재 세션 재전송 요청 (ready-to-show 타이밍 miss 방어)
+  sessionRequestCurrent: () =>
+    ipcRenderer.invoke('session:request-current'),
+
+  onSessionChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('session:changed', listener);
+    return () => ipcRenderer.removeListener('session:changed', listener);
+  },
+
+  themeBroadcastChange: (payload?: unknown) =>
+    ipcRenderer.invoke('theme:broadcast-change', payload),
+
+  onThemeChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('theme:changed', listener);
+    return () => ipcRenderer.removeListener('theme:changed', listener);
+  },
+
+  // ─── 캘린더 변경 브로드캐스트 ─────────────────────
+  calendarBroadcastChange: (payload?: unknown) =>
+    ipcRenderer.invoke('calendar:broadcast-change', payload),
+
+  onCalendarChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('calendar:changed', listener);
+    return () => ipcRenderer.removeListener('calendar:changed', listener);
+  },
+
+  // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────
+  vacationPendingLoad: () =>
+    ipcRenderer.invoke('vacation:pending:load'),
+  vacationPendingSave: (list: unknown) =>
+    ipcRenderer.invoke('vacation:pending:save', list),
+  vacationBroadcastRegistered: (payload?: unknown) =>
+    ipcRenderer.invoke('vacation:broadcast-registered', payload),
+  vacationBroadcastFailed: (payload?: unknown) =>
+    ipcRenderer.invoke('vacation:broadcast-failed', payload),
+  vacationBroadcastPendingChanged: (payload?: unknown) =>
+    ipcRenderer.invoke('vacation:broadcast-pending-changed', payload),
+
+  onVacationRegistered: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('vacation:registered', listener);
+    return () => ipcRenderer.removeListener('vacation:registered', listener);
+  },
+  onVacationFailed: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('vacation:failed', listener);
+    return () => ipcRenderer.removeListener('vacation:failed', listener);
+  },
+  onVacationPendingChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('vacation:pending-changed', listener);
+    return () => ipcRenderer.removeListener('vacation:pending-changed', listener);
+  },
 });

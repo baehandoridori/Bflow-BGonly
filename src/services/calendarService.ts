@@ -174,20 +174,9 @@ let legacyLoaded = false;
 
 /** 기존 calendar-events.json에서 로컬 이벤트 로드 (GCal 전환 전 데이터 보존) */
 async function loadLegacyEvents(): Promise<void> {
-  if (legacyLoaded) return;
+  // 기존 calendar-events.json legacy 이벤트는 더 이상 로드하지 않음
+  // (GCal 전환 완료 — 로컬 전용 이벤트는 이제 지원 안 함)
   legacyLoaded = true;
-  try {
-    const data = await window.electronAPI.readSettings('calendar-events.json');
-    if (Array.isArray(data) && data.length > 0) {
-      // GCal sync로 채워진 이벤트와 중복되지 않도록 ID 기반 머지
-      const existingIds = new Set(eventCache.map((e) => e.id));
-      const legacy = (data as CalendarEvent[]).filter((e) => !existingIds.has(e.id));
-      if (legacy.length > 0) {
-        eventCache = [...eventCache, ...legacy];
-        console.log(`[Calendar] 기존 로컬 이벤트 ${legacy.length}개 로드`);
-      }
-    }
-  } catch { /* 파일 없거나 읽기 실패 — 무시 */ }
 }
 
 export async function loadAllEvents(): Promise<CalendarEvent[]> {
@@ -225,10 +214,8 @@ export async function syncAll(): Promise<CalendarEvent[]> {
     }
   }
 
-  // legacy 로컬 이벤트 보존: GCal에 없는 로컬 전용 이벤트는 유지
-  // (sourceCalendarId가 없는 이벤트 = 기존 calendar-events.json에서 온 것)
-  const legacyEvents = eventCache.filter((e) => !e.sourceCalendarId && !seen.has(e.id));
-  eventCache = [...events, ...legacyEvents];
+  // GCal에 없는 이벤트는 캐시에서도 제거 (legacy 로컬 이벤트 미지원)
+  eventCache = [...events];
   broadcastCalendarChange();
 
   // Watch 채널 등록 (실시간 동기화용)
@@ -384,6 +371,19 @@ export async function deleteEvent(eventId: string): Promise<void> {
   if (!existing) return;
   const actualId = existing.id; // GCal ID
 
+  // 로컬 전용 이벤트(GCal에 저장되지 않은 legacy 이벤트)는 캐시에서만 제거
+  // sourceCalendarId 부재 = GCal과 연동되지 않은 이벤트 (calendarService.ts:229 참고)
+  // 주의: cal_ prefix 가드는 제거됨. in-flight insert 상태(actualId=cal_*, sourceCalendarId=실제)도
+  // GCal 삭제 경로로 진입해야 함. insert가 성공하면 GCal에 고스트 이벤트가 남기 때문.
+  // 404 등 실패 시 catch에서 롤백 처리.
+  const isLocalOnly = !existing.sourceCalendarId;
+  if (isLocalOnly) {
+    eventCache = eventCache.filter((e) => e.id !== actualId);
+    localToGcalId.delete(eventId);
+    broadcastCalendarChange({ eventId: actualId, action: 'delete' });
+    return;
+  }
+
   // 원본 캘린더 ID 우선 사용
   const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
   if (!calId) return;
@@ -405,7 +405,16 @@ export async function deleteEvent(eventId: string): Promise<void> {
 }
 
 function broadcastCalendarChange(detail?: { eventId?: string; action?: 'add' | 'update' | 'delete' }) {
+  // 1) 자기 프로세스 구독자에게 즉시 전파 (즉각적 UX 반응)
   window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail }));
+  // 2) 다른 BrowserWindow(플로팅 위젯 등)에도 IPC로 전파
+  //    무한 루프 방지: 메인 프로세스가 송신자(event.sender.id)를 제외하므로
+  //    자기 창은 IPC로 되돌아온 이벤트를 수신하지 않음.
+  try {
+    window.electronAPI?.calendarBroadcastChange?.(detail);
+  } catch {
+    // 브라우저/개발 환경에서 electronAPI 미제공 시 무시
+  }
 }
 
 export function filterEventsByRange(events: CalendarEvent[], rangeStart: string, rangeEnd: string): CalendarEvent[] {

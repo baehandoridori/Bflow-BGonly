@@ -19,6 +19,7 @@ import { LoginScreen } from '@/components/auth/LoginScreen';
 const PasswordChangeModal = lazy(() => import('@/components/auth/PasswordChangeModal').then(m => ({ default: m.PasswordChangeModal })));
 const UserManagerModal = lazy(() => import('@/components/auth/UserManagerModal').then(m => ({ default: m.UserManagerModal })));
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
+import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
 import { readAll } from '@/services/supabaseService';
 import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
@@ -27,17 +28,17 @@ import { invalidatePartCache } from '@/services/commentService';
 import { invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
-import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
+import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, DEFAULT_THEME_ID } from '@/themes';
-import { applyFontSettings, DEFAULT_FONT_SCALE, DEFAULT_CATEGORY_SCALES } from '@/utils/typography';
-import type { FontScale } from '@/utils/typography';
+import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { useNotificationStore } from '@/stores/useNotificationStore';
+import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
@@ -68,6 +69,9 @@ export default function App() {
   // Sonner 토스트 브릿지: 기존 setToast 호출을 Sonner로 전달
   const setStoreToast = useAppStore((s) => s.setToast);
   const storeToast = useAppStore((s) => s.toast);
+
+  // 전역 그라데이션 배경 토글 (모든 뷰 뒤에 표시, 로그인/스플래시 포함)
+  const globalGradientEnabled = useAppStore((s) => s.plexusSettings.globalGradientEnabled !== false);
 
   // 글로벌 스토어 토스트 → Sonner 자동 전달
   useEffect(() => {
@@ -274,13 +278,8 @@ export default function App() {
           }
         }
 
-        // 글꼴 크기 적용 (FOUC 방지: 테마보다 먼저 적용)
-        applyFontSettings({
-          fontScale: (savedPrefs?.fontScale as FontScale) ?? DEFAULT_FONT_SCALE,
-          fontCategoryScales: savedPrefs?.fontCategoryScales
-            ? { ...DEFAULT_CATEGORY_SCALES, ...savedPrefs.fontCategoryScales }
-            : undefined,
-        });
+        // 글꼴 크기/색상 적용 (FOUC 방지: 테마보다 먼저 적용)
+        if (savedPrefs) applyPreferencesToDOM(savedPrefs);
 
         // Phase 8-4: 스플래시 건너뛰기
         if (savedPrefs?.skipLoadingSplash) setLoadingSplashDone(true);
@@ -291,9 +290,12 @@ export default function App() {
           const p = savedPrefs.plexus;
           useAppStore.getState().setPlexusSettings({
             loginEnabled: p.loginEnabled ?? true,
+            loginGradientEnabled: p.loginGradientEnabled ?? true,
             loginParticleCount: p.loginParticleCount ?? 666,
             dashboardEnabled: p.dashboardEnabled ?? true,
+            dashboardGradientEnabled: p.dashboardGradientEnabled ?? true,
             dashboardParticleCount: p.dashboardParticleCount ?? 120,
+            globalGradientEnabled: p.globalGradientEnabled ?? true,
             speed: p.speed ?? 1.0,
             mouseRadius: p.mouseRadius ?? 250,
             mouseForce: p.mouseForce ?? 0.06,
@@ -419,10 +421,14 @@ export default function App() {
 
         // 세션 복원 (Phase 8-5: rememberMe 설정 확인)
         const rememberMe = savedPrefs?.rememberMe !== false; // 기본 true (하위 호환)
+        console.info('[auth] rememberMe =', rememberMe);
         if (rememberMe) {
           const { user } = await loadSession();
           if (user) {
             setCurrentUser(user);
+            console.info('[auth] currentUser 설정 완료');
+          } else {
+            console.info('[auth] 세션 없음 — 로그인 화면 표시');
           }
         }
 
@@ -500,6 +506,39 @@ export default function App() {
     }
   }, [currentUser, authReady]);
 
+  // 세션 변경 브로드캐스트: currentUser 변화를 모든 위젯 창에 전파
+  // (로그인/세션 복원/로그아웃/비밀번호 변경 등 모든 setCurrentUser 경로 공통)
+  // 로그인: user truthy → { user } 브로드캐스트
+  // 로그아웃: null → { user: null } 명시적 브로드캐스트 (위젯 창이 currentUser를 null로 재설정)
+  // 첫 실행 시 이미 로그인된 사용자(loadSession 복원 등)가 있으면 broadcast —
+  // 플로팅 위젯이 이미 열려 있는 경우 초기 사용자 상태를 전파하기 위함.
+  const prevBroadcastUserRef = useRef<typeof currentUser | undefined>(undefined);
+  useEffect(() => {
+    const prev = prevBroadcastUserRef.current;
+    prevBroadcastUserRef.current = currentUser;
+
+    // 첫 실행: currentUser가 이미 있다면 broadcast (플로팅 위젯이 이미 열려 있을 수 있음)
+    if (prev === undefined) {
+      if (currentUser) {
+        window.electronAPI?.sessionBroadcastChange?.({ user: currentUser });
+      }
+      return;
+    }
+
+    // 동일 사용자 + 동일 필드면 스킵.
+    // id만 비교하면 같은 유저의 필드 변경(비밀번호 변경, isInitialPassword, role, name 등)이 전파되지 않아
+    // 팝업/위젯 창이 stale currentUser를 유지하게 됨. AppUser는 평탄 data 구조(types/index.ts:114)라
+    // JSON.stringify 동등성으로 안전하게 비교 가능.
+    const isSameUser =
+      (prev === null && currentUser === null) ||
+      (prev != null &&
+        currentUser != null &&
+        JSON.stringify(prev) === JSON.stringify(currentUser));
+    if (isSameUser) return;
+
+    window.electronAPI?.sessionBroadcastChange?.({ user: currentUser ?? null });
+  }, [currentUser]);
+
   // 사용자 변경 시 목록 리로드
   useEffect(() => {
     if (currentUser) {
@@ -574,6 +613,55 @@ export default function App() {
       }
     }
   }, [themeId, customThemeColors, colorMode]);
+
+  // 테마 broadcast — themeId/colorMode/customThemeColors 중 어느 것이라도 바뀌면 전파
+  // 별도 effect로 분리한 이유: 위 effect의 early return(custom 경로 Case A/B/C)을 우회하여
+  // 커스텀 accent/sub 변경 시에도 플로팅 위젯에 전파되도록 보장
+  //
+  // payload에 customColors 포함: 팝업이 파일 재로드 없이 즉시 적용 → race 제거
+  // (saveTheme 쓰기 완료 전에 broadcast가 발행될 수 있어, 팝업이 stale 파일을 읽는 문제 방지)
+  useEffect(() => {
+    if (!themeInitRef.current) return; // 초기 로드는 제외
+    window.electronAPI?.themeBroadcastChange?.({
+      themeId,
+      colorMode,
+      customColors: customThemeColors ?? null,
+    });
+  }, [themeId, customThemeColors, colorMode]);
+
+  // 비-custom 폰트 색상 프리셋 사용 시: 테마/모드/커스텀색 변경에 따라 카테고리 색상 재계산·저장·broadcast
+  // FontColorSection은 settings 'font' 탭이 열렸을 때만 마운트되므로,
+  // 사용자가 다른 탭에서 테마를 바꾸면 stale fontCategoryColors가 디스크에 남는 문제 해결.
+  useEffect(() => {
+    if (!themeInitRef.current) return; // 초기 로드는 skip
+    (async () => {
+      try {
+        const prefs = await loadPreferences();
+        const preset = prefs?.fontColorPreset;
+        if (!preset || preset === 'custom') return; // custom은 사용자 지정값 유지
+        const themeColors =
+          customThemeColors
+            ?? (colorMode === 'light' ? getLightColors(themeId) : getPreset(themeId)?.colors);
+        if (!themeColors) return;
+        const primary = themeColors.textPrimary;
+        const secondary = themeColors.textSecondary;
+        const accentSub = themeColors.accentSub;
+        const nextColors = FONT_COLOR_PRESETS[preset].getColors(primary, secondary, accentSub);
+        applyTextColors(nextColors);
+        await savePreferences({
+          ...(prefs ?? {}),
+          fontColorPreset: preset,
+          fontCategoryColors: nextColors,
+        });
+        window.electronAPI?.preferencesBroadcastChange?.({
+          fontColorPreset: preset,
+          fontCategoryColors: nextColors,
+        });
+      } catch (err) {
+        console.warn('[font-color] 테마 변경에 따른 재계산 실패:', err);
+      }
+    })();
+  }, [themeId, colorMode, customThemeColors]);
 
   // 초기화 완료 후 데이터 로드
   // authReady 가드: init 완료 전까지 데이터 로딩 방지 (플래시 제거)
@@ -824,6 +912,76 @@ export default function App() {
     };
   }, [loadData]);
 
+  // 환경설정(글꼴 크기/색상) 변경 브로드캐스트 구독
+  // — 설정 창이 메인 창과 동일하지만, 메인도 자기 자신의 브로드캐스트에 반응해 재적용해야
+  //    여러 창(메인 + 플로팅 위젯 N개) 간 일관성이 유지됨
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onPreferencesChanged?.(() => {
+      loadPreferences()
+        .then((prefs) => { if (prefs) applyPreferencesToDOM(prefs); })
+        .catch((err) => console.warn('[설정] 브로드캐스트 재적용 실패', err));
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── 캘린더 변경 IPC 브로드캐스트 구독 ───────────
+  // 다른 창(플로팅 위젯 등)에서 발생한 캘린더 변경을 IPC로 받아
+  // 자기 프로세스 window event로 재발행 → 기존 구독자(CalendarWidget/MyTasksWidget/ScheduleView)가 자동 반응
+  // 무한 루프 방지: 송신자 제외는 메인 프로세스에서 처리됨
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
+      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── 휴가 등록 완료 브로드캐스트 구독 → Sonner 토스트 ─────
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationRegistered?.((payload) => {
+      const p = payload as { name?: string; type?: string } | undefined;
+      const who = p?.name ? `${p.name} ` : '';
+      const what = p?.type ? ` (${p.type})` : '';
+      sonnerToast.success(`${who}휴가 등록 완료${what}`);
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── 휴가 등록 실패 브로드캐스트 구독 ─────────────
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationFailed?.((payload) => {
+      const p = payload as { name?: string; error?: string } | undefined;
+      const who = p?.name ? `${p.name} ` : '';
+      const err = p?.error ?? '알 수 없는 오류';
+      sonnerToast.error(`${who}휴가 등록 실패: ${err}`, { duration: 10000 });
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── pending 변경 브로드캐스트 구독 → hydrate (다른 창에서 add/remove/clearStale 시 동기화) ──
+  // 송신자는 메인에서 excludeSenderId로 제외되므로 자기 상태를 덮어쓰지 않음
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationPendingChanged?.(() => {
+      useVacationPendingStore.getState().hydrate();
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── pending 휴가: hydrate + 30초 타임아웃 (메인 창 전용) ────
+  useEffect(() => {
+    useVacationPendingStore.getState().hydrate();
+    const timer = setInterval(async () => {
+      try {
+        const stale = await useVacationPendingStore.getState().clearStale(30_000);
+        for (const p of stale) {
+          sonnerToast.error(`휴가 등록 타임아웃: ${p.name ?? '알 수 없음'} (30초 경과)`, { duration: 10000 });
+        }
+      } catch (err) {
+        console.warn('[vacation:pending] 타임아웃 검사 실패', err);
+      }
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, []);
+
   // 주기적 폴링: Realtime 이벤트 누락 방지용 안전망 (5초 간격)
   useEffect(() => {
     if (!authReady) return;
@@ -1008,16 +1166,27 @@ export default function App() {
 
   // 로그인 화면 (비로그인 상태)
   if (!currentUser) {
-    return <LoginScreen />;
+    return (
+      <>
+        <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
+        <LoginScreen />
+      </>
+    );
   }
 
   // 스플래시 랜딩 (로그인 상태에서도 앱 시작 시 표시)
   if (showSplash) {
-    return <LoginScreen mode="splash" onComplete={() => setShowSplash(false)} />;
+    return (
+      <>
+        <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
+        <LoginScreen mode="splash" onComplete={() => setShowSplash(false)} />
+      </>
+    );
   }
 
   return (
     <>
+      <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
       <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
       <SpotlightSearch />
       <GlobalTooltipProvider />

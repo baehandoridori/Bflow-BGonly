@@ -462,6 +462,27 @@ export interface ElectronAPI {
   supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) => Promise<void>;
   supabaseReadAllMemos: (userId: string) => Promise<any[]>;
 
+  // ─── 설정/세션 변경 브로드캐스트 ─────────────────
+  preferencesBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
+  onPreferencesChanged: (cb: (payload: unknown) => void) => () => void;
+  sessionBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
+  sessionRequestCurrent: () => Promise<{ ok: boolean }>;
+  onSessionChanged: (cb: (payload: unknown) => void) => () => void;
+  themeBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
+  onThemeChanged: (cb: (payload: unknown) => void) => () => void;
+  calendarBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
+  onCalendarChanged: (cb: (payload: unknown) => void) => () => void;
+
+  // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────
+  vacationPendingLoad: () => Promise<unknown>;
+  vacationPendingSave: (list: unknown) => Promise<{ ok: boolean }>;
+  vacationBroadcastRegistered: (payload?: unknown) => Promise<{ ok: boolean }>;
+  vacationBroadcastFailed: (payload?: unknown) => Promise<{ ok: boolean }>;
+  vacationBroadcastPendingChanged: (payload?: unknown) => Promise<{ ok: boolean }>;
+  onVacationRegistered: (cb: (payload: unknown) => void) => () => void;
+  onVacationFailed: (cb: (payload: unknown) => void) => () => void;
+  onVacationPendingChanged: (cb: (payload: unknown) => void) => () => void;
+
   // ─── Google Calendar ──────────────────────────────
   gcalIsAuthenticated: () => Promise<boolean>;
   gcalStartAuth: () => Promise<void>;

@@ -1002,6 +1002,9 @@ export function MyTasksWidget() {
   // assigned 뷰에서 수동으로 추가한 씬 키
   const [assignedSceneKeys, setAssignedSceneKeys] = useState<SceneKey[]>([]);
 
+  // 플로팅 위젯에서 메인 세션 수신 실패 시 안내 메시지 표시 (10초 타임아웃)
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
+
   // Supabase 초기화 완료 여부 (save effect에서 초기화 전 저장 방지)
   const _supabaseInitialized = useRef(false);
 
@@ -1026,6 +1029,17 @@ export function MyTasksWidget() {
       window.electronAPI?.dataNotifyChange?.({ type: 'todo' } as import('@/types').SheetDeltaTodo);
     }
   }, [isPopup]);
+
+  // 플로팅 위젯에서 currentUser가 10초 내에 수신되지 않으면 안내 메시지로 전환
+  useEffect(() => {
+    if (currentUser) {
+      setLoadTimedOut(false);
+      return;
+    }
+    if (activeView.type !== 'assigned') return;
+    const timer = setTimeout(() => setLoadTimedOut(true), 10_000);
+    return () => clearTimeout(timer);
+  }, [currentUser, activeView.type]);
 
   // Supabase 초기화: 마이그레이션 후 데이터 로드
   useEffect(() => {
@@ -1758,6 +1772,24 @@ export function MyTasksWidget() {
       />
     );
   };
+
+  // 플로팅 위젯 창에서 메인 앱 로그인 전 → currentUser가 null인 상태로 렌더될 수 있음
+  // (assigned 뷰는 currentUser.name과 assignee 매칭 → 빈 결과 방지 위해 로딩 표시)
+  // 10초 이상 로딩되면 메인 앱 로그인 확인 안내로 전환
+  if (activeView.type === 'assigned' && !currentUser) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-xs text-text-secondary/60 px-4 text-center">
+        {loadTimedOut ? (
+          <>
+            <div>사용자 정보를 불러오지 못했습니다.</div>
+            <div className="text-[10px] text-text-secondary/40">메인 앱의 로그인 상태를 확인해주세요.</div>
+          </>
+        ) : (
+          '사용자 정보 로딩 중...'
+        )}
+      </div>
+    );
+  }
 
   return (
     <Widget

@@ -21,15 +21,19 @@ import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptCompa
 import { EpFullDeptProgressWidget } from '@/components/widgets/episode/EpFullDeptProgressWidget';
 import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
-import { loadTheme } from '@/services/settingsService';
+import { GradientBackdrop } from '@/components/common/GradientBackdrop';
+import { loadPreferences, loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
+import { applyPreferencesToDOM } from '@/utils/typography';
 import { readAll, checkConnection, readMetadata } from '@/services/supabaseService';
 import { connectGas, loadGasConfig } from '@/services/gasConfigService';
 import { invalidatePartCache } from '@/services/commentService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
-import type { Episode } from '@/types';
-import { getPreset, getLightColors, applyTheme } from '@/themes';
+import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
+import { Toaster, toast as sonnerToast } from 'sonner';
+import type { Episode, AppUser } from '@/types';
+import { getPreset, getLightColors, applyTheme, type ThemeColors } from '@/themes';
 import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 
 // 모듈 레벨 쿨다운: dataNotifyChange 호출 시 자체 변경 감지
@@ -67,7 +71,26 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
  * 위젯 팝업 윈도우 전용 렌더러
  * Windows Acrylic 네이티브 블러 + CSS 글래스 틴트 + AOT 핀 + 독 모드
  */
+/**
+ * preferences.plexus → useAppStore.setPlexusSettings 병합 헬퍼.
+ * App.tsx의 동일 로직과 일치시켜 "전체 화면 그라데이션" 토글이 팝업에도 반영되도록 함.
+ */
+function applyPlexusFromPrefs(prefs: Awaited<ReturnType<typeof loadPreferences>> | null): void {
+  if (!prefs?.plexus) return;
+  const p = prefs.plexus;
+  useAppStore.getState().setPlexusSettings({
+    ...(p.loginEnabled !== undefined ? { loginEnabled: p.loginEnabled } : {}),
+    ...(p.loginGradientEnabled !== undefined ? { loginGradientEnabled: p.loginGradientEnabled } : {}),
+    ...(p.dashboardEnabled !== undefined ? { dashboardEnabled: p.dashboardEnabled } : {}),
+    ...(p.dashboardGradientEnabled !== undefined ? { dashboardGradientEnabled: p.dashboardGradientEnabled } : {}),
+    globalGradientEnabled: p.globalGradientEnabled ?? true,
+  });
+}
+
 export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extraParams?: Record<string, string> }) {
+  // 전역 그라데이션 배경 토글 (설정의 "전체 화면 그라데이션"이 플로팅 위젯에도 반영되도록)
+  const globalGradientEnabled = useAppStore((s) => s.plexusSettings.globalGradientEnabled !== false);
+
   const [appOpacity, setAppOpacity] = useState(1);
   const [glassIntensity, setGlassIntensity] = useState(0.7);
   const [showControls, setShowControls] = useState(false);
@@ -140,6 +163,113 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     const cleanup = window.electronAPI?.onWidgetDockChange?.((docked) => {
       setIsDocked(docked);
       if (!docked) setIsDockHover(false);
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // 환경설정(글꼴 크기/색상 + 플렉서스) 변경 브로드캐스트 구독 — 메인 창에서 저장되면 즉시 재적용
+  // plexus(globalGradientEnabled 등)는 현재 EffectsSection이 broadcast하지 않지만, 향후 추가 시
+  // WidgetPopup도 자동 반영되도록 미리 재적용 경로 포함.
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onPreferencesChanged?.(() => {
+      loadPreferences()
+        .then((prefs) => {
+          if (prefs) {
+            applyPreferencesToDOM(prefs);
+            applyPlexusFromPrefs(prefs);
+          }
+        })
+        .catch((err) => console.warn('[설정] 브로드캐스트 재적용 실패', err));
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── 휴가 pending hydrate (팝업에서도 필요) — 30초 타임아웃은 메인 창 전용 ───
+  useEffect(() => {
+    useVacationPendingStore.getState().hydrate();
+  }, []);
+
+  // ─── 휴가 등록 완료 브로드캐스트 구독 → Sonner 토스트 ─────
+  // hydrate() 재호출: 메인 창이 pending을 제거했을 수 있으므로 디스크에서 최신 목록 재로드
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationRegistered?.((payload) => {
+      const p = payload as { name?: string; type?: string } | undefined;
+      const who = p?.name ? `${p.name} ` : '';
+      const what = p?.type ? ` (${p.type})` : '';
+      sonnerToast.success(`${who}휴가 등록 완료${what}`);
+      useVacationPendingStore.getState().hydrate();
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── 휴가 등록 실패 브로드캐스트 구독 ─────────────
+  // hydrate() 재호출: 실패 시에도 메인 창이 pending을 제거했을 수 있음
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationFailed?.((payload) => {
+      const p = payload as { name?: string; error?: string } | undefined;
+      const who = p?.name ? `${p.name} ` : '';
+      const err = p?.error ?? '알 수 없는 오류';
+      sonnerToast.error(`${who}휴가 등록 실패: ${err}`, { duration: 10000 });
+      useVacationPendingStore.getState().hydrate();
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // pending 변경 브로드캐스트 구독 → hydrate (다른 창에서 add/remove/clearStale 시 동기화)
+  // 송신자는 메인에서 excludeSenderId로 제외 (자기 상태 덮어쓰기 방지)
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationPendingChanged?.(() => {
+      useVacationPendingStore.getState().hydrate();
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // 세션 변경 브로드캐스트 구독 — 메인 창 로그인/로그아웃 시 currentUser 즉시 동기화
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onSessionChanged?.((payload) => {
+      const { user } = (payload as { user: AppUser | null }) ?? {};
+      useAuthStore.getState().setCurrentUser(user ?? null);
+    });
+    // 구독 등록 직후 메인에 현재 세션 재전송 요청 — ready-to-show 타이밍 miss 방어 (이중 안전망)
+    window.electronAPI?.sessionRequestCurrent?.();
+    return () => { cleanup?.(); };
+  }, []);
+
+  // 테마 변경 브로드캐스트 구독 — 메인 창에서 테마 바뀌면 즉시 재적용
+  // payload를 직접 적용 (파일 재로드 X) — saveTheme 완료 전 broadcast 수신 시 stale 파일 읽는 race 방지
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onThemeChanged?.((payload) => {
+      try {
+        const data = payload as {
+          themeId?: string;
+          colorMode?: 'dark' | 'light';
+          customColors?: ThemeColors | null;
+        } | null;
+        if (!data) return;
+        const nextThemeId = data.themeId;
+        const nextMode = data.colorMode ?? 'dark';
+        const nextCustom = data.customColors ?? null;
+        if (!nextThemeId) return;
+
+        useAppStore.getState().setThemeId(nextThemeId);
+        useAppStore.getState().setColorMode(nextMode);
+        useAppStore.getState().setCustomThemeColors(nextCustom);
+
+        const colors = nextCustom
+          ?? (nextMode === 'light' ? getLightColors(nextThemeId) : getPreset(nextThemeId)?.colors);
+        if (colors) applyTheme(colors, nextMode);
+      } catch (err) {
+        console.warn('[theme] broadcast 적용 실패:', err);
+      }
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // 캘린더 변경 IPC 브로드캐스트 구독 — 다른 창(메인/다른 위젯)에서 변경되면 window event 재발행
+  // 무한 루프 방지: 송신자 제외는 메인 프로세스에서 처리됨
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
+      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
     });
     return () => { cleanup?.(); };
   }, []);
@@ -299,6 +429,13 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           if (saved.customColors) useAppStore.getState().setCustomThemeColors(saved.customColors);
           let colors = saved.customColors ?? (savedMode === 'light' ? getLightColors(saved.themeId) : getPreset(saved.themeId)?.colors);
           if (colors) applyTheme(colors, savedMode);
+        }
+
+        // 글꼴 크기/색상 + 플렉서스 설정 적용 (FOUC 방지: 초기 렌더 전에 CSS 변수 세팅)
+        const prefs = await loadPreferences();
+        if (prefs) {
+          applyPreferencesToDOM(prefs);
+          applyPlexusFromPrefs(prefs);
         }
 
         const api = window.electronAPI;
@@ -548,7 +685,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
   const isRestoring = morphState === 'restoring';
   return (
     <div
-      className="h-screen w-screen flex flex-col overflow-hidden"
+      className="h-screen w-screen flex flex-col overflow-hidden relative"
       style={{
         background: `rgb(var(--color-bg-primary) / ${tintAlpha})`,
         transition: 'background 0.3s ease, opacity 0.35s ease, transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -563,6 +700,8 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
+      {/* 전역 그라데이션 배경 (App.tsx와 동일한 intensity="normal"로 일관성 유지) */}
+      <GradientBackdrop enabled={globalGradientEnabled} intensity="normal" />
       {/* ── 유리 반사 하이라이트 (상단) ── */}
       <div
         className="absolute inset-x-0 top-0 pointer-events-none"
@@ -709,6 +848,19 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         </WidgetIdContext.Provider>
         </IsPopupContext.Provider>
       </div>
+
+      {/* Sonner 토스트 (휴가 등록 완료/실패 브로드캐스트 표시용) */}
+      <Toaster
+        theme="dark"
+        position="bottom-right"
+        duration={4000}
+        toastOptions={{
+          className: 'bflow-toast',
+          style: { fontSize: '12px' },
+        }}
+        visibleToasts={3}
+        closeButton
+      />
     </div>
   );
 }
