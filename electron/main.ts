@@ -453,13 +453,23 @@ function broadcastSnapshotRelay(excludeWebContentsId: number, data: unknown): vo
   }
 }
 
-/** 메인 창 + 모든 위젯 창에 동일 이벤트 push */
-function broadcastToAllWindows(channel: string, payload?: unknown): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
+/** 메인 창 + 모든 위젯 창에 동일 이벤트 push (optional: 송신자 제외) */
+function broadcastToAllWindows(
+  channel: string,
+  payload?: unknown,
+  excludeSenderId?: number,
+): void {
+  if (
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.webContents.id !== excludeSenderId
+  ) {
     mainWindow.webContents.send(channel, payload);
   }
   for (const win of widgetWindows.values()) {
-    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+    if (!win.isDestroyed() && win.webContents.id !== excludeSenderId) {
+      win.webContents.send(channel, payload);
+    }
   }
 }
 
@@ -1125,6 +1135,12 @@ ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
 
 ipcMain.handle('theme:broadcast-change', (_event, payload: unknown) => {
   broadcastToAllWindows('theme:changed', payload);
+  return { ok: true };
+});
+
+// 캘린더 변경 브로드캐스트 — 송신자 제외(자기 프로세스 window event 중복 방지)
+ipcMain.handle('calendar:broadcast-change', (event, payload: unknown) => {
+  broadcastToAllWindows('calendar:changed', payload, event.sender.id);
   return { ok: true };
 });
 

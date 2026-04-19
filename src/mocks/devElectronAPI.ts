@@ -164,6 +164,8 @@ export function installDevElectronAPI(): void {
     onSessionChanged: noop,
     themeBroadcastChange: async () => ({ ok: true }),
     onThemeChanged: noop,
+    calendarBroadcastChange: async () => ({ ok: true }),
+    onCalendarChanged: noop,
 
     // ─── 휴가 pending 상태 + 브로드캐스트 (mock은 no-op) ───
     vacationPendingLoad: async () => [],

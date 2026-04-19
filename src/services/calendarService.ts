@@ -416,7 +416,16 @@ export async function deleteEvent(eventId: string): Promise<void> {
 }
 
 function broadcastCalendarChange(detail?: { eventId?: string; action?: 'add' | 'update' | 'delete' }) {
+  // 1) 자기 프로세스 구독자에게 즉시 전파 (즉각적 UX 반응)
   window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail }));
+  // 2) 다른 BrowserWindow(플로팅 위젯 등)에도 IPC로 전파
+  //    무한 루프 방지: 메인 프로세스가 송신자(event.sender.id)를 제외하므로
+  //    자기 창은 IPC로 되돌아온 이벤트를 수신하지 않음.
+  try {
+    window.electronAPI?.calendarBroadcastChange?.(detail);
+  } catch {
+    // 브라우저/개발 환경에서 electronAPI 미제공 시 무시
+  }
 }
 
 export function filterEventsByRange(events: CalendarEvent[], rangeStart: string, rangeEnd: string): CalendarEvent[] {

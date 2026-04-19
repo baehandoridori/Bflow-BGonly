@@ -870,6 +870,17 @@ export default function App() {
     return () => { cleanup?.(); };
   }, []);
 
+  // ─── 캘린더 변경 IPC 브로드캐스트 구독 ───────────
+  // 다른 창(플로팅 위젯 등)에서 발생한 캘린더 변경을 IPC로 받아
+  // 자기 프로세스 window event로 재발행 → 기존 구독자(CalendarWidget/MyTasksWidget/ScheduleView)가 자동 반응
+  // 무한 루프 방지: 송신자 제외는 메인 프로세스에서 처리됨
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
+      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
   // ─── 휴가 등록 완료 브로드캐스트 구독 → Sonner 토스트 ─────
   useEffect(() => {
     const cleanup = window.electronAPI?.onVacationRegistered?.((payload) => {

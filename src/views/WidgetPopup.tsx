@@ -215,6 +215,15 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     return () => { cleanup?.(); };
   }, []);
 
+  // 캘린더 변경 IPC 브로드캐스트 구독 — 다른 창(메인/다른 위젯)에서 변경되면 window event 재발행
+  // 무한 루프 방지: 송신자 제외는 메인 프로세스에서 처리됨
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onCalendarChanged?.((payload) => {
+      window.dispatchEvent(new CustomEvent('bflow:calendar-changed', { detail: payload }));
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
   // 저장된 opacity/AOT 복원 (Phase 0-6)
   useEffect(() => {
     window.electronAPI?.widgetGetSavedState?.(widgetId).then((saved) => {

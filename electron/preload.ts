@@ -314,6 +314,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('theme:changed', listener);
   },
 
+  // ─── 캘린더 변경 브로드캐스트 ─────────────────────
+  calendarBroadcastChange: (payload?: unknown) =>
+    ipcRenderer.invoke('calendar:broadcast-change', payload),
+
+  onCalendarChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('calendar:changed', listener);
+    return () => ipcRenderer.removeListener('calendar:changed', listener);
+  },
+
   // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────
   vacationPendingLoad: () =>
     ipcRenderer.invoke('vacation:pending:load'),

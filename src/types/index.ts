@@ -469,6 +469,8 @@ export interface ElectronAPI {
   onSessionChanged: (cb: (payload: unknown) => void) => () => void;
   themeBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
   onThemeChanged: (cb: (payload: unknown) => void) => () => void;
+  calendarBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
+  onCalendarChanged: (cb: (payload: unknown) => void) => () => void;
 
   // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────
   vacationPendingLoad: () => Promise<unknown>;
