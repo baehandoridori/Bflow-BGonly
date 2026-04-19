@@ -5,6 +5,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
+import { getSeniorityIndex } from '@/utils/seniorityOrder';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Department, Stage, AppUser } from '@/types';
 import { cn } from '@/utils/cn';
@@ -317,7 +318,7 @@ function TeamMemberCard({
    정렬 옵션
    ──────────────────────────────────────────────── */
 
-type SortOption = 'name' | 'scenes' | 'progress';
+type SortOption = 'name' | 'scenes' | 'progress' | 'seniority';
 
 /* ────────────────────────────────────────────────
    메인 뷰
@@ -358,6 +359,7 @@ export function TeamView() {
         case 'name': cmp = a.user.name.localeCompare(b.user.name, 'ko'); break;
         case 'scenes': cmp = a.totalScenes - b.totalScenes; break;
         case 'progress': cmp = a.avgPct - b.avgPct; break;
+        case 'seniority': cmp = getSeniorityIndex(b.user.name) - getSeniorityIndex(a.user.name); break;
       }
       return sortAsc ? cmp : -cmp;
     });
@@ -413,6 +415,7 @@ export function TeamView() {
             { key: 'name' as SortOption, label: '이름' },
             { key: 'scenes' as SortOption, label: '씬 수' },
             { key: 'progress' as SortOption, label: '진행률' },
+            { key: 'seniority' as SortOption, label: '짬순' },
           ]).map(({ key, label }) => (
             <button
               key={key}

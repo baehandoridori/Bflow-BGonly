@@ -75,6 +75,7 @@ const RANDOM_MESSAGES: MotivMessage[] = [
   { text: '너 지웅이 좋아해?', author: '류이레' },
   { text: '우리 언젠가 분명히 잡혀갈거야.....', author: '정영준' },
   { text: '틀리면 엑쓰', author: '경환엄마' },
+  { text: '응후응후 (여러분 모두 힘든 작업을 하고 계시지만 분명히 힘든 만큼 값진 결과가 되돌아올 것입니다. 포기하지 말고 옆에있는 팀원을 의지하면서 언제나 열심히 즐겁게 오래오래 일하는 스튜디오 장삐쭈가 되었으면 좋겠습니다. 사코팍 화이팅! 스튜디오장삐쭈 화이팅!)', author: '이혜민' },
 ];
 
 function getMessagePool(pct: number): MotivMessage[] {
