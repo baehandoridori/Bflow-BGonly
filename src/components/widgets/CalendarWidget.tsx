@@ -278,7 +278,7 @@ export function CalendarWidget() {
               onClick={() => { setViewMode(m); setSelectedDate(null); setWeekOffset(0); setDayOffset(0); }}
               className={cn(
                 'px-1.5 py-0.5 text-[9px] rounded font-medium cursor-pointer transition-colors',
-                viewMode === m ? 'bg-accent/20 text-accent' : 'text-text-secondary/40 hover:text-text-primary',
+                viewMode === m ? 'bg-accent/20 text-accent' : 'opacity-50 hover:opacity-100',
               )}
             >
               {m === 'month' ? '월' : m === '2week' ? '2주' : m === 'week' ? '주' : '오늘'}
