@@ -194,7 +194,14 @@ export async function loadSession(): Promise<{ session: AuthSession | null; user
     console.warn('[auth] session.userId 누락 — 세션 무효', session);
     return { session: null, user: null };
   }
-  const users = await loadUsers();
+  let users: AppUser[];
+  try {
+    users = await loadUsers();
+  } catch (err) {
+    // loadUsers 실패도 복구 가능한 시나리오로 취급 → 앱 초기화 전체 실패 방지
+    console.warn('[auth] 사용자 목록 로드 실패 — 세션 복원 불가:', err);
+    return { session: null, user: null };
+  }
   const user = users.find((u) => u.id === session!.userId) ?? null;
   if (!user) {
     console.warn('[auth] 세션 userId에 매칭되는 사용자 없음', { sessionUserId: session.userId, userCount: users.length });
