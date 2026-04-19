@@ -66,6 +66,9 @@ let splashWin: BrowserWindow | null = null;
 let mainLoadedOk = false;
 let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let showTrayHintInFlight = false;
+// 최근 브로드캐스트된 세션 정보 캐시 → 새로 열리는 플로팅 위젯 창에 즉시 전달
+// (메인 프로세스 재시작 시 null로 초기화됨 — 메인 창이 첫 로그인 broadcast를 쏘면 다시 캐싱)
+let lastKnownSession: unknown = null;
 
 /** 아이콘 경로 해석: dev(electron/)와 prod(dist-electron/) + app.getAppPath() 순회 */
 function resolveTrayIconPath(): string {
@@ -1115,6 +1118,7 @@ ipcMain.handle('preferences:broadcast-change', (_event, payload: unknown) => {
 });
 
 ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
+  lastKnownSession = payload;
   broadcastToAllWindows('session:changed', payload);
   return { ok: true };
 });
@@ -1473,8 +1477,13 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   // Acrylic DWM 버그 우회: 생성자의 alwaysOnTop:true는 기본 레벨이라 Acrylic에서 무효.
   // 윈도우 준비 후 'normal' 레벨로 명시적 재설정 (Acrylic에서 'normal'이 실제 topmost)
   popupWin.once('ready-to-show', () => {
-    if (!popupWin.isDestroyed() && initAOT) {
+    if (popupWin.isDestroyed()) return;
+    if (initAOT) {
       popupWin.setAlwaysOnTop(true, 'normal');
+    }
+    // 마지막으로 알려진 세션을 즉시 전달 → 위젯 초기 "사용자 정보 로딩 중..." 상태 해결
+    if (lastKnownSession) {
+      popupWin.webContents.send('session:changed', lastKnownSession);
     }
   });
 
