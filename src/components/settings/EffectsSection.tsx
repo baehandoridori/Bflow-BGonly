@@ -12,6 +12,7 @@ const DEFAULTS = {
   dashboardEnabled: true,
   dashboardGradientEnabled: true,
   dashboardParticleCount: 120,
+  globalGradientEnabled: true,
   speed: 1.0,
   mouseRadius: 250,
   mouseForce: 0.06,
@@ -329,6 +330,33 @@ export function EffectsSection() {
         </button>
       }
     >
+      {/* 전체 화면 그라데이션 배경 (모든 뷰 공통) */}
+      <div className="mb-5 pb-4 border-b border-bg-border/30">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-text-primary">전체 화면 그라데이션 배경</p>
+            <p className="text-[11px] text-text-secondary/60 mt-0.5">
+              메인 앱, 로그인 화면, 플로팅 위젯 뒤에 부드러운 조명 배경을 표시합니다.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {(plexusSettings.globalGradientEnabled !== false) !== DEFAULTS.globalGradientEnabled && (
+              <button
+                onClick={() => update({ globalGradientEnabled: DEFAULTS.globalGradientEnabled })}
+                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
+                title={`기본값 (${DEFAULTS.globalGradientEnabled ? 'ON' : 'OFF'})`}
+              >
+                <RotateCcw size={11} />
+              </button>
+            )}
+            <Toggle
+              checked={plexusSettings.globalGradientEnabled !== false}
+              onChange={(v) => update({ globalGradientEnabled: v })}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* 로그인 플렉서스 */}
       <div className="mb-5">
         <div className="flex items-center justify-between gap-4 mb-1">
@@ -347,28 +375,6 @@ export function EffectsSection() {
               </button>
             )}
             <Toggle checked={plexusSettings.loginEnabled} onChange={(v) => update({ loginEnabled: v })} />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between gap-4 mb-1 mt-2">
-          <div>
-            <p className="text-xs font-medium text-text-primary/80">그라데이션 배경</p>
-            <p className="text-[11px] text-text-secondary/60 mt-0.5">파티클과 독립적인 부드러운 조명</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {(plexusSettings.loginGradientEnabled !== false) !== DEFAULTS.loginGradientEnabled && (
-              <button
-                onClick={() => update({ loginGradientEnabled: DEFAULTS.loginGradientEnabled })}
-                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
-                title={`기본값 (${DEFAULTS.loginGradientEnabled ? 'ON' : 'OFF'})`}
-              >
-                <RotateCcw size={11} />
-              </button>
-            )}
-            <Toggle
-              checked={plexusSettings.loginGradientEnabled !== false}
-              onChange={(v) => update({ loginGradientEnabled: v })}
-            />
           </div>
         </div>
 
@@ -410,28 +416,6 @@ export function EffectsSection() {
               </button>
             )}
             <Toggle checked={plexusSettings.dashboardEnabled} onChange={(v) => update({ dashboardEnabled: v })} />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between gap-4 mb-1 mt-2">
-          <div>
-            <p className="text-xs font-medium text-text-primary/80">그라데이션 배경</p>
-            <p className="text-[11px] text-text-secondary/60 mt-0.5">파티클과 독립적인 부드러운 조명</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {(plexusSettings.dashboardGradientEnabled !== false) !== DEFAULTS.dashboardGradientEnabled && (
-              <button
-                onClick={() => update({ dashboardGradientEnabled: DEFAULTS.dashboardGradientEnabled })}
-                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
-                title={`기본값 (${DEFAULTS.dashboardGradientEnabled ? 'ON' : 'OFF'})`}
-              >
-                <RotateCcw size={11} />
-              </button>
-            )}
-            <Toggle
-              checked={plexusSettings.dashboardGradientEnabled !== false}
-              onChange={(v) => update({ dashboardGradientEnabled: v })}
-            />
           </div>
         </div>
 

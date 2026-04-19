@@ -4,7 +4,6 @@ import { LogIn, ChevronRight } from 'lucide-react';
 import { login } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
-import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { getPreset } from '@/themes';
 import { cn } from '@/utils/cn';
 
@@ -731,7 +730,6 @@ type Phase = 'landing' | 'ready' | 'transition' | 'login' | 'done';
 export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
   const { setCurrentUser } = useAuthStore();
   const [phase, setPhase] = useState<Phase>('landing');
-  const plexusSettings = useAppStore((s) => s.plexusSettings);
 
   // 텍스트 애니메이션 완료 콜백
   const handleAnimationDone = useCallback(() => {
@@ -779,12 +777,13 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
   return (
     <div
       className="fixed inset-0 flex flex-col items-center justify-center overflow-hidden select-none z-[9998] cursor-pointer"
-      style={{ background: 'rgb(var(--color-bg-primary))' }}
+      // 배경: body의 --color-bg-primary가 깔려있고, 전역 GradientBackdrop이 그 위에 그라데이션을 렌더.
+      // 플렉서스 canvas(PlexusBackground)가 ON일 때는 canvas가 불투명으로 덮음.
       onClick={handleClick}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(); }}
       tabIndex={-1}
     >
-      <GradientBackdrop enabled={plexusSettings.loginGradientEnabled !== false} intensity="subtle" />
+      {/* 그라데이션 배경은 App.tsx의 전역 GradientBackdrop이 담당 */}
       <PlexusBackground />
 
       <AnimatePresence mode="wait">

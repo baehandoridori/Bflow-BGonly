@@ -99,6 +99,7 @@ export interface UserPreferences {
     dashboardEnabled?: boolean;
     dashboardGradientEnabled?: boolean;
     dashboardParticleCount?: number;
+    globalGradientEnabled?: boolean;
     speed?: number;
     mouseRadius?: number;
     mouseForce?: number;

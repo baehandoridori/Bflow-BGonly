@@ -25,7 +25,6 @@ import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptCompa
 import { EpSinglePartWidget, parsePartWidgetId } from '@/components/widgets/episode/EpSinglePartWidget';
 import { EpFullDeptProgressWidget } from '@/components/widgets/episode/EpFullDeptProgressWidget';
 import { ChartTypeContextMenu, getWidgetSupportedCharts, useChartContextMenu } from '@/components/widgets/ChartTypeContextMenu';
-import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
@@ -828,9 +827,7 @@ export function Dashboard() {
 
   return (
     <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
-      {/* 그라데이션 배경 (파티클과 독립 토글) */}
-      <GradientBackdrop enabled={plexusSettings.dashboardGradientEnabled !== false} intensity="normal" />
-      {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) */}
+      {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) — 그라데이션은 App.tsx의 전역 GradientBackdrop이 담당 */}
       <DashboardPlexus />
 
       {/* 부서 탭 + 편집 버튼 */}

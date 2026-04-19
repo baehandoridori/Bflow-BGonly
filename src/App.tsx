@@ -19,6 +19,7 @@ import { LoginScreen } from '@/components/auth/LoginScreen';
 const PasswordChangeModal = lazy(() => import('@/components/auth/PasswordChangeModal').then(m => ({ default: m.PasswordChangeModal })));
 const UserManagerModal = lazy(() => import('@/components/auth/UserManagerModal').then(m => ({ default: m.UserManagerModal })));
 import { GlobalTooltipProvider } from '@/components/ui/GlobalTooltip';
+import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadGasConfig, connectGas, checkGasConnection } from '@/services/gasConfigService';
 import { readAll } from '@/services/supabaseService';
 import { readAllFromSupabase, testSupabaseConnection, readAllMetadataFromSupabase, onSupabaseRealtimeEvent, onSupabaseStatusChange } from '@/services/supabaseService';
@@ -68,6 +69,9 @@ export default function App() {
   // Sonner 토스트 브릿지: 기존 setToast 호출을 Sonner로 전달
   const setStoreToast = useAppStore((s) => s.setToast);
   const storeToast = useAppStore((s) => s.toast);
+
+  // 전역 그라데이션 배경 토글 (모든 뷰 뒤에 표시, 로그인/스플래시 포함)
+  const globalGradientEnabled = useAppStore((s) => s.plexusSettings.globalGradientEnabled !== false);
 
   // 글로벌 스토어 토스트 → Sonner 자동 전달
   useEffect(() => {
@@ -291,6 +295,7 @@ export default function App() {
             dashboardEnabled: p.dashboardEnabled ?? true,
             dashboardGradientEnabled: p.dashboardGradientEnabled ?? true,
             dashboardParticleCount: p.dashboardParticleCount ?? 120,
+            globalGradientEnabled: p.globalGradientEnabled ?? true,
             speed: p.speed ?? 1.0,
             mouseRadius: p.mouseRadius ?? 250,
             mouseForce: p.mouseForce ?? 0.06,
@@ -1084,16 +1089,27 @@ export default function App() {
 
   // 로그인 화면 (비로그인 상태)
   if (!currentUser) {
-    return <LoginScreen />;
+    return (
+      <>
+        <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
+        <LoginScreen />
+      </>
+    );
   }
 
   // 스플래시 랜딩 (로그인 상태에서도 앱 시작 시 표시)
   if (showSplash) {
-    return <LoginScreen mode="splash" onComplete={() => setShowSplash(false)} />;
+    return (
+      <>
+        <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
+        <LoginScreen mode="splash" onComplete={() => setShowSplash(false)} />
+      </>
+    );
   }
 
   return (
     <>
+      <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
       <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
       <SpotlightSearch />
       <GlobalTooltipProvider />

@@ -114,6 +114,7 @@ interface AppState {
     dashboardEnabled: boolean;
     dashboardGradientEnabled: boolean;
     dashboardParticleCount: number;
+    globalGradientEnabled: boolean;  // 전역 그라데이션 배경 (모든 뷰 뒤)
     speed: number;           // 0.5-2.0, default 1.0
     mouseRadius: number;     // 100-400, default 250
     mouseForce: number;      // 0.02-0.15, default 0.06
@@ -239,6 +240,7 @@ export const useAppStore = create<AppState>((set) => ({
     dashboardEnabled: true,
     dashboardGradientEnabled: true,
     dashboardParticleCount: 120,
+    globalGradientEnabled: true,
     speed: 1.0,
     mouseRadius: 250,
     mouseForce: 0.06,
