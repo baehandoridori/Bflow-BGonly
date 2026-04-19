@@ -174,20 +174,9 @@ let legacyLoaded = false;
 
 /** 기존 calendar-events.json에서 로컬 이벤트 로드 (GCal 전환 전 데이터 보존) */
 async function loadLegacyEvents(): Promise<void> {
-  if (legacyLoaded) return;
+  // 기존 calendar-events.json legacy 이벤트는 더 이상 로드하지 않음
+  // (GCal 전환 완료 — 로컬 전용 이벤트는 이제 지원 안 함)
   legacyLoaded = true;
-  try {
-    const data = await window.electronAPI.readSettings('calendar-events.json');
-    if (Array.isArray(data) && data.length > 0) {
-      // GCal sync로 채워진 이벤트와 중복되지 않도록 ID 기반 머지
-      const existingIds = new Set(eventCache.map((e) => e.id));
-      const legacy = (data as CalendarEvent[]).filter((e) => !existingIds.has(e.id));
-      if (legacy.length > 0) {
-        eventCache = [...eventCache, ...legacy];
-        console.log(`[Calendar] 기존 로컬 이벤트 ${legacy.length}개 로드`);
-      }
-    }
-  } catch { /* 파일 없거나 읽기 실패 — 무시 */ }
 }
 
 export async function loadAllEvents(): Promise<CalendarEvent[]> {
@@ -225,10 +214,8 @@ export async function syncAll(): Promise<CalendarEvent[]> {
     }
   }
 
-  // legacy 로컬 이벤트 보존: GCal에 없는 로컬 전용 이벤트는 유지
-  // (sourceCalendarId가 없는 이벤트 = 기존 calendar-events.json에서 온 것)
-  const legacyEvents = eventCache.filter((e) => !e.sourceCalendarId && !seen.has(e.id));
-  eventCache = [...events, ...legacyEvents];
+  // GCal에 없는 이벤트는 캐시에서도 제거 (legacy 로컬 이벤트 미지원)
+  eventCache = [...events];
   broadcastCalendarChange();
 
   // Watch 채널 등록 (실시간 동기화용)
