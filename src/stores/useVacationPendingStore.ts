@@ -45,25 +45,42 @@ export const useVacationPendingStore = create<Store>((set, get) => ({
     }
   },
   add: async (ev) => {
-    const next = [...get().pending, ev];
+    const prev = get().pending;
+    const next = [...prev, ev];
     set({ pending: next });
-    await window.electronAPI?.vacationPendingSave?.(next);
+    const result = await window.electronAPI?.vacationPendingSave?.(next);
+    // 디스크 쓰기 실패(권한/용량/손상 등) — 메모리 rollback 후 throw.
+    // window.electronAPI 자체가 없는 dev 환경에서는 result === undefined → skip.
+    if (result && (result as { ok: boolean }).ok === false) {
+      set({ pending: prev });
+      throw new Error('pending 저장 실패: 디스크 쓰기 실패');
+    }
     // 다른 창(팝업 등)이 hydrate하여 노란 pending 상태 동기화 — 송신자는 excludeSenderId로 제외
     await window.electronAPI?.vacationBroadcastPendingChanged?.();
   },
   remove: async (pendingId) => {
-    const next = get().pending.filter((p) => p.pendingId !== pendingId);
+    const prev = get().pending;
+    const next = prev.filter((p) => p.pendingId !== pendingId);
     set({ pending: next });
-    await window.electronAPI?.vacationPendingSave?.(next);
+    const result = await window.electronAPI?.vacationPendingSave?.(next);
+    if (result && (result as { ok: boolean }).ok === false) {
+      set({ pending: prev });
+      throw new Error('pending 저장 실패: 디스크 쓰기 실패');
+    }
     await window.electronAPI?.vacationBroadcastPendingChanged?.();
   },
   clearStale: async (olderThanMs) => {
     const now = Date.now();
-    const stale = get().pending.filter((p) => now - p.createdAt >= olderThanMs);
+    const prev = get().pending;
+    const stale = prev.filter((p) => now - p.createdAt >= olderThanMs);
     if (stale.length === 0) return [];
-    const next = get().pending.filter((p) => now - p.createdAt < olderThanMs);
+    const next = prev.filter((p) => now - p.createdAt < olderThanMs);
     set({ pending: next });
-    await window.electronAPI?.vacationPendingSave?.(next);
+    const result = await window.electronAPI?.vacationPendingSave?.(next);
+    if (result && (result as { ok: boolean }).ok === false) {
+      set({ pending: prev });
+      throw new Error('pending 저장 실패: 디스크 쓰기 실패');
+    }
     await window.electronAPI?.vacationBroadcastPendingChanged?.();
     return stale;
   },
