@@ -113,6 +113,16 @@ export function VacationRegisterModal({
       return;
     }
 
+    // pending 제거 헬퍼: 실패해도 후속 broadcast/onSubmitEnd 실행을 막지 않음
+    // (pending-store 쓰기 자체가 실패한 경우 두 번째 remove도 throw할 수 있어 가드 필수)
+    const safeRemovePending = async (label: string) => {
+      try {
+        await useVacationPendingStore.getState().remove(pendingId);
+      } catch (e) {
+        console.warn(`[vacation] ${label} pending 제거 실패:`, e);
+      }
+    };
+
     try {
       const result = await submitVacation({
         name: userName,
@@ -124,7 +134,7 @@ export function VacationRegisterModal({
 
       if (result.ok && result.success) {
         // pending 제거 → 모든 창에 완료 브로드캐스트
-        await useVacationPendingStore.getState().remove(pendingId);
+        await safeRemovePending('성공 후');
         await window.electronAPI?.vacationBroadcastRegistered?.({ name: userName, type });
         invalidateVacationCache();
         // GAS 파이프라인 완전 완료 후 데이터 갱신 (8초 후)
@@ -135,13 +145,13 @@ export function VacationRegisterModal({
       } else {
         // D3: 등록 실패 상세 알림 — critical 토스트로 강조
         const errorMsg = result.error || result.state || '알 수 없는 오류';
-        await useVacationPendingStore.getState().remove(pendingId);
+        await safeRemovePending('실패 응답 후');
         await window.electronAPI?.vacationBroadcastFailed?.({ name: userName, error: errorMsg });
         onSubmitEnd?.();
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await useVacationPendingStore.getState().remove(pendingId);
+      await safeRemovePending('예외 후');
       await window.electronAPI?.vacationBroadcastFailed?.({ name: userName, error: errorMsg });
       onSubmitEnd?.();
     }
