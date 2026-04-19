@@ -1166,7 +1166,13 @@ ipcMain.handle('vacation:pending:load', () => {
   try {
     const file = getPendingVacationsPath();
     if (!fs.existsSync(file)) return [];
-    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    // 파일이 유효 JSON이지만 배열이 아닌 경우(파손 후 수동 편집 등) downstream crash 방어
+    if (!Array.isArray(parsed)) {
+      console.warn('[vacation] pending 파일이 배열 형태가 아님 — 빈 배열로 fallback');
+      return [];
+    }
+    return parsed;
   } catch (err) {
     console.warn('[vacation] pending 로드 실패:', err);
     return [];
