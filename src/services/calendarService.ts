@@ -384,6 +384,17 @@ export async function deleteEvent(eventId: string): Promise<void> {
   if (!existing) return;
   const actualId = existing.id; // GCal ID
 
+  // 로컬 전용 이벤트(GCal에 저장되지 않은 legacy 이벤트)는 캐시에서만 제거
+  // sourceCalendarId 부재 = GCal과 연동되지 않은 이벤트 (calendarService.ts:229 참고)
+  // cal_ prefix ID도 GCal 저장 전이거나 GCal 동기화가 실패한 로컬 전용 상태
+  const isLocalOnly = !existing.sourceCalendarId || actualId.startsWith('cal_');
+  if (isLocalOnly) {
+    eventCache = eventCache.filter((e) => e.id !== actualId);
+    localToGcalId.delete(eventId);
+    broadcastCalendarChange({ eventId: actualId, action: 'delete' });
+    return;
+  }
+
   // 원본 캘린더 ID 우선 사용
   const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
   if (!calId) return;
