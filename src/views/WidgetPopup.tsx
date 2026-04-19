@@ -163,23 +163,27 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
   }, []);
 
   // ─── 휴가 등록 완료 브로드캐스트 구독 → Sonner 토스트 ─────
+  // hydrate() 재호출: 메인 창이 pending을 제거했을 수 있으므로 디스크에서 최신 목록 재로드
   useEffect(() => {
     const cleanup = window.electronAPI?.onVacationRegistered?.((payload) => {
       const p = payload as { name?: string; type?: string } | undefined;
       const who = p?.name ? `${p.name} ` : '';
       const what = p?.type ? ` (${p.type})` : '';
       sonnerToast.success(`${who}휴가 등록 완료${what}`);
+      useVacationPendingStore.getState().hydrate();
     });
     return () => { cleanup?.(); };
   }, []);
 
   // ─── 휴가 등록 실패 브로드캐스트 구독 ─────────────
+  // hydrate() 재호출: 실패 시에도 메인 창이 pending을 제거했을 수 있음
   useEffect(() => {
     const cleanup = window.electronAPI?.onVacationFailed?.((payload) => {
       const p = payload as { name?: string; error?: string } | undefined;
       const who = p?.name ? `${p.name} ` : '';
       const err = p?.error ?? '알 수 없는 오류';
       sonnerToast.error(`${who}휴가 등록 실패: ${err}`, { duration: 10000 });
+      useVacationPendingStore.getState().hydrate();
     });
     return () => { cleanup?.(); };
   }, []);
