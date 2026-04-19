@@ -299,6 +299,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sessionBroadcastChange: (payload?: unknown) =>
     ipcRenderer.invoke('session:broadcast-change', payload),
 
+  // 구독 등록 후 메인에 현재 세션 재전송 요청 (ready-to-show 타이밍 miss 방어)
+  sessionRequestCurrent: () =>
+    ipcRenderer.invoke('session:request-current'),
+
   onSessionChanged: (callback: (payload: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on('session:changed', listener);

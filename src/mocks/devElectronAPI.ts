@@ -161,6 +161,7 @@ export function installDevElectronAPI(): void {
     preferencesBroadcastChange: async () => ({ ok: true }),
     onPreferencesChanged: noop,
     sessionBroadcastChange: async () => ({ ok: true }),
+    sessionRequestCurrent: async () => ({ ok: true }),
     onSessionChanged: noop,
     themeBroadcastChange: async () => ({ ok: true }),
     onThemeChanged: noop,

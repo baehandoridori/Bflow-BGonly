@@ -203,6 +203,8 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       const { user } = (payload as { user: AppUser | null }) ?? {};
       useAuthStore.getState().setCurrentUser(user ?? null);
     });
+    // 구독 등록 직후 메인에 현재 세션 재전송 요청 — ready-to-show 타이밍 miss 방어 (이중 안전망)
+    window.electronAPI?.sessionRequestCurrent?.();
     return () => { cleanup?.(); };
   }, []);
 

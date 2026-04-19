@@ -1133,6 +1133,15 @@ ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
   return { ok: true };
 });
 
+// 팝업이 onSessionChanged 구독 등록 후 명시적으로 재전송을 요청 — ready-to-show 타이밍 miss 방어.
+// event.sender.send로 요청한 창에만 전송 (broadcast 아님). lastKnownSession이 null이면 무응답.
+ipcMain.handle('session:request-current', (event) => {
+  if (lastKnownSession !== null) {
+    event.sender.send('session:changed', lastKnownSession);
+  }
+  return { ok: true };
+});
+
 ipcMain.handle('theme:broadcast-change', (_event, payload: unknown) => {
   broadcastToAllWindows('theme:changed', payload);
   return { ok: true };

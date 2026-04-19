@@ -466,6 +466,7 @@ export interface ElectronAPI {
   preferencesBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
   onPreferencesChanged: (cb: (payload: unknown) => void) => () => void;
   sessionBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
+  sessionRequestCurrent: () => Promise<{ ok: boolean }>;
   onSessionChanged: (cb: (payload: unknown) => void) => () => void;
   themeBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
   onThemeChanged: (cb: (payload: unknown) => void) => () => void;
