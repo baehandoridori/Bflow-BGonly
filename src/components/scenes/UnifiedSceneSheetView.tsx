@@ -384,7 +384,7 @@ export function UnifiedSceneSheetView({
       setRangeEnd(null);
       setIsDragging(true);
     }
-    tableRef.current?.focus();
+    tableRef.current?.focus({ preventScroll: true });
   }, [anchor]);
 
   const handleCellMouseEnter = useCallback((row: number, col: number) => {
@@ -401,7 +401,7 @@ export function UnifiedSceneSheetView({
   const handleStopEditing = useCallback(() => {
     setEditingCell(null);
     setInitialEditChar(null);
-    tableRef.current?.focus();
+    tableRef.current?.focus({ preventScroll: true });
   }, []);
 
   // 필드 저장 헬퍼: col에 따라 올바른 sheetName/sceneIndex 결정
