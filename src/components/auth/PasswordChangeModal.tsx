@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import { X, Check } from 'lucide-react';
+import { X, Check, AlertTriangle } from 'lucide-react';
 import { changePassword, loadUsers } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useCapsLockWarning } from '@/hooks/useCapsLockWarning';
 
 export function PasswordChangeModal() {
   const { currentUser, setCurrentUser, setShowPasswordChange, setUsers } = useAuthStore();
@@ -10,6 +11,7 @@ export function PasswordChangeModal() {
   const [confirmPw, setConfirmPw] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const capsLock = useCapsLockWarning();
 
   const passwordsMatch = newPw.length > 0 && newPw === confirmPw;
 
@@ -54,6 +56,12 @@ export function PasswordChangeModal() {
           </button>
         </div>
 
+        {capsLock.isCapsLockOn && (
+          <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-400 flex items-center gap-1.5">
+            <AlertTriangle size={12} /> Caps Lock이 켜져 있습니다
+          </div>
+        )}
+
         {/* 현재 비밀번호 */}
         <div className="flex flex-col gap-1">
           <label className="text-xs text-text-secondary">현재 비밀번호</label>
@@ -61,6 +69,8 @@ export function PasswordChangeModal() {
             type="password"
             value={currentPw}
             onChange={(e) => setCurrentPw(e.target.value)}
+            onKeyDown={capsLock.onKeyDown}
+            onKeyUp={capsLock.onKeyUp}
             autoFocus
             className="bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
           />
@@ -73,6 +83,8 @@ export function PasswordChangeModal() {
             type="password"
             value={newPw}
             onChange={(e) => setNewPw(e.target.value)}
+            onKeyDown={capsLock.onKeyDown}
+            onKeyUp={capsLock.onKeyUp}
             className="bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
           />
         </div>
@@ -84,6 +96,8 @@ export function PasswordChangeModal() {
             type="password"
             value={confirmPw}
             onChange={(e) => setConfirmPw(e.target.value)}
+            onKeyDown={capsLock.onKeyDown}
+            onKeyUp={capsLock.onKeyUp}
             className="bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
           />
           {passwordsMatch && (

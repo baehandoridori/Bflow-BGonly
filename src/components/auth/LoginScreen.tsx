@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LogIn, ChevronRight } from 'lucide-react';
+import { LogIn, ChevronRight, AlertTriangle } from 'lucide-react';
 import { login } from '@/services/userService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { getPreset } from '@/themes';
 import { cn } from '@/utils/cn';
+import { useCapsLockWarning } from '@/hooks/useCapsLockWarning';
 
 // ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
@@ -570,6 +571,7 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe
   const nameRef = useRef<HTMLInputElement>(null);
   const colorMode = useAppStore((s) => s.colorMode);
   const isLight = colorMode === 'light';
+  const capsLock = useCapsLockWarning();
 
   useEffect(() => {
     const timer = setTimeout(() => nameRef.current?.focus(), 400);
@@ -649,6 +651,8 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={capsLock.onKeyDown}
+          onKeyUp={capsLock.onKeyUp}
           placeholder="비밀번호 입력"
           className={cn(
             'rounded-xl px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/50 transition-all duration-200',
@@ -657,6 +661,12 @@ function LoginForm({ onLogin }: { onLogin: (name: string, pw: string, rememberMe
               : 'bg-white/[0.04] border border-white/[0.08] focus:bg-white/[0.06]',
           )}
         />
+        {capsLock.isCapsLockOn && (
+          <div className="mt-1 text-[11px] text-amber-400 flex items-center gap-1">
+            <AlertTriangle size={12} />
+            Caps Lock이 켜져 있습니다
+          </div>
+        )}
         <p className="text-[11px] text-text-secondary/60 leading-relaxed">
           최초 비밀번호는 1234<br />
           모르겠으면 배씨에게 문의
