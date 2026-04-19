@@ -262,7 +262,7 @@ export function AssigneeView() {
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setSelectedAssignee, setHighlightSceneId } = useAppStore();
-  const [sortBy, setSortBy] = useState<SortOption>('scenes');
+  const [sortBy, setSortBy] = useState<SortOption>('seniority');
   const [sortAsc, setSortAsc] = useState(false);
 
   const assignees = useMemo(() => {
