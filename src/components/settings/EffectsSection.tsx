@@ -297,6 +297,8 @@ function Slider({ label, value, min, max, step, defaultVal, onChange }: {
 async function persistPlexus(plexus: typeof DEFAULTS) {
   const existing = await loadPreferences() ?? {};
   await savePreferences({ ...existing, plexus });
+  // 다른 창(플로팅 위젯 포함)에 실시간 전파
+  window.electronAPI?.preferencesBroadcastChange?.({ plexus });
 }
 
 /* ── 메인 섹션 ── */
