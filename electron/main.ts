@@ -1194,13 +1194,16 @@ ipcMain.handle('vacation:pending:save', (_e, list: unknown) => {
   return pendingSaveChain;
 });
 
-ipcMain.handle('vacation:broadcast-registered', (_e, payload: unknown) => {
-  broadcastToAllWindows('vacation:registered', payload);
+// 송신자 제외(excludeSenderId): 현재 창은 VacationRegisterModal에서 로컬 setToast로
+// 즉시 피드백하므로, 자기 자신이 broadcast를 받아 Sonner 토스트를 중복 표시하는 것을 방지.
+// dev/test 모드에서도 로컬 setToast가 동작하여 사용자 피드백 보장.
+ipcMain.handle('vacation:broadcast-registered', (event, payload: unknown) => {
+  broadcastToAllWindows('vacation:registered', payload, event.sender.id);
   return { ok: true };
 });
 
-ipcMain.handle('vacation:broadcast-failed', (_e, payload: unknown) => {
-  broadcastToAllWindows('vacation:failed', payload);
+ipcMain.handle('vacation:broadcast-failed', (event, payload: unknown) => {
+  broadcastToAllWindows('vacation:failed', payload, event.sender.id);
   return { ok: true };
 });
 

@@ -135,8 +135,11 @@ export function VacationRegisterModal({
       });
 
       if (result.ok && result.success) {
-        // pending 제거 → 모든 창에 완료 브로드캐스트
+        // pending 제거 → 로컬 즉시 피드백 + 다른 창에 완료 브로드캐스트
+        // 로컬 setToast: 현재 창 즉시 피드백 (dev/test 모드 포함).
+        // broadcast는 `excludeSenderId` 적용으로 다른 창만 수신 → 중복 토스트 없음.
         await safeRemovePending('성공 후');
+        setToast({ message: `${userName} 휴가 등록 완료 (${type})`, type: 'success' });
         await window.electronAPI?.vacationBroadcastRegistered?.({ name: userName, type });
         invalidateVacationCache();
         // GAS 파이프라인 완전 완료 후 데이터 갱신 (8초 후)
@@ -148,12 +151,14 @@ export function VacationRegisterModal({
         // D3: 등록 실패 상세 알림 — critical 토스트로 강조
         const errorMsg = result.error || result.state || '알 수 없는 오류';
         await safeRemovePending('실패 응답 후');
+        setToast({ message: `휴가 등록 실패: ${errorMsg}`, type: 'critical' });
         await window.electronAPI?.vacationBroadcastFailed?.({ name: userName, error: errorMsg });
         onSubmitEnd?.();
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       await safeRemovePending('예외 후');
+      setToast({ message: `휴가 등록 실패: ${errorMsg}`, type: 'critical' });
       await window.electronAPI?.vacationBroadcastFailed?.({ name: userName, error: errorMsg });
       onSubmitEnd?.();
     }
