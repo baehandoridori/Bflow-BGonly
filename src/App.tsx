@@ -28,10 +28,10 @@ import { invalidatePartCache } from '@/services/commentService';
 import { invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
-import { loadLayout, loadPreferences, loadTheme, saveTheme } from '@/services/settingsService';
+import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, DEFAULT_THEME_ID } from '@/themes';
-import { applyPreferencesToDOM } from '@/utils/typography';
+import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
@@ -628,6 +628,40 @@ export default function App() {
       customColors: customThemeColors ?? null,
     });
   }, [themeId, customThemeColors, colorMode]);
+
+  // 비-custom 폰트 색상 프리셋 사용 시: 테마/모드/커스텀색 변경에 따라 카테고리 색상 재계산·저장·broadcast
+  // FontColorSection은 settings 'font' 탭이 열렸을 때만 마운트되므로,
+  // 사용자가 다른 탭에서 테마를 바꾸면 stale fontCategoryColors가 디스크에 남는 문제 해결.
+  useEffect(() => {
+    if (!themeInitRef.current) return; // 초기 로드는 skip
+    (async () => {
+      try {
+        const prefs = await loadPreferences();
+        const preset = prefs?.fontColorPreset;
+        if (!preset || preset === 'custom') return; // custom은 사용자 지정값 유지
+        const themeColors =
+          customThemeColors
+            ?? (colorMode === 'light' ? getLightColors(themeId) : getPreset(themeId)?.colors);
+        if (!themeColors) return;
+        const primary = themeColors.textPrimary;
+        const secondary = themeColors.textSecondary;
+        const accentSub = themeColors.accentSub;
+        const nextColors = FONT_COLOR_PRESETS[preset].getColors(primary, secondary, accentSub);
+        applyTextColors(nextColors);
+        await savePreferences({
+          ...(prefs ?? {}),
+          fontColorPreset: preset,
+          fontCategoryColors: nextColors,
+        });
+        window.electronAPI?.preferencesBroadcastChange?.({
+          fontColorPreset: preset,
+          fontCategoryColors: nextColors,
+        });
+      } catch (err) {
+        console.warn('[font-color] 테마 변경에 따른 재계산 실패:', err);
+      }
+    })();
+  }, [themeId, colorMode, customThemeColors]);
 
   // 초기화 완료 후 데이터 로드
   // authReady 가드: init 완료 전까지 데이터 로딩 방지 (플래시 제거)

@@ -64,30 +64,17 @@ export function FontColorSection() {
 
   // 테마/컬러모드/커스텀 색상이 변경되면 현재 preset 기준으로 카테고리 색 재계산·적용
   // loadPreferences 완료 전에는 skip → 저장된 custom 색이 기본값으로 플래시되는 것 방지
+  //
+  // 저장(savePreferences) 및 broadcast(preferencesBroadcastChange)는 App.tsx의 전역 effect가
+  // 담당. 이 컴포넌트는 'font' 탭이 열렸을 때만 마운트되므로, 여기서 저장하면 다른 탭에서
+  // 테마를 바꿨을 때 stale fontCategoryColors가 디스크에 남는 문제 발생.
+  // 여기서는 로컬 state(colors) 동기화 + 즉시 DOM 반영(applyTextColors)만 담당.
   useEffect(() => {
     if (!hasLoaded) return;
     if (preset === 'custom') return; // custom은 사용자가 직접 지정한 값 유지
     const nextColors = FONT_COLOR_PRESETS[preset].getColors(primary, secondary, accentSub);
     setColors(nextColors);
     applyTextColors(nextColors);
-    // 재계산된 색상을 디스크에 영속화 — 앱 재시작 후에도 현재 테마 기준 색상 유지
-    // (이전에는 session-only 였기 때문에 재시작 시 stale 색상으로 되돌아감)
-    (async () => {
-      try {
-        const prev = (await loadPreferences()) ?? {};
-        await savePreferences({
-          ...prev,
-          fontColorPreset: preset,
-          fontCategoryColors: nextColors,
-        });
-        window.electronAPI?.preferencesBroadcastChange?.({
-          fontColorPreset: preset,
-          fontCategoryColors: nextColors,
-        });
-      } catch (err) {
-        console.warn('[font-color] 재계산 색상 저장 실패:', err);
-      }
-    })();
   }, [hasLoaded, preset, primary, secondary, accentSub]);
 
   // 프리셋 변경
