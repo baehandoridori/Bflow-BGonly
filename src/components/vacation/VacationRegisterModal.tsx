@@ -89,7 +89,9 @@ export function VacationRegisterModal({
     onClose();
 
     // 낙관적 pending 이벤트 추가 (위젯/캘린더에 노란색으로 즉시 표시)
+    // pending 저장 실패는 optimistic UI 문제일 뿐 — 실제 등록 API는 계속 진행해야 함
     const pendingId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let pendingAdded = true;
     try {
       await useVacationPendingStore.getState().add({
         name: userName,
@@ -102,20 +104,20 @@ export function VacationRegisterModal({
         createdAt: Date.now(),
       });
     } catch (addErr) {
-      // pending 저장 자체가 실패 (IPC/디스크 쓰기 등) — 사용자에게 피드백 필수
-      const errorMsg = addErr instanceof Error ? addErr.message : String(addErr);
-      console.error('[vacation] pending 저장 실패:', addErr);
+      // pending 저장 실패 — optimistic 표시만 생략, 실제 등록은 계속 진행
+      pendingAdded = false;
+      console.warn('[vacation] pending 저장 실패 — 등록은 계속 진행:', addErr);
       setToast({
-        message: `휴가 등록 준비 중 오류: ${errorMsg}`,
-        type: 'critical',
+        message: '로컬 캐시 저장 실패 — 등록은 계속 진행됩니다.',
+        type: 'warning',
       });
-      onSubmitEnd?.();
-      return;
     }
 
     // pending 제거 헬퍼: 실패해도 후속 broadcast/onSubmitEnd 실행을 막지 않음
     // (pending-store 쓰기 자체가 실패한 경우 두 번째 remove도 throw할 수 있어 가드 필수)
+    // add 성공 시에만 호출 — add 실패 시 remove할 항목 자체가 없음
     const safeRemovePending = async (label: string) => {
+      if (!pendingAdded) return;
       try {
         await useVacationPendingStore.getState().remove(pendingId);
       } catch (e) {
