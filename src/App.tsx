@@ -525,8 +525,16 @@ export default function App() {
       return;
     }
 
-    // 동일 사용자면 스킵 (ID 비교)
-    if (prev?.id === currentUser?.id) return;
+    // 동일 사용자 + 동일 필드면 스킵.
+    // id만 비교하면 같은 유저의 필드 변경(비밀번호 변경, isInitialPassword, role, name 등)이 전파되지 않아
+    // 팝업/위젯 창이 stale currentUser를 유지하게 됨. AppUser는 평탄 data 구조(types/index.ts:114)라
+    // JSON.stringify 동등성으로 안전하게 비교 가능.
+    const isSameUser =
+      (prev === null && currentUser === null) ||
+      (prev != null &&
+        currentUser != null &&
+        JSON.stringify(prev) === JSON.stringify(currentUser));
+    if (isSameUser) return;
 
     window.electronAPI?.sessionBroadcastChange?.({ user: currentUser ?? null });
   }, [currentUser]);
