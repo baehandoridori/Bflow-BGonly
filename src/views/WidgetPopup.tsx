@@ -21,6 +21,7 @@ import { EpDeptComparisonWidget } from '@/components/widgets/episode/EpDeptCompa
 import { EpFullDeptProgressWidget } from '@/components/widgets/episode/EpFullDeptProgressWidget';
 import { EpSinglePartWidget } from '@/components/widgets/episode/EpSinglePartWidget';
 import { WidgetIdContext, IsPopupContext } from '@/components/widgets/Widget';
+import { GradientBackdrop } from '@/components/common/GradientBackdrop';
 import { loadPreferences, loadTheme } from '@/services/settingsService';
 import { loadSession, loadUsers } from '@/services/userService';
 import { applyPreferencesToDOM } from '@/utils/typography';
@@ -70,7 +71,26 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
  * 위젯 팝업 윈도우 전용 렌더러
  * Windows Acrylic 네이티브 블러 + CSS 글래스 틴트 + AOT 핀 + 독 모드
  */
+/**
+ * preferences.plexus → useAppStore.setPlexusSettings 병합 헬퍼.
+ * App.tsx의 동일 로직과 일치시켜 "전체 화면 그라데이션" 토글이 팝업에도 반영되도록 함.
+ */
+function applyPlexusFromPrefs(prefs: Awaited<ReturnType<typeof loadPreferences>> | null): void {
+  if (!prefs?.plexus) return;
+  const p = prefs.plexus;
+  useAppStore.getState().setPlexusSettings({
+    ...(p.loginEnabled !== undefined ? { loginEnabled: p.loginEnabled } : {}),
+    ...(p.loginGradientEnabled !== undefined ? { loginGradientEnabled: p.loginGradientEnabled } : {}),
+    ...(p.dashboardEnabled !== undefined ? { dashboardEnabled: p.dashboardEnabled } : {}),
+    ...(p.dashboardGradientEnabled !== undefined ? { dashboardGradientEnabled: p.dashboardGradientEnabled } : {}),
+    globalGradientEnabled: p.globalGradientEnabled ?? true,
+  });
+}
+
 export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extraParams?: Record<string, string> }) {
+  // 전역 그라데이션 배경 토글 (설정의 "전체 화면 그라데이션"이 플로팅 위젯에도 반영되도록)
+  const globalGradientEnabled = useAppStore((s) => s.plexusSettings.globalGradientEnabled !== false);
+
   const [appOpacity, setAppOpacity] = useState(1);
   const [glassIntensity, setGlassIntensity] = useState(0.7);
   const [showControls, setShowControls] = useState(false);
@@ -147,11 +167,18 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     return () => { cleanup?.(); };
   }, []);
 
-  // 환경설정(글꼴 크기/색상) 변경 브로드캐스트 구독 — 메인 창에서 저장되면 즉시 재적용
+  // 환경설정(글꼴 크기/색상 + 플렉서스) 변경 브로드캐스트 구독 — 메인 창에서 저장되면 즉시 재적용
+  // plexus(globalGradientEnabled 등)는 현재 EffectsSection이 broadcast하지 않지만, 향후 추가 시
+  // WidgetPopup도 자동 반영되도록 미리 재적용 경로 포함.
   useEffect(() => {
     const cleanup = window.electronAPI?.onPreferencesChanged?.(() => {
       loadPreferences()
-        .then((prefs) => { if (prefs) applyPreferencesToDOM(prefs); })
+        .then((prefs) => {
+          if (prefs) {
+            applyPreferencesToDOM(prefs);
+            applyPlexusFromPrefs(prefs);
+          }
+        })
         .catch((err) => console.warn('[설정] 브로드캐스트 재적용 실패', err));
     });
     return () => { cleanup?.(); };
@@ -404,9 +431,12 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
           if (colors) applyTheme(colors, savedMode);
         }
 
-        // 글꼴 크기/색상 적용 (FOUC 방지: 초기 렌더 전에 CSS 변수 세팅)
+        // 글꼴 크기/색상 + 플렉서스 설정 적용 (FOUC 방지: 초기 렌더 전에 CSS 변수 세팅)
         const prefs = await loadPreferences();
-        if (prefs) applyPreferencesToDOM(prefs);
+        if (prefs) {
+          applyPreferencesToDOM(prefs);
+          applyPlexusFromPrefs(prefs);
+        }
 
         const api = window.electronAPI;
         if (!api) { setReady(true); return; }
@@ -655,7 +685,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
   const isRestoring = morphState === 'restoring';
   return (
     <div
-      className="h-screen w-screen flex flex-col overflow-hidden"
+      className="h-screen w-screen flex flex-col overflow-hidden relative"
       style={{
         background: `rgb(var(--color-bg-primary) / ${tintAlpha})`,
         transition: 'background 0.3s ease, opacity 0.35s ease, transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -670,6 +700,8 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
+      {/* 전역 그라데이션 배경 (App.tsx와 동일한 intensity="normal"로 일관성 유지) */}
+      <GradientBackdrop enabled={globalGradientEnabled} intensity="normal" />
       {/* ── 유리 반사 하이라이트 (상단) ── */}
       <div
         className="absolute inset-x-0 top-0 pointer-events-none"
