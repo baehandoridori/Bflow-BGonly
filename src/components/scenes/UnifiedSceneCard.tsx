@@ -45,7 +45,7 @@ export function UnifiedSceneCard({
   const primaryScene = bgScene ?? actScene;
 
   const cardRootRef = useRef<HTMLDivElement>(null);
-  const prevHighlightedRef = useRef(isHighlighted);
+  const prevHighlightedRef = useRef(false);
 
   useEffect(() => {
     if (isHighlighted && !prevHighlightedRef.current) {
