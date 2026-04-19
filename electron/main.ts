@@ -1189,6 +1189,13 @@ ipcMain.handle('vacation:broadcast-failed', (_e, payload: unknown) => {
   return { ok: true };
 });
 
+// pending 상태 변경(add/remove/clearStale) 브로드캐스트 — 다른 창이 hydrate하여 노란색 동기화
+// 송신자 제외(excludeSenderId): 자기 상태를 덮어쓰지 않도록 (이미 set으로 최신)
+ipcMain.handle('vacation:broadcast-pending-changed', (event, payload: unknown) => {
+  broadcastToAllWindows('vacation:pending-changed', payload, event.sender.id);
+  return { ok: true };
+});
+
 // ─── IPC 핸들러: 휴가 관리 (vacation-repo WebApi) ────────────
 
 ipcMain.handle('vacation:connect', async (_event, webAppUrl: string) => {

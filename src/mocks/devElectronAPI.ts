@@ -172,8 +172,10 @@ export function installDevElectronAPI(): void {
     vacationPendingSave: async () => ({ ok: true }),
     vacationBroadcastRegistered: async () => ({ ok: true }),
     vacationBroadcastFailed: async () => ({ ok: true }),
+    vacationBroadcastPendingChanged: async () => ({ ok: true }),
     onVacationRegistered: noop,
     onVacationFailed: noop,
+    onVacationPendingChanged: noop,
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;

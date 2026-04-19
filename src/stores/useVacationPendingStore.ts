@@ -48,11 +48,14 @@ export const useVacationPendingStore = create<Store>((set, get) => ({
     const next = [...get().pending, ev];
     set({ pending: next });
     await window.electronAPI?.vacationPendingSave?.(next);
+    // 다른 창(팝업 등)이 hydrate하여 노란 pending 상태 동기화 — 송신자는 excludeSenderId로 제외
+    await window.electronAPI?.vacationBroadcastPendingChanged?.();
   },
   remove: async (pendingId) => {
     const next = get().pending.filter((p) => p.pendingId !== pendingId);
     set({ pending: next });
     await window.electronAPI?.vacationPendingSave?.(next);
+    await window.electronAPI?.vacationBroadcastPendingChanged?.();
   },
   clearStale: async (olderThanMs) => {
     const now = Date.now();
@@ -61,6 +64,7 @@ export const useVacationPendingStore = create<Store>((set, get) => ({
     const next = get().pending.filter((p) => now - p.createdAt < olderThanMs);
     set({ pending: next });
     await window.electronAPI?.vacationPendingSave?.(next);
+    await window.electronAPI?.vacationBroadcastPendingChanged?.();
     return stale;
   },
 }));

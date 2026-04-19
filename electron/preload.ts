@@ -333,6 +333,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('vacation:broadcast-registered', payload),
   vacationBroadcastFailed: (payload?: unknown) =>
     ipcRenderer.invoke('vacation:broadcast-failed', payload),
+  vacationBroadcastPendingChanged: (payload?: unknown) =>
+    ipcRenderer.invoke('vacation:broadcast-pending-changed', payload),
 
   onVacationRegistered: (callback: (payload: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
@@ -343,5 +345,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
     ipcRenderer.on('vacation:failed', listener);
     return () => ipcRenderer.removeListener('vacation:failed', listener);
+  },
+  onVacationPendingChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('vacation:pending-changed', listener);
+    return () => ipcRenderer.removeListener('vacation:pending-changed', listener);
   },
 });
