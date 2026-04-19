@@ -609,9 +609,16 @@ export default function App() {
   // 테마 broadcast — themeId/colorMode/customThemeColors 중 어느 것이라도 바뀌면 전파
   // 별도 effect로 분리한 이유: 위 effect의 early return(custom 경로 Case A/B/C)을 우회하여
   // 커스텀 accent/sub 변경 시에도 플로팅 위젯에 전파되도록 보장
+  //
+  // payload에 customColors 포함: 팝업이 파일 재로드 없이 즉시 적용 → race 제거
+  // (saveTheme 쓰기 완료 전에 broadcast가 발행될 수 있어, 팝업이 stale 파일을 읽는 문제 방지)
   useEffect(() => {
     if (!themeInitRef.current) return; // 초기 로드는 제외
-    window.electronAPI?.themeBroadcastChange?.({ themeId, colorMode });
+    window.electronAPI?.themeBroadcastChange?.({
+      themeId,
+      colorMode,
+      customColors: customThemeColors ?? null,
+    });
   }, [themeId, customThemeColors, colorMode]);
 
   // 초기화 완료 후 데이터 로드
@@ -904,6 +911,15 @@ export default function App() {
       const who = p?.name ? `${p.name} ` : '';
       const err = p?.error ?? '알 수 없는 오류';
       sonnerToast.error(`${who}휴가 등록 실패: ${err}`, { duration: 10000 });
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
+  // ─── pending 변경 브로드캐스트 구독 → hydrate (다른 창에서 add/remove/clearStale 시 동기화) ──
+  // 송신자는 메인에서 excludeSenderId로 제외되므로 자기 상태를 덮어쓰지 않음
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationPendingChanged?.(() => {
+      useVacationPendingStore.getState().hydrate();
     });
     return () => { cleanup?.(); };
   }, []);

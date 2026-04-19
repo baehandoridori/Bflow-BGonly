@@ -32,7 +32,7 @@ import { loadVacationConfig, connectVacation } from '@/services/vacationService'
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import type { Episode, AppUser } from '@/types';
-import { getPreset, getLightColors, applyTheme } from '@/themes';
+import { getPreset, getLightColors, applyTheme, type ThemeColors } from '@/themes';
 import { DEFAULT_GAS_IMAGE_URL } from '@/config';
 
 // 모듈 레벨 쿨다운: dataNotifyChange 호출 시 자체 변경 감지
@@ -188,6 +188,15 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     return () => { cleanup?.(); };
   }, []);
 
+  // pending 변경 브로드캐스트 구독 → hydrate (다른 창에서 add/remove/clearStale 시 동기화)
+  // 송신자는 메인에서 excludeSenderId로 제외 (자기 상태 덮어쓰기 방지)
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onVacationPendingChanged?.(() => {
+      useVacationPendingStore.getState().hydrate();
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
   // 세션 변경 브로드캐스트 구독 — 메인 창 로그인/로그아웃 시 currentUser 즉시 동기화
   useEffect(() => {
     const cleanup = window.electronAPI?.onSessionChanged?.((payload) => {
@@ -198,23 +207,31 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
   }, []);
 
   // 테마 변경 브로드캐스트 구독 — 메인 창에서 테마 바뀌면 즉시 재적용
+  // payload를 직접 적용 (파일 재로드 X) — saveTheme 완료 전 broadcast 수신 시 stale 파일 읽는 race 방지
   useEffect(() => {
-    const cleanup = window.electronAPI?.onThemeChanged?.(() => {
-      (async () => {
-        try {
-          const saved = await loadTheme();
-          if (!saved) return;
-          const savedMode = saved.colorMode ?? 'dark';
-          useAppStore.getState().setThemeId(saved.themeId);
-          useAppStore.getState().setColorMode(savedMode);
-          if (saved.customColors) useAppStore.getState().setCustomThemeColors(saved.customColors);
-          const colors = saved.customColors
-            ?? (savedMode === 'light' ? getLightColors(saved.themeId) : getPreset(saved.themeId)?.colors);
-          if (colors) applyTheme(colors, savedMode);
-        } catch (err) {
-          console.warn('[theme] 재적용 실패:', err);
-        }
-      })();
+    const cleanup = window.electronAPI?.onThemeChanged?.((payload) => {
+      try {
+        const data = payload as {
+          themeId?: string;
+          colorMode?: 'dark' | 'light';
+          customColors?: ThemeColors | null;
+        } | null;
+        if (!data) return;
+        const nextThemeId = data.themeId;
+        const nextMode = data.colorMode ?? 'dark';
+        const nextCustom = data.customColors ?? null;
+        if (!nextThemeId) return;
+
+        useAppStore.getState().setThemeId(nextThemeId);
+        useAppStore.getState().setColorMode(nextMode);
+        useAppStore.getState().setCustomThemeColors(nextCustom);
+
+        const colors = nextCustom
+          ?? (nextMode === 'light' ? getLightColors(nextThemeId) : getPreset(nextThemeId)?.colors);
+        if (colors) applyTheme(colors, nextMode);
+      } catch (err) {
+        console.warn('[theme] broadcast 적용 실패:', err);
+      }
     });
     return () => { cleanup?.(); };
   }, []);
