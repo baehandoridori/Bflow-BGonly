@@ -604,8 +604,13 @@ export default function App() {
         });
       }
     }
+  }, [themeId, customThemeColors, colorMode]);
 
-    // 다른 창(플로팅 위젯)에도 테마 변경 전파 — loadTheme으로 재적용 유도
+  // 테마 broadcast — themeId/colorMode/customThemeColors 중 어느 것이라도 바뀌면 전파
+  // 별도 effect로 분리한 이유: 위 effect의 early return(custom 경로 Case A/B/C)을 우회하여
+  // 커스텀 accent/sub 변경 시에도 플로팅 위젯에 전파되도록 보장
+  useEffect(() => {
+    if (!themeInitRef.current) return; // 초기 로드는 제외
     window.electronAPI?.themeBroadcastChange?.({ themeId, colorMode });
   }, [themeId, customThemeColors, colorMode]);
 
