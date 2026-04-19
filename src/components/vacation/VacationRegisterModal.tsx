@@ -90,16 +90,28 @@ export function VacationRegisterModal({
 
     // 낙관적 pending 이벤트 추가 (위젯/캘린더에 노란색으로 즉시 표시)
     const pendingId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    await useVacationPendingStore.getState().add({
-      name: userName,
-      type,
-      startDate,
-      endDate,
-      reason,
-      status: 'pending',
-      pendingId,
-      createdAt: Date.now(),
-    });
+    try {
+      await useVacationPendingStore.getState().add({
+        name: userName,
+        type,
+        startDate,
+        endDate,
+        reason,
+        status: 'pending',
+        pendingId,
+        createdAt: Date.now(),
+      });
+    } catch (addErr) {
+      // pending 저장 자체가 실패 (IPC/디스크 쓰기 등) — 사용자에게 피드백 필수
+      const errorMsg = addErr instanceof Error ? addErr.message : String(addErr);
+      console.error('[vacation] pending 저장 실패:', addErr);
+      setToast({
+        message: `휴가 등록 준비 중 오류: ${errorMsg}`,
+        type: 'critical',
+      });
+      onSubmitEnd?.();
+      return;
+    }
 
     try {
       const result = await submitVacation({
