@@ -305,6 +305,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('session:changed', listener);
   },
 
+  themeBroadcastChange: (payload?: unknown) =>
+    ipcRenderer.invoke('theme:broadcast-change', payload),
+
+  onThemeChanged: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('theme:changed', listener);
+    return () => ipcRenderer.removeListener('theme:changed', listener);
+  },
+
   // ─── 휴가 pending 상태 + 브로드캐스트 ─────────────
   vacationPendingLoad: () =>
     ipcRenderer.invoke('vacation:pending:load'),

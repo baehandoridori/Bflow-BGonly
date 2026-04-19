@@ -1123,6 +1123,11 @@ ipcMain.handle('session:broadcast-change', (_event, payload: unknown) => {
   return { ok: true };
 });
 
+ipcMain.handle('theme:broadcast-change', (_event, payload: unknown) => {
+  broadcastToAllWindows('theme:changed', payload);
+  return { ok: true };
+});
+
 // ─── IPC 핸들러: 휴가 pending 상태 파일 I/O + 브로드캐스트 ─────
 
 const PENDING_VACATIONS_FILE = 'pendingVacations.json';

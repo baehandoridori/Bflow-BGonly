@@ -193,6 +193,28 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
     return () => { cleanup?.(); };
   }, []);
 
+  // 테마 변경 브로드캐스트 구독 — 메인 창에서 테마 바뀌면 즉시 재적용
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onThemeChanged?.(() => {
+      (async () => {
+        try {
+          const saved = await loadTheme();
+          if (!saved) return;
+          const savedMode = saved.colorMode ?? 'dark';
+          useAppStore.getState().setThemeId(saved.themeId);
+          useAppStore.getState().setColorMode(savedMode);
+          if (saved.customColors) useAppStore.getState().setCustomThemeColors(saved.customColors);
+          const colors = saved.customColors
+            ?? (savedMode === 'light' ? getLightColors(saved.themeId) : getPreset(saved.themeId)?.colors);
+          if (colors) applyTheme(colors, savedMode);
+        } catch (err) {
+          console.warn('[theme] 재적용 실패:', err);
+        }
+      })();
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
   // 저장된 opacity/AOT 복원 (Phase 0-6)
   useEffect(() => {
     window.electronAPI?.widgetGetSavedState?.(widgetId).then((saved) => {

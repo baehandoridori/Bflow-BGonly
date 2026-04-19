@@ -604,6 +604,9 @@ export default function App() {
         });
       }
     }
+
+    // 다른 창(플로팅 위젯)에도 테마 변경 전파 — loadTheme으로 재적용 유도
+    window.electronAPI?.themeBroadcastChange?.({ themeId, colorMode });
   }, [themeId, customThemeColors, colorMode]);
 
   // 초기화 완료 후 데이터 로드
