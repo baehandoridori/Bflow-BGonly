@@ -4,6 +4,7 @@ import { Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
+import { getSeniorityIndex } from '@/utils/seniorityOrder';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Episode, Department, Stage } from '@/types';
 import { cn } from '@/utils/cn';
@@ -252,7 +253,7 @@ function AssigneeCard({ data, onClickScene }: { data: AssigneeData; onClickScene
 /* ────────────────────────────────────────────────
    정렬 옵션
    ──────────────────────────────────────────────── */
-type SortOption = 'name' | 'scenes' | 'progress';
+type SortOption = 'name' | 'scenes' | 'progress' | 'seniority';
 
 /* ────────────────────────────────────────────────
    메인 뷰
@@ -261,7 +262,7 @@ export function AssigneeView() {
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setSelectedAssignee, setHighlightSceneId } = useAppStore();
-  const [sortBy, setSortBy] = useState<SortOption>('scenes');
+  const [sortBy, setSortBy] = useState<SortOption>('seniority');
   const [sortAsc, setSortAsc] = useState(false);
 
   const assignees = useMemo(() => {
@@ -272,6 +273,7 @@ export function AssigneeView() {
         case 'name': cmp = a.name.localeCompare(b.name, 'ko'); break;
         case 'scenes': cmp = a.totalScenes - b.totalScenes; break;
         case 'progress': cmp = a.avgPct - b.avgPct; break;
+        case 'seniority': cmp = getSeniorityIndex(b.name) - getSeniorityIndex(a.name); break;
       }
       return sortAsc ? cmp : -cmp;
     });
@@ -324,6 +326,7 @@ export function AssigneeView() {
             { key: 'name' as SortOption, label: '이름' },
             { key: 'scenes' as SortOption, label: '씬 수' },
             { key: 'progress' as SortOption, label: '진행률' },
+            { key: 'seniority' as SortOption, label: '짬순' },
           ]).map(({ key, label }) => (
             <button
               key={key}
