@@ -226,34 +226,11 @@ export async function syncAll(): Promise<CalendarEvent[]> {
   // legacy 로컬 이벤트를 먼저 로드 (syncAll이 getEvents보다 먼저 호출될 수 있으므로)
   await loadLegacyEvents();
 
-  const settings = await getGCalSettings();
   const seen = new Set<string>();
   const events: CalendarEvent[] = [];
 
-  // 팀/개인 캘린더 목록 (중복 제거)
-  // personalCalendarId가 미설정이면 'primary' 폴백 (getTargetCalendar과 일치)
-  const calIds = new Set<string>();
-  if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
-  calIds.add(settings.personalCalendarId || 'primary');
-
-  // Google Calendar fullSync — 네트워크/인증 실패로 throw 되어도 뒤의 비공개 이벤트 로드를
-  // 막지 않도록 각 calId 호출을 개별 try/catch 로 감싼다. 오프라인 또는 토큰 만료 상태에서도
-  // 비공개(Supabase 전용) 일정은 정상 표시되어야 한다.
-  for (const calId of calIds) {
-    try {
-      const gcalEvents = await gcalService.fullSync(calId);
-      for (const e of gcalEvents) {
-        if (e.id && !seen.has(e.id)) {
-          seen.add(e.id);
-          events.push(toCalendarEvent(e, calId));
-        }
-      }
-    } catch (err) {
-      console.warn(`[Calendar] Google fullSync 실패 (${calId}) — 비공개 이벤트 로드는 계속 진행:`, err);
-    }
-  }
-
-  // 비공개 이벤트 (Supabase, Google Calendar 비연동) — 현재 사용자 본인 것만 로드
+  // 비공개 이벤트 (Supabase, Google Calendar 비연동) — Google 동기화보다 먼저 로드해
+  // Google 인증/네트워크/설정 실패로 syncAll 이 조기 종료되어도 개인 일정은 반드시 표시되게 한다.
   try {
     const userId = useAuthStore.getState().currentUser?.id;
     if (userId) {
@@ -267,6 +244,32 @@ export async function syncAll(): Promise<CalendarEvent[]> {
     }
   } catch (err) {
     console.warn('[Calendar] 비공개 이벤트 로드 실패:', err);
+  }
+
+  // 팀/개인 캘린더 목록 — 설정 조회 실패 시에도 비공개 이벤트는 이미 위에서 로드됨
+  const calIds = new Set<string>();
+  try {
+    const settings = await getGCalSettings();
+    if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
+    calIds.add(settings.personalCalendarId || 'primary');
+  } catch (err) {
+    console.warn('[Calendar] GCal 설정 조회 실패 — 공개 일정 동기화 건너뜀:', err);
+  }
+
+  // Google Calendar fullSync — 각 calId 를 개별 try/catch 로 감싸 한 캘린더 실패가
+  // 다른 캘린더 로드를 막지 않게 한다.
+  for (const calId of calIds) {
+    try {
+      const gcalEvents = await gcalService.fullSync(calId);
+      for (const e of gcalEvents) {
+        if (e.id && !seen.has(e.id)) {
+          seen.add(e.id);
+          events.push(toCalendarEvent(e, calId));
+        }
+      }
+    } catch (err) {
+      console.warn(`[Calendar] Google fullSync 실패 (${calId}):`, err);
+    }
   }
 
   // GCal에 없는 이벤트는 캐시에서도 제거 (legacy 로컬 이벤트 미지원)
