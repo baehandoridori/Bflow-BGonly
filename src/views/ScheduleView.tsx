@@ -577,6 +577,8 @@ function EventCreateModal({
   const [endDate, setEndDate] = useState(editEvent?.endDate ?? initialEndDate ?? initialDate ?? today);
   const [color, setColor] = useState<string>(editEvent?.color ?? EVENT_COLORS[0]);
   const [evType, setEvType] = useState<CalendarEventType>(editEvent?.type ?? 'custom');
+  // 비공개 일정 — 같은 도메인(@studiojbbj.com) 동료에게 제목/메모 숨김
+  const [isPrivate, setIsPrivate] = useState<boolean>(!!editEvent?.isPrivate);
 
   // 연결 항목
   const [linkedEp, setLinkedEp] = useState<number | ''>(editEvent?.linkedEpisode ?? '');
@@ -643,6 +645,7 @@ function EventCreateModal({
       linkedSheetName: linkedPart || undefined,
       linkedSceneId: linkedScene || undefined,
       linkedDepartment: partData?.department as 'bg' | 'acting' | undefined,
+      isPrivate,
     });
   };
 
@@ -663,9 +666,10 @@ function EventCreateModal({
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
         className="absolute right-0 top-0 bottom-0 z-50 w-[24rem] max-h-full overflow-y-auto border-l border-bg-border"
         style={{
-          background: 'rgba(26, 29, 39, 0.97)',
+          // 테마 토큰 — 라이트/다크 자동 대응
+          background: 'rgb(var(--color-bg-card) / 0.97)',
           backdropFilter: 'blur(16px)',
-          boxShadow: '-8px 0 32px rgba(0,0,0,0.4)',
+          boxShadow: '-8px 0 32px rgb(var(--color-shadow) / var(--shadow-alpha))',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -823,6 +827,26 @@ function EventCreateModal({
             />
           </div>
 
+          {/* 비공개 일정 토글 — Google Calendar 비연동, 앱(Supabase) 에만 저장 */}
+          <label className="flex items-start gap-2 cursor-pointer select-none bg-bg-primary/50 border border-bg-border/50 rounded-xl p-3">
+            <input
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(e) => setIsPrivate(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded accent-accent cursor-pointer shrink-0"
+            />
+            <div className="flex-1">
+              <div className="text-[11px] font-semibold text-text-primary flex items-center gap-1">
+                🔒 나만 보기
+              </div>
+              <p className="text-[10px] text-text-secondary/70 leading-relaxed mt-0.5">
+                Google Calendar 에 올라가지 않고 이 앱에만 저장됩니다. 동료에게 전혀 노출되지 않아요
+                <br />
+                <span className="text-text-secondary/50">(다른 기기의 B flow 에서는 본인 계정으로 로그인하면 자동 동기화)</span>
+              </p>
+            </div>
+          </label>
+
           {/* 저장 */}
           <button
             onClick={handleSubmit}
@@ -956,7 +980,8 @@ function CalendarGrid({
                     key={di}
                     data-date={dateStr}
                     className={cn(
-                      'bg-bg-primary/50 transition-colors duration-100 cursor-pointer relative border-b border-r border-bg-border/20',
+                      // overflow-hidden — 드래그 중 가상 바가 셀 밖으로 흘러 아래 주에 걸치는 문제 방지
+                      'bg-bg-primary/50 transition-colors duration-100 cursor-pointer relative overflow-hidden border-b border-r border-bg-border/20',
                       isCurMonth ? 'hover:bg-bg-border/15' : 'opacity-30',
                       isToday && 'bg-accent/5',
                       isDropTarget && 'bg-accent/10',
@@ -966,13 +991,13 @@ function CalendarGrid({
                     onClick={() => { if (!isDragging) onDateClick(dateStr); }}
                     onMouseDown={onCellMouseDown ? (e) => onCellMouseDown(e, dateStr) : undefined}
                   >
-                    {/* 드래그 중 가상 이벤트 바 */}
+                    {/* 드래그 중 가상 이벤트 바 — 셀 내부 하단에 고정해서 칸을 넘지 않게 */}
                     {isInDragRange && (
                       <div
                         className="absolute left-0.5 right-0.5 rounded-sm pointer-events-none"
                         style={{
-                          top: `${(Math.max(maxRow, 0)) * 28 + 36}px`,
-                          height: '24px',
+                          bottom: '4px',
+                          height: '22px',
                           background: 'linear-gradient(135deg, rgba(108,92,231,0.3) 0%, rgba(108,92,231,0.15) 100%)',
                           border: '1px dashed rgba(108,92,231,0.6)',
                           borderLeft: di === 0 || !isDateInDragRange?.(fmtDate(addDays(day, -1))) ? '3px solid #6C5CE7' : '1px dashed rgba(108,92,231,0.6)',

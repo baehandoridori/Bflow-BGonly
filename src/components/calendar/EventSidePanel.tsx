@@ -106,6 +106,7 @@ export function EventSidePanel({
   const [draftStart, setDraftStart] = useState(event.startDate);
   const [draftEnd, setDraftEnd] = useState(event.endDate);
   const [draftMemo, setDraftMemo] = useState(event.memo);
+  const [draftPrivate, setDraftPrivate] = useState<boolean>(!!event.isPrivate);
 
   // 이벤트 변경 시 드래프트 리셋
   useEffect(() => {
@@ -113,8 +114,9 @@ export function EventSidePanel({
     setDraftStart(event.startDate);
     setDraftEnd(event.endDate);
     setDraftMemo(event.memo);
+    setDraftPrivate(!!event.isPrivate);
     setEditing(false);
-  }, [event.id, event.title, event.startDate, event.endDate, event.memo]);
+  }, [event.id, event.title, event.startDate, event.endDate, event.memo, event.isPrivate]);
 
   // ESC 닫기
   useEffect(() => {
@@ -126,6 +128,7 @@ export function EventSidePanel({
           setDraftStart(event.startDate);
           setDraftEnd(event.endDate);
           setDraftMemo(event.memo);
+          setDraftPrivate(!!event.isPrivate);
         } else {
           onClose();
         }
@@ -160,6 +163,7 @@ export function EventSidePanel({
       startDate: fromInputDate(draftStart),
       endDate: fromInputDate(draftEnd),
       memo: draftMemo,
+      isPrivate: draftPrivate,
     });
     setEditing(false);
   };
@@ -170,6 +174,7 @@ export function EventSidePanel({
     setDraftStart(event.startDate);
     setDraftEnd(event.endDate);
     setDraftMemo(event.memo);
+    setDraftPrivate(!!event.isPrivate);
     setEditing(false);
   };
 
@@ -207,18 +212,18 @@ export function EventSidePanel({
             <input
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
-              className="w-full bg-[#0F1117] border border-[#2D3041] focus:border-[#6C5CE7]/50 rounded-md px-2 py-1 text-sm font-semibold text-[#E8E8EE] outline-none transition-colors"
+              className="w-full bg-bg-primary border border-bg-border focus:border-accent/50 rounded-md px-2 py-1 text-sm font-semibold text-text-primary outline-none transition-colors"
               autoFocus
             />
           ) : (
-            <h3 className="text-sm font-semibold text-[#E8E8EE] truncate leading-snug">
+            <h3 className="text-sm font-semibold text-text-primary truncate leading-snug">
               {event.title}
             </h3>
           )}
         </div>
         <button
           onClick={onClose}
-          className="p-1 text-[#8B8DA3] hover:text-[#E8E8EE] rounded transition-colors cursor-pointer shrink-0"
+          className="p-1 text-text-secondary hover:text-text-primary rounded transition-colors cursor-pointer shrink-0"
         >
           <X size={14} />
         </button>
@@ -227,31 +232,31 @@ export function EventSidePanel({
       {/* ── 스크롤 바디 ── */}
       <div className="flex-1 overflow-y-auto px-4 pb-4 flex flex-col gap-3">
         {/* 정보 카드 */}
-        <div className="bg-[#0F1117]/60 rounded-lg border border-[#2D3041]/60 p-3 flex flex-col gap-2.5">
+        <div className="bg-bg-primary/60 rounded-lg border border-bg-border/60 p-3 flex flex-col gap-2.5">
           {/* 날짜 */}
           {editing ? (
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] text-[#8B8DA3] font-medium uppercase tracking-wide">
+              <label className="text-[10px] text-text-secondary font-medium uppercase tracking-wide">
                 시작일
               </label>
               <input
                 type="date"
                 value={toInputDate(draftStart)}
                 onChange={(e) => setDraftStart(fromInputDate(e.target.value))}
-                className="w-full bg-[#0F1117] border border-[#2D3041] focus:border-[#6C5CE7]/50 rounded-md px-2 py-1 text-xs text-[#E8E8EE] outline-none transition-colors [color-scheme:dark]"
+                className="w-full bg-bg-primary border border-bg-border focus:border-accent/50 rounded-md px-2 py-1 text-xs text-text-primary outline-none transition-colors"
               />
-              <label className="text-[10px] text-[#8B8DA3] font-medium uppercase tracking-wide mt-1">
+              <label className="text-[10px] text-text-secondary font-medium uppercase tracking-wide mt-1">
                 종료일
               </label>
               <input
                 type="date"
                 value={toInputDate(draftEnd)}
                 onChange={(e) => setDraftEnd(fromInputDate(e.target.value))}
-                className="w-full bg-[#0F1117] border border-[#2D3041] focus:border-[#6C5CE7]/50 rounded-md px-2 py-1 text-xs text-[#E8E8EE] outline-none transition-colors [color-scheme:dark]"
+                className="w-full bg-bg-primary border border-bg-border focus:border-accent/50 rounded-md px-2 py-1 text-xs text-text-primary outline-none transition-colors"
               />
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-[#8B8DA3]">
+            <div className="flex items-center gap-2 text-text-secondary">
               <Clock size={12} className="shrink-0" />
               <span className="text-xs">{formatDateRange(event.startDate, event.endDate)}</span>
               <span
@@ -287,7 +292,7 @@ export function EventSidePanel({
               </span>
             )}
             {linkedLabel && (
-              <span className="text-[10px] text-[#8B8DA3]">{linkedLabel}</span>
+              <span className="text-[10px] text-text-secondary">{linkedLabel}</span>
             )}
             {event.linkedDepartment && (
               <span
@@ -304,11 +309,11 @@ export function EventSidePanel({
 
           {/* 휴가 타입 */}
           {isVacation && event.vacationType && (
-            <div className="flex items-center gap-2 text-[#8B8DA3]">
+            <div className="flex items-center gap-2 text-text-secondary">
               <Palmtree size={12} className="shrink-0 text-emerald-400" />
               <span className="text-xs">{event.vacationType}</span>
               {event.vacationUserName && (
-                <span className="text-xs text-[#8B8DA3]/60">({event.vacationUserName})</span>
+                <span className="text-xs text-text-secondary/60">({event.vacationUserName})</span>
               )}
             </div>
           )}
@@ -316,7 +321,7 @@ export function EventSidePanel({
 
         {/* 메모 */}
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-1.5 text-[#8B8DA3]">
+          <div className="flex items-center gap-1.5 text-text-secondary">
             <FileText size={11} />
             <span className="text-[10px] font-medium uppercase tracking-wide">메모</span>
           </div>
@@ -325,22 +330,52 @@ export function EventSidePanel({
               value={draftMemo}
               onChange={(e) => setDraftMemo(e.target.value)}
               rows={4}
-              className="w-full bg-[#0F1117] border border-[#2D3041] focus:border-[#6C5CE7]/50 rounded-md px-2.5 py-2 text-xs text-[#E8E8EE] outline-none resize-none leading-relaxed transition-colors"
+              className="w-full bg-bg-primary border border-bg-border focus:border-accent/50 rounded-md px-2.5 py-2 text-xs text-text-primary outline-none resize-none leading-relaxed transition-colors"
               placeholder="메모 입력..."
             />
           ) : (
-            <div className="bg-[#0F1117]/40 rounded-md px-2.5 py-2 min-h-[48px]">
-              <p className="text-xs text-[#E8E8EE]/80 leading-relaxed whitespace-pre-wrap">
+            <div className="bg-bg-primary/40 rounded-md px-2.5 py-2 min-h-[48px]">
+              <p className="text-xs text-text-primary/80 leading-relaxed whitespace-pre-wrap">
                 {event.memo || (
-                  <span className="text-[#8B8DA3]/40 italic">메모 없음</span>
+                  <span className="text-text-secondary/40 italic">메모 없음</span>
                 )}
               </p>
             </div>
           )}
         </div>
 
+        {/* 나만 보기 토글 — 편집 모드 또는 현재 비공개 상태일 때만 표시.
+            Google Calendar 에 올라가지 않고 앱(Supabase) 에만 저장되어 동료에게 전혀 노출되지 않는다. */}
+        {(editing || event.isPrivate) && (
+          <div className="flex items-start gap-2">
+            {editing ? (
+              <label className="flex items-start gap-2 cursor-pointer select-none group">
+                <input
+                  type="checkbox"
+                  checked={draftPrivate}
+                  onChange={(e) => setDraftPrivate(e.target.checked)}
+                  className="mt-0.5 w-3.5 h-3.5 rounded accent-accent cursor-pointer"
+                />
+                <div className="flex-1">
+                  <div className="text-[11px] font-medium text-text-primary flex items-center gap-1">
+                    🔒 나만 보기
+                  </div>
+                  <p className="text-[10px] text-text-secondary/70 leading-relaxed mt-0.5">
+                    Google Calendar 에 올라가지 않고 이 앱에만 저장됩니다. 동료에게 전혀 노출되지 않아요.
+                  </p>
+                </div>
+              </label>
+            ) : (
+              <div className="flex items-center gap-1.5 text-[10px] text-accent/80 bg-accent/10 px-2 py-1 rounded-md">
+                🔒 <span className="font-medium">나만 보기</span>
+                <span className="text-text-secondary/60">— 동료에게 전혀 노출되지 않음</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 작성자 */}
-        <div className="flex items-center gap-2 text-[#8B8DA3]/60">
+        <div className="flex items-center gap-2 text-text-secondary/60">
           <MapPin size={11} />
           <span className="text-[10px]">작성: {event.createdBy}</span>
         </div>
@@ -352,7 +387,7 @@ export function EventSidePanel({
         {isVacation ? (
           /* 휴가 이벤트: 편집 불가 안내 */
           <div className="flex flex-col gap-2 pt-1">
-            <p className="text-[10px] text-[#8B8DA3]/50 text-center leading-relaxed">
+            <p className="text-[10px] text-text-secondary/50 text-center leading-relaxed">
               휴가 관리는 휴가 탭에서 관리합니다
             </p>
             <button
@@ -371,14 +406,14 @@ export function EventSidePanel({
           <div className="flex gap-2 pt-1">
             <button
               onClick={handleCancel}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#2D3041]/50 text-[#8B8DA3] hover:bg-[#2D3041] transition-colors cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-bg-border/50 text-text-secondary hover:bg-bg-border transition-colors cursor-pointer"
             >
               <XCircle size={13} />
               취소
             </button>
             <button
               onClick={handleSave}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/20 text-[#6C5CE7] hover:bg-[#6C5CE7]/30 transition-colors cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-accent/20 text-accent hover:bg-accent/30 transition-colors cursor-pointer"
             >
               <Save size={13} />
               저장
@@ -390,7 +425,7 @@ export function EventSidePanel({
             <div className="flex gap-2">
               <button
                 onClick={() => setEditing(true)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#2D3041]/40 text-[#E8E8EE] hover:bg-[#2D3041]/60 transition-colors cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-bg-border/40 text-text-primary hover:bg-bg-border/60 transition-colors cursor-pointer"
               >
                 <Pencil size={12} />
                 편집
@@ -398,7 +433,7 @@ export function EventSidePanel({
               {hasLinkedScene && (
                 <button
                   onClick={() => onNavigate(event)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/15 text-[#6C5CE7] hover:bg-[#6C5CE7]/25 transition-colors cursor-pointer"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 transition-colors cursor-pointer"
                 >
                   <ExternalLink size={12} />
                   이동

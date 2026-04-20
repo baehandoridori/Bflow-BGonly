@@ -45,6 +45,14 @@ export function SheetsSection() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
+  // Google Calendar 자격증명 상태 (clientId/clientSecret 입력 폼)
+  const [gcalHasCreds, setGcalHasCreds] = useState<boolean>(false);
+  const [gcalClientId, setGcalClientId] = useState('');
+  const [gcalClientSecret, setGcalClientSecret] = useState('');
+  const [showCredsForm, setShowCredsForm] = useState(false);
+  const [credsSaving, setCredsSaving] = useState(false);
+  const [credsMessage, setCredsMessage] = useState<string | null>(null);
+
   useEffect(() => {
     async function load() {
       const config = await loadGasConfig();
@@ -68,6 +76,8 @@ export function SheetsSection() {
 
       // Google Calendar 설정 로드
       try {
+        const hasCreds = await gcalService.hasCredentials();
+        setGcalHasCreds(hasCreds);
         const authed = await gcalService.isAuthenticated();
         setGcalAuth(authed); localStorage.setItem('bflow_gcal_authed', String(authed));
         if (authed) {
@@ -146,10 +156,49 @@ export function SheetsSection() {
   };
 
   // ─── Google Calendar 핸들러 ─────
+  const handleSaveGcalCredentials = async () => {
+    setCredsSaving(true);
+    setCredsMessage(null);
+    setGcalError(null);
+    try {
+      await gcalService.saveCredentials(gcalClientId.trim(), gcalClientSecret.trim());
+      setGcalHasCreds(true);
+      setShowCredsForm(false);
+      setGcalClientId('');
+      setGcalClientSecret('');
+      setCredsMessage('자격 증명 저장 완료. 이제 Google 계정 연결을 눌러 주세요.');
+      setTimeout(() => setCredsMessage(null), 4000);
+    } catch (err) {
+      setGcalError((err as Error).message || String(err));
+    } finally {
+      setCredsSaving(false);
+    }
+  };
+
   const handleGcalConnect = async () => {
     setGcalConnecting(true);
     setGcalError(null);
     try {
+      // 입력 폼에 값이 있지만 아직 "자격 증명 저장" 을 누르지 않은 상태라면 자동 저장 후 진행
+      let hasCreds = gcalHasCreds;
+      const pendingId = gcalClientId.trim();
+      const pendingSecret = gcalClientSecret.trim();
+      if (!hasCreds && pendingId && pendingSecret) {
+        await gcalService.saveCredentials(pendingId, pendingSecret);
+        hasCreds = true;
+        setGcalHasCreds(true);
+        setShowCredsForm(false);
+        setGcalClientId('');
+        setGcalClientSecret('');
+        setCredsMessage('자격 증명 저장됨');
+        setTimeout(() => setCredsMessage(null), 3000);
+      }
+      if (!hasCreds) {
+        // 자격증명이 없으면 입력 폼을 자동으로 펼침
+        setShowCredsForm(true);
+        setGcalError('먼저 Google Cloud Console 에서 발급받은 OAuth 2.0 clientId / clientSecret 을 입력해 주세요.');
+        return;
+      }
       await gcalService.startAuth();
       const authed = await gcalService.isAuthenticated();
       setGcalAuth(authed); localStorage.setItem('bflow_gcal_authed', String(authed));
@@ -158,7 +207,25 @@ export function SheetsSection() {
         setCalendars(cals);
       }
     } catch (err) {
-      setGcalError(String(err));
+      const msg = String(err);
+      if (msg.includes('invalid_request') || msg.includes('invalid_grant') || msg.includes('unauthorized')) {
+        try { await gcalService.signOut(); } catch { /* 무시 */ }
+        setGcalAuth(false);
+        localStorage.setItem('bflow_gcal_authed', 'false');
+        setGcalError(
+          'OAuth 인증이 거절되었습니다. 다음을 확인해 주세요:\n' +
+          '1) Google Cloud Console 에서 Calendar API 가 활성화되어 있는지\n' +
+          '2) OAuth 동의 화면의 "테스트 사용자" 에 본인 계정이 추가되어 있는지\n' +
+          '3) 자격 증명(clientId/Secret) 이 "데스크톱 앱" 유형으로 만들어졌는지\n' +
+          '위 항목 확인 후 자격 증명을 다시 저장하고 재시도해 주세요.'
+        );
+      } else if (msg.includes('EADDRINUSE')) {
+        setGcalError('포트 8089 가 사용 중입니다. 다른 앱(이전 인증 창 포함) 을 닫고 다시 시도해 주세요.');
+      } else if (msg.includes('timed out')) {
+        setGcalError('인증 대기 시간이 초과되었습니다. 브라우저에서 Google 로그인을 완료한 뒤 즉시 다시 시도해 주세요.');
+      } else {
+        setGcalError(msg);
+      }
     } finally {
       setGcalConnecting(false);
     }
@@ -204,7 +271,26 @@ export function SheetsSection() {
       setSyncMessage('동기화 완료');
       setTimeout(() => setSyncMessage(null), 2000);
     } catch (err) {
-      setGcalError(String(err));
+      const msg = String(err);
+      // invalid_request / invalid_grant → 토큰이 만료되거나 OAuth 설정이 꼬인 상태.
+      // 토큰을 자동 정리하고 사용자에게 재연결 안내.
+      if (msg.includes('invalid_request') || msg.includes('invalid_grant') || msg.includes('unauthorized')) {
+        try { await gcalService.signOut(); } catch { /* 무시 */ }
+        setGcalAuth(false);
+        localStorage.setItem('bflow_gcal_authed', 'false');
+        setCalendars([]);
+        setGcalError(
+          '인증 토큰이 유효하지 않습니다. 아래 단계를 확인해 주세요:\n' +
+          '1) Google Cloud Console 에서 Calendar API 가 활성화되어 있는지\n' +
+          '2) OAuth 동의 화면에서 이 앱이 "테스트 사용자" 에 등록되어 있는지\n' +
+          '3) 자격 증명(clientId/Secret) 이 올바른지 확인\n' +
+          '그 다음 "Google 계정 연결" 버튼을 다시 눌러 재인증 해주세요.'
+        );
+      } else if (msg.includes('EADDRINUSE') || msg.includes('timed out')) {
+        setGcalError('OAuth 인증에 실패했습니다. 창을 닫거나 다른 앱이 포트 8089 를 쓰고 있지 않은지 확인 후 재시도해 주세요.');
+      } else {
+        setGcalError(msg);
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -344,6 +430,78 @@ export function SheetsSection() {
           </span>
         </div>
 
+        {/* 자격증명 설정 — 미연결일 때만 노출. 설정 여부를 칩으로 표시 */}
+        {!gcalAuth && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => setShowCredsForm((v) => !v)}
+              className="flex items-center gap-2 text-xs text-text-secondary hover:text-text-primary cursor-pointer"
+            >
+              <span>자격 증명 (clientId / clientSecret)</span>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${gcalHasCreds ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                {gcalHasCreds ? '설정됨' : '미설정'}
+              </span>
+              <span className="text-text-secondary/50">{showCredsForm ? '▲' : '▼'}</span>
+            </button>
+
+            {showCredsForm && (
+              <div className="mt-2 p-3 bg-bg-primary/40 border border-bg-border/40 rounded-lg">
+                <p className="text-[11px] text-text-secondary/70 mb-2 leading-relaxed">
+                  Google Cloud Console 에서 OAuth 2.0 <b>데스크톱 앱</b> 유형의 클라이언트를 만들고, 발급받은 clientId / clientSecret 을 아래에 붙여넣으세요. 입력 값은 로컬 파일(<code className="text-text-secondary">%APPDATA%/Bflow-BGonly/gcal-credentials.json</code>) 에만 저장됩니다.
+                </p>
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-[11px] text-text-secondary mb-1">Client ID</label>
+                    <input
+                      type="text"
+                      value={gcalClientId}
+                      onChange={(e) => setGcalClientId(e.target.value)}
+                      placeholder="xxxxxxxxxxxx.apps.googleusercontent.com"
+                      className="w-full bg-bg-primary border border-bg-border rounded-md px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-blue-400"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-text-secondary mb-1">Client Secret</label>
+                    <input
+                      type="password"
+                      value={gcalClientSecret}
+                      onChange={(e) => setGcalClientSecret(e.target.value)}
+                      placeholder="GOCSPX-..."
+                      className="w-full bg-bg-primary border border-bg-border rounded-md px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-blue-400"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mt-3">
+                  <button
+                    onClick={handleSaveGcalCredentials}
+                    disabled={credsSaving || !gcalClientId.trim() || !gcalClientSecret.trim()}
+                    className="px-3 py-1.5 bg-blue-500 hover:bg-blue-500/80 disabled:opacity-50 disabled:cursor-not-allowed rounded-md text-xs text-white font-medium transition-colors cursor-pointer"
+                  >
+                    {credsSaving ? '저장 중...' : '자격 증명 저장'}
+                  </button>
+                  <button
+                    onClick={() => { setShowCredsForm(false); setGcalClientId(''); setGcalClientSecret(''); }}
+                    className="px-3 py-1.5 bg-bg-border/40 hover:bg-bg-border/60 rounded-md text-xs text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+                  >
+                    취소
+                  </button>
+                  {credsMessage && (
+                    <span className="text-xs text-emerald-400">{credsMessage}</span>
+                  )}
+                </div>
+              </div>
+            )}
+            {!showCredsForm && credsMessage && (
+              <p className="mt-2 text-xs text-emerald-400">{credsMessage}</p>
+            )}
+          </div>
+        )}
+
         {!gcalAuth ? (
           <button
             onClick={handleGcalConnect}
@@ -354,41 +512,15 @@ export function SheetsSection() {
           </button>
         ) : (
           <>
-            <div className="mb-4">
-              <label className="block text-xs text-text-secondary mb-1.5">팀 캘린더</label>
-              <select
-                value={gcalSettings.teamCalendarId || ''}
-                onChange={(e) => handleCalendarSelect('teamCalendarId', e.target.value)}
-                className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-blue-400"
-              >
-                <option value="">캘린더를 선택하세요</option>
-                {calendars.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.summary}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[11px] text-text-secondary/60 mt-1">
-                에피소드·파트·씬·휴가 일정이 저장될 캘린더
-              </p>
-            </div>
-
-            <div className="mb-4">
-              <label className="block text-xs text-text-secondary mb-1.5">개인 캘린더</label>
-              <select
-                value={gcalSettings.personalCalendarId || ''}
-                onChange={(e) => handleCalendarSelect('personalCalendarId', e.target.value)}
-                className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-blue-400"
-              >
-                <option value="">기본 캘린더 (primary)</option>
-                {calendars.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.summary}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[11px] text-text-secondary/60 mt-1">
-                개인 할일 일정이 저장될 캘린더 (미선택 시 Google 기본 캘린더)
+            {/* 연결된 계정의 기본(primary) Google Calendar 를 자동 사용한다.
+                별도 '팀 캘린더 / 개인 캘린더' 선택은 사용하지 않음 — 공유 일정은 동료가 본인 계정으로 구독,
+                비공개 일정은 Supabase 에만 저장해 Google Calendar 에 올라가지 않는다. */}
+            <div className="mb-4 rounded-lg border border-bg-border/50 bg-bg-primary/40 px-3 py-2.5">
+              <p className="text-[11px] text-text-secondary leading-relaxed">
+                공개 일정은 로그인하신 Google 계정(<span className="text-text-primary">@studiojbbj.com</span>) 의 <b>기본 캘린더</b>
+                에 저장되어 동료와 공유됩니다.
+                <br />
+                <b>🔒 나만 보기</b> 체크한 일정은 Google Calendar 에 올라가지 않고 이 앱에만 저장되어 동료에게 전혀 노출되지 않아요.
               </p>
             </div>
 
@@ -420,7 +552,7 @@ export function SheetsSection() {
         )}
 
         {gcalError && (
-          <div className="mt-3 px-3 py-2 bg-status-none/10 border border-status-none/30 rounded-lg text-xs text-status-none">
+          <div className="mt-3 px-3 py-2 bg-status-none/10 border border-status-none/30 rounded-lg text-xs text-status-none whitespace-pre-line leading-relaxed">
             {gcalError}
           </div>
         )}

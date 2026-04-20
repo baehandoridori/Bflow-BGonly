@@ -5,6 +5,35 @@
 import type { CalendarEvent, CalendarEventType, BflowEventMeta, GCalSettings } from '@/types/calendar';
 import * as gcalService from './googleCalendarService';
 import { readMetadata, writeMetadata } from './supabaseService';
+import { useAuthStore } from '@/stores/useAuthStore';
+
+// 비공개 이벤트는 Google Calendar 가 아닌 Supabase 에만 저장된다.
+// sourceCalendarId 에 이 특수 식별자를 써서 update/delete 시 올바른 저장소로 라우팅.
+const PRIVATE_CAL_ID = 'supabase-private';
+
+type RawPrivateEvent = Awaited<ReturnType<NonNullable<Window['electronAPI']>['supabaseReadPrivateEvents']>>[number];
+
+function toCalendarEventFromPrivate(row: RawPrivateEvent): CalendarEvent {
+  return {
+    id: row.id,
+    title: row.title,
+    memo: row.memo ?? '',
+    color: row.color ?? '#6C5CE7',
+    type: (row.type as CalendarEventType) || 'custom',
+    startDate: row.start_date,
+    endDate: row.end_date,
+    createdBy: row.created_by ?? '',
+    createdAt: row.created_at,
+    linkedEpisode: row.linked_episode ?? undefined,
+    linkedPart: row.linked_part ?? undefined,
+    linkedSheetName: row.linked_sheet_name ?? undefined,
+    linkedSceneId: row.linked_scene_id ?? undefined,
+    linkedDepartment: (row.linked_department as 'bg' | 'acting' | undefined) ?? undefined,
+    linkedTodoId: row.linked_todo_id ?? undefined,
+    sourceCalendarId: PRIVATE_CAL_ID,
+    isPrivate: true,
+  };
+}
 
 // teamCalendarId는 Supabase metadata에 저장 (팀 전체 공유)
 // personalCalendarId, lastSyncAt은 로컬에만 저장 (사용자별)
@@ -127,6 +156,8 @@ function toCalendarEvent(gcalEvent: any, calendarId: string): CalendarEvent {
     vacationUserName: meta.bflow_vacation_user,
     isReadOnly: !meta.bflow_type, // B flow에서 만들지 않은 이벤트는 읽기 전용
     sourceCalendarId: calendarId,
+    // Google Calendar 의 visibility='private' 를 읽어 isPrivate 에 반영
+    isPrivate: gcalEvent.visibility === 'private',
   };
 }
 
@@ -160,11 +191,12 @@ function toBflowMeta(event: Partial<CalendarEvent>): Record<string, string> {
   return meta;
 }
 
-/** 이벤트 타입에 따라 대상 캘린더 결정 */
-async function getTargetCalendar(type: CalendarEventType): Promise<string | null> {
-  const settings = await getGCalSettings();
-  if (type === 'custom') return settings.personalCalendarId || 'primary';
-  return settings.teamCalendarId || settings.personalCalendarId || 'primary';
+/** 공개 일정은 항상 로그인 계정의 primary 캘린더에 저장한다.
+ *  (팀 캘린더 / 개인 캘린더 구분은 제거 — 비공개는 Supabase 로 분리)
+ *  type 파라미터는 시그니처 호환을 위해 유지하되 사용하지 않는다. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function getTargetCalendar(_type: CalendarEventType): Promise<string | null> {
+  return 'primary';
 }
 
 // ─── 공개 API (기존 인터페이스 유지) ──────────────────────────
@@ -212,6 +244,22 @@ export async function syncAll(): Promise<CalendarEvent[]> {
         events.push(toCalendarEvent(e, calId));
       }
     }
+  }
+
+  // 비공개 이벤트 (Supabase, Google Calendar 비연동) — 현재 사용자 본인 것만 로드
+  try {
+    const userId = useAuthStore.getState().currentUser?.id;
+    if (userId) {
+      const rows = await window.electronAPI.supabaseReadPrivateEvents(userId);
+      for (const row of rows) {
+        if (!seen.has(row.id)) {
+          seen.add(row.id);
+          events.push(toCalendarEventFromPrivate(row));
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Calendar] 비공개 이벤트 로드 실패:', err);
   }
 
   // GCal에 없는 이벤트는 캐시에서도 제거 (legacy 로컬 이벤트 미지원)
@@ -296,6 +344,48 @@ async function resolveEvent(eventId: string): Promise<CalendarEvent | undefined>
 }
 
 export async function addEvent(event: CalendarEvent): Promise<void> {
+  // ── 비공개 이벤트 분기 — Supabase 에만 저장, Google Calendar 비연동 ──
+  if (event.isPrivate) {
+    const userId = useAuthStore.getState().currentUser?.id;
+    if (!userId) throw new Error('로그인 정보가 필요합니다 (비공개 일정)');
+
+    const localId = event.id;
+    // 낙관적 업데이트
+    eventCache.push({ ...event, sourceCalendarId: PRIVATE_CAL_ID, isPrivate: true });
+    broadcastCalendarChange({ eventId: localId, action: 'add' });
+
+    try {
+      const inserted = await window.electronAPI.supabaseAddPrivateEvent({
+        user_id: userId,
+        title: event.title,
+        memo: event.memo,
+        color: event.color,
+        type: event.type,
+        start_date: event.startDate,
+        end_date: event.endDate,
+        linked_episode: event.linkedEpisode ?? null,
+        linked_part: event.linkedPart ?? null,
+        linked_sheet_name: event.linkedSheetName ?? null,
+        linked_scene_id: event.linkedSceneId ?? null,
+        linked_department: event.linkedDepartment ?? null,
+        linked_todo_id: event.linkedTodoId ?? null,
+        created_by: event.createdBy,
+      });
+      // 로컬 ID → Supabase UUID 교체
+      if (localId !== inserted.id) {
+        localToGcalId.set(localId, inserted.id);
+      }
+      const idx = eventCache.findIndex((e) => e.id === localId);
+      if (idx >= 0) eventCache[idx] = { ...eventCache[idx], id: inserted.id };
+      broadcastCalendarChange({ eventId: inserted.id, action: 'update' });
+    } catch (err) {
+      eventCache = eventCache.filter((e) => e.id !== localId);
+      broadcastCalendarChange();
+      throw err;
+    }
+    return;
+  }
+
   const calId = await getTargetCalendar(event.type);
   if (!calId) throw new Error('캘린더가 설정되지 않았습니다');
 
@@ -316,6 +406,8 @@ export async function addEvent(event: CalendarEvent): Promise<void> {
       startDate: event.startDate,
       endDate: gcalEndDate,
       extendedProperties: toBflowMeta(event),
+      // 비공개 일정이면 Google Calendar 에 'private' 로 저장 — 도메인 내 다른 사용자에게 숨김
+      visibility: event.isPrivate ? 'private' : undefined,
     });
     // 성공: 로컬 ID → GCal ID 매핑 등록 + 캐시 ID 교체
     if (localId !== gcalId) {
@@ -337,6 +429,35 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   if (!existing) return;
   const actualId = existing.id; // GCal ID (캐시에 저장된 실제 ID)
 
+  // ── 비공개 이벤트 분기 — Supabase update ──
+  if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
+    const previous = { ...existing };
+    eventCache = eventCache.map((e) => (e.id === actualId ? { ...e, ...updates } : e));
+    broadcastCalendarChange({ eventId: actualId, action: 'update' });
+
+    try {
+      const patch: Record<string, unknown> = {};
+      if (updates.title !== undefined) patch.title = updates.title;
+      if (updates.memo !== undefined) patch.memo = updates.memo;
+      if (updates.color !== undefined) patch.color = updates.color;
+      if (updates.type !== undefined) patch.type = updates.type;
+      if (updates.startDate !== undefined) patch.start_date = updates.startDate;
+      if (updates.endDate !== undefined) patch.end_date = updates.endDate;
+      if (updates.linkedEpisode !== undefined) patch.linked_episode = updates.linkedEpisode ?? null;
+      if (updates.linkedPart !== undefined) patch.linked_part = updates.linkedPart ?? null;
+      if (updates.linkedSheetName !== undefined) patch.linked_sheet_name = updates.linkedSheetName ?? null;
+      if (updates.linkedSceneId !== undefined) patch.linked_scene_id = updates.linkedSceneId ?? null;
+      if (updates.linkedDepartment !== undefined) patch.linked_department = updates.linkedDepartment ?? null;
+      if (updates.linkedTodoId !== undefined) patch.linked_todo_id = updates.linkedTodoId ?? null;
+      await window.electronAPI.supabaseUpdatePrivateEvent(actualId, patch);
+    } catch (err) {
+      eventCache = eventCache.map((e) => (e.id === actualId ? previous : e));
+      broadcastCalendarChange({ eventId: actualId, action: 'update' });
+      throw err;
+    }
+    return;
+  }
+
   // 원본 캘린더 ID 우선 사용 (캘린더 설정 변경 후에도 올바른 캘린더에서 수정)
   const calId = existing.sourceCalendarId || await getTargetCalendar(existing.type);
   if (!calId) return;
@@ -357,6 +478,10 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
       startDate: updates.startDate,
       endDate: gcalEndDate,
       extendedProperties: toBflowMeta({ ...existing, ...updates }),
+      // isPrivate 가 변경되었을 때만 visibility 전송 (undefined 는 무시됨)
+      visibility: updates.isPrivate !== undefined
+        ? (updates.isPrivate ? 'private' : 'default')
+        : undefined,
     });
   } catch (err) {
     // 실패: 롤백
@@ -370,6 +495,22 @@ export async function deleteEvent(eventId: string): Promise<void> {
   const existing = await resolveEvent(eventId);
   if (!existing) return;
   const actualId = existing.id; // GCal ID
+
+  // ── 비공개 이벤트 분기 — Supabase delete ──
+  if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
+    const previous = existing;
+    eventCache = eventCache.filter((e) => e.id !== actualId);
+    localToGcalId.delete(eventId);
+    broadcastCalendarChange({ eventId: actualId, action: 'delete' });
+    try {
+      await window.electronAPI.supabaseDeletePrivateEvent(actualId);
+    } catch (err) {
+      eventCache = [...eventCache, previous];
+      broadcastCalendarChange({ eventId: actualId, action: 'add' });
+      throw err;
+    }
+    return;
+  }
 
   // 로컬 전용 이벤트(GCal에 저장되지 않은 legacy 이벤트)는 캐시에서만 제거
   // sourceCalendarId 부재 = GCal과 연동되지 않은 이벤트 (calendarService.ts:229 참고)

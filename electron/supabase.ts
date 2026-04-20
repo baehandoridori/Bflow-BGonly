@@ -629,6 +629,95 @@ export async function deleteComment(commentId: string): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════
+// PRIVATE_CALENDAR_EVENTS — 사용자 전용 비공개 일정 (Google Calendar 비연동)
+// ═══════════════════════════════════════════════
+
+export interface SupabasePrivateEvent {
+  id: string;
+  user_id: string;
+  title: string;
+  memo: string | null;
+  color: string | null;
+  type: string | null;
+  start_date: string;
+  end_date: string;
+  linked_episode: number | null;
+  linked_part: string | null;
+  linked_sheet_name: string | null;
+  linked_scene_id: string | null;
+  linked_department: string | null;
+  linked_todo_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function readPrivateEvents(userId: string): Promise<SupabasePrivateEvent[]> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .select('*')
+    .eq('user_id', userId)
+    .order('start_date', { ascending: false });
+  throwIfError(error);
+  return (data as SupabasePrivateEvent[]) || [];
+}
+
+export async function addPrivateEvent(input: {
+  user_id: string;
+  title: string;
+  memo?: string;
+  color?: string;
+  type?: string;
+  start_date: string;
+  end_date: string;
+  linked_episode?: number | null;
+  linked_part?: string | null;
+  linked_sheet_name?: string | null;
+  linked_scene_id?: string | null;
+  linked_department?: string | null;
+  linked_todo_id?: string | null;
+  created_by?: string;
+}): Promise<SupabasePrivateEvent> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .insert(input)
+    .select('*')
+    .single();
+  throwIfError(error);
+  broadcastDataChange('private_calendar_events', 'INSERT');
+  return data as SupabasePrivateEvent;
+}
+
+export async function updatePrivateEvent(
+  id: string,
+  updates: Partial<{
+    title: string;
+    memo: string;
+    color: string;
+    type: string;
+    start_date: string;
+    end_date: string;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+  }>,
+): Promise<void> {
+  const patch = { ...updates, updated_at: new Date().toISOString() };
+  const { error } = await supabase.from('private_calendar_events').update(patch).eq('id', id);
+  throwIfError(error);
+  broadcastDataChange('private_calendar_events', 'UPDATE');
+}
+
+export async function deletePrivateEvent(id: string): Promise<void> {
+  const { error } = await supabase.from('private_calendar_events').delete().eq('id', id);
+  throwIfError(error);
+  broadcastDataChange('private_calendar_events', 'DELETE');
+}
+
+// ═══════════════════════════════════════════════
 // COMP_REVISIONS
 // ═══════════════════════════════════════════════
 

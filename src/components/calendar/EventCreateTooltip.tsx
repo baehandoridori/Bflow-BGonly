@@ -283,15 +283,15 @@ export function EventCreateTooltip({
           visibility: pos ? 'visible' : 'hidden',
         }}
       >
-        {/* 글래스모피즘 카드 */}
+        {/* 글래스모피즘 카드 — 테마 토큰 기반 (라이트/다크 자동 대응) */}
         <div
           className="relative rounded-xl overflow-hidden"
           style={{
-            background: 'rgba(26,29,39,0.97)',
+            background: 'rgb(var(--color-bg-card) / 0.97)',
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
-            border: '1px solid #2D3041',
-            boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+            border: '1px solid rgb(var(--color-bg-border))',
+            boxShadow: '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha))',
             borderRadius: 12,
           }}
         >
@@ -299,7 +299,7 @@ export function EventCreateTooltip({
           <div
             className="absolute inset-x-0 top-0 h-[40%] rounded-t-xl pointer-events-none"
             style={{
-              background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 100%)',
+              background: 'linear-gradient(180deg, rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) 0%, transparent 100%)',
             }}
           />
 
@@ -312,13 +312,13 @@ export function EventCreateTooltip({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="w-full bg-transparent text-sm text-[#E8E8EE] placeholder-[#8B8DA3] outline-none pb-1.5"
-              style={{ borderBottom: '1px solid #2D3041' }}
+              className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-secondary outline-none pb-1.5"
+              style={{ borderBottom: '1px solid rgb(var(--color-bg-border))' }}
               maxLength={100}
             />
 
             {/* 날짜 표시 */}
-            <div className="text-xs text-[#8B8DA3] select-none">
+            <div className="text-xs text-text-secondary select-none">
               {dateLabel}
             </div>
 
@@ -359,8 +359,8 @@ export function EventCreateTooltip({
                 onClick={handleSave}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer"
                 style={{
-                  background: title.trim() ? '#6C5CE7' : 'rgba(108,92,231,0.3)',
-                  color: title.trim() ? '#fff' : 'rgba(255,255,255,0.4)',
+                  background: title.trim() ? 'rgb(var(--color-accent))' : 'rgb(var(--color-accent) / 0.3)',
+                  color: title.trim() ? 'rgb(var(--color-on-accent))' : 'rgb(var(--color-on-accent) / 0.4)',
                   cursor: title.trim() ? 'pointer' : 'not-allowed',
                 }}
               >
@@ -369,8 +369,8 @@ export function EventCreateTooltip({
               <button
                 type="button"
                 onClick={handleOpenDetail}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#8B8DA3] hover:text-[#E8E8EE] transition-colors cursor-pointer"
-                style={{ background: 'rgba(45,48,65,0.6)' }}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+                style={{ background: 'rgb(var(--color-bg-border) / 0.6)' }}
               >
                 상세 설정 &rarr;
               </button>

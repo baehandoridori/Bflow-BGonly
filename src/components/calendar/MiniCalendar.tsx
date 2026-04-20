@@ -127,16 +127,16 @@ export function MiniCalendar({
       <div className="flex items-center justify-between px-0.5">
         <button
           onClick={goToPrevMonth}
-          className="p-0.5 rounded hover:bg-[#2D3041]/60 text-[#8B8DA3] hover:text-[#E8E8EE] transition-colors cursor-pointer"
+          className="p-0.5 rounded hover:bg-bg-border/60 text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
         >
           <ChevronLeft size={14} />
         </button>
-        <span className="text-[11px] font-semibold text-[#E8E8EE] tabular-nums">
+        <span className="text-[11px] font-semibold text-text-primary tabular-nums">
           {year}년 {month + 1}월
         </span>
         <button
           onClick={goToNextMonth}
-          className="p-0.5 rounded hover:bg-[#2D3041]/60 text-[#8B8DA3] hover:text-[#E8E8EE] transition-colors cursor-pointer"
+          className="p-0.5 rounded hover:bg-bg-border/60 text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
         >
           <ChevronRight size={14} />
         </button>
@@ -149,7 +149,7 @@ export function MiniCalendar({
             key={d}
             className={cn(
               'text-center text-[9px] font-medium py-0.5',
-              i === 0 ? 'text-[#E17055]/60' : i === 6 ? 'text-[#74B9FF]/60' : 'text-[#8B8DA3]/50',
+              i === 0 ? 'text-[#E17055]/60' : i === 6 ? 'text-[#74B9FF]/60' : 'text-text-secondary/70',
             )}
           >
             {d}
@@ -185,11 +185,11 @@ export function MiniCalendar({
                   // Dimmed for non-current month
                   !day.isCurrentMonth && 'opacity-30',
                   // Active week highlight
-                  isInActiveWeek && day.isCurrentMonth && 'bg-[#6C5CE7]/[0.06]',
+                  isInActiveWeek && day.isCurrentMonth && 'bg-accent/[0.08]',
                   // Hover
-                  day.isCurrentMonth && 'hover:bg-[#2D3041]/40',
+                  day.isCurrentMonth && 'hover:bg-bg-border/40',
                   // Selected ring
-                  isSelected && 'ring-1 ring-[#6C5CE7]/50',
+                  isSelected && 'ring-1 ring-accent/50',
                 )}
               >
                 <span
@@ -197,12 +197,12 @@ export function MiniCalendar({
                     'text-[10px] tabular-nums leading-none flex items-center justify-center',
                     // Today: accent circle
                     day.isToday
-                      ? 'bg-[#6C5CE7] text-white w-[18px] h-[18px] rounded-full text-[9px] font-bold'
+                      ? 'bg-accent text-on-accent w-[18px] h-[18px] rounded-full text-[9px] font-bold'
                       : day.dow === 0
                         ? 'text-[#E17055]/70'
                         : day.dow === 6
                           ? 'text-[#74B9FF]/70'
-                          : 'text-[#E8E8EE]/60',
+                          : 'text-text-primary/70',
                   )}
                 >
                   {day.date}

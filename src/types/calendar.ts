@@ -57,6 +57,14 @@ export interface CalendarEvent {
 
   // GCal 연동: 이벤트가 저장된 원본 캘린더 ID (수정/삭제 시 사용)
   sourceCalendarId?: string;
+
+  /**
+   * 비공개 일정 — true 면 Google Calendar 에 `visibility: 'private'` 로 저장된다.
+   * 같은 Google Workspace 도메인(studiojbbj.com) 의 다른 사용자가 같은 캘린더를
+   * 구독/공유하더라도 이 이벤트의 제목·메모는 보이지 않고 "비공개 일정" 으로만 표시된다.
+   * 개인 일정용 — 기본값 false (공개).
+   */
+  isPrivate?: boolean;
 }
 
 /** 이벤트 저장소 */
