@@ -117,6 +117,19 @@ export function ProfileSection() {
   const [showDahyuModal, setShowDahyuModal] = useState(false);
   const [showDahyuDeleteModal, setShowDahyuDeleteModal] = useState(false);
   const [dahyuDropdownOpen, setDahyuDropdownOpen] = useState(false);
+  // "나의 휴가 관리" 섹션 접힘 — 기본 접힘, localStorage 로 상태 영구 기억
+  const [vacationCollapsed, setVacationCollapsed] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('vacationSectionCollapsed');
+      // 저장된 값이 없으면 기본값은 접힘(true)
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('vacationSectionCollapsed', String(vacationCollapsed)); } catch { /* ignore */ }
+  }, [vacationCollapsed]);
   const dahyuDropdownRef = useRef<HTMLDivElement>(null);
   const [cancellingRow, setCancellingRow] = useState<number | null>(null);
   const isDahyuAdmin = (DAHYU_ADMINS as readonly string[]).includes(currentUser?.name ?? '');
@@ -409,19 +422,32 @@ export function ProfileSection() {
         )}
       </button>
 
-      {/* ════════════ 나의 휴가 관리 ════════════ */}
-      <div className="w-full bg-bg-primary/40 rounded-xl border border-bg-border/30 p-4 mb-3">
-        <div className="flex items-center gap-2 mb-3">
-          <Palmtree size={15} className="text-emerald-400" />
-          <span className="text-[13px] font-semibold text-text-primary">나의 휴가 관리</span>
-          {vacationConnected && !vacLoading && (
-            <button onClick={() => loadVacationData(true)} className="ml-auto p-1 text-text-secondary/30 hover:text-text-primary cursor-pointer">
+      {/* ════════════ 나의 휴가 관리 (접이식) ════════════ */}
+      <div className={cn('w-full bg-bg-primary/40 rounded-xl border border-bg-border/30 mb-3', vacationCollapsed ? 'px-4 py-2.5' : 'p-4')}>
+        <div className={cn('flex items-center gap-2', vacationCollapsed ? '' : 'mb-3')}>
+          <button
+            type="button"
+            onClick={() => setVacationCollapsed((v) => !v)}
+            className="flex items-center gap-2 flex-1 text-left cursor-pointer group"
+            aria-expanded={!vacationCollapsed}
+            aria-label={vacationCollapsed ? '나의 휴가 관리 펼치기' : '나의 휴가 관리 접기'}
+            title={vacationCollapsed ? '펼치기' : '접기'}
+          >
+            <Palmtree size={15} className="text-emerald-400" />
+            <span className="text-[13px] font-semibold text-text-primary">나의 휴가 관리</span>
+            <ChevronDown
+              size={14}
+              className={cn('text-text-secondary/60 transition-transform group-hover:text-text-primary', vacationCollapsed && '-rotate-90')}
+            />
+          </button>
+          {!vacationCollapsed && vacationConnected && !vacLoading && (
+            <button onClick={() => loadVacationData(true)} className="p-1 text-text-secondary/30 hover:text-text-primary cursor-pointer" title="새로고침">
               <RefreshCw size={12} />
             </button>
           )}
         </div>
 
-        {!vacationConnected ? (
+        {!vacationCollapsed && (!vacationConnected ? (
           <div className="flex items-center gap-2 py-2">
             <CircleDashed size={14} className="text-text-secondary/40" />
             <p className="text-xs text-text-secondary/50">
@@ -590,7 +616,7 @@ export function ProfileSection() {
             <CircleDashed size={14} className="text-text-secondary/40" />
             <p className="text-xs text-text-secondary/50">직원 정보를 찾을 수 없습니다</p>
           </div>
-        )}
+        ))}
       </div>
 
       {/* 휴가 신청 모달 */}
