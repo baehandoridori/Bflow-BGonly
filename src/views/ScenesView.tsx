@@ -3358,10 +3358,19 @@ export function ScenesView() {
                 type DeletePlan = { sheetName: string; entries: { index: number; uuid: string }[] };
                 const plans: DeletePlan[] = [];
 
-                const collectUuidsFor = (sheetName: string, sceneIds: string[], scenes: { sceneId: string; id?: string }[]) => {
+                const collectUuidsFor = (_sheetName: string, sceneIds: string[], scenes: { sceneId: string; id?: string }[]) => {
                   const entries: { index: number; uuid: string }[] = [];
                   sceneIds.forEach((sid) => {
-                    const idx = scenes.findIndex((s) => s.sceneId === sid);
+                    // 1차: exact sceneId 일치
+                    let idx = scenes.findIndex((s) => s.sceneId === sid);
+                    // 2차: 정규화 키(숫자) 일치 — 정규화 병합(ac001↔a001) 에서 merged key 는 한쪽 것이라
+                    //      반대편 파트에서는 exact 로 못 찾음. 숫자 매칭으로 폴백해야 ACT 씬이 일괄 삭제에서 빠지지 않음.
+                    if (idx < 0) {
+                      const targetKey = normalizeSceneIdKey(sid);
+                      if (targetKey) {
+                        idx = scenes.findIndex((s) => normalizeSceneIdKey(s.sceneId) === targetKey);
+                      }
+                    }
                     const uuid = idx >= 0 ? scenes[idx]?.id : undefined;
                     if (idx >= 0 && uuid) entries.push({ index: idx, uuid });
                   });

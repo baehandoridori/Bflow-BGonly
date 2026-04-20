@@ -442,9 +442,9 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   const nextPrivate = updates.isPrivate !== undefined ? updates.isPrivate : currentlyPrivate;
   if (updates.isPrivate !== undefined && currentlyPrivate !== nextPrivate) {
     const merged: CalendarEvent = { ...existing, ...updates, isPrivate: nextPrivate };
-    // 1) 기존 저장소에서 제거 (낙관적 캐시 제거 포함)
-    await deleteEvent(eventId);
-    // 2) 반대 저장소로 새로 생성 — 새 id 부여 (cal_*, 각 저장소가 이후 재발급)
+    // create-first: 새 저장소에 먼저 생성해 성공을 확정한 뒤 기존 저장소에서 제거한다.
+    // delete-first 방식이면 create 가 네트워크/인증 오류로 실패했을 때 원본이 이미
+    // 사라져 데이터 손실이 발생하므로, 사용자 관점에서 atomic 하게 느껴지도록 순서를 뒤집음.
     const freshLocalId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
       ? `cal_${crypto.randomUUID()}`
       : `cal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -454,11 +454,18 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
       sourceCalendarId: undefined, // addEvent 내부에서 경로 결정
       createdAt: merged.createdAt || new Date().toISOString(),
     };
+    // 1) 새 저장소에 생성 — 실패하면 원본이 그대로 남아있어 데이터 손실 없음.
     await addEvent(fresh);
-    // 3) 원본 eventId 를 들고 있는 caller (예: 열려있는 사이드 패널) 가 stale id 로
-    //    이어지는 update/delete 를 호출해도 resolveEvent 가 매핑을 타고 찾을 수 있도록
-    //    oldId → freshLocalId 매핑 등록. addEvent 는 freshLocalId → 최종 저장소 real id
-    //    를 추가로 매핑하므로 resolveEvent 의 2단계 체인으로 해결된다.
+    // 2) 새 이벤트가 안전하게 자리잡은 뒤 기존 저장소에서 제거.
+    //    여기서 실패하더라도 사용자에게는 '이전 성공' — 중복이 잠깐 남을 뿐 데이터 손실 아님.
+    try {
+      await deleteEvent(eventId);
+    } catch (err) {
+      console.error('[calendar] privacy migration: 새 저장소 생성은 성공했으나 기존 저장소 삭제 실패. 중복 이벤트가 남을 수 있음:', err);
+    }
+    // 3) 원본 eventId 를 들고 있는 caller 가 stale id 로 이어지는 update/delete 를 호출해도
+    //    resolveEvent 가 매핑 체인을 타고 찾을 수 있도록 oldId → freshLocalId 매핑 등록.
+    //    addEvent 는 freshLocalId → 최종 저장소 real id 를 추가로 매핑하므로 2단계 체인으로 해결.
     if (actualId !== freshLocalId) {
       localToGcalId.set(actualId, freshLocalId);
     }

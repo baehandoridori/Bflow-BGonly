@@ -201,7 +201,9 @@ export function UnifiedSceneCard({
           <DeptSection
             dept="bg"
             scene={bgScene}
-            sceneId={sceneId}
+            // 정규화 병합(ac001↔a001) 에서 merged.sceneId 는 BG 것으로 굳어 ACT 섹션에 쓰면 no-op 됨.
+            // 각 섹션은 자기 부서 scene.sceneId 를 써야 handleToggleForSheet 의 exact 매칭에 걸린다.
+            sceneId={bgScene?.sceneId ?? sceneId}
             sheetName={bgSheetName}
             sceneIndex={bgSceneIndex}
             searchQuery={searchQuery}
@@ -211,7 +213,7 @@ export function UnifiedSceneCard({
           <DeptSection
             dept="acting"
             scene={actScene}
-            sceneId={sceneId}
+            sceneId={actScene?.sceneId ?? sceneId}
             sheetName={actSheetName}
             sceneIndex={actSceneIndex}
             searchQuery={searchQuery}

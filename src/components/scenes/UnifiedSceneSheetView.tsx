@@ -749,7 +749,7 @@ export function UnifiedSceneSheetView({
                     <td key={`bg-${stage}`} className="px-1 py-1.5 text-center">
                       {bgScene && bgSheetName ? (
                         <button
-                          onClick={(e) => { e.stopPropagation(); onToggle(bgSheetName, sceneId, stage); }}
+                          onClick={(e) => { e.stopPropagation(); onToggle(bgSheetName, bgScene.sceneId, stage); }}
                           className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto cursor-pointer"
                           style={
                             bgScene[stage]
@@ -790,7 +790,7 @@ export function UnifiedSceneSheetView({
                     <td key={`act-${stage}`} className="px-1 py-1.5 text-center">
                       {actScene && actSheetName ? (
                         <button
-                          onClick={(e) => { e.stopPropagation(); onToggle(actSheetName, sceneId, stage); }}
+                          onClick={(e) => { e.stopPropagation(); onToggle(actSheetName, actScene.sceneId, stage); }}
                           className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto cursor-pointer"
                           style={
                             actScene[stage]
