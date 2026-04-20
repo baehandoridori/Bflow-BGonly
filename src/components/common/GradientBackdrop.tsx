@@ -22,23 +22,29 @@ export function GradientBackdrop({
   enabled?: boolean;
   intensity?: BackdropIntensity;
 }) {
-  if (!enabled) return null;
-
   const alphas =
     intensity === 'subtle'
       ? { a: 0.08, b: 0.06, c: 0.03 }
       : { a: 0.18, b: 0.15, c: 0.08 };
 
+  // 그라데이션이 켜졌을 때만 3-레이어 radial. 꺼져도 이 컴포넌트가 바닥색(bg-primary)을
+  // 책임지므로, html/body background 를 비워도 안전하다.
+  const gradientImage = enabled
+    ? `
+        radial-gradient(at 20% 10%, rgb(var(--color-accent) / ${alphas.a}) 0%, transparent 50%),
+        radial-gradient(at 80% 90%, rgb(var(--color-accent-sub) / ${alphas.b}) 0%, transparent 50%),
+        radial-gradient(at 50% 50%, rgb(var(--color-accent) / ${alphas.c}) 0%, transparent 60%)
+      `
+    : 'none';
+
   return (
     <div
       className="fixed inset-0 pointer-events-none"
+      aria-hidden
       style={{
         zIndex: -1,
-        background: `
-          radial-gradient(at 20% 10%, rgb(var(--color-accent) / ${alphas.a}) 0%, transparent 50%),
-          radial-gradient(at 80% 90%, rgb(var(--color-accent-sub) / ${alphas.b}) 0%, transparent 50%),
-          radial-gradient(at 50% 50%, rgb(var(--color-accent) / ${alphas.c}) 0%, transparent 60%)
-        `,
+        backgroundColor: 'rgb(var(--color-bg-primary))',
+        backgroundImage: gradientImage,
       }}
     />
   );

@@ -65,3 +65,93 @@
 - [ ] 네트워크 실패 시 오프라인 큐잉 동작하는가?
 - [ ] 낙관적 업데이트 실패 시 롤백 로직이 있는가?
 - [ ] package.json에 `"type": "module"` 넣지 않았는가? (Electron CJS 필수)
+
+---
+
+## 2026-04-20: 낙관적 업데이트 × 인덱스 기반 ID 해석 — "엉뚱한 씬이 삭제됨"
+
+### 증상
+- 씬 삭제 시 고르지 않은 다른 씬이 삭제되거나 "씬 UUID를 찾을 수 없음" 에러
+- 드래그 다중 선택 후 일괄 삭제 시 엉뚱한 씬 여러 개 삭제
+- 씬 카드 클릭이 먹통 (여러 번 시도하면 동작)
+
+### 근본 원인 — 순서 의존성
+```ts
+// 문제 패턴 (Before)
+deleteSceneOptimistic(sheetName, sceneIndex);   // 1) 스토어 변경
+await deleteScene(sheetName, sceneIndex);        // 2) 내부에서 resolveSceneUuid 가 "현재 스토어" 에서 인덱스 해석
+//    → 이미 1)에서 스토어가 바뀌었으므로 엉뚱한 UUID 를 Supabase 로 보냄
+```
+배치 삭제는 더 나쁨: 낙관적 삭제 N개 → 배치 액션들이 실행 시점에 인덱스 해석 → 이미 축소된 배열에서 인덱스가 전부 밀려 **전혀 다른 씬들**이 Supabase 에서 삭제됨.
+
+### 교훈 — "ID 를 먼저 캡처하고, 그 다음 낙관적 업데이트"
+낙관적 업데이트와 원격 호출이 같은 스토어를 참조할 때:
+1. **원격 호출에 필요한 식별자(UUID)는 낙관적 업데이트 *이전* 에 추출**해 둬라.
+2. 원격 호출은 캡처된 UUID만 사용해야 한다. 스토어를 재조회하면 안 된다.
+3. 배치 액션 빌더는 **인덱스가 아닌 UUID/영속 ID** 를 받아라 (`batchActions.deleteSceneByUuid(uuid)`).
+
+### 적용 위치
+- `src/views/ScenesView.tsx`: `handleDeleteSceneForSheet` 단일 삭제, 일괄 삭제 버튼
+- `src/services/supabaseService.ts`: `batchActions.deleteSceneByUuid` 추가, `batchExecute` 에 새 케이스
+
+### 부가 교훈 — 라쏘 선택 훅이 카드 클릭을 가로채지 않게
+- 전역 `mousedown` 을 잡는 라쏘 훅은 mouseup 에서 "드래그 안 했으면 선택 초기화" 로직을 가지기 쉽다. 그런데 이게 **카드 내부 클릭**까지 가로채면 카드 onClick 이 먹통처럼 보인다.
+- 해결: mousedown 시점에 `startedOnCard` 플래그를 저장해 두고, 카드 내부에서 시작된 클릭이면 라쏘 박스도 그리지 않고 선택 초기화도 하지 않는다.
+- 임계값(8px → 10px) 상향도 손떨림에 유리.
+
+### 실수 방지 체크리스트 (추가)
+- [ ] 낙관적 업데이트 전에 원격 호출용 ID 를 변수로 캡처했는가?
+- [ ] 배치 액션 빌더가 "인덱스" 를 캡처한 뒤 실행 시점에 재해석하는 구조라면, 낙관적 업데이트와 절대 섞지 마라 (UUID/영속 ID 시그니처로 교체).
+- [ ] 전역 마우스 이벤트 훅이 카드/버튼의 클릭 이벤트를 silently 가로채고 있지는 않은가? (`startedOnCard` 플래그 패턴 검토)
+
+---
+
+## 2026-04-20: 병합 뷰(MergedScene) × 사용자 네이밍 변형
+
+### 증상
+- 전체 뷰에서 BG 의 `ac001` 과 ACT 의 `a001` 이 "같은 씬" 임에도 sceneId 가 달라 2 개의 분리된 카드로 노출.
+- 상세 모달이 "BG 우선" 고정 로직 때문에 BG 만 단일 모달로 열려, BG+ACT 를 함께 편집 불가.
+
+### 근본 원인
+1. `mergedScenes` 빌더가 `sceneId` 완전 일치만 병합했다. 현실 데이터는 부서별로 접두사 컨벤션이 달라 완벽 일치가 깨진다.
+2. `SceneDetailModal` 은 단일 `Scene` 전용 API 라서 양쪽 부서를 한 화면에 못 담았다. `UnifiedSceneCard` 더블클릭은 `bgScene` 이 있으면 BG 파트로 고정 라우팅.
+
+### 교훈 — "뷰 레이어 병합은 정규화 키로, 데이터는 그대로"
+- 사용자 입력에 어떤 접두사/자릿수 변형이 있든, **뷰에서는 정규화 키** (첫 숫자 그룹) 로 매칭하라. 2단계 매칭 (완전 일치 → 정규화 매칭) 으로 가장 보수적 동작 보장.
+- 모달이 "단일 도메인" 을 전제하는 API 라면 억지로 확장하지 말고 **통합 전용 모달을 별도로 작성** 하라. 뷰 단에서 분기 (`selectedDepartment === 'all'`) 해서 렌더 모달을 다르게 하면 기존 단일 부서 UX 도 안전.
+- 데이터 구조는 절대 건드리지 않는다. SSOT (BG/ACT 파트 분리) 는 유지하고 런타임 뷰만 병합.
+
+### 적용 위치
+- `src/utils/sceneIdKey.ts` (`normalizeSceneIdKey` 신규)
+- `src/views/ScenesView.tsx` 의 `mergedScenes` 빌더 2단계화
+- `src/components/scenes/UnifiedSceneCard.tsx` · `UnifiedSceneSheetView.tsx` 에 `onOpenMerged` 콜백 추가 (기존 `onOpenDetail` 폴백 유지)
+- `src/components/scenes/UnifiedSceneDetailModal.tsx` 신규 (좌/우 분할, BG 전용 이미지 슬롯, 부서별 삭제 + 전체 삭제, merged 단위 네비, `+ 부서 추가`)
+
+---
+
+## 2026-04-20: 통합 뷰의 "한 씬 = 하나" 멘탈 모델 × 분리 저장 데이터
+
+### 사용자 멘탈 모델
+- **"1번 씬은 하나"** — 내부에 BG 담당자/체크박스와 ACT 담당자/체크박스가 같이 있는 한 덩어리.
+- **댓글·리비전은 씬 단위로 하나**. BG 쪽에 달렸든 ACT 쪽에 달렸든 한 목록에 시간순.
+- **이미지는 BG 전용**. ACT 전용 이미지 슬롯은 정책적으로 제거. 기존 데이터는 UI 에서 표시 안 함.
+
+### 데이터 vs 뷰 정책
+| 관점 | 데이터 (불변) | 뷰 (통합) |
+|------|---------------|-----------|
+| 씬 | BG 파트 · ACT 파트 별도 행 | `mergedScenes` 로 한 카드/한 모달 |
+| 댓글 | `sheetName:sceneNo` 키로 부서별 분리 저장 | `CommentPanel` 의 `secondarySceneKey` 로 양쪽 조회 후 시간순 병합, `_sourceKey` 메타로 수정/삭제 원본 추적 |
+| 리비전 | `EP:Part:sceneId` 키 (sheetName 의 부서 부분 제거) | **이미 공용 키** — 추가 작업 없이 RevisionPanel 그대로 재사용 |
+| 이미지 | BG/ACT 각자 컬럼 | **BG 만 노출** — UnifiedSceneCard/SheetView 썸네일, SceneDetailModal 에서 ACT 일 때 이미지 섹션 숨김 |
+
+### 교훈
+- **사용자 멘탈 모델 ≠ DB 스키마**. DB 는 분리되어 있어도 UI/상호작용은 "하나"로 묶어야 할 수 있다. 뷰 레이어에서 우아하게 병합하는 게 SSOT 손상 없이 UX 를 맞추는 방법.
+- 기존 컴포넌트(CommentPanel) 에 **"secondary key"** 같은 옵션 하나만 추가해도 통합 조회 + 원본별 수정/삭제가 가능. 신규 컴포넌트 두 개를 만드는 것보다 훨씬 유지보수 용이.
+- "어디에 저장할지" 는 **primary 정책** (BG 우선) 로 못 박으면 사용자/개발자 모두 혼란 없음.
+
+### 적용 위치 (2차 리팩토링)
+- `src/components/scenes/CommentPanel.tsx` — `secondarySceneKey` 옵션 + `_sourceKey` 메타 기반 수정/삭제
+- `src/components/scenes/UnifiedSceneDetailModal.tsx` — 레이아웃 재구성 (헤더 → 이미지 → 좌/우 → 하단 댓글/리비전 탭), 쿨다운 기반 중복 호출 방지
+- `src/components/scenes/SceneDetailModal.tsx` — `department === 'bg'` 일 때만 이미지 섹션 렌더
+- `src/components/scenes/UnifiedSceneCard.tsx` · `UnifiedSceneSheetView.tsx` — 썸네일/이미지 셀을 BG 전용으로 변경
+- `src/views/ScenesView.tsx` — `onAddDept` 중복 체크, `handleSheetError` 에 `duplicate key` 사용자 친화적 메시지

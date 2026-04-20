@@ -130,11 +130,12 @@ export function GlobalTooltipProvider() {
             transform: `translateX(-50%) translateY(${tooltip.position === 'top' ? '-100%' : '0'})`,
           }}
         >
-          {/* 리퀴드글래스 컨테이너 */}
+          {/* 리퀴드글래스 컨테이너 — 라이트/다크 모두 테마 변수로 적응 */}
           <div
-            className="relative px-3 py-1.5 rounded-lg text-xs font-medium text-tooltip-text/90 whitespace-nowrap max-w-[280px] overflow-hidden"
+            className="relative px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap max-w-[280px] overflow-hidden"
             style={{
-              background: 'linear-gradient(135deg, rgb(var(--color-tooltip-bg) / 0.92) 0%, rgb(var(--color-tooltip-bg) / 0.96) 100%)',
+              color: 'rgb(var(--color-tooltip-text))',
+              background: 'linear-gradient(135deg, rgb(var(--color-tooltip-bg) / 0.94) 0%, rgb(var(--color-tooltip-bg) / 0.98) 100%)',
               backdropFilter: 'blur(16px) saturate(1.6)',
               WebkitBackdropFilter: 'blur(16px) saturate(1.6)',
               border: '1px solid rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha))',
