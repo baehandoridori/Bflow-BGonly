@@ -71,12 +71,18 @@ export function UnifiedSceneDetailModal({
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
 
-  // 댓글 키: BG와 ACT 양쪽 조회 가능하게
-  const primarySheet = bgSheetName ?? actSheetName ?? '';
+  // 댓글 키: BG와 ACT 양쪽 조회 가능하게.
+  // primary 는 "실제로 이 merged 에 존재하는 부서" 와 일치해야 한다 —
+  // ACT-only 병합 항목에서 BG sheetName 을 쓰면 ACT 씬 번호가 BG 시트 경로로 라우팅되어
+  // 댓글/리비전이 엉뚱한 키에 저장되는 문제가 생김.
   const primaryScene = bgScene ?? actScene;
+  const primarySheet = bgScene
+    ? (bgSheetName ?? '')
+    : (actSheetName ?? '');
   const primaryCommentKey = primaryScene && primarySheet ? `${primarySheet}:${primaryScene.no}` : '';
-  const secondarySheet = bgSheetName && actSheetName && bgScene && actScene ? actSheetName : null;
-  const secondaryScene = bgSheetName && actSheetName && bgScene && actScene ? actScene : null;
+  // BG + ACT 양쪽이 다 있을 때만 secondary (상대편) 설정.
+  const secondarySheet = bgScene && actScene && bgSheetName && actSheetName ? actSheetName : null;
+  const secondaryScene = bgScene && actScene && bgSheetName && actSheetName ? actScene : null;
   const secondaryCommentKey = secondarySheet && secondaryScene ? `${secondarySheet}:${secondaryScene.no}` : '';
 
   // 리비전 키 — buildSceneKey 가 부서 구분 없이 EP:Part:sceneId 로 해싱되므로 BG/ACT 공용

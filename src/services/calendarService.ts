@@ -332,9 +332,15 @@ async function resolveEvent(eventId: string): Promise<CalendarEvent | undefined>
   // 직접 매칭
   const direct = eventCache.find((e) => e.id === eventId);
   if (direct) return direct;
-  // 로컬 ID → GCal ID 매핑으로 재시도
-  const gcalId = localToGcalId.get(eventId);
-  if (gcalId) return eventCache.find((e) => e.id === gcalId);
+  // 매핑 체인을 타고 재조회 (migration: oldId → freshCalId → newRealId 같은 2단계 이상)
+  let mapped = localToGcalId.get(eventId);
+  let hops = 0;
+  while (mapped && hops < 4) {
+    const found = eventCache.find((e) => e.id === mapped);
+    if (found) return found;
+    mapped = localToGcalId.get(mapped);
+    hops++;
+  }
   // linkedTodoId로 폴백 (cal_xxx → todoId 추출)
   if (eventId.startsWith('cal_')) {
     const todoId = eventId.slice(4);
@@ -438,16 +444,27 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
     const merged: CalendarEvent = { ...existing, ...updates, isPrivate: nextPrivate };
     // 1) 기존 저장소에서 제거 (낙관적 캐시 제거 포함)
     await deleteEvent(eventId);
-    // 2) 반대 저장소로 새로 생성 — 새 id 부여 (cal_*, UUID 는 각 저장소가 재발급)
+    // 2) 반대 저장소로 새로 생성 — 새 id 부여 (cal_*, 각 저장소가 이후 재발급)
+    const freshLocalId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? `cal_${crypto.randomUUID()}`
+      : `cal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const fresh: CalendarEvent = {
       ...merged,
-      id: (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-        ? `cal_${crypto.randomUUID()}`
-        : `cal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: freshLocalId,
       sourceCalendarId: undefined, // addEvent 내부에서 경로 결정
       createdAt: merged.createdAt || new Date().toISOString(),
     };
     await addEvent(fresh);
+    // 3) 원본 eventId 를 들고 있는 caller (예: 열려있는 사이드 패널) 가 stale id 로
+    //    이어지는 update/delete 를 호출해도 resolveEvent 가 매핑을 타고 찾을 수 있도록
+    //    oldId → freshLocalId 매핑 등록. addEvent 는 freshLocalId → 최종 저장소 real id
+    //    를 추가로 매핑하므로 resolveEvent 의 2단계 체인으로 해결된다.
+    if (actualId !== freshLocalId) {
+      localToGcalId.set(actualId, freshLocalId);
+    }
+    if (eventId !== actualId && eventId !== freshLocalId) {
+      localToGcalId.set(eventId, freshLocalId);
+    }
     return;
   }
 
