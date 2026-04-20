@@ -295,6 +295,11 @@ export const batchActions = {
     action: 'deleteScene',
     params: { sheetName, rowIndex: String(rowIndex) },
   }),
+  /** UUID 기반 씬 삭제 — 낙관적 업데이트 이후에도 안전 */
+  deleteSceneByUuid: (sceneUuid: string): BatchAction => ({
+    action: 'deleteSceneByUuid',
+    params: { sceneUuid },
+  }),
   updateSceneField: (sheetName: string, rowIndex: number, field: string, value: string): BatchAction => ({
     action: 'updateSceneField',
     params: { sheetName, rowIndex: String(rowIndex), field, value },
@@ -326,6 +331,10 @@ export async function batchExecute(actions: BatchAction[]): Promise<{ ok: boolea
       case 'deleteScene': {
         const uuid = resolveSceneUuid(p.sheetName, Number(p.rowIndex));
         await window.electronAPI.supabaseDeleteScene(uuid);
+        break;
+      }
+      case 'deleteSceneByUuid': {
+        await window.electronAPI.supabaseDeleteScene(p.sceneUuid);
         break;
       }
       case 'updateSceneField': {

@@ -157,7 +157,9 @@ export function AssigneeSelect({ value, onChange, onClose, placeholder = '담당
             position: 'fixed',
             top: dropdownPos.top,
             left: dropdownPos.left,
-            width: dropdownPos.width,
+            // 최소 너비 보장 — 테이블뷰의 좁은 담당자 셀에서도 이름이 세로로 잘리지 않게
+            minWidth: Math.max(dropdownPos.width, 180),
+            maxWidth: 280,
             zIndex: 9999,
           }}
         >
@@ -191,7 +193,7 @@ export function AssigneeSelect({ value, onChange, onClose, placeholder = '담당
                   className="w-2.5 h-2.5 rounded-full shrink-0"
                   style={{ backgroundColor: color }}
                 />
-                <span style={{ color }}>{u.name}</span>
+                <span className="whitespace-nowrap" style={{ color }}>{u.name}</span>
               </button>
             );
           })}
