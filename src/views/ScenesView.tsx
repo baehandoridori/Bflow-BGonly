@@ -6,6 +6,7 @@ import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
+import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
@@ -13,6 +14,7 @@ import { HighlightText } from '@/components/common/HighlightText';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
+import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
@@ -32,6 +34,7 @@ function useLassoSelection(
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const startScrollRef = useRef<{ top: number; left: number } | null>(null);
   const isDragging = useRef(false);
+  const startedOnCard = useRef(false);
   const prevIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -41,8 +44,12 @@ function useLassoSelection(
 
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
+      // 인터랙티브 요소 클릭은 라쏘 시작 안 함
       if (target.closest('button, input, select, textarea, a, [role="button"], [data-no-lasso], [contenteditable="true"]')) return;
       if (e.button !== 0) return;
+
+      // 카드 위에서 시작된 mousedown은 라쏘 드래그로 취급하지 않음 (카드의 클릭을 카드가 처리하도록 보존)
+      startedOnCard.current = !!target.closest(cardSelector);
 
       startRef.current = { x: e.clientX, y: e.clientY };
       const scrollEl = findScrollParent(target) ?? container;
@@ -51,12 +58,15 @@ function useLassoSelection(
 
       const onMouseMove = (me: MouseEvent) => {
         if (!startRef.current || !startScrollRef.current) return;
+        // 카드 위에서 시작한 경우는 라쏘 박스를 그리지 않음 (오탐지 방지)
+        if (startedOnCard.current) return;
         const scrollDx = scrollEl.scrollLeft - startScrollRef.current.left;
         const scrollDy = scrollEl.scrollTop - startScrollRef.current.top;
         const dx = (me.clientX - startRef.current.x) - scrollDx;
         const dy = (me.clientY - startRef.current.y) - scrollDy;
 
-        if (!isDragging.current && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        // 임계값 8 → 10으로 상향 (손떨림에 강건)
+        if (!isDragging.current && Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
         isDragging.current = true;
 
         const x = Math.min(startRef.current.x, me.clientX);
@@ -83,7 +93,9 @@ function useLassoSelection(
       const onMouseUp = (me: MouseEvent) => {
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
-        if (!isDragging.current) {
+        // 드래그가 발생하지 않았고, 카드가 아닌 빈 영역에서 클릭이 끝났을 때만 선택 초기화
+        // (카드 클릭은 카드 자신이 처리하도록 보존 — 이전에는 빈 영역이 아닌데도 선택이 풀려 클릭이 먹통이었음)
+        if (!isDragging.current && !startedOnCard.current) {
           if (!me.ctrlKey && !me.metaKey) {
             onSelectionChange(new Set());
             prevIds.current = new Set();
@@ -92,6 +104,7 @@ function useLassoSelection(
         startRef.current = null;
         startScrollRef.current = null;
         isDragging.current = false;
+        startedOnCard.current = false;
         setLassoRect(null);
       };
 
@@ -347,7 +360,7 @@ import {
   addEpisode,
   addPart,
   addScene,
-  deleteScene,
+  deleteSceneFromSupabase,
   updateSceneField,
   writeMetadata,
   readMetadata,
@@ -379,6 +392,9 @@ interface SceneCardProps {
   commentCount?: number;
   revisionCount?: number;
   selectionId?: string;  // 'all' 모드에서 부서 접두사 포함된 고유 ID (라쏘/선택용)
+  /** ACT 단독 뷰에서 BG 이미지를 읽기 전용으로 보여주기 위한 URL (자체 이미지 없을 때 폴백) */
+  fallbackStoryboardUrl?: string | null;
+  fallbackGuideUrl?: string | null;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: () => void;
@@ -387,10 +403,13 @@ interface SceneCardProps {
   onShiftClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, revisionCount = 0, selectionId, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, revisionCount = 0, selectionId, fallbackStoryboardUrl, fallbackGuideUrl, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
-  const hasImages = !!(scene.storyboardUrl || scene.guideUrl);
+  // ACT 단독 뷰에서는 자체 이미지가 없으면 BG 이미지를 폴백으로 표시 (ACT 는 이미지 슬롯이 없는 정책)
+  const effectiveStoryboardUrl = scene.storyboardUrl || fallbackStoryboardUrl || '';
+  const effectiveGuideUrl = scene.guideUrl || fallbackGuideUrl || '';
+  const hasImages = !!(effectiveStoryboardUrl || effectiveGuideUrl);
 
   const borderColor = pct >= 100 ? '#6C5CE7' : pct >= 50 ? '#A599F5' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
 
@@ -466,7 +485,8 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
               <span className="text-[10px] font-bold leading-none">{revisionCount}</span>
             </span>
           )}
-          <span className="bg-[#282830] text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
+          {/* 퍼센트 뱃지 — 라이트/다크 자동 적응 (고정 다크 배경 제거) */}
+          <span className="bg-bg-border/60 dark:bg-bg-border text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
             {pct}%
           </span>
         </div>
@@ -492,21 +512,21 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         </div>
       </div>
 
-      {/* ── 가운데: 이미지 썸네일 ── */}
+      {/* ── 가운데: 이미지 썸네일 (자체 이미지 우선, 없으면 BG 폴백) ── */}
       {hasImages ? (
         <div className="mx-4 mt-1 mb-1 flex gap-px rounded-lg overflow-hidden bg-bg-border">
-          {scene.storyboardUrl && (
+          {effectiveStoryboardUrl && (
             <img
-              src={scene.storyboardUrl}
+              src={effectiveStoryboardUrl}
               alt="SB"
               className="flex-1 h-28 object-contain bg-bg-primary min-w-0"
               draggable={false}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
           )}
-          {scene.guideUrl && (
+          {effectiveGuideUrl && (
             <img
-              src={scene.guideUrl}
+              src={effectiveGuideUrl}
               alt="Guide"
               className="flex-1 h-28 object-contain bg-bg-primary min-w-0"
               draggable={false}
@@ -529,7 +549,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 
       {/* ── 하단: 프로세스 트랙 ── */}
       <div className="px-4 pt-1 pb-3.5 mt-auto relative overflow-visible">
-        <div className="flex rounded-lg bg-[#1E1E28] p-1 gap-0.5">
+        <div className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-0.5">
           {STAGES.map((stage, i) => {
             const isDone = scene[stage];
             const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
@@ -540,7 +560,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
                 onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
                 className={cn(
                   'flex-1 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
-                  !isDone && 'text-text-secondary/50 hover:text-text-primary hover:bg-white/5',
+                  !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-black/5 dark:hover:bg-white/5',
                 )}
                 style={
                   isDone
@@ -1198,6 +1218,8 @@ export function ScenesView() {
 
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
+  // 전체 뷰 전용 통합 상세 모달 — merged 를 직접 보관
+  const [detailMerged, setDetailMerged] = useState<MergedScene | null>(null);
 
   // 리비전 초기 로드
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
@@ -1557,11 +1579,14 @@ export function ScenesView() {
   // 'all' 모드: 합산 진행률
   const allModeScenes = useMemo(() => [...bgScenes, ...actScenes], [bgScenes, actScenes]);
 
-  // 'all' 모드: BG+ACT 씬 머지 (동일 sceneId 매칭)
+  // 'all' 모드: BG+ACT 씬 머지
+  // 1차: sceneId 완전 일치
+  // 2차: 남은 씬들 간 normalizeSceneIdKey(숫자만 추출) 매칭 — "ac001" ↔ "a001" 같은 접두사 변형 극복
   const mergedScenes = useMemo((): MergedScene[] => {
     if (selectedDepartment !== 'all') return [];
     const map = new Map<string, MergedScene>();
 
+    // 1차: BG 전부 먼저 등록
     bgScenes.forEach((scene) => {
       map.set(scene.sceneId, {
         sceneId: scene.sceneId,
@@ -1571,12 +1596,39 @@ export function ScenesView() {
       });
     });
 
+    // 1차: ACT 중 sceneId 완전 일치만 병합
+    const actUnmatched: Scene[] = [];
     actScenes.forEach((scene) => {
       const existing = map.get(scene.sceneId);
       if (existing) {
         existing.actScene = scene;
         existing.actSceneIndex = actPart?.scenes.indexOf(scene) ?? -1;
       } else {
+        actUnmatched.push(scene);
+      }
+    });
+
+    // 2차: 정규화 키(첫 숫자 그룹)로 BG 미매칭 + ACT 미매칭 매칭
+    // BG 측에서 actScene 아직 없는 merged 항목들을 키별로 인덱싱
+    const bgLonelyByKey = new Map<string, MergedScene>();
+    for (const ms of map.values()) {
+      if (ms.actScene) continue;
+      const key = normalizeSceneIdKey(ms.sceneId);
+      if (!key) continue;
+      // 같은 정규화 키에 두 개 이상의 BG 가 있으면 첫 번째만 연결 대상으로 삼음 (혼동 방지)
+      if (!bgLonelyByKey.has(key)) bgLonelyByKey.set(key, ms);
+    }
+
+    actUnmatched.forEach((scene) => {
+      const key = normalizeSceneIdKey(scene.sceneId);
+      const partner = key ? bgLonelyByKey.get(key) : undefined;
+      if (partner) {
+        partner.actScene = scene;
+        partner.actSceneIndex = actPart?.scenes.indexOf(scene) ?? -1;
+        // 한 번 매칭된 BG 는 다른 ACT 와 또 매칭되지 않도록 인덱스에서 제거
+        bgLonelyByKey.delete(key);
+      } else {
+        // 매칭 상대 없음 — 단독 ACT 로 추가
         map.set(scene.sceneId, {
           sceneId: scene.sceneId,
           bgScene: null, actScene: scene,
@@ -1618,6 +1670,39 @@ export function ScenesView() {
       return sortDir === 'asc' ? cmp : -cmp;
     });
   }, [bgScenes, actScenes, bgPart, actPart, selectedDepartment, sortKey, sortDir]);
+
+  // 통합 상세 모달 — detailMerged 를 항상 최신 mergedScenes 로 동기화
+  // (낙관적 업데이트 / realtime 반영 이후에도 모달이 stale 한 참조를 들고 있지 않도록)
+  useEffect(() => {
+    if (!detailMerged) return;
+    const latest = mergedScenes.find((m) => m.sceneId === detailMerged.sceneId);
+    if (!latest) {
+      // merged 가 더 이상 존재하지 않음 → 모달 닫기
+      setDetailMerged(null);
+      return;
+    }
+    // 참조가 달라졌으면 최신 버전으로 교체 (내부 scene 내용도 함께 갱신됨)
+    if (latest !== detailMerged) {
+      setDetailMerged(latest);
+    }
+  }, [mergedScenes, detailMerged]);
+
+  // ACT 단독 뷰에서 BG 이미지를 폴백으로 쓰기 위한 맵 (정규화 키 → BG 이미지 URL)
+  // 정책: ACT 는 자체 이미지 슬롯이 없고 BG 이미지를 공유해서 보여준다.
+  const actToBgImageMap = useMemo(() => {
+    if (selectedDepartment !== 'acting') return null;
+    const bgSibling = allParts.find(
+      (p) => p.partId === (currentPart?.partId ?? '') && p.department === 'bg',
+    );
+    if (!bgSibling) return null;
+    const map = new Map<string, { storyboard?: string; guide?: string }>();
+    for (const bgs of bgSibling.scenes) {
+      const key = normalizeSceneIdKey(bgs.sceneId);
+      if (!key) continue;
+      map.set(key, { storyboard: bgs.storyboardUrl, guide: bgs.guideUrl });
+    }
+    return map;
+  }, [selectedDepartment, allParts, currentPart?.partId]);
 
   // 전체뷰 레이아웃 그룹핑
   const mergedLayoutGroups = useMemo(() => {
@@ -1833,6 +1918,8 @@ export function ScenesView() {
     const msg = String(err);
     if (msg.includes('Unknown action')) {
       sonnerToast.error(`${actionName} 실패: Apps Script 웹 앱을 최신 Code.gs로 재배포해주세요.\n(배포 → 새 배포 → 배포)`);
+    } else if (msg.includes('scenes_part_id_scene_number_key') || msg.includes('duplicate key')) {
+      sonnerToast.error(`${actionName} 실패: 같은 파트에 같은 씬 번호가 이미 있습니다. 새로고침 후 다시 시도해 주세요.`);
     } else {
       sonnerToast.error(`${actionName} 실패: ${err}`);
     }
@@ -2062,14 +2149,27 @@ export function ScenesView() {
   };
 
   // 공통 씬 삭제 (sheetName 파라미터)
+  // ⚠️ UUID 기반 삭제: 낙관적 업데이트 이전에 UUID를 캡처해야 엉뚱한 씬이 삭제되지 않음
   const handleDeleteSceneForSheet = async (sheetName: string, sceneIndex: number) => {
     if (!confirm('이 씬을 삭제하시겠습니까?')) return;
 
-    const prevEpisodes = useDataStore.getState().episodes;
+    // 1) 낙관적 업데이트 전에 현재 상태에서 UUID 캡처
+    const currentEpisodes = useDataStore.getState().episodes;
+    const targetPart = currentEpisodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === sheetName);
+    const targetScene = targetPart?.scenes[sceneIndex];
+    if (!targetScene?.id) {
+      sonnerToast.error('씬 정보를 찾을 수 없습니다. 새로고침 후 다시 시도해 주세요.');
+      return;
+    }
+    const sceneUuid = targetScene.id;
+
+    // 2) 낙관적 업데이트
+    const prevEpisodes = currentEpisodes;
     deleteSceneOptimistic(sheetName, sceneIndex);
 
+    // 3) UUID 기반 원격 삭제
     try {
-      await deleteScene(sheetName, sceneIndex);
+      await deleteSceneFromSupabase(sceneUuid);
       syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
@@ -2818,6 +2918,7 @@ export function ScenesView() {
             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
             onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
             onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+            onOpenMerged={(m) => setDetailMerged(m)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onCtrlClick={(id) => {
               if (bgPart) toggleSelectedScene(`bg:${id}`);
@@ -2858,8 +2959,17 @@ export function ScenesView() {
                           onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                           onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                           onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+            onOpenMerged={(m) => setDetailMerged(m)}
                           onCelebrationEnd={clearCelebration}
+                          // 단순 클릭: 이 씬만 선택 (기존 선택 모두 해제)
                           onSelect={() => {
+                            const ids = new Set<string>();
+                            if (bgPart) ids.add(`bg:${m.sceneId}`);
+                            if (actPart) ids.add(`act:${m.sceneId}`);
+                            setSelectedScenes(ids);
+                          }}
+                          // Ctrl/Cmd+클릭: 토글 (다중 유지)
+                          onCtrlSelect={() => {
                             if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
                             if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
                           }}
@@ -2891,8 +3001,17 @@ export function ScenesView() {
                     onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                     onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                     onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+            onOpenMerged={(m) => setDetailMerged(m)}
                     onCelebrationEnd={clearCelebration}
+                    // 단순 클릭: 이 씬만 선택 (기존 선택 모두 해제)
                     onSelect={() => {
+                      const ids = new Set<string>();
+                      if (bgPart) ids.add(`bg:${m.sceneId}`);
+                      if (actPart) ids.add(`act:${m.sceneId}`);
+                      setSelectedScenes(ids);
+                    }}
+                    // Ctrl/Cmd+클릭: 토글 (다중 유지)
+                    onCtrlSelect={() => {
                       if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
                       if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
                     }}
@@ -3011,6 +3130,9 @@ export function ScenesView() {
                           searchQuery={searchQuery}
                           commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
                           revisionCount={revisionCountByScene[buildSceneKey(currentPart?.sheetName ?? '', scene.sceneId)] ?? 0}
+                          // ACT 단독 뷰 정책: 자체 이미지가 없으면 BG 이미지를 폴백으로 노출
+                          fallbackStoryboardUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId))?.storyboard ?? null}
+                          fallbackGuideUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId))?.guide ?? null}
                           onToggle={handleToggle}
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -3080,6 +3202,9 @@ export function ScenesView() {
                 searchQuery={searchQuery}
                 commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
                 revisionCount={revisionCountByScene[buildSceneKey(currentPart?.sheetName ?? '', scene.sceneId)] ?? 0}
+                // ACT 단독 뷰 정책: 자체 이미지가 없으면 BG 이미지를 폴백으로 노출
+                fallbackStoryboardUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId))?.storyboard ?? null}
+                fallbackGuideUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId))?.guide ?? null}
                 onToggle={handleToggle}
                 onDelete={handleDeleteScene}
                 onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -3228,8 +3353,23 @@ export function ScenesView() {
                 if (!confirm(`${selectedSceneIds.size}개 씬을 삭제하시겠습니까?`)) return;
                 const prevEpisodes = useDataStore.getState().episodes;
 
-                // 'all' 모드: 복합 키 파싱 → 부서별 분리
-                const partEntries: { sheetName: string; indices: number[] }[] = [];
+                // ⚠️ UUID 기반 일괄 삭제 — 낙관적 업데이트 전에 UUID를 먼저 캡처
+                // (기존 인덱스 기반은 낙관적 업데이트 후 배치 실행 시 엉뚱한 씬이 삭제됨)
+                type DeletePlan = { sheetName: string; entries: { index: number; uuid: string }[] };
+                const plans: DeletePlan[] = [];
+
+                const collectUuidsFor = (sheetName: string, sceneIds: string[], scenes: { sceneId: string; id?: string }[]) => {
+                  const entries: { index: number; uuid: string }[] = [];
+                  sceneIds.forEach((sid) => {
+                    const idx = scenes.findIndex((s) => s.sceneId === sid);
+                    const uuid = idx >= 0 ? scenes[idx]?.id : undefined;
+                    if (idx >= 0 && uuid) entries.push({ index: idx, uuid });
+                  });
+                  // 낙관적 삭제는 인덱스 역순으로 수행 (앞 인덱스가 밀리지 않게)
+                  entries.sort((a, b) => b.index - a.index);
+                  return entries;
+                };
+
                 if (selectedDepartment === 'all') {
                   const bgIds: string[] = [];
                   const actIds: string[] = [];
@@ -3238,35 +3378,41 @@ export function ScenesView() {
                     else if (id.startsWith('act:')) actIds.push(id.slice(4));
                   });
                   if (bgIds.length > 0 && bgPart) {
-                    const idxs = bgIds.map((id) => bgPart.scenes.findIndex((s) => s.sceneId === id)).filter((i) => i >= 0).sort((a, b) => b - a);
-                    partEntries.push({ sheetName: bgPart.sheetName, indices: idxs });
+                    const entries = collectUuidsFor(bgPart.sheetName, bgIds, bgPart.scenes);
+                    if (entries.length > 0) plans.push({ sheetName: bgPart.sheetName, entries });
                   }
                   if (actIds.length > 0 && actPart) {
-                    const idxs = actIds.map((id) => actPart.scenes.findIndex((s) => s.sceneId === id)).filter((i) => i >= 0).sort((a, b) => b - a);
-                    partEntries.push({ sheetName: actPart.sheetName, indices: idxs });
+                    const entries = collectUuidsFor(actPart.sheetName, actIds, actPart.scenes);
+                    if (entries.length > 0) plans.push({ sheetName: actPart.sheetName, entries });
                   }
                 } else if (currentPart) {
-                  const idxs = [...selectedSceneIds]
-                    .map((id) => currentPart.scenes.findIndex((s) => s.sceneId === id))
-                    .filter((i) => i >= 0).sort((a, b) => b - a);
-                  partEntries.push({ sheetName: currentPart.sheetName, indices: idxs });
+                  const entries = collectUuidsFor(currentPart.sheetName, [...selectedSceneIds], currentPart.scenes);
+                  if (entries.length > 0) plans.push({ sheetName: currentPart.sheetName, entries });
                 }
 
-                partEntries.forEach(({ sheetName, indices }) => {
-                  indices.forEach((idx) => deleteSceneOptimistic(sheetName, idx));
+                if (plans.length === 0) {
+                  sonnerToast.error('삭제할 씬 정보를 찾을 수 없습니다.');
+                  return;
+                }
+
+                // 낙관적 업데이트: 역순 인덱스로 스토어에서 제거
+                plans.forEach(({ sheetName, entries }) => {
+                  entries.forEach(({ index }) => deleteSceneOptimistic(sheetName, index));
                 });
                 clearSelectedScenes();
 
+                // UUID 기반 배치 삭제 (스토어 상태에 독립적으로 안전)
                 (async () => {
                   try {
-                    const actions = partEntries.flatMap(({ sheetName, indices }) =>
-                      indices.map((idx) => batchActions.deleteScene(sheetName, idx))
+                    const actions = plans.flatMap(({ entries }) =>
+                      entries.map(({ uuid }) => batchActions.deleteSceneByUuid(uuid))
                     );
                     await batchExecute(actions);
                     syncInBackground();
                   } catch (err) {
                     console.error('[일괄 삭제 실패]', err);
                     useDataStore.getState().setEpisodes(prevEpisodes);
+                    sonnerToast.error(`일괄 삭제 실패: ${(err as Error).message}`);
                     syncInBackground();
                   }
                 })();
@@ -3419,12 +3565,36 @@ export function ScenesView() {
         const hasPrev = posInFiltered > 0;
         const hasNext = posInFiltered >= 0 && posInFiltered < filteredIndices.length - 1;
 
+        // 반대 부서의 같은 번호 씬 탐색 — 댓글 통합을 위해 반대편 sheetName/sceneNo 전달
+        // 그리고 ACT 모달에서 BG 이미지를 읽기 전용으로 표시하기 위해 BG 씬 매핑도 반환
+        // allParts 는 currentEp.parts 이므로 이미 같은 에피소드로 스코프됨
+        const counterpart = (() => {
+          const currentDetailPart = allParts.find((p) => p.sheetName === detailSheetName);
+          if (!currentDetailPart) return null;
+          const otherDept: Department = currentDetailPart.department === 'bg' ? 'acting' : 'bg';
+          const otherPart = allParts.find(
+            (p) => p.partId === currentDetailPart.partId && p.department === otherDept,
+          );
+          if (!otherPart) return null;
+          // 정규화된 sceneId 키로 매칭 (예: ac001 ↔ a001)
+          const targetKey = normalizeSceneIdKey(detailScene.sceneId);
+          const match = otherPart.scenes.find((s) => normalizeSceneIdKey(s.sceneId) === targetKey);
+          return match ? { sheetName: otherPart.sheetName, sceneNo: match.no, scene: match } : null;
+        })();
+        // ACT 모달일 때 반대편(BG) 이 매칭되면 그 씬의 이미지를 읽기 전용으로 보여준다
+        const bgImageForAct = detailDept === 'acting' && counterpart?.scene
+          ? { storyboard: counterpart.scene.storyboardUrl, guide: counterpart.scene.guideUrl }
+          : null;
         return (
           <SceneDetailModal
             scene={detailScene}
             sceneIndex={detailSceneIdx}
             sheetName={detailSheetName}
             department={detailDept}
+            counterpartSheetName={counterpart?.sheetName ?? null}
+            counterpartSceneNo={counterpart?.sceneNo ?? null}
+            readOnlyStoryboardUrl={bgImageForAct?.storyboard ?? null}
+            readOnlyGuideUrl={bgImageForAct?.guide ?? null}
             onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(detailSheetName, idx, field, value)}
             onToggle={(id, stage) => handleToggleForSheet(detailSheetName, id, stage)}
             onClose={() => { setDetailSceneIndex(null); setDetailContext(null); }}
@@ -3439,6 +3609,78 @@ export function ScenesView() {
                 const newIdx = filteredIndices[nextPos];
                 setDetailSceneIndex(newIdx);
                 if (detailContext) setDetailContext({ ...detailContext, sceneIndex: newIdx });
+              }
+            }}
+          />
+        );
+      })()}
+
+      {/* 전체 뷰(all) 전용 통합 상세 모달 */}
+      {detailMerged && selectedDepartment === 'all' && (() => {
+        const curIdx = mergedScenes.findIndex((m) => m.sceneId === detailMerged.sceneId);
+        const hasPrev = curIdx > 0;
+        const hasNext = curIdx >= 0 && curIdx < mergedScenes.length - 1;
+        return (
+          <UnifiedSceneDetailModal
+            merged={detailMerged}
+            bgSheetName={bgPart?.sheetName ?? null}
+            actSheetName={actPart?.sheetName ?? null}
+            partLabel={currentPartId ? `${currentPartId}파트` : undefined}
+            episodeLabel={selectedEpisode != null ? `EP ${selectedEpisode}` : undefined}
+            hasPrev={hasPrev}
+            hasNext={hasNext}
+            currentMergedIndex={curIdx >= 0 ? curIdx : 0}
+            totalMerged={mergedScenes.length}
+            onClose={() => setDetailMerged(null)}
+            onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+            onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
+            onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+            onDeleteBoth={async () => {
+              const targets: { sheet: string; idx: number; uuid: string }[] = [];
+              if (detailMerged.bgScene?.id && bgPart?.sheetName) {
+                targets.push({ sheet: bgPart.sheetName, idx: detailMerged.bgSceneIndex, uuid: detailMerged.bgScene.id });
+              }
+              if (detailMerged.actScene?.id && actPart?.sheetName) {
+                targets.push({ sheet: actPart.sheetName, idx: detailMerged.actSceneIndex, uuid: detailMerged.actScene.id });
+              }
+              if (targets.length === 0) return;
+              const prevEpisodes = useDataStore.getState().episodes;
+              // 역순 인덱스로 낙관적 삭제
+              targets.sort((a, b) => b.idx - a.idx);
+              targets.forEach((t) => deleteSceneOptimistic(t.sheet, t.idx));
+              try {
+                await Promise.all(targets.map((t) => deleteSceneFromSupabase(t.uuid)));
+                syncInBackground();
+              } catch (err) {
+                setEpisodes(prevEpisodes);
+                handleSheetError(err, '씬 삭제');
+                syncInBackground();
+              }
+            }}
+            onAddDept={async (dept) => {
+              const targetPart = dept === 'bg' ? bgPart : actPart;
+              if (!targetPart?.sheetName) {
+                sonnerToast.error(`${dept === 'bg' ? 'BG' : 'ACT'} 파트가 존재하지 않습니다. 먼저 파트를 만들어 주세요.`);
+                return;
+              }
+              // 중복 방지: 같은 씬번호가 이미 파트에 있으면 스킵
+              const existing = targetPart.scenes.find((s) => s.sceneId === detailMerged.sceneId);
+              if (existing) {
+                sonnerToast.error(`이미 ${dept === 'bg' ? 'BG' : 'ACT'} 쪽에 "${detailMerged.sceneId}" 씬이 있습니다.`);
+                return;
+              }
+              try {
+                await addScene(targetPart.sheetName, detailMerged.sceneId, '', '');
+                await syncInBackground();
+              } catch (err) {
+                handleSheetError(err, '씬 추가');
+              }
+            }}
+            onNavigate={(dir) => {
+              if (curIdx < 0) return;
+              const nextIdx = dir === 'prev' ? curIdx - 1 : curIdx + 1;
+              if (nextIdx >= 0 && nextIdx < mergedScenes.length) {
+                setDetailMerged(mergedScenes[nextIdx]);
               }
             }}
           />

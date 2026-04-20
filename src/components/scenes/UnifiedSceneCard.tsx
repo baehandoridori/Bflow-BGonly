@@ -21,8 +21,15 @@ interface UnifiedSceneCardProps {
   onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
   onDelete: (sheetName: string, sceneIndex: number) => void;
   onOpenDetail: (sheetName: string, sceneIndex: number) => void;
+  /** 통합 상세 모달 열기 — 전체 뷰에서 BG+ACT 동시 편집 */
+  onOpenMerged?: (merged: MergedScene) => void;
   onCelebrationEnd: () => void;
+  /** 단순 클릭 — 기본 UX: 이 씬만 선택 (기존 선택 해제) */
   onSelect: () => void;
+  /** Ctrl/Cmd + 클릭 — 이 씬 선택 토글 (기존 선택 유지) */
+  onCtrlSelect?: () => void;
+  /** Shift + 클릭 — 범위 선택 */
+  onShiftSelect?: () => void;
 }
 
 export function UnifiedSceneCard({
@@ -38,8 +45,11 @@ export function UnifiedSceneCard({
   onToggle,
   onDelete,
   onOpenDetail,
+  onOpenMerged,
   onCelebrationEnd,
   onSelect,
+  onCtrlSelect,
+  onShiftSelect,
 }: UnifiedSceneCardProps) {
   const { sceneId, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
@@ -61,16 +71,31 @@ export function UnifiedSceneCard({
   const presentCount = (bgScene ? 1 : 0) + (actScene ? 1 : 0);
   const combinedPct = presentCount > 0 ? Math.round((bgPct + actPct) / presentCount) : 0;
 
-  const hasImages = !!(primaryScene.storyboardUrl || primaryScene.guideUrl);
+  // 이미지는 BG 전용 — ACT 에 저장된 이미지는 표시하지 않음 (정책 통일)
+  const hasImages = !!(bgScene?.storyboardUrl || bgScene?.guideUrl);
   const layoutId = bgScene?.layoutId || actScene?.layoutId;
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    onSelect();
+    // Ctrl/Cmd+클릭 → 토글 (다중 선택 유지), Shift+클릭 → 범위 선택
+    // 단순 클릭 → 이 씬만 선택 (기존 선택 모두 해제)
+    if (e.ctrlKey || e.metaKey) {
+      (onCtrlSelect ?? onSelect)();
+    } else if (e.shiftKey && onShiftSelect) {
+      onShiftSelect();
+    } else {
+      onSelect();
+    }
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    // 통합 모달 콜백이 있으면 우선 사용 — BG/ACT 양쪽을 함께 편집
+    if (onOpenMerged) {
+      onOpenMerged(merged);
+      return;
+    }
+    // 폴백(단일 부서 모달 호환): BG 우선
     if (bgScene && bgSheetName) {
       onOpenDetail(bgSheetName, bgSceneIndex);
     } else if (actScene && actSheetName) {
@@ -130,30 +155,44 @@ export function UnifiedSceneCard({
                 <span className="text-[10px] font-bold">{bgCommentCount + actCommentCount}</span>
               </span>
             )}
-            <span className="bg-[#282830] text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
+            {/* 퍼센트 뱃지 — 라이트/다크 자동 적응 */}
+            <span className="bg-bg-border/60 dark:bg-bg-border text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
               {combinedPct}%
             </span>
           </div>
         </div>
 
-        {/* ── 이미지 썸네일 ── */}
-        {hasImages && (
+        {/* ── 이미지 썸네일 (BG 전용) ── */}
+        {hasImages && bgScene && (
           <div className="mx-4 mt-0.5 mb-1 flex gap-px rounded-lg overflow-hidden bg-bg-border">
-            {primaryScene.storyboardUrl && (
-              <img src={primaryScene.storyboardUrl} alt="SB" className="flex-1 h-20 object-contain bg-bg-primary min-w-0" draggable={false} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            {bgScene.storyboardUrl && (
+              <img src={bgScene.storyboardUrl} alt="SB" className="flex-1 h-20 object-contain bg-bg-primary min-w-0" draggable={false} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
             )}
-            {primaryScene.guideUrl && (
-              <img src={primaryScene.guideUrl} alt="Guide" className="flex-1 h-20 object-contain bg-bg-primary min-w-0" draggable={false} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            {bgScene.guideUrl && (
+              <img src={bgScene.guideUrl} alt="Guide" className="flex-1 h-20 object-contain bg-bg-primary min-w-0" draggable={false} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
             )}
           </div>
         )}
 
-        {/* ── 메모 ── */}
-        {primaryScene.memo && (
-          <div className="mx-4 mt-1" data-no-lasso>
-            <p className="text-[11px] text-amber-400/70 leading-relaxed line-clamp-1">
-              <HighlightText text={primaryScene.memo} query={searchQuery} />
-            </p>
+        {/* ── 메모 (BG/ACT 각각 있으면 부서 라벨과 함께 둘 다 표시) ── */}
+        {(bgScene?.memo || actScene?.memo) && (
+          <div className="mx-4 mt-1 flex flex-col gap-0.5" data-no-lasso>
+            {bgScene?.memo && (
+              <p className="text-[11px] leading-relaxed line-clamp-1 text-amber-400/70">
+                {actScene?.memo && (
+                  <span className="text-[10px] font-semibold mr-1" style={{ color: DEPARTMENT_CONFIGS.bg.color }}>BG</span>
+                )}
+                <HighlightText text={bgScene.memo} query={searchQuery} />
+              </p>
+            )}
+            {actScene?.memo && (
+              <p className="text-[11px] leading-relaxed line-clamp-1 text-amber-400/70">
+                {bgScene?.memo && (
+                  <span className="text-[10px] font-semibold mr-1" style={{ color: DEPARTMENT_CONFIGS.acting.color }}>ACT</span>
+                )}
+                <HighlightText text={actScene.memo} query={searchQuery} />
+              </p>
+            )}
           </div>
         )}
 
@@ -219,7 +258,8 @@ function DeptSection({
           <span className="text-xs font-semibold text-text-secondary">{cfg.shortLabel}</span>
           <span className="text-[11px] text-text-secondary/50 italic">(미등록)</span>
         </div>
-        <div className="flex rounded-lg bg-[#1E1E28] p-1 gap-0.5">
+        {/* 진행 단계 컨테이너 — 라이트 모드에서는 살짝 어둡게, 다크 모드에서는 살짝 밝게 */}
+        <div className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-0.5">
           {STAGES.map((stage) => (
             <div key={stage} className="flex-1 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md">
               {cfg.stageLabels[stage]}
@@ -250,7 +290,7 @@ function DeptSection({
           </button>
         </div>
       </div>
-      <div className="flex rounded-lg bg-[#1E1E28] p-1 gap-0.5">
+      <div className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-0.5">
         {STAGES.map((stage, i) => {
           const isDone = scene[stage];
           const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
@@ -261,7 +301,7 @@ function DeptSection({
               onClick={(e) => { e.stopPropagation(); onToggle(sheetName, sceneId, stage); }}
               className={cn(
                 'flex-1 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
-                !isDone && 'text-text-secondary/50 hover:text-text-primary hover:bg-white/5',
+                !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-black/5 dark:hover:bg-white/5',
               )}
               style={
                 isDone

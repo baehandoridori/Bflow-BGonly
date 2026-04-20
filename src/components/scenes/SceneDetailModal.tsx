@@ -35,6 +35,13 @@ interface SceneDetailModalProps {
   sceneIndex: number;
   sheetName: string;
   department: Department;
+  /** 반대 부서의 댓글/리비전을 함께 보려면 반대편 sheetName 지정 (BG 단독 모달에서도 ACT 댓글 노출) */
+  counterpartSheetName?: string | null;
+  /** 반대 부서에 같은 번호의 씬이 존재하면 그 씬의 scene.no (댓글 키용) */
+  counterpartSceneNo?: number | null;
+  /** ACT 모달에서 BG 의 이미지를 읽기 전용으로 표시하기 위한 URL 들 */
+  readOnlyStoryboardUrl?: string | null;
+  readOnlyGuideUrl?: string | null;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
   onToggle: (sceneId: string, stage: Stage) => void;
   onClose: () => void;
@@ -187,17 +194,25 @@ function ImageSlot({
             tabIndex={0}
             onPaste={onPasteEvent}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
+            onDragLeave={(e) => {
+              // 자식 요소로 이동하는 경우는 무시 — relatedTarget 이 현재 div 안에 있으면 유지
+              const rt = e.relatedTarget as Node | null;
+              if (rt && e.currentTarget.contains(rt)) return;
+              setDragOver(false);
+            }}
             onDrop={(e) => { e.preventDefault(); setDragOver(false); onDrop(e); }}
             className={cn(
-              'rounded-xl overflow-hidden border-2 transition-colors cursor-pointer outline-none',
-              dragOver ? 'border-accent' : 'border-transparent',
+              'relative rounded-xl overflow-hidden border-2 transition-all cursor-pointer outline-none',
+              dragOver ? 'border-accent ring-4 ring-accent/25 scale-[1.01]' : 'border-transparent',
             )}
           >
             <img
               src={url}
               alt={label}
-              className="w-full max-h-60 object-contain bg-bg-primary rounded-xl"
+              className={cn(
+                'w-full max-h-60 object-contain bg-bg-primary rounded-xl transition-all',
+                dragOver && 'brightness-50 blur-[1px]',
+              )}
               draggable={false}
               onError={(e) => {
                 const img = e.target as HTMLImageElement;
@@ -211,6 +226,13 @@ function ImageSlot({
                 }
               }}
             />
+            {/* 드래그 오버 힌트 — 교체 안내 */}
+            {dragOver && (
+              <div className="absolute inset-0 rounded-xl flex flex-col items-center justify-center gap-1.5 pointer-events-none bg-accent/15 backdrop-blur-sm">
+                <ImagePlus size={30} className="text-accent drop-shadow" />
+                <span className="text-sm font-semibold text-accent drop-shadow">여기에 놓으면 이미지 교체</span>
+              </div>
+            )}
             {/* 업로드 중 오버레이 */}
             {uploading && (
               <div className="absolute inset-0 bg-overlay/40 rounded-xl flex items-center justify-center">
@@ -260,19 +282,35 @@ function ImageSlot({
           onPaste={(e) => { onPasteEvent(e); setPhase('idle'); }}
           onBlur={() => setPhase('idle')}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
+          onDragLeave={(e) => {
+            const rt = e.relatedTarget as Node | null;
+            if (rt && e.currentTarget.contains(rt)) return;
+            setDragOver(false);
+          }}
           onDrop={(e) => { e.preventDefault(); setDragOver(false); onDrop(e); }}
           className={cn(
             'flex flex-col items-center justify-center gap-2 h-40 rounded-xl border-2 border-dashed transition-all cursor-pointer outline-none',
             dragOver
-              ? 'border-accent bg-accent/10'
+              ? 'border-accent bg-accent/15 ring-4 ring-accent/25 scale-[1.02] shadow-lg shadow-accent/20'
               : phase === 'paste-hint'
                 ? 'border-accent bg-accent/5'
-                : 'border-bg-border hover:border-text-secondary/30',
+                : 'border-bg-border hover:border-text-secondary/30 hover:bg-accent/5',
           )}
           onClick={handleEmptyClick}
         >
-          {phase === 'paste-hint' ? (
+          {dragOver ? (
+            <>
+              <ImagePlus size={32} className="text-accent animate-bounce" />
+              <div className="text-center">
+                <p className="text-sm font-semibold text-accent">
+                  여기에 놓으면 이미지 추가
+                </p>
+                <p className="text-[11px] text-accent/70 mt-0.5">
+                  파일을 놓으세요
+                </p>
+              </div>
+            </>
+          ) : phase === 'paste-hint' ? (
             <>
               <ClipboardPaste size={28} className="text-accent" />
               <div className="text-center">
@@ -309,6 +347,43 @@ function ImageSlot({
   );
 }
 
+// ─── 읽기 전용 이미지 프리뷰 (ACT 모달에서 BG 이미지를 보여줄 때) ───
+
+function ReadOnlyImagePreview({
+  label,
+  url,
+  onView,
+}: {
+  label: string;
+  url: string;
+  onView: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">{label}</span>
+      <button
+        type="button"
+        onClick={onView}
+        className="relative group rounded-xl overflow-hidden cursor-zoom-in outline-none focus:ring-2 focus:ring-accent/40"
+        title="클릭하여 확대"
+      >
+        <img
+          src={url}
+          alt={label}
+          className="w-full max-h-60 object-contain bg-bg-primary rounded-xl"
+          draggable={false}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+        />
+        <div className="absolute inset-0 bg-overlay/0 group-hover:bg-overlay/30 transition-colors rounded-xl flex items-center justify-center">
+          <span className="opacity-0 group-hover:opacity-100 transition-opacity px-3 py-1.5 rounded-md bg-bg-card/80 border border-bg-border text-xs text-text-primary backdrop-blur-sm">
+            클릭하여 확대
+          </span>
+        </div>
+      </button>
+    </div>
+  );
+}
+
 // ─── 메인 모달 ─────────────────────────────────────
 
 export function SceneDetailModal({
@@ -316,6 +391,10 @@ export function SceneDetailModal({
   sceneIndex,
   sheetName,
   department,
+  counterpartSheetName,
+  counterpartSceneNo,
+  readOnlyStoryboardUrl,
+  readOnlyGuideUrl,
   onFieldUpdate,
   onToggle,
   onClose,
@@ -767,38 +846,63 @@ export function SceneDetailModal({
                   </div>
                 </section>
 
-                {/* ── 이미지 섹션 ── */}
-                <section>
-                  <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4">
-                    이미지
-                  </h3>
-                  <div className="flex flex-col gap-5 px-4">
-                    <ImageSlot
-                      label="스토리보드"
-                      url={previewUrls.storyboard || scene.storyboardUrl}
-                      loading={imageLoading === 'storyboard' && !previewUrls.storyboard}
-                      uploading={!!previewUrls.storyboard}
-                      onPickFile={() => pickFile('storyboard')}
-                      onPasteClipboard={() => pasteClipboard('storyboard')}
-                      onRemove={() => setDeleteConfirm('storyboard')}
-                      onView={() => setShowImageModal(true)}
-                      onPasteEvent={(e) => handlePasteEvent(e, 'storyboard')}
-                      onDrop={(e) => handleDrop(e, 'storyboard')}
-                    />
-                    <ImageSlot
-                      label="가이드"
-                      url={previewUrls.guide || scene.guideUrl}
-                      loading={imageLoading === 'guide' && !previewUrls.guide}
-                      uploading={!!previewUrls.guide}
-                      onPickFile={() => pickFile('guide')}
-                      onPasteClipboard={() => pasteClipboard('guide')}
-                      onRemove={() => setDeleteConfirm('guide')}
-                      onView={() => setShowImageModal(true)}
-                      onPasteEvent={(e) => handlePasteEvent(e, 'guide')}
-                      onDrop={(e) => handleDrop(e, 'guide')}
-                    />
-                  </div>
-                </section>
+                {/* ── 이미지 섹션 ─────────────────────
+                     BG 모달: 편집 가능한 이미지 슬롯
+                     ACT 모달: BG 에 이미지가 있으면 읽기 전용 프리뷰 노출 (정책 — ACT 슬롯 없음) */}
+                {department === 'bg' ? (
+                  <section>
+                    <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4">이미지</h3>
+                    <div className="flex flex-col gap-5 px-4">
+                      <ImageSlot
+                        label="스토리보드"
+                        url={previewUrls.storyboard || scene.storyboardUrl}
+                        loading={imageLoading === 'storyboard' && !previewUrls.storyboard}
+                        uploading={!!previewUrls.storyboard}
+                        onPickFile={() => pickFile('storyboard')}
+                        onPasteClipboard={() => pasteClipboard('storyboard')}
+                        onRemove={() => setDeleteConfirm('storyboard')}
+                        onView={() => setShowImageModal(true)}
+                        onPasteEvent={(e) => handlePasteEvent(e, 'storyboard')}
+                        onDrop={(e) => handleDrop(e, 'storyboard')}
+                      />
+                      <ImageSlot
+                        label="가이드"
+                        url={previewUrls.guide || scene.guideUrl}
+                        loading={imageLoading === 'guide' && !previewUrls.guide}
+                        uploading={!!previewUrls.guide}
+                        onPickFile={() => pickFile('guide')}
+                        onPasteClipboard={() => pasteClipboard('guide')}
+                        onRemove={() => setDeleteConfirm('guide')}
+                        onView={() => setShowImageModal(true)}
+                        onPasteEvent={(e) => handlePasteEvent(e, 'guide')}
+                        onDrop={(e) => handleDrop(e, 'guide')}
+                      />
+                    </div>
+                  </section>
+                ) : (readOnlyStoryboardUrl || readOnlyGuideUrl) ? (
+                  <section>
+                    <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4 flex items-center gap-2">
+                      이미지
+                      <span className="text-[10px] font-normal text-text-secondary/50 italic">BG 에서 가져옴</span>
+                    </h3>
+                    <div className="flex flex-col gap-5 px-4">
+                      {readOnlyStoryboardUrl && (
+                        <ReadOnlyImagePreview
+                          label="스토리보드"
+                          url={readOnlyStoryboardUrl}
+                          onView={() => setShowImageModal(true)}
+                        />
+                      )}
+                      {readOnlyGuideUrl && (
+                        <ReadOnlyImagePreview
+                          label="가이드"
+                          url={readOnlyGuideUrl}
+                          onView={() => setShowImageModal(true)}
+                        />
+                      )}
+                    </div>
+                  </section>
+                ) : null}
               </div>
 
               {/* ── 하단 씬 네비게이션 도트 ── */}
@@ -922,6 +1026,11 @@ export function SceneDetailModal({
             </div>
             <CommentPanel
               sceneKey={sceneKey}
+              secondarySceneKey={
+                counterpartSheetName && counterpartSceneNo != null
+                  ? `${counterpartSheetName}:${counterpartSceneNo}`
+                  : undefined
+              }
               onCountChange={setCommentCount}
             />
           </motion.div>
@@ -980,11 +1089,11 @@ export function SceneDetailModal({
         )}
       </AnimatePresence>
 
-      {/* 이미지 전체 뷰 모달 */}
+      {/* 이미지 전체 뷰 모달 — ACT 모달이면 BG 에서 가져온 읽기 전용 URL 사용 */}
       {showImageModal && (
         <ImageModal
-          storyboardUrl={scene.storyboardUrl}
-          guideUrl={scene.guideUrl}
+          storyboardUrl={department === 'bg' ? scene.storyboardUrl : (readOnlyStoryboardUrl ?? '')}
+          guideUrl={department === 'bg' ? scene.guideUrl : (readOnlyGuideUrl ?? '')}
           sceneId={scene.sceneId}
           onClose={() => setShowImageModal(false)}
           // 씬 네비게이션 props

@@ -23,6 +23,8 @@ interface UnifiedSceneSheetViewProps {
   onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
   onDelete: (sheetName: string, sceneIndex: number) => void;
   onOpenDetail: (sheetName: string, sceneIndex: number) => void;
+  /** 통합 상세 모달 열기 — 설정된 경우 onOpenDetail 대신 사용 */
+  onOpenMerged?: (merged: MergedScene) => void;
   onFieldUpdate: (sheetName: string, sceneIndex: number, field: string, value: string) => void;
   onCtrlClick?: (sceneId: string) => void;
 }
@@ -274,6 +276,7 @@ export function UnifiedSceneSheetView({
   onToggle,
   onDelete,
   onOpenDetail,
+  onOpenMerged,
   onFieldUpdate,
   onCtrlClick,
 }: UnifiedSceneSheetViewProps) {
@@ -322,6 +325,9 @@ export function UnifiedSceneSheetView({
   const [initialEditChar, setInitialEditChar] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
+  // 드래그 판정 — 단순 클릭이 범위 선택(중복 선택)으로 오해되지 않도록 임계값 설정
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dragActiveRef = useRef(false);
 
   const maxRow = Math.max(0, displayScenes.length - 1);
   const maxCol = EDITABLE_FIELDS.length - 1;
@@ -364,13 +370,29 @@ export function UnifiedSceneSheetView({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [editingCell]);
 
-  // 드래그 종료
+  // 드래그 판정 + 종료 — 마우스 다운 후 threshold(6px) 초과 시점에 isDragging=true
   useEffect(() => {
-    if (!isDragging) return;
-    const handleMouseUp = () => setIsDragging(false);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => document.removeEventListener('mouseup', handleMouseUp);
-  }, [isDragging]);
+    const onMove = (e: MouseEvent) => {
+      if (!dragStartRef.current || dragActiveRef.current) return;
+      const dx = e.clientX - dragStartRef.current.x;
+      const dy = e.clientY - dragStartRef.current.y;
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+        dragActiveRef.current = true;
+        setIsDragging(true);
+      }
+    };
+    const onUp = () => {
+      dragStartRef.current = null;
+      dragActiveRef.current = false;
+      setIsDragging(false);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, []);
 
   // ── 셀 인터랙션 핸들러 ──
 
@@ -382,14 +404,17 @@ export function UnifiedSceneSheetView({
     } else {
       setAnchor({ row, col });
       setRangeEnd(null);
-      setIsDragging(true);
+      // 드래그 시작 좌표만 기록 — 실제 드래그 활성화는 전역 mousemove threshold 에서 판정
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
+      dragActiveRef.current = false;
     }
     tableRef.current?.focus({ preventScroll: true });
   }, [anchor]);
 
   const handleCellMouseEnter = useCallback((row: number, col: number) => {
-    if (isDragging) setRangeEnd({ row, col });
-  }, [isDragging]);
+    // threshold 를 넘겨 실제 드래그로 판정된 경우에만 범위 선택 확장
+    if (dragActiveRef.current) setRangeEnd({ row, col });
+  }, []);
 
   const handleStartEditing = useCallback((row: number, col: number) => {
     setEditingCell({ row, col });
@@ -644,6 +669,11 @@ export function UnifiedSceneSheetView({
                     }
                   }}
                   onDoubleClick={() => {
+                    // 통합 모달 콜백 우선 — BG+ACT 를 함께 열기
+                    if (onOpenMerged) {
+                      onOpenMerged(m);
+                      return;
+                    }
                     if (bgScene && bgSheetName) onOpenDetail(bgSheetName, bgSceneIndex);
                     else if (actScene && actSheetName) onOpenDetail(actSheetName, actSceneIndex);
                   }}
@@ -688,11 +718,11 @@ export function UnifiedSceneSheetView({
                     onStopEditing={handleStopEditing}
                   />
 
-                  {/* 스토리보드 */}
-                  <SheetThumbnailCell url={primary.storyboardUrl} label="스토리보드" />
+                  {/* 스토리보드 — BG 전용 (정책 통일) */}
+                  <SheetThumbnailCell url={bgScene?.storyboardUrl} label="스토리보드" />
 
-                  {/* 가이드 */}
-                  <SheetThumbnailCell url={primary.guideUrl} label="가이드" />
+                  {/* 가이드 — BG 전용 */}
+                  <SheetThumbnailCell url={bgScene?.guideUrl} label="가이드" />
 
                   {/* BG 담당자 (인라인 편집) */}
                   {bgScene ? (
