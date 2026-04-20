@@ -124,6 +124,12 @@ export function broadcastDataChange(table: string, action: string, senderId?: st
   safeSend('data-change', { table, action, senderId, ts: Date.now() });
 }
 
+/** 캘린더(공개 GCal 이벤트 + 개인 비공개 이벤트) 변경 broadcast.
+ *  수신 측(calendarService) 에서 sync/재렌더 트리거. 다른 기기 비공개 CRUD 도 실시간 반영된다. */
+export function broadcastCalendarChanged(action: string, senderId?: string): void {
+  safeSend('calendar-changed', { action, senderId, ts: Date.now() });
+}
+
 /** 댓글 추가 broadcast 전송 */
 export function broadcastCommentAdded(
   sceneId: string,

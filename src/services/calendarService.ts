@@ -429,6 +429,28 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
   if (!existing) return;
   const actualId = existing.id; // GCal ID (캐시에 저장된 실제 ID)
 
+  // ── 저장소 이전(migration) 감지 —
+  //    공개(GCal) ↔ 비공개(Supabase) 플래그가 바뀌면 단순 필드 패치로는 안 된다.
+  //    "앱에만 저장" 약속을 지키려면 실제로 기존 저장소에서 삭제하고 새 저장소에 생성해야 한다.
+  const currentlyPrivate = existing.sourceCalendarId === PRIVATE_CAL_ID;
+  const nextPrivate = updates.isPrivate !== undefined ? updates.isPrivate : currentlyPrivate;
+  if (updates.isPrivate !== undefined && currentlyPrivate !== nextPrivate) {
+    const merged: CalendarEvent = { ...existing, ...updates, isPrivate: nextPrivate };
+    // 1) 기존 저장소에서 제거 (낙관적 캐시 제거 포함)
+    await deleteEvent(eventId);
+    // 2) 반대 저장소로 새로 생성 — 새 id 부여 (cal_*, UUID 는 각 저장소가 재발급)
+    const fresh: CalendarEvent = {
+      ...merged,
+      id: (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+        ? `cal_${crypto.randomUUID()}`
+        : `cal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      sourceCalendarId: undefined, // addEvent 내부에서 경로 결정
+      createdAt: merged.createdAt || new Date().toISOString(),
+    };
+    await addEvent(fresh);
+    return;
+  }
+
   // ── 비공개 이벤트 분기 — Supabase update ──
   if (existing.sourceCalendarId === PRIVATE_CAL_ID) {
     const previous = { ...existing };
@@ -478,10 +500,8 @@ export async function updateEvent(eventId: string, updates: Partial<CalendarEven
       startDate: updates.startDate,
       endDate: gcalEndDate,
       extendedProperties: toBflowMeta({ ...existing, ...updates }),
-      // isPrivate 가 변경되었을 때만 visibility 전송 (undefined 는 무시됨)
-      visibility: updates.isPrivate !== undefined
-        ? (updates.isPrivate ? 'private' : 'default')
-        : undefined,
+      // isPrivate 토글은 이미 위의 저장소 이전 경로에서 처리됨 — 여기는 저장소 변경 없이
+      // 단순 필드 수정만 오므로 visibility 는 건드리지 않는다.
     });
   } catch (err) {
     // 실패: 롤백

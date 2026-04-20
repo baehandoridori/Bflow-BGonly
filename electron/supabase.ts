@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
-import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastCommentAdded } from './broadcast';
+import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged } from './broadcast';
 
 // ─── Supabase 클라이언트 (하드코딩 — 의사결정 #환경변수 참조) ───
 
@@ -685,6 +685,7 @@ export async function addPrivateEvent(input: {
     .single();
   throwIfError(error);
   broadcastDataChange('private_calendar_events', 'INSERT');
+  broadcastCalendarChanged('INSERT');
   return data as SupabasePrivateEvent;
 }
 
@@ -709,12 +710,14 @@ export async function updatePrivateEvent(
   const { error } = await supabase.from('private_calendar_events').update(patch).eq('id', id);
   throwIfError(error);
   broadcastDataChange('private_calendar_events', 'UPDATE');
+  broadcastCalendarChanged('UPDATE');
 }
 
 export async function deletePrivateEvent(id: string): Promise<void> {
   const { error } = await supabase.from('private_calendar_events').delete().eq('id', id);
   throwIfError(error);
   broadcastDataChange('private_calendar_events', 'DELETE');
+  broadcastCalendarChanged('DELETE');
 }
 
 // ═══════════════════════════════════════════════

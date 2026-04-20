@@ -1595,10 +1595,15 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
     rebuildTrayMenu(); // 트레이 체크박스 갱신
     // 위치/크기 캐시는 유지하되 isOpen=false 로 마킹 → 다음 실행 시 자동 복원에서 제외.
     // (사용자가 다시 열면 이전 위치에 그대로 복원됨)
-    const cached = widgetPositionCache.get(widgetId);
-    if (cached) {
-      cached.isOpen = false;
-      saveWidgetPositionsDebounced();
+    // 단, 앱 종료(isQuitting) 중 발생한 closed 이벤트는 "사용자가 명시적으로 닫은" 것이 아니라
+    // 종료 절차에 의한 자동 파괴이므로 isOpen 을 건드리지 않는다 — 열려있던 위젯들이 다음 실행
+    // 시 그대로 복원되도록.
+    if (!isQuitting) {
+      const cached = widgetPositionCache.get(widgetId);
+      if (cached) {
+        cached.isOpen = false;
+        saveWidgetPositionsDebounced();
+      }
     }
     // 독 스택에서 제거 + 나머지 재배치
     const dockIdx = dockedWidgetIds.indexOf(widgetId);
