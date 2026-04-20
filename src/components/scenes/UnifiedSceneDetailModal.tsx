@@ -326,7 +326,9 @@ export function UnifiedSceneDetailModal({
                   scene={bgScene}
                   sheetName={bgSheetName}
                   sceneIndex={bgSceneIndex}
-                  sceneId={merged.sceneId}
+                  // 병합 키(merged.sceneId) 가 아닌 실제 해당 부서 씬의 sceneId 를 전달 —
+                  // 정규화 매칭(ac001↔a001) 케이스에서 둘이 다를 수 있어 onToggle 이 no-op 되는 걸 방지.
+                  sceneId={bgScene?.sceneId ?? merged.sceneId}
                   onToggle={onToggle}
                   onFieldUpdate={onFieldUpdate}
                   onDelete={() => setDeleteConfirm('bg')}
@@ -337,7 +339,7 @@ export function UnifiedSceneDetailModal({
                   scene={actScene}
                   sheetName={actSheetName}
                   sceneIndex={actSceneIndex}
-                  sceneId={merged.sceneId}
+                  sceneId={actScene?.sceneId ?? merged.sceneId}
                   onToggle={onToggle}
                   onFieldUpdate={onFieldUpdate}
                   onDelete={() => setDeleteConfirm('act')}

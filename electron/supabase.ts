@@ -720,6 +720,17 @@ export async function deletePrivateEvent(id: string): Promise<void> {
   broadcastCalendarChanged('DELETE');
 }
 
+/** 특정 비공개 이벤트의 소유자(user_id) 조회 — IPC 핸들러에서 권한 검증용. */
+export async function getPrivateEventOwner(id: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .select('user_id')
+    .eq('id', id)
+    .maybeSingle();
+  throwIfError(error);
+  return (data as { user_id: string } | null)?.user_id ?? null;
+}
+
 // ═══════════════════════════════════════════════
 // COMP_REVISIONS
 // ═══════════════════════════════════════════════

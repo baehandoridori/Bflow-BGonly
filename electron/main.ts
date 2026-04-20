@@ -737,6 +737,7 @@ import {
   addPrivateEvent as sbAddPrivateEvent,
   updatePrivateEvent as sbUpdatePrivateEvent,
   deletePrivateEvent as sbDeletePrivateEvent,
+  getPrivateEventOwner as sbGetPrivateEventOwner,
 } from './supabase';
 import type { SupabaseUser } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -839,19 +840,42 @@ ipcMain.handle('supabase:delete-comment', wrapIpc(async (_e: unknown, commentId:
 }));
 
 // ─── Supabase: 비공개 캘린더 이벤트 ───
-ipcMain.handle('supabase:read-private-events', wrapIpc(async (_e: unknown, userId: string) => {
+// 권한: 렌더러가 보낸 userId/input.user_id 를 그대로 믿지 않고, 메인 세션에 저장된
+// 현재 로그인 사용자 ID 로 강제(또는 검증) 한다. 악성/오작동 렌더러가 다른 사용자의
+// 비공개 일정을 읽거나 수정하는 경로 차단.
+function getSessionUserIdOrThrow(): string {
+  const s = lastKnownSession as { user?: { id?: string } } | null;
+  const id = s?.user?.id;
+  if (!id) throw new Error('세션에 로그인 사용자 정보가 없습니다 (비공개 일정)');
+  return id;
+}
+
+async function assertPrivateEventOwnerOrThrow(id: string): Promise<void> {
+  const ownerId = await sbGetPrivateEventOwner(id);
+  if (!ownerId) throw new Error('해당 비공개 일정을 찾을 수 없습니다');
+  const sessionUserId = getSessionUserIdOrThrow();
+  if (ownerId !== sessionUserId) throw new Error('이 비공개 일정에 대한 권한이 없습니다');
+}
+
+ipcMain.handle('supabase:read-private-events', wrapIpc(async () => {
+  // 렌더러가 넘긴 userId 는 무시 — 세션 사용자 본인 것만 조회.
+  const userId = getSessionUserIdOrThrow();
   return sbReadPrivateEvents(userId);
 }));
 
 ipcMain.handle('supabase:add-private-event', wrapIpc(async (_e: unknown, input: Parameters<typeof sbAddPrivateEvent>[0]) => {
-  return sbAddPrivateEvent(input);
+  // 렌더러가 넘긴 user_id 는 무시하고 세션 본인 id 로 강제.
+  const userId = getSessionUserIdOrThrow();
+  return sbAddPrivateEvent({ ...input, user_id: userId });
 }));
 
 ipcMain.handle('supabase:update-private-event', wrapIpc(async (_e: unknown, id: string, updates: Parameters<typeof sbUpdatePrivateEvent>[1]) => {
+  await assertPrivateEventOwnerOrThrow(id);
   await sbUpdatePrivateEvent(id, updates);
 }));
 
 ipcMain.handle('supabase:delete-private-event', wrapIpc(async (_e: unknown, id: string) => {
+  await assertPrivateEventOwnerOrThrow(id);
   await sbDeletePrivateEvent(id);
 }));
 
