@@ -236,13 +236,20 @@ export async function syncAll(): Promise<CalendarEvent[]> {
   if (settings.teamCalendarId) calIds.add(settings.teamCalendarId);
   calIds.add(settings.personalCalendarId || 'primary');
 
+  // Google Calendar fullSync — 네트워크/인증 실패로 throw 되어도 뒤의 비공개 이벤트 로드를
+  // 막지 않도록 각 calId 호출을 개별 try/catch 로 감싼다. 오프라인 또는 토큰 만료 상태에서도
+  // 비공개(Supabase 전용) 일정은 정상 표시되어야 한다.
   for (const calId of calIds) {
-    const gcalEvents = await gcalService.fullSync(calId);
-    for (const e of gcalEvents) {
-      if (e.id && !seen.has(e.id)) {
-        seen.add(e.id);
-        events.push(toCalendarEvent(e, calId));
+    try {
+      const gcalEvents = await gcalService.fullSync(calId);
+      for (const e of gcalEvents) {
+        if (e.id && !seen.has(e.id)) {
+          seen.add(e.id);
+          events.push(toCalendarEvent(e, calId));
+        }
       }
+    } catch (err) {
+      console.warn(`[Calendar] Google fullSync 실패 (${calId}) — 비공개 이벤트 로드는 계속 진행:`, err);
     }
   }
 

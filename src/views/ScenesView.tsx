@@ -3358,44 +3358,46 @@ export function ScenesView() {
                 type DeletePlan = { sheetName: string; entries: { index: number; uuid: string }[] };
                 const plans: DeletePlan[] = [];
 
-                const collectUuidsFor = (_sheetName: string, sceneIds: string[], scenes: { sceneId: string; id?: string }[]) => {
+                // 단독 부서 뷰(selectedDepartment !== 'all') — selectedSceneIds 가 씬의 실제 sceneId.
+                // exact 일치로만 해결하면 된다 (정규화 폴백 불필요).
+                const collectExact = (sceneIds: string[], scenes: { sceneId: string; id?: string }[]) => {
                   const entries: { index: number; uuid: string }[] = [];
                   sceneIds.forEach((sid) => {
-                    // 1차: exact sceneId 일치
-                    let idx = scenes.findIndex((s) => s.sceneId === sid);
-                    // 2차: 정규화 키(숫자) 일치 — 정규화 병합(ac001↔a001) 에서 merged key 는 한쪽 것이라
-                    //      반대편 파트에서는 exact 로 못 찾음. 숫자 매칭으로 폴백해야 ACT 씬이 일괄 삭제에서 빠지지 않음.
-                    if (idx < 0) {
-                      const targetKey = normalizeSceneIdKey(sid);
-                      if (targetKey) {
-                        idx = scenes.findIndex((s) => normalizeSceneIdKey(s.sceneId) === targetKey);
-                      }
-                    }
+                    const idx = scenes.findIndex((s) => s.sceneId === sid);
                     const uuid = idx >= 0 ? scenes[idx]?.id : undefined;
                     if (idx >= 0 && uuid) entries.push({ index: idx, uuid });
                   });
-                  // 낙관적 삭제는 인덱스 역순으로 수행 (앞 인덱스가 밀리지 않게)
                   entries.sort((a, b) => b.index - a.index);
                   return entries;
                 };
 
                 if (selectedDepartment === 'all') {
-                  const bgIds: string[] = [];
-                  const actIds: string[] = [];
-                  selectedSceneIds.forEach((id) => {
-                    if (id.startsWith('bg:')) bgIds.push(id.slice(3));
-                    else if (id.startsWith('act:')) actIds.push(id.slice(4));
-                  });
-                  if (bgIds.length > 0 && bgPart) {
-                    const entries = collectUuidsFor(bgPart.sheetName, bgIds, bgPart.scenes);
-                    if (entries.length > 0) plans.push({ sheetName: bgPart.sheetName, entries });
-                  }
-                  if (actIds.length > 0 && actPart) {
-                    const entries = collectUuidsFor(actPart.sheetName, actIds, actPart.scenes);
-                    if (entries.length > 0) plans.push({ sheetName: actPart.sheetName, entries });
-                  }
+                  // 전체 뷰 — mergedScenes 의 이미 검증된 페어링 정보(bgScene/actScene + index)를
+                  // 직접 사용해 정규화 매칭 오판정(예: a1 과 a01 이 같은 키로 묶여 first-match 로 엉뚱한
+                  // 씬을 삭제하는 사례) 을 원천 차단한다.
+                  const collectFromMerged = (prefix: 'bg' | 'act') => {
+                    const sheetName = prefix === 'bg' ? bgPart?.sheetName : actPart?.sheetName;
+                    if (!sheetName) return { sheetName: '', entries: [] as { index: number; uuid: string }[] };
+                    const entries: { index: number; uuid: string }[] = [];
+                    selectedSceneIds.forEach((sid) => {
+                      if (!sid.startsWith(`${prefix}:`)) return;
+                      const mergedKey = sid.slice(prefix.length + 1);
+                      const merged = mergedScenes.find((m) => m.sceneId === mergedKey);
+                      if (!merged) return;
+                      const scene = prefix === 'bg' ? merged.bgScene : merged.actScene;
+                      const sceneIndex = prefix === 'bg' ? merged.bgSceneIndex : merged.actSceneIndex;
+                      if (!scene || sceneIndex < 0 || !scene.id) return;
+                      entries.push({ index: sceneIndex, uuid: scene.id });
+                    });
+                    entries.sort((a, b) => b.index - a.index);
+                    return { sheetName, entries };
+                  };
+                  const bgPlan = collectFromMerged('bg');
+                  if (bgPlan.entries.length > 0) plans.push(bgPlan);
+                  const actPlan = collectFromMerged('act');
+                  if (actPlan.entries.length > 0) plans.push(actPlan);
                 } else if (currentPart) {
-                  const entries = collectUuidsFor(currentPart.sheetName, [...selectedSceneIds], currentPart.scenes);
+                  const entries = collectExact([...selectedSceneIds], currentPart.scenes);
                   if (entries.length > 0) plans.push({ sheetName: currentPart.sheetName, entries });
                 }
 
