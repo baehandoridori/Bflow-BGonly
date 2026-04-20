@@ -105,6 +105,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:edit-comment', commentId, text, mentions),
   supabaseDeleteComment: (commentId: string) =>
     ipcRenderer.invoke('supabase:delete-comment', commentId),
+  // 비공개 캘린더 이벤트 (Supabase 전용, Google Calendar 비연동)
+  supabaseReadPrivateEvents: (userId: string) =>
+    ipcRenderer.invoke('supabase:read-private-events', userId),
+  supabaseAddPrivateEvent: (input: unknown) =>
+    ipcRenderer.invoke('supabase:add-private-event', input),
+  supabaseUpdatePrivateEvent: (id: string, updates: unknown) =>
+    ipcRenderer.invoke('supabase:update-private-event', id, updates),
+  supabaseDeletePrivateEvent: (id: string) =>
+    ipcRenderer.invoke('supabase:delete-private-event', id),
   supabaseReadRevisions: () =>
     ipcRenderer.invoke('supabase:read-revisions'),
   supabaseAddRevision: (
@@ -228,6 +237,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ─── Google Calendar ──────────────────────────────
   gcalIsAuthenticated: () => ipcRenderer.invoke('gcal:is-authenticated'),
   gcalStartAuth: () => ipcRenderer.invoke('gcal:start-auth'),
+  gcalSaveCredentials: (clientId: string, clientSecret: string) =>
+    ipcRenderer.invoke('gcal:save-credentials', clientId, clientSecret),
+  gcalHasCredentials: () => ipcRenderer.invoke('gcal:has-credentials') as Promise<boolean>,
   gcalSignOut: () => ipcRenderer.invoke('gcal:sign-out'),
   gcalListCalendars: () => ipcRenderer.invoke('gcal:list-calendars'),
   gcalFullSync: (calendarId: string) => ipcRenderer.invoke('gcal:full-sync', calendarId),

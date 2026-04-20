@@ -11,6 +11,14 @@ export async function startAuth(): Promise<void> {
   return window.electronAPI.gcalStartAuth();
 }
 
+export async function saveCredentials(clientId: string, clientSecret: string): Promise<void> {
+  return window.electronAPI.gcalSaveCredentials(clientId, clientSecret);
+}
+
+export async function hasCredentials(): Promise<boolean> {
+  return window.electronAPI.gcalHasCredentials();
+}
+
 export async function signOut(): Promise<void> {
   return window.electronAPI.gcalSignOut();
 }
@@ -34,6 +42,8 @@ export async function insertEvent(calendarId: string, input: {
   endDate: string;
   colorId?: string;
   extendedProperties?: Record<string, string>;
+  /** 'private' = 같은 도메인 동료에게 제목/메모 숨김. 'default' = 캘린더 기본값. */
+  visibility?: 'default' | 'public' | 'private';
 }): Promise<string> {
   return window.electronAPI.gcalInsertEvent(calendarId, input);
 }
@@ -47,6 +57,7 @@ export async function updateEvent(
     startDate: string;
     endDate: string;
     extendedProperties?: Record<string, string>;
+    visibility?: 'default' | 'public' | 'private';
   }>,
 ): Promise<void> {
   return window.electronAPI.gcalUpdateEvent(calendarId, eventId, input);

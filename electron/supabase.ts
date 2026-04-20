@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
-import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastCommentAdded } from './broadcast';
+import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged } from './broadcast';
 
 // ─── Supabase 클라이언트 (하드코딩 — 의사결정 #환경변수 참조) ───
 
@@ -626,6 +626,109 @@ export async function deleteComment(commentId: string): Promise<void> {
   const { error } = await supabase.from('comments').delete().eq('id', commentId);
   throwIfError(error);
   broadcastDataChange('comments', 'DELETE');
+}
+
+// ═══════════════════════════════════════════════
+// PRIVATE_CALENDAR_EVENTS — 사용자 전용 비공개 일정 (Google Calendar 비연동)
+// ═══════════════════════════════════════════════
+
+export interface SupabasePrivateEvent {
+  id: string;
+  user_id: string;
+  title: string;
+  memo: string | null;
+  color: string | null;
+  type: string | null;
+  start_date: string;
+  end_date: string;
+  linked_episode: number | null;
+  linked_part: string | null;
+  linked_sheet_name: string | null;
+  linked_scene_id: string | null;
+  linked_department: string | null;
+  linked_todo_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function readPrivateEvents(userId: string): Promise<SupabasePrivateEvent[]> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .select('*')
+    .eq('user_id', userId)
+    .order('start_date', { ascending: false });
+  throwIfError(error);
+  return (data as SupabasePrivateEvent[]) || [];
+}
+
+export async function addPrivateEvent(input: {
+  user_id: string;
+  title: string;
+  memo?: string;
+  color?: string;
+  type?: string;
+  start_date: string;
+  end_date: string;
+  linked_episode?: number | null;
+  linked_part?: string | null;
+  linked_sheet_name?: string | null;
+  linked_scene_id?: string | null;
+  linked_department?: string | null;
+  linked_todo_id?: string | null;
+  created_by?: string;
+}): Promise<SupabasePrivateEvent> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .insert(input)
+    .select('*')
+    .single();
+  throwIfError(error);
+  broadcastDataChange('private_calendar_events', 'INSERT');
+  broadcastCalendarChanged('INSERT');
+  return data as SupabasePrivateEvent;
+}
+
+export async function updatePrivateEvent(
+  id: string,
+  updates: Partial<{
+    title: string;
+    memo: string;
+    color: string;
+    type: string;
+    start_date: string;
+    end_date: string;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+  }>,
+): Promise<void> {
+  const patch = { ...updates, updated_at: new Date().toISOString() };
+  const { error } = await supabase.from('private_calendar_events').update(patch).eq('id', id);
+  throwIfError(error);
+  broadcastDataChange('private_calendar_events', 'UPDATE');
+  broadcastCalendarChanged('UPDATE');
+}
+
+export async function deletePrivateEvent(id: string): Promise<void> {
+  const { error } = await supabase.from('private_calendar_events').delete().eq('id', id);
+  throwIfError(error);
+  broadcastDataChange('private_calendar_events', 'DELETE');
+  broadcastCalendarChanged('DELETE');
+}
+
+/** 특정 비공개 이벤트의 소유자(user_id) 조회 — IPC 핸들러에서 권한 검증용. */
+export async function getPrivateEventOwner(id: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('private_calendar_events')
+    .select('user_id')
+    .eq('id', id)
+    .maybeSingle();
+  throwIfError(error);
+  return (data as { user_id: string } | null)?.user_id ?? null;
 }
 
 // ═══════════════════════════════════════════════

@@ -17,9 +17,13 @@ import crypto from 'crypto';
 
 // ─── 설정 ──────────────────────────────
 
-// OAuth2 자격 증명은 gcal-credentials.json에서 lazy 로드
-// (import 시점에는 app.name이 아직 설정되지 않아 getDataPath()가 잘못된 경로를 반환할 수 있음)
-// 유효한 값일 때만 캐시 — 빈 값이면 다음 호출에서 재시도하여 파일이 나중에 추가되어도 복구 가능
+// 팀 공용 OAuth 클라이언트 (내부 툴 전용 — 팀원이 별도 설정 없이 바로 연결하도록 하드코딩).
+// 각 사용자의 토큰(google-tokens.json)은 여전히 로컬 AppData 에 암호화 저장되므로 개인 Google 계정은 분리된다.
+const DEFAULT_CLIENT_ID = '117212248614-7lb5o1n41chsr4hst6eejq0ijhvj6hh2.apps.googleusercontent.com';
+const DEFAULT_CLIENT_SECRET = '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';
+
+// 사용자가 커스텀 자격증명을 쓰고 싶을 때만 gcal-credentials.json 에서 덮어쓴다.
+// 없으면 위 DEFAULT_* 가 사용된다.
 let _cachedCreds: { clientId: string; clientSecret: string } | null = null;
 
 function getCredentials(): { clientId: string; clientSecret: string } {
@@ -29,20 +33,50 @@ function getCredentials(): { clientId: string; clientSecret: string } {
   const credPath = path.join(getDataPath(), 'gcal-credentials.json');
   try {
     const creds = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
-    const next = { clientId: creds.clientId || '', clientSecret: creds.clientSecret || '' };
-    // 유효한 값일 때만 캐시
+    const next = {
+      clientId: creds.clientId || DEFAULT_CLIENT_ID,
+      clientSecret: creds.clientSecret || DEFAULT_CLIENT_SECRET,
+    };
     if (next.clientId && next.clientSecret) {
       _cachedCreds = next;
     }
     return next;
   } catch {
-    return { clientId: '', clientSecret: '' };
+    // 파일 없음 — 하드코딩된 기본값 사용
+    const next = { clientId: DEFAULT_CLIENT_ID, clientSecret: DEFAULT_CLIENT_SECRET };
+    _cachedCreds = next;
+    return next;
   }
 }
 
 // lazy getter (실제 사용 시점에 로드)
 function getClientId(): string { return getCredentials().clientId; }
 function getClientSecret(): string { return getCredentials().clientSecret; }
+
+/** 자격 증명을 gcal-credentials.json에 저장. 호출 후 캐시 무효화해 재로드됨 */
+export function saveCredentials(clientId: string, clientSecret: string): void {
+  const trimmedId = (clientId || '').trim();
+  const trimmedSecret = (clientSecret || '').trim();
+  if (!trimmedId || !trimmedSecret) {
+    throw new Error('clientId 와 clientSecret 을 모두 입력해 주세요.');
+  }
+  const credPath = path.join(getDataPath(), 'gcal-credentials.json');
+  fs.writeFileSync(
+    credPath,
+    JSON.stringify({ clientId: trimmedId, clientSecret: trimmedSecret }, null, 2),
+    'utf-8',
+  );
+  // 캐시 무효화 + OAuth2 클라이언트 재생성 유도
+  _cachedCreds = null;
+  oauth2Client = null;
+  calendarApi = null;
+}
+
+/** 자격 증명 존재 여부만 반환 (실제 값 노출 금지) */
+export function hasCredentialsSet(): boolean {
+  const c = getCredentials();
+  return !!(c.clientId && c.clientSecret);
+}
 const LOOPBACK_PORT = 8089;
 const REDIRECT_URI = `http://127.0.0.1:${LOOPBACK_PORT}/oauth2callback`;
 const SCOPES = ['https://www.googleapis.com/auth/calendar'];
@@ -248,6 +282,14 @@ export interface GCalEventInput {
   endDate: string;
   colorId?: string;
   extendedProperties?: Record<string, string>;
+  /**
+   * 이벤트 공개 범위.
+   * - 'default': 캘린더 기본값 (보통 도메인 공유 캘린더면 동료에게 제목/내용 노출)
+   * - 'public': 공개
+   * - 'private': 비공개 — 같은 Google Workspace 도메인 사용자가 이 이벤트를 조회하더라도
+   *              "비공개 일정" 으로만 표시되고 제목/메모가 숨겨짐.
+   */
+  visibility?: 'default' | 'public' | 'private';
 }
 
 export async function insertEvent(calendarId: string, input: GCalEventInput): Promise<string> {
@@ -263,6 +305,7 @@ export async function insertEvent(calendarId: string, input: GCalEventInput): Pr
       extendedProperties: input.extendedProperties
         ? { private: input.extendedProperties }
         : undefined,
+      visibility: input.visibility,
     },
   });
   return res.data.id!;
@@ -286,6 +329,9 @@ export async function updateEvent(
   }
   if (input.extendedProperties) {
     body.extendedProperties = { private: input.extendedProperties };
+  }
+  if (input.visibility !== undefined) {
+    body.visibility = input.visibility;
   }
   await getCalendarApi().events.patch({ calendarId, eventId, requestBody: body });
 }

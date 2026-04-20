@@ -437,6 +437,44 @@ export interface ElectronAPI {
   supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<void>;
   supabaseEditComment: (commentId: string, text: string, mentions: string[]) => Promise<void>;
   supabaseDeleteComment: (commentId: string) => Promise<void>;
+  /** 비공개 캘린더 이벤트 — Google Calendar 비연동, Supabase 전용 */
+  supabaseReadPrivateEvents: (userId: string) => Promise<Array<{
+    id: string;
+    user_id: string;
+    title: string;
+    memo: string | null;
+    color: string | null;
+    type: string | null;
+    start_date: string;
+    end_date: string;
+    linked_episode: number | null;
+    linked_part: string | null;
+    linked_sheet_name: string | null;
+    linked_scene_id: string | null;
+    linked_department: string | null;
+    linked_todo_id: string | null;
+    created_by: string | null;
+    created_at: string;
+    updated_at: string;
+  }>>;
+  supabaseAddPrivateEvent: (input: {
+    user_id: string;
+    title: string;
+    memo?: string;
+    color?: string;
+    type?: string;
+    start_date: string;
+    end_date: string;
+    linked_episode?: number | null;
+    linked_part?: string | null;
+    linked_sheet_name?: string | null;
+    linked_scene_id?: string | null;
+    linked_department?: string | null;
+    linked_todo_id?: string | null;
+    created_by?: string;
+  }) => Promise<{ id: string }>;
+  supabaseUpdatePrivateEvent: (id: string, updates: Record<string, unknown>) => Promise<void>;
+  supabaseDeletePrivateEvent: (id: string) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
   supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
@@ -486,6 +524,8 @@ export interface ElectronAPI {
   // ─── Google Calendar ──────────────────────────────
   gcalIsAuthenticated: () => Promise<boolean>;
   gcalStartAuth: () => Promise<void>;
+  gcalSaveCredentials: (clientId: string, clientSecret: string) => Promise<void>;
+  gcalHasCredentials: () => Promise<boolean>;
   gcalSignOut: () => Promise<void>;
   gcalListCalendars: () => Promise<Array<{ id: string; summary: string; primary: boolean }>>;
   gcalFullSync: (calendarId: string) => Promise<any[]>;

@@ -276,6 +276,12 @@ interface SavedWidgetState {
   // 위젯 query string용 부가 파라미터 (예: EP 위젯의 ?ep=1).
   // 재실행 시 유실 방지를 위해 함께 영속화. optional이라 구버전 파일과 호환.
   extra?: Record<string, string>;
+  /**
+   * 위젯이 "현재 열림" 상태인지. false/undefined 면 자동 복원 대상 아님.
+   * - 사용자가 위젯 창의 X 를 누르면 false 로 갱신 (위치·크기는 유지해 다음에 다시 열 때 그 자리에 뜨도록)
+   * - 위젯 팝업을 여는 IPC 호출 시 true 로 갱신
+   */
+  isOpen?: boolean;
 }
 
 // 위젯 ID → 제목 매핑 (자동 복원 시 title 미저장 파일 호환용)
@@ -727,6 +733,11 @@ import {
   readMemo as sbReadMemo,
   upsertMemo as sbUpsertMemo,
   readAllMemos as sbReadAllMemos,
+  readPrivateEvents as sbReadPrivateEvents,
+  addPrivateEvent as sbAddPrivateEvent,
+  updatePrivateEvent as sbUpdatePrivateEvent,
+  deletePrivateEvent as sbDeletePrivateEvent,
+  getPrivateEventOwner as sbGetPrivateEventOwner,
 } from './supabase';
 import type { SupabaseUser } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -828,6 +839,46 @@ ipcMain.handle('supabase:delete-comment', wrapIpc(async (_e: unknown, commentId:
   await sbDeleteComment(commentId);
 }));
 
+// ─── Supabase: 비공개 캘린더 이벤트 ───
+// 권한: 렌더러가 보낸 userId/input.user_id 를 그대로 믿지 않고, 메인 세션에 저장된
+// 현재 로그인 사용자 ID 로 강제(또는 검증) 한다. 악성/오작동 렌더러가 다른 사용자의
+// 비공개 일정을 읽거나 수정하는 경로 차단.
+function getSessionUserIdOrThrow(): string {
+  const s = lastKnownSession as { user?: { id?: string } } | null;
+  const id = s?.user?.id;
+  if (!id) throw new Error('세션에 로그인 사용자 정보가 없습니다 (비공개 일정)');
+  return id;
+}
+
+async function assertPrivateEventOwnerOrThrow(id: string): Promise<void> {
+  const ownerId = await sbGetPrivateEventOwner(id);
+  if (!ownerId) throw new Error('해당 비공개 일정을 찾을 수 없습니다');
+  const sessionUserId = getSessionUserIdOrThrow();
+  if (ownerId !== sessionUserId) throw new Error('이 비공개 일정에 대한 권한이 없습니다');
+}
+
+ipcMain.handle('supabase:read-private-events', wrapIpc(async () => {
+  // 렌더러가 넘긴 userId 는 무시 — 세션 사용자 본인 것만 조회.
+  const userId = getSessionUserIdOrThrow();
+  return sbReadPrivateEvents(userId);
+}));
+
+ipcMain.handle('supabase:add-private-event', wrapIpc(async (_e: unknown, input: Parameters<typeof sbAddPrivateEvent>[0]) => {
+  // 렌더러가 넘긴 user_id 는 무시하고 세션 본인 id 로 강제.
+  const userId = getSessionUserIdOrThrow();
+  return sbAddPrivateEvent({ ...input, user_id: userId });
+}));
+
+ipcMain.handle('supabase:update-private-event', wrapIpc(async (_e: unknown, id: string, updates: Parameters<typeof sbUpdatePrivateEvent>[1]) => {
+  await assertPrivateEventOwnerOrThrow(id);
+  await sbUpdatePrivateEvent(id, updates);
+}));
+
+ipcMain.handle('supabase:delete-private-event', wrapIpc(async (_e: unknown, id: string) => {
+  await assertPrivateEventOwnerOrThrow(id);
+  await sbDeletePrivateEvent(id);
+}));
+
 // ─── Revisions ───
 ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
   return sbReadRevisions();
@@ -896,6 +947,14 @@ ipcMain.handle('gcal:is-authenticated', wrapIpc(async () => {
 
 ipcMain.handle('gcal:start-auth', wrapIpc(async () => {
   await gcal.startAuth();
+}));
+
+ipcMain.handle('gcal:save-credentials', wrapIpc(async (_e: unknown, clientId: string, clientSecret: string) => {
+  gcal.saveCredentials(clientId, clientSecret);
+}));
+
+ipcMain.handle('gcal:has-credentials', wrapIpc(async () => {
+  return gcal.hasCredentialsSet();
 }));
 
 ipcMain.handle('gcal:sign-out', wrapIpc(async () => {
@@ -1536,10 +1595,11 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
   widgetWindows.set(widgetId, popupWin);
   rebuildTrayMenu(); // 트레이 체크박스 갱신
 
-  // 캐시에 title 저장 (자동 재오픈용)
+  // 캐시에 title + 열림 플래그 저장 (자동 재오픈은 isOpen=true 일 때만 수행)
   const existingCache = widgetPositionCache.get(widgetId);
   if (existingCache) {
     existingCache.title = widgetTitle;
+    existingCache.isOpen = true;
     // 명시적 extra가 새로 들어온 경우만 덮어씀 (복원 경로에서는 savedPos?.extra를 유지)
     if (extra) existingCache.extra = extra;
   } else {
@@ -1548,6 +1608,7 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
       x: b.x, y: b.y, width: b.width, height: b.height,
       opacity: 1.0, alwaysOnTop: initAOT, title: widgetTitle,
       extra: effectiveExtra,
+      isOpen: true,
     });
   }
   saveWidgetPositionsDebounced();
@@ -1556,7 +1617,18 @@ function openWidgetPopup(widgetId: string, widgetTitle: string, extra?: Record<s
     widgetWindows.delete(widgetId);
     widgetOriginalBounds.delete(widgetId);
     rebuildTrayMenu(); // 트레이 체크박스 갱신
-    // 캐시는 항상 유지 → 다음 실행 시 자동 복원 (spec 결정사항)
+    // 위치/크기 캐시는 유지하되 isOpen=false 로 마킹 → 다음 실행 시 자동 복원에서 제외.
+    // (사용자가 다시 열면 이전 위치에 그대로 복원됨)
+    // 단, 앱 종료(isQuitting) 중 발생한 closed 이벤트는 "사용자가 명시적으로 닫은" 것이 아니라
+    // 종료 절차에 의한 자동 파괴이므로 isOpen 을 건드리지 않는다 — 열려있던 위젯들이 다음 실행
+    // 시 그대로 복원되도록.
+    if (!isQuitting) {
+      const cached = widgetPositionCache.get(widgetId);
+      if (cached) {
+        cached.isOpen = false;
+        saveWidgetPositionsDebounced();
+      }
+    }
     // 독 스택에서 제거 + 나머지 재배치
     const dockIdx = dockedWidgetIds.indexOf(widgetId);
     if (dockIdx >= 0) {
@@ -2052,6 +2124,9 @@ app.whenReady().then(() => {
     mainWindow.webContents.once('did-finish-load', () => {
       if (widgetPositionCache.size > 0) {
         for (const [widgetId, state] of widgetPositionCache) {
+          // 사용자가 명시적으로 닫은 위젯(isOpen=false) 은 복원하지 않음.
+          // isOpen 필드가 없는 레거시 데이터는 호환을 위해 "열린 상태" 로 간주 → 기존 UX 유지.
+          if (state.isOpen === false) continue;
           try {
             const title = state.title || WIDGET_TITLE_MAP[widgetId] || widgetId;
             // state.extra를 명시적으로 넘기지 않아도 openWidgetPopup 내부에서

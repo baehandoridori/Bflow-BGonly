@@ -16,13 +16,19 @@ import { formatTime, formatTimeShort } from '@/utils/formatTime';
 // ─── 메인 컴포넌트 ───────────────────────────
 
 interface CommentPanelProps {
+  /** 기본 sceneKey. 새 댓글은 항상 이 키에 저장된다 */
   sceneKey: string;
+  /** 통합 뷰 전용 — 이 키의 댓글도 함께 보여주되, 저장은 primary(sceneKey)에만 한다 */
+  secondarySceneKey?: string;
   onCountChange?: (count: number) => void;
 }
 
-export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
+/** 내부 렌더링용 — 원본이 어느 sceneKey 에서 왔는지 추적 */
+type SceneCommentWithSource = SceneComment & { _sourceKey?: string };
+
+export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
-  const [comments, setComments] = useState<SceneComment[]>([]);
+  const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
   const [input, setInput] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
@@ -34,13 +40,25 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
 
-  // 댓글 로드
+  // 댓글 로드 — primary + optional secondary 를 양쪽 조회 후 시간순 병합
   const loadComments = useCallback(() => {
-    getComments(sceneKey).then((data) => {
-      setComments(data);
-      onCountChange?.(data.length);
+    const primaryPromise = getComments(sceneKey).then((list) =>
+      list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey })),
+    );
+    const secondaryPromise = secondarySceneKey
+      ? getComments(secondarySceneKey).then((list) =>
+          list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: secondarySceneKey })),
+        )
+      : Promise.resolve([]);
+
+    Promise.all([primaryPromise, secondaryPromise]).then(([a, b]) => {
+      const merged = [...a, ...b].sort(
+        (x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime(),
+      );
+      setComments(merged);
+      onCountChange?.(merged.length);
     });
-  }, [sceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sceneKey, secondarySceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadComments(); }, [loadComments]);
 
@@ -72,19 +90,20 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
     items[mentionIndex]?.scrollIntoView({ block: 'nearest' });
   }, [mentionIndex, showMentions]);
 
-  // 댓글 작성 (낙관적 업데이트 + 중복 방지)
+  // 댓글 작성 (낙관적 업데이트 + 중복 방지) — 저장은 항상 primary(sceneKey)에만
   const handleSubmit = async () => {
     if (!input.trim() || !currentUser || submitting) return;
     setSubmitting(true);
 
     const mentions = extractMentions(input, users.map(u => u.name));
-    const comment: SceneComment = {
+    const comment: SceneCommentWithSource = {
       id: crypto.randomUUID(),
       userId: currentUser.id,
       userName: currentUser.name,
       text: input.trim(),
       mentions,
       createdAt: new Date().toISOString(),
+      _sourceKey: sceneKey,
     };
 
     // 낙관적: 즉시 UI 반영
@@ -133,9 +152,11 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
     }
   };
 
-  // 댓글 수정 (낙관적)
+  // 댓글 수정 (낙관적) — 대상 댓글의 _sourceKey 로 작업 (통합 뷰에서도 안전)
   const handleEdit = async (commentId: string) => {
     if (!editText.trim()) return;
+    const target = comments.find((c) => c.id === commentId);
+    const targetKey = target?._sourceKey ?? sceneKey;
     const mentions = extractMentions(editText, users.map(u => u.name));
     const prevComments = [...comments];
 
@@ -150,7 +171,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
     setEditingId(null);
 
     try {
-      await updateComment(sceneKey, commentId, editText.trim(), mentions);
+      await updateComment(targetKey, commentId, editText.trim(), mentions);
     } catch (err) {
       console.error('[댓글 수정 실패]', err);
       setComments(prevComments);
@@ -159,6 +180,8 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
 
   // 댓글 삭제 (낙관적)
   const handleDelete = async (commentId: string) => {
+    const target = comments.find((c) => c.id === commentId);
+    const targetKey = target?._sourceKey ?? sceneKey;
     const prevComments = [...comments];
     const next = comments.filter(c => c.id !== commentId);
 
@@ -167,7 +190,7 @@ export function CommentPanel({ sceneKey, onCountChange }: CommentPanelProps) {
     onCountChange?.(next.length);
 
     try {
-      await deleteComment(sceneKey, commentId);
+      await deleteComment(targetKey, commentId);
     } catch (err) {
       console.error('[댓글 삭제 실패]', err);
       setComments(prevComments);

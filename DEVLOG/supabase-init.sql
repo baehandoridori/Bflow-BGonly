@@ -122,6 +122,30 @@ CREATE TABLE IF NOT EXISTS metadata (
   UNIQUE(type, key)
 );
 
+-- 8. private_calendar_events — 사용자 개인 비공개 일정 (Google Calendar 비연동)
+-- 정책: 같은 도메인(@studiojbbj.com) 구성원에게도 노출되면 안 되는 일정은 여기에만 저장된다.
+-- Google Calendar 에는 올라가지 않으므로 '바쁨 시간' 조차 노출되지 않는다.
+CREATE TABLE IF NOT EXISTS private_calendar_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,           -- 소유자 (본인만 조회/수정)
+  title TEXT NOT NULL,
+  memo TEXT,
+  color TEXT,
+  type TEXT DEFAULT 'custom',      -- 'custom' | 'episode' | 'part' | 'scene'
+  start_date TEXT NOT NULL,        -- YYYY-MM-DD 또는 ISO datetime
+  end_date TEXT NOT NULL,
+  linked_episode INTEGER,
+  linked_part TEXT,
+  linked_sheet_name TEXT,
+  linked_scene_id TEXT,
+  linked_department TEXT,          -- 'bg' | 'acting'
+  linked_todo_id TEXT,
+  created_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_private_cal_events_user ON private_calendar_events(user_id, start_date DESC);
+
 -- ============================================================
 -- RLS 정책: 초기 개발 단계에서는 anon key로 전체 접근 허용
 -- (Supabase Auth 연동 완료 후 authenticated 전용으로 강화)
@@ -174,6 +198,13 @@ ALTER TABLE metadata ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'metadata' AND policyname = 'allow_all') THEN
     CREATE POLICY "allow_all" ON metadata FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
+
+ALTER TABLE private_calendar_events ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'private_calendar_events' AND policyname = 'allow_all') THEN
+    CREATE POLICY "allow_all" ON private_calendar_events FOR ALL USING (true) WITH CHECK (true);
   END IF;
 END $$;
 
