@@ -502,34 +502,6 @@ export async function getOpenRevisionCounts(): Promise<Record<string, number>> {
   return buildOpenRevisionCountMap(Object.values(store).flat());
 }
 
-function getSiblingSceneIdsForSheet(sheetName: string): string[] | undefined {
-  const { episode, part } = parseSheetContext(sheetName);
-  return getPartWideAliasCollisionSceneIds(episode, part);
-}
-
-function mergeSiblingSceneIds(
-  explicitSiblingSceneIds: RevisionSceneKeyOptions['siblingSceneIds'],
-  inferredSiblingSceneIds: RevisionSceneKeyOptions['siblingSceneIds'],
-): RevisionSceneKeyOptions['siblingSceneIds'] {
-  const merged: string[] = [];
-  const seen = new Set<string>();
-
-  [...(explicitSiblingSceneIds ?? []), ...(inferredSiblingSceneIds ?? [])].forEach((sceneId) => {
-    const rawSceneId = (sceneId || '').trim();
-    const key = rawSceneId.toLowerCase();
-    if (!rawSceneId || seen.has(key)) return;
-
-    merged.push(rawSceneId);
-    seen.add(key);
-  });
-
-  if (merged.length === 0) {
-    return undefined;
-  }
-
-  return merged;
-}
-
 /**
  * sheetName + sceneId → sceneKey 변환 헬퍼
  * 시트이름 형식: EP01_A_BG → EP01:A
@@ -539,11 +511,5 @@ export function buildSceneKey(
   sceneId: string,
   options?: RevisionSceneKeyOptions,
 ): string {
-  return buildUnifiedRevisionSceneKey(sheetName, sceneId, {
-    ...options,
-    siblingSceneIds: mergeSiblingSceneIds(
-      options?.siblingSceneIds,
-      getSiblingSceneIdsForSheet(sheetName),
-    ),
-  });
+  return buildUnifiedRevisionSceneKey(sheetName, sceneId, options);
 }
