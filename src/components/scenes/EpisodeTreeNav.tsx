@@ -335,11 +335,14 @@ export function EpisodeTreeNav({
                                 : 'text-text-secondary hover:bg-bg-primary/70 hover:text-text-primary',
                             )}
                             onClick={() => onSelectEpisodePart(ep.episodeNumber, group.partId)}
-                            onContextMenu={(e) => onPartContextMenu(e, {
-                              episodeNumber: ep.episodeNumber,
-                              partId: group.partId,
-                              sheetNames: group.sheetNames,
-                            })}
+                            onContextMenu={(e) => {
+                              onSelectEpisodePart(ep.episodeNumber, group.partId);
+                              onPartContextMenu(e, {
+                                episodeNumber: ep.episodeNumber,
+                                partId: group.partId,
+                                sheetNames: group.sheetNames,
+                              });
+                            }}
                           >
                             <div className="flex flex-col flex-1 min-w-0">
                               <span className="text-sm font-medium truncate leading-tight">
@@ -388,11 +391,14 @@ export function EpisodeTreeNav({
                                 : 'text-text-secondary hover:bg-bg-primary/70 hover:text-text-primary',
                             )}
                             onClick={() => onSelectEpisodePart(ep.episodeNumber, part.partId)}
-                            onContextMenu={(e) => onPartContextMenu(e, {
-                              episodeNumber: ep.episodeNumber,
-                              partId: part.partId,
-                              sheetNames: [part.sheetName],
-                            })}
+                            onContextMenu={(e) => {
+                              onSelectEpisodePart(ep.episodeNumber, part.partId);
+                              onPartContextMenu(e, {
+                                episodeNumber: ep.episodeNumber,
+                                partId: part.partId,
+                                sheetNames: [part.sheetName],
+                              });
+                            }}
                           >
                             <div className="flex flex-col flex-1 min-w-0">
                               <span className="text-sm font-medium truncate leading-tight">
