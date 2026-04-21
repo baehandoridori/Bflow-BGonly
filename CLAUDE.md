@@ -45,7 +45,6 @@ Supabase(PostgreSQL + Realtime)를 SSOT로 사용 (Google Sheets에서 전환 �
 
 - **한글 경로 인코딩**: 배포 경로에 한글 포함 → Node.js `path` 모듈 사용, 경로 하드코딩 금지
 - **동시 편집 충돌**: Last-Write-Wins 전략. Realtime으로 충돌 창 최소화 (~100ms 전파)
-- **Supabase 무료 플랜**: 7일 미사용 시 자동 정지 — 연휴 시 keep-alive 필요
 
 ---
 
