@@ -509,7 +509,7 @@ export async function getOpenRevisionCounts(): Promise<Record<string, number>> {
 export function buildSceneKey(
   sheetName: string,
   sceneId: string,
-  options?: RevisionSceneKeyOptions,
+  options: RevisionSceneKeyOptions,
 ): string {
   return buildUnifiedRevisionSceneKey(sheetName, sceneId, options);
 }
