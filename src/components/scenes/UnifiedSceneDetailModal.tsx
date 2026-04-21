@@ -89,7 +89,7 @@ export function UnifiedSceneDetailModal({
 
   // 리비전 키 — buildSceneKey 가 부서 구분 없이 EP:Part:sceneId 로 해싱되므로 BG/ACT 공용
   const revisionSheetName = primarySheet;
-  const revisionSceneId = unifiedSceneId;
+  const revisionSceneId = primaryScene?.sceneId ?? unifiedSceneId;
   const revisionSceneKey = revisionSheetName && revisionSceneId ? buildSceneKey(revisionSheetName, revisionSceneId) : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
 

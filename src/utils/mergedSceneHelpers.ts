@@ -100,15 +100,7 @@ export function matchesMergedSceneIdentity(
   if (merged.sceneId === sceneId) return true;
   if (merged.bgScene?.sceneId === sceneId) return true;
   if (merged.actScene?.sceneId === sceneId) return true;
-
-  const sceneNumber = extractSceneNumber(sceneId);
-  if (!sceneNumber) return false;
-
-  return [
-    merged.sceneId,
-    merged.bgScene?.sceneId ?? '',
-    merged.actScene?.sceneId ?? '',
-  ].some((candidate) => extractSceneNumber(candidate) === sceneNumber);
+  return false;
 }
 
 export function buildMergedScenes<TScene extends SortableSceneLike>({

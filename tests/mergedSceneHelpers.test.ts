@@ -49,6 +49,7 @@ test('matchesMergedSceneIdentity accepts both raw department ids and the unified
 
   assert.equal(matchesMergedSceneIdentity(merged, 'a001'), true);
   assert.equal(matchesMergedSceneIdentity(merged, 'ac001'), true);
+  assert.equal(matchesMergedSceneIdentity(merged, 'v2a001'), false);
   assert.equal(matchesMergedSceneIdentity(merged, 'x999'), false);
 });
 
