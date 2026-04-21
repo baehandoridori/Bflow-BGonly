@@ -345,8 +345,8 @@ test('merged revision ids stay shared normally but split disambiguated alias row
   const secondRevisionKey = buildUnifiedRevisionSceneKey('EP01_A_BG', buildMergedRevisionSceneId(duplicateAliasMerged[1]));
 
   assert.notEqual(firstRevisionKey, secondRevisionKey);
-  assert.match(firstRevisionKey, /^EP01:A:merged-/);
-  assert.match(secondRevisionKey, /^EP01:A:merged-/);
+  assert.equal(firstRevisionKey, 'EP01:A:raw-ac001');
+  assert.equal(secondRevisionKey, 'EP01:A:raw-a001');
 });
 
 test('buildMergedScenes does not merge versioned ids with the base scene number', () => {
@@ -399,4 +399,29 @@ test('getSyncedMergedDetail keeps the modal target on the latest merged scene ob
 
   assert.equal(synced, latest);
   assert.equal(getSyncedMergedDetail(latest, []), null);
+});
+
+test('getSyncedMergedDetail does not retarget disambiguated aliases by canonical sceneId', () => {
+  const latestOtherAlias = {
+    sceneId: 'a001',
+    mergedKey: 'a|scene:1|id:a001',
+    bgScene: { no: 2, sceneId: 'a001' },
+    actScene: null,
+    bgSceneIndex: 1,
+    actSceneIndex: -1,
+  };
+
+  const synced = getSyncedMergedDetail(
+    {
+      sceneId: 'a001',
+      mergedKey: 'a|scene:1|id:ac001',
+      bgScene: { no: 1, sceneId: 'ac001' },
+      actScene: null,
+      bgSceneIndex: 0,
+      actSceneIndex: -1,
+    },
+    [latestOtherAlias],
+  );
+
+  assert.equal(synced, null);
 });
