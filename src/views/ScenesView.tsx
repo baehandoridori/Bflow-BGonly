@@ -626,9 +626,18 @@ import {
   softDeleteEpisode,
   batchExecute,
   batchActions,
-  bulkUpdateCells,
+  bulkDeleteScenes,
+  bulkUpdateSceneStages,
 } from '@/services/supabaseService';
 import type { BatchAction } from '@/services/supabaseService';
+import type { BulkStageUpdate } from '@/types';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
+import {
+  runBulkOp,
+  resolveSelectedUuids,
+  resolveSelectedScenes,
+} from '@/utils/bulkOperations';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
@@ -1449,6 +1458,7 @@ export function ScenesView() {
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
   const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
   const currentUser = useAuthStore((s) => s.currentUser);
+  const isBulkInFlight = useBulkOperationsStore((s) => s.activeOp?.status === 'in-flight');
   const isLight = colorMode === 'light';
 
   // 글로우 CSS 주입 + 하이라이트 자동 해제 (3.6초 후)
@@ -2156,160 +2166,65 @@ export function ScenesView() {
     handleToggleForSheet(currentPart.sheetName, sceneId, stage);
   };
 
-  // 단일 파트에 대한 일괄 토글 (내부 헬퍼)
-  const bulkToggleForSheet = async (sheetName: string, rawIds: string[], stage: Stage) => {
-    const latestPart = useDataStore.getState().episodes
-      .flatMap((ep) => ep.parts)
-      .find((p) => p.sheetName === sheetName);
-    if (!latestPart) return;
+  // 일괄 stage 토글: 선택된 씬들을 RPC 한 번에 처리 (Tasks 13-17)
+  const handleBulkStageToggle = async (stage: Stage, onlyDept?: 'bg' | 'acting') => {
+    const targetScenes = resolveSelectedScenes(selectedSceneIds, allMergedScenes, onlyDept);
+    if (targetScenes.length === 0) return;
 
-    const updates: { sceneId: string; sceneIndex: number; stage: Stage; newValue: boolean }[] = [];
-    const completionMetas: Array<{
-      sceneId: string;
-      sceneIndex: number;
-      nextCompletedBy: string;
-      nextCompletedAt: string;
-      prevCompletedBy: string;
-      prevCompletedAt: string;
-    }> = [];
-    rawIds.forEach((id) => {
-      const idx = latestPart.scenes.findIndex((s) => s.sceneId === id);
-      if (idx < 0) return;
-      const baseScene = latestPart.scenes[idx];
-      const prevCompletedBy = baseScene.completedBy ?? '';
-      const prevCompletedAt = baseScene.completedAt ?? '';
-      const newValue = !baseScene[stage];
-      updates.push({ sceneId: id, sceneIndex: idx, stage, newValue });
-      if (newValue) {
-        const afterToggle = { ...baseScene, [stage]: true };
-        if (!afterToggle.lo || !afterToggle.done || !afterToggle.review || !afterToggle.png) return;
-        completionMetas.push({
-          sceneId: id,
-          sceneIndex: idx,
-          nextCompletedBy: currentUser?.name ?? '알 수 없음',
-          nextCompletedAt: new Date().toISOString(),
-          prevCompletedBy,
-          prevCompletedAt,
-        });
-        return;
-      }
-      if (prevCompletedBy || prevCompletedAt) {
-        completionMetas.push({
-          sceneId: id,
-          sceneIndex: idx,
-          nextCompletedBy: '',
-          nextCompletedAt: '',
-          prevCompletedBy,
-          prevCompletedAt,
-        });
-      }
-    });
-    if (updates.length === 0) return;
+    const nowIso = new Date().toISOString();
+    const actorName = currentUser?.name ?? '알 수 없음';
 
-    updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
-    completionMetas.forEach((meta) => {
-      updateSceneFieldOptimistic(sheetName, meta.sceneIndex, 'completedBy', meta.nextCompletedBy);
-      updateSceneFieldOptimistic(sheetName, meta.sceneIndex, 'completedAt', meta.nextCompletedAt);
-    });
-    try {
-      await bulkUpdateCells(sheetName, updates.map((u) => ({
-        rowIndex: u.sceneIndex, stage: u.stage, value: u.newValue,
-      })), currentUser?.id);
-      // 복수 변경이므로 snapshot relay로 다른 창에 전달
-      syncInBackground();
-    } catch (err) {
-      console.error('[일괄 토글 실패]', err);
-      updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
-      completionMetas.forEach((meta) => {
-        updateSceneFieldOptimistic(sheetName, meta.sceneIndex, 'completedBy', meta.prevCompletedBy);
-        updateSceneFieldOptimistic(sheetName, meta.sceneIndex, 'completedAt', meta.prevCompletedAt);
-      });
-      return;
-    }
-
-    if (completionMetas.length > 0) {
-      try {
-        await Promise.all(completionMetas.map((meta) => (
-          updateSceneCompletionMeta(
-            sheetName,
-            meta.sceneIndex,
-            meta.nextCompletedBy && meta.nextCompletedAt
-              ? {
-                  completedBy: meta.nextCompletedBy,
-                  completedAt: meta.nextCompletedAt,
-                }
-              : null,
-          )
-        )));
-      } catch (metaErr) {
-        console.error('[일괄 완료 메타 저장 실패]', metaErr);
-        syncInBackground();
-      }
-    }
-  };
-
-  const bulkToggleResolvedForSheet = async (
-    sheetName: string,
-    rawUpdates: { sceneId: string; sceneIndex: number }[],
-    stage: Stage,
-  ) => {
-    const latestPart = useDataStore.getState().episodes
-      .flatMap((ep) => ep.parts)
-      .find((p) => p.sheetName === sheetName);
-    if (!latestPart) return;
-
-    const updates: { sceneId: string; sceneIndex: number; stage: Stage; newValue: boolean }[] = [];
-    rawUpdates.forEach((rawUpdate) => {
-      let sceneIndex = rawUpdate.sceneIndex;
-      let scene: Scene | undefined = latestPart.scenes[sceneIndex];
-
-      if (!scene || scene.sceneId !== rawUpdate.sceneId) {
-        sceneIndex = latestPart.scenes.findIndex((candidate) => candidate.sceneId === rawUpdate.sceneId);
-        scene = sceneIndex >= 0 ? latestPart.scenes[sceneIndex] : undefined;
-      }
-
-      if (!scene || sceneIndex < 0) return;
-      updates.push({
-        sceneId: scene.sceneId,
-        sceneIndex,
+    const updates: BulkStageUpdate[] = targetScenes.map((s) => {
+      const currentValue = Boolean(s[stage]);
+      const newValue = !currentValue;
+      // done을 켜서 4단계 모두 완료되면 completedBy/At 전파
+      const afterToggle = { lo: s.lo, done: s.done, review: s.review, png: s.png, [stage]: newValue };
+      const willBeAllDone = afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png;
+      return {
+        sceneUuid: s.id!, // resolveSelectedScenes가 id 있는 것만 반환
         stage,
-        newValue: !scene[stage],
-      });
+        value: newValue,
+        completedBy: willBeAllDone ? actorName : undefined,
+        completedAt: willBeAllDone ? nowIso : undefined,
+      };
     });
 
-    if (updates.length === 0) return;
-
-    updates.forEach((update) => toggleSceneStage(sheetName, update.sceneId, update.stage));
-    try {
-      await bulkUpdateCells(sheetName, updates.map((update) => ({
-        rowIndex: update.sceneIndex,
-        stage: update.stage,
-        value: update.newValue,
-      })), currentUser?.id);
-      syncInBackground();
-    } catch (err) {
-      console.error('[일괄 토글 실패]', err);
-      updates.forEach((update) => toggleSceneStage(sheetName, update.sceneId, update.stage));
+    const completedMetaByUuid = new Map<string, { completedBy: string; completedAt: string }>();
+    const stageValueByUuid = new Map<string, boolean>();
+    for (const u of updates) {
+      stageValueByUuid.set(u.sceneUuid, u.value);
+      if (u.completedBy && u.completedAt) {
+        completedMetaByUuid.set(u.sceneUuid, { completedBy: u.completedBy, completedAt: u.completedAt });
+      }
     }
+
+    await runBulkOp(
+      'stage-toggle',
+      updates.map((u) => u.sceneUuid),
+      () => bulkUpdateSceneStages(updates, currentUser?.id ?? ''),
+      { targetStage: stage, completedMetaByUuid, stageValueByUuid },
+    );
   };
 
-  // 일괄 토글: 선택된 씬들의 특정 단계를 단일 API 호출로 처리
-  const handleBulkToggle = async (sceneIds: Set<string>, stage: Stage, onlyDept?: 'bg' | 'acting') => {
-    if (selectedDepartment === 'all') {
-      const plans = buildAllModeBulkTogglePlans(
-        sceneIds,
-        allMergedScenes,
-        bgPart?.sheetName ?? null,
-        actPart?.sheetName ?? null,
-        onlyDept,
-      );
-      for (const plan of plans) {
-        await bulkToggleResolvedForSheet(plan.sheetName, plan.updates, stage);
-      }
-      return;
-    }
-    if (!currentPart) return;
-    await bulkToggleForSheet(currentPart.sheetName, [...sceneIds], stage);
+  // 일괄 삭제: ConfirmDialog → RPC 경유, runBulkOp가 낙관적 제거 처리 (Tasks 13-17)
+  const handleBulkDelete = async () => {
+    const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes);
+    if (uuids.length === 0) return;
+
+    const ok = await ConfirmDialog.show({
+      message: `${uuids.length}개의 씬을 삭제하시겠습니까?`,
+      confirmLabel: '삭제',
+      tone: 'danger',
+    });
+    if (!ok) return;
+
+    await runBulkOp(
+      'delete',
+      uuids,
+      (list) => bulkDeleteScenes(list, currentUser?.id ?? ''),
+    );
+
+    clearSelectedScenes();
   };
 
   const handleAddEpisode = () => {
@@ -3784,8 +3699,9 @@ export function ScenesView() {
                   {STAGES.map((stage) => (
                     <button
                       key={`bg-${stage}`}
-                      onClick={() => handleBulkToggle(selectedSceneIds, stage, 'bg')}
-                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap"
+                      onClick={() => handleBulkStageToggle(stage, 'bg')}
+                      disabled={isBulkInFlight}
+                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{
                         backgroundColor: `${DEPARTMENT_CONFIGS.bg.stageColors[stage]}20`,
                         color: DEPARTMENT_CONFIGS.bg.stageColors[stage],
@@ -3803,8 +3719,9 @@ export function ScenesView() {
                   {STAGES.map((stage) => (
                     <button
                       key={`act-${stage}`}
-                      onClick={() => handleBulkToggle(selectedSceneIds, stage, 'acting')}
-                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap"
+                      onClick={() => handleBulkStageToggle(stage, 'acting')}
+                      disabled={isBulkInFlight}
+                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{
                         backgroundColor: `${DEPARTMENT_CONFIGS.acting.stageColors[stage]}20`,
                         color: DEPARTMENT_CONFIGS.acting.stageColors[stage],
@@ -3820,8 +3737,9 @@ export function ScenesView() {
               STAGES.map((stage) => (
                 <button
                   key={stage}
-                  onClick={() => handleBulkToggle(selectedSceneIds, stage)}
-                  className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap"
+                  onClick={() => handleBulkStageToggle(stage)}
+                  disabled={isBulkInFlight}
+                  className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
                     backgroundColor: `${deptConfig.stageColors[stage]}20`,
                     color: deptConfig.stageColors[stage],
@@ -3838,7 +3756,8 @@ export function ScenesView() {
             {/* 일괄 편집 */}
             <button
               onClick={() => setBatchEditOpen(true)}
-              className="h-7 px-3 text-[11px] font-medium rounded-md bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20 transition-colors cursor-pointer leading-none whitespace-nowrap"
+              disabled={isBulkInFlight}
+              className="h-7 px-3 text-[11px] font-medium rounded-md bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Pencil size={12} className="inline mr-1 align-middle" />
               편집
@@ -3846,75 +3765,9 @@ export function ScenesView() {
 
             {/* 일괄 삭제 */}
             <button
-              onClick={() => {
-                if (!confirm(`${selectedSceneIds.size}개 씬을 삭제하시겠습니까?`)) return;
-                const prevEpisodes = useDataStore.getState().episodes;
-
-                type DeletePlan = { sheetName: string; entries: { index: number; uuid: string }[] };
-                const plans: DeletePlan[] = [];
-                if (selectedDepartment === 'all') {
-                  const collectFromMerged = (prefix: 'bg' | 'act') => {
-                    const sheetName = prefix === 'bg' ? bgPart?.sheetName : actPart?.sheetName;
-                    if (!sheetName) return null;
-                    const entries: { index: number; uuid: string }[] = [];
-                    selectedSceneIds.forEach((sid) => {
-                      if (!sid.startsWith(`${prefix}:`)) return;
-                      const mergedKey = sid.slice(prefix.length + 1);
-                      const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
-                      if (!merged) return;
-                      const targetScene = prefix === 'bg' ? merged.bgScene : merged.actScene;
-                      const targetIndex = prefix === 'bg' ? merged.bgSceneIndex : merged.actSceneIndex;
-                      if (!targetScene?.id || targetIndex < 0) return;
-                      entries.push({ index: targetIndex, uuid: targetScene.id });
-                    });
-                    entries.sort((a, b) => b.index - a.index);
-                    return entries.length > 0 ? { sheetName, entries } : null;
-                  };
-
-                  const bgPlan = collectFromMerged('bg');
-                  if (bgPlan) plans.push(bgPlan);
-                  const actPlan = collectFromMerged('act');
-                  if (actPlan) plans.push(actPlan);
-                } else if (currentPart) {
-                  const entries = [...selectedSceneIds]
-                    .map((id) => {
-                      const index = currentPart.scenes.findIndex((scene) => scene.sceneId === id);
-                      const uuid = index >= 0 ? currentPart.scenes[index]?.id : undefined;
-                      return index >= 0 && uuid ? { index, uuid } : null;
-                    })
-                    .filter((entry): entry is { index: number; uuid: string } => !!entry)
-                    .sort((a, b) => b.index - a.index);
-                  if (entries.length > 0) {
-                    plans.push({ sheetName: currentPart.sheetName, entries });
-                  }
-                }
-
-                if (plans.length === 0) {
-                  sonnerToast.error('삭제할 씬 정보를 찾을 수 없습니다.');
-                  return;
-                }
-
-                plans.forEach(({ sheetName, entries }) => {
-                  entries.forEach(({ index }) => deleteSceneOptimistic(sheetName, index));
-                });
-                clearSelectedScenes();
-
-                (async () => {
-                  try {
-                    const actions = plans.flatMap(({ entries }) =>
-                      entries.map(({ uuid }) => batchActions.deleteSceneByUuid(uuid))
-                    );
-                    await batchExecute(actions);
-                    syncInBackground();
-                  } catch (err) {
-                    console.error('[일괄 삭제 실패]', err);
-                    useDataStore.getState().setEpisodes(prevEpisodes);
-                    sonnerToast.error(`일괄 삭제 실패: ${(err as Error).message}`);
-                    syncInBackground();
-                  }
-                })();
-              }}
-              className="h-7 px-3 text-[11px] font-medium rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors cursor-pointer leading-none whitespace-nowrap"
+              onClick={handleBulkDelete}
+              disabled={isBulkInFlight}
+              className="h-7 px-3 text-[11px] font-medium rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Trash2 size={12} className="inline mr-1 align-middle" />
               삭제

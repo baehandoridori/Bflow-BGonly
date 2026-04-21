@@ -51,10 +51,14 @@ export function resolveSelectedUuids(
 /**
  * 선택된 씬 ID 집합을 Scene 객체 배열로 변환한다.
  * stage 토글처럼 현재 값(lo/done/review/png)이 필요한 경우 사용한다.
+ *
+ * `onlyDept`가 주어지면 통합 모드(bg:/act: 접두사)에서 해당 부서만 필터한다.
+ * 개별 모드(plain sceneId)에서는 onlyDept를 무시한다 (현재 부서 하나만 존재).
  */
 export function resolveSelectedScenes(
   selectedIds: Set<string> | Iterable<string>,
   allMergedScenes: MergedScene[],
+  onlyDept?: 'bg' | 'acting',
 ): Scene[] {
   const scenes: Scene[] = [];
   const seen = new Set<string>();
@@ -68,10 +72,12 @@ export function resolveSelectedScenes(
 
   for (const id of selectedIds) {
     if (id.startsWith(MERGED_KEY_PREFIX.bg)) {
+      if (onlyDept && onlyDept !== 'bg') continue;
       const mergedKey = id.slice(MERGED_KEY_PREFIX.bg.length);
       const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
       pushScene(merged?.bgScene);
     } else if (id.startsWith(MERGED_KEY_PREFIX.act)) {
+      if (onlyDept && onlyDept !== 'acting') continue;
       const mergedKey = id.slice(MERGED_KEY_PREFIX.act.length);
       const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
       pushScene(merged?.actScene);
@@ -91,6 +97,11 @@ type RunBulkOpOptions = {
    * 성공 시 store에 반영한다.
    */
   completedMetaByUuid?: Map<string, { completedBy: string; completedAt: string }>;
+  /**
+   * stage-toggle에서 토글된 stage 값. 성공 시 해당 씬의 stage 필드를 store에 반영한다.
+   * key=sceneUuid, value=새 stage 값.
+   */
+  stageValueByUuid?: Map<string, boolean>;
 };
 
 /**
@@ -125,13 +136,20 @@ export async function runBulkOp(
         if (kind === 'delete') {
           useDataStore.getState().removeSceneByUuid(r.sceneUuid);
         }
-        if (kind === 'stage-toggle' && opts.completedMetaByUuid) {
-          const meta = opts.completedMetaByUuid.get(r.sceneUuid);
+        if (kind === 'stage-toggle') {
+          // stage 값과 completedMeta를 함께 반영
+          const patch: Partial<Scene> = {};
+          if (opts.stageValueByUuid?.has(r.sceneUuid) && opts.targetStage) {
+            (patch as Record<string, boolean>)[opts.targetStage] =
+              opts.stageValueByUuid.get(r.sceneUuid) as boolean;
+          }
+          const meta = opts.completedMetaByUuid?.get(r.sceneUuid);
           if (meta) {
-            useDataStore.getState().updateSceneByUuid(r.sceneUuid, {
-              completedBy: meta.completedBy,
-              completedAt: meta.completedAt,
-            });
+            patch.completedBy = meta.completedBy;
+            patch.completedAt = meta.completedAt;
+          }
+          if (Object.keys(patch).length > 0) {
+            useDataStore.getState().updateSceneByUuid(r.sceneUuid, patch);
           }
         }
       } else {
