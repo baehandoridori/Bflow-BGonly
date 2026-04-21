@@ -2,6 +2,7 @@ import { buildCanonicalSceneId, normalizeSceneIdKey } from './sceneIdKey.ts';
 import { buildDistinctRevisionSceneId } from './revisionSceneKey.ts';
 
 type SceneLike = {
+  id?: string;
   no: number;
   sceneId: string;
 };
@@ -98,6 +99,33 @@ function buildMergedSceneKeyDisambiguator(
   return `id:${normalizeRawSceneKey(merged.sceneId)}`;
 }
 
+function buildSceneSourceIdentity(
+  dept: 'bg' | 'act',
+  scene: SceneLike | null,
+  sceneIndex: number,
+): string | null {
+  if (!scene) return null;
+
+  const stableId = scene.id?.trim();
+  if (stableId) return `${dept}:id:${normalizeRawSceneKey(stableId)}`;
+  if (sceneIndex >= 0) return `${dept}:idx:${sceneIndex}`;
+
+  return `${dept}:no:${scene.no}`;
+}
+
+function buildMergedSceneDuplicateDisambiguator<TScene extends SceneLike>(
+  merged: Pick<MergedSceneLike<TScene>, 'sceneId' | 'bgScene' | 'actScene' | 'bgSceneIndex' | 'actSceneIndex'>,
+): string {
+  const sourceIdentities = [
+    buildSceneSourceIdentity('bg', merged.bgScene, merged.bgSceneIndex),
+    buildSceneSourceIdentity('act', merged.actScene, merged.actSceneIndex),
+  ].filter((identity): identity is string => Boolean(identity));
+
+  return sourceIdentities.length > 0
+    ? `dup:${sourceIdentities.join('+')}`
+    : `dup:scene:${normalizeRawSceneKey(merged.sceneId)}`;
+}
+
 function assignMergedSceneKeys<TScene extends SceneLike>(
   mergedList: MergedSceneLike<TScene>[],
   partId: string | null | undefined,
@@ -108,19 +136,31 @@ function assignMergedSceneKeys<TScene extends SceneLike>(
     baseKeyCounts.set(key, (baseKeyCounts.get(key) ?? 0) + 1);
   });
 
-  const assignedKeyCounts = new Map<string, number>();
-  mergedList.forEach((merged, index) => {
+  const candidateKeys = mergedList.map((merged, index) => {
     const baseKey = baseKeys[index];
     const needsDisambiguation = (baseKeyCounts.get(baseKey) ?? 0) > 1;
-    const candidateKey = needsDisambiguation
+    return needsDisambiguation
       ? `${baseKey}|${buildMergedSceneKeyDisambiguator(merged)}`
       : baseKey;
-    const assignedCount = assignedKeyCounts.get(candidateKey) ?? 0;
+  });
+  const candidateKeyCounts = new Map<string, number>();
+  candidateKeys.forEach((key) => {
+    candidateKeyCounts.set(key, (candidateKeyCounts.get(key) ?? 0) + 1);
+  });
+
+  const assignedKeyCounts = new Map<string, number>();
+  mergedList.forEach((merged, index) => {
+    const candidateKey = candidateKeys[index];
+    const duplicateCandidateKey = (candidateKeyCounts.get(candidateKey) ?? 0) > 1;
+    const stableKey = duplicateCandidateKey
+      ? `${candidateKey}|${buildMergedSceneDuplicateDisambiguator(merged)}`
+      : candidateKey;
+    const assignedCount = assignedKeyCounts.get(stableKey) ?? 0;
 
     merged.mergedKey = assignedCount > 0
-      ? `${candidateKey}|dup:${assignedCount + 1}`
-      : candidateKey;
-    assignedKeyCounts.set(candidateKey, assignedCount + 1);
+      ? `${stableKey}|tie:${assignedCount + 1}`
+      : stableKey;
+    assignedKeyCounts.set(stableKey, assignedCount + 1);
   });
 }
 

@@ -329,6 +329,40 @@ test('buildMergedScenes disambiguates duplicate normalized scene aliases in one 
   ]);
 });
 
+test('duplicate merged keys stay attached to the same source scene after resorting', () => {
+  const upperCaseScene = { id: 'scene-upper', no: 1, sceneId: 'A001', assignee: 'Zed', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+  const lowerCaseScene = { id: 'scene-lower', no: 2, sceneId: 'a001', assignee: 'Amy', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+  const bgPartScenes = [upperCaseScene, lowerCaseScene];
+
+  const byNumber = buildMergedScenes({
+    bgScenes: bgPartScenes,
+    actScenes: [],
+    bgPartScenes,
+    actPartScenes: [],
+    mergedScenePartId: 'A',
+    sortKey: 'no',
+    sortDir: 'asc',
+  });
+  const byAssignee = buildMergedScenes({
+    bgScenes: bgPartScenes,
+    actScenes: [],
+    bgPartScenes,
+    actPartScenes: [],
+    mergedScenePartId: 'A',
+    sortKey: 'assignee',
+    sortDir: 'asc',
+  });
+
+  const upperKeyByNumber = byNumber.find((merged) => merged.bgScene === upperCaseScene)?.mergedKey;
+  const upperKeyByAssignee = byAssignee.find((merged) => merged.bgScene === upperCaseScene)?.mergedKey;
+  const lowerKeyByNumber = byNumber.find((merged) => merged.bgScene === lowerCaseScene)?.mergedKey;
+  const lowerKeyByAssignee = byAssignee.find((merged) => merged.bgScene === lowerCaseScene)?.mergedKey;
+
+  assert.equal(upperKeyByNumber, upperKeyByAssignee);
+  assert.equal(lowerKeyByNumber, lowerKeyByAssignee);
+  assert.notEqual(upperKeyByNumber, lowerKeyByNumber);
+});
+
 test('filtered merged scene lists preserve full-list disambiguated keys', () => {
   const acScene = { no: 1, sceneId: 'ac001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
   const aScene = { no: 2, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
