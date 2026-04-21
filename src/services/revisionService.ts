@@ -150,13 +150,18 @@ function preserveRawStoredRevisionSceneKey(sceneKey: string): string {
   return `${episode}:${part}:${buildDistinctRevisionSceneId(rawSceneId)}`;
 }
 
-function buildRawPreservedSceneKey(sheetName: string, sceneId: string): string {
-  const { episode, part } = parseSheetContext(sheetName);
-  const rawSceneId = normalizeRawRevisionSceneId(sceneId);
-  if (!rawSceneId || DIGITS_ONLY_RE.test(rawSceneId)) {
-    return buildUnifiedRevisionSceneKey(sheetName, sceneId);
+function getSiblingSceneIdsForSheetName(sheetName: string): string[] | undefined {
+  const normalizedSheetName = sheetName.trim().toLowerCase();
+  if (!normalizedSheetName) return undefined;
+
+  for (const episode of useDataStore.getState().episodes) {
+    const part = episode.parts.find(
+      (candidatePart) => candidatePart.sheetName.trim().toLowerCase() === normalizedSheetName,
+    );
+    if (part) return part.scenes.map((scene) => scene.sceneId);
   }
-  return `${episode || sheetName}:${part}:${buildDistinctRevisionSceneId(rawSceneId)}`;
+
+  return undefined;
 }
 
 function normalizeStoredRevisionSceneKey(sceneKey: string): string {
@@ -564,8 +569,8 @@ export function buildSceneKey(
   sceneId: string,
   options: RevisionSceneKeyOptions = {},
 ): string {
-  if (!options.siblingSceneIds || options.siblingSceneIds.length === 0) {
-    return buildRawPreservedSceneKey(sheetName, sceneId);
-  }
-  return buildUnifiedRevisionSceneKey(sheetName, sceneId, options);
+  return buildUnifiedRevisionSceneKey(sheetName, sceneId, {
+    ...options,
+    siblingSceneIds: options.siblingSceneIds ?? getSiblingSceneIdsForSheetName(sheetName),
+  });
 }
