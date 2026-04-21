@@ -39,6 +39,19 @@ function mapRpcRows(rows: RpcRow[] | null): BulkUpdateResult[] {
   }));
 }
 
+// ─── 테스트 훅 ─────────────────────────────
+// BFLOW_FORCE_FAIL_RATE=0.3 등으로 설정 시 성공 결과 중 일부를 강제로 실패 처리.
+// 일괄 작업 재시도/부분 실패 UX 검증 용도. 프로덕션에서는 env 미설정이라 no-op.
+function maybeForceFail(results: BulkUpdateResult[]): BulkUpdateResult[] {
+  const rate = Number(process.env.BFLOW_FORCE_FAIL_RATE ?? '0');
+  if (!rate || rate <= 0) return results;
+  return results.map((r) =>
+    r.success && Math.random() < rate
+      ? { ...r, success: false, error: 'forced failure (test hook)' }
+      : r
+  );
+}
+
 // ─── Supabase 클라이언트 (하드코딩 — 의사결정 #환경변수 참조) ───
 
 const SUPABASE_URL = 'https://mpqifkpxalwxgcrddchv.supabase.co';
@@ -528,7 +541,7 @@ export async function bulkUpdateSceneStages(
     p_updated_by: updatedBy,
   });
   if (error) throw error;
-  return mapRpcRows(data as RpcRow[] | null);
+  return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
 }
 
 /** 대량 씬 삭제 (부분 실패 허용) — RPC 경유 */
@@ -541,7 +554,7 @@ export async function bulkDeleteScenes(
     p_deleted_by: deletedBy,
   });
   if (error) throw error;
-  return mapRpcRows(data as RpcRow[] | null);
+  return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
 }
 
 /** 대량 씬 필드 업데이트 (부분 실패 허용) — RPC 경유 */
@@ -563,7 +576,7 @@ export async function bulkUpdateSceneFields(
     p_updated_by: updatedBy,
   });
   if (error) throw error;
-  return mapRpcRows(data as RpcRow[] | null);
+  return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
 }
 
 /** 씬 필드 업데이트 (memo, assignee, sceneId 등) */
