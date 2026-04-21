@@ -1,28 +1,7 @@
-const TRAILING_DIGIT_GROUP_RE = /\d+$/;
-const DIGITS_ONLY_RE = /^\d+$/;
-
-function normalizeRevisionPart(part: string): string {
-  return (part || '').trim().slice(0, 1).toLowerCase();
-}
+import { normalizeSceneIdKey } from './sceneIdKey.ts';
 
 function normalizeSceneIdForRevision(sceneId: string, part: string): string {
-  const rawSceneId = sceneId.trim();
-  if (!rawSceneId) return '';
-
-  const lowerSceneId = rawSceneId.toLowerCase();
-  const match = lowerSceneId.match(TRAILING_DIGIT_GROUP_RE);
-  if (!match) return lowerSceneId;
-
-  const normalizedDigits = String(Number(match[0]));
-  const normalizedPart = normalizeRevisionPart(part);
-  if (!normalizedPart) return lowerSceneId;
-
-  if (DIGITS_ONLY_RE.test(lowerSceneId)) return normalizedDigits;
-  if (new RegExp(`^${normalizedPart}[a-z]*\\d+$`).test(lowerSceneId)) {
-    return normalizedDigits;
-  }
-
-  return lowerSceneId;
+  return normalizeSceneIdKey(sceneId, part);
 }
 
 export function normalizeRevisionSceneKey(sceneKey: string): string {

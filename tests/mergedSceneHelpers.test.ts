@@ -16,8 +16,8 @@ test('buildUnifiedSceneId canonicalizes the merged scene to the part-based scene
   assert.equal(buildUnifiedSceneId('A', 'ac001'), 'a001');
   assert.equal(buildUnifiedSceneId('A', 'a1'), 'a001');
   assert.equal(buildUnifiedSceneId('C', 'c023'), 'c023');
-  assert.equal(buildUnifiedSceneId('A', 'v2a001'), 'a001');
-  assert.equal(buildUnifiedSceneId('A', 'v2a002'), 'a002');
+  assert.equal(buildUnifiedSceneId('A', 'v2a001'), 'v2a001');
+  assert.equal(buildUnifiedSceneId('A', 'v2a002'), 'v2a002');
 });
 
 test('buildUnifiedSceneIdFromMerged prefers the shared canonical scene id for mixed raw ids', () => {
@@ -161,7 +161,7 @@ test('buildMergedScenes keeps a unique mergedKey even when canonical scene numbe
 
   assert.equal(mergedScenes.length, 2);
   assert.equal(mergedScenes[0].sceneId, 'a001');
-  assert.equal(mergedScenes[1].sceneId, 'a001');
+  assert.equal(mergedScenes[1].sceneId, 'v2a001');
   assert.notEqual(mergedScenes[0].mergedKey, mergedScenes[1].mergedKey);
 
   const plans = buildAllModeBulkTogglePlans(
@@ -183,6 +183,32 @@ test('buildMergedScenes keeps a unique mergedKey even when canonical scene numbe
       ],
     },
   ]);
+});
+
+test('buildMergedScenes does not merge versioned ids with the base scene number', () => {
+  const mergedScenes = buildMergedScenes({
+    bgScenes: [
+      { no: 1, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    ],
+    actScenes: [
+      { no: 2, sceneId: 'v2a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    ],
+    bgPartScenes: [
+      { no: 1, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    ],
+    actPartScenes: [
+      { no: 2, sceneId: 'v2a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    ],
+    mergedScenePartId: 'A',
+    sortKey: 'no',
+    sortDir: 'asc',
+  });
+
+  assert.equal(mergedScenes.length, 2);
+  assert.equal(mergedScenes[0].sceneId, 'a001');
+  assert.equal(mergedScenes[0].actScene, null);
+  assert.equal(mergedScenes[1].sceneId, 'v2a001');
+  assert.equal(mergedScenes[1].bgScene, null);
 });
 
 test('getSyncedMergedDetail keeps the modal target on the latest merged scene object', () => {

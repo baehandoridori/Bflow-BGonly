@@ -232,3 +232,22 @@ await deleteScene(sheetName, sceneIndex);        // 2) 내부에서 resolveScene
 - `src/utils/mergedSceneHelpers.ts` — `mergedKey` 추가, 벌크 토글/상세 동기화에 내부 키 사용
 - `src/views/ScenesView.tsx`, `src/components/scenes/UnifiedSceneCard.tsx`, `src/components/scenes/UnifiedSceneSheetView.tsx` — 선택/라쏘/React key를 `mergedKey` 기준으로 전환
 - `src/services/revisionService.ts`, `electron/preload.ts`, `electron/main.ts`, `electron/supabase.ts`, `src/views/CompositingView.tsx` — 공용 리비전은 유지하면서 part UUID 역조회용 `lookupDepartment` 분리
+
+---
+
+## 2026-04-21: 씬번호 정규화 규칙은 병합/리비전/lookup 전부가 같은 헬퍼를 써야 한다
+
+### 증상
+- `ac001` 과 `a001` 을 같은 씬으로 보이게 하려고 끝자리 숫자만 보는 규칙을 여러 파일에 각각 넣었더니, `v2a001` 같은 버전형 ID 까지 `a001` 과 같은 씬으로 잘못 묶였다.
+- 그 결과 전체 뷰 병합은 하나로 붙고, 리비전은 분리되거나, 반대로 이미지 fallback / 반대 부서 찾기에서 다른 씬을 잘못 집는 식으로 규칙이 서로 어긋났다.
+
+### 교훈
+- "같은 씬으로 취급할 수 있는 ID" 규칙은 한 곳에서만 정의하라.
+- 그 규칙은 **숫자만 있는 ID**, **파트 접두사만 붙은 ID(`a001`, `ac001`)** 는 같은 씬으로 보고, **버전/별칭 접두사가 섞인 ID(`v2a001`)** 는 별도 씬으로 남겨야 한다.
+- 표시용 씬번호, 전체 뷰 병합, 반대 부서 lookup, 공용 리비전 키가 서로 다른 정규화 규칙을 쓰면 같은 버그가 다른 형태로 반복된다.
+
+### 적용 위치
+- `src/utils/sceneIdKey.ts` — part-aware 씬 정규화/표시 ID 규칙 단일화
+- `src/utils/mergedSceneHelpers.ts` — unmatched 병합과 통합 표시 ID 생성에 공용 규칙 사용
+- `src/utils/revisionSceneKey.ts` — 리비전 키도 동일 규칙 재사용
+- `src/views/ScenesView.tsx` — ACT 이미지 fallback, 반대 부서 씬 찾기 lookup 도 동일 규칙 사용

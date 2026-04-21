@@ -1,3 +1,5 @@
+import { buildCanonicalSceneId, normalizeSceneIdKey } from './sceneIdKey.ts';
+
 type SceneLike = {
   no: number;
   sceneId: string;
@@ -28,15 +30,6 @@ type BulkTogglePlan = {
   updates: { sceneId: string; sceneIndex: number }[];
 };
 
-const TRAILING_DIGIT_GROUP_RE = /\d+$/;
-
-function extractSceneNumber(sceneId: string | null | undefined): string {
-  if (!sceneId) return '';
-  const match = sceneId.match(TRAILING_DIGIT_GROUP_RE);
-  if (!match) return '';
-  return String(Number(match[0]));
-}
-
 function normalizePartId(partId: string | null | undefined): string {
   return (partId || '').trim().slice(0, 1).toLowerCase();
 }
@@ -61,14 +54,7 @@ function countIncompleteStages(scene: SortableSceneLike): number {
 }
 
 export function buildUnifiedSceneId(partId: string | null | undefined, sceneId: string | null | undefined): string {
-  if (!sceneId) return '';
-
-  const sceneNumber = extractSceneNumber(sceneId);
-  if (!sceneNumber) return sceneId;
-
-  const partPrefix = normalizePartId(partId);
-  const paddedNumber = sceneNumber.padStart(3, '0');
-  return partPrefix ? `${partPrefix}${paddedNumber}` : paddedNumber;
+  return buildCanonicalSceneId(partId, sceneId);
 }
 
 export function buildMergedSceneKey(
@@ -147,13 +133,13 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
   const bgLonelyByKey = new Map<string, MergedSceneLike<TScene>>();
   for (const merged of map.values()) {
     if (merged.actScene) continue;
-    const normalizedKey = extractSceneNumber(merged.sceneId);
+    const normalizedKey = normalizeSceneIdKey(merged.sceneId, mergedScenePartId);
     if (!normalizedKey) continue;
     if (!bgLonelyByKey.has(normalizedKey)) bgLonelyByKey.set(normalizedKey, merged);
   }
 
   actUnmatched.forEach((scene) => {
-    const key = extractSceneNumber(scene.sceneId);
+    const key = normalizeSceneIdKey(scene.sceneId, mergedScenePartId);
     const partner = key ? bgLonelyByKey.get(key) : undefined;
     if (partner) {
       partner.actScene = scene;

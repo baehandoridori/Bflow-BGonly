@@ -1609,7 +1609,7 @@ export function ScenesView() {
     if (!bgSibling) return null;
     const map = new Map<string, { storyboard?: string; guide?: string }>();
     for (const bgs of bgSibling.scenes) {
-      const key = normalizeSceneIdKey(bgs.sceneId);
+      const key = normalizeSceneIdKey(bgs.sceneId, bgSibling.partId);
       if (!key) continue;
       map.set(key, { storyboard: bgs.storyboardUrl, guide: bgs.guideUrl });
     }
@@ -3098,8 +3098,8 @@ export function ScenesView() {
                           commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
                           revisionCount={revisionCountByScene[buildSceneKey(currentPart?.sheetName ?? '', scene.sceneId)] ?? 0}
                           // ACT 단독 뷰 정책: 자체 이미지가 없으면 BG 이미지를 폴백으로 노출
-                          fallbackStoryboardUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId))?.storyboard ?? null}
-                          fallbackGuideUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId))?.guide ?? null}
+                      fallbackStoryboardUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId, currentPart?.partId))?.storyboard ?? null}
+                      fallbackGuideUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId, currentPart?.partId))?.guide ?? null}
                           onToggle={handleToggle}
                           onDelete={handleDeleteScene}
                           onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -3170,8 +3170,8 @@ export function ScenesView() {
                 commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
                 revisionCount={revisionCountByScene[buildSceneKey(currentPart?.sheetName ?? '', scene.sceneId)] ?? 0}
                 // ACT 단독 뷰 정책: 자체 이미지가 없으면 BG 이미지를 폴백으로 노출
-                fallbackStoryboardUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId))?.storyboard ?? null}
-                fallbackGuideUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId))?.guide ?? null}
+                      fallbackStoryboardUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId, currentPart?.partId))?.storyboard ?? null}
+                      fallbackGuideUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId, currentPart?.partId))?.guide ?? null}
                 onToggle={handleToggle}
                 onDelete={handleDeleteScene}
                 onOpenDetail={() => setDetailSceneIndex(sIdx)}
@@ -3572,8 +3572,8 @@ export function ScenesView() {
           );
           if (!otherPart) return null;
           // 정규화된 sceneId 키로 매칭 (예: ac001 ↔ a001)
-          const targetKey = normalizeSceneIdKey(detailScene.sceneId);
-          const match = otherPart.scenes.find((s) => normalizeSceneIdKey(s.sceneId) === targetKey);
+          const targetKey = normalizeSceneIdKey(detailScene.sceneId, currentDetailPart.partId);
+          const match = otherPart.scenes.find((s) => normalizeSceneIdKey(s.sceneId, otherPart.partId) === targetKey);
           return match ? { sheetName: otherPart.sheetName, sceneNo: match.no, scene: match } : null;
         })();
         // ACT 모달일 때 반대편(BG) 이 매칭되면 그 씬의 이미지를 읽기 전용으로 보여준다
