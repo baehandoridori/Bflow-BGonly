@@ -38,6 +38,24 @@ export function buildLegacySharedRevisionSceneKey(sceneKey: string): string | nu
   return `${episode}:${part}:${legacySceneId}`;
 }
 
+function buildHistoricalRawAliasRevisionSceneKey(
+  sceneKey: string,
+  normalizedSceneKey: string,
+): string | null {
+  const [episode = '', part = '', sceneId = ''] = sceneKey.split(':');
+  const rawSceneId = sceneId.trim();
+  const normalizedSceneId = rawSceneId.toLowerCase();
+  if (!rawSceneId || DIGITS_ONLY_RE.test(normalizedSceneId) || normalizedSceneId.startsWith('raw-')) {
+    return null;
+  }
+
+  const rawAliasKey = `${episode}:${part}:${buildDistinctRevisionSceneId(rawSceneId)}`;
+  if (rawAliasKey === normalizedSceneKey) return null;
+
+  const legacySharedKey = buildLegacySharedRevisionSceneKey(rawAliasKey);
+  return legacySharedKey === normalizedSceneKey ? rawAliasKey : null;
+}
+
 export function buildRevisionSceneIdForScene(
   sceneId: string,
   part: string,
@@ -79,9 +97,13 @@ export function buildRevisionSceneKeyLookupKeys(
   const normalizedSceneKey = normalizeRevisionSceneKey(sceneKey, options);
   const keys = [normalizedSceneKey];
   const legacySharedKey = buildLegacySharedRevisionSceneKey(normalizedSceneKey);
+  const historicalRawAliasKey = buildHistoricalRawAliasRevisionSceneKey(sceneKey, normalizedSceneKey);
 
   if (legacySharedKey && !keys.includes(legacySharedKey)) {
     keys.push(legacySharedKey);
+  }
+  if (historicalRawAliasKey && !keys.includes(historicalRawAliasKey)) {
+    keys.push(historicalRawAliasKey);
   }
 
   return keys;
