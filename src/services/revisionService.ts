@@ -11,6 +11,7 @@
 import type { CompRevision, Part, RevisionPriority, RevisionStatus } from '../types';
 import { useDataStore } from '../stores/useDataStore';
 import {
+  buildDistinctRevisionSceneId,
   buildRevisionSceneKeyLookupKeys,
   buildUnifiedRevisionSceneKey,
   normalizeRevisionSceneKey,
@@ -118,9 +119,18 @@ function normalizeStoredRevisionSceneKey(sceneKey: string): string {
 }
 
 export function getRevisionLookupSceneKeys(sceneKey: string): string[] {
-  return buildRevisionSceneKeyLookupKeys(sceneKey, {
+  const lookupKeys = buildRevisionSceneKeyLookupKeys(sceneKey, {
     siblingSceneIds: getSiblingSceneIdsForStoredSceneKey(sceneKey),
   });
+  const primarySceneId = parseRevisionSceneKey(lookupKeys[0] ?? sceneKey).sceneId.trim().toLowerCase();
+
+  if (!primarySceneId.startsWith('raw-')) {
+    getRawAliasSceneKeysForSharedSceneKey(lookupKeys[0] ?? sceneKey).forEach((aliasKey) => {
+      if (!lookupKeys.includes(aliasKey)) lookupKeys.push(aliasKey);
+    });
+  }
+
+  return lookupKeys;
 }
 
 function collectRevisionsForSceneKey(store: RevisionsStore, sceneKey: string): CompRevision[] {
@@ -140,21 +150,17 @@ function collectRevisionsForSceneKey(store: RevisionsStore, sceneKey: string): C
 
 function getRawAliasSceneKeysForSharedSceneKey(sceneKey: string): string[] {
   const { episode, part, sceneId } = parseRevisionSceneKey(sceneKey);
-  if (!episode || !part || !sceneId) return [];
-
-  const collisionSceneIds = getPartWideAliasCollisionSceneIds(episode, part);
-  if (!collisionSceneIds) return [];
+  const normalizedSceneId = sceneId.trim().toLowerCase();
+  if (!episode || !part || !normalizedSceneId || normalizedSceneId.startsWith('raw-')) return [];
 
   const aliasKeys: string[] = [];
   const seen = new Set<string>();
   for (const candidatePart of getPartsForRevisionContext(episode, part)) {
     for (const scene of candidatePart.scenes) {
       const rawSceneId = scene.sceneId.trim();
-      if (!rawSceneId || normalizeSceneIdKey(rawSceneId, part) !== sceneId) continue;
+      if (!rawSceneId || normalizeSceneIdKey(rawSceneId, part) !== normalizedSceneId) continue;
 
-      const aliasKey = buildUnifiedRevisionSceneKey(candidatePart.sheetName, rawSceneId, {
-        siblingSceneIds: collisionSceneIds,
-      });
+      const aliasKey = `${episode}:${part}:${buildDistinctRevisionSceneId(rawSceneId)}`;
       if (aliasKey === sceneKey || seen.has(aliasKey)) continue;
 
       aliasKeys.push(aliasKey);
@@ -171,9 +177,9 @@ export function buildOpenRevisionCountMap(revisions: CompRevision[]): Record<str
   revisions.forEach((revision) => {
     if (revision.status === 'resolved') return;
 
-    counts[revision.sceneKey] = (counts[revision.sceneKey] || 0) + 1;
-    getRawAliasSceneKeysForSharedSceneKey(revision.sceneKey).forEach((aliasKey) => {
-      counts[aliasKey] = (counts[aliasKey] || 0) + 1;
+    const sceneKeys = new Set(getRevisionLookupSceneKeys(revision.sceneKey));
+    sceneKeys.forEach((sceneKey) => {
+      counts[sceneKey] = (counts[sceneKey] || 0) + 1;
     });
   });
 
