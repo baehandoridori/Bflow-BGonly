@@ -430,9 +430,11 @@ function RevisionItem({
 
 function AddRevisionForm({
   sceneKey,
+  department,
   onClose,
 }: {
   sceneKey: string;
+  department?: 'bg' | 'acting';
   onClose: () => void;
 }) {
   const { currentUser } = useAuthStore();
@@ -478,6 +480,7 @@ function AddRevisionForm({
         priority,
         frameNo: frameNo.trim() || undefined,
         imageUrl: imagePreview || undefined,
+        lookupDepartment: department,
         requesterId: currentUser.id,
         requesterName: currentUser.name,
       });
@@ -711,11 +714,12 @@ function SceneRow({
               {/* 추가 버튼 / 폼 */}
               <AnimatePresence mode="wait">
                 {showAddForm ? (
-                  <AddRevisionForm
-                    key="form"
-                    sceneKey={info.sceneKey}
-                    onClose={() => setShowAddForm(false)}
-                  />
+                    <AddRevisionForm
+                      key="form"
+                      sceneKey={info.sceneKey}
+                      department={info.department}
+                      onClose={() => setShowAddForm(false)}
+                    />
                 ) : (
                   <motion.div
                     key="btn"

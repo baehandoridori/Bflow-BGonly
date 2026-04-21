@@ -884,10 +884,10 @@ ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
   return sbReadRevisions();
 }));
 ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, partUuid: string, sceneId: string,
-  revisionNo: number, status: string, priority: string, description: string, frameNo: string,
-  imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => {
-  await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, requesterId, requesterName, assignee, createdAt);
-}));
+    revisionNo: number, status: string, priority: string, description: string, frameNo: string,
+    imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => {
+    await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt);
+  }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   await sbUpdateRevision(id, updates);
 }));

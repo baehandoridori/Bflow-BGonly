@@ -16,6 +16,7 @@ type SortDirLike = 'asc' | 'desc';
 
 export type MergedSceneLike<TScene extends SceneLike = SceneLike> = {
   sceneId: string;
+  mergedKey: string;
   bgScene: TScene | null;
   actScene: TScene | null;
   bgSceneIndex: number;
@@ -70,9 +71,19 @@ export function buildUnifiedSceneId(partId: string | null | undefined, sceneId: 
   return partPrefix ? `${partPrefix}${paddedNumber}` : paddedNumber;
 }
 
+export function buildMergedSceneKey(
+  partId: string | null | undefined,
+  merged: Pick<MergedSceneLike, 'sceneId' | 'bgScene' | 'actScene'>,
+): string {
+  const partPrefix = normalizePartId(partId) || '_';
+  const bgId = (merged.bgScene?.sceneId ?? '').trim() || '-';
+  const actId = (merged.actScene?.sceneId ?? '').trim() || '-';
+  return `${partPrefix}|bg:${bgId}|act:${actId}`;
+}
+
 export function buildUnifiedSceneIdFromMerged(
   partId: string | null | undefined,
-  merged: MergedSceneLike,
+  merged: Pick<MergedSceneLike, 'sceneId' | 'bgScene' | 'actScene'>,
 ): string {
   return buildUnifiedSceneId(
     partId,
@@ -85,6 +96,7 @@ export function matchesMergedSceneIdentity(
   sceneId: string | null | undefined,
 ): boolean {
   if (!sceneId) return false;
+  if (merged.mergedKey === sceneId) return true;
   if (merged.sceneId === sceneId) return true;
   if (merged.bgScene?.sceneId === sceneId) return true;
   if (merged.actScene?.sceneId === sceneId) return true;
@@ -121,6 +133,7 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
   bgScenes.forEach((scene) => {
     map.set(scene.sceneId, {
       sceneId: scene.sceneId,
+      mergedKey: '',
       bgScene: scene,
       actScene: null,
       bgSceneIndex: bgPartScenes.indexOf(scene),
@@ -159,6 +172,7 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
 
     map.set(scene.sceneId, {
       sceneId: scene.sceneId,
+      mergedKey: '',
       bgScene: null,
       actScene: scene,
       bgSceneIndex: -1,
@@ -202,6 +216,7 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
   });
 
   mergedList.forEach((merged) => {
+    merged.mergedKey = buildMergedSceneKey(mergedScenePartId, merged);
     merged.sceneId = buildUnifiedSceneIdFromMerged(mergedScenePartId, merged);
   });
 
@@ -213,7 +228,10 @@ export function getSyncedMergedDetail<TScene extends SceneLike, TMerged extends 
   mergedScenes: TMerged[],
 ): TMerged | null {
   if (!detailMerged) return null;
-  return mergedScenes.find((scene) => scene.sceneId === detailMerged.sceneId) ?? null;
+  return mergedScenes.find((scene) =>
+    (detailMerged.mergedKey && scene.mergedKey === detailMerged.mergedKey)
+    || scene.sceneId === detailMerged.sceneId
+  ) ?? null;
 }
 
 export function buildAllModeBulkTogglePlans(
@@ -223,7 +241,7 @@ export function buildAllModeBulkTogglePlans(
   actSheetName: string | null,
   onlyDept?: 'bg' | 'acting',
 ): BulkTogglePlan[] {
-  const mergedByKey = new Map(mergedScenes.map((scene) => [scene.sceneId, scene]));
+  const mergedByKey = new Map(mergedScenes.map((scene) => [scene.mergedKey, scene]));
   const plans: BulkTogglePlan[] = [];
 
   const collect = (

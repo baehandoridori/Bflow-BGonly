@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildMergedScenes,
+  buildMergedSceneKey,
   buildAllModeBulkTogglePlans,
   getSyncedMergedDetail,
   buildUnifiedSceneId,
@@ -22,6 +23,13 @@ test('buildUnifiedSceneId canonicalizes the merged scene to the part-based scene
 test('buildUnifiedSceneIdFromMerged prefers the shared canonical scene id for mixed raw ids', () => {
   assert.equal(buildUnifiedSceneIdFromMerged('A', {
     sceneId: 'ac001',
+    mergedKey: buildMergedSceneKey('A', {
+      sceneId: 'ac001',
+      bgScene: { no: 3, sceneId: 'ac001' },
+      actScene: { no: 7, sceneId: 'a001' },
+      bgSceneIndex: 2,
+      actSceneIndex: 5,
+    }),
     bgScene: { no: 3, sceneId: 'ac001' },
     actScene: { no: 7, sceneId: 'a001' },
     bgSceneIndex: 2,
@@ -32,6 +40,7 @@ test('buildUnifiedSceneIdFromMerged prefers the shared canonical scene id for mi
 test('matchesMergedSceneIdentity accepts both raw department ids and the unified id', () => {
   const merged = {
     sceneId: 'a001',
+    mergedKey: 'a|bg:ac001|act:a001',
     bgScene: { no: 3, sceneId: 'ac001' },
     actScene: { no: 7, sceneId: 'a001' },
     bgSceneIndex: 2,
@@ -47,6 +56,7 @@ test('all-view bulk toggle resolves ACT updates with the real ACT sceneId', () =
   const mergedScenes = [
     {
       sceneId: 'a001',
+      mergedKey: 'a|bg:ac001|act:a001',
       bgScene: {
         no: 3,
         sceneId: 'ac001',
@@ -61,7 +71,7 @@ test('all-view bulk toggle resolves ACT updates with the real ACT sceneId', () =
   ];
 
   const plans = buildAllModeBulkTogglePlans(
-    new Set(['bg:a001', 'act:a001']),
+    new Set(['bg:a|bg:ac001|act:a001', 'act:a|bg:ac001|act:a001']),
     mergedScenes,
     'EP01_A_BG',
     'EP01_A_ACT',
@@ -83,6 +93,7 @@ test('all-view comment badges use each department scene number independently', (
   const counts = getMergedCommentBadgeCounts(
     {
       sceneId: 'a001',
+      mergedKey: 'a|bg:ac001|act:a001',
       bgScene: {
         no: 3,
         sceneId: 'ac001',
@@ -127,13 +138,56 @@ test('buildMergedScenes merges matching BG and ACT scenes into one canonical sce
 
   assert.equal(mergedScenes.length, 1);
   assert.equal(mergedScenes[0].sceneId, 'a001');
+  assert.equal(mergedScenes[0].mergedKey, 'a|bg:ac001|act:a001');
   assert.equal(mergedScenes[0].bgScene?.sceneId, 'ac001');
   assert.equal(mergedScenes[0].actScene?.sceneId, 'a001');
+});
+
+test('buildMergedScenes keeps a unique mergedKey even when canonical scene numbers collide', () => {
+  const bgPartScenes = [
+    { no: 1, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    { no: 2, sceneId: 'v2a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+  ];
+  const mergedScenes = buildMergedScenes({
+    bgScenes: bgPartScenes,
+    actScenes: [],
+    bgPartScenes,
+    actPartScenes: [],
+    mergedScenePartId: 'A',
+    sortKey: 'no',
+    sortDir: 'asc',
+  });
+
+  assert.equal(mergedScenes.length, 2);
+  assert.equal(mergedScenes[0].sceneId, 'a001');
+  assert.equal(mergedScenes[1].sceneId, 'a001');
+  assert.notEqual(mergedScenes[0].mergedKey, mergedScenes[1].mergedKey);
+
+  const plans = buildAllModeBulkTogglePlans(
+    new Set([
+      `bg:${mergedScenes[0].mergedKey}`,
+      `bg:${mergedScenes[1].mergedKey}`,
+    ]),
+    mergedScenes,
+    'EP01_A_BG',
+    'EP01_A_ACT',
+  );
+
+  assert.deepEqual(plans, [
+    {
+      sheetName: 'EP01_A_BG',
+      updates: [
+        { sceneId: 'a001', sceneIndex: 0 },
+        { sceneId: 'v2a001', sceneIndex: 1 },
+      ],
+    },
+  ]);
 });
 
 test('getSyncedMergedDetail keeps the modal target on the latest merged scene object', () => {
   const latest = {
     sceneId: 'a001',
+    mergedKey: 'a|bg:ac001|act:a001',
     bgScene: { no: 3, sceneId: 'ac001' },
     actScene: { no: 7, sceneId: 'a001' },
     bgSceneIndex: 2,
@@ -143,6 +197,7 @@ test('getSyncedMergedDetail keeps the modal target on the latest merged scene ob
   const synced = getSyncedMergedDetail(
     {
       sceneId: 'a001',
+      mergedKey: 'a|bg:ac001|act:a001',
       bgScene: { no: 1, sceneId: 'ac001' },
       actScene: { no: 2, sceneId: 'a001' },
       bgSceneIndex: 0,

@@ -1250,9 +1250,9 @@ export function ScenesView() {
   const getSceneIdFromEl = useCallback((el: Element) => el.getAttribute('data-scene-id'), []);
   const handleLassoChange = useCallback((ids: Set<string>) => {
     if (selectedDepartment === 'all') {
-      // 전체 모드: sceneId → bg:sceneId + act:sceneId 양쪽 접두사 추가
-      const prefixed = new Set<string>();
-      ids.forEach((id) => { prefixed.add(`bg:${id}`); prefixed.add(`act:${id}`); });
+        // 전체 모드: mergedKey → bg:mergedKey + act:mergedKey 양쪽 접두사 추가
+        const prefixed = new Set<string>();
+        ids.forEach((id) => { prefixed.add(`bg:${id}`); prefixed.add(`act:${id}`); });
       setSelectedScenes(prefixed);
     } else {
       setSelectedScenes(ids);
@@ -2907,13 +2907,13 @@ export function ScenesView() {
                       if (!primary) return null;
                       return (
                         <UnifiedSceneCard
-                          key={m.sceneId}
+                          key={m.mergedKey}
                           merged={m}
                           bgSheetName={bgPart?.sheetName ?? null}
                           actSheetName={actPart?.sheetName ?? null}
                           celebrating={matchesMergedSceneIdentity(m, celebratingId)}
                           isHighlighted={matchesMergedSceneIdentity(m, highlightSceneId)}
-                          isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
+                          isSelected={selectedSceneIds.has(`bg:${m.mergedKey}`) || selectedSceneIds.has(`act:${m.mergedKey}`)}
                           searchQuery={searchQuery}
                           bgCommentCount={commentBadgeCounts.bg}
                           actCommentCount={commentBadgeCounts.act}
@@ -2925,14 +2925,14 @@ export function ScenesView() {
                           // 단순 클릭: 이 씬만 선택 (기존 선택 모두 해제)
                           onSelect={() => {
                             const ids = new Set<string>();
-                            if (bgPart) ids.add(`bg:${m.sceneId}`);
-                            if (actPart) ids.add(`act:${m.sceneId}`);
+                            if (bgPart) ids.add(`bg:${m.mergedKey}`);
+                            if (actPart) ids.add(`act:${m.mergedKey}`);
                             setSelectedScenes(ids);
                           }}
                           // Ctrl/Cmd+클릭: 토글 (다중 유지)
                           onCtrlSelect={() => {
-                            if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
-                            if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
+                            if (bgPart) toggleSelectedScene(`bg:${m.mergedKey}`);
+                            if (actPart) toggleSelectedScene(`act:${m.mergedKey}`);
                           }}
                         />
                       );
@@ -2955,13 +2955,13 @@ export function ScenesView() {
                 if (!primary) return null;
                 return (
                   <UnifiedSceneCard
-                    key={m.sceneId}
+                    key={m.mergedKey}
                     merged={m}
                     bgSheetName={bgPart?.sheetName ?? null}
                     actSheetName={actPart?.sheetName ?? null}
                     celebrating={matchesMergedSceneIdentity(m, celebratingId)}
                     isHighlighted={matchesMergedSceneIdentity(m, highlightSceneId)}
-                    isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
+                    isSelected={selectedSceneIds.has(`bg:${m.mergedKey}`) || selectedSceneIds.has(`act:${m.mergedKey}`)}
                     searchQuery={searchQuery}
                     bgCommentCount={commentBadgeCounts.bg}
                     actCommentCount={commentBadgeCounts.act}
@@ -2973,14 +2973,14 @@ export function ScenesView() {
                     // 단순 클릭: 이 씬만 선택 (기존 선택 모두 해제)
                     onSelect={() => {
                       const ids = new Set<string>();
-                      if (bgPart) ids.add(`bg:${m.sceneId}`);
-                      if (actPart) ids.add(`act:${m.sceneId}`);
+                      if (bgPart) ids.add(`bg:${m.mergedKey}`);
+                      if (actPart) ids.add(`act:${m.mergedKey}`);
                       setSelectedScenes(ids);
                     }}
                     // Ctrl/Cmd+클릭: 토글 (다중 유지)
                     onCtrlSelect={() => {
-                      if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
-                      if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
+                      if (bgPart) toggleSelectedScene(`bg:${m.mergedKey}`);
+                      if (actPart) toggleSelectedScene(`act:${m.mergedKey}`);
                     }}
                   />
                 );
@@ -3349,7 +3349,7 @@ export function ScenesView() {
                     selectedSceneIds.forEach((sid) => {
                       if (!sid.startsWith(`${prefix}:`)) return;
                       const mergedKey = sid.slice(prefix.length + 1);
-                      const merged = allMergedScenes.find((m) => m.sceneId === mergedKey);
+                      const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
                       if (!merged) return;
                       const scene = prefix === 'bg' ? merged.bgScene : merged.actScene;
                       const sceneIndex = prefix === 'bg' ? merged.bgSceneIndex : merged.actSceneIndex;
@@ -3458,7 +3458,7 @@ export function ScenesView() {
                     if (selectedDepartment === 'all') {
                       if (id.startsWith('bg:') && bgPart) {
                         const mergedKey = id.slice(3);
-                        const merged = allMergedScenes.find((scene) => scene.sceneId === mergedKey);
+                        const merged = allMergedScenes.find((scene) => scene.mergedKey === mergedKey);
                         return {
                           sheetName: bgPart.sheetName,
                           rawId: merged?.bgScene?.sceneId ?? mergedKey,
@@ -3467,7 +3467,7 @@ export function ScenesView() {
                       }
                       if (id.startsWith('act:') && actPart) {
                         const mergedKey = id.slice(4);
-                        const merged = allMergedScenes.find((scene) => scene.sceneId === mergedKey);
+                        const merged = allMergedScenes.find((scene) => scene.mergedKey === mergedKey);
                         return {
                           sheetName: actPart.sheetName,
                           rawId: merged?.actScene?.sceneId ?? mergedKey,
@@ -3612,7 +3612,7 @@ export function ScenesView() {
 
       {/* 전체 뷰(all) 전용 통합 상세 모달 */}
       {detailMerged && selectedDepartment === 'all' && (() => {
-        const curIdx = mergedScenes.findIndex((m) => m.sceneId === detailMerged.sceneId);
+        const curIdx = mergedScenes.findIndex((m) => m.mergedKey === detailMerged.mergedKey);
         const hasPrev = curIdx > 0;
         const hasNext = curIdx >= 0 && curIdx < mergedScenes.length - 1;
         return (

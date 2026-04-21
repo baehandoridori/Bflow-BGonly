@@ -633,7 +633,7 @@ export function UnifiedSceneSheetView({
           {/* ── 본문 ── */}
           <tbody>
             {displayScenes.map((m, rowIndex) => {
-              const { sceneId, bgScene, actScene, bgSceneIndex, actSceneIndex } = m;
+              const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = m;
               const primary = bgScene ?? actScene;
               if (!primary) return null;
 
@@ -643,7 +643,7 @@ export function UnifiedSceneSheetView({
               const combinedPct = presentCount > 0 ? Math.round((bgPct + actPct) / presentCount) : 0;
 
               const meta = layoutMeta.get(m);
-              const isRowSelected = selectedSceneIds.has(`bg:${sceneId}`) || selectedSceneIds.has(`act:${sceneId}`);
+              const isRowSelected = selectedSceneIds.has(`bg:${mergedKey}`) || selectedSceneIds.has(`act:${mergedKey}`);
               const isFirstInGroup = meta?.isFirst ?? false;
               const groupSize = meta?.groupSize ?? 1;
               const layoutKey = meta?.layoutKey ?? '';
@@ -657,7 +657,7 @@ export function UnifiedSceneSheetView({
 
               return (
                 <motion.tr
-                  key={sceneId}
+                  key={mergedKey}
                   initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.15, delay: Math.min(rowIndex * 0.01, 0.2) }}
@@ -671,7 +671,7 @@ export function UnifiedSceneSheetView({
                   )}
                   onClick={(e) => {
                     if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
-                      onCtrlClick(sceneId);
+                      onCtrlClick(mergedKey);
                     }
                   }}
                   onDoubleClick={() => {

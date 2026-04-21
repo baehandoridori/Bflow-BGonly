@@ -215,3 +215,20 @@ await deleteScene(sheetName, sceneIndex);        // 2) 내부에서 resolveScene
 - `src/utils/partMemoHelpers.ts` — 파트 메모 대상/표시 대상 계산 규칙 추가
 - `src/hooks/useUnifiedScenes.ts` — 통합 씬 파생 상태 훅
 - `src/hooks/usePartMemos.ts` — 파트 메모 로드/저장 훅
+
+---
+
+## 2026-04-21: 통합 뷰에서는 "표시용 ID" 와 "내부 고유 키"를 절대 같은 값으로 쓰지 말 것
+
+### 증상
+- 통합 씬 번호를 `a001` 같은 공통 번호로 정규화한 뒤, 같은 숫자를 가진 레거시 씬(`a001`, `v2a001`)이 한 뷰 안에 같이 있을 때 벌크 토글/선택/React key가 서로 덮였다.
+- 공용 리비전은 부서 라벨 없이 저장해야 하는데, Supabase 쪽 `part_uuid` 역조회는 실제 부서 정보가 필요해 ACT-only 파트에서 실패할 수 있었다.
+
+### 교훈
+- 사용자가 보는 번호(`sceneId`)는 **표시용** 으로만 두고, 선택/맵/React key/벌크 동작은 반드시 별도 내부 키(`mergedKey`)를 써라.
+- "공용 데이터" 와 "저장 경로를 찾기 위한 힌트" 는 분리하라. 공용 리비전이라도 DB의 part UUID 를 찾기 위한 `lookupDepartment` 는 따로 전달해야 한다.
+
+### 적용 위치
+- `src/utils/mergedSceneHelpers.ts` — `mergedKey` 추가, 벌크 토글/상세 동기화에 내부 키 사용
+- `src/views/ScenesView.tsx`, `src/components/scenes/UnifiedSceneCard.tsx`, `src/components/scenes/UnifiedSceneSheetView.tsx` — 선택/라쏘/React key를 `mergedKey` 기준으로 전환
+- `src/services/revisionService.ts`, `electron/preload.ts`, `electron/main.ts`, `electron/supabase.ts`, `src/views/CompositingView.tsx` — 공용 리비전은 유지하면서 part UUID 역조회용 `lookupDepartment` 분리

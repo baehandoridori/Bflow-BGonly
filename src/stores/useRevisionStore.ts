@@ -20,6 +20,7 @@ interface RevisionState {
       frameNo?: string;
       imageUrl?: string;
       department?: 'bg' | 'acting';
+      lookupDepartment?: 'bg' | 'acting';
       requesterId: string;
       requesterName: string;
       assignee?: string;

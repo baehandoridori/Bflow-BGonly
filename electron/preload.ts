@@ -116,13 +116,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:delete-private-event', id),
   supabaseReadRevisions: () =>
     ipcRenderer.invoke('supabase:read-revisions'),
-  supabaseAddRevision: (
-    id: string, partUuid: string, sceneId: string, revisionNo: number, status: string,
-    priority: string, description: string, frameNo: string, imageUrl: string,
-    department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
-  ) =>
-    ipcRenderer.invoke('supabase:add-revision', id, partUuid, sceneId, revisionNo, status,
-      priority, description, frameNo, imageUrl, department, requesterId, requesterName, assignee, createdAt),
+    supabaseAddRevision: (
+      id: string, partUuid: string, sceneId: string, revisionNo: number, status: string,
+      priority: string, description: string, frameNo: string, imageUrl: string,
+      department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
+    ) =>
+      ipcRenderer.invoke('supabase:add-revision', id, partUuid, sceneId, revisionNo, status,
+        priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt),
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) =>
     ipcRenderer.invoke('supabase:update-revision', id, updates),
   supabaseReadAllMetadata: () =>

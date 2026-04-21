@@ -51,7 +51,7 @@ export function UnifiedSceneCard({
   onCtrlSelect,
   onShiftSelect,
 }: UnifiedSceneCardProps) {
-  const { sceneId, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
+  const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
 
   const cardRootRef = useRef<HTMLDivElement>(null);
@@ -105,7 +105,7 @@ export function UnifiedSceneCard({
 
   return (
     <motion.div
-      data-scene-id={sceneId}
+      data-scene-id={mergedKey}
       className={cn(
         'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer transition-all duration-200',
         'hover:-translate-y-0.5 hover:border-text-secondary/30',

@@ -181,6 +181,7 @@ export async function createRevision(
     frameNo?: string;
     imageUrl?: string;
     department?: 'bg' | 'acting';
+    lookupDepartment?: 'bg' | 'acting';
     requesterId: string;
     requesterName: string;
     assignee?: string;
@@ -214,7 +215,7 @@ export async function createRevision(
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
     await window.electronAPI.supabaseAddRevision(
       id, '', normalizedSceneKey, revisionNo, 'open', priority,
-      data.description, data.frameNo || '', data.imageUrl || '', data.department || '',
+      data.description, data.frameNo || '', data.imageUrl || '', data.department || '', data.lookupDepartment || data.department || '',
       data.requesterId, data.requesterName, data.assignee || '', now,
     );
 
