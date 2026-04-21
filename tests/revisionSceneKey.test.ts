@@ -44,6 +44,10 @@ test('revision keys split same-sheet aliases only when the aliases coexist', () 
     buildUnifiedRevisionSceneKey('EP01_A_BG', 'ac001', { siblingSceneIds }),
     buildUnifiedRevisionSceneKey('EP01_A_BG', 'a001', { siblingSceneIds }),
   );
+  assert.equal(
+    buildUnifiedRevisionSceneKey('EP01_A_ACT', 'a001', { siblingSceneIds }),
+    'EP01:A:raw-a001',
+  );
 });
 
 test('stored revision keys preserve legacy aliases when same-sheet aliases coexist', () => {
