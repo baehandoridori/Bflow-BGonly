@@ -56,6 +56,29 @@ test('matchesMergedSceneIdentity accepts both raw department ids and the unified
   assert.equal(matchesMergedSceneIdentity(merged, 'x999'), false);
 });
 
+test('matchesMergedSceneIdentity does not match duplicate aliases by canonical sceneId', () => {
+  const acAlias = {
+    sceneId: 'a001',
+    mergedKey: 'a|scene:1|id:ac001',
+    bgScene: { no: 1, sceneId: 'ac001' },
+    actScene: null,
+    bgSceneIndex: 0,
+    actSceneIndex: -1,
+  };
+  const aAlias = {
+    sceneId: 'a001',
+    mergedKey: 'a|scene:1|id:a001',
+    bgScene: { no: 2, sceneId: 'a001' },
+    actScene: null,
+    bgSceneIndex: 1,
+    actSceneIndex: -1,
+  };
+
+  assert.equal(matchesMergedSceneIdentity(acAlias, 'a001'), false);
+  assert.equal(matchesMergedSceneIdentity(acAlias, 'ac001'), true);
+  assert.equal(matchesMergedSceneIdentity(aAlias, 'a001'), true);
+});
+
 test('all-view bulk toggle resolves ACT updates with the real ACT sceneId', () => {
   const mergedScenes = [
     {
