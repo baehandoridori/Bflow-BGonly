@@ -20,11 +20,55 @@ const REVISIONS_FILE = 'revisions.json';
 
 type RevisionsStore = Record<string, CompRevision[]>; // sceneKey → revisions
 
+function parseRevisionSceneKey(sceneKey: string) {
+  const [episode = '', part = '', sceneId = ''] = sceneKey.split(':');
+  return { episode, part, sceneId };
+}
+
+function normalizeRawRevisionSceneId(sceneId: string): string {
+  const normalized = sceneId.trim().toLowerCase();
+  if (!normalized.startsWith('raw-')) return normalized;
+
+  try {
+    return decodeURIComponent(normalized.slice(4));
+  } catch {
+    return normalized.slice(4);
+  }
+}
+
+function getSiblingSceneIdsForStoredSceneKey(sceneKey: string): string[] | undefined {
+  const { episode, part, sceneId } = parseRevisionSceneKey(sceneKey);
+  const rawSceneId = normalizeRawRevisionSceneId(sceneId);
+  if (!episode || !part || !rawSceneId) return undefined;
+
+  const episodes = useDataStore.getState().episodes;
+  for (const candidateEpisode of episodes) {
+    for (const candidatePart of candidateEpisode.parts) {
+      const [candidateEpisodeId = '', candidatePartId = ''] = candidatePart.sheetName.split('_');
+      if (candidateEpisodeId !== episode || candidatePartId !== part) continue;
+
+      const sceneIds = candidatePart.scenes.map((scene) => scene.sceneId);
+      const includesStoredScene = sceneIds.some(
+        (candidateSceneId) => candidateSceneId.trim().toLowerCase() === rawSceneId,
+      );
+      if (includesStoredScene) return sceneIds;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeStoredRevisionSceneKey(sceneKey: string): string {
+  return normalizeRevisionSceneKey(sceneKey, {
+    siblingSceneIds: getSiblingSceneIdsForStoredSceneKey(sceneKey),
+  });
+}
+
 function normalizeRevisionStore(store: RevisionsStore): RevisionsStore {
   const normalized: RevisionsStore = {};
 
   for (const [sceneKey, revisions] of Object.entries(store)) {
-    const normalizedKey = normalizeRevisionSceneKey(sceneKey);
+    const normalizedKey = normalizeStoredRevisionSceneKey(sceneKey);
     if (!normalized[normalizedKey]) normalized[normalizedKey] = [];
 
     revisions.forEach((revision) => {
@@ -82,9 +126,10 @@ function rowToRevision(row: {
   priority?: string; frameNo?: string;
 }): CompRevision {
   const p = row.priority as RevisionPriority | undefined;
+  const sceneKey = normalizeStoredRevisionSceneKey(row.sceneKey);
   return {
     id: row.id,
-    sceneKey: normalizeRevisionSceneKey(row.sceneKey),
+    sceneKey,
     revisionNo: Number(row.revisionNo) || 0,
     status: (row.status as RevisionStatus) || 'open',
     priority: (p === 'urgent' || p === 'high' || p === 'normal') ? p : 'normal',
@@ -149,7 +194,7 @@ export function invalidateRevisionsCache(): void {
 // ─── 통합 API ───────────────────────────────────
 
 export async function getRevisions(sceneKey: string): Promise<CompRevision[]> {
-  const normalizedSceneKey = normalizeRevisionSceneKey(sceneKey);
+  const normalizedSceneKey = normalizeStoredRevisionSceneKey(sceneKey);
   if (sheetsMode) {
     const store = await loadAllRevisions();
     return [...(store[normalizedSceneKey] ?? [])];
@@ -192,7 +237,7 @@ export async function createRevision(
     assignee?: string;
   },
 ): Promise<CompRevision> {
-  const normalizedSceneKey = normalizeRevisionSceneKey(sceneKey);
+  const normalizedSceneKey = normalizeStoredRevisionSceneKey(sceneKey);
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const priority = data.priority || 'normal';
@@ -264,7 +309,7 @@ export async function updateRevisionStatus(
   status: RevisionStatus,
   extra?: { resolvedBy?: string; resolvedNote?: string },
 ): Promise<void> {
-  const normalizedSceneKey = normalizeRevisionSceneKey(sceneKey);
+  const normalizedSceneKey = normalizeStoredRevisionSceneKey(sceneKey);
   const now = new Date().toISOString();
   const updates: Record<string, string> = { status, updatedAt: now };
   if (status === 'resolved') {
