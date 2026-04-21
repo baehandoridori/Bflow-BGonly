@@ -32,9 +32,13 @@ export function buildRevisionSceneIdForScene(
   return hasAliasCollision ? buildDistinctRevisionSceneId(rawSceneId) : rawSceneId;
 }
 
-export function normalizeRevisionSceneKey(sceneKey: string): string {
+export function normalizeRevisionSceneKey(
+  sceneKey: string,
+  options: RevisionSceneKeyOptions = {},
+): string {
   const [episode = '', part = '', rawSceneId = ''] = sceneKey.split(':');
-  const normalizedSceneId = normalizeSceneIdForRevision(rawSceneId, part);
+  const revisionSceneId = buildRevisionSceneIdForScene(rawSceneId, part, options);
+  const normalizedSceneId = normalizeSceneIdForRevision(revisionSceneId, part);
   return `${episode}:${part}:${normalizedSceneId}`;
 }
 
