@@ -1,8 +1,13 @@
 import { useBulkOperationsStore, type OpKind } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
-import type { BulkUpdateResult, MergedScene, Scene } from '@/types';
+import type { BulkUpdateResult, MergedScene, Part, Scene } from '@/types';
 
 const MERGED_KEY_PREFIX = { bg: 'bg:', act: 'act:' } as const;
+
+function findSceneInPart(part: Part | null | undefined, sceneId: string): Scene | undefined {
+  if (!part) return undefined;
+  return part.scenes.find((s) => s.sceneId === sceneId);
+}
 
 /**
  * 선택된 씬 ID 집합을 Supabase 씬 UUID 배열로 변환한다.
@@ -12,12 +17,13 @@ const MERGED_KEY_PREFIX = { bg: 'bg:', act: 'act:' } as const;
  * - `act:${mergedKey}` — 통합 모드에서 액팅 씬 선택
  * - `${sceneId}` (plain) — 개별 모드, human sceneId ("a001" 등)
  *
- * 개별 모드(plain sceneId)를 해석하려면 현재 파트의 씬 목록을 순회해야 하므로,
- * allMergedScenes 외에도 useDataStore를 fall-back으로 사용한다.
+ * 개별 모드에서는 `fallbackPart`가 있으면 해당 파트 내에서만 검색하고,
+ * 없으면 스토어 전체에서 첫 번째로 매치되는 씬을 반환한다.
  */
 export function resolveSelectedUuids(
   selectedIds: Set<string> | Iterable<string>,
   allMergedScenes: MergedScene[],
+  fallbackPart?: Part | null,
 ): string[] {
   const uuids: string[] = [];
   const seen = new Set<string>();
@@ -39,8 +45,9 @@ export function resolveSelectedUuids(
       const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
       pushUuid(merged?.actScene?.id);
     } else {
-      // 개별 모드: plain sceneId → 스토어 전체 검색
-      const scene = useDataStore.getState().findSceneBySceneId(id);
+      const scene = fallbackPart
+        ? findSceneInPart(fallbackPart, id)
+        : useDataStore.getState().findSceneBySceneId(id);
       pushUuid(scene?.id);
     }
   }
@@ -54,11 +61,13 @@ export function resolveSelectedUuids(
  *
  * `onlyDept`가 주어지면 통합 모드(bg:/act: 접두사)에서 해당 부서만 필터한다.
  * 개별 모드(plain sceneId)에서는 onlyDept를 무시한다 (현재 부서 하나만 존재).
+ * `fallbackPart`가 주어지면 개별 모드에서는 해당 파트 내에서만 검색한다.
  */
 export function resolveSelectedScenes(
   selectedIds: Set<string> | Iterable<string>,
   allMergedScenes: MergedScene[],
   onlyDept?: 'bg' | 'acting',
+  fallbackPart?: Part | null,
 ): Scene[] {
   const scenes: Scene[] = [];
   const seen = new Set<string>();
@@ -82,7 +91,9 @@ export function resolveSelectedScenes(
       const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
       pushScene(merged?.actScene);
     } else {
-      const scene = useDataStore.getState().findSceneBySceneId(id);
+      const scene = fallbackPart
+        ? findSceneInPart(fallbackPart, id)
+        : useDataStore.getState().findSceneBySceneId(id);
       pushScene(scene);
     }
   }

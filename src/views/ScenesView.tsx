@@ -2168,7 +2168,7 @@ export function ScenesView() {
 
   // 일괄 stage 토글: 선택된 씬들을 RPC 한 번에 처리 (Tasks 13-17)
   const handleBulkStageToggle = async (stage: Stage, onlyDept?: 'bg' | 'acting') => {
-    const targetScenes = resolveSelectedScenes(selectedSceneIds, allMergedScenes, onlyDept);
+    const targetScenes = resolveSelectedScenes(selectedSceneIds, allMergedScenes, onlyDept, currentPart);
     if (targetScenes.length === 0) return;
 
     const nowIso = new Date().toISOString();
@@ -2208,7 +2208,7 @@ export function ScenesView() {
 
   // 일괄 삭제: ConfirmDialog → RPC 경유, runBulkOp가 낙관적 제거 처리 (Tasks 13-17)
   const handleBulkDelete = async () => {
-    const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes);
+    const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes, currentPart);
     if (uuids.length === 0) return;
 
     const ok = await ConfirmDialog.show({
@@ -2239,7 +2239,7 @@ export function ScenesView() {
     if (!fields.assignee && !fields.memo && !fields.layoutId) return;
 
     const selection = selectionSnapshot ?? selectedSceneIds;
-    const uuids = resolveSelectedUuids(selection, allMergedScenes);
+    const uuids = resolveSelectedUuids(selection, allMergedScenes, currentPart);
     if (uuids.length === 0) return;
 
     const updates: BulkFieldUpdate[] = uuids.map((uuid) => ({
