@@ -227,6 +227,49 @@ test('buildMergedScenes keeps a unique mergedKey for base and versioned scene id
   ]);
 });
 
+test('buildMergedScenes disambiguates duplicate normalized scene aliases in one part', () => {
+  const bgPartScenes = [
+    { no: 1, sceneId: 'ac001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    { no: 2, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+  ];
+  const mergedScenes = buildMergedScenes({
+    bgScenes: bgPartScenes,
+    actScenes: [],
+    bgPartScenes,
+    actPartScenes: [],
+    mergedScenePartId: 'A',
+    sortKey: 'no',
+    sortDir: 'asc',
+  });
+
+  assert.equal(mergedScenes.length, 2);
+  assert.equal(mergedScenes[0].sceneId, 'a001');
+  assert.equal(mergedScenes[1].sceneId, 'a001');
+  assert.notEqual(mergedScenes[0].mergedKey, mergedScenes[1].mergedKey);
+  assert.match(mergedScenes[0].mergedKey, /^a\|scene:1\|/);
+  assert.match(mergedScenes[1].mergedKey, /^a\|scene:1\|/);
+
+  const plans = buildAllModeBulkTogglePlans(
+    new Set([
+      `bg:${mergedScenes[0].mergedKey}`,
+      `bg:${mergedScenes[1].mergedKey}`,
+    ]),
+    mergedScenes,
+    'EP01_A_BG',
+    'EP01_A_ACT',
+  );
+
+  assert.deepEqual(plans, [
+    {
+      sheetName: 'EP01_A_BG',
+      updates: [
+        { sceneId: 'ac001', sceneIndex: 0 },
+        { sceneId: 'a001', sceneIndex: 1 },
+      ],
+    },
+  ]);
+});
+
 test('buildMergedScenes does not merge versioned ids with the base scene number', () => {
   const mergedScenes = buildMergedScenes({
     bgScenes: [
