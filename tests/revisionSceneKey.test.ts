@@ -53,6 +53,10 @@ test('revision keys split same-sheet aliases only when the aliases coexist', () 
 test('stored revision keys preserve legacy aliases when same-sheet aliases coexist', () => {
   const siblingSceneIds = ['ac001', 'a001'];
   assert.equal(
+    normalizeRevisionSceneKey('EP01:A:1', { siblingSceneIds }),
+    'EP01:A:1',
+  );
+  assert.equal(
     normalizeRevisionSceneKey('EP01:A:ac001', { siblingSceneIds }),
     'EP01:A:raw-ac001',
   );
