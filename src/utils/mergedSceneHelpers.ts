@@ -35,6 +35,19 @@ function normalizePartId(partId: string | null | undefined): string {
   return (partId || '').trim().slice(0, 1).toLowerCase();
 }
 
+const rawCounterpartSceneIdsByPart = new Map<string, Set<string>>();
+
+function rawSceneIdKey(sceneId: string | null | undefined): string {
+  return (sceneId || '').trim().toLowerCase();
+}
+
+function shouldPreserveRawSceneId(partId: string | null | undefined, sceneId: string | null | undefined): boolean {
+  const normalizedPartId = normalizePartId(partId);
+  if (!normalizedPartId) return false;
+
+  return rawCounterpartSceneIdsByPart.get(normalizedPartId)?.has(rawSceneIdKey(sceneId)) ?? false;
+}
+
 function dedupeUpdates(updates: { sceneId: string; sceneIndex: number }[]) {
   const seen = new Set<string>();
   return updates.filter((update) => {
@@ -55,6 +68,10 @@ function countIncompleteStages(scene: SortableSceneLike): number {
 }
 
 export function buildUnifiedSceneId(partId: string | null | undefined, sceneId: string | null | undefined): string {
+  if (shouldPreserveRawSceneId(partId, sceneId)) {
+    return (sceneId || '').trim();
+  }
+
   return buildCanonicalSceneId(partId, sceneId);
 }
 
@@ -107,6 +124,29 @@ function assignMergedSceneKeys<TScene extends SceneLike>(
   });
 }
 
+function registerRawCounterpartSceneIds<TScene extends SceneLike>(
+  mergedList: MergedSceneLike<TScene>[],
+  partId: string | null | undefined,
+) {
+  const normalizedPartId = normalizePartId(partId);
+  if (!normalizedPartId) return;
+
+  const rawSceneIds = new Set<string>();
+  mergedList.forEach((merged) => {
+    if (!shouldPreserveRawSceneIdForCounterpart(merged)) return;
+
+    const rawSceneId = merged.bgScene?.sceneId ?? merged.actScene?.sceneId ?? merged.sceneId;
+    const key = rawSceneIdKey(rawSceneId);
+    if (key) rawSceneIds.add(key);
+  });
+
+  if (rawSceneIds.size > 0) {
+    rawCounterpartSceneIdsByPart.set(normalizedPartId, rawSceneIds);
+  } else {
+    rawCounterpartSceneIdsByPart.delete(normalizedPartId);
+  }
+}
+
 export function buildUnifiedSceneIdFromMerged(
   partId: string | null | undefined,
   merged: Pick<MergedSceneLike, 'sceneId' | 'bgScene' | 'actScene'>,
@@ -130,6 +170,38 @@ export function buildMergedRevisionSceneId(
   }
 
   return rawSceneId;
+}
+
+export function shouldPreserveRawSceneIdForCounterpart(
+  merged: Pick<MergedSceneLike, 'mergedKey'>,
+): boolean {
+  return merged.mergedKey.includes('|id:') || merged.mergedKey.includes('|dup:');
+}
+
+export function buildCounterpartSceneId(
+  partId: string | null | undefined,
+  merged: Pick<MergedSceneLike, 'sceneId' | 'mergedKey' | 'bgScene' | 'actScene'>,
+  targetDept: 'bg' | 'acting',
+): string {
+  const sourceScene = targetDept === 'bg' ? merged.actScene : merged.bgScene;
+  const rawSceneId = sourceScene?.sceneId ?? merged.bgScene?.sceneId ?? merged.actScene?.sceneId ?? merged.sceneId;
+
+  return shouldPreserveRawSceneIdForCounterpart(merged)
+    ? rawSceneId
+    : buildUnifiedSceneId(partId, rawSceneId);
+}
+
+export function matchesCounterpartSceneId(
+  partId: string | null | undefined,
+  candidateSceneId: string | null | undefined,
+  targetSceneId: string,
+  preserveRawSceneId: boolean,
+): boolean {
+  if (preserveRawSceneId) {
+    return (candidateSceneId || '').trim().toLowerCase() === targetSceneId.trim().toLowerCase();
+  }
+
+  return buildUnifiedSceneId(partId, candidateSceneId) === targetSceneId;
 }
 
 export function matchesMergedSceneIdentity(
@@ -249,6 +321,7 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
   });
 
   assignMergedSceneKeys(mergedList, mergedScenePartId);
+  registerRawCounterpartSceneIds(mergedList, mergedScenePartId);
   mergedList.forEach((merged) => {
     merged.sceneId = buildUnifiedSceneIdFromMerged(mergedScenePartId, merged);
   });
