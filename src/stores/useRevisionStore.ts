@@ -5,6 +5,7 @@ import * as revisionService from '@/services/revisionService';
 interface RevisionState {
   revisions: CompRevision[];
   revisionCountByScene: Record<string, number>; // sceneKey → open count
+  totalOpenRevisionCount: number;
   isLoading: boolean;
   lastLoadTime: number | null;
 
@@ -42,6 +43,16 @@ function buildCountMap(revisions: CompRevision[]): Record<string, number> {
   return revisionService.buildOpenRevisionCountMap(revisions);
 }
 
+function countOpenRevisions(revisions: CompRevision[]): number {
+  const openRevisionIds = new Set<string>();
+  revisions.forEach((revision) => {
+    if (revision.status !== 'resolved') {
+      openRevisionIds.add(revision.id);
+    }
+  });
+  return openRevisionIds.size;
+}
+
 function getRevisionLookupKeys(sceneKey: string): Set<string> {
   return new Set(revisionService.getRevisionLookupSceneKeys(sceneKey));
 }
@@ -49,6 +60,7 @@ function getRevisionLookupKeys(sceneKey: string): Set<string> {
 export const useRevisionStore = create<RevisionState>((set, get) => ({
   revisions: [],
   revisionCountByScene: {},
+  totalOpenRevisionCount: 0,
   isLoading: false,
   lastLoadTime: null,
 
@@ -59,6 +71,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
       set({
         revisions: all,
         revisionCountByScene: buildCountMap(all),
+        totalOpenRevisionCount: countOpenRevisions(all),
         lastLoadTime: Date.now(),
       });
     } catch (err) {
@@ -71,7 +84,11 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   addRevisionOptimistic: (revision) => {
     set((state) => {
       const revisions = [...state.revisions, revision];
-      return { revisions, revisionCountByScene: buildCountMap(revisions) };
+      return {
+        revisions,
+        revisionCountByScene: buildCountMap(revisions),
+        totalOpenRevisionCount: countOpenRevisions(revisions),
+      };
     });
   },
 
@@ -81,7 +98,11 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
       const revisions = state.revisions.map((r) =>
         r.id === id && lookupKeys.has(r.sceneKey) ? { ...r, ...updates } : r,
       );
-      return { revisions, revisionCountByScene: buildCountMap(revisions) };
+      return {
+        revisions,
+        revisionCountByScene: buildCountMap(revisions),
+        totalOpenRevisionCount: countOpenRevisions(revisions),
+      };
     });
   },
 
