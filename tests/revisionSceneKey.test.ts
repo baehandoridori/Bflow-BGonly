@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildLegacySharedRevisionSceneKey,
+  buildRevisionSceneKeyLookupKeys,
   buildUnifiedRevisionSceneKey,
   normalizeRevisionSceneKey,
 } from '../src/utils/revisionSceneKey.ts';
@@ -69,4 +71,18 @@ test('stored revision keys preserve legacy aliases when same-sheet aliases coexi
     'EP01:A:raw-ac001',
   );
   assert.equal(normalizeRevisionSceneKey('EP01:A:ac001'), 'EP01:A:1');
+});
+
+test('raw alias revision lookups include the legacy shared numeric key', () => {
+  const siblingSceneIds = ['ac001', 'a001'];
+
+  assert.equal(buildLegacySharedRevisionSceneKey('EP01:A:raw-ac001'), 'EP01:A:1');
+  assert.deepEqual(
+    buildRevisionSceneKeyLookupKeys('EP01:A:ac001', { siblingSceneIds }),
+    ['EP01:A:raw-ac001', 'EP01:A:1'],
+  );
+  assert.deepEqual(
+    buildRevisionSceneKeyLookupKeys('EP01:A:1', { siblingSceneIds }),
+    ['EP01:A:1'],
+  );
 });
