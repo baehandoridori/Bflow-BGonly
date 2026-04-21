@@ -7,6 +7,7 @@ import {
   buildPartContextMenuTarget,
   getCombinedPartMemo,
   listVisiblePartMemoSheetNames,
+  rollbackFailedPartMemoSheets,
   type PartContextMenuTarget,
 } from '@/utils/partMemoHelpers';
 
@@ -78,15 +79,22 @@ export function usePartMemos({
   }, [allParts, currentEpisodeNumber, parts, selectedDepartment]);
 
   const savePartMemo = useCallback(async (target: PartContextMenuTarget, memo: string) => {
+    const previousPartMemos = partMemos;
+    const normalizedMemo = memo.trim();
     setPartMemos((prev) => applyPartMemoToSheets(prev, target.sheetNames, memo));
-    try {
-      await Promise.all(
-        target.sheetNames.map((sheetName) => writeMetadata('part-memo', sheetName, memo.trim())),
+
+    const results = await Promise.allSettled(
+      target.sheetNames.map((sheetName) => writeMetadata('part-memo', sheetName, normalizedMemo)),
+    );
+    const failedSheetNames = target.sheetNames.filter((_, index) => results[index].status === 'rejected');
+
+    if (failedSheetNames.length > 0) {
+      console.warn('[파트 메모] 일부 시트 저장 실패', failedSheetNames);
+      setPartMemos((current) =>
+        rollbackFailedPartMemoSheets(current, previousPartMemos, failedSheetNames, normalizedMemo),
       );
-    } catch (err) {
-      console.warn('[파트 메모] 시트 저장 실패', err);
     }
-  }, []);
+  }, [partMemos]);
 
   return {
     partMemos,
