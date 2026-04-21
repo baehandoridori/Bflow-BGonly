@@ -694,7 +694,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
   readAllEpisodes as sbReadAllEpisodes,
@@ -710,6 +710,8 @@ import {
   deleteScene as sbDeleteScene,
   updateSceneStage as sbUpdateSceneStage,
   bulkUpdateSceneStages as sbBulkUpdateSceneStages,
+  bulkDeleteScenes as sbBulkDeleteScenes,
+  bulkUpdateSceneFields as sbBulkUpdateSceneFields,
   updateSceneField as sbUpdateSceneField,
   readUsers as sbReadUsers,
   addUser as sbAddUser,
@@ -739,7 +741,7 @@ import {
   deletePrivateEvent as sbDeletePrivateEvent,
   getPrivateEventOwner as sbGetPrivateEventOwner,
 } from './supabase';
-import type { SupabaseUser } from './supabase';
+import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
 
 // ─── Supabase IPC 에러 래퍼 ───
@@ -803,8 +805,33 @@ ipcMain.handle('supabase:delete-scene', wrapIpc(async (_e: unknown, sceneUuid: s
 ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => {
   await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
 }));
-ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => {
-  await sbBulkUpdateSceneStages(updates, updatedBy);
+ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: BulkStageUpdate[], updatedBy: string) => {
+  const results = await sbBulkUpdateSceneStages(updates, updatedBy);
+  for (const u of updates) {
+    const r = results.find((x) => x.sceneUuid === u.sceneUuid);
+    if (r?.success) {
+      broadcastSceneUpdate(u.sceneUuid, u.stage, u.value, updatedBy);
+    }
+  }
+  return results;
+}));
+ipcMain.handle('supabase:bulk-delete-scenes', wrapIpc(async (_e: unknown, sceneUuids: string[], deletedBy: string) => {
+  const results = await sbBulkDeleteScenes(sceneUuids, deletedBy);
+  // deleteScene 기존에 broadcast 호출이 없었으므로 패리티 유지 목적으로 여기도 생략.
+  return results;
+}));
+ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, updates: BulkFieldUpdate[], updatedBy: string) => {
+  const results = await sbBulkUpdateSceneFields(updates, updatedBy);
+  for (const u of updates) {
+    const r = results.find((x) => x.sceneUuid === u.sceneUuid);
+    if (!r?.success) continue;
+    for (const [key, value] of Object.entries(u.fields)) {
+      if (value !== undefined) {
+        broadcastSceneFieldUpdate(u.sceneUuid, key, value, updatedBy);
+      }
+    }
+  }
+  return results;
 }));
 ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneUuid: string, field: string, value: string, senderId?: string) => {
   await sbUpdateSceneField(sceneUuid, field, value, senderId);
