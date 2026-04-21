@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast as sonnerToast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -23,6 +23,7 @@ import { ImageModal } from './ImageModal';
 import { CommentPanel } from './CommentPanel';
 import { RevisionPanel } from './RevisionPanel';
 import { useRevisionStore } from '@/stores/useRevisionStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
 
@@ -91,7 +92,20 @@ export function UnifiedSceneDetailModal({
   // 리비전 키 — buildSceneKey 가 부서 구분 없이 EP:Part:sceneId 로 해싱되므로 BG/ACT 공용
   const revisionSheetName = primarySheet;
   const revisionSceneId = buildMergedRevisionSceneId(merged) || primaryScene?.sceneId || unifiedSceneId;
-  const revisionSceneKey = revisionSheetName && revisionSceneId ? buildSceneKey(revisionSheetName, revisionSceneId) : '';
+  const episodes = useDataStore((s) => s.episodes);
+  const revisionSiblingSceneIds = useMemo(() => {
+    if (!revisionSheetName) return [];
+
+    for (const episode of episodes) {
+      const part = episode.parts.find((candidate) => candidate.sheetName === revisionSheetName);
+      if (part) return part.scenes.map((scene) => scene.sceneId);
+    }
+
+    return [];
+  }, [episodes, revisionSheetName]);
+  const revisionSceneKey = revisionSheetName && revisionSceneId
+    ? buildSceneKey(revisionSheetName, revisionSceneId, { siblingSceneIds: revisionSiblingSceneIds })
+    : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
 
   // UI state
@@ -441,6 +455,7 @@ export function UnifiedSceneDetailModal({
                 <RevisionPanel
                   sheetName={revisionSheetName}
                   sceneId={revisionSceneId}
+                  siblingSceneIds={revisionSiblingSceneIds}
                   onCountChange={setRevisionCount}
                 />
               </motion.div>
