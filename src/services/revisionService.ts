@@ -11,6 +11,7 @@
 import type { CompRevision, Part, RevisionPriority, RevisionStatus } from '../types';
 import { useDataStore } from '../stores/useDataStore';
 import {
+  buildRevisionSceneKeyLookupKeys,
   buildUnifiedRevisionSceneKey,
   normalizeRevisionSceneKey,
   type RevisionSceneKeyOptions,
@@ -114,6 +115,69 @@ function normalizeStoredRevisionSceneKey(sceneKey: string): string {
   return normalizeRevisionSceneKey(sceneKey, {
     siblingSceneIds: getSiblingSceneIdsForStoredSceneKey(sceneKey),
   });
+}
+
+export function getRevisionLookupSceneKeys(sceneKey: string): string[] {
+  return buildRevisionSceneKeyLookupKeys(sceneKey, {
+    siblingSceneIds: getSiblingSceneIdsForStoredSceneKey(sceneKey),
+  });
+}
+
+function collectRevisionsForSceneKey(store: RevisionsStore, sceneKey: string): CompRevision[] {
+  const revisions: CompRevision[] = [];
+  const seen = new Set<string>();
+
+  getRevisionLookupSceneKeys(sceneKey).forEach((lookupKey) => {
+    (store[lookupKey] ?? []).forEach((revision) => {
+      if (seen.has(revision.id)) return;
+      revisions.push(revision);
+      seen.add(revision.id);
+    });
+  });
+
+  return revisions;
+}
+
+function getRawAliasSceneKeysForSharedSceneKey(sceneKey: string): string[] {
+  const { episode, part, sceneId } = parseRevisionSceneKey(sceneKey);
+  if (!episode || !part || !sceneId) return [];
+
+  const collisionSceneIds = getPartWideAliasCollisionSceneIds(episode, part);
+  if (!collisionSceneIds) return [];
+
+  const aliasKeys: string[] = [];
+  const seen = new Set<string>();
+  for (const candidatePart of getPartsForRevisionContext(episode, part)) {
+    for (const scene of candidatePart.scenes) {
+      const rawSceneId = scene.sceneId.trim();
+      if (!rawSceneId || normalizeSceneIdKey(rawSceneId, part) !== sceneId) continue;
+
+      const aliasKey = buildUnifiedRevisionSceneKey(candidatePart.sheetName, rawSceneId, {
+        siblingSceneIds: collisionSceneIds,
+      });
+      if (aliasKey === sceneKey || seen.has(aliasKey)) continue;
+
+      aliasKeys.push(aliasKey);
+      seen.add(aliasKey);
+    }
+  }
+
+  return aliasKeys;
+}
+
+export function buildOpenRevisionCountMap(revisions: CompRevision[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+
+  revisions.forEach((revision) => {
+    if (revision.status === 'resolved') return;
+
+    counts[revision.sceneKey] = (counts[revision.sceneKey] || 0) + 1;
+    getRawAliasSceneKeysForSharedSceneKey(revision.sceneKey).forEach((aliasKey) => {
+      counts[aliasKey] = (counts[aliasKey] || 0) + 1;
+    });
+  });
+
+  return counts;
 }
 
 function normalizeRevisionStore(store: RevisionsStore): RevisionsStore {
@@ -246,13 +310,12 @@ export function invalidateRevisionsCache(): void {
 // ─── 통합 API ───────────────────────────────────
 
 export async function getRevisions(sceneKey: string): Promise<CompRevision[]> {
-  const normalizedSceneKey = normalizeStoredRevisionSceneKey(sceneKey);
   if (sheetsMode) {
     const store = await loadAllRevisions();
-    return [...(store[normalizedSceneKey] ?? [])];
+    return collectRevisionsForSceneKey(store, sceneKey);
   }
   const all = await loadLocalAll();
-  return [...(all[normalizedSceneKey] ?? [])];
+  return collectRevisionsForSceneKey(all, sceneKey);
 }
 
 export async function getAllRevisions(): Promise<CompRevision[]> {
@@ -269,8 +332,8 @@ export async function getAllRevisions(): Promise<CompRevision[]> {
   return all;
 }
 
-function nextRevisionNo(store: RevisionsStore, sceneKey: string): number {
-  const existing = store[sceneKey] ?? [];
+function nextRevisionNo(store: RevisionsStore, sceneKeys: string[]): number {
+  const existing = sceneKeys.flatMap((sceneKey) => store[sceneKey] ?? []);
   if (existing.length === 0) return 1;
   return Math.max(...existing.map(r => r.revisionNo)) + 1;
 }
@@ -289,14 +352,16 @@ export async function createRevision(
     assignee?: string;
   },
 ): Promise<CompRevision> {
-  const normalizedSceneKey = normalizeStoredRevisionSceneKey(sceneKey);
+  const lookupSceneKeys = getRevisionLookupSceneKeys(sceneKey);
+  const normalizedSceneKey = lookupSceneKeys[0];
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const priority = data.priority || 'normal';
+  const department = data.department || data.lookupDepartment;
 
   if (sheetsMode) {
     const store = await loadAllRevisions();
-    const revisionNo = nextRevisionNo(store, normalizedSceneKey);
+    const revisionNo = nextRevisionNo(store, lookupSceneKeys);
     const revision: CompRevision = {
       id,
       sceneKey: normalizedSceneKey,
@@ -306,7 +371,7 @@ export async function createRevision(
       description: data.description,
       frameNo: data.frameNo,
       imageUrl: data.imageUrl,
-      department: data.department,
+      department,
       requesterId: data.requesterId,
       requesterName: data.requesterName,
       assignee: data.assignee,
@@ -317,7 +382,7 @@ export async function createRevision(
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
     await window.electronAPI.supabaseAddRevision(
       id, '', normalizedSceneKey, revisionNo, 'open', priority,
-      data.description, data.frameNo || '', data.imageUrl || '', data.department || '', data.lookupDepartment || data.department || '',
+      data.description, data.frameNo || '', data.imageUrl || '', department || '', data.lookupDepartment || department || '',
       data.requesterId, data.requesterName, data.assignee || '', now,
     );
 
@@ -330,7 +395,7 @@ export async function createRevision(
 
   // 로컬 모드
   const all = await loadLocalAll();
-  const revisionNo = nextRevisionNo(all, normalizedSceneKey);
+  const revisionNo = nextRevisionNo(all, lookupSceneKeys);
   const revision: CompRevision = {
     id,
     sceneKey: normalizedSceneKey,
@@ -340,7 +405,7 @@ export async function createRevision(
     description: data.description,
     frameNo: data.frameNo,
     imageUrl: data.imageUrl,
-    department: data.department,
+    department,
     requesterId: data.requesterId,
     requesterName: data.requesterName,
     assignee: data.assignee,
@@ -361,7 +426,7 @@ export async function updateRevisionStatus(
   status: RevisionStatus,
   extra?: { resolvedBy?: string; resolvedNote?: string },
 ): Promise<void> {
-  const normalizedSceneKey = normalizeStoredRevisionSceneKey(sceneKey);
+  const lookupSceneKeys = getRevisionLookupSceneKeys(sceneKey);
   const now = new Date().toISOString();
   const updates: Record<string, string> = { status, updatedAt: now };
   if (status === 'resolved') {
@@ -374,8 +439,10 @@ export async function updateRevisionStatus(
     await window.electronAPI.supabaseUpdateRevision(id, updates);
     // 캐시 업데이트
     if (sheetsCache) {
-      const list = sheetsCache[normalizedSceneKey];
-      if (list) {
+      for (const lookupSceneKey of lookupSceneKeys) {
+        const list = sheetsCache[lookupSceneKey];
+        if (!list) continue;
+
         const idx = list.findIndex(r => r.id === id);
         if (idx >= 0) {
           list[idx] = {
@@ -386,6 +453,7 @@ export async function updateRevisionStatus(
             resolvedBy: extra?.resolvedBy ?? list[idx].resolvedBy,
             resolvedNote: extra?.resolvedNote ?? list[idx].resolvedNote,
           };
+          break;
         }
       }
     }
@@ -394,18 +462,22 @@ export async function updateRevisionStatus(
 
   // 로컬 모드
   const all = await loadLocalAll();
-  const list = all[normalizedSceneKey];
-  if (!list) return;
-  const idx = list.findIndex(r => r.id === id);
-  if (idx >= 0) {
-    list[idx] = {
-      ...list[idx],
-      status,
-      updatedAt: now,
-      resolvedAt: status === 'resolved' ? now : list[idx].resolvedAt,
-      resolvedBy: extra?.resolvedBy ?? list[idx].resolvedBy,
-      resolvedNote: extra?.resolvedNote ?? list[idx].resolvedNote,
-    };
+  for (const lookupSceneKey of lookupSceneKeys) {
+    const list = all[lookupSceneKey];
+    if (!list) continue;
+
+    const idx = list.findIndex(r => r.id === id);
+    if (idx >= 0) {
+      list[idx] = {
+        ...list[idx],
+        status,
+        updatedAt: now,
+        resolvedAt: status === 'resolved' ? now : list[idx].resolvedAt,
+        resolvedBy: extra?.resolvedBy ?? list[idx].resolvedBy,
+        resolvedNote: extra?.resolvedNote ?? list[idx].resolvedNote,
+      };
+      break;
+    }
   }
   await saveLocal(all);
 }
@@ -421,12 +493,7 @@ export async function getOpenRevisionCounts(): Promise<Record<string, number>> {
     store = await loadLocalAll();
   }
 
-  const counts: Record<string, number> = {};
-  for (const [sceneKey, list] of Object.entries(store)) {
-    const openCount = list.filter(r => r.status !== 'resolved').length;
-    if (openCount > 0) counts[sceneKey] = openCount;
-  }
-  return counts;
+  return buildOpenRevisionCountMap(Object.values(store).flat());
 }
 
 function getSiblingSceneIdsForSheet(sheetName: string): string[] | undefined {
