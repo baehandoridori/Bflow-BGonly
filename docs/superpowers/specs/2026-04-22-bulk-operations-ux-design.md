@@ -1,9 +1,10 @@
-# 다중 선택 일괄 작업 UX 재설계 — Hybrid Server-Authoritative
+# 다중 선택 일괄 작업 UX 재설계 — Hybrid Server-Authoritative + RPC
 
 - 작성일: 2026-04-22
 - 브랜치: `claude/determined-herschel-236409`
-- 대상 범위: 씬 뷰(카드/시트)의 일괄 삭제·일괄 단계 토글·일괄 편집 경로, Realtime 수신 로직, 메인 프로세스 배치 핸들러, preload 바인딩
+- 대상 범위: 씬 뷰(카드/시트)의 일괄 삭제·일괄 단계 토글·일괄 편집 경로, Realtime 수신 로직, 메인 프로세스 배치 핸들러, preload 바인딩, **PostgreSQL RPC 함수 신설**
 - PR 단위: **단일 PR** (사용자 결정)
+- 전제: Supabase **Pro 플랜** (2026-04-22 업그레이드) — 확장된 Realtime 한도 + 일일 백업 + 자동 정지 없음
 
 ---
 
@@ -104,13 +105,17 @@ Studio JBBJ 팀이 카드 뷰/시트 뷰에서 다중 선택 후 일괄 작업(�
 - **혼합 방향 정책**: 기존 동작 유지 (반전). 사용자가 "일괄 켜기" vs "일괄 끄기"를 고르는 토글은 별도 기능이 아니므로 spec에서 신규 정의하지 않음.
 
 **완료 메타 (completed_by/completed_at):**
-현재 `bulkToggleForSheet`는 `bulkUpdateCells` 호출 후 **별도**로 `updateSceneCompletionMeta` N건을 추가 호출한다 (ScenesView.tsx:2231-2246). 이 분리는 Realtime 에코 순서와 `extractSceneDelta`(`completed_by`/`completed_at` 미매핑)에서 혼란을 일으킬 수 있다.
 
-→ **본 설계에서는 `bulkUpdateSceneStages`가 완료 메타까지 한 번에 처리**한다. 즉:
+중요 정정: `completed_by`/`completed_at`은 **scenes 테이블 컬럼이 아니다**. 별도 `metadata` 테이블에 generic KV (type='scene_completion_meta', key=scene uuid, value=JSON string) 형태로 저장된다 (DEVLOG/supabase-init.sql L114-123).
+
+현재 `bulkToggleForSheet`는 `bulkUpdateCells` 호출 후 **별도**로 `updateSceneCompletionMeta` N건을 추가 호출한다 (ScenesView.tsx:2231-2246). N×2 HTTP 요청이 발생하고 Realtime 에코 순서도 보장되지 않는다.
+
+→ **본 설계에서는 Pro 플랜의 이점을 살려 PostgreSQL RPC 함수로 scenes + metadata를 한 트랜잭션에 원자적으로 처리** (§5.1.0 참조). 즉:
 - 렌더러는 `{ sceneUuid, stage, value, completedBy?, completedAt? }[]` 형태로 한 번에 전달
-- 메인 프로세스 `bulkUpdateSceneStages`가 `updateSceneStage` 내부에서 완료 메타 함께 갱신
+- RPC `bulk_update_scene_stages` 내부에서 scenes row UPDATE + metadata row UPSERT를 하나의 트랜잭션으로 수행
 - 별도 `updateSceneCompletionMeta` 호출 제거
-- `SCENE_FIELD_MAP`에 `['completed_by', 'completedBy', 'string']`, `['completed_at', 'completedAt', 'string']` **추가** (Realtime UPDATE 수신 시 반영되도록)
+- `SCENE_FIELD_MAP` 확장 **불필요** (scenes 테이블에는 해당 컬럼이 없으므로 Realtime scenes UPDATE 델타에 완료 메타는 포함 안 됨)
+- 다른 클라이언트에서 완료 메타 갱신 반영은 **기존 동작 그대로** (metadata 테이블은 현재 Realtime 구독 대상이 아님 — 다음 로드 시 반영됨). 본 스펙 범위 밖.
 
 ### 3.3 일괄 편집 (담당자·메모·레이아웃ID) 플로우
 
@@ -171,7 +176,185 @@ Studio JBBJ 팀이 카드 뷰/시트 뷰에서 다중 선택 후 일괄 작업(�
 
 ## 5. 구현 사양
 
-### 5.1 백엔드 — 항목별 결과 노출 + 완료 메타 통합
+### 5.1.0 PostgreSQL RPC 함수 설계 (Pro 플랜 활용)
+
+**왜 RPC인가**: 현재 `Promise.allSettled`는 N개 씬 업데이트 = N번의 HTTP 왕복(electron main → Supabase). RPC 함수로 전환하면 **1번의 HTTP 왕복에 서버 내부에서 N개 쿼리 실행**. 속도↑ + 트랜잭션 일관성↑ + scenes/metadata 동시 갱신의 원자성 확보.
+
+**설계 원칙**:
+- 각 함수는 `BEGIN/EXCEPTION WHEN OTHERS` 루프로 **항목별 best-effort** (부분 성공 허용) — 현 UX 사양 보존.
+- `RETURNS TABLE (scene_uuid uuid, success boolean, error text)` 시그니처 통일.
+- SECURITY INVOKER (호출자 권한 — 기존 RLS 정책 "allow_all" 그대로 적용).
+- IF NOT EXISTS / CREATE OR REPLACE 패턴 (기존 supabase-init.sql 스타일 따름).
+
+**함수 #1: `bulk_update_scene_stages`**
+
+```sql
+CREATE OR REPLACE FUNCTION bulk_update_scene_stages(
+  p_updates jsonb,   -- [{sceneUuid, stage, value, completedBy?, completedAt?}, ...]
+  p_updated_by text
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  u jsonb;
+  v_uuid uuid;
+  v_stage text;
+  v_value boolean;
+  v_completed_by text;
+  v_completed_at timestamptz;
+  v_meta_value text;  -- JSON stringified
+BEGIN
+  FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
+    v_uuid := (u->>'sceneUuid')::uuid;
+    v_stage := u->>'stage';
+    v_value := (u->>'value')::boolean;
+    v_completed_by := u->>'completedBy';
+    v_completed_at := NULLIF(u->>'completedAt', '')::timestamptz;
+
+    BEGIN
+      IF v_stage NOT IN ('lo','done','review','png') THEN
+        RAISE EXCEPTION 'invalid stage: %', v_stage;
+      END IF;
+
+      -- scenes 테이블 UPDATE (CASE 분기)
+      UPDATE scenes SET
+        lo     = CASE WHEN v_stage = 'lo'     THEN v_value ELSE lo END,
+        done   = CASE WHEN v_stage = 'done'   THEN v_value ELSE done END,
+        review = CASE WHEN v_stage = 'review' THEN v_value ELSE review END,
+        png    = CASE WHEN v_stage = 'png'    THEN v_value ELSE png END,
+        updated_at = now(),
+        updated_by = p_updated_by
+      WHERE id = v_uuid;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+
+      -- metadata 테이블 UPSERT (완료 메타 있을 때만)
+      IF v_completed_by IS NOT NULL OR v_completed_at IS NOT NULL THEN
+        v_meta_value := jsonb_build_object(
+          'completedBy', v_completed_by,
+          'completedAt', v_completed_at,
+          'stage', v_stage
+        )::text;
+        INSERT INTO metadata (type, key, value, updated_at)
+          VALUES ('scene_completion_meta', v_uuid::text, v_meta_value, now())
+          ON CONFLICT (type, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+      END IF;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+```
+
+**함수 #2: `bulk_delete_scenes`**
+
+```sql
+CREATE OR REPLACE FUNCTION bulk_delete_scenes(
+  p_uuids uuid[],
+  p_deleted_by text  -- 현재 미사용(감사 로그 필요 시 확장)
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_uuid uuid;
+BEGIN
+  FOREACH v_uuid IN ARRAY p_uuids LOOP
+    BEGIN
+      DELETE FROM scenes WHERE id = v_uuid;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+      -- 연관 metadata 정리 (best-effort, 실패해도 메인 삭제는 성공)
+      DELETE FROM metadata WHERE type = 'scene_completion_meta' AND key = v_uuid::text;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+```
+
+**함수 #3: `bulk_update_scene_fields`**
+
+```sql
+CREATE OR REPLACE FUNCTION bulk_update_scene_fields(
+  p_updates jsonb,   -- [{sceneUuid, fields: {assignee?, memo?, layout?, storyboardUrl?, guideUrl?}}, ...]
+  p_updated_by text
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  u jsonb;
+  f jsonb;
+  v_uuid uuid;
+BEGIN
+  FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
+    v_uuid := (u->>'sceneUuid')::uuid;
+    f := u->'fields';
+
+    BEGIN
+      UPDATE scenes SET
+        assignee       = COALESCE(f->>'assignee', assignee),
+        memo           = COALESCE(f->>'memo', memo),
+        layout         = COALESCE(f->>'layout', layout),
+        storyboard_url = COALESCE(f->>'storyboardUrl', storyboard_url),
+        guide_url      = COALESCE(f->>'guideUrl', guide_url),
+        updated_at = now(),
+        updated_by = p_updated_by
+      WHERE id = v_uuid;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+```
+
+**배포 절차:**
+1. 위 3개 CREATE OR REPLACE FUNCTION 블록을 `DEVLOG/supabase-init.sql` 하단에 추가 (RLS 정책 블록 뒤).
+2. 사용자(한솔)가 Supabase 대시보드 SQL Editor에서 수동 실행 (기존 관리 방식 따름).
+3. 동일 PR에서 `electron/supabase.ts`가 `supabase.rpc(...)`를 호출하도록 변경.
+4. 배포 순서: **SQL 먼저 적용 → 클라이언트 배포** (반대 순서면 RPC 호출 실패).
+
+**Realtime 이벤트:** RPC 내부에서 실행된 UPDATE/DELETE 문은 통상적인 Postgres Changes 이벤트를 발행함. 클라이언트 Realtime 구독 코드는 변경 없음.
+
+**보안 검토:** `SECURITY INVOKER`이므로 현재 "allow_all" RLS 아래서는 anon key로 호출 가능. 향후 Supabase Auth 전환 시 RLS를 authenticated 전용으로 강화하면 RPC도 자동으로 보호됨.
+
+### 5.1 백엔드 — RPC 기반 구현으로 전환
 
 **타입 정의** (`electron/supabase.ts` 또는 공유 types):
 ```typescript
@@ -191,69 +374,85 @@ export type BulkUpdateResult = {
 ```
 
 **`bulkUpdateSceneStages` 개정** ([electron/supabase.ts:479-497]):
+
+RPC 호출로 단순화. 기존 `Promise.allSettled` + `updateSceneStage` N번 호출 전부 제거.
+
 ```typescript
 export async function bulkUpdateSceneStages(
   updates: BulkStageUpdate[],
-  updatedBy?: string,
+  updatedBy: string,
 ): Promise<BulkUpdateResult[]> {
-  const results = await Promise.allSettled(
-    updates.map((u) => updateSceneStageWithMeta(u, updatedBy)),
-  );
-  return updates.map((u, i) => {
-    const r = results[i];
-    return {
+  const { data, error } = await supabase.rpc('bulk_update_scene_stages', {
+    p_updates: updates.map((u) => ({
       sceneUuid: u.sceneUuid,
-      success: r.status === 'fulfilled',
-      error: r.status === 'rejected' ? (r.reason as Error).message : undefined,
-    };
+      stage: u.stage,
+      value: u.value,
+      completedBy: u.completedBy ?? null,
+      completedAt: u.completedAt ?? null,
+    })),
+    p_updated_by: updatedBy,
   });
-}
-
-// 신규 내부 헬퍼: stage 값 + 완료 메타를 한 트랜잭션으로
-async function updateSceneStageWithMeta(u: BulkStageUpdate, updatedBy?: string) {
-  const updates: Record<string, unknown> = {
-    [u.stage]: u.value,
-    updated_at: new Date().toISOString(),
-    updated_by: updatedBy ?? null,
-  };
-  if (u.completedBy !== undefined) updates.completed_by = u.completedBy;
-  if (u.completedAt !== undefined) updates.completed_at = u.completedAt;
-  const { error } = await client.from('scenes').update(updates).eq('id', u.sceneUuid);
-  if (error) throw error;
+  if (error) throw error;  // 전체 함수 실패 (네트워크/SQL 구문 에러 등)
+  return (data ?? []).map((row: { scene_uuid: string; success: boolean; error: string | null }) => ({
+    sceneUuid: row.scene_uuid,
+    success: row.success,
+    error: row.error ?? undefined,
+  }));
 }
 ```
 
-**신규 함수들**:
+**신규 함수들** (동일 패턴):
 
 ```typescript
 export async function bulkDeleteScenes(
   sceneUuids: string[],
-  deletedBy?: string,
+  deletedBy: string,
 ): Promise<BulkUpdateResult[]> {
-  const results = await Promise.allSettled(
-    sceneUuids.map((uuid) => deleteScene(uuid, deletedBy)),
-  );
-  return sceneUuids.map((uuid, i) => ({
-    sceneUuid: uuid,
-    success: results[i].status === 'fulfilled',
-    error: results[i].status === 'rejected'
-      ? (results[i] as PromiseRejectedResult).reason.message
-      : undefined,
+  const { data, error } = await supabase.rpc('bulk_delete_scenes', {
+    p_uuids: sceneUuids,
+    p_deleted_by: deletedBy,
+  });
+  if (error) throw error;
+  return (data ?? []).map((row: { scene_uuid: string; success: boolean; error: string | null }) => ({
+    sceneUuid: row.scene_uuid,
+    success: row.success,
+    error: row.error ?? undefined,
   }));
 }
 
 export async function bulkUpdateSceneFields(
   updates: Array<{ sceneUuid: string; fields: Partial<Scene> }>,
-  updatedBy?: string,
+  updatedBy: string,
 ): Promise<BulkUpdateResult[]> {
-  // 각 항목마다 fields를 camelCase → DB 컬럼명으로 매핑 후 기존 sbUpdateScene 경유.
-  // 예: { assignee: 'X', memo: 'Y', layoutId: 'L-1' }
-  //   → supabase.from('scenes').update({ assignee: 'X', memo: 'Y', layout: 'L-1', updated_at, updated_by }).eq('id', uuid)
-  // bulkDeleteScenes와 동일하게 Promise.allSettled로 N건 병렬 + 항목별 결과 반환.
+  const { data, error } = await supabase.rpc('bulk_update_scene_fields', {
+    p_updates: updates.map((u) => ({
+      sceneUuid: u.sceneUuid,
+      fields: {
+        assignee: u.fields.assignee,
+        memo: u.fields.memo,
+        layout: u.fields.layoutId,          // client camelCase → db column
+        storyboardUrl: u.fields.storyboardUrl,
+        guideUrl: u.fields.guideUrl,
+      },
+    })),
+    p_updated_by: updatedBy,
+  });
+  if (error) throw error;
+  return (data ?? []).map((row: { scene_uuid: string; success: boolean; error: string | null }) => ({
+    sceneUuid: row.scene_uuid,
+    success: row.success,
+    error: row.error ?? undefined,
+  }));
 }
 ```
 
-**기존 `bulkUpdateCells`** (`src/services/supabaseService.ts:190-199`): 삭제 또는 내부적으로 `bulkUpdateSceneStages` 결과를 삼켜 `Promise<void>` 호환 어댑터로 변환(호출자 마이그레이션 완료 후 제거). 초안에서는 **모든 호출자 마이그레이션을 동일 PR에 포함**하여 어댑터 불필요.
+**에러 의미 구분**:
+- RPC 호출 자체가 `error`를 반환 → 전체 함수 실패 (네트워크 끊김, SQL 문법 오류 등) → 렌더러에서 `network-error` 상태로.
+- RPC `data`에 `success: false` 항목 포함 → 특정 scene만 실패 (부분 실패) → `markFailed`로 표시.
+
+**기존 `bulkUpdateCells`** (`src/services/supabaseService.ts:190-199`): 삭제 (호출자 전부 `bulkUpdateSceneStages`로 마이그레이션). 기존 `updateSceneStage` 개별 헬퍼는 단일 경로에서 여전히 사용되므로 유지.
+
+**기존 `updateSceneCompletionMeta` 개별 호출 제거**: `bulkToggleForSheet` 라인 2231-2246의 메타 별도 호출 루프 완전 삭제 (RPC가 원자적으로 처리).
 
 ### 5.2 IPC 레이어 + Preload 바인딩
 
@@ -565,7 +764,7 @@ if (activeOp && activeOp.pendingSceneUuids.has(delta.uuid)) {
 | `src/services/supabaseService.ts` | 신규 함수 바인딩 + 타입 export (`BulkUpdateResult`, `BulkStageUpdate`) | 소 |
 | `src/stores/useBulkOperationsStore.ts` | **신규** | 중 |
 | `src/stores/useDataStore.ts` | `removeSceneByUuid(uuid)` 신규 액션 | 소 |
-| `src/utils/realtimeDelta.ts` | `SCENE_FIELD_MAP`에 `completed_by`/`completed_at` 추가 | 소 |
+| `DEVLOG/supabase-init.sql` | 3개 RPC 함수 CREATE OR REPLACE 블록 추가 (§5.1.0) | 중 |
 | `src/App.tsx` | Realtime UPDATE/DELETE 핸들러 분기 추가 + `markConfirmed` 훅인 | 소 |
 | `src/views/ScenesView.tsx` | 일괄 경로 4곳 교체 + `bulkToggleForSheet`/`bulkToggleResolvedForSheet` 리팩터 (낙관적+롤백 → runBulkOp) + `window.confirm` → `ConfirmDialog` | 중 |
 | `src/views/ScenesView.utils.ts` (or 적절 위치) | `runBulkOp`, `resolveSelectedUuids` 헬퍼 | 소 |
@@ -609,8 +808,9 @@ if (activeOp && activeOp.pendingSceneUuids.has(delta.uuid)) {
 
 - `tsc --noEmit` + `vite build` 통과
 - 단일 클릭 경로 회귀 없는지 diff 재검토
-- `extractSceneDelta`의 `completed_by`/`completed_at` 매핑으로 기존 `updateSceneCompletionMeta` 호출이 **완전히 제거**되었는지 확인
+- `updateSceneCompletionMeta` 개별 호출이 **완전히 제거**되었는지 확인 (grep — RPC가 대체)
 - `bulkUpdateCells` 호출 지점이 0이 되는지 (grep) — 남아있으면 구 경로가 조용히 같이 실행됨
+- `supabase.rpc('bulk_update_scene_stages', ...)` 3종 호출이 실제 성공하는지 (SQL 배포 누락 시 runtime에 "function does not exist" 에러 — 배포 순서 §5.1.0 준수)
 
 ### 7.4 사전 DB 검증
 
@@ -635,18 +835,24 @@ SELECT relname, relreplident FROM pg_class WHERE relname = 'scenes';
 | 작업 중첩 | 싱글톤 activeOp, in-flight 동안 하단 바 비활성 |
 | 취소 동작 | 서버 요청 중단 X, UI 모니터링만 해제 |
 | Sonner toast 간섭 | 일괄 작업 진행 중 정보성 토스트 표시 억제 (에러 토스트는 유지) |
+| **서버 처리 방식** | **PostgreSQL RPC 함수 (Pro 플랜 활용)** — 1번 요청 + 원자적 scenes/metadata 갱신 |
+| **부분 실패 정책** | RPC 내부 BEGIN/EXCEPTION per-item (best-effort) — 기존 UX 사양 보존 |
+| **배포 순서** | SQL 함수 먼저 적용 → 클라이언트 배포 (역순은 runtime 에러) |
+| **keep-alive 정리** | 본 PR에 포함 (CLAUDE.md + DEVLOG 문서 두 군데 업데이트) |
 
 ---
 
 ## 9. 작업 규모 예측
 
-- 백엔드(supabase.ts, main.ts, preload) + 타입 정의: 0.5일
+- **SQL RPC 함수 작성 + Supabase 적용 + 테스트**: 0.5일 (§5.1.0)
+- 백엔드(supabase.ts — RPC 호출로 전환, main.ts, preload) + 타입 정의: 0.5일
 - `useBulkOperationsStore` + idempotency 테스트: 0.5일
 - ScenesView 4개 경로 교체 + helper 추출: 1일
-- Realtime 핸들러 수정 + `removeSceneByUuid` + SCENE_FIELD_MAP 확장: 0.5일
+- Realtime 핸들러 수정 + `removeSceneByUuid`: 0.5일
 - `BulkOperationStatus` + `ConfirmDialog` + CSS: 0.5일
+- keep-alive 워크어라운드 제거 + 문서 정리: 0.25일
 - 수동 검증 + 사용자 피드백 반영: 0.5~1일
-- **총: 3~4일**
+- **총: 4~5일**
 
 ---
 
@@ -654,8 +860,22 @@ SELECT relname, relreplident FROM pg_class WHERE relname = 'scenes';
 
 - 이 변경은 **일괄 경로 교체** 위주. 단일 경로 무변경.
 - 문제 발생 시 단일 PR 단독 revert로 복구 가능.
-- DB 스키마 변경 없음 → 데이터 복구 시나리오 불필요.
+- DB 스키마 변경 없음 (테이블 구조 그대로, 함수만 추가) → 데이터 복구 시나리오 불필요.
+- RPC 함수는 `CREATE OR REPLACE` 이므로 기존 함수 덮어쓰기 걱정 없음. PR revert 시 함수는 DB에 남아있지만 미사용 상태이므로 무해 (원하면 DROP FUNCTION 수동 실행).
+- **Pro 플랜 일일 백업**: 심각한 데이터 손실 시 Supabase 대시보드에서 하루 전 스냅샷 복구 가능.
 - 만약 `BulkOperationStatus`만 문제면 해당 컴포넌트 숨김 + 기존 Sonner 토스트 경로 임시 부활 가능 (2단 방어).
+
+---
+
+## 11. 부수 작업 — keep-alive 워크어라운드 제거
+
+Pro 플랜은 7일 자동 정지가 없으므로 관련 문서·코드 정리:
+
+- **CLAUDE.md L48**: "Supabase 무료 플랜: 7일 미사용 시 자동 정지 — 연휴 시 keep-alive 필요" 줄 삭제.
+- **DEVLOG/supabase-migration-plan.md**: keep-alive 관련 문단 제거 또는 "Pro 플랜 전환으로 해소" 각주 추가.
+- **코드 영향**: 확인 결과 keep-alive 로직이 코드에 **이미 구현되어 있지 않음** (수동 대응 전제였음) → 코드 변경 불필요.
+
+이 정리는 선택 사항이며 본 PR에 같이 포함하면 프로젝트 문서 일관성이 개선됨.
 
 ---
 
