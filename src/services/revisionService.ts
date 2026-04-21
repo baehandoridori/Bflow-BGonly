@@ -9,7 +9,12 @@
  */
 
 import type { CompRevision, RevisionPriority, RevisionStatus } from '../types';
-import { buildUnifiedRevisionSceneKey, normalizeRevisionSceneKey } from '../utils/revisionSceneKey';
+import { useDataStore } from '../stores/useDataStore';
+import {
+  buildUnifiedRevisionSceneKey,
+  normalizeRevisionSceneKey,
+  type RevisionSceneKeyOptions,
+} from '../utils/revisionSceneKey';
 
 const REVISIONS_FILE = 'revisions.json';
 
@@ -327,10 +332,26 @@ export async function getOpenRevisionCounts(): Promise<Record<string, number>> {
   return counts;
 }
 
+function getSiblingSceneIdsForSheet(sheetName: string): string[] | undefined {
+  const episodes = useDataStore.getState().episodes;
+  for (const episode of episodes) {
+    const part = episode.parts.find((candidate) => candidate.sheetName === sheetName);
+    if (part) return part.scenes.map((scene) => scene.sceneId);
+  }
+  return undefined;
+}
+
 /**
  * sheetName + sceneId → sceneKey 변환 헬퍼
  * 시트이름 형식: EP01_A_BG → EP01:A
  */
-export function buildSceneKey(sheetName: string, sceneId: string): string {
-  return buildUnifiedRevisionSceneKey(sheetName, sceneId);
+export function buildSceneKey(
+  sheetName: string,
+  sceneId: string,
+  options?: RevisionSceneKeyOptions,
+): string {
+  return buildUnifiedRevisionSceneKey(sheetName, sceneId, {
+    ...options,
+    siblingSceneIds: options?.siblingSceneIds ?? getSiblingSceneIdsForSheet(sheetName),
+  });
 }
