@@ -106,7 +106,7 @@ Studio JBBJ 팀이 카드 뷰/시트 뷰에서 다중 선택 후 일괄 작업(�
 
 **완료 메타 (completed_by/completed_at):**
 
-중요 정정: `completed_by`/`completed_at`은 **scenes 테이블 컬럼이 아니다**. 별도 `metadata` 테이블에 generic KV (type='scene_completion_meta', key=scene uuid, value=JSON string) 형태로 저장된다 (DEVLOG/supabase-init.sql L114-123).
+중요 정정: `completed_by`/`completed_at`은 **scenes 테이블 컬럼이 아니다**. 별도 `metadata` 테이블에 generic KV (type='scene-completion', key=scene uuid, value=JSON string) 형태로 저장된다 (DEVLOG/supabase-init.sql L114-123).
 
 현재 `bulkToggleForSheet`는 `bulkUpdateCells` 호출 후 **별도**로 `updateSceneCompletionMeta` N건을 추가 호출한다 (ScenesView.tsx:2231-2246). N×2 HTTP 요청이 발생하고 Realtime 에코 순서도 보장되지 않는다.
 
@@ -217,7 +217,11 @@ BEGIN
         RAISE EXCEPTION 'invalid stage: %', v_stage;
       END IF;
 
-      -- scenes 테이블 UPDATE (CASE 분기)
+      -- scenes 테이블 UPDATE (CASE 분기).
+      -- 4개 stage 컬럼 모두를 재기록하지만 미대상은 자기값으로 복원하므로 논리적 무해.
+      -- 트레이드오프: scenes에 ON UPDATE 트리거 추가 시 stage 비대상 컬럼도 변경 이벤트로
+      -- 오인될 수 있음. 현재 트리거 없고, "Last-Write-Wins" 정책 아래에서 허용.
+      -- (필요 시 EXECUTE format('UPDATE scenes SET %I = $1 ...')로 dynamic SQL 전환 가능.)
       UPDATE scenes SET
         lo     = CASE WHEN v_stage = 'lo'     THEN v_value ELSE lo END,
         done   = CASE WHEN v_stage = 'done'   THEN v_value ELSE done END,
@@ -231,15 +235,16 @@ BEGIN
         RAISE EXCEPTION 'scene not found: %', v_uuid;
       END IF;
 
-      -- metadata 테이블 UPSERT (완료 메타 있을 때만)
-      IF v_completed_by IS NOT NULL OR v_completed_at IS NOT NULL THEN
+      -- metadata 테이블 UPSERT (완료 메타 있을 때만 — 기존 parseSceneCompletionMeta는
+      -- completedBy/At 둘 다 string일 때만 유효하게 파싱하므로, AND 조건으로 제한)
+      IF v_completed_by IS NOT NULL AND v_completed_at IS NOT NULL THEN
         v_meta_value := jsonb_build_object(
           'completedBy', v_completed_by,
-          'completedAt', v_completed_at,
-          'stage', v_stage
+          'completedAt', v_completed_at
+          -- 'stage' 필드는 parseSceneCompletionMeta가 무시하므로 호환성 위해 생략
         )::text;
         INSERT INTO metadata (type, key, value, updated_at)
-          VALUES ('scene_completion_meta', v_uuid::text, v_meta_value, now())
+          VALUES ('scene-completion', v_uuid::text, v_meta_value, now())
           ON CONFLICT (type, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
       END IF;
 
@@ -278,7 +283,7 @@ BEGIN
         RAISE EXCEPTION 'scene not found: %', v_uuid;
       END IF;
       -- 연관 metadata 정리 (best-effort, 실패해도 메인 삭제는 성공)
-      DELETE FROM metadata WHERE type = 'scene_completion_meta' AND key = v_uuid::text;
+      DELETE FROM metadata WHERE type = 'scene-completion' AND key = v_uuid::text;
 
       scene_uuid := v_uuid;
       success := TRUE;
@@ -345,12 +350,41 @@ $$;
 ```
 
 **배포 절차:**
-1. 위 3개 CREATE OR REPLACE FUNCTION 블록을 `DEVLOG/supabase-init.sql` 하단에 추가 (RLS 정책 블록 뒤).
-2. 사용자(한솔)가 Supabase 대시보드 SQL Editor에서 수동 실행 (기존 관리 방식 따름).
-3. 동일 PR에서 `electron/supabase.ts`가 `supabase.rpc(...)`를 호출하도록 변경.
-4. 배포 순서: **SQL 먼저 적용 → 클라이언트 배포** (반대 순서면 RPC 호출 실패).
+1. 위 3개 CREATE OR REPLACE FUNCTION 블록 + **GRANT EXECUTE** 구문을 `DEVLOG/supabase-init.sql` 하단에 추가 (RLS 정책 블록 뒤).
+2. GRANT 누락 시 `permission denied for function ...` 런타임 에러 발생. 반드시 포함:
+
+```sql
+GRANT EXECUTE ON FUNCTION bulk_update_scene_stages(jsonb, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION bulk_delete_scenes(uuid[], text)     TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION bulk_update_scene_fields(jsonb, text) TO anon, authenticated;
+```
+
+3. 사용자(한솔)가 Supabase 대시보드 SQL Editor에서 수동 실행 (기존 관리 방식 따름).
+4. 동일 PR에서 `electron/supabase.ts`가 `supabase.rpc(...)`를 호출하도록 변경.
+5. 배포 순서: **SQL 먼저 적용 → 클라이언트 배포** (반대 순서면 RPC 호출 실패).
 
 **Realtime 이벤트:** RPC 내부에서 실행된 UPDATE/DELETE 문은 통상적인 Postgres Changes 이벤트를 발행함. 클라이언트 Realtime 구독 코드는 변경 없음.
+
+**커스텀 Broadcast 보존 (중요):**
+현재 `electron/supabase.ts:475, 523`는 `updateSceneStage`/`updateSceneField` 성공 후 각각 `broadcastSceneUpdate(sceneUuid, stage, value, updatedBy)` / `broadcastSceneFieldUpdate(...)`를 호출한다. 이는 `electron/broadcast.ts`의 **custom Broadcast 채널 이벤트**이며 `App.tsx:793-844`에서 "다른 사용자가 LO를 완료했습니다" 같은 **피어 알림**을 띄우는 경로다.
+
+RPC 도입으로 해당 호출이 사라지면 일괄 작업 시 피어 알림이 누락되는 **UX 회귀**가 발생한다. 보존책:
+
+→ **main process의 `supabase:bulk-update-scene-stages` / `supabase:bulk-delete-scenes` / `supabase:bulk-update-scene-fields` IPC 핸들러에서 RPC 결과를 받은 뒤, 성공한 항목 각각에 대해 해당하는 broadcast 함수를 호출**한다. 예:
+
+```typescript
+// electron/main.ts IPC 핸들러
+ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e, updates, updatedBy) => {
+  const results = await sbBulkUpdateSceneStages(updates, updatedBy);
+  // 피어 broadcast (성공한 항목만)
+  for (const u of updates) {
+    const r = results.find((x) => x.sceneUuid === u.sceneUuid);
+    if (r?.success) broadcastSceneUpdate(u.sceneUuid, u.stage, u.value, updatedBy);
+  }
+  return results;
+}));
+```
+bulk-update-scene-fields도 동일 패턴(필드별 `broadcastSceneFieldUpdate`). bulk-delete-scenes는 기존 동작상 broadcast 호출이 없으므로(코드 확인: `deleteScene`에 broadcast 호출 없음) 추가 작업 불필요.
 
 **보안 검토:** `SECURITY INVOKER`이므로 현재 "allow_all" RLS 아래서는 anon key로 호출 가능. 향후 Supabase Auth 전환 시 RLS를 authenticated 전용으로 강화하면 RPC도 자동으로 보호됨.
 
@@ -542,7 +576,12 @@ async function runBulkOp(
   kind: OpKind,
   sceneUuids: string[],
   executor: (uuids: string[]) => Promise<BulkUpdateResult[]>,
-  opts: { targetStage?: Stage } = {},
+  opts: {
+    targetStage?: Stage;
+    // stage-toggle 중 "done" 방향으로 가는 항목의 완료 메타를 호출자가 미리 계산해 전달.
+    // RPC 응답에 포함되지 않으므로 로컬 store 반영용.
+    completedMetaByUuid?: Map<string, { completedBy: string; completedAt: string }>;
+  } = {},
 ) {
   const store = useBulkOperationsStore.getState();
   store.startOp({
@@ -560,11 +599,21 @@ async function runBulkOp(
     for (const r of results) {
       if (r.success) {
         store.markConfirmed(r.sceneUuid);
-        // 중요: delete kind는 IPC 성공 시점에 데이터 스토어에서도 제거해야 함.
-        // Realtime DELETE 에코가 오프라인이면 영영 안 와서 카드가 pending에 갇히기 때문.
-        // removeSceneByUuid는 존재하지 않는 uuid에 대해 no-op이므로 Realtime과 경합해도 안전.
+        // delete kind: 데이터 스토어에서도 제거 (Realtime 오프라인 시 카드 stuck 방지)
         if (kind === 'delete') {
           useDataStore.getState().removeSceneByUuid(r.sceneUuid);
+        }
+        // stage-toggle kind: 완료 메타를 로컬 스토어에 즉시 반영.
+        // (RPC 응답에는 완료 메타가 담기지 않고, metadata 테이블은 Realtime 구독 대상이 아니므로
+        //  이 단계에서 로컬에 직접 써주지 않으면 "내가 방금 완료 표시한 것"이 다음 로드 전까지 안 보임.)
+        if (kind === 'stage-toggle' && opts.completedMetaByUuid) {
+          const meta = opts.completedMetaByUuid.get(r.sceneUuid);
+          if (meta) {
+            useDataStore.getState().updateSceneByUuid(r.sceneUuid, {
+              completedBy: meta.completedBy,
+              completedAt: meta.completedAt,
+            });
+          }
         }
       } else {
         store.markFailed(r.sceneUuid, r.error ?? 'Unknown error');
@@ -589,16 +638,26 @@ await runBulkOp('delete', uuids, (list) =>
 
 **호출 예 (일괄 stage 토글)**:
 ```typescript
-const updates: BulkStageUpdate[] = selectedScenes.map((s) => ({
-  sceneUuid: s.uuid,
-  stage,
-  value: !s[stage],
-  completedBy: stage === 'done' && !s.done ? currentUser?.name : undefined,
-  completedAt: stage === 'done' && !s.done ? new Date().toISOString() : undefined,
-}));
+const updates: BulkStageUpdate[] = selectedScenes.map((s) => {
+  const isDoneTurningOn = stage === 'done' && !s.done;
+  return {
+    sceneUuid: s.uuid,
+    stage,
+    value: !s[stage],
+    completedBy: isDoneTurningOn ? currentUser?.name : undefined,
+    completedAt: isDoneTurningOn ? new Date().toISOString() : undefined,
+  };
+});
+// 로컬 store 반영용 맵 (RPC 응답에 완료 메타가 없으므로)
+const completedMetaByUuid = new Map<string, { completedBy: string; completedAt: string }>();
+for (const u of updates) {
+  if (u.completedBy && u.completedAt) {
+    completedMetaByUuid.set(u.sceneUuid, { completedBy: u.completedBy, completedAt: u.completedAt });
+  }
+}
 await runBulkOp('stage-toggle', updates.map((u) => u.sceneUuid),
   () => window.electronAPI.supabaseBulkUpdateSceneStages(updates, currentUser?.id),
-  { targetStage: stage },
+  { targetStage: stage, completedMetaByUuid },
 );
 ```
 
@@ -664,7 +723,8 @@ if (table === 'scenes' && payload?.eventType === 'DELETE') {
     useBulkOperationsStore.getState().markConfirmed(deletedId);  // idempotent
     return;  // debounced reload 생략
   }
-  // deletedId 없으면 → 안전하게 기존 debounced reload로 폴백
+  // deletedId 없으면 (REPLICA IDENTITY nothing 등 비정상) → 아래 debounced reload 블록으로 폴백
+  // (return 하지 않고 fall-through)
 }
 ```
 
@@ -758,7 +818,8 @@ if (activeOp && activeOp.pendingSceneUuids.has(delta.uuid)) {
 
 | 파일 | 변경 종류 | 규모 |
 |------|----------|------|
-| `electron/supabase.ts` | `bulkUpdateSceneStages` 시그니처 변경, `bulkDeleteScenes`/`bulkUpdateSceneFields` 신규, `updateSceneStageWithMeta` 내부 헬퍼 | 중 |
+| `electron/supabase.ts` | `bulkUpdateSceneStages` RPC 호출로 교체, `bulkDeleteScenes`/`bulkUpdateSceneFields` 신규 (모두 RPC 래퍼) | 중 |
+| `electron/main.ts` | IPC 핸들러 내부에서 RPC 성공 항목별 `broadcastSceneUpdate`/`broadcastSceneFieldUpdate` 호출 보존 | 소 |
 | `electron/main.ts` | IPC 핸들러 2개 신규 + 1개 반환 타입 변경 | 소 |
 | `electron/preload.ts` | IPC 노출 추가 (3개) | 소 |
 | `src/services/supabaseService.ts` | 신규 함수 바인딩 + 타입 export (`BulkUpdateResult`, `BulkStageUpdate`) | 소 |
@@ -801,7 +862,9 @@ if (activeOp && activeOp.pendingSceneUuids.has(delta.uuid)) {
 ### 7.2 테스트 훅 사양
 
 **환경 변수**: `BFLOW_FORCE_FAIL_RATE=0.0~1.0`
-- `electron/supabase.ts`의 `updateSceneStageWithMeta`/`deleteScene`/등에서 `Math.random() < rate`이면 강제 throw.
+- 두 지점 중 택1:
+  - **RPC 내부**: SQL 함수에 `IF random() < <rate> THEN RAISE EXCEPTION 'forced failure' END IF;` 개발 빌드 한정 주입
+  - **electron/supabase.ts 래퍼**: RPC 호출 전에 입력의 무작위 항목에 대해 미리 "실패 유사" 응답을 inject — 더 간단, 권장
 - 프로덕션 빌드에서는 해당 코드 경로 비활성 (dev 한정).
 
 ### 7.3 회귀 방지 체크
@@ -811,6 +874,8 @@ if (activeOp && activeOp.pendingSceneUuids.has(delta.uuid)) {
 - `updateSceneCompletionMeta` 개별 호출이 **완전히 제거**되었는지 확인 (grep — RPC가 대체)
 - `bulkUpdateCells` 호출 지점이 0이 되는지 (grep) — 남아있으면 구 경로가 조용히 같이 실행됨
 - `supabase.rpc('bulk_update_scene_stages', ...)` 3종 호출이 실제 성공하는지 (SQL 배포 누락 시 runtime에 "function does not exist" 에러 — 배포 순서 §5.1.0 준수)
+- 피어 알림 회귀 검사: 두 기기에서 기기 A가 일괄 LO → 기기 B 화면에 "A가 씬 X의 LO를 완료했습니다" 알림이 정상 도착하는지 (broadcastSceneUpdate 보존 검증)
+- 완료 메타 즉시 반영 검사: 기기 A에서 일괄 "완료" → A의 화면에 "한솔 · 방금" 메타가 즉시 표시되는지 (로컬 store 반영 검증)
 
 ### 7.4 사전 DB 검증
 
