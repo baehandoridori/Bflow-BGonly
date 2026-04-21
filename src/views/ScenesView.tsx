@@ -8,7 +8,6 @@ import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene } from '@/
 import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import {
-  buildAllModeBulkTogglePlans,
   buildUnifiedSceneId,
   getMergedCommentBadgeCounts,
   matchesMergedSceneIdentity,
