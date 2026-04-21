@@ -246,7 +246,10 @@ export async function bulkUpdateSceneFields(
   updates: Array<{ sceneUuid: string; fields: Partial<Scene> }>,
   updatedBy?: string,
 ): Promise<BulkUpdateResult[]> {
-  // 구조 동일. fields는 서버 친화적 키로 매핑해 sbUpdateScene 경유.
+  // 각 항목마다 fields를 camelCase → DB 컬럼명으로 매핑 후 기존 sbUpdateScene 경유.
+  // 예: { assignee: 'X', memo: 'Y', layoutId: 'L-1' }
+  //   → supabase.from('scenes').update({ assignee: 'X', memo: 'Y', layout: 'L-1', updated_at, updated_by }).eq('id', uuid)
+  // bulkDeleteScenes와 동일하게 Promise.allSettled로 N건 병렬 + 항목별 결과 반환.
 }
 ```
 
@@ -302,6 +305,7 @@ interface BulkOperationsStore {
   startOp(init: Omit<PendingOp, 'completedCount' | 'failedItems' | 'startedAt' | 'status'>): void;
   markConfirmed(sceneUuid: string): void;  // idempotent
   markFailed(sceneUuid: string, error: string): void;  // idempotent per-uuid
+  setStatus(status: OpStatus): void;  // 네트워크 에러·취소 등 강제 전이
   retryFailed(retryFn: (uuids: string[]) => Promise<BulkUpdateResult[]>): Promise<void>;
   cancel(): void;
   clear(): void;
@@ -318,6 +322,10 @@ interface BulkOperationsStore {
 
 **단일 source of truth**: `pendingSceneUuids` Set만 체크하면 IPC/Realtime 어느 쪽이 먼저 와도 정확. "이미 제거된 uuid"에 대한 중복 호출이 자동으로 무시됨.
 
+**Invariant — stage-toggle op 범위:**
+- 하나의 `activeOp` 는 **단일 `targetStage`에 대해서만** 작동한다. 즉 같은 배치에서 LO와 완료를 동시에 토글하는 건 허용 안 함 (현재 UI에도 없음).
+- 이 불변을 보장해야 `pendingSceneUuids` Set이 "씬 uuid → 셀 하나"로 1:1 대응 가능.
+
 ### 5.4 ScenesView — 일괄 경로 교체 (공통 패턴)
 
 **영향 위치**:
@@ -329,6 +337,8 @@ interface BulkOperationsStore {
 **패턴 — 공통 helper로 추출**:
 ```typescript
 // src/views/ScenesView.utils.ts (신규 or 기존 유틸)
+const MERGED_KEY_PREFIX = { bg: 'bg:', act: 'act:' } as const;
+
 async function runBulkOp(
   kind: OpKind,
   sceneUuids: string[],
@@ -349,8 +359,17 @@ async function runBulkOp(
     // happy path: IPC 응답으로 즉시 markConfirmed/markFailed
     // Realtime 에코가 동시 도착해도 idempotent이므로 OK
     for (const r of results) {
-      if (r.success) store.markConfirmed(r.sceneUuid);
-      else store.markFailed(r.sceneUuid, r.error ?? 'Unknown error');
+      if (r.success) {
+        store.markConfirmed(r.sceneUuid);
+        // 중요: delete kind는 IPC 성공 시점에 데이터 스토어에서도 제거해야 함.
+        // Realtime DELETE 에코가 오프라인이면 영영 안 와서 카드가 pending에 갇히기 때문.
+        // removeSceneByUuid는 존재하지 않는 uuid에 대해 no-op이므로 Realtime과 경합해도 안전.
+        if (kind === 'delete') {
+          useDataStore.getState().removeSceneByUuid(r.sceneUuid);
+        }
+      } else {
+        store.markFailed(r.sceneUuid, r.error ?? 'Unknown error');
+      }
     }
   } catch (e) {
     // 전체 실패 (네트워크 끊김 등)
@@ -400,8 +419,8 @@ function resolveSelectedUuids(
 ): string[] {
   const uuids: string[] = [];
   for (const id of selectedIds) {
-    if (id.startsWith('bg:')) uuids.push(id.slice(3));
-    else if (id.startsWith('act:')) uuids.push(id.slice(4));
+    if (id.startsWith(MERGED_KEY_PREFIX.bg)) uuids.push(id.slice(MERGED_KEY_PREFIX.bg.length));
+    else if (id.startsWith(MERGED_KEY_PREFIX.act)) uuids.push(id.slice(MERGED_KEY_PREFIX.act.length));
     else {
       // merged key: bg/act 둘 다 존재할 수 있음
       const merged = allMergedScenes.find((m) => m.key === id);
