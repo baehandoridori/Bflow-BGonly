@@ -15,6 +15,8 @@ test('buildUnifiedSceneId canonicalizes the merged scene to the part-based scene
   assert.equal(buildUnifiedSceneId('A', 'ac001'), 'a001');
   assert.equal(buildUnifiedSceneId('A', 'a1'), 'a001');
   assert.equal(buildUnifiedSceneId('C', 'c023'), 'c023');
+  assert.equal(buildUnifiedSceneId('A', 'v2a001'), 'a001');
+  assert.equal(buildUnifiedSceneId('A', 'v2a002'), 'a002');
 });
 
 test('buildUnifiedSceneIdFromMerged prefers the shared canonical scene id for mixed raw ids', () => {

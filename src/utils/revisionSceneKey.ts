@@ -1,7 +1,7 @@
-const FIRST_DIGIT_GROUP_RE = /\d+/;
+const TRAILING_DIGIT_GROUP_RE = /\d+$/;
 
 function normalizeSceneIdForRevision(sceneId: string): string {
-  const match = sceneId.match(FIRST_DIGIT_GROUP_RE);
+  const match = sceneId.match(TRAILING_DIGIT_GROUP_RE);
   if (!match) return sceneId;
   return String(Number(match[0]));
 }

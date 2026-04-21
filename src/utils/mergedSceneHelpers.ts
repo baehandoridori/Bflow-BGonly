@@ -27,11 +27,11 @@ type BulkTogglePlan = {
   updates: { sceneId: string; sceneIndex: number }[];
 };
 
-const FIRST_DIGIT_GROUP_RE = /\d+/;
+const TRAILING_DIGIT_GROUP_RE = /\d+$/;
 
 function extractSceneNumber(sceneId: string | null | undefined): string {
   if (!sceneId) return '';
-  const match = sceneId.match(FIRST_DIGIT_GROUP_RE);
+  const match = sceneId.match(TRAILING_DIGIT_GROUP_RE);
   if (!match) return '';
   return String(Number(match[0]));
 }

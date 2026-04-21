@@ -28,6 +28,29 @@ export function useUnifiedScenes({
   sortKey,
   sortDir,
 }: UseUnifiedScenesArgs) {
+  const allMergedScenes = useMemo(() => {
+    if (selectedDepartment !== 'all') {
+      return [] as MergedScene[];
+    }
+
+    return buildMergedScenes({
+      bgScenes: bgPart?.scenes ?? [],
+      actScenes: actPart?.scenes ?? [],
+      bgPartScenes: bgPart?.scenes ?? [],
+      actPartScenes: actPart?.scenes ?? [],
+      mergedScenePartId,
+      sortKey,
+      sortDir,
+    }) as MergedScene[];
+  }, [
+    actPart?.scenes,
+    bgPart?.scenes,
+    mergedScenePartId,
+    selectedDepartment,
+    sortDir,
+    sortKey,
+  ]);
+
   const mergedScenes = useMemo(() => {
     if (selectedDepartment !== 'all') {
       return [] as MergedScene[];
@@ -60,6 +83,7 @@ export function useUnifiedScenes({
   }, [mergedScenes]);
 
   return {
+    allMergedScenes,
     mergedScenes,
     detailMerged,
     setDetailMerged,

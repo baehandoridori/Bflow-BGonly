@@ -36,10 +36,11 @@ export function usePartMemos({
 
   useEffect(() => {
     let cancelled = false;
+    const sheetNamesToLoad = visibleSheetNamesKey ? visibleSheetNamesKey.split('|') : [];
 
     const loadPartMemos = async () => {
       const memos: Record<string, string> = {};
-      for (const sheetName of visibleSheetNames) {
+      for (const sheetName of sheetNamesToLoad) {
         try {
           const data = await readMetadata('part-memo', sheetName);
           if (data?.value) {
@@ -59,7 +60,7 @@ export function usePartMemos({
     return () => {
       cancelled = true;
     };
-  }, [visibleSheetNames, visibleSheetNamesKey]);
+  }, [visibleSheetNamesKey]);
 
   const getPartMemoText = useCallback((sheetNames: string[]) => {
     return getCombinedPartMemo(partMemos, sheetNames);

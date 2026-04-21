@@ -1588,7 +1588,7 @@ export function ScenesView() {
   const allModeScenes = useMemo(() => [...bgScenes, ...actScenes], [bgScenes, actScenes]);
 
   // 'all' 모드: BG+ACT 씬 머지
-  const { mergedScenes, detailMerged, setDetailMerged } = useUnifiedScenes({
+  const { allMergedScenes, mergedScenes, detailMerged, setDetailMerged } = useUnifiedScenes({
     selectedDepartment,
     bgPart,
     actPart,
@@ -1809,7 +1809,7 @@ export function ScenesView() {
     if (selectedDepartment === 'all') {
       const plans = buildAllModeBulkTogglePlans(
         sceneIds,
-        mergedScenes,
+        allMergedScenes,
         bgPart?.sheetName ?? null,
         actPart?.sheetName ?? null,
         onlyDept,
@@ -3349,7 +3349,7 @@ export function ScenesView() {
                     selectedSceneIds.forEach((sid) => {
                       if (!sid.startsWith(`${prefix}:`)) return;
                       const mergedKey = sid.slice(prefix.length + 1);
-                      const merged = mergedScenes.find((m) => m.sceneId === mergedKey);
+                      const merged = allMergedScenes.find((m) => m.sceneId === mergedKey);
                       if (!merged) return;
                       const scene = prefix === 'bg' ? merged.bgScene : merged.actScene;
                       const sceneIndex = prefix === 'bg' ? merged.bgSceneIndex : merged.actSceneIndex;
@@ -3458,7 +3458,7 @@ export function ScenesView() {
                     if (selectedDepartment === 'all') {
                       if (id.startsWith('bg:') && bgPart) {
                         const mergedKey = id.slice(3);
-                        const merged = mergedScenes.find((scene) => scene.sceneId === mergedKey);
+                        const merged = allMergedScenes.find((scene) => scene.sceneId === mergedKey);
                         return {
                           sheetName: bgPart.sheetName,
                           rawId: merged?.bgScene?.sceneId ?? mergedKey,
@@ -3467,7 +3467,7 @@ export function ScenesView() {
                       }
                       if (id.startsWith('act:') && actPart) {
                         const mergedKey = id.slice(4);
-                        const merged = mergedScenes.find((scene) => scene.sceneId === mergedKey);
+                        const merged = allMergedScenes.find((scene) => scene.sceneId === mergedKey);
                         return {
                           sheetName: actPart.sheetName,
                           rawId: merged?.actScene?.sceneId ?? mergedKey,
