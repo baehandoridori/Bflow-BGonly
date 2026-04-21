@@ -6,6 +6,7 @@ import {
   buildPartContextMenuTarget,
   getCombinedPartMemo,
   listVisiblePartMemoSheetNames,
+  rollbackFailedPartMemoSheets,
 } from '../src/utils/partMemoHelpers.ts';
 
 test('getCombinedPartMemo returns a single shared memo once for grouped parts', () => {
@@ -58,6 +59,43 @@ test('applyPartMemoToSheets clears grouped memos when the input is blank', () =>
   );
 
   assert.deepEqual(next, {});
+});
+
+test('rollbackFailedPartMemoSheets reverts only failed grouped memo writes', () => {
+  const next = rollbackFailedPartMemoSheets(
+    {
+      EP01_A_BG: '새 메모',
+      EP01_A_ACT: '새 메모',
+    },
+    {
+      EP01_A_BG: '이전 BG',
+      EP01_A_ACT: '이전 ACT',
+    },
+    ['EP01_A_ACT'],
+    '새 메모',
+  );
+
+  assert.deepEqual(next, {
+    EP01_A_BG: '새 메모',
+    EP01_A_ACT: '이전 ACT',
+  });
+});
+
+test('rollbackFailedPartMemoSheets restores failed blank memo deletes', () => {
+  const next = rollbackFailedPartMemoSheets(
+    {},
+    {
+      EP01_A_BG: '이전 BG',
+      EP01_A_ACT: '이전 ACT',
+    },
+    ['EP01_A_BG', 'EP01_A_ACT'],
+    '   ',
+  );
+
+  assert.deepEqual(next, {
+    EP01_A_BG: '이전 BG',
+    EP01_A_ACT: '이전 ACT',
+  });
 });
 
 test('listVisiblePartMemoSheetNames collects every visible part sheet once', () => {
