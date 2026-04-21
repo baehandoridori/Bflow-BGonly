@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Copy, Trash2, Check, Palette, Pencil } from 'lucide-react';
 import { CalendarEvent, CalendarEventType, EVENT_COLORS } from '@/types/calendar';
+import { useAppStore } from '@/stores/useAppStore';
+import { floatingGlassStyle } from '@/utils/glassStyles';
 
 interface EventQuickEditProps {
   event: CalendarEvent;
@@ -32,6 +34,7 @@ export function EventQuickEdit({
   onDelete,
   onDuplicate,
 }: EventQuickEditProps) {
+  const colorMode = useAppStore((s) => s.colorMode);
   const ref = useRef<HTMLDivElement>(null);
   const [adjusted, setAdjusted] = useState(position);
   const [tab, setTab] = useState<TabKey>('color');
@@ -44,6 +47,11 @@ export function EventQuickEdit({
   const [memo, setMemo] = useState(event.memo);
 
   const isVacation = event.type === 'vacation';
+  const fieldStyle = {
+    background: 'rgb(var(--color-bg-primary) / 0.82)',
+    border: '1px solid rgb(var(--color-bg-border) / 0.56)',
+    color: 'rgb(var(--color-text-primary))',
+  } as const;
 
   // 화면 밖으로 나가지 않도록 위치 조정
   useEffect(() => {
@@ -99,24 +107,23 @@ export function EventQuickEdit({
         transition={{ duration: 0.15 }}
         className="fixed z-[1000]"
         style={{
+          ...floatingGlassStyle,
           left: adjusted.x,
           top: adjusted.y,
           width: 300,
-          background: 'rgba(26,29,39,0.97)',
-          backdropFilter: 'blur(16px)',
-          border: '1px solid #2D3041',
+          background: 'rgb(var(--color-bg-card) / 0.95)',
           borderRadius: 12,
-          boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+          boxShadow: '0 16px 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.28))',
         }}
       >
         {/* 헤더: 탭 */}
-        <div className="flex border-b" style={{ borderColor: '#2D3041' }}>
+        <div className="flex border-b" style={{ borderColor: 'rgb(var(--color-bg-border) / 0.45)' }}>
           <button
             onClick={() => setTab('color')}
             className="flex-1 py-2.5 text-xs font-medium transition-colors cursor-pointer"
             style={{
-              color: tab === 'color' ? '#6C5CE7' : '#8B8DA3',
-              borderBottom: tab === 'color' ? '2px solid #6C5CE7' : '2px solid transparent',
+              color: tab === 'color' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
+              borderBottom: tab === 'color' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
             }}
           >
             <Palette size={12} className="inline mr-1" /> 색상
@@ -125,8 +132,8 @@ export function EventQuickEdit({
             onClick={() => !isVacation && setTab('edit')}
             className={`flex-1 py-2.5 text-xs font-medium transition-colors ${isVacation ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
             style={{
-              color: tab === 'edit' ? '#6C5CE7' : '#8B8DA3',
-              borderBottom: tab === 'edit' ? '2px solid #6C5CE7' : '2px solid transparent',
+              color: tab === 'edit' ? 'rgb(var(--color-accent))' : 'rgb(var(--color-text-secondary))',
+              borderBottom: tab === 'edit' ? '2px solid rgb(var(--color-accent))' : '2px solid transparent',
             }}
           >
             <Pencil size={12} className="inline mr-1" /> 일정 편집
@@ -144,7 +151,7 @@ export function EventQuickEdit({
                   className="w-3 h-3 rounded-full shrink-0"
                   style={{ background: event.color }}
                 />
-                <span className="text-xs font-medium truncate" style={{ color: '#E8E8EE' }}>
+                <span className="text-xs font-medium truncate text-text-primary">
                   {event.title}
                 </span>
               </div>
@@ -172,8 +179,7 @@ export function EventQuickEdit({
               <div className="flex gap-2">
                 <button
                   onClick={handleDuplicate}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
-                  style={{ background: '#2D3041', color: '#E8E8EE' }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer bg-bg-primary/80 text-text-primary hover:bg-bg-border/40"
                 >
                   <Copy size={12} />
                   복사
@@ -192,7 +198,7 @@ export function EventQuickEdit({
             /* ── 일정 편집 탭 ── */
             <div>
               {isVacation ? (
-                <p className="text-xs text-center py-6" style={{ color: '#8B8DA3' }}>
+                <p className="text-xs text-center py-6 text-text-secondary">
                   휴가 관리는 휴가 탭에서 관리합니다
                 </p>
               ) : (
@@ -203,12 +209,8 @@ export function EventQuickEdit({
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="일정 제목"
-                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none"
-                    style={{
-                      background: '#2D3041',
-                      border: '1px solid #3A3D50',
-                      color: '#E8E8EE',
-                    }}
+                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none placeholder:text-text-secondary/45"
+                    style={fieldStyle}
                   />
 
                   {/* 날짜 */}
@@ -219,10 +221,8 @@ export function EventQuickEdit({
                       onChange={(e) => setStartDate(e.target.value)}
                       className="flex-1 px-2.5 py-1.5 rounded-lg text-xs outline-none"
                       style={{
-                        background: '#2D3041',
-                        border: '1px solid #3A3D50',
-                        color: '#E8E8EE',
-                        colorScheme: 'dark',
+                        ...fieldStyle,
+                        colorScheme: colorMode,
                       }}
                     />
                     <input
@@ -231,10 +231,8 @@ export function EventQuickEdit({
                       onChange={(e) => setEndDate(e.target.value)}
                       className="flex-1 px-2.5 py-1.5 rounded-lg text-xs outline-none"
                       style={{
-                        background: '#2D3041',
-                        border: '1px solid #3A3D50',
-                        color: '#E8E8EE',
-                        colorScheme: 'dark',
+                        ...fieldStyle,
+                        colorScheme: colorMode,
                       }}
                     />
                   </div>
@@ -247,8 +245,8 @@ export function EventQuickEdit({
                         onClick={() => setType(opt.value)}
                         className="flex-1 py-1.5 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
                         style={{
-                          background: type === opt.value ? '#6C5CE7' : '#2D3041',
-                          color: type === opt.value ? '#FFFFFF' : '#8B8DA3',
+                          background: type === opt.value ? 'rgb(var(--color-accent))' : 'rgb(var(--color-bg-primary) / 0.82)',
+                          color: type === opt.value ? 'rgb(var(--color-on-accent))' : 'rgb(var(--color-text-secondary))',
                         }}
                       >
                         {opt.label}
@@ -262,19 +260,15 @@ export function EventQuickEdit({
                     onChange={(e) => setMemo(e.target.value)}
                     placeholder="메모"
                     rows={3}
-                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-none"
-                    style={{
-                      background: '#2D3041',
-                      border: '1px solid #3A3D50',
-                      color: '#E8E8EE',
-                    }}
+                    className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-none placeholder:text-text-secondary/45"
+                    style={fieldStyle}
                   />
 
                   {/* 저장 */}
                   <button
                     onClick={handleSave}
                     className="w-full py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer"
-                    style={{ background: '#6C5CE7', color: '#FFFFFF' }}
+                    style={{ background: 'rgb(var(--color-accent))', color: 'rgb(var(--color-on-accent))' }}
                   >
                     저장
                   </button>

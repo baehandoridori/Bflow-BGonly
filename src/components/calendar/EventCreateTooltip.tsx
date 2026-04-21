@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { EVENT_COLORS } from '@/types/calendar';
+import { floatingGlassStyle } from '@/utils/glassStyles';
 
 // ─── 타입 ─────────────────────────────────────────
 
@@ -105,7 +106,7 @@ function getArrowStyle(placement: Placement, anchorRect: DOMRect, tooltipX: numb
     height: 0,
     borderStyle: 'solid',
   };
-  const color = 'rgba(26,29,39,0.97)';
+  const color = 'rgb(var(--color-bg-card))';
 
   switch (placement) {
     case 'bottom': {
@@ -283,15 +284,13 @@ export function EventCreateTooltip({
           visibility: pos ? 'visible' : 'hidden',
         }}
       >
-        {/* 글래스모피즘 카드 — 테마 토큰 기반 (라이트/다크 자동 대응) */}
+        {/* 글래스모피즘 카드 */}
         <div
           className="relative rounded-xl overflow-hidden"
           style={{
-            background: 'rgb(var(--color-bg-card) / 0.97)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
-            border: '1px solid rgb(var(--color-bg-border))',
-            boxShadow: '0 12px 32px rgb(var(--color-shadow) / var(--shadow-alpha))',
+            ...floatingGlassStyle,
+            background: 'rgb(var(--color-bg-card) / 0.96)',
+            boxShadow: '0 16px 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.25))',
             borderRadius: 12,
           }}
         >
@@ -299,7 +298,7 @@ export function EventCreateTooltip({
           <div
             className="absolute inset-x-0 top-0 h-[40%] rounded-t-xl pointer-events-none"
             style={{
-              background: 'linear-gradient(180deg, rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) 0%, transparent 100%)',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 100%)',
             }}
           />
 
@@ -313,7 +312,7 @@ export function EventCreateTooltip({
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={handleKeyDown}
               className="w-full bg-transparent text-sm text-text-primary placeholder:text-text-secondary outline-none pb-1.5"
-              style={{ borderBottom: '1px solid rgb(var(--color-bg-border))' }}
+              style={{ borderBottom: '1px solid rgb(var(--color-bg-border) / 0.45)' }}
               maxLength={100}
             />
 
@@ -360,7 +359,7 @@ export function EventCreateTooltip({
                 className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer"
                 style={{
                   background: title.trim() ? 'rgb(var(--color-accent))' : 'rgb(var(--color-accent) / 0.3)',
-                  color: title.trim() ? 'rgb(var(--color-on-accent))' : 'rgb(var(--color-on-accent) / 0.4)',
+                  color: title.trim() ? 'rgb(var(--color-on-accent))' : 'rgb(var(--color-on-accent) / 0.45)',
                   cursor: title.trim() ? 'pointer' : 'not-allowed',
                 }}
               >
@@ -370,7 +369,7 @@ export function EventCreateTooltip({
                 type="button"
                 onClick={handleOpenDetail}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
-                style={{ background: 'rgb(var(--color-bg-border) / 0.6)' }}
+                style={{ background: 'rgb(var(--color-bg-primary) / 0.72)' }}
               >
                 상세 설정 &rarr;
               </button>

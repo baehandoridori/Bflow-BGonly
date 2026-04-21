@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { elevatedGlassStyle, glassShimmer, glassTopHighlight } from '@/utils/glassStyles';
 
 interface WelcomeToastProps {
   userName?: string;
@@ -38,27 +39,21 @@ export function WelcomeToast({ userName, message, onDismiss }: WelcomeToastProps
           <div
             className="absolute -inset-4 rounded-3xl opacity-40 blur-2xl pointer-events-none"
             style={{
-              background: 'radial-gradient(ellipse at center, rgb(var(--color-accent) / 0.5) 0%, transparent 70%)',
+              background: 'radial-gradient(ellipse at center, rgb(var(--color-accent) / 0.26) 0%, transparent 72%)',
             }}
           />
 
           {/* 글래스 카드 */}
           <div
             className="relative px-7 py-4 rounded-2xl overflow-hidden pointer-events-auto cursor-pointer"
-            style={{
-              background: 'rgba(26, 29, 39, 0.7)',
-              backdropFilter: 'blur(20px) saturate(1.6)',
-              WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              boxShadow: '0 24px 48px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.04) inset, 0 0 60px rgb(var(--color-accent) / 0.08)',
-            }}
+            style={elevatedGlassStyle}
             onClick={() => { setVisible(false); setTimeout(onDismiss, 600); }}
           >
             {/* 상단 빛 반사 효과 */}
             <div
               className="absolute top-0 left-0 right-0 h-px opacity-30"
               style={{
-                background: 'linear-gradient(90deg, transparent 10%, rgba(255,255,255,0.5) 50%, transparent 90%)',
+                background: glassTopHighlight,
               }}
             />
 
@@ -69,7 +64,7 @@ export function WelcomeToast({ userName, message, onDismiss }: WelcomeToastProps
               animate={{ x: '200%' }}
               transition={{ duration: 2, ease: 'easeInOut', delay: 0.4 }}
               style={{
-                background: 'linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.06) 45%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.06) 55%, transparent 60%)',
+                background: glassShimmer,
               }}
             />
 
@@ -92,7 +87,7 @@ export function WelcomeToast({ userName, message, onDismiss }: WelcomeToastProps
               <p className="text-sm tracking-wide whitespace-nowrap">
                 {message ? (
                   <motion.span
-                    className="text-text-primary/90"
+                    className="text-text-primary"
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.15, duration: 0.4, ease: 'easeOut' }}
@@ -105,7 +100,7 @@ export function WelcomeToast({ userName, message, onDismiss }: WelcomeToastProps
                       className="font-semibold"
                       style={{
                         color: 'rgb(var(--color-accent))',
-                        textShadow: '0 0 16px rgb(var(--color-accent) / 0.4)',
+                        textShadow: '0 0 12px rgb(var(--color-accent) / 0.18)',
                       }}
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -114,7 +109,7 @@ export function WelcomeToast({ userName, message, onDismiss }: WelcomeToastProps
                       {userName}
                     </motion.span>
                     <motion.span
-                      className="text-text-primary/90"
+                      className="text-text-primary"
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.25, duration: 0.4, ease: 'easeOut' }}

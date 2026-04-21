@@ -156,6 +156,8 @@ export async function writeMetadataToSupabase(type: string, key: string, value: 
 
 import { useDataStore } from '../stores/useDataStore';
 
+const SCENE_COMPLETION_META_TYPE = 'scene-completion';
+
 /** sheetName + sceneIndex → scene UUID 조회 (스토어에서) */
 function resolveSceneUuid(sheetName: string, sceneIndex: number): string {
   const episodes = useDataStore.getState().episodes;
@@ -226,6 +228,20 @@ export async function deleteScene(sheetName: string, rowIndex: number): Promise<
 export async function updateSceneField(sheetName: string, rowIndex: number, field: string, value: string): Promise<void> {
   const uuid = resolveSceneUuid(sheetName, rowIndex);
   await window.electronAPI.supabaseUpdateSceneField(uuid, field, value);
+}
+
+/** 씬 완료 메타 저장 (rowIndex → metadata upsert) */
+export async function updateSceneCompletionMeta(
+  sheetName: string,
+  rowIndex: number,
+  completion: { completedBy: string; completedAt: string } | null,
+): Promise<void> {
+  const uuid = resolveSceneUuid(sheetName, rowIndex);
+  await window.electronAPI.supabaseWriteMetadata(
+    SCENE_COMPLETION_META_TYPE,
+    uuid,
+    completion ? JSON.stringify(completion) : '',
+  );
 }
 
 /** 파트 소프트 삭제 */

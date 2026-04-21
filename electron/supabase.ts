@@ -51,6 +51,8 @@ export interface SupabaseSceneRow {
   done: boolean;
   review: boolean;
   png: boolean;
+  completedBy?: string;
+  completedAt?: string;
 }
 
 export interface SupabaseUser {
@@ -115,6 +117,20 @@ function throwIfError(error: { message: string } | null) {
   if (error) throw new Error(error.message);
 }
 
+const SCENE_COMPLETION_META_TYPE = 'scene-completion';
+
+function parseSceneCompletionMeta(value: string | null | undefined): { completedBy: string; completedAt: string } | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as { completedBy?: unknown; completedAt?: unknown };
+    if (typeof parsed.completedBy !== 'string' || typeof parsed.completedAt !== 'string') return null;
+    if (!parsed.completedBy || !parsed.completedAt) return null;
+    return { completedBy: parsed.completedBy, completedAt: parsed.completedAt };
+  } catch {
+    return null;
+  }
+}
+
 // ─── 연결 테스트 ────────────────────────────────
 
 export async function testConnection(): Promise<{ ok: boolean; error?: string }> {
@@ -172,6 +188,22 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
     scenes = sceneRows || [];
   }
 
+  const sceneCompletionById = new Map<string, { completedBy: string; completedAt: string }>();
+  const sceneIds = scenes.map((scene) => scene.id);
+  if (sceneIds.length > 0) {
+    const { data: completionRows, error: completionErr } = await supabase
+      .from('metadata')
+      .select('key, value')
+      .eq('type', SCENE_COMPLETION_META_TYPE)
+      .in('key', sceneIds);
+    throwIfError(completionErr);
+    for (const row of completionRows || []) {
+      const meta = parseSceneCompletionMeta(row.value as string | null | undefined);
+      if (!meta) continue;
+      sceneCompletionById.set(row.key as string, meta);
+    }
+  }
+
   // 4) 조립
   const scenesByPart = new Map<string, typeof scenes>();
   for (const s of scenes) {
@@ -201,6 +233,7 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
           department: p.department,
           sheetName: makeSheetName(ep.episode_number, p.part_id, p.department),
           scenes: partScenes.map((s) => ({
+            ...(sceneCompletionById.get(s.id) ?? {}),
             id: s.id,
             no: s.sort_order,
             sceneId: s.scene_number,

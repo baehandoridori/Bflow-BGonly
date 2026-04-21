@@ -90,6 +90,7 @@ function applyPlexusFromPrefs(prefs: Awaited<ReturnType<typeof loadPreferences>>
 export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extraParams?: Record<string, string> }) {
   // 전역 그라데이션 배경 토글 (설정의 "전체 화면 그라데이션"이 플로팅 위젯에도 반영되도록)
   const globalGradientEnabled = useAppStore((s) => s.plexusSettings.globalGradientEnabled !== false);
+  const colorMode = useAppStore((s) => s.colorMode);
 
   const [appOpacity, setAppOpacity] = useState(1);
   const [glassIntensity, setGlassIntensity] = useState(0.7);
@@ -851,7 +852,7 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
 
       {/* Sonner 토스트 (휴가 등록 완료/실패 브로드캐스트 표시용) */}
       <Toaster
-        theme="dark"
+        theme={colorMode === 'light' ? 'light' : 'dark'}
         position="bottom-right"
         duration={4000}
         toastOptions={{

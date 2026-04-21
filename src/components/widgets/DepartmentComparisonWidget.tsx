@@ -8,6 +8,7 @@ import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { VerticalBar } from './charts/VerticalBar';
 import { DonutChart } from './charts/DonutChart';
 import type { Stage, ChartType } from '@/types';
+import { tooltipGlassStyle } from '@/utils/glassStyles';
 
 const SUPPORTED_CHARTS: ChartType[] = ['horizontal-bar', 'vertical-bar', 'donut'];
 
@@ -269,14 +270,10 @@ export function DepartmentComparisonWidget() {
           <div
             className="absolute z-[60] pointer-events-none px-4 py-3 rounded-2xl whitespace-nowrap"
             style={{
+              ...tooltipGlassStyle,
               left: tooltip.x,
               top: tooltip.y - 8,
               transform: 'translate(-50%, -100%)',
-              background: 'linear-gradient(135deg, rgba(30, 34, 48, 0.78) 0%, rgba(20, 22, 32, 0.82) 100%)',
-              backdropFilter: 'blur(24px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-              border: '1px solid rgba(255, 255, 255, 0.14)',
-              boxShadow: '0 12px 40px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)) inset, 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5)) inset',
             }}
           >
             <div className="flex items-center gap-2 font-semibold text-[13px] mb-1.5">
@@ -288,7 +285,7 @@ export function DepartmentComparisonWidget() {
               <span className="text-text-secondary/50">·</span>
               <span style={{ color: tooltip.color }}>{tooltip.stageLabel}</span>
             </div>
-            <div className="text-[12px] text-text-secondary/80">
+            <div className="text-[12px] text-text-secondary/85">
               {tooltip.total}씬 중 <span className="text-text-primary font-semibold">{tooltip.done}씬</span> 완료 ({tooltip.pct.toFixed(1)}%)
             </div>
           </div>

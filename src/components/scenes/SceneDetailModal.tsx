@@ -748,7 +748,7 @@ export function SceneDetailModal({
                   <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4">
                     진행 단계
                   </h3>
-                  <div className="flex rounded-lg bg-[#22222A] p-1.5 gap-1.5 mx-4 border border-bg-border/50">
+                  <div className="flex rounded-lg bg-bg-primary/75 p-1.5 gap-1.5 mx-4 border border-bg-border/50">
                     {STAGES.map((stage, i) => {
                       const isDone = scene[stage];
                       const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
@@ -759,7 +759,7 @@ export function SceneDetailModal({
                           onClick={() => onToggle(scene.sceneId, stage)}
                           className={cn(
                             'flex-1 py-2.5 rounded-md text-sm font-medium transition-all cursor-pointer',
-                            !isDone && 'text-text-secondary hover:text-text-primary hover:bg-white/5',
+                            !isDone && 'text-text-secondary hover:text-text-primary hover:bg-bg-border/25',
                           )}
                           style={
                             isDone

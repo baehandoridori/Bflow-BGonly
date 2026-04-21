@@ -25,6 +25,7 @@ import { resizeBlob } from '@/utils/imageUtils';
 import type { CompRevision, RevisionStatus, RevisionPriority, Episode } from '@/types';
 import { formatDateTime } from '@/utils/formatTime';
 import { STATUS_CONFIG, PRIORITY_CONFIG } from '@/constants/revision';
+import { elevatedGlassStyle, floatingGlassStyle } from '@/utils/glassStyles';
 
 // ─── 유틸 ───────────────────────────────────
 
@@ -244,7 +245,7 @@ function StatusDropdown({
             exit={{ opacity: 0, y: -4, scale: 0.95 }}
             transition={{ duration: 0.15 }}
             className="absolute right-0 top-full mt-1 z-20 rounded-lg overflow-hidden border border-bg-border shadow-xl"
-            style={{ background: 'rgba(26, 29, 39, 0.95)', backdropFilter: 'blur(12px)' }}
+            style={floatingGlassStyle}
           >
             {options.filter(s => s !== currentStatus).map((s) => {
               const cfg = STATUS_CONFIG[s];
@@ -252,7 +253,7 @@ function StatusDropdown({
                 <button
                   key={s}
                   onClick={(e) => { e.stopPropagation(); onSelect(s); setOpen(false); }}
-                  className="flex items-center gap-2 px-3 py-1.5 text-[11px] w-full hover:bg-white/5 transition-colors cursor-pointer whitespace-nowrap"
+                  className="flex items-center gap-2 px-3 py-1.5 text-[11px] w-full hover:bg-bg-border/20 transition-colors cursor-pointer whitespace-nowrap"
                   style={{ color: cfg.color }}
                 >
                   {s === 'open' && <Circle size={10} fill="currentColor" />}
@@ -310,7 +311,7 @@ function RevisionItem({
       transition={{ duration: 0.2 }}
       onClick={onSelect}
       className={`relative flex items-start gap-3 pl-10 pr-4 py-2.5 rounded-lg transition-colors group cursor-pointer ${
-        isSelected ? 'bg-accent/[0.08]' : 'hover:bg-white/[0.02]'
+        isSelected ? 'bg-accent/[0.08]' : 'hover:bg-bg-border/10'
       }`}
     >
       {/* 트리 가지 (가로 커넥터) */}
@@ -502,7 +503,7 @@ function AddRevisionForm({
     >
       <div
         className="rounded-xl p-4 space-y-3 border border-bg-border/60"
-        style={{ background: 'rgba(26, 29, 39, 0.8)', backdropFilter: 'blur(12px)' }}
+        style={elevatedGlassStyle}
         onClick={(e) => e.stopPropagation()}
       >
         {/* 우선순위 선택 */}
@@ -630,7 +631,7 @@ function SceneRow({
       {/* 씬 헤더 */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors cursor-pointer"
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-bg-border/10 transition-colors cursor-pointer"
       >
         {/* 펼치기/접기 */}
         <span className="shrink-0 text-text-secondary/50 w-5">
@@ -873,7 +874,7 @@ function DetailPanel({
           {/* 설명 카드 */}
           <div
             className="rounded-xl p-4 mb-5 border border-bg-border/60"
-            style={{ background: 'rgba(26, 29, 39, 0.8)' }}
+            style={elevatedGlassStyle}
           >
             <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
               {descText || revision.description}
