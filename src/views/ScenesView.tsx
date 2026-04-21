@@ -23,6 +23,7 @@ import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
+import { BulkOperationStatus } from '@/components/scenes/BulkOperationStatus';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
@@ -3746,6 +3747,9 @@ export function ScenesView() {
           }}
         />
       )}
+
+      {/* 일괄 작업 상태 floating 카드 */}
+      <BulkOperationStatus />
       </div>{/* 진행도 + 씬 목록 영역 끝 */}
 
       {/* 일괄 액션 바 (선택된 씬이 있을 때) */}
