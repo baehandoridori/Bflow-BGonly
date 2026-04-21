@@ -39,7 +39,7 @@ Supabase(PostgreSQL + Realtime)를 SSOT로 사용 (Google Sheets에서 전환 �
 | 배포 | `G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\` |
 | 개인 설정 | `%APPDATA%\Bflow-BGonly\` (layout.json, preferences.json) |
 
-**데이터**: 씬/에피소드/체크박스 → Supabase (PostgreSQL), 이미지 → Google Drive (GAS 경유), 위젯 레이아웃/개인 설정 → %APPDATA% 로컬 파일
+**데이터**: 씬/에피소드/체크박스/메모/개인일정 → Supabase (PostgreSQL), 이미지 → Supabase Storage (`scene-images` 버킷, 800px/JPEG 80% 리사이즈), 레거시 Drive 이미지는 `drive-img://` 프로토콜로 표시만 유지, 위젯 레이아웃/개인 설정 → %APPDATA% 로컬 파일
 
 ### 제약 사항
 
