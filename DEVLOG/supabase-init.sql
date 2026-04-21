@@ -236,3 +236,153 @@ DO $$ BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE parts;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- ============================================================
+-- 다중 선택 일괄 작업 RPC (2026-04-22, spec 2026-04-22-bulk-operations-ux-design.md)
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION bulk_update_scene_stages(
+  p_updates jsonb,
+  p_updated_by text
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  u jsonb;
+  v_uuid uuid;
+  v_stage text;
+  v_value boolean;
+  v_completed_by text;
+  v_completed_at timestamptz;
+  v_meta_value text;
+BEGIN
+  FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
+    v_uuid := (u->>'sceneUuid')::uuid;
+    v_stage := u->>'stage';
+    v_value := (u->>'value')::boolean;
+    v_completed_by := u->>'completedBy';
+    v_completed_at := NULLIF(u->>'completedAt', '')::timestamptz;
+
+    BEGIN
+      IF v_stage NOT IN ('lo','done','review','png') THEN
+        RAISE EXCEPTION 'invalid stage: %', v_stage;
+      END IF;
+
+      UPDATE scenes SET
+        lo     = CASE WHEN v_stage = 'lo'     THEN v_value ELSE lo END,
+        done   = CASE WHEN v_stage = 'done'   THEN v_value ELSE done END,
+        review = CASE WHEN v_stage = 'review' THEN v_value ELSE review END,
+        png    = CASE WHEN v_stage = 'png'    THEN v_value ELSE png END,
+        updated_at = now(),
+        updated_by = p_updated_by
+      WHERE id = v_uuid;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+
+      IF v_completed_by IS NOT NULL AND v_completed_at IS NOT NULL THEN
+        v_meta_value := jsonb_build_object(
+          'completedBy', v_completed_by,
+          'completedAt', v_completed_at
+        )::text;
+        INSERT INTO metadata (type, key, value, updated_at)
+          VALUES ('scene-completion', v_uuid::text, v_meta_value, now())
+          ON CONFLICT (type, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+      END IF;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION bulk_delete_scenes(
+  p_uuids uuid[],
+  p_deleted_by text
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_uuid uuid;
+BEGIN
+  FOREACH v_uuid IN ARRAY p_uuids LOOP
+    BEGIN
+      DELETE FROM scenes WHERE id = v_uuid;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+      DELETE FROM metadata WHERE type = 'scene-completion' AND key = v_uuid::text;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION bulk_update_scene_fields(
+  p_updates jsonb,
+  p_updated_by text
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  u jsonb;
+  f jsonb;
+  v_uuid uuid;
+BEGIN
+  FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
+    v_uuid := (u->>'sceneUuid')::uuid;
+    f := u->'fields';
+
+    BEGIN
+      UPDATE scenes SET
+        assignee       = COALESCE(f->>'assignee', assignee),
+        memo           = COALESCE(f->>'memo', memo),
+        layout         = COALESCE(f->>'layout', layout),
+        storyboard_url = COALESCE(f->>'storyboardUrl', storyboard_url),
+        guide_url      = COALESCE(f->>'guideUrl', guide_url),
+        updated_at = now(),
+        updated_by = p_updated_by
+      WHERE id = v_uuid;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION bulk_update_scene_stages(jsonb, text)  TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION bulk_delete_scenes(uuid[], text)        TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION bulk_update_scene_fields(jsonb, text)  TO anon, authenticated;
