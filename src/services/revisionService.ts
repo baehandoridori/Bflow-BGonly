@@ -20,8 +20,11 @@ import {
 import { normalizeSceneIdKey } from '../utils/sceneIdKey';
 
 const REVISIONS_FILE = 'revisions.json';
+const DIGITS_ONLY_RE = /^\d+$/;
 
 type RevisionsStore = Record<string, CompRevision[]>; // sceneKey → revisions
+
+let revisionContextSignature: string | null = null;
 
 function parseRevisionSceneKey(sceneKey: string) {
   const [episode = '', part = '', sceneId = ''] = sceneKey.split(':');
@@ -42,6 +45,27 @@ function normalizeRawRevisionSceneId(sceneId: string): string {
   } catch {
     return normalized.slice(4);
   }
+}
+
+function buildRevisionContextSignature(): string {
+  return useDataStore.getState().episodes
+    .map((episode) => episode.parts
+      .map((part) => `${part.sheetName}:${part.scenes.map((scene) => scene.sceneId.trim().toLowerCase()).join(',')}`)
+      .join('|'))
+    .join('||');
+}
+
+function syncRevisionContextSignature(): void {
+  const nextSignature = buildRevisionContextSignature();
+  if (revisionContextSignature === null) {
+    revisionContextSignature = nextSignature;
+    return;
+  }
+  if (revisionContextSignature === nextSignature) return;
+
+  revisionContextSignature = nextSignature;
+  sheetsCache = null;
+  localCache = null;
 }
 
 function getPartsForRevisionContext(episode: string, part: string) {
@@ -112,7 +136,34 @@ function getSiblingSceneIdsForStoredSceneKey(sceneKey: string): string[] | undef
   return getPartWideAliasCollisionSceneIds(episode, part, rawSceneId);
 }
 
+function hasPartsForRevisionContext(sceneKey: string): boolean {
+  const { episode, part } = parseRevisionSceneKey(sceneKey);
+  return getPartsForRevisionContext(episode, part).length > 0;
+}
+
+function preserveRawStoredRevisionSceneKey(sceneKey: string): string {
+  const { episode, part, sceneId } = parseRevisionSceneKey(sceneKey);
+  const rawSceneId = normalizeRawRevisionSceneId(sceneId);
+  if (!rawSceneId || DIGITS_ONLY_RE.test(rawSceneId)) {
+    return normalizeRevisionSceneKey(sceneKey);
+  }
+  return `${episode}:${part}:${buildDistinctRevisionSceneId(rawSceneId)}`;
+}
+
+function buildRawPreservedSceneKey(sheetName: string, sceneId: string): string {
+  const { episode, part } = parseSheetContext(sheetName);
+  const rawSceneId = normalizeRawRevisionSceneId(sceneId);
+  if (!rawSceneId || DIGITS_ONLY_RE.test(rawSceneId)) {
+    return buildUnifiedRevisionSceneKey(sheetName, sceneId);
+  }
+  return `${episode || sheetName}:${part}:${buildDistinctRevisionSceneId(rawSceneId)}`;
+}
+
 function normalizeStoredRevisionSceneKey(sceneKey: string): string {
+  if (!hasPartsForRevisionContext(sceneKey)) {
+    return preserveRawStoredRevisionSceneKey(sceneKey);
+  }
+
   return normalizeRevisionSceneKey(sceneKey, {
     siblingSceneIds: getSiblingSceneIdsForStoredSceneKey(sceneKey),
   });
@@ -218,6 +269,7 @@ export function setRevisionsSheetsMode(enabled: boolean): void {
 let localCache: RevisionsStore | null = null;
 
 async function loadLocalAll(): Promise<RevisionsStore> {
+  syncRevisionContextSignature();
   if (localCache) return localCache;
   try {
     const data = await window.electronAPI.readSettings(REVISIONS_FILE);
@@ -271,6 +323,7 @@ function rowToRevision(row: {
 }
 
 export async function loadAllRevisions(): Promise<RevisionsStore> {
+  syncRevisionContextSignature();
   if (sheetsCache) return sheetsCache;
 
   let rows: {
@@ -509,7 +562,10 @@ export async function getOpenRevisionCounts(): Promise<Record<string, number>> {
 export function buildSceneKey(
   sheetName: string,
   sceneId: string,
-  options: RevisionSceneKeyOptions,
+  options: RevisionSceneKeyOptions = {},
 ): string {
+  if (!options.siblingSceneIds || options.siblingSceneIds.length === 0) {
+    return buildRawPreservedSceneKey(sheetName, sceneId);
+  }
   return buildUnifiedRevisionSceneKey(sheetName, sceneId, options);
 }
