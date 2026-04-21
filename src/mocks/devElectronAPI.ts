@@ -102,7 +102,9 @@ export function installDevElectronAPI(): void {
     supabaseAddScenes: async () => {},
     supabaseDeleteScene: async () => {},
     supabaseUpdateSceneStage: async () => {},
-    supabaseBulkUpdateSceneStages: async () => {},
+    supabaseBulkUpdateSceneStages: async (updates) => updates.map((u) => ({ sceneUuid: u.sceneUuid, success: true })),
+    supabaseBulkDeleteScenes: async (sceneUuids) => sceneUuids.map((id) => ({ sceneUuid: id, success: true })),
+    supabaseBulkUpdateSceneFields: async (updates) => updates.map((u) => ({ sceneUuid: u.sceneUuid, success: true })),
     supabaseUpdateSceneField: async () => {},
     supabaseReadUsers: async () => MOCK_USERS.map(u => ({
       id: u.id, name: u.name, slack_id: u.slackId,

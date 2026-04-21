@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supabase';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // 앱 설정
@@ -84,8 +85,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:delete-scene', sceneUuid),
   supabaseUpdateSceneStage: (sceneUuid: string, stage: string, value: boolean, updatedBy?: string) =>
     ipcRenderer.invoke('supabase:update-scene-stage', sceneUuid, stage, value, updatedBy),
-  supabaseBulkUpdateSceneStages: (updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) =>
-    ipcRenderer.invoke('supabase:bulk-update-scene-stages', updates, updatedBy),
+  supabaseBulkUpdateSceneStages: (updates: BulkStageUpdate[], updatedBy: string) =>
+    ipcRenderer.invoke('supabase:bulk-update-scene-stages', updates, updatedBy) as Promise<BulkUpdateResult[]>,
+  supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) =>
+    ipcRenderer.invoke('supabase:bulk-delete-scenes', sceneUuids, deletedBy) as Promise<BulkUpdateResult[]>,
+  supabaseBulkUpdateSceneFields: (updates: BulkFieldUpdate[], updatedBy: string) =>
+    ipcRenderer.invoke('supabase:bulk-update-scene-fields', updates, updatedBy) as Promise<BulkUpdateResult[]>,
   supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) =>
     ipcRenderer.invoke('supabase:update-scene-field', sceneUuid, field, value, senderId),
   supabaseReadUsers: () =>
