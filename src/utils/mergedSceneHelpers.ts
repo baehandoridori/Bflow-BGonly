@@ -138,7 +138,7 @@ export function matchesMergedSceneIdentity(
 ): boolean {
   if (!sceneId) return false;
   if (merged.mergedKey === sceneId) return true;
-  if (merged.sceneId === sceneId) return true;
+  if (!merged.mergedKey.includes('|id:') && !merged.mergedKey.includes('|dup:') && merged.sceneId === sceneId) return true;
   if (merged.bgScene?.sceneId === sceneId) return true;
   if (merged.actScene?.sceneId === sceneId) return true;
   return false;
