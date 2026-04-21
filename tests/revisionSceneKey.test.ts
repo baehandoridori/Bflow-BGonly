@@ -86,3 +86,14 @@ test('raw alias revision lookups include the legacy shared numeric key', () => {
     ['EP01:A:1'],
   );
 });
+
+test('shared revision lookups include the historical raw alias key for raw scene ids', () => {
+  assert.deepEqual(
+    buildRevisionSceneKeyLookupKeys('EP01:A:ac001'),
+    ['EP01:A:1', 'EP01:A:raw-ac001'],
+  );
+  assert.deepEqual(
+    buildRevisionSceneKeyLookupKeys('EP01:A:a001'),
+    ['EP01:A:1', 'EP01:A:raw-a001'],
+  );
+});
