@@ -37,6 +37,7 @@ import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greeting
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
+import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
@@ -1208,6 +1209,9 @@ export default function App() {
           </Suspense>
         </LazyErrorBoundary>
       )}
+
+      {/* Promise 기반 확인 다이얼로그 호스트 */}
+      <ConfirmDialogHost />
 
       {/* Sonner 토스트 — 테마 색상 연동 + 스르륵 애니메이션 + 호버 펼침 */}
       <Toaster
