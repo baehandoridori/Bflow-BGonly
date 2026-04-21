@@ -69,6 +69,47 @@ export function buildMergedSceneKey(
   return `${partPrefix}|scene:${sceneIdentity}`;
 }
 
+function normalizeRawSceneKey(sceneId: string | null | undefined): string {
+  const normalized = (sceneId || '').trim().toLowerCase();
+  return normalized ? encodeURIComponent(normalized) : '-';
+}
+
+function buildMergedSceneKeyDisambiguator(
+  merged: Pick<MergedSceneLike, 'sceneId' | 'bgScene' | 'actScene'>,
+): string {
+  return [
+    `bg:${normalizeRawSceneKey(merged.bgScene?.sceneId)}`,
+    `act:${normalizeRawSceneKey(merged.actScene?.sceneId)}`,
+    `id:${normalizeRawSceneKey(merged.sceneId)}`,
+  ].join('|');
+}
+
+function assignMergedSceneKeys<TScene extends SceneLike>(
+  mergedList: MergedSceneLike<TScene>[],
+  partId: string | null | undefined,
+) {
+  const baseKeys = mergedList.map((merged) => buildMergedSceneKey(partId, merged));
+  const baseKeyCounts = new Map<string, number>();
+  baseKeys.forEach((key) => {
+    baseKeyCounts.set(key, (baseKeyCounts.get(key) ?? 0) + 1);
+  });
+
+  const assignedKeyCounts = new Map<string, number>();
+  mergedList.forEach((merged, index) => {
+    const baseKey = baseKeys[index];
+    const needsDisambiguation = (baseKeyCounts.get(baseKey) ?? 0) > 1;
+    const candidateKey = needsDisambiguation
+      ? `${baseKey}|${buildMergedSceneKeyDisambiguator(merged)}`
+      : baseKey;
+    const assignedCount = assignedKeyCounts.get(candidateKey) ?? 0;
+
+    merged.mergedKey = assignedCount > 0
+      ? `${candidateKey}|dup:${assignedCount + 1}`
+      : candidateKey;
+    assignedKeyCounts.set(candidateKey, assignedCount + 1);
+  });
+}
+
 export function buildUnifiedSceneIdFromMerged(
   partId: string | null | undefined,
   merged: Pick<MergedSceneLike, 'sceneId' | 'bgScene' | 'actScene'>,
@@ -195,8 +236,8 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
+  assignMergedSceneKeys(mergedList, mergedScenePartId);
   mergedList.forEach((merged) => {
-    merged.mergedKey = buildMergedSceneKey(mergedScenePartId, merged);
     merged.sceneId = buildUnifiedSceneIdFromMerged(mergedScenePartId, merged);
   });
 
