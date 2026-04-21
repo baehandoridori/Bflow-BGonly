@@ -5,13 +5,16 @@ import {
   buildMergedScenes,
   buildMergedSceneKey,
   buildAllModeBulkTogglePlans,
+  buildCounterpartSceneId,
   buildMergedRevisionSceneId,
   getSyncedMergedDetail,
   filterMergedScenesBySourceScenes,
   buildUnifiedSceneId,
   buildUnifiedSceneIdFromMerged,
   getMergedCommentBadgeCounts,
+  matchesCounterpartSceneId,
   matchesMergedSceneIdentity,
+  shouldPreserveRawSceneIdForCounterpart,
 } from '../src/utils/mergedSceneHelpers.ts';
 import { buildUnifiedRevisionSceneKey } from '../src/utils/revisionSceneKey.ts';
 
@@ -77,6 +80,34 @@ test('matchesMergedSceneIdentity does not match duplicate aliases by canonical s
   assert.equal(matchesMergedSceneIdentity(acAlias, 'a001'), false);
   assert.equal(matchesMergedSceneIdentity(acAlias, 'ac001'), true);
   assert.equal(matchesMergedSceneIdentity(aAlias, 'a001'), true);
+});
+
+test('counterpart scene creation preserves raw ids only for disambiguated aliases', () => {
+  const normalMerged = {
+    sceneId: 'a001',
+    mergedKey: 'a|scene:1',
+    bgScene: { no: 1, sceneId: 'ac001' },
+    actScene: null,
+    bgSceneIndex: 0,
+    actSceneIndex: -1,
+  };
+  const aliasMerged = {
+    sceneId: 'a001',
+    mergedKey: 'a|scene:1|id:ac001',
+    bgScene: { no: 1, sceneId: 'ac001' },
+    actScene: null,
+    bgSceneIndex: 0,
+    actSceneIndex: -1,
+  };
+
+  assert.equal(shouldPreserveRawSceneIdForCounterpart(normalMerged), false);
+  assert.equal(buildCounterpartSceneId('A', normalMerged, 'acting'), 'a001');
+  assert.equal(matchesCounterpartSceneId('A', 'ac001', 'a001', false), true);
+
+  assert.equal(shouldPreserveRawSceneIdForCounterpart(aliasMerged), true);
+  assert.equal(buildCounterpartSceneId('A', aliasMerged, 'acting'), 'ac001');
+  assert.equal(matchesCounterpartSceneId('A', 'a001', 'ac001', true), false);
+  assert.equal(matchesCounterpartSceneId('A', 'ac001', 'ac001', true), true);
 });
 
 test('all-view bulk toggle resolves ACT updates with the real ACT sceneId', () => {
@@ -269,11 +300,13 @@ test('buildMergedScenes disambiguates duplicate normalized scene aliases in one 
   });
 
   assert.equal(mergedScenes.length, 2);
-  assert.equal(mergedScenes[0].sceneId, 'a001');
+  assert.equal(mergedScenes[0].sceneId, 'ac001');
   assert.equal(mergedScenes[1].sceneId, 'a001');
   assert.notEqual(mergedScenes[0].mergedKey, mergedScenes[1].mergedKey);
   assert.match(mergedScenes[0].mergedKey, /^a\|scene:1\|/);
   assert.match(mergedScenes[1].mergedKey, /^a\|scene:1\|/);
+  assert.equal(buildUnifiedSceneId('A', mergedScenes[0].sceneId), 'ac001');
+  assert.equal(buildUnifiedSceneId('A', mergedScenes[1].sceneId), 'a001');
 
   const plans = buildAllModeBulkTogglePlans(
     new Set([
