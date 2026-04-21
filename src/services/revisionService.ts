@@ -150,18 +150,9 @@ function preserveRawStoredRevisionSceneKey(sceneKey: string): string {
   return `${episode}:${part}:${buildDistinctRevisionSceneId(rawSceneId)}`;
 }
 
-function getSiblingSceneIdsForSheetName(sheetName: string): string[] | undefined {
-  const normalizedSheetName = sheetName.trim().toLowerCase();
-  if (!normalizedSheetName) return undefined;
-
-  for (const episode of useDataStore.getState().episodes) {
-    const part = episode.parts.find(
-      (candidatePart) => candidatePart.sheetName.trim().toLowerCase() === normalizedSheetName,
-    );
-    if (part) return part.scenes.map((scene) => scene.sceneId);
-  }
-
-  return undefined;
+function getSiblingSceneIdsForSheetScene(sheetName: string, sceneId: string): string[] | undefined {
+  const { episode, part } = parseSheetContext(sheetName);
+  return getPartWideAliasCollisionSceneIds(episode, part, sceneId);
 }
 
 function normalizeStoredRevisionSceneKey(sceneKey: string): string {
@@ -569,8 +560,14 @@ export function buildSceneKey(
   sceneId: string,
   options: RevisionSceneKeyOptions = {},
 ): string {
+  const fallbackSiblingSceneIds = getSiblingSceneIdsForSheetScene(sheetName, sceneId) ?? [];
+  const siblingSceneIds = Array.from(new Set([
+    ...(options.siblingSceneIds ?? []),
+    ...fallbackSiblingSceneIds,
+  ]));
+
   return buildUnifiedRevisionSceneKey(sheetName, sceneId, {
     ...options,
-    siblingSceneIds: options.siblingSceneIds ?? getSiblingSceneIdsForSheetName(sheetName),
+    siblingSceneIds,
   });
 }
