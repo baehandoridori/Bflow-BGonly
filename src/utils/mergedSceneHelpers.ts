@@ -1,4 +1,5 @@
 import { buildCanonicalSceneId, normalizeSceneIdKey } from './sceneIdKey.ts';
+import { buildDistinctRevisionSceneId } from './revisionSceneKey.ts';
 
 type SceneLike = {
   no: number;
@@ -119,11 +120,16 @@ export function buildUnifiedSceneIdFromMerged(
 export function buildMergedRevisionSceneId(
   merged: Pick<MergedSceneLike, 'sceneId' | 'mergedKey' | 'bgScene' | 'actScene'>,
 ): string {
-  if (merged.mergedKey.includes('|id:') || merged.mergedKey.includes('|dup:')) {
+  if (merged.mergedKey.includes('|dup:')) {
     return `merged-${encodeURIComponent(merged.mergedKey)}`;
   }
 
-  return merged.bgScene?.sceneId ?? merged.actScene?.sceneId ?? merged.sceneId;
+  const rawSceneId = merged.bgScene?.sceneId ?? merged.actScene?.sceneId ?? merged.sceneId;
+  if (merged.mergedKey.includes('|id:')) {
+    return buildDistinctRevisionSceneId(rawSceneId) || `merged-${encodeURIComponent(merged.mergedKey)}`;
+  }
+
+  return rawSceneId;
 }
 
 export function matchesMergedSceneIdentity(
@@ -269,10 +275,11 @@ export function getSyncedMergedDetail<TScene extends SceneLike, TMerged extends 
   mergedScenes: TMerged[],
 ): TMerged | null {
   if (!detailMerged) return null;
-  return mergedScenes.find((scene) =>
-    (detailMerged.mergedKey && scene.mergedKey === detailMerged.mergedKey)
-    || scene.sceneId === detailMerged.sceneId
-  ) ?? null;
+  if (detailMerged.mergedKey) {
+    return mergedScenes.find((scene) => scene.mergedKey === detailMerged.mergedKey) ?? null;
+  }
+
+  return mergedScenes.find((scene) => scene.sceneId === detailMerged.sceneId) ?? null;
 }
 
 export function buildAllModeBulkTogglePlans(
