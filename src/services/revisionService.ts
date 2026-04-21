@@ -8,13 +8,14 @@
  * sceneKey 형식: "EP01:A:1" (에피소드:파트:정규화된 씬번호 — 시트명 비의존)
  */
 
-import type { CompRevision, RevisionPriority, RevisionStatus } from '../types';
+import type { CompRevision, Part, RevisionPriority, RevisionStatus } from '../types';
 import { useDataStore } from '../stores/useDataStore';
 import {
   buildUnifiedRevisionSceneKey,
   normalizeRevisionSceneKey,
   type RevisionSceneKeyOptions,
 } from '../utils/revisionSceneKey';
+import { normalizeSceneIdKey } from '../utils/sceneIdKey';
 
 const REVISIONS_FILE = 'revisions.json';
 
@@ -23,6 +24,11 @@ type RevisionsStore = Record<string, CompRevision[]>; // sceneKey → revisions
 function parseRevisionSceneKey(sceneKey: string) {
   const [episode = '', part = '', sceneId = ''] = sceneKey.split(':');
   return { episode, part, sceneId };
+}
+
+function parseSheetContext(sheetName: string) {
+  const [episode = '', part = ''] = sheetName.split('_');
+  return { episode, part };
 }
 
 function normalizeRawRevisionSceneId(sceneId: string): string {
@@ -36,26 +42,72 @@ function normalizeRawRevisionSceneId(sceneId: string): string {
   }
 }
 
-function getSiblingSceneIdsForStoredSceneKey(sceneKey: string): string[] | undefined {
-  const { episode, part, sceneId } = parseRevisionSceneKey(sceneKey);
-  const rawSceneId = normalizeRawRevisionSceneId(sceneId);
-  if (!episode || !part || !rawSceneId) return undefined;
-
+function getPartsForRevisionContext(episode: string, part: string) {
   const episodes = useDataStore.getState().episodes;
+  const parts: Part[] = [];
   for (const candidateEpisode of episodes) {
     for (const candidatePart of candidateEpisode.parts) {
-      const [candidateEpisodeId = '', candidatePartId = ''] = candidatePart.sheetName.split('_');
+      const { episode: candidateEpisodeId, part: candidatePartId } = parseSheetContext(candidatePart.sheetName);
       if (candidateEpisodeId !== episode || candidatePartId !== part) continue;
+      parts.push(candidatePart);
+    }
+  }
+  return parts;
+}
 
-      const sceneIds = candidatePart.scenes.map((scene) => scene.sceneId);
-      const includesStoredScene = sceneIds.some(
-        (candidateSceneId) => candidateSceneId.trim().toLowerCase() === rawSceneId,
-      );
-      if (includesStoredScene) return sceneIds;
+function getPartWideAliasCollisionSceneIds(
+  episode: string,
+  part: string,
+  targetSceneId?: string,
+): string[] | undefined {
+  if (!episode || !part) return undefined;
+
+  const parts = getPartsForRevisionContext(episode, part);
+  if (parts.length === 0) return undefined;
+
+  const collidingKeys = new Set<string>();
+  for (const candidatePart of parts) {
+    const rawIdsByKey = new Map<string, Set<string>>();
+    candidatePart.scenes.forEach((scene) => {
+      const rawSceneId = scene.sceneId.trim();
+      const normalizedKey = normalizeSceneIdKey(rawSceneId, part);
+      if (!rawSceneId || !normalizedKey) return;
+
+      if (!rawIdsByKey.has(normalizedKey)) rawIdsByKey.set(normalizedKey, new Set());
+      rawIdsByKey.get(normalizedKey)?.add(rawSceneId.toLowerCase());
+    });
+
+    rawIdsByKey.forEach((rawIds, normalizedKey) => {
+      if (rawIds.size > 1) collidingKeys.add(normalizedKey);
+    });
+  }
+
+  const targetKey = targetSceneId ? normalizeSceneIdKey(targetSceneId, part) : '';
+  if (targetKey && !collidingKeys.has(targetKey)) return undefined;
+
+  const collisionSceneIds: string[] = [];
+  const seen = new Set<string>();
+  for (const candidatePart of parts) {
+    for (const scene of candidatePart.scenes) {
+      const rawSceneId = scene.sceneId.trim();
+      const normalizedKey = normalizeSceneIdKey(rawSceneId, part);
+      const dedupeKey = rawSceneId.toLowerCase();
+      if (!rawSceneId || !collidingKeys.has(normalizedKey) || seen.has(dedupeKey)) continue;
+
+      collisionSceneIds.push(rawSceneId);
+      seen.add(dedupeKey);
     }
   }
 
-  return undefined;
+  return collisionSceneIds.length > 0 ? collisionSceneIds : undefined;
+}
+
+function getSiblingSceneIdsForStoredSceneKey(sceneKey: string): string[] | undefined {
+  const { episode, part, sceneId } = parseRevisionSceneKey(sceneKey);
+  const rawSceneId = normalizeRawRevisionSceneId(sceneId);
+  if (!rawSceneId) return undefined;
+
+  return getPartWideAliasCollisionSceneIds(episode, part, rawSceneId);
 }
 
 function normalizeStoredRevisionSceneKey(sceneKey: string): string {
@@ -378,12 +430,31 @@ export async function getOpenRevisionCounts(): Promise<Record<string, number>> {
 }
 
 function getSiblingSceneIdsForSheet(sheetName: string): string[] | undefined {
-  const episodes = useDataStore.getState().episodes;
-  for (const episode of episodes) {
-    const part = episode.parts.find((candidate) => candidate.sheetName === sheetName);
-    if (part) return part.scenes.map((scene) => scene.sceneId);
+  const { episode, part } = parseSheetContext(sheetName);
+  return getPartWideAliasCollisionSceneIds(episode, part);
+}
+
+function mergeSiblingSceneIds(
+  explicitSiblingSceneIds: RevisionSceneKeyOptions['siblingSceneIds'],
+  inferredSiblingSceneIds: RevisionSceneKeyOptions['siblingSceneIds'],
+): RevisionSceneKeyOptions['siblingSceneIds'] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+
+  [...(explicitSiblingSceneIds ?? []), ...(inferredSiblingSceneIds ?? [])].forEach((sceneId) => {
+    const rawSceneId = (sceneId || '').trim();
+    const key = rawSceneId.toLowerCase();
+    if (!rawSceneId || seen.has(key)) return;
+
+    merged.push(rawSceneId);
+    seen.add(key);
+  });
+
+  if (merged.length === 0) {
+    return undefined;
   }
-  return undefined;
+
+  return merged;
 }
 
 /**
@@ -397,6 +468,9 @@ export function buildSceneKey(
 ): string {
   return buildUnifiedRevisionSceneKey(sheetName, sceneId, {
     ...options,
-    siblingSceneIds: options?.siblingSceneIds ?? getSiblingSceneIdsForSheet(sheetName),
+    siblingSceneIds: mergeSiblingSceneIds(
+      options?.siblingSceneIds,
+      getSiblingSceneIdsForSheet(sheetName),
+    ),
   });
 }
