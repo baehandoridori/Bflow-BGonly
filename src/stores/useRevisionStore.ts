@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import type { CompRevision, RevisionPriority, RevisionStatus } from '@/types';
+import type { CompRevision, Episode, RevisionPriority, RevisionStatus } from '@/types';
 import * as revisionService from '@/services/revisionService';
+import { useDataStore } from '@/stores/useDataStore';
 
 interface RevisionState {
   revisions: CompRevision[];
@@ -41,6 +42,14 @@ interface RevisionState {
 
 function buildCountMap(revisions: CompRevision[]): Record<string, number> {
   return revisionService.buildOpenRevisionCountMap(revisions);
+}
+
+function buildRevisionContextSignature(episodes: Episode[]): string {
+  return episodes
+    .map((episode) => episode.parts
+      .map((part) => `${part.sheetName}:${part.scenes.map((scene) => scene.sceneId.trim().toLowerCase()).join(',')}`)
+      .join('|'))
+    .join('||');
 }
 
 function countOpenRevisions(revisions: CompRevision[]): number {
@@ -144,3 +153,17 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     ).length;
   },
 }));
+
+let lastRevisionContextSignature = buildRevisionContextSignature(useDataStore.getState().episodes);
+
+useDataStore.subscribe((state, previousState) => {
+  if (state.episodes === previousState.episodes) return;
+
+  const nextSignature = buildRevisionContextSignature(state.episodes);
+  if (nextSignature === lastRevisionContextSignature) return;
+
+  lastRevisionContextSignature = nextSignature;
+  useRevisionStore.setState((revisionState) => ({
+    revisionCountByScene: buildCountMap(revisionState.revisions),
+  }));
+});
