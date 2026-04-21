@@ -240,7 +240,7 @@ function RevisionCard({
 interface RevisionPanelProps {
   sheetName: string;
   sceneId: string;
-  department: 'bg' | 'acting';
+  department?: 'bg' | 'acting';
   onCountChange?: (count: number) => void;
 }
 

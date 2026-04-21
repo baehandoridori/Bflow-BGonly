@@ -430,11 +430,9 @@ function RevisionItem({
 
 function AddRevisionForm({
   sceneKey,
-  department,
   onClose,
 }: {
   sceneKey: string;
-  department: 'bg' | 'acting';
   onClose: () => void;
 }) {
   const { currentUser } = useAuthStore();
@@ -480,7 +478,6 @@ function AddRevisionForm({
         priority,
         frameNo: frameNo.trim() || undefined,
         imageUrl: imagePreview || undefined,
-        department,
         requesterId: currentUser.id,
         requesterName: currentUser.name,
       });
@@ -717,7 +714,6 @@ function SceneRow({
                   <AddRevisionForm
                     key="form"
                     sceneKey={info.sceneKey}
-                    department={info.department}
                     onClose={() => setShowAddForm(false)}
                   />
                 ) : (
@@ -1067,7 +1063,7 @@ export default function CompositingView() {
       for (const part of ep.parts) {
         for (const scene of part.scenes) {
           const sceneKey = buildSceneKey(part.sheetName, scene.sceneId);
-          map.set(sceneKey, {
+          const nextInfo = {
             sceneKey,
             sceneId: scene.sceneId,
             sceneNo: scene.no,
@@ -1076,7 +1072,11 @@ export default function CompositingView() {
             part: part.partId,
             department: part.department as 'bg' | 'acting',
             assignee: scene.assignee,
-          });
+          };
+          const existing = map.get(sceneKey);
+          if (!existing || (existing.department !== 'bg' && nextInfo.department === 'bg')) {
+            map.set(sceneKey, nextInfo);
+          }
         }
       }
     }

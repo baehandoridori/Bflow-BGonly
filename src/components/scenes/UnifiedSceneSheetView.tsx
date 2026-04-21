@@ -7,6 +7,7 @@ import type { MergedScene, Stage, Scene } from '@/types';
 import type { SceneGroupMode } from '@/stores/useAppStore';
 import { sceneProgress, progressGradient } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
+import { getMergedCommentBadgeCounts } from '@/utils/mergedSceneHelpers';
 import { HighlightText } from '@/components/common/HighlightText';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 
@@ -647,7 +648,12 @@ export function UnifiedSceneSheetView({
               const groupSize = meta?.groupSize ?? 1;
               const layoutKey = meta?.layoutKey ?? '';
 
-              const bgCommentCount = bgSheetName ? (commentCounts[`${bgSheetName}:${primary.no}`] ?? 0) : 0;
+              const commentBadgeCounts = getMergedCommentBadgeCounts(
+                m,
+                bgSheetName,
+                actSheetName,
+                commentCounts,
+              );
 
               return (
                 <motion.tr
@@ -693,11 +699,11 @@ export function UnifiedSceneSheetView({
                   {/* 씬번호 + 댓글 뱃지 */}
                   <td className="px-2 py-1.5 font-mono text-xs text-accent">
                     <span className="flex items-center gap-1">
-                      <HighlightText text={primary.sceneId || '-'} query={searchQuery} />
-                      {bgCommentCount > 0 && (
+                      <HighlightText text={sceneId || primary.sceneId || '-'} query={searchQuery} />
+                      {commentBadgeCounts.total > 0 && (
                         <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full">
                           <MessageCircle size={9} fill="currentColor" />
-                          <span className="text-[10px] font-bold">{bgCommentCount}</span>
+                          <span className="text-[10px] font-bold">{commentBadgeCounts.total}</span>
                         </span>
                       )}
                     </span>

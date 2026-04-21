@@ -137,10 +137,10 @@ export function UnifiedSceneCard({
         <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-sm font-mono text-text-secondary/50">
-              #{primaryScene.sceneId ? (primaryScene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || primaryScene.no) : primaryScene.no}
+              #{sceneId ? (sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || primaryScene.no) : primaryScene.no}
             </span>
             <span className="text-[15px] font-mono font-bold text-text-primary truncate">
-              <HighlightText text={primaryScene.sceneId || '(씬번호 없음)'} query={searchQuery} />
+              <HighlightText text={sceneId || primaryScene.sceneId || '(씬번호 없음)'} query={searchQuery} />
             </span>
             {layoutId && (
               <span className="text-[11px] italic text-text-secondary/50 shrink-0">
@@ -201,8 +201,7 @@ export function UnifiedSceneCard({
           <DeptSection
             dept="bg"
             scene={bgScene}
-            // 정규화 병합(ac001↔a001) 에서 merged.sceneId 는 BG 것으로 굳어 ACT 섹션에 쓰면 no-op 됨.
-            // 각 섹션은 자기 부서 scene.sceneId 를 써야 handleToggleForSheet 의 exact 매칭에 걸린다.
+            // 통합 대표 ID는 표시/선택용이고, 실제 토글은 각 부서의 원본 sceneId 로 저장해야 한다.
             sceneId={bgScene?.sceneId ?? sceneId}
             sheetName={bgSheetName}
             sceneIndex={bgSceneIndex}

@@ -7,10 +7,17 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
+import {
+  buildAllModeBulkTogglePlans,
+  buildUnifiedSceneId,
+  getMergedCommentBadgeCounts,
+  matchesMergedSceneIdentity,
+} from '@/utils/mergedSceneHelpers';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, Sparkles, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { HighlightText } from '@/components/common/HighlightText';
+import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
@@ -19,6 +26,9 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
 import { useRevisionStore } from '@/stores/useRevisionStore';
+import type { PartContextMenuTarget } from '@/utils/partMemoHelpers';
+import { usePartMemos } from '@/hooks/usePartMemos';
+import { useUnifiedScenes } from '@/hooks/useUnifiedScenes';
 
 /* ── 라쏘 드래그 선택 훅 ── */
 interface LassoRect { x: number; y: number; w: number; h: number }
@@ -363,7 +373,6 @@ import {
   deleteSceneFromSupabase,
   updateSceneField,
   writeMetadata,
-  readMetadata,
   softDeletePart,
   softDeleteEpisode,
   batchExecute,
@@ -375,7 +384,6 @@ import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
 import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
-import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { PanelLeftOpen } from 'lucide-react';
 
@@ -1097,6 +1105,7 @@ function AddEpisodeModal({
     >
       <div
         className="bg-bg-card rounded-xl shadow-2xl border border-bg-border w-80 p-4 flex flex-col gap-3"
+        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-bold text-text-primary">새 에피소드 추가</h3>
@@ -1182,9 +1191,8 @@ export function ScenesView() {
 
   // 파트 컨텍스트 메뉴
   const { menuPosition: partMenuPos, openMenu: openPartMenu, closeMenu: closePartMenu } = useContextMenu();
-  const [partMenuTarget, setPartMenuTarget] = useState<string | null>(null);
-  const [partMemos, setPartMemos] = useState<Record<string, string>>({});
-  const [editingPartMemo, setEditingPartMemo] = useState<string | null>(null);
+  const [partMenuTarget, setPartMenuTarget] = useState<PartContextMenuTarget | null>(null);
+  const [editingPartMemo, setEditingPartMemo] = useState<PartContextMenuTarget | null>(null);
   const [partMemoInput, setPartMemoInput] = useState('');
 
   // 에피소드 편집
@@ -1218,8 +1226,6 @@ export function ScenesView() {
 
   const clearCelebration = useCallback(() => setCelebratingId(null), []);
   const [detailSceneIndex, setDetailSceneIndex] = useState<number | null>(null);
-  // 전체 뷰 전용 통합 상세 모달 — merged 를 직접 보관
-  const [detailMerged, setDetailMerged] = useState<MergedScene | null>(null);
 
   // 리비전 초기 로드
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
@@ -1338,6 +1344,23 @@ export function ScenesView() {
   const currentPart = selectedDepartment !== 'all' && parts.length > 0
     ? (parts.find((p) => p.partId === selectedPart) ?? parts[0])
     : (bgPart ?? actPart ?? undefined);  // 'all' 모드 fallback (기존 로직 호환)
+  const mergedScenePartId = currentPartId ?? bgPart?.partId ?? actPart?.partId ?? '';
+  const {
+    partMemos,
+    getPartMemoText,
+    buildPartContextMenuTarget,
+    savePartMemo,
+  } = usePartMemos({
+    episodes,
+    selectedDepartment,
+    currentEpisodeNumber: currentEp?.episodeNumber,
+    allParts,
+    parts,
+  });
+  const handleSaveEditingPartMemo = useCallback((target: PartContextMenuTarget, memo: string) => {
+    setEditingPartMemo(null);
+    void savePartMemo(target, memo);
+  }, [savePartMemo]);
 
   // 실제 부서: 개별 모드에서만 의미 있음
   const effectiveDept: Department = selectedDepartment === 'all'
@@ -1402,21 +1425,6 @@ export function ScenesView() {
       }).catch(() => {});
     });
   }, [detailSceneIndex, detailContext, currentPart?.sheetName, bgPart?.sheetName, actPart?.sheetName, selectedDepartment]);
-
-  // 파트 메모 로드
-  useEffect(() => {
-    const loadPartMemos = async () => {
-      const memos: Record<string, string> = {};
-      for (const part of parts) {
-        try {
-          const data = await readMetadata('part-memo', part.sheetName);
-          if (data?.value) memos[part.sheetName] = data.value;
-        } catch { /* 무시 */ }
-      }
-      if (Object.keys(memos).length > 0) setPartMemos(memos);
-    };
-    loadPartMemos();
-  }, [currentEp?.episodeNumber, selectedDepartment]);
 
   // 에피소드 제목/메모 → App.tsx에서 병렬 로드됨 (글로벌 스토어)
 
@@ -1580,112 +1588,16 @@ export function ScenesView() {
   const allModeScenes = useMemo(() => [...bgScenes, ...actScenes], [bgScenes, actScenes]);
 
   // 'all' 모드: BG+ACT 씬 머지
-  // 1차: sceneId 완전 일치
-  // 2차: 남은 씬들 간 normalizeSceneIdKey(숫자만 추출) 매칭 — "ac001" ↔ "a001" 같은 접두사 변형 극복
-  const mergedScenes = useMemo((): MergedScene[] => {
-    if (selectedDepartment !== 'all') return [];
-    const map = new Map<string, MergedScene>();
-
-    // 1차: BG 전부 먼저 등록
-    bgScenes.forEach((scene) => {
-      map.set(scene.sceneId, {
-        sceneId: scene.sceneId,
-        bgScene: scene, actScene: null,
-        bgSceneIndex: bgPart?.scenes.indexOf(scene) ?? -1,
-        actSceneIndex: -1,
-      });
-    });
-
-    // 1차: ACT 중 sceneId 완전 일치만 병합
-    const actUnmatched: Scene[] = [];
-    actScenes.forEach((scene) => {
-      const existing = map.get(scene.sceneId);
-      if (existing) {
-        existing.actScene = scene;
-        existing.actSceneIndex = actPart?.scenes.indexOf(scene) ?? -1;
-      } else {
-        actUnmatched.push(scene);
-      }
-    });
-
-    // 2차: 정규화 키(첫 숫자 그룹)로 BG 미매칭 + ACT 미매칭 매칭
-    // BG 측에서 actScene 아직 없는 merged 항목들을 키별로 인덱싱
-    const bgLonelyByKey = new Map<string, MergedScene>();
-    for (const ms of map.values()) {
-      if (ms.actScene) continue;
-      const key = normalizeSceneIdKey(ms.sceneId);
-      if (!key) continue;
-      // 같은 정규화 키에 두 개 이상의 BG 가 있으면 첫 번째만 연결 대상으로 삼음 (혼동 방지)
-      if (!bgLonelyByKey.has(key)) bgLonelyByKey.set(key, ms);
-    }
-
-    actUnmatched.forEach((scene) => {
-      const key = normalizeSceneIdKey(scene.sceneId);
-      const partner = key ? bgLonelyByKey.get(key) : undefined;
-      if (partner) {
-        partner.actScene = scene;
-        partner.actSceneIndex = actPart?.scenes.indexOf(scene) ?? -1;
-        // 한 번 매칭된 BG 는 다른 ACT 와 또 매칭되지 않도록 인덱스에서 제거
-        bgLonelyByKey.delete(key);
-      } else {
-        // 매칭 상대 없음 — 단독 ACT 로 추가
-        map.set(scene.sceneId, {
-          sceneId: scene.sceneId,
-          bgScene: null, actScene: scene,
-          bgSceneIndex: -1,
-          actSceneIndex: actPart?.scenes.indexOf(scene) ?? -1,
-        });
-      }
-    });
-
-    // 정렬: primary scene (BG 우선) 기준
-    return Array.from(map.values()).sort((a, b) => {
-      const aScene = a.bgScene ?? a.actScene;
-      const bScene = b.bgScene ?? b.actScene;
-      if (!aScene || !bScene) return 0;
-      let cmp = 0;
-      switch (sortKey) {
-        case 'no': {
-          const aNum = parseInt(aScene.sceneId?.match(/\d+$/)?.[0] || '0', 10) || aScene.no;
-          const bNum = parseInt(bScene.sceneId?.match(/\d+$/)?.[0] || '0', 10) || bScene.no;
-          cmp = aNum - bNum;
-          break;
-        }
-        case 'assignee': cmp = (aScene.assignee || '').localeCompare(bScene.assignee || ''); break;
-        case 'progress': {
-          const aPct = ((a.bgScene ? sceneProgress(a.bgScene) : 0) + (a.actScene ? sceneProgress(a.actScene) : 0)) / ((a.bgScene ? 1 : 0) + (a.actScene ? 1 : 0) || 1);
-          const bPct = ((b.bgScene ? sceneProgress(b.bgScene) : 0) + (b.actScene ? sceneProgress(b.actScene) : 0)) / ((b.bgScene ? 1 : 0) + (b.actScene ? 1 : 0) || 1);
-          cmp = aPct - bPct;
-          break;
-        }
-        case 'incomplete': {
-          const aLeft = (a.bgScene ? 4 - [a.bgScene.lo, a.bgScene.done, a.bgScene.review, a.bgScene.png].filter(Boolean).length : 0)
-            + (a.actScene ? 4 - [a.actScene.lo, a.actScene.done, a.actScene.review, a.actScene.png].filter(Boolean).length : 0);
-          const bLeft = (b.bgScene ? 4 - [b.bgScene.lo, b.bgScene.done, b.bgScene.review, b.bgScene.png].filter(Boolean).length : 0)
-            + (b.actScene ? 4 - [b.actScene.lo, b.actScene.done, b.actScene.review, b.actScene.png].filter(Boolean).length : 0);
-          cmp = bLeft - aLeft;
-          break;
-        }
-      }
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-  }, [bgScenes, actScenes, bgPart, actPart, selectedDepartment, sortKey, sortDir]);
-
-  // 통합 상세 모달 — detailMerged 를 항상 최신 mergedScenes 로 동기화
-  // (낙관적 업데이트 / realtime 반영 이후에도 모달이 stale 한 참조를 들고 있지 않도록)
-  useEffect(() => {
-    if (!detailMerged) return;
-    const latest = mergedScenes.find((m) => m.sceneId === detailMerged.sceneId);
-    if (!latest) {
-      // merged 가 더 이상 존재하지 않음 → 모달 닫기
-      setDetailMerged(null);
-      return;
-    }
-    // 참조가 달라졌으면 최신 버전으로 교체 (내부 scene 내용도 함께 갱신됨)
-    if (latest !== detailMerged) {
-      setDetailMerged(latest);
-    }
-  }, [mergedScenes, detailMerged]);
+  const { mergedScenes, detailMerged, setDetailMerged } = useUnifiedScenes({
+    selectedDepartment,
+    bgPart,
+    actPart,
+    bgScenes,
+    actScenes,
+    mergedScenePartId,
+    sortKey,
+    sortDir,
+  });
 
   // ACT 단독 뷰에서 BG 이미지를 폴백으로 쓰기 위한 맵 (정규화 키 → BG 이미지 URL)
   // 정책: ACT 는 자체 이미지 슬롯이 없고 BG 이미지를 공유해서 보여준다.
@@ -1847,18 +1759,64 @@ export function ScenesView() {
     }
   };
 
+  const bulkToggleResolvedForSheet = async (
+    sheetName: string,
+    rawUpdates: { sceneId: string; sceneIndex: number }[],
+    stage: Stage,
+  ) => {
+    const latestPart = useDataStore.getState().episodes
+      .flatMap((ep) => ep.parts)
+      .find((p) => p.sheetName === sheetName);
+    if (!latestPart) return;
+
+    const updates: { sceneId: string; sceneIndex: number; stage: Stage; newValue: boolean }[] = [];
+    rawUpdates.forEach((rawUpdate) => {
+      let sceneIndex = rawUpdate.sceneIndex;
+      let scene: Scene | undefined = latestPart.scenes[sceneIndex];
+
+      if (!scene || scene.sceneId !== rawUpdate.sceneId) {
+        sceneIndex = latestPart.scenes.findIndex((candidate) => candidate.sceneId === rawUpdate.sceneId);
+        scene = sceneIndex >= 0 ? latestPart.scenes[sceneIndex] : undefined;
+      }
+
+      if (!scene || sceneIndex < 0) return;
+      updates.push({
+        sceneId: scene.sceneId,
+        sceneIndex,
+        stage,
+        newValue: !scene[stage],
+      });
+    });
+
+    if (updates.length === 0) return;
+
+    updates.forEach((update) => toggleSceneStage(sheetName, update.sceneId, update.stage));
+    try {
+      await bulkUpdateCells(sheetName, updates.map((update) => ({
+        rowIndex: update.sceneIndex,
+        stage: update.stage,
+        value: update.newValue,
+      })), currentUser?.id);
+      syncInBackground();
+    } catch (err) {
+      console.error('[일괄 토글 실패]', err);
+      updates.forEach((update) => toggleSceneStage(sheetName, update.sceneId, update.stage));
+    }
+  };
+
   // 일괄 토글: 선택된 씬들의 특정 단계를 단일 API 호출로 처리
   const handleBulkToggle = async (sceneIds: Set<string>, stage: Stage, onlyDept?: 'bg' | 'acting') => {
     if (selectedDepartment === 'all') {
-      // 'all' 모드: 복합 키(bg:id / act:id) 파싱 → 부서별 분리 처리
-      const bgIds: string[] = [];
-      const actIds: string[] = [];
-      sceneIds.forEach((id) => {
-        if (id.startsWith('bg:')) bgIds.push(id.slice(3));
-        else if (id.startsWith('act:')) actIds.push(id.slice(4));
-      });
-      if ((!onlyDept || onlyDept === 'bg') && bgIds.length > 0 && bgPart) await bulkToggleForSheet(bgPart.sheetName, bgIds, stage);
-      if ((!onlyDept || onlyDept === 'acting') && actIds.length > 0 && actPart) await bulkToggleForSheet(actPart.sheetName, actIds, stage);
+      const plans = buildAllModeBulkTogglePlans(
+        sceneIds,
+        mergedScenes,
+        bgPart?.sheetName ?? null,
+        actPart?.sheetName ?? null,
+        onlyDept,
+      );
+      for (const plan of plans) {
+        await bulkToggleResolvedForSheet(plan.sheetName, plan.updates, stage);
+      }
       return;
     }
     if (!currentPart) return;
@@ -2238,17 +2196,6 @@ export function ScenesView() {
     }
   };
 
-  // ─── 파트 메모 저장 ─────────────────
-  const handleSavePartMemo = async (sheetName: string, memo: string) => {
-    setPartMemos((prev) => ({ ...prev, [sheetName]: memo }));
-    setEditingPartMemo(null);
-    try {
-      await writeMetadata('part-memo', sheetName, memo);
-    } catch (err) {
-      console.warn('[파트 메모] 시트 저장 실패', err);
-    }
-  };
-
   // ─── 에피소드 삭제 ────────────────────
   const handleDeleteEpisode = async () => {
     if (!currentEp) return;
@@ -2446,8 +2393,8 @@ export function ScenesView() {
             onSelectEpisodePart={handleTreeSelect}
             onAddEpisode={handleAddEpisode}
             onAddPart={handleAddPart}
-            onPartContextMenu={(e, sheetName) => {
-              setPartMenuTarget(sheetName);
+            onPartContextMenu={(e, target) => {
+              setPartMenuTarget(target);
               openPartMenu(e);
             }}
             onEpisodeEdit={handleTreeEpisodeEdit}
@@ -2616,25 +2563,33 @@ export function ScenesView() {
                     // unique partId만 표시
                     return uniquePartIds.map((pid) => ({
                       value: pid,
-                      label: `${pid}파트`,
+                      label: `${pid}파트${(() => {
+                        const target = buildPartContextMenuTarget(pid);
+                        const memo = target ? getPartMemoText(target.sheetNames) : '';
+                        return memo ? ` (${memo})` : '';
+                      })()}`,
+                      sublabel: (() => {
+                        const target = buildPartContextMenuTarget(pid);
+                        return target ? (getPartMemoText(target.sheetNames) || undefined) : undefined;
+                      })(),
                     }));
                   }
                   return parts.map((p) => ({
                     value: p.partId,
-                    label: `${p.partId}파트${partMemos[p.sheetName] ? ` (${partMemos[p.sheetName]})` : ''}`,
-                    sublabel: partMemos[p.sheetName] || undefined,
+                    label: `${p.partId}파트${getPartMemoText([p.sheetName]) ? ` (${getPartMemoText([p.sheetName])})` : ''}`,
+                    sublabel: getPartMemoText([p.sheetName]) || undefined,
                   }));
                 })()}
                 value={selectedPart ?? (uniquePartIds[0] ?? (parts[0]?.partId ?? null))}
                 onChange={(v) => setSelectedPart(v)}
                 label="파트 선택"
-                onItemContextMenu={selectedDepartment !== 'all' ? (v, e) => {
-                  const part = parts.find((p) => p.partId === v);
-                  if (part) {
-                    setPartMenuTarget(part.sheetName);
+                onItemContextMenu={(v, e) => {
+                  const target = buildPartContextMenuTarget(String(v));
+                  if (target) {
+                    setPartMenuTarget(target);
                     openPartMenu(e);
                   }
-                } : undefined}
+                }}
                 minWidth={140}
               />
               {/* 파트 추가 */}
@@ -2943,6 +2898,12 @@ export function ScenesView() {
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
                     {group.map((m) => {
                       const primary = m.bgScene ?? m.actScene;
+                      const commentBadgeCounts = getMergedCommentBadgeCounts(
+                        m,
+                        bgPart?.sheetName ?? null,
+                        actPart?.sheetName ?? null,
+                        commentCounts,
+                      );
                       if (!primary) return null;
                       return (
                         <UnifiedSceneCard
@@ -2950,12 +2911,12 @@ export function ScenesView() {
                           merged={m}
                           bgSheetName={bgPart?.sheetName ?? null}
                           actSheetName={actPart?.sheetName ?? null}
-                          celebrating={celebratingId === m.sceneId}
-                          isHighlighted={highlightSceneId === m.sceneId}
+                          celebrating={matchesMergedSceneIdentity(m, celebratingId)}
+                          isHighlighted={matchesMergedSceneIdentity(m, highlightSceneId)}
                           isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
                           searchQuery={searchQuery}
-                          bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
-                          actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                          bgCommentCount={commentBadgeCounts.bg}
+                          actCommentCount={commentBadgeCounts.act}
                           onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                           onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                           onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
@@ -2985,6 +2946,12 @@ export function ScenesView() {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
               {mergedScenes.map((m) => {
                 const primary = m.bgScene ?? m.actScene;
+                const commentBadgeCounts = getMergedCommentBadgeCounts(
+                  m,
+                  bgPart?.sheetName ?? null,
+                  actPart?.sheetName ?? null,
+                  commentCounts,
+                );
                 if (!primary) return null;
                 return (
                   <UnifiedSceneCard
@@ -2992,12 +2959,12 @@ export function ScenesView() {
                     merged={m}
                     bgSheetName={bgPart?.sheetName ?? null}
                     actSheetName={actPart?.sheetName ?? null}
-                    celebrating={celebratingId === m.sceneId}
-                    isHighlighted={highlightSceneId === m.sceneId}
+                    celebrating={matchesMergedSceneIdentity(m, celebratingId)}
+                    isHighlighted={matchesMergedSceneIdentity(m, highlightSceneId)}
                     isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
                     searchQuery={searchQuery}
-                    bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
-                    actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                    bgCommentCount={commentBadgeCounts.bg}
+                    actCommentCount={commentBadgeCounts.act}
                     onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                     onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                     onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
@@ -3456,13 +3423,14 @@ export function ScenesView() {
             className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
             onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }}
           >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.93, y: 12 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.93, y: 12 }}
-              className="bg-bg-card rounded-2xl shadow-2xl border border-bg-border w-96"
-              onClick={(e) => e.stopPropagation()}
-            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.93, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.93, y: 12 }}
+                className="bg-bg-card rounded-2xl shadow-2xl border border-bg-border w-96"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
               <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">
                 <h3 className="text-sm font-bold text-text-primary">일괄 편집 ({selectedSceneIds.size}개 씬)</h3>
                 <button onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
@@ -3488,8 +3456,24 @@ export function ScenesView() {
                   // 복합 키 → { sheetName, rawId } 파싱 헬퍼
                   const resolveSelection = (id: string): { sheetName: string; rawId: string; scenes: Scene[] } | null => {
                     if (selectedDepartment === 'all') {
-                      if (id.startsWith('bg:') && bgPart) return { sheetName: bgPart.sheetName, rawId: id.slice(3), scenes: bgPart.scenes };
-                      if (id.startsWith('act:') && actPart) return { sheetName: actPart.sheetName, rawId: id.slice(4), scenes: actPart.scenes };
+                      if (id.startsWith('bg:') && bgPart) {
+                        const mergedKey = id.slice(3);
+                        const merged = mergedScenes.find((scene) => scene.sceneId === mergedKey);
+                        return {
+                          sheetName: bgPart.sheetName,
+                          rawId: merged?.bgScene?.sceneId ?? mergedKey,
+                          scenes: bgPart.scenes,
+                        };
+                      }
+                      if (id.startsWith('act:') && actPart) {
+                        const mergedKey = id.slice(4);
+                        const merged = mergedScenes.find((scene) => scene.sceneId === mergedKey);
+                        return {
+                          sheetName: actPart.sheetName,
+                          rawId: merged?.actScene?.sceneId ?? mergedKey,
+                          scenes: actPart.scenes,
+                        };
+                      }
                       return null;
                     }
                     if (!currentPart) return null;
@@ -3674,14 +3658,17 @@ export function ScenesView() {
                 sonnerToast.error(`${dept === 'bg' ? 'BG' : 'ACT'} 파트가 존재하지 않습니다. 먼저 파트를 만들어 주세요.`);
                 return;
               }
-              // 중복 방지: 같은 씬번호가 이미 파트에 있으면 스킵
-              const existing = targetPart.scenes.find((s) => s.sceneId === detailMerged.sceneId);
+              const targetSceneId = buildUnifiedSceneId(mergedScenePartId, detailMerged.sceneId);
+              // 중복 방지: 공통 씬번호 기준으로 이미 있으면 스킵
+              const existing = targetPart.scenes.find((scene) =>
+                buildUnifiedSceneId(mergedScenePartId, scene.sceneId) === targetSceneId,
+              );
               if (existing) {
-                sonnerToast.error(`이미 ${dept === 'bg' ? 'BG' : 'ACT'} 쪽에 "${detailMerged.sceneId}" 씬이 있습니다.`);
+                sonnerToast.error(`이미 ${dept === 'bg' ? 'BG' : 'ACT'} 쪽에 "${targetSceneId}" 씬이 있습니다.`);
                 return;
               }
               try {
-                await addScene(targetPart.sheetName, detailMerged.sceneId, '', '');
+                await addScene(targetPart.sheetName, targetSceneId, '', '');
                 await syncInBackground();
               } catch (err) {
                 handleSheetError(err, '씬 추가');
@@ -3708,7 +3695,7 @@ export function ScenesView() {
               label: '메모 편집',
               icon: <StickyNote size={12} />,
               onClick: () => {
-                setPartMemoInput(partMemos[partMenuTarget] ?? '');
+                setPartMemoInput(getPartMemoText(partMenuTarget.sheetNames));
                 setEditingPartMemo(partMenuTarget);
               },
             },
@@ -3716,7 +3703,13 @@ export function ScenesView() {
               label: '파트 삭제',
               icon: <Trash2 size={12} />,
               danger: true,
-              onClick: () => handleDeletePart(partMenuTarget),
+              disabled: partMenuTarget.sheetNames.length !== 1,
+              onClick: () => {
+                const targetSheetName = partMenuTarget.sheetNames[0];
+                if (targetSheetName) {
+                  handleDeletePart(targetSheetName);
+                }
+              },
             },
           ]}
         />
@@ -3730,20 +3723,26 @@ export function ScenesView() {
         >
           <div
             className="bg-bg-card rounded-xl shadow-2xl border border-bg-border w-80 p-4 flex flex-col gap-3"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-bold text-text-primary">파트 메모</h3>
+            <h3 className="text-sm font-bold text-text-primary">{editingPartMemo.partId}파트 메모</h3>
             <input
               autoFocus
               value={partMemoInput}
               onChange={(e) => setPartMemoInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSavePartMemo(editingPartMemo, partMemoInput);
+                if (e.key === 'Enter') handleSaveEditingPartMemo(editingPartMemo, partMemoInput);
                 if (e.key === 'Escape') setEditingPartMemo(null);
               }}
               placeholder="파트 메모를 입력하세요"
               className="w-full bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
             />
+            {editingPartMemo.sheetNames.length > 1 && (
+              <p className="text-[11px] text-text-secondary/70 leading-relaxed">
+                전체 모드에서는 연결된 BG/ACT 파트에 같은 메모가 함께 저장됩니다.
+              </p>
+            )}
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setEditingPartMemo(null)}
@@ -3752,7 +3751,7 @@ export function ScenesView() {
                 취소
               </button>
               <button
-                onClick={() => handleSavePartMemo(editingPartMemo, partMemoInput)}
+                onClick={() => handleSaveEditingPartMemo(editingPartMemo, partMemoInput)}
                 className="px-3 py-1.5 text-xs text-white bg-accent rounded-lg hover:bg-accent/80 transition-colors"
               >
                 저장
@@ -3770,6 +3769,7 @@ export function ScenesView() {
         >
           <div
             className="bg-bg-card rounded-xl shadow-2xl border border-bg-border w-80 p-4 flex flex-col gap-3"
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-bold text-text-primary">
@@ -3878,7 +3878,7 @@ export function ScenesView() {
         const epDisplayName = episodeTitles[archiveDialogEpNum] || ep?.title || `EP.${String(archiveDialogEpNum).padStart(2, '0')}`;
         return (
           <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-overlay/50" onClick={() => setArchiveDialogEpNum(null)}>
-            <div className="bg-bg-card rounded-xl border border-bg-border shadow-2xl p-5 w-[360px]" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-bg-card rounded-xl border border-bg-border shadow-2xl p-5 w-[360px]" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center">
                   <Archive size={16} className="text-amber-400" />

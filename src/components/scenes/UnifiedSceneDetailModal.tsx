@@ -85,9 +85,11 @@ export function UnifiedSceneDetailModal({
   const secondaryScene = bgScene && actScene && bgSheetName && actSheetName ? actScene : null;
   const secondaryCommentKey = secondarySheet && secondaryScene ? `${secondarySheet}:${secondaryScene.no}` : '';
 
+  const unifiedSceneId = merged.sceneId || primaryScene?.sceneId || '';
+
   // 리비전 키 — buildSceneKey 가 부서 구분 없이 EP:Part:sceneId 로 해싱되므로 BG/ACT 공용
   const revisionSheetName = primarySheet;
-  const revisionSceneId = primaryScene?.sceneId ?? '';
+  const revisionSceneId = unifiedSceneId;
   const revisionSceneKey = revisionSheetName && revisionSceneId ? buildSceneKey(revisionSheetName, revisionSceneId) : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
 
@@ -203,7 +205,7 @@ export function UnifiedSceneDetailModal({
 
   if (!headScene) return null;
 
-  const sceneNoDisplay = headScene.sceneId?.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(headScene.no);
+  const sceneNoDisplay = unifiedSceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(headScene.no);
   const showSceneDots = totalMerged > 0 && totalMerged <= 80;
 
   return (
@@ -231,7 +233,7 @@ export function UnifiedSceneDetailModal({
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-sm font-mono text-text-secondary/50">#{sceneNoDisplay}</span>
                 <span className="text-lg font-mono font-bold text-text-primary truncate">
-                  {headScene.sceneId || '(씬번호 없음)'}
+                  {unifiedSceneId || headScene.sceneId || '(씬번호 없음)'}
                 </span>
                 {headScene.layoutId && (
                   <span className="text-xs italic text-text-secondary/50 shrink-0">L#{headScene.layoutId}</span>
@@ -438,7 +440,6 @@ export function UnifiedSceneDetailModal({
                 <RevisionPanel
                   sheetName={revisionSheetName}
                   sceneId={revisionSceneId}
-                  department="bg"
                   onCountChange={setRevisionCount}
                 />
               </motion.div>

@@ -5,14 +5,33 @@
  * - 시트 연결 시: _COMP_REVISIONS 탭에서 전체 로딩 + 캐시
  * - 미연결 시: %APPDATA%/Bflow-BGonly/revisions.json 로컬 폴백
  *
- * sceneKey 형식: "EP01:A:a001" (에피소드:파트:씬ID — 시트명 비의존)
+ * sceneKey 형식: "EP01:A:1" (에피소드:파트:정규화된 씬번호 — 시트명 비의존)
  */
 
 import type { CompRevision, RevisionPriority, RevisionStatus } from '../types';
+import { buildUnifiedRevisionSceneKey, normalizeRevisionSceneKey } from '../utils/revisionSceneKey';
 
 const REVISIONS_FILE = 'revisions.json';
 
 type RevisionsStore = Record<string, CompRevision[]>; // sceneKey → revisions
+
+function normalizeRevisionStore(store: RevisionsStore): RevisionsStore {
+  const normalized: RevisionsStore = {};
+
+  for (const [sceneKey, revisions] of Object.entries(store)) {
+    const normalizedKey = normalizeRevisionSceneKey(sceneKey);
+    if (!normalized[normalizedKey]) normalized[normalizedKey] = [];
+
+    revisions.forEach((revision) => {
+      normalized[normalizedKey].push({
+        ...revision,
+        sceneKey: normalizedKey,
+      });
+    });
+  }
+
+  return normalized;
+}
 
 // ─── 모드 관리 ──────────────────────────────────
 
@@ -32,7 +51,7 @@ async function loadLocalAll(): Promise<RevisionsStore> {
   try {
     const data = await window.electronAPI.readSettings(REVISIONS_FILE);
     if (data && typeof data === 'object') {
-      localCache = data as RevisionsStore;
+      localCache = normalizeRevisionStore(data as RevisionsStore);
       return localCache;
     }
   } catch { /* 파일 없음 */ }
@@ -60,7 +79,7 @@ function rowToRevision(row: {
   const p = row.priority as RevisionPriority | undefined;
   return {
     id: row.id,
-    sceneKey: row.sceneKey,
+    sceneKey: normalizeRevisionSceneKey(row.sceneKey),
     revisionNo: Number(row.revisionNo) || 0,
     status: (row.status as RevisionStatus) || 'open',
     priority: (p === 'urgent' || p === 'high' || p === 'normal') ? p : 'normal',
@@ -113,8 +132,8 @@ export async function loadAllRevisions(): Promise<RevisionsStore> {
     store[rev.sceneKey].push(rev);
   }
 
-  sheetsCache = store;
-  return store;
+  sheetsCache = normalizeRevisionStore(store);
+  return sheetsCache;
 }
 
 /** 시트 캐시 무효화 */
@@ -125,12 +144,13 @@ export function invalidateRevisionsCache(): void {
 // ─── 통합 API ───────────────────────────────────
 
 export async function getRevisions(sceneKey: string): Promise<CompRevision[]> {
+  const normalizedSceneKey = normalizeRevisionSceneKey(sceneKey);
   if (sheetsMode) {
     const store = await loadAllRevisions();
-    return [...(store[sceneKey] ?? [])];
+    return [...(store[normalizedSceneKey] ?? [])];
   }
   const all = await loadLocalAll();
-  return [...(all[sceneKey] ?? [])];
+  return [...(all[normalizedSceneKey] ?? [])];
 }
 
 export async function getAllRevisions(): Promise<CompRevision[]> {
@@ -166,16 +186,17 @@ export async function createRevision(
     assignee?: string;
   },
 ): Promise<CompRevision> {
+  const normalizedSceneKey = normalizeRevisionSceneKey(sceneKey);
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const priority = data.priority || 'normal';
 
   if (sheetsMode) {
     const store = await loadAllRevisions();
-    const revisionNo = nextRevisionNo(store, sceneKey);
+    const revisionNo = nextRevisionNo(store, normalizedSceneKey);
     const revision: CompRevision = {
       id,
-      sceneKey,
+      sceneKey: normalizedSceneKey,
       revisionNo,
       status: 'open',
       priority,
@@ -192,24 +213,24 @@ export async function createRevision(
 
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
     await window.electronAPI.supabaseAddRevision(
-      id, '', sceneKey, revisionNo, 'open', priority,
+      id, '', normalizedSceneKey, revisionNo, 'open', priority,
       data.description, data.frameNo || '', data.imageUrl || '', data.department || '',
       data.requesterId, data.requesterName, data.assignee || '', now,
     );
 
     // 캐시 업데이트
-    if (!store[sceneKey]) store[sceneKey] = [];
-    store[sceneKey].push(revision);
+    if (!store[normalizedSceneKey]) store[normalizedSceneKey] = [];
+    store[normalizedSceneKey].push(revision);
 
     return revision;
   }
 
   // 로컬 모드
   const all = await loadLocalAll();
-  const revisionNo = nextRevisionNo(all, sceneKey);
+  const revisionNo = nextRevisionNo(all, normalizedSceneKey);
   const revision: CompRevision = {
     id,
-    sceneKey,
+    sceneKey: normalizedSceneKey,
     revisionNo,
     status: 'open',
     priority,
@@ -224,8 +245,8 @@ export async function createRevision(
     updatedAt: now,
   };
 
-  if (!all[sceneKey]) all[sceneKey] = [];
-  all[sceneKey].push(revision);
+  if (!all[normalizedSceneKey]) all[normalizedSceneKey] = [];
+  all[normalizedSceneKey].push(revision);
   await saveLocal(all);
 
   return revision;
@@ -237,6 +258,7 @@ export async function updateRevisionStatus(
   status: RevisionStatus,
   extra?: { resolvedBy?: string; resolvedNote?: string },
 ): Promise<void> {
+  const normalizedSceneKey = normalizeRevisionSceneKey(sceneKey);
   const now = new Date().toISOString();
   const updates: Record<string, string> = { status, updatedAt: now };
   if (status === 'resolved') {
@@ -249,7 +271,7 @@ export async function updateRevisionStatus(
     await window.electronAPI.supabaseUpdateRevision(id, updates);
     // 캐시 업데이트
     if (sheetsCache) {
-      const list = sheetsCache[sceneKey];
+      const list = sheetsCache[normalizedSceneKey];
       if (list) {
         const idx = list.findIndex(r => r.id === id);
         if (idx >= 0) {
@@ -269,7 +291,7 @@ export async function updateRevisionStatus(
 
   // 로컬 모드
   const all = await loadLocalAll();
-  const list = all[sceneKey];
+  const list = all[normalizedSceneKey];
   if (!list) return;
   const idx = list.findIndex(r => r.id === id);
   if (idx >= 0) {
@@ -309,10 +331,5 @@ export async function getOpenRevisionCounts(): Promise<Record<string, number>> {
  * 시트이름 형식: EP01_A_BG → EP01:A
  */
 export function buildSceneKey(sheetName: string, sceneId: string): string {
-  // EP01_A_BG → EP01, A, BG
-  // EP01_A → EP01, A (legacy)
-  const parts = sheetName.split('_');
-  const ep = parts[0] || sheetName; // EP01
-  const part = parts[1] || '';       // A
-  return `${ep}:${part}:${sceneId}`;
+  return buildUnifiedRevisionSceneKey(sheetName, sceneId);
 }
