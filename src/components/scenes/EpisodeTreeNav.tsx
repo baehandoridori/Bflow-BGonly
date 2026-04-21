@@ -3,6 +3,7 @@ import { ChevronRight, Plus, FolderOpen, Folder, MoreVertical, Archive, RotateCc
 import { cn } from '@/utils/cn';
 import type { Episode, Department, ScenesDeptFilter } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
+import { getCombinedPartMemo, type PartContextMenuTarget } from '@/utils/partMemoHelpers';
 
 export interface ArchivedEpisodeInfo {
   episodeNumber: number;
@@ -25,7 +26,7 @@ interface EpisodeTreeNavProps {
   onSelectEpisodePart: (epNum: number, partId: string | null) => void;
   onAddEpisode: () => void;
   onAddPart: () => void;
-  onPartContextMenu: (e: React.MouseEvent, sheetName: string) => void;
+  onPartContextMenu: (e: React.MouseEvent, target: PartContextMenuTarget) => void;
   onEpisodeEdit: (epNum: number) => void;
   onArchiveEpisode: (epNum: number) => void;
   onUnarchiveEpisode: (epNum: number) => void;
@@ -153,6 +154,7 @@ export function EpisodeTreeNav({
     partId: string;
     scenes: { lo: boolean; done: boolean; review: boolean; png: boolean }[];
     sceneCount: number;
+    sheetNames: string[];
   };
 
   const epPartsMap = useMemo(() => {
@@ -177,11 +179,15 @@ export function EpisodeTreeNav({
         if (existing) {
           existing.scenes.push(...part.scenes);
           existing.sceneCount += part.scenes.length;
+          if (!existing.sheetNames.includes(part.sheetName)) {
+            existing.sheetNames.push(part.sheetName);
+          }
         } else {
           grouped.set(part.partId, {
             partId: part.partId,
             scenes: [...part.scenes],
             sceneCount: part.scenes.length,
+            sheetNames: [part.sheetName],
           });
         }
       }
@@ -317,6 +323,7 @@ export function EpisodeTreeNav({
                         const defaultPartId = (epGroupedPartsMap.get(ep.episodeNumber) ?? [])[0]?.partId;
                         const isPartActive = isEpSelected && (selectedPart ?? defaultPartId) === group.partId;
                         const partProgress = calcPartProgress(group.scenes);
+                        const memo = getCombinedPartMemo(partMemos, group.sheetNames);
 
                         return (
                           <div
@@ -328,11 +335,24 @@ export function EpisodeTreeNav({
                                 : 'text-text-secondary hover:bg-bg-primary/70 hover:text-text-primary',
                             )}
                             onClick={() => onSelectEpisodePart(ep.episodeNumber, group.partId)}
+                            onContextMenu={(e) => {
+                              onSelectEpisodePart(ep.episodeNumber, group.partId);
+                              onPartContextMenu(e, {
+                                episodeNumber: ep.episodeNumber,
+                                partId: group.partId,
+                                sheetNames: group.sheetNames,
+                              });
+                            }}
                           >
                             <div className="flex flex-col flex-1 min-w-0">
                               <span className="text-sm font-medium truncate leading-tight">
                                 {group.partId}파트
                               </span>
+                              {memo && (
+                                <span className="text-xs text-amber-400/60 italic truncate leading-tight" title={memo}>
+                                  {memo}
+                                </span>
+                              )}
                             </div>
 
                             <span className="text-xs text-text-secondary/40 tabular-nums shrink-0">
@@ -371,7 +391,14 @@ export function EpisodeTreeNav({
                                 : 'text-text-secondary hover:bg-bg-primary/70 hover:text-text-primary',
                             )}
                             onClick={() => onSelectEpisodePart(ep.episodeNumber, part.partId)}
-                            onContextMenu={(e) => onPartContextMenu(e, part.sheetName)}
+                            onContextMenu={(e) => {
+                              onSelectEpisodePart(ep.episodeNumber, part.partId);
+                              onPartContextMenu(e, {
+                                episodeNumber: ep.episodeNumber,
+                                partId: part.partId,
+                                sheetNames: [part.sheetName],
+                              });
+                            }}
                           >
                             <div className="flex flex-col flex-1 min-w-0">
                               <span className="text-sm font-medium truncate leading-tight">

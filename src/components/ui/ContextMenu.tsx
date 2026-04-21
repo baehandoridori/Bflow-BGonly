@@ -51,6 +51,11 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
     <div
       ref={ref}
       className="fixed z-[999] min-w-[160px] py-1 rounded-lg shadow-xl border"
+      onMouseDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       style={{
         left: adjusted.x,
         top: adjusted.y,
@@ -61,6 +66,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
       {items.map((item, i) => (
         <button
           key={i}
+          type="button"
           disabled={item.disabled}
           onClick={() => { item.onClick(); onClose(); }}
           className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors cursor-pointer

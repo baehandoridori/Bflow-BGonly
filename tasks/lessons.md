@@ -168,3 +168,99 @@ await deleteScene(sheetName, sceneIndex);        // 2) 내부에서 resolveScene
 - `src/components/scenes/SceneDetailModal.tsx` — `department === 'bg'` 일 때만 이미지 섹션 렌더
 - `src/components/scenes/UnifiedSceneCard.tsx` · `UnifiedSceneSheetView.tsx` — 썸네일/이미지 셀을 BG 전용으로 변경
 - `src/views/ScenesView.tsx` — `onAddDept` 중복 체크, `handleSheetError` 에 `duplicate key` 사용자 친화적 메시지
+
+---
+
+## 2026-04-21: 모달 `click` 차단만으로는 부족함 — 배경 `mousedown` 리스너가 입력을 가로챔
+
+### 증상
+- ScenesView 에서 가끔 입력 모달이 첫 클릭에 포커스를 못 잡거나, 파트 우클릭 메뉴/메모 편집이 간헐적으로 불안정해 보임.
+
+### 근본 원인
+- 모달/컨텍스트 메뉴 패널은 `onClick={(e) => e.stopPropagation()}` 만 가지고 있었고, 배경의 드롭다운/셀렉트는 `document.addEventListener('mousedown', ...)` 로 외부 클릭을 감지하고 있었다.
+- 그래서 **모달 안 클릭도 먼저 document `mousedown` 에 도달**해 배경 드롭다운이 닫히거나 상태를 바꾸고, 그 렌더가 입력 포커스/메뉴 상호작용과 충돌할 수 있었다.
+
+### 교훈
+- 바깥 클릭 닫기 로직이 `mousedown` 기반이면, 오버레이 패널 내부는 **`click` 뿐 아니라 `mousedown` 도 막아야 한다.**
+- 우클릭으로 다른 메뉴를 여는 드롭다운은 기존 드롭다운을 즉시 닫아, 두 개의 팝업이 동시에 열린 상태를 남기지 마라.
+- 전역 `keydown` 를 가진 드롭다운/팝업은 입력창(`input`/`textarea`/`select`/contenteditable) 에 포커스가 있으면 키를 가로채지 않게 해야 한다.
+
+### 적용 위치
+- `src/components/common/GlassDropdown.tsx` — 우클릭 컨텍스트 메뉴 시 즉시 닫기, 입력 필드 포커스 중 전역 키 처리 무시
+- `src/components/ui/ContextMenu.tsx` — 패널 내부 `mousedown`/우클릭 전파 차단
+- `src/views/ScenesView.tsx` — 파트 메모/에피소드 편집/일괄 편집/아카이브/에피소드 추가 모달 패널에 `onMouseDown` 차단 추가
+
+---
+
+## 2026-04-21: 통합 사이드바에서 "그룹 항목" 기능 누락
+
+### 증상
+- 씬 뷰 좌측 사이드바에서 파트를 우클릭했을 때, 개별 부서 모드에서는 되는데 전체 모드에서는 파트 메모가 안 뜨거나 일관되지 않음.
+
+### 근본 원인
+- 사이드바의 전체 모드는 `partId` 기준 그룹 행을 별도로 렌더링하고 있었는데, 이 그룹 행에는 `onContextMenu` 자체가 없었다.
+- 파트 메모 로딩도 `현재 에피소드의 parts` 만 읽고 있어서, 사이드바에 보이는 다른 에피소드 파트 메모 상태와 어긋날 수 있었다.
+
+### 교훈
+- 개별 행과 그룹 행을 따로 렌더링할 때, "클릭/우클릭/배지/메모" 같은 상호작용을 한쪽에만 넣으면 전체 모드에서 조용히 기능이 빠진다.
+- 사이드바처럼 여러 에피소드를 동시에 보여주는 UI 는 **선택된 항목 기준 로딩** 이 아니라 **현재 화면에 보이는 항목 기준 로딩** 으로 맞춰야 한다.
+- 전체 모드의 그룹 항목에서 메모를 편집할 때는, 연결된 BG/ACT 파트들에 같은 메모를 같이 쓰는 정책이 가장 덜 놀랍다.
+
+### 적용 위치
+- `src/components/scenes/EpisodeTreeNav.tsx` — 그룹 파트에 우클릭/메모 표시 추가
+- `src/views/ScenesView.tsx` — 파트 메모 타깃을 단일 sheetName 에서 다중 sheetNames 로 확장, 사이드바 표시 대상 전체 메모 로드
+- `src/utils/partMemoHelpers.ts` — 그룹 파트 메모 합치기/동시 저장 헬퍼
+
+---
+
+## 2026-04-21: 큰 뷰 파일을 줄일 때는 "순수 규칙"과 "상태 오케스트레이션"을 먼저 분리
+
+### 상황
+- `ScenesView.tsx` 안에 통합 씬 계산, 파트 메모 로딩/저장, 상세 모달 동기화가 한 파일에 같이 들어 있어 읽기도 어렵고 수정 범위도 넓었다.
+
+### 교훈
+- 먼저 **순수 계산 규칙**을 유틸로 빼고 테스트로 고정한 뒤, 그 위에 **상태 훅**을 얹는 순서가 가장 안전하다.
+- 이렇게 하면 구조는 정리되지만 사용자 동작은 그대로 유지할 수 있고, 회귀 테스트도 유틸 레벨에서 빠르게 돌릴 수 있다.
+- 컴포넌트 파일에서 다른 컴포넌트 타입을 직접 끌어다 쓰기보다, 공용 타입/헬퍼 경계로 옮기는 편이 의존성이 덜 꼬인다.
+
+### 적용 위치
+- `src/utils/mergedSceneHelpers.ts` — 통합 씬 계산/상세 동기화 규칙 추가
+- `src/utils/partMemoHelpers.ts` — 파트 메모 대상/표시 대상 계산 규칙 추가
+- `src/hooks/useUnifiedScenes.ts` — 통합 씬 파생 상태 훅
+- `src/hooks/usePartMemos.ts` — 파트 메모 로드/저장 훅
+
+---
+
+## 2026-04-21: 통합 뷰에서는 "표시용 ID" 와 "내부 고유 키"를 절대 같은 값으로 쓰지 말 것
+
+### 증상
+- 통합 씬 번호를 `a001` 같은 공통 번호로 정규화한 뒤, 같은 숫자를 가진 레거시 씬(`a001`, `v2a001`)이 한 뷰 안에 같이 있을 때 벌크 토글/선택/React key가 서로 덮였다.
+- 공용 리비전은 부서 라벨 없이 저장해야 하는데, Supabase 쪽 `part_uuid` 역조회는 실제 부서 정보가 필요해 ACT-only 파트에서 실패할 수 있었다.
+
+### 교훈
+- 사용자가 보는 번호(`sceneId`)는 **표시용** 으로만 두고, 선택/맵/React key/벌크 동작은 반드시 별도 내부 키(`mergedKey`)를 써라.
+- "공용 데이터" 와 "저장 경로를 찾기 위한 힌트" 는 분리하라. 공용 리비전이라도 DB의 part UUID 를 찾기 위한 `lookupDepartment` 는 따로 전달해야 한다.
+
+### 적용 위치
+- `src/utils/mergedSceneHelpers.ts` — `mergedKey` 추가, 벌크 토글/상세 동기화에 내부 키 사용
+- `src/views/ScenesView.tsx`, `src/components/scenes/UnifiedSceneCard.tsx`, `src/components/scenes/UnifiedSceneSheetView.tsx` — 선택/라쏘/React key를 `mergedKey` 기준으로 전환
+- `src/services/revisionService.ts`, `electron/preload.ts`, `electron/main.ts`, `electron/supabase.ts`, `src/views/CompositingView.tsx` — 공용 리비전은 유지하면서 part UUID 역조회용 `lookupDepartment` 분리
+
+---
+
+## 2026-04-21: 씬번호 정규화 규칙은 병합/리비전/lookup 전부가 같은 헬퍼를 써야 한다
+
+### 증상
+- `ac001` 과 `a001` 을 같은 씬으로 보이게 하려고 끝자리 숫자만 보는 규칙을 여러 파일에 각각 넣었더니, `v2a001` 같은 버전형 ID 까지 `a001` 과 같은 씬으로 잘못 묶였다.
+- 그 결과 전체 뷰 병합은 하나로 붙고, 리비전은 분리되거나, 반대로 이미지 fallback / 반대 부서 찾기에서 다른 씬을 잘못 집는 식으로 규칙이 서로 어긋났다.
+
+### 교훈
+- "같은 씬으로 취급할 수 있는 ID" 규칙은 한 곳에서만 정의하라.
+- 그 규칙은 **숫자만 있는 ID**, **파트 접두사만 붙은 ID(`a001`, `ac001`)** 는 같은 씬으로 보고, **버전/별칭 접두사가 섞인 ID(`v2a001`)** 는 별도 씬으로 남겨야 한다.
+- 표시용 씬번호, 전체 뷰 병합, 반대 부서 lookup, 공용 리비전 키가 서로 다른 정규화 규칙을 쓰면 같은 버그가 다른 형태로 반복된다.
+
+### 적용 위치
+- `src/utils/sceneIdKey.ts` — part-aware 씬 정규화/표시 ID 규칙 단일화
+- `src/utils/mergedSceneHelpers.ts` — unmatched 병합과 통합 표시 ID 생성에 공용 규칙 사용
+- `src/utils/revisionSceneKey.ts` — 리비전 키도 동일 규칙 재사용
+- `src/views/ScenesView.tsx` — ACT 이미지 fallback, 반대 부서 씬 찾기 lookup 도 동일 규칙 사용

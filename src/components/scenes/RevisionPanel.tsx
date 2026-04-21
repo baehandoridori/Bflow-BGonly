@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Check, Clock, Circle, ChevronDown, ImagePlus, X } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { resizeBlob } from '@/utils/imageUtils';
 import type { CompRevision, RevisionPriority, RevisionStatus } from '@/types';
@@ -238,18 +239,36 @@ function RevisionCard({
 
 // ─── 메인 패널 ───────────────────────────────
 
+function inferDepartmentFromSheetName(sheetName: string): 'bg' | 'acting' | undefined {
+  if (/_ACT$/i.test(sheetName)) return 'acting';
+  if (/_BG$/i.test(sheetName)) return 'bg';
+  return undefined;
+}
+
 interface RevisionPanelProps {
   sheetName: string;
   sceneId: string;
-  department: 'bg' | 'acting';
+  siblingSceneIds?: readonly string[];
+  department?: 'bg' | 'acting';
   onCountChange?: (count: number) => void;
 }
 
-export function RevisionPanel({ sheetName, sceneId, department, onCountChange }: RevisionPanelProps) {
+export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department, onCountChange }: RevisionPanelProps) {
   const { currentUser } = useAuthStore();
   const { createRevision, updateStatus, loadRevisions, getRevisionsForScene, getOpenCount } = useRevisionStore();
+  const episodes = useDataStore((s) => s.episodes);
+  const inferredSiblingSceneIds = useMemo(() => {
+    for (const episode of episodes) {
+      const part = episode.parts.find((candidate) => candidate.sheetName === sheetName);
+      if (part) return part.scenes.map((scene) => scene.sceneId);
+    }
 
-  const sceneKey = buildSceneKey(sheetName, sceneId);
+    return [];
+  }, [episodes, sheetName]);
+  const effectiveSiblingSceneIds = siblingSceneIds ?? inferredSiblingSceneIds;
+  const effectiveDepartment = department ?? inferDepartmentFromSheetName(sheetName);
+
+  const sceneKey = buildSceneKey(sheetName, sceneId, { siblingSceneIds: effectiveSiblingSceneIds });
   const revisions = getRevisionsForScene(sceneKey);
   const sortedRevisions = [...revisions].sort((a, b) =>
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -319,7 +338,7 @@ export function RevisionPanel({ sheetName, sceneId, department, onCountChange }:
         priority,
         frameNo: frameNo.trim() || undefined,
         imageUrl: imagePreview || undefined,
-        department,
+        department: effectiveDepartment,
         requesterId: currentUser.id,
         requesterName: currentUser.name,
       });

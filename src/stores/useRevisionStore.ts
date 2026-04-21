@@ -1,10 +1,12 @@
 import { create } from 'zustand';
-import type { CompRevision, RevisionPriority, RevisionStatus } from '@/types';
+import type { CompRevision, Episode, RevisionPriority, RevisionStatus } from '@/types';
 import * as revisionService from '@/services/revisionService';
+import { useDataStore } from '@/stores/useDataStore';
 
 interface RevisionState {
   revisions: CompRevision[];
   revisionCountByScene: Record<string, number>; // sceneKey → open count
+  totalOpenRevisionCount: number;
   isLoading: boolean;
   lastLoadTime: number | null;
 
@@ -20,6 +22,7 @@ interface RevisionState {
       frameNo?: string;
       imageUrl?: string;
       department?: 'bg' | 'acting';
+      lookupDepartment?: 'bg' | 'acting';
       requesterId: string;
       requesterName: string;
       assignee?: string;
@@ -38,18 +41,35 @@ interface RevisionState {
 }
 
 function buildCountMap(revisions: CompRevision[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const r of revisions) {
-    if (r.status !== 'resolved') {
-      counts[r.sceneKey] = (counts[r.sceneKey] || 0) + 1;
+  return revisionService.buildOpenRevisionCountMap(revisions);
+}
+
+function buildRevisionContextSignature(episodes: Episode[]): string {
+  return episodes
+    .map((episode) => episode.parts
+      .map((part) => `${part.sheetName}:${part.scenes.map((scene) => scene.sceneId.trim().toLowerCase()).join(',')}`)
+      .join('|'))
+    .join('||');
+}
+
+function countOpenRevisions(revisions: CompRevision[]): number {
+  const openRevisionIds = new Set<string>();
+  revisions.forEach((revision) => {
+    if (revision.status !== 'resolved') {
+      openRevisionIds.add(revision.id);
     }
-  }
-  return counts;
+  });
+  return openRevisionIds.size;
+}
+
+function getRevisionLookupKeys(sceneKey: string): Set<string> {
+  return new Set(revisionService.getRevisionLookupSceneKeys(sceneKey));
 }
 
 export const useRevisionStore = create<RevisionState>((set, get) => ({
   revisions: [],
   revisionCountByScene: {},
+  totalOpenRevisionCount: 0,
   isLoading: false,
   lastLoadTime: null,
 
@@ -60,6 +80,7 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
       set({
         revisions: all,
         revisionCountByScene: buildCountMap(all),
+        totalOpenRevisionCount: countOpenRevisions(all),
         lastLoadTime: Date.now(),
       });
     } catch (err) {
@@ -72,16 +93,25 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   addRevisionOptimistic: (revision) => {
     set((state) => {
       const revisions = [...state.revisions, revision];
-      return { revisions, revisionCountByScene: buildCountMap(revisions) };
+      return {
+        revisions,
+        revisionCountByScene: buildCountMap(revisions),
+        totalOpenRevisionCount: countOpenRevisions(revisions),
+      };
     });
   },
 
   updateRevisionOptimistic: (id, sceneKey, updates) => {
     set((state) => {
+      const lookupKeys = getRevisionLookupKeys(sceneKey);
       const revisions = state.revisions.map((r) =>
-        r.id === id && r.sceneKey === sceneKey ? { ...r, ...updates } : r,
+        r.id === id && lookupKeys.has(r.sceneKey) ? { ...r, ...updates } : r,
       );
-      return { revisions, revisionCountByScene: buildCountMap(revisions) };
+      return {
+        revisions,
+        revisionCountByScene: buildCountMap(revisions),
+        totalOpenRevisionCount: countOpenRevisions(revisions),
+      };
     });
   },
 
@@ -112,10 +142,28 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   },
 
   getRevisionsForScene: (sceneKey) => {
-    return get().revisions.filter((r) => r.sceneKey === sceneKey);
+    const lookupKeys = getRevisionLookupKeys(sceneKey);
+    return get().revisions.filter((r) => lookupKeys.has(r.sceneKey));
   },
 
   getOpenCount: (sceneKey) => {
-    return get().revisionCountByScene[sceneKey] || 0;
+    const lookupKeys = getRevisionLookupKeys(sceneKey);
+    return get().revisions.filter((r) =>
+      lookupKeys.has(r.sceneKey) && r.status !== 'resolved',
+    ).length;
   },
 }));
+
+let lastRevisionContextSignature = buildRevisionContextSignature(useDataStore.getState().episodes);
+
+useDataStore.subscribe((state, previousState) => {
+  if (state.episodes === previousState.episodes) return;
+
+  const nextSignature = buildRevisionContextSignature(state.episodes);
+  if (nextSignature === lastRevisionContextSignature) return;
+
+  lastRevisionContextSignature = nextSignature;
+  useRevisionStore.setState((revisionState) => ({
+    revisionCountByScene: buildCountMap(revisionState.revisions),
+  }));
+});

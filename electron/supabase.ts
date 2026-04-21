@@ -812,6 +812,7 @@ export async function addRevision(
   frameNo: string,
   imageUrl: string,
   department: string,
+  lookupDepartment: string,
   requesterId: string,
   requesterName: string,
   assignee: string,
@@ -820,7 +821,7 @@ export async function addRevision(
   // partUuid가 비어있으면 sceneId(=sceneKey)에서 역조회
   let resolvedPartUuid = partUuid;
   if (!resolvedPartUuid) {
-    resolvedPartUuid = await resolvePartUuid(sceneId, department);
+    resolvedPartUuid = await resolvePartUuid(sceneId, lookupDepartment || department);
   }
 
   const { error } = await supabase.from('comp_revisions').insert({

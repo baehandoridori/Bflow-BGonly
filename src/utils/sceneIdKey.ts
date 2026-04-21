@@ -1,28 +1,50 @@
 /**
- * sceneId 정규화 유틸 — 전체 뷰 병합 전용
+ * sceneId 정규화 유틸 — 병합 / lookup / 리비전 공용
  *
- * BG 와 ACT 는 각각의 시트에서 독립적으로 sceneId 를 부여한다
- * (예: BG "ac001", ACT "a001"). 사용자 입장에서는 같은 "1번 씬" 으로
- * 보이지만 현재 mergedScenes 빌더는 sceneId 완전 일치만 병합한다.
- *
- * 정규화 키는 **첫 숫자 그룹** 을 추출해 반환한다.
- *   "ac001" → "001"
- *   "a001"  → "001"
- *   "001"   → "001"
- *   "bg3-001" → "3"   (첫 숫자 그룹 우선)
- *   "ending" → "ending" (숫자가 없으면 원본 — 안전한 fallback)
- *
- * 설계 결정: 문자 접두사 변형은 극복하되, "3-001" 과 "001" 이 섞여서 엉뚱하게
- * 병합되지 않도록 첫 숫자 그룹만 본다. 완전한 매칭이 아닐 뿐, 대부분의 현실
- * 데이터(접두사만 다른 경우) 를 극복한다.
+ * 같은 파트 안에서 BG "ac001", ACT "a001", 숫자만 있는 "001" 은 같은
+ * "1번 씬" 으로 취급한다. 반면 `v2a001` 처럼 접두사 안에 다른 식별자가
+ * 붙은 경우는 별도 씬으로 남겨야 한다.
  */
 
-const FIRST_DIGIT_GROUP_RE = /\d+/;
+const TRAILING_DIGIT_GROUP_RE = /\d+$/;
+const DIGITS_ONLY_RE = /^\d+$/;
 
-export function normalizeSceneIdKey(sceneId: string | null | undefined): string {
-  if (!sceneId) return '';
-  const m = sceneId.match(FIRST_DIGIT_GROUP_RE);
-  if (!m) return sceneId;
-  // 선행 0 제거로 "001" / "01" / "1" 을 동일 키로 취급
-  return String(Number(m[0]));
+function normalizePartId(partId: string | null | undefined): string {
+  return (partId || '').trim().slice(0, 1).toLowerCase();
+}
+
+export function normalizeSceneIdKey(
+  sceneId: string | null | undefined,
+  partId?: string | null,
+): string {
+  const rawSceneId = (sceneId || '').trim();
+  if (!rawSceneId) return '';
+
+  const lowerSceneId = rawSceneId.toLowerCase();
+  const trailingDigits = lowerSceneId.match(TRAILING_DIGIT_GROUP_RE)?.[0] ?? '';
+  const normalizedDigits = trailingDigits ? String(Number(trailingDigits)) : '';
+  const normalizedPart = normalizePartId(partId);
+
+  if (DIGITS_ONLY_RE.test(lowerSceneId)) return String(Number(lowerSceneId));
+  if (normalizedPart && normalizedDigits && new RegExp(`^${normalizedPart}[a-z]*\\d+$`).test(lowerSceneId)) {
+    return normalizedDigits;
+  }
+
+  return lowerSceneId;
+}
+
+export function buildCanonicalSceneId(
+  partId: string | null | undefined,
+  sceneId: string | null | undefined,
+): string {
+  const normalizedKey = normalizeSceneIdKey(sceneId, partId);
+  if (!normalizedKey) return '';
+
+  if (DIGITS_ONLY_RE.test(normalizedKey)) {
+    const normalizedPart = normalizePartId(partId);
+    const paddedNumber = normalizedKey.padStart(3, '0');
+    return normalizedPart ? `${normalizedPart}${paddedNumber}` : paddedNumber;
+  }
+
+  return normalizedKey;
 }

@@ -162,7 +162,7 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
 
 export function Sidebar() {
   const { currentView, setView, sidebarExpanded, toggleSidebarExpanded } = useAppStore();
-  const totalOpenRevisions = useRevisionStore((s) => Object.values(s.revisionCountByScene).reduce((a, b) => a + b, 0));
+  const totalOpenRevisions = useRevisionStore((s) => s.totalOpenRevisionCount);
   const [showSplash, setShowSplash] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>();

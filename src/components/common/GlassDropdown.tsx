@@ -42,6 +42,10 @@ export function GlassDropdown<T extends string | number = string>({
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const close = useCallback(() => {
+    setOpen(false);
+    setFocusIdx(-1);
+  }, []);
 
   // 전체 옵션 + 일반 옵션 결합
   const allItems = allOption ? [allOption, ...options] : options;
@@ -58,16 +62,25 @@ export function GlassDropdown<T extends string | number = string>({
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
       if (containerRef.current?.contains(target)) return;
-      setOpen(false);
+      close();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  }, [open, close]);
 
   // 키보드 내비게이션
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.isContentEditable ||
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT'
+      ) {
+        return;
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setFocusIdx((p) => Math.min(p + 1, allItems.length - 1));
@@ -77,15 +90,15 @@ export function GlassDropdown<T extends string | number = string>({
       } else if (e.key === 'Enter' && focusIdx >= 0 && focusIdx < allItems.length) {
         e.preventDefault();
         onChange(allItems[focusIdx].value);
-        setOpen(false);
+        close();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        setOpen(false);
+        close();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, focusIdx, allItems, onChange]);
+  }, [open, focusIdx, allItems, onChange, close]);
 
   // 포커스 항목 스크롤
   useEffect(() => {
@@ -133,6 +146,7 @@ export function GlassDropdown<T extends string | number = string>({
     <div ref={containerRef} className={cn('relative', className)}>
       {/* 트리거 버튼 */}
       <button
+        type="button"
         ref={triggerRef}
         onClick={toggle}
         className={cn(
@@ -200,14 +214,18 @@ export function GlassDropdown<T extends string | number = string>({
                 return (
                   <div key={`${String(opt.value)}:${idx}`}>
                     <button
+                      type="button"
                       onClick={() => {
                         onChange(opt.value);
-                        setOpen(false);
+                        close();
                       }}
                       onMouseEnter={() => setFocusIdx(idx)}
                       onContextMenu={
                         onItemContextMenu
-                          ? (e) => onItemContextMenu(opt.value, e)
+                          ? (e) => {
+                              onItemContextMenu(opt.value, e);
+                              close();
+                            }
                           : undefined
                       }
                       className={cn(

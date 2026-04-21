@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast as sonnerToast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -23,7 +23,9 @@ import { ImageModal } from './ImageModal';
 import { CommentPanel } from './CommentPanel';
 import { RevisionPanel } from './RevisionPanel';
 import { useRevisionStore } from '@/stores/useRevisionStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
+import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -85,10 +87,25 @@ export function UnifiedSceneDetailModal({
   const secondaryScene = bgScene && actScene && bgSheetName && actSheetName ? actScene : null;
   const secondaryCommentKey = secondarySheet && secondaryScene ? `${secondarySheet}:${secondaryScene.no}` : '';
 
+  const unifiedSceneId = merged.sceneId || primaryScene?.sceneId || '';
+
   // 리비전 키 — buildSceneKey 가 부서 구분 없이 EP:Part:sceneId 로 해싱되므로 BG/ACT 공용
   const revisionSheetName = primarySheet;
-  const revisionSceneId = primaryScene?.sceneId ?? '';
-  const revisionSceneKey = revisionSheetName && revisionSceneId ? buildSceneKey(revisionSheetName, revisionSceneId) : '';
+  const revisionSceneId = buildMergedRevisionSceneId(merged) || primaryScene?.sceneId || unifiedSceneId;
+  const episodes = useDataStore((s) => s.episodes);
+  const revisionSiblingSceneIds = useMemo(() => {
+    if (!revisionSheetName) return [];
+
+    for (const episode of episodes) {
+      const part = episode.parts.find((candidate) => candidate.sheetName === revisionSheetName);
+      if (part) return part.scenes.map((scene) => scene.sceneId);
+    }
+
+    return [];
+  }, [episodes, revisionSheetName]);
+  const revisionSceneKey = revisionSheetName && revisionSceneId
+    ? buildSceneKey(revisionSheetName, revisionSceneId, { siblingSceneIds: revisionSiblingSceneIds })
+    : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
 
   // UI state
@@ -203,7 +220,7 @@ export function UnifiedSceneDetailModal({
 
   if (!headScene) return null;
 
-  const sceneNoDisplay = headScene.sceneId?.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(headScene.no);
+  const sceneNoDisplay = unifiedSceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || String(headScene.no);
   const showSceneDots = totalMerged > 0 && totalMerged <= 80;
 
   return (
@@ -231,7 +248,7 @@ export function UnifiedSceneDetailModal({
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-sm font-mono text-text-secondary/50">#{sceneNoDisplay}</span>
                 <span className="text-lg font-mono font-bold text-text-primary truncate">
-                  {headScene.sceneId || '(씬번호 없음)'}
+                  {unifiedSceneId || headScene.sceneId || '(씬번호 없음)'}
                 </span>
                 {headScene.layoutId && (
                   <span className="text-xs italic text-text-secondary/50 shrink-0">L#{headScene.layoutId}</span>
@@ -326,7 +343,7 @@ export function UnifiedSceneDetailModal({
                   scene={bgScene}
                   sheetName={bgSheetName}
                   sceneIndex={bgSceneIndex}
-                  // 병합 키(merged.sceneId) 가 아닌 실제 해당 부서 씬의 sceneId 를 전달 —
+                  // 대표 표시 번호(merged.sceneId) 가 아닌 실제 해당 부서 씬의 sceneId 를 전달 —
                   // 정규화 매칭(ac001↔a001) 케이스에서 둘이 다를 수 있어 onToggle 이 no-op 되는 걸 방지.
                   sceneId={bgScene?.sceneId ?? merged.sceneId}
                   onToggle={onToggle}
@@ -438,7 +455,7 @@ export function UnifiedSceneDetailModal({
                 <RevisionPanel
                   sheetName={revisionSheetName}
                   sceneId={revisionSceneId}
-                  department="bg"
+                  siblingSceneIds={revisionSiblingSceneIds}
                   onCountChange={setRevisionCount}
                 />
               </motion.div>

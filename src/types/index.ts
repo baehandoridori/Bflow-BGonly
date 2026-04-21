@@ -77,7 +77,8 @@ export interface Scene {
 // ─── 통합 씬 (BG + ACT 머지) ─────────────────
 
 export interface MergedScene {
-  sceneId: string;
+  sceneId: string;         // 통합 뷰 대표 씬번호 (예: a001)
+  mergedKey: string;       // 통합 뷰 내부 고유 키 (예: a|bg:ac001|act:a001)
   bgScene: Scene | null;
   actScene: Scene | null;
   bgSceneIndex: number;   // bgPart.scenes 내 인덱스 (-1 if absent)
@@ -91,7 +92,7 @@ export type RevisionPriority = 'urgent' | 'high' | 'normal';
 
 export interface CompRevision {
   id: string;
-  sceneKey: string;        // "EP01:A:a001" (에피소드:파트:씬ID)
+  sceneKey: string;        // "EP01:A:1" (에피소드:파트:정규화된 씬번호)
   revisionNo: number;      // 씬별 자동 증가 (Rev.1, Rev.2, ...)
   status: RevisionStatus;
   priority: RevisionPriority;
@@ -476,7 +477,7 @@ export interface ElectronAPI {
   supabaseUpdatePrivateEvent: (id: string, updates: Record<string, unknown>) => Promise<void>;
   supabaseDeletePrivateEvent: (id: string) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
-  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<void>;
+  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
   supabaseReadAllMetadata: () => Promise<unknown[]>;
   supabaseReadMetadata: (type: string, key: string) => Promise<unknown>;

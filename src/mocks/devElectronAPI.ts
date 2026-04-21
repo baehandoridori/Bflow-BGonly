@@ -121,7 +121,7 @@ export function installDevElectronAPI(): void {
     supabaseUpdatePrivateEvent: async () => {},
     supabaseDeletePrivateEvent: async () => {},
     supabaseReadRevisions: async () => [],
-    supabaseAddRevision: async () => {},
+    supabaseAddRevision: async (..._args: unknown[]) => {},
     supabaseUpdateRevision: async () => {},
     supabaseReadAllMetadata: async () => [],
     supabaseReadMetadata: async () => null,

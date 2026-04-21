@@ -47,7 +47,7 @@ export function UnifiedSceneCard({
   onCtrlSelect,
   onShiftSelect,
 }: UnifiedSceneCardProps) {
-  const { sceneId, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
+  const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
 
   const cardRootRef = useRef<HTMLDivElement>(null);
@@ -96,7 +96,7 @@ export function UnifiedSceneCard({
 
   return (
     <motion.div
-      data-scene-id={sceneId}
+      data-scene-id={mergedKey}
       className={cn(
         'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer transition-all duration-200',
         'hover:-translate-y-0.5 hover:border-text-secondary/30',
@@ -128,10 +128,10 @@ export function UnifiedSceneCard({
         <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-sm font-mono text-text-secondary/50">
-              #{primaryScene.sceneId ? (primaryScene.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || primaryScene.no) : primaryScene.no}
+              #{sceneId ? (sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || primaryScene.no) : primaryScene.no}
             </span>
             <span className="text-[15px] font-mono font-bold text-text-primary truncate">
-              <HighlightText text={primaryScene.sceneId || '(씬번호 없음)'} query={searchQuery} />
+              <HighlightText text={sceneId || primaryScene.sceneId || '(씬번호 없음)'} query={searchQuery} />
             </span>
             {layoutId && (
               <span className="text-[11px] italic text-text-secondary/50 shrink-0">
@@ -178,7 +178,8 @@ export function UnifiedSceneCard({
           <DeptSection
             dept="bg"
             scene={bgScene}
-            sceneId={sceneId}
+            // 통합 대표 ID는 표시/선택용이고, 실제 토글은 각 부서의 원본 sceneId 로 저장해야 한다.
+            sceneId={bgScene?.sceneId ?? sceneId}
             sheetName={bgSheetName}
             sceneIndex={bgSceneIndex}
             searchQuery={searchQuery}
@@ -188,7 +189,7 @@ export function UnifiedSceneCard({
           <DeptSection
             dept="acting"
             scene={actScene}
-            sceneId={sceneId}
+            sceneId={actScene?.sceneId ?? sceneId}
             sheetName={actSheetName}
             sceneIndex={actSceneIndex}
             searchQuery={searchQuery}
