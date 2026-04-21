@@ -27,6 +27,9 @@ export interface WeekSidebarProps {
 const ACTIVE_BG = 'rgba(108,92,231,0.15)';
 const ACTIVE_BORDER = 'rgba(108,92,231,0.4)';
 const MAX_DOTS = 3;
+const PRIMARY_TEXT = 'rgb(var(--color-text-primary))';
+const SECONDARY_TEXT = 'rgb(var(--color-text-secondary))';
+const ACCENT = 'rgb(var(--color-accent))';
 
 /* ── 컴포넌트 ────────────────────────────────────────── */
 export default function WeekSidebar({
@@ -122,11 +125,11 @@ function WeekItem({
       <div className="flex items-center justify-between mb-1">
         <span
           className="font-bold"
-          style={{ fontSize: 11, color: isActive ? '#6C5CE7' : '#E8E8EE' }}
+          style={{ fontSize: 11, color: isActive ? ACCENT : PRIMARY_TEXT }}
         >
           {isoWeek}주차
         </span>
-        <span style={{ fontSize: 9, color: '#8B8DA3' }}>{rangeLabel}</span>
+        <span style={{ fontSize: 9, color: SECONDARY_TEXT }}>{rangeLabel}</span>
       </div>
 
       {/* 미니 7-number 날짜 그리드 */}
@@ -136,7 +139,7 @@ function WeekItem({
           const isToday = ds === today;
           const dow = day.getDay();
           const color =
-            dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : '#E8E8EE';
+            dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
 
           return (
             <span
@@ -172,7 +175,7 @@ function WeekItem({
             />
           ))}
           {weekColors.extra > 0 && (
-            <span style={{ fontSize: 8, color: '#8B8DA3' }}>
+            <span style={{ fontSize: 8, color: SECONDARY_TEXT }}>
               +{weekColors.extra}
             </span>
           )}

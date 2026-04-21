@@ -65,6 +65,12 @@ const TRANSITION = {
 
 const DEBOUNCE_MS = 150;
 const VISIBLE_RANGE = 2; // ±2 days shown
+const PRIMARY_TEXT = 'rgb(var(--color-text-primary))';
+const SECONDARY_TEXT = 'rgb(var(--color-text-secondary))';
+const ACCENT = 'rgb(var(--color-accent))';
+const CARD_BG_SOFT = 'rgb(var(--color-bg-card) / 0.58)';
+const CARD_BG_SOFTEST = 'rgb(var(--color-bg-card) / 0.46)';
+const CARD_BORDER = '1px solid rgb(var(--color-bg-border) / 0.28)';
 
 /* ── 컴포넌트 ────────────────────────────────────────── */
 export default function DayScrollView({
@@ -207,7 +213,7 @@ function ActiveDay({
 }) {
   const dow = date.getDay();
   const isToday = dateStr === today;
-  const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : '#E8E8EE';
+  const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
   const label = `${date.getMonth() + 1}/${date.getDate()} ${WEEKDAY_KR[dow]}`;
 
   return (
@@ -231,17 +237,17 @@ function ActiveDay({
           {date.getDate()}
         </span>
         <div className="flex flex-col">
-          <span className="text-sm font-bold" style={{ color: '#6C5CE7' }}>
+          <span className="text-sm font-bold" style={{ color: ACCENT }}>
             {label}
           </span>
-          <span className="text-[10px]" style={{ color: '#8B8DA3' }}>
+          <span className="text-[10px]" style={{ color: SECONDARY_TEXT }}>
             {date.getFullYear()}년 {date.getMonth() + 1}월
           </span>
         </div>
         {isToday && (
           <span
             className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full"
-            style={{ background: 'rgba(108,92,231,0.2)', color: '#6C5CE7' }}
+            style={{ background: 'rgb(var(--color-accent) / 0.2)', color: ACCENT }}
           >
             오늘
           </span>
@@ -251,11 +257,11 @@ function ActiveDay({
       {/* 이벤트 카드 */}
       {events.length === 0 ? (
         <div
-          className="flex flex-col items-center justify-center flex-1 gap-2 cursor-pointer rounded-lg hover:bg-white/5 transition-colors"
+          className="flex flex-col items-center justify-center flex-1 gap-2 cursor-pointer rounded-lg hover:bg-bg-border/20 transition-colors"
           onClick={() => onDateClick?.(dateStr)}
         >
-          <CalendarDays size={36} color="#8B8DA3" />
-          <span className="text-sm" style={{ color: '#8B8DA3' }}>
+          <CalendarDays size={36} color={SECONDARY_TEXT} />
+          <span className="text-sm" style={{ color: SECONDARY_TEXT }}>
             일정이 없습니다
           </span>
         </div>
@@ -271,7 +277,7 @@ function ActiveDay({
           ))}
           {/* 빈 공간 클릭으로 이벤트 생성 */}
           <div
-            className="flex-1 min-h-[40px] cursor-pointer rounded-lg hover:bg-white/5 transition-colors"
+            className="flex-1 min-h-[40px] cursor-pointer rounded-lg hover:bg-bg-border/20 transition-colors"
             onClick={() => onDateClick?.(dateStr)}
           />
         </div>
@@ -319,11 +325,11 @@ function DayEventCard({
       <div className="flex flex-col flex-1 min-w-0">
         <span
           className="font-bold truncate"
-          style={{ fontSize: 12, color: '#E8E8EE' }}
+          style={{ fontSize: 12, color: PRIMARY_TEXT }}
         >
           {event.title}
         </span>
-        <span style={{ fontSize: 10, color: '#8B8DA3' }}>
+        <span style={{ fontSize: 10, color: SECONDARY_TEXT }}>
           {dateRange} · {event.type}
         </span>
       </div>
@@ -354,12 +360,12 @@ function NearDay({
 }) {
   const dow = date.getDay();
   const isToday = dateStr === today;
-  const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : '#E8E8EE';
+  const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
 
   return (
     <div
       className="rounded-lg px-2 py-3 h-full flex flex-col items-center"
-      style={{ background: 'rgba(26,29,39,0.5)' }}
+      style={{ background: CARD_BG_SOFT, border: CARD_BORDER }}
     >
       <span
         className="text-[10px] font-medium mb-1"
@@ -386,7 +392,7 @@ function NearDay({
           />
         ))}
         {events.length > 5 && (
-          <span style={{ fontSize: 7, color: '#8B8DA3' }}>
+          <span style={{ fontSize: 7, color: SECONDARY_TEXT }}>
             +{events.length - 5}
           </span>
         )}
@@ -407,12 +413,12 @@ function FarDay({
 }) {
   const dow = date.getDay();
   const isToday = dateStr === today;
-  const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : '#E8E8EE';
+  const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
 
   return (
     <div
       className="rounded-lg px-1 py-3 h-full flex flex-col items-center justify-center"
-      style={{ background: 'rgba(26,29,39,0.3)' }}
+      style={{ background: CARD_BG_SOFTEST, border: CARD_BORDER }}
     >
       <span
         className="text-sm font-bold w-7 h-7 flex items-center justify-center rounded-full"

@@ -38,8 +38,10 @@ export function GlassDropdown<T extends string | number = string>({
 }: GlassDropdownProps<T>) {
   const [open, setOpen] = useState(false);
   const [focusIdx, setFocusIdx] = useState(-1);
+  const [openUpward, setOpenUpward] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const close = useCallback(() => {
     setOpen(false);
     setFocusIdx(-1);
@@ -58,9 +60,9 @@ export function GlassDropdown<T extends string | number = string>({
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        close();
-      }
+      const target = e.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      close();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -110,11 +112,42 @@ export function GlassDropdown<T extends string | number = string>({
     setFocusIdx(-1);
   }, []);
 
+  const updateMenuPlacement = useCallback(() => {
+    if (!open || !triggerRef.current || typeof window === 'undefined') return;
+
+    const rect = triggerRef.current.getBoundingClientRect();
+    const menuHeight = listRef.current?.getBoundingClientRect().height
+      ?? Math.min(320, allItems.length * 40 + (label ? 34 : 0) + 12);
+    const viewportPadding = 8;
+    const gap = 6;
+    const shouldOpenUp = rect.bottom + gap + menuHeight > window.innerHeight - viewportPadding
+      && rect.top > window.innerHeight - rect.bottom;
+    setOpenUpward(shouldOpenUp);
+  }, [allItems.length, label, open]);
+
+  useEffect(() => {
+    if (!open) {
+      setOpenUpward(false);
+      return;
+    }
+
+    const raf = requestAnimationFrame(updateMenuPlacement);
+    window.addEventListener('resize', updateMenuPlacement);
+    window.addEventListener('scroll', updateMenuPlacement, true);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', updateMenuPlacement);
+      window.removeEventListener('scroll', updateMenuPlacement, true);
+    };
+  }, [open, updateMenuPlacement]);
+
   return (
     <div ref={containerRef} className={cn('relative', className)}>
       {/* 트리거 버튼 */}
       <button
         type="button"
+        ref={triggerRef}
         onClick={toggle}
         className={cn(
           'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium',
@@ -139,12 +172,23 @@ export function GlassDropdown<T extends string | number = string>({
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.96 }}
+            initial={{
+              opacity: 0,
+              y: openUpward ? 8 : -8,
+              scale: 0.96,
+            }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.96 }}
+            exit={{
+              opacity: 0,
+              y: openUpward ? 8 : -8,
+              scale: 0.96,
+            }}
             transition={{ duration: 0.15 }}
-            className="absolute top-full left-0 mt-1.5 z-50"
-            style={{ minWidth }}
+            className={cn(
+              'absolute left-0 z-[80]',
+              openUpward ? 'bottom-full mb-2' : 'top-full mt-2',
+            )}
+            style={{ minWidth: Math.max(minWidth, triggerRef.current?.offsetWidth ?? minWidth) }}
           >
             <div
               ref={listRef}
@@ -157,20 +201,18 @@ export function GlassDropdown<T extends string | number = string>({
                 backdropFilter: 'blur(12px)',
               }}
             >
-              {/* 헤더 라벨 */}
               {label && (
                 <div className="px-3 py-1.5 text-[11px] font-medium text-text-secondary/50 uppercase tracking-wider">
                   {label}
                 </div>
               )}
 
-              {/* 옵션 목록 */}
               {allItems.map((opt, idx) => {
                 const isSelected = value === opt.value;
                 const isFocused = focusIdx === idx;
                 const fullOpt = opt as GlassDropdownOption<T>;
                 return (
-                  <div key={String(opt.value)}>
+                  <div key={`${String(opt.value)}:${idx}`}>
                     <button
                       type="button"
                       onClick={() => {

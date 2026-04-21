@@ -39,6 +39,9 @@ export interface DaySidebarProps {
 const ACTIVE_BG = 'rgba(108,92,231,0.15)';
 const ACTIVE_BORDER = 'rgba(108,92,231,0.4)';
 const MAX_DOTS = 3;
+const PRIMARY_TEXT = 'rgb(var(--color-text-primary))';
+const SECONDARY_TEXT = 'rgb(var(--color-text-secondary))';
+const ACCENT = 'rgb(var(--color-accent))';
 
 /* ── 컴포넌트 ────────────────────────────────────────── */
 export default function DaySidebar({
@@ -87,7 +90,7 @@ export default function DaySidebar({
     >
       {/* 월 라벨 */}
       <div className="px-2 py-1 mb-1">
-        <span className="text-xs font-bold" style={{ color: '#6C5CE7' }}>
+        <span className="text-xs font-bold" style={{ color: ACCENT }}>
           {year}년 {activeMonth + 1}월
         </span>
       </div>
@@ -96,7 +99,7 @@ export default function DaySidebar({
         const isActive = dayIdx === activeDayIndex;
         const isToday = dateStr === today;
         const dow = date.getDay();
-        const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : '#E8E8EE';
+        const dayColor = dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
 
         // 이 날짜의 이벤트 색상 수집
         const dayEvents = events.filter(
@@ -150,7 +153,7 @@ export default function DaySidebar({
                   />
                 ))}
                 {dayEvents.length > MAX_DOTS && (
-                  <span style={{ fontSize: 7, color: '#8B8DA3' }}>
+                  <span style={{ fontSize: 7, color: SECONDARY_TEXT }}>
                     +{dayEvents.length - MAX_DOTS}
                   </span>
                 )}

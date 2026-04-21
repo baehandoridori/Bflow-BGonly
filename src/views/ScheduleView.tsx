@@ -31,6 +31,7 @@ import WeekSidebar from '@/components/calendar/WeekSidebar';
 import DayScrollView from '@/components/calendar/DayScrollView';
 import DaySidebar from '@/components/calendar/DaySidebar';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
+import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
 
 /* ═══════════════════════════════════════════════════
    유틸리티
@@ -318,16 +319,12 @@ function EventBarChip({
         <div
           className="pointer-events-none rounded-2xl px-4 py-3 max-w-[260px]"
           style={{
+            ...tooltipGlassStyle,
             position: 'fixed',
             zIndex: 99999,
             left: Math.min(tooltipPos.x, window.innerWidth - 280),
             top: Math.max(tooltipPos.y - 12, 8),
             transform: 'translate(-50%, -100%)',
-            background: 'linear-gradient(135deg, rgba(30, 34, 48, 0.78) 0%, rgba(20, 22, 32, 0.82) 100%)',
-            backdropFilter: 'blur(24px) saturate(1.8)',
-            WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-            border: '1px solid rgba(255, 255, 255, 0.14)',
-            boxShadow: '0 12px 40px rgb(var(--color-shadow) / var(--shadow-alpha)), 0 0 0 1px rgb(var(--color-glass-highlight) / var(--glass-highlight-alpha)), 0 1px 0 rgb(var(--color-glass-highlight) / calc(var(--glass-highlight-alpha) * 1.5))',
           }}
         >
           <div className="text-[13px] font-semibold text-text-primary truncate">{ev.title}</div>
@@ -362,8 +359,9 @@ function OverflowPopup({
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95, y: -4 }}
       transition={{ duration: 0.15 }}
-      className="fixed z-50 bg-bg-card rounded-xl shadow-2xl border border-bg-border p-3 w-64 max-h-72 overflow-y-auto"
+      className="fixed z-50 rounded-xl p-3 w-64 max-h-72 overflow-y-auto"
       style={{
+        ...floatingGlassStyle,
         left: anchorRect ? Math.min(anchorRect.left, window.innerWidth - 280) : 100,
         top: anchorRect ? Math.min(anchorRect.bottom + 4, window.innerHeight - 300) : 100,
       }}
@@ -577,7 +575,6 @@ function EventCreateModal({
   const [endDate, setEndDate] = useState(editEvent?.endDate ?? initialEndDate ?? initialDate ?? today);
   const [color, setColor] = useState<string>(editEvent?.color ?? EVENT_COLORS[0]);
   const [evType, setEvType] = useState<CalendarEventType>(editEvent?.type ?? 'custom');
-  // 비공개 일정 — 같은 도메인(@studiojbbj.com) 동료에게 제목/메모 숨김
   const [isPrivate, setIsPrivate] = useState<boolean>(!!editEvent?.isPrivate);
 
   // 연결 항목
@@ -664,12 +661,12 @@ function EventCreateModal({
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 40 }}
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-        className="absolute right-0 top-0 bottom-0 z-50 w-[24rem] max-h-full overflow-y-auto border-l border-bg-border"
+        className="absolute right-0 top-0 bottom-0 z-50 w-[24rem] max-h-full overflow-y-auto"
         style={{
-          // 테마 토큰 — 라이트/다크 자동 대응
-          background: 'rgb(var(--color-bg-card) / 0.97)',
-          backdropFilter: 'blur(16px)',
-          boxShadow: '-8px 0 32px rgb(var(--color-shadow) / var(--shadow-alpha))',
+          ...floatingGlassStyle,
+          background: 'rgb(var(--color-bg-card) / 0.96)',
+          borderLeft: '1px solid rgb(var(--color-bg-border) / 0.42)',
+          boxShadow: '-14px 0 36px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.22))',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -827,22 +824,17 @@ function EventCreateModal({
             />
           </div>
 
-          {/* 비공개 일정 토글 — Google Calendar 비연동, 앱(Supabase) 에만 저장 */}
-          <label className="flex items-start gap-2 cursor-pointer select-none bg-bg-primary/50 border border-bg-border/50 rounded-xl p-3">
+          <label className="flex items-start gap-3 rounded-xl border border-bg-border/65 bg-bg-primary/60 px-3.5 py-3 cursor-pointer transition-colors hover:border-accent/30">
             <input
               type="checkbox"
               checked={isPrivate}
               onChange={(e) => setIsPrivate(e.target.checked)}
-              className="mt-0.5 w-4 h-4 rounded accent-accent cursor-pointer shrink-0"
+              className="mt-0.5 h-4 w-4 shrink-0 rounded accent-accent cursor-pointer"
             />
-            <div className="flex-1">
-              <div className="text-[11px] font-semibold text-text-primary flex items-center gap-1">
-                🔒 나만 보기
-              </div>
-              <p className="text-[10px] text-text-secondary/70 leading-relaxed mt-0.5">
-                Google Calendar 에 올라가지 않고 이 앱에만 저장됩니다. 동료에게 전혀 노출되지 않아요
-                <br />
-                <span className="text-text-secondary/50">(다른 기기의 B flow 에서는 본인 계정으로 로그인하면 자동 동기화)</span>
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-text-primary">나만 보기</div>
+              <p className="mt-1 text-[11px] leading-relaxed text-text-secondary/80">
+                Google Calendar에는 올리지 않고 B flow에만 저장합니다. 같은 계정으로 로그인한 본인 기기에서만 계속 보입니다.
               </p>
             </div>
           </label>
@@ -980,7 +972,6 @@ function CalendarGrid({
                     key={di}
                     data-date={dateStr}
                     className={cn(
-                      // overflow-hidden — 드래그 중 가상 바가 셀 밖으로 흘러 아래 주에 걸치는 문제 방지
                       'bg-bg-primary/50 transition-colors duration-100 cursor-pointer relative overflow-hidden border-b border-r border-bg-border/20',
                       isCurMonth ? 'hover:bg-bg-border/15' : 'opacity-30',
                       isToday && 'bg-accent/5',

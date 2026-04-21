@@ -9,6 +9,7 @@ import { resizeBlob } from '@/utils/imageUtils';
 import type { CompRevision, RevisionPriority, RevisionStatus } from '@/types';
 import { formatTime } from '@/utils/formatTime';
 import { STATUS_CONFIG, PRIORITY_CONFIG } from '@/constants/revision';
+import { elevatedGlassStyle, floatingGlassStyle } from '@/utils/glassStyles';
 
 // ─── 상태 뱃지 ───────────────────────────────
 
@@ -73,13 +74,13 @@ function StatusDropdown({
             exit={{ opacity: 0, y: -4, scale: 0.95 }}
             transition={{ duration: 0.15 }}
             className="absolute right-0 top-full mt-1 z-10 rounded-xl overflow-hidden border border-bg-border shadow-xl"
-            style={{ background: 'rgba(26, 29, 39, 0.95)', backdropFilter: 'blur(12px)' }}
+            style={floatingGlassStyle}
           >
             {options.filter(s => s !== currentStatus).map((s) => (
               <button
                 key={s}
                 onClick={() => { onSelect(s); setOpen(false); }}
-                className="flex items-center gap-2 px-3 py-2 text-xs w-full hover:bg-white/5 transition-colors cursor-pointer"
+                className="flex items-center gap-2 px-3 py-2 text-xs w-full hover:bg-bg-border/20 transition-colors cursor-pointer"
               >
                 <StatusBadge status={s} />
               </button>
@@ -126,7 +127,7 @@ function RevisionCard({
       exit={{ opacity: 0, y: 10 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
       className="rounded-xl p-3 border border-bg-border/60"
-      style={{ background: 'rgba(26, 29, 39, 0.8)', backdropFilter: 'blur(12px)' }}
+      style={elevatedGlassStyle}
     >
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-2">

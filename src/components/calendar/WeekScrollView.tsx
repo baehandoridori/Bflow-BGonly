@@ -106,6 +106,11 @@ const TRANSITION = {
 
 const DEBOUNCE_MS = 150;
 const VISIBLE_RANGE = 2; // 활성 주 ± 2주 표시
+const PRIMARY_TEXT = 'rgb(var(--color-text-primary))';
+const SECONDARY_TEXT = 'rgb(var(--color-text-secondary))';
+const ACCENT = 'rgb(var(--color-accent))';
+const COMPACT_BG = 'rgb(var(--color-bg-card) / 0.62)';
+const COMPACT_BORDER = '1px solid rgb(var(--color-bg-border) / 0.3)';
 
 /* ── 컴포넌트 ────────────────────────────────────────── */
 export default function WeekScrollView({
@@ -273,10 +278,10 @@ function ActiveWeek({
     >
       {/* 주차 라벨 */}
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs font-bold" style={{ color: '#6C5CE7' }}>
+        <span className="text-xs font-bold" style={{ color: ACCENT }}>
           {isoWeek}주차
         </span>
-        <span className="text-[10px]" style={{ color: '#8B8DA3' }}>
+        <span className="text-[10px]" style={{ color: SECONDARY_TEXT }}>
           {week[0].getMonth() + 1}.{week[0].getDate()} ~ {week[6].getMonth() + 1}.{week[6].getDate()}
         </span>
       </div>
@@ -288,7 +293,7 @@ function ActiveWeek({
           const isToday = ds === today;
           const dow = day.getDay();
           const color =
-            dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : '#E8E8EE';
+            dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
 
           // 이 날짜에 해당하는 이벤트 수집
           const dayEvents = events.filter(
@@ -298,7 +303,7 @@ function ActiveWeek({
           return (
             <div
               key={ds}
-              className="flex flex-col items-center gap-0.5 cursor-pointer rounded-lg hover:bg-white/5 transition-colors py-0.5"
+              className="flex flex-col items-center gap-0.5 cursor-pointer rounded-lg hover:bg-bg-border/20 transition-colors py-0.5"
               onClick={() => onDateClick?.(ds)}
             >
               <span
@@ -330,7 +335,7 @@ function ActiveWeek({
                   />
                 ))}
                 {dayEvents.length > 3 && (
-                  <span style={{ fontSize: 7, color: '#8B8DA3', lineHeight: '5px' }}>
+                  <span style={{ fontSize: 7, color: SECONDARY_TEXT, lineHeight: '5px' }}>
                     +{dayEvents.length - 3}
                   </span>
                 )}
@@ -381,11 +386,11 @@ function ActiveWeek({
       {/* Event cards */}
       {events.length === 0 ? (
         <div
-          className="flex flex-col items-center justify-center flex-1 gap-2 cursor-pointer rounded-lg hover:bg-white/5 transition-colors"
+          className="flex flex-col items-center justify-center flex-1 gap-2 cursor-pointer rounded-lg hover:bg-bg-border/20 transition-colors"
           onClick={() => onDateClick?.(fmtDate(week[3]))}
         >
-          <CalendarDays size={36} color="#8B8DA3" />
-          <span className="text-sm" style={{ color: '#8B8DA3' }}>
+          <CalendarDays size={36} color={SECONDARY_TEXT} />
+          <span className="text-sm" style={{ color: SECONDARY_TEXT }}>
             이번 주 일정이 없습니다
           </span>
         </div>
@@ -448,11 +453,11 @@ function EventCard({
       <div className="flex flex-col flex-1 min-w-0">
         <span
           className="font-bold truncate"
-          style={{ fontSize: 11, color: '#E8E8EE' }}
+          style={{ fontSize: 11, color: PRIMARY_TEXT }}
         >
           {event.title}
         </span>
-        <span style={{ fontSize: 9, color: '#8B8DA3' }}>
+        <span style={{ fontSize: 9, color: SECONDARY_TEXT }}>
           {dateRange}{spanDays} · {event.type}
         </span>
       </div>
@@ -484,17 +489,17 @@ function CompactWeek({
   showBars: boolean;
 }) {
   return (
-    <div className="rounded-lg px-3 py-2 mb-1" style={{ background: 'rgba(26,29,39,0.5)' }}>
+    <div className="rounded-lg px-3 py-2 mb-1" style={{ background: COMPACT_BG, border: COMPACT_BORDER }}>
       {/* 주차 라벨 */}
       <div className="flex items-center gap-1.5 mb-1">
-        <span className="text-[9px] font-bold" style={{ color: '#8B8DA3' }}>
+        <span className="text-[9px] font-bold" style={{ color: SECONDARY_TEXT }}>
           {isoWeek}주차
         </span>
-        <span className="text-[8px]" style={{ color: '#8B8DA350' }}>
+        <span className="text-[8px]" style={{ color: 'rgb(var(--color-text-secondary) / 0.5)' }}>
           {week[0].getMonth() + 1}.{week[0].getDate()}~{week[6].getMonth() + 1}.{week[6].getDate()}
         </span>
         {showBars && events.length > 0 && (
-          <span className="text-[8px]" style={{ color: '#8B8DA3' }}>
+          <span className="text-[8px]" style={{ color: SECONDARY_TEXT }}>
             · {events.length}건
           </span>
         )}
@@ -505,7 +510,7 @@ function CompactWeek({
           const isToday = ds === today;
           const dow = day.getDay();
           const color =
-            dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : '#E8E8EE';
+            dow === 0 ? '#E17055' : dow === 6 ? '#74B9FF' : PRIMARY_TEXT;
 
           return (
             <div

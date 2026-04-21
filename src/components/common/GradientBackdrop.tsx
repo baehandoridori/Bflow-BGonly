@@ -1,3 +1,5 @@
+import { useAppStore } from '@/stores/useAppStore';
+
 /**
  * 파티클 canvas 뒤, 앱 콘텐츠 뒤에 깔리는 그라데이션 배경.
  * z-index: -1 — 부모가 stacking context를 만들어야 올바르게 보임.
@@ -22,29 +24,26 @@ export function GradientBackdrop({
   enabled?: boolean;
   intensity?: BackdropIntensity;
 }) {
+  const colorMode = useAppStore((s) => s.colorMode);
+  const isLight = colorMode === 'light';
+
+  if (!enabled) return null;
+
   const alphas =
     intensity === 'subtle'
-      ? { a: 0.08, b: 0.06, c: 0.03 }
-      : { a: 0.18, b: 0.15, c: 0.08 };
-
-  // 그라데이션이 켜졌을 때만 3-레이어 radial. 꺼져도 이 컴포넌트가 바닥색(bg-primary)을
-  // 책임지므로, html/body background 를 비워도 안전하다.
-  const gradientImage = enabled
-    ? `
-        radial-gradient(at 20% 10%, rgb(var(--color-accent) / ${alphas.a}) 0%, transparent 50%),
-        radial-gradient(at 80% 90%, rgb(var(--color-accent-sub) / ${alphas.b}) 0%, transparent 50%),
-        radial-gradient(at 50% 50%, rgb(var(--color-accent) / ${alphas.c}) 0%, transparent 60%)
-      `
-    : 'none';
+      ? (isLight ? { a: 0.04, b: 0.03, c: 0.015 } : { a: 0.08, b: 0.06, c: 0.03 })
+      : (isLight ? { a: 0.09, b: 0.07, c: 0.035 } : { a: 0.18, b: 0.15, c: 0.08 });
 
   return (
     <div
       className="fixed inset-0 pointer-events-none"
-      aria-hidden
       style={{
         zIndex: -1,
-        backgroundColor: 'rgb(var(--color-bg-primary))',
-        backgroundImage: gradientImage,
+        background: `
+          radial-gradient(at 20% 10%, rgb(var(--color-accent) / ${alphas.a}) 0%, transparent 50%),
+          radial-gradient(at 80% 90%, rgb(var(--color-accent-sub) / ${alphas.b}) 0%, transparent 50%),
+          radial-gradient(at 50% 50%, rgb(var(--color-accent) / ${alphas.c}) 0%, transparent 60%)
+        `,
       }}
     />
   );
