@@ -24,6 +24,7 @@ import { CommentPanel } from './CommentPanel';
 import { RevisionPanel } from './RevisionPanel';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { buildSceneKey } from '@/services/revisionService';
+import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -89,7 +90,7 @@ export function UnifiedSceneDetailModal({
 
   // 리비전 키 — buildSceneKey 가 부서 구분 없이 EP:Part:sceneId 로 해싱되므로 BG/ACT 공용
   const revisionSheetName = primarySheet;
-  const revisionSceneId = primaryScene?.sceneId ?? unifiedSceneId;
+  const revisionSceneId = buildMergedRevisionSceneId(merged) || primaryScene?.sceneId || unifiedSceneId;
   const revisionSceneKey = revisionSheetName && revisionSceneId ? buildSceneKey(revisionSheetName, revisionSceneId) : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
 
