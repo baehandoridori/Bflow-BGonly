@@ -7,6 +7,7 @@ import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene } from '@/types';
 import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
+import { getAllViewCompletionState, getSingleViewCompletionState } from '@/utils/visibleCompletion';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
@@ -2087,14 +2088,20 @@ export function ScenesView() {
     0
   );
   const overallPct = totalChecks > 0 ? Math.round((doneChecks / totalChecks) * 100) : 0;
-  const isVisibleComplete = selectedDepartment !== 'all' && scenes.length > 0 && overallPct >= 100;
-  const visibleCompletedMeta = useMemo(() => {
-    if (!isVisibleComplete) return null;
-    const lastCompleted = [...scenes]
-      .filter((s) => s.completedAt)
-      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0];
-    return formatCompletedMeta(lastCompleted?.completedAt, lastCompleted?.completedBy);
-  }, [isVisibleComplete, scenes]);
+  const visibleCompletionState = useMemo(
+    () => (selectedDepartment === 'all'
+      ? getAllViewCompletionState(mergedScenes)
+      : getSingleViewCompletionState(scenes)),
+    [mergedScenes, scenes, selectedDepartment],
+  );
+  const isVisibleComplete = visibleCompletionState.isComplete;
+  const visibleCompletedMeta = useMemo(
+    () => formatCompletedMeta(
+      visibleCompletionState.completedMeta?.completedAt,
+      visibleCompletionState.completedMeta?.completedBy,
+    ),
+    [visibleCompletionState.completedMeta],
+  );
   const sceneControlsSummary = useMemo(() => {
     const items = [
       { label: '작업자', value: selectedAssignee ?? '전체' },
@@ -3361,7 +3368,7 @@ export function ScenesView() {
           )}
         </div>
 
-        {selectedDepartment !== 'all' && isVisibleComplete && visibleCompletedMeta && (
+        {isVisibleComplete && visibleCompletedMeta && (
           <div className="flex justify-end">
             <div
               className={cn(
@@ -3432,120 +3439,126 @@ export function ScenesView() {
 
       {/* ─── 'all' 모드: 통합 뷰 (카드/테이블/시트) ─── */}
       {selectedDepartment === 'all' ? (
-        mergedScenes.length === 0 ? (
-          <div className="text-sm text-text-secondary/50 text-center py-8">표시할 씬이 없습니다</div>
-        ) : sceneViewMode === 'sheet' ? (
-          /* 통합 시트 뷰 */
-          <UnifiedSceneSheetView
-            mergedScenes={mergedScenes}
-            bgSheetName={bgPart?.sheetName ?? null}
-            actSheetName={actPart?.sheetName ?? null}
-            commentCounts={commentCounts}
-            searchQuery={searchQuery}
-            selectedSceneIds={selectedSceneIds}
-            sceneGroupMode={sceneGroupMode}
-            onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
-            onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
-            onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-            onOpenMerged={(m) => setDetailMerged(m)}
-            onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
-            onCtrlClick={(id) => {
-              if (bgPart) toggleSelectedScene(`bg:${id}`);
-              if (actPart) toggleSelectedScene(`act:${id}`);
-            }}
-          />
-        ) : (
-          /* 통합 카드 뷰 */
-          mergedLayoutGroups ? (
-            /* 레이아웃별 그룹 */
-            <div className="flex flex-col gap-6">
-              {mergedLayoutGroups.map(([layoutKey, group]) => (
-                <div key={layoutKey}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Layers size={14} className="text-text-secondary/50" />
-                    <span className="text-sm font-semibold text-text-primary">
-                      {layoutKey === '미분류' ? '미분류' : `L#${layoutKey}`}
-                    </span>
-                    <span className="text-[11px] text-text-secondary/40">{group.length}개</span>
-                    <div className="flex-1 h-px bg-bg-border/30" />
+        <div
+          className={cn(
+            'relative flex-1 min-h-0 overflow-hidden rounded-[28px]',
+            isVisibleComplete && 'border border-bg-border/40 bg-bg-card/20',
+          )}
+        >
+          <AnimatePresence>
+            {isVisibleComplete && <PartCompleteOverlay completedMeta={visibleCompletedMeta} />}
+          </AnimatePresence>
+          <div className="relative z-10 flex h-full min-h-0 flex-col">
+            {mergedScenes.length === 0 ? (
+              <div className="text-sm text-text-secondary/50 text-center py-8">표시할 씬이 없습니다</div>
+            ) : sceneViewMode === 'sheet' ? (
+              <UnifiedSceneSheetView
+                mergedScenes={mergedScenes}
+                bgSheetName={bgPart?.sheetName ?? null}
+                actSheetName={actPart?.sheetName ?? null}
+                commentCounts={commentCounts}
+                searchQuery={searchQuery}
+                selectedSceneIds={selectedSceneIds}
+                sceneGroupMode={sceneGroupMode}
+                onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+                onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+                onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                onOpenMerged={(m) => setDetailMerged(m)}
+                onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
+                onCtrlClick={(id) => {
+                  if (bgPart) toggleSelectedScene(`bg:${id}`);
+                  if (actPart) toggleSelectedScene(`act:${id}`);
+                }}
+              />
+            ) : mergedLayoutGroups ? (
+              <div className="flex flex-col gap-6 overflow-auto">
+                {mergedLayoutGroups.map(([layoutKey, group]) => (
+                  <div key={layoutKey}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Layers size={14} className="text-text-secondary/50" />
+                      <span className="text-sm font-semibold text-text-primary">
+                        {layoutKey === '미분류' ? '미분류' : `L#${layoutKey}`}
+                      </span>
+                      <span className="text-[11px] text-text-secondary/40">{group.length}개</span>
+                      <div className="flex-1 h-px bg-bg-border/30" />
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                      {group.map((m) => {
+                        const primary = m.bgScene ?? m.actScene;
+                        if (!primary) return null;
+                        return (
+                          <UnifiedSceneCard
+                            key={m.sceneId}
+                            merged={m}
+                            bgSheetName={bgPart?.sheetName ?? null}
+                            actSheetName={actPart?.sheetName ?? null}
+                            celebrating={celebratingId === m.sceneId}
+                            isHighlighted={highlightSceneId === m.sceneId}
+                            isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
+                            searchQuery={searchQuery}
+                            bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                            actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                            onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+                            onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+                            onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                            onOpenMerged={(merged) => setDetailMerged(merged)}
+                            onCelebrationEnd={clearCelebration}
+                            onSelect={() => {
+                              const ids = new Set<string>();
+                              if (bgPart) ids.add(`bg:${m.sceneId}`);
+                              if (actPart) ids.add(`act:${m.sceneId}`);
+                              setSelectedScenes(ids);
+                            }}
+                            onCtrlSelect={() => {
+                              if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
+                              if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
-                    {group.map((m) => {
-                      const primary = m.bgScene ?? m.actScene;
-                      if (!primary) return null;
-                      return (
-                        <UnifiedSceneCard
-                          key={m.sceneId}
-                          merged={m}
-                          bgSheetName={bgPart?.sheetName ?? null}
-                          actSheetName={actPart?.sheetName ?? null}
-                          celebrating={celebratingId === m.sceneId}
-                          isHighlighted={highlightSceneId === m.sceneId}
-                          isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
-                          searchQuery={searchQuery}
-                          bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
-                          actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
-                          onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
-                          onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
-                          onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                          onOpenMerged={(merged) => setDetailMerged(merged)}
-                          onCelebrationEnd={clearCelebration}
-                          onSelect={() => {
-                            const ids = new Set<string>();
-                            if (bgPart) ids.add(`bg:${m.sceneId}`);
-                            if (actPart) ids.add(`act:${m.sceneId}`);
-                            setSelectedScenes(ids);
-                          }}
-                          onCtrlSelect={() => {
-                            if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
-                            if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            /* 플랫 카드 뷰 */
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
-              {mergedScenes.map((m) => {
-                const primary = m.bgScene ?? m.actScene;
-                if (!primary) return null;
-                return (
-                  <UnifiedSceneCard
-                    key={m.sceneId}
-                    merged={m}
-                    bgSheetName={bgPart?.sheetName ?? null}
-                    actSheetName={actPart?.sheetName ?? null}
-                    celebrating={celebratingId === m.sceneId}
-                    isHighlighted={highlightSceneId === m.sceneId}
-                    isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
-                    searchQuery={searchQuery}
-                    bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
-                    actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
-                    onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
-                    onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
-                    onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                    onOpenMerged={(merged) => setDetailMerged(merged)}
-                    onCelebrationEnd={clearCelebration}
-                    onSelect={() => {
-                      const ids = new Set<string>();
-                      if (bgPart) ids.add(`bg:${m.sceneId}`);
-                      if (actPart) ids.add(`act:${m.sceneId}`);
-                      setSelectedScenes(ids);
-                    }}
-                    onCtrlSelect={() => {
-                      if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
-                      if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
-                    }}
-                  />
-                );
-              })}
-            </div>
-          )
-        )
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 overflow-auto content-start">
+                {mergedScenes.map((m) => {
+                  const primary = m.bgScene ?? m.actScene;
+                  if (!primary) return null;
+                  return (
+                    <UnifiedSceneCard
+                      key={m.sceneId}
+                      merged={m}
+                      bgSheetName={bgPart?.sheetName ?? null}
+                      actSheetName={actPart?.sheetName ?? null}
+                      celebrating={celebratingId === m.sceneId}
+                      isHighlighted={highlightSceneId === m.sceneId}
+                      isSelected={selectedSceneIds.has(`bg:${m.sceneId}`) || selectedSceneIds.has(`act:${m.sceneId}`)}
+                      searchQuery={searchQuery}
+                      bgCommentCount={bgPart ? (commentCounts[`${bgPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                      actCommentCount={actPart ? (commentCounts[`${actPart.sheetName}:${primary.no}`] ?? 0) : 0}
+                      onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
+                      onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
+                      onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
+                      onOpenMerged={(merged) => setDetailMerged(merged)}
+                      onCelebrationEnd={clearCelebration}
+                      onSelect={() => {
+                        const ids = new Set<string>();
+                        if (bgPart) ids.add(`bg:${m.sceneId}`);
+                        if (actPart) ids.add(`act:${m.sceneId}`);
+                        setSelectedScenes(ids);
+                      }}
+                      onCtrlSelect={() => {
+                        if (bgPart) toggleSelectedScene(`bg:${m.sceneId}`);
+                        if (actPart) toggleSelectedScene(`act:${m.sceneId}`);
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       ) : (
       /* ─── 개별 모드: 기존 렌더링 ─── */
       <>
