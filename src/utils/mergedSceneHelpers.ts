@@ -77,11 +77,7 @@ function normalizeRawSceneKey(sceneId: string | null | undefined): string {
 function buildMergedSceneKeyDisambiguator(
   merged: Pick<MergedSceneLike, 'sceneId' | 'bgScene' | 'actScene'>,
 ): string {
-  return [
-    `bg:${normalizeRawSceneKey(merged.bgScene?.sceneId)}`,
-    `act:${normalizeRawSceneKey(merged.actScene?.sceneId)}`,
-    `id:${normalizeRawSceneKey(merged.sceneId)}`,
-  ].join('|');
+  return `id:${normalizeRawSceneKey(merged.sceneId)}`;
 }
 
 function assignMergedSceneKeys<TScene extends SceneLike>(
@@ -118,6 +114,16 @@ export function buildUnifiedSceneIdFromMerged(
     partId,
     merged.bgScene?.sceneId ?? merged.actScene?.sceneId ?? merged.sceneId,
   );
+}
+
+export function buildMergedRevisionSceneId(
+  merged: Pick<MergedSceneLike, 'sceneId' | 'mergedKey' | 'bgScene' | 'actScene'>,
+): string {
+  if (merged.mergedKey.includes('|id:') || merged.mergedKey.includes('|dup:')) {
+    return `merged-${encodeURIComponent(merged.mergedKey)}`;
+  }
+
+  return merged.bgScene?.sceneId ?? merged.actScene?.sceneId ?? merged.sceneId;
 }
 
 export function matchesMergedSceneIdentity(
@@ -242,6 +248,20 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
   });
 
   return mergedList;
+}
+
+export function filterMergedScenesBySourceScenes<TScene extends SceneLike>(
+  mergedScenes: MergedSceneLike<TScene>[],
+  bgScenes: TScene[],
+  actScenes: TScene[],
+): MergedSceneLike<TScene>[] {
+  const bgSceneSet = new Set(bgScenes);
+  const actSceneSet = new Set(actScenes);
+
+  return mergedScenes.filter((merged) =>
+    (merged.bgScene ? bgSceneSet.has(merged.bgScene) : false)
+    || (merged.actScene ? actSceneSet.has(merged.actScene) : false),
+  );
 }
 
 export function getSyncedMergedDetail<TScene extends SceneLike, TMerged extends MergedSceneLike<TScene>>(
