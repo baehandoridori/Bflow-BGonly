@@ -4,6 +4,8 @@ export type RevisionSceneKeyOptions = {
   siblingSceneIds?: readonly (string | null | undefined)[];
 };
 
+const DIGITS_ONLY_RE = /^\d+$/;
+
 function normalizeSceneIdForRevision(sceneId: string, part: string): string {
   return normalizeSceneIdKey(sceneId, part);
 }
@@ -37,6 +39,11 @@ export function normalizeRevisionSceneKey(
   options: RevisionSceneKeyOptions = {},
 ): string {
   const [episode = '', part = '', rawSceneId = ''] = sceneKey.split(':');
+  const trimmedSceneId = rawSceneId.trim();
+  if (DIGITS_ONLY_RE.test(trimmedSceneId)) {
+    return `${episode}:${part}:${normalizeSceneIdForRevision(trimmedSceneId, part)}`;
+  }
+
   const revisionSceneId = buildRevisionSceneIdForScene(rawSceneId, part, options);
   const normalizedSceneId = normalizeSceneIdForRevision(revisionSceneId, part);
   return `${episode}:${part}:${normalizedSceneId}`;
