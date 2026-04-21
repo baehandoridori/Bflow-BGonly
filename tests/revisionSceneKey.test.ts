@@ -26,3 +26,22 @@ test('revision keys preserve distinct scene ids that only share the trailing num
     buildUnifiedRevisionSceneKey('EP01_A_BG', 'v2a001'),
   );
 });
+
+test('revision keys split same-sheet aliases only when the aliases coexist', () => {
+  assert.equal(buildUnifiedRevisionSceneKey('EP01_A_BG', 'ac001'), 'EP01:A:1');
+  assert.equal(buildUnifiedRevisionSceneKey('EP01_A_ACT', 'a001'), 'EP01:A:1');
+
+  const siblingSceneIds = ['ac001', 'a001'];
+  assert.equal(
+    buildUnifiedRevisionSceneKey('EP01_A_BG', 'ac001', { siblingSceneIds }),
+    'EP01:A:raw-ac001',
+  );
+  assert.equal(
+    buildUnifiedRevisionSceneKey('EP01_A_BG', 'a001', { siblingSceneIds }),
+    'EP01:A:raw-a001',
+  );
+  assert.notEqual(
+    buildUnifiedRevisionSceneKey('EP01_A_BG', 'ac001', { siblingSceneIds }),
+    buildUnifiedRevisionSceneKey('EP01_A_BG', 'a001', { siblingSceneIds }),
+  );
+});
