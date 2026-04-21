@@ -3,6 +3,7 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
 // 뷰 lazy 로딩 — 초기 번들에서 제외
 const Dashboard = lazy(() => import('@/views/Dashboard').then(m => ({ default: m.Dashboard })));
 const ScenesView = lazy(() => import('@/views/ScenesView').then(m => ({ default: m.ScenesView })));
@@ -726,6 +727,7 @@ export default function App() {
         const delta = extractSceneDelta(payload.new);
         if (delta) {
           const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
+          useBulkOperationsStore.getState().markConfirmed(delta.uuid); // idempotent no-op if not pending
           if (applied) return;
         }
       }
