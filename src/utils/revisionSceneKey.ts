@@ -15,6 +15,29 @@ export function buildDistinctRevisionSceneId(sceneId: string | null | undefined)
   return normalized ? `raw-${encodeURIComponent(normalized)}` : '';
 }
 
+function parseDistinctRevisionSceneId(sceneId: string): string {
+  const normalized = sceneId.trim().toLowerCase();
+  if (!normalized.startsWith('raw-')) return normalized;
+
+  try {
+    return decodeURIComponent(normalized.slice(4));
+  } catch {
+    return normalized.slice(4);
+  }
+}
+
+export function buildLegacySharedRevisionSceneKey(sceneKey: string): string | null {
+  const [episode = '', part = '', sceneId = ''] = sceneKey.split(':');
+  const normalizedSceneId = sceneId.trim().toLowerCase();
+  if (!normalizedSceneId.startsWith('raw-')) return null;
+
+  const rawSceneId = parseDistinctRevisionSceneId(normalizedSceneId);
+  const legacySceneId = normalizeSceneIdForRevision(rawSceneId, part);
+  if (!legacySceneId || legacySceneId === normalizedSceneId) return null;
+
+  return `${episode}:${part}:${legacySceneId}`;
+}
+
 export function buildRevisionSceneIdForScene(
   sceneId: string,
   part: string,
@@ -47,6 +70,21 @@ export function normalizeRevisionSceneKey(
   const revisionSceneId = buildRevisionSceneIdForScene(rawSceneId, part, options);
   const normalizedSceneId = normalizeSceneIdForRevision(revisionSceneId, part);
   return `${episode}:${part}:${normalizedSceneId}`;
+}
+
+export function buildRevisionSceneKeyLookupKeys(
+  sceneKey: string,
+  options: RevisionSceneKeyOptions = {},
+): string[] {
+  const normalizedSceneKey = normalizeRevisionSceneKey(sceneKey, options);
+  const keys = [normalizedSceneKey];
+  const legacySharedKey = buildLegacySharedRevisionSceneKey(normalizedSceneKey);
+
+  if (legacySharedKey && !keys.includes(legacySharedKey)) {
+    keys.push(legacySharedKey);
+  }
+
+  return keys;
 }
 
 export function buildUnifiedRevisionSceneKey(
