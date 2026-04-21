@@ -4,6 +4,7 @@ import type { SortKey } from '@/stores/useAppStore';
 import type { MergedScene, Part, Scene, ScenesDeptFilter } from '@/types';
 import {
   buildMergedScenes,
+  filterMergedScenesBySourceScenes,
   getSyncedMergedDetail,
 } from '@/utils/mergedSceneHelpers';
 
@@ -56,24 +57,12 @@ export function useUnifiedScenes({
       return [] as MergedScene[];
     }
 
-    return buildMergedScenes({
-      bgScenes,
-      actScenes,
-      bgPartScenes: bgPart?.scenes ?? [],
-      actPartScenes: actPart?.scenes ?? [],
-      mergedScenePartId,
-      sortKey,
-      sortDir,
-    }) as MergedScene[];
+    return filterMergedScenesBySourceScenes(allMergedScenes, bgScenes, actScenes) as MergedScene[];
   }, [
-    actPart?.scenes,
+    allMergedScenes,
     actScenes,
-    bgPart?.scenes,
     bgScenes,
-    mergedScenePartId,
     selectedDepartment,
-    sortDir,
-    sortKey,
   ]);
 
   const [detailMerged, setDetailMerged] = useState<MergedScene | null>(null);
