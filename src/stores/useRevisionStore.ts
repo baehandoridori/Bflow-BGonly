@@ -39,13 +39,11 @@ interface RevisionState {
 }
 
 function buildCountMap(revisions: CompRevision[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const r of revisions) {
-    if (r.status !== 'resolved') {
-      counts[r.sceneKey] = (counts[r.sceneKey] || 0) + 1;
-    }
-  }
-  return counts;
+  return revisionService.buildOpenRevisionCountMap(revisions);
+}
+
+function getRevisionLookupKeys(sceneKey: string): Set<string> {
+  return new Set(revisionService.getRevisionLookupSceneKeys(sceneKey));
 }
 
 export const useRevisionStore = create<RevisionState>((set, get) => ({
@@ -79,8 +77,9 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
 
   updateRevisionOptimistic: (id, sceneKey, updates) => {
     set((state) => {
+      const lookupKeys = getRevisionLookupKeys(sceneKey);
       const revisions = state.revisions.map((r) =>
-        r.id === id && r.sceneKey === sceneKey ? { ...r, ...updates } : r,
+        r.id === id && lookupKeys.has(r.sceneKey) ? { ...r, ...updates } : r,
       );
       return { revisions, revisionCountByScene: buildCountMap(revisions) };
     });
@@ -113,10 +112,14 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
   },
 
   getRevisionsForScene: (sceneKey) => {
-    return get().revisions.filter((r) => r.sceneKey === sceneKey);
+    const lookupKeys = getRevisionLookupKeys(sceneKey);
+    return get().revisions.filter((r) => lookupKeys.has(r.sceneKey));
   },
 
   getOpenCount: (sceneKey) => {
-    return get().revisionCountByScene[sceneKey] || 0;
+    const lookupKeys = getRevisionLookupKeys(sceneKey);
+    return get().revisions.filter((r) =>
+      lookupKeys.has(r.sceneKey) && r.status !== 'resolved',
+    ).length;
   },
 }));
