@@ -732,6 +732,17 @@ export default function App() {
         }
       }
 
+      // scenes DELETE → 대상 UUID 즉시 제거 + 일괄 작업 확정 (full reload 없이 즉시)
+      if (table === 'scenes' && payload?.eventType === 'DELETE') {
+        const deletedId = (payload?.old as { id?: string } | undefined)?.id;
+        if (typeof deletedId === 'string') {
+          useDataStore.getState().removeSceneByUuid(deletedId);
+          useBulkOperationsStore.getState().markConfirmed(deletedId); // idempotent
+          return;
+        }
+        // deletedId 없으면 (REPLICA IDENTITY 특이 상황) 아래 debounced reload로 fallthrough
+      }
+
       // 리비전 변경 → 캐시 무효화 + 스토어 리로드 신호
       if (table === 'comp_revisions') {
         invalidateRevisionsCache();
