@@ -62,9 +62,11 @@ export function buildMergedSceneKey(
   merged: Pick<MergedSceneLike, 'sceneId' | 'bgScene' | 'actScene'>,
 ): string {
   const partPrefix = normalizePartId(partId) || '_';
-  const bgId = (merged.bgScene?.sceneId ?? '').trim() || '-';
-  const actId = (merged.actScene?.sceneId ?? '').trim() || '-';
-  return `${partPrefix}|bg:${bgId}|act:${actId}`;
+  const sceneIdentity = normalizeSceneIdKey(
+    merged.bgScene?.sceneId ?? merged.actScene?.sceneId ?? merged.sceneId,
+    partId,
+  ) || '-';
+  return `${partPrefix}|scene:${sceneIdentity}`;
 }
 
 export function buildUnifiedSceneIdFromMerged(
