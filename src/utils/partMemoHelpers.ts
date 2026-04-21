@@ -86,3 +86,31 @@ export function applyPartMemoToSheets(
 
   return next;
 }
+
+export function rollbackFailedPartMemoSheets(
+  currentPartMemos: Record<string, string>,
+  previousPartMemos: Record<string, string>,
+  failedSheetNames: string[],
+  attemptedMemo: string,
+): Record<string, string> {
+  const next = { ...currentPartMemos };
+  const normalizedAttempt = attemptedMemo.trim();
+
+  failedSheetNames.forEach((sheetName) => {
+    const currentMemo = currentPartMemos[sheetName]?.trim() ?? '';
+    const stillShowingAttempt = normalizedAttempt
+      ? currentMemo === normalizedAttempt
+      : currentMemo === '';
+
+    if (!stillShowingAttempt) return;
+
+    const previousMemo = previousPartMemos[sheetName]?.trim() ?? '';
+    if (previousMemo) {
+      next[sheetName] = previousMemo;
+    } else {
+      delete next[sheetName];
+    }
+  });
+
+  return next;
+}
