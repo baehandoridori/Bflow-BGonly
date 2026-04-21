@@ -135,6 +135,11 @@ export interface UserPreferences {
   // 사이드바
   sidebarExpanded?: boolean;
 
+  // 씬 뷰 UI 상태
+  sceneUi?: {
+    controlsCollapsedByContext?: Record<string, boolean>;
+  };
+
   // 화이트보드 배경색
   whiteboardBgColor?: string;  // 기본값 '#FFFFFF'
 }

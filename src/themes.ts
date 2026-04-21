@@ -264,11 +264,11 @@ export function getLightColors(themeId: string): ThemeColors {
   const accent = preset?.colors.accent ?? THEME_PRESETS[0].colors.accent;
   const accentSub = preset?.colors.accentSub ?? THEME_PRESETS[0].colors.accentSub;
   return {
-    bgPrimary: '225 228 238',     // 카드(흰색)와 충분한 대비 (~30pt gap)
+    bgPrimary: '239 243 250',     // 기존보다 밝고 중성적인 캔버스, 흰 카드와는 여전히 분리
     bgCard: '255 255 255',
-    bgBorder: '180 186 205',      // 보더 강화: 흰 배경 위에서 확실히 보이도록 (~75pt gap)
-    textPrimary: '24 28 38',      // 약간 더 진한 검정
-    textSecondary: '50 58 75',    // 강화: /50 /40 알파에서도 가독성 확보 (기존 70 80 96 → 50 58 75)
+    bgBorder: '188 195 211',      // 라이트 카드 구분은 유지하되 이전보다 덜 무거운 회청색
+    textPrimary: '24 29 40',
+    textSecondary: '78 88 106',   // 회색 계열 보조 텍스트가 라이트 배경에서 너무 가라앉지 않도록 상향
     accent,
     accentSub,
   };

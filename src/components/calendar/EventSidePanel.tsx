@@ -18,6 +18,7 @@ import { EVENT_COLORS } from '@/types/calendar';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { DEPARTMENT_CONFIGS } from '@/types';
+import { floatingGlassStyle } from '@/utils/glassStyles';
 
 // ─── 유틸 ──────────────────────────────────────────
 
@@ -98,7 +99,8 @@ export function EventSidePanel({
   onNavigate,
 }: EventSidePanelProps) {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const { setView } = useAppStore();
+  const setView = useAppStore((s) => s.setView);
+  const colorMode = useAppStore((s) => s.colorMode);
   const [editing, setEditing] = useState(false);
 
   // 편집 드래프트
@@ -142,6 +144,9 @@ export function EventSidePanel({
   const hasLinkedScene = event.type !== 'custom' && event.type !== 'vacation';
   const hasLinkedTodo = !!(event.linkedTodoId || event.id.startsWith('cal_'));
   const dday = calcDDay(event.endDate);
+  const fieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-sm font-semibold text-text-primary outline-none transition-colors';
+  const dateFieldClassName = 'w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2 py-1 text-xs text-text-primary outline-none transition-colors';
+  const labelClassName = 'text-[10px] text-text-secondary/70 font-medium uppercase tracking-wide';
 
   // 연결 정보 텍스트
   const linkedLabel = (() => {
@@ -188,11 +193,10 @@ export function EventSidePanel({
       transition={panelTransition}
       className="absolute right-0 top-0 bottom-0 w-[280px] z-40 flex flex-col"
       style={{
-        background: 'rgba(26,29,39,0.95)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        borderLeft: '1px solid #2D3041',
-        boxShadow: '-8px 0 24px rgba(0,0,0,0.4)',
+        ...floatingGlassStyle,
+        background: 'rgb(var(--color-bg-card) / 0.95)',
+        borderLeft: '1px solid rgb(var(--color-bg-border) / 0.4)',
+        boxShadow: '-12px 0 32px rgb(var(--color-shadow) / calc(var(--shadow-alpha) * 1.2))',
       }}
     >
       {/* ── 컬러 스트라이프 ── */}
@@ -212,7 +216,7 @@ export function EventSidePanel({
             <input
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
-              className="w-full bg-bg-primary border border-bg-border focus:border-accent/50 rounded-md px-2 py-1 text-sm font-semibold text-text-primary outline-none transition-colors"
+              className={fieldClassName}
               autoFocus
             />
           ) : (
@@ -232,27 +236,29 @@ export function EventSidePanel({
       {/* ── 스크롤 바디 ── */}
       <div className="flex-1 overflow-y-auto px-4 pb-4 flex flex-col gap-3">
         {/* 정보 카드 */}
-        <div className="bg-bg-primary/60 rounded-lg border border-bg-border/60 p-3 flex flex-col gap-2.5">
+        <div className="bg-bg-primary/55 rounded-lg border border-bg-border/55 p-3 flex flex-col gap-2.5">
           {/* 날짜 */}
           {editing ? (
             <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] text-text-secondary font-medium uppercase tracking-wide">
+              <label className={labelClassName}>
                 시작일
               </label>
               <input
                 type="date"
                 value={toInputDate(draftStart)}
                 onChange={(e) => setDraftStart(fromInputDate(e.target.value))}
-                className="w-full bg-bg-primary border border-bg-border focus:border-accent/50 rounded-md px-2 py-1 text-xs text-text-primary outline-none transition-colors"
+                className={dateFieldClassName}
+                style={{ colorScheme: colorMode }}
               />
-              <label className="text-[10px] text-text-secondary font-medium uppercase tracking-wide mt-1">
+              <label className={`${labelClassName} mt-1`}>
                 종료일
               </label>
               <input
                 type="date"
                 value={toInputDate(draftEnd)}
                 onChange={(e) => setDraftEnd(fromInputDate(e.target.value))}
-                className="w-full bg-bg-primary border border-bg-border focus:border-accent/50 rounded-md px-2 py-1 text-xs text-text-primary outline-none transition-colors"
+                className={dateFieldClassName}
+                style={{ colorScheme: colorMode }}
               />
             </div>
           ) : (
@@ -285,7 +291,7 @@ export function EventSidePanel({
             {hasLinkedTodo && (
               <span
                 className="text-[10px] px-1.5 py-0.5 rounded-full font-medium inline-flex items-center gap-0.5"
-                style={{ backgroundColor: '#6C5CE720', color: '#A29BFE' }}
+                style={{ backgroundColor: 'rgb(var(--color-accent) / 0.14)', color: 'rgb(var(--color-accent-sub))' }}
               >
                 <CheckSquare size={9} />
                 할일 연동
@@ -319,6 +325,34 @@ export function EventSidePanel({
           )}
         </div>
 
+        {(editing || event.isPrivate) && (
+          <div className="rounded-lg border border-bg-border/55 bg-bg-primary/45 px-3 py-2.5">
+            {editing ? (
+              <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={draftPrivate}
+                  onChange={(e) => setDraftPrivate(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded accent-accent cursor-pointer"
+                />
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold text-text-primary">나만 보기</div>
+                  <p className="mt-1 text-[10px] leading-relaxed text-text-secondary/75">
+                    Google Calendar에는 올리지 않고 B flow에만 저장합니다. 동료에게는 보이지 않습니다.
+                  </p>
+                </div>
+              </label>
+            ) : (
+              <div className="flex items-center gap-2 text-[10px] text-accent/90">
+                <span className="rounded-full border border-accent/25 bg-accent/10 px-2 py-0.5 font-semibold">
+                  나만 보기
+                </span>
+                <span className="text-text-secondary/65">동료에게 전혀 노출되지 않음</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 메모 */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-1.5 text-text-secondary">
@@ -330,7 +364,7 @@ export function EventSidePanel({
               value={draftMemo}
               onChange={(e) => setDraftMemo(e.target.value)}
               rows={4}
-              className="w-full bg-bg-primary border border-bg-border focus:border-accent/50 rounded-md px-2.5 py-2 text-xs text-text-primary outline-none resize-none leading-relaxed transition-colors"
+              className="w-full bg-bg-primary/85 border border-bg-border/70 focus:border-accent/50 rounded-md px-2.5 py-2 text-xs text-text-primary outline-none resize-none leading-relaxed transition-colors"
               placeholder="메모 입력..."
             />
           ) : (
@@ -343,36 +377,6 @@ export function EventSidePanel({
             </div>
           )}
         </div>
-
-        {/* 나만 보기 토글 — 편집 모드 또는 현재 비공개 상태일 때만 표시.
-            Google Calendar 에 올라가지 않고 앱(Supabase) 에만 저장되어 동료에게 전혀 노출되지 않는다. */}
-        {(editing || event.isPrivate) && (
-          <div className="flex items-start gap-2">
-            {editing ? (
-              <label className="flex items-start gap-2 cursor-pointer select-none group">
-                <input
-                  type="checkbox"
-                  checked={draftPrivate}
-                  onChange={(e) => setDraftPrivate(e.target.checked)}
-                  className="mt-0.5 w-3.5 h-3.5 rounded accent-accent cursor-pointer"
-                />
-                <div className="flex-1">
-                  <div className="text-[11px] font-medium text-text-primary flex items-center gap-1">
-                    🔒 나만 보기
-                  </div>
-                  <p className="text-[10px] text-text-secondary/70 leading-relaxed mt-0.5">
-                    Google Calendar 에 올라가지 않고 이 앱에만 저장됩니다. 동료에게 전혀 노출되지 않아요.
-                  </p>
-                </div>
-              </label>
-            ) : (
-              <div className="flex items-center gap-1.5 text-[10px] text-accent/80 bg-accent/10 px-2 py-1 rounded-md">
-                🔒 <span className="font-medium">나만 보기</span>
-                <span className="text-text-secondary/60">— 동료에게 전혀 노출되지 않음</span>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* 작성자 */}
         <div className="flex items-center gap-2 text-text-secondary/60">
@@ -406,14 +410,14 @@ export function EventSidePanel({
           <div className="flex gap-2 pt-1">
             <button
               onClick={handleCancel}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-bg-border/50 text-text-secondary hover:bg-bg-border transition-colors cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-bg-primary/75 text-text-secondary hover:bg-bg-border/50 hover:text-text-primary transition-colors cursor-pointer"
             >
               <XCircle size={13} />
               취소
             </button>
             <button
               onClick={handleSave}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-accent/20 text-accent hover:bg-accent/30 transition-colors cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/20 text-[#6C5CE7] hover:bg-[#6C5CE7]/30 transition-colors cursor-pointer"
             >
               <Save size={13} />
               저장
@@ -425,7 +429,7 @@ export function EventSidePanel({
             <div className="flex gap-2">
               <button
                 onClick={() => setEditing(true)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-bg-border/40 text-text-primary hover:bg-bg-border/60 transition-colors cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-bg-primary/70 text-text-primary hover:bg-bg-border/45 transition-colors cursor-pointer"
               >
                 <Pencil size={12} />
                 편집
@@ -433,7 +437,7 @@ export function EventSidePanel({
               {hasLinkedScene && (
                 <button
                   onClick={() => onNavigate(event)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 transition-colors cursor-pointer"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium bg-[#6C5CE7]/15 text-[#6C5CE7] hover:bg-[#6C5CE7]/25 transition-colors cursor-pointer"
                 >
                   <ExternalLink size={12} />
                   이동

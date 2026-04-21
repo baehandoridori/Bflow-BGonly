@@ -1248,29 +1248,56 @@ export function MyTasksWidget() {
 
     toggleSceneStage(sheetName, scene.sceneId, stage);
 
-    let completedBy: string | undefined;
-    let completedAt: string | undefined;
-    if (newValue) {
-      const afterToggle = { ...scene, [stage]: true };
-      if (afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png) {
-        completedBy = currentUser?.name ?? '알 수 없음';
-        completedAt = new Date().toISOString();
-        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completedBy);
-        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completedAt);
+    const completionMeta = (() => {
+      const prevCompletedBy = scene.completedBy ?? '';
+      const prevCompletedAt = scene.completedAt ?? '';
+      if (newValue) {
+        const afterToggle = { ...scene, [stage]: true };
+        if (!afterToggle.lo || !afterToggle.done || !afterToggle.review || !afterToggle.png) return null;
+        return {
+          nextCompletedBy: currentUser?.name ?? '알 수 없음',
+          nextCompletedAt: new Date().toISOString(),
+          prevCompletedBy,
+          prevCompletedAt,
+        };
       }
+      if (!prevCompletedBy && !prevCompletedAt) return null;
+      return {
+        nextCompletedBy: '',
+        nextCompletedAt: '',
+        prevCompletedBy,
+        prevCompletedAt,
+      };
+    })();
+
+    if (completionMeta) {
+      updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.nextCompletedBy);
+      updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.nextCompletedAt);
     }
 
     try {
-      const { updateCell, updateSceneField } = await import('@/services/supabaseService');
+      const { updateCell, updateSceneCompletionMeta } = await import('@/services/supabaseService');
       await updateCell(sheetName, sceneIndex, stage, newValue, currentUser?.id);
-      if (completedBy) {
-        await updateSceneField(sheetName, sceneIndex, 'completedBy', completedBy).catch(() => {});
-        await updateSceneField(sheetName, sceneIndex, 'completedAt', completedAt!).catch(() => {});
+      if (completionMeta) {
+        await updateSceneCompletionMeta(
+          sheetName,
+          sceneIndex,
+          completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
+            ? {
+                completedBy: completionMeta.nextCompletedBy,
+                completedAt: completionMeta.nextCompletedAt,
+              }
+            : null,
+        ).catch(() => {});
       }
       notifyChange();
     } catch (err) {
       console.error('[MyTasks 토글 실패]', err);
       toggleSceneStage(sheetName, scene.sceneId, stage);
+      if (completionMeta) {
+        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.prevCompletedBy);
+        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.prevCompletedAt);
+      }
     }
   }, [toggleSceneStage, updateSceneFieldOptimistic, currentUser, notifyChange]);
 
