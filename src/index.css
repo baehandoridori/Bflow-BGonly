@@ -454,3 +454,42 @@ input[type="range"]::-webkit-slider-thumb {
     scroll-behavior: auto !important;
   }
 }
+
+/* ─── 일괄 작업 pending/failed 시각 상태 ─── */
+@layer components {
+  @keyframes bflow-pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 0.32; }
+  }
+
+  .bflow-pending-cell,
+  .bflow-pending-card {
+    animation: bflow-pulse 1.2s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  .bflow-pending-failed {
+    opacity: 0.7;
+    outline: 1.5px solid rgb(239, 68, 68);
+    outline-offset: -1px;
+    position: relative;
+    animation: none;
+  }
+
+  .bflow-pending-failed::after {
+    content: '!';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgb(239, 68, 68);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
