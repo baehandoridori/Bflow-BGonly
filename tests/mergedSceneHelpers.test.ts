@@ -5,12 +5,15 @@ import {
   buildMergedScenes,
   buildMergedSceneKey,
   buildAllModeBulkTogglePlans,
+  buildMergedRevisionSceneId,
   getSyncedMergedDetail,
+  filterMergedScenesBySourceScenes,
   buildUnifiedSceneId,
   buildUnifiedSceneIdFromMerged,
   getMergedCommentBadgeCounts,
   matchesMergedSceneIdentity,
 } from '../src/utils/mergedSceneHelpers.ts';
+import { buildUnifiedRevisionSceneKey } from '../src/utils/revisionSceneKey.ts';
 
 test('buildUnifiedSceneId canonicalizes the merged scene to the part-based scene id', () => {
   assert.equal(buildUnifiedSceneId('A', 'ac001'), 'a001');
@@ -268,6 +271,82 @@ test('buildMergedScenes disambiguates duplicate normalized scene aliases in one 
       ],
     },
   ]);
+});
+
+test('filtered merged scene lists preserve full-list disambiguated keys', () => {
+  const acScene = { no: 1, sceneId: 'ac001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+  const aScene = { no: 2, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+  const fullMergedScenes = buildMergedScenes({
+    bgScenes: [acScene, aScene],
+    actScenes: [],
+    bgPartScenes: [acScene, aScene],
+    actPartScenes: [],
+    mergedScenePartId: 'A',
+    sortKey: 'no',
+    sortDir: 'asc',
+  });
+
+  const visibleMergedScenes = filterMergedScenesBySourceScenes(fullMergedScenes, [acScene], []);
+
+  assert.equal(visibleMergedScenes.length, 1);
+  assert.equal(visibleMergedScenes[0].mergedKey, fullMergedScenes[0].mergedKey);
+  assert.notEqual(visibleMergedScenes[0].mergedKey, 'a|scene:1');
+  assert.deepEqual(
+    buildAllModeBulkTogglePlans(
+      new Set([`bg:${visibleMergedScenes[0].mergedKey}`]),
+      fullMergedScenes,
+      'EP01_A_BG',
+      'EP01_A_ACT',
+    ),
+    [
+      {
+        sheetName: 'EP01_A_BG',
+        updates: [{ sceneId: 'ac001', sceneIndex: 0 }],
+      },
+    ],
+  );
+});
+
+test('merged revision ids stay shared normally but split disambiguated alias rows', () => {
+  const sharedMerged = buildMergedScenes({
+    bgScenes: [
+      { no: 1, sceneId: 'ac001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    ],
+    actScenes: [
+      { no: 2, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    ],
+    bgPartScenes: [
+      { no: 1, sceneId: 'ac001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    ],
+    actPartScenes: [
+      { no: 2, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false },
+    ],
+    mergedScenePartId: 'A',
+    sortKey: 'no',
+    sortDir: 'asc',
+  });
+  assert.equal(
+    buildUnifiedRevisionSceneKey('EP01_A_BG', buildMergedRevisionSceneId(sharedMerged[0])),
+    'EP01:A:1',
+  );
+
+  const acScene = { no: 1, sceneId: 'ac001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+  const aScene = { no: 2, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+  const duplicateAliasMerged = buildMergedScenes({
+    bgScenes: [acScene, aScene],
+    actScenes: [],
+    bgPartScenes: [acScene, aScene],
+    actPartScenes: [],
+    mergedScenePartId: 'A',
+    sortKey: 'no',
+    sortDir: 'asc',
+  });
+  const firstRevisionKey = buildUnifiedRevisionSceneKey('EP01_A_BG', buildMergedRevisionSceneId(duplicateAliasMerged[0]));
+  const secondRevisionKey = buildUnifiedRevisionSceneKey('EP01_A_BG', buildMergedRevisionSceneId(duplicateAliasMerged[1]));
+
+  assert.notEqual(firstRevisionKey, secondRevisionKey);
+  assert.match(firstRevisionKey, /^EP01:A:merged-/);
+  assert.match(secondRevisionKey, /^EP01:A:merged-/);
 });
 
 test('buildMergedScenes does not merge versioned ids with the base scene number', () => {
