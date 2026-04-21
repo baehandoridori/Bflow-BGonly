@@ -102,6 +102,10 @@ type RunBulkOpOptions = {
    * key=sceneUuid, value=새 stage 값.
    */
   stageValueByUuid?: Map<string, boolean>;
+  /**
+   * field-edit에서 적용할 필드. 성공 시 store에 반영한다.
+   */
+  fieldsByUuid?: Map<string, Partial<Scene>>;
 };
 
 /**
@@ -150,6 +154,12 @@ export async function runBulkOp(
           }
           if (Object.keys(patch).length > 0) {
             useDataStore.getState().updateSceneByUuid(r.sceneUuid, patch);
+          }
+        }
+        if (kind === 'field-edit' && opts.fieldsByUuid) {
+          const fields = opts.fieldsByUuid.get(r.sceneUuid);
+          if (fields) {
+            useDataStore.getState().updateSceneByUuid(r.sceneUuid, fields);
           }
         }
       } else {

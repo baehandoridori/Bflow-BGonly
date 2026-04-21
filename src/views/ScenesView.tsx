@@ -628,9 +628,10 @@ import {
   batchActions,
   bulkDeleteScenes,
   bulkUpdateSceneStages,
+  bulkUpdateSceneFields,
 } from '@/services/supabaseService';
 import type { BatchAction } from '@/services/supabaseService';
-import type { BulkStageUpdate } from '@/types';
+import type { BulkStageUpdate, BulkFieldUpdate } from '@/types';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
 import {
@@ -2225,6 +2226,39 @@ export function ScenesView() {
     );
 
     clearSelectedScenes();
+  };
+
+  // 일괄 편집: 선택된 씬들의 assignee/memo/layoutId를 RPC로 일괄 갱신 (Tasks 13-17)
+  const handleBulkEditSubmit = async (
+    payload: { assignee?: string; memo?: string; layoutId?: string },
+    selectionSnapshot?: Set<string>,
+  ) => {
+    const fields: BulkFieldUpdate['fields'] = {};
+    if (payload.assignee) fields.assignee = payload.assignee;
+    if (payload.memo) fields.memo = payload.memo;
+    if (payload.layoutId) fields.layoutId = payload.layoutId;
+    if (!fields.assignee && !fields.memo && !fields.layoutId) return;
+
+    const selection = selectionSnapshot ?? selectedSceneIds;
+    const uuids = resolveSelectedUuids(selection, allMergedScenes);
+    if (uuids.length === 0) return;
+
+    const updates: BulkFieldUpdate[] = uuids.map((uuid) => ({
+      sceneUuid: uuid,
+      fields,
+    }));
+
+    const fieldsByUuid = new Map<string, Partial<Scene>>();
+    for (const uuid of uuids) {
+      fieldsByUuid.set(uuid, fields);
+    }
+
+    await runBulkOp(
+      'field-edit',
+      uuids,
+      () => bulkUpdateSceneFields(updates, currentUser?.id ?? ''),
+      { fieldsByUuid },
+    );
   };
 
   const handleAddEpisode = () => {
@@ -3823,69 +3857,20 @@ export function ScenesView() {
                     return;
                   }
 
-                  const batchActionList: BatchAction[] = [];
-
-                  // 복합 키 → { sheetName, rawId } 파싱 헬퍼
-                  const resolveSelection = (id: string): { sheetName: string; rawId: string; scenes: Scene[] } | null => {
-                    if (selectedDepartment === 'all') {
-                      if (id.startsWith('bg:') && bgPart) {
-                        const mergedKey = id.slice(3);
-                        const merged = allMergedScenes.find((scene) => scene.mergedKey === mergedKey);
-                        return {
-                          sheetName: bgPart.sheetName,
-                          rawId: merged?.bgScene?.sceneId ?? mergedKey,
-                          scenes: bgPart.scenes,
-                        };
-                      }
-                      if (id.startsWith('act:') && actPart) {
-                        const mergedKey = id.slice(4);
-                        const merged = allMergedScenes.find((scene) => scene.mergedKey === mergedKey);
-                        return {
-                          sheetName: actPart.sheetName,
-                          rawId: merged?.actScene?.sceneId ?? mergedKey,
-                          scenes: actPart.scenes,
-                        };
-                      }
-                      return null;
-                    }
-                    if (!currentPart) return null;
-                    return { sheetName: currentPart.sheetName, rawId: id, scenes: currentPart.scenes };
-                  };
-
-                  // 낙관적 업데이트 + 배치 액션 수집
-                  selectedSceneIds.forEach((id) => {
-                    const resolved = resolveSelection(id);
-                    if (!resolved) return;
-                    const { sheetName, rawId, scenes: partScenes } = resolved;
-                    const idx = partScenes.findIndex((s) => s.sceneId === rawId);
-                    if (idx < 0) return;
-                    if (assignee) {
-                      updateSceneFieldOptimistic(sheetName, idx, 'assignee', assignee);
-                      batchActionList.push(batchActions.updateSceneField(sheetName, idx, 'assignee', assignee));
-                    }
-                    if (memo) {
-                      updateSceneFieldOptimistic(sheetName, idx, 'memo', memo);
-                      batchActionList.push(batchActions.updateSceneField(sheetName, idx, 'memo', memo));
-                    }
-                    if (layoutId) {
-                      updateSceneFieldOptimistic(sheetName, idx, 'layoutId', layoutId);
-                      batchActionList.push(batchActions.updateSceneField(sheetName, idx, 'layoutId', layoutId));
-                    }
-                  });
-
+                  // 모달 닫기 전에 선택 스냅샷 확보 (clearSelectedScenes 이후엔 비어있음)
+                  const selectionSnapshot = new Set(selectedSceneIds);
                   setBatchEditOpen(false);
                   setBatchAssigneeValue('');
                   clearSelectedScenes();
 
-                  // Phase 0: 배치로 한 번에 전송
-                  if (batchActionList.length > 0) {
-                    batchExecute(batchActionList)
-                      .then(() => syncInBackground())
-                      .catch((err) => {
-                        console.error('[일괄 편집 실패]', err);
-                        syncInBackground();
-                      });
-                  }
+                  void handleBulkEditSubmit(
+                    {
+                      assignee: assignee || undefined,
+                      memo: memo || undefined,
+                      layoutId: layoutId || undefined,
+                    },
+                    selectionSnapshot,
+                  );
                 }}
               >
                 <div>
