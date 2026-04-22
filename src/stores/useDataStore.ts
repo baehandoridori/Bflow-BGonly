@@ -47,6 +47,8 @@ interface DataState {
   deleteEpisodeOptimistic: (episodeNumber: number) => void;
   /** Supabase UUID로 씬 필드 직접 업데이트 (Realtime delta용) */
   updateSceneByUuid: (uuid: string, fields: Partial<Scene>) => boolean;
+  /** UUID로 씬 제거 (일괄 삭제·Realtime DELETE delta용) */
+  removeSceneByUuid: (uuid: string) => boolean;
   /** UUID로 씬 검색 (새 배열 미생성, O(n) loop) */
   findSceneByUuid: (uuid: string) => Scene | undefined;
   /** sceneId(사용자 지정 ID)로 씬 검색 */
@@ -269,6 +271,27 @@ export const useDataStore = create<DataState>((set, get) => ({
         // 변경된 branch만 새 참조 생성
         const newScenes = [...part.scenes];
         newScenes[si] = { ...newScenes[si], ...fields };
+        const newParts = [...ep.parts];
+        newParts[pi] = { ...part, scenes: newScenes };
+        const newEpisodes = [...oldEpisodes];
+        newEpisodes[ei] = { ...ep, parts: newParts };
+        set(applyUpdate(get, newEpisodes));
+        return true;
+      }
+    }
+    return false;
+  },
+
+  removeSceneByUuid: (uuid) => {
+    const oldEpisodes = get().episodes;
+    for (let ei = 0; ei < oldEpisodes.length; ei++) {
+      const ep = oldEpisodes[ei];
+      for (let pi = 0; pi < ep.parts.length; pi++) {
+        const part = ep.parts[pi];
+        const si = part.scenes.findIndex((s) => s.id === uuid);
+        if (si < 0) continue;
+        // 변경된 branch만 새 참조 생성
+        const newScenes = part.scenes.filter((_, i) => i !== si);
         const newParts = [...ep.parts];
         newParts[pi] = { ...part, scenes: newScenes };
         const newEpisodes = [...oldEpisodes];

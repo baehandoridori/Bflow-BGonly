@@ -37,6 +37,7 @@ import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greeting
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
+import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
@@ -721,12 +722,29 @@ export default function App() {
       }
 
       // scenes UPDATE → delta 직접 적용 (full reload 없이 즉시)
+      // 주의: bulk op 확정은 여기서 처리하지 않는다. IPC 응답(runBulkOp)만을 확정 경로로 사용.
+      // (Codex 리뷰 #9) updated_by === me.id 필터만으로는 "같은 사용자의 다른 op" 또는
+      // "다른 기기의 지연된 에코"가 새 op의 pending을 잘못 confirm할 수 있어, op 레벨 correlation
+      // 없이는 Realtime 확정이 안전하지 않다. Realtime은 데이터 스토어 동기화 용도로만 사용.
       if (table === 'scenes' && payload?.eventType === 'UPDATE' && payload?.new) {
         const delta = extractSceneDelta(payload.new);
         if (delta) {
           const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
           if (applied) return;
         }
+      }
+
+      // scenes DELETE → 대상 UUID 즉시 제거 (full reload 없이 즉시)
+      // 주의: bulk op 확정은 IPC 응답에서만 처리. 다른 사용자가 같은 씬을 동시 삭제했을 때
+      //       field-edit/stage-toggle 경로의 pending이 가짜 confirm되는 것을 방지.
+      //       (delete 경로도 RPC 응답에서 removeSceneByUuid를 직접 호출하므로 유실 없음)
+      if (table === 'scenes' && payload?.eventType === 'DELETE') {
+        const deletedId = (payload?.old as { id?: string } | undefined)?.id;
+        if (typeof deletedId === 'string') {
+          useDataStore.getState().removeSceneByUuid(deletedId);
+          return;
+        }
+        // deletedId 없으면 (REPLICA IDENTITY 특이 상황) 아래 debounced reload로 fallthrough
       }
 
       // 리비전 변경 → 캐시 무효화 + 스토어 리로드 신호
@@ -1208,6 +1226,9 @@ export default function App() {
           </Suspense>
         </LazyErrorBoundary>
       )}
+
+      {/* Promise 기반 확인 다이얼로그 호스트 */}
+      <ConfirmDialogHost />
 
       {/* Sonner 토스트 — 테마 색상 연동 + 스르륵 애니메이션 + 호버 펼침 */}
       <Toaster

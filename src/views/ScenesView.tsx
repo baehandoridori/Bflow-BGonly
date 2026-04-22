@@ -8,7 +8,6 @@ import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene } from '@/
 import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import {
-  buildAllModeBulkTogglePlans,
   buildUnifiedSceneId,
   getMergedCommentBadgeCounts,
   matchesMergedSceneIdentity,
@@ -23,6 +22,7 @@ import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
+import { BulkOperationStatus } from '@/components/scenes/BulkOperationStatus';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
@@ -39,14 +39,26 @@ function useLassoSelection(
   containerRef: React.RefObject<HTMLElement | null>,
   cardSelector: string,
   getSceneId: (el: Element) => string | null,
-  onSelectionChange: (ids: Set<string>) => void,
+  /**
+   * @param ids  lasso 영역에 걸린 원본 sceneId 집합 (prefix 없음).
+   * @param shiftKey  mousedown 시점의 Shift 상태. true면 baseline과 union해야 함.
+   * @param baseline  mousedown 시점에 snapshot된 기존 selection (shiftKey=false 또는 getBaselineSelection 미제공이면 빈 Set).
+   */
+  onSelectionChange: (ids: Set<string>, shiftKey: boolean, baseline: Set<string>) => void,
   enabled: boolean,
+  /**
+   * Shift+라쏘 시 mousedown 시점에 기존 selection을 한 번만 snapshot해 baseline으로 고정.
+   * 매 mousemove마다 재읽으면 이전 프레임의 누적 selection이 섞여 "드래그 경로 누적" 버그 발생.
+   */
+  getBaselineSelection?: () => Set<string>,
 ) {
   const [lassoRect, setLassoRect] = useState<LassoRect | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const startScrollRef = useRef<{ top: number; left: number } | null>(null);
   const isDragging = useRef(false);
   const prevIds = useRef<Set<string>>(new Set());
+  const startShiftRef = useRef(false);
+  const baselineRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!enabled) return;
@@ -62,6 +74,12 @@ function useLassoSelection(
       const scrollEl = findScrollParent(target) ?? container;
       startScrollRef.current = { top: scrollEl.scrollTop, left: scrollEl.scrollLeft };
       isDragging.current = false;
+      startShiftRef.current = e.shiftKey;
+      // Shift+라쏘: mousedown 시점의 selection을 여기서 한 번만 snapshot.
+      // 이후 mousemove 내내 이 baseline을 재사용 (누적 버그 방지).
+      baselineRef.current = e.shiftKey && getBaselineSelection
+        ? new Set(getBaselineSelection())
+        : new Set();
 
       const onMouseMove = (me: MouseEvent) => {
         if (!startRef.current || !startScrollRef.current) return;
@@ -90,7 +108,7 @@ function useLassoSelection(
         });
         if (selected.size !== prevIds.current.size || ![...selected].every((id) => prevIds.current.has(id))) {
           prevIds.current = selected;
-          onSelectionChange(selected);
+          onSelectionChange(selected, startShiftRef.current, baselineRef.current);
         }
       };
 
@@ -98,13 +116,16 @@ function useLassoSelection(
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
         if (!isDragging.current) {
-          if (!me.ctrlKey && !me.metaKey) {
-            onSelectionChange(new Set());
+          // 단순 클릭: Ctrl/Meta/Shift 눌려있으면 기존 선택 유지, 아니면 초기화.
+          if (!me.ctrlKey && !me.metaKey && !me.shiftKey) {
+            onSelectionChange(new Set(), false, new Set());
             prevIds.current = new Set();
           }
         }
         startRef.current = null;
         startScrollRef.current = null;
+        startShiftRef.current = false;
+        baselineRef.current = new Set();
         isDragging.current = false;
         setLassoRect(null);
       };
@@ -115,7 +136,7 @@ function useLassoSelection(
 
     container.addEventListener('mousedown', onMouseDown);
     return () => container.removeEventListener('mousedown', onMouseDown);
-  }, [enabled, containerRef, cardSelector, getSceneId, onSelectionChange]);
+  }, [enabled, containerRef, cardSelector, getSceneId, onSelectionChange, getBaselineSelection]);
 
   return { lassoRect, isSelecting: isDragging.current };
 }
@@ -625,9 +646,19 @@ import {
   softDeleteEpisode,
   batchExecute,
   batchActions,
-  bulkUpdateCells,
+  bulkDeleteScenes,
+  bulkUpdateSceneStages,
+  bulkUpdateSceneFields,
 } from '@/services/supabaseService';
 import type { BatchAction } from '@/services/supabaseService';
+import type { BulkStageUpdate, BulkFieldUpdate } from '@/types';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
+import {
+  runBulkOp,
+  resolveSelectedUuids,
+  resolveSelectedScenes,
+} from '@/utils/bulkOperations';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
 import { Confetti } from '@/components/ui/Confetti';
@@ -1448,6 +1479,7 @@ export function ScenesView() {
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
   const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
   const currentUser = useAuthStore((s) => s.currentUser);
+  const isBulkInFlight = useBulkOperationsStore((s) => s.activeOp?.status === 'in-flight');
   const isLight = colorMode === 'light';
 
   // 글로우 CSS 주입 + 하이라이트 자동 해제 (3.6초 후)
@@ -1542,23 +1574,34 @@ export function ScenesView() {
   // 라쏘 드래그 선택
   const gridRef = useRef<HTMLDivElement>(null);
   const getSceneIdFromEl = useCallback((el: Element) => el.getAttribute('data-scene-id'), []);
-  const handleLassoChange = useCallback((ids: Set<string>) => {
-    if (selectedDepartment === 'all') {
-        // 전체 모드: mergedKey → bg:mergedKey + act:mergedKey 양쪽 접두사 추가
-        const prefixed = new Set<string>();
-        ids.forEach((id) => { prefixed.add(`bg:${id}`); prefixed.add(`act:${id}`); });
-      setSelectedScenes(prefixed);
+  const handleLassoChange = useCallback((ids: Set<string>, shiftKey: boolean, baseline: Set<string>) => {
+    // 1) 라쏘 원본 ids를 selectedDepartment에 맞춰 정규화 (전체 모드면 bg:/act: 접두사 부여)
+    const normalize = (raw: Set<string>): Set<string> => {
+      if (selectedDepartment !== 'all') return raw;
+      const prefixed = new Set<string>();
+      raw.forEach((id) => { prefixed.add(`bg:${id}`); prefixed.add(`act:${id}`); });
+      return prefixed;
+    };
+    const normalized = normalize(ids);
+    // 2) Shift+라쏘: 훅이 mousedown 시점에 snapshot한 baseline과 union (경로 누적 방지).
+    if (shiftKey) {
+      setSelectedScenes(new Set<string>([...baseline, ...normalized]));
     } else {
-      setSelectedScenes(ids);
+      setSelectedScenes(normalized);
     }
   }, [setSelectedScenes, selectedDepartment]);
   const isCardView = sceneViewMode === 'card';
+  const getLassoBaseline = useCallback(
+    () => useAppStore.getState().selectedSceneIds,
+    [],
+  );
   const { lassoRect } = useLassoSelection(
     gridRef,
     '[data-scene-id]',
     getSceneIdFromEl,
     handleLassoChange,
     isCardView,
+    getLassoBaseline,
   );
 
   // 파트/에피소드/뷰모드 변경 시 선택 초기화
@@ -2155,160 +2198,128 @@ export function ScenesView() {
     handleToggleForSheet(currentPart.sheetName, sceneId, stage);
   };
 
-  // 단일 파트에 대한 일괄 토글 (내부 헬퍼)
-  const bulkToggleForSheet = async (sheetName: string, rawIds: string[], stage: Stage) => {
-    const latestPart = useDataStore.getState().episodes
-      .flatMap((ep) => ep.parts)
-      .find((p) => p.sheetName === sheetName);
-    if (!latestPart) return;
+  // 일괄 stage 토글: 선택된 씬들을 RPC 한 번에 처리 (Tasks 13-17)
+  const handleBulkStageToggle = async (stage: Stage, onlyDept?: 'bg' | 'acting') => {
+    const targetScenes = resolveSelectedScenes(selectedSceneIds, allMergedScenes, onlyDept, currentPart);
+    if (targetScenes.length === 0) return;
 
-    const updates: { sceneId: string; sceneIndex: number; stage: Stage; newValue: boolean }[] = [];
-    const completionMetas: Array<{
-      sceneId: string;
-      sceneIndex: number;
-      nextCompletedBy: string;
-      nextCompletedAt: string;
-      prevCompletedBy: string;
-      prevCompletedAt: string;
-    }> = [];
-    rawIds.forEach((id) => {
-      const idx = latestPart.scenes.findIndex((s) => s.sceneId === id);
-      if (idx < 0) return;
-      const baseScene = latestPart.scenes[idx];
-      const prevCompletedBy = baseScene.completedBy ?? '';
-      const prevCompletedAt = baseScene.completedAt ?? '';
-      const newValue = !baseScene[stage];
-      updates.push({ sceneId: id, sceneIndex: idx, stage, newValue });
-      if (newValue) {
-        const afterToggle = { ...baseScene, [stage]: true };
-        if (!afterToggle.lo || !afterToggle.done || !afterToggle.review || !afterToggle.png) return;
-        completionMetas.push({
-          sceneId: id,
-          sceneIndex: idx,
-          nextCompletedBy: currentUser?.name ?? '알 수 없음',
-          nextCompletedAt: new Date().toISOString(),
-          prevCompletedBy,
-          prevCompletedAt,
-        });
-        return;
-      }
-      if (prevCompletedBy || prevCompletedAt) {
-        completionMetas.push({
-          sceneId: id,
-          sceneIndex: idx,
-          nextCompletedBy: '',
-          nextCompletedAt: '',
-          prevCompletedBy,
-          prevCompletedAt,
-        });
-      }
-    });
-    if (updates.length === 0) return;
+    const nowIso = new Date().toISOString();
+    const actorName = currentUser?.name ?? '알 수 없음';
 
-    updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
-    completionMetas.forEach((meta) => {
-      updateSceneFieldOptimistic(sheetName, meta.sceneIndex, 'completedBy', meta.nextCompletedBy);
-      updateSceneFieldOptimistic(sheetName, meta.sceneIndex, 'completedAt', meta.nextCompletedAt);
-    });
-    try {
-      await bulkUpdateCells(sheetName, updates.map((u) => ({
-        rowIndex: u.sceneIndex, stage: u.stage, value: u.newValue,
-      })), currentUser?.id);
-      // 복수 변경이므로 snapshot relay로 다른 창에 전달
-      syncInBackground();
-    } catch (err) {
-      console.error('[일괄 토글 실패]', err);
-      updates.forEach((u) => toggleSceneStage(sheetName, u.sceneId, u.stage));
-      completionMetas.forEach((meta) => {
-        updateSceneFieldOptimistic(sheetName, meta.sceneIndex, 'completedBy', meta.prevCompletedBy);
-        updateSceneFieldOptimistic(sheetName, meta.sceneIndex, 'completedAt', meta.prevCompletedAt);
-      });
-      return;
-    }
-
-    if (completionMetas.length > 0) {
-      try {
-        await Promise.all(completionMetas.map((meta) => (
-          updateSceneCompletionMeta(
-            sheetName,
-            meta.sceneIndex,
-            meta.nextCompletedBy && meta.nextCompletedAt
-              ? {
-                  completedBy: meta.nextCompletedBy,
-                  completedAt: meta.nextCompletedAt,
-                }
-              : null,
-          )
-        )));
-      } catch (metaErr) {
-        console.error('[일괄 완료 메타 저장 실패]', metaErr);
-        syncInBackground();
-      }
-    }
-  };
-
-  const bulkToggleResolvedForSheet = async (
-    sheetName: string,
-    rawUpdates: { sceneId: string; sceneIndex: number }[],
-    stage: Stage,
-  ) => {
-    const latestPart = useDataStore.getState().episodes
-      .flatMap((ep) => ep.parts)
-      .find((p) => p.sheetName === sheetName);
-    if (!latestPart) return;
-
-    const updates: { sceneId: string; sceneIndex: number; stage: Stage; newValue: boolean }[] = [];
-    rawUpdates.forEach((rawUpdate) => {
-      let sceneIndex = rawUpdate.sceneIndex;
-      let scene: Scene | undefined = latestPart.scenes[sceneIndex];
-
-      if (!scene || scene.sceneId !== rawUpdate.sceneId) {
-        sceneIndex = latestPart.scenes.findIndex((candidate) => candidate.sceneId === rawUpdate.sceneId);
-        scene = sceneIndex >= 0 ? latestPart.scenes[sceneIndex] : undefined;
-      }
-
-      if (!scene || sceneIndex < 0) return;
-      updates.push({
-        sceneId: scene.sceneId,
-        sceneIndex,
-        stage,
-        newValue: !scene[stage],
-      });
-    });
-
-    if (updates.length === 0) return;
-
-    updates.forEach((update) => toggleSceneStage(sheetName, update.sceneId, update.stage));
-    try {
-      await bulkUpdateCells(sheetName, updates.map((update) => ({
-        rowIndex: update.sceneIndex,
-        stage: update.stage,
-        value: update.newValue,
-      })), currentUser?.id);
-      syncInBackground();
-    } catch (err) {
-      console.error('[일괄 토글 실패]', err);
-      updates.forEach((update) => toggleSceneStage(sheetName, update.sceneId, update.stage));
-    }
-  };
-
-  // 일괄 토글: 선택된 씬들의 특정 단계를 단일 API 호출로 처리
-  const handleBulkToggle = async (sceneIds: Set<string>, stage: Stage, onlyDept?: 'bg' | 'acting') => {
-    if (selectedDepartment === 'all') {
-      const plans = buildAllModeBulkTogglePlans(
-        sceneIds,
-        allMergedScenes,
-        bgPart?.sheetName ?? null,
-        actPart?.sheetName ?? null,
-        onlyDept,
+    const updates: BulkStageUpdate[] = targetScenes.map((s) => {
+      const currentValue = Boolean(s[stage]);
+      const newValue = !currentValue;
+      const wasAllDone = Boolean(s.lo && s.done && s.review && s.png);
+      const afterToggle = { lo: s.lo, done: s.done, review: s.review, png: s.png, [stage]: newValue };
+      const willBeAllDone = Boolean(
+        afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png,
       );
-      for (const plan of plans) {
-        await bulkToggleResolvedForSheet(plan.sheetName, plan.updates, stage);
+
+      // 완료 메타 시맨틱 (BulkStageUpdate 주석 참조):
+      // - 4단계 전체 미완료 → 완료: actor/now UPSERT
+      // - 4단계 전체 완료 → 해제: null 전파하여 metadata 행 DELETE
+      // - 그 외(완료 상태가 바뀌지 않는 토글): undefined로 남겨 메타 건드리지 않음
+      let completedBy: string | null | undefined;
+      let completedAt: string | null | undefined;
+      if (!wasAllDone && willBeAllDone) {
+        completedBy = actorName;
+        completedAt = nowIso;
+      } else if (wasAllDone && !willBeAllDone) {
+        completedBy = null;
+        completedAt = null;
       }
-      return;
+
+      return {
+        sceneUuid: s.id!, // resolveSelectedScenes가 id 있는 것만 반환
+        stage,
+        value: newValue,
+        completedBy,
+        completedAt,
+      };
+    });
+
+    // 로컬 store 반영용 맵 — null(해제)은 빈 문자열로, string(설정)은 값 그대로
+    const completedMetaByUuid = new Map<string, { completedBy: string; completedAt: string }>();
+    const stageValueByUuid = new Map<string, boolean>();
+    for (const u of updates) {
+      stageValueByUuid.set(u.sceneUuid, u.value);
+      if (u.completedBy === null && u.completedAt === null) {
+        completedMetaByUuid.set(u.sceneUuid, { completedBy: '', completedAt: '' });
+      } else if (u.completedBy && u.completedAt) {
+        completedMetaByUuid.set(u.sceneUuid, { completedBy: u.completedBy, completedAt: u.completedAt });
+      }
     }
-    if (!currentPart) return;
-    await bulkToggleForSheet(currentPart.sheetName, [...sceneIds], stage);
+
+    await runBulkOp(
+      'stage-toggle',
+      updates.map((u) => u.sceneUuid),
+      // retry 시 전달받은 uuids 부분집합만 재전송 (이미 성공한 씬의 값 덮어쓰기 방지)
+      (uuidsToSend) => {
+        const set = new Set(uuidsToSend);
+        const subset = updates.filter((u) => set.has(u.sceneUuid));
+        return bulkUpdateSceneStages(subset, currentUser?.id ?? '');
+      },
+      { targetStage: stage, completedMetaByUuid, stageValueByUuid },
+    );
+  };
+
+  // 일괄 삭제: ConfirmDialog → RPC 경유, runBulkOp가 낙관적 제거 처리 (Tasks 13-17)
+  const handleBulkDelete = async () => {
+    const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes, currentPart);
+    if (uuids.length === 0) return;
+
+    const ok = await ConfirmDialog.show({
+      message: `${uuids.length}개의 씬을 삭제하시겠습니까?`,
+      confirmLabel: '삭제',
+      tone: 'danger',
+    });
+    if (!ok) return;
+
+    await runBulkOp(
+      'delete',
+      uuids,
+      (list) => bulkDeleteScenes(list, currentUser?.id ?? ''),
+    );
+
+    clearSelectedScenes();
+  };
+
+  // 일괄 편집: 선택된 씬들의 assignee/memo/layoutId를 RPC로 일괄 갱신 (Tasks 13-17)
+  const handleBulkEditSubmit = async (
+    payload: { assignee?: string; memo?: string; layoutId?: string },
+    selectionSnapshot?: Set<string>,
+  ) => {
+    const fields: BulkFieldUpdate['fields'] = {};
+    if (payload.assignee) fields.assignee = payload.assignee;
+    if (payload.memo) fields.memo = payload.memo;
+    if (payload.layoutId) fields.layoutId = payload.layoutId;
+    if (!fields.assignee && !fields.memo && !fields.layoutId) return;
+
+    const selection = selectionSnapshot ?? selectedSceneIds;
+    const uuids = resolveSelectedUuids(selection, allMergedScenes, currentPart);
+    if (uuids.length === 0) return;
+
+    const updates: BulkFieldUpdate[] = uuids.map((uuid) => ({
+      sceneUuid: uuid,
+      fields,
+    }));
+
+    const fieldsByUuid = new Map<string, Partial<Scene>>();
+    for (const uuid of uuids) {
+      fieldsByUuid.set(uuid, fields);
+    }
+
+    await runBulkOp(
+      'field-edit',
+      uuids,
+      // retry 시 전달받은 uuids 부분집합만 재전송
+      (uuidsToSend) => {
+        const set = new Set(uuidsToSend);
+        const subset = updates.filter((u) => set.has(u.sceneUuid));
+        return bulkUpdateSceneFields(subset, currentUser?.id ?? '');
+      },
+      { fieldsByUuid },
+    );
   };
 
   const handleAddEpisode = () => {
@@ -3746,6 +3757,9 @@ export function ScenesView() {
           }}
         />
       )}
+
+      {/* 일괄 작업 상태 floating 카드 */}
+      <BulkOperationStatus />
       </div>{/* 진행도 + 씬 목록 영역 끝 */}
 
       {/* 일괄 액션 바 (선택된 씬이 있을 때) */}
@@ -3780,8 +3794,9 @@ export function ScenesView() {
                   {STAGES.map((stage) => (
                     <button
                       key={`bg-${stage}`}
-                      onClick={() => handleBulkToggle(selectedSceneIds, stage, 'bg')}
-                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap"
+                      onClick={() => handleBulkStageToggle(stage, 'bg')}
+                      disabled={isBulkInFlight}
+                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{
                         backgroundColor: `${DEPARTMENT_CONFIGS.bg.stageColors[stage]}20`,
                         color: DEPARTMENT_CONFIGS.bg.stageColors[stage],
@@ -3799,8 +3814,9 @@ export function ScenesView() {
                   {STAGES.map((stage) => (
                     <button
                       key={`act-${stage}`}
-                      onClick={() => handleBulkToggle(selectedSceneIds, stage, 'acting')}
-                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap"
+                      onClick={() => handleBulkStageToggle(stage, 'acting')}
+                      disabled={isBulkInFlight}
+                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{
                         backgroundColor: `${DEPARTMENT_CONFIGS.acting.stageColors[stage]}20`,
                         color: DEPARTMENT_CONFIGS.acting.stageColors[stage],
@@ -3816,8 +3832,9 @@ export function ScenesView() {
               STAGES.map((stage) => (
                 <button
                   key={stage}
-                  onClick={() => handleBulkToggle(selectedSceneIds, stage)}
-                  className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap"
+                  onClick={() => handleBulkStageToggle(stage)}
+                  disabled={isBulkInFlight}
+                  className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
                     backgroundColor: `${deptConfig.stageColors[stage]}20`,
                     color: deptConfig.stageColors[stage],
@@ -3834,7 +3851,8 @@ export function ScenesView() {
             {/* 일괄 편집 */}
             <button
               onClick={() => setBatchEditOpen(true)}
-              className="h-7 px-3 text-[11px] font-medium rounded-md bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20 transition-colors cursor-pointer leading-none whitespace-nowrap"
+              disabled={isBulkInFlight}
+              className="h-7 px-3 text-[11px] font-medium rounded-md bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Pencil size={12} className="inline mr-1 align-middle" />
               편집
@@ -3842,75 +3860,9 @@ export function ScenesView() {
 
             {/* 일괄 삭제 */}
             <button
-              onClick={() => {
-                if (!confirm(`${selectedSceneIds.size}개 씬을 삭제하시겠습니까?`)) return;
-                const prevEpisodes = useDataStore.getState().episodes;
-
-                type DeletePlan = { sheetName: string; entries: { index: number; uuid: string }[] };
-                const plans: DeletePlan[] = [];
-                if (selectedDepartment === 'all') {
-                  const collectFromMerged = (prefix: 'bg' | 'act') => {
-                    const sheetName = prefix === 'bg' ? bgPart?.sheetName : actPart?.sheetName;
-                    if (!sheetName) return null;
-                    const entries: { index: number; uuid: string }[] = [];
-                    selectedSceneIds.forEach((sid) => {
-                      if (!sid.startsWith(`${prefix}:`)) return;
-                      const mergedKey = sid.slice(prefix.length + 1);
-                      const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
-                      if (!merged) return;
-                      const targetScene = prefix === 'bg' ? merged.bgScene : merged.actScene;
-                      const targetIndex = prefix === 'bg' ? merged.bgSceneIndex : merged.actSceneIndex;
-                      if (!targetScene?.id || targetIndex < 0) return;
-                      entries.push({ index: targetIndex, uuid: targetScene.id });
-                    });
-                    entries.sort((a, b) => b.index - a.index);
-                    return entries.length > 0 ? { sheetName, entries } : null;
-                  };
-
-                  const bgPlan = collectFromMerged('bg');
-                  if (bgPlan) plans.push(bgPlan);
-                  const actPlan = collectFromMerged('act');
-                  if (actPlan) plans.push(actPlan);
-                } else if (currentPart) {
-                  const entries = [...selectedSceneIds]
-                    .map((id) => {
-                      const index = currentPart.scenes.findIndex((scene) => scene.sceneId === id);
-                      const uuid = index >= 0 ? currentPart.scenes[index]?.id : undefined;
-                      return index >= 0 && uuid ? { index, uuid } : null;
-                    })
-                    .filter((entry): entry is { index: number; uuid: string } => !!entry)
-                    .sort((a, b) => b.index - a.index);
-                  if (entries.length > 0) {
-                    plans.push({ sheetName: currentPart.sheetName, entries });
-                  }
-                }
-
-                if (plans.length === 0) {
-                  sonnerToast.error('삭제할 씬 정보를 찾을 수 없습니다.');
-                  return;
-                }
-
-                plans.forEach(({ sheetName, entries }) => {
-                  entries.forEach(({ index }) => deleteSceneOptimistic(sheetName, index));
-                });
-                clearSelectedScenes();
-
-                (async () => {
-                  try {
-                    const actions = plans.flatMap(({ entries }) =>
-                      entries.map(({ uuid }) => batchActions.deleteSceneByUuid(uuid))
-                    );
-                    await batchExecute(actions);
-                    syncInBackground();
-                  } catch (err) {
-                    console.error('[일괄 삭제 실패]', err);
-                    useDataStore.getState().setEpisodes(prevEpisodes);
-                    sonnerToast.error(`일괄 삭제 실패: ${(err as Error).message}`);
-                    syncInBackground();
-                  }
-                })();
-              }}
-              className="h-7 px-3 text-[11px] font-medium rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors cursor-pointer leading-none whitespace-nowrap"
+              onClick={handleBulkDelete}
+              disabled={isBulkInFlight}
+              className="h-7 px-3 text-[11px] font-medium rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Trash2 size={12} className="inline mr-1 align-middle" />
               삭제
@@ -3966,69 +3918,20 @@ export function ScenesView() {
                     return;
                   }
 
-                  const batchActionList: BatchAction[] = [];
-
-                  // 복합 키 → { sheetName, rawId } 파싱 헬퍼
-                  const resolveSelection = (id: string): { sheetName: string; rawId: string; scenes: Scene[] } | null => {
-                    if (selectedDepartment === 'all') {
-                      if (id.startsWith('bg:') && bgPart) {
-                        const mergedKey = id.slice(3);
-                        const merged = allMergedScenes.find((scene) => scene.mergedKey === mergedKey);
-                        return {
-                          sheetName: bgPart.sheetName,
-                          rawId: merged?.bgScene?.sceneId ?? mergedKey,
-                          scenes: bgPart.scenes,
-                        };
-                      }
-                      if (id.startsWith('act:') && actPart) {
-                        const mergedKey = id.slice(4);
-                        const merged = allMergedScenes.find((scene) => scene.mergedKey === mergedKey);
-                        return {
-                          sheetName: actPart.sheetName,
-                          rawId: merged?.actScene?.sceneId ?? mergedKey,
-                          scenes: actPart.scenes,
-                        };
-                      }
-                      return null;
-                    }
-                    if (!currentPart) return null;
-                    return { sheetName: currentPart.sheetName, rawId: id, scenes: currentPart.scenes };
-                  };
-
-                  // 낙관적 업데이트 + 배치 액션 수집
-                  selectedSceneIds.forEach((id) => {
-                    const resolved = resolveSelection(id);
-                    if (!resolved) return;
-                    const { sheetName, rawId, scenes: partScenes } = resolved;
-                    const idx = partScenes.findIndex((s) => s.sceneId === rawId);
-                    if (idx < 0) return;
-                    if (assignee) {
-                      updateSceneFieldOptimistic(sheetName, idx, 'assignee', assignee);
-                      batchActionList.push(batchActions.updateSceneField(sheetName, idx, 'assignee', assignee));
-                    }
-                    if (memo) {
-                      updateSceneFieldOptimistic(sheetName, idx, 'memo', memo);
-                      batchActionList.push(batchActions.updateSceneField(sheetName, idx, 'memo', memo));
-                    }
-                    if (layoutId) {
-                      updateSceneFieldOptimistic(sheetName, idx, 'layoutId', layoutId);
-                      batchActionList.push(batchActions.updateSceneField(sheetName, idx, 'layoutId', layoutId));
-                    }
-                  });
-
+                  // 모달 닫기 전에 선택 스냅샷 확보 (clearSelectedScenes 이후엔 비어있음)
+                  const selectionSnapshot = new Set(selectedSceneIds);
                   setBatchEditOpen(false);
                   setBatchAssigneeValue('');
                   clearSelectedScenes();
 
-                  // Phase 0: 배치로 한 번에 전송
-                  if (batchActionList.length > 0) {
-                    batchExecute(batchActionList)
-                      .then(() => syncInBackground())
-                      .catch((err) => {
-                        console.error('[일괄 편집 실패]', err);
-                        syncInBackground();
-                      });
-                  }
+                  void handleBulkEditSubmit(
+                    {
+                      assignee: assignee || undefined,
+                      memo: memo || undefined,
+                      layoutId: layoutId || undefined,
+                    },
+                    selectionSnapshot,
+                  );
                 }}
               >
                 <div>

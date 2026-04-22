@@ -694,7 +694,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
   readAllEpisodes as sbReadAllEpisodes,
@@ -710,6 +710,8 @@ import {
   deleteScene as sbDeleteScene,
   updateSceneStage as sbUpdateSceneStage,
   bulkUpdateSceneStages as sbBulkUpdateSceneStages,
+  bulkDeleteScenes as sbBulkDeleteScenes,
+  bulkUpdateSceneFields as sbBulkUpdateSceneFields,
   updateSceneField as sbUpdateSceneField,
   readUsers as sbReadUsers,
   addUser as sbAddUser,
@@ -739,7 +741,7 @@ import {
   deletePrivateEvent as sbDeletePrivateEvent,
   getPrivateEventOwner as sbGetPrivateEventOwner,
 } from './supabase';
-import type { SupabaseUser } from './supabase';
+import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
 
 // ─── Supabase IPC 에러 래퍼 ───
@@ -803,8 +805,47 @@ ipcMain.handle('supabase:delete-scene', wrapIpc(async (_e: unknown, sceneUuid: s
 ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => {
   await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
 }));
-ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => {
-  await sbBulkUpdateSceneStages(updates, updatedBy);
+ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: BulkStageUpdate[], updatedBy: string) => {
+  const results = await sbBulkUpdateSceneStages(updates, updatedBy);
+  for (const u of updates) {
+    const r = results.find((x) => x.sceneUuid === u.sceneUuid);
+    if (!r?.success) continue;
+    // stage boolean broadcast
+    broadcastSceneUpdate(u.sceneUuid, u.stage, u.value, updatedBy);
+    // 완료 메타(scene-completion metadata) 변경 broadcast — Codex 리뷰 #11.
+    // metadata 테이블은 Realtime 구독 대상이 아니므로, 피어 UI가 completedBy/At을
+    // 즉시 반영할 수 있도록 scene-field-update 이벤트로 별도 전파한다.
+    // undefined = 변경 없음(미전송), null = clear(빈 문자열 전송), string = set.
+    if (u.completedBy !== undefined) {
+      broadcastSceneFieldUpdate(u.sceneUuid, 'completedBy', u.completedBy ?? '', updatedBy);
+    }
+    if (u.completedAt !== undefined) {
+      broadcastSceneFieldUpdate(u.sceneUuid, 'completedAt', u.completedAt ?? '', updatedBy);
+    }
+  }
+  return results;
+}));
+ipcMain.handle('supabase:bulk-delete-scenes', wrapIpc(async (_e: unknown, sceneUuids: string[], deletedBy: string) => {
+  const results = await sbBulkDeleteScenes(sceneUuids, deletedBy);
+  // 단일 deleteScene과 parity 유지를 위해 성공 시 data-change broadcast — Codex 리뷰 #12.
+  // Realtime 끊긴 상태의 피어가 broadcast-triggered reload로 동기화할 수 있도록 한다.
+  if (results.some((r) => r.success)) {
+    broadcastDataChange('scenes', 'DELETE', deletedBy);
+  }
+  return results;
+}));
+ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, updates: BulkFieldUpdate[], updatedBy: string) => {
+  const results = await sbBulkUpdateSceneFields(updates, updatedBy);
+  for (const u of updates) {
+    const r = results.find((x) => x.sceneUuid === u.sceneUuid);
+    if (!r?.success) continue;
+    for (const [key, value] of Object.entries(u.fields)) {
+      if (value !== undefined) {
+        broadcastSceneFieldUpdate(u.sceneUuid, key, value, updatedBy);
+      }
+    }
+  }
+  return results;
 }));
 ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneUuid: string, field: string, value: string, senderId?: string) => {
   await sbUpdateSceneField(sceneUuid, field, value, senderId);

@@ -3,7 +3,10 @@
  * window.electronAPI → IPC → 메인 프로세스
  */
 
-import type { Episode, Stage } from '../types';
+import type { Episode, Stage, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from '../types';
+
+// 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
+export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
 
 // 타입은 src/types/index.ts의 ElectronAPI 인터페이스에 정의됨
 
@@ -68,11 +71,35 @@ export async function updateSceneStageInSupabase(sceneUuid: string, stage: Stage
   await window.electronAPI.supabaseUpdateSceneStage(sceneUuid, stage, value, updatedBy);
 }
 
-export async function bulkUpdateSceneStagesInSupabase(
-  updates: { sceneUuid: string; stage: string; value: boolean }[],
-  updatedBy?: string,
-): Promise<void> {
-  await window.electronAPI.supabaseBulkUpdateSceneStages(updates, updatedBy);
+/**
+ * 일괄 단계 토글 — RPC `bulk_update_scene_stages` 경유.
+ * 각 항목별 per-row 결과(BulkUpdateResult)를 반환해 부분 실패 처리 가능.
+ */
+export async function bulkUpdateSceneStages(
+  updates: BulkStageUpdate[],
+  updatedBy: string,
+): Promise<BulkUpdateResult[]> {
+  return window.electronAPI.supabaseBulkUpdateSceneStages(updates, updatedBy);
+}
+
+/**
+ * 일괄 씬 삭제 — RPC `bulk_delete_scenes` 경유.
+ */
+export async function bulkDeleteScenes(
+  sceneUuids: string[],
+  deletedBy: string,
+): Promise<BulkUpdateResult[]> {
+  return window.electronAPI.supabaseBulkDeleteScenes(sceneUuids, deletedBy);
+}
+
+/**
+ * 일괄 필드 수정 — RPC `bulk_update_scene_fields` 경유.
+ */
+export async function bulkUpdateSceneFields(
+  updates: BulkFieldUpdate[],
+  updatedBy: string,
+): Promise<BulkUpdateResult[]> {
+  return window.electronAPI.supabaseBulkUpdateSceneFields(updates, updatedBy);
 }
 
 export async function updateSceneFieldInSupabase(sceneUuid: string, field: string, value: string): Promise<void> {
@@ -184,18 +211,6 @@ export async function updateCell(
 ): Promise<void> {
   const uuid = resolveSceneUuid(sheetName, rowIndex);
   await window.electronAPI.supabaseUpdateSceneStage(uuid, stage, value, updatedBy);
-}
-
-/** 다건 체크박스 업데이트 */
-export async function bulkUpdateCells(
-  sheetName: string, updates: { rowIndex: number; stage: string; value: boolean }[], updatedBy?: string,
-): Promise<void> {
-  const mapped = updates.map((u) => ({
-    sceneUuid: resolveSceneUuid(sheetName, u.rowIndex),
-    stage: u.stage,
-    value: u.value,
-  }));
-  await window.electronAPI.supabaseBulkUpdateSceneStages(mapped, updatedBy);
 }
 
 /** 에피소드 추가 */

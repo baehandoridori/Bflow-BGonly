@@ -7,6 +7,19 @@ import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Stage, Department } from '@/types';
 import { HighlightText } from '@/components/common/HighlightText';
 import { Confetti } from '@/components/ui/Confetti';
+import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
+
+// 씬 UUID에 대한 현재 일괄 작업 상태(pending / failed)를 조회
+function getPendingState(
+  op: PendingOp | null,
+  sceneUuid: string | undefined,
+): { kind: 'pending' } | { kind: 'failed'; error: string } | null {
+  if (!op || !sceneUuid) return null;
+  const failed = op.failedItems.find((f) => f.sceneUuid === sceneUuid);
+  if (failed) return { kind: 'failed', error: failed.error };
+  if (op.pendingSceneUuids.has(sceneUuid)) return { kind: 'pending' };
+  return null;
+}
 
 interface UnifiedSceneCardProps {
   merged: MergedScene;
@@ -52,6 +65,20 @@ export function UnifiedSceneCard({
 
   const cardRootRef = useRef<HTMLDivElement>(null);
   const prevHighlightedRef = useRef(false);
+
+  // 일괄 작업 상태 구독: delete/field-edit일 때 카드 전체, stage-toggle일 때 단계 셀에만 적용
+  const activeOp = useBulkOperationsStore((s) => s.activeOp);
+
+  // delete/field-edit 작업 진행 중 → 카드 전체 pending/failed 표시
+  const cardWholePendingClass = (() => {
+    if (!activeOp || (activeOp.kind !== 'delete' && activeOp.kind !== 'field-edit')) return '';
+    const bgState = getPendingState(activeOp, bgScene?.id);
+    const actState = getPendingState(activeOp, actScene?.id);
+    // failed가 하나라도 있으면 failed 우선 표시
+    if (bgState?.kind === 'failed' || actState?.kind === 'failed') return 'bflow-pending-failed';
+    if (bgState?.kind === 'pending' || actState?.kind === 'pending') return 'bflow-pending-card';
+    return '';
+  })();
 
   useEffect(() => {
     if (isHighlighted && !prevHighlightedRef.current) {
@@ -102,6 +129,7 @@ export function UnifiedSceneCard({
         'hover:-translate-y-0.5 hover:border-text-secondary/30',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
+        cardWholePendingClass,
       )}
       style={{
         boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
@@ -185,6 +213,7 @@ export function UnifiedSceneCard({
             searchQuery={searchQuery}
             onToggle={onToggle}
             onDelete={onDelete}
+            activeOp={activeOp}
           />
           <DeptSection
             dept="acting"
@@ -195,6 +224,7 @@ export function UnifiedSceneCard({
             searchQuery={searchQuery}
             onToggle={onToggle}
             onDelete={onDelete}
+            activeOp={activeOp}
           />
         </div>
 
@@ -216,6 +246,7 @@ function DeptSection({
   searchQuery,
   onToggle,
   onDelete,
+  activeOp,
 }: {
   dept: Department;
   scene: import('@/types').Scene | null;
@@ -225,8 +256,17 @@ function DeptSection({
   searchQuery?: string;
   onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
   onDelete: (sheetName: string, sceneIndex: number) => void;
+  activeOp: PendingOp | null;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
+
+  // stage-toggle 작업에서 이 씬의 targetStage 셀에만 pending/failed 스타일 적용
+  const stageCellPendingClass = (stage: Stage): string => {
+    if (!activeOp || activeOp.kind !== 'stage-toggle' || activeOp.targetStage !== stage) return '';
+    const state = getPendingState(activeOp, scene?.id);
+    if (!state) return '';
+    return state.kind === 'pending' ? 'bflow-pending-cell' : 'bflow-pending-failed';
+  };
 
   if (!scene || !sheetName) {
     return (
@@ -279,6 +319,7 @@ function DeptSection({
               className={cn(
                 'flex-1 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
                 !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
+                stageCellPendingClass(stage),
               )}
               style={
                 isDone

@@ -236,3 +236,177 @@ DO $$ BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE parts;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- ============================================================
+-- 다중 선택 일괄 작업 RPC (2026-04-22, spec 2026-04-22-bulk-operations-ux-design.md)
+-- ============================================================
+
+-- 완료 메타 시맨틱 (PR #32 Codex 리뷰 #2 반영):
+--  - completedBy/At 키 부재           → 메타 건드리지 않음 (토글 방향이 완료 상태를 바꾸지 않을 때)
+--  - 키 존재 AND 값이 NULL/빈 문자열  → metadata 행 DELETE (4단계 완료 해제)
+--  - 키 존재 AND 값이 둘 다 있음      → metadata 행 UPSERT (4단계 전부 완료)
+CREATE OR REPLACE FUNCTION bulk_update_scene_stages(
+  p_updates jsonb,
+  p_updated_by text
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  u jsonb;
+  v_uuid uuid;
+  v_stage text;
+  v_value boolean;
+  v_has_meta_keys boolean;
+  v_completed_by text;
+  v_completed_at_text text;
+  v_completed_at timestamptz;
+  v_meta_value text;
+BEGIN
+  FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
+    -- 모든 파싱/캐스팅을 BEGIN 블록 안으로 이동 — 한 항목의 malformed 입력(invalid UUID,
+    -- invalid boolean 등)이 RPC 전체를 실패시키지 않고 해당 row만 실패로 기록되도록 보장.
+    -- (Codex 리뷰 #13) 매 루프 시작 시 v_uuid를 NULL로 리셋해 이전 루프 값이 실패 row에
+    -- 잘못 매핑되는 것도 방지.
+    v_uuid := NULL;
+    BEGIN
+      v_uuid := (u->>'sceneUuid')::uuid;
+      v_stage := u->>'stage';
+      v_value := (u->>'value')::boolean;
+      v_has_meta_keys := (u ? 'completedBy') OR (u ? 'completedAt');
+      v_completed_by := u->>'completedBy';
+      v_completed_at_text := u->>'completedAt';
+
+      IF v_stage NOT IN ('lo','done','review','png') THEN
+        RAISE EXCEPTION 'invalid stage: %', v_stage;
+      END IF;
+
+      UPDATE scenes SET
+        lo     = CASE WHEN v_stage = 'lo'     THEN v_value ELSE lo END,
+        done   = CASE WHEN v_stage = 'done'   THEN v_value ELSE done END,
+        review = CASE WHEN v_stage = 'review' THEN v_value ELSE review END,
+        png    = CASE WHEN v_stage = 'png'    THEN v_value ELSE png END,
+        updated_at = now(),
+        updated_by = p_updated_by
+      WHERE id = v_uuid;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+
+      IF v_has_meta_keys THEN
+        IF v_completed_by IS NOT NULL AND v_completed_by <> ''
+           AND v_completed_at_text IS NOT NULL AND v_completed_at_text <> '' THEN
+          -- 명시적 set: UPSERT
+          v_completed_at := v_completed_at_text::timestamptz;
+          v_meta_value := jsonb_build_object(
+            'completedBy', v_completed_by,
+            'completedAt', v_completed_at
+          )::text;
+          INSERT INTO metadata (type, key, value, updated_at)
+            VALUES ('scene-completion', v_uuid::text, v_meta_value, now())
+            ON CONFLICT (type, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+        ELSE
+          -- 명시적 clear: null/빈 문자열 조합 → metadata 행 제거
+          DELETE FROM metadata WHERE type = 'scene-completion' AND key = v_uuid::text;
+        END IF;
+      END IF;
+      -- v_has_meta_keys = false: 메타 건드리지 않음 (완료 여부 미변동 토글)
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      -- v_uuid가 파싱 전에 실패하면 NULL 반환 (이전 루프 값 오염 방지를 위해 위에서 reset)
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION bulk_delete_scenes(
+  p_uuids uuid[],
+  p_deleted_by text
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_uuid uuid;
+BEGIN
+  FOREACH v_uuid IN ARRAY p_uuids LOOP
+    BEGIN
+      DELETE FROM scenes WHERE id = v_uuid;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+      DELETE FROM metadata WHERE type = 'scene-completion' AND key = v_uuid::text;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION bulk_update_scene_fields(
+  p_updates jsonb,
+  p_updated_by text
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  u jsonb;
+  f jsonb;
+  v_uuid uuid;
+BEGIN
+  FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
+    -- UUID 파싱도 BEGIN 블록 안으로 이동 (Codex 리뷰 #14).
+    v_uuid := NULL;
+    BEGIN
+      v_uuid := (u->>'sceneUuid')::uuid;
+      f := u->'fields';
+
+      UPDATE scenes SET
+        assignee       = COALESCE(f->>'assignee', assignee),
+        memo           = COALESCE(f->>'memo', memo),
+        layout         = COALESCE(f->>'layout', layout),
+        storyboard_url = COALESCE(f->>'storyboardUrl', storyboard_url),
+        guide_url      = COALESCE(f->>'guideUrl', guide_url),
+        updated_at = now(),
+        updated_by = p_updated_by
+      WHERE id = v_uuid;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION bulk_update_scene_stages(jsonb, text)  TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION bulk_delete_scenes(uuid[], text)        TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION bulk_update_scene_fields(jsonb, text)  TO anon, authenticated;

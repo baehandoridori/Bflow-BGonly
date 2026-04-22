@@ -333,6 +333,39 @@ export interface SheetsConfig {
   webAppUrl: string;
 }
 
+// ─── 일괄 작업 (bulk operations) ────────────
+
+export type BulkStageUpdate = {
+  sceneUuid: string;
+  stage: Stage;
+  value: boolean;
+  /**
+   * 완료 메타 시맨틱:
+   * - `undefined`: 메타 건드리지 않음
+   * - `null`: metadata 행을 삭제 (완료 해제)
+   * - `string`: UPSERT (완료 설정)
+   */
+  completedBy?: string | null;
+  completedAt?: string | null;
+};
+
+export type BulkFieldUpdate = {
+  sceneUuid: string;
+  fields: {
+    assignee?: string;
+    memo?: string;
+    layoutId?: string;
+    storyboardUrl?: string;
+    guideUrl?: string;
+  };
+};
+
+export type BulkUpdateResult = {
+  sceneUuid: string;
+  success: boolean;
+  error?: string;
+};
+
 // ─── Electron API (preload에서 노출) ─────────
 
 export interface ElectronAPI {
@@ -428,7 +461,9 @@ export interface ElectronAPI {
   supabaseAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<void>;
   supabaseDeleteScene: (sceneUuid: string) => Promise<void>;
   supabaseUpdateSceneStage: (sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => Promise<void>;
-  supabaseBulkUpdateSceneStages: (updates: { sceneUuid: string; stage: string; value: boolean }[], updatedBy?: string) => Promise<void>;
+  supabaseBulkUpdateSceneStages: (updates: BulkStageUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
+  supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) => Promise<BulkUpdateResult[]>;
+  supabaseBulkUpdateSceneFields: (updates: BulkFieldUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) => Promise<void>;
   supabaseReadUsers: () => Promise<unknown[]>;
   supabaseAddUser: (user: unknown) => Promise<void>;

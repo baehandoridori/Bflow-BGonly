@@ -2,6 +2,62 @@ import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged } from './broadcast';
 
+// ─── 일괄 작업 타입 ─────────────────────────────
+
+export type BulkStageUpdate = {
+  sceneUuid: string;
+  stage: 'lo' | 'done' | 'review' | 'png';
+  value: boolean;
+  /**
+   * 완료 메타 설정/해제 시맨틱:
+   * - `undefined`: 변경 없음 (메타 건드리지 않음)
+   * - `null`: 명시적 해제 (RPC가 metadata 행 DELETE)
+   * - `string`: 설정 (RPC가 UPSERT)
+   */
+  completedBy?: string | null;
+  completedAt?: string | null;
+};
+
+export type BulkFieldUpdate = {
+  sceneUuid: string;
+  fields: {
+    assignee?: string;
+    memo?: string;
+    layoutId?: string;
+    storyboardUrl?: string;
+    guideUrl?: string;
+  };
+};
+
+export type BulkUpdateResult = {
+  sceneUuid: string;
+  success: boolean;
+  error?: string;
+};
+
+type RpcRow = { scene_uuid: string; success: boolean; error: string | null };
+
+function mapRpcRows(rows: RpcRow[] | null): BulkUpdateResult[] {
+  return (rows ?? []).map((row) => ({
+    sceneUuid: row.scene_uuid,
+    success: row.success,
+    error: row.error ?? undefined,
+  }));
+}
+
+// ─── 테스트 훅 ─────────────────────────────
+// BFLOW_FORCE_FAIL_RATE=0.3 등으로 설정 시 성공 결과 중 일부를 강제로 실패 처리.
+// 일괄 작업 재시도/부분 실패 UX 검증 용도. 프로덕션에서는 env 미설정이라 no-op.
+function maybeForceFail(results: BulkUpdateResult[]): BulkUpdateResult[] {
+  const rate = Number(process.env.BFLOW_FORCE_FAIL_RATE ?? '0');
+  if (!rate || rate <= 0) return results;
+  return results.map((r) =>
+    r.success && Math.random() < rate
+      ? { ...r, success: false, error: 'forced failure (test hook)' }
+      : r
+  );
+}
+
 // ─── Supabase 클라이언트 (하드코딩 — 의사결정 #환경변수 참조) ───
 
 const SUPABASE_URL = 'https://mpqifkpxalwxgcrddchv.supabase.co';
@@ -475,25 +531,63 @@ export async function updateSceneStage(
   broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
 }
 
-/** 대량 씬 체크박스 토글 (부분 실패 허용) */
+/** 대량 씬 체크박스 토글 (부분 실패 허용) — RPC 경유 */
 export async function bulkUpdateSceneStages(
-  updates: { sceneUuid: string; stage: string; value: boolean }[],
-  updatedBy?: string,
-): Promise<void> {
-  const results = await Promise.allSettled(
-    updates.map((u) => updateSceneStage(u.sceneUuid, u.stage, u.value, updatedBy)),
-  );
-  const failures = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
-  if (failures.length > 0) {
-    const total = updates.length;
-    const failedCount = failures.length;
-    const firstReason = failures[0].reason instanceof Error
-      ? failures[0].reason.message
-      : String(failures[0].reason);
-    throw new Error(
-      `${total}개 중 ${failedCount}개 업데이트 실패: ${firstReason}`,
-    );
-  }
+  updates: BulkStageUpdate[],
+  updatedBy: string,
+): Promise<BulkUpdateResult[]> {
+  const { data, error } = await supabase.rpc('bulk_update_scene_stages', {
+    // undefined는 key를 누락시켜 RPC가 "메타 건드리지 않음"으로 인식,
+    // null/string은 key 포함해 "명시적 clear/upsert"로 인식되게 한다.
+    p_updates: updates.map((u) => {
+      const payload: Record<string, unknown> = {
+        sceneUuid: u.sceneUuid,
+        stage: u.stage,
+        value: u.value,
+      };
+      if (u.completedBy !== undefined) payload.completedBy = u.completedBy;
+      if (u.completedAt !== undefined) payload.completedAt = u.completedAt;
+      return payload;
+    }),
+    p_updated_by: updatedBy,
+  });
+  if (error) throw error;
+  return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
+}
+
+/** 대량 씬 삭제 (부분 실패 허용) — RPC 경유 */
+export async function bulkDeleteScenes(
+  sceneUuids: string[],
+  deletedBy: string,
+): Promise<BulkUpdateResult[]> {
+  const { data, error } = await supabase.rpc('bulk_delete_scenes', {
+    p_uuids: sceneUuids,
+    p_deleted_by: deletedBy,
+  });
+  if (error) throw error;
+  return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
+}
+
+/** 대량 씬 필드 업데이트 (부분 실패 허용) — RPC 경유 */
+export async function bulkUpdateSceneFields(
+  updates: BulkFieldUpdate[],
+  updatedBy: string,
+): Promise<BulkUpdateResult[]> {
+  const { data, error } = await supabase.rpc('bulk_update_scene_fields', {
+    p_updates: updates.map((u) => ({
+      sceneUuid: u.sceneUuid,
+      fields: {
+        assignee: u.fields.assignee,
+        memo: u.fields.memo,
+        layout: u.fields.layoutId,
+        storyboardUrl: u.fields.storyboardUrl,
+        guideUrl: u.fields.guideUrl,
+      },
+    })),
+    p_updated_by: updatedBy,
+  });
+  if (error) throw error;
+  return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
 }
 
 /** 씬 필드 업데이트 (memo, assignee, sceneId 등) */
