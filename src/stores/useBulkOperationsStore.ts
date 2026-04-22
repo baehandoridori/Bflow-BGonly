@@ -5,6 +5,7 @@ import type { BulkUpdateResult } from '@/types';
 
 export type OpKind = 'delete' | 'stage-toggle' | 'field-edit';
 export type OpStatus = 'in-flight' | 'complete' | 'partial-fail' | 'network-error' | 'cancelled';
+export type BulkOpExecutor = (uuids: string[]) => Promise<BulkUpdateResult[]>;
 
 export type PendingOp = {
   id: string;
@@ -16,6 +17,12 @@ export type PendingOp = {
   startedAt: number;
   status: OpStatus;
   targetStage?: 'lo' | 'done' | 'review' | 'png';
+  /**
+   * "다시 시도" 버튼이 직접 호출하는 재전송 함수.
+   * 최초 op 시작 시 저장되고, failed uuids만 재전송할 수 있어야 함.
+   * (함수라 persist 대상 아님 — 본 스토어는 persist 미사용이므로 무해)
+   */
+  retryExecutor?: BulkOpExecutor;
 };
 
 interface BulkOperationsStore {
@@ -24,7 +31,8 @@ interface BulkOperationsStore {
   markConfirmed(sceneUuid: string): void;
   markFailed(sceneUuid: string, error: string): void;
   setStatus(status: OpStatus): void;
-  retryFailed(retryFn: (uuids: string[]) => Promise<BulkUpdateResult[]>): Promise<void>;
+  /** retryFn 미지정 시 activeOp.retryExecutor 사용 */
+  retryFailed(retryFn?: BulkOpExecutor): Promise<void>;
   cancel(): void;
   clear(): void;
 }
@@ -98,6 +106,11 @@ export const useBulkOperationsStore = create<BulkOperationsStore>((set, get) => 
   retryFailed: async (retryFn) => {
     const op = get().activeOp;
     if (!op || op.failedItems.length === 0) return;
+    const effectiveFn = retryFn ?? op.retryExecutor;
+    if (!effectiveFn) {
+      console.warn('[useBulkOperationsStore] retryFailed: no retryExecutor available');
+      return;
+    }
     const toRetry = op.failedItems.map((f) => f.sceneUuid);
     const nextSet = new Set(op.pendingSceneUuids);
     toRetry.forEach((u) => nextSet.add(u));
@@ -110,7 +123,7 @@ export const useBulkOperationsStore = create<BulkOperationsStore>((set, get) => 
       },
     });
     try {
-      const results = await retryFn(toRetry);
+      const results = await effectiveFn(toRetry);
       for (const r of results) {
         if (r.success) get().markConfirmed(r.sceneUuid);
         else get().markFailed(r.sceneUuid, r.error ?? 'Unknown error');

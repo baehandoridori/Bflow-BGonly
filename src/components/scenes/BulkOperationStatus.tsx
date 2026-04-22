@@ -53,7 +53,8 @@ export function BulkOperationStatus() {
           )}
         </div>
         <Actions activeOp={activeOp} onCancel={cancel} onRetry={() => {
-          window.dispatchEvent(new CustomEvent('bflow:bulk-retry'));
+          // activeOp.retryExecutor를 사용해 실패 항목만 재전송
+          void useBulkOperationsStore.getState().retryFailed();
         }} onClose={clear} />
       </div>
 

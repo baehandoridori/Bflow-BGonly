@@ -141,6 +141,8 @@ export async function runBulkOp(
     totalCount: sceneUuids.length,
     pendingSceneUuids: new Set(sceneUuids),
     targetStage: opts.targetStage,
+    // 재시도 버튼이 실패한 UUID 부분집합으로 같은 executor를 다시 호출할 수 있게 저장
+    retryExecutor: executor,
   });
 
   try {
