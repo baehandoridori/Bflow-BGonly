@@ -41,10 +41,16 @@ function useLassoSelection(
   getSceneId: (el: Element) => string | null,
   /**
    * @param ids  lasso 영역에 걸린 원본 sceneId 집합 (prefix 없음).
-   * @param shiftKey  mousedown 시점에 Shift가 눌려있었는지. true면 호출자가 기존 selection과 union해야 함.
+   * @param shiftKey  mousedown 시점의 Shift 상태. true면 baseline과 union해야 함.
+   * @param baseline  mousedown 시점에 snapshot된 기존 selection (shiftKey=false 또는 getBaselineSelection 미제공이면 빈 Set).
    */
-  onSelectionChange: (ids: Set<string>, shiftKey: boolean) => void,
+  onSelectionChange: (ids: Set<string>, shiftKey: boolean, baseline: Set<string>) => void,
   enabled: boolean,
+  /**
+   * Shift+라쏘 시 mousedown 시점에 기존 selection을 한 번만 snapshot해 baseline으로 고정.
+   * 매 mousemove마다 재읽으면 이전 프레임의 누적 selection이 섞여 "드래그 경로 누적" 버그 발생.
+   */
+  getBaselineSelection?: () => Set<string>,
 ) {
   const [lassoRect, setLassoRect] = useState<LassoRect | null>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
@@ -52,6 +58,7 @@ function useLassoSelection(
   const isDragging = useRef(false);
   const prevIds = useRef<Set<string>>(new Set());
   const startShiftRef = useRef(false);
+  const baselineRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!enabled) return;
@@ -67,8 +74,12 @@ function useLassoSelection(
       const scrollEl = findScrollParent(target) ?? container;
       startScrollRef.current = { top: scrollEl.scrollTop, left: scrollEl.scrollLeft };
       isDragging.current = false;
-      // mousedown 시점의 Shift 상태를 캡처. mousemove 내내 동일 값 사용.
       startShiftRef.current = e.shiftKey;
+      // Shift+라쏘: mousedown 시점의 selection을 여기서 한 번만 snapshot.
+      // 이후 mousemove 내내 이 baseline을 재사용 (누적 버그 방지).
+      baselineRef.current = e.shiftKey && getBaselineSelection
+        ? new Set(getBaselineSelection())
+        : new Set();
 
       const onMouseMove = (me: MouseEvent) => {
         if (!startRef.current || !startScrollRef.current) return;
@@ -97,7 +108,7 @@ function useLassoSelection(
         });
         if (selected.size !== prevIds.current.size || ![...selected].every((id) => prevIds.current.has(id))) {
           prevIds.current = selected;
-          onSelectionChange(selected, startShiftRef.current);
+          onSelectionChange(selected, startShiftRef.current, baselineRef.current);
         }
       };
 
@@ -105,16 +116,16 @@ function useLassoSelection(
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
         if (!isDragging.current) {
-          // 실제 드래그 없이 mousedown→mouseup (단순 클릭): selection 초기화.
-          // Ctrl/Meta/Shift가 눌려있으면 기존 선택 유지.
+          // 단순 클릭: Ctrl/Meta/Shift 눌려있으면 기존 선택 유지, 아니면 초기화.
           if (!me.ctrlKey && !me.metaKey && !me.shiftKey) {
-            onSelectionChange(new Set(), false);
+            onSelectionChange(new Set(), false, new Set());
             prevIds.current = new Set();
           }
         }
         startRef.current = null;
         startScrollRef.current = null;
         startShiftRef.current = false;
+        baselineRef.current = new Set();
         isDragging.current = false;
         setLassoRect(null);
       };
@@ -125,7 +136,7 @@ function useLassoSelection(
 
     container.addEventListener('mousedown', onMouseDown);
     return () => container.removeEventListener('mousedown', onMouseDown);
-  }, [enabled, containerRef, cardSelector, getSceneId, onSelectionChange]);
+  }, [enabled, containerRef, cardSelector, getSceneId, onSelectionChange, getBaselineSelection]);
 
   return { lassoRect, isSelecting: isDragging.current };
 }
@@ -1563,7 +1574,7 @@ export function ScenesView() {
   // 라쏘 드래그 선택
   const gridRef = useRef<HTMLDivElement>(null);
   const getSceneIdFromEl = useCallback((el: Element) => el.getAttribute('data-scene-id'), []);
-  const handleLassoChange = useCallback((ids: Set<string>, shiftKey: boolean) => {
+  const handleLassoChange = useCallback((ids: Set<string>, shiftKey: boolean, baseline: Set<string>) => {
     // 1) 라쏘 원본 ids를 selectedDepartment에 맞춰 정규화 (전체 모드면 bg:/act: 접두사 부여)
     const normalize = (raw: Set<string>): Set<string> => {
       if (selectedDepartment !== 'all') return raw;
@@ -1572,21 +1583,25 @@ export function ScenesView() {
       return prefixed;
     };
     const normalized = normalize(ids);
-    // 2) Shift+라쏘: 기존 selection과 union (추가 선택). 아니면 치환.
+    // 2) Shift+라쏘: 훅이 mousedown 시점에 snapshot한 baseline과 union (경로 누적 방지).
     if (shiftKey) {
-      const baseline = useAppStore.getState().selectedSceneIds;
       setSelectedScenes(new Set<string>([...baseline, ...normalized]));
     } else {
       setSelectedScenes(normalized);
     }
   }, [setSelectedScenes, selectedDepartment]);
   const isCardView = sceneViewMode === 'card';
+  const getLassoBaseline = useCallback(
+    () => useAppStore.getState().selectedSceneIds,
+    [],
+  );
   const { lassoRect } = useLassoSelection(
     gridRef,
     '[data-scene-id]',
     getSceneIdFromEl,
     handleLassoChange,
     isCardView,
+    getLassoBaseline,
   );
 
   // 파트/에피소드/뷰모드 변경 시 선택 초기화
