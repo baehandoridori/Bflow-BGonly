@@ -111,9 +111,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     setComments(next);
     onCountChange?.(next.length);
     setInput('');
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-    }
+    // field-sizing: content 가 자동으로 다시 min-h 로 축소 — 수동 리셋 불필요
     setShowMentions(false);
 
     try {
@@ -201,12 +199,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
   // @멘션 감지
   const handleInputChange = (text: string) => {
     setInput(text);
-    // Auto-grow textarea (모든 키 입력 시 실행 — 멘션 드롭다운 중에도)
-    const ta = inputRef.current;
-    if (ta) {
-      ta.style.height = 'auto';
-      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-    }
+    // 높이 조절은 CSS `field-sizing: content` 가 담당 — JS auto-grow 불필요
+    // (이전 `style.height = 'auto'` 리셋 방식은 transition 을 깨뜨려 툭툭 튀는 현상이 있었음)
     const lastAt = text.lastIndexOf('@');
     if (lastAt >= 0) {
       const afterAt = text.slice(lastAt + 1);
@@ -266,8 +260,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
 
   return (
     <div className="flex flex-col h-full">
-      {/* 댓글 목록 — 채팅 스타일 */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0">
+      {/* 댓글 목록 — 채팅 스타일. select-text: 말풍선·이름·시간 모두 드래그 선택 가능 (복사용) */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
         {comments.length === 0 ? (
           <div className="text-center py-10">
             <p className="text-text-secondary text-xs">아직 의견이 없습니다</p>
@@ -401,7 +395,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
             placeholder="댓글 입력..."
-            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-[200px] overflow-y-auto transition-[height] duration-150 ease-out"
+            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-[200px] overflow-y-auto field-sizing-content transition-[height] duration-150 ease-out"
             onKeyDown={(e) => {
               // @멘션 드롭다운 키보드 탐색
               if (showMentions && filteredUsers.length > 0) {

@@ -109,6 +109,19 @@ input, textarea, select, [contenteditable="true"] {
   -webkit-user-select: text;
   user-select: text;
 }
+/* .select-text 유틸을 붙인 요소와 그 자식들은 텍스트 드래그 선택 허용
+   (전역 `* { user-select: none }` 이 자식들까지 덮기 때문에 children 까지 명시적으로 풀어줘야 한다.
+   댓글 말풍선·상세 모달 읽기 영역 등에서 복사 붙여넣기가 가능해야 하는 경우 사용) */
+.select-text,
+.select-text * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* textarea content 기반 자동 리사이즈 — JS auto-grow 없이 부드러운 CSS transition 유지 */
+.field-sizing-content {
+  field-sizing: content;
+}
 
 /* ─── 라이트↔다크 전환 트랜지션 ─── */
 body.theme-ready *,
