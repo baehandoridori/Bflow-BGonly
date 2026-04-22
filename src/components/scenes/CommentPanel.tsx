@@ -341,11 +341,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
                       </div>
                     ) : (
                       <div
-                        className="rounded-xl px-3.5 py-2.5 text-xs leading-relaxed break-words"
-                        style={{
-                          backgroundColor: isOwn ? 'rgba(16, 185, 129, 0.18)' : '#2A2A35',
-                          color: 'rgb(var(--color-text-primary))',
-                        }}
+                        className={`rounded-xl px-3.5 py-2.5 text-xs leading-relaxed break-words text-text-primary ${
+                          isOwn ? 'bg-emerald-500/20' : 'bg-bg-border/70'
+                        }`}
                       >
                         {renderText(comment.text)}
                       </div>
