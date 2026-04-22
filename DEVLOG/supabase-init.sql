@@ -264,15 +264,19 @@ DECLARE
   v_meta_value text;
 BEGIN
   FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
-    v_uuid := (u->>'sceneUuid')::uuid;
-    v_stage := u->>'stage';
-    v_value := (u->>'value')::boolean;
-
-    v_has_meta_keys := (u ? 'completedBy') OR (u ? 'completedAt');
-    v_completed_by := u->>'completedBy';
-    v_completed_at_text := u->>'completedAt';
-
+    -- 모든 파싱/캐스팅을 BEGIN 블록 안으로 이동 — 한 항목의 malformed 입력(invalid UUID,
+    -- invalid boolean 등)이 RPC 전체를 실패시키지 않고 해당 row만 실패로 기록되도록 보장.
+    -- (Codex 리뷰 #13) 매 루프 시작 시 v_uuid를 NULL로 리셋해 이전 루프 값이 실패 row에
+    -- 잘못 매핑되는 것도 방지.
+    v_uuid := NULL;
     BEGIN
+      v_uuid := (u->>'sceneUuid')::uuid;
+      v_stage := u->>'stage';
+      v_value := (u->>'value')::boolean;
+      v_has_meta_keys := (u ? 'completedBy') OR (u ? 'completedAt');
+      v_completed_by := u->>'completedBy';
+      v_completed_at_text := u->>'completedAt';
+
       IF v_stage NOT IN ('lo','done','review','png') THEN
         RAISE EXCEPTION 'invalid stage: %', v_stage;
       END IF;
@@ -314,6 +318,7 @@ BEGIN
       error := NULL;
       RETURN NEXT;
     EXCEPTION WHEN OTHERS THEN
+      -- v_uuid가 파싱 전에 실패하면 NULL 반환 (이전 루프 값 오염 방지를 위해 위에서 reset)
       scene_uuid := v_uuid;
       success := FALSE;
       error := SQLERRM;
@@ -368,10 +373,12 @@ DECLARE
   v_uuid uuid;
 BEGIN
   FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
-    v_uuid := (u->>'sceneUuid')::uuid;
-    f := u->'fields';
-
+    -- UUID 파싱도 BEGIN 블록 안으로 이동 (Codex 리뷰 #14).
+    v_uuid := NULL;
     BEGIN
+      v_uuid := (u->>'sceneUuid')::uuid;
+      f := u->'fields';
+
       UPDATE scenes SET
         assignee       = COALESCE(f->>'assignee', assignee),
         memo           = COALESCE(f->>'memo', memo),
