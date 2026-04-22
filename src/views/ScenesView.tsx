@@ -2221,7 +2221,12 @@ export function ScenesView() {
     await runBulkOp(
       'stage-toggle',
       updates.map((u) => u.sceneUuid),
-      () => bulkUpdateSceneStages(updates, currentUser?.id ?? ''),
+      // retry 시 전달받은 uuids 부분집합만 재전송 (이미 성공한 씬의 값 덮어쓰기 방지)
+      (uuidsToSend) => {
+        const set = new Set(uuidsToSend);
+        const subset = updates.filter((u) => set.has(u.sceneUuid));
+        return bulkUpdateSceneStages(subset, currentUser?.id ?? '');
+      },
       { targetStage: stage, completedMetaByUuid, stageValueByUuid },
     );
   };
@@ -2275,7 +2280,12 @@ export function ScenesView() {
     await runBulkOp(
       'field-edit',
       uuids,
-      () => bulkUpdateSceneFields(updates, currentUser?.id ?? ''),
+      // retry 시 전달받은 uuids 부분집합만 재전송
+      (uuidsToSend) => {
+        const set = new Set(uuidsToSend);
+        const subset = updates.filter((u) => set.has(u.sceneUuid));
+        return bulkUpdateSceneFields(subset, currentUser?.id ?? '');
+      },
       { fieldsByUuid },
     );
   };

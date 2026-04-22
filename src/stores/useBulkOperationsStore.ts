@@ -6,6 +6,8 @@ import type { BulkUpdateResult } from '@/types';
 export type OpKind = 'delete' | 'stage-toggle' | 'field-edit';
 export type OpStatus = 'in-flight' | 'complete' | 'partial-fail' | 'network-error' | 'cancelled';
 export type BulkOpExecutor = (uuids: string[]) => Promise<BulkUpdateResult[]>;
+/** 개별 항목 성공 시 useDataStore 등에 반영할 부가 처리. runBulkOp이 kind별로 생성·주입. */
+export type BulkOpSideEffect = (sceneUuid: string, result: BulkUpdateResult) => void;
 
 export type PendingOp = {
   id: string;
@@ -23,6 +25,12 @@ export type PendingOp = {
    * (함수라 persist 대상 아님 — 본 스토어는 persist 미사용이므로 무해)
    */
   retryExecutor?: BulkOpExecutor;
+  /**
+   * 성공 항목마다 실행할 데이터 스토어 반영 로직.
+   * runBulkOp 최초 호출에서 kind별 sideeffect를 클로저로 캡처해 저장하고,
+   * retryFailed도 동일한 sideeffect를 호출해 retry 성공 시 UI가 stale해지지 않도록 한다.
+   */
+  retrySideEffect?: BulkOpSideEffect;
 };
 
 interface BulkOperationsStore {
@@ -132,9 +140,15 @@ export const useBulkOperationsStore = create<BulkOperationsStore>((set, get) => 
     });
     try {
       const results = await effectiveFn(toRetry);
+      const sideEffect = get().activeOp?.retrySideEffect;
       for (const r of results) {
-        if (r.success) get().markConfirmed(r.sceneUuid);
-        else get().markFailed(r.sceneUuid, r.error ?? 'Unknown error');
+        if (r.success) {
+          get().markConfirmed(r.sceneUuid);
+          // runBulkOp과 동일하게 데이터 스토어 반영 (Realtime 에코 지연/누락에 무관하게 UI 최신화)
+          sideEffect?.(r.sceneUuid, r);
+        } else {
+          get().markFailed(r.sceneUuid, r.error ?? 'Unknown error');
+        }
       }
     } catch (_e) {
       get().setStatus('network-error');

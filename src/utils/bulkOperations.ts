@@ -134,6 +134,37 @@ export async function runBulkOp(
 ): Promise<void> {
   if (sceneUuids.length === 0) return;
 
+  // kind별 성공 시 데이터 스토어 반영 클로저. opts(completedMetaByUuid 등)를 캡처.
+  // 최초 실행과 "다시 시도" 모두 동일한 sideeffect를 호출해 UI가 stale되지 않도록 함.
+  const applySideEffect = (sceneUuid: string): void => {
+    if (kind === 'delete') {
+      useDataStore.getState().removeSceneByUuid(sceneUuid);
+      return;
+    }
+    if (kind === 'stage-toggle') {
+      const patch: Partial<Scene> = {};
+      if (opts.stageValueByUuid?.has(sceneUuid) && opts.targetStage) {
+        (patch as Record<string, boolean>)[opts.targetStage] =
+          opts.stageValueByUuid.get(sceneUuid) as boolean;
+      }
+      const meta = opts.completedMetaByUuid?.get(sceneUuid);
+      if (meta) {
+        patch.completedBy = meta.completedBy;
+        patch.completedAt = meta.completedAt;
+      }
+      if (Object.keys(patch).length > 0) {
+        useDataStore.getState().updateSceneByUuid(sceneUuid, patch);
+      }
+      return;
+    }
+    if (kind === 'field-edit' && opts.fieldsByUuid) {
+      const fields = opts.fieldsByUuid.get(sceneUuid);
+      if (fields) {
+        useDataStore.getState().updateSceneByUuid(sceneUuid, fields);
+      }
+    }
+  };
+
   const store = useBulkOperationsStore.getState();
   store.startOp({
     id: crypto.randomUUID(),
@@ -141,8 +172,8 @@ export async function runBulkOp(
     totalCount: sceneUuids.length,
     pendingSceneUuids: new Set(sceneUuids),
     targetStage: opts.targetStage,
-    // 재시도 버튼이 실패한 UUID 부분집합으로 같은 executor를 다시 호출할 수 있게 저장
     retryExecutor: executor,
+    retrySideEffect: (sceneUuid) => applySideEffect(sceneUuid),
   });
 
   try {
@@ -150,31 +181,7 @@ export async function runBulkOp(
     for (const r of results) {
       if (r.success) {
         store.markConfirmed(r.sceneUuid);
-        if (kind === 'delete') {
-          useDataStore.getState().removeSceneByUuid(r.sceneUuid);
-        }
-        if (kind === 'stage-toggle') {
-          // stage 값과 completedMeta를 함께 반영
-          const patch: Partial<Scene> = {};
-          if (opts.stageValueByUuid?.has(r.sceneUuid) && opts.targetStage) {
-            (patch as Record<string, boolean>)[opts.targetStage] =
-              opts.stageValueByUuid.get(r.sceneUuid) as boolean;
-          }
-          const meta = opts.completedMetaByUuid?.get(r.sceneUuid);
-          if (meta) {
-            patch.completedBy = meta.completedBy;
-            patch.completedAt = meta.completedAt;
-          }
-          if (Object.keys(patch).length > 0) {
-            useDataStore.getState().updateSceneByUuid(r.sceneUuid, patch);
-          }
-        }
-        if (kind === 'field-edit' && opts.fieldsByUuid) {
-          const fields = opts.fieldsByUuid.get(r.sceneUuid);
-          if (fields) {
-            useDataStore.getState().updateSceneByUuid(r.sceneUuid, fields);
-          }
-        }
+        applySideEffect(r.sceneUuid);
       } else {
         store.markFailed(r.sceneUuid, r.error ?? 'Unknown error');
       }
