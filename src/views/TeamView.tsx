@@ -333,7 +333,7 @@ export function TeamView() {
     highlightUserName, setHighlightUserName,
   } = useAppStore();
 
-  const [sortBy, setSortBy] = useState<SortOption>('scenes');
+  const [sortBy, setSortBy] = useState<SortOption>('seniority');
   const [sortAsc, setSortAsc] = useState(false);
 
   // 하이라이트 대상 ref
