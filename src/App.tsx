@@ -3,7 +3,6 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
 // 뷰 lazy 로딩 — 초기 번들에서 제외
 const Dashboard = lazy(() => import('@/views/Dashboard').then(m => ({ default: m.Dashboard })));
 const ScenesView = lazy(() => import('@/views/ScenesView').then(m => ({ default: m.ScenesView })));
@@ -723,17 +722,14 @@ export default function App() {
       }
 
       // scenes UPDATE → delta 직접 적용 (full reload 없이 즉시)
+      // 주의: bulk op 확정은 여기서 처리하지 않는다. IPC 응답(runBulkOp)만을 확정 경로로 사용.
+      // (Codex 리뷰 #9) updated_by === me.id 필터만으로는 "같은 사용자의 다른 op" 또는
+      // "다른 기기의 지연된 에코"가 새 op의 pending을 잘못 confirm할 수 있어, op 레벨 correlation
+      // 없이는 Realtime 확정이 안전하지 않다. Realtime은 데이터 스토어 동기화 용도로만 사용.
       if (table === 'scenes' && payload?.eventType === 'UPDATE' && payload?.new) {
         const delta = extractSceneDelta(payload.new);
         if (delta) {
           const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
-          // 일괄 작업 확정은 **현재 사용자가 트리거한 변경**일 때만 처리.
-          // 다른 사용자의 변경 이벤트가 내 pending 항목을 가짜로 confirm하는 것을 방지.
-          const updatedBy = (payload.new as { updated_by?: string | null }).updated_by ?? null;
-          const me = useAuthStore.getState().currentUser;
-          if (updatedBy && me?.id && updatedBy === me.id) {
-            useBulkOperationsStore.getState().markConfirmed(delta.uuid);
-          }
           if (applied) return;
         }
       }

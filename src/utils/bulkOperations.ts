@@ -165,9 +165,14 @@ export async function runBulkOp(
     }
   };
 
+  // opId를 로컬에 보관해 async 응답 처리 시점에 "내가 시작한 op이 여전히 활성인지" 검증.
+  // 사용자가 취소 + 새 op 시작 등의 상황에서 이전 요청의 응답이 새 op에 새어들어가지 않도록 scope 제한. (Codex 리뷰 #8)
+  const opId = crypto.randomUUID();
+  const isStillActive = () => useBulkOperationsStore.getState().activeOp?.id === opId;
+
   const store = useBulkOperationsStore.getState();
   store.startOp({
-    id: crypto.randomUUID(),
+    id: opId,
     kind,
     totalCount: sceneUuids.length,
     pendingSceneUuids: new Set(sceneUuids),
@@ -178,6 +183,7 @@ export async function runBulkOp(
 
   try {
     const results = await executor(sceneUuids);
+    if (!isStillActive()) return; // 이미 취소되었거나 새 op으로 교체됨 — 응답 무시
     for (const r of results) {
       if (r.success) {
         store.markConfirmed(r.sceneUuid);
@@ -187,6 +193,7 @@ export async function runBulkOp(
       }
     }
   } catch (_e) {
+    if (!isStillActive()) return;
     store.setStatus('network-error');
   }
 }
