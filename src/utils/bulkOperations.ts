@@ -184,12 +184,21 @@ export async function runBulkOp(
   try {
     const results = await executor(sceneUuids);
     if (!isStillActive()) return; // 이미 취소되었거나 새 op으로 교체됨 — 응답 무시
-    for (const r of results) {
+    // 순차 애니메이션 효과를 위해 각 항목 처리 사이에 짧은 interval 삽입.
+    // 삭제는 DOM 제거라 CSS transition이 자연 적용 안 돼 한꺼번에 사라져 보이는 문제가 있었음.
+    // 50개 이상일 땐 간격을 줄여 총 시간이 너무 길지 않게 조정.
+    const stagger = results.length > 50 ? 15 : results.length > 20 ? 30 : 60;
+    for (let i = 0; i < results.length; i++) {
+      if (!isStillActive()) return;
+      const r = results[i];
       if (r.success) {
         store.markConfirmed(r.sceneUuid);
         applySideEffect(r.sceneUuid);
       } else {
         store.markFailed(r.sceneUuid, r.error ?? 'Unknown error');
+      }
+      if (i < results.length - 1) {
+        await new Promise((res) => setTimeout(res, stagger));
       }
     }
   } catch (_e) {
