@@ -21,25 +21,58 @@ export function BulkOperationStatus() {
   const activeOp = useBulkOperationsStore((s) => s.activeOp);
   const clear = useBulkOperationsStore((s) => s.clear);
   const slowHintShownRef = useRef<Set<string>>(new Set());
+  const prevOpIdRef = useRef<string | null>(null);
 
-  // 주요 상태 전이 → toast 업데이트
+  // op이 교체/종료되면 이전 op의 토스트 강제 dismiss.
+  // partial-fail/network-error 토스트는 duration=Infinity라 사용자가 수동으로
+  // 닫기 전까진 떠있는데, 그 상태에서 새 op이 시작되면 오래된 토스트의 "다시 시도"가
+  // 새 op의 pending uuid를 건드릴 위험. 전환 시 무조건 dismiss로 차단.
+  useEffect(() => {
+    const currentId = activeOp?.id ?? null;
+    const prevId = prevOpIdRef.current;
+    if (prevId && prevId !== currentId) {
+      toast.dismiss(`bulk-op-${prevId}`);
+    }
+    prevOpIdRef.current = currentId;
+  }, [activeOp?.id]);
+
+  // 주요 상태 전이 → toast 업데이트.
+  // 모든 action handler는 opId를 클로저로 캡처하고, 실행 직전에
+  // 현재 activeOp.id === opId인지 확인해 stale 토스트의 사고 방지.
   useEffect(() => {
     if (!activeOp) return;
-    const toastId = `bulk-op-${activeOp.id}`;
+    const opId = activeOp.id;
+    const toastId = `bulk-op-${opId}`;
     const label = kindLabel(activeOp.kind, activeOp.targetStage);
+
+    const withOpGuard = (fn: () => void): (() => void) => () => {
+      const current = useBulkOperationsStore.getState().activeOp;
+      if (current?.id !== opId) {
+        // 이미 다른 op이 진행 중이거나 op이 종료됨 — stale 토스트의 동작 무시 + 제거
+        toast.dismiss(toastId);
+        return;
+      }
+      fn();
+    };
+    const retryGuarded = withOpGuard(() => {
+      void useBulkOperationsStore.getState().retryFailed();
+    });
+    const closeGuarded = withOpGuard(() => {
+      clear();
+    });
+    const cancelGuarded = withOpGuard(() => {
+      useBulkOperationsStore.getState().cancel();
+    });
 
     switch (activeOp.status) {
       case 'in-flight': {
-        const description = slowHintShownRef.current.has(activeOp.id)
+        const description = slowHintShownRef.current.has(opId)
           ? '네트워크가 느려요'
           : undefined;
         toast.loading(renderInFlight(activeOp, label), {
           id: toastId,
           description,
-          cancel: {
-            label: '취소',
-            onClick: () => useBulkOperationsStore.getState().cancel(),
-          },
+          cancel: { label: '취소', onClick: cancelGuarded },
         });
         break;
       }
@@ -48,7 +81,11 @@ export function BulkOperationStatus() {
           id: toastId,
           duration: 2500,
         });
-        const timer = setTimeout(() => clear(), 2500);
+        const timer = setTimeout(() => {
+          // clear 시점에도 op 아직 동일한지 확인
+          const current = useBulkOperationsStore.getState().activeOp;
+          if (current?.id === opId) clear();
+        }, 2500);
         return () => clearTimeout(timer);
       }
       case 'partial-fail': {
@@ -58,16 +95,8 @@ export function BulkOperationStatus() {
           id: toastId,
           description: renderFailureSample(activeOp.failedItems),
           duration: Infinity,
-          action: {
-            label: '다시 시도',
-            onClick: () => {
-              void useBulkOperationsStore.getState().retryFailed();
-            },
-          },
-          cancel: {
-            label: '닫기',
-            onClick: () => clear(),
-          },
+          action: { label: '다시 시도', onClick: retryGuarded },
+          cancel: { label: '닫기', onClick: closeGuarded },
         });
         break;
       }
@@ -75,22 +104,17 @@ export function BulkOperationStatus() {
         toast.error('연결 끊김 — 다시 시도해주세요', {
           id: toastId,
           duration: Infinity,
-          action: {
-            label: '다시 시도',
-            onClick: () => {
-              void useBulkOperationsStore.getState().retryFailed();
-            },
-          },
-          cancel: {
-            label: '닫기',
-            onClick: () => clear(),
-          },
+          action: { label: '다시 시도', onClick: retryGuarded },
+          cancel: { label: '닫기', onClick: closeGuarded },
         });
         break;
       }
       case 'cancelled': {
         toast.dismiss(toastId);
-        const timer = setTimeout(() => clear(), 200);
+        const timer = setTimeout(() => {
+          const current = useBulkOperationsStore.getState().activeOp;
+          if (current?.id === opId) clear();
+        }, 200);
         return () => clearTimeout(timer);
       }
     }
