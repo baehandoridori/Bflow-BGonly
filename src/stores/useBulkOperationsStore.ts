@@ -129,6 +129,11 @@ export const useBulkOperationsStore = create<BulkOperationsStore>((set, get) => 
       ]),
     );
     if (toRetry.length === 0) return;
+    // opId를 await 전에 캡처. runBulkOp과 동일한 scope 패턴.
+    // 사용자가 retry 진행 중 취소 + 새 op 시작 시 이전 응답이 새 op을 오염시키는 것을 차단.
+    const opId = op.id;
+    const isStillActive = () => get().activeOp?.id === opId;
+
     const nextSet = new Set(toRetry);
     set({
       activeOp: {
@@ -140,6 +145,7 @@ export const useBulkOperationsStore = create<BulkOperationsStore>((set, get) => 
     });
     try {
       const results = await effectiveFn(toRetry);
+      if (!isStillActive()) return; // op 교체됨 — 응답 무시
       const sideEffect = get().activeOp?.retrySideEffect;
       for (const r of results) {
         if (r.success) {
@@ -151,6 +157,7 @@ export const useBulkOperationsStore = create<BulkOperationsStore>((set, get) => 
         }
       }
     } catch (_e) {
+      if (!isStillActive()) return;
       get().setStatus('network-error');
     }
   },
