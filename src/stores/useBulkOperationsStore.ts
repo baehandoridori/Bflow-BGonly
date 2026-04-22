@@ -105,15 +105,23 @@ export const useBulkOperationsStore = create<BulkOperationsStore>((set, get) => 
 
   retryFailed: async (retryFn) => {
     const op = get().activeOp;
-    if (!op || op.failedItems.length === 0) return;
+    if (!op) return;
     const effectiveFn = retryFn ?? op.retryExecutor;
     if (!effectiveFn) {
       console.warn('[useBulkOperationsStore] retryFailed: no retryExecutor available');
       return;
     }
-    const toRetry = op.failedItems.map((f) => f.sceneUuid);
-    const nextSet = new Set(op.pendingSceneUuids);
-    toRetry.forEach((u) => nextSet.add(u));
+    // 재시도 대상 = 실패 항목 ∪ 아직 미확정인 pending 항목.
+    // network-error 케이스에서는 failedItems가 비어있고 pendingSceneUuids에만 uuid가 남는다.
+    // partial-fail 케이스에서는 failedItems에만 들어있다. 합집합으로 양쪽 모두 대응.
+    const toRetry = Array.from(
+      new Set<string>([
+        ...op.failedItems.map((f) => f.sceneUuid),
+        ...Array.from(op.pendingSceneUuids),
+      ]),
+    );
+    if (toRetry.length === 0) return;
+    const nextSet = new Set(toRetry);
     set({
       activeOp: {
         ...op,

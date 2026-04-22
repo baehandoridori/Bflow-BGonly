@@ -727,17 +727,25 @@ export default function App() {
         const delta = extractSceneDelta(payload.new);
         if (delta) {
           const applied = useDataStore.getState().updateSceneByUuid(delta.uuid, delta.fields);
-          useBulkOperationsStore.getState().markConfirmed(delta.uuid); // idempotent no-op if not pending
+          // 일괄 작업 확정은 **현재 사용자가 트리거한 변경**일 때만 처리.
+          // 다른 사용자의 변경 이벤트가 내 pending 항목을 가짜로 confirm하는 것을 방지.
+          const updatedBy = (payload.new as { updated_by?: string | null }).updated_by ?? null;
+          const me = useAuthStore.getState().currentUser;
+          if (updatedBy && me?.id && updatedBy === me.id) {
+            useBulkOperationsStore.getState().markConfirmed(delta.uuid);
+          }
           if (applied) return;
         }
       }
 
-      // scenes DELETE → 대상 UUID 즉시 제거 + 일괄 작업 확정 (full reload 없이 즉시)
+      // scenes DELETE → 대상 UUID 즉시 제거 (full reload 없이 즉시)
+      // 주의: bulk op 확정은 IPC 응답에서만 처리. 다른 사용자가 같은 씬을 동시 삭제했을 때
+      //       field-edit/stage-toggle 경로의 pending이 가짜 confirm되는 것을 방지.
+      //       (delete 경로도 RPC 응답에서 removeSceneByUuid를 직접 호출하므로 유실 없음)
       if (table === 'scenes' && payload?.eventType === 'DELETE') {
         const deletedId = (payload?.old as { id?: string } | undefined)?.id;
         if (typeof deletedId === 'string') {
           useDataStore.getState().removeSceneByUuid(deletedId);
-          useBulkOperationsStore.getState().markConfirmed(deletedId); // idempotent
           return;
         }
         // deletedId 없으면 (REPLICA IDENTITY 특이 상황) 아래 debounced reload로 fallthrough
