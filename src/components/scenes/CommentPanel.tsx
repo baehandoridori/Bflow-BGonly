@@ -205,7 +205,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     const ta = inputRef.current;
     if (ta) {
       ta.style.height = 'auto';
-      ta.style.height = `${Math.min(ta.scrollHeight, 96)}px`;
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
     }
     const lastAt = text.lastIndexOf('@');
     if (lastAt >= 0) {
@@ -401,7 +401,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
             placeholder="댓글 입력..."
-            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-24 overflow-y-auto"
+            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-[200px] overflow-y-auto transition-[height] duration-150 ease-out"
             onKeyDown={(e) => {
               // @멘션 드롭다운 키보드 탐색
               if (showMentions && filteredUsers.length > 0) {
