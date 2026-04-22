@@ -111,9 +111,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     setComments(next);
     onCountChange?.(next.length);
     setInput('');
-    // 전송 후 입력란을 min-height(32px) 로 부드럽게 축소
+    // 전송 후 입력란 높이 초기화
     if (inputRef.current) {
-      inputRef.current.style.height = '';
+      inputRef.current.style.height = 'auto';
     }
     setShowMentions(false);
 
@@ -202,23 +202,12 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
   // @멘션 감지
   const handleInputChange = (text: string) => {
     setInput(text);
-    // 입력란 높이: double requestAnimationFrame 으로 transition 강제 발동.
-    // `height='auto'` 직후 바로 px 을 지정하면 브라우저가 같은 프레임에 두 값을 덮어써
-    // transition 이 출발점을 잃는다. 아래 패턴은 한 프레임 동안 "현재 높이" 를 명시적
-    // 으로 유지해 커밋시킨 뒤 다음 프레임에서 새 높이로 변경 → CSS 가 px→px 전환으로
-    // 인식해 transition-[height] 가 정상 발동한다.
+    // 입력란 auto-grow (애니메이션 없이 즉시 리사이즈).
+    // Cowork 식 부드러운 전환은 v1.13.0 백로그 이슈 A2 에서 리팩토링 예정.
     const ta = inputRef.current;
     if (ta) {
-      const currentHeight = ta.offsetHeight;
       ta.style.height = 'auto';
-      const target = Math.min(ta.scrollHeight, 200);
-      ta.style.height = `${currentHeight}px`;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const ref = inputRef.current;
-          if (ref) ref.style.height = `${target}px`;
-        });
-      });
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
     }
     const lastAt = text.lastIndexOf('@');
     if (lastAt >= 0) {
@@ -414,7 +403,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
             placeholder="댓글 입력..."
-            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-[200px] overflow-y-auto transition-[height] duration-150 ease-out"
+            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-[200px] overflow-y-auto"
             onKeyDown={(e) => {
               // @멘션 드롭다운 키보드 탐색
               if (showMentions && filteredUsers.length > 0) {
