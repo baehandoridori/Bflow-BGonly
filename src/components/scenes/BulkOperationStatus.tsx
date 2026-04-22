@@ -1,127 +1,149 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
 
+/**
+ * 일괄 작업 상태를 Sonner 토스트로 표시.
+ * 자체 렌더 JSX 없이 activeOp 변화를 감지해 toast API를 호출만 한다.
+ *
+ * 설계:
+ *  - 같은 op 동안 하나의 토스트 id(`bulk-op-<opId>`)를 재사용해 상태 전이마다 업데이트.
+ *  - in-flight → loading 토스트 (스피너 기본 + "취소" cancel action)
+ *  - complete  → success 토스트 + 자동 clear (2.5s)
+ *  - partial-fail / network-error → error 토스트 + "다시 시도" action + "닫기" cancel
+ *  - cancelled → 토스트 dismiss + clear
+ *  - 5초 이상 in-flight 지속 시 loading 토스트 description에 "네트워크가 느려요" 힌트 추가.
+ *
+ * Sonner 기본 아이콘(loading/success/error)은 Lucide feather 계열로 앱 톤과 자연스럽게 어울린다.
+ * 이전의 ⏳/✓/!/⚠/⏹ 이모지 혼용 이슈 제거.
+ */
 export function BulkOperationStatus() {
   const activeOp = useBulkOperationsStore((s) => s.activeOp);
   const clear = useBulkOperationsStore((s) => s.clear);
-  const cancel = useBulkOperationsStore((s) => s.cancel);
-  const [expanded, setExpanded] = useState(false);
-  const [slowHint, setSlowHint] = useState(false);
+  const slowHintShownRef = useRef<Set<string>>(new Set());
 
+  // 주요 상태 전이 → toast 업데이트
   useEffect(() => {
-    if (activeOp?.status !== 'in-flight') { setSlowHint(false); return; }
-    const t = setTimeout(() => setSlowHint(true), 5000);
-    return () => clearTimeout(t);
-  }, [activeOp?.status, activeOp?.id]);
+    if (!activeOp) return;
+    const toastId = `bulk-op-${activeOp.id}`;
+    const label = kindLabel(activeOp.kind, activeOp.targetStage);
 
-  // 주의: 예전에 10초 후 자동으로 status='network-error'로 전환하는 타임아웃이 있었으나,
-  // 원본 RPC 요청을 실제로 취소하지 못한 채 UI 상태만 바꿔서 사용자가 retry를 누를 경우
-  // 중복 쓰기(원본 요청이 곧이어 성공 + retry까지 도달) 위험이 있었다. (Codex 리뷰 #7)
-  // 실제 네트워크 실패는 runBulkOp의 catch 블록이 자연스럽게 setStatus('network-error')로 처리.
-  // 사용자가 느린 응답을 포기하고 싶으면 "취소" 버튼 사용 (이미 스펙 §4.1 참조).
-
-  useEffect(() => {
-    if (activeOp?.status !== 'complete') return;
-    const t = setTimeout(() => clear(), 2000);
-    return () => clearTimeout(t);
-  }, [activeOp?.status, clear]);
-
-  useEffect(() => {
-    if (activeOp?.status === 'cancelled') {
-      const t = setTimeout(() => clear(), 600);
-      return () => clearTimeout(t);
+    switch (activeOp.status) {
+      case 'in-flight': {
+        const description = slowHintShownRef.current.has(activeOp.id)
+          ? '네트워크가 느려요'
+          : undefined;
+        toast.loading(renderInFlight(activeOp, label), {
+          id: toastId,
+          description,
+          cancel: {
+            label: '취소',
+            onClick: () => useBulkOperationsStore.getState().cancel(),
+          },
+        });
+        break;
+      }
+      case 'complete': {
+        toast.success(`${activeOp.totalCount}개 ${label} 완료`, {
+          id: toastId,
+          duration: 2500,
+        });
+        const timer = setTimeout(() => clear(), 2500);
+        return () => clearTimeout(timer);
+      }
+      case 'partial-fail': {
+        const failedCount = activeOp.failedItems.length;
+        const completed = activeOp.completedCount;
+        toast.error(`${completed}개 완료 · ${failedCount}개 실패`, {
+          id: toastId,
+          description: renderFailureSample(activeOp.failedItems),
+          duration: Infinity,
+          action: {
+            label: '다시 시도',
+            onClick: () => {
+              void useBulkOperationsStore.getState().retryFailed();
+            },
+          },
+          cancel: {
+            label: '닫기',
+            onClick: () => clear(),
+          },
+        });
+        break;
+      }
+      case 'network-error': {
+        toast.error('연결 끊김 — 다시 시도해주세요', {
+          id: toastId,
+          duration: Infinity,
+          action: {
+            label: '다시 시도',
+            onClick: () => {
+              void useBulkOperationsStore.getState().retryFailed();
+            },
+          },
+          cancel: {
+            label: '닫기',
+            onClick: () => clear(),
+          },
+        });
+        break;
+      }
+      case 'cancelled': {
+        toast.dismiss(toastId);
+        const timer = setTimeout(() => clear(), 200);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [activeOp?.status, clear]);
+  }, [
+    activeOp?.id,
+    activeOp?.status,
+    activeOp?.completedCount,
+    activeOp?.failedItems.length,
+    activeOp?.totalCount,
+    clear,
+  ]);
 
-  if (!activeOp) return null;
+  // 5초 이상 in-flight 지속 → "네트워크가 느려요" 힌트를 loading 토스트 description에 갱신
+  useEffect(() => {
+    if (!activeOp || activeOp.status !== 'in-flight') return;
+    const opId = activeOp.id;
+    if (slowHintShownRef.current.has(opId)) return;
+    const timer = setTimeout(() => {
+      const fresh = useBulkOperationsStore.getState().activeOp;
+      if (!fresh || fresh.id !== opId || fresh.status !== 'in-flight') return;
+      slowHintShownRef.current.add(opId);
+      const label = kindLabel(fresh.kind, fresh.targetStage);
+      toast.loading(renderInFlight(fresh, label), {
+        id: `bulk-op-${opId}`,
+        description: '네트워크가 느려요',
+        cancel: {
+          label: '취소',
+          onClick: () => useBulkOperationsStore.getState().cancel(),
+        },
+      });
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [activeOp?.id, activeOp?.status]);
 
-  const label = kindLabel(activeOp.kind, activeOp.targetStage);
-
-  return (
-    <div className="fixed bottom-[120px] left-1/2 -translate-x-1/2 z-[100] bg-[#1A1D27] border border-[#2D3041] rounded-lg px-4 py-3 shadow-xl min-w-[320px] max-w-[500px]">
-      <div className="flex items-center gap-3">
-        <StatusIcon status={activeOp.status} />
-        <div className="flex-1">
-          <div className="text-sm text-[#E8E8EE]">{renderTitle(activeOp, label)}</div>
-          {slowHint && activeOp.status === 'in-flight' && (
-            <div className="text-xs text-[#FDCB6E] mt-1">네트워크가 느려요</div>
-          )}
-        </div>
-        <Actions activeOp={activeOp} onCancel={cancel} onRetry={() => {
-          // activeOp.retryExecutor를 사용해 실패 항목만 재전송
-          void useBulkOperationsStore.getState().retryFailed();
-        }} onClose={clear} />
-      </div>
-
-      {activeOp.failedItems.length > 0 && (
-        <div className="mt-2">
-          <button className="text-xs text-[#6C5CE7] underline" onClick={() => setExpanded(!expanded)}>
-            {expanded ? '실패 목록 접기' : `실패 ${activeOp.failedItems.length}건 보기`}
-          </button>
-          {expanded && (
-            <ul className="mt-1 text-xs text-[#8B8DA3] max-h-40 overflow-auto">
-              {activeOp.failedItems.map((f) => (
-                <li key={f.sceneUuid} className="py-0.5">
-                  {f.sceneUuid.slice(0, 8)}… — {f.error}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
+  return null;
 }
 
-function StatusIcon({ status }: { status: string }) {
-  const map: Record<string, { char: string; color: string }> = {
-    'in-flight':     { char: '⏳', color: 'text-[#6C5CE7]' },
-    'partial-fail':  { char: '!',  color: 'text-red-500' },
-    'network-error': { char: '⚠',  color: 'text-[#FDCB6E]' },
-    'complete':      { char: '✓',  color: 'text-[#00B894]' },
-    'cancelled':     { char: '⏹',  color: 'text-[#8B8DA3]' },
-  };
-  const m = map[status] ?? map['in-flight'];
-  return <span className={`text-lg font-bold ${m.color}`}>{m.char}</span>;
-}
-
-function kindLabel(kind: string, stage?: string) {
+function kindLabel(kind: string, stage?: string): string {
   if (kind === 'delete') return '삭제';
-  if (kind === 'stage-toggle') return `${(stage ?? '').toUpperCase()}`;
+  if (kind === 'stage-toggle') return (stage ?? '').toUpperCase();
   if (kind === 'field-edit') return '편집';
   return '';
 }
 
 type ActiveOp = NonNullable<ReturnType<typeof useBulkOperationsStore.getState>['activeOp']>;
 
-function renderTitle(op: ActiveOp, label: string) {
-  const { status, completedCount, totalCount, failedItems } = op;
-  const failedCount = failedItems.length;
-  switch (status) {
-    case 'in-flight': return `${label} ${completedCount}/${totalCount} 처리 중`;
-    case 'complete': return `${totalCount}개 ${label} 완료`;
-    case 'partial-fail': return `${completedCount}개 완료 · ${failedCount}개 실패`;
-    case 'network-error': return `연결 끊김 — 다시 시도해주세요`;
-    case 'cancelled': return `${label} 처리 중단됨`;
-    default: return '';
-  }
+function renderInFlight(op: ActiveOp, label: string): string {
+  return `${label} ${op.completedCount}/${op.totalCount} 처리 중`;
 }
 
-function Actions({ activeOp, onCancel, onRetry, onClose }: {
-  activeOp: ActiveOp;
-  onCancel: () => void;
-  onRetry: () => void;
-  onClose: () => void;
-}) {
-  const btn = 'px-2 py-1 text-xs rounded hover:bg-[#2D3041] text-[#E8E8EE]';
-  if (activeOp.status === 'in-flight') return (
-    <button className={btn} onClick={onCancel} title="이미 전송된 작업은 서버에서 계속 처리됩니다">취소</button>
-  );
-  if (activeOp.status === 'partial-fail' || activeOp.status === 'network-error') return (
-    <div className="flex gap-1">
-      <button className={btn} onClick={onRetry}>다시 시도</button>
-      <button className={btn} onClick={onClose}>닫기</button>
-    </div>
-  );
-  return null;
+function renderFailureSample(failed: ActiveOp['failedItems']): string | undefined {
+  if (failed.length === 0) return undefined;
+  const head = failed.slice(0, 2).map((f) => `${f.sceneUuid.slice(0, 8)}… (${f.error})`);
+  const suffix = failed.length > 2 ? ` 외 ${failed.length - 2}건` : '';
+  return head.join(', ') + suffix;
 }
