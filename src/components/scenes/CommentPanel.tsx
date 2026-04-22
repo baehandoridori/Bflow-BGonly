@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { motion } from 'framer-motion';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -202,26 +203,15 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
   // @멘션 감지
   const handleInputChange = (text: string) => {
     setInput(text);
-    // ── 입력란 높이 부드러운 자동 조절 ──
-    //
-    // 순진하게 `height='auto'` → `height=newPx` 만 하면 transition 의 "시작 지점"이
-    // auto 라서 애니메이션이 깨진다 (툭툭 튀는 현상).
-    //
-    // 해결: (1) transition 을 잠깐 끄고, (2) auto 로 scrollHeight 측정 후 (3) 이전
-    // 높이를 복원한 상태로 force reflow 해 브라우저에 "현재 상태 = 이전 높이" 로
-    // 고정. (4) transition 복원 + 목표 높이 지정 → 브라우저가 px→px 전환으로 인식해
-    // 지정된 150ms ease-out 을 제대로 발동한다.
+    // 입력란 높이: textarea scrollHeight 기준 즉시 px 설정.
+    // 부드러운 애니메이션은 부모 motion.div 의 `layout` prop 이 담당한다 — textarea
+    // 크기 변화 → 부모 input 영역 컨테이너의 height 변화를 framer-motion 이 프레임
+    // 간 보간해 스무스한 transition 을 만들어줌. textarea 자체에 transition 을 걸면
+    // layout 애니메이션과 충돌해 "이중 보간" 이 되므로 textarea 는 즉시 반영만.
     const ta = inputRef.current;
     if (ta) {
-      const prev = ta.style.height;
-      ta.style.transition = 'none';
       ta.style.height = 'auto';
-      const target = Math.min(ta.scrollHeight, 200);
-      ta.style.height = prev || `${target}px`;
-      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-      ta.offsetHeight; // force reflow
-      ta.style.transition = '';
-      ta.style.height = `${target}px`;
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
     }
     const lastAt = text.lastIndexOf('@');
     if (lastAt >= 0) {
@@ -392,8 +382,14 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
         )}
       </div>
 
-      {/* 입력 영역 */}
-      <div className="px-4 py-3 border-t border-bg-border relative">
+      {/* 입력 영역 — motion.div layout 으로 높이 변화를 자동 애니메이션.
+          textarea 자체는 즉시 리사이즈되고 parent 의 layout 변화가 부드럽게 보간되어
+          메시지 목록까지 같이 밀려 내려가는 Cowork 식 동작이 나온다. */}
+      <motion.div
+        layout
+        transition={{ type: 'tween', duration: 0.15, ease: 'easeOut' }}
+        className="px-4 py-3 border-t border-bg-border relative"
+      >
         {/* @멘션 자동완성 */}
         {showMentions && filteredUsers.length > 0 && (
           <div ref={mentionDropdownRef} className="absolute bottom-full left-4 right-4 mb-1 bg-bg-card border border-bg-border rounded-lg shadow-lg max-h-32 overflow-y-auto z-10">
@@ -417,7 +413,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
             placeholder="댓글 입력..."
-            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-[200px] overflow-y-auto transition-[height] duration-150 ease-out"
+            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-[200px] overflow-y-auto"
             onKeyDown={(e) => {
               // @멘션 드롭다운 키보드 탐색
               if (showMentions && filteredUsers.length > 0) {
@@ -460,7 +456,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
             )}
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
