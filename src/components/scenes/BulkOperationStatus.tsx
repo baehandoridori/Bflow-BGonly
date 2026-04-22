@@ -14,16 +14,11 @@ export function BulkOperationStatus() {
     return () => clearTimeout(t);
   }, [activeOp?.status, activeOp?.id]);
 
-  useEffect(() => {
-    if (activeOp?.status !== 'in-flight') return;
-    const t = setTimeout(() => {
-      const fresh = useBulkOperationsStore.getState().activeOp;
-      if (fresh?.status === 'in-flight') {
-        useBulkOperationsStore.getState().setStatus('network-error');
-      }
-    }, 10_000);
-    return () => clearTimeout(t);
-  }, [activeOp?.id]);
+  // 주의: 예전에 10초 후 자동으로 status='network-error'로 전환하는 타임아웃이 있었으나,
+  // 원본 RPC 요청을 실제로 취소하지 못한 채 UI 상태만 바꿔서 사용자가 retry를 누를 경우
+  // 중복 쓰기(원본 요청이 곧이어 성공 + retry까지 도달) 위험이 있었다. (Codex 리뷰 #7)
+  // 실제 네트워크 실패는 runBulkOp의 catch 블록이 자연스럽게 setStatus('network-error')로 처리.
+  // 사용자가 느린 응답을 포기하고 싶으면 "취소" 버튼 사용 (이미 스펙 §4.1 참조).
 
   useEffect(() => {
     if (activeOp?.status !== 'complete') return;
