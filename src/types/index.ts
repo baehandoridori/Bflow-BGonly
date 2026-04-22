@@ -339,8 +339,14 @@ export type BulkStageUpdate = {
   sceneUuid: string;
   stage: Stage;
   value: boolean;
-  completedBy?: string;
-  completedAt?: string;
+  /**
+   * 완료 메타 시맨틱:
+   * - `undefined`: 메타 건드리지 않음
+   * - `null`: metadata 행을 삭제 (완료 해제)
+   * - `string`: UPSERT (완료 설정)
+   */
+  completedBy?: string | null;
+  completedAt?: string | null;
 };
 
 export type BulkFieldUpdate = {

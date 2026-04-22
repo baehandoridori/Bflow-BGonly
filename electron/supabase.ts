@@ -8,8 +8,14 @@ export type BulkStageUpdate = {
   sceneUuid: string;
   stage: 'lo' | 'done' | 'review' | 'png';
   value: boolean;
-  completedBy?: string;
-  completedAt?: string;
+  /**
+   * 완료 메타 설정/해제 시맨틱:
+   * - `undefined`: 변경 없음 (메타 건드리지 않음)
+   * - `null`: 명시적 해제 (RPC가 metadata 행 DELETE)
+   * - `string`: 설정 (RPC가 UPSERT)
+   */
+  completedBy?: string | null;
+  completedAt?: string | null;
 };
 
 export type BulkFieldUpdate = {
@@ -531,13 +537,18 @@ export async function bulkUpdateSceneStages(
   updatedBy: string,
 ): Promise<BulkUpdateResult[]> {
   const { data, error } = await supabase.rpc('bulk_update_scene_stages', {
-    p_updates: updates.map((u) => ({
-      sceneUuid: u.sceneUuid,
-      stage: u.stage,
-      value: u.value,
-      completedBy: u.completedBy ?? null,
-      completedAt: u.completedAt ?? null,
-    })),
+    // undefined는 key를 누락시켜 RPC가 "메타 건드리지 않음"으로 인식,
+    // null/string은 key 포함해 "명시적 clear/upsert"로 인식되게 한다.
+    p_updates: updates.map((u) => {
+      const payload: Record<string, unknown> = {
+        sceneUuid: u.sceneUuid,
+        stage: u.stage,
+        value: u.value,
+      };
+      if (u.completedBy !== undefined) payload.completedBy = u.completedBy;
+      if (u.completedAt !== undefined) payload.completedAt = u.completedAt;
+      return payload;
+    }),
     p_updated_by: updatedBy,
   });
   if (error) throw error;

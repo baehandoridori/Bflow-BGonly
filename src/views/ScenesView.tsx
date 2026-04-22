@@ -2177,23 +2177,43 @@ export function ScenesView() {
     const updates: BulkStageUpdate[] = targetScenes.map((s) => {
       const currentValue = Boolean(s[stage]);
       const newValue = !currentValue;
-      // done을 켜서 4단계 모두 완료되면 completedBy/At 전파
+      const wasAllDone = Boolean(s.lo && s.done && s.review && s.png);
       const afterToggle = { lo: s.lo, done: s.done, review: s.review, png: s.png, [stage]: newValue };
-      const willBeAllDone = afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png;
+      const willBeAllDone = Boolean(
+        afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png,
+      );
+
+      // 완료 메타 시맨틱 (BulkStageUpdate 주석 참조):
+      // - 4단계 전체 미완료 → 완료: actor/now UPSERT
+      // - 4단계 전체 완료 → 해제: null 전파하여 metadata 행 DELETE
+      // - 그 외(완료 상태가 바뀌지 않는 토글): undefined로 남겨 메타 건드리지 않음
+      let completedBy: string | null | undefined;
+      let completedAt: string | null | undefined;
+      if (!wasAllDone && willBeAllDone) {
+        completedBy = actorName;
+        completedAt = nowIso;
+      } else if (wasAllDone && !willBeAllDone) {
+        completedBy = null;
+        completedAt = null;
+      }
+
       return {
         sceneUuid: s.id!, // resolveSelectedScenes가 id 있는 것만 반환
         stage,
         value: newValue,
-        completedBy: willBeAllDone ? actorName : undefined,
-        completedAt: willBeAllDone ? nowIso : undefined,
+        completedBy,
+        completedAt,
       };
     });
 
+    // 로컬 store 반영용 맵 — null(해제)은 빈 문자열로, string(설정)은 값 그대로
     const completedMetaByUuid = new Map<string, { completedBy: string; completedAt: string }>();
     const stageValueByUuid = new Map<string, boolean>();
     for (const u of updates) {
       stageValueByUuid.set(u.sceneUuid, u.value);
-      if (u.completedBy && u.completedAt) {
+      if (u.completedBy === null && u.completedAt === null) {
+        completedMetaByUuid.set(u.sceneUuid, { completedBy: '', completedAt: '' });
+      } else if (u.completedBy && u.completedAt) {
         completedMetaByUuid.set(u.sceneUuid, { completedBy: u.completedBy, completedAt: u.completedAt });
       }
     }
