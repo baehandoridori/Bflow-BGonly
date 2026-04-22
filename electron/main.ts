@@ -694,7 +694,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
   readAllEpisodes as sbReadAllEpisodes,
@@ -809,15 +809,29 @@ ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, 
   const results = await sbBulkUpdateSceneStages(updates, updatedBy);
   for (const u of updates) {
     const r = results.find((x) => x.sceneUuid === u.sceneUuid);
-    if (r?.success) {
-      broadcastSceneUpdate(u.sceneUuid, u.stage, u.value, updatedBy);
+    if (!r?.success) continue;
+    // stage boolean broadcast
+    broadcastSceneUpdate(u.sceneUuid, u.stage, u.value, updatedBy);
+    // 완료 메타(scene-completion metadata) 변경 broadcast — Codex 리뷰 #11.
+    // metadata 테이블은 Realtime 구독 대상이 아니므로, 피어 UI가 completedBy/At을
+    // 즉시 반영할 수 있도록 scene-field-update 이벤트로 별도 전파한다.
+    // undefined = 변경 없음(미전송), null = clear(빈 문자열 전송), string = set.
+    if (u.completedBy !== undefined) {
+      broadcastSceneFieldUpdate(u.sceneUuid, 'completedBy', u.completedBy ?? '', updatedBy);
+    }
+    if (u.completedAt !== undefined) {
+      broadcastSceneFieldUpdate(u.sceneUuid, 'completedAt', u.completedAt ?? '', updatedBy);
     }
   }
   return results;
 }));
 ipcMain.handle('supabase:bulk-delete-scenes', wrapIpc(async (_e: unknown, sceneUuids: string[], deletedBy: string) => {
   const results = await sbBulkDeleteScenes(sceneUuids, deletedBy);
-  // deleteScene 기존에 broadcast 호출이 없었으므로 패리티 유지 목적으로 여기도 생략.
+  // 단일 deleteScene과 parity 유지를 위해 성공 시 data-change broadcast — Codex 리뷰 #12.
+  // Realtime 끊긴 상태의 피어가 broadcast-triggered reload로 동기화할 수 있도록 한다.
+  if (results.some((r) => r.success)) {
+    broadcastDataChange('scenes', 'DELETE', deletedBy);
+  }
   return results;
 }));
 ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, updates: BulkFieldUpdate[], updatedBy: string) => {
