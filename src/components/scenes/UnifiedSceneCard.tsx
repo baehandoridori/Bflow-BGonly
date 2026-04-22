@@ -278,7 +278,7 @@ function DeptSection({
         </div>
         <div className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5">
           {STAGES.map((stage) => (
-            <div key={stage} className="flex-1 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md">
+            <div key={stage} className="flex-1 min-w-0 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md whitespace-nowrap overflow-hidden text-ellipsis">
               {cfg.stageLabels[stage]}
             </div>
           ))}
@@ -317,7 +317,7 @@ function DeptSection({
               key={stage}
               onClick={(e) => { e.stopPropagation(); onToggle(sheetName, sceneId, stage); }}
               className={cn(
-                'flex-1 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
+                'flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer whitespace-nowrap overflow-hidden text-ellipsis',
                 !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
                 stageCellPendingClass(stage),
               )}

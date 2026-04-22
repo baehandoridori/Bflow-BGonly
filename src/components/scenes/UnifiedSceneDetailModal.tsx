@@ -225,7 +225,9 @@ export function UnifiedSceneDetailModal({
 
   return (
     <AnimatePresence>
+      {/* data-no-lasso: 모달 내부 드래그가 뒤쪽 씬 그리드 라쏘를 트리거하지 않도록 */}
       <motion.div
+        data-no-lasso
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
