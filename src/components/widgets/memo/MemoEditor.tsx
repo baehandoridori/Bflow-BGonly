@@ -49,6 +49,12 @@ export function MemoEditor({
         openOnClick: false, // 클릭 시 자동 네비게이션 금지 — 버블 메뉴에서 수동 처리
         autolink: true,
         linkOnPaste: true,
+        // Electron main 의 shell:open-external 핸들러는 http(s)/mailto/tel 만 허용.
+        // autolink / paste / setLink 모든 경로에서 같은 화이트리스트를 강제 → 죽은 링크 방지.
+        isAllowedUri: (url, { defaultValidate }) => {
+          if (!defaultValidate(url)) return false;
+          return /^(https?:|mailto:|tel:)/i.test(url);
+        },
         HTMLAttributes: {
           rel: 'noopener noreferrer',
         },
