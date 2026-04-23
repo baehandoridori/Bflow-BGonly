@@ -138,7 +138,14 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
     } catch { /* fallback도 실패 */ }
   }
 
-  /** 댓글 row를 요청된 sheet 기준 scene.no 문자열로 변환. 매칭 씬이 없으면 null 반환(skip). */
+  /**
+   * 댓글 row를 요청된 sheet 기준 scene.no 문자열로 변환. 매칭 씬이 없으면 null 반환(skip).
+   *
+   * Codex P1 3차(2026-04-23): 정규화만으로 매칭하면 alias-collision (예: `a001`·`ac001` 이
+   * 같은 키로 정규화) 상황에서 상대 부서 댓글이 다른 물리 씬에 붙을 수 있다. 순서:
+   *   1) 원본 scene_number(lowercase) 정확 매칭 — collision 영향 없음, 일반 케이스 대부분 해결
+   *   2) 정규화 매칭 — 단 requested part 에 같은 정규화 씬이 "유일"할 때만. 2개 이상이면 skip.
+   */
   const mapToRequestedSceneNo = (row: typeof rawComments[number]): string | null => {
     // 요청 파트 메타를 못 얻었거나 fallback 경로 등은 원본 scene_id 를 그대로 사용(이전 동작과 호환).
     if (!requestedPart) return row.sceneId;
@@ -147,15 +154,26 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
     // 자기 파트 댓글이면 그대로
     if (!sourcePart || sourcePart.id === requestedPart.id) return row.sceneId;
 
-    // 상대 부서 댓글: 원본 파트에서 해당 scene.no 의 씬을 찾아 scene_number 정규화 → 요청 파트에서 같은 정규화 씬
     const sourceScene = sourcePart.scenes.find((s) => String(s.no) === String(row.sceneId));
     if (!sourceScene) return null;
+
+    // 1차: 원본 scene_number 정확 매칭 (lowercase + trim). collision 안전.
+    const sourceSceneNumber = (sourceScene.sceneId || '').trim().toLowerCase();
+    if (sourceSceneNumber) {
+      const exactMatch = requestedPart.scenes.find(
+        (s) => (s.sceneId || '').trim().toLowerCase() === sourceSceneNumber,
+      );
+      if (exactMatch) return String(exactMatch.no);
+    }
+
+    // 2차: 정규화 매칭 — 유일한 매칭일 때만 허용. 2개 이상이면 alias-collision 이므로 skip.
     const normalizedSource = normalizeSceneIdKey(sourceScene.sceneId, sourcePart.partId);
     if (!normalizedSource) return null;
-    const matchedScene = requestedPart.scenes.find((s) =>
-      normalizeSceneIdKey(s.sceneId, requestedPart!.partId) === normalizedSource,
+    const normalizedMatches = requestedPart.scenes.filter(
+      (s) => normalizeSceneIdKey(s.sceneId, requestedPart!.partId) === normalizedSource,
     );
-    return matchedScene ? String(matchedScene.no) : null;
+    if (normalizedMatches.length === 1) return String(normalizedMatches[0].no);
+    return null;
   };
 
   const store: CommentsStore = {};
