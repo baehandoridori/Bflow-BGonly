@@ -66,7 +66,39 @@ TipTap + 필수 extension 7개 추가 시 **gzip +~110KB**. 현재 번들 기준
 
 **문제**: 표준 Markdown(GFM)에서 `__text__`는 **Bold**이다. 그러나 B flow 앱은 과거부터 `__text__`를 **밑줄(underline)** 로 써왔다(`SimpleMarkdown` 구현).
 
-**해결**: `tiptap-markdown` 의 **custom serializer/parser 오버라이드**로 앱 관습 유지.
+**해결**: `tiptap-markdown` 의 **custom serializer/parser 오버라이드**로 앱 관습 유지. 구현 접근:
+
+`tiptap-markdown` 은 내부적으로 **markdown-it** 을 parser로, **custom token serializer** 를 writer로 사용한다. 기본적으로 markdown-it의 `emphasis` 규칙이 `__x__`를 `<strong>` 으로 처리하므로 다음 두 가지를 수정한다:
+
+**Parser (Markdown → HTML)**:
+```typescript
+// markdownExtensions.ts
+export const markdownItConfigure = (md: MarkdownIt) => {
+  // 1) 기본 emphasis 규칙에서 __ (언더스코어 double) 처리를 끄고
+  //    __x__ 를 Underline으로 처리하는 custom inline rule 삽입
+  md.inline.ruler.before('emphasis', 'underline', underlineRule);
+  //    underlineRule 내부에서 __ 토큰만 소비, * / ** / ~~는 건드리지 않음
+};
+```
+`underlineRule` 은 `state.src.slice(state.pos, state.pos+2) === '__'` 확인 후 닫는 `__` 위치를 찾아 `u_open` / `u_close` 토큰 push. 실패 시 false 반환하여 다른 규칙으로 양보.
+
+**Serializer (HTML → Markdown)**:
+```typescript
+// MemoEditor 에서 Markdown extension 설정:
+Markdown.configure({
+  html: false,
+  transformPastedText: true,
+  transformCopiedText: true,
+  // tiptap-markdown 은 extension별 toMarkdown 훅 제공
+});
+
+// Underline mark 정의 시 toMarkdown 지정:
+Underline.extend({
+  addStorage() { return { markdown: { serialize: { open: '__', close: '__', mixable: true, expelEnclosingWhitespace: true } } }; },
+});
+```
+
+**결과**:
 
 ```
 Markdown 저장:              HTML 렌더:
@@ -76,12 +108,7 @@ __밑줄__     ← 비GFM       <u>밑줄</u>
 ~~취소선~~                  <s>취소선</s>
 ```
 
-- Markdown → HTML (parser):  
-  - `__x__` 패턴을 Underline mark 로 파싱 (Bold로 해석하지 않도록 override)
-  - `**x**` 는 정상 Bold
-- HTML → Markdown (serializer):  
-  - Underline mark 는 `__x__` 로 직렬화
-  - Bold mark 는 `**x**` 로 직렬화
+**검증**: Phase A에서 단위 테스트 — 원본 Markdown 문자열 N개를 parse → serialize 왕복 시 문자열 동일성 확인 (fixture).
 
 ### 3.3 줄바꿈 처리
 
@@ -129,7 +156,7 @@ __밑줄__     ← 비GFM       <u>밑줄</u>
 | 리스트 | ☑≡ | Task List | Ctrl+Shift+9 |
 | 링크 | 🔗 | Link | Ctrl+K |
 
-**3가지 상태**:
+**4가지 상태**:
 
 | 상태 | 시각 |
 |------|------|
@@ -137,6 +164,7 @@ __밑줄__     ← 비GFM       <u>밑줄</u>
 | Hover | `text-accent bg-accent/10` |
 | Active (서식 적용된 위치에 커서) | `text-accent bg-accent/15` |
 | Focus-visible (키보드) | `ring-1 ring-accent/40` 추가 |
+| **Disabled** (editor === null, 초기 로딩 중) | `opacity-40 cursor-not-allowed`, 클릭 무시 |
 
 **크기 & 간격**: 버튼 22×22px, 아이콘 13px (Lucide). 그룹 내 2px gap, 그룹 간 8px gap + `border-l border-bg-border/40` 세로 구분선.
 
@@ -146,12 +174,12 @@ __밑줄__     ← 비GFM       <u>밑줄</u>
 
 ### 4.3 에디터 본문
 
-**헤딩 크기**: 본문 폰트 크기(슬라이더 값)에 비율 연동.
-- H1 = 본문 × 1.6 (font-semibold, leading-tight, mt-4 mb-2)
-- H2 = 본문 × 1.35 (font-semibold, leading-tight, mt-3 mb-1.5)
-- H3 = 본문 × 1.15 (font-medium, leading-snug, mt-2 mb-1)
+**헤딩 크기**: 본문 폰트 크기(슬라이더 값)에 비율 연동. **`em` 단위 사용** (CSS scale/transform 제외 — 레이아웃 flow 유지).
+- H1 = `1.6em` (font-semibold, leading-tight, mt-4 mb-2)
+- H2 = `1.35em` (font-semibold, leading-tight, mt-3 mb-1.5)
+- H3 = `1.15em` (font-medium, leading-snug, mt-2 mb-1)
 
-CSS custom property 기반. `style={{ fontSize: fontSize }}`로 에디터 컨테이너에 루트 폰트 지정하고, 헤딩은 `em` 단위 또는 CSS scale 로 비율 계산.
+구현: `style={{ fontSize: fontSize + 'px' }}` 로 에디터 컨테이너(`ProseMirror` root) 에 픽셀 단위 폰트 지정. 자식 헤딩은 CSS 클래스에 `font-size: 1.6em` 등 지정 → 상위 fontSize 기반 자동 계산. 슬라이더 변경 시 컨테이너 style만 리렌더되고 헤딩은 상대값으로 즉시 추종.
 
 **리스트**:
 - Bullet: `list-disc pl-5`, TipTap `BulletList` extension
@@ -338,7 +366,7 @@ interface MemoLinkBubbleProps {
 
 ### 7.1 에디터 내부 단축키 (TipTap이 처리)
 
-11개 버튼의 단축키는 모두 TipTap Extension 기본 바인딩 또는 커스텀 `addKeyboardShortcuts`.
+§4.2 버튼 표의 11개 단축키는 모두 TipTap Extension 기본 바인딩 또는 커스텀 `addKeyboardShortcuts` 로 구현.
 
 ### 7.2 앱 전역 단축키와의 충돌 검증
 
@@ -381,12 +409,27 @@ interface MemoLinkBubbleProps {
 | `~~x~~` | Strike | Strike (GFM) | ✅ |
 | `- item` | Bullet | Bullet | ✅ |
 | `1. item` | Ordered | Ordered | ✅ |
-| `1) item` | Ordered (느슨한 매칭) | 일반 텍스트 | ⚠ 희귀 케이스 |
+| `1) item` | Ordered (느슨한 매칭) | 일반 텍스트 | ⚠ 희귀 케이스 (§8.2.1 검증) |
 | `# heading` | 일반 텍스트 (헤딩 미구현) | H1 | 🟢 개선 |
 | 빈 줄 | `<div h-1.5>` | `<p><br></p>` | 허용 오차 |
 | 연속 `\n` | 각 줄마다 div | 한 단락 내 hardBreak 또는 단락 분리 | 허용 오차 |
 
 **대응**: `1) item` 패턴은 전체 메모 내 거의 없음(추정). 발견 시 사용자가 수동 보정. 그 외 변화는 **업그레이드 방향**(헤딩 렌더 추가).
+
+### 8.2.1 구현 착수 전 실제 빈도 검증 (단발성 SQL)
+
+Phase A 시작 전 Supabase SQL 에디터에서 1회 실행:
+
+```sql
+-- tabs 배열 안의 content 내 '1) ' 또는 '2) ' 등 패턴 포함 카운트
+SELECT COUNT(*) FROM user_memos
+WHERE tabs::text ~ '\d+\) ';
+```
+
+- **결과 0~5건**: 수용 — 사용자 수동 보정 전제로 진행
+- **결과 >5건**: 이 spec 에 `1)` → `1.` 정규화 one-shot 마이그레이션 step 추가 (Phase A에 포함)
+
+검증 결과와 대응을 PR 설명에 기록.
 
 ### 8.3 롤백 경로
 
@@ -408,7 +451,8 @@ interface MemoLinkBubbleProps {
 | 링크 위 커서 + 서식 변경 | 링크 내 텍스트에 Bold 등 적용 가능 (TipTap 기본) |
 | 붙여넣기로 HTML 유입 | TipTap `clipboardTextSerializer`로 plain text 또는 허용된 마크만 필터 |
 | 탭 전환 중 IME 조합 중 | TipTap이 IME composition 처리 (기존 textarea 수준 이상) |
-| 에디터 언마운트 시 저장 미완료 | `MemoWidget` 기존 언마운트 즉시 저장 로직 유지 |
+| 에디터 언마운트 시 저장 미완료 (debounce pending) | `MemoWidget` 언마운트 useEffect cleanup 에서 **pending debounce timer flush** — 마지막 `memoDataRef.current` 즉시 `upsertMemo` 호출 (기존 로직 유지). TipTap onUpdate → MemoWidget onChange → 500ms debounce 체인에서 debounce 타이머가 flush 없이 사라지는 일이 없도록 cleanup에서 `clearTimeout` 후 **한 번 더 저장 호출** 보장. |
+| Supabase 로드 시 malformed Markdown (예: 레거시 데이터의 미종료 fence, 비정상 HTML 잔재) | `editor.commands.setContent(markdown)` 호출을 **try/catch 로 감쌈**. 예외 시 `console.error` + **plain text 로 fallback** (`setContent(markdown, false, { preserveWhitespace: 'full' })`). 사용자에게 "서식이 일부 단순 텍스트로 표시됩니다" 미니 토스트 (sonner) 1회 노출. 데이터는 손실 없음 (Markdown 원문은 Supabase에 그대로). |
 | 사용자 전환 (로그아웃/로그인) | `useAuthStore` 변경 시 `MemoWidget` 이 `memoKey + currentUserId` useEffect로 재로드 (기존 로직 유지) |
 | Realtime 수신 (`memo-sync` storage 이벤트) | 다른 윈도우에서 동일 메모 변경 시 reload (기존 로직 유지) |
 
@@ -441,6 +485,8 @@ interface MemoLinkBubbleProps {
 - Ctrl+B를 에디터 밖에서 누름 → 사이드바 토글 정상 작동
 - Ctrl+B를 에디터 안에서 누름 → TipTap Bold 동작, 사이드바 토글 안 됨
 - Escape → 링크 버블 먼저 닫힘, 다시 Escape → 에디터 blur
+- **Word/브라우저 페이지 복사 → 붙여넣기**: 서식 있는 HTML 유입 시 plain text 또는 허용 마크만 남고 inline style/className은 제거 (§9 `clipboardTextSerializer` 검증)
+- **의도적 malformed Markdown**: 개발자 도구로 Supabase row 의 `content` 에 `# 제목 __mismatched` 같은 값 주입 후 로드 → §9 fallback 동작 확인 (sonner 토스트 노출 + 텍스트 보존)
 
 ### 10.3 Regression
 
@@ -457,7 +503,7 @@ interface MemoLinkBubbleProps {
 - [ ] 미리보기 토글 버튼 UI 및 `previewMode` state 제거
 - [ ] 툴바 버튼 11개 노출 (넓은 모드 기준)
 - [ ] 각 버튼 Active state가 커서 위치 서식에 따라 자동 전환
-- [ ] 모든 단축키(표 7.1) 동작
+- [ ] 모든 단축키(§4.2 버튼 표) 동작
 - [ ] 링크 버블 메뉴 — 새 링크/기존 링크 2가지 모드 동작
 - [ ] Markdown 저장 형식 유지, Supabase 필드 스키마 변경 없음
 - [ ] `__x__` 가 Underline으로 저장/로드 (custom serializer 작동)
@@ -484,7 +530,7 @@ interface MemoLinkBubbleProps {
 
 세부 plan은 writing-plans 스킬로 별도 작성. 예상 순서:
 
-1. **Phase A — 기반**: 의존성 설치, `markdownExtensions.ts` 작성, 단위 테스트(파서/시리얼라이저 왕복)
+1. **Phase A — 기반**: 의존성 설치, `markdownExtensions.ts` 작성, 단위 테스트(파서/시리얼라이저 왕복). 왕복 fixture 는 최소 12개 케이스 (plain / bold / italic / underline / strike / 중첩 / H1-3 / bullet / ordered / task / link / 실제 Supabase 샘플 3건 복사). `1)` 패턴 §8.2.1 SQL 결과 반영 여부 결정
 2. **Phase B — 에디터 코어**: `MemoEditor.tsx` 구현, `MemoWidget` textarea를 임시로 MemoEditor 로 교체 (툴바는 기존 FormatToolbar 일단 유지)
 3. **Phase C — 툴바 확장**: `MemoToolbar.tsx` 작성 (11버튼 + 반응형), Active state 바인딩
 4. **Phase D — 링크 버블**: `MemoLinkBubble.tsx` 작성
