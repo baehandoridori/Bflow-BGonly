@@ -963,7 +963,15 @@ export async function addRevision(
   // Codex P1 2차(2026-04-23): 리비전 sceneKey 숫자는 normalizeSceneIdKey 결과(예: "a035"→"35")로
   // scene_number 파생 값이다. sort_order 와 일치가 보장되지 않으므로 반드시 scene_number 매칭 경로로.
   const sceneUuid = await resolveSceneUuidByNumberWithRetry(resolvedPartUuid, sceneIdForResolve);
-  if (!sceneUuid) {
+
+  // Codex P2 5차(2026-04-23): unified 뷰의 dup/disambiguated 씬은 실제 scenes.scene_number 가 아닌
+  // synthetic ID (예: "merged-${encodeURIComponent(mergedKey)}", "dup:..." in mergedSceneHelpers.ts)
+  // 로 sceneKey 를 생성한다. 이 경우 scene_uuid 매칭이 본질적으로 불가능하므로 저장 자체를 막으면
+  // 해당 데이터 형태의 사용자는 리비전을 아예 기록할 수 없다. scene_uuid 컬럼은 nullable 이므로
+  // synthetic 으로 확인된 경우에만 null 저장을 허용한다 (CASCADE 는 포기하되 저장 가능성 보장).
+  const lowerResolve = sceneIdForResolve.toLowerCase();
+  const isSyntheticMergedId = lowerResolve.startsWith('merged-') || lowerResolve.startsWith('dup:');
+  if (!sceneUuid && !isSyntheticMergedId) {
     throw new Error(`리비전 저장 실패: 씬을 찾을 수 없음 (partUuid=${resolvedPartUuid}, sceneId=${sceneId})`);
   }
 
@@ -971,7 +979,7 @@ export async function addRevision(
     id,
     part_id: resolvedPartUuid,
     scene_id: sceneId,
-    scene_uuid: sceneUuid,
+    scene_uuid: sceneUuid, // null 가능 — synthetic merged ID 의 경우
     revision_no: revisionNo,
     status,
     priority,
