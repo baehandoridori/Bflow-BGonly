@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { BubbleMenu } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
+import { toast } from 'sonner';
 import { ExternalLink, Pencil, X, Link2, Check } from 'lucide-react';
 
 interface MemoLinkBubbleProps {
@@ -16,12 +17,29 @@ interface MemoLinkBubbleProps {
   editRequestToken: number;
 }
 
-/** URL 유효성 검사 + https:// prepend */
+/**
+ * URL 유효성 검사 + https:// prepend.
+ *
+ * Electron main 의 `shell:open-external` 핸들러는 http(s)/mailto/tel 프로토콜만 허용하므로
+ * 같은 화이트리스트에 맞춘다. 상대 경로(`/foo`) 나 프로토콜만(`http:`) 등은 거부 (`null` 반환).
+ * 반환값 규약:
+ *   - `''` (빈 입력): `null` — 의도적 취소로 해석
+ *   - 유효한 http(s)/mailto/tel 또는 도메인 형태: 정규화된 절대 URL
+ *   - 그 외 (상대 경로, 프로토콜 누락, 공백 섞인 쓰레기): `null`
+ */
 function normalizeUrl(input: string): string | null {
   const v = input.trim();
   if (!v) return null;
-  if (/^(https?:|mailto:|tel:)/i.test(v)) return v;
-  if (v.startsWith('/')) return v; // 상대 경로
+  // 이미 지원되는 프로토콜: 그대로 반환 (최소 길이 검증)
+  if (/^https?:\/\/\S+/i.test(v)) return v;
+  if (/^mailto:\S+@\S+/i.test(v)) return v;
+  if (/^tel:\S+/i.test(v)) return v;
+  // 상대 경로 `/foo`, 프로토콜 미지원 `ftp://...`, 스킴만 있는 `http:` 등은 거부
+  if (/^\//.test(v)) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return null;
+  if (/\s/.test(v)) return null;
+  // 도메인 형태만 남음 → 최소 점 하나 포함(도메인.tld) 요구
+  if (!/\.[a-z]{2,}/i.test(v)) return null;
   return `https://${v}`;
 }
 
@@ -60,9 +78,18 @@ export function MemoLinkBubble({ editor, editRequestToken }: MemoLinkBubbleProps
 
   const apply = useCallback(() => {
     if (!editor) return;
-    const normalized = normalizeUrl(url);
-    if (!normalized) {
+    const raw = url.trim();
+    // 빈 입력은 취소로 해석 (기존 링크 있으면 유지)
+    if (!raw) {
       setEditMode(false);
+      return;
+    }
+    const normalized = normalizeUrl(raw);
+    if (!normalized) {
+      toast.error('유효하지 않은 URL 형식입니다. http:// 또는 https:// 로 시작하거나 도메인을 입력해주세요.');
+      // 버블 유지 + input 재포커스
+      inputRef.current?.focus();
+      inputRef.current?.select();
       return;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
