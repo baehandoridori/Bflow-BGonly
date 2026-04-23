@@ -56,6 +56,14 @@ export function MemoLinkBubble({ editor, editRequestToken }: MemoLinkBubbleProps
    */
   const lastHandledTokenRef = useRef(0);
 
+  // editor 인스턴스가 교체되면 (탭 전환으로 MemoEditor 가 리마운트) 편집 상태 리셋.
+  // 이 reset effect 가 token effect 보다 선언 순서상 먼저여야, 탭 전환과 동시에 Ctrl+K 가
+  // 눌린 경우에도 reset 후 token effect 가 뒤이어 editMode=true 로 올바르게 설정된다.
+  useEffect(() => {
+    setEditMode(false);
+    setUrl('');
+  }, [editor]);
+
   // 외부 요청 시 편집 모드 진입 + 현재 링크 URL 프리필
   useEffect(() => {
     if (editRequestToken <= 0 || !editor) return;
