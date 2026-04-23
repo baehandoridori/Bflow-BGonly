@@ -668,7 +668,28 @@ async function writeAppState(patch: Record<string, unknown>): Promise<void> {
   await fs.promises.writeFile(getAppStateFilePath(), JSON.stringify(next, null, 2), 'utf-8');
 }
 
+// Codex 리뷰 #3 P1: users.dat 경로를 getAppRoot() → userData 로 바꾸면서
+// 기존 로컬 파일이 보이지 않게 됨. 업그레이드 사용자의 로컬 사용자 목록 보존 위해
+// 최초 접근 시 한 번만 legacy(getAppRoot()/users.dat) → userData/users.dat 로 복사.
+let usersFileMigrationChecked = false;
+function migrateLegacyUsersFileIfNeeded(): void {
+  if (usersFileMigrationChecked) return;
+  usersFileMigrationChecked = true;
+  const newPath = getUsersFilePath();
+  if (fs.existsSync(newPath)) return; // 이미 userData 쪽에 있으면 migration 불필요
+  const legacyPath = path.join(getAppRoot(), 'users.dat');
+  if (!fs.existsSync(legacyPath)) return; // 레거시 파일도 없으면 생략
+  try {
+    ensureDir(path.dirname(newPath));
+    fs.copyFileSync(legacyPath, newPath);
+    console.log('[users] 레거시 users.dat 를 userData 로 마이그레이션 (롤백 대비 원본 유지)');
+  } catch (err) {
+    console.warn('[users] 레거시 users.dat 마이그레이션 실패:', err);
+  }
+}
+
 ipcMain.handle('users:read', () => {
+  migrateLegacyUsersFileIfNeeded();
   const filePath = getUsersFilePath();
   try {
     if (!fs.existsSync(filePath)) return null;
@@ -681,6 +702,7 @@ ipcMain.handle('users:read', () => {
 });
 
 ipcMain.handle('users:write', (_event, data: unknown) => {
+  migrateLegacyUsersFileIfNeeded();
   const filePath = getUsersFilePath();
   const dir = path.dirname(filePath);
   ensureDir(dir);

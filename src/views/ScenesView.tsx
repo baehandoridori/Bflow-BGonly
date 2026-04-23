@@ -3503,10 +3503,8 @@ export function ScenesView() {
       {selectedDepartment === 'all' ? (
         <div
           className={cn(
-            'relative flex-1 min-h-0',
-            isVisibleComplete
-              ? 'overflow-hidden rounded-[28px] border border-bg-border/40 bg-bg-card/20'
-              : 'overflow-auto',
+            'relative flex-1 min-h-0 overflow-auto',
+            isVisibleComplete && 'rounded-[28px] border border-bg-border/40 bg-bg-card/20',
           )}
         >
           <AnimatePresence>
@@ -3646,10 +3644,8 @@ export function ScenesView() {
       {/* 씬 목록 */}
       <div
         className={cn(
-          'relative flex-1 min-h-0',
-          isVisibleComplete
-            ? 'overflow-hidden rounded-[28px] border border-bg-border/40 bg-bg-card/20'
-            : 'overflow-auto'
+          'relative flex-1 min-h-0 overflow-auto',
+          isVisibleComplete && 'rounded-[28px] border border-bg-border/40 bg-bg-card/20'
         )}
       >
         {/* 파트 완료 보케 오버레이 */}
