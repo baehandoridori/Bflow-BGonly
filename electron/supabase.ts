@@ -422,6 +422,22 @@ export async function addPart(
   throwIfError(epErr);
 
   const depts = department ? [department] : ['bg', 'acting'];
+
+  // 이슈 F(2026-04-23): 같은 이름의 soft-deleted 파트가 있으면 진짜 DELETE로 정리.
+  // UNIQUE(episode_id, part_id, department) 제약이 deleted 행을 잡고 있어 재생성이 실패하던 문제 해결.
+  // CASCADE 덕분에 해당 파트의 자식 scenes·comments·comp_revisions까지 자동 정리되어
+  // '같은 이름 재생성 시 데이터 계승' 버그도 동시에 차단.
+  for (const d of depts) {
+    const { error: delErr } = await supabase
+      .from('parts')
+      .delete()
+      .eq('episode_id', ep!.id)
+      .eq('part_id', partId)
+      .eq('department', d)
+      .eq('status', 'deleted');
+    if (delErr) throwIfError(delErr);
+  }
+
   const rows = depts.map((d) => ({
     episode_id: ep!.id,
     part_id: partId,
@@ -720,10 +736,18 @@ export async function addComment(
   mentions: string[],
   createdAt: string,
 ): Promise<void> {
+  // 이슈 F(2026-04-23): scene_uuid 저장 — 씬 삭제 시 CASCADE로 자동 정리되게 함.
+  // 씬을 못 찾으면 댓글 저장 자체를 거부(앞으로 고아 댓글 신규 생성 차단).
+  const sceneUuid = await resolveSceneUuidWithRetry(partUuid, sceneId);
+  if (!sceneUuid) {
+    throw new Error(`댓글 저장 실패: 씬을 찾을 수 없음 (partUuid=${partUuid}, sceneId=${sceneId})`);
+  }
+
   const { error } = await supabase.from('comments').insert({
     id: commentId,
     part_id: partUuid,
     scene_id: sceneId,
+    scene_uuid: sceneUuid,
     user_id: userId,
     user_name: userName,
     text,
@@ -918,10 +942,19 @@ export async function addRevision(
     resolvedPartUuid = await resolvePartUuid(sceneId, lookupDepartment || department);
   }
 
+  // 이슈 F(2026-04-23): scene_uuid 저장 — 씬 삭제 시 CASCADE 자동 정리.
+  // sceneId가 리비전 sceneKey(예: "EP02:A:35") 형식일 수 있어 마지막 segment만 추출.
+  const sceneIdForResolve = sceneId.includes(':') ? sceneId.split(':').pop() || sceneId : sceneId;
+  const sceneUuid = await resolveSceneUuidWithRetry(resolvedPartUuid, sceneIdForResolve);
+  if (!sceneUuid) {
+    throw new Error(`리비전 저장 실패: 씬을 찾을 수 없음 (partUuid=${resolvedPartUuid}, sceneId=${sceneId})`);
+  }
+
   const { error } = await supabase.from('comp_revisions').insert({
     id,
     part_id: resolvedPartUuid,
     scene_id: sceneId,
+    scene_uuid: sceneUuid,
     revision_no: revisionNo,
     status,
     priority,
@@ -1031,6 +1064,60 @@ export async function writeMetadata(type: string, key: string, value: string): P
 // ═══════════════════════════════════════════════
 // 내부 헬퍼: sheetName → part UUID 변환
 // ═══════════════════════════════════════════════
+
+/**
+ * partUuid + sceneId(문자열) → scenes 테이블의 scene UUID를 반환.
+ * 이슈 F 해결(2026-04-23): 댓글·리비전을 씬과 FK CASCADE로 연결하기 위해
+ * part_letter 소문자 + sceneId 3자리 zero-pad 규칙으로 scene_number 재구성 후 조회.
+ * 숫자가 아닌 sceneId는 lower/trim 적용해 그대로 사용.
+ */
+export async function resolveSceneUuid(
+  partUuid: string,
+  sceneId: string,
+): Promise<string | null> {
+  if (!partUuid || !sceneId) return null;
+
+  const { data: part } = await supabase
+    .from('parts')
+    .select('part_id')
+    .eq('id', partUuid)
+    .single();
+  if (!part) return null;
+
+  const partLetter = String(part.part_id || '').trim().slice(0, 1).toLowerCase();
+  const trimmed = String(sceneId).trim().toLowerCase();
+  const normalized = /^\d+$/.test(trimmed) && partLetter
+    ? `${partLetter}${trimmed.padStart(3, '0')}`
+    : trimmed;
+
+  const { data: scene } = await supabase
+    .from('scenes')
+    .select('id')
+    .eq('part_id', partUuid)
+    .eq('scene_number', normalized)
+    .limit(1)
+    .maybeSingle();
+
+  return scene?.id || null;
+}
+
+/**
+ * resolveSceneUuid 재시도판.
+ * 낙관적 UI가 씬을 먼저 보여주고 DB 저장이 늦을 때 댓글/리비전 저장이 레이스로 실패하는
+ * 문제를 완화한다. 500ms → 1000ms 백오프로 최대 3회 시도.
+ */
+async function resolveSceneUuidWithRetry(
+  partUuid: string,
+  sceneId: string,
+): Promise<string | null> {
+  const delays = [0, 500, 1000];
+  for (const delay of delays) {
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    const uuid = await resolveSceneUuid(partUuid, sceneId);
+    if (uuid) return uuid;
+  }
+  return null;
+}
 
 /**
  * sheetName (예: "EP01_A_BG") → parts 테이블의 UUID를 반환.

@@ -40,25 +40,25 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
 
-  // 댓글 로드 — primary + optional secondary 를 양쪽 조회 후 시간순 병합
+  // 댓글 로드 — loadPartComments가 이미 BG·ACT 양쪽 파트를 통합 조회하므로
+  // 이슈 F-2(2026-04-23) 이후로는 primary 한 번 조회만으로 양쪽 댓글이 모두 포함된다.
+  // secondarySceneKey 를 추가로 조회하면 같은 댓글이 두 번 merge되어 React key 중복 경고 발생.
   const loadComments = useCallback(() => {
-    const primaryPromise = getComments(sceneKey).then((list) =>
-      list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey })),
-    );
-    const secondaryPromise = secondarySceneKey
-      ? getComments(secondarySceneKey).then((list) =>
-          list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: secondarySceneKey })),
-        )
-      : Promise.resolve([]);
-
-    Promise.all([primaryPromise, secondaryPromise]).then(([a, b]) => {
-      const merged = [...a, ...b].sort(
-        (x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime(),
-      );
-      setComments(merged);
-      onCountChange?.(merged.length);
+    getComments(sceneKey).then((list) => {
+      const sorted = list
+        .map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey }))
+        .sort((x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime());
+      // 안전장치: 혹시 모를 상류 중복 제거.
+      const seen = new Set<string>();
+      const deduped = sorted.filter((c) => {
+        if (seen.has(c.id)) return false;
+        seen.add(c.id);
+        return true;
+      });
+      setComments(deduped);
+      onCountChange?.(deduped.length);
     });
-  }, [sceneKey, secondarySceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadComments(); }, [loadComments]);
 

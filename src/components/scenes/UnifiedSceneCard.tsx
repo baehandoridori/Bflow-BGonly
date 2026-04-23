@@ -168,10 +168,12 @@ export function UnifiedSceneCard({
             )}
           </div>
           <div className="flex items-center gap-1.5">
-            {(bgCommentCount + actCommentCount) > 0 && (
-              <span className="flex items-center gap-0.5 bg-accent/15 text-accent px-1.5 py-0.5 rounded-full" title={`의견 ${bgCommentCount + actCommentCount}개`}>
+            {/* 이슈 F-2(2026-04-23): bgCommentCount·actCommentCount 둘 다 이미 BG·ACT 통합 결과라
+                더하면 2배 집계됨. 최댓값 하나만 사용 (대부분 둘이 같음, 한쪽 sheet 캐시가 낙관적으로 먼저 반영될 땐 다를 수 있어 max). */}
+            {Math.max(bgCommentCount, actCommentCount) > 0 && (
+              <span className="flex items-center gap-0.5 bg-accent/15 text-accent px-1.5 py-0.5 rounded-full" title={`의견 ${Math.max(bgCommentCount, actCommentCount)}개`}>
                 <MessageCircle size={10} fill="currentColor" />
-                <span className="text-[10px] font-bold">{bgCommentCount + actCommentCount}</span>
+                <span className="text-[10px] font-bold">{Math.max(bgCommentCount, actCommentCount)}</span>
               </span>
             )}
             <span className="bg-bg-primary/80 border border-bg-border/45 text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">

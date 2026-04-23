@@ -1785,8 +1785,11 @@ export function ScenesView() {
     setPendingDeepLink(null);
   }, [pendingDeepLink, episodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 댓글 카운트 로드 (currentPart 또는 bgPart/actPart 정의 후)
-  useEffect(() => {
+  // 댓글 카운트 로드 (currentPart 또는 bgPart/actPart 정의 후).
+  // 주의: 이 함수 내부에서 invalidatePartCache 를 호출하면 'bflow:comments-invalidated' 이벤트가
+  // 발화되어 아래 리스너가 다시 이 함수를 호출하는 무한 루프가 발생한다. 캐시 무효화는
+  // 소스(댓글 add/edit/delete, 씬 삭제 핸들러, App.tsx Realtime 처리) 쪽에서만 책임진다.
+  const reloadCommentCounts = useCallback(() => {
     const sheetsToLoad = selectedDepartment === 'all'
       ? [bgPart?.sheetName, actPart?.sheetName].filter(Boolean) as string[]
       : currentPart ? [currentPart.sheetName] : [];
@@ -1795,6 +1798,10 @@ export function ScenesView() {
       loadPartComments(sheetName).then((store) => {
         setCommentCounts((prev) => {
           const next = { ...prev };
+          const prefix = `${sheetName}:`;
+          Object.keys(next).forEach((key) => {
+            if (key.startsWith(prefix)) delete next[key];
+          });
           for (const [key, list] of Object.entries(store)) {
             next[key] = list.length;
           }
@@ -1802,7 +1809,20 @@ export function ScenesView() {
         });
       }).catch(() => {});
     });
-  }, [detailSceneIndex, detailContext, currentPart?.sheetName, bgPart?.sheetName, actPart?.sheetName, selectedDepartment]);
+  }, [selectedDepartment, bgPart?.sheetName, actPart?.sheetName, currentPart?.sheetName]);
+
+  useEffect(() => {
+    reloadCommentCounts();
+    // 이슈 F(2026-04-23): 씬 수 변화(삭제/추가/재생성)도 트리거. 재생성 시 잔존 뱃지 방지.
+  }, [reloadCommentCounts, detailSceneIndex, detailContext, bgPart?.scenes.length, actPart?.scenes.length, currentPart?.scenes.length]);
+
+  // 이슈 F-2(2026-04-23): 댓글 추가/수정/삭제로 캐시가 무효화되면 카드 뷰 뱃지도 즉시 갱신.
+  // 이 시점에는 소스 쪽에서 이미 캐시를 비운 뒤이므로 재조회만 하면 된다 (invalidate 재호출 금지).
+  useEffect(() => {
+    const handler = () => reloadCommentCounts();
+    window.addEventListener('bflow:comments-invalidated', handler);
+    return () => window.removeEventListener('bflow:comments-invalidated', handler);
+  }, [reloadCommentCounts]);
 
   // 에피소드 제목/메모 → App.tsx에서 병렬 로드됨 (글로벌 스토어)
 
@@ -2615,9 +2635,18 @@ export function ScenesView() {
       return;
     }
     const sceneUuid = targetScene.id;
+    const sceneNo = targetScene.no;
 
     const prevEpisodes = currentEpisodes;
     deleteSceneOptimistic(sheetName, sceneIndex);
+
+    // 이슈 F(2026-04-23): CASCADE로 DB 댓글/리비전이 사라지니 로컬 캐시·카운트도 즉시 정리.
+    invalidatePartCache(sheetName);
+    setCommentCounts((prev) => {
+      const next = { ...prev };
+      delete next[`${sheetName}:${sceneNo}`];
+      return next;
+    });
 
     try {
       await deleteSceneFromSupabase(sceneUuid);
@@ -2666,20 +2695,29 @@ export function ScenesView() {
   };
 
   // ─── 파트 삭제 ─────────────────────
-  const handleDeletePart = async (sheetName: string) => {
-    const part = parts.find((p) => p.sheetName === sheetName);
-    if (!part) return;
-    if (!confirm(`${part.partId}파트를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
+  // BG·ACT 동시 선택(전체 뷰)에서도 한 번의 확인으로 양쪽 파트를 함께 삭제 처리.
+  const handleDeletePartsForSheets = async (sheetNames: string[]) => {
+    if (sheetNames.length === 0) return;
+    const allParts = useDataStore.getState().episodes.flatMap((ep) => ep.parts);
+    const targetParts = sheetNames
+      .map((sn) => allParts.find((p) => p.sheetName === sn))
+      .filter((p): p is NonNullable<typeof p> => !!p);
+    if (targetParts.length === 0) return;
 
-    // 롤백용 스냅샷
+    const partLabel = [...new Set(targetParts.map((p) => p.partId))].join('·');
+    if (!confirm(`${partLabel}파트를 삭제하시겠습니까?\n파트에 속한 모든 씬·댓글·리비전도 함께 정리됩니다.`)) return;
+
     const prevEpisodes = useDataStore.getState().episodes;
     const prevSelectedPart = selectedPart;
 
-    deletePartOptimistic(sheetName);
+    for (const sn of sheetNames) {
+      deletePartOptimistic(sn);
+      invalidatePartCache(sn);
+    }
     setSelectedPart(null);
 
     try {
-      await softDeletePart(sheetName);
+      await Promise.all(sheetNames.map((sn) => softDeletePart(sn)));
       syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
@@ -2689,11 +2727,13 @@ export function ScenesView() {
     }
   };
 
+  const handleDeletePart = (sheetName: string) => handleDeletePartsForSheets([sheetName]);
+
   // ─── 에피소드 삭제 ────────────────────
   const handleDeleteEpisode = async () => {
     if (!currentEp) return;
     const epDisplayName = episodeTitles[currentEp.episodeNumber] || currentEp.title;
-    if (!confirm(`"${epDisplayName}"를 삭제하시겠습니까?\n(시트에서 숨김 처리됩니다)`)) return;
+    if (!confirm(`"${epDisplayName}"를 삭제하시겠습니까?\n에피소드의 모든 파트·씬·댓글도 함께 정리됩니다. 아카이빙을 원하면 우클릭 메뉴에서 '아카이빙하기'를 이용해주세요.`)) return;
 
     // 롤백용 스냅샷
     const prevEpisodes = useDataStore.getState().episodes;
@@ -4115,11 +4155,10 @@ export function ScenesView() {
               label: '파트 삭제',
               icon: <Trash2 size={12} />,
               danger: true,
-              disabled: partMenuTarget.sheetNames.length !== 1,
+              disabled: partMenuTarget.sheetNames.length === 0,
               onClick: () => {
-                const targetSheetName = partMenuTarget.sheetNames[0];
-                if (targetSheetName) {
-                  handleDeletePart(targetSheetName);
+                if (partMenuTarget.sheetNames.length > 0) {
+                  handleDeletePartsForSheets(partMenuTarget.sheetNames);
                 }
               },
             },

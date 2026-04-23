@@ -451,9 +451,12 @@ export function getMergedCommentBadgeCounts(
     ? (commentCounts[`${actSheetName}:${merged.actScene.no}`] ?? 0)
     : 0;
 
+  // 이슈 F-2(2026-04-23): commentCounts의 각 sheet 값은 이미 loadPartComments가
+  // BG·ACT를 통합해 돌려준 결과다. 두 값을 더하면 같은 댓글이 2배로 집계되므로
+  // 최댓값을 취해 정확한 총합을 유지한다.
   return {
     bg,
     act,
-    total: bg + act,
+    total: Math.max(bg, act),
   };
 }
