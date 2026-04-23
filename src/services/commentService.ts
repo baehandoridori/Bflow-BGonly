@@ -8,6 +8,9 @@
  * sceneKey 형식: "sheetName:sceneNo" (예: "EP01_A_BG:3")
  */
 
+import type { Part } from '../types';
+import { normalizeSceneIdKey } from '../utils/sceneIdKey';
+
 const COMMENTS_FILE = 'comments.json';
 
 export interface SceneComment {
@@ -63,29 +66,58 @@ function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string }
   return { sheetName: sceneKey.substring(0, idx), sceneId: sceneKey.substring(idx + 1) };
 }
 
+/** BG↔ACT 상대 sheetName. 같은 장면의 댓글을 양쪽 탭에서 공유하기 위해 사용. */
+function getCounterpartSheetName(sheetName: string): string | null {
+  if (sheetName.endsWith('_BG')) return sheetName.slice(0, -3) + '_ACT';
+  if (sheetName.endsWith('_ACT')) return sheetName.slice(0, -4) + '_BG';
+  return null;
+}
+
+function getRelatedSheetNames(sheetName: string): string[] {
+  const cp = getCounterpartSheetName(sheetName);
+  return cp ? [sheetName, cp] : [sheetName];
+}
+
 /**
  * 특정 파트의 댓글을 시트에서 로드 (캐시).
+ * 이슈 F-2(2026-04-23): 같은 장면의 BG·ACT 댓글을 함께 조회해 한쪽에서 작성한 댓글이
+ * 반대 부서 탭·카드 뷰 뱃지에서도 보이게 함. 저장은 그대로 원본 파트에만 한다.
+ *
+ * Codex P1(2026-04-23): 상대 부서 댓글을 요청된 sheet 키로 재매핑할 때 단순히
+ * `${sheetName}:${c.sceneId}`로 작성하면 BG·ACT scene.no 가 비대칭(삭제/추가로 어긋난 경우)
+ * 일 때 엉뚱한 카드에 매핑된다. 댓글이 달린 "장면"의 scene_number 를 정규화하여 요청 파트에서
+ * 같은 정규화 값을 가진 씬의 scene.no 로 키를 재구성한다. 매칭 씬이 없으면 안전하게 skip.
  */
 export async function loadPartComments(sheetName: string): Promise<CommentsStore> {
   if (sheetPartCache.has(sheetName)) return sheetPartCache.get(sheetName)!;
 
-  // Supabase: sheetName → part UUID 해석 (스토어에서 조회)
-  let partUuid: string | undefined;
+  const related = getRelatedSheetNames(sheetName);
+  let requestedPart: Part | undefined;
+  const partByUuid = new Map<string, Part>();
+  const partUuids: string[] = [];
   try {
     const { useDataStore } = await import('../stores/useDataStore');
-    const part = useDataStore.getState().episodes
-      .flatMap((ep) => ep.parts)
-      .find((p) => p.sheetName === sheetName);
-    partUuid = part?.id;
+    const allParts: Part[] = useDataStore.getState().episodes.flatMap((ep) => ep.parts);
+    requestedPart = allParts.find((p) => p.sheetName === sheetName);
+    for (const sn of related) {
+      const p = allParts.find((pp) => pp.sheetName === sn);
+      if (p?.id) {
+        partUuids.push(p.id);
+        partByUuid.set(p.id, p);
+      }
+    }
   } catch { /* 무시 */ }
 
   let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string | null }[] = [];
 
   let supabaseFailed = false;
-  if (partUuid) {
-    // Supabase 경로
+  if (partUuids.length > 0) {
+    // Supabase 경로 — 관련 파트(BG·ACT) UUID 모두에서 조회
     try {
-      rawComments = (await window.electronAPI.supabaseReadComments(partUuid)) as typeof rawComments;
+      const results = await Promise.all(
+        partUuids.map((uuid) => window.electronAPI.supabaseReadComments(uuid) as Promise<typeof rawComments>),
+      );
+      rawComments = results.flat();
     } catch (err) {
       console.warn('[댓글] Supabase 로드 실패, Sheets fallback:', err);
       supabaseFailed = true;
@@ -93,7 +125,7 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
   }
 
   // Supabase 실패 또는 partUuid 없을 때 Sheets fallback
-  if (rawComments.length === 0 && (!partUuid || supabaseFailed)) {
+  if (rawComments.length === 0 && (partUuids.length === 0 || supabaseFailed)) {
     try {
       const result = await window.electronAPI.sheetsReadComments(sheetName);
       if (result.ok) {
@@ -106,9 +138,55 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
     } catch { /* fallback도 실패 */ }
   }
 
+  /**
+   * 댓글 row를 요청된 sheet 기준 scene.no 문자열로 변환. 매칭 씬이 없으면 null 반환(skip).
+   *
+   * Codex P1 3차(2026-04-23): 정규화만으로 매칭하면 alias-collision (예: `a001`·`ac001` 이
+   * 같은 키로 정규화) 상황에서 상대 부서 댓글이 다른 물리 씬에 붙을 수 있다. 순서:
+   *   1) 원본 scene_number(lowercase) 정확 매칭 — collision 영향 없음, 일반 케이스 대부분 해결
+   *   2) 정규화 매칭 — 단 requested part 에 같은 정규화 씬이 "유일"할 때만. 2개 이상이면 skip.
+   */
+  const mapToRequestedSceneNo = (row: typeof rawComments[number]): string | null => {
+    // 요청 파트 메타를 못 얻었거나 fallback 경로 등은 원본 scene_id 를 그대로 사용(이전 동작과 호환).
+    if (!requestedPart) return row.sceneId;
+    const sourcePart = row.partId ? partByUuid.get(row.partId) : undefined;
+
+    // 자기 파트 댓글이면 그대로
+    if (!sourcePart || sourcePart.id === requestedPart.id) return row.sceneId;
+
+    const sourceScene = sourcePart.scenes.find((s) => String(s.no) === String(row.sceneId));
+    if (!sourceScene) return null;
+
+    // 1차: 원본 scene_number 정확 매칭 (lowercase + trim). collision 안전.
+    const sourceSceneNumber = (sourceScene.sceneId || '').trim().toLowerCase();
+    if (sourceSceneNumber) {
+      const exactMatch = requestedPart.scenes.find(
+        (s) => (s.sceneId || '').trim().toLowerCase() === sourceSceneNumber,
+      );
+      if (exactMatch) return String(exactMatch.no);
+    }
+
+    // 2차: 정규화 매칭 — 유일한 매칭일 때만 허용. 2개 이상이면 alias-collision 이므로 skip.
+    const normalizedSource = normalizeSceneIdKey(sourceScene.sceneId, sourcePart.partId);
+    if (!normalizedSource) return null;
+    const normalizedMatches = requestedPart.scenes.filter(
+      (s) => normalizeSceneIdKey(s.sceneId, requestedPart!.partId) === normalizedSource,
+    );
+    if (normalizedMatches.length === 1) return String(normalizedMatches[0].no);
+    return null;
+  };
+
   const store: CommentsStore = {};
+  const seenIds = new Set<string>();
   for (const c of rawComments) {
-    const key = `${sheetName}:${c.sceneId}`;
+    // 통합 조회 중복 제거 (안전장치)
+    if (seenIds.has(c.id)) continue;
+    seenIds.add(c.id);
+
+    const targetSceneNo = mapToRequestedSceneNo(c);
+    if (targetSceneNo == null) continue; // 비대칭으로 대응 씬이 없으면 안전하게 skip
+
+    const key = `${sheetName}:${targetSceneNo}`;
     if (!store[key]) store[key] = [];
     store[key].push({
       id: c.id,
@@ -125,11 +203,18 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
   return store;
 }
 
-/** 파트 캐시 무효화 + 컴포넌트에 리로드 신호 전달 */
+/**
+ * 파트 캐시 무효화 + 컴포넌트에 리로드 신호 전달.
+ * BG↔ACT 양쪽 캐시를 함께 비워 한쪽 갱신이 다른 쪽 뷰에도 반영되게 함.
+ */
 export function invalidatePartCache(sheetName?: string): void {
-  if (sheetName) sheetPartCache.delete(sheetName);
-  else sheetPartCache.clear();
-  // CommentPanel 등 구독 컴포넌트에 다시 불러오라는 신호
+  if (sheetName) {
+    sheetPartCache.delete(sheetName);
+    const cp = getCounterpartSheetName(sheetName);
+    if (cp) sheetPartCache.delete(cp);
+  } else {
+    sheetPartCache.clear();
+  }
   window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
 }
 
@@ -163,12 +248,18 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
       comment.userId, comment.userName, comment.text,
       comment.mentions, comment.createdAt,
     );
-    // 캐시 업데이트
-    const store = sheetPartCache.get(sheetName);
-    if (store) {
-      if (!store[sceneKey]) store[sceneKey] = [];
-      store[sceneKey].push(comment);
+    // 캐시 업데이트 — 원본 sheet 캐시에만 낙관적 반영.
+    // 반대 부서 sheet 캐시는 invalidate해서 다음 조회 시 통합 재조회로 반영 (중복 삽입 방지).
+    const ownStore = sheetPartCache.get(sheetName);
+    if (ownStore) {
+      if (!ownStore[sceneKey]) ownStore[sceneKey] = [];
+      ownStore[sceneKey].push(comment);
     }
+    const counterpart = getCounterpartSheetName(sheetName);
+    if (counterpart) sheetPartCache.delete(counterpart);
+    // 자기 창 카드 뷰 뱃지 즉시 갱신 (ScenesView 리스너 트리거).
+    // 주의: 이벤트만 발화. 캐시 비우기는 이미 위에서 처리했음 (invalidatePartCache 호출 금지 — 무한 루프 방지).
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
     // 다른 창에 댓글 변경 알림
     window.electronAPI?.dataNotifyChange?.({
       type: 'comment', sheetName, sceneId, commentAction: 'add',
@@ -189,14 +280,15 @@ export async function updateComment(
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
     await window.electronAPI.supabaseEditComment(commentId, text, mentions);
-    // 캐시 업데이트
+    // 캐시 업데이트 — commentId 기준으로 모든 캐시/리스트를 순회 (BG·ACT 양쪽 매핑 반영)
     sheetPartCache.forEach((store) => {
-      const list = store[sceneKey];
-      if (list) {
+      for (const list of Object.values(store)) {
         const idx = list.findIndex(c => c.id === commentId);
         if (idx >= 0) list[idx] = { ...list[idx], text, mentions, editedAt };
       }
     });
+    // 자기 창 뱃지/패널 즉시 갱신
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
     // 다른 창에 댓글 변경 알림
     window.electronAPI?.dataNotifyChange?.({
       type: 'comment', sheetName, sceneId, commentAction: 'edit',
@@ -216,14 +308,19 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
     await window.electronAPI.supabaseDeleteComment(commentId);
-    // 캐시에서 제거
+    // 캐시에서 제거 — commentId 기준으로 모든 캐시/리스트 순회 (BG·ACT 양쪽 반영)
     sheetPartCache.forEach((store) => {
-      const list = store[sceneKey];
-      if (list) {
-        store[sceneKey] = list.filter(c => c.id !== commentId);
-        if (store[sceneKey].length === 0) delete store[sceneKey];
+      for (const key of Object.keys(store)) {
+        const list = store[key];
+        const filtered = list.filter(c => c.id !== commentId);
+        if (filtered.length !== list.length) {
+          if (filtered.length === 0) delete store[key];
+          else store[key] = filtered;
+        }
       }
     });
+    // 자기 창 뱃지/패널 즉시 갱신
+    window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
     // 다른 창에 댓글 변경 알림
     window.electronAPI?.dataNotifyChange?.({
       type: 'comment', sheetName, sceneId, commentAction: 'delete',

@@ -18,6 +18,8 @@ interface UnifiedSceneSheetViewProps {
   bgSheetName: string | null;
   actSheetName: string | null;
   commentCounts: Record<string, number>;
+  /** Codex P2 6차(2026-04-23): ambiguous skip 케이스에서 정확한 union 크기 계산을 위한 id 맵. */
+  commentIdsByKey?: Record<string, string[]>;
   searchQuery?: string;
   selectedSceneIds: Set<string>;
   sceneGroupMode: SceneGroupMode;
@@ -271,6 +273,7 @@ export function UnifiedSceneSheetView({
   bgSheetName,
   actSheetName,
   commentCounts,
+  commentIdsByKey,
   searchQuery,
   selectedSceneIds,
   sceneGroupMode,
@@ -653,6 +656,7 @@ export function UnifiedSceneSheetView({
                 bgSheetName,
                 actSheetName,
                 commentCounts,
+                commentIdsByKey,
               );
 
               return (

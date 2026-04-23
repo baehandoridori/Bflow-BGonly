@@ -422,6 +422,22 @@ export async function addPart(
   throwIfError(epErr);
 
   const depts = department ? [department] : ['bg', 'acting'];
+
+  // 이슈 F(2026-04-23): 같은 이름의 soft-deleted 파트가 있으면 진짜 DELETE로 정리.
+  // UNIQUE(episode_id, part_id, department) 제약이 deleted 행을 잡고 있어 재생성이 실패하던 문제 해결.
+  // CASCADE 덕분에 해당 파트의 자식 scenes·comments·comp_revisions까지 자동 정리되어
+  // '같은 이름 재생성 시 데이터 계승' 버그도 동시에 차단.
+  for (const d of depts) {
+    const { error: delErr } = await supabase
+      .from('parts')
+      .delete()
+      .eq('episode_id', ep!.id)
+      .eq('part_id', partId)
+      .eq('department', d)
+      .eq('status', 'deleted');
+    if (delErr) throwIfError(delErr);
+  }
+
   const rows = depts.map((d) => ({
     episode_id: ep!.id,
     part_id: partId,
@@ -720,10 +736,22 @@ export async function addComment(
   mentions: string[],
   createdAt: string,
 ): Promise<void> {
+  // 이슈 F(2026-04-23) + Codex P1(2차): 댓글 경로의 sceneId는 scene.no (=sort_order).
+  // sort_order 정확 매칭으로 scene_number 표기 규칙과 무관하게 정확히 식별.
+  // 씬을 못 찾으면 댓글 저장 자체를 거부(앞으로 고아 댓글 신규 생성 차단).
+  const sortOrder = Number(String(sceneId).trim());
+  const sceneUuid = Number.isFinite(sortOrder)
+    ? await resolveSceneUuidBySortOrderWithRetry(partUuid, sortOrder)
+    : null;
+  if (!sceneUuid) {
+    throw new Error(`댓글 저장 실패: 씬을 찾을 수 없음 (partUuid=${partUuid}, sceneId=${sceneId})`);
+  }
+
   const { error } = await supabase.from('comments').insert({
     id: commentId,
     part_id: partUuid,
     scene_id: sceneId,
+    scene_uuid: sceneUuid,
     user_id: userId,
     user_name: userName,
     text,
@@ -918,10 +946,40 @@ export async function addRevision(
     resolvedPartUuid = await resolvePartUuid(sceneId, lookupDepartment || department);
   }
 
+  // 이슈 F(2026-04-23): scene_uuid 저장 — 씬 삭제 시 CASCADE 자동 정리.
+  // sceneId가 리비전 sceneKey(예: "EP02:A:35" 또는 "EP02:A:raw-sc001") 형식일 수 있어 마지막 segment 추출.
+  // Codex P2(2026-04-23): alias-collision 케이스에서 segment가 `raw-${encodeURIComponent(rawSceneId)}`
+  // 형태로 들어올 수 있으므로 반드시 decode해야 실제 scene_number와 매칭된다.
+  const rawSegment = sceneId.includes(':') ? sceneId.split(':').pop() || sceneId : sceneId;
+  const lowerSegment = rawSegment.trim().toLowerCase();
+  let sceneIdForResolve = rawSegment;
+  if (lowerSegment.startsWith('raw-')) {
+    try {
+      sceneIdForResolve = decodeURIComponent(lowerSegment.slice(4));
+    } catch {
+      sceneIdForResolve = lowerSegment.slice(4);
+    }
+  }
+  // Codex P1 2차(2026-04-23): 리비전 sceneKey 숫자는 normalizeSceneIdKey 결과(예: "a035"→"35")로
+  // scene_number 파생 값이다. sort_order 와 일치가 보장되지 않으므로 반드시 scene_number 매칭 경로로.
+  const sceneUuid = await resolveSceneUuidByNumberWithRetry(resolvedPartUuid, sceneIdForResolve);
+
+  // Codex P2 5차(2026-04-23): unified 뷰의 dup/disambiguated 씬은 실제 scenes.scene_number 가 아닌
+  // synthetic ID (예: "merged-${encodeURIComponent(mergedKey)}", "dup:..." in mergedSceneHelpers.ts)
+  // 로 sceneKey 를 생성한다. 이 경우 scene_uuid 매칭이 본질적으로 불가능하므로 저장 자체를 막으면
+  // 해당 데이터 형태의 사용자는 리비전을 아예 기록할 수 없다. scene_uuid 컬럼은 nullable 이므로
+  // synthetic 으로 확인된 경우에만 null 저장을 허용한다 (CASCADE 는 포기하되 저장 가능성 보장).
+  const lowerResolve = sceneIdForResolve.toLowerCase();
+  const isSyntheticMergedId = lowerResolve.startsWith('merged-') || lowerResolve.startsWith('dup:');
+  if (!sceneUuid && !isSyntheticMergedId) {
+    throw new Error(`리비전 저장 실패: 씬을 찾을 수 없음 (partUuid=${resolvedPartUuid}, sceneId=${sceneId})`);
+  }
+
   const { error } = await supabase.from('comp_revisions').insert({
     id,
     part_id: resolvedPartUuid,
     scene_id: sceneId,
+    scene_uuid: sceneUuid, // null 가능 — synthetic merged ID 의 경우
     revision_no: revisionNo,
     status,
     priority,
@@ -1031,6 +1089,151 @@ export async function writeMetadata(type: string, key: string, value: string): P
 // ═══════════════════════════════════════════════
 // 내부 헬퍼: sheetName → part UUID 변환
 // ═══════════════════════════════════════════════
+
+/**
+ * scene UUID 조회 경로가 두 갈래로 나뉜다 (Codex P1 2차, 2026-04-23):
+ *
+ *   A) 댓글 경로: `sceneKey = sheetName:scene.no` 이고 `scene.no === scenes.sort_order`.
+ *      → `resolveSceneUuidBySortOrder` 사용. sort_order 정확 매칭이 항상 올바름.
+ *
+ *   B) 리비전 경로: `sceneKey = EP:partLetter:normalizedNumberOrRaw`.
+ *      숫자 segment("35")는 `normalizeSceneIdKey("a035", "A")` 결과의 숫자부이므로
+ *      sort_order 와 일치 보장 없음 (삭제·재배치로 어긋날 수 있음).
+ *      `raw-...` alias segment는 decode 후 custom scene_number 가 됨.
+ *      → `resolveSceneUuidByNumber` 사용. scene_number 정규화 매칭이 정답.
+ *
+ * 두 함수는 호출자가 의도를 명확히 표현하도록 분리되었다. 공유 매칭을 피해
+ * "어쩌다 sort_order 와 숫자부가 같아서 올바른 씬이 잡히는" 우연을 제거한다.
+ */
+
+/** 댓글 경로 전용 — scene.no(=sort_order) 정확 매칭. */
+export async function resolveSceneUuidBySortOrder(
+  partUuid: string,
+  sortOrder: number,
+): Promise<string | null> {
+  if (!partUuid || !Number.isFinite(sortOrder)) return null;
+  const { data } = await supabase
+    .from('scenes')
+    .select('id')
+    .eq('part_id', partUuid)
+    .eq('sort_order', sortOrder)
+    .limit(1)
+    .maybeSingle();
+  return data?.id || null;
+}
+
+/**
+ * `src/utils/sceneIdKey.ts#normalizeSceneIdKey` 와 동일한 규칙을 electron 쪽에서도 사용하기 위한
+ * 로컬 복제. 두 코드는 서로 다른 번들에 속하므로 런타임 import 대신 로직을 복제한다.
+ * 동일 규칙 유지를 위해 sceneIdKey.ts 를 수정할 때는 이 함수도 함께 갱신해야 한다.
+ */
+function normalizeSceneIdKeyLocal(sceneNumber: string, partLetter: string): string {
+  const raw = String(sceneNumber || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (/^\d+$/.test(raw)) return String(Number(raw));
+  if (partLetter && new RegExp(`^${partLetter}[a-z]*\\d+$`).test(raw)) {
+    const trailing = raw.match(/\d+$/)?.[0];
+    return trailing ? String(Number(trailing)) : raw;
+  }
+  return raw;
+}
+
+/** 리비전 경로 전용 — scene_number 기반 매칭.
+ *  숫자는 part_letter + LPAD(3) 로 정규화, 그 외 custom prefix("sc001")는 lowercase 원본으로.
+ *  alias-prefixed 씬(예: "ac001") 대응을 위해 정규화 키 기반 fallback 추가. */
+export async function resolveSceneUuidByNumber(
+  partUuid: string,
+  sceneNumberLike: string,
+): Promise<string | null> {
+  if (!partUuid || !sceneNumberLike) return null;
+  const trimmed = String(sceneNumberLike).trim();
+  const lower = trimmed.toLowerCase();
+
+  const { data: part } = await supabase
+    .from('parts')
+    .select('part_id')
+    .eq('id', partUuid)
+    .single();
+  if (!part) return null;
+
+  const partLetter = String(part.part_id || '').trim().slice(0, 1).toLowerCase();
+  const normalized = /^\d+$/.test(lower) && partLetter
+    ? `${partLetter}${lower.padStart(3, '0')}`
+    : lower;
+
+  // 1차: part_letter + LPAD(3) canonical 매칭 (대부분 케이스)
+  const { data: byNumber } = await supabase
+    .from('scenes')
+    .select('id')
+    .eq('part_id', partUuid)
+    .eq('scene_number', normalized)
+    .limit(1)
+    .maybeSingle();
+  if (byNumber?.id) return byNumber.id;
+
+  // 2차: custom prefix (예: "sc001", "v2a001") — 원본 lowercase 그대로 한 번 더
+  if (normalized !== lower) {
+    const { data: byRaw } = await supabase
+      .from('scenes')
+      .select('id')
+      .eq('part_id', partUuid)
+      .eq('scene_number', lower)
+      .limit(1)
+      .maybeSingle();
+    if (byRaw?.id) return byRaw.id;
+  }
+
+  // 3차(Codex P1 4차, 2026-04-23): alias-prefixed 씬 대응.
+  // 예를 들어 part A 에 "ac001" 만 있고 "a001" 이 없는 프로젝트에서 sceneKey 숫자 "1" 이 전달되면
+  // 1·2차 모두 실패한다. 이때 파트의 모든 씬을 가져와 normalizeSceneIdKey 규칙으로 같은 정규화 키를
+  // 가진 씬을 찾는다. 유일하면 매칭, collision 이면 안전하게 null.
+  const targetKey = normalizeSceneIdKeyLocal(lower, partLetter);
+  if (targetKey) {
+    const { data: allScenes } = await supabase
+      .from('scenes')
+      .select('id, scene_number')
+      .eq('part_id', partUuid);
+    if (allScenes && allScenes.length > 0) {
+      const matches = allScenes.filter(
+        (s) => normalizeSceneIdKeyLocal(String(s.scene_number || ''), partLetter) === targetKey,
+      );
+      if (matches.length === 1) return matches[0].id as string;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 후방 호환용 — 과거에 이 이름을 참조하던 외부 경로가 남아 있을 경우를 위한 얇은 래퍼.
+ * 새 코드는 반드시 resolveSceneUuidBySortOrder 또는 resolveSceneUuidByNumber 중 의도에
+ * 맞는 함수를 직접 사용할 것.
+ */
+export async function resolveSceneUuid(
+  partUuid: string,
+  sceneId: string,
+): Promise<string | null> {
+  return resolveSceneUuidByNumber(partUuid, sceneId);
+}
+
+/** 낙관적 UI ↔ DB 저장 레이스 완화용 재시도 래퍼. 0→500→1000ms 백오프. */
+async function withRetry<T>(fn: () => Promise<T | null>): Promise<T | null> {
+  const delays = [0, 500, 1000];
+  for (const delay of delays) {
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    const result = await fn();
+    if (result) return result;
+  }
+  return null;
+}
+
+async function resolveSceneUuidBySortOrderWithRetry(partUuid: string, sortOrder: number): Promise<string | null> {
+  return withRetry(() => resolveSceneUuidBySortOrder(partUuid, sortOrder));
+}
+
+async function resolveSceneUuidByNumberWithRetry(partUuid: string, sceneNumberLike: string): Promise<string | null> {
+  return withRetry(() => resolveSceneUuidByNumber(partUuid, sceneNumberLike));
+}
 
 /**
  * sheetName (예: "EP01_A_BG") → parts 테이블의 UUID를 반환.

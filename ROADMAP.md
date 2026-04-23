@@ -1,6 +1,6 @@
 # ROADMAP.md — Bflow 프로덕션 현황 관리 도구 개발 로드맵
 
-> **최종 갱신**: 2026-03-14 (Phase 9 Supabase 마이그레이션 진행 반영)
+> **최종 갱신**: 2026-04-23 (v1.12.2 — 이슈 F 씬·파트 삭제 댓글 계승 버그 해결 + BG·ACT 댓글 통합)
 > **프로젝트**: Bflow (Studio JBBJ 프로덕션 진행 현황 대시보드)
 > **담당**: Claude × 한솔 (Studio JBBJ)
 > **현재 상태**: Phase 0 (0-4 제외) 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7 완료, Phase 8-0~8-1, 8-3~8-5 완료, Phase 9 M-0, M-2 완료 + M-3 부분 완료

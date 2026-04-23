@@ -443,17 +443,29 @@ export function getMergedCommentBadgeCounts(
   bgSheetName: string | null,
   actSheetName: string | null,
   commentCounts: Record<string, number>,
+  commentIdsByKey?: Record<string, readonly string[]>,
 ) {
-  const bg = merged.bgScene && bgSheetName
-    ? (commentCounts[`${bgSheetName}:${merged.bgScene.no}`] ?? 0)
-    : 0;
-  const act = merged.actScene && actSheetName
-    ? (commentCounts[`${actSheetName}:${merged.actScene.no}`] ?? 0)
-    : 0;
+  const bgKey = merged.bgScene && bgSheetName ? `${bgSheetName}:${merged.bgScene.no}` : null;
+  const actKey = merged.actScene && actSheetName ? `${actSheetName}:${merged.actScene.no}` : null;
 
-  return {
-    bg,
-    act,
-    total: bg + act,
-  };
+  const bg = bgKey ? (commentCounts[bgKey] ?? 0) : 0;
+  const act = actKey ? (commentCounts[actKey] ?? 0) : 0;
+
+  // 이슈 F-2(2026-04-23) + Codex P2 6차(2026-04-23):
+  // loadPartComments 의 `mapToRequestedSceneNo` 가 alias-collision 등 ambiguous 케이스에서 skip하면
+  // BG sheet 결과와 ACT sheet 결과가 서로 다른 댓글 집합이 될 수 있다. 이 때 Math.max 는 한쪽에만
+  // 있는 댓글을 누락해 과소 집계하고, CommentPanel(primary+secondary 병합)과 뱃지 숫자가 어긋난다.
+  // commentIdsByKey 가 제공되면 양쪽 sheet 의 commentId 유니온 크기를 total 로 사용해 정확도 확보.
+  let total: number;
+  if (commentIdsByKey) {
+    const ids = new Set<string>();
+    if (bgKey) for (const id of commentIdsByKey[bgKey] ?? []) ids.add(id);
+    if (actKey) for (const id of commentIdsByKey[actKey] ?? []) ids.add(id);
+    total = ids.size;
+  } else {
+    // 후방 호환 경로 — id map 없으면 Math.max fallback (대부분 케이스에선 동일 값)
+    total = Math.max(bg, act);
+  }
+
+  return { bg, act, total };
 }
