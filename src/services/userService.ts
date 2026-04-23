@@ -204,9 +204,11 @@ export async function loadSession(): Promise<{ session: AuthSession | null; user
   }
   const user = users.find((u) => u.id === session!.userId) ?? null;
   if (!user) {
-    console.warn('[auth] 세션 userId에 매칭되는 사용자 없음', { sessionUserId: session.userId, userCount: users.length });
-    // 삭제된 사용자 → 세션 클리어
-    await logout();
+    console.warn('[auth] 세션 userId에 매칭되는 사용자 없음 — 세션 유지, user만 null', { sessionUserId: session.userId, userCount: users.length });
+    // auth.json 을 null 로 덮어쓰지 않는다. sheetsMode=false 상태의 로컬 폴백(SEED_USER만)
+    // 매칭 실패가 많은데, logout() 을 호출하면 Supabase 연결 직전에 세션이 파괴되어
+    // 재시도 경로(App.tsx init)에서도 복원할 수 없게 된다. 실제로 삭제된 사용자라면
+    // 다음 로그인 시 새 userId 로 auth.json 이 덮어써진다.
     return { session: null, user: null };
   }
   console.info('[auth] 세션 복원 성공', { userId: user.id, name: user.name });

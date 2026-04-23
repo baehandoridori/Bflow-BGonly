@@ -538,6 +538,37 @@ export async function updateRevisionStatus(
 }
 
 /**
+ * 리비전 삭제 — Supabase 모드에서는 Storage 이미지도 함께 정리 (서버 측),
+ * 로컬 모드에서는 단순히 로컬 파일에서만 제거.
+ */
+export async function deleteRevision(id: string, sceneKey: string): Promise<void> {
+  const lookupSceneKeys = getRevisionLookupSceneKeys(sceneKey);
+
+  if (sheetsMode) {
+    await window.electronAPI.supabaseDeleteRevision(id);
+    if (sheetsCache) {
+      for (const lookupSceneKey of lookupSceneKeys) {
+        const list = sheetsCache[lookupSceneKey];
+        if (!list) continue;
+        const idx = list.findIndex((r) => r.id === id);
+        if (idx >= 0) { list.splice(idx, 1); break; }
+      }
+    }
+    return;
+  }
+
+  // 로컬 모드
+  const all = await loadLocalAll();
+  for (const lookupSceneKey of lookupSceneKeys) {
+    const list = all[lookupSceneKey];
+    if (!list) continue;
+    const idx = list.findIndex((r) => r.id === id);
+    if (idx >= 0) { list.splice(idx, 1); break; }
+  }
+  await saveLocal(all);
+}
+
+/**
  * 씬별 오픈 리비전 수 계산 (뱃지용)
  */
 export async function getOpenRevisionCounts(): Promise<Record<string, number>> {

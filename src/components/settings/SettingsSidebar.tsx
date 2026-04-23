@@ -1,8 +1,12 @@
+import { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Palette, Type, Keyboard, Sparkles, Monitor,
   KeyRound, Database, HelpCircle, UserCircle, Bell,
+  ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { loadPreferences, savePreferences } from '@/services/settingsService';
 
 export type SettingsTabId =
   | 'profile'
@@ -20,22 +24,59 @@ interface Tab {
   id: SettingsTabId;
   label: string;
   icon: React.ReactNode;
-  disabled?: boolean;
-  separator?: boolean;
 }
 
-const TABS: Tab[] = [
-  { id: 'profile',      label: '내 정보',  icon: <UserCircle size={16} /> },
-  { id: 'notification', label: '알림',    icon: <Bell size={16} />, separator: true },
-  { id: 'theme',        label: '외관',    icon: <Palette size={16} /> },
-  { id: 'font',       label: '글꼴',     icon: <Type size={16} /> },
-  { id: 'shortcuts',  label: '단축키',   icon: <Keyboard size={16} /> },
-  { id: 'effects',    label: '효과',     icon: <Sparkles size={16} /> },
-  { id: 'startup',    label: '시작',     icon: <Monitor size={16} /> },
-  { id: 'login',      label: '로그인',   icon: <KeyRound size={16} /> },
-  { id: 'sheets',     label: '연동',     icon: <Database size={16} /> },
-  { id: 'guide',      label: '안내',     icon: <HelpCircle size={16} /> },
+interface Group {
+  id: string;
+  label: string;
+  tabs: Tab[];
+}
+
+const GROUPS: Group[] = [
+  {
+    id: 'account',
+    label: '계정',
+    tabs: [
+      { id: 'profile', label: '내 정보', icon: <UserCircle size={16} /> },
+      { id: 'login',   label: '로그인', icon: <KeyRound size={16} /> },
+    ],
+  },
+  {
+    id: 'display',
+    label: '표시',
+    tabs: [
+      { id: 'theme',   label: '외관',   icon: <Palette size={16} /> },
+      { id: 'font',    label: '글꼴',   icon: <Type size={16} /> },
+      { id: 'effects', label: '효과',   icon: <Sparkles size={16} /> },
+    ],
+  },
+  {
+    id: 'workspace',
+    label: '작업 환경',
+    tabs: [
+      { id: 'startup',      label: '시작',     icon: <Monitor size={16} /> },
+      { id: 'notification', label: '알림',     icon: <Bell size={16} /> },
+      { id: 'shortcuts',    label: '단축키',   icon: <Keyboard size={16} /> },
+    ],
+  },
+  {
+    id: 'system',
+    label: '시스템',
+    tabs: [
+      { id: 'sheets', label: '연동', icon: <Database size={16} /> },
+      { id: 'guide',  label: '안내', icon: <HelpCircle size={16} /> },
+    ],
+  },
 ];
+
+// 탭 ID → 소속 그룹 ID 역인덱스 (선택된 탭이 접힌 그룹에 있으면 자동 펼침)
+const TAB_TO_GROUP: Record<SettingsTabId, string> = GROUPS.reduce(
+  (acc, g) => {
+    g.tabs.forEach((t) => { acc[t.id] = g.id; });
+    return acc;
+  },
+  {} as Record<SettingsTabId, string>,
+);
 
 interface SettingsSidebarProps {
   active: SettingsTabId;
@@ -43,33 +84,90 @@ interface SettingsSidebarProps {
 }
 
 export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  // 초기 로드: preferences 에서 접힘 상태 복원
+  useEffect(() => {
+    let cancelled = false;
+    loadPreferences().then((prefs) => {
+      if (cancelled) return;
+      if (Array.isArray(prefs?.settingsCollapsedGroups)) {
+        setCollapsed(new Set(prefs!.settingsCollapsedGroups));
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // 선택된 탭이 접힌 그룹에 속하면 자동 펼침 + preferences 동기화
+  useEffect(() => {
+    const owningGroup = TAB_TO_GROUP[active];
+    if (!owningGroup || !collapsed.has(owningGroup)) return;
+    const next = new Set(collapsed);
+    next.delete(owningGroup);
+    setCollapsed(next);
+    persist(next);
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const persist = (next: Set<string>) => {
+    loadPreferences().then((prefs) => {
+      savePreferences({ ...(prefs ?? {}), settingsCollapsedGroups: [...next] });
+    });
+  };
+
+  const toggle = (groupId: string) => {
+    const next = new Set(collapsed);
+    if (next.has(groupId)) next.delete(groupId);
+    else next.add(groupId);
+    setCollapsed(next);
+    persist(next);
+  };
+
   return (
     <nav className="w-[120px] shrink-0 sticky top-0 self-start flex flex-col gap-0.5">
-      {TABS.map((tab) => (
-        <div key={tab.id}>
-          <button
-            onClick={() => !tab.disabled && onChange(tab.id)}
-            disabled={tab.disabled}
-            className={cn(
-              'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer text-left',
-              active === tab.id
-                ? 'bg-accent/15 text-accent'
-                : tab.disabled
-                  ? 'text-text-secondary/30 cursor-not-allowed'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/30',
-            )}
-          >
-            {tab.icon}
-            <span>{tab.label}</span>
-            {tab.disabled && (
-              <span className="ml-auto text-[9px] text-text-secondary/30 font-normal">예정</span>
-            )}
-          </button>
-          {tab.separator && (
-            <div className="border-t border-bg-border/20 my-1.5 mx-2" />
-          )}
-        </div>
-      ))}
+      {GROUPS.map((group, gi) => {
+        const isCollapsed = collapsed.has(group.id);
+        return (
+          <div key={group.id}>
+            {gi > 0 && <div className="border-t border-bg-border/20 my-1.5 mx-2" />}
+            <button
+              onClick={() => toggle(group.id)}
+              className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-secondary/60 hover:text-text-secondary transition-colors cursor-pointer"
+            >
+              <span>{group.label}</span>
+              {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+            </button>
+            <AnimatePresence initial={false}>
+              {!isCollapsed && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                  style={{ overflow: 'hidden' }}
+                >
+                  <div className="flex flex-col gap-0.5">
+                    {group.tabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => onChange(tab.id)}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer text-left',
+                          active === tab.id
+                            ? 'bg-accent/15 text-accent'
+                            : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/30',
+                        )}
+                      >
+                        {tab.icon}
+                        <span>{tab.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        );
+      })}
     </nav>
   );
 }

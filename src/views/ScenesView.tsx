@@ -715,12 +715,15 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
     <motion.div
       data-scene-id={selectionId ?? scene.sceneId}
       className={cn(
-        'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:border-text-secondary/30',
+        'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer',
+        'shadow-[0_2px_6px_rgba(0,0,0,0.08),0_8px_20px_rgba(0,0,0,0.12)]',
+        'hover:shadow-[0_3px_8px_rgba(0,0,0,0.12),0_10px_24px_rgba(0,0,0,0.18)]',
+        'scene-card-interactive',
+        'hover:-translate-y-0.5 hover:border-accent/70',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
       )}
       style={{
-        boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
         overflow: 'visible',
       }}
       onClick={handleClick}
@@ -788,10 +791,10 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
           </span>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(sceneIndex); }}
-            className="opacity-0 group-hover:opacity-100 text-xs text-status-none hover:text-red-400 transition-opacity cursor-pointer"
+            className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-text-secondary/60 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
             title="씬 삭제"
           >
-            ×
+            <Trash2 size={12} />
           </button>
         </div>
       </div>
@@ -2639,7 +2642,12 @@ export function ScenesView() {
 
   // 공통 씬 삭제 (sheetName 파라미터)
   const handleDeleteSceneForSheet = async (sheetName: string, sceneIndex: number) => {
-    if (!confirm('이 씬을 삭제하시겠습니까?')) return;
+    const ok = await ConfirmDialog.show({
+      message: '이 씬을 삭제하시겠습니까?',
+      confirmLabel: '삭제',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     const currentEpisodes = useDataStore.getState().episodes;
     const targetPart = currentEpisodes.flatMap((ep) => ep.parts).find((p) => p.sheetName === sheetName);
@@ -3495,8 +3503,10 @@ export function ScenesView() {
       {selectedDepartment === 'all' ? (
         <div
           className={cn(
-            'relative flex-1 min-h-0 overflow-hidden rounded-[28px]',
-            isVisibleComplete && 'border border-bg-border/40 bg-bg-card/20',
+            'relative flex-1 min-h-0',
+            isVisibleComplete
+              ? 'overflow-hidden rounded-[28px] border border-bg-border/40 bg-bg-card/20'
+              : 'overflow-auto',
           )}
         >
           <AnimatePresence>
@@ -3526,7 +3536,7 @@ export function ScenesView() {
                 }}
               />
             ) : mergedLayoutGroups ? (
-              <div className="flex flex-col gap-6 overflow-auto">
+              <div className="flex flex-col gap-6">
                 {mergedLayoutGroups.map(([layoutKey, group]) => (
                   <div key={layoutKey}>
                     <div className="flex items-center gap-2 mb-3">
@@ -3537,7 +3547,7 @@ export function ScenesView() {
                       <span className="text-[11px] text-text-secondary/40">{group.length}개</span>
                       <div className="flex-1 h-px bg-bg-border/30" />
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 px-2 py-3">
                       {group.map((m) => {
                         const primary = m.bgScene ?? m.actScene;
                         const commentBadgeCounts = getMergedCommentBadgeCounts(
@@ -3584,7 +3594,7 @@ export function ScenesView() {
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 overflow-auto content-start">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 px-2 py-3 content-start">
                 {mergedScenes.map((m) => {
                   const primary = m.bgScene ?? m.actScene;
                   const commentBadgeCounts = getMergedCommentBadgeCounts(
@@ -3636,8 +3646,10 @@ export function ScenesView() {
       {/* 씬 목록 */}
       <div
         className={cn(
-          'relative flex-1 min-h-0 overflow-hidden rounded-[28px]',
-          isVisibleComplete && 'border border-bg-border/40 bg-bg-card/20'
+          'relative flex-1 min-h-0',
+          isVisibleComplete
+            ? 'overflow-hidden rounded-[28px] border border-bg-border/40 bg-bg-card/20'
+            : 'overflow-auto'
         )}
       >
         {/* 파트 완료 보케 오버레이 */}
@@ -3707,7 +3719,7 @@ export function ScenesView() {
                         <span className="text-xs font-mono text-text-secondary">{groupPct}%</span>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 px-2 py-3">
                         {groupScenes.map((scene, idx) => {
                           const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
                           const sIdx = rawIdx >= 0 ? rawIdx : idx;
@@ -3776,7 +3788,7 @@ export function ScenesView() {
               />
             </div>
           ) : (
-            <div className="flex-1 overflow-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 content-start">
+            <div className="flex-1 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 px-2 py-3 content-start">
               {scenes.map((scene, idx) => {
                 const rawIdx = currentPart?.scenes.indexOf(scene) ?? -1;
                 const sIdx = rawIdx >= 0 ? rawIdx : idx;

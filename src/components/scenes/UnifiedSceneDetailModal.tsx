@@ -243,7 +243,7 @@ export function UnifiedSceneDetailModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 6 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="relative w-[min(1000px,calc(100vw-26rem))] max-h-[90vh] flex flex-col bg-bg-card border border-bg-border rounded-2xl shadow-2xl"
+            className="relative w-[min(720px,calc(100vw-26rem))] max-h-[90vh] flex flex-col bg-bg-card border border-bg-border rounded-2xl shadow-2xl"
           >
             {/* 헤더 */}
             <div className="flex items-center gap-3 px-5 py-3 border-b border-bg-border/40 shrink-0">

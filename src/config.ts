@@ -9,6 +9,10 @@
  *     설정 화면에서 직접 저장한 URL이 있으면 그쪽이 우선합니다.
  */
 
+// ─── Supabase 프로젝트 URL ─────────────────────────────
+// electron/supabase.ts 의 SUPABASE_URL 과 동일하게 유지. 연동 탭 표시용.
+export const SUPABASE_URL = 'https://mpqifkpxalwxgcrddchv.supabase.co';
+
 // ─── GAS 이미지 업로드용 기본 URL ───────────────────────
 // 아래 URL을 실제 배포된 GAS 웹 앱 URL로 교체하세요.
 // 예시: 'https://script.google.com/macros/s/AKfycb.../exec'

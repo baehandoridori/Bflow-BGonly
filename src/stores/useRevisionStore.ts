@@ -13,6 +13,7 @@ interface RevisionState {
   loadRevisions: () => Promise<void>;
   addRevisionOptimistic: (revision: CompRevision) => void;
   updateRevisionOptimistic: (id: string, sceneKey: string, updates: Partial<CompRevision>) => void;
+  deleteRevisionOptimistic: (id: string) => void;
 
   createRevision: (
     sceneKey: string,
@@ -35,6 +36,8 @@ interface RevisionState {
     status: RevisionStatus,
     extra?: { resolvedBy?: string; resolvedNote?: string },
   ) => Promise<void>;
+
+  deleteRevision: (id: string, sceneKey: string) => Promise<void>;
 
   getRevisionsForScene: (sceneKey: string) => CompRevision[];
   getOpenCount: (sceneKey: string) => number;
@@ -115,10 +118,37 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     });
   },
 
+  deleteRevisionOptimistic: (id) => {
+    set((state) => {
+      const revisions = state.revisions.filter((r) => r.id !== id);
+      return {
+        revisions,
+        revisionCountByScene: buildCountMap(revisions),
+        totalOpenRevisionCount: countOpenRevisions(revisions),
+      };
+    });
+  },
+
   createRevision: async (sceneKey, data) => {
     const revision = await revisionService.createRevision(sceneKey, data);
     get().addRevisionOptimistic(revision);
     return revision;
+  },
+
+  deleteRevision: async (id, sceneKey) => {
+    const prev = get().revisions;
+    get().deleteRevisionOptimistic(id);
+    try {
+      await revisionService.deleteRevision(id, sceneKey);
+    } catch (err) {
+      console.error('[리비전 스토어] 삭제 실패, 롤백:', err);
+      set({
+        revisions: prev,
+        revisionCountByScene: buildCountMap(prev),
+        totalOpenRevisionCount: countOpenRevisions(prev),
+      });
+      throw err;
+    }
   },
 
   updateStatus: async (id, sceneKey, status, extra) => {

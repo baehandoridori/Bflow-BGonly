@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Check, Clock, Circle, ChevronDown, ImagePlus, X } from 'lucide-react';
+import { Plus, Check, Clock, Circle, ChevronDown, ImagePlus, X, Trash2 } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -97,13 +99,19 @@ function StatusDropdown({
 function RevisionCard({
   revision,
   onStatusChange,
+  onDelete,
 }: {
   revision: CompRevision;
   onStatusChange: (status: RevisionStatus, note?: string) => void;
+  onDelete?: () => void;
 }) {
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const { currentUser } = useAuthStore();
+  const canDelete = !!(
+    currentUser && onDelete &&
+    (currentUser.id === revision.requesterId || currentUser.role === 'admin')
+  );
 
   const handleStatusChange = (status: RevisionStatus) => {
     if (status === 'resolved') {
@@ -126,7 +134,7 @@ function RevisionCard({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 10 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
-      className="rounded-xl p-3 border border-bg-border/60"
+      className="rounded-xl p-3 border border-bg-border/60 group"
       style={elevatedGlassStyle}
     >
       {/* 헤더 */}
@@ -155,7 +163,18 @@ function RevisionCard({
           )}
         </div>
         {currentUser && (
-          <StatusDropdown currentStatus={revision.status} onSelect={handleStatusChange} />
+          <div className="flex items-center gap-1.5">
+            <StatusDropdown currentStatus={revision.status} onSelect={handleStatusChange} />
+            {canDelete && (
+              <button
+                onClick={onDelete}
+                title="리비전 삭제"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-text-secondary/60 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -361,6 +380,21 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
     });
   };
 
+  const handleDelete = async (rev: CompRevision) => {
+    const ok = await ConfirmDialog.show({
+      message: `Rev.${rev.revisionNo} 리비전을 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
+      confirmLabel: '삭제',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await useRevisionStore.getState().deleteRevision(rev.id, rev.sceneKey);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      sonnerToast.error(`리비전 삭제 실패: ${msg}`);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* 리비전 목록 */}
@@ -377,6 +411,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                 key={rev.id}
                 revision={rev}
                 onStatusChange={(status, note) => handleStatusChange(rev.id, status, note)}
+                onDelete={() => handleDelete(rev)}
               />
             ))}
           </AnimatePresence>

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged } from './broadcast';
+import { deleteImage as storageDeleteImage } from './storage';
 
 // ─── 일괄 작업 타입 ─────────────────────────────
 
@@ -522,8 +523,26 @@ export async function addScenes(
   broadcastDataChange('scenes', 'INSERT');
 }
 
-/** 씬 삭제 (UUID로 삭제) */
+/** 씬 삭제 (UUID로 삭제) — DB row 삭제 전에 Storage 이미지 먼저 정리해 고아 파일 방지 */
 export async function deleteScene(sceneUuid: string): Promise<void> {
+  // 1) Storage 이미지 URL 조회 (DB 삭제 전에)
+  const { data: scene } = await supabase
+    .from('scenes')
+    .select('storyboard_url, guide_url')
+    .eq('id', sceneUuid)
+    .maybeSingle();
+
+  // 2) Storage 삭제 (실패해도 DB 삭제는 계속 — 부분 고아 < 완전 고아)
+  if (scene?.storyboard_url) {
+    await storageDeleteImage(scene.storyboard_url).catch((err) =>
+      console.warn('[Storage] storyboard 삭제 실패:', err));
+  }
+  if (scene?.guide_url) {
+    await storageDeleteImage(scene.guide_url).catch((err) =>
+      console.warn('[Storage] guide 삭제 실패:', err));
+  }
+
+  // 3) DB row 삭제 (comments 등은 FK CASCADE 로 자동 정리)
   const { error } = await supabase.from('scenes').delete().eq('id', sceneUuid);
   throwIfError(error);
   broadcastDataChange('scenes', 'DELETE');
@@ -571,11 +590,31 @@ export async function bulkUpdateSceneStages(
   return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
 }
 
-/** 대량 씬 삭제 (부분 실패 허용) — RPC 경유 */
+/** 대량 씬 삭제 (부분 실패 허용) — RPC 경유.
+ *  RPC 호출 전에 해당 씬들의 Storage 이미지를 일괄 정리해 고아 파일 방지. */
 export async function bulkDeleteScenes(
   sceneUuids: string[],
   deletedBy: string,
 ): Promise<BulkUpdateResult[]> {
+  // 1) Storage 이미지 URL 일괄 조회
+  const { data: scenes } = await supabase
+    .from('scenes')
+    .select('storyboard_url, guide_url')
+    .in('id', sceneUuids);
+
+  // 2) Storage 병렬 삭제 (실패 허용)
+  if (scenes && scenes.length > 0) {
+    const urls: string[] = [];
+    for (const s of scenes) {
+      if (s.storyboard_url) urls.push(s.storyboard_url as string);
+      if (s.guide_url) urls.push(s.guide_url as string);
+    }
+    if (urls.length > 0) {
+      await Promise.allSettled(urls.map((u) => storageDeleteImage(u)));
+    }
+  }
+
+  // 3) RPC 로 DB 대량 삭제 (부분 실패 허용)
   const { data, error } = await supabase.rpc('bulk_delete_scenes', {
     p_uuids: sceneUuids,
     p_deleted_by: deletedBy,
@@ -889,6 +928,28 @@ export async function getPrivateEventOwner(id: string): Promise<string | null> {
 // ═══════════════════════════════════════════════
 // COMP_REVISIONS
 // ═══════════════════════════════════════════════
+
+/** 리비전 삭제 — Storage 이미지 먼저 정리 후 DB row 삭제 */
+export async function deleteRevision(id: string): Promise<void> {
+  // Storage 이미지 URL 조회
+  const { data: rev } = await supabase
+    .from('comp_revisions')
+    .select('image_url')
+    .eq('id', id)
+    .maybeSingle();
+
+  // Storage 삭제 (실패해도 DB 삭제는 계속)
+  const imageUrl = (rev as { image_url?: string } | null)?.image_url;
+  if (imageUrl) {
+    await storageDeleteImage(imageUrl).catch((err) =>
+      console.warn('[Storage] revision 이미지 삭제 실패:', err));
+  }
+
+  // DB row 삭제
+  const { error } = await supabase.from('comp_revisions').delete().eq('id', id);
+  throwIfError(error);
+  broadcastDataChange('comp_revisions', 'DELETE');
+}
 
 /** 모든 리비전 읽기 */
 export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey: string })[]> {

@@ -502,10 +502,75 @@ function getAppRoot(): string {
 
 // ─── 윈도우 생성 ──────────────────────────────────────────────
 
+// ─── 메인 창 bounds 저장/복원 ─────────────────────────
+interface StoredMainWindowBounds {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+  isMaximized?: boolean;
+  isFullScreen?: boolean;
+}
+
+let cachedMainWindowBounds: StoredMainWindowBounds | null = null;
+let saveMainWindowBoundsTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function loadMainWindowBounds(): Promise<StoredMainWindowBounds | null> {
+  try {
+    const state = await readAppState();
+    const b = state.mainWindowBounds as StoredMainWindowBounds | undefined;
+    if (!b) return null;
+    // 크기 sanity
+    if (b.width < 300 || b.height < 200 || b.width > 10000 || b.height > 10000) return null;
+    // 위치가 있으면 off-screen 검증 — 중심점이 어느 display 작업영역 안에 있어야 함
+    if (typeof b.x === 'number' && typeof b.y === 'number') {
+      const cx = b.x + b.width / 2;
+      const cy = b.y + b.height / 2;
+      const inside = screen.getAllDisplays().some((d) => {
+        const { x, y, width, height } = d.workArea;
+        return cx >= x && cx <= x + width && cy >= y && cy <= y + height;
+      });
+      if (!inside) {
+        // 위치는 포기하고 크기와 최대화 상태만 유지
+        return { width: b.width, height: b.height, isMaximized: b.isMaximized, isFullScreen: b.isFullScreen };
+      }
+    }
+    return b;
+  } catch {
+    return null;
+  }
+}
+
+async function preloadMainWindowBounds(): Promise<void> {
+  cachedMainWindowBounds = await loadMainWindowBounds();
+}
+
+function scheduleSaveMainWindowBounds(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (saveMainWindowBoundsTimer) clearTimeout(saveMainWindowBoundsTimer);
+  saveMainWindowBoundsTimer = setTimeout(() => {
+    saveMainWindowBoundsTimer = null;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const isMaximized = mainWindow.isMaximized();
+    const isFullScreen = mainWindow.isFullScreen();
+    // maximize/fullscreen 상태의 "복원 크기" 저장 — 다음 실행 때 창을 원래 크기로 기억
+    const raw = isMaximized || isFullScreen ? mainWindow.getNormalBounds() : mainWindow.getBounds();
+    const payload: StoredMainWindowBounds = {
+      x: raw.x, y: raw.y, width: raw.width, height: raw.height,
+      isMaximized, isFullScreen,
+    };
+    writeAppState({ mainWindowBounds: payload }).catch((err) =>
+      console.warn('[window-bounds] 저장 실패:', err));
+  }, 500);
+}
+
 function createWindow(): void {
+  const b = cachedMainWindowBounds;
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    x: b?.x,
+    y: b?.y,
+    width: b?.width ?? 1400,
+    height: b?.height ?? 900,
     minWidth: 800,
     minHeight: 600,
     title: 'B flow',
@@ -517,6 +582,18 @@ function createWindow(): void {
       nodeIntegration: false,
     },
   });
+
+  // 저장된 최대화/전체화면 상태 복원
+  if (b?.isMaximized) mainWindow.maximize();
+  if (b?.isFullScreen) mainWindow.setFullScreen(true);
+
+  // bounds 변경 시 디바운스(500ms) 저장 — 디스크 I/O 최소화
+  mainWindow.on('resize', scheduleSaveMainWindowBounds);
+  mainWindow.on('move', scheduleSaveMainWindowBounds);
+  mainWindow.on('maximize', scheduleSaveMainWindowBounds);
+  mainWindow.on('unmaximize', scheduleSaveMainWindowBounds);
+  mainWindow.on('enter-full-screen', scheduleSaveMainWindowBounds);
+  mainWindow.on('leave-full-screen', scheduleSaveMainWindowBounds);
 
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -566,7 +643,9 @@ function createWindow(): void {
 // ─── IPC 핸들러: 사용자 파일 (base64 인코딩 JSON) ────────────
 
 function getUsersFilePath(): string {
-  return path.join(getAppRoot(), 'users.dat');
+  // userData 경로 사용 — portable 빌드는 app.getPath('exe')가 매 실행마다
+  // 임시 압축해제 폴더를 반환해 users.dat 이 소실됨. userData 는 고정.
+  return path.join(getDataPath(), 'users.dat');
 }
 
 function getAppStateFilePath(): string {
@@ -724,6 +803,7 @@ import {
   readAllRevisions as sbReadRevisions,
   addRevision as sbAddRevision,
   updateRevision as sbUpdateRevision,
+  deleteRevision as sbDeleteRevision,
   readAllMetadata as sbReadAllMetadata,
   readMetadata as sbReadMetadata,
   writeMetadata as sbWriteMetadata,
@@ -743,6 +823,7 @@ import {
 } from './supabase';
 import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
+import { recordActivity, getActivity, channelToTable, channelToAction } from './activityLogger';
 
 // ─── Supabase IPC 에러 래퍼 ───
 function wrapIpc<T extends unknown[], R>(
@@ -757,6 +838,24 @@ function wrapIpc<T extends unknown[], R>(
       throw new Error(msg);
     }
   };
+}
+
+// ─── Supabase IPC 활동 자동 기록 래퍼 ───
+// ipcMain.handle('supabase:*', ...) 에만 가로채기 적용. 다른 채널은 그대로.
+// 'supabase:get-activity' 자신은 기록에서 제외 (자가 호출로 활동 왜곡 방지).
+{
+  const origHandle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = ((channel: string, listener: (...args: unknown[]) => unknown) => {
+    if (!channel.startsWith('supabase:') || channel === 'supabase:get-activity') {
+      return origHandle(channel, listener as Parameters<typeof origHandle>[1]);
+    }
+    const table = channelToTable(channel);
+    const action = channelToAction(channel);
+    return origHandle(channel, (async (...args: unknown[]) => {
+      recordActivity(table, action);
+      return listener(...args);
+    }) as Parameters<typeof origHandle>[1]);
+  }) as typeof ipcMain.handle;
 }
 
 // 연결 테스트
@@ -932,6 +1031,9 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   await sbUpdateRevision(id, updates);
 }));
+ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: string) => {
+  await sbDeleteRevision(id);
+}));
 
 // ─── Metadata ───
 ipcMain.handle('supabase:read-all-metadata', wrapIpc(async () => {
@@ -943,6 +1045,15 @@ ipcMain.handle('supabase:read-metadata', wrapIpc(async (_e: unknown, type: strin
 ipcMain.handle('supabase:write-metadata', wrapIpc(async (_e: unknown, type: string, key: string, value: string) => {
   await sbWriteMetadata(type, key, value);
 }));
+
+// ─── Activity (클라이언트 IPC 트래픽 메모리 집계) ───
+// 이 핸들러는 자기 자신 호출을 기록하지 않도록 위쪽 래퍼에서 제외되어 있다.
+ipcMain.handle('supabase:get-activity', async (
+  _e: unknown,
+  opts: { table?: string; action?: 'read' | 'write'; rangeMs: number; buckets: number },
+) => {
+  return getActivity(opts);
+});
 
 // ─── Personal Todos IPC ──────────────────────────────
 
@@ -2081,9 +2192,12 @@ app.on('open-url', (event, url) => {
 
 // ─── 앱 라이프사이클 ─────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // 두 번째 인스턴스면 초기화하지 않고 종료
   if (!gotTheLock) return;
+
+  // 메인 창 bounds 미리 로드 — createWindow 전에 캐시 완료되어 있어야 첫 창부터 저장 크기로 뜸
+  await preloadMainWindowBounds();
 
   // 위젯 위치 캐시 로드 (Phase 0-6)
   loadWidgetPositions();

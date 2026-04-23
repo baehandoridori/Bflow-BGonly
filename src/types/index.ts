@@ -514,9 +514,12 @@ export interface ElectronAPI {
   supabaseReadRevisions: () => Promise<unknown[]>;
   supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
+  supabaseDeleteRevision: (id: string) => Promise<void>;
   supabaseReadAllMetadata: () => Promise<unknown[]>;
   supabaseReadMetadata: (type: string, key: string) => Promise<unknown>;
   supabaseWriteMetadata: (type: string, key: string, value: string) => Promise<void>;
+  supabaseGetActivity: (opts: { table?: string; action?: 'read' | 'write'; rangeMs: number; buckets: number })
+    => Promise<Array<{ startTs: number; count: number }>>;
   onSupabaseRealtime: (callback: (event: unknown) => void) => () => void;
   onSupabaseStatus: (callback: (status: string) => void) => () => void;
   onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;

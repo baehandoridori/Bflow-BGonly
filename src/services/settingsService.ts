@@ -142,6 +142,12 @@ export interface UserPreferences {
 
   // 화이트보드 배경색
   whiteboardBgColor?: string;  // 기본값 '#FFFFFF'
+
+  // 설정 사이드바: 접힌 그룹 ID 목록
+  settingsCollapsedGroups?: string[];
+
+  // 연동 탭: 접힌 IntegrationCard ID 목록
+  settingsIntegrationCollapsed?: string[];
 }
 
 export async function loadPreferences(): Promise<UserPreferences | null> {
