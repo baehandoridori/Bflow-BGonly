@@ -1114,8 +1114,25 @@ export async function resolveSceneUuidBySortOrder(
   return data?.id || null;
 }
 
+/**
+ * `src/utils/sceneIdKey.ts#normalizeSceneIdKey` 와 동일한 규칙을 electron 쪽에서도 사용하기 위한
+ * 로컬 복제. 두 코드는 서로 다른 번들에 속하므로 런타임 import 대신 로직을 복제한다.
+ * 동일 규칙 유지를 위해 sceneIdKey.ts 를 수정할 때는 이 함수도 함께 갱신해야 한다.
+ */
+function normalizeSceneIdKeyLocal(sceneNumber: string, partLetter: string): string {
+  const raw = String(sceneNumber || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (/^\d+$/.test(raw)) return String(Number(raw));
+  if (partLetter && new RegExp(`^${partLetter}[a-z]*\\d+$`).test(raw)) {
+    const trailing = raw.match(/\d+$/)?.[0];
+    return trailing ? String(Number(trailing)) : raw;
+  }
+  return raw;
+}
+
 /** 리비전 경로 전용 — scene_number 기반 매칭.
- *  숫자는 part_letter + LPAD(3) 로 정규화, 그 외 custom prefix("sc001")는 lowercase 원본으로. */
+ *  숫자는 part_letter + LPAD(3) 로 정규화, 그 외 custom prefix("sc001")는 lowercase 원본으로.
+ *  alias-prefixed 씬(예: "ac001") 대응을 위해 정규화 키 기반 fallback 추가. */
 export async function resolveSceneUuidByNumber(
   partUuid: string,
   sceneNumberLike: string,
@@ -1136,6 +1153,7 @@ export async function resolveSceneUuidByNumber(
     ? `${partLetter}${lower.padStart(3, '0')}`
     : lower;
 
+  // 1차: part_letter + LPAD(3) canonical 매칭 (대부분 케이스)
   const { data: byNumber } = await supabase
     .from('scenes')
     .select('id')
@@ -1145,7 +1163,7 @@ export async function resolveSceneUuidByNumber(
     .maybeSingle();
   if (byNumber?.id) return byNumber.id;
 
-  // custom prefix (예: "sc001") — 정규화된 값과 다르면 원본으로 한번 더 시도
+  // 2차: custom prefix (예: "sc001", "v2a001") — 원본 lowercase 그대로 한 번 더
   if (normalized !== lower) {
     const { data: byRaw } = await supabase
       .from('scenes')
@@ -1155,6 +1173,24 @@ export async function resolveSceneUuidByNumber(
       .limit(1)
       .maybeSingle();
     if (byRaw?.id) return byRaw.id;
+  }
+
+  // 3차(Codex P1 4차, 2026-04-23): alias-prefixed 씬 대응.
+  // 예를 들어 part A 에 "ac001" 만 있고 "a001" 이 없는 프로젝트에서 sceneKey 숫자 "1" 이 전달되면
+  // 1·2차 모두 실패한다. 이때 파트의 모든 씬을 가져와 normalizeSceneIdKey 규칙으로 같은 정규화 키를
+  // 가진 씬을 찾는다. 유일하면 매칭, collision 이면 안전하게 null.
+  const targetKey = normalizeSceneIdKeyLocal(lower, partLetter);
+  if (targetKey) {
+    const { data: allScenes } = await supabase
+      .from('scenes')
+      .select('id, scene_number')
+      .eq('part_id', partUuid);
+    if (allScenes && allScenes.length > 0) {
+      const matches = allScenes.filter(
+        (s) => normalizeSceneIdKeyLocal(String(s.scene_number || ''), partLetter) === targetKey,
+      );
+      if (matches.length === 1) return matches[0].id as string;
+    }
   }
 
   return null;
