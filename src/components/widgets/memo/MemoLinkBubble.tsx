@@ -47,10 +47,20 @@ export function MemoLinkBubble({ editor, editRequestToken }: MemoLinkBubbleProps
   const [editMode, setEditMode] = useState(false);
   const [url, setUrl] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  /**
+   * 이미 처리한 editRequestToken 추적.
+   * editRequestToken 은 상위에서 monotonic 증가만 하므로 reset 이 없음.
+   * dependency 에 editor 가 들어가야 최신 editor 에서 editRequestToken 을 처리할 수 있지만,
+   * token 동일한 상태로 editor 가 교체되면 (예: 탭 전환 시 MemoEditor key 재마운트) effect 가
+   * 다시 뛰어 의도치 않게 버블이 열리는 문제가 있어 — ref 로 처리된 토큰을 기록해서 중복 실행 방지.
+   */
+  const lastHandledTokenRef = useRef(0);
 
   // 외부 요청 시 편집 모드 진입 + 현재 링크 URL 프리필
   useEffect(() => {
     if (editRequestToken <= 0 || !editor) return;
+    if (editRequestToken === lastHandledTokenRef.current) return;
+    lastHandledTokenRef.current = editRequestToken;
     const currentUrl = (editor.getAttributes('link')?.href as string | undefined) ?? '';
     setUrl(currentUrl);
     setEditMode(true);
