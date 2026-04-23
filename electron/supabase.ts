@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged } from './broadcast';
+import { deleteImage as storageDeleteImage } from './storage';
 
 // ─── 일괄 작업 타입 ─────────────────────────────
 
@@ -522,8 +523,26 @@ export async function addScenes(
   broadcastDataChange('scenes', 'INSERT');
 }
 
-/** 씬 삭제 (UUID로 삭제) */
+/** 씬 삭제 (UUID로 삭제) — DB row 삭제 전에 Storage 이미지 먼저 정리해 고아 파일 방지 */
 export async function deleteScene(sceneUuid: string): Promise<void> {
+  // 1) Storage 이미지 URL 조회 (DB 삭제 전에)
+  const { data: scene } = await supabase
+    .from('scenes')
+    .select('storyboard_url, guide_url')
+    .eq('id', sceneUuid)
+    .maybeSingle();
+
+  // 2) Storage 삭제 (실패해도 DB 삭제는 계속 — 부분 고아 < 완전 고아)
+  if (scene?.storyboard_url) {
+    await storageDeleteImage(scene.storyboard_url).catch((err) =>
+      console.warn('[Storage] storyboard 삭제 실패:', err));
+  }
+  if (scene?.guide_url) {
+    await storageDeleteImage(scene.guide_url).catch((err) =>
+      console.warn('[Storage] guide 삭제 실패:', err));
+  }
+
+  // 3) DB row 삭제 (comments 등은 FK CASCADE 로 자동 정리)
   const { error } = await supabase.from('scenes').delete().eq('id', sceneUuid);
   throwIfError(error);
   broadcastDataChange('scenes', 'DELETE');
@@ -571,17 +590,49 @@ export async function bulkUpdateSceneStages(
   return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
 }
 
-/** 대량 씬 삭제 (부분 실패 허용) — RPC 경유 */
+/** 대량 씬 삭제 (부분 실패 허용) — RPC 경유.
+ *  bulk_delete_scenes 는 부분 성공을 허용하므로, Storage 이미지는
+ *  "RPC 에서 성공적으로 DB 삭제된 씬"에 대해서만 정리해야 한다.
+ *  (Codex 리뷰 #1 P1 — RPC 전에 모두 삭제하면 실패한 씬이 이미지 잃은 채 DB 에 남음.) */
 export async function bulkDeleteScenes(
   sceneUuids: string[],
   deletedBy: string,
 ): Promise<BulkUpdateResult[]> {
+  // 1) 씬 UUID → 이미지 URL 목록 맵을 먼저 확보 (RPC 가 실제로 삭제한 씬만 이미지 정리하기 위함)
+  const urlsByUuid = new Map<string, string[]>();
+  {
+    const { data: scenes } = await supabase
+      .from('scenes')
+      .select('id, storyboard_url, guide_url')
+      .in('id', sceneUuids);
+    for (const s of scenes ?? []) {
+      const urls: string[] = [];
+      if (s.storyboard_url) urls.push(s.storyboard_url as string);
+      if (s.guide_url) urls.push(s.guide_url as string);
+      if (urls.length > 0) urlsByUuid.set(s.id as string, urls);
+    }
+  }
+
+  // 2) RPC 실행 (부분 실패 허용)
   const { data, error } = await supabase.rpc('bulk_delete_scenes', {
     p_uuids: sceneUuids,
     p_deleted_by: deletedBy,
   });
   if (error) throw error;
-  return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
+  const results = maybeForceFail(mapRpcRows(data as RpcRow[] | null));
+
+  // 3) RPC 에서 성공적으로 DB 삭제된 씬에 한해서만 Storage 이미지 정리
+  const urlsToDelete: string[] = [];
+  for (const r of results) {
+    if (!r.success) continue;
+    const urls = urlsByUuid.get(r.sceneUuid);
+    if (urls) urlsToDelete.push(...urls);
+  }
+  if (urlsToDelete.length > 0) {
+    await Promise.allSettled(urlsToDelete.map((u) => storageDeleteImage(u)));
+  }
+
+  return results;
 }
 
 /** 대량 씬 필드 업데이트 (부분 실패 허용) — RPC 경유 */
@@ -889,6 +940,46 @@ export async function getPrivateEventOwner(id: string): Promise<string | null> {
 // ═══════════════════════════════════════════════
 // COMP_REVISIONS
 // ═══════════════════════════════════════════════
+
+/** 리비전 삭제 — 권한 검증(요청자 본인 또는 admin) 후 Storage 이미지 정리 + DB row 삭제.
+ *  Codex 리뷰 #5 P2: UI 의 canDelete 체크만으로는 다른 renderer 호출이 bypass 가능 →
+ *  main 프로세스에서 반드시 권한 검증 수행. */
+export async function deleteRevision(id: string, requesterUserId: string): Promise<void> {
+  // 1) 리비전 + 요청자 정보 + 권한자 role 조회
+  const { data: rev } = await supabase
+    .from('comp_revisions')
+    .select('image_url, requester_id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (!rev) return; // 이미 없으면 no-op
+
+  const isOwner = rev.requester_id === requesterUserId;
+  let isAdmin = false;
+  if (!isOwner) {
+    const { data: user } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', requesterUserId)
+      .maybeSingle();
+    isAdmin = (user as { role?: string } | null)?.role === 'admin';
+  }
+  if (!isOwner && !isAdmin) {
+    throw new Error('리비전 삭제 권한이 없습니다. (요청자 본인 또는 관리자만)');
+  }
+
+  // 2) Storage 이미지 삭제 (실패해도 DB 삭제 계속)
+  const imageUrl = (rev as { image_url?: string }).image_url;
+  if (imageUrl) {
+    await storageDeleteImage(imageUrl).catch((err) =>
+      console.warn('[Storage] revision 이미지 삭제 실패:', err));
+  }
+
+  // 3) DB row 삭제
+  const { error } = await supabase.from('comp_revisions').delete().eq('id', id);
+  throwIfError(error);
+  broadcastDataChange('comp_revisions', 'DELETE');
+}
 
 /** 모든 리비전 읽기 */
 export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey: string })[]> {

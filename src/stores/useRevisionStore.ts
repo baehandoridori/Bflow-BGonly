@@ -13,6 +13,7 @@ interface RevisionState {
   loadRevisions: () => Promise<void>;
   addRevisionOptimistic: (revision: CompRevision) => void;
   updateRevisionOptimistic: (id: string, sceneKey: string, updates: Partial<CompRevision>) => void;
+  deleteRevisionOptimistic: (id: string) => void;
 
   createRevision: (
     sceneKey: string,
@@ -35,6 +36,8 @@ interface RevisionState {
     status: RevisionStatus,
     extra?: { resolvedBy?: string; resolvedNote?: string },
   ) => Promise<void>;
+
+  deleteRevision: (id: string, sceneKey: string) => Promise<void>;
 
   getRevisionsForScene: (sceneKey: string) => CompRevision[];
   getOpenCount: (sceneKey: string) => number;
@@ -115,10 +118,34 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     });
   },
 
+  deleteRevisionOptimistic: (id) => {
+    set((state) => {
+      const revisions = state.revisions.filter((r) => r.id !== id);
+      return {
+        revisions,
+        revisionCountByScene: buildCountMap(revisions),
+        totalOpenRevisionCount: countOpenRevisions(revisions),
+      };
+    });
+  },
+
   createRevision: async (sceneKey, data) => {
     const revision = await revisionService.createRevision(sceneKey, data);
     get().addRevisionOptimistic(revision);
     return revision;
+  },
+
+  deleteRevision: async (id, sceneKey) => {
+    get().deleteRevisionOptimistic(id);
+    try {
+      await revisionService.deleteRevision(id, sceneKey);
+    } catch (err) {
+      // Codex 리뷰 #6 P2: stale snapshot 복원은 in-flight 간 들어온 realtime/로컬 변경을
+      // 덮어쓸 수 있음. 서버에서 재로드해 실제 상태와 동기화한다.
+      console.error('[리비전 스토어] 삭제 실패 → 서버 재로드:', err);
+      await get().loadRevisions();
+      throw err;
+    }
   },
 
   updateStatus: async (id, sceneKey, status, extra) => {

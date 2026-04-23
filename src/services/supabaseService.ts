@@ -408,6 +408,29 @@ export function onSupabaseRealtimeEvent(callback: (event: SupabaseRealtimeEvent)
 }
 
 /** Supabase 연결 상태 리스너 등록 */
+export interface ActivityBucket { startTs: number; count: number }
+export interface ActivityQueryOpts {
+  /** 특정 테이블만. 생략 시 전체 */
+  table?: string;
+  /** read/write 만. 생략 시 전체 */
+  action?: 'read' | 'write';
+  rangeMs: number;
+  buckets: number;
+}
+
+/** Supabase IPC 활동 기록(최근 세션) 에서 시간대별 카운트 조회 — 쿼리 아님, 로컬 메모리 집계. */
+export async function getSupabaseActivity(opts: ActivityQueryOpts): Promise<ActivityBucket[]> {
+  if (!window.electronAPI?.supabaseGetActivity) return [];
+  return window.electronAPI.supabaseGetActivity(opts);
+}
+
+/** 현재 Realtime subscription 상태를 메인 프로세스 캐시에서 조회 — 늦은 마운트 대응. */
+export async function getSupabaseRealtimeStatus(): Promise<string> {
+  if (!window.electronAPI?.supabaseGetRealtimeStatus) return 'CONNECTING';
+  try { return await window.electronAPI.supabaseGetRealtimeStatus(); }
+  catch { return 'CONNECTING'; }
+}
+
 export function onSupabaseStatusChange(callback: (status: string) => void): () => void {
   return window.electronAPI.onSupabaseStatus(callback);
 }

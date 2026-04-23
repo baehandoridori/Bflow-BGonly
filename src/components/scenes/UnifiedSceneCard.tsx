@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, Trash2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { sceneProgress } from '@/utils/calcStats';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
@@ -128,14 +128,16 @@ export function UnifiedSceneCard({
     <motion.div
       data-scene-id={mergedKey}
       className={cn(
-        'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer transition-all duration-200',
-        'hover:-translate-y-0.5 hover:border-text-secondary/30',
+        'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer',
+        'shadow-[0_2px_6px_rgba(0,0,0,0.08),0_8px_20px_rgba(0,0,0,0.12)]',
+        'hover:shadow-[0_3px_8px_rgba(0,0,0,0.12),0_10px_24px_rgba(0,0,0,0.18)]',
+        'scene-card-interactive',
+        'hover:-translate-y-0.5 hover:border-accent/70',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
         cardWholePendingClass,
       )}
       style={{
-        boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
         overflow: 'visible',
       }}
       onClick={handleClick}
@@ -309,10 +311,10 @@ function DeptSection({
           </span>
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(sheetName, sceneIndex); }}
-            className="opacity-0 group-hover:opacity-100 text-[11px] text-text-secondary hover:text-red-400 transition-opacity cursor-pointer"
+            className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-text-secondary/60 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
             title={`${cfg.shortLabel} 씬 삭제`}
           >
-            ×
+            <Trash2 size={12} />
           </button>
         </div>
       </div>

@@ -130,12 +130,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
         priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt),
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) =>
     ipcRenderer.invoke('supabase:update-revision', id, updates),
+  supabaseDeleteRevision: (id: string) =>
+    ipcRenderer.invoke('supabase:delete-revision', id),
   supabaseReadAllMetadata: () =>
     ipcRenderer.invoke('supabase:read-all-metadata'),
   supabaseReadMetadata: (type: string, key: string) =>
     ipcRenderer.invoke('supabase:read-metadata', type, key),
   supabaseWriteMetadata: (type: string, key: string, value: string) =>
     ipcRenderer.invoke('supabase:write-metadata', type, key, value),
+  supabaseGetActivity: (opts: { table?: string; action?: 'read' | 'write'; rangeMs: number; buckets: number }) =>
+    ipcRenderer.invoke('supabase:get-activity', opts) as Promise<Array<{ startTs: number; count: number }>>,
+  supabaseGetRealtimeStatus: () =>
+    ipcRenderer.invoke('supabase:get-realtime-status') as Promise<string>,
   // ─── Personal Todos / Task Views ──────────────────
   supabaseReadTodos: (userId: string) => ipcRenderer.invoke('supabase:read-todos', userId),
   supabaseUpsertTodo: (userId: string, todo: unknown) => ipcRenderer.invoke('supabase:upsert-todo', userId, todo),
