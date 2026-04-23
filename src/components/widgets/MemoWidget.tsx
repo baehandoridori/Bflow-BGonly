@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useContext } from 'react';
-import { StickyNote, Type, Eye, Pencil, Plus, X, Bold, Italic, Underline, Strikethrough } from 'lucide-react';
+import { StickyNote, Type, Pencil, Plus, X } from 'lucide-react';
+import type { Editor } from '@tiptap/core';
 import { Widget, WidgetIdContext, IsPopupContext } from './Widget';
 import * as supabaseService from '@/services/supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { MemoEditor } from './memo/MemoEditor';
+import { MemoToolbar } from './memo/MemoToolbar';
+import { MemoLinkBubble } from './memo/MemoLinkBubble';
 
 const MEMO_FILE = 'memo.json';
 const MEMO_MIGRATION_KEY = 'bflow_migration_memo_done';
@@ -48,93 +52,6 @@ function makeDefaultMemoData(): MemoData {
     activeTabId: 'default',
     fontSize: DEFAULT_FONT_SIZE,
   };
-}
-
-/* ── 간단한 마크다운 렌더러 ──
- * 지원: **굵게**, *기울임*, __밑줄__, ~~취소선~~
- * 굵게(**)는 밑줄(__)보다 먼저 매칭되어야 `**` 가 `_ _` 로 오해석되지 않음
- */
-
-function inlineFormat(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = [];
-  // 순서 주의: ** 를 * 보다 먼저, __ 를 _ 보다 먼저 매칭
-  const regex = /(\*\*(.+?)\*\*|__(.+?)__|~~(.+?)~~|\*(.+?)\*)/g;
-  let lastIndex = 0;
-  let match;
-  let k = 0;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
-    if (match[2] !== undefined) parts.push(<strong key={k++}>{match[2]}</strong>);
-    else if (match[3] !== undefined) parts.push(<u key={k++}>{match[3]}</u>);
-    else if (match[4] !== undefined) parts.push(<s key={k++}>{match[4]}</s>);
-    else if (match[5] !== undefined) parts.push(<em key={k++}>{match[5]}</em>);
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-  return parts.length <= 1 ? (parts[0] ?? '') : <>{parts}</>;
-}
-
-function SimpleMarkdown({ content, fontSize }: { content: string; fontSize: number }) {
-  if (!content) {
-    return <div className="text-text-secondary/30" style={{ fontSize }}>메모를 입력하세요...</div>;
-  }
-
-  const lines = content.split('\n');
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-  let key = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // 비순서 목록 (- 또는 * )
-    if (/^\s*[-*]\s/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\s*[-*]\s/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*[-*]\s/, ''));
-        i++;
-      }
-      elements.push(
-        <ul key={key++} className="list-disc pl-5 my-0.5 text-text-primary" style={{ fontSize }}>
-          {items.map((item, idx) => <li key={idx} className="py-px">{inlineFormat(item)}</li>)}
-        </ul>,
-      );
-      continue;
-    }
-
-    // 순서 목록 (1. 또는 1) )
-    if (/^\s*\d+[.)]\s/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\s*\d+[.)]\s/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*\d+[.)]\s/, ''));
-        i++;
-      }
-      elements.push(
-        <ol key={key++} className="list-decimal pl-5 my-0.5 text-text-primary" style={{ fontSize }}>
-          {items.map((item, idx) => <li key={idx} className="py-px">{inlineFormat(item)}</li>)}
-        </ol>,
-      );
-      continue;
-    }
-
-    // 빈 줄
-    if (line.trim() === '') {
-      elements.push(<div key={key++} className="h-1.5" />);
-      i++;
-      continue;
-    }
-
-    // 일반 텍스트
-    elements.push(
-      <div key={key++} className="text-text-primary leading-relaxed" style={{ fontSize }}>
-        {inlineFormat(line)}
-      </div>,
-    );
-    i++;
-  }
-
-  return <div>{elements}</div>;
 }
 
 /* ── memo.json → Supabase 마이그레이션 ── */
@@ -248,7 +165,6 @@ function MemoTabBar({
             <span className={tab.title ? 'cursor-pointer' : 'cursor-pointer italic opacity-60'}>
               {displayTitle}
             </span>
-            {/* 연필 아이콘 — 호버 시 노출, 한 번 클릭으로 편집 */}
             <button
               className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-accent/15 hover:text-accent cursor-pointer"
               onClick={(e) => { e.stopPropagation(); beginEdit(tab.id, tab.title); }}
@@ -282,115 +198,6 @@ function MemoTabBar({
   );
 }
 
-/* ── 서식 툴바 (textarea 선택 텍스트를 마크다운으로 감쌈) ── */
-
-type MdStyle = 'bold' | 'italic' | 'underline' | 'strike';
-
-function applyMarkdown(
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
-  style: MdStyle,
-  onChange: (nextValue: string) => void,
-) {
-  const ta = textareaRef.current;
-  if (!ta) return;
-
-  const wrapMap: Record<MdStyle, string> = {
-    bold: '**',
-    italic: '*',
-    underline: '__',
-    strike: '~~',
-  };
-  const wrap = wrapMap[style];
-  const { selectionStart: s, selectionEnd: e, value } = ta;
-  const before = value.slice(0, s);
-  const selected = value.slice(s, e);
-  const after = value.slice(e);
-
-  // 이미 같은 서식으로 감싸져 있으면 토글 해제
-  const alreadyWrapped =
-    selected.startsWith(wrap) && selected.endsWith(wrap) && selected.length >= wrap.length * 2;
-  const insertion = alreadyWrapped
-    ? selected.slice(wrap.length, selected.length - wrap.length)
-    : `${wrap}${selected || '텍스트'}${wrap}`;
-  const next = `${before}${insertion}${after}`;
-
-  onChange(next);
-
-  // 다음 렌더 후 커서/선택 영역 복원
-  requestAnimationFrame(() => {
-    const cur = textareaRef.current;
-    if (!cur) return;
-    if (alreadyWrapped) {
-      cur.selectionStart = s;
-      cur.selectionEnd = s + insertion.length;
-    } else {
-      cur.selectionStart = s + wrap.length;
-      cur.selectionEnd = s + wrap.length + (selected || '텍스트').length;
-    }
-    cur.focus();
-  });
-}
-
-function FormatToolbar({
-  textareaRef,
-  onChange,
-  disabled,
-}: {
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
-  onChange: (next: string) => void;
-  disabled?: boolean;
-}) {
-  const btn = 'p-1 rounded-md text-text-secondary/60 hover:text-accent hover:bg-accent/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed';
-  return (
-    <div className="flex items-center gap-0.5 px-1.5 py-0.5 border-b border-bg-border/10 shrink-0">
-      <button
-        type="button"
-        className={btn}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => applyMarkdown(textareaRef, 'bold', onChange)}
-        disabled={disabled}
-        title="굵게 (**text**)"
-        aria-label="굵게"
-      >
-        <Bold size={12} />
-      </button>
-      <button
-        type="button"
-        className={btn}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => applyMarkdown(textareaRef, 'italic', onChange)}
-        disabled={disabled}
-        title="기울임 (*text*)"
-        aria-label="기울임"
-      >
-        <Italic size={12} />
-      </button>
-      <button
-        type="button"
-        className={btn}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => applyMarkdown(textareaRef, 'underline', onChange)}
-        disabled={disabled}
-        title="밑줄 (__text__)"
-        aria-label="밑줄"
-      >
-        <Underline size={12} />
-      </button>
-      <button
-        type="button"
-        className={btn}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => applyMarkdown(textareaRef, 'strike', onChange)}
-        disabled={disabled}
-        title="취소선 (~~text~~)"
-        aria-label="취소선"
-      >
-        <Strikethrough size={12} />
-      </button>
-    </div>
-  );
-}
-
 /* ── 메모 위젯 ── */
 
 export function MemoWidget() {
@@ -401,12 +208,13 @@ export function MemoWidget() {
 
   const [memoData, setMemoData] = useState<MemoData>(makeDefaultMemoData);
   const [loaded, setLoaded] = useState(false);
-  const [previewMode, setPreviewMode] = useState(false);
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [linkEditToken, setLinkEditToken] = useState(0);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const memoDataRef = useRef(memoData);
   memoDataRef.current = memoData;
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorAreaRef = useRef<HTMLDivElement>(null);
 
   const activeTab = memoData.tabs.find((t) => t.id === memoData.activeTabId) ?? memoData.tabs[0];
 
@@ -420,7 +228,6 @@ export function MemoWidget() {
           if (remote) {
             setMemoData(migrateMemoData(remote));
           } else {
-            // 사용자 전환 시 이전 데이터 초기화
             setMemoData(makeDefaultMemoData());
           }
         }
@@ -474,7 +281,7 @@ export function MemoWidget() {
     return () => window.removeEventListener('storage', handler);
   }, [memoKey]);
 
-  // 언마운트 시 즉시 저장
+  // 언마운트 시 즉시 저장 (debounce flush)
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) {
@@ -496,6 +303,21 @@ export function MemoWidget() {
     };
   }, [memoKey]);
 
+  // Ctrl+K 단축키 — 에디터에 포커스된 상태에서만 링크 편집 트리거
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'k') return;
+      if (e.shiftKey || e.altKey) return;
+      const active = document.activeElement as HTMLElement | null;
+      const inEditor = editorAreaRef.current?.contains(active);
+      if (!inEditor) return;
+      e.preventDefault();
+      setLinkEditToken((t) => t + 1);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   // ── 탭 관리 핸들러 ──
 
   const handleSelectTab = useCallback((id: string) => {
@@ -506,13 +328,7 @@ export function MemoWidget() {
 
   const handleAddTab = useCallback(() => {
     const newId = `tab-${Date.now()}`;
-    // 제목은 빈 값으로 생성 — 탭 바에서 "메모 N" placeholder 로 노출되며,
-    // 사용자가 직접 입력하면 그 값이 저장됨
-    const newTab: MemoTab = {
-      id: newId,
-      title: '',
-      content: '',
-    };
+    const newTab: MemoTab = { id: newId, title: '', content: '' };
     const updated: MemoData = {
       ...memoData,
       tabs: [...memoData.tabs, newTab],
@@ -545,17 +361,19 @@ export function MemoWidget() {
 
   // ── 콘텐츠/폰트 변경 ──
 
-  const handleContentChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
+  const handleContentChange = useCallback((markdown: string) => {
+    const latest = memoDataRef.current;
+    // 활성 탭의 content 갱신
+    if (latest.tabs.find(t => t.id === latest.activeTabId)?.content === markdown) return;
     const updated: MemoData = {
-      ...memoData,
-      tabs: memoData.tabs.map((t) =>
-        t.id === memoData.activeTabId ? { ...t, content: val } : t,
+      ...latest,
+      tabs: latest.tabs.map((t) =>
+        t.id === latest.activeTabId ? { ...t, content: markdown } : t,
       ),
     };
     setMemoData(updated);
     save(updated);
-  }, [memoData, save]);
+  }, [save]);
 
   const handleFontSizeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const val = Number(e.target.value);
@@ -564,16 +382,17 @@ export function MemoWidget() {
     save(updated);
   }, [memoData, save]);
 
-  // 컨트롤 바 (미리보기 토글 + 글자 크기 슬라이더)
+  const handleEditorReady = useCallback((ed: Editor | null) => {
+    setEditor(ed);
+  }, []);
+
+  const handleLinkRequest = useCallback(() => {
+    setLinkEditToken((t) => t + 1);
+  }, []);
+
+  // 컨트롤 바 (글자 크기 슬라이더만 — 미리보기 토글 제거됨)
   const controls = (
     <div className="flex items-center gap-1.5">
-      <button
-        onClick={() => setPreviewMode(!previewMode)}
-        className="p-1 rounded-md text-text-secondary/40 hover:text-accent hover:bg-accent/10 transition-colors cursor-pointer"
-        title={previewMode ? '편집 모드' : '미리보기'}
-      >
-        {previewMode ? <Pencil size={13} /> : <Eye size={13} />}
-      </button>
       <Type size={12} className="text-text-secondary/50 shrink-0" />
       <input
         type="range"
@@ -602,43 +421,25 @@ export function MemoWidget() {
     />
   );
 
-  // 서식 툴바가 본문을 변경할 때 활성 탭의 content 를 업데이트
-  const handleFormatToolbarChange = useCallback((nextValue: string) => {
-    const latest = memoDataRef.current;
-    const updated: MemoData = {
-      ...latest,
-      tabs: latest.tabs.map((t) =>
-        t.id === latest.activeTabId ? { ...t, content: nextValue } : t,
-      ),
-    };
-    setMemoData(updated);
-    save(updated);
-  }, [save]);
-
-  const formatToolbar = !previewMode && loaded ? (
-    <FormatToolbar
-      textareaRef={textareaRef}
-      onChange={handleFormatToolbarChange}
+  const toolbar = (
+    <MemoToolbar
+      editor={editor}
+      widthRef={editorAreaRef}
+      onLinkRequest={handleLinkRequest}
     />
-  ) : null;
+  );
 
   const memoContent = loaded ? (
-    previewMode ? (
-      <div className="w-full h-full overflow-auto cursor-text" onClick={() => setPreviewMode(false)}>
-        <SimpleMarkdown content={activeTab?.content ?? ''} fontSize={memoData.fontSize} />
-      </div>
-    ) : (
-      <textarea
+    <div ref={editorAreaRef} className="flex-1 overflow-auto">
+      <MemoEditor
         key={activeTab?.id}
-        ref={textareaRef}
-        value={activeTab?.content ?? ''}
+        content={activeTab?.content ?? ''}
         onChange={handleContentChange}
-        placeholder="메모를 입력하세요... (상단 툴바로 서식 적용 가능)"
-        className="w-full h-full bg-transparent text-text-primary resize-none outline-none placeholder:text-text-secondary/30 leading-relaxed"
-        style={{ fontSize: `${memoData.fontSize}px`, minHeight: isPopup ? '100%' : '80px' }}
-        spellCheck={false}
+        fontSize={memoData.fontSize}
+        onEditorReady={handleEditorReady}
       />
-    )
+      <MemoLinkBubble editor={editor} editRequestToken={linkEditToken} />
+    </div>
   ) : (
     <div className="flex items-center justify-center h-full">
       <span className="text-sm text-text-secondary/30 animate-pulse">로딩 중...</span>
@@ -655,10 +456,8 @@ export function MemoWidget() {
           <div className="ml-auto">{controls}</div>
         </div>
         {tabBar}
-        {formatToolbar}
-        <div className="flex-1 overflow-auto p-4">
-          {memoContent}
-        </div>
+        {toolbar}
+        {memoContent}
       </div>
     );
   }
@@ -666,7 +465,7 @@ export function MemoWidget() {
   return (
     <Widget title="메모" icon={<StickyNote size={15} />} headerRight={controls}>
       {tabBar}
-      {formatToolbar}
+      {toolbar}
       {memoContent}
     </Widget>
   );

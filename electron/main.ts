@@ -719,6 +719,19 @@ ipcMain.handle('users:write', (_event, data: unknown) => {
 
 ipcMain.handle('settings:get-path', () => getDataPath());
 
+// 외부 URL 을 기본 브라우저로 열기 (메모 링크)
+ipcMain.handle('shell:open-external', async (_event, url: string) => {
+  try {
+    if (typeof url !== 'string' || !/^(https?:|mailto:|tel:)/i.test(url)) {
+      return { ok: false, error: 'invalid url' };
+    }
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
 // 파일탐색기에서 경로 열기
 ipcMain.handle('shell:show-item', async (_event, filePath: string) => {
   try {
