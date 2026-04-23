@@ -2650,8 +2650,13 @@ export function ScenesView() {
     }
     const sceneUuid = targetScene.id;
     const sceneNo = targetScene.no;
+    const badgeKey = `${sheetName}:${sceneNo}`;
 
     const prevEpisodes = currentEpisodes;
+    // Codex P2 8차(2026-04-23): 실패 롤백 시 뱃지 state 도 복원할 수 있도록 이전 값 보관.
+    const prevCommentCount = commentCounts[badgeKey];
+    const prevCommentIds = commentIdsByKey[badgeKey];
+
     deleteSceneOptimistic(sheetName, sceneIndex);
 
     // 이슈 F(2026-04-23): 낙관적으로 로컬 state 에서 뱃지 숫자를 즉시 비움.
@@ -2660,12 +2665,12 @@ export function ScenesView() {
     // 캐시 무효화는 DB 삭제 성공 후에만 수행한다.
     setCommentCounts((prev) => {
       const next = { ...prev };
-      delete next[`${sheetName}:${sceneNo}`];
+      delete next[badgeKey];
       return next;
     });
     setCommentIdsByKey((prev) => {
       const next = { ...prev };
-      delete next[`${sheetName}:${sceneNo}`];
+      delete next[badgeKey];
       return next;
     });
 
@@ -2676,6 +2681,13 @@ export function ScenesView() {
       syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
+      // Codex P2 8차(2026-04-23): 씬이 롤백되었는데 뱃지가 0 으로 남으면 사용자 혼란 → 함께 복원.
+      if (prevCommentCount !== undefined) {
+        setCommentCounts((prev) => ({ ...prev, [badgeKey]: prevCommentCount }));
+      }
+      if (prevCommentIds !== undefined) {
+        setCommentIdsByKey((prev) => ({ ...prev, [badgeKey]: prevCommentIds }));
+      }
       handleSheetError(err, '씬 삭제');
       syncInBackground();
     }
@@ -2733,14 +2745,19 @@ export function ScenesView() {
     const prevEpisodes = useDataStore.getState().episodes;
     const prevSelectedPart = selectedPart;
 
+    // Codex P2 8차(2026-04-23): 씬 삭제와 동일 race — DB 호출 전 invalidatePartCache 를 부르면
+    // 이벤트 리스너가 즉시 reload → 파트가 아직 살아있어 스테일 댓글이 뱃지에 다시 채워짐.
+    // 낙관적 단계에서는 UI state 만 업데이트(deletePartOptimistic 은 에피소드 상태만 건드림),
+    // 캐시 무효화는 DB 성공 후 수행.
     for (const sn of sheetNames) {
       deletePartOptimistic(sn);
-      invalidatePartCache(sn);
     }
     setSelectedPart(null);
 
     try {
       await Promise.all(sheetNames.map((sn) => softDeletePart(sn)));
+      // DB 삭제 성공 후에만 캐시 무효화 + 이벤트 전파 → reload 가 최신 상태 반환.
+      for (const sn of sheetNames) invalidatePartCache(sn);
       syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
