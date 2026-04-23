@@ -541,11 +541,11 @@ export async function updateRevisionStatus(
  * 리비전 삭제 — Supabase 모드에서는 Storage 이미지도 함께 정리 (서버 측),
  * 로컬 모드에서는 단순히 로컬 파일에서만 제거.
  */
-export async function deleteRevision(id: string, sceneKey: string, requesterUserId: string): Promise<void> {
+export async function deleteRevision(id: string, sceneKey: string): Promise<void> {
   const lookupSceneKeys = getRevisionLookupSceneKeys(sceneKey);
 
   if (sheetsMode) {
-    await window.electronAPI.supabaseDeleteRevision(id, requesterUserId);
+    await window.electronAPI.supabaseDeleteRevision(id);
     if (sheetsCache) {
       for (const lookupSceneKey of lookupSceneKeys) {
         const list = sheetsCache[lookupSceneKey];

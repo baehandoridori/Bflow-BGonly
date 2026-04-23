@@ -1056,8 +1056,28 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   await sbUpdateRevision(id, updates);
 }));
-ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: string, requesterUserId: string) => {
-  await sbDeleteRevision(id, requesterUserId);
+// Codex 리뷰 #8 P1: 리비전 삭제는 renderer-provided userId 를 신뢰하면 안 됨.
+// 신뢰된 출처(메모리 session + auth.json 파일)에서 직접 해석.
+function resolveTrustedCurrentUserId(): string | null {
+  const memId = (lastKnownSession as { user?: { id?: string } } | null)?.user?.id ?? null;
+  let fileId: string | null = null;
+  try {
+    const authPath = path.join(getDataPath(), 'auth.json');
+    if (fs.existsSync(authPath)) {
+      const raw = fs.readFileSync(authPath, { encoding: 'utf-8' });
+      const session = JSON.parse(raw) as { userId?: string } | null;
+      fileId = session?.userId ?? null;
+    }
+  } catch { /* ignore */ }
+  // 둘 다 있으면 반드시 일치해야 신뢰 (세션 위변조 방어)
+  if (memId && fileId) return memId === fileId ? memId : null;
+  return memId ?? fileId;
+}
+
+ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: string) => {
+  const userId = resolveTrustedCurrentUserId();
+  if (!userId) throw new Error('로그인이 필요합니다.');
+  await sbDeleteRevision(id, userId);
 }));
 
 // ─── Metadata ───

@@ -381,11 +381,6 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   };
 
   const handleDelete = async (rev: CompRevision) => {
-    const userId = currentUser?.id;
-    if (!userId) {
-      sonnerToast.error('로그인 상태를 확인해 주세요.');
-      return;
-    }
     const ok = await ConfirmDialog.show({
       message: `Rev.${rev.revisionNo} 리비전을 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
       confirmLabel: '삭제',
@@ -393,7 +388,8 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
     });
     if (!ok) return;
     try {
-      await useRevisionStore.getState().deleteRevision(rev.id, rev.sceneKey, userId);
+      // 권한은 main 프로세스가 신뢰된 session 에서 직접 확인 (Codex #8 P1)
+      await useRevisionStore.getState().deleteRevision(rev.id, rev.sceneKey);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       sonnerToast.error(`리비전 삭제 실패: ${msg}`);
