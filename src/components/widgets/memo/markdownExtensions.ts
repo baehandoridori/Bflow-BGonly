@@ -19,8 +19,17 @@ import type { Editor } from '@tiptap/core';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MarkdownIt = any;
 
-/** strong_open/close 렌더러를 markup 기준으로 분기 */
+/**
+ * markdown-it 인스턴스에 이미 underline 렌더러 패치가 적용됐는지 표시하는 고유 키.
+ * 같은 인스턴스에 여러 번 install 이 호출돼도 wrapper 가 누적되지 않도록 가드.
+ */
+const PATCHED_KEY = '__bflowUnderlinePatched__';
+
+/** strong_open/close 렌더러를 markup 기준으로 분기 (idempotent) */
 function installUnderlineRenderer(md: MarkdownIt) {
+  if (md[PATCHED_KEY]) return;
+  md[PATCHED_KEY] = true;
+
   const defaultStrongOpen = md.renderer.rules.strong_open
     ?? ((tokens: unknown[], idx: number, opts: unknown, _env: unknown, self: { renderToken: (...a: unknown[]) => string }) =>
       self.renderToken(tokens, idx, opts));

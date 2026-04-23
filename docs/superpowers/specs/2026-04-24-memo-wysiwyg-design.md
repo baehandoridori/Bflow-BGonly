@@ -244,10 +244,13 @@ __밑줄__     ← 비GFM       <u>밑줄</u>
 | 애니메이션 | `animate-fade-in` (기존 키프레임 재사용) |
 | z-index | 50 |
 
-**URL 유효성**:
-- `https?://`, `mailto:`, 상대경로 `/` 로 시작 허용
-- 그 외 텍스트는 `https://` 자동 prepend
-- TipTap `Link` extension의 `autolink: true` 로 순수 URL 붙여넣기 자동 링크화
+**URL 유효성** (화이트리스트, `shell:open-external` IPC 핸들러와 동일):
+- `https?:`, `mailto:`, `tel:` **프로토콜만 허용**
+- 그 외 (상대경로 `/foo`, 미지원 프로토콜 `ftp://`, 공백 포함, 프로토콜 없는 도메인에 `.tld` 없음) → `null` 반환 → 저장 거부 + sonner 토스트 노출
+- 프로토콜 없는 도메인 형태 (`example.com`)는 `https://` 자동 prepend
+- TipTap `Link.configure` 의 `isAllowedUri` 로도 같은 화이트리스트 강제 — autolink / paste / setLink 모든 경로에서 `ftp://` 등 차단
+
+> 초기 설계에서는 상대경로 `/foo` 허용도 포함했으나, Electron 의 `shell.openExternal` 이 상대 경로를 열지 못해 **죽은 링크**가 생기는 문제가 발견되어(Codex 1차 리뷰) 거부로 확정. 앱 내부 라우팅이 필요한 경우 별도 기능으로 분리.
 
 **접근성**:
 - URL input: `aria-label="링크 URL"`, 자동 포커스
@@ -446,8 +449,10 @@ WHERE tabs::text ~ '\d+\) ';
 |--------|------|
 | 빈 메모 로드 | Placeholder 표시, 첫 입력 시 사라짐 |
 | 긴 메모 (수천 줄) | TipTap 가상화 없음. 현재 체감 사용량(<500줄) 범위 내 문제 없음 (YAGNI) |
-| URL 입력 시 `http://` 누락 | `https://` 자동 prepend |
+| URL 입력 시 프로토콜 누락 (도메인만, 예: `example.com`) | `.tld` 패턴 검증 후 `https://` 자동 prepend |
 | 빈 URL로 Enter | 링크 적용 취소 (서식 변경 없음) |
+| 상대경로 / 미지원 프로토콜 / 공백 포함 / 프로토콜 없는 쓰레기 입력 | `normalizeUrl` → `null` → sonner 토스트(`유효하지 않은 URL 형식입니다.`) + input 재포커스 + 버블 유지 |
+| `ftp://...`, `file://...` 등 붙여넣기 / autolink | `Link.configure({ isAllowedUri })` 에서 거부 → `<a>` 마크가 생성되지 않아 평문으로 남음 |
 | 링크 위 커서 + 서식 변경 | 링크 내 텍스트에 Bold 등 적용 가능 (TipTap 기본) |
 | 붙여넣기로 HTML 유입 | TipTap `clipboardTextSerializer`로 plain text 또는 허용된 마크만 필터 |
 | 탭 전환 중 IME 조합 중 | TipTap이 IME composition 처리 (기존 textarea 수준 이상) |
