@@ -1053,8 +1053,8 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   await sbUpdateRevision(id, updates);
 }));
-ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: string) => {
-  await sbDeleteRevision(id);
+ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: string, requesterUserId: string) => {
+  await sbDeleteRevision(id, requesterUserId);
 }));
 
 // ─── Metadata ───

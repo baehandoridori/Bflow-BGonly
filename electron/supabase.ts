@@ -941,23 +941,41 @@ export async function getPrivateEventOwner(id: string): Promise<string | null> {
 // COMP_REVISIONS
 // ═══════════════════════════════════════════════
 
-/** 리비전 삭제 — Storage 이미지 먼저 정리 후 DB row 삭제 */
-export async function deleteRevision(id: string): Promise<void> {
-  // Storage 이미지 URL 조회
+/** 리비전 삭제 — 권한 검증(요청자 본인 또는 admin) 후 Storage 이미지 정리 + DB row 삭제.
+ *  Codex 리뷰 #5 P2: UI 의 canDelete 체크만으로는 다른 renderer 호출이 bypass 가능 →
+ *  main 프로세스에서 반드시 권한 검증 수행. */
+export async function deleteRevision(id: string, requesterUserId: string): Promise<void> {
+  // 1) 리비전 + 요청자 정보 + 권한자 role 조회
   const { data: rev } = await supabase
     .from('comp_revisions')
-    .select('image_url')
+    .select('image_url, requester_id')
     .eq('id', id)
     .maybeSingle();
 
-  // Storage 삭제 (실패해도 DB 삭제는 계속)
-  const imageUrl = (rev as { image_url?: string } | null)?.image_url;
+  if (!rev) return; // 이미 없으면 no-op
+
+  const isOwner = rev.requester_id === requesterUserId;
+  let isAdmin = false;
+  if (!isOwner) {
+    const { data: user } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', requesterUserId)
+      .maybeSingle();
+    isAdmin = (user as { role?: string } | null)?.role === 'admin';
+  }
+  if (!isOwner && !isAdmin) {
+    throw new Error('리비전 삭제 권한이 없습니다. (요청자 본인 또는 관리자만)');
+  }
+
+  // 2) Storage 이미지 삭제 (실패해도 DB 삭제 계속)
+  const imageUrl = (rev as { image_url?: string }).image_url;
   if (imageUrl) {
     await storageDeleteImage(imageUrl).catch((err) =>
       console.warn('[Storage] revision 이미지 삭제 실패:', err));
   }
 
-  // DB row 삭제
+  // 3) DB row 삭제
   const { error } = await supabase.from('comp_revisions').delete().eq('id', id);
   throwIfError(error);
   broadcastDataChange('comp_revisions', 'DELETE');

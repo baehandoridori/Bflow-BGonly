@@ -130,8 +130,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt),
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) =>
     ipcRenderer.invoke('supabase:update-revision', id, updates),
-  supabaseDeleteRevision: (id: string) =>
-    ipcRenderer.invoke('supabase:delete-revision', id),
+  supabaseDeleteRevision: (id: string, requesterUserId: string) =>
+    ipcRenderer.invoke('supabase:delete-revision', id, requesterUserId),
   supabaseReadAllMetadata: () =>
     ipcRenderer.invoke('supabase:read-all-metadata'),
   supabaseReadMetadata: (type: string, key: string) =>

@@ -37,7 +37,7 @@ interface RevisionState {
     extra?: { resolvedBy?: string; resolvedNote?: string },
   ) => Promise<void>;
 
-  deleteRevision: (id: string, sceneKey: string) => Promise<void>;
+  deleteRevision: (id: string, sceneKey: string, requesterUserId: string) => Promise<void>;
 
   getRevisionsForScene: (sceneKey: string) => CompRevision[];
   getOpenCount: (sceneKey: string) => number;
@@ -135,18 +135,15 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     return revision;
   },
 
-  deleteRevision: async (id, sceneKey) => {
-    const prev = get().revisions;
+  deleteRevision: async (id, sceneKey, requesterUserId) => {
     get().deleteRevisionOptimistic(id);
     try {
-      await revisionService.deleteRevision(id, sceneKey);
+      await revisionService.deleteRevision(id, sceneKey, requesterUserId);
     } catch (err) {
-      console.error('[리비전 스토어] 삭제 실패, 롤백:', err);
-      set({
-        revisions: prev,
-        revisionCountByScene: buildCountMap(prev),
-        totalOpenRevisionCount: countOpenRevisions(prev),
-      });
+      // Codex 리뷰 #6 P2: stale snapshot 복원은 in-flight 간 들어온 realtime/로컬 변경을
+      // 덮어쓸 수 있음. 서버에서 재로드해 실제 상태와 동기화한다.
+      console.error('[리비전 스토어] 삭제 실패 → 서버 재로드:', err);
+      await get().loadRevisions();
       throw err;
     }
   },
