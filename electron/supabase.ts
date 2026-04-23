@@ -736,9 +736,13 @@ export async function addComment(
   mentions: string[],
   createdAt: string,
 ): Promise<void> {
-  // 이슈 F(2026-04-23): scene_uuid 저장 — 씬 삭제 시 CASCADE로 자동 정리되게 함.
+  // 이슈 F(2026-04-23) + Codex P1(2차): 댓글 경로의 sceneId는 scene.no (=sort_order).
+  // sort_order 정확 매칭으로 scene_number 표기 규칙과 무관하게 정확히 식별.
   // 씬을 못 찾으면 댓글 저장 자체를 거부(앞으로 고아 댓글 신규 생성 차단).
-  const sceneUuid = await resolveSceneUuidWithRetry(partUuid, sceneId);
+  const sortOrder = Number(String(sceneId).trim());
+  const sceneUuid = Number.isFinite(sortOrder)
+    ? await resolveSceneUuidBySortOrderWithRetry(partUuid, sortOrder)
+    : null;
   if (!sceneUuid) {
     throw new Error(`댓글 저장 실패: 씬을 찾을 수 없음 (partUuid=${partUuid}, sceneId=${sceneId})`);
   }
@@ -956,7 +960,9 @@ export async function addRevision(
       sceneIdForResolve = lowerSegment.slice(4);
     }
   }
-  const sceneUuid = await resolveSceneUuidWithRetry(resolvedPartUuid, sceneIdForResolve);
+  // Codex P1 2차(2026-04-23): 리비전 sceneKey 숫자는 normalizeSceneIdKey 결과(예: "a035"→"35")로
+  // scene_number 파생 값이다. sort_order 와 일치가 보장되지 않으므로 반드시 scene_number 매칭 경로로.
+  const sceneUuid = await resolveSceneUuidByNumberWithRetry(resolvedPartUuid, sceneIdForResolve);
   if (!sceneUuid) {
     throw new Error(`리비전 저장 실패: 씬을 찾을 수 없음 (partUuid=${resolvedPartUuid}, sceneId=${sceneId})`);
   }
@@ -1077,44 +1083,47 @@ export async function writeMetadata(type: string, key: string, value: string): P
 // ═══════════════════════════════════════════════
 
 /**
- * partUuid + sceneId(문자열) → scenes 테이블의 scene UUID를 반환.
- * 이슈 F 해결(2026-04-23) + Codex P1(2026-04-23):
+ * scene UUID 조회 경로가 두 갈래로 나뉜다 (Codex P1 2차, 2026-04-23):
  *
- * 댓글 흐름의 sceneId는 `scene.no` (=scenes.sort_order)에서 오므로 scene_number 접두사/패딩 규칙과
- * 무관하게 sort_order 매칭이 가장 정확하다. 리비전은 사용자가 입력한 원본 scene_number 문자열
- * (예: "sc001", "v2a001")이 전달될 수 있어 scene_number 직접 매칭 fallback이 필요하다.
+ *   A) 댓글 경로: `sceneKey = sheetName:scene.no` 이고 `scene.no === scenes.sort_order`.
+ *      → `resolveSceneUuidBySortOrder` 사용. sort_order 정확 매칭이 항상 올바름.
  *
- * 매칭 순서:
- *   1) sceneId가 숫자면 sort_order = parseInt(sceneId) 매칭 (댓글 경로 정답)
- *   2) part_letter + LPAD(3) 정규화된 scene_number 매칭 (기존 규칙)
- *   3) 원본 lowercase sceneId를 scene_number 로 직접 매칭 (커스텀 prefix 대응)
+ *   B) 리비전 경로: `sceneKey = EP:partLetter:normalizedNumberOrRaw`.
+ *      숫자 segment("35")는 `normalizeSceneIdKey("a035", "A")` 결과의 숫자부이므로
+ *      sort_order 와 일치 보장 없음 (삭제·재배치로 어긋날 수 있음).
+ *      `raw-...` alias segment는 decode 후 custom scene_number 가 됨.
+ *      → `resolveSceneUuidByNumber` 사용. scene_number 정규화 매칭이 정답.
+ *
+ * 두 함수는 호출자가 의도를 명확히 표현하도록 분리되었다. 공유 매칭을 피해
+ * "어쩌다 sort_order 와 숫자부가 같아서 올바른 씬이 잡히는" 우연을 제거한다.
  */
-export async function resolveSceneUuid(
-  partUuid: string,
-  sceneId: string,
-): Promise<string | null> {
-  if (!partUuid || !sceneId) return null;
 
-  const trimmed = String(sceneId).trim();
+/** 댓글 경로 전용 — scene.no(=sort_order) 정확 매칭. */
+export async function resolveSceneUuidBySortOrder(
+  partUuid: string,
+  sortOrder: number,
+): Promise<string | null> {
+  if (!partUuid || !Number.isFinite(sortOrder)) return null;
+  const { data } = await supabase
+    .from('scenes')
+    .select('id')
+    .eq('part_id', partUuid)
+    .eq('sort_order', sortOrder)
+    .limit(1)
+    .maybeSingle();
+  return data?.id || null;
+}
+
+/** 리비전 경로 전용 — scene_number 기반 매칭.
+ *  숫자는 part_letter + LPAD(3) 로 정규화, 그 외 custom prefix("sc001")는 lowercase 원본으로. */
+export async function resolveSceneUuidByNumber(
+  partUuid: string,
+  sceneNumberLike: string,
+): Promise<string | null> {
+  if (!partUuid || !sceneNumberLike) return null;
+  const trimmed = String(sceneNumberLike).trim();
   const lower = trimmed.toLowerCase();
 
-  // 1차: sort_order 매칭 — 앱의 scene.no ↔ DB의 sort_order 가 동일하므로
-  // scene_number 표기 규칙(접두사/패딩/커스텀)과 무관하게 정확히 식별된다.
-  if (/^\d+$/.test(trimmed)) {
-    const sortOrder = Number(trimmed);
-    if (Number.isFinite(sortOrder)) {
-      const { data: byOrder } = await supabase
-        .from('scenes')
-        .select('id')
-        .eq('part_id', partUuid)
-        .eq('sort_order', sortOrder)
-        .limit(1)
-        .maybeSingle();
-      if (byOrder?.id) return byOrder.id;
-    }
-  }
-
-  // 2차: scene_number 정규화 매칭 (part_letter + 3자리 zero-pad).
   const { data: part } = await supabase
     .from('parts')
     .select('part_id')
@@ -1136,7 +1145,7 @@ export async function resolveSceneUuid(
     .maybeSingle();
   if (byNumber?.id) return byNumber.id;
 
-  // 3차: 커스텀 prefix (예: "sc001", "v2a001") — 원본을 scene_number 로 그대로 매칭.
+  // custom prefix (예: "sc001") — 정규화된 값과 다르면 원본으로 한번 더 시도
   if (normalized !== lower) {
     const { data: byRaw } = await supabase
       .from('scenes')
@@ -1152,21 +1161,34 @@ export async function resolveSceneUuid(
 }
 
 /**
- * resolveSceneUuid 재시도판.
- * 낙관적 UI가 씬을 먼저 보여주고 DB 저장이 늦을 때 댓글/리비전 저장이 레이스로 실패하는
- * 문제를 완화한다. 500ms → 1000ms 백오프로 최대 3회 시도.
+ * 후방 호환용 — 과거에 이 이름을 참조하던 외부 경로가 남아 있을 경우를 위한 얇은 래퍼.
+ * 새 코드는 반드시 resolveSceneUuidBySortOrder 또는 resolveSceneUuidByNumber 중 의도에
+ * 맞는 함수를 직접 사용할 것.
  */
-async function resolveSceneUuidWithRetry(
+export async function resolveSceneUuid(
   partUuid: string,
   sceneId: string,
 ): Promise<string | null> {
+  return resolveSceneUuidByNumber(partUuid, sceneId);
+}
+
+/** 낙관적 UI ↔ DB 저장 레이스 완화용 재시도 래퍼. 0→500→1000ms 백오프. */
+async function withRetry<T>(fn: () => Promise<T | null>): Promise<T | null> {
   const delays = [0, 500, 1000];
   for (const delay of delays) {
     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
-    const uuid = await resolveSceneUuid(partUuid, sceneId);
-    if (uuid) return uuid;
+    const result = await fn();
+    if (result) return result;
   }
   return null;
+}
+
+async function resolveSceneUuidBySortOrderWithRetry(partUuid: string, sortOrder: number): Promise<string | null> {
+  return withRetry(() => resolveSceneUuidBySortOrder(partUuid, sortOrder));
+}
+
+async function resolveSceneUuidByNumberWithRetry(partUuid: string, sceneNumberLike: string): Promise<string | null> {
+  return withRetry(() => resolveSceneUuidByNumber(partUuid, sceneNumberLike));
 }
 
 /**

@@ -40,17 +40,30 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
 
-  // 댓글 로드 — loadPartComments가 이미 BG·ACT 양쪽 파트를 통합 조회하므로
-  // 이슈 F-2(2026-04-23) 이후로는 primary 한 번 조회만으로 양쪽 댓글이 모두 포함된다.
-  // secondarySceneKey 를 추가로 조회하면 같은 댓글이 두 번 merge되어 React key 중복 경고 발생.
+  // 댓글 로드 — primary + optional secondary 조회 후 시간순 병합.
+  //
+  // 모드별 동작:
+  // - sheets 모드: loadPartComments 가 BG·ACT 양쪽 파트를 통합 조회하므로 primary 결과에 이미
+  //   양쪽 댓글이 모두 포함된다. secondary 결과는 primary 와 겹치지만 commentId dedupe 로 안전.
+  // - 로컬(파일) 모드 (Codex P2 2차, 2026-04-23): getComments 가 단일 sceneKey 만 읽으므로
+  //   통합 뷰 상세 모달에서 counterpart 부서 댓글을 보려면 secondary 도 반드시 조회해야 한다.
   const loadComments = useCallback(() => {
-    getComments(sceneKey).then((list) => {
-      const sorted = list
-        .map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey }))
-        .sort((x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime());
-      // 안전장치: 혹시 모를 상류 중복 제거.
+    const primaryPromise = getComments(sceneKey).then((list) =>
+      list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey })),
+    );
+    const secondaryPromise = secondarySceneKey
+      ? getComments(secondarySceneKey).then((list) =>
+          list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: secondarySceneKey })),
+        )
+      : Promise.resolve([] as SceneCommentWithSource[]);
+
+    Promise.all([primaryPromise, secondaryPromise]).then(([a, b]) => {
+      const merged = [...a, ...b].sort(
+        (x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime(),
+      );
+      // commentId 기준 중복 제거 — sheets 모드 통합 조회로 primary·secondary가 겹쳐도 안전.
       const seen = new Set<string>();
-      const deduped = sorted.filter((c) => {
+      const deduped = merged.filter((c) => {
         if (seen.has(c.id)) return false;
         seen.add(c.id);
         return true;
@@ -58,7 +71,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       setComments(deduped);
       onCountChange?.(deduped.length);
     });
-  }, [sceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sceneKey, secondarySceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadComments(); }, [loadComments]);
 
