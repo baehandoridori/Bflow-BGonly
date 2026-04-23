@@ -424,6 +424,13 @@ export async function getSupabaseActivity(opts: ActivityQueryOpts): Promise<Acti
   return window.electronAPI.supabaseGetActivity(opts);
 }
 
+/** 현재 Realtime subscription 상태를 메인 프로세스 캐시에서 조회 — 늦은 마운트 대응. */
+export async function getSupabaseRealtimeStatus(): Promise<string> {
+  if (!window.electronAPI?.supabaseGetRealtimeStatus) return 'CONNECTING';
+  try { return await window.electronAPI.supabaseGetRealtimeStatus(); }
+  catch { return 'CONNECTING'; }
+}
+
 export function onSupabaseStatusChange(callback: (status: string) => void): () => void {
   return window.electronAPI.onSupabaseStatus(callback);
 }

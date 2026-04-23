@@ -8,6 +8,7 @@ import {
   onSupabaseStatusChange,
   testSupabaseConnection,
   getSupabaseActivity,
+  getSupabaseRealtimeStatus,
 } from '@/services/supabaseService';
 import { SUPABASE_URL } from '@/config';
 import { Sparkline } from './Sparkline';
@@ -66,6 +67,9 @@ export function SupabaseStatusCard() {
     (async () => {
       try { const r = await testSupabaseConnection(); if (!cancelled) setSupaOk(!!r.ok); }
       catch { if (!cancelled) setSupaOk(false); }
+      // 마운트 시 현재 Realtime 상태 bootstrap (Codex 리뷰 #7)
+      try { const cur = await getSupabaseRealtimeStatus(); if (!cancelled) setRtStatus(cur); }
+      catch { /* keep CONNECTING */ }
     })();
     const cleanup = onSupabaseStatusChange((status) => setRtStatus(status));
     return () => { cancelled = true; cleanup(); };

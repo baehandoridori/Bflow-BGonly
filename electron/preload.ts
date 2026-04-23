@@ -140,6 +140,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:write-metadata', type, key, value),
   supabaseGetActivity: (opts: { table?: string; action?: 'read' | 'write'; rangeMs: number; buckets: number }) =>
     ipcRenderer.invoke('supabase:get-activity', opts) as Promise<Array<{ startTs: number; count: number }>>,
+  supabaseGetRealtimeStatus: () =>
+    ipcRenderer.invoke('supabase:get-realtime-status') as Promise<string>,
   // ─── Personal Todos / Task Views ──────────────────
   supabaseReadTodos: (userId: string) => ipcRenderer.invoke('supabase:read-todos', userId),
   supabaseUpsertTodo: (userId: string, todo: unknown) => ipcRenderer.invoke('supabase:upsert-todo', userId, todo),

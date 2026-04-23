@@ -60,6 +60,9 @@ let isQuitting = false;
 let tray: Tray | null = null;
 let trayFailed = false;
 let lastSupabaseStatus = '연결 중...';
+// Codex 리뷰 #7 P2: 렌더러 Overview/SupabaseStatusCard 가 뒤늦게 마운트되는 경우
+// onStatusChange 구독으론 과거 이벤트를 못 받음 → 원본 Realtime status 를 캐시해 IPC getter 로 노출.
+let currentRealtimeStatus: string = 'CONNECTING';
 // Chunk 2(스플래시 2단계 부팅)에서 사용 예정
 let splashWin: BrowserWindow | null = null;
 // Chunk 2(스플래시 2단계 부팅)에서 사용 예정
@@ -1077,6 +1080,10 @@ ipcMain.handle('supabase:get-activity', async (
   return getActivity(opts);
 });
 
+// Realtime 현재 상태 getter — Codex 리뷰 #7 P2: 늦게 마운트된 렌더러가
+// 과거 onStatusChange 이벤트를 놓치지 않도록 최신 상태를 조회.
+ipcMain.handle('supabase:get-realtime-status', () => currentRealtimeStatus);
+
 // ─── Personal Todos IPC ──────────────────────────────
 
 ipcMain.handle('supabase:read-todos', wrapIpc(async (_e: unknown, userId: string) => {
@@ -1189,6 +1196,7 @@ function startSupabaseRealtime() {
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
     onStatusChange: (status) => {
+      currentRealtimeStatus = status;
       lastSupabaseStatus = humanizeStatus(status);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('supabase:status', status);

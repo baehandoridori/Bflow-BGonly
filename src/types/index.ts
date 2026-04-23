@@ -520,6 +520,7 @@ export interface ElectronAPI {
   supabaseWriteMetadata: (type: string, key: string, value: string) => Promise<void>;
   supabaseGetActivity: (opts: { table?: string; action?: 'read' | 'write'; rangeMs: number; buckets: number })
     => Promise<Array<{ startTs: number; count: number }>>;
+  supabaseGetRealtimeStatus: () => Promise<string>;
   onSupabaseRealtime: (callback: (event: unknown) => void) => () => void;
   onSupabaseStatus: (callback: (status: string) => void) => () => void;
   onSupabaseBroadcast: (callback: (event: unknown) => void) => () => void;

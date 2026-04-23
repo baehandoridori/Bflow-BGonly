@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { onSupabaseStatusChange, testSupabaseConnection } from '@/services/supabaseService';
+import { onSupabaseStatusChange, testSupabaseConnection, getSupabaseRealtimeStatus } from '@/services/supabaseService';
 import { checkGasConnection } from '@/services/gasConfigService';
 import { checkVacationConnection } from '@/services/vacationService';
 import * as gcalService from '@/services/googleCalendarService';
@@ -43,6 +43,10 @@ export function IntegrationOverview() {
 
       try { const authed = await gcalService.isAuthenticated(); if (!cancelled) setGcalOk(!!authed); }
       catch { if (!cancelled) setGcalOk(false); }
+
+      // 마운트 시 현재 Realtime 상태 bootstrap — 이벤트 구독만으론 과거 상태 못 받음
+      try { const cur = await getSupabaseRealtimeStatus(); if (!cancelled) setRtStatus(cur); }
+      catch { /* keep CONNECTING */ }
     })();
 
     const cleanup = onSupabaseStatusChange((status) => setRtStatus(status));
