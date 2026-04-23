@@ -2654,8 +2654,10 @@ export function ScenesView() {
     const prevEpisodes = currentEpisodes;
     deleteSceneOptimistic(sheetName, sceneIndex);
 
-    // 이슈 F(2026-04-23): CASCADE로 DB 댓글/리비전이 사라지니 로컬 캐시·카운트도 즉시 정리.
-    invalidatePartCache(sheetName);
+    // 이슈 F(2026-04-23): 낙관적으로 로컬 state 에서 뱃지 숫자를 즉시 비움.
+    // Codex P2 7차(2026-04-23): 여기서 invalidatePartCache 를 부르면 `bflow:comments-invalidated`
+    // 이벤트가 즉시 발화되어 리스너가 DB 재조회 → 씬이 아직 남아 있어 뱃지가 다시 채워지는 race.
+    // 캐시 무효화는 DB 삭제 성공 후에만 수행한다.
     setCommentCounts((prev) => {
       const next = { ...prev };
       delete next[`${sheetName}:${sceneNo}`];
@@ -2669,6 +2671,8 @@ export function ScenesView() {
 
     try {
       await deleteSceneFromSupabase(sceneUuid);
+      // CASCADE 로 DB 쪽 댓글/리비전은 이 시점에 확실히 사라졌으므로 캐시 무효화 + 이벤트 전파.
+      invalidatePartCache(sheetName);
       syncInBackground();
     } catch (err) {
       setEpisodes(prevEpisodes);
