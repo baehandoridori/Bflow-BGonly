@@ -1566,6 +1566,9 @@ export function ScenesView() {
 
   // 전체 댓글 카운트 로드
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
+  // Codex P2 6차(2026-04-23): ambiguous skip 으로 BG/ACT 댓글 집합이 달라질 수 있어
+  // `getMergedCommentBadgeCounts` 가 union 크기를 산출할 수 있도록 id list 도 함께 유지.
+  const [commentIdsByKey, setCommentIdsByKey] = useState<Record<string, string[]>>({});
   // 댓글 카운트 로딩은 currentPart 정의 후 아래에서 수행 (useEffect)
 
   // Shift+Click 범위 선택을 위한 마지막 클릭 인덱스
@@ -1804,6 +1807,17 @@ export function ScenesView() {
           });
           for (const [key, list] of Object.entries(store)) {
             next[key] = list.length;
+          }
+          return next;
+        });
+        setCommentIdsByKey((prev) => {
+          const next = { ...prev };
+          const prefix = `${sheetName}:`;
+          Object.keys(next).forEach((key) => {
+            if (key.startsWith(prefix)) delete next[key];
+          });
+          for (const [key, list] of Object.entries(store)) {
+            next[key] = list.map((c) => c.id);
           }
           return next;
         });
@@ -2647,6 +2661,11 @@ export function ScenesView() {
       delete next[`${sheetName}:${sceneNo}`];
       return next;
     });
+    setCommentIdsByKey((prev) => {
+      const next = { ...prev };
+      delete next[`${sheetName}:${sceneNo}`];
+      return next;
+    });
 
     try {
       await deleteSceneFromSupabase(sceneUuid);
@@ -3471,6 +3490,7 @@ export function ScenesView() {
                 bgSheetName={bgPart?.sheetName ?? null}
                 actSheetName={actPart?.sheetName ?? null}
                 commentCounts={commentCounts}
+                commentIdsByKey={commentIdsByKey}
                 searchQuery={searchQuery}
                 selectedSceneIds={selectedSceneIds}
                 sceneGroupMode={sceneGroupMode}
@@ -3504,6 +3524,7 @@ export function ScenesView() {
                           bgPart?.sheetName ?? null,
                           actPart?.sheetName ?? null,
                           commentCounts,
+                          commentIdsByKey,
                         );
                         if (!primary) return null;
                         return (
@@ -3518,6 +3539,7 @@ export function ScenesView() {
                             searchQuery={searchQuery}
                             bgCommentCount={commentBadgeCounts.bg}
                             actCommentCount={commentBadgeCounts.act}
+                            totalCommentCount={commentBadgeCounts.total}
                             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                             onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                             onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
@@ -3549,6 +3571,7 @@ export function ScenesView() {
                     bgPart?.sheetName ?? null,
                     actPart?.sheetName ?? null,
                     commentCounts,
+                    commentIdsByKey,
                   );
                   if (!primary) return null;
                   return (
@@ -3563,6 +3586,7 @@ export function ScenesView() {
                       searchQuery={searchQuery}
                       bgCommentCount={commentBadgeCounts.bg}
                       actCommentCount={commentBadgeCounts.act}
+                      totalCommentCount={commentBadgeCounts.total}
                       onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                       onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                       onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
