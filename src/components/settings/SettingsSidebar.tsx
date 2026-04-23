@@ -99,6 +99,9 @@ export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
   }, []);
 
   // 선택된 탭이 접힌 그룹에 속하면 자동 펼침 + preferences 동기화
+  // Codex 리뷰 #2 P2: deps 에 collapsed 포함 — preferences 하이드레이트 이후 로드된
+  // 접힘 상태에 대해서도 펼침이 실행되어야 함. (collapsed 에서 owningGroup 제거 후
+  // 재실행 시 early return 으로 무한 루프 없음.)
   useEffect(() => {
     const owningGroup = TAB_TO_GROUP[active];
     if (!owningGroup || !collapsed.has(owningGroup)) return;
@@ -106,7 +109,7 @@ export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
     next.delete(owningGroup);
     setCollapsed(next);
     persist(next);
-  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, collapsed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const persist = (next: Set<string>) => {
     loadPreferences().then((prefs) => {

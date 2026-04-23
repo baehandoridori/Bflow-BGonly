@@ -591,36 +591,48 @@ export async function bulkUpdateSceneStages(
 }
 
 /** 대량 씬 삭제 (부분 실패 허용) — RPC 경유.
- *  RPC 호출 전에 해당 씬들의 Storage 이미지를 일괄 정리해 고아 파일 방지. */
+ *  bulk_delete_scenes 는 부분 성공을 허용하므로, Storage 이미지는
+ *  "RPC 에서 성공적으로 DB 삭제된 씬"에 대해서만 정리해야 한다.
+ *  (Codex 리뷰 #1 P1 — RPC 전에 모두 삭제하면 실패한 씬이 이미지 잃은 채 DB 에 남음.) */
 export async function bulkDeleteScenes(
   sceneUuids: string[],
   deletedBy: string,
 ): Promise<BulkUpdateResult[]> {
-  // 1) Storage 이미지 URL 일괄 조회
-  const { data: scenes } = await supabase
-    .from('scenes')
-    .select('storyboard_url, guide_url')
-    .in('id', sceneUuids);
-
-  // 2) Storage 병렬 삭제 (실패 허용)
-  if (scenes && scenes.length > 0) {
-    const urls: string[] = [];
-    for (const s of scenes) {
+  // 1) 씬 UUID → 이미지 URL 목록 맵을 먼저 확보 (RPC 가 실제로 삭제한 씬만 이미지 정리하기 위함)
+  const urlsByUuid = new Map<string, string[]>();
+  {
+    const { data: scenes } = await supabase
+      .from('scenes')
+      .select('id, storyboard_url, guide_url')
+      .in('id', sceneUuids);
+    for (const s of scenes ?? []) {
+      const urls: string[] = [];
       if (s.storyboard_url) urls.push(s.storyboard_url as string);
       if (s.guide_url) urls.push(s.guide_url as string);
-    }
-    if (urls.length > 0) {
-      await Promise.allSettled(urls.map((u) => storageDeleteImage(u)));
+      if (urls.length > 0) urlsByUuid.set(s.id as string, urls);
     }
   }
 
-  // 3) RPC 로 DB 대량 삭제 (부분 실패 허용)
+  // 2) RPC 실행 (부분 실패 허용)
   const { data, error } = await supabase.rpc('bulk_delete_scenes', {
     p_uuids: sceneUuids,
     p_deleted_by: deletedBy,
   });
   if (error) throw error;
-  return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
+  const results = maybeForceFail(mapRpcRows(data as RpcRow[] | null));
+
+  // 3) RPC 에서 성공적으로 DB 삭제된 씬에 한해서만 Storage 이미지 정리
+  const urlsToDelete: string[] = [];
+  for (const r of results) {
+    if (!r.success) continue;
+    const urls = urlsByUuid.get(r.sceneUuid);
+    if (urls) urlsToDelete.push(...urls);
+  }
+  if (urlsToDelete.length > 0) {
+    await Promise.allSettled(urlsToDelete.map((u) => storageDeleteImage(u)));
+  }
+
+  return results;
 }
 
 /** 대량 씬 필드 업데이트 (부분 실패 허용) — RPC 경유 */
