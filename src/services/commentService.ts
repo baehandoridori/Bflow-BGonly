@@ -8,6 +8,9 @@
  * sceneKey 형식: "sheetName:sceneNo" (예: "EP01_A_BG:3")
  */
 
+import type { Part } from '../types';
+import { normalizeSceneIdKey } from '../utils/sceneIdKey';
+
 const COMMENTS_FILE = 'comments.json';
 
 export interface SceneComment {
@@ -79,18 +82,29 @@ function getRelatedSheetNames(sheetName: string): string[] {
  * 특정 파트의 댓글을 시트에서 로드 (캐시).
  * 이슈 F-2(2026-04-23): 같은 장면의 BG·ACT 댓글을 함께 조회해 한쪽에서 작성한 댓글이
  * 반대 부서 탭·카드 뷰 뱃지에서도 보이게 함. 저장은 그대로 원본 파트에만 한다.
+ *
+ * Codex P1(2026-04-23): 상대 부서 댓글을 요청된 sheet 키로 재매핑할 때 단순히
+ * `${sheetName}:${c.sceneId}`로 작성하면 BG·ACT scene.no 가 비대칭(삭제/추가로 어긋난 경우)
+ * 일 때 엉뚱한 카드에 매핑된다. 댓글이 달린 "장면"의 scene_number 를 정규화하여 요청 파트에서
+ * 같은 정규화 값을 가진 씬의 scene.no 로 키를 재구성한다. 매칭 씬이 없으면 안전하게 skip.
  */
 export async function loadPartComments(sheetName: string): Promise<CommentsStore> {
   if (sheetPartCache.has(sheetName)) return sheetPartCache.get(sheetName)!;
 
   const related = getRelatedSheetNames(sheetName);
+  let requestedPart: Part | undefined;
+  const partByUuid = new Map<string, Part>();
   const partUuids: string[] = [];
   try {
     const { useDataStore } = await import('../stores/useDataStore');
-    const allParts = useDataStore.getState().episodes.flatMap((ep) => ep.parts);
+    const allParts: Part[] = useDataStore.getState().episodes.flatMap((ep) => ep.parts);
+    requestedPart = allParts.find((p) => p.sheetName === sheetName);
     for (const sn of related) {
       const p = allParts.find((pp) => pp.sheetName === sn);
-      if (p?.id) partUuids.push(p.id);
+      if (p?.id) {
+        partUuids.push(p.id);
+        partByUuid.set(p.id, p);
+      }
     }
   } catch { /* 무시 */ }
 
@@ -124,14 +138,37 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
     } catch { /* fallback도 실패 */ }
   }
 
+  /** 댓글 row를 요청된 sheet 기준 scene.no 문자열로 변환. 매칭 씬이 없으면 null 반환(skip). */
+  const mapToRequestedSceneNo = (row: typeof rawComments[number]): string | null => {
+    // 요청 파트 메타를 못 얻었거나 fallback 경로 등은 원본 scene_id 를 그대로 사용(이전 동작과 호환).
+    if (!requestedPart) return row.sceneId;
+    const sourcePart = row.partId ? partByUuid.get(row.partId) : undefined;
+
+    // 자기 파트 댓글이면 그대로
+    if (!sourcePart || sourcePart.id === requestedPart.id) return row.sceneId;
+
+    // 상대 부서 댓글: 원본 파트에서 해당 scene.no 의 씬을 찾아 scene_number 정규화 → 요청 파트에서 같은 정규화 씬
+    const sourceScene = sourcePart.scenes.find((s) => String(s.no) === String(row.sceneId));
+    if (!sourceScene) return null;
+    const normalizedSource = normalizeSceneIdKey(sourceScene.sceneId, sourcePart.partId);
+    if (!normalizedSource) return null;
+    const matchedScene = requestedPart.scenes.find((s) =>
+      normalizeSceneIdKey(s.sceneId, requestedPart!.partId) === normalizedSource,
+    );
+    return matchedScene ? String(matchedScene.no) : null;
+  };
+
   const store: CommentsStore = {};
   const seenIds = new Set<string>();
   for (const c of rawComments) {
     // 통합 조회 중복 제거 (안전장치)
     if (seenIds.has(c.id)) continue;
     seenIds.add(c.id);
-    // 키는 요청된 sheetName 기준 — 호출자(카드 뷰 뱃지)가 같은 키로 조회할 수 있게.
-    const key = `${sheetName}:${c.sceneId}`;
+
+    const targetSceneNo = mapToRequestedSceneNo(c);
+    if (targetSceneNo == null) continue; // 비대칭으로 대응 씬이 없으면 안전하게 skip
+
+    const key = `${sheetName}:${targetSceneNo}`;
     if (!store[key]) store[key] = [];
     store[key].push({
       id: c.id,

@@ -943,8 +943,19 @@ export async function addRevision(
   }
 
   // 이슈 F(2026-04-23): scene_uuid 저장 — 씬 삭제 시 CASCADE 자동 정리.
-  // sceneId가 리비전 sceneKey(예: "EP02:A:35") 형식일 수 있어 마지막 segment만 추출.
-  const sceneIdForResolve = sceneId.includes(':') ? sceneId.split(':').pop() || sceneId : sceneId;
+  // sceneId가 리비전 sceneKey(예: "EP02:A:35" 또는 "EP02:A:raw-sc001") 형식일 수 있어 마지막 segment 추출.
+  // Codex P2(2026-04-23): alias-collision 케이스에서 segment가 `raw-${encodeURIComponent(rawSceneId)}`
+  // 형태로 들어올 수 있으므로 반드시 decode해야 실제 scene_number와 매칭된다.
+  const rawSegment = sceneId.includes(':') ? sceneId.split(':').pop() || sceneId : sceneId;
+  const lowerSegment = rawSegment.trim().toLowerCase();
+  let sceneIdForResolve = rawSegment;
+  if (lowerSegment.startsWith('raw-')) {
+    try {
+      sceneIdForResolve = decodeURIComponent(lowerSegment.slice(4));
+    } catch {
+      sceneIdForResolve = lowerSegment.slice(4);
+    }
+  }
   const sceneUuid = await resolveSceneUuidWithRetry(resolvedPartUuid, sceneIdForResolve);
   if (!sceneUuid) {
     throw new Error(`리비전 저장 실패: 씬을 찾을 수 없음 (partUuid=${resolvedPartUuid}, sceneId=${sceneId})`);
@@ -1067,9 +1078,16 @@ export async function writeMetadata(type: string, key: string, value: string): P
 
 /**
  * partUuid + sceneId(문자열) → scenes 테이블의 scene UUID를 반환.
- * 이슈 F 해결(2026-04-23): 댓글·리비전을 씬과 FK CASCADE로 연결하기 위해
- * part_letter 소문자 + sceneId 3자리 zero-pad 규칙으로 scene_number 재구성 후 조회.
- * 숫자가 아닌 sceneId는 lower/trim 적용해 그대로 사용.
+ * 이슈 F 해결(2026-04-23) + Codex P1(2026-04-23):
+ *
+ * 댓글 흐름의 sceneId는 `scene.no` (=scenes.sort_order)에서 오므로 scene_number 접두사/패딩 규칙과
+ * 무관하게 sort_order 매칭이 가장 정확하다. 리비전은 사용자가 입력한 원본 scene_number 문자열
+ * (예: "sc001", "v2a001")이 전달될 수 있어 scene_number 직접 매칭 fallback이 필요하다.
+ *
+ * 매칭 순서:
+ *   1) sceneId가 숫자면 sort_order = parseInt(sceneId) 매칭 (댓글 경로 정답)
+ *   2) part_letter + LPAD(3) 정규화된 scene_number 매칭 (기존 규칙)
+ *   3) 원본 lowercase sceneId를 scene_number 로 직접 매칭 (커스텀 prefix 대응)
  */
 export async function resolveSceneUuid(
   partUuid: string,
@@ -1077,6 +1095,26 @@ export async function resolveSceneUuid(
 ): Promise<string | null> {
   if (!partUuid || !sceneId) return null;
 
+  const trimmed = String(sceneId).trim();
+  const lower = trimmed.toLowerCase();
+
+  // 1차: sort_order 매칭 — 앱의 scene.no ↔ DB의 sort_order 가 동일하므로
+  // scene_number 표기 규칙(접두사/패딩/커스텀)과 무관하게 정확히 식별된다.
+  if (/^\d+$/.test(trimmed)) {
+    const sortOrder = Number(trimmed);
+    if (Number.isFinite(sortOrder)) {
+      const { data: byOrder } = await supabase
+        .from('scenes')
+        .select('id')
+        .eq('part_id', partUuid)
+        .eq('sort_order', sortOrder)
+        .limit(1)
+        .maybeSingle();
+      if (byOrder?.id) return byOrder.id;
+    }
+  }
+
+  // 2차: scene_number 정규화 매칭 (part_letter + 3자리 zero-pad).
   const { data: part } = await supabase
     .from('parts')
     .select('part_id')
@@ -1085,20 +1123,32 @@ export async function resolveSceneUuid(
   if (!part) return null;
 
   const partLetter = String(part.part_id || '').trim().slice(0, 1).toLowerCase();
-  const trimmed = String(sceneId).trim().toLowerCase();
-  const normalized = /^\d+$/.test(trimmed) && partLetter
-    ? `${partLetter}${trimmed.padStart(3, '0')}`
-    : trimmed;
+  const normalized = /^\d+$/.test(lower) && partLetter
+    ? `${partLetter}${lower.padStart(3, '0')}`
+    : lower;
 
-  const { data: scene } = await supabase
+  const { data: byNumber } = await supabase
     .from('scenes')
     .select('id')
     .eq('part_id', partUuid)
     .eq('scene_number', normalized)
     .limit(1)
     .maybeSingle();
+  if (byNumber?.id) return byNumber.id;
 
-  return scene?.id || null;
+  // 3차: 커스텀 prefix (예: "sc001", "v2a001") — 원본을 scene_number 로 그대로 매칭.
+  if (normalized !== lower) {
+    const { data: byRaw } = await supabase
+      .from('scenes')
+      .select('id')
+      .eq('part_id', partUuid)
+      .eq('scene_number', lower)
+      .limit(1)
+      .maybeSingle();
+    if (byRaw?.id) return byRaw.id;
+  }
+
+  return null;
 }
 
 /**
