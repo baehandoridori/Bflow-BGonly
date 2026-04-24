@@ -574,11 +574,18 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 8px;
   padding: 1px 0;
 }
+/* 체크박스 수직 정렬: 첫 줄 텍스트 중심(line-height 1.7, 폰트 1em)에 체크박스(15px≈1em)
+   중심을 맞춤. 수식: (line-height - checkbox-height) / 2 = (1.7em - 1em) / 2 = 0.35em.
+   실측 보정으로 0.3em 적용 — 폰트 슬라이더를 올려도 비율 유지. */
 .memo-editor-root .ProseMirror ul[data-type="taskList"] li > label {
   flex-shrink: 0;
-  margin-top: 0.4em;
+  margin-top: 0.3em;
   user-select: none;
   -webkit-user-select: none;
+}
+/* 텍스트 쪽 div > p 의 기본 상하 여백이 생기면 label 정렬이 다시 어긋나므로 0 강제 */
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > div > p {
+  margin: 0;
 }
 /* 커스텀 체크박스 — native appearance 제거하고 토큰 기반으로 재구성 */
 .memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"] {
