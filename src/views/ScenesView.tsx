@@ -2497,6 +2497,7 @@ export function ScenesView() {
 
       try {
         await Promise.all(sheets.map((sheet) => addScene(sheet, sceneId, assignee, memo)));
+        sonnerToast.success(`씬 ${sceneId} 추가 완료 (BG+액팅)`);
         syncInBackground();
       } catch (err) {
         setEpisodes(prevEpisodes);
@@ -2559,7 +2560,10 @@ export function ScenesView() {
 
     try {
       await addScene(targetSheet, sceneId, assignee, memo);
-      if (!skipSync) syncInBackground();
+      if (!skipSync) {
+        sonnerToast.success(`씬 ${sceneId} 추가 완료`);
+        syncInBackground();
+      }
     } catch (err) {
       setEpisodes(prevEpisodes);
       handleSheetError(err, '씬 추가');
@@ -2617,6 +2621,7 @@ export function ScenesView() {
         const { addScenes } = await import('@/services/supabaseService');
         await Promise.all(sheets.map((sheet) => addScenes(sheet, scenesToAdd)));
         await syncInBackground();
+        sonnerToast.success(`${scenesToAdd.length}개 씬 추가 완료 (BG+액팅 양쪽 / 총 ${scenesToAdd.length * sheets.length}개)`);
       } catch (err) {
         sonnerToast.error(`대량 씬 추가 실패: ${err}`);
       } finally {
@@ -2633,6 +2638,7 @@ export function ScenesView() {
       const { addScenes } = await import('@/services/supabaseService');
       await addScenes(targetSheet, scenesToAdd);
       await syncInBackground();
+      sonnerToast.success(`${scenesToAdd.length}개 씬 추가 완료`);
     } catch (err) {
       sonnerToast.error(`대량 씬 추가 실패: ${err}`);
     } finally {
