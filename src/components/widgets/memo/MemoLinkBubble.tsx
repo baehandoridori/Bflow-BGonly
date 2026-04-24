@@ -69,6 +69,10 @@ export function MemoLinkBubble({ editor, editRequestToken }: MemoLinkBubbleProps
     if (editRequestToken <= 0 || !editor) return;
     if (editRequestToken === lastHandledTokenRef.current) return;
     lastHandledTokenRef.current = editRequestToken;
+    // 탭별로 MemoEditor + MemoLinkBubble 이 각자 마운트된 구조에서는 토큰이 모든 탭에
+    // 브로드캐스트된다. 실제 편집 모드는 포커스된(= 활성 탭의) editor 만 진입하도록 제한.
+    // 비포커스 editor 는 token 만 소진해서 다음 Ctrl+K 가 정상 동작하도록 한다.
+    if (!editor.isFocused) return;
     const currentUrl = (editor.getAttributes('link')?.href as string | undefined) ?? '';
     setUrl(currentUrl);
     setEditMode(true);
