@@ -574,12 +574,11 @@ input[type="range"]::-webkit-slider-thumb {
   gap: 8px;
   padding: 1px 0;
 }
-/* 체크박스 수직 정렬: 첫 줄 텍스트 중심(line-height 1.7, 폰트 1em)에 체크박스(15px≈1em)
-   중심을 맞춤. 수식: (line-height - checkbox-height) / 2 = (1.7em - 1em) / 2 = 0.35em.
-   실측 보정으로 0.3em 적용 — 폰트 슬라이더를 올려도 비율 유지. */
+/* 체크박스 수직 정렬: 한글 폰트는 x-height 가 높고 글자 중심이 line-box 중간보다
+   위쪽이라, 라인 높이 수식 계산(0.35em)보다 실측이 더 작음. 0.1em 로 보정. */
 .memo-editor-root .ProseMirror ul[data-type="taskList"] li > label {
   flex-shrink: 0;
-  margin-top: 0.3em;
+  margin-top: 0.1em;
   user-select: none;
   -webkit-user-select: none;
 }
