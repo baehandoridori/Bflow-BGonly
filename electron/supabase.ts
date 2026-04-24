@@ -248,13 +248,24 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
   const sceneCompletionById = new Map<string, { completedBy: string; completedAt: string }>();
   const sceneIds = scenes.map((scene) => scene.id);
   if (sceneIds.length > 0) {
-    const { data: completionRows, error: completionErr } = await supabase
-      .from('metadata')
-      .select('key, value')
-      .eq('type', SCENE_COMPLETION_META_TYPE)
-      .in('key', sceneIds);
-    throwIfError(completionErr);
-    for (const row of completionRows || []) {
+    // PostgREST 는 GET 쿼리의 URL 길이 한계가 약 2~4KB.
+    // UUID 36자 × N개를 `in(...)` 파라미터로 넣으면 200~300개를 넘어서는 순간 400 Bad Request.
+    // 스튜디오 규모 확장(에피소드당 150~300씬 × 수십 에피소드)에 대비해 배치 분할.
+    // 100개 배치 = URL 약 3.7KB, 10,000개 씬도 100회 RTT 로 커버 가능.
+    // 향후 데이터가 수만 건 규모로 커지면 PostgreSQL RPC 함수로 POST 1회 호출로 전환 고려.
+    const BATCH = 100;
+    const completionRows: Array<{ key: string; value: string | null }> = [];
+    for (let i = 0; i < sceneIds.length; i += BATCH) {
+      const chunk = sceneIds.slice(i, i + BATCH);
+      const { data, error } = await supabase
+        .from('metadata')
+        .select('key, value')
+        .eq('type', SCENE_COMPLETION_META_TYPE)
+        .in('key', chunk);
+      throwIfError(error);
+      if (data) completionRows.push(...(data as Array<{ key: string; value: string | null }>));
+    }
+    for (const row of completionRows) {
       const meta = parseSceneCompletionMeta(row.value as string | null | undefined);
       if (!meta) continue;
       sceneCompletionById.set(row.key as string, meta);
