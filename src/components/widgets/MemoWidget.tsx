@@ -431,8 +431,14 @@ export function MemoWidget() {
 
   const memoContent = loaded ? (
     <div ref={editorAreaRef} className="flex-1 overflow-auto">
+      {/*
+        key 를 부여하지 않는다 — 탭 전환 시 에디터 인스턴스를 재마운트하면
+        BubbleMenu(tippy.js)의 포털 정리와 React DOM 재조정이 충돌해
+        "insertBefore NotFoundError"가 간헐적으로 발생한다.
+        대신 MemoEditor 내부 useEffect 가 content prop 변화를 감지해
+        editor.commands.setContent() 로 내용만 교체한다.
+      */}
       <MemoEditor
-        key={activeTab?.id}
         content={activeTab?.content ?? ''}
         onChange={handleContentChange}
         fontSize={memoData.fontSize}
