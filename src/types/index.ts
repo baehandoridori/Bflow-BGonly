@@ -371,6 +371,8 @@ export type BulkUpdateResult = {
 export interface ElectronAPI {
   getDataPath: () => Promise<string>;
   shellShowItem?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
+  /** 외부 URL 을 기본 브라우저로 열기 (메모 링크 전용) */
+  openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
 
   // 사용자 파일 (exe 옆 또는 test-data/ 옆, base64 인코딩 JSON)
   usersRead: () => Promise<UsersFile | null>;

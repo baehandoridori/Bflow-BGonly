@@ -512,6 +512,171 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
+/* ─── 메모 WYSIWYG 에디터 (TipTap) ─────────────────────────
+   헤딩 크기는 본문 기준 em 비율 (본문 fontSize 는 컨테이너 inline style 로 지정)
+   라이트/다크 + 6개 프리셋 테마 자동 대응 (모든 색은 CSS 변수 토큰 경유) */
+.memo-editor-root .ProseMirror {
+  outline: none;
+  min-height: 80px;
+  padding: 12px 16px;
+  line-height: 1.7;
+  color: rgb(var(--color-text-primary));
+  word-break: break-word;
+}
+/* 텍스트 선택 허용 (전역 user-select: none 해제) */
+.memo-editor-root .ProseMirror,
+.memo-editor-root .ProseMirror * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* 헤딩 — global h1/h2/h3 !important 색상 스타일을 덮어쓰지 않고 크기만 조정 */
+.memo-editor-root .ProseMirror h1 {
+  font-size: 1.6em !important;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0.6em 0 0.3em;
+}
+.memo-editor-root .ProseMirror h1:first-child { margin-top: 0; }
+.memo-editor-root .ProseMirror h2 {
+  font-size: 1.35em !important;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0.5em 0 0.25em;
+}
+.memo-editor-root .ProseMirror h3 {
+  font-size: 1.15em !important;
+  font-weight: 500;
+  line-height: 1.4;
+  margin: 0.4em 0 0.2em;
+}
+.memo-editor-root .ProseMirror p { margin: 0 0 0.2em; }
+.memo-editor-root .ProseMirror p:last-child { margin-bottom: 0; }
+
+/* 리스트 */
+.memo-editor-root .ProseMirror ul,
+.memo-editor-root .ProseMirror ol {
+  padding-left: 1.4em;
+  margin: 0.2em 0;
+}
+.memo-editor-root .ProseMirror ul { list-style: disc; }
+.memo-editor-root .ProseMirror ol { list-style: decimal; }
+.memo-editor-root .ProseMirror li > p { margin: 0; }
+
+/* 체크박스 리스트 */
+.memo-editor-root .ProseMirror ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 1px 0;
+}
+/* 체크박스 수직 정렬: 한글 폰트는 x-height 가 높고 글자 중심이 line-box 중간보다
+   위쪽이라, 라인 높이 수식 계산(0.35em)보다 실측이 더 작음. 0.1em 로 보정. */
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  margin-top: 0.1em;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* 텍스트 쪽 div > p 의 기본 상하 여백이 생기면 label 정렬이 다시 어긋나므로 0 강제 */
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > div > p {
+  margin: 0;
+}
+/* 커스텀 체크박스 — native appearance 제거하고 토큰 기반으로 재구성 */
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1.5px solid rgb(var(--color-bg-border));
+  border-radius: 4px;
+  background: rgb(var(--color-bg-primary) / 0.4);
+  cursor: pointer;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 150ms, border-color 150ms, box-shadow 150ms;
+  outline: none;
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"]:hover {
+  border-color: rgb(var(--color-accent) / 0.6);
+  background: rgb(var(--color-accent) / 0.08);
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.35);
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"]:checked {
+  background: rgb(var(--color-accent));
+  border-color: rgb(var(--color-accent));
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"]:checked::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 8px;
+  border: solid rgb(var(--color-on-accent));
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-0.5px, -1px);
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: rgb(var(--color-text-secondary) / 0.55);
+  text-decoration: line-through;
+  text-decoration-color: rgb(var(--color-text-secondary) / 0.55);
+}
+
+/* 인라인 서식 */
+.memo-editor-root .ProseMirror strong { font-weight: 700; }
+.memo-editor-root .ProseMirror em { font-style: italic; }
+.memo-editor-root .ProseMirror u {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgb(var(--color-text-primary) / 0.4);
+}
+.memo-editor-root .ProseMirror s {
+  text-decoration: line-through;
+  text-decoration-color: rgb(var(--color-text-primary) / 0.5);
+}
+
+/* 링크 */
+.memo-editor-root .ProseMirror a {
+  color: rgb(var(--color-accent));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgb(var(--color-accent) / 0.5);
+  cursor: pointer;
+  transition: all 150ms;
+}
+.memo-editor-root .ProseMirror a:hover {
+  text-decoration-color: rgb(var(--color-accent));
+}
+
+/* Placeholder — Placeholder extension 의 emptyEditorClass 가 적용된 첫 단락에만 표시 */
+.memo-editor-root .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: rgb(var(--color-text-secondary) / 0.3);
+  pointer-events: none;
+  height: 0;
+}
+
+/* 선택 하이라이트 (accent 에 맞춤) */
+.memo-editor-root .ProseMirror::selection,
+.memo-editor-root .ProseMirror *::selection {
+  background: rgb(var(--color-accent) / 0.25);
+}
+
 /* ─── 일괄 작업 pending/failed 시각 상태 ─── */
 @layer components {
   @keyframes bflow-pulse {

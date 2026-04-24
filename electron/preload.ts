@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   shellShowItem: (filePath: string) =>
     ipcRenderer.invoke('shell:show-item', filePath) as Promise<{ ok: boolean; error?: string }>,
 
+  // 외부 URL 을 기본 브라우저로 열기 (메모 링크)
+  openExternal: (url: string) =>
+    ipcRenderer.invoke('shell:open-external', url) as Promise<{ ok: boolean; error?: string }>,
+
   // 사용자 파일 (base64 인코딩 JSON — exe 옆 또는 test-data/)
   usersRead: () => ipcRenderer.invoke('users:read'),
   usersWrite: (data: unknown) => ipcRenderer.invoke('users:write', data),

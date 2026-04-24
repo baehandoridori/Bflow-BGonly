@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="violet" data-mode="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>메모 WYSIWYG — 디자인 목업</title>
+<style>
+  /* ─── 토큰 시스템 (앱 themes.ts 와 1:1 일치) ─── */
+  [data-theme="violet"][data-mode="dark"] {
+    --bg-primary: 15 17 23;
+    --bg-card: 26 29 39;
+    --bg-border: 45 48 65;
+    --text-primary: 232 232 238;
+    --text-secondary: 139 141 163;
+    --accent: 108 92 231;
+    --accent-sub: 162 155 254;
+    --on-accent: 255 255 255;
+  }
+  [data-theme="cinema-red"][data-mode="dark"] {
+    --bg-primary: 12 10 16;
+    --bg-card: 22 18 27;
+    --bg-border: 45 34 50;
+    --text-primary: 238 232 238;
+    --text-secondary: 163 139 158;
+    --accent: 225 29 72;
+    --accent-sub: 251 113 133;
+    --on-accent: 255 255 255;
+  }
+  [data-theme="midnight-blue"][data-mode="dark"] {
+    --bg-primary: 11 17 32;
+    --bg-card: 18 26 44;
+    --bg-border: 35 48 75;
+    --text-primary: 230 235 245;
+    --text-secondary: 130 148 180;
+    --accent: 59 130 246;
+    --accent-sub: 96 165 250;
+    --on-accent: 255 255 255;
+  }
+  [data-theme="emerald"][data-mode="dark"] {
+    --bg-primary: 10 16 14;
+    --bg-card: 16 26 22;
+    --bg-border: 30 50 42;
+    --text-primary: 230 242 236;
+    --text-secondary: 130 163 148;
+    --accent: 16 185 129;
+    --accent-sub: 52 211 153;
+    --on-accent: 255 255 255;
+  }
+  [data-mode="light"] {
+    --bg-primary: 239 243 250;
+    --bg-card: 255 255 255;
+    --bg-border: 188 195 211;
+    --text-primary: 24 29 40;
+    --text-secondary: 78 88 106;
+    --on-accent: 255 255 255;
+  }
+  [data-theme="violet"][data-mode="light"]      { --accent: 108 92 231; --accent-sub: 162 155 254; }
+  [data-theme="cinema-red"][data-mode="light"]  { --accent: 225 29 72;  --accent-sub: 251 113 133; }
+  [data-theme="midnight-blue"][data-mode="light"] { --accent: 59 130 246; --accent-sub: 96 165 250; }
+  [data-theme="emerald"][data-mode="light"]     { --accent: 16 185 129; --accent-sub: 52 211 153; }
+
+  /* ─── 기본 ─── */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif; }
+  body {
+    background: rgb(var(--bg-primary));
+    color: rgb(var(--text-primary));
+    padding: 32px;
+    min-height: 100vh;
+    transition: background 200ms;
+  }
+
+  /* ─── 상단 컨트롤 ─── */
+  .controls {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    padding: 12px 16px;
+    background: rgb(var(--bg-card));
+    border: 1px solid rgb(var(--bg-border) / .5);
+    border-radius: 12px;
+    margin-bottom: 24px;
+    position: sticky; top: 16px; z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+  .controls label {
+    font-size: 12px;
+    color: rgb(var(--text-secondary));
+    margin-right: 4px;
+  }
+  .controls select, .controls button {
+    background: rgb(var(--bg-primary));
+    color: rgb(var(--text-primary));
+    border: 1px solid rgb(var(--bg-border));
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 150ms;
+  }
+  .controls button:hover {
+    border-color: rgb(var(--accent));
+    color: rgb(var(--accent));
+  }
+  .controls .mode-badge {
+    margin-left: auto;
+    font-size: 11px;
+    color: rgb(var(--text-secondary));
+  }
+
+  /* ─── 섹션 ─── */
+  .section {
+    margin-bottom: 48px;
+  }
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgb(var(--text-secondary));
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+    padding-left: 8px;
+    border-left: 3px solid rgb(var(--accent));
+  }
+  .section-desc {
+    font-size: 13px;
+    color: rgb(var(--text-secondary));
+    margin-bottom: 16px;
+    padding-left: 11px;
+  }
+
+  /* ─── Before/After 비교 ─── */
+  .before-after {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 900px) {
+    .before-after { grid-template-columns: 1fr; }
+  }
+  .compare-col {
+    display: flex; flex-direction: column;
+  }
+  .compare-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgb(var(--text-secondary));
+    margin-bottom: 6px;
+    padding: 2px 8px;
+    background: rgb(var(--bg-border) / .3);
+    border-radius: 4px;
+    align-self: flex-start;
+  }
+  .compare-label.after {
+    background: rgb(var(--accent) / .15);
+    color: rgb(var(--accent));
+  }
+
+  /* ─── 메모 위젯 (실제 앱 Widget.tsx 모사) ─── */
+  .widget {
+    background: rgb(var(--bg-card));
+    border: 1px solid rgb(var(--bg-border) / .5);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .widget-narrow { max-width: 420px; }
+  .widget-wide { max-width: 560px; }
+  .widget-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid rgb(var(--bg-border) / .3);
+  }
+  .widget-header .icon-note {
+    color: rgb(var(--accent));
+  }
+  .widget-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgb(var(--text-primary) / .8);
+  }
+  .widget-header-right {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px;
+    color: rgb(var(--text-secondary) / .7);
+  }
+  .widget-header-right input[type="range"] {
+    width: 56px; height: 4px; cursor: pointer; accent-color: rgb(var(--accent));
+  }
+
+  /* 탭바 */
+  .tabbar {
+    display: flex; align-items: center; gap: 2px;
+    padding: 4px 6px;
+    border-bottom: 1px solid rgb(var(--bg-border) / .2);
+  }
+  .tab {
+    padding: 2px 8px;
+    font-size: 11px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: rgb(var(--text-secondary) / .6);
+  }
+  .tab:hover { color: rgb(var(--text-primary)); background: rgb(var(--accent) / .05); }
+  .tab.active {
+    background: rgb(var(--accent) / .15);
+    color: rgb(var(--accent));
+    font-weight: 500;
+  }
+  .tab-add {
+    padding: 2px 6px;
+    color: rgb(var(--text-secondary) / .4);
+    cursor: pointer;
+  }
+  .tab-add:hover { color: rgb(var(--accent)); background: rgb(var(--accent) / .1); border-radius: 6px; }
+
+  /* ─── 툴바 ─── */
+  .toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 2px 6px;
+    border-bottom: 1px solid rgb(var(--bg-border) / .15);
+    min-height: 28px;
+  }
+  .toolbar-group {
+    display: flex; align-items: center; gap: 2px;
+  }
+  .toolbar-divider {
+    width: 1px; height: 16px;
+    background: rgb(var(--bg-border) / .4);
+  }
+  .tool-btn {
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; background: transparent;
+    color: rgb(var(--text-secondary) / .6);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 150ms;
+  }
+  .tool-btn:hover {
+    color: rgb(var(--accent));
+    background: rgb(var(--accent) / .1);
+  }
+  .tool-btn.active {
+    color: rgb(var(--accent));
+    background: rgb(var(--accent) / .15);
+  }
+  .tool-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--accent) / .4);
+  }
+  .tool-btn svg { width: 13px; height: 13px; }
+  .tool-dropdown {
+    display: inline-flex; align-items: center; gap: 2px;
+    padding: 2px 6px;
+    font-size: 11px;
+    color: rgb(var(--text-secondary) / .7);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .tool-dropdown:hover { background: rgb(var(--accent) / .1); color: rgb(var(--accent)); }
+
+  /* ─── 에디터 본문 ─── */
+  .editor {
+    padding: 12px 16px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: rgb(var(--text-primary));
+    min-height: 320px;
+  }
+  .editor h1 {
+    font-size: 1.6em;
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 16px 0 8px;
+  }
+  .editor h1:first-child { margin-top: 0; }
+  .editor h2 {
+    font-size: 1.35em;
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 12px 0 6px;
+  }
+  .editor h3 {
+    font-size: 1.15em;
+    font-weight: 500;
+    line-height: 1.4;
+    margin: 8px 0 4px;
+  }
+  .editor p { margin: 0 0 4px; }
+  .editor ul, .editor ol {
+    padding-left: 20px;
+    margin: 2px 0;
+  }
+  .editor ul.task-list {
+    list-style: none;
+    padding-left: 0;
+  }
+  .editor ul.task-list li {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 2px 0;
+  }
+  .editor ul.task-list input[type="checkbox"] {
+    width: 14px; height: 14px;
+    margin-top: 5px;
+    accent-color: rgb(var(--accent));
+    cursor: pointer;
+  }
+  .editor ul.task-list li.done > span {
+    color: rgb(var(--text-secondary) / .5);
+    text-decoration: line-through;
+  }
+  .editor strong { font-weight: 700; }
+  .editor em { font-style: italic; }
+  .editor u { text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgb(var(--text-primary) / .4); }
+  .editor s { text-decoration: line-through; text-decoration-color: rgb(var(--text-primary) / .5); }
+  .editor a {
+    color: rgb(var(--accent));
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: rgb(var(--accent) / .5);
+    cursor: pointer;
+    transition: all 150ms;
+  }
+  .editor a:hover { text-decoration-color: rgb(var(--accent)); }
+  .editor a.selected {
+    background: rgb(var(--accent) / .15);
+    border-radius: 3px;
+    padding: 0 2px;
+  }
+  .editor .selection-highlight {
+    background: rgb(var(--accent) / .25);
+    padding: 0 1px;
+    border-radius: 2px;
+  }
+  .editor .caret::after {
+    content: '';
+    display: inline-block;
+    width: 1px; height: 1em;
+    background: rgb(var(--text-primary));
+    vertical-align: text-bottom;
+    animation: blink 1s infinite;
+    margin-left: 1px;
+  }
+  @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+  .editor .placeholder { color: rgb(var(--text-secondary) / .3); pointer-events: none; }
+
+  /* Before(현재) 렌더 */
+  .editor-before {
+    padding: 12px 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    color: rgb(var(--text-primary));
+    min-height: 320px;
+    white-space: pre-wrap;
+  }
+  .editor-before .raw-md {
+    background: rgb(var(--text-secondary) / .08);
+    padding: 0 3px;
+    border-radius: 2px;
+  }
+
+  /* ─── 링크 버블 메뉴 ─── */
+  .bubble-container {
+    position: relative;
+    padding: 40px 16px 120px;
+    min-height: 200px;
+  }
+  .bubble-line {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .bubble {
+    position: absolute;
+    background: rgb(var(--bg-card));
+    border: 1px solid rgb(var(--bg-border));
+    border-radius: 8px;
+    box-shadow: 0 10px 24px rgb(var(--bg-primary) / .4), 0 2px 6px rgb(0 0 0 / .2);
+    padding: 6px 8px;
+    display: flex; align-items: center; gap: 4px;
+    min-width: 240px;
+    z-index: 10;
+    animation: fadeIn 150ms ease-out;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translate(-50%, -4px); } to { opacity: 1; transform: translate(-50%, 0); } }
+  .bubble::after {
+    content: '';
+    position: absolute;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 10px; height: 10px;
+    background: rgb(var(--bg-card));
+    border-right: 1px solid rgb(var(--bg-border));
+    border-bottom: 1px solid rgb(var(--bg-border));
+  }
+  .bubble-icon {
+    color: rgb(var(--text-secondary) / .7);
+    font-size: 14px;
+    margin-right: 2px;
+  }
+  .bubble input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: rgb(var(--text-primary));
+    font-size: 13px;
+    min-width: 0;
+  }
+  .bubble input::placeholder { color: rgb(var(--text-secondary) / .4); }
+  .bubble-action {
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; border-radius: 5px;
+    background: rgb(var(--accent));
+    color: rgb(var(--on-accent));
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .bubble-action:hover { background: rgb(var(--accent) / .9); }
+  .bubble-action.icon {
+    background: transparent;
+    color: rgb(var(--text-secondary) / .7);
+  }
+  .bubble-action.icon:hover {
+    background: rgb(var(--accent) / .1);
+    color: rgb(var(--accent));
+  }
+  .bubble-url {
+    flex: 1;
+    font-size: 12px;
+    color: rgb(var(--text-secondary));
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 4px;
+  }
+
+  /* ─── 상태 라벨 ─── */
+  .state-label {
+    display: inline-block;
+    font-size: 10px;
+    color: rgb(var(--text-secondary));
+    padding: 2px 6px;
+    background: rgb(var(--bg-border) / .3);
+    border-radius: 4px;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  /* 위젯 박스 라벨 */
+  .widget-wrap {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .widget-note {
+    font-size: 11px;
+    color: rgb(var(--text-secondary));
+    padding: 0 4px;
+  }
+
+  /* 상태 갤러리 (툴바 버튼 3상태) */
+  .state-gallery {
+    display: flex; gap: 20px; flex-wrap: wrap;
+    padding: 16px;
+    background: rgb(var(--bg-card));
+    border: 1px solid rgb(var(--bg-border) / .5);
+    border-radius: 8px;
+  }
+  .state-item {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    min-width: 80px;
+  }
+  .state-item .label {
+    font-size: 10px;
+    color: rgb(var(--text-secondary));
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── 컨트롤 ─── -->
+<div class="controls">
+  <label>테마</label>
+  <select id="theme">
+    <option value="violet">바이올렛 드림</option>
+    <option value="cinema-red">공산당 레드</option>
+    <option value="midnight-blue">윤성원 블루</option>
+    <option value="emerald">에메랄드</option>
+  </select>
+
+  <label>모드</label>
+  <button id="modeToggle">☾ 다크 모드</button>
+
+  <span class="mode-badge" id="modeLabel">위젯 가로: <b>넓음</b> (≥320px)</span>
+</div>
+
+<!-- ─── SECTION 0: Before vs After 전체 비교 ─── -->
+<div class="section">
+  <div class="section-title">0. 전체 모습 — 지금 vs 바뀐 후</div>
+  <div class="section-desc">실제 B flow 에 들어갈 메모 위젯 한 장면. 마크다운 기호가 사라지고 서식이 실시간 적용되는 것이 핵심.</div>
+
+  <div class="before-after">
+    <!-- BEFORE -->
+    <div class="compare-col">
+      <span class="compare-label">지금 (textarea + 마크다운)</span>
+      <div class="widget widget-wide">
+        <div class="widget-header">
+          <svg class="icon-note" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z"/><path d="M15 3v6h6"/></svg>
+          <span class="widget-title">메모</span>
+          <div class="widget-header-right">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/></svg>
+            <span style="margin-left:8px">🔠</span>
+            <input type="range" min="10" max="24" value="14" disabled>
+            <span>14</span>
+          </div>
+        </div>
+        <div class="tabbar">
+          <span class="tab active">주간 회의</span>
+          <span class="tab">TODO</span>
+          <span class="tab-add">+</span>
+        </div>
+        <div class="toolbar">
+          <div class="toolbar-group">
+            <button class="tool-btn"><strong>B</strong></button>
+            <button class="tool-btn"><em>I</em></button>
+            <button class="tool-btn"><u>U</u></button>
+            <button class="tool-btn"><s>S</s></button>
+          </div>
+        </div>
+<pre class="editor-before"># 3월 4주차 주간 회의
+
+**참석자**: 한솔, 재원, 수민
+
+## 체크 항목
+
+- 에피1 BG <span class="raw-md">__LO 검수__</span> 마감 수요일
+- 에피1 액팅 <span class="raw-md">**우선순위 높음**</span>
+- 시즌1 전체 PNG <span class="raw-md">~~보류~~</span>
+
+### 다음 안건
+
+1. 렌더팜 예산 재산정
+2. 외주 드로잉 일정
+
+링크: <span class="raw-md">[기획서](https://example.com/doc)</span></pre>
+      </div>
+      <div class="widget-note">⬆ 마크다운 기호가 그대로 노출. <code>👁 미리보기</code> 토글을 눌러야 서식 확인 가능.</div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="compare-col">
+      <span class="compare-label after">바뀐 후 (TipTap WYSIWYG)</span>
+      <div class="widget widget-wide">
+        <div class="widget-header">
+          <svg class="icon-note" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z"/><path d="M15 3v6h6"/></svg>
+          <span class="widget-title">메모</span>
+          <div class="widget-header-right">
+            <span style="margin-left:2px">🔠</span>
+            <input type="range" min="10" max="24" value="14">
+            <span>14</span>
+          </div>
+        </div>
+        <div class="tabbar">
+          <span class="tab active">주간 회의</span>
+          <span class="tab">TODO</span>
+          <span class="tab-add">+</span>
+        </div>
+        <div class="toolbar">
+          <div class="toolbar-group">
+            <button class="tool-btn" title="굵게 (Ctrl+B)"><strong>B</strong></button>
+            <button class="tool-btn" title="기울임 (Ctrl+I)"><em>I</em></button>
+            <button class="tool-btn" title="밑줄 (Ctrl+U)"><u>U</u></button>
+            <button class="tool-btn" title="취소선 (Ctrl+Shift+X)"><s>S</s></button>
+          </div>
+          <div class="toolbar-divider"></div>
+          <div class="toolbar-group">
+            <button class="tool-btn" title="제목1 (Ctrl+Alt+1)" style="font-size:10px">H1</button>
+            <button class="tool-btn" title="제목2 (Ctrl+Alt+2)" style="font-size:10px">H2</button>
+            <button class="tool-btn" title="제목3 (Ctrl+Alt+3)" style="font-size:10px">H3</button>
+          </div>
+          <div class="toolbar-divider"></div>
+          <div class="toolbar-group">
+            <button class="tool-btn" title="불릿 목록 (Ctrl+Shift+8)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg>
+            </button>
+            <button class="tool-btn" title="번호 목록 (Ctrl+Shift+7)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
+            </button>
+            <button class="tool-btn active" title="체크리스트 (Ctrl+Shift+9)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            </button>
+          </div>
+          <div class="toolbar-divider"></div>
+          <div class="toolbar-group">
+            <button class="tool-btn" title="링크 (Ctrl+K)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="editor">
+          <h1>3월 4주차 주간 회의</h1>
+          <p><strong>참석자</strong>: 한솔, 재원, 수민</p>
+          <h2>체크 항목</h2>
+          <ul class="task-list">
+            <li class="done"><input type="checkbox" checked> <span>에피1 BG <u>LO 검수</u> 마감 수요일</span></li>
+            <li><input type="checkbox"> <span>에피1 액팅 <strong>우선순위 높음</strong></span></li>
+            <li><input type="checkbox"> <span>시즌1 전체 PNG <s>보류</s></span></li>
+          </ul>
+          <h3>다음 안건</h3>
+          <ol>
+            <li>렌더팜 예산 재산정</li>
+            <li>외주 드로잉 일정</li>
+          </ol>
+          <p>링크: <a href="#">기획서</a></p>
+        </div>
+      </div>
+      <div class="widget-note">⬆ 쓰는 순간 서식 그대로 보임. <code>☑ 체크리스트</code> 버튼에 커서가 있어 <strong>Active 상태</strong>로 켜져 있음.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SECTION 1: 툴바 3가지 상태 ─── -->
+<div class="section">
+  <div class="section-title">1. 툴바 버튼 — 4가지 상태</div>
+  <div class="section-desc">Default / Hover / Active(커서 위치에 서식 적용됨) / Disabled(로딩 중). 키보드 포커스 시에는 accent 40% ring 추가.</div>
+  <div class="state-gallery">
+    <div class="state-item">
+      <button class="tool-btn"><strong>B</strong></button>
+      <span class="label">Default</span>
+    </div>
+    <div class="state-item">
+      <button class="tool-btn" style="background: rgb(var(--accent) / .1); color: rgb(var(--accent));"><strong>B</strong></button>
+      <span class="label">Hover</span>
+    </div>
+    <div class="state-item">
+      <button class="tool-btn active"><strong>B</strong></button>
+      <span class="label">Active ⭐</span>
+    </div>
+    <div class="state-item">
+      <button class="tool-btn" style="box-shadow: 0 0 0 2px rgb(var(--accent) / .4)"><strong>B</strong></button>
+      <span class="label">Focus (키보드)</span>
+    </div>
+    <div class="state-item">
+      <button class="tool-btn" style="opacity: .4; cursor: not-allowed"><strong>B</strong></button>
+      <span class="label">Disabled</span>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SECTION 2: 좁은 모드 ─── -->
+<div class="section">
+  <div class="section-title">2. 좁은 위젯 (에디터 가로 &lt; 320px)</div>
+  <div class="section-desc">ResizeObserver 로 감지해서 H1/H2/H3 → <code>[단락 ▾]</code>, 리스트 3개 → <code>[리스트 ▾]</code> 드롭다운으로 자동 축약.</div>
+  <div class="widget widget-narrow">
+    <div class="widget-header">
+      <svg class="icon-note" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z"/><path d="M15 3v6h6"/></svg>
+      <span class="widget-title">메모</span>
+      <div class="widget-header-right">
+        <span>🔠</span>
+        <input type="range" min="10" max="24" value="14">
+        <span>14</span>
+      </div>
+    </div>
+    <div class="tabbar">
+      <span class="tab active">메모 1</span>
+      <span class="tab-add">+</span>
+    </div>
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button class="tool-btn"><strong>B</strong></button>
+        <button class="tool-btn"><em>I</em></button>
+        <button class="tool-btn"><u>U</u></button>
+        <button class="tool-btn"><s>S</s></button>
+      </div>
+      <div class="toolbar-divider"></div>
+      <button class="tool-dropdown">단락 <span style="font-size:8px">▾</span></button>
+      <button class="tool-dropdown">리스트 <span style="font-size:8px">▾</span></button>
+      <div class="toolbar-divider"></div>
+      <button class="tool-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </button>
+    </div>
+    <div class="editor" style="min-height: 140px">
+      <p>좁아도 모든 기능 그대로 사용 가능</p>
+      <p class="placeholder">메모를 입력하세요...</p>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SECTION 3: 링크 버블 메뉴 ─── -->
+<div class="section">
+  <div class="section-title">3. 링크 버블 메뉴</div>
+  <div class="section-desc">텍스트 선택 + 🔗 버튼(또는 Ctrl+K) → 편집 버블. 기존 링크 위 커서 → 읽기 버블. ESC 로 닫힘.</div>
+
+  <div class="before-after">
+    <!-- 편집 버블 -->
+    <div class="compare-col">
+      <span class="compare-label after">시나리오 A — 새 링크 만들기</span>
+      <div class="widget widget-wide">
+        <div class="bubble-container">
+          <div class="bubble-line" style="text-align: center;">
+            하셨다 <span class="selection-highlight">스튜디오JBBJ 홈페이지</span> 방문해주세요
+          </div>
+          <div class="bubble" style="top: 78px; left: 50%;">
+            <span class="bubble-icon">🔗</span>
+            <input type="text" placeholder="https://..." value="https://studiojbbj.com" />
+            <button class="bubble-action">✓</button>
+          </div>
+        </div>
+      </div>
+      <div class="widget-note">URL input 자동 포커스 → Enter 또는 [✓] 로 적용, ESC 로 취소.</div>
+    </div>
+
+    <!-- 읽기 버블 -->
+    <div class="compare-col">
+      <span class="compare-label after">시나리오 B — 기존 링크 수정/제거</span>
+      <div class="widget widget-wide">
+        <div class="bubble-container">
+          <div class="bubble-line" style="text-align: center;">
+            문의는 <a href="#" class="selected">스튜디오JBBJ 홈페이지<span class="caret"></span></a> 로 주세요
+          </div>
+          <div class="bubble" style="top: 78px; left: 50%;">
+            <span class="bubble-url">studiojbbj.com</span>
+            <button class="bubble-action icon" title="열기">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </button>
+            <button class="bubble-action icon" title="편집">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="bubble-action icon" title="링크 제거">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="widget-note">[↗] 브라우저로 열기 · [✏] 편집 모드 · [✖] 링크만 제거(텍스트 유지).</div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SECTION 4: 체크박스 리스트 상태 ─── -->
+<div class="section">
+  <div class="section-title">4. 체크리스트 — 체크 전 vs 체크 후</div>
+  <div class="section-desc">체크된 항목은 텍스트 <strong>흐림 50%</strong> + <strong>취소선</strong>. '끝난 일' 시각적 구분 확실.</div>
+  <div class="widget widget-wide">
+    <div class="editor">
+      <ul class="task-list">
+        <li class="done"><input type="checkbox" checked> <span>베니스앨 쓰어보기</span></li>
+        <li><input type="checkbox"> <span>TipTap 설치 (의존성 7개)</span></li>
+        <li class="done"><input type="checkbox" checked> <span>디자인 시안 결정</span></li>
+        <li><input type="checkbox"> <span>테스트 작성 + 빌드 검증</span></li>
+        <li><input type="checkbox"> <span>PR 생성 + @codex 리뷰 루프</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ─── SECTION 5: 색상 토큰 원칙 ─── -->
+<div class="section">
+  <div class="section-title">5. 테마 전환 실증</div>
+  <div class="section-desc">위 '테마' / '모드' 컨트롤을 바꿔보세요. 하드코딩 없이 CSS 변수 토큰으로만 동작 — 6개 프리셋 + 라이트/다크 자동 대응.</div>
+  <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+    <div style="padding: 12px 16px; background: rgb(var(--bg-card)); border: 1px solid rgb(var(--bg-border)); border-radius: 8px; font-size: 12px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:24px; height:24px; background: rgb(var(--accent)); border-radius: 4px;"></div>
+        <span>accent</span>
+      </div>
+    </div>
+    <div style="padding: 12px 16px; background: rgb(var(--bg-card)); border: 1px solid rgb(var(--bg-border)); border-radius: 8px; font-size: 12px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:24px; height:24px; background: rgb(var(--bg-card)); border: 1px solid rgb(var(--bg-border)); border-radius: 4px;"></div>
+        <span>bg-card</span>
+      </div>
+    </div>
+    <div style="padding: 12px 16px; background: rgb(var(--bg-card)); border: 1px solid rgb(var(--bg-border)); border-radius: 8px; font-size: 12px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:24px; height:24px; background: rgb(var(--text-primary)); border-radius: 4px;"></div>
+        <span>text-primary</span>
+      </div>
+    </div>
+    <div style="padding: 12px 16px; background: rgb(var(--bg-card)); border: 1px solid rgb(var(--bg-border)); border-radius: 8px; font-size: 12px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:24px; height:24px; background: rgb(var(--accent) / .15); border-radius: 4px;"></div>
+        <span>accent/15 (버튼 Active)</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 테마 전환
+  document.getElementById('theme').addEventListener('change', (e) => {
+    document.documentElement.setAttribute('data-theme', e.target.value);
+  });
+  const modeBtn = document.getElementById('modeToggle');
+  modeBtn.addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-mode');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-mode', next);
+    modeBtn.textContent = next === 'dark' ? '☾ 다크 모드' : '☀ 라이트 모드';
+  });
+
+  // 체크박스 토글 시 done 상태 반영
+  document.querySelectorAll('.task-list input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      e.target.closest('li').classList.toggle('done', e.target.checked);
+    });
+  });
+</script>
+</body>
+</html>

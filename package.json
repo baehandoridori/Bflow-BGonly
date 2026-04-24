@@ -1,6 +1,6 @@
 {
   "name": "bflow",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -18,6 +18,14 @@
     "@liveblocks/client": "^3.14.1",
     "@liveblocks/react": "^3.14.1",
     "@supabase/supabase-js": "^2.99.1",
+    "@tiptap/extension-bubble-menu": "^2.27.2",
+    "@tiptap/extension-link": "^2.27.2",
+    "@tiptap/extension-placeholder": "^2.27.2",
+    "@tiptap/extension-task-item": "^2.27.2",
+    "@tiptap/extension-task-list": "^2.27.2",
+    "@tiptap/extension-underline": "^2.27.2",
+    "@tiptap/react": "^2.27.2",
+    "@tiptap/starter-kit": "^2.27.2",
     "clsx": "^2.1.0",
     "framer-motion": "^10.18.0",
     "googleapis": "^171.4.0",
@@ -26,6 +34,7 @@
     "react-dom": "^18.3.1",
     "react-grid-layout": "^1.4.4",
     "sonner": "^2.0.7",
+    "tiptap-markdown": "^0.8.10",
     "zustand": "^4.5.2"
   },
   "build": {
