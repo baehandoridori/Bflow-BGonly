@@ -580,12 +580,45 @@ input[type="range"]::-webkit-slider-thumb {
   user-select: none;
   -webkit-user-select: none;
 }
+/* 커스텀 체크박스 — native appearance 제거하고 토큰 기반으로 재구성 */
 .memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-  accent-color: rgb(var(--color-accent));
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
   margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1.5px solid rgb(var(--color-bg-border));
+  border-radius: 4px;
+  background: rgb(var(--color-bg-primary) / 0.4);
+  cursor: pointer;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 150ms, border-color 150ms, box-shadow 150ms;
+  outline: none;
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"]:hover {
+  border-color: rgb(var(--color-accent) / 0.6);
+  background: rgb(var(--color-accent) / 0.08);
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 2px rgb(var(--color-accent) / 0.35);
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"]:checked {
+  background: rgb(var(--color-accent));
+  border-color: rgb(var(--color-accent));
+}
+.memo-editor-root .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"]:checked::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 8px;
+  border: solid rgb(var(--color-on-accent));
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-0.5px, -1px);
 }
 .memo-editor-root .ProseMirror ul[data-type="taskList"] li > div {
   flex: 1 1 auto;
