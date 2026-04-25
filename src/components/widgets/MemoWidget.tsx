@@ -6,7 +6,6 @@ import * as supabaseService from '@/services/supabaseService';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { MemoEditor } from './memo/MemoEditor';
 import { MemoToolbar } from './memo/MemoToolbar';
-import { MemoLinkBubble } from './memo/MemoLinkBubble';
 
 const MEMO_FILE = 'memo.json';
 const MEMO_MIGRATION_KEY = 'bflow_migration_memo_done';
@@ -208,7 +207,11 @@ export function MemoWidget() {
 
   const [memoData, setMemoData] = useState<MemoData>(makeDefaultMemoData);
   const [loaded, setLoaded] = useState(false);
-  const [editor, setEditor] = useState<Editor | null>(null);
+  // 탭별 editor 인스턴스 — 각 탭은 독립된 TipTap editor 를 가진다.
+  // 이유: StarterKit 의 history 는 editor 단위 — 하나의 editor 를 공유하면 탭 A 의
+  //   undo 가 탭 B 에서 replay 되어 현재 탭 content 를 이전 탭 상태로 덮어쓰는
+  //   크로스탭 데이터 오염이 발생한다 (Codex 리뷰 P1 지적). 탭당 editor 분리로 차단.
+  const [editorByTab, setEditorByTab] = useState<Record<string, Editor>>({});
   const [linkEditToken, setLinkEditToken] = useState(0);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -216,7 +219,7 @@ export function MemoWidget() {
   memoDataRef.current = memoData;
   const editorAreaRef = useRef<HTMLDivElement>(null);
 
-  const activeTab = memoData.tabs.find((t) => t.id === memoData.activeTabId) ?? memoData.tabs[0];
+  const activeEditor = editorByTab[memoData.activeTabId] ?? null;
 
   // 로드 (Supabase) — 사용자 전환 시에도 재로드
   useEffect(() => {
@@ -361,14 +364,18 @@ export function MemoWidget() {
 
   // ── 콘텐츠/폰트 변경 ──
 
-  const handleContentChange = useCallback((markdown: string) => {
+  /**
+   * 특정 탭의 content 를 갱신한다. tabId 를 closure 가 아닌 인자로 받아,
+   * 각 탭의 onChange 가 독립된 editor 로부터 올라오는 경로를 보존한다.
+   * (비활성 탭이 외부 동기화 등으로 내용 갱신을 일으켜도 activeTabId 와 무관하게 올바른 탭에 저장.)
+   */
+  const handleContentChangeForTab = useCallback((tabId: string, markdown: string) => {
     const latest = memoDataRef.current;
-    // 활성 탭의 content 갱신
-    if (latest.tabs.find(t => t.id === latest.activeTabId)?.content === markdown) return;
+    if (latest.tabs.find(t => t.id === tabId)?.content === markdown) return;
     const updated: MemoData = {
       ...latest,
       tabs: latest.tabs.map((t) =>
-        t.id === latest.activeTabId ? { ...t, content: markdown } : t,
+        t.id === tabId ? { ...t, content: markdown } : t,
       ),
     };
     setMemoData(updated);
@@ -382,8 +389,18 @@ export function MemoWidget() {
     save(updated);
   }, [memoData, save]);
 
-  const handleEditorReady = useCallback((ed: Editor | null) => {
-    setEditor(ed);
+  /** 탭의 editor 인스턴스가 준비/해제될 때 editorByTab 에 등록/삭제 */
+  const handleEditorReadyForTab = useCallback((tabId: string, ed: Editor | null) => {
+    setEditorByTab((prev) => {
+      if (ed) {
+        if (prev[tabId] === ed) return prev;
+        return { ...prev, [tabId]: ed };
+      }
+      if (!(tabId in prev)) return prev;
+      const next = { ...prev };
+      delete next[tabId];
+      return next;
+    });
   }, []);
 
   const handleLinkRequest = useCallback(() => {
@@ -423,7 +440,7 @@ export function MemoWidget() {
 
   const toolbar = (
     <MemoToolbar
-      editor={editor}
+      editor={activeEditor}
       widthRef={editorAreaRef}
       onLinkRequest={handleLinkRequest}
     />
@@ -431,14 +448,36 @@ export function MemoWidget() {
 
   const memoContent = loaded ? (
     <div ref={editorAreaRef} className="flex-1 overflow-auto">
-      <MemoEditor
-        key={activeTab?.id}
-        content={activeTab?.content ?? ''}
-        onChange={handleContentChange}
-        fontSize={memoData.fontSize}
-        onEditorReady={handleEditorReady}
-      />
-      <MemoLinkBubble editor={editor} editRequestToken={linkEditToken} />
+      {/*
+        탭별로 독립된 MemoEditor 인스턴스를 마운트해두고 display 만 토글한다.
+
+        이 구조의 이유:
+        1) insertBefore 버그 방지 — 탭 전환/추가 시 editor 가 destroy/재생성되지 않으므로
+           BubbleMenu(tippy.js) 포털과 React 재조정이 충돌할 기회가 없다.
+        2) 탭별 undo 경계 보장 — StarterKit history 는 editor 단위. 하나의 editor 를
+           공유하면 탭 A 의 undo transaction 이 탭 B 에서 replay 되어 B 의 content 를
+           A 의 이전 상태로 덮어쓰는 크로스탭 데이터 오염이 발생한다 (Codex P1 지적).
+        3) MemoLinkBubble 은 MemoEditor 내부에 포함돼 각 editor 와 부모-자식 관계 —
+           언마운트 시 tippy → editor 순서로 안전하게 정리된다.
+      */}
+      {memoData.tabs.map((tab) => {
+        const isActive = tab.id === memoData.activeTabId;
+        return (
+          <div
+            key={tab.id}
+            className={isActive ? 'h-full' : 'hidden'}
+            aria-hidden={!isActive}
+          >
+            <MemoEditor
+              content={tab.content}
+              onChange={(md) => handleContentChangeForTab(tab.id, md)}
+              fontSize={memoData.fontSize}
+              onEditorReady={(ed) => handleEditorReadyForTab(tab.id, ed)}
+              editRequestToken={linkEditToken}
+            />
+          </div>
+        );
+      })}
     </div>
   ) : (
     <div className="flex items-center justify-center h-full">
