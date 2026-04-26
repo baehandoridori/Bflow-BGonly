@@ -39,8 +39,13 @@
 
 ### 3.1 `src/utils/pathLink.ts` (신규)
 
+**중요**: 정규식은 단일 상수로 정의해 `tokenizeGPaths` / `PathLinkMark.addInputRules` / `PathLinkMark.addPasteRules` 4곳이 **모두 동일 패턴 사용**. 정규식이 어긋나면 4곳 인식 결과가 분기되어 일관성 깨짐.
+
 ```typescript
-const G_PATH_REGEX = /G:\\[^\s\n]*/g;
+/** G:\ 경로 인식 정규식 — 4곳에서 공유 */
+export const G_PATH_REGEX_GLOBAL = /G:\\[^\s\n]+/g;
+export const G_PATH_REGEX_INPUT_RULE = /(G:\\[^\s\n]+)\s$/;     // 공백 입력 시 mark 적용 (캡처 그룹 1만 mark)
+export const G_PATH_REGEX_PASTE_RULE = /G:\\[^\s\n]+/g;
 
 export interface PathToken {
   type: 'text' | 'path';
@@ -52,7 +57,7 @@ export function tokenizeGPaths(text: string): PathToken[] {
   if (!text) return [];
   const tokens: PathToken[] = [];
   let lastIdx = 0;
-  for (const match of text.matchAll(G_PATH_REGEX)) {
+  for (const match of text.matchAll(G_PATH_REGEX_GLOBAL)) {
     if (match.index === undefined) continue;
     if (match.index > lastIdx) {
       tokens.push({ type: 'text', content: text.slice(lastIdx, match.index) });
@@ -82,7 +87,8 @@ import { FolderOpen } from 'lucide-react';
 
 interface PathBadgeProps {
   path: string;
-  resolved?: boolean;     // 리비전용 옵션 (회색 처리). 기본 false → 청색
+  /** CompositingView 전용 — 해결된 리비전 경로 회색 처리. 메모/댓글/메모위젯 사용처에선 항상 false. */
+  resolved?: boolean;
   className?: string;
 }
 
@@ -144,8 +150,8 @@ export function PathLinkifiedText({ text, renderTextSegment }: Props) {
 `UnifiedSceneDetailModal.tsx:635`의 `InlineTextareaRow` 컴포넌트 내부에서 표시 모드일 때 `<PathLinkifiedText>` 사용. 편집 모드는 그대로 textarea (raw 입력).
 
 ```typescript
-// 표시 모드
-<div onClick={enterEditMode}>
+// 표시 모드 — min-height로 빈 placeholder 클릭 영역 확보 (기존 패딩과 동일)
+<div onClick={enterEditMode} className="min-h-[1.5em] cursor-pointer ...">
   {value ? <PathLinkifiedText text={value} /> : <span className="text-muted">메모 추가...</span>}
 </div>
 
@@ -155,21 +161,34 @@ export function PathLinkifiedText({ text, renderTextSegment }: Props) {
 
 ### 4.2 댓글 — `CommentPanel.renderText`
 
-기존 `renderText(text)` 함수가 @멘션 split만 처리. 이걸 G:\ 변환 + @멘션 변환의 합성으로 바꿈.
+기존 `renderText(text)` 함수가 @멘션 split만 처리. 이걸 G:\ 변환 + @멘션 변환의 합성으로 바꾸되, **기존 멘션 처리 로직은 정확히 보존**해야 한다 (users 매칭 + handleMentionClick 호출 + 미매칭 폴백):
 
 ```typescript
-const renderText = (text: string) => (
-  <PathLinkifiedText
-    text={text}
-    renderTextSegment={(segment, baseIdx) =>
-      // 기존 @멘션 split 로직을 segment에 적용
-      segment.split(/(@\S+)/g).map((part, i) =>
-        part.startsWith('@')
-          ? <MentionChip key={`${baseIdx}-${i}`} mention={part} />
-          : part
-      )
+// 기존 멘션 처리 로직을 inner 함수로 추출 — 동작 동일
+const renderMentionInSegment = (segment: string, baseIdx: number) =>
+  segment.split(/(@\S+)/g).map((part, i) => {
+    const key = `${baseIdx}-${i}`;
+    if (part.startsWith('@')) {
+      const name = part.slice(1);
+      const isUser = users.some(u => u.name === name);
+      if (isUser) {
+        return (
+          <span
+            key={key}
+            className="text-accent font-bold bg-accent/10 rounded px-0.5 cursor-pointer hover:bg-accent/20 transition-colors"
+            onClick={() => handleMentionClick(name)}
+            title={`${name} 팀원 보기`}
+          >
+            {part}
+          </span>
+        );
+      }
     }
-  />
+    return <span key={key}>{part}</span>;
+  });
+
+const renderText = (text: string) => (
+  <PathLinkifiedText text={text} renderTextSegment={renderMentionInSegment} />
 );
 ```
 
@@ -185,6 +204,7 @@ const renderText = (text: string) => (
 
 ```typescript
 import { Mark, markInputRule, markPasteRule } from '@tiptap/core';
+import { G_PATH_REGEX_INPUT_RULE, G_PATH_REGEX_PASTE_RULE } from '@/utils/pathLink';
 
 export const PathLinkMark = Mark.create({
   name: 'pathLink',
@@ -203,10 +223,19 @@ export const PathLinkMark = Mark.create({
       title: `${mark.attrs.href}\n(클릭하면 파일탐색기에서 열기)`,
     }, 0];
   },
+  /** tiptap-markdown 직렬화 — mark는 raw 텍스트로 풀고, 재로드 시 PasteRule이 다시 인식 */
+  addStorage() {
+    return {
+      markdown: {
+        serialize: { open: '', close: '', mixable: true, expelEnclosingWhitespace: true },
+        parse: { setup: () => {} },
+      },
+    };
+  },
   addInputRules() {
     return [
       markInputRule({
-        find: /(G:\\[^\s]+)\s$/,                        // 경로 + 공백 입력 순간 mark 적용
+        find: G_PATH_REGEX_INPUT_RULE,                  // (G:\\…)\s$ — 캡처 그룹 1만 mark
         type: this.type,
         getAttributes: (match) => ({ href: match[1] }),
       }),
@@ -215,7 +244,7 @@ export const PathLinkMark = Mark.create({
   addPasteRules() {
     return [
       markPasteRule({
-        find: /G:\\[^\s\n]+/g,
+        find: G_PATH_REGEX_PASTE_RULE,
         type: this.type,
         getAttributes: (match) => ({ href: match[0] }),
       }),
@@ -224,12 +253,15 @@ export const PathLinkMark = Mark.create({
 });
 ```
 
+> **Markdown round-trip 결정**: PathLinkMark는 `addStorage().markdown`에서 **빈 open/close**로 직렬화 → 저장된 Markdown엔 raw `G:\\` 경로만 남음. 재로드 시 PasteRule이 다시 mark를 입힘 → 시각적 round-trip 보장. `BflowUnderline`(`markdownExtensions.ts`) 패턴과 동일.
+
 `MemoEditor.tsx`에 등록:
 ```typescript
 extensions: [...existing, PathLinkMark]
 ```
 
-CSS (`src/styles/memo-editor.css` 또는 동급):
+**CSS — 신규 파일 `src/styles/path-link.css`** + `src/main.tsx`(또는 `src/index.css`)에서 import:
+
 ```css
 .path-link-mark {
   display: inline-flex;
@@ -245,7 +277,14 @@ CSS (`src/styles/memo-editor.css` 또는 동급):
   cursor: pointer;
 }
 .path-link-mark:hover { filter: brightness(1.25); }
+.path-link-mark::before {
+  content: '';
+  display: inline-block; width: 10px; height: 10px;
+  background-image: url('data:image/svg+xml;utf8,<svg ...FolderOpen 10px SVG...>');
+}
 ```
+
+> **아이콘 일관성**: PathBadge(React)에는 lucide `<FolderOpen size={10}>`, TipTap mark는 CSS `::before`로 SVG data-URI. 색상 토큰(`#74B9FF`, alpha 0.1/0.2)은 두 곳에 중복 등장하지만, 본 v1에선 코드 가독성을 위해 변수화 안 함. v2에서 `--path-link-fg` 등 CSS 변수로 추출 가능.
 
 클릭 핸들러는 `MemoEditor.tsx`의 `editorProps.handleClickOn`에 추가:
 ```typescript
@@ -255,11 +294,13 @@ handleClickOn(view, pos, node, nodePos, event) {
   if (linkEl) {
     event.preventDefault();
     window.electronAPI?.shellShowItem?.(linkEl.dataset.pathLink ?? '');
-    return true;
+    return true;                   // selection 이동 차단 → BubbleMenu 미발생
   }
   return false;
 }
 ```
+
+> **BubbleMenu 충돌**: `MemoLinkBubble`은 link mark에서만 활성. PathLinkMark는 별도 mark이므로 LinkBubble 자동 트리거 안 됨. 다만 PathLink 클릭 시 selection이 이동하지 않도록 `return true`로 차단해 BubbleMenu가 잘못 뜨지 않도록 보장.
 
 ---
 
@@ -269,11 +310,13 @@ handleClickOn(view, pos, node, nodePos, event) {
 |---|---|
 | 빈 메모/댓글 | tokenizeGPaths가 [] 반환 → 빈 렌더 |
 | `G:\` 단독 (경로 없음) | 정규식 매치 안 됨 (`[^\s\n]*` 0길이 매치는 가능하지만 `\s`/`\n` 종결 필요한 컨텍스트로 발생 안 함) |
-| 한글 경로 (`G:\공유 드라이브\...`) | OK — 정규식이 `\s`/`\n`만 종결자. 공백 포함되면 거기서 끊김 (파일명에 공백이 있으면 사용자가 따옴표 등을 쓰지 않는 한 짧게 끊김 — 이는 의도된 한계) |
+| 한글 경로 (`G:\공유 드라이브\...`) | OK — 정규식이 `\s`/`\n`만 종결자. **공백 포함 경로는 첫 공백에서 끊김** (의도된 한계). 사용자가 공백 포함 경로를 정확히 표시하려면 `G:\\공유 드라이브\\...` 처럼 non-breaking space 등을 사용하거나, 짧게 끊긴 경로를 클릭해도 `shell:show-item`이 상위 폴더로 폴백하므로 사용성 OK |
 | 매우 긴 경로 | PathBadge에서 `shortenPath`로 마지막 segment만 표시. 풀 경로는 툴팁(title) |
 | 잘못된 형식·없는 파일 | `shell:show-item`이 자체 처리 — 파일/폴더 없으면 상위 폴더 시도, 그것도 없으면 무음 (현재 동작 그대로) |
 | URL과 충돌 | `G:\`는 URL이 아니라 충돌 없음. http(s) 메모 링크는 `MemoLinkBubble`이 별도 처리 |
 | TipTap 클릭 vs Drag-Select | `handleClickOn`은 click 한정, 드래그 선택은 영향 없음 |
+| PathLink 클릭 → BubbleMenu 오작동 | `handleClickOn`이 `return true`로 selection 이동 차단해 LinkBubble 자동 트리거 안 됨 (검증 항목) |
+| Markdown round-trip | `addStorage().markdown` open/close 빈 문자열 → 저장 시 mark 풀림, 재로드 시 PasteRule이 다시 입힘 (시각적 round-trip 보장) |
 | 메모 위젯 raw 모드 | 현재 메모 위젯은 WYSIWYG만 — raw 모드 없음 (Mark가 항상 활성) |
 | 편집 중 textarea (씬 메모/댓글) | 의도된 동작 — 편집 시 raw 텍스트, 저장 후 표시만 변환 |
 
@@ -281,7 +324,9 @@ handleClickOn(view, pos, node, nodePos, event) {
 
 ## 6. 테스트 전략
 
-### 6.1 단위 테스트 — `src/utils/__tests__/pathLink.test.ts` (신규)
+### 6.1 단위 테스트
+
+**`src/utils/__tests__/pathLink.test.ts`** (신규):
 
 ```typescript
 describe('tokenizeGPaths', () => {
@@ -302,6 +347,55 @@ describe('shortenPath', () => {
 });
 ```
 
+**`src/components/common/__tests__/PathLinkifiedText.test.tsx`** (신규):
+
+```typescript
+import { render } from '@testing-library/react';
+import { PathLinkifiedText } from '../PathLinkifiedText';
+
+describe('PathLinkifiedText', () => {
+  it('경로 없는 텍스트는 그대로 렌더', () => {
+    const { container } = render(<PathLinkifiedText text="안녕하세요" />);
+    expect(container).toHaveTextContent('안녕하세요');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('G:\\ 경로는 button (PathBadge)으로 렌더', () => {
+    const { container } = render(<PathLinkifiedText text="확인 G:\\test\\file.png 부탁" />);
+    expect(container.querySelectorAll('button')).toHaveLength(1);
+    expect(container.querySelector('button')).toHaveAttribute('title');
+  });
+
+  it('renderTextSegment로 추가 변환 합성 가능 (예: 멘션)', () => {
+    const { container } = render(
+      <PathLinkifiedText
+        text="@한솔 G:\\file"
+        renderTextSegment={(seg, i) =>
+          seg.split(/(@\S+)/g).map((p, j) =>
+            p.startsWith('@')
+              ? <span key={`${i}-${j}`} data-mention={p.slice(1)}>{p}</span>
+              : p
+          )
+        }
+      />
+    );
+    expect(container.querySelector('[data-mention="한솔"]')).toBeTruthy();
+    expect(container.querySelectorAll('button')).toHaveLength(1);
+  });
+});
+```
+
+**`src/components/widgets/memo/extensions/__tests__/PathLinkMark.test.ts`** (신규):
+
+```typescript
+// TipTap Editor를 headless 모드로 띄우고 markdown round-trip 검증
+describe('PathLinkMark', () => {
+  it('PasteRule이 G:\\ 경로를 mark로 변환', () => { ... });
+  it('Markdown round-trip — 저장된 raw 텍스트가 재로드 시 다시 mark 적용', () => { ... });
+  it('InputRule — typing G:\\foo + 공백 → mark 적용', () => { ... });
+});
+```
+
 ### 6.2 수동 검증
 
 - [ ] 씬 모달에서 메모에 `G:\공유 드라이브\test.png` 입력·저장 → PathBadge 표시 → 클릭 → 파일탐색기 열림
@@ -309,6 +403,9 @@ describe('shortenPath', () => {
 - [ ] 메모 위젯에 G:\ 입력 후 공백 → 즉시 청색 PathBadge로 변환
 - [ ] 메모 위젯에 G:\ 경로 붙여넣기 → 자동 변환
 - [ ] 리비전(CompositingView)에서 PathBadge 외관·동작 변경 없이 그대로 (회귀 테스트)
+- [ ] PathLink 클릭 시 LinkBubble이 잘못 뜨지 않음
+- [ ] 메모 위젯에 G:\ 입력 → 저장 → 앱 재시작 → 여전히 PathBadge 표시 (Markdown round-trip)
+- [ ] 빈 메모 표시 모드 클릭 시 편집 모드 진입 (placeholder 클릭 영역 보장)
 
 ### 6.3 빌드 검증
 
