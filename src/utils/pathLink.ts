@@ -7,8 +7,11 @@
  * 종결자: 줄바꿈(\n, \r). Studio JBBJ 표준 폴더명에 공백이 들어가므로(예: "G:\공유 드라이브\...")
  * 단순 공백은 종결자로 쓰지 않는다. 사용자가 한 줄 안에 "G:\path 추가설명"처럼 쓰면 줄 끝까지 모두
  * 경로로 잡히므로, 경로 뒤에 부가 텍스트를 쓰려면 줄을 분리해야 한다.
+ *
+ * 대소문자: Windows 드라이브 letter 가 case-insensitive 이므로 `i` 플래그 사용.
+ * 기존 데이터에 `g:\...` 소문자로 입력된 경로가 있어도 동일하게 인식한다.
  */
-export const G_PATH_REGEX_GLOBAL = /G:\\[^\n\r]+/g;
+export const G_PATH_REGEX_GLOBAL = /G:\\[^\n\r]+/gi;
 
 export interface PathToken {
   type: 'text' | 'path';

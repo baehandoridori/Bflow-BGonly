@@ -53,18 +53,21 @@ function parsePathsFromText(text: string): { description: string; paths: string[
 
   for (const line of lines) {
     const trimmed = line.trim();
-    // 줄 전체가 G:\로 시작하면 경로 (대문자 G 만 인식 — 다른 3곳과 일관성 유지)
-    if (/^G:\\/.test(trimmed)) {
+    // 줄 전체가 G:\로 시작하면 경로 (Windows 드라이브 letter 가 case-insensitive 라 g:\ 도 인식)
+    if (/^G:\\/i.test(trimmed)) {
       paths.push(trimmed);
-    } else if (trimmed.includes('G:\\')) {
-      // 줄 중간에 G:\가 있으면 그 앞은 설명, 뒤는 경로
-      const idx = trimmed.indexOf('G:\\');
-      const before = trimmed.slice(0, idx).trim();
-      const pathPart = trimmed.slice(idx).trim();
-      if (before) descLines.push(before);
-      paths.push(pathPart);
     } else {
-      descLines.push(line);
+      // 줄 중간에 G:\ (또는 g:\) 가 있으면 그 앞은 설명, 뒤는 경로
+      const m = /G:\\/i.exec(trimmed);
+      if (m) {
+        const idx = m.index;
+        const before = trimmed.slice(0, idx).trim();
+        const pathPart = trimmed.slice(idx).trim();
+        if (before) descLines.push(before);
+        paths.push(pathPart);
+      } else {
+        descLines.push(line);
+      }
     }
   }
 

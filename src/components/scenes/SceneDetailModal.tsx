@@ -20,6 +20,7 @@ import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
 import * as storageService from '@/services/storageService';
 import { AssigneeSelect, getUserColor } from '@/components/common/AssigneeSelect';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { CommentPanel } from './CommentPanel';
@@ -103,7 +104,9 @@ function PropertyRow({ label, value, placeholder, onSave }: PropertyRowProps) {
             className="w-full rounded-md px-2.5 py-1 border border-transparent cursor-pointer transition-all duration-200 hover:border-accent/30 hover:bg-accent/5 hover:shadow-[0_0_8px_rgba(108,92,231,0.15)]"
           >
             <span className="text-sm text-text-primary">
-              {value || (
+              {value ? (
+                <PathLinkifiedText text={value} />
+              ) : (
                 <span className="text-text-secondary/50 italic">
                   {placeholder ?? '비어 있음'}
                 </span>
