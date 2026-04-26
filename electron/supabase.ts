@@ -581,6 +581,7 @@ export async function updateSceneStage(
 export async function bulkUpdateSceneStages(
   updates: BulkStageUpdate[],
   updatedBy: string,
+  userName?: string | null,
 ): Promise<BulkUpdateResult[]> {
   const { data, error } = await supabase.rpc('bulk_update_scene_stages', {
     // undefined는 key를 누락시켜 RPC가 "메타 건드리지 않음"으로 인식,
@@ -596,6 +597,7 @@ export async function bulkUpdateSceneStages(
       return payload;
     }),
     p_updated_by: updatedBy,
+    p_user_name: userName ?? null,
   });
   if (error) throw error;
   return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
@@ -608,6 +610,7 @@ export async function bulkUpdateSceneStages(
 export async function bulkDeleteScenes(
   sceneUuids: string[],
   deletedBy: string,
+  userName?: string | null,
 ): Promise<BulkUpdateResult[]> {
   // 1) 씬 UUID → 이미지 URL 목록 맵을 먼저 확보 (RPC 가 실제로 삭제한 씬만 이미지 정리하기 위함)
   const urlsByUuid = new Map<string, string[]>();
@@ -628,6 +631,7 @@ export async function bulkDeleteScenes(
   const { data, error } = await supabase.rpc('bulk_delete_scenes', {
     p_uuids: sceneUuids,
     p_deleted_by: deletedBy,
+    p_user_name: userName ?? null,
   });
   if (error) throw error;
   const results = maybeForceFail(mapRpcRows(data as RpcRow[] | null));
@@ -650,6 +654,7 @@ export async function bulkDeleteScenes(
 export async function bulkUpdateSceneFields(
   updates: BulkFieldUpdate[],
   updatedBy: string,
+  userName?: string | null,
 ): Promise<BulkUpdateResult[]> {
   const { data, error } = await supabase.rpc('bulk_update_scene_fields', {
     p_updates: updates.map((u) => ({
@@ -663,6 +668,7 @@ export async function bulkUpdateSceneFields(
       },
     })),
     p_updated_by: updatedBy,
+    p_user_name: userName ?? null,
   });
   if (error) throw error;
   return maybeForceFail(mapRpcRows(data as RpcRow[] | null));

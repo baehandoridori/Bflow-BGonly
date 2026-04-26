@@ -7,6 +7,10 @@ interface Props {
   onBarHover?: (info: { label: string; count: number; x: number; y: number } | null) => void;
 }
 
+const ACCENT_GRADIENT = 'linear-gradient(to top, rgb(var(--color-accent)) 0%, rgb(var(--color-accent-sub)) 100%)';
+// 정점 강조용 — 노란색/액센트 (테마와 분리, 실제 시안 그대로)
+const PEAK_GRADIENT = 'linear-gradient(to top, #FDCB6E 0%, #FFE5A0 100%)';
+
 export function GoldenBarChart({ mode, onBarHover }: Props) {
   const grid = useActivityStore((s) => s.statsGrid);
 
@@ -36,14 +40,16 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
           return (
             <div
               key={h}
-              className="rounded-t-[3px] cursor-pointer transition-opacity hover:opacity-80 relative"
+              className="rounded-t-[3px] cursor-pointer relative path-link-bar"
               style={{
                 height: `${Math.max(pct, 2)}%`,
-                background: 'linear-gradient(to top, #6C5CE7 0%, #A29BFE 100%)',
+                background: ACCENT_GRADIENT,
+                transition: 'opacity 0.15s ease, filter 0.15s ease',
               }}
-              onMouseEnter={(e) =>
-                onBarHover?.({ label: `${h}시`, count, x: e.clientX, y: e.clientY })
-              }
+              onMouseEnter={(e) => {
+                const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                onBarHover?.({ label: `${h}시`, count, x: rect.left + rect.width / 2, y: rect.top });
+              }}
               onMouseLeave={() => onBarHover?.(null)}
             >
               {[0, 6, 12, 18].includes(h) && (
@@ -70,16 +76,16 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
         return (
           <div
             key={d}
-            className="rounded-t-[5px] cursor-pointer transition-opacity hover:opacity-85 relative"
+            className="rounded-t-[5px] cursor-pointer relative path-link-bar"
             style={{
               height: `${Math.max(pct, 4)}%`,
-              background: isPeak
-                ? 'linear-gradient(to top, #FDCB6E 0%, #FFE5A0 100%)'
-                : 'linear-gradient(to top, #6C5CE7 0%, #A29BFE 100%)',
+              background: isPeak ? PEAK_GRADIENT : ACCENT_GRADIENT,
+              transition: 'opacity 0.15s ease, filter 0.15s ease',
             }}
-            onMouseEnter={(e) =>
-              onBarHover?.({ label: `${dayLabel(d)}요일`, count, x: e.clientX, y: e.clientY })
-            }
+            onMouseEnter={(e) => {
+              const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+              onBarHover?.({ label: `${dayLabel(d)}요일`, count, x: rect.left + rect.width / 2, y: rect.top });
+            }}
             onMouseLeave={() => onBarHover?.(null)}
           >
             <span className="absolute left-1/2 -translate-x-1/2 -bottom-5 text-[11px] text-text-secondary">

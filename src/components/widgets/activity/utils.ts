@@ -117,13 +117,19 @@ export function intensityLevel(count: number): 0 | 1 | 2 | 3 | 4 {
 }
 
 export function intensityBg(level: 0 | 1 | 2 | 3 | 4): string {
+  // 테마 색상 따라가게 — --color-accent (RGB 값) 변수 사용. 테마 변경 시 자동 반영.
   return [
-    'rgba(108, 92, 231, 0.06)',
-    'rgba(108, 92, 231, 0.18)',
-    'rgba(108, 92, 231, 0.36)',
-    'rgba(108, 92, 231, 0.58)',
-    'rgba(108, 92, 231, 0.85)',
+    'rgb(var(--color-accent) / 0.06)',
+    'rgb(var(--color-accent) / 0.18)',
+    'rgb(var(--color-accent) / 0.36)',
+    'rgb(var(--color-accent) / 0.58)',
+    'rgb(var(--color-accent) / 0.85)',
   ][level];
+}
+
+/** 히트맵 정점 셀 glow (lv 4) */
+export function intensityGlow(level: 0 | 1 | 2 | 3 | 4): string {
+  return level === 4 ? '0 0 8px rgb(var(--color-accent) / 0.3)' : '';
 }
 
 const DAY_LABELS = ['월', '화', '수', '목', '금', '토', '일'];

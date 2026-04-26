@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Activity, Clock, Filter, Grid3x3, BarChart3 } from 'lucide-react';
 import { Widget } from './Widget';
 import { useActivityStore, type GoldenMode } from '@/stores/useActivityStore';
@@ -116,10 +117,11 @@ export function RecentActivityWidget() {
         {/* 피드 */}
         <ActivityFeed />
 
-        {/* 글로벌 툴팁 */}
-        {tooltip.visible && (
+        {/* 글로벌 툴팁 — Portal 로 document.body 에 직접 렌더해야
+            위젯의 backdrop-filter 가 만든 stacking context 안에 갇히지 않음 */}
+        {tooltip.visible && createPortal(
           <div
-            className="fixed z-[100] bg-bg-card/95 border border-bg-border rounded-lg px-2.5 py-1.5 text-[11.5px] text-text-primary pointer-events-none shadow-xl backdrop-blur-md"
+            className="fixed z-[9999] bg-bg-card/95 border border-bg-border rounded-lg px-2.5 py-1.5 text-[11.5px] text-text-primary pointer-events-none shadow-xl backdrop-blur-md"
             style={{
               left: tooltip.x,
               top: tooltip.y,
@@ -128,7 +130,8 @@ export function RecentActivityWidget() {
             }}
           >
             {tooltip.text}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     </Widget>

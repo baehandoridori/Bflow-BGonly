@@ -1061,7 +1061,7 @@ ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneU
   }
 }));
 ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: BulkStageUpdate[], updatedBy: string) => {
-  const results = await sbBulkUpdateSceneStages(updates, updatedBy);
+  const results = await sbBulkUpdateSceneStages(updates, updatedBy, currentActivityUser?.name ?? null);
   for (const u of updates) {
     const r = results.find((x) => x.sceneUuid === u.sceneUuid);
     if (!r?.success) continue;
@@ -1081,7 +1081,7 @@ ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, 
   return results;
 }));
 ipcMain.handle('supabase:bulk-delete-scenes', wrapIpc(async (_e: unknown, sceneUuids: string[], deletedBy: string) => {
-  const results = await sbBulkDeleteScenes(sceneUuids, deletedBy);
+  const results = await sbBulkDeleteScenes(sceneUuids, deletedBy, currentActivityUser?.name ?? null);
   // 단일 deleteScene과 parity 유지를 위해 성공 시 data-change broadcast — Codex 리뷰 #12.
   // Realtime 끊긴 상태의 피어가 broadcast-triggered reload로 동기화할 수 있도록 한다.
   if (results.some((r) => r.success)) {
@@ -1090,7 +1090,7 @@ ipcMain.handle('supabase:bulk-delete-scenes', wrapIpc(async (_e: unknown, sceneU
   return results;
 }));
 ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, updates: BulkFieldUpdate[], updatedBy: string) => {
-  const results = await sbBulkUpdateSceneFields(updates, updatedBy);
+  const results = await sbBulkUpdateSceneFields(updates, updatedBy, currentActivityUser?.name ?? null);
   for (const u of updates) {
     const r = results.find((x) => x.sceneUuid === u.sceneUuid);
     if (!r?.success) continue;

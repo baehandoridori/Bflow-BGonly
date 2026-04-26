@@ -1,5 +1,5 @@
 import { useActivityStore } from '@/stores/useActivityStore';
-import { intensityLevel, intensityBg, dayLabel } from './utils';
+import { intensityLevel, intensityBg, intensityGlow, dayLabel } from './utils';
 
 interface Props {
   onCellHover?: (info: { day: number; hour: number; count: number; x: number; y: number } | null) => void;
@@ -44,17 +44,27 @@ function DayRow({
       </div>
       {row.map((count, h) => {
         const lv = intensityLevel(count);
+        const handleEnter = (e: React.MouseEvent<HTMLDivElement>) => {
+          // 셀의 화면 좌상단 좌표 사용 — 호버 영역 안에서 마우스 움직여도 툴팁 위치 안정
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          onCellHover?.({
+            day: dayIdx,
+            hour: h,
+            count,
+            x: rect.left + rect.width / 2,
+            y: rect.top,
+          });
+        };
         return (
           <div
             key={`c${dayIdx}-${h}`}
-            className="aspect-square rounded-[2px] cursor-pointer transition-transform hover:scale-[1.4] hover:z-10 relative"
+            className="aspect-square rounded-[2px] cursor-pointer relative path-link-heatmap-cell"
             style={{
               background: intensityBg(lv),
-              ...(lv === 4 ? { boxShadow: '0 0 8px rgba(108, 92, 231, 0.3)' } : {}),
+              boxShadow: intensityGlow(lv),
+              transition: 'transform 0.15s ease',
             }}
-            onMouseEnter={(e) =>
-              onCellHover?.({ day: dayIdx, hour: h, count, x: e.clientX, y: e.clientY })
-            }
+            onMouseEnter={handleEnter}
             onMouseLeave={() => onCellHover?.(null)}
           />
         );
