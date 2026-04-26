@@ -366,6 +366,30 @@ export type BulkUpdateResult = {
   error?: string;
 };
 
+// ─── 활동 기록 (activity_log) ───────────────
+
+export type ActionGroup = 'progress' | 'memo' | 'scene' | 'etc';
+export type ActionType =
+  | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
+  | 'memo_update' | 'comment_add' | 'revision_add' | 'revision_resolve'
+  | 'scene_add' | 'scene_delete'
+  | 'assignee_change' | 'layout_change'
+  | 'image_upload_storyboard' | 'image_upload_guide';
+
+export interface Activity {
+  id: string;
+  userId: string;
+  userName: string;
+  actionType: ActionType;
+  actionGroup: ActionGroup;
+  sceneId: string | null;
+  sceneLabel: string | null;
+  episodeNumber: number | null;
+  department: 'bg' | 'acting' | null;
+  detail: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 // ─── Electron API (preload에서 노출) ─────────
 
 export interface ElectronAPI {
