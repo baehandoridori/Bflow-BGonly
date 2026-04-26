@@ -2,10 +2,14 @@
 
 - 작성일: 2026-04-27
 - 브랜치: `claude/trusting-blackwell-722ea1`
-- 대상 범위: 신규 위젯 1개 + 신규 테이블/RPC + 12개 mutation 함수에 활동 기록 호출 추가
+- 대상 범위: 신규 위젯 1개 + 신규 테이블/RPC + 기존 mutation 코드에 활동 기록 헬퍼 호출 추가
+- 용어 정의:
+  - **action_type 13종** — 활동 종류 enum 값
+  - **호출 지점 14개** — `recordActivity()` 헬퍼를 부르는 코드 위치 (단계 4종은 `updateSceneField` 1개 함수 안에 분기, 이미지 2종은 1개 핸들러 안에 분기)
+  - **수정 대상 함수 12개** — `electron/supabase.ts`에서 손대는 함수 개수
 - PR 단위: **단일 PR** (Phase 9-7 또는 v1.14.0)
 - 시안 미리보기: `docs/superpowers/specs/mockups/2026-04-27-recent-activity-widget/final.html`
-- 참고: Supabase Pro 플랜 기준 (2026-04-22 업그레이드 완료)
+- 인프라: **Supabase Pro 플랜** (2026-04-22 업그레이드 완료, DB 8GB / pg_cron 사용 가능)
 
 ---
 
@@ -29,7 +33,7 @@ Studio JBBJ 팀이 BG/액팅 작업을 하면서 "**다른 동료들이 지금 �
 |---|---|---|
 | 용도 | 팀 소셜 피드 | 한솔 결정 (다른 옵션: 매니저 모니터링/본인 회고/통합) |
 | 레이아웃 | 옵션 1 — 상하 분할 (히트맵 위 / 피드 아래) | 4가지 시안 비교 후 선택 |
-| 추적 종류 | **13종** | 작업 4 + 메모/댓글/리비전 4 + 씬 add/del 2 + 기타 4 |
+| 추적 종류 | **14종** | 작업 4 + 메모/댓글/리비전 4 + 씬 add/del 2 + 기타 4 (담당자/레이아웃/스토리보드 업로드/가이드 업로드) |
 | 출시 방식 | **깨끗하게 시작** (백필 없음) | DB 변경 최소, 출시 후 자동 누적 |
 | 데이터 경로 | **앱 INSERT + RPC 트랜잭션** | 디버깅 용이, 표시 라벨 같이 저장 |
 | 그래프 모드 | **3가지 토글** (히트맵 / 시간대 막대 / 요일 막대) | 한솔 보강 요청 |
@@ -51,12 +55,12 @@ Studio JBBJ 팀이 BG/액팅 작업을 하면서 "**다른 동료들이 지금 �
 CREATE TABLE IF NOT EXISTS activity_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-  user_id TEXT NOT NULL,                -- 누가
+  user_id TEXT NOT NULL,                -- 누가 (users.id 참조, 단 FK는 안 검 — 신뢰 모델은 §3.4)
   user_name TEXT NOT NULL,              -- 표시용 (조인 비용 ↓, 이름 변경되어도 옛 기록은 옛 이름)
   action_type TEXT NOT NULL,            -- 13종 enum (아래 §3.2)
   action_group TEXT NOT NULL,           -- 'progress' | 'memo' | 'scene' | 'etc' (필터 4그룹)
 
-  scene_id UUID,                        -- 어떤 씬 (nullable: 씬 외 활동도 가능 — 향후 확장)
+  scene_id UUID,                        -- scenes.id (UUID, nullable). 주의: comments.scene_id는 TEXT라 다름. 본 테이블은 UUID 통일.
   scene_label TEXT,                     -- 표시용: "EP01 A씬 #5"
   episode_number INTEGER,               -- 통계/필터용
   department TEXT,                      -- 'bg' | 'acting'
@@ -78,21 +82,24 @@ ALTER PUBLICATION supabase_realtime ADD TABLE activity_log;
 
 ### 3.2 13종 `action_type` enum
 
-| 그룹 | type 값 | 발생 시점 | 픽토그램 컬러 |
-|---|---|---|---|
-| **progress** | `stage_lo`         | LO 체크박스 ON/OFF | LO `#74B9FF` |
-| **progress** | `stage_done`       | 완료 체크박스 ON/OFF | 완료 `#A29BFE` |
-| **progress** | `stage_review`     | 검수 체크박스 ON/OFF | 검수 `#FDCB6E` |
-| **progress** | `stage_png`        | PNG 체크박스 ON/OFF | PNG `#00B894` |
-| **memo** | `memo_update`      | 씬 메모 변경 | 분홍 `#FF8FA3` |
-| **memo** | `comment_add`      | 댓글 작성 | 주황 `#FFA94D` |
-| **memo** | `revision_add`     | 리비전 등록 | 시안 `#4DD0E1` |
-| **memo** | `revision_resolve` | 리비전 해결 | 시안-밝음 `#81ECEC` |
-| **scene** | `scene_add`        | 씬 추가 | 초록 `#6FCF97` |
-| **scene** | `scene_delete`     | 씬 삭제 | 빨강 `#FF7675` |
-| **etc** | `assignee_change`  | 담당자 변경 | 회색 `#95A5A6` |
-| **etc** | `layout_change`    | 레이아웃ID 변경 | 회색 |
-| **etc** | `image_upload_storyboard` / `image_upload_guide` | 이미지 업로드 | 회색 |
+| # | 그룹 | type 값 | 발생 시점 | 픽토그램 컬러 |
+|---|---|---|---|---|
+| 1 | **progress** | `stage_lo`         | LO 체크박스 ON/OFF | LO `#74B9FF` |
+| 2 | **progress** | `stage_done`       | 완료 체크박스 ON/OFF | 완료 `#A29BFE` |
+| 3 | **progress** | `stage_review`     | 검수 체크박스 ON/OFF | 검수 `#FDCB6E` |
+| 4 | **progress** | `stage_png`        | PNG 체크박스 ON/OFF | PNG `#00B894` |
+| 5 | **memo** | `memo_update`      | 씬 메모 변경 | 분홍 `#FF8FA3` |
+| 6 | **memo** | `comment_add`      | 댓글 작성 | 주황 `#FFA94D` |
+| 7 | **memo** | `revision_add`     | 리비전 등록 | 시안 `#4DD0E1` |
+| 8 | **memo** | `revision_resolve` | 리비전 해결 | 시안-밝음 `#81ECEC` |
+| 9 | **scene** | `scene_add`        | 씬 추가 | 초록 `#6FCF97` |
+| 10 | **scene** | `scene_delete`     | 씬 삭제 | 빨강 `#FF7675` |
+| 11 | **etc** | `assignee_change`  | 담당자 변경 | 회색 `#95A5A6` |
+| 12 | **etc** | `layout_change`    | 레이아웃ID 변경 | 회색 |
+| 13 | **etc** | `image_upload_storyboard` | 스토리보드 이미지 업로드 | 회색 |
+| 14 | **etc** | `image_upload_guide` | 가이드 이미지 업로드 | 회색 |
+
+> 정정: 표 행은 14이지만 그 중 `image_upload_storyboard`/`image_upload_guide`는 한 헬퍼(`uploadImage`)에서 분기하므로 **호출 지점 14개 / type 14개**로 일관 유지. 머리말의 "13종"은 **그룹 분류 기준**(progress 4 + memo 4 + scene 2 + etc 4 = 14)이 아닌 의도된 값. 위 표대로 14종으로 통일하고 머리말·§2를 14로 정정.
 
 ### 3.3 보존 정책 — 1년 자동 정리
 
@@ -108,10 +115,14 @@ $$;
 -- pg_cron 사용 (Supabase Pro 활성화됨)
 SELECT cron.schedule(
   'activity-log-cleanup',
-  '0 4 * * *',                          -- 매일 새벽 4시
+  '0 4 * * *',                          -- 매일 새벽 4시 (KST 13시)
   $$ SELECT cleanup_old_activity_logs(); $$
 );
 ```
+
+### 3.4 신뢰 모델 (RLS `allow_all`)
+
+기존 `comments`/`comp_revisions`와 동일하게 `allow_all` 정책. 즉 **anon key로 임의 user_id 위변조 가능**한 상태. v1은 신뢰 환경(스튜디오 사내 사용)으로 가정하고 현행 유지. **Supabase Auth 도입 시점(별도 스펙)에 `auth.uid() = user_id` 정책으로 강화 예정.**
 
 ---
 
@@ -153,30 +164,60 @@ GRANT EXECUTE ON FUNCTION record_activity(...) TO anon, authenticated;
 
 ### 4.2 mutation 함수 패치 — `electron/supabase.ts`
 
-다음 12개 함수 끝에 `recordActivity()` 호출 추가 (try/catch로 감싸서 본 mutation은 실패시키지 않음):
+**수정 대상 함수 12개 / 호출 지점 14개** (단계 4종은 `updateSceneField` 1개 함수 내 분기, 이미지 2종은 1개 핸들러 내 분기). 각 호출 지점 끝에 `recordActivity()` 호출 추가하되 **try/catch로 감싸서 본 mutation은 실패시키지 않음**:
 
-| 함수 | action_type |
-|---|---|
-| `updateSceneField(stage='lo')` | `stage_lo` |
-| `updateSceneField(stage='done')` | `stage_done` |
-| `updateSceneField(stage='review')` | `stage_review` |
-| `updateSceneField(stage='png')` | `stage_png` |
-| `updateSceneField(field='memo')` | `memo_update` |
-| `updateSceneField(field='assignee')` | `assignee_change` |
-| `updateSceneField(field='layout')` | `layout_change` |
-| `addScene` | `scene_add` |
-| `deleteScene` | `scene_delete` |
-| `addComment` | `comment_add` |
-| `addRevision` | `revision_add` |
-| `updateRevisionStatus(='resolved')` | `revision_resolve` |
-| `uploadImage(type='storyboard')` | `image_upload_storyboard` |
-| `uploadImage(type='guide')` | `image_upload_guide` |
+| 함수 | 분기 | action_type |
+|---|---|---|
+| `updateSceneField` | stage='lo' | `stage_lo` |
+| `updateSceneField` | stage='done' | `stage_done` |
+| `updateSceneField` | stage='review' | `stage_review` |
+| `updateSceneField` | stage='png' | `stage_png` |
+| `updateSceneField` | field='memo' | `memo_update` |
+| `updateSceneField` | field='assignee' | `assignee_change` |
+| `updateSceneField` | field='layout' | `layout_change` |
+| `addScene` | — | `scene_add` |
+| `deleteScene` | — | `scene_delete` |
+| `addComment` | — | `comment_add` |
+| `addRevision` | — | `revision_add` |
+| `updateRevisionStatus` | status='resolved' | `revision_resolve` |
+| `uploadImage` | type='storyboard' | `image_upload_storyboard` |
+| `uploadImage` | type='guide' | `image_upload_guide` |
 
-bulk RPC 함수(`bulk_update_scene_stages` 등) 안에서도 각 row 단위로 활동을 INSERT하도록 수정 (트리거 없이 RPC 내부에서 처리).
+### 4.3 bulk RPC 함수 활동 기록 — 파라미터 명세
 
-### 4.3 자기 변경 dedupe
+기존 `bulk_update_scene_stages`/`bulk_delete_scenes`/`bulk_update_scene_fields`는 클라이언트가 호출하는 `SECURITY INVOKER` RPC. 활동 기록을 추가하려면 **호출자가 user_id/user_name과 row별 표시 라벨을 함께 보내야** 한다.
 
-낙관적 prepend의 임시 ID(`tmp_*`)를 RPC 응답의 진짜 UUID로 교체. Realtime 이벤트가 같은 UUID면 store에서 무시.
+**수정 후 시그니처** (예: `bulk_update_scene_stages`):
+
+```sql
+CREATE OR REPLACE FUNCTION bulk_update_scene_stages(
+  p_updates jsonb,                     -- 각 element: { sceneUuid, stage, value, sceneLabel, episodeNumber, department, ... }
+  p_updated_by text,
+  p_user_name text                     -- 신규 파라미터 (활동 표시용)
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+```
+
+`p_updates` jsonb element에 `sceneLabel`, `episodeNumber`, `department` 추가. RPC 내부 루프에서 UPDATE 성공한 row마다 `INSERT INTO activity_log (...)` 직접 실행 (`record_activity` 함수 호출 또는 `INSERT` 인라인). 한 row의 활동 기록 실패는 본 작업 결과에 영향 주지 않도록 inner BEGIN/EXCEPTION 블록으로 분리.
+
+### 4.4 자기 변경 dedupe — 정확한 알고리즘
+
+useActivityStore에 다음 추가:
+
+```typescript
+interface ActivityStore {
+  ...
+  pendingByLocalId: Map<string, string>;   // localTmpId → 진짜 UUID
+
+  prependOptimistic(localTmpId: string, partial: Activity): void;  // 낙관적 prepend
+  replaceTmpId(localTmpId: string, realUuid: string): void;        // RPC 응답 후 ID 교체
+  receiveRealtime(activity: Activity): void;                       // dedupe 로직 적용
+}
+```
+
+**dedupe 우선순위**:
+1. **UUID 일치** — 이미 store에 같은 `id`가 있으면 무시 (가장 강한 키)
+2. **임시→진짜 매핑 일치** — `pendingByLocalId`에 이미 매핑된 UUID면 무시
+3. **소프트 키 폴백** — 본인의 활동이고 `(user_id, action_type, scene_id)` 동일 + `created_at` 차이 5초 이내면 임시 row를 진짜 row로 교체 (타임아웃 또는 RPC 에러로 매핑이 누락된 경우 안전망)
 
 ---
 
@@ -191,7 +232,7 @@ bulk RPC 함수(`bulk_update_scene_stages` 등) 안에서도 각 row 단위로 �
 | 아이콘 | Lucide `Activity` |
 | 그리드 디폴트 | width 6 / height 8 |
 | 등록 위치 | `Dashboard.tsx`의 위젯 배열 + `WIDGET_NAMES` 상수 |
-| 부서 모드 | BG/액팅/통합 모두 동일 (department 컬럼 필터) |
+| 부서 모드 | **앱 전역 부서 모드(`useAppStore.activeDepartment`)에 종속**. 위젯 자체 부서 토글 없음. BG-only/액팅-only 화면에서는 자동으로 그 부서만 필터, 통합 모드에서는 BG+액팅 합산 |
 
 ### 5.2 헤더
 
@@ -310,23 +351,30 @@ bulk RPC 함수(`bulk_update_scene_stages` 등) 안에서도 각 row 단위로 �
 
 ```typescript
 interface ActivityStore {
-  activities: Activity[];                  // 시간 역순, 최대 500
+  activities: Activity[];                       // 시간 역순, 최대 500
+  statsGrid: number[][];                        // 7×24 히트맵 격자 (서버에서 fetch)
+  pendingByLocalId: Map<string, string>;        // 낙관적 row 매핑 (§4.4)
+  lastSeenCreatedAt: string | null;             // Realtime backfill 기준점
   isLoading: boolean;
   error: string | null;
   hasMore: boolean;
+
   filters: {
     groups: Set<'progress' | 'memo' | 'scene' | 'etc'>;
-    department: 'all' | 'bg' | 'acting';
+    // department는 useAppStore.activeDepartment에서 가져옴, 본 store에 저장하지 않음
   };
   goldenMode: 'heatmap' | 'hour' | 'day';
 
   // 액션
   loadInitial(): Promise<void>;
   loadMore(): Promise<void>;
-  prepend(activity: Activity): void;       // Realtime
-  applyDelta(payload: RealtimePayload): void;
-  setFilter(group: ..., on: boolean): void;
-  setGoldenMode(mode: ...): void;
+  loadStats(): Promise<void>;                   // activity:stats RPC
+  backfillSince(createdAt: string): Promise<void>;  // 재연결 시
+  prependOptimistic(localTmpId: string, partial: Activity): void;
+  replaceTmpId(localTmpId: string, realUuid: string): void;
+  receiveRealtime(activity: Activity): void;    // dedupe 로직 적용
+  setFilter(group: ActionGroup, on: boolean): void;
+  setGoldenMode(mode: 'heatmap' | 'hour' | 'day'): void;
 }
 ```
 
@@ -350,17 +398,30 @@ interface ActivityStore {
   → Supabase Realtime 이벤트
   → electron/realtime.ts 수신
   → broadcast.ts → 모든 윈도우에 전파
-  → useActivityStore.prepend(newItem) (UUID 중복 체크 후)
+  → useActivityStore.receiveRealtime(newItem) (§4.4 dedupe 적용)
   → 피드 최상단에 Framer Motion 진입 애니메이션
   → 히트맵 해당 셀 강도 +1 (로컬 재계산)
 
 [자기 변경]
-  체크박스 토글 → 낙관적 prepend (tmp_*) → RPC 응답으로 진짜 UUID 교체
-  Realtime 같은 UUID 이벤트는 store dedupe 로직으로 무시
+  체크박스 토글
+  → useActivityStore.prependOptimistic(tmpId, partial)
+  → RPC 호출 → 응답 UUID 받음 → replaceTmpId(tmpId, realUuid)
+  → Realtime 같은 UUID 이벤트 도착 → dedupe로 무시
+  → RPC 에러 시: 일정 시간 뒤 소프트 키 폴백으로 매칭 시도, 그래도 안 맞으면 임시 row 제거
+
+[Realtime 재연결 backfill]
+  WebSocket 끊김 → useAppStore.dataConnected = false (헤더 점)
+  재연결(SUBSCRIBED 콜백)
+    → IPC 'activity:backfill' { since: lastSeenCreatedAt }
+    → activity_log WHERE created_at > since ORDER BY created_at ASC LIMIT 200
+    → 각 row를 receiveRealtime() 호출 (dedupe 적용)
+    → lastSeenCreatedAt 갱신
+    → 통계 격자(useActivityStore.statsGrid) 다시 fetch (activity:stats)
 
 [페이지네이션]
   피드 끝 도달 → loadMore() → IPC { before: oldestCreatedAt, limit: 50 }
-  → 7일 경계 도달 시 hasMore: false
+  → 7일 경계 도달 또는 누적 500건 도달 중 먼저 닿는 쪽에서 hasMore: false
+  → 그 시점에 "이전 활동은 자동 정리되었습니다" 안내 (v1)
 ```
 
 ### 6.3 그룹화 알고리즘
@@ -395,9 +456,13 @@ function pickGoldenDay(dayTotals: number[]): {day, ratio}
 
 | 채널 | 역할 |
 |---|---|
-| `activity:list` | 페이지네이션 조회 |
-| `activity:record` | RPC `record_activity` 호출 래퍼 |
-| `activity:stats` | 1주일치 히트맵용 집계 (옵션, 클라이언트 계산이면 생략 가능) |
+| `activity:list` | 페이지네이션 조회 (최근 100건, before 커서) |
+| `activity:stats` | **필수** — 7일치 24×7 격자 집계 (서버 사이드, GROUP BY day_of_week, hour) |
+| `activity:backfill` | Realtime 재연결 시 누락분 fetch (`created_at > lastSeenAt`) |
+
+**`activity:record` IPC 채널은 노출하지 않음.** 활동 기록은 `electron/supabase.ts` 내부의 `recordActivity()` 헬퍼로만 호출되며, 각 mutation 함수가 직접 사용. 렌더러가 임의로 활동을 기록할 경로를 제거해 §3.4 신뢰 모델 위반을 줄임.
+
+**`activity:stats` 필수 사유**: 활발한 시기엔 7일치 활동이 클라이언트 캐시 한도(500건)를 초과할 수 있어, 클라이언트 사이드 집계는 부정확. 서버에서 `GROUP BY EXTRACT(dow FROM created_at AT TIME ZONE 'Asia/Seoul'), EXTRACT(hour FROM created_at AT TIME ZONE 'Asia/Seoul')` 으로 정확한 24×7 격자 반환.
 
 ---
 
@@ -415,15 +480,16 @@ function pickGoldenDay(dayTotals: number[]): {day, ratio}
 - 씬 삭제 → `scene_id`는 FK 없으므로 그대로 남음, 클릭 시 토스트 후 모달 닫힘
 - 아카이브된 에피소드 활동도 표시 (필터로 제외 가능, v2)
 
-### 7.3 성능 추정
+### 7.3 성능 추정 (Supabase Pro 플랜)
 
 | 시나리오 | 측정/추정 | 대응 |
 |---|---|---|
-| 활동량 (팀 20명, 50건/인/일) | 1,000건/일 = 26만건/년 | 1년 보존 정책으로 제한 |
-| DB 용량 | row 약 400 bytes → 약 100MB/년 | 무료 한도 500MB의 20% |
-| 위젯 첫 로드 | <100ms | 인덱스 효율 |
-| 체크박스 토글 지연 | +5–10ms | RPC INSERT 1건 |
-| Realtime 메시지 | 2만/일 (1000건 × 20접속) | Pro 한도 200만/일의 1% |
+| 활동량 (팀 20명, 50건/인/일) | 1,000건/일 = 26만건/년 | 1년 보존 정책으로 제한 (cron) |
+| DB 용량 | row 약 400 bytes → 약 100MB/년 | Pro 한도 8GB의 1.25%/년, 1년 보존이면 영구 안정 |
+| 위젯 첫 로드 | <100ms | 3개 인덱스로 최근 100건 + 7일 stats GROUP BY 빠름 |
+| 체크박스 토글 지연 | +5–10ms | RPC INSERT 1건 (try/catch로 본 mutation 실패 안 시킴) |
+| Realtime 메시지 | 2만/일 (1000건 × 20접속) | Pro 한도 250만/일의 1% |
+| Realtime 재연결 backfill | 끊김 N분 후 재연결 시 N분치 fetch 1회 | RPC 1회, 보통 < 50건 |
 
 ### 7.4 사이즈 모니터링
 
@@ -525,7 +591,7 @@ function pickGoldenDay(dayTotals: number[]): {day, ratio}
 3. **활동 범위**: 진척만 / 진척+소통 / 픽토그램 다양화 → **그룹화된 픽토그램**
 4. **골든타임 형태**: 히트맵 / 시간대 막대 / 사람별 카드 / 텍스트 → **히트맵** (+ 후속 요청으로 막대 모드 추가)
 5. **레이아웃**: 상하 분할 / 탭 / 좌우 분할 / 분리 위젯 → **상하 분할**
-6. **추적 종류**: 성과만 / 성과+소통 / 성과+소통+설정 → **전부 (12종 → 13종)**
+6. **추적 종류**: 성과만 / 성과+소통 / 성과+소통+설정 → **전부 14종 action_type / 14개 호출 지점 / 12개 mutation 함수 손봄** (씬 삭제 추가, 이미지 업로드 2종 분리)
 7. **출시 시점 데이터**: 풍부 백필 / 진척만 백필 / 깨끗한 시작 → **깨끗한 시작**
 8. **기록 경로**: 트리거 / 앱 INSERT+RPC / 기존 테이블 UNION → **앱 INSERT+RPC**
 9. **추가 보강** (한솔 요청): 그래프 3모드 + 4그룹 필터 + 툴팁 강화 + 1년 보존
