@@ -1,0 +1,30 @@
+/* TipTap PathLinkMark 스타일. PathBadge(React 인라인 스타일)와 외관 일관 유지. */
+.path-link-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: monospace;
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: #74B9FF;
+  background: rgba(116, 185, 255, 0.1);
+  border: 1px solid rgba(116, 185, 255, 0.2);
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.path-link-mark:hover {
+  filter: brightness(1.25);
+}
+
+.path-link-mark::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%2374B9FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></svg>');
+  background-size: contain;
+  background-repeat: no-repeat;
+}
