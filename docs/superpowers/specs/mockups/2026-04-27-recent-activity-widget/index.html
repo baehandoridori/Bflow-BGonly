@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>최근 작업 위젯 — 레이아웃 시안 비교</title>
+<style>
+  :root {
+    --bg: #0F1117;
+    --bg-deep: #0a0c12;
+    --card: #1A1D27;
+    --card-hi: #20232f;
+    --border: #2D3041;
+    --border-soft: rgba(45, 48, 65, 0.6);
+    --text: #E8E8EE;
+    --text-muted: #8B8DA3;
+    --text-faint: #5b5e75;
+    --accent: #6C5CE7;
+    --accent-sub: #A29BFE;
+    --lo: #74B9FF;
+    --done: #A29BFE;
+    --review: #FDCB6E;
+    --png: #00B894;
+    --memo: #FF8FA3;
+    --comment: #FFA94D;
+    --rev: #4DD0E1;
+    --new: #6FCF97;
+
+    --glass-tint: rgba(26, 29, 39, 0.55);
+    --glass-highlight: rgba(255, 255, 255, 0.06);
+    --shadow: rgba(0, 0, 0, 0.45);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(ellipse at top, #1a1d2e 0%, var(--bg) 35%, var(--bg-deep) 100%);
+    color: var(--text);
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    padding: 32px 24px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 페이지 헤더 */
+  .page-header {
+    max-width: 1400px;
+    margin: 0 auto 32px;
+  }
+  .page-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+  }
+  .page-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  .page-tag {
+    display: inline-block;
+    background: rgba(108, 92, 231, 0.15);
+    color: var(--accent-sub);
+    border: 1px solid rgba(108, 92, 231, 0.25);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+
+  /* 시안 그리드 */
+  .options {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 28px;
+  }
+
+  .option {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .option-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .option-num {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-sub);
+    background: rgba(108, 92, 231, 0.15);
+    padding: 3px 8px;
+    border-radius: 6px;
+    letter-spacing: 0.05em;
+  }
+  .option-title {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .option-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin: 0 0 4px;
+    padding-left: 2px;
+  }
+
+  /* 위젯 외관 (Widget.tsx 글래스 패턴) */
+  .widget {
+    background: var(--glass-tint);
+    backdrop-filter: blur(24px) saturate(1.8);
+    -webkit-backdrop-filter: blur(24px) saturate(1.8);
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow:
+      0 8px 32px var(--shadow),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: column;
+  }
+  .widget-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(45, 48, 65, 0.4);
+    user-select: none;
+  }
+  .drag-dots {
+    display: grid;
+    grid-template-columns: repeat(2, 3px);
+    gap: 3px;
+    margin-right: 4px;
+  }
+  .drag-dots span {
+    width: 3px; height: 3px; border-radius: 50%;
+    background: rgba(139, 141, 163, 0.35);
+  }
+  .widget-icon {
+    color: var(--accent);
+    display: flex;
+  }
+  .widget-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(232, 232, 238, 0.9);
+  }
+  .widget-tools {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+    color: var(--text-faint);
+  }
+  .widget-tools svg { cursor: pointer; transition: color .2s; }
+  .widget-tools svg:hover { color: var(--accent-sub); }
+
+  /* 활동 피드 */
+  .feed {
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+  .feed::-webkit-scrollbar { width: 6px; }
+  .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .feed::-webkit-scrollbar-track { background: transparent; }
+
+  .feed-item {
+    display: flex;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(45, 48, 65, 0.25);
+    transition: background .15s;
+    cursor: pointer;
+  }
+  .feed-item:hover { background: rgba(255, 255, 255, 0.02); }
+  .feed-item:last-child { border-bottom: none; }
+
+  .avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6C5CE7, #A29BFE);
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    border: 1.5px solid rgba(255, 255, 255, 0.06);
+  }
+  .avatar.h { background: linear-gradient(135deg, #FF8FA3, #FF6B9D); }
+  .avatar.j { background: linear-gradient(135deg, #74B9FF, #4DA3FF); }
+  .avatar.m { background: linear-gradient(135deg, #00B894, #00D4A8); }
+  .avatar.s { background: linear-gradient(135deg, #FDCB6E, #F39C12); }
+  .avatar.d { background: linear-gradient(135deg, #4DD0E1, #26C6DA); }
+
+  .feed-body { flex: 1; min-width: 0; }
+  .feed-line {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12.5px;
+    color: var(--text);
+    line-height: 1.45;
+    flex-wrap: wrap;
+  }
+  .feed-name { font-weight: 600; color: var(--text); }
+  .feed-action { color: var(--text-muted); }
+  .feed-target {
+    color: var(--accent-sub);
+    background: rgba(108, 92, 231, 0.1);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .feed-meta {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+  .pictogram {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    flex-shrink: 0;
+  }
+  .pictogram.lo     { background: rgba(116, 185, 255, 0.18); color: var(--lo); }
+  .pictogram.done   { background: rgba(162, 155, 254, 0.18); color: var(--done); }
+  .pictogram.review { background: rgba(253, 203, 110, 0.18); color: var(--review); }
+  .pictogram.png    { background: rgba(0, 184, 148, 0.18);   color: var(--png); }
+  .pictogram.memo   { background: rgba(255, 143, 163, 0.18); color: var(--memo); }
+  .pictogram.comment{ background: rgba(255, 169, 77, 0.18);  color: var(--comment); }
+  .pictogram.rev    { background: rgba(77, 208, 225, 0.18);  color: var(--rev); }
+  .pictogram.new    { background: rgba(111, 207, 151, 0.18); color: var(--new); }
+
+  /* 히트맵 */
+  .heatmap-wrap {
+    padding: 14px 16px 16px;
+  }
+  .heatmap-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+  .heatmap-legend {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 10.5px;
+  }
+  .heatmap-legend .lcell {
+    width: 10px; height: 10px; border-radius: 2px;
+  }
+
+  .heatmap {
+    display: grid;
+    grid-template-columns: 22px repeat(24, 1fr);
+    gap: 2px;
+    align-items: center;
+  }
+  .h-empty { width: 22px; }
+  .h-hour {
+    font-size: 9px;
+    color: var(--text-faint);
+    text-align: center;
+  }
+  .h-day {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: right;
+    padding-right: 6px;
+  }
+  .cell {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 2px;
+    background: rgba(108, 92, 231, 0.06);
+    transition: transform .15s;
+    cursor: pointer;
+  }
+  .cell:hover { transform: scale(1.4); z-index: 2; position: relative; }
+  .cell.l1 { background: rgba(108, 92, 231, 0.18); }
+  .cell.l2 { background: rgba(108, 92, 231, 0.36); }
+  .cell.l3 { background: rgba(108, 92, 231, 0.58); }
+  .cell.l4 { background: rgba(108, 92, 231, 0.85); box-shadow: 0 0 8px rgba(108, 92, 231, 0.3); }
+
+  /* 옵션 1: 상하 분할 */
+  .opt1 .widget { height: 580px; }
+  .opt1 .heatmap-wrap { flex-shrink: 0; }
+  .opt1 .feed-section-divider {
+    padding: 8px 16px 6px;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    border-top: 1px solid rgba(45, 48, 65, 0.4);
+    background: rgba(0, 0, 0, 0.15);
+  }
+  .opt1 .feed { flex: 1; }
+
+  /* 옵션 2: 탭 전환 */
+  .opt2 .widget { height: 580px; }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px 0;
+    border-bottom: 1px solid rgba(45, 48, 65, 0.4);
+  }
+  .tab {
+    padding: 8px 14px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: color .2s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tab.active {
+    color: var(--accent-sub);
+  }
+  .tab.active::after {
+    content: ''; position: absolute;
+    left: 12px; right: 12px; bottom: -1px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+  .tab .tab-count {
+    font-size: 10px;
+    background: rgba(108, 92, 231, 0.2);
+    color: var(--accent-sub);
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .opt2 .feed { flex: 1; }
+
+  /* 옵션 3: 좌우 분할 */
+  .opt3 .widget { height: 420px; }
+  .split-horizontal {
+    display: grid;
+    grid-template-columns: 1fr 1px 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+  .split-divider {
+    background: rgba(45, 48, 65, 0.4);
+  }
+  .split-side {
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .split-side .feed { flex: 1; }
+  .side-label {
+    padding: 8px 14px 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+  }
+
+  /* 옵션 4: 두 위젯 분리 */
+  .opt4 .widget-pair {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 14px;
+  }
+  .opt4 .widget { height: 420px; }
+  .opt4 .feed { flex: 1; }
+  .opt4 .ghost-widget {
+    background: rgba(26, 29, 39, 0.25);
+    border: 1px dashed rgba(45, 48, 65, 0.5);
+    border-radius: 16px;
+    padding: 24px;
+    color: var(--text-faint);
+    font-size: 11px;
+    text-align: center;
+    grid-column: 1 / -1;
+    margin-top: 12px;
+  }
+
+  /* 인사이트 배너 (히트맵 위) */
+  .insight {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    margin: 12px 16px 0;
+    background: rgba(108, 92, 231, 0.08);
+    border: 1px solid rgba(108, 92, 231, 0.18);
+    border-radius: 10px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .insight strong { color: var(--accent-sub); }
+  .insight-icon {
+    color: var(--accent-sub);
+    flex-shrink: 0;
+  }
+  /* 옵션 4: 위젯이 좁아 인사이트는 메인 헤더 위에만 표시 */
+</style>
+</head>
+<body>
+
+<header class="page-header">
+  <h1 class="page-title">
+    최근 작업 위젯 · 레이아웃 시안 비교
+    <span class="page-tag">옵션 4가지</span>
+  </h1>
+  <p class="page-subtitle">동일한 가짜 데이터(EP01~EP03 / 5명 / 24시간) 기준 · 다크 + 글래스모피즘 · 디자인 토큰 그대로</p>
+</header>
+
+<main class="options">
+
+  <!-- ────────────── 옵션 1: 상하 분할 ────────────── -->
+  <section class="option opt1">
+    <div class="option-header">
+      <span class="option-num">옵션 1</span>
+      <span class="option-title">상하 분할 — 히트맵(고정) + 활동 피드(스크롤)</span>
+    </div>
+    <p class="option-desc">상단에 1주일 골든타임을 한눈에. 하단은 시간순 활동 피드가 무한 스크롤. 시선이 패턴 → 최신 활동으로 자연스럽게 흐름.</p>
+
+    <div class="widget">
+      <div class="widget-header">
+        <div class="drag-dots">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <span class="widget-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><polyline points="12 7 12 12 15 14"/></svg>
+        </span>
+        <span class="widget-title">최근 작업</span>
+        <div class="widget-tools">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v7H3V3h7"/></svg>
+        </div>
+      </div>
+
+      <div class="heatmap-wrap">
+        <div class="heatmap-head">
+          <span><strong style="color:var(--text)">팀 골든타임</strong> · 최근 7일</span>
+          <div class="heatmap-legend">
+            적음
+            <span class="lcell" style="background: rgba(108, 92, 231, 0.06);"></span>
+            <span class="lcell" style="background: rgba(108, 92, 231, 0.18);"></span>
+            <span class="lcell" style="background: rgba(108, 92, 231, 0.36);"></span>
+            <span class="lcell" style="background: rgba(108, 92, 231, 0.58);"></span>
+            <span class="lcell" style="background: rgba(108, 92, 231, 0.85);"></span>
+            많음
+          </div>
+        </div>
+        <div class="heatmap" id="heatmap-1"></div>
+      </div>
+
+      <div class="insight">
+        <span class="insight-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </span>
+        <span>이번 주 가장 활발: <strong>화요일 14–16시</strong> (47건)</span>
+      </div>
+
+      <div class="feed-section-divider">최근 활동</div>
+      <div class="feed" id="feed-1"></div>
+    </div>
+  </section>
+
+  <!-- ────────────── 옵션 2: 탭 전환 ────────────── -->
+  <section class="option opt2">
+    <div class="option-header">
+      <span class="option-num">옵션 2</span>
+      <span class="option-title">탭 전환 — 활동 / 골든타임</span>
+    </div>
+    <p class="option-desc">한 번에 한 가지만 집중해서 보기. 세로 공간을 풍부하게 쓸 수 있지만, 다른 정보는 탭 전환 전엔 안 보임.</p>
+
+    <div class="widget">
+      <div class="widget-header">
+        <div class="drag-dots">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <span class="widget-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><polyline points="12 7 12 12 15 14"/></svg>
+        </span>
+        <span class="widget-title">최근 작업</span>
+        <div class="widget-tools">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v7H3V3h7"/></svg>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab active">
+          활동 피드
+          <span class="tab-count">38</span>
+        </button>
+        <button class="tab">
+          골든타임
+        </button>
+      </div>
+      <div class="feed" id="feed-2"></div>
+    </div>
+  </section>
+
+  <!-- ────────────── 옵션 3: 좌우 분할 ────────────── -->
+  <section class="option opt3">
+    <div class="option-header">
+      <span class="option-num">옵션 3</span>
+      <span class="option-title">좌우 분할 — 피드 ‖ 히트맵</span>
+    </div>
+    <p class="option-desc">가로로 넓은 위젯에 적합. 둘을 동시에 보면서 “이 사람이 이때 했구나” 교차 파악 가능. 단, 위젯이 충분히 넓고 낮아야 자연스러움.</p>
+
+    <div class="widget">
+      <div class="widget-header">
+        <div class="drag-dots">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <span class="widget-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><polyline points="12 7 12 12 15 14"/></svg>
+        </span>
+        <span class="widget-title">최근 작업</span>
+        <div class="widget-tools">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v7H3V3h7"/></svg>
+        </div>
+      </div>
+      <div class="split-horizontal">
+        <div class="split-side">
+          <div class="side-label">활동 피드</div>
+          <div class="feed" id="feed-3"></div>
+        </div>
+        <div class="split-divider"></div>
+        <div class="split-side">
+          <div class="side-label">골든타임</div>
+          <div class="heatmap-wrap" style="padding-top:6px;">
+            <div class="heatmap" id="heatmap-3"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ────────────── 옵션 4: 두 위젯 분리 ────────────── -->
+  <section class="option opt4">
+    <div class="option-header">
+      <span class="option-num">옵션 4</span>
+      <span class="option-title">두 위젯 분리 — 그리드에 자유 배치</span>
+    </div>
+    <p class="option-desc">‘최근 활동’과 ‘팀 골든타임’이 각각 독립 위젯. 사용자가 react-grid-layout에서 자유롭게 배치/팝아웃/리사이즈. 단, 두 정보 사이 시선 거리가 멀어질 수 있음.</p>
+
+    <div class="widget-pair">
+      <div class="widget">
+        <div class="widget-header">
+          <div class="drag-dots">
+            <span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <span class="widget-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </span>
+          <span class="widget-title">최근 활동</span>
+          <div class="widget-tools">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v7H3V3h7"/></svg>
+          </div>
+        </div>
+        <div class="feed" id="feed-4"></div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-header">
+          <div class="drag-dots">
+            <span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <span class="widget-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </span>
+          <span class="widget-title">팀 골든타임</span>
+          <div class="widget-tools">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v7H3V3h7"/></svg>
+          </div>
+        </div>
+        <div class="heatmap-wrap" style="flex:1; display:flex; flex-direction:column;">
+          <div class="heatmap" id="heatmap-4"></div>
+          <div style="margin-top:auto;font-size:11px;color:var(--text-muted);text-align:center;padding-top:14px;">
+            🌟 정점 <strong style="color:var(--accent-sub);">화요일 14–16시</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  /* ─── 가짜 활동 데이터 ─── */
+  const ACTIONS = [
+    { type: 'lo',      icon: 'check',    verb: 'LO 완료',    target: 'EP02 A씬 #5' },
+    { type: 'done',    icon: 'check',    verb: '완료 진척',  target: 'EP01 B씬 #12' },
+    { type: 'review',  icon: 'eye',      verb: '검수 통과',  target: 'EP03 C씬 #3' },
+    { type: 'png',     icon: 'sparkle',  verb: 'PNG 마감',   target: 'EP01 A씬 #8' },
+    { type: 'memo',    icon: 'pen',      verb: '메모 수정',  target: 'EP02 B씬 #4' },
+    { type: 'comment', icon: 'message',  verb: '댓글 작성',  target: 'EP01 D씬 #2' },
+    { type: 'rev',     icon: 'rotate',   verb: '리비전 등록', target: 'EP03 A씬 #7' },
+    { type: 'new',     icon: 'plus',     verb: '씬 추가',    target: 'EP02 C씬 #11' },
+  ];
+  const PEOPLE = [
+    { id: 'h', name: '한솔',   avatarClass: 'h' },
+    { id: 'j', name: '지영',   avatarClass: 'j' },
+    { id: 'm', name: '민수',   avatarClass: 'm' },
+    { id: 's', name: '수진',   avatarClass: 's' },
+    { id: 'd', name: '도현',   avatarClass: 'd' },
+  ];
+
+  const ICON_SVG = {
+    check:   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>',
+    eye:     '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+    sparkle: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.39 6.96L22 12l-7.61 3.04L12 22l-2.39-6.96L2 12l7.61-3.04z"/></svg>',
+    pen:     '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+    message: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    rotate:  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+    plus:    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  };
+
+  const sampleFeed = [
+    { p:'h', a: ACTIONS[0], when: '2분 전' },
+    { p:'j', a: ACTIONS[5], when: '8분 전' },
+    { p:'m', a: ACTIONS[3], when: '14분 전' },
+    { p:'h', a: ACTIONS[2], when: '32분 전' },
+    { p:'s', a: ACTIONS[6], when: '47분 전' },
+    { p:'d', a: ACTIONS[4], when: '1시간 전' },
+    { p:'j', a: ACTIONS[7], when: '1시간 전' },
+    { p:'m', a: ACTIONS[1], when: '1시간 전' },
+    { p:'h', a: ACTIONS[5], when: '2시간 전' },
+    { p:'s', a: ACTIONS[0], when: '2시간 전' },
+    { p:'d', a: ACTIONS[2], when: '3시간 전' },
+    { p:'j', a: ACTIONS[3], when: '4시간 전' },
+  ];
+
+  function renderFeed(targetId, items) {
+    const el = document.getElementById(targetId);
+    if (!el) return;
+    el.innerHTML = items.map(i => {
+      const person = PEOPLE.find(p => p.id === i.p);
+      const initial = person.name.charAt(0);
+      return `
+        <div class="feed-item">
+          <div class="avatar ${person.avatarClass}">${initial}</div>
+          <div class="feed-body">
+            <div class="feed-line">
+              <span class="feed-name">${person.name}</span>
+              <span class="pictogram ${i.a.type}">${ICON_SVG[i.a.icon]}</span>
+              <span class="feed-action">${i.a.verb}</span>
+              <span class="feed-target">${i.a.target}</span>
+            </div>
+            <div class="feed-meta">
+              <span>${i.when}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  /* ─── 히트맵 ─── */
+  const DAYS = ['월','화','수','목','금','토','일'];
+  // 의도된 골든타임 패턴: 화요일 14-16시가 정점
+  function genHeatmap() {
+    const grid = [];
+    for (let d = 0; d < 7; d++) {
+      const row = [];
+      for (let h = 0; h < 24; h++) {
+        let level = 0;
+        if (h >= 10 && h <= 18 && d < 5) {
+          level = Math.floor(Math.random() * 3) + 1;
+          if (h >= 13 && h <= 16 && d === 1) level = 4; // 화 14-16시 정점
+          if (h >= 14 && h <= 15 && d === 0) level = 3;
+          if (h === 11 && d === 2) level = 3;
+        } else if (h >= 19 && h <= 22 && d < 5) {
+          level = Math.random() > 0.6 ? 1 : 0;
+        } else if (d >= 5 && h >= 14 && h <= 17) {
+          level = Math.random() > 0.7 ? 1 : 0;
+        }
+        row.push(level);
+      }
+      grid.push(row);
+    }
+    return grid;
+  }
+
+  function renderHeatmap(targetId, includeHourLabels = true) {
+    const el = document.getElementById(targetId);
+    if (!el) return;
+    const grid = genHeatmap();
+    let html = '';
+
+    // 시간 라벨 행
+    if (includeHourLabels) {
+      html += '<div class="h-empty"></div>';
+      for (let h = 0; h < 24; h++) {
+        html += `<div class="h-hour">${h % 6 === 0 ? h : ''}</div>`;
+      }
+    }
+    // 요일별 행
+    for (let d = 0; d < 7; d++) {
+      html += `<div class="h-day">${DAYS[d]}</div>`;
+      for (let h = 0; h < 24; h++) {
+        const level = grid[d][h];
+        html += `<div class="cell ${level > 0 ? 'l'+level : ''}" title="${DAYS[d]} ${h}시"></div>`;
+      }
+    }
+    el.innerHTML = html;
+  }
+
+  // 렌더링
+  renderFeed('feed-1', sampleFeed.slice(0, 8));
+  renderFeed('feed-2', sampleFeed);
+  renderFeed('feed-3', sampleFeed.slice(0, 6));
+  renderFeed('feed-4', sampleFeed.slice(0, 8));
+
+  renderHeatmap('heatmap-1');
+  renderHeatmap('heatmap-3');
+  renderHeatmap('heatmap-4');
+</script>
+
+</body>
+</html>

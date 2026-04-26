@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>최근 작업 위젯 — 최종 시안</title>
+<style>
+  :root {
+    --bg: #0F1117;
+    --bg-deep: #0a0c12;
+    --card: #1A1D27;
+    --card-hi: #20232f;
+    --border: #2D3041;
+    --border-soft: rgba(45, 48, 65, 0.6);
+    --text: #E8E8EE;
+    --text-muted: #8B8DA3;
+    --text-faint: #5b5e75;
+    --accent: #6C5CE7;
+    --accent-sub: #A29BFE;
+    --lo: #74B9FF;
+    --done: #A29BFE;
+    --review: #FDCB6E;
+    --png: #00B894;
+    --memo: #FF8FA3;
+    --comment: #FFA94D;
+    --rev: #4DD0E1;
+    --rev-resolve: #81ECEC;
+    --new: #6FCF97;
+    --del: #FF7675;
+    --gray: #95A5A6;
+
+    --glass-tint: rgba(26, 29, 39, 0.55);
+    --shadow: rgba(0, 0, 0, 0.45);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(ellipse at top, #1a1d2e 0%, var(--bg) 35%, var(--bg-deep) 100%);
+    color: var(--text);
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    padding: 32px 24px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page-wrap {
+    max-width: 760px; margin: 0 auto;
+  }
+  .page-title {
+    font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 6px;
+  }
+  .page-subtitle {
+    font-size: 12.5px; color: var(--text-muted); margin: 0 0 22px;
+  }
+  .tag {
+    display: inline-block;
+    background: rgba(108, 92, 231, 0.15);
+    color: var(--accent-sub);
+    border: 1px solid rgba(108, 92, 231, 0.25);
+    padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+    margin-left: 8px; vertical-align: middle;
+  }
+
+  /* 위젯 */
+  .widget {
+    background: var(--glass-tint);
+    backdrop-filter: blur(24px) saturate(1.8);
+    -webkit-backdrop-filter: blur(24px) saturate(1.8);
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow:
+      0 8px 32px var(--shadow),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    display: flex; flex-direction: column;
+    height: 720px;
+  }
+
+  /* 헤더 */
+  .widget-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 14px; border-bottom: 1px solid rgba(45, 48, 65, 0.4);
+    user-select: none;
+  }
+  .drag-dots {
+    display: grid; grid-template-columns: repeat(2, 3px); gap: 3px; margin-right: 4px;
+  }
+  .drag-dots span { width: 3px; height: 3px; border-radius: 50%; background: rgba(139,141,163,0.35); }
+  .widget-icon { color: var(--accent); display: flex; }
+  .widget-title { font-size: 13px; font-weight: 500; color: rgba(232, 232, 238, 0.9); }
+  .widget-tools { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+
+  /* 그래프 모드 토글 */
+  .mode-toggle {
+    display: flex; gap: 2px; background: rgba(0, 0, 0, 0.25);
+    padding: 2px; border-radius: 7px;
+  }
+  .mode-toggle button {
+    background: none; border: none; color: var(--text-muted);
+    padding: 4px 8px; border-radius: 5px; cursor: pointer;
+    font-size: 11px; display: flex; align-items: center; gap: 4px;
+    transition: all .15s;
+  }
+  .mode-toggle button:hover { color: var(--text); }
+  .mode-toggle button.active {
+    background: rgba(108, 92, 231, 0.2);
+    color: var(--accent-sub);
+    box-shadow: inset 0 0 0 1px rgba(108, 92, 231, 0.3);
+  }
+  .icon-btn {
+    background: none; border: none; color: var(--text-faint);
+    padding: 4px; border-radius: 6px; cursor: pointer;
+    transition: color .15s;
+    display: flex; align-items: center;
+  }
+  .icon-btn:hover { color: var(--accent-sub); background: rgba(108, 92, 231, 0.08); }
+
+  /* 인사이트 배너 */
+  .insight {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    margin: 12px 14px 0;
+    background: rgba(108, 92, 231, 0.08);
+    border: 1px solid rgba(108, 92, 231, 0.2);
+    border-radius: 10px;
+    font-size: 12.5px;
+    color: var(--text);
+  }
+  .insight strong { color: var(--accent-sub); }
+  .insight-icon { color: var(--accent-sub); flex-shrink: 0; display: flex; }
+
+  /* 골든타임 영역 */
+  .golden-area {
+    padding: 12px 14px 4px;
+    flex-shrink: 0;
+  }
+  .golden-mode { display: none; }
+  .golden-mode.active { display: block; }
+
+  /* 히트맵 */
+  .heatmap {
+    display: grid;
+    grid-template-columns: 22px repeat(24, 1fr);
+    gap: 2px;
+    align-items: center;
+  }
+  .h-empty { width: 22px; }
+  .h-hour {
+    font-size: 9px; color: var(--text-faint); text-align: center;
+  }
+  .h-day {
+    font-size: 10px; color: var(--text-muted); text-align: right; padding-right: 6px;
+  }
+  .cell {
+    width: 100%; aspect-ratio: 1 / 1; border-radius: 2px;
+    background: rgba(108, 92, 231, 0.06);
+    transition: transform .15s;
+    cursor: pointer; position: relative;
+  }
+  .cell:hover { transform: scale(1.4); z-index: 5; }
+  .cell.l1 { background: rgba(108, 92, 231, 0.18); }
+  .cell.l2 { background: rgba(108, 92, 231, 0.36); }
+  .cell.l3 { background: rgba(108, 92, 231, 0.58); }
+  .cell.l4 { background: rgba(108, 92, 231, 0.85); box-shadow: 0 0 8px rgba(108, 92, 231, 0.3); }
+
+  /* 시간대 막대 그래프 */
+  .bar-chart {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    align-items: end;
+    gap: 3px;
+    height: 130px;
+    padding-bottom: 18px;
+    position: relative;
+  }
+  .bar {
+    background: linear-gradient(to top, var(--accent) 0%, var(--accent-sub) 100%);
+    border-radius: 3px 3px 0 0;
+    cursor: pointer;
+    transition: opacity .15s;
+    position: relative;
+  }
+  .bar:hover { opacity: 0.8; }
+  .bar-label {
+    position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
+    font-size: 8.5px; color: var(--text-faint);
+  }
+
+  /* 요일 막대 그래프 */
+  .bar-chart-week {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    align-items: end;
+    gap: 12px;
+    height: 130px;
+    padding: 0 12px 22px;
+  }
+  .bar-week {
+    background: linear-gradient(to top, var(--accent) 0%, var(--accent-sub) 100%);
+    border-radius: 5px 5px 0 0;
+    cursor: pointer;
+    position: relative;
+    transition: opacity .15s;
+  }
+  .bar-week:hover { opacity: 0.85; }
+  .bar-week .bar-label {
+    bottom: -20px; font-size: 11px; color: var(--text-muted);
+  }
+  .bar-week.peak { background: linear-gradient(to top, #FDCB6E 0%, #FFE5A0 100%); }
+
+  /* 툴팁 (글로벌) */
+  .tooltip {
+    position: fixed;
+    background: rgba(15, 17, 23, 0.95);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 11.5px;
+    color: var(--text);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 100;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(12px);
+    transform: translate(-50%, -100%);
+    margin-top: -8px;
+    display: none;
+  }
+  .tooltip.visible { display: block; }
+  .tooltip-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--accent-sub);
+  }
+  .tooltip-row {
+    display: flex; gap: 6px; align-items: center;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+  .tooltip-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+  }
+
+  /* 필터 칩 */
+  .filter-bar {
+    display: flex; gap: 6px; padding: 12px 14px 4px;
+    flex-wrap: wrap;
+    border-top: 1px solid rgba(45, 48, 65, 0.3);
+    margin-top: 8px;
+  }
+  .chip {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 4px 10px; border-radius: 999px;
+    font-size: 11.5px; cursor: pointer;
+    transition: all .15s;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .chip:hover { border-color: var(--accent-sub); color: var(--text); }
+  .chip.active {
+    background: rgba(108, 92, 231, 0.18);
+    border-color: rgba(108, 92, 231, 0.5);
+    color: var(--text);
+  }
+  .chip.all {
+    background: rgba(108, 92, 231, 0.3);
+    border-color: var(--accent-sub);
+    color: var(--accent-sub);
+    font-weight: 600;
+  }
+  .chip-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+  }
+
+  /* 활동 피드 */
+  .feed-divider {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px 6px;
+    font-size: 10.5px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint);
+  }
+  .feed-divider .count {
+    background: rgba(108, 92, 231, 0.15);
+    color: var(--accent-sub);
+    padding: 1px 7px; border-radius: 999px;
+    font-size: 10px;
+    text-transform: none; letter-spacing: 0;
+  }
+  .feed { flex: 1; overflow-y: auto; padding-bottom: 8px; }
+  .feed::-webkit-scrollbar { width: 6px; }
+  .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .feed::-webkit-scrollbar-track { background: transparent; }
+
+  .feed-item {
+    display: flex; gap: 10px;
+    padding: 9px 14px;
+    border-bottom: 1px solid rgba(45, 48, 65, 0.2);
+    transition: background .15s;
+    cursor: pointer;
+    position: relative;
+  }
+  .feed-item:hover { background: rgba(255, 255, 255, 0.025); }
+  .feed-item:last-child { border-bottom: none; }
+  .feed-item.is-self {
+    background: rgba(108, 92, 231, 0.04);
+  }
+  .feed-item.is-self::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 2px; background: var(--accent-sub);
+  }
+
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: linear-gradient(135deg, #6C5CE7, #A29BFE);
+    color: white; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    border: 1.5px solid rgba(255, 255, 255, 0.06);
+  }
+  .avatar.h { background: linear-gradient(135deg, #FF8FA3, #FF6B9D); }
+  .avatar.j { background: linear-gradient(135deg, #74B9FF, #4DA3FF); }
+  .avatar.m { background: linear-gradient(135deg, #00B894, #00D4A8); }
+  .avatar.s { background: linear-gradient(135deg, #FDCB6E, #F39C12); }
+  .avatar.d { background: linear-gradient(135deg, #4DD0E1, #26C6DA); }
+
+  .feed-body { flex: 1; min-width: 0; }
+  .feed-line {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12.5px; line-height: 1.45;
+    flex-wrap: wrap;
+  }
+  .feed-name { font-weight: 600; color: var(--text); }
+  .feed-name.self::after {
+    content: ' (나)';
+    color: var(--accent-sub);
+    font-size: 10.5px;
+    font-weight: 500;
+  }
+  .feed-action { color: var(--text-muted); }
+  .feed-target {
+    color: var(--accent-sub);
+    background: rgba(108, 92, 231, 0.1);
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 11.5px; font-weight: 500;
+  }
+  .feed-meta {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+  .pictogram {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 5px; flex-shrink: 0;
+  }
+  .pictogram.lo     { background: rgba(116, 185, 255, 0.2); color: var(--lo); }
+  .pictogram.done   { background: rgba(162, 155, 254, 0.2); color: var(--done); }
+  .pictogram.review { background: rgba(253, 203, 110, 0.2); color: var(--review); }
+  .pictogram.png    { background: rgba(0, 184, 148, 0.22);  color: var(--png); }
+  .pictogram.memo   { background: rgba(255, 143, 163, 0.2); color: var(--memo); }
+  .pictogram.comment{ background: rgba(255, 169, 77, 0.2);  color: var(--comment); }
+  .pictogram.rev    { background: rgba(77, 208, 225, 0.2);  color: var(--rev); }
+  .pictogram.new    { background: rgba(111, 207, 151, 0.22); color: var(--new); }
+  .pictogram.del    { background: rgba(255, 118, 117, 0.2);  color: var(--del); }
+  .pictogram.assignee, .pictogram.layout, .pictogram.image { background: rgba(149, 165, 166, 0.2); color: var(--gray); }
+
+  /* 그룹화된 활동 (확장/접기) */
+  .feed-group {
+    border-bottom: 1px solid rgba(45, 48, 65, 0.2);
+  }
+  .group-head {
+    display: flex; gap: 10px; padding: 9px 14px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .group-head:hover { background: rgba(255, 255, 255, 0.025); }
+  .group-meta {
+    color: var(--text-faint); font-size: 11px; margin-top: 3px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .group-toggle {
+    color: var(--text-faint);
+    transition: transform .2s;
+    margin-left: 4px;
+  }
+  .group-toggle.open { transform: rotate(90deg); color: var(--accent-sub); }
+  .group-children {
+    background: rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    transition: max-height .25s;
+  }
+  .group-children .feed-item {
+    padding-left: 50px;
+    background: none;
+  }
+  .group-children .feed-item::before { display: none; }
+  .group-children.collapsed { max-height: 0 !important; }
+
+  /* 칩 도트 컬러 */
+  .dot-progress { background: var(--lo); }
+  .dot-memo { background: var(--memo); }
+  .dot-scene { background: var(--new); }
+  .dot-etc { background: var(--gray); }
+
+  /* 레이아웃 안내 라벨 */
+  .label-strip {
+    background: rgba(108, 92, 231, 0.08);
+    border-left: 3px solid var(--accent);
+    padding: 8px 12px;
+    margin: 0 0 16px;
+    border-radius: 0 8px 8px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .label-strip strong { color: var(--accent-sub); }
+</style>
+</head>
+<body>
+
+<div class="page-wrap">
+  <h1 class="page-title">최근 작업 위젯 · 최종 시안 <span class="tag">v2 — 확정</span></h1>
+  <p class="page-subtitle">상하 분할 / 12종+1 추적 / 4그룹 필터 / 3가지 그래프 모드 / 본인 강조 / 그룹화 5분 / 1년 보존</p>
+
+  <div class="label-strip">
+    💡 헤더의 <strong>모드 토글(▦/▮▮▮/━)</strong> · 인사이트 배너 · <strong>4그룹 필터칩</strong> · 그룹화된 항목(▸ 클릭) · 본인 활동(보라색 보더) 모두 클릭/호버 동작합니다.
+  </div>
+
+  <!-- ────────────── 위젯 본체 ────────────── -->
+  <div class="widget">
+
+    <!-- 헤더 -->
+    <div class="widget-header">
+      <div class="drag-dots"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <span class="widget-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </span>
+      <span class="widget-title">최근 작업</span>
+      <div class="widget-tools">
+        <div class="mode-toggle" id="mode-toggle">
+          <button class="active" data-mode="heatmap" title="히트맵 모드">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            히트맵
+          </button>
+          <button data-mode="hour" title="시간대 막대">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
+            시간대
+          </button>
+          <button data-mode="day" title="요일 막대">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            요일
+          </button>
+        </div>
+        <button class="icon-btn" title="필터">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        </button>
+        <button class="icon-btn" title="팝업으로 띄우기">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v7H3V3h7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 인사이트 배너 -->
+    <div class="insight" id="insight">
+      <span class="insight-icon">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </span>
+      <span id="insight-text">이번 주 가장 활발: <strong>화요일 14–16시</strong> (47건)</span>
+    </div>
+
+    <!-- 골든타임 영역 -->
+    <div class="golden-area">
+
+      <!-- 히트맵 모드 -->
+      <div class="golden-mode active" data-mode="heatmap">
+        <div class="heatmap" id="heatmap"></div>
+      </div>
+
+      <!-- 시간대 막대 모드 -->
+      <div class="golden-mode" data-mode="hour">
+        <div class="bar-chart" id="hour-chart"></div>
+      </div>
+
+      <!-- 요일 막대 모드 -->
+      <div class="golden-mode" data-mode="day">
+        <div class="bar-chart-week" id="day-chart"></div>
+      </div>
+    </div>
+
+    <!-- 필터 칩 -->
+    <div class="filter-bar">
+      <button class="chip all">전체 38</button>
+      <button class="chip active">
+        <span class="chip-dot dot-progress"></span> 작업 진행 18
+      </button>
+      <button class="chip active">
+        <span class="chip-dot dot-memo"></span> 메모/댓글 11
+      </button>
+      <button class="chip active">
+        <span class="chip-dot dot-scene"></span> 씬 생성/삭제 4
+      </button>
+      <button class="chip active">
+        <span class="chip-dot dot-etc"></span> 기타 5
+      </button>
+    </div>
+
+    <!-- 피드 -->
+    <div class="feed-divider">
+      최근 활동
+      <span class="count">38건 · 최근 7일</span>
+    </div>
+    <div class="feed" id="feed"></div>
+  </div>
+
+  <!-- 라벨 안내 -->
+  <div style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
+    <div style="font-size: 11.5px; color: var(--text-muted); padding: 8px 14px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+      ✓ 옵션 1 (상하 분할) · ✓ 그래프 3모드 · ✓ 4그룹 필터 칩 · ✓ 그룹화 5분 · ✓ 본인 활동 보더 강조 · ✓ 1년 보존 정책 · ✓ Realtime dedupe
+    </div>
+  </div>
+
+</div>
+
+<!-- 글로벌 툴팁 -->
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+  /* ─── 가짜 데이터 ─── */
+  const ACTIONS = {
+    stage_lo:     { group:'progress', icon:'check',   verb:'LO 완료',     pictoClass:'lo' },
+    stage_done:   { group:'progress', icon:'check',   verb:'완료 진척',   pictoClass:'done' },
+    stage_review: { group:'progress', icon:'eye',     verb:'검수 통과',   pictoClass:'review' },
+    stage_png:    { group:'progress', icon:'sparkle', verb:'PNG 마감',    pictoClass:'png' },
+    memo_update:  { group:'memo',     icon:'pen',     verb:'메모 수정',   pictoClass:'memo' },
+    comment_add:  { group:'memo',     icon:'message', verb:'댓글 작성',   pictoClass:'comment' },
+    revision_add: { group:'memo',     icon:'rotate',  verb:'리비전 등록', pictoClass:'rev' },
+    scene_add:    { group:'scene',    icon:'plus',    verb:'씬 추가',     pictoClass:'new' },
+    scene_delete: { group:'scene',    icon:'trash',   verb:'씬 삭제',     pictoClass:'del' },
+    assignee_change: { group:'etc',  icon:'user',    verb:'담당자 변경', pictoClass:'assignee' },
+    layout_change:   { group:'etc',  icon:'grid',    verb:'레이아웃 변경', pictoClass:'layout' },
+    image_upload_storyboard: { group:'etc', icon:'image', verb:'스토리보드 업로드', pictoClass:'image' },
+  };
+  const ICON_SVG = {
+    check:   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>',
+    eye:     '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+    sparkle: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.39 6.96L22 12l-7.61 3.04L12 22l-2.39-6.96L2 12l7.61-3.04z"/></svg>',
+    pen:     '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+    message: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    rotate:  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+    plus:    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    trash:   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>',
+    user:    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    grid:    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+    image:   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+  };
+
+  const PEOPLE = [
+    { id: 'h', name: '한솔', avatarClass: 'h' },
+    { id: 'j', name: '지영', avatarClass: 'j' },
+    { id: 'm', name: '민수', avatarClass: 'm' },
+    { id: 's', name: '수진', avatarClass: 's' },
+    { id: 'd', name: '도현', avatarClass: 'd' },
+  ];
+
+  const FEED = [
+    /* 그룹: 한솔 / stage_lo / EP01 A씬 / 2분 전 — 5건 묶음 */
+    { type:'group', p:'h', actionType:'stage_lo', label:'EP01 A씬', when:'방금', items: [
+      { target:'EP01 A씬 #5', when:'방금' },
+      { target:'EP01 A씬 #6', when:'1분 전' },
+      { target:'EP01 A씬 #7', when:'2분 전' },
+      { target:'EP01 A씬 #8', when:'3분 전' },
+      { target:'EP01 A씬 #9', when:'4분 전' },
+    ]},
+    { type:'item', p:'j', actionType:'comment_add', target:'EP01 D씬 #2', when:'8분 전' },
+    { type:'item', p:'m', actionType:'stage_png',   target:'EP01 A씬 #8', when:'14분 전' },
+    { type:'item', p:'h', actionType:'stage_review',target:'EP03 C씬 #3', when:'32분 전', isSelf:true },
+    { type:'item', p:'s', actionType:'revision_add',target:'EP03 A씬 #7', when:'47분 전' },
+    { type:'item', p:'d', actionType:'memo_update', target:'EP02 B씬 #4', when:'1시간 전' },
+    { type:'item', p:'j', actionType:'scene_add',   target:'EP02 C씬 #11', when:'1시간 전' },
+    { type:'item', p:'m', actionType:'stage_done',  target:'EP01 B씬 #12', when:'1시간 전' },
+    { type:'item', p:'h', actionType:'memo_update', target:'EP01 D씬 #2', when:'2시간 전', isSelf:true },
+    { type:'item', p:'s', actionType:'assignee_change', target:'EP02 A씬 #3', when:'2시간 전' },
+    { type:'item', p:'d', actionType:'image_upload_storyboard', target:'EP01 C씬 #4', when:'3시간 전' },
+    { type:'item', p:'j', actionType:'scene_delete', target:'EP02 D씬 #15', when:'4시간 전' },
+  ];
+
+  /* ─── 활동 피드 렌더 ─── */
+  function renderFeed() {
+    const el = document.getElementById('feed');
+    el.innerHTML = FEED.map(item => {
+      if (item.type === 'group') {
+        const person = PEOPLE.find(p => p.id === item.p);
+        const action = ACTIONS[item.actionType];
+        const initial = person.name.charAt(0);
+        const isSelf = person.id === 'h'; // 데모: 한솔이 본인
+        const childItems = item.items.map(c => `
+          <div class="feed-item">
+            <div class="feed-body" style="margin-left:0;">
+              <div class="feed-line">
+                <span class="pictogram ${action.pictoClass}">${ICON_SVG[action.icon]}</span>
+                <span class="feed-action">${action.verb}</span>
+                <span class="feed-target">${c.target}</span>
+              </div>
+              <div class="feed-meta"><span>${c.when}</span></div>
+            </div>
+          </div>
+        `).join('');
+        return `
+          <div class="feed-group ${isSelf ? 'is-self-group' : ''}" style="${isSelf ? 'border-left:2px solid var(--accent-sub);' : ''}">
+            <div class="group-head" onclick="toggleGroup(this)">
+              <div class="avatar ${person.avatarClass}">${initial}</div>
+              <div class="feed-body">
+                <div class="feed-line">
+                  <span class="feed-name ${isSelf ? 'self' : ''}">${person.name}</span>
+                  <span class="pictogram ${action.pictoClass}">${ICON_SVG[action.icon]}</span>
+                  <span class="feed-action">${action.verb}</span>
+                  <span class="feed-target">${item.label}</span>
+                  <span style="color:var(--text-faint); font-size:11px;">· ${item.items.length}건</span>
+                </div>
+                <div class="group-meta">
+                  <span>${item.when}</span>
+                  <span style="color:var(--text-faint);">·</span>
+                  <span>5분 내 묶음</span>
+                </div>
+              </div>
+              <span class="group-toggle">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+              </span>
+            </div>
+            <div class="group-children collapsed">${childItems}</div>
+          </div>
+        `;
+      }
+      const person = PEOPLE.find(p => p.id === item.p);
+      const action = ACTIONS[item.actionType];
+      const initial = person.name.charAt(0);
+      return `
+        <div class="feed-item ${item.isSelf ? 'is-self' : ''}">
+          <div class="avatar ${person.avatarClass}">${initial}</div>
+          <div class="feed-body">
+            <div class="feed-line">
+              <span class="feed-name ${item.isSelf ? 'self' : ''}">${person.name}</span>
+              <span class="pictogram ${action.pictoClass}">${ICON_SVG[action.icon]}</span>
+              <span class="feed-action">${action.verb}</span>
+              <span class="feed-target">${item.target}</span>
+            </div>
+            <div class="feed-meta"><span>${item.when}</span></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function toggleGroup(headEl) {
+    const children = headEl.nextElementSibling;
+    const toggle = headEl.querySelector('.group-toggle');
+    children.classList.toggle('collapsed');
+    if (children.classList.contains('collapsed')) {
+      children.style.maxHeight = '0';
+    } else {
+      children.style.maxHeight = children.scrollHeight + 'px';
+    }
+    toggle.classList.toggle('open');
+  }
+
+  /* ─── 골든타임 데이터 ─── */
+  const DAYS = ['월','화','수','목','금','토','일'];
+  function genGrid() {
+    const grid = [];
+    for (let d = 0; d < 7; d++) {
+      const row = [];
+      for (let h = 0; h < 24; h++) {
+        let level = 0;
+        if (h >= 10 && h <= 18 && d < 5) {
+          level = Math.floor(Math.random() * 3) + 1;
+          if (h >= 13 && h <= 16 && d === 1) level = 4;
+          if (h >= 14 && h <= 15 && d === 0) level = 3;
+          if (h === 11 && d === 2) level = 3;
+        } else if (h >= 19 && h <= 22 && d < 5) {
+          level = Math.random() > 0.6 ? 1 : 0;
+        }
+        row.push(level);
+      }
+      grid.push(row);
+    }
+    return grid;
+  }
+  const GRID = genGrid();
+
+  /* 카운트로 변환 (level → 추정 건수) */
+  function levelToCount(l) {
+    if (l === 0) return 0;
+    if (l === 1) return Math.floor(Math.random() * 2) + 1;
+    if (l === 2) return Math.floor(Math.random() * 3) + 3;
+    if (l === 3) return Math.floor(Math.random() * 4) + 6;
+    if (l === 4) return Math.floor(Math.random() * 5) + 11;
+  }
+  const COUNT_GRID = GRID.map(row => row.map(levelToCount));
+
+  /* ─── 히트맵 렌더 ─── */
+  function renderHeatmap() {
+    const el = document.getElementById('heatmap');
+    let html = '<div class="h-empty"></div>';
+    for (let h = 0; h < 24; h++) {
+      html += `<div class="h-hour">${[0,6,12,18].includes(h) ? h : ''}</div>`;
+    }
+    for (let d = 0; d < 7; d++) {
+      html += `<div class="h-day">${DAYS[d]}</div>`;
+      for (let h = 0; h < 24; h++) {
+        const lv = GRID[d][h];
+        const cnt = COUNT_GRID[d][h];
+        html += `<div class="cell ${lv > 0 ? 'l'+lv : ''}" data-day="${DAYS[d]}" data-hour="${h}" data-count="${cnt}" data-tooltip="heatmap"></div>`;
+      }
+    }
+    el.innerHTML = html;
+  }
+
+  /* ─── 시간대 막대 렌더 ─── */
+  function renderHourChart() {
+    const el = document.getElementById('hour-chart');
+    const hourTotal = Array(24).fill(0);
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) hourTotal[h] += COUNT_GRID[d][h];
+    const max = Math.max(...hourTotal);
+    let html = '';
+    for (let h = 0; h < 24; h++) {
+      const pct = max > 0 ? (hourTotal[h] / max) * 100 : 0;
+      html += `<div class="bar" style="height:${Math.max(pct, 2)}%;" data-hour="${h}" data-count="${hourTotal[h]}" data-tooltip="hour">
+        ${[0,6,12,18].includes(h) ? `<span class="bar-label">${h}</span>` : ''}
+      </div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  /* ─── 요일 막대 렌더 ─── */
+  function renderDayChart() {
+    const el = document.getElementById('day-chart');
+    const dayTotal = Array(7).fill(0);
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) dayTotal[d] += COUNT_GRID[d][h];
+    const max = Math.max(...dayTotal);
+    const peakIdx = dayTotal.indexOf(max);
+    let html = '';
+    for (let d = 0; d < 7; d++) {
+      const pct = max > 0 ? (dayTotal[d] / max) * 100 : 0;
+      html += `<div class="bar-week ${d === peakIdx ? 'peak' : ''}" style="height:${Math.max(pct, 4)}%;" data-day="${DAYS[d]}" data-count="${dayTotal[d]}" data-tooltip="day">
+        <span class="bar-label">${DAYS[d]}</span>
+      </div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  /* ─── 모드 토글 ─── */
+  document.getElementById('mode-toggle').addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const mode = btn.dataset.mode;
+    document.querySelectorAll('#mode-toggle button').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.golden-mode').forEach(m => m.classList.toggle('active', m.dataset.mode === mode));
+    const insightText = document.getElementById('insight-text');
+    if (mode === 'heatmap') insightText.innerHTML = '이번 주 가장 활발: <strong>화요일 14–16시</strong> (47건)';
+    if (mode === 'hour')    insightText.innerHTML = '하루 중 정점: <strong>오후 2–4시</strong> (24시간 기준 32%)';
+    if (mode === 'day')     insightText.innerHTML = '주중 정점: <strong>화요일</strong> (전체의 28%)';
+  });
+
+  /* ─── 툴팁 ─── */
+  const tooltip = document.getElementById('tooltip');
+  document.addEventListener('mouseover', e => {
+    const t = e.target.closest('[data-tooltip]');
+    if (!t) { tooltip.classList.remove('visible'); return; }
+    const kind = t.dataset.tooltip;
+    let html = '';
+    if (kind === 'heatmap') {
+      const cnt = +t.dataset.count;
+      const breakdown = breakdownOf(cnt);
+      html = `
+        <div class="tooltip-title">${t.dataset.day} ${t.dataset.hour}시 · ${cnt}건</div>
+        <div class="tooltip-row"><span class="tooltip-dot" style="background:var(--lo)"></span> 작업 진행 ${breakdown.progress}건</div>
+        <div class="tooltip-row"><span class="tooltip-dot" style="background:var(--memo)"></span> 메모/댓글 ${breakdown.memo}건</div>
+        <div class="tooltip-row"><span class="tooltip-dot" style="background:var(--new)"></span> 씬 변경 ${breakdown.scene}건</div>
+        <div class="tooltip-row"><span class="tooltip-dot" style="background:var(--gray)"></span> 기타 ${breakdown.etc}건</div>
+      `;
+    } else if (kind === 'hour') {
+      html = `<div class="tooltip-title">${t.dataset.hour}시</div><div class="tooltip-row">${t.dataset.count}건 (요일 합산)</div>`;
+    } else if (kind === 'day') {
+      html = `<div class="tooltip-title">${t.dataset.day}요일</div><div class="tooltip-row">${t.dataset.count}건 (시간 합산)</div>`;
+    }
+    tooltip.innerHTML = html;
+    tooltip.classList.add('visible');
+  });
+  document.addEventListener('mousemove', e => {
+    if (!tooltip.classList.contains('visible')) return;
+    tooltip.style.left = e.clientX + 'px';
+    tooltip.style.top = e.clientY + 'px';
+  });
+  document.addEventListener('mouseout', e => {
+    if (!e.target.closest('[data-tooltip]')) tooltip.classList.remove('visible');
+  });
+
+  function breakdownOf(total) {
+    const a = Math.floor(total * 0.5);
+    const b = Math.floor(total * 0.25);
+    const c = Math.floor(total * 0.15);
+    const d = Math.max(0, total - a - b - c);
+    return { progress: a, memo: b, scene: c, etc: d };
+  }
+
+  /* ─── 초기 렌더 ─── */
+  renderFeed();
+  renderHeatmap();
+  renderHourChart();
+  renderDayChart();
+</script>
+
+</body>
+</html>
