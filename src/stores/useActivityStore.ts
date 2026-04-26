@@ -53,10 +53,16 @@ function loadMode(): GoldenMode {
 }
 
 function getCurrentDepartment(): 'bg' | 'acting' | null {
-  // useAppStore.activeDepartment 가 있으면 사용. 없으면 통합 (null)
-  const dept = (useAppStore.getState() as { activeDepartment?: string }).activeDepartment;
+  // 대시보드 부서 필터 (useAppStore.dashboardDeptFilter: 'all' | 'bg' | 'acting')
+  const dept = useAppStore.getState().dashboardDeptFilter;
   if (dept === 'bg' || dept === 'acting') return dept;
   return null;
+}
+
+function getCurrentGroupsForServer(filters: Set<ActionGroup>): ActionGroup[] | undefined {
+  // 4그룹 모두 ON이면 굳이 보낼 필요 없음 (서버에 array 비싸지 않지만 명시성)
+  if (filters.size === 4) return undefined;
+  return [...filters];
 }
 
 /** stats grid 의 해당 셀 +1 — Realtime 신규 시 즉시 반영 */
@@ -90,7 +96,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const department = getCurrentDepartment();
-      const rows = await supabaseService.listActivities({ limit: PAGE_SIZE, department });
+      const groups = getCurrentGroupsForServer(get().filters.groups);
+      const rows = await supabaseService.listActivities({ limit: PAGE_SIZE, department, groups });
       set({
         activities: rows,
         lastSeenCreatedAt: rows[0]?.createdAt ?? null,
@@ -111,8 +118,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ isLoading: true });
     try {
       const department = getCurrentDepartment();
+      const groups = getCurrentGroupsForServer(get().filters.groups);
       const rows = await supabaseService.listActivities({
-        before: last.createdAt, limit: PAGE_SIZE, department,
+        before: last.createdAt, limit: PAGE_SIZE, department, groups,
       });
       const sevenDaysAgo = Date.now() - 7 * 86_400_000;
       const filtered = rows.filter((r) => new Date(r.createdAt).getTime() >= sevenDaysAgo);
@@ -130,7 +138,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   async loadStats() {
     try {
       const department = getCurrentDepartment();
-      const stats = await supabaseService.getActivityStats({ days: 7, department });
+      const groups = getCurrentGroupsForServer(get().filters.groups);
+      // 그룹 필터가 켜진 상태면 서버 집계도 같은 그룹만 — 차트와 피드 일관성 유지
+      const stats = await supabaseService.getActivityStats({ days: 7, department, groups });
       set({ statsGrid: buildHeatmapGrid(stats) });
     } catch (err) {
       console.warn('[activity] stats load failed:', err);
@@ -150,10 +160,19 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   },
 
   receiveRealtime(activity) {
+    // 부서 필터: BG-only 또는 ACT-only 모드면 다른 부서 활동은 skip
+    const currentDept = getCurrentDepartment();
+    if (currentDept && activity.department && activity.department !== currentDept) {
+      return;
+    }
+    // 그룹 필터: 4그룹 일부만 활성화면 비활성 그룹 활동은 skip (피드/격자 일관성)
+    const activeGroups = get().filters.groups;
+    if (activeGroups.size < 4 && !activeGroups.has(activity.actionGroup)) {
+      return;
+    }
     set((s) => {
-      // 1) UUID 중복 → 무시
+      // UUID 중복 → 무시
       if (s.activities.some((a) => a.id === activity.id)) return s;
-      // 2) (옵션) 본인 활동 자기 변경 dedupe — Realtime + 자동 INSERT 동시 발생할 일은 적음
       const newActs = [activity, ...s.activities].slice(0, MAX_CACHED);
       return {
         activities: newActs,
@@ -168,6 +187,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (on) next.add(group); else next.delete(group);
     saveFilters(next);
     set({ filters: { groups: next } });
+    // 그룹 필터 변경 시 차트도 같은 그룹만 집계하도록 stats 재로드
+    void get().loadStats();
   },
 
   setAllFilters(on) {
@@ -176,6 +197,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       : new Set();
     saveFilters(next);
     set({ filters: { groups: next } });
+    void get().loadStats();
   },
 
   setGoldenMode(mode) {
