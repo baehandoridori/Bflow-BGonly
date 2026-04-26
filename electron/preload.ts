@@ -160,6 +160,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supabaseReadAllMemos: (userId: string) =>
     ipcRenderer.invoke('supabase:read-all-memos', userId),
 
+  // 활동 기록 — 메인에 currentUser 알리기 (mutation 자동 기록 시 사용)
+  authSetCurrentUser: (user: { id: string; name: string } | null) =>
+    ipcRenderer.invoke('auth:set-current-user', user),
+
   // 활동 기록 (activity_log)
   activityList: (opts: {
     before?: string;

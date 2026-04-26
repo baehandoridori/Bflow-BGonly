@@ -190,6 +190,7 @@ export function installDevElectronAPI(): void {
     onVacationPendingChanged: noop,
 
     // ─── 활동 기록 (mock 은 빈 결과) ─────────────
+    authSetCurrentUser: async () => {},
     activityList: async () => [],
     activityStats: async () => [],
     activityBackfill: async () => [],

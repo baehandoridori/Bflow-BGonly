@@ -542,6 +542,9 @@ export interface ElectronAPI {
   supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) => Promise<void>;
   supabaseReadAllMemos: (userId: string) => Promise<any[]>;
 
+  // ─── 활동 기록 — currentUser 동기화 ─────────
+  authSetCurrentUser: (user: { id: string; name: string } | null) => Promise<void>;
+
   // ─── 활동 기록 (activity_log) ──────────────
   activityList: (opts: {
     before?: string;
