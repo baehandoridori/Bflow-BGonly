@@ -65,10 +65,13 @@ export const PathLinkMark = Node.create({
       new Plugin({
         key: new PluginKey('pathLinkAutoConvert'),
         appendTransaction: (transactions, oldState, newState) => {
-          // 사용자 입력으로 doc 이 바뀐 transaction 만 처리 (자기 변환 transaction 은 docChanged 가 true 지만
-          // setMeta('addToHistory', false) 등으로 구분 가능 — 단순 구현은 selection 보호로 충분)
+          // doc 변경 또는 selection 변경 시 트리거.
+          //  - 입력 중(docChanged + cursor 가 path 위에 있음): selection 보호로 변환 skip
+          //  - 입력 후 cursor 만 이동(selectionChanged): 이전 path 가 selection 영역 밖이므로 변환 진행
+          //  → "타이핑 → cursor 이동 → 자동 변환" 흐름이 정상 작동
           const docChanged = transactions.some((tr) => tr.docChanged);
-          if (!docChanged) return null;
+          const selectionChanged = !oldState.selection.eq(newState.selection);
+          if (!docChanged && !selectionChanged) return null;
 
           const tr = newState.tr;
           let modified = false;
@@ -82,7 +85,8 @@ export const PathLinkMark = Node.create({
 
           newState.doc.descendants((node, pos) => {
             if (!node.isText || !node.text) return;
-            const regex = new RegExp(G_PATH_REGEX_GLOBAL.source, 'g');
+            // i 플래그 등 G_PATH_REGEX_GLOBAL 의 모든 flags 를 그대로 복사 (lowercase g:\ 인식 보장)
+            const regex = new RegExp(G_PATH_REGEX_GLOBAL.source, G_PATH_REGEX_GLOBAL.flags);
             for (const match of node.text.matchAll(regex)) {
               if (match.index === undefined) continue;
               const from = pos + match.index;
