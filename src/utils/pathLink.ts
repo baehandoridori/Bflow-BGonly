@@ -1,12 +1,14 @@
 /**
  * G:\ 경로 인식 정규식.
  *
- * 본 모듈에서만 정의하고 4곳(tokenizeGPaths / PathLinkMark inputRule / pasteRule / 향후 확장)이
+ * 본 모듈에서만 정의하고 메모(InlineTextareaRow) / 댓글(CommentPanel) / 메모위젯(PathLinkExtension Decoration) 3곳이
  * import해 공유한다. 정규식이 어긋나면 인식 결과가 분기되어 일관성이 깨지므로 상수로 묶어둔다.
+ *
+ * 종결자: 줄바꿈(\n, \r). Studio JBBJ 표준 폴더명에 공백이 들어가므로(예: "G:\공유 드라이브\...")
+ * 단순 공백은 종결자로 쓰지 않는다. 사용자가 한 줄 안에 "G:\path 추가설명"처럼 쓰면 줄 끝까지 모두
+ * 경로로 잡히므로, 경로 뒤에 부가 텍스트를 쓰려면 줄을 분리해야 한다.
  */
-export const G_PATH_REGEX_GLOBAL = /G:\\[^\s\n]+/g;
-export const G_PATH_REGEX_INPUT_RULE = /(G:\\[^\s\n]+)\s$/;
-export const G_PATH_REGEX_PASTE_RULE = /G:\\[^\s\n]+/g;
+export const G_PATH_REGEX_GLOBAL = /G:\\[^\n\r]+/g;
 
 export interface PathToken {
   type: 'text' | 'path';
