@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS activity_log (
 
   user_id TEXT NOT NULL,                -- 누가 (users.id 참조, 단 FK는 안 검 — 신뢰 모델은 §3.4)
   user_name TEXT NOT NULL,              -- 표시용 (조인 비용 ↓, 이름 변경되어도 옛 기록은 옛 이름)
-  action_type TEXT NOT NULL,            -- 13종 enum (아래 §3.2)
+  action_type TEXT NOT NULL,            -- 14종 enum (아래 §3.2)
   action_group TEXT NOT NULL,           -- 'progress' | 'memo' | 'scene' | 'etc' (필터 4그룹)
 
   scene_id UUID,                        -- scenes.id (UUID, nullable). 주의: comments.scene_id는 TEXT라 다름. 본 테이블은 UUID 통일.
@@ -80,7 +80,7 @@ CREATE POLICY "allow_all" ON activity_log FOR ALL USING (true) WITH CHECK (true)
 ALTER PUBLICATION supabase_realtime ADD TABLE activity_log;
 ```
 
-### 3.2 13종 `action_type` enum
+### 3.2 14종 `action_type` enum
 
 | # | 그룹 | type 값 | 발생 시점 | 픽토그램 컬러 |
 |---|---|---|---|---|
@@ -99,7 +99,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE activity_log;
 | 13 | **etc** | `image_upload_storyboard` | 스토리보드 이미지 업로드 | 회색 |
 | 14 | **etc** | `image_upload_guide` | 가이드 이미지 업로드 | 회색 |
 
-> 정정: 표 행은 14이지만 그 중 `image_upload_storyboard`/`image_upload_guide`는 한 헬퍼(`uploadImage`)에서 분기하므로 **호출 지점 14개 / type 14개**로 일관 유지. 머리말의 "13종"은 **그룹 분류 기준**(progress 4 + memo 4 + scene 2 + etc 4 = 14)이 아닌 의도된 값. 위 표대로 14종으로 통일하고 머리말·§2를 14로 정정.
+> 합계: action_type 14종 = progress 4 + memo 4 + scene 2 + etc 4. mutation 함수 12개에서 분기를 통해 호출 지점 14개로 매핑(§4.2 표 참조).
 
 ### 3.3 보존 정책 — 1년 자동 정리
 
