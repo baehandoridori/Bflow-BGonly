@@ -105,16 +105,22 @@ export function MemoEditor({
         class: 'memo-prose focus:outline-none',
         spellcheck: 'false',
       },
-      handleClickOn(_view, _pos, _node, _nodePos, event) {
-        // PathLink mark 클릭 → 파일탐색기 열기. selection 이동 차단해 BubbleMenu 미발생.
-        const target = event.target as HTMLElement | null;
-        const linkEl = target?.closest('[data-path-link]') as HTMLElement | null;
-        if (linkEl) {
-          event.preventDefault();
-          window.electronAPI?.shellShowItem?.(linkEl.dataset.pathLink ?? '');
-          return true;
-        }
-        return false;
+      handleDOMEvents: {
+        // PathLink decoration 클릭 → 파일탐색기 열기.
+        // handleClickOn 은 ProseMirror 가 부여한 위치를 우선하므로 decoration 의 data 속성을 못 잡는 경우가 있어
+        // raw DOM 이벤트로 처리한다.
+        click(_view, event) {
+          const target = event.target as HTMLElement | null;
+          const linkEl = target?.closest('[data-path-link]') as HTMLElement | null;
+          if (linkEl) {
+            event.preventDefault();
+            event.stopPropagation();
+            const path = linkEl.getAttribute('data-path-link') ?? '';
+            window.electronAPI?.shellShowItem?.(path);
+            return true;
+          }
+          return false;
+        },
       },
     },
   });

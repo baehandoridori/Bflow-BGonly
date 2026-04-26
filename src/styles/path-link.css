@@ -1,4 +1,6 @@
-/* TipTap PathLinkMark 스타일. PathBadge(React 인라인 스타일)와 외관 일관 유지. */
+/* TipTap PathLink Decoration 스타일. PathBadge(React) 와 외관 일관 유지.
+   ProseMirror Decoration.inline 이 자식 텍스트에 직접 wrap 하므로 max-width + ellipsis 로 박스 길이 제한.
+   풀 경로는 hover 시 title 속성으로 표시. */
 .path-link-mark {
   display: inline-flex;
   align-items: center;
@@ -12,6 +14,11 @@
   border: 1px solid rgba(116, 185, 255, 0.2);
   cursor: pointer;
   transition: filter 0.15s;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .path-link-mark:hover {
