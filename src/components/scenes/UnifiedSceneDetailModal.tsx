@@ -18,6 +18,7 @@ import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Scene, Stage, Department } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { CommentPanel } from './CommentPanel';
@@ -72,6 +73,8 @@ export function UnifiedSceneDetailModal({
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
+  // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
+  const backdropMouseDownRef = useRef(false);
 
   // 댓글 키: BG와 ACT 양쪽 조회 가능하게.
   // primary 는 "실제로 이 merged 에 존재하는 부서" 와 일치해야 한다 —
@@ -233,7 +236,17 @@ export function UnifiedSceneDetailModal({
         exit={{ opacity: 0 }}
         transition={{ duration: 0.15 }}
         className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4"
-        onClick={onClose}
+        onMouseDown={(e) => {
+          // 모달 안에서 시작한 드래그가 바깥에서 끝나도 닫히지 않도록 mousedown 위치 추적
+          backdropMouseDownRef.current = e.target === e.currentTarget;
+        }}
+        onClick={(e) => {
+          // mousedown이 backdrop에서 시작했고 click도 backdrop에서 발생한 경우만 닫음
+          if (backdropMouseDownRef.current && e.target === e.currentTarget) {
+            onClose();
+          }
+          backdropMouseDownRef.current = false;
+        }}
       >
         {/* ── flex 래퍼 — 본체 + 리비전 패널 + 댓글 ── */}
         <div className="flex gap-3 items-stretch max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
@@ -713,15 +726,17 @@ function InlineTextareaRow({ label, value, onSave }: {
           spellCheck={false}
         />
       ) : (
-        <button
+        <div
           onClick={() => setEditing(true)}
           className="w-full text-left px-3 py-2 rounded-md border border-transparent hover:border-accent/30 hover:bg-accent/5 text-sm text-text-primary min-h-[40px] cursor-pointer transition-colors whitespace-pre-wrap"
         >
-          {value || <span className="text-text-secondary/50 italic">메모 없음</span>}
+          {value
+            ? <PathLinkifiedText text={value} />
+            : <span className="text-text-secondary/50 italic">메모 없음</span>}
           {value && (
             <Pencil size={12} className="inline-block ml-2 opacity-0 hover:opacity-60 transition-opacity" />
           )}
-        </button>
+        </div>
       )}
     </div>
   );

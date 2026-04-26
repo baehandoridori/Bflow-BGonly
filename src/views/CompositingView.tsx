@@ -26,6 +26,7 @@ import type { CompRevision, RevisionStatus, RevisionPriority, Episode } from '@/
 import { formatDateTime } from '@/utils/formatTime';
 import { STATUS_CONFIG, PRIORITY_CONFIG } from '@/constants/revision';
 import { elevatedGlassStyle, floatingGlassStyle } from '@/utils/glassStyles';
+import { PathBadge } from '@/components/common/PathBadge';
 
 // ─── 유틸 ───────────────────────────────────
 
@@ -52,52 +53,27 @@ function parsePathsFromText(text: string): { description: string; paths: string[
 
   for (const line of lines) {
     const trimmed = line.trim();
-    // 줄 전체가 G:\로 시작하면 경로
+    // 줄 전체가 G:\로 시작하면 경로 (Windows 드라이브 letter 가 case-insensitive 라 g:\ 도 인식)
     if (/^G:\\/i.test(trimmed)) {
       paths.push(trimmed);
-    } else if (trimmed.includes('G:\\')) {
-      // 줄 중간에 G:\가 있으면 그 앞은 설명, 뒤는 경로
-      const idx = trimmed.indexOf('G:\\');
-      const before = trimmed.slice(0, idx).trim();
-      const pathPart = trimmed.slice(idx).trim();
-      if (before) descLines.push(before);
-      paths.push(pathPart);
     } else {
-      descLines.push(line);
+      // 줄 중간에 G:\ (또는 g:\) 가 있으면 그 앞은 설명, 뒤는 경로
+      const m = /G:\\/i.exec(trimmed);
+      if (m) {
+        const idx = m.index;
+        const before = trimmed.slice(0, idx).trim();
+        const pathPart = trimmed.slice(idx).trim();
+        if (before) descLines.push(before);
+        paths.push(pathPart);
+      } else {
+        descLines.push(line);
+      }
     }
   }
 
   const description = descLines.join('\n').trim();
   return { description, paths };
 }
-
-/** 경로 뱃지 컴포넌트 (클릭 시 파일탐색기 열기) */
-function PathBadge({ path: filePath, resolved }: { path: string; resolved?: boolean }) {
-  // 경로의 마지막 부분(파일명 또는 폴더명)만 표시
-  const segments = filePath.replace(/\\/g, '/').split('/');
-  const shortName = segments[segments.length - 1] || segments[segments.length - 2] || filePath;
-
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    window.electronAPI?.shellShowItem?.(filePath);
-  };
-
-  return (
-    <button
-      onClick={handleClick}
-      className="inline-flex items-center gap-1 text-[11px] font-mono rounded px-1.5 py-0.5 max-w-full cursor-pointer transition-all hover:brightness-125"
-      style={resolved
-        ? { color: '#6B7280', backgroundColor: 'rgba(107, 114, 128, 0.1)', border: '1px solid rgba(107, 114, 128, 0.2)' }
-        : { color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.1)', border: '1px solid rgba(116, 185, 255, 0.2)' }
-      }
-      title={`${filePath}\n(클릭하면 파일탐색기에서 열기)`}
-    >
-      <FolderOpen size={10} className="shrink-0" />
-      <span className="truncate">{shortName}</span>
-    </button>
-  );
-}
-
 
 // ─── 씬 정보 매핑 타입 ──────────────────────
 
