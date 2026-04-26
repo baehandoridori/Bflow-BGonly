@@ -53,8 +53,8 @@ function parsePathsFromText(text: string): { description: string; paths: string[
 
   for (const line of lines) {
     const trimmed = line.trim();
-    // 줄 전체가 G:\로 시작하면 경로
-    if (/^G:\\/i.test(trimmed)) {
+    // 줄 전체가 G:\로 시작하면 경로 (대문자 G 만 인식 — 다른 3곳과 일관성 유지)
+    if (/^G:\\/.test(trimmed)) {
       paths.push(trimmed);
     } else if (trimmed.includes('G:\\')) {
       // 줄 중간에 G:\가 있으면 그 앞은 설명, 뒤는 경로

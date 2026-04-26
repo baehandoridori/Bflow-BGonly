@@ -61,7 +61,8 @@ export const PathLinkMark = Mark.create({
   addPasteRules() {
     return [
       markPasteRule({
-        find: G_PATH_REGEX_PASTE_RULE,
+        // /g 플래그 정규식은 lastIndex 오염 위험이 있으므로 매번 새 인스턴스로 전달.
+        find: new RegExp(G_PATH_REGEX_PASTE_RULE.source, 'g'),
         type: this.type,
         getAttributes: (match) => ({ href: match[0] }),
       }),
