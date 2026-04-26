@@ -12,6 +12,7 @@ import {
 import type { SceneComment } from '@/services/commentService';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
 import { formatTime, formatTimeShort } from '@/utils/formatTime';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 
 // ─── 메인 컴포넌트 ───────────────────────────
 
@@ -256,16 +257,18 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
   };
 
   // 텍스트 내 @멘션 렌더 (굵은 글씨 + 배경 하이라이트 + 클릭 가능)
-  const renderText = (text: string) => {
-    const parts = text.split(/(@\S+)/g);
+  // PathLinkifiedText 가 G:\ 경로를 PathBadge 로 분리하고, 그 사이 텍스트만 이 함수가 받아 멘션 처리.
+  const renderMentionInSegment = (segment: string, baseIdx: number) => {
+    const parts = segment.split(/(@\S+)/g);
     return parts.map((part, i) => {
+      const key = `${baseIdx}-${i}`;
       if (part.startsWith('@')) {
         const name = part.slice(1);
         const isUser = users.some(u => u.name === name);
         if (isUser) {
           return (
             <span
-              key={i}
+              key={key}
               className="text-accent font-bold bg-accent/10 rounded px-0.5 cursor-pointer hover:bg-accent/20 transition-colors"
               onClick={() => handleMentionClick(name)}
               title={`${name} 팀원 보기`}
@@ -275,9 +278,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
           );
         }
       }
-      return <span key={i}>{part}</span>;
+      return <span key={key}>{part}</span>;
     });
   };
+
+  const renderText = (text: string) => (
+    <PathLinkifiedText text={text} renderTextSegment={renderMentionInSegment} />
+  );
 
   return (
     <div className="flex flex-col h-full">

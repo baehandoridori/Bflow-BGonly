@@ -18,6 +18,7 @@ import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Scene, Stage, Department } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { CommentPanel } from './CommentPanel';
@@ -713,15 +714,17 @@ function InlineTextareaRow({ label, value, onSave }: {
           spellCheck={false}
         />
       ) : (
-        <button
+        <div
           onClick={() => setEditing(true)}
           className="w-full text-left px-3 py-2 rounded-md border border-transparent hover:border-accent/30 hover:bg-accent/5 text-sm text-text-primary min-h-[40px] cursor-pointer transition-colors whitespace-pre-wrap"
         >
-          {value || <span className="text-text-secondary/50 italic">메모 없음</span>}
+          {value
+            ? <PathLinkifiedText text={value} />
+            : <span className="text-text-secondary/50 italic">메모 없음</span>}
           {value && (
             <Pencil size={12} className="inline-block ml-2 opacity-0 hover:opacity-60 transition-opacity" />
           )}
-        </button>
+        </div>
       )}
     </div>
   );

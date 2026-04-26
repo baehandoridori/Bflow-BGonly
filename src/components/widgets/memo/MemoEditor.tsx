@@ -14,6 +14,7 @@ import { Markdown } from 'tiptap-markdown';
 import { useEffect, useRef } from 'react';
 import { BflowUnderline, getEditorMarkdown } from './markdownExtensions';
 import { MemoLinkBubble } from './MemoLinkBubble';
+import { PathLinkMark } from './extensions/PathLinkMark';
 
 interface MemoEditorProps {
   /** Markdown 문자열 (초기값/외부 변경 주입용). undefined 일 때 editor 내용 변경 안 함 */
@@ -82,6 +83,7 @@ export function MemoEditor({
         placeholder,
         emptyEditorClass: 'is-editor-empty',
       }),
+      PathLinkMark,
       // Markdown 은 마지막에 (다른 extension 의 addStorage().markdown 을 읽어 serializer 구성)
       Markdown.configure({
         html: false,
@@ -102,6 +104,17 @@ export function MemoEditor({
       attributes: {
         class: 'memo-prose focus:outline-none',
         spellcheck: 'false',
+      },
+      handleClickOn(_view, _pos, _node, _nodePos, event) {
+        // PathLink mark 클릭 → 파일탐색기 열기. selection 이동 차단해 BubbleMenu 미발생.
+        const target = event.target as HTMLElement | null;
+        const linkEl = target?.closest('[data-path-link]') as HTMLElement | null;
+        if (linkEl) {
+          event.preventDefault();
+          window.electronAPI?.shellShowItem?.(linkEl.dataset.pathLink ?? '');
+          return true;
+        }
+        return false;
       },
     },
   });
