@@ -105,6 +105,13 @@ export default function App() {
     return () => { cleanup?.(); };
   }, []);
 
+  // currentUser 변경 시 메인 프로세스에 동기화 (활동 기록 자동 user_id/user_name 사용)
+  useEffect(() => {
+    window.electronAPI?.authSetCurrentUser?.(
+      currentUser ? { id: currentUser.id, name: currentUser.name } : null,
+    );
+  }, [currentUser]);
+
   // 토스트 설정 (위치/시간) — 설정에서 로드
   const [toastPosition, setToastPosition] = useState<'top-left' | 'top-center' | 'top-right' | 'bottom-left' | 'bottom-center' | 'bottom-right'>('bottom-right');
   const [toastDuration, setToastDuration] = useState(3000);
