@@ -20,6 +20,7 @@ import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
 import * as storageService from '@/services/storageService';
 import { AssigneeSelect, getUserColor } from '@/components/common/AssigneeSelect';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { CommentPanel } from './CommentPanel';
@@ -103,7 +104,9 @@ function PropertyRow({ label, value, placeholder, onSave }: PropertyRowProps) {
             className="w-full rounded-md px-2.5 py-1 border border-transparent cursor-pointer transition-all duration-200 hover:border-accent/30 hover:bg-accent/5 hover:shadow-[0_0_8px_rgba(108,92,231,0.15)]"
           >
             <span className="text-sm text-text-primary">
-              {value || (
+              {value ? (
+                <PathLinkifiedText text={value} />
+              ) : (
                 <span className="text-text-secondary/50 italic">
                   {placeholder ?? '비어 있음'}
                 </span>
@@ -410,6 +413,8 @@ export function SceneDetailModal({
   const [commentCount, setCommentCount] = useState(0);
   const [revisionCount, setRevisionCount] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState<'storyboard' | 'guide' | null>(null);
+  // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
+  const backdropMouseDownRef = useRef(false);
 
   // 이미지 즉시 프리뷰용 낙관적 URL (업로드 중 base64 표시)
   const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
@@ -674,8 +679,13 @@ export function SceneDetailModal({
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
         className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm"
+        onMouseDown={(e) => {
+          // 모달 안 드래그가 backdrop 에서 끝나도 닫히지 않도록 mousedown 시작 위치 추적
+          backdropMouseDownRef.current = e.target === e.currentTarget;
+        }}
         onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
+          if (backdropMouseDownRef.current && e.target === e.currentTarget) onClose();
+          backdropMouseDownRef.current = false;
         }}
       >
         {/* 모달 래퍼 — 좌: 본체 + 우: 댓글 패널 (항상 표시) */}

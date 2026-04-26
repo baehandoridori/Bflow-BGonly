@@ -14,6 +14,7 @@ import { Markdown } from 'tiptap-markdown';
 import { useEffect, useRef } from 'react';
 import { BflowUnderline, getEditorMarkdown } from './markdownExtensions';
 import { MemoLinkBubble } from './MemoLinkBubble';
+import { PathLinkMark } from './extensions/PathLinkMark';
 
 interface MemoEditorProps {
   /** Markdown 문자열 (초기값/외부 변경 주입용). undefined 일 때 editor 내용 변경 안 함 */
@@ -82,6 +83,7 @@ export function MemoEditor({
         placeholder,
         emptyEditorClass: 'is-editor-empty',
       }),
+      PathLinkMark,
       // Markdown 은 마지막에 (다른 extension 의 addStorage().markdown 을 읽어 serializer 구성)
       Markdown.configure({
         html: false,
@@ -103,6 +105,7 @@ export function MemoEditor({
         class: 'memo-prose focus:outline-none',
         spellcheck: 'false',
       },
+      // PathLink 클릭/삭제는 PathLinkNodeView 내부 React 핸들러가 처리 (NodeView 패턴)
     },
   });
 
