@@ -858,6 +858,10 @@ import {
   updatePrivateEvent as sbUpdatePrivateEvent,
   deletePrivateEvent as sbDeletePrivateEvent,
   getPrivateEventOwner as sbGetPrivateEventOwner,
+  listActivities as sbListActivities,
+  getActivityStats as sbGetActivityStats,
+  backfillActivities as sbBackfillActivities,
+  getActivityStorageInfo as sbGetActivityStorageInfo,
 } from './supabase';
 import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -1153,6 +1157,33 @@ ipcMain.handle('supabase:read-all-memos', wrapIpc(async (_e: unknown, userId: st
   return sbReadAllMemos(userId);
 }));
 
+// ─── 활동 기록 (activity_log) ──────────────────────────────
+// 주의: recordActivity 는 IPC 노출 안 함. 활동 기록은 mutation 함수 내부 헬퍼로만 호출.
+ipcMain.handle('activity:list', wrapIpc(async (_e: unknown, opts: {
+  before?: string;
+  limit?: number;
+  groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+  department?: 'bg' | 'acting' | null;
+}) => {
+  return sbListActivities(opts ?? {});
+}));
+
+ipcMain.handle('activity:stats', wrapIpc(async (_e: unknown, opts: {
+  days?: number;
+  groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+  department?: 'bg' | 'acting' | null;
+}) => {
+  return sbGetActivityStats(opts ?? {});
+}));
+
+ipcMain.handle('activity:backfill', wrapIpc(async (_e: unknown, since: string) => {
+  return sbBackfillActivities(since);
+}));
+
+ipcMain.handle('activity:storage-info', wrapIpc(async () => {
+  return sbGetActivityStorageInfo();
+}));
+
 // ─── Google Calendar IPC ──────────────────────────────
 
 ipcMain.handle('gcal:is-authenticated', wrapIpc(async () => {
@@ -1228,6 +1259,17 @@ function startSupabaseRealtime() {
     onRevisionChange: (payload) => broadcastSupabaseEvent('comp_revisions', payload),
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
+    onActivityInsert: (payload) => {
+      // 활동 기록은 INSERT 만 추적, 모든 윈도우에 전파
+      const row = payload.new;
+      if (!row) return;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('activity:realtime-insert', row);
+      }
+      for (const win of widgetWindows.values()) {
+        if (!win.isDestroyed()) win.webContents.send('activity:realtime-insert', row);
+      }
+    },
     onStatusChange: (status) => {
       currentRealtimeStatus = status;
       lastSupabaseStatus = humanizeStatus(status);

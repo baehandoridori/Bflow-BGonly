@@ -188,6 +188,13 @@ export function installDevElectronAPI(): void {
     onVacationRegistered: noop,
     onVacationFailed: noop,
     onVacationPendingChanged: noop,
+
+    // ─── 활동 기록 (mock 은 빈 결과) ─────────────
+    activityList: async () => [],
+    activityStats: async () => [],
+    activityBackfill: async () => [],
+    activityStorageInfo: async () => ({ count: 0, sizeMB: 0 }),
+    onActivityRealtimeInsert: noop,
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;

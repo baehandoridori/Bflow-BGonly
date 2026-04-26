@@ -542,6 +542,22 @@ export interface ElectronAPI {
   supabaseUpsertMemo: (userId: string, widgetId: string, data: unknown) => Promise<void>;
   supabaseReadAllMemos: (userId: string) => Promise<any[]>;
 
+  // ─── 활동 기록 (activity_log) ──────────────
+  activityList: (opts: {
+    before?: string;
+    limit?: number;
+    groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+    department?: 'bg' | 'acting' | null;
+  }) => Promise<any[]>;
+  activityStats: (opts: {
+    days?: number;
+    groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+    department?: 'bg' | 'acting' | null;
+  }) => Promise<Array<{ day_of_week: number; hour: number; count: number }>>;
+  activityBackfill: (since: string) => Promise<any[]>;
+  activityStorageInfo: () => Promise<{ count: number; sizeMB: number }>;
+  onActivityRealtimeInsert: (cb: (row: any) => void) => () => void;
+
   // ─── 설정/세션 변경 브로드캐스트 ─────────────────
   preferencesBroadcastChange: (payload?: unknown) => Promise<{ ok: boolean }>;
   onPreferencesChanged: (cb: (payload: unknown) => void) => () => void;

@@ -1549,3 +1549,129 @@ export async function readAllMemos(userId: string): Promise<Array<{
     fontSize: r.font_size ?? 14,
   }));
 }
+
+// ============================================================
+// 최근 작업 위젯 — activity_log
+// spec: docs/superpowers/specs/2026-04-27-recent-activity-widget-design.md
+// 주의: 기존 activityLogger.ts 의 recordActivity (IPC 메모리 추적) 와 다름.
+//        본 함수는 activity_log DB 테이블에 INSERT 하므로 recordActivityLog 로 명명.
+// ============================================================
+
+export type ActionGroup = 'progress' | 'memo' | 'scene' | 'etc';
+export type ActionType =
+  | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
+  | 'memo_update' | 'comment_add' | 'revision_add' | 'revision_resolve'
+  | 'scene_add' | 'scene_delete'
+  | 'assignee_change' | 'layout_change'
+  | 'image_upload_storyboard' | 'image_upload_guide';
+
+export interface ActivityRow {
+  id: string;
+  user_id: string;
+  user_name: string;
+  action_type: ActionType;
+  action_group: ActionGroup;
+  scene_id: string | null;
+  scene_label: string | null;
+  episode_number: number | null;
+  department: 'bg' | 'acting' | null;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface RecordActivityLogInput {
+  userId: string;
+  userName: string;
+  actionType: ActionType;
+  actionGroup: ActionGroup;
+  sceneId?: string | null;
+  sceneLabel?: string | null;
+  episodeNumber?: number | null;
+  department?: 'bg' | 'acting' | null;
+  detail?: Record<string, unknown>;
+}
+
+/**
+ * activity_log 테이블에 row INSERT.
+ * try/catch 로 모든 에러 흡수 — 본 mutation 흐름은 절대 중단 안 됨.
+ */
+export async function recordActivityLog(input: RecordActivityLogInput): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.rpc('record_activity', {
+      p_user_id: input.userId,
+      p_user_name: input.userName,
+      p_action_type: input.actionType,
+      p_action_group: input.actionGroup,
+      p_scene_id: input.sceneId ?? null,
+      p_scene_label: input.sceneLabel ?? null,
+      p_episode_number: input.episodeNumber ?? null,
+      p_department: input.department ?? null,
+      p_detail: input.detail ?? {},
+    });
+    if (error) {
+      console.warn('[activity-log] record failed:', error.message);
+      return null;
+    }
+    return data as string;
+  } catch (err) {
+    console.warn('[activity-log] record exception:', err);
+    return null;
+  }
+}
+
+export async function listActivities(opts: {
+  before?: string;
+  limit?: number;
+  groups?: ActionGroup[];
+  department?: 'bg' | 'acting' | null;
+}): Promise<ActivityRow[]> {
+  let q = supabase
+    .from('activity_log')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(opts.limit ?? 100);
+
+  if (opts.before) q = q.lt('created_at', opts.before);
+  if (opts.groups && opts.groups.length > 0) q = q.in('action_group', opts.groups);
+  if (opts.department) q = q.eq('department', opts.department);
+
+  const { data, error } = await q;
+  if (error) throw new Error(`listActivities failed: ${error.message}`);
+  return (data ?? []) as ActivityRow[];
+}
+
+export async function getActivityStats(opts: {
+  days?: number;
+  groups?: ActionGroup[];
+  department?: 'bg' | 'acting' | null;
+}): Promise<Array<{ day_of_week: number; hour: number; count: number }>> {
+  const since = new Date(Date.now() - (opts.days ?? 7) * 86400000).toISOString();
+  const { data, error } = await supabase.rpc('activity_log_stats', {
+    p_since: since,
+    p_groups: opts.groups ?? null,
+    p_department: opts.department ?? null,
+  });
+  if (error) throw new Error(`getActivityStats failed: ${error.message}`);
+  return (data ?? []) as Array<{ day_of_week: number; hour: number; count: number }>;
+}
+
+export async function backfillActivities(since: string, limit = 200): Promise<ActivityRow[]> {
+  const { data, error } = await supabase
+    .from('activity_log')
+    .select('*')
+    .gt('created_at', since)
+    .order('created_at', { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`backfillActivities failed: ${error.message}`);
+  return (data ?? []) as ActivityRow[];
+}
+
+/** 설정 화면 모니터링용 — 활동 기록 row 수 + 추정 크기. */
+export async function getActivityStorageInfo(): Promise<{ count: number; sizeMB: number }> {
+  const { count, error: countErr } = await supabase
+    .from('activity_log')
+    .select('*', { count: 'exact', head: true });
+  if (countErr) throw new Error(`activity count failed: ${countErr.message}`);
+  const sizeMB = ((count ?? 0) * 400) / (1024 * 1024);
+  return { count: count ?? 0, sizeMB };
+}
