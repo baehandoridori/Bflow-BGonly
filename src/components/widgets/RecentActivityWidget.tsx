@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Activity, Clock, Filter, Grid3x3, BarChart3 } from 'lucide-react';
 import { Widget } from './Widget';
 import { useActivityStore, type GoldenMode } from '@/stores/useActivityStore';
+import { useAppStore } from '@/stores/useAppStore';
 import { GoldenHeatmap } from './activity/GoldenHeatmap';
 import { GoldenBarChart } from './activity/GoldenBarChart';
 import { ActivityFilterChips } from './activity/ActivityFilterChips';
@@ -29,13 +30,21 @@ export function RecentActivityWidget() {
 
   const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, text: '', x: 0, y: 0 });
 
-  // Realtime 구독 먼저 → 초기 로드 — fetch 동안 들어온 활동 누락 방지 (race window 최소화).
-  // store.loadInitial 도 set 시 기존 activities 와 UUID dedupe merge 해 덮어쓰기 방지.
+  // 대시보드 부서 필터 변경 시 활동 + statsGrid 자동 재로드 (Codex P2).
+  // useActivityStore 의 store action 은 stable reference 라 useEffect 가 재실행되지 않으므로
+  // dashboardDeptFilter 를 명시적으로 deps 에 두어 변경을 감지한다.
+  const dashboardDeptFilter = useAppStore((s) => s.dashboardDeptFilter);
+
+  // Realtime 구독은 마운트 생명주기에 1번만 (구독 먼저 → race window 최소화)
   useEffect(() => {
     const unsub = subscribeToActivityRealtime(receiveRealtime);
-    loadInitial();
     return () => unsub();
-  }, [loadInitial, receiveRealtime]);
+  }, [receiveRealtime]);
+
+  // 활동/통계 로드는 마운트 시 + 부서 필터 변경 시
+  useEffect(() => {
+    loadInitial();
+  }, [dashboardDeptFilter, loadInitial]);
 
   // 인사이트 자동 산출 (모드별)
   const insightText = useMemo(() => {

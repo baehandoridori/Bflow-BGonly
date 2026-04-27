@@ -98,13 +98,17 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       const department = getCurrentDepartment();
       // group 필터는 client-side (ActivityFeed) — hidden group 활동도 store 에 보존 (Codex P1)
       const rows = await supabaseService.listActivities({ limit: PAGE_SIZE, department });
-      // realtime 으로 이미 store 에 들어온 활동과 merge (UUID dedupe) — initial fetch race 방지 (Codex P2).
-      // 위젯 마운트 시 subscribeToActivityRealtime 이 먼저 실행되어 receiveRealtime 으로 prepend 된
-      // 활동을 덮어쓰지 않도록 기존 store 와 합쳐 createdAt 역순 정렬 후 MAX_CACHED 만큼 자른다.
+      // 1) 기존 store 에서 현재 부서와 일치하지 않는 활동 제거 — 부서 필터 변경 시 옛 부서 row 제거
+      //    (department === null 이면 'all' 모드라 모든 활동 유지)
+      // 2) 그 후 fetch 결과와 UUID dedupe merge — realtime 으로 들어온 활동 보존 (race 방지, Codex P2)
+      // 3) createdAt 역순 정렬 후 MAX_CACHED 만큼 슬라이스
       set((s) => {
-        const existingIds = new Set(s.activities.map((a) => a.id));
+        const validExisting = department === null
+          ? s.activities
+          : s.activities.filter((a) => a.department === department);
+        const existingIds = new Set(validExisting.map((a) => a.id));
         const fresh = rows.filter((r) => !existingIds.has(r.id));
-        const merged = [...s.activities, ...fresh]
+        const merged = [...validExisting, ...fresh]
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .slice(0, MAX_CACHED);
         return {
