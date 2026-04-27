@@ -410,3 +410,375 @@ $$;
 GRANT EXECUTE ON FUNCTION bulk_update_scene_stages(jsonb, text)  TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION bulk_delete_scenes(uuid[], text)        TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION bulk_update_scene_fields(jsonb, text)  TO anon, authenticated;
+
+-- ============================================================
+-- 최근 작업 위젯 — activity_log (2026-04-27)
+-- spec: docs/superpowers/specs/2026-04-27-recent-activity-widget-design.md
+-- ============================================================
+
+-- 1. activity_log 테이블
+CREATE TABLE IF NOT EXISTS activity_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,                -- 누가 (users.id 참조, 단 FK 안 검 — 신뢰 모델 §3.4)
+  user_name TEXT NOT NULL,              -- 표시용 (조인 비용 ↓, 이름 변경되어도 옛 기록은 옛 이름)
+  action_type TEXT NOT NULL,            -- 14종 enum (spec §3.2)
+  action_group TEXT NOT NULL,           -- 'progress' | 'memo' | 'scene' | 'etc'
+  scene_id UUID,                        -- scenes.id (UUID, nullable). comments.scene_id 는 TEXT 라 다름 — 본 테이블은 UUID 통일
+  scene_label TEXT,                     -- 표시용 "EP01 A씬 #5"
+  episode_number INTEGER,
+  department TEXT,                      -- 'bg' | 'acting'
+  detail JSONB,                         -- 자유 메타 (예: { value: true })
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_log_created  ON activity_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_log_user     ON activity_log(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_log_scene    ON activity_log(scene_id);
+
+ALTER TABLE activity_log ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'activity_log' AND policyname = 'allow_all') THEN
+    CREATE POLICY "allow_all" ON activity_log FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE activity_log;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- 2. record_activity RPC (앱 INSERT 헬퍼)
+CREATE OR REPLACE FUNCTION record_activity(
+  p_user_id TEXT,
+  p_user_name TEXT,
+  p_action_type TEXT,
+  p_action_group TEXT,
+  p_scene_id UUID,
+  p_scene_label TEXT,
+  p_episode_number INTEGER,
+  p_department TEXT,
+  p_detail JSONB
+) RETURNS UUID
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_id UUID;
+BEGIN
+  INSERT INTO activity_log (
+    user_id, user_name, action_type, action_group,
+    scene_id, scene_label, episode_number, department, detail
+  ) VALUES (
+    p_user_id, p_user_name, p_action_type, p_action_group,
+    p_scene_id, p_scene_label, p_episode_number, p_department, p_detail
+  ) RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION record_activity(TEXT, TEXT, TEXT, TEXT, UUID, TEXT, INTEGER, TEXT, JSONB)
+  TO anon, authenticated;
+
+-- 3. activity_log_stats RPC (히트맵 24x7 격자 집계)
+-- KST 기준으로 day_of_week / hour 추출 (PostgreSQL EXTRACT(dow): 0=일 ~ 6=토)
+CREATE OR REPLACE FUNCTION activity_log_stats(
+  p_since TIMESTAMPTZ,
+  p_groups TEXT[] DEFAULT NULL,        -- NULL이면 전체
+  p_department TEXT DEFAULT NULL       -- NULL이면 전체
+) RETURNS TABLE (
+  day_of_week INTEGER,
+  hour INTEGER,
+  count INTEGER
+)
+LANGUAGE sql
+SECURITY INVOKER
+AS $$
+  SELECT
+    EXTRACT(dow  FROM (created_at AT TIME ZONE 'Asia/Seoul'))::integer AS day_of_week,
+    EXTRACT(hour FROM (created_at AT TIME ZONE 'Asia/Seoul'))::integer AS hour,
+    COUNT(*)::integer AS count
+  FROM activity_log
+  WHERE created_at >= p_since
+    AND (p_groups IS NULL OR action_group = ANY(p_groups))
+    AND (p_department IS NULL OR department = p_department)
+  GROUP BY 1, 2
+  ORDER BY 1, 2;
+$$;
+
+GRANT EXECUTE ON FUNCTION activity_log_stats(TIMESTAMPTZ, TEXT[], TEXT) TO anon, authenticated;
+
+-- 4. 보존 정책 — 1년 자동 정리 (pg_cron 사용, Supabase Pro 활성화됨)
+CREATE OR REPLACE FUNCTION cleanup_old_activity_logs() RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  DELETE FROM activity_log WHERE created_at < now() - INTERVAL '1 year';
+END;
+$$;
+
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- 기존 같은 이름 cron 이 있으면 unschedule 후 재등록 (재실행 안전)
+DO $$ BEGIN
+  PERFORM cron.unschedule('activity-log-cleanup');
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+SELECT cron.schedule(
+  'activity-log-cleanup',
+  '0 4 * * *',                          -- 매일 새벽 4시 (KST 13시 ≈ UTC 04시)
+  $$ SELECT cleanup_old_activity_logs(); $$
+);
+
+-- 5. bulk RPC 시그니처 확장 — 활동 기록 파라미터 추가
+-- 기존 함수를 CREATE OR REPLACE 로 덮어씀. user_name 이 NULL 이면 활동 기록 생략 (호환성).
+
+CREATE OR REPLACE FUNCTION bulk_update_scene_stages(
+  p_updates jsonb,
+  p_updated_by text,
+  p_user_name text DEFAULT NULL          -- 신규: 활동 기록용
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  u jsonb;
+  v_uuid uuid;
+  v_stage text;
+  v_value boolean;
+  v_has_meta_keys boolean;
+  v_completed_by text;
+  v_completed_at_text text;
+  v_completed_at timestamptz;
+  v_meta_value text;
+  v_scene_label text;
+  v_episode_number integer;
+  v_department text;
+BEGIN
+  FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
+    v_uuid := NULL;
+    BEGIN
+      v_uuid := (u->>'sceneUuid')::uuid;
+      v_stage := u->>'stage';
+      v_value := (u->>'value')::boolean;
+      v_has_meta_keys := (u ? 'completedBy') OR (u ? 'completedAt');
+      v_completed_by := u->>'completedBy';
+      v_completed_at_text := u->>'completedAt';
+      v_scene_label := u->>'sceneLabel';
+      v_episode_number := COALESCE((u->>'episodeNumber')::integer, NULL);
+      v_department := u->>'department';
+
+      IF v_stage NOT IN ('lo','done','review','png') THEN
+        RAISE EXCEPTION 'invalid stage: %', v_stage;
+      END IF;
+
+      UPDATE scenes SET
+        lo     = CASE WHEN v_stage = 'lo'     THEN v_value ELSE lo END,
+        done   = CASE WHEN v_stage = 'done'   THEN v_value ELSE done END,
+        review = CASE WHEN v_stage = 'review' THEN v_value ELSE review END,
+        png    = CASE WHEN v_stage = 'png'    THEN v_value ELSE png END,
+        updated_at = now(),
+        updated_by = p_updated_by
+      WHERE id = v_uuid;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+
+      IF v_has_meta_keys THEN
+        IF v_completed_by IS NOT NULL AND v_completed_by <> ''
+           AND v_completed_at_text IS NOT NULL AND v_completed_at_text <> '' THEN
+          v_completed_at := v_completed_at_text::timestamptz;
+          v_meta_value := jsonb_build_object(
+            'completedBy', v_completed_by,
+            'completedAt', v_completed_at
+          )::text;
+          INSERT INTO metadata (type, key, value, updated_at)
+            VALUES ('scene-completion', v_uuid::text, v_meta_value, now())
+            ON CONFLICT (type, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+        ELSE
+          DELETE FROM metadata WHERE type = 'scene-completion' AND key = v_uuid::text;
+        END IF;
+      END IF;
+
+      -- 신규: 활동 기록 (p_user_name 이 NULL 아닐 때만, 실패해도 본 작업은 성공)
+      IF p_user_name IS NOT NULL THEN
+        BEGIN
+          PERFORM record_activity(
+            p_updated_by, p_user_name,
+            'stage_' || v_stage, 'progress',
+            v_uuid, v_scene_label, v_episode_number, v_department,
+            jsonb_build_object('value', v_value)
+          );
+        EXCEPTION WHEN OTHERS THEN
+          NULL;
+        END;
+      END IF;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION bulk_update_scene_stages(jsonb, text, text) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION bulk_delete_scenes(
+  p_uuids uuid[],
+  p_deleted_by text,
+  p_user_name text DEFAULT NULL,
+  p_meta jsonb DEFAULT '[]'::jsonb        -- 각 element: { sceneUuid, sceneLabel, episodeNumber, department }
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_uuid uuid;
+  m_elem jsonb;
+  v_scene_label text;
+  v_episode_number integer;
+  v_department text;
+BEGIN
+  FOREACH v_uuid IN ARRAY p_uuids LOOP
+    BEGIN
+      DELETE FROM scenes WHERE id = v_uuid;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+      DELETE FROM metadata WHERE type = 'scene-completion' AND key = v_uuid::text;
+
+      IF p_user_name IS NOT NULL THEN
+        m_elem := NULL;
+        FOR m_elem IN SELECT jsonb_array_elements(p_meta) LOOP
+          IF (m_elem->>'sceneUuid')::uuid = v_uuid THEN EXIT; END IF;
+          m_elem := NULL;
+        END LOOP;
+        IF m_elem IS NOT NULL THEN
+          v_scene_label := m_elem->>'sceneLabel';
+          v_episode_number := COALESCE((m_elem->>'episodeNumber')::integer, NULL);
+          v_department := m_elem->>'department';
+        ELSE
+          v_scene_label := NULL;
+          v_episode_number := NULL;
+          v_department := NULL;
+        END IF;
+        BEGIN
+          PERFORM record_activity(
+            p_deleted_by, p_user_name,
+            'scene_delete', 'scene',
+            v_uuid, v_scene_label, v_episode_number, v_department,
+            '{}'::jsonb
+          );
+        EXCEPTION WHEN OTHERS THEN
+          NULL;
+        END;
+      END IF;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION bulk_delete_scenes(uuid[], text, text, jsonb) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION bulk_update_scene_fields(
+  p_updates jsonb,
+  p_updated_by text,
+  p_user_name text DEFAULT NULL
+) RETURNS TABLE (scene_uuid uuid, success boolean, error text)
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  u jsonb;
+  f jsonb;
+  v_uuid uuid;
+  v_scene_label text;
+  v_episode_number integer;
+  v_department text;
+  v_field_changed text;
+  v_field_value text;
+BEGIN
+  FOR u IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
+    v_uuid := NULL;
+    BEGIN
+      v_uuid := (u->>'sceneUuid')::uuid;
+      f := u->'fields';
+      v_scene_label := u->>'sceneLabel';
+      v_episode_number := COALESCE((u->>'episodeNumber')::integer, NULL);
+      v_department := u->>'department';
+
+      UPDATE scenes SET
+        assignee       = COALESCE(f->>'assignee', assignee),
+        memo           = COALESCE(f->>'memo', memo),
+        layout         = COALESCE(f->>'layout', layout),
+        storyboard_url = COALESCE(f->>'storyboardUrl', storyboard_url),
+        guide_url      = COALESCE(f->>'guideUrl', guide_url),
+        updated_at = now(),
+        updated_by = p_updated_by
+      WHERE id = v_uuid;
+
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'scene not found: %', v_uuid;
+      END IF;
+
+      -- 변경된 필드별 활동 기록 (간단화 위해 첫 번째 필드만 기록)
+      IF p_user_name IS NOT NULL THEN
+        IF f ? 'memo' THEN v_field_changed := 'memo_update'; v_field_value := f->>'memo';
+        ELSIF f ? 'assignee' THEN v_field_changed := 'assignee_change'; v_field_value := f->>'assignee';
+        ELSIF f ? 'layout' THEN v_field_changed := 'layout_change'; v_field_value := f->>'layout';
+        ELSIF f ? 'storyboardUrl' THEN v_field_changed := 'image_upload_storyboard'; v_field_value := NULL;
+        ELSIF f ? 'guideUrl' THEN v_field_changed := 'image_upload_guide'; v_field_value := NULL;
+        ELSE v_field_changed := NULL;
+        END IF;
+
+        IF v_field_changed IS NOT NULL THEN
+          BEGIN
+            PERFORM record_activity(
+              p_updated_by, p_user_name,
+              v_field_changed,
+              CASE
+                WHEN v_field_changed = 'memo_update' THEN 'memo'
+                ELSE 'etc'
+              END,
+              v_uuid, v_scene_label, v_episode_number, v_department,
+              CASE WHEN v_field_value IS NOT NULL THEN jsonb_build_object('to', v_field_value) ELSE '{}'::jsonb END
+            );
+          EXCEPTION WHEN OTHERS THEN
+            NULL;
+          END;
+        END IF;
+      END IF;
+
+      scene_uuid := v_uuid;
+      success := TRUE;
+      error := NULL;
+      RETURN NEXT;
+    EXCEPTION WHEN OTHERS THEN
+      scene_uuid := v_uuid;
+      success := FALSE;
+      error := SQLERRM;
+      RETURN NEXT;
+    END;
+  END LOOP;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION bulk_update_scene_fields(jsonb, text, text) TO anon, authenticated;

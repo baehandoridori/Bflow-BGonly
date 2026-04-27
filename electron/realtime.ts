@@ -13,6 +13,7 @@ export interface RealtimeCallbacks {
   onRevisionChange: (payload: ChangePayload) => void;
   onEpisodeChange: (payload: ChangePayload) => void;
   onPartChange: (payload: ChangePayload) => void;
+  onActivityInsert: (payload: ChangePayload) => void;
   onStatusChange: (status: string) => void;
 }
 
@@ -61,6 +62,14 @@ function createChannel(callbacks: RealtimeCallbacks): RealtimeChannel {
       (payload) => {
         console.log('[Realtime] parts 이벤트 수신:', payload.eventType);
         callbacks.onPartChange(payload);
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'activity_log' },
+      (payload) => {
+        // 활동 기록은 INSERT 만 추적 (UPDATE/DELETE 없음)
+        callbacks.onActivityInsert(payload);
       },
     );
 }

@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { Responsive, WidthProvider, type Layouts, type Layout } from 'react-grid-layout';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check, Trash2, RotateCcw, PieChart, BarChart3, Users, LayoutGrid, GitCompareArrows, Calendar as CalendarIcon, CheckSquare, StickyNote, Presentation, Palmtree, type LucideIcon } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, ArrowLeft, Check, Trash2, RotateCcw, PieChart, BarChart3, Users, LayoutGrid, GitCompareArrows, Calendar as CalendarIcon, CheckSquare, StickyNote, Presentation, Palmtree, Activity, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -14,6 +14,7 @@ import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { VacationWidget } from '@/components/widgets/VacationWidget';
 import { MemoWidget } from '@/components/widgets/MemoWidget';
+import { RecentActivityWidget } from '@/components/widgets/RecentActivityWidget';
 import { WhiteboardWidget } from '@/components/widgets/whiteboard/WhiteboardWidget';
 import { WidgetIdContext } from '@/components/widgets/Widget';
 import { EdgeGlow, type ResizeZone } from '@/components/widgets/EdgeGlow';
@@ -226,6 +227,7 @@ const ALL_WIDGETS: WidgetMeta[] = [
   { id: 'vacation-today', label: '휴가자 현황', component: <VacationWidget />, category: 'etc', icon: Palmtree },
   { id: 'memo', label: '메모', component: <MemoWidget />, category: 'tool', icon: StickyNote },
   { id: 'whiteboard', label: '화이트보드', component: <WhiteboardWidget />, category: 'tool', icon: Presentation },
+  { id: 'recent-activity', label: '최근 작업', component: <RecentActivityWidget />, category: 'progress', icon: Activity },
 ];
 
 const WIDGET_MAP = Object.fromEntries(ALL_WIDGETS.map((w) => [w.id, w.component]));
@@ -260,6 +262,9 @@ function getWidgetComponent(id: string, isEpMode: boolean): React.ReactNode | un
   }
   if (id === 'whiteboard') {
     return <WhiteboardWidget />;
+  }
+  if (id === 'recent-activity') {
+    return <RecentActivityWidget />;
   }
   // 파트 단일 위젯: ep-part-{bg|acting|all}-{A~Z}[-{ts}]
   if (parsePartWidgetId(id)) {

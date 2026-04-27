@@ -581,6 +581,7 @@ export async function updateSceneStage(
 export async function bulkUpdateSceneStages(
   updates: BulkStageUpdate[],
   updatedBy: string,
+  userName?: string | null,
 ): Promise<BulkUpdateResult[]> {
   const { data, error } = await supabase.rpc('bulk_update_scene_stages', {
     // undefined는 key를 누락시켜 RPC가 "메타 건드리지 않음"으로 인식,
@@ -596,6 +597,7 @@ export async function bulkUpdateSceneStages(
       return payload;
     }),
     p_updated_by: updatedBy,
+    p_user_name: userName ?? null,
   });
   if (error) throw error;
   return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
@@ -608,19 +610,42 @@ export async function bulkUpdateSceneStages(
 export async function bulkDeleteScenes(
   sceneUuids: string[],
   deletedBy: string,
+  userName?: string | null,
 ): Promise<BulkUpdateResult[]> {
-  // 1) 씬 UUID → 이미지 URL 목록 맵을 먼저 확보 (RPC 가 실제로 삭제한 씬만 이미지 정리하기 위함)
+  // 1) 씬 UUID → 이미지 URL + 활동 메타 자동 조회 (RPC 호출 전에 한 번에)
   const urlsByUuid = new Map<string, string[]>();
+  const meta: Array<{
+    sceneUuid: string; sceneLabel: string | null;
+    episodeNumber: number | null; department: string | null;
+  }> = [];
   {
     const { data: scenes } = await supabase
       .from('scenes')
-      .select('id, storyboard_url, guide_url')
+      .select('id, scene_number, storyboard_url, guide_url, parts(part_id, department, episodes(episode_number))')
       .in('id', sceneUuids);
-    for (const s of scenes ?? []) {
+    for (const s of (scenes ?? []) as Array<{
+      id: string; scene_number: string;
+      storyboard_url: string | null; guide_url: string | null;
+      parts?: { part_id?: string; department?: string; episodes?: { episode_number?: number } };
+    }>) {
+      // 이미지 URL
       const urls: string[] = [];
-      if (s.storyboard_url) urls.push(s.storyboard_url as string);
-      if (s.guide_url) urls.push(s.guide_url as string);
-      if (urls.length > 0) urlsByUuid.set(s.id as string, urls);
+      if (s.storyboard_url) urls.push(s.storyboard_url);
+      if (s.guide_url) urls.push(s.guide_url);
+      if (urls.length > 0) urlsByUuid.set(s.id, urls);
+      // 활동 메타 (RPC 도 자동 조회하지만 클라이언트 전달로 안전성 강화 — Codex P2)
+      const part = s.parts;
+      const epNum = part?.episodes?.episode_number ?? null;
+      const partLabel = part?.part_id ?? null;
+      const sceneLabel = epNum && partLabel
+        ? `EP${String(epNum).padStart(2, '0')} ${partLabel} #${s.scene_number}`
+        : `씬 #${s.scene_number}`;
+      meta.push({
+        sceneUuid: s.id,
+        sceneLabel,
+        episodeNumber: epNum,
+        department: part?.department ?? null,
+      });
     }
   }
 
@@ -628,6 +653,8 @@ export async function bulkDeleteScenes(
   const { data, error } = await supabase.rpc('bulk_delete_scenes', {
     p_uuids: sceneUuids,
     p_deleted_by: deletedBy,
+    p_user_name: userName ?? null,
+    p_meta: meta,
   });
   if (error) throw error;
   const results = maybeForceFail(mapRpcRows(data as RpcRow[] | null));
@@ -650,19 +677,48 @@ export async function bulkDeleteScenes(
 export async function bulkUpdateSceneFields(
   updates: BulkFieldUpdate[],
   updatedBy: string,
+  userName?: string | null,
 ): Promise<BulkUpdateResult[]> {
+  // 활동 기록 메타 사전 조회 (RPC 도 자동 조회 fallback 있지만 클라이언트 측 전달로 안전성 강화 — Codex P1)
+  const metaByUuid = new Map<string, { sceneLabel: string; episodeNumber: number | null; department: string | null }>();
+  if (userName) {
+    const { data: metaRows } = await supabase
+      .from('scenes')
+      .select('id, scene_number, parts(part_id, department, episodes(episode_number))')
+      .in('id', updates.map((u) => u.sceneUuid));
+    for (const r of (metaRows ?? []) as Array<{
+      id: string; scene_number: string;
+      parts?: { part_id?: string; department?: string; episodes?: { episode_number?: number } };
+    }>) {
+      const part = r.parts;
+      const epNum = part?.episodes?.episode_number ?? null;
+      const partLabel = part?.part_id ?? null;
+      const sceneLabel = epNum && partLabel
+        ? `EP${String(epNum).padStart(2, '0')} ${partLabel} #${r.scene_number}`
+        : `씬 #${r.scene_number}`;
+      metaByUuid.set(r.id, { sceneLabel, episodeNumber: epNum, department: part?.department ?? null });
+    }
+  }
+
   const { data, error } = await supabase.rpc('bulk_update_scene_fields', {
-    p_updates: updates.map((u) => ({
-      sceneUuid: u.sceneUuid,
-      fields: {
-        assignee: u.fields.assignee,
-        memo: u.fields.memo,
-        layout: u.fields.layoutId,
-        storyboardUrl: u.fields.storyboardUrl,
-        guideUrl: u.fields.guideUrl,
-      },
-    })),
+    p_updates: updates.map((u) => {
+      const meta = metaByUuid.get(u.sceneUuid);
+      return {
+        sceneUuid: u.sceneUuid,
+        fields: {
+          assignee: u.fields.assignee,
+          memo: u.fields.memo,
+          layout: u.fields.layoutId,
+          storyboardUrl: u.fields.storyboardUrl,
+          guideUrl: u.fields.guideUrl,
+        },
+        sceneLabel: meta?.sceneLabel ?? null,
+        episodeNumber: meta?.episodeNumber ?? null,
+        department: meta?.department ?? null,
+      };
+    }),
     p_updated_by: updatedBy,
+    p_user_name: userName ?? null,
   });
   if (error) throw error;
   return maybeForceFail(mapRpcRows(data as RpcRow[] | null));
@@ -1548,4 +1604,146 @@ export async function readAllMemos(userId: string): Promise<Array<{
     activeTabId: r.active_tab_id,
     fontSize: r.font_size ?? 14,
   }));
+}
+
+// ============================================================
+// 최근 작업 위젯 — activity_log
+// spec: docs/superpowers/specs/2026-04-27-recent-activity-widget-design.md
+// 주의: 기존 activityLogger.ts 의 recordActivity (IPC 메모리 추적) 와 다름.
+//        본 함수는 activity_log DB 테이블에 INSERT 하므로 recordActivityLog 로 명명.
+// ============================================================
+
+export type ActionGroup = 'progress' | 'memo' | 'scene' | 'etc';
+export type ActionType =
+  | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
+  | 'memo_update' | 'comment_add' | 'revision_add' | 'revision_resolve'
+  | 'scene_add' | 'scene_delete'
+  | 'assignee_change' | 'layout_change'
+  | 'image_upload_storyboard' | 'image_upload_guide';
+
+export interface ActivityRow {
+  id: string;
+  user_id: string;
+  user_name: string;
+  action_type: ActionType;
+  action_group: ActionGroup;
+  scene_id: string | null;
+  scene_label: string | null;
+  episode_number: number | null;
+  department: 'bg' | 'acting' | null;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface RecordActivityLogInput {
+  userId: string;
+  userName: string;
+  actionType: ActionType;
+  actionGroup: ActionGroup;
+  sceneId?: string | null;
+  sceneLabel?: string | null;
+  episodeNumber?: number | null;
+  department?: 'bg' | 'acting' | null;
+  detail?: Record<string, unknown>;
+}
+
+/**
+ * activity_log 테이블에 row INSERT.
+ * try/catch 로 모든 에러 흡수 — 본 mutation 흐름은 절대 중단 안 됨.
+ */
+export async function recordActivityLog(input: RecordActivityLogInput): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.rpc('record_activity', {
+      p_user_id: input.userId,
+      p_user_name: input.userName,
+      p_action_type: input.actionType,
+      p_action_group: input.actionGroup,
+      p_scene_id: input.sceneId ?? null,
+      p_scene_label: input.sceneLabel ?? null,
+      p_episode_number: input.episodeNumber ?? null,
+      p_department: input.department ?? null,
+      p_detail: input.detail ?? {},
+    });
+    if (error) {
+      console.warn('[activity-log] record failed:', error.message);
+      return null;
+    }
+    return data as string;
+  } catch (err) {
+    console.warn('[activity-log] record exception:', err);
+    return null;
+  }
+}
+
+export async function listActivities(opts: {
+  /** 페이지 cursor — 형식: "<createdAt>|<id>" (timestamp tie-breaker 보장).
+   *  단순 timestamp 만 쓰면 같은 ms 에 쓰인 row 들이 페이지 경계에서 사라질 수 있음 (Codex P1).
+   */
+  before?: string;
+  limit?: number;
+  /** v1: 항상 미전달 — group 필터는 client-side 에서 적용 (hidden group 활동 보존, Codex P1) */
+  groups?: ActionGroup[];
+  department?: 'bg' | 'acting' | null;
+}): Promise<ActivityRow[]> {
+  let q = supabase
+    .from('activity_log')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })   // tie-breaker — 같은 timestamp 안에서 안정적 cursor
+    .limit(opts.limit ?? 100);
+
+  if (opts.before) {
+    const sep = opts.before.indexOf('|');
+    if (sep > 0) {
+      const beforeCreatedAt = opts.before.slice(0, sep);
+      const beforeId = opts.before.slice(sep + 1);
+      // (created_at, id) < (a, b) 조건: created_at < a OR (created_at == a AND id < b)
+      q = q.or(`created_at.lt.${beforeCreatedAt},and(created_at.eq.${beforeCreatedAt},id.lt.${beforeId})`);
+    } else {
+      // backward-compat — opts.before 가 순수 timestamp 만이면 기존 방식
+      q = q.lt('created_at', opts.before);
+    }
+  }
+  if (opts.groups && opts.groups.length > 0) q = q.in('action_group', opts.groups);
+  if (opts.department) q = q.eq('department', opts.department);
+
+  const { data, error } = await q;
+  if (error) throw new Error(`listActivities failed: ${error.message}`);
+  return (data ?? []) as ActivityRow[];
+}
+
+export async function getActivityStats(opts: {
+  days?: number;
+  groups?: ActionGroup[];
+  department?: 'bg' | 'acting' | null;
+}): Promise<Array<{ day_of_week: number; hour: number; count: number }>> {
+  const since = new Date(Date.now() - (opts.days ?? 7) * 86400000).toISOString();
+  const { data, error } = await supabase.rpc('activity_log_stats', {
+    p_since: since,
+    p_groups: opts.groups ?? null,
+    p_department: opts.department ?? null,
+  });
+  if (error) throw new Error(`getActivityStats failed: ${error.message}`);
+  return (data ?? []) as Array<{ day_of_week: number; hour: number; count: number }>;
+}
+
+export async function backfillActivities(since: string, limit = 200): Promise<ActivityRow[]> {
+  const { data, error } = await supabase
+    .from('activity_log')
+    .select('*')
+    .gt('created_at', since)
+    .order('created_at', { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`backfillActivities failed: ${error.message}`);
+  return (data ?? []) as ActivityRow[];
+}
+
+/** 설정 화면 모니터링용 — 활동 기록 row 수 + 추정 크기. */
+export async function getActivityStorageInfo(): Promise<{ count: number; sizeMB: number }> {
+  const { count, error: countErr } = await supabase
+    .from('activity_log')
+    .select('*', { count: 'exact', head: true });
+  if (countErr) throw new Error(`activity count failed: ${countErr.message}`);
+  const sizeMB = ((count ?? 0) * 400) / (1024 * 1024);
+  return { count: count ?? 0, sizeMB };
 }

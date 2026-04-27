@@ -160,6 +160,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supabaseReadAllMemos: (userId: string) =>
     ipcRenderer.invoke('supabase:read-all-memos', userId),
 
+  // 활동 기록 — 메인에 currentUser 알리기 (mutation 자동 기록 시 사용)
+  authSetCurrentUser: (user: { id: string; name: string } | null) =>
+    ipcRenderer.invoke('auth:set-current-user', user),
+
+  // 활동 기록 (activity_log)
+  activityList: (opts: {
+    before?: string;
+    limit?: number;
+    groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+    department?: 'bg' | 'acting' | null;
+  }) => ipcRenderer.invoke('activity:list', opts),
+  activityStats: (opts: {
+    days?: number;
+    groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+    department?: 'bg' | 'acting' | null;
+  }) => ipcRenderer.invoke('activity:stats', opts),
+  activityBackfill: (since: string) => ipcRenderer.invoke('activity:backfill', since),
+  activityStorageInfo: () => ipcRenderer.invoke('activity:storage-info'),
+  onActivityRealtimeInsert: (callback: (row: unknown) => void) => {
+    const handler = (_event: unknown, row: unknown) => callback(row);
+    ipcRenderer.on('activity:realtime-insert', handler);
+    return () => ipcRenderer.removeListener('activity:realtime-insert', handler);
+  },
+
   // 슬랙 웹훅
   sendSlackWebhook: (payload: Record<string, string>) =>
     ipcRenderer.invoke('slack:send-webhook', payload),

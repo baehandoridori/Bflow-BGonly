@@ -1,0 +1,14 @@
+/* 최근 작업 위젯 — 시각 효과 (hover 등) */
+
+/* 히트맵 셀 hover: 1.4배 확대 + z-index 위로 */
+.path-link-heatmap-cell:hover {
+  transform: scale(1.4);
+  z-index: 10;
+  position: relative;
+}
+
+/* 막대 차트 hover: 살짝 밝아지기 */
+.path-link-bar:hover {
+  opacity: 0.85;
+  filter: brightness(1.15);
+}

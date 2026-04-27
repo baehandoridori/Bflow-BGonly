@@ -29,7 +29,15 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   currentUser: null,
-  setCurrentUser: (user) => set({ currentUser: user }),
+  setCurrentUser: (user) => {
+    set({ currentUser: user });
+    // 메인 프로세스에 currentUser 동기화 — 활동 기록에서 user_id/user_name 자동 사용
+    try {
+      window.electronAPI?.authSetCurrentUser?.(
+        user ? { id: user.id, name: user.name } : null,
+      );
+    } catch { /* mock/dev 환경 무시 */ }
+  },
 
   users: [],
   setUsers: (users) => set({ users }),

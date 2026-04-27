@@ -858,6 +858,10 @@ import {
   updatePrivateEvent as sbUpdatePrivateEvent,
   deletePrivateEvent as sbDeletePrivateEvent,
   getPrivateEventOwner as sbGetPrivateEventOwner,
+  listActivities as sbListActivities,
+  getActivityStats as sbGetActivityStats,
+  backfillActivities as sbBackfillActivities,
+  getActivityStorageInfo as sbGetActivityStorageInfo,
 } from './supabase';
 import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -896,6 +900,81 @@ function wrapIpc<T extends unknown[], R>(
   }) as typeof ipcMain.handle;
 }
 
+// ─── 활동 기록 헬퍼 ───
+// 렌더러가 useAuthStore 변경 시 'auth:set-current-user' 로 알려준다.
+// 메인은 이 정보로 자동 활동 기록 (mutation 핸들러에서 1줄 호출).
+let currentActivityUser: { id: string; name: string } | null = null;
+
+ipcMain.handle('auth:set-current-user', (_e, user: { id: string; name: string } | null) => {
+  currentActivityUser = user;
+});
+
+import { supabase as supabaseClient, recordActivityLog as sbRecordActivityLog } from './supabase';
+import type { ActionGroup, ActionType } from './supabase';
+
+/** revision sceneKey ('EP02:A:35' 또는 'raw-...') 에서 scene_number 추출. addRevision 의 sceneIdForResolve 와 동일 로직. */
+function parseRevisionSceneKey(sceneKey: string): string {
+  const rawSegment = sceneKey.includes(':') ? sceneKey.split(':').pop() || sceneKey : sceneKey;
+  const lowerSegment = rawSegment.trim().toLowerCase();
+  if (lowerSegment.startsWith('raw-')) {
+    try { return decodeURIComponent(lowerSegment.slice(4)); }
+    catch { return lowerSegment.slice(4); }
+  }
+  return rawSegment;
+}
+
+/** scene_id 로 표시 라벨/에피소드/부서 자동 조회 (활동 기록 메타). */
+async function fetchSceneMeta(sceneUuid: string): Promise<{
+  sceneLabel: string | null;
+  episodeNumber: number | null;
+  department: 'bg' | 'acting' | null;
+}> {
+  try {
+    const { data } = await supabaseClient
+      .from('scenes')
+      .select('scene_number, parts(part_id, department, episodes(episode_number))')
+      .eq('id', sceneUuid)
+      .single();
+    if (!data) return { sceneLabel: null, episodeNumber: null, department: null };
+    const part = (data as { parts?: { part_id?: string; department?: string; episodes?: { episode_number?: number } } }).parts;
+    const epNum = part?.episodes?.episode_number ?? null;
+    const dept = (part?.department === 'bg' || part?.department === 'acting') ? part.department : null;
+    const sceneNumber = (data as { scene_number?: string }).scene_number;
+    const sceneLabel = epNum && part?.part_id
+      ? `EP${String(epNum).padStart(2, '0')} ${part.part_id} #${sceneNumber}`
+      : sceneNumber ? `씬 #${sceneNumber}` : null;
+    return { sceneLabel, episodeNumber: epNum, department: dept };
+  } catch {
+    return { sceneLabel: null, episodeNumber: null, department: null };
+  }
+}
+
+/** 씬 관련 활동 자동 기록 (try/catch 흡수, 본 mutation 흐름 영향 없음) */
+async function logSceneActivity(input: {
+  sceneUuid: string;
+  actionType: ActionType;
+  actionGroup: ActionGroup;
+  detail?: Record<string, unknown>;
+}): Promise<void> {
+  if (!currentActivityUser) return;
+  try {
+    const meta = await fetchSceneMeta(input.sceneUuid);
+    await sbRecordActivityLog({
+      userId: currentActivityUser.id,
+      userName: currentActivityUser.name,
+      actionType: input.actionType,
+      actionGroup: input.actionGroup,
+      sceneId: input.sceneUuid,
+      sceneLabel: meta.sceneLabel,
+      episodeNumber: meta.episodeNumber,
+      department: meta.department,
+      detail: input.detail ?? {},
+    });
+  } catch {
+    // 무시
+  }
+}
+
 // 연결 테스트
 ipcMain.handle('supabase:test-connection', wrapIpc(async () => {
   return supabaseTestConnection();
@@ -931,19 +1010,69 @@ ipcMain.handle('supabase:soft-delete-part', wrapIpc(async (_e: unknown, sheetNam
 
 // ─── Scenes ───
 ipcMain.handle('supabase:add-scene', wrapIpc(async (_e: unknown, sheetName: string, sceneId: string, assignee: string, memo: string) => {
-  await sbAddScene(sheetName, sceneId, assignee, memo);
+  const result = await sbAddScene(sheetName, sceneId, assignee, memo);
+  // 활동 기록 — addScene 반환값에 새 UUID 가 있으면 사용. 없으면 sheetName/sceneId 로 라벨만 구성
+  if (currentActivityUser) {
+    try {
+      const sceneLabel = `${sheetName} #${sceneId}`;
+      const dept = sheetName.endsWith('_BG') ? 'bg' : sheetName.endsWith('_ACT') ? 'acting' : null;
+      await sbRecordActivityLog({
+        userId: currentActivityUser.id, userName: currentActivityUser.name,
+        actionType: 'scene_add', actionGroup: 'scene',
+        sceneId: null, sceneLabel, episodeNumber: null, department: dept,
+        detail: { sceneId },
+      });
+    } catch { /* 무시 */ }
+  }
+  return result;
 }));
 ipcMain.handle('supabase:add-scenes', wrapIpc(async (_e: unknown, sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => {
   await sbAddScenes(sheetName, scenes);
+  // 다중 추가는 첫 항목만 대표로 기록 (자잘한 다중 추가 노이즈 방지)
+  if (currentActivityUser && scenes.length > 0) {
+    try {
+      const dept = sheetName.endsWith('_BG') ? 'bg' : sheetName.endsWith('_ACT') ? 'acting' : null;
+      const label = scenes.length === 1
+        ? `${sheetName} #${scenes[0].sceneId}`
+        : `${sheetName} #${scenes[0].sceneId} 외 ${scenes.length - 1}건`;
+      await sbRecordActivityLog({
+        userId: currentActivityUser.id, userName: currentActivityUser.name,
+        actionType: 'scene_add', actionGroup: 'scene',
+        sceneId: null, sceneLabel: label, episodeNumber: null, department: dept,
+        detail: { count: scenes.length },
+      });
+    } catch { /* 무시 */ }
+  }
 }));
 ipcMain.handle('supabase:delete-scene', wrapIpc(async (_e: unknown, sceneUuid: string) => {
+  // 삭제 전에 메타 조회 (DELETE 후엔 못 가져옴)
+  const meta = currentActivityUser ? await fetchSceneMeta(sceneUuid) : null;
   await sbDeleteScene(sceneUuid);
+  if (currentActivityUser && meta) {
+    try {
+      await sbRecordActivityLog({
+        userId: currentActivityUser.id, userName: currentActivityUser.name,
+        actionType: 'scene_delete', actionGroup: 'scene',
+        sceneId: sceneUuid,
+        sceneLabel: meta.sceneLabel, episodeNumber: meta.episodeNumber, department: meta.department,
+        detail: {},
+      });
+    } catch { /* 무시 */ }
+  }
 }));
 ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => {
   await sbUpdateSceneStage(sceneUuid, stage, value, updatedBy);
+  if (stage === 'lo' || stage === 'done' || stage === 'review' || stage === 'png') {
+    await logSceneActivity({
+      sceneUuid,
+      actionType: `stage_${stage}` as ActionType,
+      actionGroup: 'progress',
+      detail: { value },
+    });
+  }
 }));
 ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: BulkStageUpdate[], updatedBy: string) => {
-  const results = await sbBulkUpdateSceneStages(updates, updatedBy);
+  const results = await sbBulkUpdateSceneStages(updates, updatedBy, currentActivityUser?.name ?? null);
   for (const u of updates) {
     const r = results.find((x) => x.sceneUuid === u.sceneUuid);
     if (!r?.success) continue;
@@ -963,7 +1092,7 @@ ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, 
   return results;
 }));
 ipcMain.handle('supabase:bulk-delete-scenes', wrapIpc(async (_e: unknown, sceneUuids: string[], deletedBy: string) => {
-  const results = await sbBulkDeleteScenes(sceneUuids, deletedBy);
+  const results = await sbBulkDeleteScenes(sceneUuids, deletedBy, currentActivityUser?.name ?? null);
   // 단일 deleteScene과 parity 유지를 위해 성공 시 data-change broadcast — Codex 리뷰 #12.
   // Realtime 끊긴 상태의 피어가 broadcast-triggered reload로 동기화할 수 있도록 한다.
   if (results.some((r) => r.success)) {
@@ -972,7 +1101,7 @@ ipcMain.handle('supabase:bulk-delete-scenes', wrapIpc(async (_e: unknown, sceneU
   return results;
 }));
 ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, updates: BulkFieldUpdate[], updatedBy: string) => {
-  const results = await sbBulkUpdateSceneFields(updates, updatedBy);
+  const results = await sbBulkUpdateSceneFields(updates, updatedBy, currentActivityUser?.name ?? null);
   for (const u of updates) {
     const r = results.find((x) => x.sceneUuid === u.sceneUuid);
     if (!r?.success) continue;
@@ -986,6 +1115,20 @@ ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, 
 }));
 ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneUuid: string, field: string, value: string, senderId?: string) => {
   await sbUpdateSceneField(sceneUuid, field, value, senderId);
+  // 필드별 활동 기록
+  let actionType: ActionType | null = null;
+  let actionGroup: ActionGroup | null = null;
+  if (field === 'memo')                                     { actionType = 'memo_update'; actionGroup = 'memo'; }
+  else if (field === 'assignee')                            { actionType = 'assignee_change'; actionGroup = 'etc'; }
+  else if (field === 'layout' || field === 'layoutId')      { actionType = 'layout_change'; actionGroup = 'etc'; }
+  else if (field === 'storyboardUrl')                       { actionType = 'image_upload_storyboard'; actionGroup = 'etc'; }
+  else if (field === 'guideUrl')                            { actionType = 'image_upload_guide'; actionGroup = 'etc'; }
+  if (actionType && actionGroup) {
+    await logSceneActivity({
+      sceneUuid, actionType, actionGroup,
+      detail: actionType.startsWith('image_upload') ? {} : { to: value },
+    });
+  }
 }));
 
 // ─── Users ───
@@ -1009,6 +1152,41 @@ ipcMain.handle('supabase:read-comments', wrapIpc(async (_e: unknown, partUuid: s
 ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string) => {
   await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt);
+  // 활동 기록 — partUuid 로 부서/에피소드 + scene UUID 자동 조회
+  // (sceneId 가 TEXT 형식이라 scenes 테이블 조회로 UUID 변환 — 그룹화 정확성 + 부서 필터 통과)
+  if (currentActivityUser) {
+    try {
+      const { data: partRow } = await supabaseClient
+        .from('parts')
+        .select('part_id, department, episodes(episode_number)')
+        .eq('id', partUuid)
+        .single();
+      const part = partRow as { part_id?: string; department?: string; episodes?: { episode_number?: number } } | null;
+      const epNum = part?.episodes?.episode_number ?? null;
+      const dept = (part?.department === 'bg' || part?.department === 'acting') ? part.department : null;
+
+      // scene UUID 조회 — comment.scene_id (TEXT scene_number) + partUuid 로 scenes 테이블 매칭
+      let sceneUuid: string | null = null;
+      const { data: sceneRow } = await supabaseClient
+        .from('scenes')
+        .select('id')
+        .eq('part_id', partUuid)
+        .eq('scene_number', sceneId)
+        .maybeSingle();
+      sceneUuid = (sceneRow as { id?: string } | null)?.id ?? null;
+
+      const sceneLabel = epNum && part?.part_id
+        ? `EP${String(epNum).padStart(2, '0')} ${part.part_id} #${sceneId}`
+        : `씬 ${sceneId}`;
+      await sbRecordActivityLog({
+        userId: currentActivityUser.id, userName: currentActivityUser.name,
+        actionType: 'comment_add', actionGroup: 'memo',
+        sceneId: sceneUuid, sceneLabel,
+        episodeNumber: epNum, department: dept,
+        detail: { commentId, textPreview: text.slice(0, 60) },
+      });
+    } catch { /* 무시 */ }
+  }
 }));
 ipcMain.handle('supabase:edit-comment', wrapIpc(async (_e: unknown, commentId: string, text: string, mentions: string[]) => {
   await sbEditComment(commentId, text, mentions);
@@ -1065,9 +1243,95 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
     revisionNo: number, status: string, priority: string, description: string, frameNo: string,
     imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => {
     await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt);
+    if (currentActivityUser) {
+      try {
+        // sceneId 가 sceneKey 형식 (예: 'EP02:A:35') 일 수 있으므로 파싱 + raw- prefix 디코드 (Codex P2)
+        const sceneNumber = parseRevisionSceneKey(sceneId);
+
+        // 저장된 row 에서 정확한 part_id (UUID) 조회 — partUuid 가 빈 문자열일 수 있어 직접 사용 못 함
+        const { data: revRow } = await supabaseClient
+          .from('comp_revisions')
+          .select('part_id, parts(part_id, episodes(episode_number))')
+          .eq('id', id)
+          .single();
+        const rev = revRow as {
+          part_id?: string;
+          parts?: { part_id?: string; episodes?: { episode_number?: number } };
+        } | null;
+        const resolvedPartUuid = rev?.part_id ?? null;
+        const epNum = rev?.parts?.episodes?.episode_number ?? null;
+        const partLabel = rev?.parts?.part_id ?? null;
+
+        let sceneUuid: string | null = null;
+        if (resolvedPartUuid) {
+          const { data: sceneRow } = await supabaseClient
+            .from('scenes')
+            .select('id')
+            .eq('part_id', resolvedPartUuid)
+            .eq('scene_number', sceneNumber)
+            .maybeSingle();
+          sceneUuid = (sceneRow as { id?: string } | null)?.id ?? null;
+        }
+
+        const dept = department === 'bg' || department === 'acting' ? department : null;
+        const sceneLabel = epNum && partLabel
+          ? `EP${String(epNum).padStart(2, '0')} ${partLabel} #${sceneNumber} 리비전 #${revisionNo}`
+          : `씬 ${sceneNumber} 리비전 #${revisionNo}`;
+        await sbRecordActivityLog({
+          userId: currentActivityUser.id, userName: currentActivityUser.name,
+          actionType: 'revision_add', actionGroup: 'memo',
+          sceneId: sceneUuid, sceneLabel,
+          episodeNumber: epNum, department: dept,
+          detail: { revisionId: id, descriptionPreview: description.slice(0, 60) },
+        });
+      } catch { /* 무시 */ }
+    }
   }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   await sbUpdateRevision(id, updates);
+  // status === 'resolved' 변경만 활동 기록 — comp_revisions 에서 부서/에피소드 자동 조회 (Codex P2)
+  if (currentActivityUser && updates.status === 'resolved') {
+    try {
+      const { data: revRow } = await supabaseClient
+        .from('comp_revisions')
+        .select('scene_id, revision_no, department, part_id, parts(part_id, episodes(episode_number))')
+        .eq('id', id)
+        .single();
+      const rev = revRow as {
+        scene_id?: string;
+        revision_no?: number;
+        department?: string;
+        part_id?: string;        // comp_revisions.part_id (UUID)
+        parts?: { part_id?: string; episodes?: { episode_number?: number } };  // parts.part_id (TEXT 라벨)
+      } | null;
+      const dept = (rev?.department === 'bg' || rev?.department === 'acting') ? rev.department : null;
+      const epNum = rev?.parts?.episodes?.episode_number ?? null;
+
+      // scene UUID 조회 — rev.scene_id 는 sceneKey 형식 (예: 'EP02:A:35') 이므로 파싱 + raw- 디코드 (Codex P2)
+      let sceneUuid: string | null = null;
+      const sceneNumber = rev?.scene_id ? parseRevisionSceneKey(rev.scene_id) : null;
+      if (rev?.part_id && sceneNumber) {
+        const { data: sceneRow } = await supabaseClient
+          .from('scenes')
+          .select('id')
+          .eq('part_id', rev.part_id)
+          .eq('scene_number', sceneNumber)
+          .maybeSingle();
+        sceneUuid = (sceneRow as { id?: string } | null)?.id ?? null;
+      }
+
+      const sceneLabel = epNum && rev?.parts?.part_id && sceneNumber
+        ? `EP${String(epNum).padStart(2, '0')} ${rev.parts.part_id} #${sceneNumber} 리비전 #${rev.revision_no ?? '?'}`
+        : `리비전 #${rev?.revision_no ?? '?'} 해결`;
+      await sbRecordActivityLog({
+        userId: currentActivityUser.id, userName: currentActivityUser.name,
+        actionType: 'revision_resolve', actionGroup: 'memo',
+        sceneId: sceneUuid, sceneLabel,
+        episodeNumber: epNum, department: dept,
+        detail: { revisionId: id },
+      });
+    } catch { /* 무시 */ }
+  }
 }));
 // Codex 리뷰 #8 P1: 리비전 삭제는 renderer-provided userId 를 신뢰하면 안 됨.
 // 신뢰된 출처(메모리 session + auth.json 파일)에서 직접 해석.
@@ -1153,6 +1417,33 @@ ipcMain.handle('supabase:read-all-memos', wrapIpc(async (_e: unknown, userId: st
   return sbReadAllMemos(userId);
 }));
 
+// ─── 활동 기록 (activity_log) ──────────────────────────────
+// 주의: recordActivity 는 IPC 노출 안 함. 활동 기록은 mutation 함수 내부 헬퍼로만 호출.
+ipcMain.handle('activity:list', wrapIpc(async (_e: unknown, opts: {
+  before?: string;
+  limit?: number;
+  groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+  department?: 'bg' | 'acting' | null;
+}) => {
+  return sbListActivities(opts ?? {});
+}));
+
+ipcMain.handle('activity:stats', wrapIpc(async (_e: unknown, opts: {
+  days?: number;
+  groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+  department?: 'bg' | 'acting' | null;
+}) => {
+  return sbGetActivityStats(opts ?? {});
+}));
+
+ipcMain.handle('activity:backfill', wrapIpc(async (_e: unknown, since: string) => {
+  return sbBackfillActivities(since);
+}));
+
+ipcMain.handle('activity:storage-info', wrapIpc(async () => {
+  return sbGetActivityStorageInfo();
+}));
+
 // ─── Google Calendar IPC ──────────────────────────────
 
 ipcMain.handle('gcal:is-authenticated', wrapIpc(async () => {
@@ -1228,6 +1519,17 @@ function startSupabaseRealtime() {
     onRevisionChange: (payload) => broadcastSupabaseEvent('comp_revisions', payload),
     onEpisodeChange: (payload) => broadcastSupabaseEvent('episodes', payload),
     onPartChange: (payload) => broadcastSupabaseEvent('parts', payload),
+    onActivityInsert: (payload) => {
+      // 활동 기록은 INSERT 만 추적, 모든 윈도우에 전파
+      const row = payload.new;
+      if (!row) return;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('activity:realtime-insert', row);
+      }
+      for (const win of widgetWindows.values()) {
+        if (!win.isDestroyed()) win.webContents.send('activity:realtime-insert', row);
+      }
+    },
     onStatusChange: (status) => {
       currentRealtimeStatus = status;
       lastSupabaseStatus = humanizeStatus(status);

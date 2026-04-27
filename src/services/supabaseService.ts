@@ -3,7 +3,7 @@
  * window.electronAPI → IPC → 메인 프로세스
  */
 
-import type { Episode, Stage, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from '../types';
+import type { Episode, Stage, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult, Activity, ActionGroup } from '../types';
 
 // 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
 export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
@@ -483,6 +483,55 @@ export async function upsertMemo(
   memoData: { tabs: unknown[]; activeTabId: string | null; fontSize: number },
 ): Promise<void> {
   return window.electronAPI.supabaseUpsertMemo(userId, widgetId, memoData);
+}
+
+// ─── 활동 기록 (activity_log) ──────────────
+
+function rowToActivity(row: any): Activity {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    userName: row.user_name,
+    actionType: row.action_type,
+    actionGroup: row.action_group,
+    sceneId: row.scene_id,
+    sceneLabel: row.scene_label,
+    episodeNumber: row.episode_number,
+    department: row.department,
+    detail: row.detail,
+    createdAt: row.created_at,
+  };
+}
+
+export async function listActivities(opts: {
+  before?: string;
+  limit?: number;
+  groups?: ActionGroup[];
+  department?: 'bg' | 'acting' | null;
+}): Promise<Activity[]> {
+  const rows = await window.electronAPI.activityList(opts);
+  return (rows ?? []).map(rowToActivity);
+}
+
+export async function getActivityStats(opts: {
+  days?: number;
+  groups?: ActionGroup[];
+  department?: 'bg' | 'acting' | null;
+}): Promise<Array<{ day_of_week: number; hour: number; count: number }>> {
+  return await window.electronAPI.activityStats(opts);
+}
+
+export async function backfillActivities(since: string): Promise<Activity[]> {
+  const rows = await window.electronAPI.activityBackfill(since);
+  return (rows ?? []).map(rowToActivity);
+}
+
+export async function getActivityStorageInfo(): Promise<{ count: number; sizeMB: number }> {
+  return await window.electronAPI.activityStorageInfo();
+}
+
+export function subscribeToActivityRealtime(cb: (activity: Activity) => void): () => void {
+  return window.electronAPI.onActivityRealtimeInsert((row: any) => cb(rowToActivity(row)));
 }
 
 export async function readAllMemos(userId: string) {
