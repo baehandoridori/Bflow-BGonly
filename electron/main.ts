@@ -1234,12 +1234,33 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
     await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt);
     if (currentActivityUser) {
       try {
+        // partUuid 로 episode_number + part_id 자동 조회 + scene UUID 매칭 (Codex P2 — 그룹화 정확성)
+        const { data: partRow } = await supabaseClient
+          .from('parts')
+          .select('part_id, episodes(episode_number)')
+          .eq('id', partUuid)
+          .single();
+        const part = partRow as { part_id?: string; episodes?: { episode_number?: number } } | null;
+        const epNum = part?.episodes?.episode_number ?? null;
+
+        // scene UUID 조회 — sceneId 는 TEXT scene_number, partUuid + scene_number 로 scenes 매칭
+        const { data: sceneRow } = await supabaseClient
+          .from('scenes')
+          .select('id')
+          .eq('part_id', partUuid)
+          .eq('scene_number', sceneId)
+          .maybeSingle();
+        const sceneUuid = (sceneRow as { id?: string } | null)?.id ?? null;
+
         const dept = department === 'bg' || department === 'acting' ? department : null;
+        const sceneLabel = epNum && part?.part_id
+          ? `EP${String(epNum).padStart(2, '0')} ${part.part_id} #${sceneId} 리비전 #${revisionNo}`
+          : `씬 ${sceneId} 리비전 #${revisionNo}`;
         await sbRecordActivityLog({
           userId: currentActivityUser.id, userName: currentActivityUser.name,
           actionType: 'revision_add', actionGroup: 'memo',
-          sceneId: null, sceneLabel: `씬 ${sceneId} 리비전 #${revisionNo}`,
-          episodeNumber: null, department: dept,
+          sceneId: sceneUuid, sceneLabel,
+          episodeNumber: epNum, department: dept,
           detail: { revisionId: id, descriptionPreview: description.slice(0, 60) },
         });
       } catch { /* 무시 */ }
