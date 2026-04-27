@@ -4,8 +4,8 @@ import { Check, Eye, Sparkles, Pencil, MessageSquare, RotateCw, Plus, Trash2, Us
 import { useActivityStore } from '@/stores/useActivityStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import type { Activity, ActionType } from '@/types';
-import { groupActivities, formatRelativeTime } from './utils';
-import { ACTION_TYPE_LABEL, ACTION_TYPE_COLOR, ACTION_TYPE_TO_GROUP } from './constants';
+import { groupActivities, formatRelativeTime, getActivityVerb } from './utils';
+import { ACTION_TYPE_COLOR, ACTION_TYPE_TO_GROUP } from './constants';
 
 function ActionIcon({ type, size = 11 }: { type: ActionType; size?: number }) {
   const props = { size };
@@ -78,7 +78,7 @@ interface FeedItemRowProps {
 }
 
 function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
-  const verb = ACTION_TYPE_LABEL[activity.actionType];
+  const verb = getActivityVerb(activity);
   return (
     <div
       className={`flex gap-2.5 py-2 px-3.5 border-b border-bg-border/15 transition-colors hover:bg-white/[0.025] cursor-pointer relative ${
@@ -131,7 +131,7 @@ interface FeedGroupProps {
 function FeedGroup({ items, isSelf }: FeedGroupProps) {
   const [open, setOpen] = useState(isSelf); // 본인 그룹은 자동 펼침
   const head = items[0];
-  const verb = ACTION_TYPE_LABEL[head.actionType];
+  const verb = getActivityVerb(head);
 
   return (
     <div className={`border-b border-bg-border/15 ${isSelf ? 'bg-accent/[0.04]' : ''} relative`}>

@@ -1,5 +1,34 @@
-import type { Activity } from '@/types';
+import type { Activity, ActionType, Department, Stage } from '@/types';
+import { DEPARTMENT_CONFIGS } from '@/types';
+import { ACTION_TYPE_LABEL } from './constants';
 import { GROUP_WINDOW_MS } from './constants';
+
+/**
+ * 활동 동사(verb) 라벨 — stage 활동은 부서별 명칭 + 토글 ON/OFF 구분.
+ * - BG: lo='LO', done='완료', review='검수', png='PNG'
+ * - 액팅: lo='1원화', done='2원화', review='동화', png='최종'
+ * - value=true → "{단계명} 완료", value=false → "{단계명} 해제"
+ * - stage 외 활동(메모/댓글/씬 추가 등)은 ACTION_TYPE_LABEL 그대로.
+ */
+export function getActivityVerb(activity: Activity): string {
+  const stageMap: Record<string, Stage> = {
+    stage_lo: 'lo', stage_done: 'done', stage_review: 'review', stage_png: 'png',
+  };
+  const stage = stageMap[activity.actionType];
+  if (!stage) return ACTION_TYPE_LABEL[activity.actionType];
+
+  const dept: Department = activity.department === 'acting' ? 'acting' : 'bg';
+  const stageName = DEPARTMENT_CONFIGS[dept].stageLabels[stage];
+  const value = activity.detail && typeof (activity.detail as { value?: unknown }).value === 'boolean'
+    ? (activity.detail as { value: boolean }).value
+    : true; // 옛 데이터 호환: detail.value 없으면 완료로 간주
+  return `${stageName} ${value ? '완료' : '해제'}`;
+}
+
+/** action_type 만으로 빠르게 verb 가 필요한 곳 (필터/통계 등). 부서/value 무시. */
+export function getActionLabelGeneric(actionType: ActionType): string {
+  return ACTION_TYPE_LABEL[actionType];
+}
 
 export type FeedItem =
   | { type: 'item'; activity: Activity }
