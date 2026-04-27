@@ -580,7 +580,15 @@ export interface ElectronAPI {
     days?: number;
     groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
     department?: 'bg' | 'acting' | null;
-  }) => Promise<Array<{ day_of_week: number; hour: number; count: number }>>;
+  }) => Promise<Array<{
+    day_of_week: number;
+    hour: number;
+    count: number;
+    count_progress: number;
+    count_memo: number;
+    count_scene: number;
+    count_etc: number;
+  }>>;
   activityBackfill: (since: string) => Promise<any[]>;
   activityStorageInfo: () => Promise<{ count: number; sizeMB: number }>;
   onActivityRealtimeInsert: (cb: (row: any) => void) => () => void;
