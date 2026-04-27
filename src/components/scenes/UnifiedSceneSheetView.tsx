@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { MessageCircle, Trash2, ArrowUpRight } from 'lucide-react';
+import { MessageCircle, Trash2 } from 'lucide-react';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Stage, Scene } from '@/types';
 import type { SceneGroupMode } from '@/stores/useAppStore';
@@ -23,6 +23,8 @@ interface UnifiedSceneSheetViewProps {
   searchQuery?: string;
   selectedSceneIds: Set<string>;
   sceneGroupMode: SceneGroupMode;
+  /** 한솔 결정 (8번): 토스트 클릭 후 시트 뷰 진입 시 강조할 sceneId */
+  highlightSceneId?: string | null;
   onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
   onDelete: (sheetName: string, sceneIndex: number) => void;
   onOpenDetail: (sheetName: string, sceneIndex: number) => void;
@@ -277,6 +279,7 @@ export function UnifiedSceneSheetView({
   searchQuery,
   selectedSceneIds,
   sceneGroupMode,
+  highlightSceneId,
   onToggle,
   onDelete,
   onOpenDetail,
@@ -647,6 +650,10 @@ export function UnifiedSceneSheetView({
               const isFirstInGroup = meta?.isFirst ?? false;
               const groupSize = meta?.groupSize ?? 1;
               const layoutKey = meta?.layoutKey ?? '';
+              // 한솔 결정 (8번): 토스트 클릭 후 진입 시 해당 행 빛남
+              const isHighlighted = !!highlightSceneId && (
+                bgScene?.sceneId === highlightSceneId || actScene?.sceneId === highlightSceneId
+              );
 
               const commentBadgeCounts = getMergedCommentBadgeCounts(
                 m,
@@ -681,6 +688,7 @@ export function UnifiedSceneSheetView({
                       'hover:bg-accent/5',
                       isRowSelected && 'bg-accent/10 hover:bg-accent/15',
                       searchQuery && 'bg-accent/5 border-l-2 border-l-accent/60',
+                      isHighlighted && 'scene-row-highlighted',
                     )}
                     onClick={(e) => {
                       if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
@@ -698,14 +706,15 @@ export function UnifiedSceneSheetView({
                     }}
                   >
 
-                  {/* 씬번호 + 레이아웃 뱃지 + 댓글 뱃지 + 호버 시 ↗ (더블클릭 가능 어포던스) */}
-                  <td className="px-2 py-1.5 font-mono text-xs text-accent group/scenecell">
-                    <span className="flex items-center gap-1.5">
-                      <HighlightText text={sceneId || primary.sceneId || '-'} query={searchQuery} />
-                      <ArrowUpRight
-                        size={11}
-                        className="text-accent opacity-0 group-hover/scenecell:opacity-100 transition-opacity flex-shrink-0"
-                      />
+                  {/* 씬번호 + 레이아웃 뱃지 + 댓글 뱃지.
+                      한솔 결정 (5번): 1+3 합본 효과 — 텍스트 네온 펄스 + wrap 회전 보더. */}
+                  <td className="px-2 py-1.5 font-mono text-xs">
+                    <span className="flex items-center gap-2">
+                      <span className="scene-num-glow-wrap">
+                        <span className="scene-num-glow-text">
+                          <HighlightText text={sceneId || primary.sceneId || '-'} query={searchQuery} />
+                        </span>
+                      </span>
                       {primary.layoutId && (
                         <span className="text-[11px] italic font-medium text-accent-sub flex-shrink-0">
                           L#{primary.layoutId}

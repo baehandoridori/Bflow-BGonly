@@ -3547,6 +3547,7 @@ export function ScenesView() {
                 searchQuery={searchQuery}
                 selectedSceneIds={selectedSceneIds}
                 sceneGroupMode={sceneGroupMode}
+                highlightSceneId={highlightSceneId}
                 onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                 onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                 onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
@@ -3700,6 +3701,7 @@ export function ScenesView() {
                   searchQuery={searchQuery}
                   selectedSceneIds={selectedSceneIds}
                   sceneGroupMode="layout"
+                  highlightSceneId={highlightSceneId}
                   onToggle={handleToggle}
                   onDelete={handleDeleteScene}
                   onOpenDetail={(idx) => setDetailSceneIndex(idx)}
@@ -3800,6 +3802,7 @@ export function ScenesView() {
                 searchQuery={searchQuery}
                 selectedSceneIds={selectedSceneIds}
                 sceneGroupMode="flat"
+                highlightSceneId={highlightSceneId}
                 onToggle={handleToggle}
                 onDelete={handleDeleteScene}
                 onOpenDetail={(idx) => setDetailSceneIndex(idx)}

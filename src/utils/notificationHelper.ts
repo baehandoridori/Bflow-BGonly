@@ -49,14 +49,13 @@ export function dispatchNotification(payload: NotifyPayload, settings?: Notifica
   const canNavigate = !!(sceneId || sceneName);
 
   // 1. Sonner 토스트 (기본 스타일)
-  // 한솔 결정 (8번): 라벨 '씬 보기' → '확인' (간결). 동작은 동일하게 씬 모달로 포커스 이동.
-  // 토스트 노출 시간을 8초로 늘려 한솔이 충분히 인지할 시간 확보.
+  // 라벨 '씬 보기' 그대로 유지. 노출 시간 8초로 늘려 한솔이 인지할 시간 확보.
   sonnerToast(payload.title, {
     description: payload.body,
     duration: 8000,
     ...(canNavigate && {
       action: {
-        label: '확인',
+        label: '씬 보기',
         onClick: () => navigateToScene(sceneId, sceneName),
       },
     }),
