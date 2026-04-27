@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { WidgetPopup } from './views/WidgetPopup';
+import { PreviewBadge } from './components/PreviewBadge';
 import './index.css';
 import './styles/path-link.css';
 import './styles/activity-widget.css';
@@ -25,6 +26,9 @@ const popupParams = popupMatch?.[2]
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
+    {/* PreviewBadge 는 App 의 어떤 분기(splash, LoginScreen, 메인)에서도 항상 표시되어야 하므로
+        App 외부 fragment 의 sibling 으로 마운트 — 분기마다 추가하지 않고 한 번만 */}
+    <PreviewBadge />
     {popupMatch ? (
       <WidgetPopup widgetId={decodeURIComponent(popupMatch[1])} extraParams={popupParams} />
     ) : (

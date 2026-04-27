@@ -42,7 +42,6 @@ import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 import { isPreviewMode } from '@/utils/previewMode';
-import { PreviewBadge } from '@/components/PreviewBadge';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
 // 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
@@ -1234,7 +1233,6 @@ export default function App() {
 
   return (
     <>
-      <PreviewBadge />
       <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
       <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
       <SpotlightSearch />
