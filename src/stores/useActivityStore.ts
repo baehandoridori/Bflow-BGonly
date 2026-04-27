@@ -96,8 +96,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const department = getCurrentDepartment();
-      const groups = getCurrentGroupsForServer(get().filters.groups);
-      const rows = await supabaseService.listActivities({ limit: PAGE_SIZE, department, groups });
+      // group 필터는 client-side (ActivityFeed) — hidden group 활동도 store 에 보존 (Codex P1)
+      const rows = await supabaseService.listActivities({ limit: PAGE_SIZE, department });
       set({
         activities: rows,
         lastSeenCreatedAt: rows[0]?.createdAt ?? null,
@@ -118,9 +118,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ isLoading: true });
     try {
       const department = getCurrentDepartment();
-      const groups = getCurrentGroupsForServer(get().filters.groups);
+      // (createdAt, id) tuple cursor — 같은 timestamp row 누락 방지 (Codex P1)
+      const cursor = `${last.createdAt}|${last.id}`;
       const rows = await supabaseService.listActivities({
-        before: last.createdAt, limit: PAGE_SIZE, department, groups,
+        before: cursor, limit: PAGE_SIZE, department,
       });
       const sevenDaysAgo = Date.now() - 7 * 86_400_000;
       const filtered = rows.filter((r) => new Date(r.createdAt).getTime() >= sevenDaysAgo);
@@ -166,11 +167,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (currentDept && activity.department !== currentDept) {
       return;
     }
-    // 그룹 필터: 4그룹 일부만 활성화면 비활성 그룹 활동은 skip (피드/격자 일관성)
+    // 그룹 필터는 client-side (ActivityFeed) — store 에는 모든 그룹 활동 보존.
+    // 비활성 그룹 활동을 여기서 drop 하면 그룹 다시 켰을 때 그동안의 활동이 영구 누락됨 (Codex P1).
+    // 단, statsGrid 는 server 측 group 필터 결과와 일관되도록 활성 그룹일 때만 +1.
     const activeGroups = get().filters.groups;
-    if (activeGroups.size < 4 && !activeGroups.has(activity.actionGroup)) {
-      return;
-    }
+    const inActiveGroup = activeGroups.size === 4 || activeGroups.has(activity.actionGroup);
+
     set((s) => {
       // UUID 중복 → 무시
       if (s.activities.some((a) => a.id === activity.id)) return s;
@@ -178,7 +180,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       return {
         activities: newActs,
         lastSeenCreatedAt: activity.createdAt,
-        statsGrid: incrementGrid(s.statsGrid, activity.createdAt),
+        statsGrid: inActiveGroup ? incrementGrid(s.statsGrid, activity.createdAt) : s.statsGrid,
       };
     });
   },
@@ -188,8 +190,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (on) next.add(group); else next.delete(group);
     saveFilters(next);
     set({ filters: { groups: next } });
-    // 그룹 필터 변경 → 활동 + 차트 모두 재로드 (서버 측 group 필터 적용 결과 반영)
-    void get().loadInitial();
+    // group 필터는 client-side — 활동은 이미 store 에 보존되어 있으니 reload 불필요.
+    // statsGrid 만 server 측 group 필터로 재집계 (히트맵/막대 정확성).
+    void get().loadStats();
   },
 
   setAllFilters(on) {
@@ -198,7 +201,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       : new Set();
     saveFilters(next);
     set({ filters: { groups: next } });
-    void get().loadInitial();
+    void get().loadStats();
   },
 
   setGoldenMode(mode) {

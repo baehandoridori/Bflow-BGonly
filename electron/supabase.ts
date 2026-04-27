@@ -1626,8 +1626,12 @@ export async function recordActivityLog(input: RecordActivityLogInput): Promise<
 }
 
 export async function listActivities(opts: {
+  /** 페이지 cursor — 형식: "<createdAt>|<id>" (timestamp tie-breaker 보장).
+   *  단순 timestamp 만 쓰면 같은 ms 에 쓰인 row 들이 페이지 경계에서 사라질 수 있음 (Codex P1).
+   */
   before?: string;
   limit?: number;
+  /** v1: 항상 미전달 — group 필터는 client-side 에서 적용 (hidden group 활동 보존, Codex P1) */
   groups?: ActionGroup[];
   department?: 'bg' | 'acting' | null;
 }): Promise<ActivityRow[]> {
@@ -1635,9 +1639,21 @@ export async function listActivities(opts: {
     .from('activity_log')
     .select('*')
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })   // tie-breaker — 같은 timestamp 안에서 안정적 cursor
     .limit(opts.limit ?? 100);
 
-  if (opts.before) q = q.lt('created_at', opts.before);
+  if (opts.before) {
+    const sep = opts.before.indexOf('|');
+    if (sep > 0) {
+      const beforeCreatedAt = opts.before.slice(0, sep);
+      const beforeId = opts.before.slice(sep + 1);
+      // (created_at, id) < (a, b) 조건: created_at < a OR (created_at == a AND id < b)
+      q = q.or(`created_at.lt.${beforeCreatedAt},and(created_at.eq.${beforeCreatedAt},id.lt.${beforeId})`);
+    } else {
+      // backward-compat — opts.before 가 순수 timestamp 만이면 기존 방식
+      q = q.lt('created_at', opts.before);
+    }
+  }
   if (opts.groups && opts.groups.length > 0) q = q.in('action_group', opts.groups);
   if (opts.department) q = q.eq('department', opts.department);
 
