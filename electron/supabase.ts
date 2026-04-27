@@ -679,17 +679,44 @@ export async function bulkUpdateSceneFields(
   updatedBy: string,
   userName?: string | null,
 ): Promise<BulkUpdateResult[]> {
+  // 활동 기록 메타 사전 조회 (RPC 도 자동 조회 fallback 있지만 클라이언트 측 전달로 안전성 강화 — Codex P1)
+  const metaByUuid = new Map<string, { sceneLabel: string; episodeNumber: number | null; department: string | null }>();
+  if (userName) {
+    const { data: metaRows } = await supabase
+      .from('scenes')
+      .select('id, scene_number, parts(part_id, department, episodes(episode_number))')
+      .in('id', updates.map((u) => u.sceneUuid));
+    for (const r of (metaRows ?? []) as Array<{
+      id: string; scene_number: string;
+      parts?: { part_id?: string; department?: string; episodes?: { episode_number?: number } };
+    }>) {
+      const part = r.parts;
+      const epNum = part?.episodes?.episode_number ?? null;
+      const partLabel = part?.part_id ?? null;
+      const sceneLabel = epNum && partLabel
+        ? `EP${String(epNum).padStart(2, '0')} ${partLabel} #${r.scene_number}`
+        : `씬 #${r.scene_number}`;
+      metaByUuid.set(r.id, { sceneLabel, episodeNumber: epNum, department: part?.department ?? null });
+    }
+  }
+
   const { data, error } = await supabase.rpc('bulk_update_scene_fields', {
-    p_updates: updates.map((u) => ({
-      sceneUuid: u.sceneUuid,
-      fields: {
-        assignee: u.fields.assignee,
-        memo: u.fields.memo,
-        layout: u.fields.layoutId,
-        storyboardUrl: u.fields.storyboardUrl,
-        guideUrl: u.fields.guideUrl,
-      },
-    })),
+    p_updates: updates.map((u) => {
+      const meta = metaByUuid.get(u.sceneUuid);
+      return {
+        sceneUuid: u.sceneUuid,
+        fields: {
+          assignee: u.fields.assignee,
+          memo: u.fields.memo,
+          layout: u.fields.layoutId,
+          storyboardUrl: u.fields.storyboardUrl,
+          guideUrl: u.fields.guideUrl,
+        },
+        sceneLabel: meta?.sceneLabel ?? null,
+        episodeNumber: meta?.episodeNumber ?? null,
+        department: meta?.department ?? null,
+      };
+    }),
     p_updated_by: updatedBy,
     p_user_name: userName ?? null,
   });
