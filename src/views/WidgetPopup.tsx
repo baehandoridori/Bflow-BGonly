@@ -11,6 +11,7 @@ import { DepartmentComparisonWidget } from '@/components/widgets/DepartmentCompa
 import { CalendarWidget } from '@/components/widgets/CalendarWidget';
 import { MyTasksWidget } from '@/components/widgets/MyTasksWidget';
 import { MemoWidget } from '@/components/widgets/MemoWidget';
+import { RecentActivityWidget } from '@/components/widgets/RecentActivityWidget';
 import { VacationWidget } from '@/components/widgets/VacationWidget';
 import { WhiteboardWidget } from '@/components/widgets/whiteboard/WhiteboardWidget';
 import { EpOverallProgressWidget } from '@/components/widgets/episode/EpOverallProgressWidget';
@@ -58,6 +59,7 @@ const WIDGET_REGISTRY: Record<string, { label: string; component: React.ReactNod
   'vacation-today': { label: '휴가자 현황', component: <VacationWidget /> },
   'memo': { label: '메모', component: <MemoWidget /> },
   'whiteboard': { label: '화이트보드', component: <WhiteboardWidget /> },
+  'recent-activity': { label: '최근 작업', component: <RecentActivityWidget /> },
   'ep-overall-progress': { label: 'EP 통합 진행률', component: <EpOverallProgressWidget /> },
   'ep-stage-bars': { label: 'EP 단계별 진행률', component: <EpStageBarsWidget /> },
   'ep-assignee-cards': { label: 'EP 담당자별 현황', component: <EpAssigneeCardsWidget /> },
