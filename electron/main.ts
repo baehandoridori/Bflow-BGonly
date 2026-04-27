@@ -1273,24 +1273,38 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
     try {
       const { data: revRow } = await supabaseClient
         .from('comp_revisions')
-        .select('scene_id, revision_no, department, parts(part_id, episodes(episode_number))')
+        .select('scene_id, revision_no, department, part_id, parts(part_id, episodes(episode_number))')
         .eq('id', id)
         .single();
       const rev = revRow as {
         scene_id?: string;
         revision_no?: number;
         department?: string;
-        parts?: { part_id?: string; episodes?: { episode_number?: number } };
+        part_id?: string;        // comp_revisions.part_id (UUID)
+        parts?: { part_id?: string; episodes?: { episode_number?: number } };  // parts.part_id (TEXT 라벨)
       } | null;
       const dept = (rev?.department === 'bg' || rev?.department === 'acting') ? rev.department : null;
       const epNum = rev?.parts?.episodes?.episode_number ?? null;
+
+      // scene UUID 조회 — rev.part_id (UUID) + rev.scene_id (TEXT scene_number) 로 scenes 매칭
+      let sceneUuid: string | null = null;
+      if (rev?.part_id && rev?.scene_id) {
+        const { data: sceneRow } = await supabaseClient
+          .from('scenes')
+          .select('id')
+          .eq('part_id', rev.part_id)
+          .eq('scene_number', rev.scene_id)
+          .maybeSingle();
+        sceneUuid = (sceneRow as { id?: string } | null)?.id ?? null;
+      }
+
       const sceneLabel = epNum && rev?.parts?.part_id && rev?.scene_id
         ? `EP${String(epNum).padStart(2, '0')} ${rev.parts.part_id} #${rev.scene_id} 리비전 #${rev.revision_no ?? '?'}`
         : `리비전 #${rev?.revision_no ?? '?'} 해결`;
       await sbRecordActivityLog({
         userId: currentActivityUser.id, userName: currentActivityUser.name,
         actionType: 'revision_resolve', actionGroup: 'memo',
-        sceneId: null, sceneLabel,
+        sceneId: sceneUuid, sceneLabel,
         episodeNumber: epNum, department: dept,
         detail: { revisionId: id },
       });
