@@ -1,10 +1,17 @@
 import { useMemo } from 'react';
 import { useActivityStore } from '@/stores/useActivityStore';
-import { dayLabel } from './utils';
+import { dayLabel, addGroupedCount, EMPTY_GROUPED_COUNT, type GroupedCount } from './utils';
+
+export interface BarHoverInfo {
+  label: string;
+  cell: GroupedCount;
+  x: number;
+  y: number;
+}
 
 interface Props {
   mode: 'hour' | 'day';
-  onBarHover?: (info: { label: string; count: number; x: number; y: number } | null) => void;
+  onBarHover?: (info: BarHoverInfo | null) => void;
 }
 
 const ACCENT_GRADIENT = 'linear-gradient(to top, rgb(var(--color-accent)) 0%, rgb(var(--color-accent-sub)) 100%)';
@@ -14,18 +21,19 @@ const PEAK_GRADIENT = 'linear-gradient(to top, #FDCB6E 0%, #FFE5A0 100%)';
 export function GoldenBarChart({ mode, onBarHover }: Props) {
   const grid = useActivityStore((s) => s.statsGrid);
 
-  const totals = useMemo(() => {
+  /** mode 기준으로 24시간(또는 7요일) 분 그룹별 카운트 합산. */
+  const buckets = useMemo<GroupedCount[]>(() => {
     if (mode === 'hour') {
-      const arr = new Array(24).fill(0);
-      for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) arr[h] += grid[d][h];
-      return arr;
-    } else {
-      const arr = new Array(7).fill(0);
-      for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) arr[d] += grid[d][h];
+      const arr: GroupedCount[] = Array.from({ length: 24 }, () => ({ ...EMPTY_GROUPED_COUNT }));
+      for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) arr[h] = addGroupedCount(arr[h], grid[d][h]);
       return arr;
     }
+    const arr: GroupedCount[] = Array.from({ length: 7 }, () => ({ ...EMPTY_GROUPED_COUNT }));
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) arr[d] = addGroupedCount(arr[d], grid[d][h]);
+    return arr;
   }, [grid, mode]);
 
+  const totals = useMemo(() => buckets.map((b) => b.total), [buckets]);
   const max = Math.max(1, ...totals);
   const peakIdx = totals.indexOf(Math.max(...totals));
 
@@ -35,8 +43,8 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
         className="grid items-end gap-[3px] relative"
         style={{ gridTemplateColumns: 'repeat(24, 1fr)', height: '130px', paddingBottom: '18px' }}
       >
-        {totals.map((count, h) => {
-          const pct = max > 0 ? (count / max) * 100 : 0;
+        {buckets.map((cell, h) => {
+          const pct = max > 0 ? (cell.total / max) * 100 : 0;
           return (
             <div
               key={h}
@@ -48,7 +56,7 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
               }}
               onMouseEnter={(e) => {
                 const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                onBarHover?.({ label: `${h}시`, count, x: rect.left + rect.width / 2, y: rect.top });
+                onBarHover?.({ label: `${h}시`, cell, x: rect.left + rect.width / 2, y: rect.top });
               }}
               onMouseLeave={() => onBarHover?.(null)}
             >
@@ -70,9 +78,9 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
       className="grid items-end gap-3 px-3"
       style={{ gridTemplateColumns: 'repeat(7, 1fr)', height: '130px', paddingBottom: '22px' }}
     >
-      {totals.map((count, d) => {
-        const pct = max > 0 ? (count / max) * 100 : 0;
-        const isPeak = d === peakIdx && count > 0;
+      {buckets.map((cell, d) => {
+        const pct = max > 0 ? (cell.total / max) * 100 : 0;
+        const isPeak = d === peakIdx && cell.total > 0;
         return (
           <div
             key={d}
@@ -84,7 +92,7 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
             }}
             onMouseEnter={(e) => {
               const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-              onBarHover?.({ label: `${dayLabel(d)}요일`, count, x: rect.left + rect.width / 2, y: rect.top });
+              onBarHover?.({ label: `${dayLabel(d)}요일`, cell, x: rect.left + rect.width / 2, y: rect.top });
             }}
             onMouseLeave={() => onBarHover?.(null)}
           >

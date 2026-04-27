@@ -1712,11 +1712,21 @@ export async function listActivities(opts: {
   return (data ?? []) as ActivityRow[];
 }
 
+export interface ActivityStatBucket {
+  day_of_week: number;
+  hour: number;
+  count: number;
+  count_progress: number;
+  count_memo: number;
+  count_scene: number;
+  count_etc: number;
+}
+
 export async function getActivityStats(opts: {
   days?: number;
   groups?: ActionGroup[];
   department?: 'bg' | 'acting' | null;
-}): Promise<Array<{ day_of_week: number; hour: number; count: number }>> {
+}): Promise<ActivityStatBucket[]> {
   const since = new Date(Date.now() - (opts.days ?? 7) * 86400000).toISOString();
   const { data, error } = await supabase.rpc('activity_log_stats', {
     p_since: since,
@@ -1724,7 +1734,7 @@ export async function getActivityStats(opts: {
     p_department: opts.department ?? null,
   });
   if (error) throw new Error(`getActivityStats failed: ${error.message}`);
-  return (data ?? []) as Array<{ day_of_week: number; hour: number; count: number }>;
+  return (data ?? []) as ActivityStatBucket[];
 }
 
 export async function backfillActivities(since: string, limit = 200): Promise<ActivityRow[]> {

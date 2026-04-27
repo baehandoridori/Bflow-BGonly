@@ -517,7 +517,15 @@ export async function getActivityStats(opts: {
   days?: number;
   groups?: ActionGroup[];
   department?: 'bg' | 'acting' | null;
-}): Promise<Array<{ day_of_week: number; hour: number; count: number }>> {
+}): Promise<Array<{
+  day_of_week: number;
+  hour: number;
+  count: number;
+  count_progress: number;
+  count_memo: number;
+  count_scene: number;
+  count_etc: number;
+}>> {
   return await window.electronAPI.activityStats(opts);
 }
 

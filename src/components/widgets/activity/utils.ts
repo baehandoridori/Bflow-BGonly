@@ -79,6 +79,31 @@ export function groupActivities(items: Activity[]): FeedItem[] {
   return result;
 }
 
+/**
+ * 그룹별 카운트 묶음 — 한 셀(요일×시간)의 활동을 그룹별로 분해 보관.
+ * v1.14.1 추가: 히트맵 셀 호버 툴팁에서 "작업진행 N건 / 메모·댓글 N건 / 씬 N건 / 기타 N건" 표시용.
+ * total 은 4개 합과 항상 일치 (서버 RPC FILTER 절에서 보장).
+ */
+export interface GroupedCount {
+  total: number;
+  progress: number;
+  memo: number;
+  scene: number;
+  etc: number;
+}
+
+export const EMPTY_GROUPED_COUNT: GroupedCount = { total: 0, progress: 0, memo: 0, scene: 0, etc: 0 };
+
+export function addGroupedCount(a: GroupedCount, b: GroupedCount): GroupedCount {
+  return {
+    total: a.total + b.total,
+    progress: a.progress + b.progress,
+    memo: a.memo + b.memo,
+    scene: a.scene + b.scene,
+    etc: a.etc + b.etc,
+  };
+}
+
 export interface GoldenWindow {
   day: number;
   hour: number;
@@ -86,11 +111,11 @@ export interface GoldenWindow {
 }
 
 /** 24x7 격자에서 연속 2시간 합이 최대인 슬롯. 동률이면 가장 최근 요일 우선. */
-export function pickGoldenWindow(grid: number[][]): GoldenWindow | null {
+export function pickGoldenWindow(grid: GroupedCount[][]): GoldenWindow | null {
   let best: GoldenWindow | null = null;
   for (let d = 0; d < 7; d++) {
     for (let h = 0; h < 23; h++) {
-      const sum = (grid[d]?.[h] ?? 0) + (grid[d]?.[h + 1] ?? 0);
+      const sum = (grid[d]?.[h]?.total ?? 0) + (grid[d]?.[h + 1]?.total ?? 0);
       if (sum === 0) continue;
       if (!best || sum > best.count || (sum === best.count && d > best.day)) {
         best = { day: d, hour: h, count: sum };
@@ -126,14 +151,33 @@ export function pickGoldenDay(dayTotals: number[]): { day: number; ratio: number
 /**
  * stats 결과(PostgreSQL EXTRACT(dow): 0=일~6=토) → 표시용 24x7 격자.
  * 표시 인덱스: 0=월, 1=화, ..., 5=토, 6=일.
+ * v1.14.1: 그룹별 카운트(progress/memo/scene/etc) 포함.
  */
-export function buildHeatmapGrid(stats: Array<{ day_of_week: number; hour: number; count: number }>): number[][] {
-  const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+export interface ActivityStatRow {
+  day_of_week: number;
+  hour: number;
+  count: number;
+  count_progress?: number;
+  count_memo?: number;
+  count_scene?: number;
+  count_etc?: number;
+}
+
+export function buildHeatmapGrid(stats: ActivityStatRow[]): GroupedCount[][] {
+  const grid: GroupedCount[][] = Array.from({ length: 7 }, () =>
+    Array.from({ length: 24 }, () => ({ ...EMPTY_GROUPED_COUNT })),
+  );
   for (const s of stats) {
     // pg dow 0=일,1=월,...,6=토 → 표시 0=월,...,6=일
     const displayDay = (s.day_of_week + 6) % 7;
     if (displayDay >= 0 && displayDay < 7 && s.hour >= 0 && s.hour < 24) {
-      grid[displayDay][s.hour] = s.count;
+      grid[displayDay][s.hour] = {
+        total: s.count,
+        progress: s.count_progress ?? 0,
+        memo: s.count_memo ?? 0,
+        scene: s.count_scene ?? 0,
+        etc: s.count_etc ?? 0,
+      };
     }
   }
   return grid;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, Clock, Filter, Grid3x3, BarChart3 } from 'lucide-react';
+import { Activity, Clock, Grid3x3, BarChart3 } from 'lucide-react';
 import { Widget } from './Widget';
 import { useActivityStore, type GoldenMode } from '@/stores/useActivityStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -8,15 +8,20 @@ import { GoldenHeatmap } from './activity/GoldenHeatmap';
 import { GoldenBarChart } from './activity/GoldenBarChart';
 import { ActivityFilterChips } from './activity/ActivityFilterChips';
 import { ActivityFeed } from './activity/ActivityFeed';
-import { pickGoldenWindow, pickGoldenHour, pickGoldenDay, dayLabel } from './activity/utils';
+import { pickGoldenWindow, pickGoldenHour, pickGoldenDay, dayLabel, EMPTY_GROUPED_COUNT, type GroupedCount } from './activity/utils';
+import { GROUP_LABEL, GROUP_DOT_COLOR } from './activity/constants';
 import { subscribeToActivityRealtime } from '@/services/supabaseService';
+import type { ActionGroup } from '@/types';
 
 interface TooltipState {
   visible: boolean;
-  text: string;
+  title: string;
+  cell: GroupedCount;
   x: number;
   y: number;
 }
+
+const TOOLTIP_GROUP_ORDER: ActionGroup[] = ['progress', 'memo', 'scene', 'etc'];
 
 export function RecentActivityWidget() {
   const {
@@ -28,7 +33,16 @@ export function RecentActivityWidget() {
     receiveRealtime,
   } = useActivityStore();
 
-  const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, text: '', x: 0, y: 0 });
+  const [tooltip, setTooltip] = useState<TooltipState>({
+    visible: false,
+    title: '',
+    cell: { ...EMPTY_GROUPED_COUNT },
+    x: 0,
+    y: 0,
+  });
+
+  const hideTooltip = () =>
+    setTooltip({ visible: false, title: '', cell: { ...EMPTY_GROUPED_COUNT }, x: 0, y: 0 });
 
   // 대시보드 부서 필터 변경 시 활동 + statsGrid 자동 재로드 (Codex P2).
   // useActivityStore 의 store action 은 stable reference 라 useEffect 가 재실행되지 않으므로
@@ -56,14 +70,14 @@ export function RecentActivityWidget() {
     }
     if (goldenMode === 'hour') {
       const hourTotals = new Array(24).fill(0);
-      for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) hourTotals[h] += statsGrid[d][h];
+      for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) hourTotals[h] += statsGrid[d][h].total;
       const r = pickGoldenHour(hourTotals);
       if (!r) return '활동 기록이 부족합니다';
       return `하루 중 정점: ${r.hour}–${r.hour + 2}시 (24시간 기준 ${Math.round(r.ratio * 100)}%)`;
     }
     // day
     const dayTotals = new Array(7).fill(0);
-    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) dayTotals[d] += statsGrid[d][h];
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) dayTotals[d] += statsGrid[d][h].total;
     const r = pickGoldenDay(dayTotals);
     if (!r) return '활동 기록이 부족합니다';
     return `주중 정점: ${dayLabel(r.day)}요일 (전체의 ${Math.round(r.ratio * 100)}%)`;
@@ -87,10 +101,11 @@ export function RecentActivityWidget() {
           {goldenMode === 'heatmap' && (
             <GoldenHeatmap
               onCellHover={(info) => {
-                if (!info) { setTooltip({ visible: false, text: '', x: 0, y: 0 }); return; }
+                if (!info) { hideTooltip(); return; }
                 setTooltip({
                   visible: true,
-                  text: `${dayLabel(info.day)} ${info.hour}시 · ${info.count}건`,
+                  title: `${dayLabel(info.day)} ${info.hour}시`,
+                  cell: info.cell,
                   x: info.x, y: info.y,
                 });
               }}
@@ -100,8 +115,8 @@ export function RecentActivityWidget() {
             <GoldenBarChart
               mode="hour"
               onBarHover={(info) => {
-                if (!info) { setTooltip({ visible: false, text: '', x: 0, y: 0 }); return; }
-                setTooltip({ visible: true, text: `${info.label} · ${info.count}건`, x: info.x, y: info.y });
+                if (!info) { hideTooltip(); return; }
+                setTooltip({ visible: true, title: info.label, cell: info.cell, x: info.x, y: info.y });
               }}
             />
           )}
@@ -109,8 +124,8 @@ export function RecentActivityWidget() {
             <GoldenBarChart
               mode="day"
               onBarHover={(info) => {
-                if (!info) { setTooltip({ visible: false, text: '', x: 0, y: 0 }); return; }
-                setTooltip({ visible: true, text: `${info.label} · ${info.count}건`, x: info.x, y: info.y });
+                if (!info) { hideTooltip(); return; }
+                setTooltip({ visible: true, title: info.label, cell: info.cell, x: info.x, y: info.y });
               }}
             />
           )}
@@ -131,7 +146,7 @@ export function RecentActivityWidget() {
             위젯의 backdrop-filter 가 만든 stacking context 안에 갇히지 않음 */}
         {tooltip.visible && createPortal(
           <div
-            className="fixed z-[9999] bg-bg-card/95 border border-bg-border rounded-lg px-2.5 py-1.5 text-[11.5px] text-text-primary pointer-events-none shadow-xl backdrop-blur-md"
+            className="fixed z-[9999] bg-bg-card/95 border border-bg-border rounded-lg px-2.5 py-2 text-[11.5px] text-text-primary pointer-events-none shadow-xl backdrop-blur-md min-w-[120px]"
             style={{
               left: tooltip.x,
               top: tooltip.y,
@@ -139,7 +154,29 @@ export function RecentActivityWidget() {
               whiteSpace: 'nowrap',
             }}
           >
-            {tooltip.text}
+            <div className="font-semibold text-accent-sub mb-1.5">
+              {tooltip.title} <span className="text-text-secondary font-normal">· 총 {tooltip.cell.total}건</span>
+            </div>
+            {tooltip.cell.total === 0 ? (
+              <div className="text-text-secondary text-[11px]">활동 없음</div>
+            ) : (
+              <div className="flex flex-col gap-[3px]">
+                {TOOLTIP_GROUP_ORDER.map((g) => {
+                  const c = tooltip.cell[g];
+                  if (c === 0) return null;
+                  return (
+                    <div key={g} className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+                      <span
+                        className="w-[7px] h-[7px] rounded-full flex-shrink-0"
+                        style={{ background: GROUP_DOT_COLOR[g] }}
+                      />
+                      <span>{GROUP_LABEL[g]}</span>
+                      <span className="text-text-primary ml-auto pl-2">{c}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>,
           document.body,
         )}

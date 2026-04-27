@@ -1,8 +1,16 @@
 import { useActivityStore } from '@/stores/useActivityStore';
-import { intensityLevel, intensityBg, intensityGlow, dayLabel } from './utils';
+import { intensityLevel, intensityBg, intensityGlow, dayLabel, type GroupedCount } from './utils';
+
+export interface HeatmapCellHoverInfo {
+  day: number;
+  hour: number;
+  cell: GroupedCount;
+  x: number;
+  y: number;
+}
 
 interface Props {
-  onCellHover?: (info: { day: number; hour: number; count: number; x: number; y: number } | null) => void;
+  onCellHover?: (info: HeatmapCellHoverInfo | null) => void;
 }
 
 export function GoldenHeatmap({ onCellHover }: Props) {
@@ -34,7 +42,7 @@ function DayRow({
   onCellHover,
 }: {
   dayIdx: number;
-  row: number[];
+  row: GroupedCount[];
   onCellHover?: Props['onCellHover'];
 }) {
   return (
@@ -42,15 +50,15 @@ function DayRow({
       <div className="text-[10px] text-text-secondary text-right pr-1.5">
         {dayLabel(dayIdx)}
       </div>
-      {row.map((count, h) => {
-        const lv = intensityLevel(count);
+      {row.map((cell, h) => {
+        const lv = intensityLevel(cell.total);
         const handleEnter = (e: React.MouseEvent<HTMLDivElement>) => {
           // 셀의 화면 좌상단 좌표 사용 — 호버 영역 안에서 마우스 움직여도 툴팁 위치 안정
           const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
           onCellHover?.({
             day: dayIdx,
             hour: h,
-            count,
+            cell,
             x: rect.left + rect.width / 2,
             y: rect.top,
           });

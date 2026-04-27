@@ -3,7 +3,7 @@ import type { Activity, ActionGroup } from '@/types';
 import * as supabaseService from '@/services/supabaseService';
 import { useAppStore } from './useAppStore';
 import { useAuthStore } from './useAuthStore';
-import { buildHeatmapGrid } from '@/components/widgets/activity/utils';
+import { buildHeatmapGrid, EMPTY_GROUPED_COUNT, type GroupedCount } from '@/components/widgets/activity/utils';
 import { MAX_CACHED, PAGE_SIZE } from '@/components/widgets/activity/constants';
 
 const FILTERS_KEY = 'bflow_activity_filters';
@@ -13,7 +13,8 @@ export type GoldenMode = 'heatmap' | 'hour' | 'day';
 
 interface ActivityState {
   activities: Activity[];
-  statsGrid: number[][];
+  /** 24x7 그룹별 카운트 격자 — 히트맵 셀 호버 툴팁이 progress/memo/scene/etc 분해 표시 */
+  statsGrid: GroupedCount[][];
   /** 낙관적 prepend 매핑 — localTmpId → 진짜 UUID. Realtime dedupe 보조 */
   pendingByLocalId: Map<string, string>;
   lastSeenCreatedAt: string | null;
@@ -65,8 +66,8 @@ function getCurrentGroupsForServer(filters: Set<ActionGroup>): ActionGroup[] | u
   return [...filters];
 }
 
-/** stats grid 의 해당 셀 +1 — Realtime 신규 시 즉시 반영 */
-function incrementGrid(grid: number[][], createdAt: string): number[][] {
+/** stats grid 의 해당 셀 +1 — Realtime 신규 시 즉시 반영 (총합 + 그룹별 둘 다 갱신) */
+function incrementGrid(grid: GroupedCount[][], createdAt: string, group: ActionGroup): GroupedCount[][] {
   const dt = new Date(createdAt);
   // KST 변환 — getTimezoneOffset 은 분 단위
   const kstStr = dt.toLocaleString('en-US', { timeZone: 'Asia/Seoul', hour12: false });
@@ -76,14 +77,18 @@ function incrementGrid(grid: number[][], createdAt: string): number[][] {
   const displayDay = (dow + 6) % 7; // 표시 0=월 ~ 6=일
   const hour = kst.getHours();
   if (displayDay < 0 || displayDay >= 7 || hour < 0 || hour >= 24) return grid;
-  const next = grid.map((row) => [...row]);
-  next[displayDay][hour] += 1;
+  const next = grid.map((row) => row.map((c) => ({ ...c })));
+  const cell = next[displayDay][hour];
+  cell.total += 1;
+  cell[group] += 1;
   return next;
 }
 
 export const useActivityStore = create<ActivityState>((set, get) => ({
   activities: [],
-  statsGrid: Array.from({ length: 7 }, () => Array(24).fill(0)),
+  statsGrid: Array.from({ length: 7 }, () =>
+    Array.from({ length: 24 }, () => ({ ...EMPTY_GROUPED_COUNT })),
+  ),
   pendingByLocalId: new Map(),
   lastSeenCreatedAt: null,
   isLoading: false,
@@ -202,7 +207,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       return {
         activities: newActs,
         lastSeenCreatedAt: activity.createdAt,
-        statsGrid: inActiveGroup ? incrementGrid(s.statsGrid, activity.createdAt) : s.statsGrid,
+        statsGrid: inActiveGroup ? incrementGrid(s.statsGrid, activity.createdAt, activity.actionGroup) : s.statsGrid,
       };
     });
   },

@@ -479,8 +479,10 @@ $$;
 GRANT EXECUTE ON FUNCTION record_activity(TEXT, TEXT, TEXT, TEXT, UUID, TEXT, INTEGER, TEXT, JSONB)
   TO anon, authenticated;
 
--- 3. activity_log_stats RPC (히트맵 24x7 격자 집계)
+-- 3. activity_log_stats RPC (히트맵 24x7 격자 집계 + 그룹별 카운트)
 -- KST 기준으로 day_of_week / hour 추출 (PostgreSQL EXTRACT(dow): 0=일 ~ 6=토)
+-- v1.14.1: 그룹별 카운트(progress/memo/scene/etc) 추가 — 히트맵 셀 호버 툴팁용
+DROP FUNCTION IF EXISTS activity_log_stats(TIMESTAMPTZ, TEXT[], TEXT);
 CREATE OR REPLACE FUNCTION activity_log_stats(
   p_since TIMESTAMPTZ,
   p_groups TEXT[] DEFAULT NULL,        -- NULL이면 전체
@@ -488,7 +490,11 @@ CREATE OR REPLACE FUNCTION activity_log_stats(
 ) RETURNS TABLE (
   day_of_week INTEGER,
   hour INTEGER,
-  count INTEGER
+  count INTEGER,
+  count_progress INTEGER,
+  count_memo INTEGER,
+  count_scene INTEGER,
+  count_etc INTEGER
 )
 LANGUAGE sql
 SECURITY INVOKER
@@ -496,7 +502,11 @@ AS $$
   SELECT
     EXTRACT(dow  FROM (created_at AT TIME ZONE 'Asia/Seoul'))::integer AS day_of_week,
     EXTRACT(hour FROM (created_at AT TIME ZONE 'Asia/Seoul'))::integer AS hour,
-    COUNT(*)::integer AS count
+    COUNT(*)::integer AS count,
+    COUNT(*) FILTER (WHERE action_group = 'progress')::integer AS count_progress,
+    COUNT(*) FILTER (WHERE action_group = 'memo')::integer     AS count_memo,
+    COUNT(*) FILTER (WHERE action_group = 'scene')::integer    AS count_scene,
+    COUNT(*) FILTER (WHERE action_group = 'etc')::integer      AS count_etc
   FROM activity_log
   WHERE created_at >= p_since
     AND (p_groups IS NULL OR action_group = ANY(p_groups))
