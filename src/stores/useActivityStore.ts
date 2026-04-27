@@ -139,11 +139,19 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       });
       const sevenDaysAgo = Date.now() - 7 * 86_400_000;
       const filtered = rows.filter((r) => new Date(r.createdAt).getTime() >= sevenDaysAgo);
-      const merged = [...activities, ...filtered].slice(0, MAX_CACHED);
-      set({
-        activities: merged,
-        hasMore: rows.length === PAGE_SIZE && filtered.length === rows.length && merged.length < MAX_CACHED,
-        isLoading: false,
+      // functional set — fetch in-flight 중에 들어온 realtime/loadInitial 업데이트를 덮어쓰지 않음 (Codex P2)
+      // closure 가 캡처한 activities 가 아닌 최신 store state(s.activities) 와 UUID dedupe merge.
+      set((s) => {
+        const existingIds = new Set(s.activities.map((a) => a.id));
+        const fresh = filtered.filter((r) => !existingIds.has(r.id));
+        const merged = [...s.activities, ...fresh]
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, MAX_CACHED);
+        return {
+          activities: merged,
+          hasMore: rows.length === PAGE_SIZE && filtered.length === rows.length && merged.length < MAX_CACHED,
+          isLoading: false,
+        };
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err), isLoading: false });
