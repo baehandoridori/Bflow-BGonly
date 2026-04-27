@@ -210,6 +210,35 @@ App.tsx 에서 항상 렌더 (`isPreviewMode()` 가 false 면 컴포넌트가 nu
 
 ---
 
+## 섹션 5: 보안 안전망 (mock password 분리)
+
+### 목표
+
+만에 하나 mock 사용자 데이터가 production 번들에 새어들어가는 사고가 발생해도, 다른 직원이 mock 정보로 실 시스템에 진입하는 경로를 차단.
+
+### 결정
+
+mock `MOCK_USERS[0]` (배한솔, admin) 의 password 를 기존 `'1234'` → `'1q2w3e4r'` 로 변경.
+
+```ts
+// src/mocks/devElectronAPI.ts (line 9 수정)
+{ id: '1', name: '배한솔', slackId: 'U05DFV9UAN5',
+  password: '1q2w3e4r',  // mock 전용. 실 Supabase 의 password 와 분리.
+  isInitialPassword: false, createdAt: '2025-01-01T00:00:00Z', role: 'admin' },
+```
+
+### 효과
+
+- **다른 직원이 실 .exe 에서 mock password 를 짐작해 시도해도 진입 불가** (실 Supabase 의 진짜 '배한솔' password 는 별도 강한 값)
+- 한솔이 미리보기 자동 로그인 사용 시 이 password 를 직접 입력할 일 없음 — `setCurrentUser` 가 password 검증을 거치지 않고 currentUser 를 직접 설정
+- mock '배한솔' 외 11명의 password 변경은 후속 사이클(필요 시)에서 결정
+
+### 운영적 보존
+
+mock password 값(`'1q2w3e4r'`)은 한솔 본인의 메모리에 기록되어 다음 작업 사이클에서 Claude 가 자동으로 참조 가능.
+
+---
+
 ## 비범위 (Out of Scope)
 
 다음 항목은 본 작업에 포함하지 않는다 (사용자 결정에 따라 또는 YAGNI):
