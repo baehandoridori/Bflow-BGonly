@@ -1107,11 +1107,11 @@ ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneU
   // 필드별 활동 기록
   let actionType: ActionType | null = null;
   let actionGroup: ActionGroup | null = null;
-  if (field === 'memo')                  { actionType = 'memo_update'; actionGroup = 'memo'; }
-  else if (field === 'assignee')         { actionType = 'assignee_change'; actionGroup = 'etc'; }
-  else if (field === 'layout')           { actionType = 'layout_change'; actionGroup = 'etc'; }
-  else if (field === 'storyboardUrl')    { actionType = 'image_upload_storyboard'; actionGroup = 'etc'; }
-  else if (field === 'guideUrl')         { actionType = 'image_upload_guide'; actionGroup = 'etc'; }
+  if (field === 'memo')                                     { actionType = 'memo_update'; actionGroup = 'memo'; }
+  else if (field === 'assignee')                            { actionType = 'assignee_change'; actionGroup = 'etc'; }
+  else if (field === 'layout' || field === 'layoutId')      { actionType = 'layout_change'; actionGroup = 'etc'; }
+  else if (field === 'storyboardUrl')                       { actionType = 'image_upload_storyboard'; actionGroup = 'etc'; }
+  else if (field === 'guideUrl')                            { actionType = 'image_upload_guide'; actionGroup = 'etc'; }
   if (actionType && actionGroup) {
     await logSceneActivity({
       sceneUuid, actionType, actionGroup,
@@ -1141,14 +1141,25 @@ ipcMain.handle('supabase:read-comments', wrapIpc(async (_e: unknown, partUuid: s
 ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string) => {
   await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt);
-  // 활동 기록 — comment.scene_id 는 TEXT 형식이라 activity_log.scene_id (UUID) 에 못 넣음. label 만 기록.
+  // 활동 기록 — partUuid 로 부서/에피소드 자동 조회 (부서 필터 통과시키기 위해 필수, Codex P1)
   if (currentActivityUser) {
     try {
+      const { data: partRow } = await supabaseClient
+        .from('parts')
+        .select('part_id, department, episodes(episode_number)')
+        .eq('id', partUuid)
+        .single();
+      const part = partRow as { part_id?: string; department?: string; episodes?: { episode_number?: number } } | null;
+      const epNum = part?.episodes?.episode_number ?? null;
+      const dept = (part?.department === 'bg' || part?.department === 'acting') ? part.department : null;
+      const sceneLabel = epNum && part?.part_id
+        ? `EP${String(epNum).padStart(2, '0')} ${part.part_id} #${sceneId}`
+        : `씬 ${sceneId}`;
       await sbRecordActivityLog({
         userId: currentActivityUser.id, userName: currentActivityUser.name,
         actionType: 'comment_add', actionGroup: 'memo',
-        sceneId: null, sceneLabel: `씬 ${sceneId}`,
-        episodeNumber: null, department: null,
+        sceneId: null, sceneLabel,
+        episodeNumber: epNum, department: dept,
         detail: { commentId, textPreview: text.slice(0, 60) },
       });
     } catch { /* 무시 */ }

@@ -49,6 +49,8 @@ export function groupActivities(items: Activity[]): FeedItem[] {
     if (a.userId !== b.userId) return false;
     if (a.actionType !== b.actionType) return false;
     if (a.episodeNumber !== b.episodeNumber) return false;
+    // scene_id 까지 일치해야 같은 그룹 — 같은 에피소드 다른 씬을 한 그룹으로 묶지 않음 (Codex P2)
+    if (a.sceneId !== b.sceneId) return false;
     const da = new Date(a.createdAt).getTime();
     const db = new Date(b.createdAt).getTime();
     return Math.abs(da - db) <= GROUP_WINDOW_MS;

@@ -160,9 +160,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   },
 
   receiveRealtime(activity) {
-    // 부서 필터: BG-only 또는 ACT-only 모드면 다른 부서 활동은 skip
+    // 부서 필터: BG-only 또는 ACT-only 모드면 다른 부서 + null 부서 모두 skip
+    // (서버 측 listActivities 도 department=eq 로 null 활동을 제외하므로 일관성 유지)
     const currentDept = getCurrentDepartment();
-    if (currentDept && activity.department && activity.department !== currentDept) {
+    if (currentDept && activity.department !== currentDept) {
       return;
     }
     // 그룹 필터: 4그룹 일부만 활성화면 비활성 그룹 활동은 skip (피드/격자 일관성)
@@ -187,8 +188,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (on) next.add(group); else next.delete(group);
     saveFilters(next);
     set({ filters: { groups: next } });
-    // 그룹 필터 변경 시 차트도 같은 그룹만 집계하도록 stats 재로드
-    void get().loadStats();
+    // 그룹 필터 변경 → 활동 + 차트 모두 재로드 (서버 측 group 필터 적용 결과 반영)
+    void get().loadInitial();
   },
 
   setAllFilters(on) {
@@ -197,7 +198,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       : new Set();
     saveFilters(next);
     set({ filters: { groups: next } });
-    void get().loadStats();
+    void get().loadInitial();
   },
 
   setGoldenMode(mode) {
