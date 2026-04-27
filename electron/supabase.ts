@@ -612,18 +612,40 @@ export async function bulkDeleteScenes(
   deletedBy: string,
   userName?: string | null,
 ): Promise<BulkUpdateResult[]> {
-  // 1) 씬 UUID → 이미지 URL 목록 맵을 먼저 확보 (RPC 가 실제로 삭제한 씬만 이미지 정리하기 위함)
+  // 1) 씬 UUID → 이미지 URL + 활동 메타 자동 조회 (RPC 호출 전에 한 번에)
   const urlsByUuid = new Map<string, string[]>();
+  const meta: Array<{
+    sceneUuid: string; sceneLabel: string | null;
+    episodeNumber: number | null; department: string | null;
+  }> = [];
   {
     const { data: scenes } = await supabase
       .from('scenes')
-      .select('id, storyboard_url, guide_url')
+      .select('id, scene_number, storyboard_url, guide_url, parts(part_id, department, episodes(episode_number))')
       .in('id', sceneUuids);
-    for (const s of scenes ?? []) {
+    for (const s of (scenes ?? []) as Array<{
+      id: string; scene_number: string;
+      storyboard_url: string | null; guide_url: string | null;
+      parts?: { part_id?: string; department?: string; episodes?: { episode_number?: number } };
+    }>) {
+      // 이미지 URL
       const urls: string[] = [];
-      if (s.storyboard_url) urls.push(s.storyboard_url as string);
-      if (s.guide_url) urls.push(s.guide_url as string);
-      if (urls.length > 0) urlsByUuid.set(s.id as string, urls);
+      if (s.storyboard_url) urls.push(s.storyboard_url);
+      if (s.guide_url) urls.push(s.guide_url);
+      if (urls.length > 0) urlsByUuid.set(s.id, urls);
+      // 활동 메타 (RPC 도 자동 조회하지만 클라이언트 전달로 안전성 강화 — Codex P2)
+      const part = s.parts;
+      const epNum = part?.episodes?.episode_number ?? null;
+      const partLabel = part?.part_id ?? null;
+      const sceneLabel = epNum && partLabel
+        ? `EP${String(epNum).padStart(2, '0')} ${partLabel} #${s.scene_number}`
+        : `씬 #${s.scene_number}`;
+      meta.push({
+        sceneUuid: s.id,
+        sceneLabel,
+        episodeNumber: epNum,
+        department: part?.department ?? null,
+      });
     }
   }
 
@@ -632,6 +654,7 @@ export async function bulkDeleteScenes(
     p_uuids: sceneUuids,
     p_deleted_by: deletedBy,
     p_user_name: userName ?? null,
+    p_meta: meta,
   });
   if (error) throw error;
   const results = maybeForceFail(mapRpcRows(data as RpcRow[] | null));
