@@ -29,10 +29,11 @@ export function RecentActivityWidget() {
 
   const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, text: '', x: 0, y: 0 });
 
-  // 초기 로드 + Realtime 구독
+  // Realtime 구독 먼저 → 초기 로드 — fetch 동안 들어온 활동 누락 방지 (race window 최소화).
+  // store.loadInitial 도 set 시 기존 activities 와 UUID dedupe merge 해 덮어쓰기 방지.
   useEffect(() => {
-    loadInitial();
     const unsub = subscribeToActivityRealtime(receiveRealtime);
+    loadInitial();
     return () => unsub();
   }, [loadInitial, receiveRealtime]);
 
