@@ -1141,7 +1141,8 @@ ipcMain.handle('supabase:read-comments', wrapIpc(async (_e: unknown, partUuid: s
 ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string) => {
   await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt);
-  // 활동 기록 — partUuid 로 부서/에피소드 자동 조회 (부서 필터 통과시키기 위해 필수, Codex P1)
+  // 활동 기록 — partUuid 로 부서/에피소드 + scene UUID 자동 조회
+  // (sceneId 가 TEXT 형식이라 scenes 테이블 조회로 UUID 변환 — 그룹화 정확성 + 부서 필터 통과)
   if (currentActivityUser) {
     try {
       const { data: partRow } = await supabaseClient
@@ -1152,13 +1153,24 @@ ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: st
       const part = partRow as { part_id?: string; department?: string; episodes?: { episode_number?: number } } | null;
       const epNum = part?.episodes?.episode_number ?? null;
       const dept = (part?.department === 'bg' || part?.department === 'acting') ? part.department : null;
+
+      // scene UUID 조회 — comment.scene_id (TEXT scene_number) + partUuid 로 scenes 테이블 매칭
+      let sceneUuid: string | null = null;
+      const { data: sceneRow } = await supabaseClient
+        .from('scenes')
+        .select('id')
+        .eq('part_id', partUuid)
+        .eq('scene_number', sceneId)
+        .maybeSingle();
+      sceneUuid = (sceneRow as { id?: string } | null)?.id ?? null;
+
       const sceneLabel = epNum && part?.part_id
         ? `EP${String(epNum).padStart(2, '0')} ${part.part_id} #${sceneId}`
         : `씬 ${sceneId}`;
       await sbRecordActivityLog({
         userId: currentActivityUser.id, userName: currentActivityUser.name,
         actionType: 'comment_add', actionGroup: 'memo',
-        sceneId: null, sceneLabel,
+        sceneId: sceneUuid, sceneLabel,
         episodeNumber: epNum, department: dept,
         detail: { commentId, textPreview: text.slice(0, 60) },
       });
@@ -1235,14 +1247,30 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
   }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   await sbUpdateRevision(id, updates);
-  // status === 'resolved' 변경만 활동 기록
+  // status === 'resolved' 변경만 활동 기록 — comp_revisions 에서 부서/에피소드 자동 조회 (Codex P2)
   if (currentActivityUser && updates.status === 'resolved') {
     try {
+      const { data: revRow } = await supabaseClient
+        .from('comp_revisions')
+        .select('scene_id, revision_no, department, parts(part_id, episodes(episode_number))')
+        .eq('id', id)
+        .single();
+      const rev = revRow as {
+        scene_id?: string;
+        revision_no?: number;
+        department?: string;
+        parts?: { part_id?: string; episodes?: { episode_number?: number } };
+      } | null;
+      const dept = (rev?.department === 'bg' || rev?.department === 'acting') ? rev.department : null;
+      const epNum = rev?.parts?.episodes?.episode_number ?? null;
+      const sceneLabel = epNum && rev?.parts?.part_id && rev?.scene_id
+        ? `EP${String(epNum).padStart(2, '0')} ${rev.parts.part_id} #${rev.scene_id} 리비전 #${rev.revision_no ?? '?'}`
+        : `리비전 #${rev?.revision_no ?? '?'} 해결`;
       await sbRecordActivityLog({
         userId: currentActivityUser.id, userName: currentActivityUser.name,
         actionType: 'revision_resolve', actionGroup: 'memo',
-        sceneId: null, sceneLabel: `리비전 해결`,
-        episodeNumber: null, department: null,
+        sceneId: null, sceneLabel,
+        episodeNumber: epNum, department: dept,
         detail: { revisionId: id },
       });
     } catch { /* 무시 */ }
