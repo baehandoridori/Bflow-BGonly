@@ -45,6 +45,9 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
       >
         {buckets.map((cell, h) => {
           const pct = max > 0 ? (cell.total / max) * 100 : 0;
+          // 마우스 위치를 그대로 전달 — 툴팁이 커서를 따라다님 (목업과 동일)
+          const reportHover = (e: React.MouseEvent<HTMLDivElement>) =>
+            onBarHover?.({ label: `${h}시`, cell, x: e.clientX, y: e.clientY });
           return (
             <div
               key={h}
@@ -54,10 +57,8 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
                 background: ACCENT_GRADIENT,
                 transition: 'opacity 0.15s ease, filter 0.15s ease',
               }}
-              onMouseEnter={(e) => {
-                const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-                onBarHover?.({ label: `${h}시`, cell, x: rect.left + rect.width / 2, y: rect.top });
-              }}
+              onMouseEnter={reportHover}
+              onMouseMove={reportHover}
               onMouseLeave={() => onBarHover?.(null)}
             >
               {[0, 6, 12, 18].includes(h) && (
@@ -81,6 +82,8 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
       {buckets.map((cell, d) => {
         const pct = max > 0 ? (cell.total / max) * 100 : 0;
         const isPeak = d === peakIdx && cell.total > 0;
+        const reportHover = (e: React.MouseEvent<HTMLDivElement>) =>
+          onBarHover?.({ label: `${dayLabel(d)}요일`, cell, x: e.clientX, y: e.clientY });
         return (
           <div
             key={d}
@@ -90,10 +93,8 @@ export function GoldenBarChart({ mode, onBarHover }: Props) {
               background: isPeak ? PEAK_GRADIENT : ACCENT_GRADIENT,
               transition: 'opacity 0.15s ease, filter 0.15s ease',
             }}
-            onMouseEnter={(e) => {
-              const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-              onBarHover?.({ label: `${dayLabel(d)}요일`, cell, x: rect.left + rect.width / 2, y: rect.top });
-            }}
+            onMouseEnter={reportHover}
+            onMouseMove={reportHover}
             onMouseLeave={() => onBarHover?.(null)}
           >
             <span className="absolute left-1/2 -translate-x-1/2 -bottom-5 text-[11px] text-text-secondary">

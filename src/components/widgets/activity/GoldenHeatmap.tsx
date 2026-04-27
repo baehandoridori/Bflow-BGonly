@@ -52,15 +52,14 @@ function DayRow({
       </div>
       {row.map((cell, h) => {
         const lv = intensityLevel(cell.total);
-        const handleEnter = (e: React.MouseEvent<HTMLDivElement>) => {
-          // 셀의 화면 좌상단 좌표 사용 — 호버 영역 안에서 마우스 움직여도 툴팁 위치 안정
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        // 마우스 위치를 그대로 전달 — 툴팁이 커서를 따라다니도록 (목업과 동일)
+        const reportHover = (e: React.MouseEvent<HTMLDivElement>) => {
           onCellHover?.({
             day: dayIdx,
             hour: h,
             cell,
-            x: rect.left + rect.width / 2,
-            y: rect.top,
+            x: e.clientX,
+            y: e.clientY,
           });
         };
         return (
@@ -72,7 +71,8 @@ function DayRow({
               boxShadow: intensityGlow(lv),
               transition: 'transform 0.15s ease',
             }}
-            onMouseEnter={handleEnter}
+            onMouseEnter={reportHover}
+            onMouseMove={reportHover}
             onMouseLeave={() => onCellHover?.(null)}
           />
         );
