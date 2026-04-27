@@ -6,7 +6,9 @@
 import type { ElectronAPI, AppUser } from '@/types';
 
 const MOCK_USERS: AppUser[] = [
-  { id: '1', name: '배한솔', slackId: 'U05DFV9UAN5', password: '1234', isInitialPassword: false, createdAt: '2025-01-01T00:00:00Z', role: 'admin' },
+  // mock 전용 password — vite 가 dynamic import 의 dead-code 를 보수적으로 처리해 .exe 번들에 평문으로 노출됨.
+  // 따라서 짐작 불가능한 32자 hex 로 강화. 한솔 메모리(`project_preview_mode_credentials.md`) 에 보존.
+  { id: '1', name: '배한솔', slackId: 'U05DFV9UAN5', password: '7f2a9c8b4e3d1605a8c7b9d2e3f4a5b6', isInitialPassword: false, createdAt: '2025-01-01T00:00:00Z', role: 'admin' },
   { id: '2', name: '장삐쭈', slackId: 'U03MM2C4F4Z', password: '1234', isInitialPassword: true, createdAt: '2025-01-01T00:00:00Z', role: 'user' },
   { id: '3', name: '허혜원', slackId: 'U03M1Q37LDU', password: '1234', isInitialPassword: true, createdAt: '2025-01-01T00:00:00Z', role: 'user' },
   { id: '4', name: '안류천', slackId: 'U03MAQH93BN', password: '1234', isInitialPassword: true, createdAt: '2025-01-01T00:00:00Z', role: 'user' },

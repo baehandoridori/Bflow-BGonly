@@ -7,9 +7,13 @@ import './styles/path-link.css';
 import './styles/activity-widget.css';
 
 // 브라우저 개발 환경: electronAPI가 없으면 mock 설치
-if (!window.electronAPI && import.meta.env.DEV) {
-  const { installDevElectronAPI } = await import('./mocks/devElectronAPI');
-  installDevElectronAPI();
+// import.meta.env.DEV 를 외곽 if 로 분리해 production 빌드에서 dynamic import 가
+// dead-code 로 명확히 제거되도록 한다 (mock 12명 정보가 .exe 번들에 들어가지 않게).
+if (import.meta.env.DEV) {
+  if (!window.electronAPI) {
+    const { installDevElectronAPI } = await import('./mocks/devElectronAPI');
+    installDevElectronAPI();
+  }
 }
 
 // 해시로 위젯 팝업 모드 감지: #widget-popup/{widgetId}?key=val

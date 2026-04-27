@@ -41,6 +41,8 @@ import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+import { isPreviewMode } from '@/utils/previewMode';
+import { PreviewBadge } from '@/components/PreviewBadge';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
 // 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
@@ -62,10 +64,31 @@ export default function App() {
   const {
     currentUser, setCurrentUser,
     authReady, setAuthReady,
-    setUsers,
+    users, setUsers,
     isAdminMode, setAdminMode,
     showPasswordChange, showUserManager, setShowUserManager,
   } = useAuthStore();
+
+  // 미리보기 모드 자동 로그인 — 한 번만 발동, 사용자 명시적 로그아웃 후 재로그인 방지.
+  // React StrictMode 의 더블 마운트에서도 같은 컴포넌트 인스턴스의 ref 는 보존되므로 안전.
+  const previewAutoLoginDoneRef = useRef(false);
+
+  // 미리보기 모드: dev + ?preview=1 진입 시 mock '배한솔' admin 으로 자동 로그인.
+  // users 가 아직 비어 있으면(loadUsers() 가 끝나기 전) ref 미설정 + return →
+  // deps 의 `users` 변화로 setUsers() 직후 effect 가 재발동해 자동 로그인.
+  useEffect(() => {
+    if (previewAutoLoginDoneRef.current) return;
+    if (!authReady || currentUser) return;
+    if (!isPreviewMode()) return;
+
+    const fallback = users[0];
+    if (!fallback) return;
+
+    previewAutoLoginDoneRef.current = true;
+    // dev-only — 트리거 자체가 import.meta.env.DEV === true 보장이라 production 에서 실행되지 않음
+    console.log('[Preview] 자동 로그인:', fallback.name);
+    setCurrentUser(fallback);
+  }, [authReady, currentUser, users, setCurrentUser]);
 
   // Sonner 토스트 브릿지: 기존 setToast 호출을 Sonner로 전달
   const setStoreToast = useAppStore((s) => s.setToast);
@@ -1211,6 +1234,7 @@ export default function App() {
 
   return (
     <>
+      <PreviewBadge />
       <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
       <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
       <SpotlightSearch />
