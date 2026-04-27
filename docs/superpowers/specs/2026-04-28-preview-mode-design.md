@@ -64,12 +64,22 @@ dev 모드 + 명시적 URL 파라미터 조합 시에만 미리보기 활성화.
  * 미리보기 모드 여부.
  * - import.meta.env.DEV: vite dev server 환경에서만 true (프로덕션 빌드는 false)
  * - URL 쿼리 ?preview=1 동시 충족 — 명시적 진입만 허용
+ *
+ * 결과를 모듈 상수로 한 번만 캐시 — URL 은 페이지 라이프사이클 중 변하지 않으므로
+ * 매 호출마다 URLSearchParams 를 다시 만들 이유가 없고, useEffect 의존성/메모이제이션
+ * 측면에서도 안정적인 참조 값이 유리.
  */
-export function isPreviewMode(): boolean {
+const PREVIEW_MODE_FLAG = (() => {
   if (!import.meta.env.DEV) return false;
   if (typeof window === 'undefined') return false;
   const params = new URLSearchParams(window.location.search);
+  // 엄격 매치(`=== '1'`)를 의도적으로 채택 — `?preview=true`, `?preview` 단독 등은 무시.
+  // 의도치 않은 URL 변형으로 미리보기가 활성화되는 사고를 차단.
   return params.get('preview') === '1';
+})();
+
+export function isPreviewMode(): boolean {
+  return PREVIEW_MODE_FLAG;
 }
 ```
 
@@ -77,6 +87,7 @@ export function isPreviewMode(): boolean {
 
 - **dev 자동 활성화 (`?preview=1` 불필요)** 는 채택하지 않음 → 일반 `npm run dev` 작업 시에도 자동 로그인되어 부작용 가능
 - **별도 npm 스크립트 (`npm run preview`)** 는 채택하지 않음 → vite preview 와 혼동, 빌드 산출물 검증과 의미 충돌
+- **`?preview=true`, `?preview`(값 없음) 등 느슨한 매치** 는 채택하지 않음 → 엄격 매치로 의도된 진입만 허용. URL 직접 수정에서 오타로 인한 비활성도 빠르게 인지 가능
 
 ---
 
@@ -92,49 +103,51 @@ export function isPreviewMode(): boolean {
 
 ### 코드 스케치
 
+`useAuthStore` 가 `users` 배열과 `setCurrentUser` 를 모두 보유하므로 단일 store 에서 destructure 한다. (`useAuthStore.ts` 의 `AuthState` 정의 참조)
+
 ```tsx
 // src/App.tsx (인증 초기화 useEffect 근처)
+import { useRef } from 'react';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { isPreviewMode } from '@/utils/previewMode';
 
+// 컴포넌트 본문 안:
+const { authReady, currentUser, users, setCurrentUser } = useAuthStore();
+const previewAutoLoginDoneRef = useRef(false);
+
 useEffect(() => {
+  // 한 번 자동 로그인했으면 끝 — 사용자가 명시적으로 로그아웃한 경우 재로그인 방지
+  if (previewAutoLoginDoneRef.current) return;
   if (!authReady || currentUser) return;
   if (!isPreviewMode()) return;
 
-  // mock 사용자 목록에서 첫 번째(배한솔 admin)를 자동 선택
-  // — useAuthStore.users 는 App 마운트 시 loadUsers() 결과로 채워짐
+  // 마운트 직후 users 가 아직 채워지기 전일 수 있음. 비어 있으면 return,
+  // deps 의 `users` 변화로 인해 다음 setUsers() 후 재발동.
   const fallback = users[0];
-  if (fallback) {
-    console.log('[Preview] 자동 로그인:', fallback.name);
-    setCurrentUser(fallback);
-  }
+  if (!fallback) return;
+
+  previewAutoLoginDoneRef.current = true;
+  console.log('[Preview] 자동 로그인:', fallback.name);
+  setCurrentUser(fallback);
 }, [authReady, currentUser, users, setCurrentUser]);
 ```
+
+> **React StrictMode 안전성**: dev 환경에서 컴포넌트가 더블 마운트되어도 `previewAutoLoginDoneRef` 는 같은 컴포넌트 인스턴스 내에서 유지되므로 자동 로그인이 두 번 발동하지 않는다.
 
 ### 동작 시퀀스
 
 1. 한솔이 미리보기 띄움 → vite dev server 의 `localhost:5173/?preview=1`
 2. 부팅: `installDevElectronAPI()` 호출 → mock IPC 설치
 3. 일반 인증 흐름: `loadUsers()` → mock 의 `usersRead()` → `setUsers(MOCK_USERS)`
-4. `authReady === true` 시점에 위 useEffect 발동 → `currentUser === null` AND `isPreviewMode() === true` 조건 → 자동 로그인
-5. 메인 대시보드 진입
+4. **users 가 비어 있는 동안** useEffect 가 발동해도 `if (!fallback) return` 으로 ref 미설정 → 아무것도 하지 않음
+5. **users 배열이 채워진 직후** deps 변화로 useEffect 재발동 → `currentUser === null`, `authReady === true`, `users[0]` 존재 모두 충족 → 자동 로그인 + ref 설정
+6. 메인 대시보드 진입
 
 ### Edge case
 
-- 사용자가 자동 로그인 후 의도적으로 `로그아웃` → useAuthStore.currentUser 가 다시 null. useEffect 의 `currentUser` 의존성 때문에 재발동 → 재로그인. **로그아웃 의도가 있는 경우 방해되므로 회피**: 한 번 자동 로그인했음을 ref 로 표시해두고 중복 호출 막음.
-
-```tsx
-const previewAutoLoginDoneRef = useRef(false);
-
-useEffect(() => {
-  if (previewAutoLoginDoneRef.current) return;
-  if (!authReady || currentUser) return;
-  if (!isPreviewMode()) return;
-  const fallback = users[0];
-  if (!fallback) return;
-  previewAutoLoginDoneRef.current = true;
-  setCurrentUser(fallback);
-}, [authReady, currentUser, users, setCurrentUser]);
-```
+- **`users` 배열이 비어 있을 때**: 위 시퀀스 4–5 처럼 ref 를 설정하지 않고 return → `users` 가 채워지면 재발동해 자동 로그인. (`users` 가 deps 에 들어간 이유)
+- **로그아웃 의도가 있는 경우**: ref 가 이미 true 라 재로그인 방지. 사용자가 다시 들어오려면 페이지 새로고침 필요.
+- **`authReady` 가 끝까지 false 인 비정상 흐름** (예: `loadUsers()` 가 mock 응답조차 받지 못함): 자동 로그인 발동 안 함 → LoginScreen 이 정상 표시되어 한솔이 수동으로 시도 가능. 미리보기 모드 자체가 폴백 없이 멎지는 않음.
 
 ---
 
@@ -147,7 +160,8 @@ useEffect(() => {
 ### 구현 위치
 
 신규 파일: `src/components/PreviewBadge.tsx`
-렌더 위치: `src/App.tsx` 내 최상위 (모달/드로어 위까지 보이도록 z-index 충분히 높게)
+
+**렌더 위치**: `src/App.tsx` 의 *LoginScreen / 메인 라우팅 분기 바깥* (즉, `currentUser` 여부와 무관하게 App 컴포넌트 트리 최상위에 항상 마운트). 이렇게 해야 자동 로그인 *전* 찰나(LoginScreen 표시 단계)에도 미리보기임이 즉시 인지된다. 모달/드로어 위까지 보이도록 z-index 9999.
 
 ### 디자인
 
@@ -189,9 +203,10 @@ App.tsx 에서 항상 렌더 (`isPreviewMode()` 가 false 면 컴포넌트가 nu
 
 ### 검증 포인트
 
-1. `import.meta.env.DEV` 는 vite production build 에서 *정적으로* `false` 로 치환됨 → `isPreviewMode()` 는 항상 false 반환 → 자동 로그인 분기 비활성, `PreviewBadge` null 반환
+1. `import.meta.env.DEV` 는 vite production build 에서 *정적으로* `false` 로 치환됨 → `PREVIEW_MODE_FLAG` 모듈 상수가 false 로 평가, `isPreviewMode()` 항상 false → 자동 로그인 분기 비활성, `PreviewBadge` null 반환
 2. URL 쿼리는 Electron 프로덕션 환경에서 `file://` 또는 `app://` 로딩이라 사용자가 `?preview=1` 을 실수로/일부러 붙여도 dev 조건 미충족으로 무시
-3. `installDevElectronAPI()` 는 main.tsx 에서 *이미* `if (!window.electronAPI && import.meta.env.DEV)` 조건. 프로덕션에서는 `window.electronAPI` 가 preload 로 존재 + DEV false 라 호출 안 됨
+3. `installDevElectronAPI()` 는 main.tsx 에서 *이미* `if (!window.electronAPI && import.meta.env.DEV)` 조건 + `await import(...)` 동적 import. 프로덕션 빌드에서 `window.electronAPI` 가 preload 로 존재 + DEV false 라 dynamic import 자체가 평가되지 않음
+4. **mock 사용자 12명(`MOCK_USERS`) 데이터가 프로덕션 번들에 포함되지 않는지 확인**: `devElectronAPI.ts` 는 `main.tsx:11` 에서 *동적 import* (`await import('./mocks/devElectronAPI')`) 로만 참조됨. vite/rollup 의 코드 분할로 별도 청크로 분리되며 dev 조건 분기 안에서만 로드되므로 production 번들에 포함되지 않아야 함. 빌드 후 `dist/assets/` 청크 분석으로 검증 가능.
 
 ---
 
