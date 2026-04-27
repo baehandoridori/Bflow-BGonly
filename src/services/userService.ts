@@ -21,13 +21,16 @@ export function setUsersSheetsMode(enabled: boolean): void {
 }
 
 // ─── 최초 사용자 (파일이 없을 때 자동 시드) ────
+// 비밀번호는 코드에 하드코딩하지 않는다 (production 번들에 평문 노출 방지).
+// 빈 사용자 목록에서 시드되더라도 빈 password 로는 로그인 매칭 불가 → Supabase Studio 에서 별도 설정.
+// 실 운영은 Supabase 사용자 row 가 살아있어 이 시드 fallback 자체가 거의 호출되지 않으므로 영향 없음.
 
 const SEED_USER: AppUser = {
   id: '00000000-0000-0000-0000-000000000001',
   name: '배한솔',
   slackId: 'U05DFV9UAN5',
-  password: '1q2w3e4r!A',
-  isInitialPassword: false,
+  password: '',
+  isInitialPassword: true,
   createdAt: '2025-01-01T00:00:00.000Z',
   role: 'admin',
 };

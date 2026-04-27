@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { MessageCircle, Trash2 } from 'lucide-react';
+import { MessageCircle, Trash2, ArrowUpRight } from 'lucide-react';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Stage, Scene } from '@/types';
 import type { SceneGroupMode } from '@/stores/useAppStore';
@@ -591,11 +591,8 @@ export function UnifiedSceneSheetView({
               <th />
             </tr>
             <tr className="bg-bg-card border-b border-bg-border">
-              {sceneGroupMode === 'layout' && (
-                <th className="w-20 px-2 py-2 text-left text-xs font-medium text-text-secondary border-r border-bg-border/50">
-                  레이아웃
-                </th>
-              )}
+              {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 별도 컬럼 대신 행 위에 그룹 헤더 행을 삽입.
+                  sceneGroupMode === 'layout' 컬럼 분기 제거 — 컬럼 수가 일반 모드와 동일하게 유지된다. */}
               <th className="w-20 px-2 py-2 text-left text-xs font-medium text-text-secondary">씬번호</th>
               <th className="px-2 py-2 text-left text-xs font-medium text-text-secondary">메모</th>
               <th className="w-14 px-1 py-2 text-center text-xs font-medium text-text-secondary">SB</th>
@@ -660,50 +657,60 @@ export function UnifiedSceneSheetView({
               );
 
               return (
-                <motion.tr
-                  key={mergedKey}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.15, delay: Math.min(rowIndex * 0.01, 0.2) }}
-                  className={cn(
-                    'border-b border-bg-border/30 transition-colors group cursor-pointer',
-                    rowIndex % 2 === 0 ? 'bg-bg-card/20' : 'bg-bg-primary/10',
-                    'hover:bg-accent/5',
-                    isRowSelected && 'bg-accent/10 hover:bg-accent/15',
-                    searchQuery && 'bg-accent/5 border-l-2 border-l-accent/60',
-                    sceneGroupMode === 'layout' && isFirstInGroup && rowIndex > 0 && 'border-t-2 border-t-bg-border',
-                  )}
-                  onClick={(e) => {
-                    if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
-                      onCtrlClick(mergedKey);
-                    }
-                  }}
-                  onDoubleClick={() => {
-                    // 통합 모달 콜백 우선 — BG+ACT 를 함께 열기
-                    if (onOpenMerged) {
-                      onOpenMerged(m);
-                      return;
-                    }
-                    if (bgScene && bgSheetName) onOpenDetail(bgSheetName, bgSceneIndex);
-                    else if (actScene && actSheetName) onOpenDetail(actSheetName, actSceneIndex);
-                  }}
-                >
-                  {/* 레이아웃 병합 셀 */}
+                <Fragment key={mergedKey}>
+                  {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 그룹 시작 위에 헤더 행 삽입 (카드 뷰 섹션 스타일) */}
                   {sceneGroupMode === 'layout' && isFirstInGroup && (
-                    <td
-                      rowSpan={groupSize}
-                      className="px-2 py-2 text-center font-mono text-xs font-bold border-r border-bg-border/50 align-middle text-accent"
-                    >
-                      {layoutKey !== '미분류' ? `#${layoutKey}` : (
-                        <span className="text-text-secondary/40 font-normal">-</span>
-                      )}
-                    </td>
+                    <tr className="bg-accent/8 border-y border-accent/30">
+                      <td colSpan={100} className="px-3 py-2">
+                        <span className="inline-flex items-center gap-2">
+                          <span className="text-sm font-bold text-accent">
+                            {layoutKey !== '미분류' ? `L#${layoutKey}` : '레이아웃 미분류'}
+                          </span>
+                          <span className="text-[11px] text-text-secondary">{groupSize}개 씬</span>
+                        </span>
+                      </td>
+                    </tr>
                   )}
+                  <motion.tr
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.15, delay: Math.min(rowIndex * 0.01, 0.2) }}
+                    className={cn(
+                      'border-b border-bg-border/30 transition-colors group cursor-pointer',
+                      rowIndex % 2 === 0 ? 'bg-bg-card/20' : 'bg-bg-primary/10',
+                      'hover:bg-accent/5',
+                      isRowSelected && 'bg-accent/10 hover:bg-accent/15',
+                      searchQuery && 'bg-accent/5 border-l-2 border-l-accent/60',
+                    )}
+                    onClick={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
+                        onCtrlClick(mergedKey);
+                      }
+                    }}
+                    onDoubleClick={() => {
+                      // 통합 모달 콜백 우선 — BG+ACT 를 함께 열기
+                      if (onOpenMerged) {
+                        onOpenMerged(m);
+                        return;
+                      }
+                      if (bgScene && bgSheetName) onOpenDetail(bgSheetName, bgSceneIndex);
+                      else if (actScene && actSheetName) onOpenDetail(actSheetName, actSceneIndex);
+                    }}
+                  >
 
-                  {/* 씬번호 + 댓글 뱃지 */}
-                  <td className="px-2 py-1.5 font-mono text-xs text-accent">
-                    <span className="flex items-center gap-1">
+                  {/* 씬번호 + 레이아웃 뱃지 + 댓글 뱃지 + 호버 시 ↗ (더블클릭 가능 어포던스) */}
+                  <td className="px-2 py-1.5 font-mono text-xs text-accent group/scenecell">
+                    <span className="flex items-center gap-1.5">
                       <HighlightText text={sceneId || primary.sceneId || '-'} query={searchQuery} />
+                      <ArrowUpRight
+                        size={11}
+                        className="text-accent opacity-0 group-hover/scenecell:opacity-100 transition-opacity flex-shrink-0"
+                      />
+                      {primary.layoutId && (
+                        <span className="text-[11px] italic font-medium text-accent-sub flex-shrink-0">
+                          L#{primary.layoutId}
+                        </span>
+                      )}
                       {commentBadgeCounts.total > 0 && (
                         <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full">
                           <MessageCircle size={9} fill="currentColor" />
@@ -848,7 +855,8 @@ export function UnifiedSceneSheetView({
                       )}
                     </div>
                   </td>
-                </motion.tr>
+                  </motion.tr>
+                </Fragment>
               );
             })}
           </tbody>

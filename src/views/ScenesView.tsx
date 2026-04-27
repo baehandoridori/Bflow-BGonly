@@ -665,6 +665,11 @@ import { Confetti } from '@/components/ui/Confetti';
 import { SceneDetailModal } from '@/components/scenes/SceneDetailModal';
 import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { PanelLeftOpen } from 'lucide-react';
+import {
+  loadPersistedSceneViewMode, savePersistedSceneViewMode,
+  loadPersistedLastEpisode, savePersistedLastEpisode,
+  loadPersistedTreeOpen, savePersistedTreeOpen,
+} from '@/utils/scenesViewPersist';
 
 // ─── 씬 카드 (요약 카드 — 클릭으로 상세 모달 열기) ──────────────
 
@@ -755,7 +760,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             <HighlightText text={scene.sceneId || '(씬번호 없음)'} query={searchQuery} />
           </span>
           {scene.layoutId && (
-            <span className="text-[11px] italic text-text-secondary/50 shrink-0">
+            <span className="text-[12px] italic font-medium text-accent-sub shrink-0">
               L#{scene.layoutId}
             </span>
           )}
@@ -1502,7 +1507,35 @@ export function ScenesView() {
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [batchAssigneeValue, setBatchAssigneeValue] = useState('');
-  const [treeOpen, setTreeOpen] = useState(true);
+  // treeOpen 초기값 — 영속화된 값이 있으면 그걸로, 없으면 true (디폴트 펼침)
+  const [treeOpen, setTreeOpen] = useState(() => loadPersistedTreeOpen() ?? true);
+
+  // 마운트 시 / episodes 가 처음 채워지는 시점에 영속화된 상태(viewMode + lastEpisode) 1회 복원.
+  // ref guard 로 한솔이 직접 변경한 값이 첫 마운트 때 saved 로 되돌아가지 않게 보장.
+  const persistRestoredRef = useRef(false);
+  useEffect(() => {
+    if (persistRestoredRef.current) return;
+    if (episodes.length === 0) return; // episodes 가 늦게 로드될 때까지 대기
+
+    const savedMode = loadPersistedSceneViewMode();
+    if (savedMode) setSceneViewMode(savedMode);
+
+    const savedEp = loadPersistedLastEpisode();
+    if (savedEp !== null && episodes.some((ep) => ep.episodeNumber === savedEp)) {
+      setSelectedEpisode(savedEp);
+    }
+
+    persistRestoredRef.current = true;
+  }, [episodes, setSceneViewMode, setSelectedEpisode]);
+
+  // 변화 감지 → 즉시 영속화. 디폴트 값일 때 호출되어도 무해.
+  useEffect(() => { savePersistedSceneViewMode(sceneViewMode); }, [sceneViewMode]);
+  useEffect(() => {
+    if (selectedEpisode !== null && selectedEpisode !== undefined) {
+      savePersistedLastEpisode(selectedEpisode);
+    }
+  }, [selectedEpisode]);
+  useEffect(() => { savePersistedTreeOpen(treeOpen); }, [treeOpen]);
 
   // 파트 컨텍스트 메뉴
   const { menuPosition: partMenuPos, openMenu: openPartMenu, closeMenu: closePartMenu } = useContextMenu();
@@ -3242,25 +3275,10 @@ export function ScenesView() {
           </div>
         </div>
 
-        {/* 2줄: 보기 설정 (담당자 + 상태 필터 + 정렬 + 뷰모드 + 검색) */}
+        {/* 2줄: 보기 설정 (담당자 + 상태 필터 + 정렬 + 뷰모드 + 검색)
+            한솔 결정: 옵션 접기 = 완전 숨김 (요약 칩 라인 제거). 펼치기 시 다시 표시. */}
         <AnimatePresence initial={false} mode="wait">
-          {sceneControlsCollapsed ? (
-            <motion.div
-              key="scene-controls-collapsed"
-              initial={{ opacity: 0, height: 0, y: -6 }}
-              animate={{ opacity: 1, height: 'auto', y: 0 }}
-              exit={{ opacity: 0, height: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="overflow-hidden"
-            >
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-bg-border/50 bg-bg-primary/20 px-3 py-2">
-                <span className="text-[11px] font-medium tracking-[0.18em] text-text-secondary/60">현재 옵션</span>
-                {sceneControlsSummary.map((item) => (
-                  <SceneOptionSummaryChip key={item.label} label={item.label} value={item.value} />
-                ))}
-              </div>
-            </motion.div>
-          ) : (
+          {sceneControlsCollapsed ? null : (
             <motion.div
               key="scene-controls-expanded"
               initial={{ opacity: 0, height: 0, y: -6 }}
