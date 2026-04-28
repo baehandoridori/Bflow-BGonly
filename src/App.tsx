@@ -554,6 +554,54 @@ export default function App() {
     }
   }, [currentUser, setUsers]);
 
+  // 한솔 결정 (v1.15.5): 로그인 catch-up — last_seen_at 이후 받은 멘션 댓글을 알림 패널에 누적
+  // (토스트 X, 알림 패널 + 요약 토스트 1번). 사용자별 ref 로 한 번만 발동.
+  const catchupDoneUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) return;
+    if (!authReady) return;
+    if (catchupDoneUserIdRef.current === currentUser.id) return;
+
+    catchupDoneUserIdRef.current = currentUser.id;
+    const me = currentUser;
+
+    (async () => {
+      const { getLastSeenAt, setLastSeenAt, ensureLastSeenInitialized } = await import('@/utils/lastSeenTracker');
+      const lastSeen = getLastSeenAt(me.id);
+      if (!lastSeen) {
+        // 첫 로그인 — 이전 알림 catch-up 안 함, 시각만 기록
+        ensureLastSeenInitialized(me.id);
+        return;
+      }
+      try {
+        const missed = await window.electronAPI?.supabaseFetchMissedMentions?.(me.id, me.name, lastSeen, 50);
+        if (!missed || missed.length === 0) {
+          setLastSeenAt(me.id, new Date().toISOString());
+          return;
+        }
+        // 알림 패널에만 누적 (토스트 X — 한꺼번에 N 개 띄우면 시끄러움)
+        const store = useNotificationStore.getState();
+        for (const c of missed) {
+          store.addNotification({
+            type: 'comment',
+            title: `${c.userName || '누군가'}님이 나를 태그했습니다`,
+            body: c.text ? (c.text.length > 50 ? c.text.slice(0, 50) + '...' : c.text) : undefined,
+            // scene_uuid 가 SupabaseComment 변환에서 빠져있어 partId+sceneId(no) 로만 표기 — 클릭 시 navigateToScene 자체 fallback 동작
+            metadata: { sceneName: c.sceneId },
+          });
+        }
+        // 요약 토스트 1번 (한솔이 인지)
+        sonnerToast(`놓친 알림 ${missed.length}개를 가져왔어요`, {
+          description: '종 모양을 클릭해 확인해주세요.',
+          duration: 6000,
+        });
+        setLastSeenAt(me.id, new Date().toISOString());
+      } catch (err) {
+        console.warn('[catchup] 멘션 catch-up 실패:', err);
+      }
+    })();
+  }, [currentUser, authReady]);
+
   // 테마 변경 시: CSS 적용 + appdata 저장 (초기화 완료 후에만 저장)
   useEffect(() => {
     if (!themeInitRef.current) return; // init()에서 테마 로드 전까지 저장 방지

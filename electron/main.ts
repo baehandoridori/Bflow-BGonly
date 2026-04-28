@@ -835,6 +835,7 @@ import {
   updateUser as sbUpdateUser,
   deleteUser as sbDeleteUser,
   readCommentsForPart as sbReadComments,
+  fetchMissedMentions as sbFetchMissedMentions,
   addComment as sbAddComment,
   editComment as sbEditComment,
   deleteComment as sbDeleteComment,
@@ -1148,6 +1149,16 @@ ipcMain.handle('supabase:delete-user', wrapIpc(async (_e: unknown, userId: strin
 // ─── Comments ───
 ipcMain.handle('supabase:read-comments', wrapIpc(async (_e: unknown, partUuid: string) => {
   return sbReadComments(partUuid);
+}));
+// 한솔 결정 (v1.15.5): 로그인 catch-up — last seen 이후 받은 멘션 댓글 일괄 조회
+ipcMain.handle('supabase:fetch-missed-mentions', wrapIpc(async (
+  _e: unknown,
+  userId: string,
+  userName: string,
+  since: string,
+  limit?: number,
+) => {
+  return sbFetchMissedMentions(userId, userName, since, limit ?? 50);
 }));
 ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string) => {
