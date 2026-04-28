@@ -135,3 +135,49 @@
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
 }
+
+/* ── 1-B: 레이아웃별 보기 카드 박스 + 굵은 보더 (한솔 시안 2 + 굵은 보더) ──
+ * table 분리 없이 한 table 안에서 카드 느낌을 표현:
+ * - 그룹 헤더 행: 진한 액센트 배경 + 위쪽 3px 굵은 액센트 보더
+ * - 그룹 마지막 행: 아래쪽 3px 굵은 액센트 보더 + 추가 padding
+ * - 행 양쪽: 얇은 액센트 보더로 카드 가장자리 흉내
+ */
+.scene-group-header > td {
+  background: rgb(var(--color-accent) / 0.18) !important;
+  border-top: 3px solid rgb(var(--color-accent) / 0.85) !important;
+  padding: 10px 12px !important;
+}
+.scene-group-header > td:first-child {
+  border-left: 2px solid rgb(var(--color-accent) / 0.6) !important;
+}
+.scene-group-header > td:last-child {
+  border-right: 2px solid rgb(var(--color-accent) / 0.6) !important;
+}
+
+.scene-row-group-mid > td:first-child {
+  border-left: 2px solid rgb(var(--color-accent) / 0.6) !important;
+}
+.scene-row-group-mid > td:last-child {
+  border-right: 2px solid rgb(var(--color-accent) / 0.6) !important;
+}
+
+.scene-row-group-last > td {
+  border-bottom: 3px solid rgb(var(--color-accent) / 0.85) !important;
+  padding-bottom: 10px !important;
+}
+.scene-row-group-last > td:first-child {
+  border-left: 2px solid rgb(var(--color-accent) / 0.6) !important;
+  border-bottom-left-radius: 6px;
+}
+.scene-row-group-last > td:last-child {
+  border-right: 2px solid rgb(var(--color-accent) / 0.6) !important;
+  border-bottom-right-radius: 6px;
+}
+
+/* 그룹 사이 간격 — 빈 행으로 카드 분리감 */
+.scene-row-group-gap > td {
+  height: 14px !important;
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}

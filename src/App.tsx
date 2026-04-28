@@ -696,7 +696,9 @@ export default function App() {
         if (payload?.eventType === 'INSERT' && payload?.new) {
           const newComment = payload.new as { scene_id?: string; user_name?: string; user_id?: string; text?: string; mentions?: string[] };
           const me = useAuthStore.getState().currentUser;
-          if (me && newComment.user_id && newComment.user_id !== me.id && newComment.scene_id) {
+          // 한솔 테스트용 (v1.15.0): 본인이 본인 태그한 경우에도 토스트 발동되도록 user_id 자기 비교 제거.
+          // 실 운영 시 본인 댓글 알림이 의미없으면 다음 PR 에서 user_id !== me.id 조건 복원.
+          if (me && newComment.user_id && newComment.scene_id) {
             const dedupeKey = `comment:${newComment.user_id}:${newComment.scene_id}`;
             if (!dedupeNotification(dedupeKey)) { /* 이미 broadcast로 처리됨 */ }
             else {

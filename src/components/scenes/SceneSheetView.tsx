@@ -313,11 +313,16 @@ export function SceneSheetView({
   }, [scenes, sceneGroupMode]);
 
   const layoutMeta = useMemo(() => {
-    if (!layoutGroups) return new Map<Scene, { isFirst: boolean; groupSize: number; layoutKey: string }>();
-    const meta = new Map<Scene, { isFirst: boolean; groupSize: number; layoutKey: string }>();
+    if (!layoutGroups) return new Map<Scene, { isFirst: boolean; isLast: boolean; groupSize: number; layoutKey: string }>();
+    const meta = new Map<Scene, { isFirst: boolean; isLast: boolean; groupSize: number; layoutKey: string }>();
     for (const [layoutKey, groupScenes] of layoutGroups) {
       groupScenes.forEach((scene, i) => {
-        meta.set(scene, { isFirst: i === 0, groupSize: groupScenes.length, layoutKey });
+        meta.set(scene, {
+          isFirst: i === 0,
+          isLast: i === groupScenes.length - 1,
+          groupSize: groupScenes.length,
+          layoutKey,
+        });
       });
     }
     return meta;
@@ -597,15 +602,20 @@ export function SceneSheetView({
               const meta = layoutMeta.get(scene);
               const isRowSelected = selectedSceneIds?.has(scene.sceneId);
               const isFirstInGroup = meta?.isFirst ?? false;
+              const isLastInGroup = meta?.isLast ?? false;
               const groupSize = meta?.groupSize ?? 1;
               const layoutKey = meta?.layoutKey ?? '';
+              const isLayoutMode = sceneGroupMode === 'layout';
 
               return (
                 <Fragment key={`${scene.sceneId}-${idx}`}>
-                  {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 그룹 시작 위에 헤더 행 삽입 (카드 뷰 섹션 스타일) */}
-                  {sceneGroupMode === 'layout' && isFirstInGroup && (
-                    <tr className="bg-accent/8 border-y border-accent/30">
-                      <td colSpan={100} className="px-3 py-2">
+                  {/* 한솔 결정 (1-B 시안 2 + 굵은 보더): 카드 박스 헤더 + 그룹 사이 빈 간격 */}
+                  {isLayoutMode && isFirstInGroup && rowIndex > 0 && (
+                    <tr className="scene-row-group-gap"><td colSpan={100}></td></tr>
+                  )}
+                  {isLayoutMode && isFirstInGroup && (
+                    <tr className="scene-group-header">
+                      <td colSpan={100}>
                         <span className="inline-flex items-center gap-2">
                           <span className="text-sm font-bold text-accent">
                             {layoutKey !== '미분류' ? `L#${layoutKey}` : '레이아웃 미분류'}
@@ -626,6 +636,8 @@ export function SceneSheetView({
                       isRowSelected && 'bg-accent/10 hover:bg-accent/15',
                       searchQuery && 'bg-accent/5 border-l-2 border-l-accent/60',
                       highlightSceneId && scene.sceneId === highlightSceneId && 'scene-row-highlighted',
+                      isLayoutMode && !isLastInGroup && 'scene-row-group-mid',
+                      isLayoutMode && isLastInGroup && 'scene-row-group-last',
                     )}
                     onClick={(e) => {
                       if ((e.ctrlKey || e.metaKey) && onCtrlClick) {

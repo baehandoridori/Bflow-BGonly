@@ -315,11 +315,16 @@ export function UnifiedSceneSheetView({
   }, [layoutGroups, mergedScenes]);
 
   const layoutMeta = useMemo(() => {
-    if (!layoutGroups) return new Map<MergedScene, { isFirst: boolean; groupSize: number; layoutKey: string }>();
-    const meta = new Map<MergedScene, { isFirst: boolean; groupSize: number; layoutKey: string }>();
+    if (!layoutGroups) return new Map<MergedScene, { isFirst: boolean; isLast: boolean; groupSize: number; layoutKey: string }>();
+    const meta = new Map<MergedScene, { isFirst: boolean; isLast: boolean; groupSize: number; layoutKey: string }>();
     for (const [layoutKey, groupScenes] of layoutGroups) {
       groupScenes.forEach((m, i) => {
-        meta.set(m, { isFirst: i === 0, groupSize: groupScenes.length, layoutKey });
+        meta.set(m, {
+          isFirst: i === 0,
+          isLast: i === groupScenes.length - 1,
+          groupSize: groupScenes.length,
+          layoutKey,
+        });
       });
     }
     return meta;
@@ -648,8 +653,10 @@ export function UnifiedSceneSheetView({
               const meta = layoutMeta.get(m);
               const isRowSelected = selectedSceneIds.has(`bg:${mergedKey}`) || selectedSceneIds.has(`act:${mergedKey}`);
               const isFirstInGroup = meta?.isFirst ?? false;
+              const isLastInGroup = meta?.isLast ?? false;
               const groupSize = meta?.groupSize ?? 1;
               const layoutKey = meta?.layoutKey ?? '';
+              const isLayoutMode = sceneGroupMode === 'layout';
               // 한솔 결정 (8번): 토스트 클릭 후 진입 시 해당 행 빛남
               const isHighlighted = !!highlightSceneId && (
                 bgScene?.sceneId === highlightSceneId || actScene?.sceneId === highlightSceneId
@@ -665,10 +672,13 @@ export function UnifiedSceneSheetView({
 
               return (
                 <Fragment key={mergedKey}>
-                  {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 그룹 시작 위에 헤더 행 삽입 (카드 뷰 섹션 스타일) */}
-                  {sceneGroupMode === 'layout' && isFirstInGroup && (
-                    <tr className="bg-accent/8 border-y border-accent/30">
-                      <td colSpan={100} className="px-3 py-2">
+                  {/* 한솔 결정 (1-B 시안 2 + 굵은 보더): 그룹 시작 위에 액센트 카드 박스 헤더 행 */}
+                  {isLayoutMode && isFirstInGroup && rowIndex > 0 && (
+                    <tr className="scene-row-group-gap"><td colSpan={100}></td></tr>
+                  )}
+                  {isLayoutMode && isFirstInGroup && (
+                    <tr className="scene-group-header">
+                      <td colSpan={100}>
                         <span className="inline-flex items-center gap-2">
                           <span className="text-sm font-bold text-accent">
                             {layoutKey !== '미분류' ? `L#${layoutKey}` : '레이아웃 미분류'}
@@ -689,6 +699,8 @@ export function UnifiedSceneSheetView({
                       isRowSelected && 'bg-accent/10 hover:bg-accent/15',
                       searchQuery && 'bg-accent/5 border-l-2 border-l-accent/60',
                       isHighlighted && 'scene-row-highlighted',
+                      isLayoutMode && !isLastInGroup && 'scene-row-group-mid',
+                      isLayoutMode && isLastInGroup && 'scene-row-group-last',
                     )}
                     onClick={(e) => {
                       if ((e.ctrlKey || e.metaKey) && onCtrlClick) {

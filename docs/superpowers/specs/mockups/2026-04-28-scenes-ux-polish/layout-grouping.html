@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>(1-B) 레이아웃 별 뷰 그룹 분리 — 5개 시안</title>
+<style>
+  :root {
+    --bg-primary: #0F1117;
+    --bg-card: #161922;
+    --bg-border: #2A2F3D;
+    --text-primary: #E8EAF0;
+    --text-secondary: #8B92A4;
+    --accent: #6C5CE7;
+    --accent-sub: #A29BFE;
+    --accent-bright: #B8AFFF;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, "Pretendard", "Segoe UI", sans-serif;
+    font-size: 14px;
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; color: var(--accent-sub); }
+  h3 { font-size: 14px; margin: 0 0 4px; color: var(--accent-sub); }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin-bottom: 24px; line-height: 1.6; }
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+    border-radius: 12px;
+    padding: 18px;
+    position: relative;
+  }
+  .card.full { grid-column: span 2; }
+  .card-num {
+    position: absolute; top: 12px; right: 14px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    color: var(--text-secondary);
+    background: rgba(108, 92, 231, 0.15);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .card-desc {
+    font-size: 12px; color: var(--text-secondary);
+    margin: 6px 0 14px; line-height: 1.5;
+  }
+
+  /* 공통 시트 스타일 */
+  .sheet {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: rgba(15, 17, 23, 0.6);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 11px;
+  }
+  .sheet th {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-size: 10px; font-weight: 600;
+    padding: 6px 10px; text-align: left;
+  }
+  .sheet td {
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(42, 47, 61, 0.5);
+    font-family: "JetBrains Mono", monospace; font-size: 11px;
+  }
+  .sheet tr:nth-child(odd) td:not(.group-cell) { background: rgba(15, 17, 23, 0.3); }
+  .scene-num { color: var(--accent-bright); font-weight: 600; }
+
+  /* 헤더 행 (모든 시안 공통) */
+  .group-header td {
+    background: rgba(108, 92, 231, 0.12) !important;
+    padding: 8px 12px !important;
+    border-bottom: none !important;
+  }
+  .group-header-title { font-size: 13px; font-weight: 700; color: var(--accent); }
+  .group-header-meta { font-size: 11px; color: var(--text-secondary); margin-left: 8px; }
+
+  /* ======== 시안 1: 그룹 사이 빈 간격 ======== */
+  .style-1 .gap td {
+    background: var(--bg-primary) !important;
+    height: 14px;
+    padding: 0 !important;
+    border-bottom: none !important;
+  }
+  .style-1 .group-header td { border-top: 1px solid rgba(108, 92, 231, 0.3); }
+
+  /* ======== 시안 2: 카드 박스 (각 그룹이 독립 카드) ======== */
+  .style-2 .group-card {
+    background: rgba(15, 17, 23, 0.6);
+    border: 1px solid rgba(108, 92, 231, 0.25);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+  .style-2 .group-card-header {
+    background: rgba(108, 92, 231, 0.15);
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(108, 92, 231, 0.3);
+  }
+  .style-2 .inner-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  .style-2 .inner-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid rgba(42, 47, 61, 0.4);
+    font-family: "JetBrains Mono", monospace;
+  }
+  .style-2 .inner-table tr:last-child td { border-bottom: none; }
+  .style-2 .inner-table tr:nth-child(even) td { background: rgba(15, 17, 23, 0.4); }
+
+  /* ======== 시안 3: 좌측 컬러 바 (그룹마다 같은 색 막대 연결) ======== */
+  .style-3 td.lbar {
+    width: 4px;
+    padding: 0 !important;
+    border-bottom: none !important;
+  }
+  .style-3 .lbar-color1 {
+    background: linear-gradient(180deg, var(--accent), var(--accent-sub)) !important;
+  }
+  .style-3 .lbar-color2 {
+    background: linear-gradient(180deg, #74B9FF, #A29BFE) !important;
+  }
+  .style-3 .lbar-color3 {
+    background: linear-gradient(180deg, #FF8FA3, var(--accent-sub)) !important;
+  }
+  .style-3 .group-end td:not(.lbar) {
+    border-bottom: 2px solid var(--bg-border) !important;
+    padding-bottom: 12px !important;
+  }
+  .style-3 .group-header td:first-child { padding-left: 18px !important; }
+
+  /* ======== 시안 4: 그룹 마지막 행 굵은 보더 + 다음 헤더 강조 ======== */
+  .style-4 .group-end td {
+    border-bottom: 2px solid var(--accent) !important;
+    padding-bottom: 10px !important;
+  }
+  .style-4 .group-header td {
+    background: rgba(108, 92, 231, 0.18) !important;
+    box-shadow: inset 0 -1px 0 var(--accent);
+  }
+  .style-4 .group-header + tr td { padding-top: 10px !important; }
+
+  /* ======== 시안 5: 그룹 번갈아 배경색 + 헤더 강조 ======== */
+  .style-5 tr.group-bg-A td:not(.group-cell) { background: rgba(108, 92, 231, 0.04) !important; }
+  .style-5 tr.group-bg-A:nth-child(odd) td:not(.group-cell) { background: rgba(108, 92, 231, 0.08) !important; }
+  .style-5 tr.group-bg-B td:not(.group-cell) { background: rgba(116, 185, 255, 0.04) !important; }
+  .style-5 tr.group-bg-B:nth-child(odd) td:not(.group-cell) { background: rgba(116, 185, 255, 0.08) !important; }
+  .style-5 tr.group-bg-C td:not(.group-cell) { background: rgba(255, 143, 163, 0.04) !important; }
+  .style-5 tr.group-bg-C:nth-child(odd) td:not(.group-cell) { background: rgba(255, 143, 163, 0.08) !important; }
+
+  .vote {
+    margin-top: 32px;
+    padding: 14px;
+    background: rgba(108, 92, 231, 0.06);
+    border-radius: 8px;
+    text-align: center;
+    color: var(--accent-sub);
+    font-size: 13px;
+  }
+
+  .header-bar {
+    background: rgba(108, 92, 231, 0.08);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0 28px;
+    line-height: 1.6;
+    font-size: 13px;
+  }
+  .current-state {
+    background: rgba(255, 118, 117, 0.06);
+    border-left: 3px solid #FF7675;
+    padding: 12px 16px;
+    border-radius: 0 8px 8px 0;
+    margin: 0 0 24px;
+    line-height: 1.6;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>📐 (1-B) 레이아웃 별 뷰 그룹 분리 — 5개 시안</h1>
+<p class="subtitle">"셀이 다 이어져있어서 가시화 약함" — 한솔 피드백 반영. 그룹별 시각 분리를 강화하는 5가지 방향.</p>
+
+<div class="current-state">
+  <strong>🔍 현재 구현된 모습</strong>: 그룹 헤더 행 + 그 아래 일반 행들이 셀 간격 동일하게 *연속*. 헤더 행만 액센트 배경이고 행들은 줄무늬만 있음. 그룹 경계가 약함.
+</div>
+
+<div class="header-bar">
+  💡 마음에 드는 시안 번호 (1~5) 알려주세요. 또는 "X번에 이런 부분만 더해" 도 가능합니다.
+</div>
+
+<div class="grid">
+
+  <!-- 시안 1: 빈 간격 -->
+  <div class="card">
+    <span class="card-num">시안 1</span>
+    <h3>📏 그룹 사이 빈 간격 (Spacer)</h3>
+    <p class="card-desc">그룹 끝과 다음 그룹 시작 사이에 14px 높이의 빈 행 삽입. 가장 단순하면서도 효과적.</p>
+    <table class="sheet style-1">
+      <tr><th style="width:100px;">씬번호</th><th>메모</th><th style="width:50px;">LO</th></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A2</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr><td><span class="scene-num">EP01-A-15</span></td><td>골목 진입</td><td>✓</td></tr>
+      <tr><td><span class="scene-num">EP01-A-16</span></td><td>벽 그림자</td><td>✓</td></tr>
+      <tr class="gap"><td colspan="3"></td></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A3</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr><td><span class="scene-num">EP01-A-17</span></td><td>달려오는 인물</td><td></td></tr>
+      <tr><td><span class="scene-num">EP01-A-18</span></td><td>턴어라운드</td><td></td></tr>
+      <tr class="gap"><td colspan="3"></td></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A4</span><span class="group-header-meta">1개 씬</span></td></tr>
+      <tr><td><span class="scene-num">EP01-A-19</span></td><td>옥상 펜스</td><td>✓</td></tr>
+    </table>
+  </div>
+
+  <!-- 시안 2: 카드 박스 -->
+  <div class="card">
+    <span class="card-num">시안 2</span>
+    <h3>🃏 카드 박스 (Card Container)</h3>
+    <p class="card-desc">각 그룹을 *독립 카드*로 분리. 둥근 모서리 + 보더 + 그림자. 가장 강한 분리.</p>
+    <div class="style-2">
+      <div class="group-card">
+        <div class="group-card-header"><span class="group-header-title">L#A2</span><span class="group-header-meta">2개 씬</span></div>
+        <table class="inner-table">
+          <tr><td style="width:100px;"><span class="scene-num">EP01-A-15</span></td><td>골목 진입</td><td style="width:50px;">✓</td></tr>
+          <tr><td><span class="scene-num">EP01-A-16</span></td><td>벽 그림자</td><td>✓</td></tr>
+        </table>
+      </div>
+      <div class="group-card">
+        <div class="group-card-header"><span class="group-header-title">L#A3</span><span class="group-header-meta">2개 씬</span></div>
+        <table class="inner-table">
+          <tr><td style="width:100px;"><span class="scene-num">EP01-A-17</span></td><td>달려오는 인물</td><td style="width:50px;"></td></tr>
+          <tr><td><span class="scene-num">EP01-A-18</span></td><td>턴어라운드</td><td></td></tr>
+        </table>
+      </div>
+      <div class="group-card">
+        <div class="group-card-header"><span class="group-header-title">L#A4</span><span class="group-header-meta">1개 씬</span></div>
+        <table class="inner-table">
+          <tr><td style="width:100px;"><span class="scene-num">EP01-A-19</span></td><td>옥상 펜스</td><td style="width:50px;">✓</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 시안 3: 좌측 컬러 바 -->
+  <div class="card">
+    <span class="card-num">시안 3</span>
+    <h3>🎨 좌측 컬러 바 (Group Color Bar)</h3>
+    <p class="card-desc">그룹마다 다른 색상의 좌측 막대가 헤더부터 마지막 행까지 *연결*. 시각적 묶음 명확.</p>
+    <table class="sheet style-3">
+      <tr><th style="width:4px;"></th><th style="width:100px;">씬번호</th><th>메모</th><th style="width:50px;">LO</th></tr>
+      <tr class="group-header"><td class="lbar lbar-color1"></td><td colspan="3"><span class="group-header-title">L#A2</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr><td class="lbar lbar-color1"></td><td><span class="scene-num">EP01-A-15</span></td><td>골목 진입</td><td>✓</td></tr>
+      <tr class="group-end"><td class="lbar lbar-color1"></td><td><span class="scene-num">EP01-A-16</span></td><td>벽 그림자</td><td>✓</td></tr>
+      <tr class="group-header"><td class="lbar lbar-color2"></td><td colspan="3"><span class="group-header-title">L#A3</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr><td class="lbar lbar-color2"></td><td><span class="scene-num">EP01-A-17</span></td><td>달려오는 인물</td><td></td></tr>
+      <tr class="group-end"><td class="lbar lbar-color2"></td><td><span class="scene-num">EP01-A-18</span></td><td>턴어라운드</td><td></td></tr>
+      <tr class="group-header"><td class="lbar lbar-color3"></td><td colspan="3"><span class="group-header-title">L#A4</span><span class="group-header-meta">1개 씬</span></td></tr>
+      <tr><td class="lbar lbar-color3"></td><td><span class="scene-num">EP01-A-19</span></td><td>옥상 펜스</td><td>✓</td></tr>
+    </table>
+  </div>
+
+  <!-- 시안 4: 마지막 행 굵은 보더 -->
+  <div class="card">
+    <span class="card-num">시안 4</span>
+    <h3>📍 그룹 끝 굵은 보더 (Strong Divider)</h3>
+    <p class="card-desc">그룹 마지막 행에 *굵은 액센트 보더* + 헤더에 진한 액센트 배경. 단순 + 명확.</p>
+    <table class="sheet style-4">
+      <tr><th style="width:100px;">씬번호</th><th>메모</th><th style="width:50px;">LO</th></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A2</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr><td><span class="scene-num">EP01-A-15</span></td><td>골목 진입</td><td>✓</td></tr>
+      <tr class="group-end"><td><span class="scene-num">EP01-A-16</span></td><td>벽 그림자</td><td>✓</td></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A3</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr><td><span class="scene-num">EP01-A-17</span></td><td>달려오는 인물</td><td></td></tr>
+      <tr class="group-end"><td><span class="scene-num">EP01-A-18</span></td><td>턴어라운드</td><td></td></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A4</span><span class="group-header-meta">1개 씬</span></td></tr>
+      <tr class="group-end"><td><span class="scene-num">EP01-A-19</span></td><td>옥상 펜스</td><td>✓</td></tr>
+    </table>
+  </div>
+
+  <!-- 시안 5: 번갈아 배경 -->
+  <div class="card full">
+    <span class="card-num">시안 5</span>
+    <h3>🎨 그룹별 옅은 배경색 (Tinted Group Background)</h3>
+    <p class="card-desc">각 그룹마다 약간 다른 옅은 색조의 배경. 줄무늬는 같은 톤으로 유지. 무지개처럼 부드럽게 분리.</p>
+    <table class="sheet style-5">
+      <tr><th style="width:100px;">씬번호</th><th>메모</th><th style="width:50px;">LO</th></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A2</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr class="group-bg-A"><td><span class="scene-num">EP01-A-15</span></td><td>골목 진입</td><td>✓</td></tr>
+      <tr class="group-bg-A"><td><span class="scene-num">EP01-A-16</span></td><td>벽 그림자</td><td>✓</td></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A3</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr class="group-bg-B"><td><span class="scene-num">EP01-A-17</span></td><td>달려오는 인물</td><td></td></tr>
+      <tr class="group-bg-B"><td><span class="scene-num">EP01-A-18</span></td><td>턴어라운드</td><td></td></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A4</span><span class="group-header-meta">1개 씬</span></td></tr>
+      <tr class="group-bg-C"><td><span class="scene-num">EP01-A-19</span></td><td>옥상 펜스</td><td>✓</td></tr>
+    </table>
+  </div>
+
+</div>
+
+<div class="vote">
+  ⬆️ 마음에 드는 시안 번호 (1~5) 알려주세요. 조합도 가능 — 예: "1 + 4" 또는 "3에 빈 간격도 추가".
+</div>
+
+</div>
+</body>
+</html>
