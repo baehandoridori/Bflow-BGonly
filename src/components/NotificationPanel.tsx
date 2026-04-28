@@ -80,8 +80,9 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
       </div>
 
       {/* 한솔 결정: 호버 시 우측에 [씬 보기 / 읽음 / 삭제] 액션 fade-in.
-          본문 클릭은 그대로 자동 (씬 이동 + 읽음). 액션 버튼은 stopPropagation 으로 분리. */}
-      <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 group-hover/noti:opacity-100 transition-opacity">
+          본문 클릭은 그대로 자동 (씬 이동 + 읽음). 액션 버튼은 stopPropagation 으로 분리.
+          flex sibling 으로 두어 평소에도 영역만 차지 (opacity 0) → 본문 truncate 가 액션 영역까지 침범하지 않음. */}
+      <div className="flex items-center gap-1 self-start mt-0.5 flex-shrink-0 opacity-0 group-hover/noti:opacity-100 transition-opacity">
         {hasNavigateTarget && (
           <button
             type="button"
