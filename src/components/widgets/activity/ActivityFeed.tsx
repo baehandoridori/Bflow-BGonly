@@ -81,7 +81,7 @@ function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
   const verb = getActivityVerb(activity);
   return (
     <div
-      className={`flex gap-2.5 py-2 px-3.5 border-b border-bg-border/15 transition-colors hover:bg-white/[0.025] cursor-pointer relative ${
+      className={`flex gap-2.5 py-2 px-3.5 border-b border-bg-border/15 transition-colors hover:bg-bg-border/20 cursor-pointer relative ${
         isSelf ? 'bg-accent/[0.04]' : ''
       } ${isInsideGroup ? 'pl-12' : ''}`}
     >
@@ -137,7 +137,7 @@ function FeedGroup({ items, isSelf }: FeedGroupProps) {
     <div className={`border-b border-bg-border/15 ${isSelf ? 'bg-accent/[0.04]' : ''} relative`}>
       {isSelf && <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent-sub" />}
       <div
-        className="flex gap-2.5 py-2 px-3.5 cursor-pointer transition-colors hover:bg-white/[0.025]"
+        className="flex gap-2.5 py-2 px-3.5 cursor-pointer transition-colors hover:bg-bg-border/20"
         onClick={() => setOpen((o) => !o)}
       >
         <Avatar name={head.userName} color={getUserColorFromId(head.userId)} />
@@ -179,7 +179,7 @@ function FeedGroup({ items, isSelf }: FeedGroupProps) {
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden bg-black/15"
+            className="overflow-hidden bg-bg-border/30"
           >
             {items.map((it) => (
               <FeedItemRow key={it.id} activity={it} isSelf={isSelf} isInsideGroup />

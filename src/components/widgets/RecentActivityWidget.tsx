@@ -187,7 +187,7 @@ export function RecentActivityWidget() {
 
 function ModeToggle({ mode, onChange }: { mode: GoldenMode; onChange: (m: GoldenMode) => void }) {
   return (
-    <div className="flex gap-[2px] bg-black/25 p-[2px] rounded-[7px]">
+    <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-[7px]">
       <ModeButton active={mode === 'heatmap'} onClick={() => onChange('heatmap')} title="히트맵 모드">
         <Grid3x3 size={11} />
         <span className="text-[10.5px]">히트맵</span>
