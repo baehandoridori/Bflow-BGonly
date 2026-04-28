@@ -554,29 +554,42 @@ export default function App() {
     }
   }, [currentUser, setUsers]);
 
-  // 한솔 결정 (v1.15.5): 로그인 catch-up — last_seen_at 이후 받은 멘션 댓글을 알림 패널에 누적
-  // (토스트 X, 알림 패널 + 요약 토스트 1번). 사용자별 ref 로 한 번만 발동.
+  // 한솔 결정 (v1.15.5): 로그인 catch-up — last_seen_at 이후 받은 멘션 댓글을 알림 패널에 누적.
+  // v1.15.6 진단 로그: 한솔 보고 "catch-up 실행 안 됨" — 단계별 콘솔 로그로 정확한 원인 파악.
   const catchupDoneUserIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!currentUser) return;
-    if (!authReady) return;
-    if (catchupDoneUserIdRef.current === currentUser.id) return;
+    console.log('[catchup] effect 진입', { currentUser: currentUser?.id, authReady, doneRef: catchupDoneUserIdRef.current });
+    if (!currentUser) { console.log('[catchup] currentUser 없음 — skip'); return; }
+    if (!authReady) { console.log('[catchup] authReady false — skip'); return; }
+    if (catchupDoneUserIdRef.current === currentUser.id) {
+      console.log('[catchup] 이미 처리된 사용자 — skip', currentUser.id);
+      return;
+    }
 
     catchupDoneUserIdRef.current = currentUser.id;
     const me = currentUser;
+    console.log('[catchup] 처리 시작', { id: me.id, name: me.name });
 
     (async () => {
       const { getLastSeenAt, setLastSeenAt, ensureLastSeenInitialized } = await import('@/utils/lastSeenTracker');
       const lastSeen = getLastSeenAt(me.id);
+      console.log('[catchup] lastSeen', lastSeen);
       if (!lastSeen) {
         // 첫 로그인 — 이전 알림 catch-up 안 함, 시각만 기록
         ensureLastSeenInitialized(me.id);
+        console.log('[catchup] 첫 로그인 — last_seen 초기화만, catch-up 스킵');
         return;
       }
       try {
+        console.log('[catchup] supabaseFetchMissedMentions 호출', {
+          available: !!window.electronAPI?.supabaseFetchMissedMentions,
+          since: lastSeen,
+        });
         const missed = await window.electronAPI?.supabaseFetchMissedMentions?.(me.id, me.name, lastSeen, 50);
+        console.log('[catchup] fetch 결과', { count: missed?.length ?? 0, missed });
         if (!missed || missed.length === 0) {
           setLastSeenAt(me.id, new Date().toISOString());
+          console.log('[catchup] 놓친 알림 없음 — last_seen 업데이트만');
           return;
         }
         // 알림 패널에만 누적 (토스트 X — 한꺼번에 N 개 띄우면 시끄러움)
@@ -586,7 +599,6 @@ export default function App() {
             type: 'comment',
             title: `${c.userName || '누군가'}님이 나를 태그했습니다`,
             body: c.text ? (c.text.length > 50 ? c.text.slice(0, 50) + '...' : c.text) : undefined,
-            // scene_uuid 가 SupabaseComment 변환에서 빠져있어 partId+sceneId(no) 로만 표기 — 클릭 시 navigateToScene 자체 fallback 동작
             metadata: { sceneName: c.sceneId },
           });
         }
@@ -596,6 +608,7 @@ export default function App() {
           duration: 6000,
         });
         setLastSeenAt(me.id, new Date().toISOString());
+        console.log('[catchup] 완료', { added: missed.length });
       } catch (err) {
         console.warn('[catchup] 멘션 catch-up 실패:', err);
       }
