@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>알림 탭 — 액션 버튼 4개 시안</title>
+<style>
+  :root {
+    --bg-primary: #0F1117;
+    --bg-card: #161922;
+    --bg-border: #2A2F3D;
+    --text-primary: #E8EAF0;
+    --text-secondary: #8B92A4;
+    --accent: #6C5CE7;
+    --accent-sub: #A29BFE;
+    --status-done: #00D9A0;
+    --status-warn: #FDCB6E;
+    --status-danger: #FF7675;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px;
+    background: var(--bg-primary); color: var(--text-primary);
+    font-family: -apple-system, "Pretendard", "Segoe UI", sans-serif;
+    font-size: 14px;
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; color: var(--accent-sub); }
+  h3 { font-size: 14px; margin: 0 0 4px; color: var(--accent-sub); }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin-bottom: 24px; line-height: 1.6; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+    border-radius: 12px;
+    padding: 18px;
+    position: relative;
+  }
+  .card-num {
+    position: absolute; top: 12px; right: 14px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    color: var(--text-secondary);
+    background: rgba(108, 92, 231, 0.15);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .card-desc {
+    font-size: 12px; color: var(--text-secondary);
+    margin: 6px 0 14px; line-height: 1.5;
+  }
+  .panel {
+    background: rgba(15, 17, 23, 0.6);
+    border: 1px solid var(--bg-border);
+    border-radius: 8px;
+    padding: 6px;
+    overflow: hidden;
+  }
+  .panel-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 10px 8px 8px;
+    border-bottom: 1px solid var(--bg-border);
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .panel-actions {
+    display: flex; gap: 8px;
+  }
+  .panel-actions button {
+    background: rgba(108, 92, 231, 0.15);
+    color: var(--accent-sub);
+    border: none;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+  }
+  .noti-item {
+    display: flex; gap: 8px;
+    padding: 10px 8px;
+    border-radius: 6px;
+    margin: 2px 0;
+    transition: background 0.15s;
+    position: relative;
+  }
+  .noti-item.unread { background: rgba(108, 92, 231, 0.08); }
+  .noti-item:hover { background: rgba(108, 92, 231, 0.12); }
+  .noti-icon {
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+  .noti-icon.comment { background: rgba(108, 92, 231, 0.2); color: var(--accent); }
+  .noti-icon.scene { background: rgba(116, 185, 255, 0.2); color: #74B9FF; }
+  .noti-icon.system { background: rgba(139, 141, 163, 0.2); color: var(--text-secondary); }
+  .noti-body {
+    flex: 1;
+    min-width: 0;
+  }
+  .noti-title { font-size: 12.5px; line-height: 1.4; margin-bottom: 2px; }
+  .noti-desc { font-size: 11.5px; color: var(--text-secondary); line-height: 1.4; }
+  .noti-time { font-size: 10.5px; color: var(--text-secondary); margin-top: 2px; }
+  .unread-dot {
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    position: absolute;
+    left: 4px; top: 16px;
+  }
+
+  /* ── 시안 1: 호버 시 액션 fade-in ── */
+  .style-1 .noti-item .actions {
+    display: flex; gap: 4px;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .style-1 .noti-item:hover .actions { opacity: 1; }
+  .style-1 .actions button {
+    background: rgba(108, 92, 231, 0.15);
+    border: 1px solid rgba(108, 92, 231, 0.3);
+    color: var(--accent-sub);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .style-1 .actions button.danger {
+    background: rgba(255, 118, 117, 0.1);
+    border-color: rgba(255, 118, 117, 0.3);
+    color: var(--status-danger);
+  }
+  .style-1 .actions button.read {
+    background: rgba(0, 217, 160, 0.1);
+    border-color: rgba(0, 217, 160, 0.3);
+    color: var(--status-done);
+  }
+
+  /* ── 시안 2: 항상 표시 미니 아이콘 ── */
+  .style-2 .actions { display: flex; gap: 2px; }
+  .style-2 .actions button {
+    background: transparent;
+    border: none;
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.15s, color 0.15s;
+  }
+  .style-2 .actions button:hover {
+    background: rgba(108, 92, 231, 0.2);
+    color: var(--accent-sub);
+  }
+  .style-2 .actions button.danger:hover {
+    background: rgba(255, 118, 117, 0.15);
+    color: var(--status-danger);
+  }
+  .style-2 .actions button.done:hover {
+    background: rgba(0, 217, 160, 0.15);
+    color: var(--status-done);
+  }
+
+  /* ── 시안 3: 본문 클릭 = 자동 + ⋯ 메뉴 ── */
+  .style-3 .noti-item.clickable { cursor: pointer; }
+  .style-3 .menu-btn {
+    background: transparent;
+    border: none;
+    width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 16px;
+  }
+  .style-3 .menu-btn:hover { background: rgba(108, 92, 231, 0.2); color: var(--accent-sub); }
+  .style-3 .open-menu {
+    position: absolute;
+    right: 8px; top: 32px;
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    z-index: 10;
+    min-width: 90px;
+  }
+  .style-3 .open-menu button {
+    background: transparent;
+    border: none;
+    width: 100%;
+    padding: 6px 10px;
+    text-align: left;
+    color: var(--text-primary);
+    font-size: 11.5px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .style-3 .open-menu button:hover { background: rgba(108, 92, 231, 0.15); }
+  .style-3 .open-menu button.danger { color: var(--status-danger); }
+  .style-3 .quick-hint {
+    margin-top: 8px;
+    padding: 6px 8px;
+    background: rgba(108, 92, 231, 0.06);
+    border-radius: 4px;
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    text-align: center;
+  }
+
+  /* ── 시안 4: 좌측 액션 칩 ── */
+  .style-4 .noti-item { padding-left: 4px; }
+  .style-4 .left-chips {
+    display: flex; flex-direction: column; gap: 3px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .style-4 .left-chips button {
+    background: rgba(108, 92, 231, 0.12);
+    color: var(--accent-sub);
+    border: none;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 9.5px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .style-4 .left-chips button:hover { background: rgba(108, 92, 231, 0.25); }
+  .style-4 .left-chips button.danger {
+    background: rgba(255, 118, 117, 0.1);
+    color: var(--status-danger);
+  }
+
+  .vote {
+    margin-top: 32px;
+    padding: 14px;
+    background: rgba(108, 92, 231, 0.06);
+    border-radius: 8px;
+    text-align: center;
+    color: var(--accent-sub);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🔔 알림 탭 액션 버튼 — 4개 시안</h1>
+<p class="subtitle">"씬 보기 / 알림 읽음 / 삭제 버튼 추가" — 한솔 요청. 각 시안마다 어디에 어떻게 배치하느냐가 다름.</p>
+
+<div class="grid">
+
+  <!-- 시안 1 -->
+  <div class="card">
+    <span class="card-num">시안 1</span>
+    <h3>👻 호버 시 액션 Fade-in</h3>
+    <p class="card-desc">평소엔 깔끔하다가, 마우스 올리면 우측에 [씬 보기][읽음][삭제] 3 버튼이 부드럽게 등장. 가독성 우선.</p>
+    <div class="panel style-1">
+      <div class="panel-header"><span>알림 (3)</span><span style="color:var(--accent-sub); cursor:pointer; font-size:11px;">전체 읽음</span></div>
+
+      <div class="noti-item unread">
+        <div class="unread-dot"></div>
+        <div class="noti-icon comment" style="margin-left:8px;">💬</div>
+        <div class="noti-body">
+          <div class="noti-title">윤스님이 나를 태그했습니다</div>
+          <div class="noti-desc">EP01-A-17 의 BG 검수 한 번만...</div>
+          <div class="noti-time">2분 전</div>
+        </div>
+        <div class="actions">
+          <button>씬 보기</button>
+          <button class="read">✓</button>
+          <button class="danger">×</button>
+        </div>
+      </div>
+
+      <div class="noti-item unread">
+        <div class="unread-dot"></div>
+        <div class="noti-icon scene" style="margin-left:8px;">🔄</div>
+        <div class="noti-body">
+          <div class="noti-title">EP01-A-15 — LO ✓</div>
+          <div class="noti-desc">한솔님이 LO 완료 처리</div>
+          <div class="noti-time">14분 전</div>
+        </div>
+        <div class="actions">
+          <button>씬 보기</button>
+          <button class="read">✓</button>
+          <button class="danger">×</button>
+        </div>
+      </div>
+
+      <div class="noti-item">
+        <div class="noti-icon system" style="margin-left:8px;">🔔</div>
+        <div class="noti-body" style="opacity:0.7;">
+          <div class="noti-title">시스템 — 동기화 완료</div>
+          <div class="noti-time">1시간 전</div>
+        </div>
+        <div class="actions">
+          <button class="danger">×</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 시안 2 -->
+  <div class="card">
+    <span class="card-num">시안 2</span>
+    <h3>👁 항상 미니 아이콘 3개</h3>
+    <p class="card-desc">우측에 작은 아이콘 버튼 항상 표시 — 👁(씬 보기) ✓(읽음) ✕(삭제). 호버 시 각 색상 강조. 클릭 1번에 바로 동작.</p>
+    <div class="panel style-2">
+      <div class="panel-header"><span>알림 (3)</span><span style="color:var(--accent-sub); cursor:pointer; font-size:11px;">전체 읽음</span></div>
+
+      <div class="noti-item unread">
+        <div class="unread-dot"></div>
+        <div class="noti-icon comment" style="margin-left:8px;">💬</div>
+        <div class="noti-body">
+          <div class="noti-title">윤스님이 나를 태그했습니다</div>
+          <div class="noti-desc">EP01-A-17 의 BG 검수 한 번만...</div>
+          <div class="noti-time">2분 전</div>
+        </div>
+        <div class="actions">
+          <button title="씬 보기">👁</button>
+          <button class="done" title="읽음">✓</button>
+          <button class="danger" title="삭제">✕</button>
+        </div>
+      </div>
+
+      <div class="noti-item unread">
+        <div class="unread-dot"></div>
+        <div class="noti-icon scene" style="margin-left:8px;">🔄</div>
+        <div class="noti-body">
+          <div class="noti-title">EP01-A-15 — LO ✓</div>
+          <div class="noti-desc">한솔님이 LO 완료 처리</div>
+          <div class="noti-time">14분 전</div>
+        </div>
+        <div class="actions">
+          <button title="씬 보기">👁</button>
+          <button class="done" title="읽음">✓</button>
+          <button class="danger" title="삭제">✕</button>
+        </div>
+      </div>
+
+      <div class="noti-item">
+        <div class="noti-icon system" style="margin-left:8px;">🔔</div>
+        <div class="noti-body" style="opacity:0.7;">
+          <div class="noti-title">시스템 — 동기화 완료</div>
+          <div class="noti-time">1시간 전</div>
+        </div>
+        <div class="actions">
+          <button class="danger" title="삭제">✕</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 시안 3 -->
+  <div class="card">
+    <span class="card-num">시안 3</span>
+    <h3>🎯 본문 클릭 = 자동 + ⋯ 메뉴</h3>
+    <p class="card-desc">알림 본문 클릭 = 자동으로 씬 보기 + 읽음 처리. 우측 ⋯ 버튼 = 메뉴 (삭제/읽음 토글). 가장 깔끔.</p>
+    <div class="panel style-3">
+      <div class="panel-header"><span>알림 (3)</span><span style="color:var(--accent-sub); cursor:pointer; font-size:11px;">전체 읽음</span></div>
+
+      <div class="noti-item unread clickable">
+        <div class="unread-dot"></div>
+        <div class="noti-icon comment" style="margin-left:8px;">💬</div>
+        <div class="noti-body">
+          <div class="noti-title">윤스님이 나를 태그했습니다</div>
+          <div class="noti-desc">EP01-A-17 의 BG 검수 한 번만...</div>
+          <div class="noti-time">2분 전</div>
+        </div>
+        <button class="menu-btn">⋯</button>
+      </div>
+
+      <div class="noti-item unread clickable" style="position:relative;">
+        <div class="unread-dot"></div>
+        <div class="noti-icon scene" style="margin-left:8px;">🔄</div>
+        <div class="noti-body">
+          <div class="noti-title">EP01-A-15 — LO ✓</div>
+          <div class="noti-desc">한솔님이 LO 완료 처리</div>
+          <div class="noti-time">14분 전</div>
+        </div>
+        <button class="menu-btn">⋯</button>
+        <!-- 메뉴 펼친 상태 미리보기 -->
+        <div class="open-menu">
+          <button>👁 씬 보기</button>
+          <button>✓ 읽음</button>
+          <button class="danger">✕ 삭제</button>
+        </div>
+      </div>
+
+      <div class="noti-item clickable">
+        <div class="noti-icon system" style="margin-left:8px;">🔔</div>
+        <div class="noti-body" style="opacity:0.7;">
+          <div class="noti-title">시스템 — 동기화 완료</div>
+          <div class="noti-time">1시간 전</div>
+        </div>
+        <button class="menu-btn">⋯</button>
+      </div>
+      <div class="quick-hint">💡 알림 본문 클릭 시 즉시 씬으로 이동 + 읽음 처리. 삭제 등은 ⋯ 메뉴에서.</div>
+    </div>
+  </div>
+
+  <!-- 시안 4 -->
+  <div class="card">
+    <span class="card-num">시안 4</span>
+    <h3>📌 좌측 액션 칩 (가독성)</h3>
+    <p class="card-desc">알림 좌측에 작은 칩 [보기][읽음][삭제] 항상 표시. 본문 텍스트와 분리되어 가독성 ↑. 알림 자체 클릭 동작 없음.</p>
+    <div class="panel style-4">
+      <div class="panel-header"><span>알림 (3)</span><span style="color:var(--accent-sub); cursor:pointer; font-size:11px;">전체 읽음</span></div>
+
+      <div class="noti-item unread">
+        <div class="left-chips">
+          <button>보기</button>
+          <button>읽음</button>
+          <button class="danger">삭제</button>
+        </div>
+        <div class="noti-icon comment">💬</div>
+        <div class="noti-body">
+          <div class="noti-title">윤스님이 나를 태그했습니다</div>
+          <div class="noti-desc">EP01-A-17 의 BG 검수 한 번만...</div>
+          <div class="noti-time">2분 전</div>
+        </div>
+      </div>
+
+      <div class="noti-item unread">
+        <div class="left-chips">
+          <button>보기</button>
+          <button>읽음</button>
+          <button class="danger">삭제</button>
+        </div>
+        <div class="noti-icon scene">🔄</div>
+        <div class="noti-body">
+          <div class="noti-title">EP01-A-15 — LO ✓</div>
+          <div class="noti-desc">한솔님이 LO 완료 처리</div>
+          <div class="noti-time">14분 전</div>
+        </div>
+      </div>
+
+      <div class="noti-item">
+        <div class="left-chips">
+          <button class="danger">삭제</button>
+        </div>
+        <div class="noti-icon system">🔔</div>
+        <div class="noti-body" style="opacity:0.7;">
+          <div class="noti-title">시스템 — 동기화 완료</div>
+          <div class="noti-time">1시간 전</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="vote">
+  ⬆️ 마음에 드는 시안 번호 (1~4) 알려주세요. 조합 또는 변형도 가능 — 예: "2번에 호버 강조 추가".
+</div>
+
+</div>
+</body>
+</html>
