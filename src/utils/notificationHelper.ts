@@ -29,7 +29,10 @@ function navigateToScene(sceneUuid?: string, sceneName?: string) {
         (sceneUuid && s.id === sceneUuid) || (sceneName && s.sceneId === sceneName),
       );
       if (found) {
+        // 한솔 보고 (v1.15.4): part 도 같이 이동해야 다른 파트의 씬으로 가도 펄스 이펙트가 보임.
+        // 기존엔 setSelectedEpisode 만 호출 → 현재 part 의 시트가 그대로라 highlight 매칭 실패.
         useAppStore.getState().setSelectedEpisode(ep.episodeNumber);
+        useAppStore.getState().setSelectedPart(part.partId);
         useAppStore.getState().setHighlightSceneId(found.sceneId);
         useAppStore.getState().setView('scenes');
         return;

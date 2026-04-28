@@ -179,7 +179,9 @@ function NotificationDropdown() {
             (sceneId && s.id === sceneId) || (sceneName && s.sceneId === sceneName),
           );
           if (found) {
+            // 한솔 보고 (v1.15.4): part 도 같이 이동해야 다른 파트의 씬으로 가도 펄스 이펙트가 보임
             setSelectedEpisode(ep.episodeNumber);
+            useAppStore.getState().setSelectedPart(part.partId);
             setHighlightSceneId(found.sceneId);
             setView('scenes');
             setPanelOpen(false);

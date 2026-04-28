@@ -737,6 +737,29 @@ export default function App() {
                 const isMentioned = Array.isArray(newComment.mentions) && newComment.mentions.includes(me.name);
                 const isAssignee = scene && scene.assignee === me.name;
 
+                // 한솔 진단용 (v1.15.4): scene 매칭 실패 원인을 콘솔에서 정확히 파악하기 위한 로그.
+                // 강선영 PC 등 다른 사용자에서 멘션 알림 받을 때 scene 못 찾는 케이스 진단.
+                if (!scene) {
+                  const ds = useDataStore.getState();
+                  console.warn('[댓글알림진단] scene 매칭 실패', {
+                    payload: {
+                      scene_id: newComment.scene_id,
+                      scene_uuid: newComment.scene_uuid,
+                      part_id: newComment.part_id,
+                      user_name: newComment.user_name,
+                      mentions: newComment.mentions,
+                    },
+                    me: { id: me.id, name: me.name },
+                    storeStats: {
+                      episodeCount: ds.episodes.length,
+                      partCount: ds.episodes.reduce((s, e) => s + e.parts.length, 0),
+                      sceneCount: ds.episodes.reduce((s, e) => s + e.parts.reduce((ss, p) => ss + p.scenes.length, 0), 0),
+                    },
+                    samplePartIds: ds.episodes.flatMap((e) => e.parts.map((p) => p.id)).slice(0, 5),
+                    matchedPart: newComment.part_id ? ds.episodes.flatMap((e) => e.parts).find((p) => p.id === newComment.part_id) : null,
+                  });
+                }
+
                 if (isMentioned) {
                   dispatchNotification({
                     type: 'comment',
