@@ -822,6 +822,42 @@ export async function deleteUser(userId: string): Promise<void> {
 // COMMENTS
 // ═══════════════════════════════════════════════
 
+/**
+ * 한솔 결정 (v1.15.5): 로그인 catch-up — 사용자가 last seen 이후 받은 멘션 댓글을 일괄 조회.
+ *
+ * - mentions 배열에 userName 이 포함된 댓글
+ * - created_at > since
+ * - 본인이 작성한 댓글 제외
+ * - 최대 limit 개 (기본 50). 새로운 것부터.
+ */
+export async function fetchMissedMentions(
+  userId: string,
+  userName: string,
+  since: string,
+  limit = 50,
+): Promise<SupabaseComment[]> {
+  const { data, error } = await supabase
+    .from('comments')
+    .select('*')
+    .gt('created_at', since)
+    .neq('user_id', userId)
+    .contains('mentions', [userName])
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`fetchMissedMentions failed: ${error.message}`);
+  return (data || []).map((c) => ({
+    id: c.id,
+    partId: c.part_id,
+    sceneId: c.scene_id,
+    userId: c.user_id,
+    userName: c.user_name,
+    text: c.text,
+    mentions: c.mentions || [],
+    createdAt: c.created_at,
+    editedAt: c.edited_at,
+  }));
+}
+
 /** 파트별 댓글 읽기 */
 export async function readCommentsForPart(partUuid: string): Promise<SupabaseComment[]> {
   const { data, error } = await supabase

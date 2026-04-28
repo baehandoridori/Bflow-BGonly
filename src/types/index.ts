@@ -496,6 +496,18 @@ export interface ElectronAPI {
   supabaseUpdateUser: (userId: string, updates: Record<string, string>) => Promise<void>;
   supabaseDeleteUser: (userId: string) => Promise<void>;
   supabaseReadComments: (partUuid: string) => Promise<unknown[]>;
+  /** 한솔 결정 (v1.15.5): 로그인 catch-up — last seen 이후 받은 멘션 댓글 일괄 조회 */
+  supabaseFetchMissedMentions: (userId: string, userName: string, since: string, limit?: number) => Promise<Array<{
+    id: string;
+    partId: string;
+    sceneId: string;
+    userId: string;
+    userName: string;
+    text: string;
+    mentions: string[];
+    createdAt: string;
+    editedAt?: string | null;
+  }>>;
   supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string) => Promise<void>;
   supabaseEditComment: (commentId: string, text: string, mentions: string[]) => Promise<void>;
   supabaseDeleteComment: (commentId: string) => Promise<void>;

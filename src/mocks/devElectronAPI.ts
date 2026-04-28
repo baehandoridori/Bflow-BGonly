@@ -115,6 +115,7 @@ export function installDevElectronAPI(): void {
     supabaseUpdateUser: async () => {},
     supabaseDeleteUser: async () => {},
     supabaseReadComments: async () => [],
+    supabaseFetchMissedMentions: async () => [],
     supabaseAddComment: async () => {},
     supabaseEditComment: async () => {},
     supabaseDeleteComment: async () => {},
