@@ -717,10 +717,11 @@ export default function App() {
                     type: 'comment',
                     title: `${newComment.user_name || '누군가'}님이 나를 태그했습니다`,
                     body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
-                    // scene 못 찾아도 newComment.scene_id 라도 sceneName 으로 — canNavigate=true 보장 + navigateToScene 가 같은 키로 재시도
+                    // scene 못 찾아도 newComment.scene_id 를 sceneId(UUID 매칭) + sceneName(사용자 ID 매칭) 둘 다 채워서
+                    // navigateToScene 안에서 어떤 형식이든 매칭 시도 가능.
                     metadata: scene
                       ? { sceneId: scene.id, sceneName: scene.sceneId }
-                      : { sceneName: newComment.scene_id ?? '' },
+                      : { sceneId: newComment.scene_id ?? '', sceneName: newComment.scene_id ?? '' },
                   }, notiSettings);
                 } else if (isAssignee) {
                   dispatchNotification({

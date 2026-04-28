@@ -18,7 +18,8 @@ export interface NotificationSettings {
   sound?: boolean;
 }
 
-/** 씬 UUID로 해당 에피소드 번호를 찾아 씬 뷰로 이동 */
+/** 씬 UUID/이름으로 해당 에피소드 번호를 찾아 씬 뷰로 이동.
+ *  매칭 실패 시 fallback: 씬 뷰로만이라도 이동 + 안내 토스트 (한솔이 직접 찾을 수 있게). */
 function navigateToScene(sceneUuid?: string, sceneName?: string) {
   if (!sceneUuid && !sceneName) return;
   const episodes = useDataStore.getState().episodes;
@@ -35,6 +36,12 @@ function navigateToScene(sceneUuid?: string, sceneName?: string) {
       }
     }
   }
+  // 매칭 실패 — 씬 뷰로만이라도 이동 (silent return 대신)
+  useAppStore.getState().setView('scenes');
+  useAppStore.getState().setToast?.({
+    type: 'warning',
+    message: '씬을 자동으로 찾지 못했어요. 씬 뷰에서 직접 확인해주세요.',
+  });
 }
 
 /**
