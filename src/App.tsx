@@ -704,7 +704,11 @@ export default function App() {
             else {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.commentNotify !== false) {
-                const scene = useDataStore.getState().findSceneBySceneId(newComment.scene_id!);
+                // scene 검색 — newComment.scene_id 가 UUID 형식일 수도, 사용자 지정 sceneId 형식일 수도 있어 둘 다 시도.
+                // (한솔 보고: 본인 멘션 시 scene 못 찾아 액션 버튼 누락 → fallback 강화)
+                const scene =
+                  useDataStore.getState().findSceneBySceneId(newComment.scene_id!) ||
+                  useDataStore.getState().findSceneByUuid(newComment.scene_id!);
                 const isMentioned = Array.isArray(newComment.mentions) && newComment.mentions.includes(me.name);
                 const isAssignee = scene && scene.assignee === me.name;
 
@@ -713,7 +717,10 @@ export default function App() {
                     type: 'comment',
                     title: `${newComment.user_name || '누군가'}님이 나를 태그했습니다`,
                     body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
-                    metadata: scene ? { sceneId: scene.id, sceneName: scene.sceneId } : undefined,
+                    // scene 못 찾아도 newComment.scene_id 라도 sceneName 으로 — canNavigate=true 보장 + navigateToScene 가 같은 키로 재시도
+                    metadata: scene
+                      ? { sceneId: scene.id, sceneName: scene.sceneId }
+                      : { sceneName: newComment.scene_id ?? '' },
                   }, notiSettings);
                 } else if (isAssignee) {
                   dispatchNotification({
