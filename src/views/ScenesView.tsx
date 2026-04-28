@@ -760,7 +760,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             <HighlightText text={scene.sceneId || '(씬번호 없음)'} query={searchQuery} />
           </span>
           {scene.layoutId && (
-            <span className="text-[12px] italic font-medium text-accent-sub shrink-0">
+            <span className="text-[12px] italic font-medium text-accent shrink-0">
               L#{scene.layoutId}
             </span>
           )}

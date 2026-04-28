@@ -656,7 +656,7 @@ export function SceneSheetView({
                         </span>
                       </span>
                       {scene.layoutId && (
-                        <span className="text-[11px] italic font-medium text-accent-sub flex-shrink-0">
+                        <span className="text-[11px] italic font-medium text-accent flex-shrink-0">
                           L#{scene.layoutId}
                         </span>
                       )}
