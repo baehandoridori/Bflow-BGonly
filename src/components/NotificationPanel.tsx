@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Bell, Check, Trash2, MessageSquare, RefreshCw, Award } from 'lucide-react';
+import { Bell, Check, Trash2, MessageSquare, RefreshCw, Award, ExternalLink } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -32,17 +32,24 @@ function typeConfig(type: NotificationType) {
 // ─── 알림 항목 ───────────────────────────────────────
 function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (n: AppNotification) => void }) {
   const markAsRead = useNotificationStore((s) => s.markAsRead);
+  const removeNotification = useNotificationStore((s) => s.removeNotification);
   const cfg = typeConfig(n.type);
   const Icon = cfg.icon;
+  const hasNavigateTarget = !!(n.metadata?.sceneId || n.metadata?.sceneName);
+
+  const handleItemClick = () => {
+    if (!n.isRead) markAsRead(n.id);
+    onNavigate(n);
+  };
 
   return (
-    <button
-      onClick={() => {
-        if (!n.isRead) markAsRead(n.id);
-        onNavigate(n);
-      }}
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleItemClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleItemClick(); } }}
       className={cn(
-        'w-full text-left px-3 py-2.5 flex gap-2.5 transition-colors cursor-pointer rounded-lg',
+        'group/noti relative w-full text-left px-3 py-2.5 flex gap-2.5 transition-colors cursor-pointer rounded-lg',
         n.isRead
           ? 'hover:bg-bg-border/15'
           : 'bg-accent/[0.08] hover:bg-accent/[0.12]',
@@ -58,20 +65,58 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
         <Icon size={14} style={{ color: n.isRead ? 'rgb(var(--color-text-secondary) / 0.55)' : cfg.color }} />
       </div>
 
-      {/* 내용 */}
+      {/* 내용 — truncate 된 텍스트는 호버 시 GlobalTooltip 으로 전체 노출 */}
       <div className="flex-1 min-w-0">
-        <p className={cn(
-          'text-[12px] leading-tight truncate',
-          n.isRead ? 'text-text-secondary/80' : 'text-text-primary font-medium',
-        )}>
+        <p
+          title={n.title}
+          className={cn(
+            'text-[12px] leading-tight truncate',
+            n.isRead ? 'text-text-secondary/80' : 'text-text-primary font-medium',
+          )}
+        >
           {n.title}
         </p>
         {n.body && (
-          <p className="text-[11px] text-text-secondary/65 mt-0.5 truncate">{n.body}</p>
+          <p title={n.body} className="text-[11px] text-text-secondary/65 mt-0.5 truncate">{n.body}</p>
         )}
         <span className="text-[10px] text-text-secondary/50 mt-1 block">{timeAgo(n.createdAt)}</span>
       </div>
-    </button>
+
+      {/* 한솔 결정: 호버 시 우측에 [씬 보기 / 읽음 / 삭제] 액션 fade-in.
+          본문 클릭은 그대로 자동 (씬 이동 + 읽음). 액션 버튼은 stopPropagation 으로 분리.
+          flex sibling 으로 두어 평소에도 영역만 차지 (opacity 0) → 본문 truncate 가 액션 영역까지 침범하지 않음. */}
+      <div className="flex items-center gap-1 self-start mt-0.5 flex-shrink-0 opacity-0 group-hover/noti:opacity-100 transition-opacity">
+        {hasNavigateTarget && (
+          <button
+            type="button"
+            title="씬 보기"
+            onClick={(e) => { e.stopPropagation(); handleItemClick(); }}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-medium bg-accent/15 text-accent-sub border border-accent/30 hover:bg-accent/25"
+          >
+            <ExternalLink size={10} />
+            <span>씬 보기</span>
+          </button>
+        )}
+        {!n.isRead && (
+          <button
+            type="button"
+            title="읽음 처리"
+            onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}
+            className="inline-flex items-center justify-center w-5 h-5 rounded text-[#00D9A0] bg-[#00D9A0]/10 border border-[#00D9A0]/30 hover:bg-[#00D9A0]/20"
+          >
+            <Check size={11} />
+          </button>
+        )}
+        <button
+          type="button"
+          title="삭제"
+          onClick={(e) => { e.stopPropagation(); removeNotification(n.id); }}
+          className="inline-flex items-center justify-center w-5 h-5 rounded text-[#FF7675] bg-[#FF7675]/10 border border-[#FF7675]/30 hover:bg-[#FF7675]/20"
+        >
+          <Trash2 size={11} />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -142,6 +187,13 @@ function NotificationDropdown() {
           }
         }
       }
+      // 매칭 실패 — 씬 뷰로만이라도 이동 + 안내 (한솔 결정: 알림 패널 씬 보기 무반응 fix)
+      console.warn('[NotificationPanel] 씬 매칭 실패', { sceneId, sceneName, episodeCount: episodes.length });
+      setView('scenes');
+      useAppStore.getState().setToast?.({
+        type: 'warning',
+        message: '씬을 자동으로 찾지 못했어요. 씬 뷰에서 직접 확인해주세요.',
+      });
     }
     setPanelOpen(false);
   };

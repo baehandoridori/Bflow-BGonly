@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>v1.15.0 씬 뷰 UX 폴리싱 — 디자인 프리뷰</title>
+<style>
+  :root {
+    --bg-primary: #0F1117;
+    --bg-card: #161922;
+    --bg-border: #2A2F3D;
+    --text-primary: #E8EAF0;
+    --text-secondary: #8B92A4;
+    --accent: #6C5CE7;
+    --accent-sub: #A29BFE;
+    --bg-color: #74B9FF;
+    --act-color: #FF6B9D;
+    --status-done: #00D9A0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px; background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, "Pretendard", "Segoe UI", sans-serif;
+    font-size: 14px;
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; color: var(--accent-sub); }
+  h2 {
+    font-size: 16px; margin: 36px 0 8px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--bg-border);
+    color: var(--accent-sub);
+  }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin-bottom: 24px; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  .section-desc {
+    background: rgba(108, 92, 231, 0.08);
+    border-left: 3px solid var(--accent);
+    padding: 10px 14px; margin: 12px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 13px; line-height: 1.6;
+  }
+  .compare {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 14px 0;
+  }
+  .compare-block {
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+    border-radius: 8px; padding: 14px;
+  }
+  .compare-label {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+  }
+  .compare-label.before { color: #FF7675; }
+  .compare-label.after { color: var(--status-done); }
+
+  /* ── 시트 뷰 모방 ── */
+  table.sheet {
+    width: 100%; border-collapse: collapse; font-size: 11px;
+    background: rgba(15, 17, 23, 0.6);
+    border-radius: 6px; overflow: hidden;
+  }
+  table.sheet th {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-size: 10px; font-weight: 600; text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--bg-border);
+  }
+  table.sheet td {
+    padding: 5px 8px; border-bottom: 1px solid rgba(42, 47, 61, 0.5);
+    font-family: "JetBrains Mono", monospace; font-size: 11px;
+  }
+  table.sheet tr:nth-child(odd) td { background: rgba(15, 17, 23, 0.3); }
+  table.sheet tr.row-hover td { background: rgba(108, 92, 231, 0.08); }
+
+  /* layoutId 라벨 — 1-C 강화 */
+  .layout-label-old {
+    color: rgba(139, 146, 164, 0.5);
+    font-size: 10px;
+    font-style: italic;
+    margin-left: 4px;
+  }
+  .layout-label-new {
+    color: var(--accent-sub);
+    font-size: 12px;
+    font-style: italic;
+    font-weight: 500;
+    margin-left: 4px;
+  }
+
+  /* 호버 ↗ — 5번 */
+  .scene-cell {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .scene-cell .arrow {
+    color: var(--accent);
+    opacity: 0;
+    transition: opacity 0.2s;
+    font-size: 11px;
+  }
+  .scene-cell.hovered .arrow { opacity: 1; }
+
+  /* 그룹 헤더 — 1-B 카드 스타일 */
+  .group-header {
+    background: rgba(108, 92, 231, 0.08);
+    border-top: 1px solid rgba(108, 92, 231, 0.3);
+    border-bottom: 1px solid rgba(108, 92, 231, 0.3);
+  }
+  .group-header td {
+    padding: 8px 12px !important;
+    background: transparent !important;
+    border-bottom: none !important;
+  }
+  .group-header-title {
+    font-size: 13px; font-weight: 700; color: var(--accent);
+  }
+  .group-header-meta {
+    font-size: 11px; color: var(--text-secondary); margin-left: 8px;
+  }
+
+  /* 토스트 — 8번 */
+  .toast-container {
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex; align-items: center; gap: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    max-width: 360px;
+  }
+  .toast-icon {
+    width: 32px; height: 32px;
+    background: rgba(108, 92, 231, 0.2);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+  }
+  .toast-body {
+    flex: 1;
+  }
+  .toast-title {
+    font-size: 13px; font-weight: 600;
+  }
+  .toast-desc {
+    font-size: 12px; color: var(--text-secondary);
+    margin-top: 2px;
+  }
+  .toast-action {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px; font-weight: 600;
+    cursor: pointer;
+  }
+  .toast-action.label-old { background: rgba(108, 92, 231, 0.5); }
+
+  /* 상단바 — 7번 */
+  .toolbar-row {
+    background: rgba(15, 17, 23, 0.5);
+    border: 1px solid var(--bg-border);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex; gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .chip {
+    background: rgba(42, 47, 61, 0.4);
+    border: 1px solid var(--bg-border);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+  }
+  .chip.active {
+    background: rgba(108, 92, 231, 0.2);
+    border-color: rgba(108, 92, 231, 0.4);
+    color: var(--accent-sub);
+  }
+  .toolbar-summary {
+    background: rgba(42, 47, 61, 0.2);
+    border: 1px solid rgba(42, 47, 61, 0.5);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .toolbar-empty {
+    height: 0;
+    padding: 0;
+    border: none;
+    overflow: hidden;
+    /* 그냥 안 보임을 표현 */
+  }
+  .arrow-collapse {
+    color: var(--accent-sub);
+    font-size: 14px;
+    margin-right: 6px;
+  }
+  .collapse-btn {
+    background: rgba(42, 47, 61, 0.4);
+    border: 1px solid var(--bg-border);
+    padding: 6px 12px;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .footnote {
+    color: var(--text-secondary);
+    font-size: 11px;
+    margin-top: 6px;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🎨 v1.15.0 씬 뷰 UX 폴리싱 — 디자인 프리뷰</h1>
+<p class="subtitle">한솔 결정 기반의 6가지 변경 + SEED_USER 보안 hotfix. 실 코드 변경 사항을 시각적으로 미리 확인.</p>
+
+<!-- ============================================== -->
+<h2>🅐 (1-A) 시트 뷰 셀에 L#레이아웃 항상 표시</h2>
+<div class="section-desc">
+  <strong>현재</strong>: '레이아웃 별' 보기 모드일 때만 별도 컬럼에 표시. 일반 모드(에피소드 별 등)에서는 어디에도 안 보임.<br>
+  <strong>변경</strong>: 시트 행 의 씬번호 옆에 작은 italic 뱃지로 항상 표시. 보기 모드와 무관.
+</div>
+<div class="compare">
+  <div class="compare-block">
+    <div class="compare-label before">전 (일반 모드 — 레이아웃 안 보임)</div>
+    <table class="sheet">
+      <tr><th>씬번호</th><th>메모</th><th>BG담당</th><th>LO</th><th>완료</th></tr>
+      <tr><td><span class="scene-cell">EP01-A-15</span></td><td>골목 진입</td><td>한솔</td><td>✓</td><td></td></tr>
+      <tr><td><span class="scene-cell">EP01-A-16</span></td><td>벽 그림자</td><td>한솔</td><td>✓</td><td>✓</td></tr>
+      <tr><td><span class="scene-cell">EP01-A-17</span></td><td>달려오는 인물</td><td>윤스</td><td></td><td></td></tr>
+    </table>
+  </div>
+  <div class="compare-block">
+    <div class="compare-label after">후 (셀 안에 L#XX 항상 표시)</div>
+    <table class="sheet">
+      <tr><th>씬번호</th><th>메모</th><th>BG담당</th><th>LO</th><th>완료</th></tr>
+      <tr><td><span class="scene-cell">EP01-A-15<span class="layout-label-new">L#A2</span></span></td><td>골목 진입</td><td>한솔</td><td>✓</td><td></td></tr>
+      <tr><td><span class="scene-cell">EP01-A-16<span class="layout-label-new">L#A2</span></span></td><td>벽 그림자</td><td>한솔</td><td>✓</td><td>✓</td></tr>
+      <tr><td><span class="scene-cell">EP01-A-17<span class="layout-label-new">L#A3</span></span></td><td>달려오는 인물</td><td>윤스</td><td></td><td></td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<h2>🅐 (1-B) 레이아웃 별 보기 = 카드 뷰처럼 섹션 그룹핑</h2>
+<div class="section-desc">
+  <strong>현재</strong>: 레이아웃 별 보기 시 첫 행에 rowspan 으로 #레이아웃키 라벨 표시 + 다음 그룹 시작에 얇은 separator. 섹션 구분 모호.<br>
+  <strong>변경</strong>: 그룹 시작 직전에 별도 헤더 행 삽입 — <code>L#XX (n개 씬)</code> 표기 + 액센트 색 배경 + 위·아래 액센트 보더. 카드 뷰의 섹션 헤더와 동일한 강도.
+</div>
+<div class="compare">
+  <div class="compare-block">
+    <div class="compare-label before">전 (rowspan 셀 + 얇은 separator)</div>
+    <table class="sheet">
+      <tr><th style="background:rgba(108,92,231,0.05);">레이아웃</th><th>씬번호</th><th>메모</th><th>LO</th></tr>
+      <tr><td rowspan="2" style="text-align:center; color:var(--accent); font-weight:700; border-right:1px solid var(--bg-border);">#A2</td><td>EP01-A-15</td><td>골목 진입</td><td>✓</td></tr>
+      <tr><td>EP01-A-16</td><td>벽 그림자</td><td>✓</td></tr>
+      <tr style="border-top:2px solid var(--bg-border);"><td rowspan="2" style="text-align:center; color:var(--accent); font-weight:700; border-right:1px solid var(--bg-border);">#A3</td><td>EP01-A-17</td><td>달려오는 인물</td><td></td></tr>
+      <tr><td>EP01-A-18</td><td>턴어라운드</td><td></td></tr>
+    </table>
+  </div>
+  <div class="compare-block">
+    <div class="compare-label after">후 (그룹 헤더 행 + 액센트 강조)</div>
+    <table class="sheet">
+      <tr><th>씬번호</th><th>메모</th><th>LO</th></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A2</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr><td>EP01-A-15<span class="layout-label-new">L#A2</span></td><td>골목 진입</td><td>✓</td></tr>
+      <tr><td>EP01-A-16<span class="layout-label-new">L#A2</span></td><td>벽 그림자</td><td>✓</td></tr>
+      <tr class="group-header"><td colspan="3"><span class="group-header-title">L#A3</span><span class="group-header-meta">2개 씬</span></td></tr>
+      <tr><td>EP01-A-17<span class="layout-label-new">L#A3</span></td><td>달려오는 인물</td><td></td></tr>
+      <tr><td>EP01-A-18<span class="layout-label-new">L#A3</span></td><td>턴어라운드</td><td></td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<h2>🅐 (1-C) 레이아웃 라벨 가시성 강화</h2>
+<div class="section-desc">
+  카드 뷰 셀과 시트 뷰 셀 모두 동일한 강한 스타일 적용 — 일관성 확보.
+</div>
+<div class="compare">
+  <div class="compare-block">
+    <div class="compare-label before">전 (50% 투명 회색 italic 11px)</div>
+    <div style="padding:18px; text-align:center; font-family:monospace;">
+      EP01-A-16
+      <span class="layout-label-old">L#A2</span>
+    </div>
+  </div>
+  <div class="compare-block">
+    <div class="compare-label after">후 (액센트색 italic 12px font-medium)</div>
+    <div style="padding:18px; text-align:center; font-family:monospace;">
+      EP01-A-16
+      <span class="layout-label-new">L#A2</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<h2>🅒 (5) 시트 뷰 씬번호 호버 ↗ 어포던스</h2>
+<div class="section-desc">
+  씬 번호에 마우스를 올리면 "더블클릭으로 상세 모달 가능" 단서로 ↗ 화살표 아이콘이 부드럽게 등장.
+</div>
+<div class="compare">
+  <div class="compare-block">
+    <div class="compare-label before">기본 상태</div>
+    <table class="sheet">
+      <tr><th>씬번호</th><th>메모</th></tr>
+      <tr><td><span class="scene-cell">EP01-A-15<span class="arrow">↗</span><span class="layout-label-new">L#A2</span></span></td><td>골목 진입</td></tr>
+      <tr><td><span class="scene-cell">EP01-A-16<span class="arrow">↗</span><span class="layout-label-new">L#A2</span></span></td><td>벽 그림자</td></tr>
+    </table>
+    <div class="footnote">평소엔 ↗ 안 보임</div>
+  </div>
+  <div class="compare-block">
+    <div class="compare-label after">호버 시</div>
+    <table class="sheet">
+      <tr><th>씬번호</th><th>메모</th></tr>
+      <tr class="row-hover"><td><span class="scene-cell hovered">EP01-A-15<span class="arrow">↗</span><span class="layout-label-new">L#A2</span></span></td><td>골목 진입</td></tr>
+      <tr><td><span class="scene-cell">EP01-A-16<span class="arrow">↗</span><span class="layout-label-new">L#A2</span></span></td><td>벽 그림자</td></tr>
+    </table>
+    <div class="footnote">호버한 행에만 ↗ 등장 (fade-in 0.2s)</div>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<h2>🅓 (7) 상단바 옵션 접기 = 완전 숨김</h2>
+<div class="section-desc">
+  <strong>현재</strong>: 접기 누르면 옵션 줄이 사라지지만 *현재 옵션 [chip] [chip] ...* 요약 라인이 남음. 칩은 클릭 비활성이라 잠긴 느낌.<br>
+  <strong>변경</strong>: 요약 라인까지 완전히 사라짐. 펼치기 누르면 원래대로.
+</div>
+<div class="compare">
+  <div class="compare-block">
+    <div class="compare-label before">전 (접기 → 요약 칩 라인 남음)</div>
+    <button class="collapse-btn"><span class="arrow-collapse">⌄</span>옵션 펼치기</button>
+    <div class="toolbar-summary">
+      <span style="font-weight:600; margin-right:6px; letter-spacing:0.1em; color:rgba(139,146,164,0.6);">현재 옵션</span>
+      <span class="chip">작업자: 전체</span>
+      <span class="chip">상태: 진행중</span>
+      <span class="chip">정렬: 번호순 ↑</span>
+      <span class="chip">보기: 시트</span>
+    </div>
+    <div class="footnote">↑ 칩이 클릭 안 됨 — "잠긴 느낌"</div>
+  </div>
+  <div class="compare-block">
+    <div class="compare-label after">후 (접기 → 깨끗하게 사라짐)</div>
+    <button class="collapse-btn"><span class="arrow-collapse">⌄</span>옵션 펼치기</button>
+    <div class="toolbar-empty"></div>
+    <div class="footnote">↑ 옵션 줄 자체가 사라져 화면 공간 절약</div>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<h2>🅔 (8) 댓글 토스트 — '확인' 버튼 + 8초 노출</h2>
+<div class="section-desc">
+  <strong>현재</strong>: 멘션/담당 씬 댓글 도착 시 sonner 토스트 + '씬 보기' 액션 (4초 노출). 트리거는 이미 동작 중 (App.tsx:709-722).<br>
+  <strong>변경</strong>: 라벨 '씬 보기' → '확인' (간결). 노출 시간 4초 → 8초 (한솔이 인지할 시간 확보).
+</div>
+<div class="compare">
+  <div class="compare-block">
+    <div class="compare-label before">전 (라벨 '씬 보기')</div>
+    <div class="toast-container">
+      <div class="toast-icon">💬</div>
+      <div class="toast-body">
+        <div class="toast-title">윤스님이 나를 태그했습니다</div>
+        <div class="toast-desc">EP01-A-17 의 BG 검수 한 번만...</div>
+      </div>
+      <button class="toast-action label-old">씬 보기</button>
+    </div>
+    <div class="footnote">4초 후 자동 사라짐</div>
+  </div>
+  <div class="compare-block">
+    <div class="compare-label after">후 (라벨 '확인' + 8초)</div>
+    <div class="toast-container">
+      <div class="toast-icon">💬</div>
+      <div class="toast-body">
+        <div class="toast-title">윤스님이 나를 태그했습니다</div>
+        <div class="toast-desc">EP01-A-17 의 BG 검수 한 번만...</div>
+      </div>
+      <button class="toast-action">확인</button>
+    </div>
+    <div class="footnote">8초 노출 + 클릭 시 씬 모달 자동 열림</div>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<h2>🅑 (2+3+4) 마지막 상태 기억 (시각 비교 X — 동작 차이)</h2>
+<div class="section-desc">
+  <strong>현재</strong>: 씬 뷰 진입 시 항상 기본값 (카드 뷰 / 첫 에피소드 / 트리 펼침).<br>
+  <strong>변경</strong>: localStorage 에 저장된 마지막 상태로 자동 복원. 한 번 시트 모드 + 트리 접기로 작업하면 다음 진입 때 그대로.
+</div>
+
+<!-- ============================================== -->
+<h2>🅕 SEED_USER 보안 hotfix (시각 비교 X — 빌드 산출물 차이)</h2>
+<div class="section-desc">
+  <strong>현재 v1.14.1 .exe</strong>: 한솔 admin 의 옛 password (<code>1q2w3e4r!A</code>) 가 main entry chunk 에 평문으로 들어가 있음. 누구든 .exe 분석으로 노출 가능.<br>
+  <strong>변경 후 v1.15.0 .exe</strong>: <code>password=''</code>, <code>isInitialPassword=true</code>. 코드에 password 자체가 안 들어감.<br>
+  <strong>한솔 권장</strong>: 실 admin 비밀번호를 새 강한 값으로 변경 (이미 노출된 옛 password 무효화).
+</div>
+
+<div style="margin-top:48px; padding:18px; background: rgba(108, 92, 231, 0.08); border-radius:8px; text-align:center;">
+  <div style="font-size:13px; color:var(--accent-sub);">PR <a href="https://github.com/baehandoridori/Bflow-BGonly/pull/43" style="color:var(--accent-sub);">#43</a> 에 머지 + 빌드/배포 후 BFLOW 앱에서 직접 확인 가능합니다.</div>
+</div>
+
+</div>
+</body>
+</html>

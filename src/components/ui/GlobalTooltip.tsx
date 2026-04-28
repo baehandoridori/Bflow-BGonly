@@ -64,17 +64,15 @@ export function GlobalTooltipProvider() {
       originalTitle.current = title;
       target.removeAttribute('title');
 
+      // 한솔 결정: 마우스 위치 따라가는 툴팁 (작업 진행 위젯과 동일 패턴)
+      const initialX = e.clientX;
+      const initialY = e.clientY;
       showTimer.current = setTimeout(() => {
-        const rect = target.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        // 위/아래 자동: 화면 상단 120px 이내면 아래, 그 외 위
-        const showBelow = rect.top < 120;
-        const y = showBelow ? rect.bottom + 8 : rect.top - 8;
-
+        const showBelow = initialY < 120;
         setTooltip({
           text: title,
-          x: centerX,
-          y,
+          x: initialX,
+          y: showBelow ? initialY + 16 : initialY - 12,
           position: showBelow ? 'bottom' : 'top',
         });
       }, SHOW_DELAY);
@@ -92,6 +90,26 @@ export function GlobalTooltipProvider() {
       }
     };
 
+    // 한솔 결정: 마우스 따라가는 툴팁 — currentEl 위에서 마우스 움직이면 위치 즉시 업데이트
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!currentEl.current) return;
+      const target = (e.target as HTMLElement)?.closest?.('[title]') as HTMLElement | null;
+      // 같은 currentEl 안이거나 자식 요소만 처리
+      if (target !== currentEl.current && !currentEl.current.contains(e.target as Node)) return;
+      const x = e.clientX;
+      const y = e.clientY;
+      setTooltip((prev) => {
+        if (!prev) return prev;
+        const showBelow = y < 120;
+        return {
+          text: prev.text,
+          x,
+          y: showBelow ? y + 16 : y - 12,
+          position: showBelow ? 'bottom' : 'top',
+        };
+      });
+    };
+
     const handleScroll = () => {
       clearTimeout(showTimer.current);
       setTooltip(null);
@@ -100,6 +118,7 @@ export function GlobalTooltipProvider() {
 
     document.addEventListener('mouseover', handleMouseOver, true);
     document.addEventListener('mouseout', handleMouseOut, true);
+    document.addEventListener('mousemove', handleMouseMove, true);
     document.addEventListener('scroll', handleScroll, true);
     document.addEventListener('mousedown', handleScroll, true);
 
@@ -109,6 +128,7 @@ export function GlobalTooltipProvider() {
       restoreTitle();
       document.removeEventListener('mouseover', handleMouseOver, true);
       document.removeEventListener('mouseout', handleMouseOut, true);
+      document.removeEventListener('mousemove', handleMouseMove, true);
       document.removeEventListener('scroll', handleScroll, true);
       document.removeEventListener('mousedown', handleScroll, true);
     };
@@ -118,9 +138,10 @@ export function GlobalTooltipProvider() {
     <AnimatePresence>
       {tooltip && (
         <motion.div
-          key={tooltip.text + tooltip.x}
-          initial={{ opacity: 0, scale: 0.92, y: tooltip.position === 'top' ? 4 : -4 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
+          // 한솔 결정: text 만 key 로 — 마우스 따라 x/y 변경 시 re-mount 안 되고 style 만 갱신 (깜빡임 X)
+          key={tooltip.text}
+          initial={{ opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.92 }}
           transition={{ duration: 0.12, ease: [0.2, 0, 0, 1] }}
           className="fixed z-[99999] pointer-events-none"

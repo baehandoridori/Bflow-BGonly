@@ -49,6 +49,7 @@ interface NotificationState {
   addNotification: (n: Omit<AppNotification, 'id' | 'createdAt' | 'isRead'>) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
+  removeNotification: (id: string) => void;
   clearAll: () => void;
   setPanelOpen: (open: boolean) => void;
   togglePanel: () => void;
@@ -94,6 +95,12 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   markAllAsRead: () => {
     const next = get().notifications.map((n) => ({ ...n, isRead: true }));
+    setNotifications(set, next);
+    persistToDisk(next);
+  },
+
+  removeNotification: (id) => {
+    const next = get().notifications.filter((n) => n.id !== id);
     setNotifications(set, next);
     persistToDisk(next);
   },

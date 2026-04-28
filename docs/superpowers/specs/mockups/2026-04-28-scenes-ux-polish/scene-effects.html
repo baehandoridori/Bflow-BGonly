@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>(5) 씬 번호 빛나는 효과 — 6개 시안</title>
+<style>
+  :root {
+    --bg-primary: #0F1117;
+    --bg-card: #161922;
+    --bg-border: #2A2F3D;
+    --text-primary: #E8EAF0;
+    --text-secondary: #8B92A4;
+    --accent: #6C5CE7;
+    --accent-sub: #A29BFE;
+    --accent-bright: #B8AFFF;
+  }
+  @property --gradient-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, "Pretendard", "Segoe UI", sans-serif;
+    font-size: 14px;
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; color: var(--accent-sub); }
+  h3 { font-size: 14px; margin: 0 0 4px; color: var(--accent-sub); }
+  .subtitle {
+    color: var(--text-secondary); font-size: 13px;
+    margin-bottom: 24px; line-height: 1.6;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+    border-radius: 12px;
+    padding: 18px;
+    position: relative;
+  }
+  .card-num {
+    position: absolute; top: 12px; right: 14px;
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--text-secondary);
+    background: rgba(108, 92, 231, 0.15);
+    padding: 2px 8px; border-radius: 10px;
+  }
+  .card-desc {
+    font-size: 12px; color: var(--text-secondary);
+    margin: 6px 0 18px; line-height: 1.5;
+  }
+  .demo-bar {
+    background: rgba(15, 17, 23, 0.5);
+    border-radius: 8px;
+    padding: 18px 16px;
+    display: flex; gap: 28px; align-items: center;
+    justify-content: center;
+  }
+  .demo-label {
+    font-size: 10px; color: var(--text-secondary);
+    margin-bottom: 6px; text-align: center;
+  }
+  .demo-cell {
+    display: inline-flex; flex-direction: column; gap: 4px;
+  }
+  .scene-text {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px; font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 8px;
+    position: relative;
+  }
+  .vote {
+    margin-top: 26px;
+    padding: 14px;
+    background: rgba(108, 92, 231, 0.06);
+    border-radius: 8px;
+    text-align: center;
+    color: var(--accent-sub);
+    font-size: 13px;
+  }
+
+  /* ============ 시안 1: 네온 펄스 (Neon Pulse) ============ */
+  .style-1 {
+    color: var(--accent);
+    text-shadow:
+      0 0 4px rgba(108, 92, 231, 0.6),
+      0 0 12px rgba(108, 92, 231, 0.3);
+    animation: pulse1 2.4s ease-in-out infinite;
+    transition: all 0.3s;
+  }
+  .style-1:hover {
+    color: var(--accent-bright);
+    text-shadow:
+      0 0 6px rgba(184, 175, 255, 1),
+      0 0 18px rgba(108, 92, 231, 0.8),
+      0 0 32px rgba(108, 92, 231, 0.4);
+    transform: scale(1.05);
+  }
+  @keyframes pulse1 {
+    0%, 100% { text-shadow: 0 0 4px rgba(108, 92, 231, 0.5), 0 0 10px rgba(108, 92, 231, 0.25); }
+    50% { text-shadow: 0 0 8px rgba(108, 92, 231, 0.8), 0 0 18px rgba(108, 92, 231, 0.45); }
+  }
+
+  /* ============ 시안 2: 에너지 오브 (Energy Orb) ============ */
+  .style-2-wrap {
+    position: relative;
+    display: inline-block;
+    padding: 4px 14px;
+  }
+  .style-2-wrap::before {
+    content: '';
+    position: absolute; inset: 0;
+    border-radius: 100px;
+    background: radial-gradient(ellipse at center,
+      rgba(108, 92, 231, 0.35) 0%,
+      rgba(108, 92, 231, 0.15) 40%,
+      transparent 70%);
+    filter: blur(6px);
+    opacity: 0.7;
+    transition: all 0.4s;
+    z-index: 0;
+    animation: orb-pulse 2.5s ease-in-out infinite;
+  }
+  .style-2-wrap:hover::before {
+    opacity: 1;
+    background: radial-gradient(ellipse at center,
+      rgba(184, 175, 255, 0.7) 0%,
+      rgba(108, 92, 231, 0.4) 40%,
+      transparent 70%);
+    filter: blur(10px);
+    transform: scale(1.3);
+  }
+  .style-2 {
+    color: var(--accent);
+    position: relative; z-index: 1;
+    transition: color 0.3s;
+  }
+  .style-2-wrap:hover .style-2 { color: white; }
+  @keyframes orb-pulse {
+    0%, 100% { opacity: 0.5; transform: scale(0.95); }
+    50% { opacity: 0.85; transform: scale(1.1); }
+  }
+
+  /* ============ 시안 3: 회전 보더 (Rotating Border) ============ */
+  .style-3-wrap {
+    position: relative;
+    display: inline-block;
+    padding: 5px 14px;
+    border-radius: 8px;
+    isolation: isolate;
+  }
+  .style-3-wrap::before {
+    content: '';
+    position: absolute; inset: 0;
+    padding: 1.5px;
+    border-radius: 8px;
+    background: conic-gradient(from var(--gradient-angle),
+      var(--accent), var(--accent-sub), var(--accent-bright),
+      var(--accent-sub), var(--accent));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    animation: rotate-border 3s linear infinite;
+    opacity: 0.55;
+    transition: opacity 0.3s;
+  }
+  .style-3-wrap:hover::before {
+    opacity: 1;
+    animation-duration: 1.2s;
+  }
+  .style-3 {
+    color: var(--accent);
+    transition: all 0.3s;
+  }
+  .style-3-wrap:hover .style-3 {
+    color: var(--accent-bright);
+    text-shadow: 0 0 8px rgba(108, 92, 231, 0.6);
+  }
+  @keyframes rotate-border {
+    to { --gradient-angle: 360deg; }
+  }
+
+  /* ============ 시안 4: 스캔 라인 (Scan Line) ============ */
+  .style-4-wrap {
+    position: relative; display: inline-block;
+    padding: 4px 12px;
+    overflow: hidden;
+    border-radius: 6px;
+    background: rgba(108, 92, 231, 0.08);
+  }
+  .style-4-wrap::before {
+    content: '';
+    position: absolute;
+    top: -100%; left: 0; right: 0;
+    height: 30%;
+    background: linear-gradient(180deg,
+      transparent,
+      rgba(184, 175, 255, 0.4),
+      transparent);
+    animation: scanline 2.4s ease-in-out infinite;
+    pointer-events: none;
+  }
+  .style-4-wrap:hover::before {
+    animation-duration: 0.8s;
+  }
+  .style-4 {
+    color: var(--accent-bright);
+    position: relative;
+    text-shadow: 0 0 6px rgba(108, 92, 231, 0.4);
+    transition: text-shadow 0.3s;
+  }
+  .style-4-wrap:hover .style-4 {
+    text-shadow: 0 0 12px rgba(108, 92, 231, 0.9);
+  }
+  @keyframes scanline {
+    0% { top: -30%; }
+    100% { top: 130%; }
+  }
+
+  /* ============ 시안 5: 파티클 모음 (Particle Gather) ============ */
+  .style-5-wrap {
+    position: relative; display: inline-block;
+    padding: 6px 14px;
+  }
+  .style-5 {
+    color: var(--accent);
+    transition: all 0.3s;
+  }
+  .style-5-wrap:hover .style-5 {
+    color: var(--accent-bright);
+    text-shadow: 0 0 8px rgba(108, 92, 231, 0.8);
+  }
+  .particle {
+    position: absolute;
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--accent-sub);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .style-5-wrap:hover .particle {
+    animation: particle-gather 0.7s ease-out forwards;
+  }
+  .style-5-wrap .p1 { top: -8px; left: -8px; }
+  .style-5-wrap .p2 { top: -8px; right: -8px; }
+  .style-5-wrap .p3 { bottom: -8px; left: -8px; }
+  .style-5-wrap .p4 { bottom: -8px; right: -8px; }
+  .style-5-wrap .p5 { top: 50%; left: -16px; }
+  .style-5-wrap .p6 { top: 50%; right: -16px; }
+  @keyframes particle-gather {
+    0% { opacity: 0; transform: translate(0, 0) scale(0.5); }
+    50% { opacity: 1; transform: translate(0, 0) scale(1); }
+    100% {
+      opacity: 0;
+      transform: translate(calc(50% - var(--px, 0px)), calc(50% - var(--py, 0px))) scale(0.3);
+    }
+  }
+  .style-5-wrap .p1 { --px: -8px; --py: -8px; }
+  .style-5-wrap .p2 { --px: 8px; --py: -8px; }
+  .style-5-wrap .p3 { --px: -8px; --py: 8px; }
+  .style-5-wrap .p4 { --px: 8px; --py: 8px; }
+  .style-5-wrap .p5 { --px: -16px; --py: 0; }
+  .style-5-wrap .p6 { --px: 16px; --py: 0; }
+
+  /* ============ 시안 6: 마법 광휘 (Magic Glow) ============ */
+  .style-6-wrap {
+    position: relative; display: inline-block;
+    padding: 4px 14px;
+    border-radius: 6px;
+  }
+  .style-6 {
+    background: linear-gradient(120deg,
+      var(--accent) 0%,
+      var(--accent-sub) 50%,
+      var(--accent-bright) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 3.5s linear infinite;
+    transition: filter 0.3s;
+  }
+  .style-6-wrap::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 8px;
+    background: linear-gradient(120deg, transparent 30%,
+      rgba(184, 175, 255, 0.5) 50%,
+      transparent 70%);
+    background-size: 200% 100%;
+    animation: shimmer 3.5s linear infinite;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: -1;
+    filter: blur(8px);
+  }
+  .style-6-wrap:hover::after { opacity: 1; }
+  .style-6-wrap:hover .style-6 {
+    filter: drop-shadow(0 0 4px rgba(184, 175, 255, 0.8));
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .header-bar {
+    background: rgba(108, 92, 231, 0.08);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0 28px;
+    line-height: 1.6;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🎮 (5) 씬 번호 빛나는 효과 — 6개 시안</h1>
+<p class="subtitle">"화살표 말고, 게임 이펙트처럼 빛나는 거" — 한솔 요청 반영. 평소엔 살짝 빛나고, 호버 시 더 강해지는 패턴으로 통일.</p>
+
+<div class="header-bar">
+  💡 <strong>각 카드의 씬 번호 위에 마우스를 올려보세요</strong> — 호버 시 효과가 강해집니다. 마음에 드시는 시안 번호를 알려주세요!
+</div>
+
+<div class="grid">
+
+  <!-- 시안 1 -->
+  <div class="card">
+    <span class="card-num">시안 1</span>
+    <h3>✨ 네온 펄스 (Neon Pulse)</h3>
+    <p class="card-desc">은은한 빛이 자체적으로 펄스. 호버 시 강한 글로우 + 살짝 확대. 깔끔하고 가장 가벼움.</p>
+    <div class="demo-bar">
+      <div class="demo-cell">
+        <div class="demo-label">평소 (자체 펄스)</div>
+        <span class="scene-text style-1">EP01-A-15</span>
+      </div>
+      <div class="demo-cell">
+        <div class="demo-label">호버 (강한 글로우)</div>
+        <span class="scene-text style-1" style="color:var(--accent-bright); text-shadow: 0 0 6px rgba(184, 175, 255, 1), 0 0 18px rgba(108, 92, 231, 0.8), 0 0 32px rgba(108, 92, 231, 0.4); transform: scale(1.05); display: inline-block;">EP01-A-15</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 시안 2 -->
+  <div class="card">
+    <span class="card-num">시안 2</span>
+    <h3>🔮 에너지 오브 (Energy Orb)</h3>
+    <p class="card-desc">텍스트 뒤에 보라 구슬이 펄스. 호버 시 구슬이 커지고 텍스트 흰색으로. "구슬에 에너지 차는" 그 느낌!</p>
+    <div class="demo-bar">
+      <div class="demo-cell">
+        <div class="demo-label">평소 (구슬 떠다님)</div>
+        <span class="style-2-wrap"><span class="scene-text style-2">EP01-A-15</span></span>
+      </div>
+      <div class="demo-cell">
+        <div class="demo-label">호버 (구슬 활성화)</div>
+        <span class="style-2-wrap" style="--hover:1;"><span class="scene-text style-2">EP01-A-15</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 시안 3 -->
+  <div class="card">
+    <span class="card-num">시안 3</span>
+    <h3>🎯 회전 보더 (Rotating Border)</h3>
+    <p class="card-desc">텍스트 주위에 보라/연보라 그라데이션 보더가 회전. 호버 시 회전 빨라지며 보더 진해짐. 미래적.</p>
+    <div class="demo-bar">
+      <div class="demo-cell">
+        <div class="demo-label">평소 (천천히 회전)</div>
+        <span class="style-3-wrap"><span class="scene-text style-3">EP01-A-15</span></span>
+      </div>
+      <div class="demo-cell">
+        <div class="demo-label">호버 (빠르게 회전)</div>
+        <span class="style-3-wrap"><span class="scene-text style-3">EP01-A-15</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 시안 4 -->
+  <div class="card">
+    <span class="card-num">시안 4</span>
+    <h3>📡 스캔 라인 (Scan Line)</h3>
+    <p class="card-desc">텍스트 위로 빛이 위→아래로 스캔하며 흐름. 호버 시 스캔 속도 3배. 시네마틱한 디지털 느낌.</p>
+    <div class="demo-bar">
+      <div class="demo-cell">
+        <div class="demo-label">평소 (천천히 스캔)</div>
+        <span class="style-4-wrap"><span class="scene-text style-4">EP01-A-15</span></span>
+      </div>
+      <div class="demo-cell">
+        <div class="demo-label">호버 (빠르게 스캔)</div>
+        <span class="style-4-wrap"><span class="scene-text style-4">EP01-A-15</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 시안 5 -->
+  <div class="card">
+    <span class="card-num">시안 5</span>
+    <h3>💫 파티클 모음 (Particle Gather)</h3>
+    <p class="card-desc">호버 시 텍스트 주위에서 작은 점 6개가 가운데로 모여듦. 마치 마법 봉인 푸는 효과.</p>
+    <div class="demo-bar">
+      <div class="demo-cell">
+        <div class="demo-label">평소 (정적)</div>
+        <span class="style-5-wrap"><span class="scene-text style-5">EP01-A-15</span></span>
+      </div>
+      <div class="demo-cell">
+        <div class="demo-label">호버 (파티클 모음)</div>
+        <span class="style-5-wrap">
+          <span class="particle p1"></span>
+          <span class="particle p2"></span>
+          <span class="particle p3"></span>
+          <span class="particle p4"></span>
+          <span class="particle p5"></span>
+          <span class="particle p6"></span>
+          <span class="scene-text style-5">EP01-A-15</span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 시안 6 -->
+  <div class="card">
+    <span class="card-num">시안 6</span>
+    <h3>🌈 마법 광휘 (Magic Glow)</h3>
+    <p class="card-desc">텍스트 자체가 보라→연보라→밝은보라 그라데이션이 흘러감. 호버 시 외부에 빛 띠가 회전. 가장 럭셔리.</p>
+    <div class="demo-bar">
+      <div class="demo-cell">
+        <div class="demo-label">평소 (그라데이션 흐름)</div>
+        <span class="style-6-wrap"><span class="scene-text style-6">EP01-A-15</span></span>
+      </div>
+      <div class="demo-cell">
+        <div class="demo-label">호버 (외부 빛띠 추가)</div>
+        <span class="style-6-wrap"><span class="scene-text style-6">EP01-A-15</span></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="vote">
+  ⬆️ 마음에 드는 시안 번호 (1~6) 알려주세요. 또는 "이 시안에 이런 부분만 바꿔서" 도 가능합니다.
+</div>
+
+<!-- ============ 한솔 선택: 1 + 3 합본 ============ -->
+<style>
+  .final-section {
+    margin-top: 56px;
+    padding: 24px;
+    background: linear-gradient(135deg, rgba(108, 92, 231, 0.12), rgba(162, 155, 254, 0.06));
+    border: 1px solid rgba(108, 92, 231, 0.3);
+    border-radius: 12px;
+  }
+  .final-title {
+    font-size: 18px; font-weight: 700;
+    color: var(--accent-bright);
+    margin: 0 0 6px;
+  }
+
+  /* 1+3 합본: 네온 펄스 (text-shadow) + 회전 보더 (conic) */
+  .combo-wrap {
+    position: relative;
+    display: inline-block;
+    padding: 5px 14px;
+    border-radius: 8px;
+    isolation: isolate;
+  }
+  .combo-wrap::before {
+    content: '';
+    position: absolute; inset: 0;
+    padding: 1.5px;
+    border-radius: 8px;
+    background: conic-gradient(from var(--gradient-angle),
+      var(--accent), var(--accent-sub), var(--accent-bright),
+      var(--accent-sub), var(--accent));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    animation: rotate-border 3s linear infinite;
+    opacity: 0.55;
+    transition: opacity 0.3s, filter 0.3s;
+  }
+  .combo-wrap:hover::before {
+    opacity: 1;
+    animation-duration: 1.2s;
+    filter: blur(0.5px);
+  }
+  .combo-text {
+    color: var(--accent);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px; font-weight: 600;
+    text-shadow:
+      0 0 4px rgba(108, 92, 231, 0.6),
+      0 0 12px rgba(108, 92, 231, 0.3);
+    animation: pulse1 2.4s ease-in-out infinite;
+    transition: all 0.3s;
+    cursor: pointer;
+  }
+  .combo-wrap:hover .combo-text {
+    color: var(--accent-bright);
+    text-shadow:
+      0 0 6px rgba(184, 175, 255, 1),
+      0 0 18px rgba(108, 92, 231, 0.8),
+      0 0 32px rgba(108, 92, 231, 0.4);
+  }
+
+  /* 행 하이라이트 버전 — 같은 효과를 행 전체에 적용 (토스트 클릭 후 2초간) */
+  .row-highlight-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: rgba(15, 17, 23, 0.6);
+    border-radius: 6px;
+    margin-top: 10px;
+    overflow: hidden;
+  }
+  .row-highlight-table th {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-size: 10px; font-weight: 600;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  .row-highlight-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(42, 47, 61, 0.5);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+  }
+  .row-highlight-table tr:nth-child(odd) td {
+    background: rgba(15, 17, 23, 0.3);
+  }
+  /* 강조된 행 — 1+3 합본 효과를 행 전체에 */
+  .row-highlight-table tr.highlighted {
+    position: relative;
+    isolation: isolate;
+    animation: row-pulse 2.4s ease-in-out 2;
+    box-shadow:
+      inset 0 0 0 1.5px transparent,
+      0 0 8px rgba(108, 92, 231, 0.4);
+  }
+  .row-highlight-table tr.highlighted td {
+    background: rgba(108, 92, 231, 0.08) !important;
+    position: relative;
+  }
+  .row-highlight-table tr.highlighted td:first-child::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: linear-gradient(180deg,
+      var(--accent), var(--accent-sub), var(--accent-bright));
+    animation: side-pulse 1.5s ease-in-out infinite;
+  }
+  .row-highlight-table tr.highlighted .scene-num {
+    color: var(--accent-bright);
+    text-shadow:
+      0 0 6px rgba(184, 175, 255, 1),
+      0 0 14px rgba(108, 92, 231, 0.7);
+  }
+  @keyframes row-pulse {
+    0%, 100% { box-shadow: inset 0 0 0 1.5px transparent, 0 0 8px rgba(108, 92, 231, 0.3); }
+    50% { box-shadow: inset 0 0 0 1.5px rgba(108, 92, 231, 0.5), 0 0 24px rgba(108, 92, 231, 0.6); }
+  }
+  @keyframes side-pulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+</style>
+
+<div class="final-section">
+  <h2 class="final-title">✨ 한솔 선택: 1 + 3 합본 (네온 펄스 + 회전 보더)</h2>
+  <p style="color:var(--text-secondary); font-size:13px; line-height:1.6; margin-bottom:18px;">
+    글자 자체에 네온 펄스 (자체 글로우) + 텍스트 주위에 회전 그라데이션 보더. 호버 시 글로우 강화 + 보더 회전 가속.
+  </p>
+
+  <div class="demo-bar">
+    <div class="demo-cell">
+      <div class="demo-label">평소 (펄스 + 천천히 회전)</div>
+      <span class="combo-wrap"><span class="combo-text">EP01-A-15</span></span>
+    </div>
+    <div class="demo-cell">
+      <div class="demo-label">호버 (강한 글로우 + 빠른 회전)</div>
+      <span class="combo-wrap"><span class="combo-text">EP01-A-15</span></span>
+    </div>
+  </div>
+
+  <h3 style="margin-top:32px; color:var(--accent-bright);">📍 (8번 추가) 토스트 클릭 후 시트 뷰 행 하이라이트</h3>
+  <p style="color:var(--text-secondary); font-size:13px; line-height:1.6;">
+    토스트의 '씬 보기' 클릭 → 마지막 뷰가 시트 뷰면 해당 행이 같은 톤으로 빛남. 2번 펄스 (약 4.8초) 후 자동으로 가라앉음.
+  </p>
+
+  <table class="row-highlight-table">
+    <tr><th style="width:120px;">씬번호</th><th>메모</th><th style="width:80px;">BG담당</th><th style="width:60px;">LO</th></tr>
+    <tr><td><span class="scene-num">EP01-A-14</span></td><td>도시 외경</td><td>한솔</td><td>✓</td></tr>
+    <tr class="highlighted"><td><span class="scene-num">EP01-A-15</span></td><td>골목 진입 ← 토스트로 이동된 씬</td><td>한솔</td><td>✓</td></tr>
+    <tr><td><span class="scene-num">EP01-A-16</span></td><td>벽 그림자</td><td>한솔</td><td>✓</td></tr>
+    <tr><td><span class="scene-num">EP01-A-17</span></td><td>달려오는 인물</td><td>윤스</td><td></td></tr>
+  </table>
+
+  <p style="text-align:center; color:var(--accent-sub); font-size:13px; margin-top:18px;">
+    ⬆️ 이 디자인으로 실 코드 적용해도 될까요?
+  </p>
+</div>
+
+</div>
+</body>
+</html>

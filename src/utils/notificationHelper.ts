@@ -18,7 +18,8 @@ export interface NotificationSettings {
   sound?: boolean;
 }
 
-/** 씬 UUID로 해당 에피소드 번호를 찾아 씬 뷰로 이동 */
+/** 씬 UUID/이름으로 해당 에피소드 번호를 찾아 씬 뷰로 이동.
+ *  매칭 실패 시 fallback: 씬 뷰로만이라도 이동 + 안내 토스트 (한솔이 직접 찾을 수 있게). */
 function navigateToScene(sceneUuid?: string, sceneName?: string) {
   if (!sceneUuid && !sceneName) return;
   const episodes = useDataStore.getState().episodes;
@@ -35,6 +36,18 @@ function navigateToScene(sceneUuid?: string, sceneName?: string) {
       }
     }
   }
+  // 매칭 실패 — 씬 뷰로만이라도 이동 + 디버그 로그 (한솔이 콘솔에서 원인 파악 가능)
+  console.warn('[navigateToScene] 매칭 실패', {
+    sceneUuid,
+    sceneName,
+    episodeCount: episodes.length,
+    sampleSceneIds: episodes[0]?.parts[0]?.scenes.slice(0, 3).map((s) => ({ id: s.id, sceneId: s.sceneId })),
+  });
+  useAppStore.getState().setView('scenes');
+  useAppStore.getState().setToast?.({
+    type: 'warning',
+    message: '씬을 자동으로 찾지 못했어요. 씬 뷰에서 직접 확인해주세요.',
+  });
 }
 
 /**
@@ -49,8 +62,10 @@ export function dispatchNotification(payload: NotifyPayload, settings?: Notifica
   const canNavigate = !!(sceneId || sceneName);
 
   // 1. Sonner 토스트 (기본 스타일)
+  // 라벨 '씬 보기' 그대로 유지. 노출 시간 8초로 늘려 한솔이 인지할 시간 확보.
   sonnerToast(payload.title, {
     description: payload.body,
+    duration: 8000,
     ...(canNavigate && {
       action: {
         label: '씬 보기',

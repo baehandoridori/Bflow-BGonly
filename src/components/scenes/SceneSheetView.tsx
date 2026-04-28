@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { MessageCircle, Trash2 } from 'lucide-react';
@@ -21,6 +21,8 @@ interface SceneSheetViewProps {
   searchQuery?: string;
   selectedSceneIds?: Set<string>;
   sceneGroupMode: SceneGroupMode;
+  /** 한솔 결정 (8번): 토스트 클릭 후 진입 시 강조할 sceneId */
+  highlightSceneId?: string | null;
   onToggle: (sceneId: string, stage: Stage) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: (sceneIndex: number) => void;
@@ -283,6 +285,7 @@ export function SceneSheetView({
   searchQuery,
   selectedSceneIds,
   sceneGroupMode,
+  highlightSceneId,
   onToggle,
   onDelete,
   onOpenDetail,
@@ -310,11 +313,16 @@ export function SceneSheetView({
   }, [scenes, sceneGroupMode]);
 
   const layoutMeta = useMemo(() => {
-    if (!layoutGroups) return new Map<Scene, { isFirst: boolean; groupSize: number; layoutKey: string }>();
-    const meta = new Map<Scene, { isFirst: boolean; groupSize: number; layoutKey: string }>();
+    if (!layoutGroups) return new Map<Scene, { isFirst: boolean; isLast: boolean; groupSize: number; layoutKey: string }>();
+    const meta = new Map<Scene, { isFirst: boolean; isLast: boolean; groupSize: number; layoutKey: string }>();
     for (const [layoutKey, groupScenes] of layoutGroups) {
       groupScenes.forEach((scene, i) => {
-        meta.set(scene, { isFirst: i === 0, groupSize: groupScenes.length, layoutKey });
+        meta.set(scene, {
+          isFirst: i === 0,
+          isLast: i === groupScenes.length - 1,
+          groupSize: groupScenes.length,
+          layoutKey,
+        });
       });
     }
     return meta;
@@ -565,11 +573,8 @@ export function SceneSheetView({
           {/* ── 헤더 ── */}
           <thead className="sticky top-0 z-10">
             <tr className="bg-bg-card border-b border-bg-border">
-              {sceneGroupMode === 'layout' && (
-                <th className="w-20 px-2 py-2 text-left text-xs font-medium text-text-secondary border-r border-bg-border/50">
-                  레이아웃
-                </th>
-              )}
+              {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 별도 컬럼 대신 행 위에 그룹 헤더 행을 삽입.
+                  컬럼 수가 일반 모드와 동일하게 유지된다. */}
               <th className="w-20 px-2 py-2 text-left text-xs font-medium text-text-secondary">씬번호</th>
               <th className="px-2 py-2 text-left text-xs font-medium text-text-secondary">메모</th>
               <th className="w-14 px-1 py-2 text-center text-xs font-medium text-text-secondary">스토리보드</th>
@@ -597,47 +602,64 @@ export function SceneSheetView({
               const meta = layoutMeta.get(scene);
               const isRowSelected = selectedSceneIds?.has(scene.sceneId);
               const isFirstInGroup = meta?.isFirst ?? false;
+              const isLastInGroup = meta?.isLast ?? false;
               const groupSize = meta?.groupSize ?? 1;
               const layoutKey = meta?.layoutKey ?? '';
+              const isLayoutMode = sceneGroupMode === 'layout';
 
               return (
-                <motion.tr
-                  key={`${scene.sceneId}-${idx}`}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.15, delay: Math.min(rowIndex * 0.01, 0.2) }}
-                  className={cn(
-                    'border-b border-bg-border/30 transition-colors group',
-                    rowIndex % 2 === 0 ? 'bg-bg-card/20' : 'bg-bg-primary/10',
-                    'hover:bg-accent/5',
-                    isRowSelected && 'bg-accent/10 hover:bg-accent/15',
-                    searchQuery && 'bg-accent/5 border-l-2 border-l-accent/60',
-                    sceneGroupMode === 'layout' && isFirstInGroup && rowIndex > 0 && 'border-t-2 border-t-bg-border',
+                <Fragment key={`${scene.sceneId}-${idx}`}>
+                  {/* 한솔 결정 (1-B 시안 2 + 굵은 보더): 카드 박스 헤더 + 그룹 사이 빈 간격 */}
+                  {isLayoutMode && isFirstInGroup && rowIndex > 0 && (
+                    <tr className="scene-row-group-gap"><td colSpan={100}></td></tr>
                   )}
-                  onClick={(e) => {
-                    if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
-                      onCtrlClick(scene.sceneId);
-                    }
-                  }}
-                  onDoubleClick={() => onOpenDetail(idx)}
-                >
-                  {/* 레이아웃 병합 셀 */}
-                  {sceneGroupMode === 'layout' && isFirstInGroup && (
-                    <td
-                      rowSpan={groupSize}
-                      className="px-2 py-2 text-center font-mono text-xs font-bold border-r border-bg-border/50 align-middle"
-                      style={{ color: deptConfig.color }}
-                    >
-                      {layoutKey !== '미분류' ? `#${layoutKey}` : (
-                        <span className="text-text-secondary/40 font-normal">-</span>
+                  {isLayoutMode && isFirstInGroup && (
+                    <tr className="scene-group-header">
+                      <td colSpan={100}>
+                        <span className="inline-flex items-center gap-2">
+                          <span className="text-sm font-bold text-accent">
+                            {layoutKey !== '미분류' ? `L#${layoutKey}` : '레이아웃 미분류'}
+                          </span>
+                          <span className="text-[11px] text-text-secondary">{groupSize}개 씬</span>
+                        </span>
+                      </td>
+                    </tr>
+                  )}
+                  <motion.tr
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.15, delay: Math.min(rowIndex * 0.01, 0.2) }}
+                    className={cn(
+                      'border-b border-bg-border/30 transition-colors group',
+                      rowIndex % 2 === 0 ? 'bg-bg-card/20' : 'bg-bg-primary/10',
+                      'hover:bg-accent/5',
+                      isRowSelected && 'bg-accent/10 hover:bg-accent/15',
+                      searchQuery && 'bg-accent/5 border-l-2 border-l-accent/60',
+                      highlightSceneId && scene.sceneId === highlightSceneId && 'scene-row-highlighted',
+                      isLayoutMode && !isLastInGroup && 'scene-row-group-mid',
+                      isLayoutMode && isLastInGroup && 'scene-row-group-last',
+                    )}
+                    onClick={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
+                        onCtrlClick(scene.sceneId);
+                      }
+                    }}
+                    onDoubleClick={() => onOpenDetail(idx)}
+                  >
+                  {/* 씬번호 + 레이아웃 뱃지 + 댓글 뱃지.
+                      한솔 결정 (5번): 1+3 합본 효과 — 텍스트 네온 펄스 + wrap 회전 보더. */}
+                  <td className="px-2 py-1.5 font-mono text-xs">
+                    <span className="flex items-center gap-2">
+                      <span className="scene-num-glow-wrap">
+                        <span className="scene-num-glow-text">
+                          <HighlightText text={scene.sceneId || '-'} query={searchQuery} />
+                        </span>
+                      </span>
+                      {scene.layoutId && (
+                        <span className="text-[11px] italic font-medium text-accent-sub flex-shrink-0">
+                          L#{scene.layoutId}
+                        </span>
                       )}
-                    </td>
-                  )}
-
-                  {/* 씬번호 + 댓글 뱃지 */}
-                  <td className="px-2 py-1.5 font-mono text-xs text-accent">
-                    <span className="flex items-center gap-1">
-                      <HighlightText text={scene.sceneId || '-'} query={searchQuery} />
                       {(() => {
                         const cc = commentCounts[`${sheetName}:${scene.no}`];
                         return cc > 0 ? (
@@ -718,7 +740,8 @@ export function SceneSheetView({
                       <Trash2 size={13} />
                     </button>
                   </td>
-                </motion.tr>
+                  </motion.tr>
+                </Fragment>
               );
             })}
           </tbody>

@@ -694,15 +694,46 @@ export default function App() {
 
         // INSERT 이벤트: 다른 사용자가 내 씬에 댓글 / @멘션 시 알림
         if (payload?.eventType === 'INSERT' && payload?.new) {
-          const newComment = payload.new as { scene_id?: string; user_name?: string; user_id?: string; text?: string; mentions?: string[] };
+          // comments 테이블 컬럼: scene_id 는 사실 scene.no(sort_order, 예: '1', '2'...).
+          // 정확한 씬 매칭은 scene_uuid 컬럼 사용 (electron/supabase.ts:872 참고).
+          const newComment = payload.new as {
+            scene_id?: string;
+            scene_uuid?: string;
+            part_id?: string;
+            user_name?: string;
+            user_id?: string;
+            text?: string;
+            mentions?: string[];
+          };
           const me = useAuthStore.getState().currentUser;
-          if (me && newComment.user_id && newComment.user_id !== me.id && newComment.scene_id) {
+          // 한솔 테스트용 (v1.15.0): 본인이 본인 태그한 경우에도 토스트 발동되도록 user_id 자기 비교 제거.
+          // 실 운영 시 본인 댓글 알림이 의미없으면 다음 PR 에서 user_id !== me.id 조건 복원.
+          if (me && newComment.user_id && newComment.scene_id) {
             const dedupeKey = `comment:${newComment.user_id}:${newComment.scene_id}`;
             if (!dedupeNotification(dedupeKey)) { /* 이미 broadcast로 처리됨 */ }
             else {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.commentNotify !== false) {
-                const scene = useDataStore.getState().findSceneBySceneId(newComment.scene_id!);
+                // 한솔 보고 (2026-04-28): comments.scene_id='1' 같은 sort_order 라 기존 sceneId/UUID 매칭 모두 실패.
+                // 정확한 씬은 scene_uuid 우선. fallback 으로 part_id + sceneNo 매칭.
+                const sceneByUuid = newComment.scene_uuid
+                  ? useDataStore.getState().findSceneByUuid(newComment.scene_uuid)
+                  : null;
+                const sceneByPartAndNo = (() => {
+                  if (sceneByUuid) return null;
+                  if (!newComment.part_id || !newComment.scene_id) return null;
+                  const targetNo = Number(newComment.scene_id);
+                  if (!Number.isFinite(targetNo)) return null;
+                  for (const ep of useDataStore.getState().episodes) {
+                    for (const part of ep.parts) {
+                      if (part.id !== newComment.part_id) continue;
+                      const found = part.scenes.find((s) => Number(s.no) === targetNo);
+                      if (found) return found;
+                    }
+                  }
+                  return null;
+                })();
+                const scene = sceneByUuid ?? sceneByPartAndNo ?? null;
                 const isMentioned = Array.isArray(newComment.mentions) && newComment.mentions.includes(me.name);
                 const isAssignee = scene && scene.assignee === me.name;
 
@@ -711,7 +742,10 @@ export default function App() {
                     type: 'comment',
                     title: `${newComment.user_name || '누군가'}님이 나를 태그했습니다`,
                     body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
-                    metadata: scene ? { sceneId: scene.id, sceneName: scene.sceneId } : undefined,
+                    // scene 정확히 찾았으면 UUID + 사용자 sceneId. 못 찾으면 액션 버튼 비활성 (metadata 비움)
+                    metadata: scene
+                      ? { sceneId: scene.id, sceneName: scene.sceneId }
+                      : undefined,
                   }, notiSettings);
                 } else if (isAssignee) {
                   dispatchNotification({

@@ -5,6 +5,7 @@ import { WidgetPopup } from './views/WidgetPopup';
 import './index.css';
 import './styles/path-link.css';
 import './styles/activity-widget.css';
+import './styles/scene-effects.css';
 
 // 브라우저 개발 환경: electronAPI가 없으면 mock 설치
 if (!window.electronAPI && import.meta.env.DEV) {
