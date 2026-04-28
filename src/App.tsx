@@ -742,10 +742,12 @@ export default function App() {
                     type: 'comment',
                     title: `${newComment.user_name || '누군가'}님이 나를 태그했습니다`,
                     body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
-                    // scene 정확히 찾았으면 UUID + 사용자 sceneId. 못 찾으면 액션 버튼 비활성 (metadata 비움)
+                    // scene 정확히 찾았으면 UUID + 사용자 sceneId. 못 찾아도 scene_uuid 라도 넣어 '씬 보기' 버튼은 항상 노출
+                    // (한솔 보고 v1.15.3: 다른 PC 사용자가 멘션 받았을 때 useDataStore 에 그 씬이 없어 metadata=undefined → 버튼 누락)
+                    // navigateToScene 이 매칭 실패하면 자체 fallback 으로 씬 뷰 이동 + 안내
                     metadata: scene
                       ? { sceneId: scene.id, sceneName: scene.sceneId }
-                      : undefined,
+                      : (newComment.scene_uuid ? { sceneId: newComment.scene_uuid } : undefined),
                   }, notiSettings);
                 } else if (isAssignee) {
                   dispatchNotification({
