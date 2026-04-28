@@ -36,7 +36,13 @@ function navigateToScene(sceneUuid?: string, sceneName?: string) {
       }
     }
   }
-  // 매칭 실패 — 씬 뷰로만이라도 이동 (silent return 대신)
+  // 매칭 실패 — 씬 뷰로만이라도 이동 + 디버그 로그 (한솔이 콘솔에서 원인 파악 가능)
+  console.warn('[navigateToScene] 매칭 실패', {
+    sceneUuid,
+    sceneName,
+    episodeCount: episodes.length,
+    sampleSceneIds: episodes[0]?.parts[0]?.scenes.slice(0, 3).map((s) => ({ id: s.id, sceneId: s.sceneId })),
+  });
   useAppStore.getState().setView('scenes');
   useAppStore.getState().setToast?.({
     type: 'warning',

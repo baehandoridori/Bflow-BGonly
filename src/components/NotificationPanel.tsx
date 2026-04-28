@@ -65,16 +65,19 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
         <Icon size={14} style={{ color: n.isRead ? 'rgb(var(--color-text-secondary) / 0.55)' : cfg.color }} />
       </div>
 
-      {/* 내용 */}
+      {/* 내용 — truncate 된 텍스트는 호버 시 GlobalTooltip 으로 전체 노출 */}
       <div className="flex-1 min-w-0">
-        <p className={cn(
-          'text-[12px] leading-tight truncate',
-          n.isRead ? 'text-text-secondary/80' : 'text-text-primary font-medium',
-        )}>
+        <p
+          title={n.title}
+          className={cn(
+            'text-[12px] leading-tight truncate',
+            n.isRead ? 'text-text-secondary/80' : 'text-text-primary font-medium',
+          )}
+        >
           {n.title}
         </p>
         {n.body && (
-          <p className="text-[11px] text-text-secondary/65 mt-0.5 truncate">{n.body}</p>
+          <p title={n.body} className="text-[11px] text-text-secondary/65 mt-0.5 truncate">{n.body}</p>
         )}
         <span className="text-[10px] text-text-secondary/50 mt-1 block">{timeAgo(n.createdAt)}</span>
       </div>
@@ -184,6 +187,13 @@ function NotificationDropdown() {
           }
         }
       }
+      // 매칭 실패 — 씬 뷰로만이라도 이동 + 안내 (한솔 결정: 알림 패널 씬 보기 무반응 fix)
+      console.warn('[NotificationPanel] 씬 매칭 실패', { sceneId, sceneName, episodeCount: episodes.length });
+      setView('scenes');
+      useAppStore.getState().setToast?.({
+        type: 'warning',
+        message: '씬을 자동으로 찾지 못했어요. 씬 뷰에서 직접 확인해주세요.',
+      });
     }
     setPanelOpen(false);
   };
