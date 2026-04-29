@@ -380,8 +380,15 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       const userStartedNew =
         inputValueRef.current.length > 0 || attachedImagesRef.current.length > 0;
       if (userStartedNew) {
+        // Codex P2 7차(2026-04-29): 사용자가 새 드래프트 시작했고 prev 를 버리는 분기 →
+        // previewUrl 뿐 아니라 *이미 업로드 완료된* uploadedUrl 도 storage 에서 삭제 (orphan 방지).
         prevAttached.forEach(a => {
           try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
+          if (a.uploadedUrl) {
+            storageService.deleteImage(a.uploadedUrl).catch(err => {
+              console.warn('[댓글 전송 실패 롤백] 버려진 업로드 객체 정리 실패:', err);
+            });
+          }
         });
       } else {
         setInput(prevInput);
