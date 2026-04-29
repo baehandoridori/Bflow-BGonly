@@ -836,26 +836,32 @@ export async function fetchMissedMentions(
   since: string,
   limit = 50,
 ): Promise<SupabaseComment[]> {
+  // 한솔 보고 (v1.15.7): .contains('mentions', [userName]) 가 mentions 컬럼 타입(jsonb vs text[])과
+  // 충돌해 "invalid input syntax for type json" 에러. server filter 에서 mentions 빼고 client 에서 처리.
+  // server: since + 본인 댓글 제외만. client: mentions 배열에 userName 포함 검사.
+  // 200 한계는 last_seen 짧은 기간이라 보통 충분 (멘션 매칭은 전체 중 소수).
   const { data, error } = await supabase
     .from('comments')
     .select('*')
     .gt('created_at', since)
     .neq('user_id', userId)
-    .contains('mentions', [userName])
     .order('created_at', { ascending: false })
-    .limit(limit);
+    .limit(200);
   if (error) throw new Error(`fetchMissedMentions failed: ${error.message}`);
-  return (data || []).map((c) => ({
-    id: c.id,
-    partId: c.part_id,
-    sceneId: c.scene_id,
-    userId: c.user_id,
-    userName: c.user_name,
-    text: c.text,
-    mentions: c.mentions || [],
-    createdAt: c.created_at,
-    editedAt: c.edited_at,
-  }));
+  return (data || [])
+    .filter((c) => Array.isArray(c.mentions) && c.mentions.includes(userName))
+    .slice(0, limit)
+    .map((c) => ({
+      id: c.id,
+      partId: c.part_id,
+      sceneId: c.scene_id,
+      userId: c.user_id,
+      userName: c.user_name,
+      text: c.text,
+      mentions: c.mentions || [],
+      createdAt: c.created_at,
+      editedAt: c.edited_at,
+    }));
 }
 
 /** 파트별 댓글 읽기 */
