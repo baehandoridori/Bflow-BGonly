@@ -811,8 +811,38 @@ export async function updateUser(
   broadcastDataChange('users', 'UPDATE');
 }
 
-/** 사용자 삭제 */
+/** 사용자 삭제.
+ *  한솔 결정 (v1.15.7): 퇴사자 처리. 삭제 *전* 그 사용자가 담당자였던 씬/리비전의 assignee 를 자동으로 비움(NULL).
+ *  - scenes.assignee, revisions.assignee 만 정리 (둘 다 TEXT, NOT NULL 없음)
+ *  - 댓글의 user_id/user_name, 활동 로그는 *역사적 기록* 으로 보존 (누가 작업했는지)
+ *  - update 가 실패해도 user 삭제 자체는 진행 (warn 만, hard fail X)
+ */
 export async function deleteUser(userId: string): Promise<void> {
+  // 1) user_name 조회 — assignee 매칭 키
+  const { data: userRow } = await supabase
+    .from('users')
+    .select('name')
+    .eq('id', userId)
+    .maybeSingle();
+  const userName = userRow?.name;
+
+  if (userName) {
+    // 2) scenes.assignee 비우기
+    const { error: scenesErr } = await supabase
+      .from('scenes')
+      .update({ assignee: null })
+      .eq('assignee', userName);
+    if (scenesErr) console.warn('[deleteUser] scenes.assignee 비우기 실패:', scenesErr);
+
+    // 3) revisions.assignee 비우기 (revisions 테이블에도 assignee 컬럼 있음)
+    const { error: revsErr } = await supabase
+      .from('revisions')
+      .update({ assignee: null })
+      .eq('assignee', userName);
+    if (revsErr) console.warn('[deleteUser] revisions.assignee 비우기 실패:', revsErr);
+  }
+
+  // 4) user 삭제
   const { error } = await supabase.from('users').delete().eq('id', userId);
   throwIfError(error);
   broadcastDataChange('users', 'DELETE');
@@ -836,32 +866,50 @@ export async function fetchMissedMentions(
   since: string,
   limit = 50,
 ): Promise<SupabaseComment[]> {
-  // 한솔 보고 (v1.15.7): .contains('mentions', [userName]) 가 mentions 컬럼 타입(jsonb vs text[])과
-  // 충돌해 "invalid input syntax for type json" 에러. server filter 에서 mentions 빼고 client 에서 처리.
-  // server: since + 본인 댓글 제외만. client: mentions 배열에 userName 포함 검사.
-  // 200 한계는 last_seen 짧은 기간이라 보통 충분 (멘션 매칭은 전체 중 소수).
-  const { data, error } = await supabase
-    .from('comments')
-    .select('*')
-    .gt('created_at', since)
-    .neq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(200);
-  if (error) throw new Error(`fetchMissedMentions failed: ${error.message}`);
-  return (data || [])
-    .filter((c) => Array.isArray(c.mentions) && c.mentions.includes(userName))
-    .slice(0, limit)
-    .map((c) => ({
-      id: c.id,
-      partId: c.part_id,
-      sceneId: c.scene_id,
-      userId: c.user_id,
-      userName: c.user_name,
-      text: c.text,
-      mentions: c.mentions || [],
-      createdAt: c.created_at,
-      editedAt: c.edited_at,
-    }));
+  // 한솔 보고 (v1.15.7): .contains('mentions', [userName]) 가 mentions 컬럼 타입과 충돌
+  // ("invalid input syntax for type json"). server filter 에서 mentions 빼고 client 에서 처리.
+  //
+  // Codex P2 fix: 단순 200 cap 으로 자르면 사용자가 busy 기간 후 복귀 시 200개 안에 멘션이 없는
+  // 케이스에서 누락. limit (50개 매치) 찾을 때까지 또는 데이터 끝까지 페이지네이션.
+  const PAGE_SIZE = 200;
+  const MAX_PAGES = 10;  // 안전 cap — 최대 2000개까지 스캔
+  const matched: SupabaseComment[] = [];
+  let pageOffset = 0;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('*')
+      .gt('created_at', since)
+      .neq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .range(pageOffset, pageOffset + PAGE_SIZE - 1);
+    if (error) throw new Error(`fetchMissedMentions failed: ${error.message}`);
+
+    const rows = data || [];
+    if (rows.length === 0) break;
+
+    for (const c of rows) {
+      if (!Array.isArray(c.mentions) || !c.mentions.includes(userName)) continue;
+      matched.push({
+        id: c.id,
+        partId: c.part_id,
+        sceneId: c.scene_id,
+        userId: c.user_id,
+        userName: c.user_name,
+        text: c.text,
+        mentions: c.mentions || [],
+        createdAt: c.created_at,
+        editedAt: c.edited_at,
+      });
+      if (matched.length >= limit) return matched;
+    }
+
+    if (rows.length < PAGE_SIZE) break;  // 더 이상 데이터 없음
+    pageOffset += PAGE_SIZE;
+  }
+
+  return matched;
 }
 
 /** 파트별 댓글 읽기 */
