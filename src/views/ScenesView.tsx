@@ -1521,7 +1521,18 @@ export function ScenesView() {
     if (savedMode) setSceneViewMode(savedMode);
 
     const savedEp = loadPersistedLastEpisode();
-    if (savedEp !== null && episodes.some((ep) => ep.episodeNumber === savedEp)) {
+    // v1.15.10: 외부에서 selectedEpisode 가 이미 set 된 경우(예: 다른 에피소드 댓글 알림 클릭으로
+    // navigateToScene 이 호출된 직후) saved 로 덮어쓰지 않음 — 외부 navigation 우선.
+    const currentSelected = useAppStore.getState().selectedEpisode;
+    const currentIsValid =
+      currentSelected !== null &&
+      currentSelected !== undefined &&
+      episodes.some((ep) => ep.episodeNumber === currentSelected);
+    if (
+      savedEp !== null &&
+      episodes.some((ep) => ep.episodeNumber === savedEp) &&
+      !currentIsValid
+    ) {
       setSelectedEpisode(savedEp);
     }
 
