@@ -128,6 +128,8 @@ export interface SupabaseComment {
   id: string;
   partId: string;
   sceneId: string;
+  /** 한솔 결정 (v1.15.9): 정확한 씬 매칭용 UUID (catch-up 의 navigateToScene 에서 활용) */
+  sceneUuid?: string | null;
   userId: string;
   userName: string;
   text: string;
@@ -895,6 +897,7 @@ export async function fetchMissedMentions(
         id: c.id,
         partId: c.part_id,
         sceneId: c.scene_id,
+        sceneUuid: c.scene_uuid ?? null,  // v1.15.9: 정확 씬 매칭용
         userId: c.user_id,
         userName: c.user_name,
         text: c.text,

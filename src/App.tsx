@@ -593,13 +593,35 @@ export default function App() {
           return;
         }
         // 알림 패널에만 누적 (토스트 X — 한꺼번에 N 개 띄우면 시끄러움)
+        // 한솔 보고 (v1.15.9): catch-up 알림에서 씬 매칭이 안 됨. Realtime 분기와 동일 패턴으로
+        // scene_uuid 우선 + part_id+sceneNo fallback 으로 정확한 scene 찾아 metadata 채움.
+        const ds = useDataStore.getState();
         const store = useNotificationStore.getState();
         for (const c of missed) {
+          // 1) scene_uuid 로 정확 매칭
+          let scene = c.sceneUuid ? ds.findSceneByUuid(c.sceneUuid) : null;
+          // 2) part_id + sceneNo 조합으로 fallback
+          if (!scene && c.partId && c.sceneId) {
+            const targetNo = Number(c.sceneId);
+            if (Number.isFinite(targetNo)) {
+              for (const ep of ds.episodes) {
+                for (const part of ep.parts) {
+                  if (part.id !== c.partId) continue;
+                  const found = part.scenes.find((s) => Number(s.no) === targetNo);
+                  if (found) { scene = found; break; }
+                }
+                if (scene) break;
+              }
+            }
+          }
           store.addNotification({
             type: 'comment',
             title: `${c.userName || '누군가'}님이 나를 태그했습니다`,
             body: c.text ? (c.text.length > 50 ? c.text.slice(0, 50) + '...' : c.text) : undefined,
-            metadata: { sceneName: c.sceneId },
+            // scene 매칭 성공 시 UUID + 사용자 sceneId 둘 다. 못 찾아도 sceneUuid 라도 넣어 '씬 보기' 버튼은 노출
+            metadata: scene
+              ? { sceneId: scene.id, sceneName: scene.sceneId }
+              : (c.sceneUuid ? { sceneId: c.sceneUuid } : undefined),
           });
         }
         // 요약 토스트 1번 (한솔이 인지)
