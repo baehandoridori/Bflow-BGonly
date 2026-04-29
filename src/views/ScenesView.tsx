@@ -667,7 +667,7 @@ import { GlassDropdown } from '@/components/common/GlassDropdown';
 import { PanelLeftOpen } from 'lucide-react';
 import {
   loadPersistedSceneViewMode, savePersistedSceneViewMode,
-  loadPersistedLastEpisode, savePersistedLastEpisode,
+  savePersistedLastEpisode,
   loadPersistedTreeOpen, savePersistedTreeOpen,
 } from '@/utils/scenesViewPersist';
 
@@ -1510,34 +1510,18 @@ export function ScenesView() {
   // treeOpen 초기값 — 영속화된 값이 있으면 그걸로, 없으면 true (디폴트 펼침)
   const [treeOpen, setTreeOpen] = useState(() => loadPersistedTreeOpen() ?? true);
 
-  // 마운트 시 / episodes 가 처음 채워지는 시점에 영속화된 상태(viewMode + lastEpisode) 1회 복원.
-  // ref guard 로 한솔이 직접 변경한 값이 첫 마운트 때 saved 로 되돌아가지 않게 보장.
+  // v1.15.11 (한솔 보고): selectedEpisode 복원은 App.tsx 의 root-level init useEffect 로 이전.
+  // 이전엔 ScenesView 마운트 시 saved last episode 를 복원했는데 외부 navigate 와 race 발생 →
+  // 다른 에피소드 알림 클릭 시 마지막 본 에피소드로 되돌아가는 버그.
+  // 여기선 sceneViewMode (cards/sheet/grouped) 만 1회 복원 — selectedEpisode 와 무관하므로 race 없음.
   const persistRestoredRef = useRef(false);
   useEffect(() => {
     if (persistRestoredRef.current) return;
-    if (episodes.length === 0) return; // episodes 가 늦게 로드될 때까지 대기
-
+    if (episodes.length === 0) return;
     const savedMode = loadPersistedSceneViewMode();
     if (savedMode) setSceneViewMode(savedMode);
-
-    const savedEp = loadPersistedLastEpisode();
-    // v1.15.10: 외부에서 selectedEpisode 가 이미 set 된 경우(예: 다른 에피소드 댓글 알림 클릭으로
-    // navigateToScene 이 호출된 직후) saved 로 덮어쓰지 않음 — 외부 navigation 우선.
-    const currentSelected = useAppStore.getState().selectedEpisode;
-    const currentIsValid =
-      currentSelected !== null &&
-      currentSelected !== undefined &&
-      episodes.some((ep) => ep.episodeNumber === currentSelected);
-    if (
-      savedEp !== null &&
-      episodes.some((ep) => ep.episodeNumber === savedEp) &&
-      !currentIsValid
-    ) {
-      setSelectedEpisode(savedEp);
-    }
-
     persistRestoredRef.current = true;
-  }, [episodes, setSceneViewMode, setSelectedEpisode]);
+  }, [episodes, setSceneViewMode]);
 
   // 변화 감지 → 즉시 영속화. 디폴트 값일 때 호출되어도 무해.
   useEffect(() => { savePersistedSceneViewMode(sceneViewMode); }, [sceneViewMode]);

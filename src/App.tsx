@@ -637,6 +637,32 @@ export default function App() {
     })();
   }, [currentUser, authReady]);
 
+  // v1.15.11 (한솔 보고): persistRestore 책임을 ScenesView 외부로 이동.
+  // 이전엔 ScenesView 마운트 시 saved last episode 를 복원했는데, 외부에서 navigateToScene 으로
+  // setSelectedEpisode 를 set한 직후 ScenesView 가 첫 마운트 되는 케이스에서 race condition 발생 →
+  // 다른 에피소드 알림 클릭 시 마지막 본 에피소드로 되돌아가는 버그.
+  // 해결: 앱 root 에서 episodes 첫 로드 시 한 번만 saved 복원. selectedEpisode 가 이미 set 되어 있으면 skip.
+  // → ScenesView 마운트 / unmount 와 무관하게 race 자체가 사라짐.
+  const episodesForInit = useDataStore((s) => s.episodes);
+  const selectedEpisodeForInit = useAppStore((s) => s.selectedEpisode);
+  const lastEpisodeRestoredRef = useRef(false);
+  useEffect(() => {
+    if (lastEpisodeRestoredRef.current) return;
+    if (episodesForInit.length === 0) return;
+    if (selectedEpisodeForInit !== null && selectedEpisodeForInit !== undefined) {
+      // 외부 (예: 알림 navigate) 가 이미 set 했으면 건드리지 않음
+      lastEpisodeRestoredRef.current = true;
+      return;
+    }
+    void import('@/utils/scenesViewPersist').then(({ loadPersistedLastEpisode }) => {
+      const saved = loadPersistedLastEpisode();
+      if (saved !== null && episodesForInit.some((ep) => ep.episodeNumber === saved)) {
+        useAppStore.getState().setSelectedEpisode(saved);
+      }
+      lastEpisodeRestoredRef.current = true;
+    });
+  }, [episodesForInit, selectedEpisodeForInit]);
+
   // 테마 변경 시: CSS 적용 + appdata 저장 (초기화 완료 후에만 저장)
   useEffect(() => {
     if (!themeInitRef.current) return; // init()에서 테마 로드 전까지 저장 방지
