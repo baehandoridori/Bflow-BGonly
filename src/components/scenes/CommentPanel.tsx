@@ -329,11 +329,16 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
 
     // Codex P2(2026-04-29): blob URL revoke 와 attachedImages 초기화는 전송 성공 *후* 에 수행.
     // 실패 시 사용자가 같은 페이로드(텍스트 + 첨부)로 재시도할 수 있어야 새 이미지 첨부 흐름의 신뢰성이 보장된다.
+    // Codex P1 6차(2026-04-29): ref sync useEffect 가 한 렌더 늦을 수 있어, setState 직후 unmount 가 일어나면
+    // unmount cleanup 이 pre-submit 첨부물을 보고 in-flight 댓글의 이미지를 삭제하는 race 발생 가능.
+    // setState 와 동시에 ref 도 즉시 동기화하여 cleanup 이 항상 최신 상태(빈 배열) 를 본다.
     const prevInput = input;
     const prevAttached = attachedImages;
     setInput('');
+    inputValueRef.current = '';
     setShowMentions(false);
-    setAttachedImages([]);  // UI 에서는 즉시 비움 (낙관적), 실패 시 복원
+    setAttachedImages([]);
+    attachedImagesRef.current = [];
 
     try {
       await addComment(sceneKey, comment);
