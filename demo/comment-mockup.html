@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="ko" data-color-mode="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>B flow 댓글 패널 디자인 목업</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #0F1117;
+      --bg-card: #1A1D27;
+      --bg-card-elev: #232634;
+      --bg-input: #14161F;
+      --border: #2D3041;
+      --border-strong: #3D4154;
+      --text-primary: #E8E8EE;
+      --text-secondary: #8B8DA3;
+      --text-tertiary: #6A6E84;
+      --accent: #6C5CE7;
+      --accent-light: #A29BFE;
+      --green: #10B981;
+      --red: #EF4444;
+      --shadow-base: 0 4px 16px rgba(0,0,0,0.25);
+      --shadow-card: 0 4px 16px rgba(0,0,0,0.25), 0 0 0 1px rgba(108,92,231,0.06);
+      --pulse-rgb: 108, 92, 231;
+    }
+    [data-color-mode="light"] {
+      --bg-primary: #F4F5FB;
+      --bg-card: #FFFFFF;
+      --bg-card-elev: #F8F9FE;
+      --bg-input: #FFFFFF;
+      --border: #E0E2EC;
+      --border-strong: #C7CAD8;
+      --text-primary: #1A1D27;
+      --text-secondary: #6A6E84;
+      --text-tertiary: #9396A8;
+      --shadow-base: 0 4px 16px rgba(20,22,30,0.08);
+      --shadow-card: 0 4px 16px rgba(20,22,30,0.08), 0 0 0 1px rgba(108,92,231,0.04);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+      min-height: 100vh;
+      transition: background 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+    .smooth { transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1); }
+    .smooth-fast { transition: all 150ms cubic-bezier(0.16, 1, 0.3, 1); }
+    textarea { font-family: inherit; }
+    input[type=range] { accent-color: var(--accent); }
+
+    /* 입력창 부드러운 자라기 */
+    .smooth-h {
+      transition: height 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* 입력 카드 (떠있는 모습) — focus 펄스 효과 */
+    .input-card {
+      box-shadow: var(--shadow-card);
+      transition: border-color 200ms ease, box-shadow 250ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .input-card-focused {
+      animation: input-pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes input-pulse {
+      0%, 100% {
+        box-shadow:
+          var(--shadow-base),
+          0 0 0 1px rgba(var(--pulse-rgb), 0.28);
+      }
+      50% {
+        box-shadow:
+          var(--shadow-base),
+          0 0 0 6px rgba(var(--pulse-rgb), 0.16);
+      }
+    }
+    /* 드래그 중 입력 카드 — 펄스 멈추고 진한 강조 */
+    .input-card-dragover {
+      animation: none !important;
+      box-shadow:
+        var(--shadow-base),
+        0 0 0 2px rgba(var(--pulse-rgb), 0.55) !important;
+    }
+
+    /* 드래그 오버레이 — 댓글 패널 전체 덮음 */
+    .drop-overlay {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: rgba(var(--pulse-rgb), 0.16);
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+      border: 2px dashed rgba(var(--pulse-rgb), 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 20;
+      animation: drop-overlay-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes drop-overlay-in {
+      from { opacity: 0; transform: scale(0.98); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .drop-icon {
+      animation: drop-icon-bounce 1.2s ease-in-out infinite;
+    }
+    @keyframes drop-icon-bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="env,react">
+    const { useState, useRef, useEffect, useLayoutEffect, useCallback } = React;
+
+    const DEMO_COMMENTS = [
+      { id: 1, author: '한솔', text: '안녕하세요! 이 씬 작업 시작합니다.', isOwn: true, time: '14:23' },
+      { id: 2, author: '민지', text: '네 안녕하세요. 레퍼런스 확인했어요.', isOwn: false, time: '14:25' },
+      { id: 3, author: '동수', text: '@한솔 회의는 언제 잡으면 될까요?', isOwn: false, time: '14:30' },
+      { id: 4, author: '한솔', text: '오늘 4시 어떠세요?', isOwn: true, time: '14:32' },
+      { id: 5, author: '수빈', text: '4시 좋아요!', isOwn: false, time: '14:33' },
+      { id: 6, author: '민지', text: '저도 가능합니다 🙂', isOwn: false, time: '14:35' },
+      { id: 7, author: '기훈', text: '이 부분 컨셉 다시 한번 확인 부탁드립니다.', isOwn: false, time: '14:40' },
+    ];
+
+    function CommentBubble({ c }) {
+      return (
+        <div className={`flex ${c.isOwn ? 'justify-end' : 'justify-start'}`}>
+          <div className="max-w-[78%]">
+            <div className="flex items-center gap-2 mb-1" style={{ flexDirection: c.isOwn ? 'row-reverse' : 'row' }}>
+              <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{c.author}</span>
+              <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{c.time}</span>
+            </div>
+            <div
+              className="px-3 py-2 rounded-lg text-sm leading-relaxed whitespace-pre-wrap break-words"
+              style={{
+                background: c.isOwn ? 'var(--accent)' : 'var(--bg-card-elev)',
+                color: c.isOwn ? '#fff' : 'var(--text-primary)',
+                border: c.isOwn ? 'none' : '1px solid var(--border)',
+              }}
+            >
+              {c.text}
+              {c.images && c.images.length > 0 && (
+                <div className={`grid gap-1 mt-2 ${c.images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                  {c.images.map((img, i) => (
+                    <img key={i} src={img} className="rounded-md w-full object-cover" style={{ maxHeight: 140 }} alt="" />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── 현재 디자인 ──
+    function CurrentCommentPanel({ width, panelHeight, comments, inputText, setInputText }) {
+      const taRef = useRef(null);
+      useEffect(() => {
+        const ta = taRef.current;
+        if (!ta) return;
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+      }, [inputText]);
+
+      return (
+        <div
+          className="flex flex-col rounded-xl border smooth"
+          style={{
+            width,
+            height: panelHeight,
+            background: 'var(--bg-card)',
+            borderColor: 'var(--border)',
+          }}
+        >
+          <div
+            className="flex items-center justify-between px-4 py-3 border-b"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <span className="font-semibold text-sm">댓글 및 활동</span>
+            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{comments.length}개</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
+            {comments.map(c => <CommentBubble key={c.id} c={c} />)}
+          </div>
+
+          <div className="px-4 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
+            <div className="flex gap-2 items-end">
+              <textarea
+                ref={taRef}
+                value={inputText}
+                onChange={e => setInputText(e.target.value)}
+                placeholder="댓글 입력..."
+                rows={1}
+                className="flex-1 px-3 py-2 rounded-xl border text-sm resize-none outline-none smooth-fast"
+                style={{
+                  background: 'var(--bg-input)',
+                  borderColor: 'var(--border)',
+                  color: 'var(--text-primary)',
+                  maxHeight: 200,
+                  minHeight: 40,
+                }}
+              />
+              <button
+                className="px-4 py-2 rounded-xl text-sm font-medium text-white smooth-fast"
+                style={{ background: 'var(--green)' }}
+              >전송</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── 새 디자인 ──
+    function NewCommentPanel({ width, panelHeight, comments, inputText, setInputText, attachedImages, addImage, removeImage, inputMaxPct }) {
+      const taRef = useRef(null);
+      const [draggingOver, setDraggingOver] = useState(false);
+      const [focused, setFocused] = useState(false);
+      const [taHeight, setTaHeight] = useState(40);
+
+      const inputBoxMaxPx = Math.floor(panelHeight * inputMaxPct);
+      const imageRowHeight = attachedImages.length > 0 ? 80 : 0;
+      const taMaxPx = Math.max(40, inputBoxMaxPx - imageRowHeight - 24);
+
+      // 측정만 'auto'로 잠깐, 곧바로 이전 height 복원 → setState 가 transition 발동 (px → px)
+      useLayoutEffect(() => {
+        const ta = taRef.current;
+        if (!ta) return;
+        const prev = ta.style.height;
+        ta.style.height = 'auto';
+        const sh = ta.scrollHeight;
+        ta.style.height = prev;
+        const next = Math.max(40, Math.min(sh, taMaxPx));
+        setTaHeight(next);
+      }, [inputText, taMaxPx]);
+
+      const handlePaste = (e) => {
+        const items = Array.from(e.clipboardData?.items || []);
+        const imageItems = items.filter(it => it.type.startsWith('image/'));
+        if (imageItems.length > 0) {
+          e.preventDefault();
+          imageItems.forEach(it => {
+            const file = it.getAsFile();
+            if (file) {
+              const url = URL.createObjectURL(file);
+              addImage({ id: Date.now() + Math.random(), url });
+            }
+          });
+        }
+      };
+      // 드래그 카운터 — 자식 위로 이동 시 깜빡임 방지
+      const dragCounter = useRef(0);
+      const handleDragEnter = (e) => {
+        e.preventDefault();
+        if (e.dataTransfer?.types?.includes('Files')) {
+          dragCounter.current += 1;
+          if (dragCounter.current === 1) setDraggingOver(true);
+        }
+      };
+      const handleDragOver = (e) => { e.preventDefault(); };
+      const handleDragLeave = (e) => {
+        e.preventDefault();
+        dragCounter.current = Math.max(0, dragCounter.current - 1);
+        if (dragCounter.current === 0) setDraggingOver(false);
+      };
+      const handleDrop = (e) => {
+        e.preventDefault();
+        dragCounter.current = 0;
+        setDraggingOver(false);
+        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+        files.forEach(f => {
+          const url = URL.createObjectURL(f);
+          addImage({ id: Date.now() + Math.random(), url });
+        });
+      };
+
+      return (
+        <div
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className="flex flex-col rounded-xl border smooth relative"
+          style={{
+            width,
+            height: panelHeight,
+            background: 'var(--bg-card)',
+            borderColor: 'var(--border)',
+          }}
+        >
+          {draggingOver && (
+            <div className="drop-overlay">
+              <div className="flex flex-col items-center gap-2 px-4 text-center">
+                <div className="drop-icon text-5xl">🖼️</div>
+                <div className="text-base font-semibold" style={{ color: 'var(--accent-light)' }}>
+                  이미지를 여기에 놓으세요
+                </div>
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  여러 장을 한 번에 첨부할 수 있어요
+                </div>
+              </div>
+            </div>
+          )}
+          <div
+            className="flex items-center justify-between px-4 py-3 border-b"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <span className="font-semibold text-sm">댓글 및 활동</span>
+            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{comments.length}개</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0 smooth">
+            {comments.map(c => <CommentBubble key={c.id} c={c} />)}
+          </div>
+
+          <div className="px-3 pb-3 pt-2">
+            <div
+              onPaste={handlePaste}
+              className={`rounded-xl border p-2 input-card ${focused && !draggingOver ? 'input-card-focused' : ''} ${draggingOver ? 'input-card-dragover' : ''}`}
+              style={{
+                background: 'var(--bg-card-elev)',
+                borderColor: draggingOver ? 'var(--accent)' : (focused ? 'var(--accent-light)' : 'var(--border-strong)'),
+              }}
+            >
+              {attachedImages.length > 0 && (
+                <div className="flex gap-2 mb-2 overflow-x-auto pb-1 smooth" style={{ height: 76 }}>
+                  {attachedImages.map(img => (
+                    <div key={img.id} className="relative flex-shrink-0 group">
+                      <img
+                        src={img.url}
+                        className="w-16 h-16 object-cover rounded-lg border smooth-fast"
+                        style={{ borderColor: 'var(--border)' }}
+                        alt=""
+                      />
+                      <button
+                        onClick={() => removeImage(img.id)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-white text-[11px] flex items-center justify-center smooth-fast hover:scale-110"
+                        style={{ background: 'var(--red)', border: '2px solid var(--bg-card-elev)' }}
+                        title="제거"
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-end gap-1.5">
+                <textarea
+                  ref={taRef}
+                  value={inputText}
+                  onChange={e => setInputText(e.target.value)}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setFocused(false)}
+                  placeholder="댓글 입력... (Ctrl+V / 드래그로 이미지 첨부)"
+                  rows={1}
+                  className="flex-1 px-2 py-2 text-sm resize-none outline-none bg-transparent leading-relaxed smooth-h"
+                  style={{ color: 'var(--text-primary)', height: taHeight, minHeight: 40 }}
+                />
+                <button
+                  onClick={() => addImage({
+                    id: Date.now() + Math.random(),
+                    url: `https://picsum.photos/seed/${Math.floor(Math.random()*1000)}/200/200`
+                  })}
+                  className="w-9 h-9 rounded-lg flex items-center justify-center text-base smooth-fast"
+                  style={{ background: 'transparent', color: 'var(--text-secondary)' }}
+                  title="이미지 첨부"
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-card)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                >📎</button>
+                <button
+                  className="w-9 h-9 rounded-lg flex items-center justify-center text-white smooth-fast"
+                  style={{ background: 'var(--accent)' }}
+                  title="전송"
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-light)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'var(--accent)'}
+                >↑</button>
+              </div>
+            </div>
+            <div className="text-[10px] text-center mt-1.5" style={{ color: 'var(--text-tertiary)' }}>
+              입력 카드 최대 높이 {inputBoxMaxPx}px (패널의 35%) · 그 이상은 입력창 안에서 스크롤
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [inputText, setInputText] = useState('');
+      const [attachedImages, setAttachedImages] = useState([]);
+      const [panelWidth, setPanelWidth] = useState(320);
+      const inputMaxPct = 0.35; // 한솔 결정: 35% 고정
+      const [colorMode, setColorMode] = useState('dark');
+      const panelHeight = 620;
+
+      const addImage = (img) => setAttachedImages(prev => [...prev, img]);
+      const removeImage = (id) => setAttachedImages(prev => prev.filter(i => i.id !== id));
+
+      useEffect(() => {
+        document.documentElement.dataset.colorMode = colorMode;
+      }, [colorMode]);
+
+      const fillText = (lines) => {
+        const samples = [
+          '이 씬 수정 필요해요.',
+          '컨셉 톤을 좀 더 어둡게 가는 게 좋을 것 같아요.',
+          '레퍼런스 다시 확인해 주세요.',
+          '@민지 색감 한번 봐주실래요?',
+          '내일 회의 때 같이 얘기하면 좋을 것 같습니다.',
+          '디테일이 살짝 부족한 것 같은데...',
+          '구도는 좋아요.',
+          '캐릭터 위치 조금만 옮기면 완벽할 듯.',
+          '그림자 방향 한번 더 체크 부탁드려요.',
+          '마지막으로 한 번 더 검토 후 넘어가겠습니다.',
+        ].slice(0, lines);
+        setInputText(samples.join('\n'));
+      };
+
+      return (
+        <div className="min-h-screen p-6">
+          <div className="max-w-7xl mx-auto">
+            <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <h1 className="text-xl font-bold mb-1">B flow 댓글 패널 디자인 목업</h1>
+                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  좌측: 현재 디자인 / 우측: 새 디자인 (cowork 스타일, 입력창이 카드처럼 떠있음)
+                </p>
+              </div>
+              <button
+                onClick={() => setColorMode(m => m === 'dark' ? 'light' : 'dark')}
+                className="px-3 py-2 rounded-lg text-sm border smooth-fast"
+                style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+              >
+                {colorMode === 'dark' ? '☀️ 라이트 모드' : '🌙 다크 모드'}
+              </button>
+            </div>
+
+            <div
+              className="rounded-xl border p-4 mb-6 grid grid-cols-1 md:grid-cols-2 gap-6"
+              style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+            >
+              <div>
+                <label className="text-xs block mb-2 font-medium" style={{ color: 'var(--text-secondary)' }}>패널 너비</label>
+                <div className="flex gap-2">
+                  {[320, 380, 420].map(w => (
+                    <button
+                      key={w}
+                      onClick={() => setPanelWidth(w)}
+                      className="px-3 py-1.5 rounded text-xs border smooth-fast"
+                      style={{
+                        background: panelWidth === w ? 'var(--accent)' : 'transparent',
+                        borderColor: panelWidth === w ? 'var(--accent)' : 'var(--border)',
+                        color: panelWidth === w ? '#fff' : 'var(--text-primary)',
+                      }}
+                    >{w}px</button>
+                  ))}
+                </div>
+                <p className="text-[10px] mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                  현재 앱은 320px (w-80) · 입력 카드 최대 높이 <span style={{ color: 'var(--accent-light)' }}>35% 고정</span> ({Math.floor(panelHeight * inputMaxPct)}px)
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs block mb-2 font-medium" style={{ color: 'var(--text-secondary)' }}>테스트 컨트롤</label>
+                <div className="flex gap-1.5 flex-wrap">
+                  <button onClick={() => setInputText('')} className="px-2.5 py-1 rounded text-xs border smooth-fast" style={{ borderColor: 'var(--border)' }}>비우기</button>
+                  {[1, 3, 6, 10].map(n => (
+                    <button key={n} onClick={() => fillText(n)} className="px-2.5 py-1 rounded text-xs border smooth-fast" style={{ borderColor: 'var(--border)' }}>{n}줄</button>
+                  ))}
+                  <button
+                    onClick={() => addImage({ id: Date.now() + Math.random(), url: `https://picsum.photos/seed/${Math.floor(Math.random()*1000)}/200/200` })}
+                    className="px-2.5 py-1 rounded text-xs border smooth-fast"
+                    style={{ borderColor: 'var(--border)' }}
+                  >🖼️ 이미지 추가</button>
+                  <button onClick={() => setAttachedImages([])} className="px-2.5 py-1 rounded text-xs border smooth-fast" style={{ borderColor: 'var(--border)' }}>이미지 비우기</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-8 items-start justify-center flex-wrap">
+              <div>
+                <div className="text-xs font-semibold mb-3 text-center" style={{ color: 'var(--text-tertiary)' }}>◀ 현재 디자인 (변경 전)</div>
+                <CurrentCommentPanel
+                  width={panelWidth}
+                  panelHeight={panelHeight}
+                  comments={DEMO_COMMENTS}
+                  inputText={inputText}
+                  setInputText={setInputText}
+                />
+              </div>
+              <div>
+                <div className="text-xs font-semibold mb-3 text-center" style={{ color: 'var(--accent-light)' }}>새 디자인 (cowork 스타일) ▶</div>
+                <NewCommentPanel
+                  width={panelWidth}
+                  panelHeight={panelHeight}
+                  comments={DEMO_COMMENTS}
+                  inputText={inputText}
+                  setInputText={setInputText}
+                  attachedImages={attachedImages}
+                  addImage={addImage}
+                  removeImage={removeImage}
+                  inputMaxPct={inputMaxPct}
+                />
+              </div>
+            </div>
+
+            <div
+              className="mt-8 max-w-2xl mx-auto rounded-xl border p-4 text-sm"
+              style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+            >
+              <p className="font-semibold mb-2">💡 직접 시도해 보세요</p>
+              <ul className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
+                <li>• <strong>입력창에 텍스트 길게 입력</strong> → 위 댓글 영역이 동적으로 줄어듦</li>
+                <li>• <strong>📎 아이콘 클릭</strong> → 데모 이미지 추가 (한 댓글에 여러 장)</li>
+                <li>• <strong>이미지 파일 드래그</strong> → 입력 카드 위로 던지면 보라 점선 테두리</li>
+                <li>• <strong>Ctrl+V</strong> → 클립보드의 스크린샷 바로 붙여넣기</li>
+                <li>• <strong>상단 컨트롤</strong> → 패널 너비 (320/380/420px), 입력창 최대 높이 슬라이더로 비교</li>
+                <li>• <strong>다크/라이트 모드</strong> 우상단 버튼으로 전환</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

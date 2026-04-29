@@ -63,7 +63,7 @@ function toBuffer(base64Data: string): Buffer {
 export async function uploadImage(
   sheetName: string,
   sceneId: string,
-  imageType: 'storyboard' | 'guide',
+  imageType: 'storyboard' | 'guide' | 'comment',
   base64Data: string,
 ): Promise<{ ok: boolean; url?: string; error?: string }> {
   try {

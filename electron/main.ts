@@ -1161,8 +1161,8 @@ ipcMain.handle('supabase:fetch-missed-mentions', wrapIpc(async (
   return sbFetchMissedMentions(userId, userName, since, limit ?? 50);
 }));
 ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
-  userId: string, userName: string, text: string, mentions: string[], createdAt: string) => {
-  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt);
+  userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = []) => {
+  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images);
   // 활동 기록 — partUuid 로 부서/에피소드 + scene UUID 자동 조회
   // (sceneId 가 TEXT 형식이라 scenes 테이블 조회로 UUID 변환 — 그룹화 정확성 + 부서 필터 통과)
   if (currentActivityUser) {
@@ -1199,8 +1199,8 @@ ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: st
     } catch { /* 무시 */ }
   }
 }));
-ipcMain.handle('supabase:edit-comment', wrapIpc(async (_e: unknown, commentId: string, text: string, mentions: string[]) => {
-  await sbEditComment(commentId, text, mentions);
+ipcMain.handle('supabase:edit-comment', wrapIpc(async (_e: unknown, commentId: string, text: string, mentions: string[], images: string[] = []) => {
+  await sbEditComment(commentId, text, mentions, images);
 }));
 ipcMain.handle('supabase:delete-comment', wrapIpc(async (_e: unknown, commentId: string) => {
   await sbDeleteComment(commentId);

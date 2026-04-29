@@ -134,6 +134,7 @@ export interface SupabaseComment {
   userName: string;
   text: string;
   mentions: string[];
+  images: string[];
   createdAt: string;
   editedAt: string | null;
 }
@@ -902,6 +903,7 @@ export async function fetchMissedMentions(
         userName: c.user_name,
         text: c.text,
         mentions: c.mentions || [],
+        images: c.images || [],            // v1.15.12: 이미지 첨부
         createdAt: c.created_at,
         editedAt: c.edited_at,
       });
@@ -931,6 +933,7 @@ export async function readCommentsForPart(partUuid: string): Promise<SupabaseCom
     userName: c.user_name,
     text: c.text,
     mentions: c.mentions || [],
+    images: c.images || [],
     createdAt: c.created_at,
     editedAt: c.edited_at,
   }));
@@ -946,6 +949,7 @@ export async function addComment(
   text: string,
   mentions: string[],
   createdAt: string,
+  images: string[] = [],
 ): Promise<void> {
   // 이슈 F(2026-04-23) + Codex P1(2차): 댓글 경로의 sceneId는 scene.no (=sort_order).
   // sort_order 정확 매칭으로 scene_number 표기 규칙과 무관하게 정확히 식별.
@@ -967,6 +971,7 @@ export async function addComment(
     user_name: userName,
     text,
     mentions,
+    images,
     created_at: createdAt,
   });
   throwIfError(error);
@@ -978,10 +983,11 @@ export async function editComment(
   commentId: string,
   text: string,
   mentions: string[],
+  images: string[] = [],
 ): Promise<void> {
   const { error } = await supabase
     .from('comments')
-    .update({ text, mentions, edited_at: new Date().toISOString() })
+    .update({ text, mentions, images, edited_at: new Date().toISOString() })
     .eq('id', commentId);
   throwIfError(error);
   broadcastDataChange('comments', 'UPDATE');

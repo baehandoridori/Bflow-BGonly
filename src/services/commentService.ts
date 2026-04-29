@@ -19,6 +19,7 @@ export interface SceneComment {
   userName: string;
   text: string;
   mentions: string[];   // 태그된 사용자 이름 목록
+  images?: string[];    // Supabase Storage CDN URL — v1.15.12+ (이미지 첨부)
   createdAt: string;    // ISO 8601
   editedAt?: string;
 }
@@ -108,7 +109,7 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
     }
   } catch { /* 무시 */ }
 
-  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string | null }[] = [];
+  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; images?: string[]; createdAt: string; editedAt: string | null }[] = [];
 
   let supabaseFailed = false;
   if (partUuids.length > 0) {
@@ -132,7 +133,8 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
         rawComments = (result.data ?? []).map((c) => ({
           id: c.commentId, partId: '', sceneId: c.sceneId,
           userId: c.userId, userName: c.userName, text: c.text,
-          mentions: c.mentions ?? [], createdAt: c.createdAt, editedAt: c.editedAt || null,
+          mentions: c.mentions ?? [], images: [],
+          createdAt: c.createdAt, editedAt: c.editedAt || null,
         }));
       }
     } catch { /* fallback도 실패 */ }
@@ -194,6 +196,7 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
       userName: c.userName,
       text: c.text,
       mentions: c.mentions ?? [],
+      images: c.images ?? [],
       createdAt: c.createdAt,
       editedAt: c.editedAt || undefined,
     });
@@ -246,7 +249,7 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
     await window.electronAPI.supabaseAddComment(
       comment.id, partUuid, sceneId,
       comment.userId, comment.userName, comment.text,
-      comment.mentions, comment.createdAt,
+      comment.mentions, comment.createdAt, comment.images ?? [],
     );
     // 캐시 업데이트 — 원본 sheet 캐시에만 낙관적 반영.
     // 반대 부서 sheet 캐시는 invalidate해서 다음 조회 시 통합 재조회로 반영 (중복 삽입 방지).
@@ -273,18 +276,18 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
 }
 
 export async function updateComment(
-  sceneKey: string, commentId: string, text: string, mentions: string[],
+  sceneKey: string, commentId: string, text: string, mentions: string[], images: string[] = [],
 ): Promise<void> {
   const editedAt = new Date().toISOString();
 
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
-    await window.electronAPI.supabaseEditComment(commentId, text, mentions);
+    await window.electronAPI.supabaseEditComment(commentId, text, mentions, images);
     // 캐시 업데이트 — commentId 기준으로 모든 캐시/리스트를 순회 (BG·ACT 양쪽 매핑 반영)
     sheetPartCache.forEach((store) => {
       for (const list of Object.values(store)) {
         const idx = list.findIndex(c => c.id === commentId);
-        if (idx >= 0) list[idx] = { ...list[idx], text, mentions, editedAt };
+        if (idx >= 0) list[idx] = { ...list[idx], text, mentions, images, editedAt };
       }
     });
     // 자기 창 뱃지/패널 즉시 갱신
@@ -300,7 +303,7 @@ export async function updateComment(
   const list = all[sceneKey];
   if (!list) return;
   const idx = list.findIndex(c => c.id === commentId);
-  if (idx >= 0) list[idx] = { ...list[idx], text, mentions, editedAt };
+  if (idx >= 0) list[idx] = { ...list[idx], text, mentions, images, editedAt };
   await saveLocal(all);
 }
 

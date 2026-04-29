@@ -1,0 +1,100 @@
+/* ─── 댓글 패널 cowork 스타일 (v1.15.12) ─── */
+/* 떠있는 입력 카드 + 부드러운 자라기 + focus 펄스 + 드래그 오버레이 */
+
+:root {
+  --comment-shadow-base: 0 6px 18px rgba(0, 0, 0, 0.32);
+  --comment-card-elev-rgb: 41, 44, 60;       /* 다크 — bg-card 보다 한 단계 elevated */
+}
+[data-color-mode="light"] {
+  --comment-shadow-base: 0 6px 18px rgba(20, 22, 30, 0.12);
+  --comment-card-elev-rgb: 247, 248, 253;
+}
+
+/* textarea 부드러운 자라기 */
+.comment-input-textarea {
+  transition: height 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 떠있는 입력 카드 */
+.comment-input-card {
+  box-shadow: var(--comment-shadow-base), 0 0 0 1px rgb(var(--color-accent) / 0.08);
+  transition: border-color 200ms ease, box-shadow 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.comment-input-card.focused {
+  animation: comment-input-pulse 2.4s ease-in-out infinite;
+}
+@keyframes comment-input-pulse {
+  0%, 100% {
+    box-shadow:
+      var(--comment-shadow-base),
+      0 0 0 1px rgb(var(--color-accent) / 0.32);
+  }
+  50% {
+    box-shadow:
+      var(--comment-shadow-base),
+      0 0 0 6px rgb(var(--color-accent) / 0.18);
+  }
+}
+/* 드래그 중 입력 카드: 펄스 멈추고 진한 강조 */
+.comment-input-card.dragover {
+  animation: none !important;
+  box-shadow:
+    var(--comment-shadow-base),
+    0 0 0 2px rgb(var(--color-accent) / 0.6) !important;
+}
+
+/* 드래그 오버레이 — 댓글 패널 전체 덮음 */
+.comment-drop-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgb(var(--color-accent) / 0.18);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  border: 2px dashed rgb(var(--color-accent) / 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 20;
+  animation: comment-drop-overlay-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes comment-drop-overlay-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+.comment-drop-icon {
+  animation: comment-drop-icon-bounce 1.2s ease-in-out infinite;
+}
+@keyframes comment-drop-icon-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+/* 라이트박스 (이미지 클릭 시 확대 보기) */
+.comment-lightbox-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: comment-lightbox-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes comment-lightbox-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.comment-lightbox-image {
+  max-width: 92vw;
+  max-height: 92vh;
+  object-fit: contain;
+  animation: comment-lightbox-image-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes comment-lightbox-image-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
+import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
+import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 import {
@@ -11,10 +11,13 @@ import {
 } from '@/services/commentService';
 import type { SceneComment } from '@/services/commentService';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
-import { formatTime, formatTimeShort } from '@/utils/formatTime';
+import { formatTimeShort } from '@/utils/formatTime';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import * as storageService from '@/services/storageService';
+import { resizeBlob } from '@/utils/imageUtils';
+import '@/styles/comment-panel.css';
 
-// ─── 메인 컴포넌트 ───────────────────────────
+// ─── 타입 ───────────────────────────────────
 
 interface CommentPanelProps {
   /** 기본 sceneKey. 새 댓글은 항상 이 키에 저장된다 */
@@ -27,27 +30,91 @@ interface CommentPanelProps {
 /** 내부 렌더링용 — 원본이 어느 sceneKey 에서 왔는지 추적 */
 type SceneCommentWithSource = SceneComment & { _sourceKey?: string };
 
+/** 첨부 진행 중인 이미지 — 업로드 완료 시 uploadedUrl 채워짐 */
+interface AttachedImage {
+  id: string;
+  previewUrl: string;       // blob URL — 즉시 미리보기
+  uploadedUrl?: string;     // CDN URL — 업로드 완료 후
+  uploading: boolean;
+  error?: string;
+}
+
+// ─── sceneKey 분해 ─────────────────────────
+function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string } {
+  const idx = sceneKey.lastIndexOf(':');
+  return { sheetName: sceneKey.substring(0, idx), sceneId: sceneKey.substring(idx + 1) };
+}
+
+// ─── 메인 컴포넌트 ──────────────────────────
+
 export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
+  const { setView, setHighlightUserName } = useAppStore();
+
+  const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
+
+  // 댓글 상태
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
-  const [input, setInput] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+
+  // 입력 상태
+  const [input, setInput] = useState('');
+  const [taHeight, setTaHeight] = useState(40);
+  const [focused, setFocused] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+
+  // 멘션 자동완성
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
-  const [submitting, setSubmitting] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
+
+  // 드래그 + 라이트박스
+  const [draggingOver, setDraggingOver] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  // 패널 높이 측정 — 입력 카드 35% 한계 계산
+  const [panelHeight, setPanelHeight] = useState(0);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragCounter = useRef(0);
 
-  // 댓글 로드 — primary + optional secondary 조회 후 시간순 병합.
-  //
-  // 모드별 동작:
-  // - sheets 모드: loadPartComments 가 BG·ACT 양쪽 파트를 통합 조회하므로 primary 결과에 이미
-  //   양쪽 댓글이 모두 포함된다. secondary 결과는 primary 와 겹치지만 commentId dedupe 로 안전.
-  // - 로컬(파일) 모드 (Codex P2 2차, 2026-04-23): getComments 가 단일 sceneKey 만 읽으므로
-  //   통합 뷰 상세 모달에서 counterpart 부서 댓글을 보려면 secondary 도 반드시 조회해야 한다.
+  // ── 입력 카드 + textarea 한계 계산 ──
+  // 패널 전체 높이의 35% 까지 입력 카드가 자란다. 그 이상은 textarea 안에서 스크롤.
+  // textarea 가 hard cap (taMaxPx) 을 넘지 않게 막아 toolbar 영역이 카드 maxHeight 안에 항상 보이게 보장.
+  const inputCardMaxPx = Math.max(140, Math.floor(panelHeight * 0.35));
+  const imageRowHeight = attachedImages.length > 0 ? 88 : 0;       // 썸네일 64 + 위아래 여백 + pb-1
+  const FOOTER_H = 56;                                              // toolbar(h-7) + mt-1.5 + border + pt-1.5 + 카드 padding(pt-2 + pb-1.5)
+  const taMaxPx = Math.max(40, inputCardMaxPx - imageRowHeight - FOOTER_H);
+
+  // 패널 ResizeObserver — 부모 높이 변화 추적
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const update = () => setPanelHeight(panel.clientHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(panel);
+    return () => ro.disconnect();
+  }, []);
+
+  // textarea 부드러운 자라기 — 측정 시 'auto' 잠깐 → 이전 px 복원 → setState (px → px transition)
+  useLayoutEffect(() => {
+    const ta = inputRef.current;
+    if (!ta) return;
+    const prev = ta.style.height;
+    ta.style.height = 'auto';
+    const sh = ta.scrollHeight;
+    ta.style.height = prev;
+    setTaHeight(Math.max(40, Math.min(sh, taMaxPx)));
+  }, [input, taMaxPx]);
+
+  // 댓글 로드 — primary + optional secondary 시간순 병합 (기존 로직)
   const loadComments = useCallback(() => {
     const primaryPromise = getComments(sceneKey).then((list) =>
       list.map<SceneCommentWithSource>((c) => ({ ...c, _sourceKey: sceneKey })),
@@ -62,7 +129,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       const merged = [...a, ...b].sort(
         (x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime(),
       );
-      // commentId 기준 중복 제거 — sheets 모드 통합 조회로 primary·secondary가 겹쳐도 안전.
       const seen = new Set<string>();
       const deduped = merged.filter((c) => {
         if (seen.has(c.id)) return false;
@@ -76,7 +142,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
 
   useEffect(() => { loadComments(); }, [loadComments]);
 
-  // 다른 PC에서 댓글 변경 시 자동 리로드 (300ms 디바운스로 중복 방지)
+  // 다른 PC 변경 시 자동 리로드 (300ms 디바운스)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const handler = () => {
@@ -104,9 +170,114 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     items[mentionIndex]?.scrollIntoView({ block: 'nearest' });
   }, [mentionIndex, showMentions]);
 
-  // 댓글 작성 (낙관적 업데이트 + 중복 방지) — 저장은 항상 primary(sceneKey)에만
+  // 라이트박스 ESC 닫기
+  useEffect(() => {
+    if (!lightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLightboxUrl(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightboxUrl]);
+
+  // 컴포넌트 언마운트 시 blob URL 정리
+  useEffect(() => {
+    return () => {
+      attachedImages.forEach(a => {
+        try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── 이미지 업로드 ──
+  const uploadAttachedImage = useCallback(async (id: string, file: File | Blob) => {
+    try {
+      const base64 = await resizeBlob(file, 800, 0.8);
+      const result = await storageService.uploadImage(sheetName, sceneId, 'comment', base64);
+      if (result.ok && result.url) {
+        const url = result.url;
+        setAttachedImages(prev => prev.map(a =>
+          a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a
+        ));
+      } else {
+        throw new Error(result.error || '업로드 실패');
+      }
+    } catch (err) {
+      console.error('[댓글 이미지 업로드 실패]', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setAttachedImages(prev => prev.map(a =>
+        a.id === id ? { ...a, uploading: false, error: msg } : a
+      ));
+    }
+  }, [sheetName, sceneId]);
+
+  const addAttachedImageFromBlob = useCallback((file: File | Blob) => {
+    const id = crypto.randomUUID();
+    const previewUrl = URL.createObjectURL(file);
+    setAttachedImages(prev => [...prev, { id, previewUrl, uploading: true }]);
+    void uploadAttachedImage(id, file);
+  }, [uploadAttachedImage]);
+
+  const removeAttachedImage = (id: string) => {
+    setAttachedImages(prev => {
+      const target = prev.find(a => a.id === id);
+      if (target?.previewUrl) {
+        try { URL.revokeObjectURL(target.previewUrl); } catch { /* ignore */ }
+      }
+      return prev.filter(a => a.id !== id);
+    });
+  };
+
+  // 클립보드 paste
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const imageItems = items.filter(it => it.type.startsWith('image/'));
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+    imageItems.forEach(it => {
+      const f = it.getAsFile();
+      if (f) addAttachedImageFromBlob(f);
+    });
+  };
+
+  // 드래그 카운터 패턴 — 자식 위 이동 시 깜빡임 방지
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (Array.from(e.dataTransfer?.types || []).includes('Files')) {
+      dragCounter.current += 1;
+      if (dragCounter.current === 1) setDraggingOver(true);
+    }
+  };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
+    if (dragCounter.current === 0) setDraggingOver(false);
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDraggingOver(false);
+    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
+    files.forEach(addAttachedImageFromBlob);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
+    files.forEach(addAttachedImageFromBlob);
+    e.target.value = '';
+  };
+
+  // ── 전송 ──
+  const hasUploadingImage = attachedImages.some(a => a.uploading);
+  const uploadedImageUrls = attachedImages.map(a => a.uploadedUrl).filter((u): u is string => !!u);
+  const canSubmit = !submitting
+    && !hasUploadingImage
+    && (input.trim().length > 0 || uploadedImageUrls.length > 0);
+
   const handleSubmit = async () => {
-    if (!input.trim() || !currentUser || submitting) return;
+    if (!canSubmit || !currentUser) return;
     setSubmitting(true);
 
     const mentions = extractMentions(input, users.map(u => u.name));
@@ -116,39 +287,41 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       userName: currentUser.name,
       text: input.trim(),
       mentions,
+      images: uploadedImageUrls,
       createdAt: new Date().toISOString(),
       _sourceKey: sceneKey,
     };
 
-    // 낙관적: 즉시 UI 반영
+    // 낙관적 UI
     const next = [...comments, comment];
     setComments(next);
     onCountChange?.(next.length);
+
+    // 입력 영역 초기화 + blob URL 정리
     setInput('');
-    // 전송 후 입력란 높이 초기화
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-    }
+    setAttachedImages(prev => {
+      prev.forEach(a => {
+        try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
+      });
+      return [];
+    });
     setShowMentions(false);
 
     try {
       await addComment(sceneKey, comment);
 
-      // 슬랙 웹훅: 멘션된 사용자에게 알림 전송 (fire-and-forget)
-      console.log('[댓글 웹훅] mentions:', mentions, 'currentUser.slackId:', currentUser.slackId);
+      // 슬랙 멘션 웹훅 (기존 로직 보존)
       if (mentions.length > 0 && currentUser.slackId) {
-        const [sheetName, sceneId] = sceneKey.split(':');
         const parts = sheetName.match(/^EP(\d+)_([A-Z])_/);
         const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : sheetName;
         const partLabel = parts ? `${parts[2]}파트` : '';
-
         for (const mentionedName of mentions) {
           const target = users.find(u => u.name === mentionedName);
           if (target?.slackId && target.slackId !== currentUser.slackId) {
             sendMentionWebhook({
               commentText: comment.text,
               episodeLabel: epLabel,
-              sceneId: sceneId || '',
+              sceneId,
               partLabel,
               sheetName,
               authorSlackId: currentUser.slackId,
@@ -158,7 +331,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
         }
       }
     } catch (err) {
-      // 롤백
       console.error('[댓글 추가 실패]', err);
       setComments(comments);
       onCountChange?.(comments.length);
@@ -167,15 +339,15 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     }
   };
 
-  // 댓글 수정 (낙관적) — 대상 댓글의 _sourceKey 로 작업 (통합 뷰에서도 안전)
+  // 댓글 수정 (낙관적) — 이미지는 기존 그대로 유지 (수정은 텍스트만)
   const handleEdit = async (commentId: string) => {
     if (!editText.trim()) return;
     const target = comments.find((c) => c.id === commentId);
     const targetKey = target?._sourceKey ?? sceneKey;
     const mentions = extractMentions(editText, users.map(u => u.name));
+    const existingImages = target?.images ?? [];
     const prevComments = [...comments];
 
-    // 낙관적 UI 업데이트
     setComments(prev =>
       prev.map(c =>
         c.id === commentId
@@ -186,7 +358,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     setEditingId(null);
 
     try {
-      await updateComment(targetKey, commentId, editText.trim(), mentions);
+      await updateComment(targetKey, commentId, editText.trim(), mentions, existingImages);
     } catch (err) {
       console.error('[댓글 수정 실패]', err);
       setComments(prevComments);
@@ -200,7 +372,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     const prevComments = [...comments];
     const next = comments.filter(c => c.id !== commentId);
 
-    // 낙관적 UI 업데이트
     setComments(next);
     onCountChange?.(next.length);
 
@@ -213,16 +384,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     }
   };
 
-  // @멘션 감지
+  // @멘션 입력 추적 (자라기 동작은 useLayoutEffect 가 담당)
   const handleInputChange = (text: string) => {
     setInput(text);
-    // 입력란 auto-grow (애니메이션 없이 즉시 리사이즈).
-    // Cowork 식 부드러운 전환은 v1.13.0 백로그 이슈 A2 에서 리팩토링 예정.
-    const ta = inputRef.current;
-    if (ta) {
-      ta.style.height = 'auto';
-      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-    }
     const lastAt = text.lastIndexOf('@');
     if (lastAt >= 0) {
       const afterAt = text.slice(lastAt + 1);
@@ -236,7 +400,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     setShowMentions(false);
   };
 
-  // @멘션 삽입
   const insertMention = (userName: string) => {
     const lastAt = input.lastIndexOf('@');
     const before = input.slice(0, lastAt);
@@ -249,15 +412,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     u.name.toLowerCase().includes(mentionFilter)
   );
 
-  // @멘션 클릭 → 팀원 뷰로 이동 + 글로우 하이라이트
-  const { setView, setHighlightUserName } = useAppStore();
   const handleMentionClick = (userName: string) => {
     setHighlightUserName(userName);
     setView('team');
   };
 
-  // 텍스트 내 @멘션 렌더 (굵은 글씨 + 배경 하이라이트 + 클릭 가능)
-  // PathLinkifiedText 가 G:\ 경로를 PathBadge 로 분리하고, 그 사이 텍스트만 이 함수가 받아 멘션 처리.
   const renderMentionInSegment = (segment: string, baseIdx: number) => {
     const parts = segment.split(/(@\S+)/g);
     return parts.map((part, i) => {
@@ -286,9 +445,18 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     <PathLinkifiedText text={text} renderTextSegment={renderMentionInSegment} />
   );
 
+  // ─── 렌더링 ────────────────────────────────
+
   return (
-    <div className="flex flex-col h-full">
-      {/* 댓글 목록 — 채팅 스타일. select-text: 말풍선·이름·시간 모두 드래그 선택 가능 (복사용) */}
+    <div
+      ref={panelRef}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="flex flex-col h-full relative"
+    >
+      {/* 댓글 목록 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
         {comments.length === 0 ? (
           <div className="text-center py-10">
@@ -299,9 +467,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
           comments.map((comment) => {
             const isOwn = currentUser?.id === comment.userId;
             const isEditing = editingId === comment.id;
+            const hasImages = (comment.images?.length ?? 0) > 0;
             return (
               <div key={comment.id} className="group">
-                {/* 메타: 이름 + 시간 */}
+                {/* 메타 */}
                 <div className={`flex items-center gap-2 mb-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
                   {isOwn ? (
                     <>
@@ -367,13 +536,32 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
                           isOwn ? 'bg-emerald-500/20' : 'bg-bg-border/70'
                         }`}
                       >
-                        {renderText(comment.text)}
+                        {comment.text && <div>{renderText(comment.text)}</div>}
+                        {hasImages && (
+                          <div
+                            className={`grid gap-1 ${comment.text ? 'mt-2' : ''} ${
+                              comment.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+                            }`}
+                          >
+                            {comment.images!.map((url, i) => (
+                              <img
+                                key={i}
+                                src={url}
+                                alt=""
+                                className="rounded-md w-full object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
+                                style={{ maxHeight: 160 }}
+                                onClick={() => setLightboxUrl(url)}
+                                loading="lazy"
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {/* 수정/삭제 (자기 댓글만) — 호버 시 표시 */}
+                    {/* 수정/삭제 (자기 댓글만) */}
                     {isOwn && !isEditing && (
-                      <div className={`absolute top-0 ${isOwn ? '-left-14' : '-right-14'} flex gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity`}>
+                      <div className="absolute top-0 -left-14 flex gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity">
                         <button
                           onClick={() => { setEditingId(comment.id); setEditText(comment.text); }}
                           className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
@@ -398,11 +586,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
         )}
       </div>
 
-      {/* 입력 영역 */}
-      <div className="px-4 py-3 border-t border-bg-border relative">
+      {/* 입력 영역 — 떠있는 카드 (위 댓글 영역과 시각적 분리) */}
+      <div className="px-3 pb-3 pt-3 relative">
         {/* @멘션 자동완성 */}
         {showMentions && filteredUsers.length > 0 && (
-          <div ref={mentionDropdownRef} className="absolute bottom-full left-4 right-4 mb-1 bg-bg-card border border-bg-border rounded-lg shadow-lg max-h-32 overflow-y-auto z-10">
+          <div ref={mentionDropdownRef} className="absolute bottom-full left-3 right-3 mb-1 bg-bg-card border border-bg-border rounded-lg shadow-lg max-h-32 overflow-y-auto z-30">
             {filteredUsers.map((user, i) => (
               <button
                 key={user.id}
@@ -417,15 +605,62 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
             ))}
           </div>
         )}
-        <div className="flex gap-2 items-end">
+
+        <div
+          onPaste={handlePaste}
+          className={`comment-input-card rounded-xl border px-2.5 pt-2 pb-1.5 ${focused && !draggingOver ? 'focused' : ''} ${draggingOver ? 'dragover' : ''}`}
+          style={{
+            background: 'rgb(var(--comment-card-elev-rgb))',
+            borderColor: draggingOver
+              ? 'rgb(var(--color-accent))'
+              : (focused ? 'rgb(var(--color-accent-sub))' : 'rgb(var(--color-bg-border))'),
+            maxHeight: inputCardMaxPx,
+          }}
+        >
+          {/* 이미지 썸네일 줄 */}
+          {attachedImages.length > 0 && (
+            <div className="flex gap-2 mb-2 overflow-x-auto pb-1" style={{ height: 76 }}>
+              {attachedImages.map(img => (
+                <div key={img.id} className="relative flex-shrink-0">
+                  <img
+                    src={img.previewUrl}
+                    className="w-16 h-16 object-cover rounded-lg border border-bg-border"
+                    alt=""
+                  />
+                  {img.uploading && (
+                    <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    </div>
+                  )}
+                  {img.error && (
+                    <div className="absolute inset-0 bg-red-500/40 rounded-lg flex items-center justify-center" title={`업로드 실패: ${img.error}`}>
+                      <X size={20} className="text-white" />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => removeAttachedImage(img.id)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[11px] flex items-center justify-center hover:scale-110 transition-transform cursor-pointer"
+                    style={{ border: '2px solid rgb(var(--comment-card-elev-rgb))' }}
+                    title="제거"
+                  >×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* textarea — 풀 너비 */}
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
-            placeholder="댓글 입력..."
-            className="flex-1 bg-bg-primary border border-bg-border rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary/40 resize-none focus:outline-none focus:border-accent min-h-[32px] max-h-[200px] overflow-y-auto"
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder="댓글 입력... (Ctrl+V / 드래그로 이미지)"
+            rows={1}
+            className="comment-input-textarea block w-full px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto"
+            style={{ height: taHeight, maxHeight: taMaxPx, boxSizing: 'border-box' }}
             onKeyDown={(e) => {
-              // @멘션 드롭다운 키보드 탐색
+              // @멘션 키보드 탐색
               if (showMentions && filteredUsers.length > 0) {
                 if (e.key === 'ArrowDown') {
                   e.preventDefault();
@@ -454,19 +689,79 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
               }
             }}
           />
-          <button
-            onClick={handleSubmit}
-            disabled={!input.trim() || submitting}
-            className="px-3.5 py-2 rounded-xl bg-[#10B981] hover:bg-[#10B981]/80 disabled:opacity-30 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors cursor-pointer"
-          >
-            {submitting ? (
-              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              '전송'
-            )}
-          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={handleFileChange}
+          />
+          {/* 하단 toolbar — 좌측 첨부, 우측 전송 (cowork 스타일) */}
+          <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-bg-border/40">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-card hover:text-text-primary transition-colors cursor-pointer"
+              title="이미지 첨부"
+            >
+              <Paperclip size={14} />
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              className="w-7 h-7 rounded-md flex items-center justify-center bg-accent hover:bg-accent-sub text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              title={hasUploadingImage ? '이미지 업로드 중...' : '전송 (Enter)'}
+            >
+              {submitting ? (
+                <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <ArrowUp size={14} strokeWidth={2.5} />
+              )}
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* 드래그 오버레이 */}
+      {draggingOver && (
+        <div className="comment-drop-overlay">
+          <div className="flex flex-col items-center gap-2 px-4 text-center">
+            <div className="comment-drop-icon text-accent">
+              <ImagePlus size={48} strokeWidth={1.6} />
+            </div>
+            <div className="text-sm font-semibold text-accent-sub">
+              이미지를 여기에 놓으세요
+            </div>
+            <div className="text-[11px] text-text-secondary">
+              여러 장을 한 번에 첨부할 수 있어요
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 라이트박스 (이미지 클릭 시 확대) */}
+      {lightboxUrl && (
+        <div
+          className="comment-lightbox-backdrop cursor-zoom-out"
+          onClick={() => setLightboxUrl(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <img
+            src={lightboxUrl}
+            alt=""
+            className="comment-lightbox-image cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setLightboxUrl(null)}
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors cursor-pointer"
+            title="닫기 (ESC)"
+          >
+            <X size={20} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
