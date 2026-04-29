@@ -187,11 +187,19 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
   const inputValueRef = useRef('');
   useEffect(() => { inputValueRef.current = input; }, [input]);
 
-  // 컴포넌트 언마운트 시 blob URL 정리
+  // 컴포넌트 언마운트 시 blob URL 정리.
+  // Codex P2 5차(2026-04-29): unmount 시점에 attachedImages 에 남아있는 항목은 모두 *전송 안 된 draft* 다
+  // (성공 시 setAttachedImages([]) 으로 비워지므로). 업로드 완료된 draft 의 uploadedUrl 도 storage 에서 삭제 →
+  // "이미지 첨부 → 업로드 완료 → 패널 닫고 떠남" 같은 정상 사용자 행동에서 발생하던 storage leak 방지.
   useEffect(() => {
     return () => {
       attachedImagesRef.current.forEach(a => {
         try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
+        if (a.uploadedUrl) {
+          storageService.deleteImage(a.uploadedUrl).catch(err => {
+            console.warn('[댓글 패널 unmount] draft Storage 정리 실패:', err);
+          });
+        }
       });
     };
   }, []);
@@ -203,9 +211,18 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       const result = await storageService.uploadImage(sheetName, sceneId, 'comment', base64);
       if (result.ok && result.url) {
         const url = result.url;
-        setAttachedImages(prev => prev.map(a =>
-          a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a
-        ));
+        // Codex P2 5차(2026-04-29): 업로드 race — 사용자가 진행 중에 X 로 이미 제거했을 수 있다.
+        // functional updater 안에서 항목 존재 여부 확인 후, 없으면 방금 업로드된 객체를 즉시 storage 에서 삭제.
+        setAttachedImages(prev => {
+          const exists = prev.some(a => a.id === id);
+          if (!exists) {
+            storageService.deleteImage(url).catch(err => {
+              console.warn('[댓글 이미지 race] 사용자 제거 후 도착한 업로드 객체 정리 실패:', err);
+            });
+            return prev;
+          }
+          return prev.map(a => a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a);
+        });
       } else {
         throw new Error(result.error || '업로드 실패');
       }
