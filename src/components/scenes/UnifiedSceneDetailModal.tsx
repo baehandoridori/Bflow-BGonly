@@ -418,32 +418,60 @@ export function UnifiedSceneDetailModal({
               </div>
             )}
 
-            {/* ── 리비전 토글 탭 버튼 — 본체 우측에 튀어나오도록 absolute ── */}
-            <AnimatePresence>
-              {!showRevisions && (
-                <motion.button
-                  key="revision-tab"
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
-                  transition={{ delay: 0.15, duration: 0.2 }}
-                  onClick={() => setShowRevisions(true)}
-                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer z-10"
-                  style={openRevCount > 0 ? { backgroundColor: 'rgba(253, 203, 110, 0.15)' } : {}}
-                  title="컴포지팅 리비전"
-                >
-                  <Film size={18} />
-                  {(openRevCount > 0 || revisionCount > 0) && (
-                    <span className="text-[10px] font-bold text-[#FDCB6E] tabular-nums">
-                      {openRevCount > 0 ? openRevCount : revisionCount}
-                    </span>
-                  )}
-                </motion.button>
-              )}
-            </AnimatePresence>
           </motion.div>
 
-          {/* ── 리비전 패널 (토글) ── */}
+          {/* ── 댓글 패널 (상시 표시) — 리비전 토글 탭이 우측에 매달림 ── */}
+          {primaryCommentKey && (
+            <motion.div
+              key="comment-panel"
+              initial={{ opacity: 0, x: 30 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.25, delay: 0.1 }}
+              className="relative shrink-0"
+            >
+              <div className="w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="px-4 py-3 border-b border-bg-border shrink-0">
+                  <h3 className="text-sm font-medium text-text-primary">
+                    댓글 및 활동
+                    {commentCount > 0 && (
+                      <span className="ml-2 text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
+                    )}
+                  </h3>
+                </div>
+                <CommentPanel
+                  sceneKey={primaryCommentKey}
+                  secondarySceneKey={secondaryCommentKey || undefined}
+                  onCountChange={setCommentCount}
+                />
+              </div>
+
+              {/* ── 리비전 토글 탭 버튼 — 댓글 패널 우측에 튀어나오도록 absolute ── */}
+              <AnimatePresence>
+                {!showRevisions && (
+                  <motion.button
+                    key="revision-tab"
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
+                    transition={{ delay: 0.15, duration: 0.2 }}
+                    onClick={() => setShowRevisions(true)}
+                    className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer z-10"
+                    style={openRevCount > 0 ? { backgroundColor: 'rgba(253, 203, 110, 0.15)' } : {}}
+                    title="컴포지팅 리비전"
+                  >
+                    <Film size={18} />
+                    {(openRevCount > 0 || revisionCount > 0) && (
+                      <span className="text-[10px] font-bold text-[#FDCB6E] tabular-nums">
+                        {openRevCount > 0 ? openRevCount : revisionCount}
+                      </span>
+                    )}
+                  </motion.button>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          )}
+
+          {/* ── 리비전 패널 (토글) — 댓글 패널 우측에 펼쳐짐 ── */}
           <AnimatePresence>
             {showRevisions && revisionSheetName && revisionSceneId && (
               <motion.div
@@ -476,31 +504,6 @@ export function UnifiedSceneDetailModal({
               </motion.div>
             )}
           </AnimatePresence>
-
-          {/* ── 댓글 패널 (상시 표시) ── */}
-          {primaryCommentKey && (
-            <motion.div
-              key="comment-panel"
-              initial={{ opacity: 0, x: 30 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.25, delay: 0.1 }}
-              className="w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col shrink-0 overflow-hidden"
-            >
-              <div className="px-4 py-3 border-b border-bg-border shrink-0">
-                <h3 className="text-sm font-medium text-text-primary">
-                  댓글 및 활동
-                  {commentCount > 0 && (
-                    <span className="ml-2 text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
-                  )}
-                </h3>
-              </div>
-              <CommentPanel
-                sceneKey={primaryCommentKey}
-                secondarySceneKey={secondaryCommentKey || undefined}
-                onCountChange={setCommentCount}
-              />
-            </motion.div>
-          )}
         </div>
       </motion.div>
 

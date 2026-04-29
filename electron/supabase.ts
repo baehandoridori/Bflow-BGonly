@@ -816,9 +816,13 @@ export async function updateUser(
 
 /** 사용자 삭제.
  *  한솔 결정 (v1.15.7): 퇴사자 처리. 삭제 *전* 그 사용자가 담당자였던 씬/리비전의 assignee 를 자동으로 비움(NULL).
- *  - scenes.assignee, revisions.assignee 만 정리 (둘 다 TEXT, NOT NULL 없음)
- *  - 댓글의 user_id/user_name, 활동 로그는 *역사적 기록* 으로 보존 (누가 작업했는지)
- *  - update 가 실패해도 user 삭제 자체는 진행 (warn 만, hard fail X)
+ *  v1.15.13: 개인 데이터(개인 투두/메모/작업뷰/비공개 일정) 도 함께 정리.
+ *            - personal_todos 의 user_id FK constraint 가 라이브 DB 에 ON DELETE CASCADE 없이
+ *              걸려 있어 user 삭제가 막히던 문제 해결. 동시에 한솔 요청대로 개인 데이터 일괄 정리.
+ *  - scenes.assignee, comp_revisions.assignee 는 NULL 로 비움
+ *  - 개인 데이터 4종(personal_todos / task_views / memos / private_calendar_events) 은 행 자체 삭제
+ *  - 댓글(comments) 과 활동 로그(activity_log) 는 *역사적 기록* 으로 보존 (누가 작업했는지)
+ *  - 보조 cleanup 이 실패해도 user 삭제 자체는 진행 (warn 만, hard fail X)
  */
 export async function deleteUser(userId: string): Promise<void> {
   // 1) user_name 조회 — assignee 매칭 키
@@ -845,7 +849,15 @@ export async function deleteUser(userId: string): Promise<void> {
     if (revsErr) console.warn('[deleteUser] comp_revisions.assignee 비우기 실패:', revsErr);
   }
 
-  // 4) user 삭제
+  // 4) 개인 데이터 정리 — user 삭제 전에 user_id 로 묶인 행 먼저 비우기.
+  //    (personal_todos 는 라이브 DB 에 FK 가 걸려 있어 이 단계 없이는 user 삭제가 실패한다.)
+  const personalTables = ['personal_todos', 'task_views', 'memos', 'private_calendar_events'] as const;
+  for (const table of personalTables) {
+    const { error: cleanupErr } = await supabase.from(table).delete().eq('user_id', userId);
+    if (cleanupErr) console.warn(`[deleteUser] ${table} 정리 실패:`, cleanupErr);
+  }
+
+  // 5) user 삭제
   const { error } = await supabase.from('users').delete().eq('id', userId);
   throwIfError(error);
   broadcastDataChange('users', 'DELETE');
