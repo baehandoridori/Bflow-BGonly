@@ -1027,10 +1027,15 @@ export async function deleteComment(commentId: string): Promise<void> {
     })
     .filter((p): p is string => !!p);
   if (paths.length > 0) {
+    // Codex P2 11차(2026-04-30): supabase.storage.remove() 는 API 실패 시 throw 대신 { data, error } 를 반환.
+    // try/catch 만으로는 잡지 못하므로 error 객체를 명시적으로 확인.
     try {
-      await supabase.storage.from(STORAGE_BUCKET).remove(paths);
+      const { error: storageErr } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
+      if (storageErr) {
+        console.warn('[deleteComment] storage 이미지 정리 실패 (orphan 가능):', storageErr);
+      }
     } catch (err) {
-      console.warn('[deleteComment] storage 이미지 정리 실패 (orphan 가능):', err);
+      console.warn('[deleteComment] storage 이미지 정리 예외:', err);
     }
   }
 
