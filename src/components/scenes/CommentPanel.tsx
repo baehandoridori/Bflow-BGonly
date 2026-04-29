@@ -216,25 +216,30 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       const result = await storageService.uploadImage(sheetName, sceneId, 'comment', base64);
       if (result.ok && result.url) {
         const url = result.url;
-        // Codex P2 8차(2026-04-29): unmount 후 upload 완료 시 React 가 setState drop → orphan 발생.
-        // mountedRef 로 직접 체크해 unmount 됐으면 즉시 storage 정리. setAttachedImages updater 안 side-effect 의존 X.
+        // Codex P2 8차(2026-04-29): unmount 후 upload 완료 시 React 가 setState drop → orphan.
         if (!mountedRef.current) {
           storageService.deleteImage(url).catch(err => {
             console.warn('[댓글 이미지 unmount race] 정리 실패:', err);
           });
           return;
         }
-        // mounted 상태 — ref 로 사용자가 진행 중 X 로 제거했는지 확인.
-        const stillExists = attachedImagesRef.current.some(a => a.id === id);
-        if (!stillExists) {
-          storageService.deleteImage(url).catch(err => {
-            console.warn('[댓글 이미지 race] 사용자 제거 후 도착한 업로드 객체 정리 실패:', err);
-          });
-          return;
-        }
-        setAttachedImages(prev => prev.map(a =>
-          a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a
-        ));
+        // Codex P2 13차(2026-04-30): attachedImagesRef 가 useEffect 로 동기화되어 한 렌더 늦을 수 있어 race —
+        // 사용자 X 클릭 직후 ref 가 stale 한 상태에서 도착한 upload 가 stillExists=true 로 인식되면
+        // 이후 setAttachedImages.map 이 no-op 이 되어 uploadedUrl 이 어디에도 안 남고 orphan 발생.
+        // 해결: setAttachedImages functional updater 안에서 latest prev 로 직접 검사 (React 가 latest state 보장).
+        setAttachedImages(prev => {
+          const exists = prev.some(a => a.id === id);
+          if (!exists) {
+            // 사용자 X 클릭으로 이미 제거 → 도착한 upload 객체 정리
+            storageService.deleteImage(url).catch(err => {
+              console.warn('[댓글 이미지 race] 사용자 제거 후 도착한 업로드 객체 정리 실패:', err);
+            });
+            return prev;
+          }
+          return prev.map(a =>
+            a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a
+          );
+        });
       } else {
         throw new Error(result.error || '업로드 실패');
       }
