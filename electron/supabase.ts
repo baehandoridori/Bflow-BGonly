@@ -1005,12 +1005,17 @@ export async function editComment(
  *  댓글 삭제 후 storage 에 영구 orphan 파일이 쌓이는 문제 방지.
  */
 export async function deleteComment(commentId: string): Promise<void> {
-  // 1) 행 삭제 전에 attached image URL 조회
-  const { data: row } = await supabase
+  // 1) 행 삭제 전에 attached image URL 조회.
+  // Codex P2 12차(2026-04-30): maybeSingle 의 error 도 명시 체크 — 일시적 네트워크/PostgREST 에러로
+  // images 가 [] 로 silent fallback 되면 storage 객체가 정리되지 않은 채 row 만 삭제되어 orphan.
+  const { data: row, error: fetchErr } = await supabase
     .from('comments')
     .select('images')
     .eq('id', commentId)
     .maybeSingle();
+  if (fetchErr) {
+    console.warn('[deleteComment] images 조회 실패 — storage 정리 누락 가능:', fetchErr);
+  }
   const images = (row?.images ?? []) as unknown[];
 
   // 2) 댓글 row 삭제
