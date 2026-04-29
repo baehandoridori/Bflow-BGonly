@@ -383,6 +383,22 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       }
     } catch (err) {
       console.error('[댓글 추가 실패]', err);
+
+      // Codex P2 9차(2026-04-29): addComment 실패 + panel 이 그 동안 unmount 된 케이스 (slow request 중 close).
+      // setState 가 unmounted component 에서 drop 되어 prevAttached 의 uploadedUrl 정리 안 됨 → orphan.
+      // mountedRef 체크 후 state 복원 대신 storage 직접 정리.
+      if (!mountedRef.current) {
+        prevAttached.forEach(a => {
+          try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
+          if (a.uploadedUrl) {
+            storageService.deleteImage(a.uploadedUrl).catch(err2 => {
+              console.warn('[댓글 전송 실패 + unmount] storage 정리 실패:', err2);
+            });
+          }
+        });
+        return;
+      }
+
       // 롤백 — 댓글 리스트는 항상 복원.
       setComments(comments);
       onCountChange?.(comments.length);
