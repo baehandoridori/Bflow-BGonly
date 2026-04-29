@@ -284,25 +284,25 @@ export function MemoWidget() {
     return () => window.removeEventListener('storage', handler);
   }, [memoKey]);
 
-  // 언마운트 시 즉시 저장 (debounce flush)
+  // 언마운트 시 즉시 저장 — 한솔 보고 (v1.15.7): 플로팅 위젯 닫고 다시 열면 줄바꿈이 초기화됨.
+  // 기존엔 saveTimerRef.current 가 있을 때만 즉시 저장 → debounce 만료 + 새 변경 race 케이스에서 마지막
+  // 값이 누락될 수 있음. 조건 제거 + 항상 마지막 memoDataRef 를 Supabase 에 push.
   useEffect(() => {
     return () => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        const data = memoDataRef.current;
-        (async () => {
-          try {
-            const userId = useAuthStore.getState().currentUser?.id;
-            if (!userId) return;
-            await supabaseService.upsertMemo(userId, memoKey, {
-              tabs: data.tabs,
-              activeTabId: data.activeTabId,
-              fontSize: data.fontSize,
-            });
-            localStorage.setItem('memo-sync', `${memoKey}:${Date.now()}`);
-          } catch { /* ignore */ }
-        })();
-      }
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      const data = memoDataRef.current;
+      (async () => {
+        try {
+          const userId = useAuthStore.getState().currentUser?.id;
+          if (!userId) return;
+          await supabaseService.upsertMemo(userId, memoKey, {
+            tabs: data.tabs,
+            activeTabId: data.activeTabId,
+            fontSize: data.fontSize,
+          });
+          localStorage.setItem('memo-sync', `${memoKey}:${Date.now()}`);
+        } catch { /* ignore */ }
+      })();
     };
   }, [memoKey]);
 
