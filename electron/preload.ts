@@ -113,7 +113,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supabaseAddComment: (commentId: string, partUuid: string, sceneId: string,
     userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = []) =>
     ipcRenderer.invoke('supabase:add-comment', commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images),
-  supabaseEditComment: (commentId: string, text: string, mentions: string[], images: string[] = []) =>
+  supabaseEditComment: (commentId: string, text: string, mentions: string[], images?: string[]) =>
     ipcRenderer.invoke('supabase:edit-comment', commentId, text, mentions, images),
   supabaseDeleteComment: (commentId: string) =>
     ipcRenderer.invoke('supabase:delete-comment', commentId),

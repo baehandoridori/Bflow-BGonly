@@ -978,16 +978,23 @@ export async function addComment(
   broadcastCommentAdded(sceneId, userName, userId, text, mentions);
 }
 
-/** 댓글 수정 */
+/** 댓글 수정.
+ *  Codex P1(2026-04-29): images 가 undefined 면 update payload 에서 빼서 기존 값 보존.
+ *  Sheets fallback 으로 attachment 정보를 모르는 댓글을 수정할 때 실 이미지 URL 들을 silently 덮어쓰지 않도록.
+ */
 export async function editComment(
   commentId: string,
   text: string,
   mentions: string[],
-  images: string[] = [],
+  images?: string[],
 ): Promise<void> {
+  const updates: Record<string, unknown> = {
+    text, mentions, edited_at: new Date().toISOString(),
+  };
+  if (images !== undefined) updates.images = images;
   const { error } = await supabase
     .from('comments')
-    .update({ text, mentions, images, edited_at: new Date().toISOString() })
+    .update(updates)
     .eq('id', commentId);
   throwIfError(error);
   broadcastDataChange('comments', 'UPDATE');

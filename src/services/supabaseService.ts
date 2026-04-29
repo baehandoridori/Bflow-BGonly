@@ -138,7 +138,7 @@ export async function addCommentToSupabase(
   await window.electronAPI.supabaseAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images);
 }
 
-export async function editCommentInSupabase(commentId: string, text: string, mentions: string[], images: string[] = []): Promise<void> {
+export async function editCommentInSupabase(commentId: string, text: string, mentions: string[], images?: string[]): Promise<void> {
   await window.electronAPI.supabaseEditComment(commentId, text, mentions, images);
 }
 

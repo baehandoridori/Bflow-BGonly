@@ -180,14 +180,17 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     return () => window.removeEventListener('keydown', onKey);
   }, [lightboxUrl]);
 
-  // 컴포넌트 언마운트 시 blob URL 정리
+  // 컴포넌트 언마운트 시 blob URL 정리.
+  // Codex P2(2026-04-29): 빈 deps 의 cleanup 은 초기 렌더 시 attachedImages([])만 capture →
+  // 이후 추가된 미리보기 URL 들은 revoke 되지 않아 메모리 누수. ref 로 latest 값 추적해서 unmount 시 정확히 정리.
+  const attachedImagesRef = useRef<AttachedImage[]>([]);
+  useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
   useEffect(() => {
     return () => {
-      attachedImages.forEach(a => {
+      attachedImagesRef.current.forEach(a => {
         try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
       });
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── 이미지 업로드 ──
@@ -339,13 +342,15 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     }
   };
 
-  // 댓글 수정 (낙관적) — 이미지는 기존 그대로 유지 (수정은 텍스트만)
+  // 댓글 수정 (낙관적) — 이미지는 기존 그대로 유지 (수정은 텍스트만).
+  // Codex P1(2026-04-29): target.images 가 undefined (Sheets fallback) 면 그대로 undefined 전달 →
+  // updateComment 가 supabase update payload 에서 images 컬럼을 제외해 실 이미지 URL 들이 보존된다.
   const handleEdit = async (commentId: string) => {
     if (!editText.trim()) return;
     const target = comments.find((c) => c.id === commentId);
     const targetKey = target?._sourceKey ?? sceneKey;
     const mentions = extractMentions(editText, users.map(u => u.name));
-    const existingImages = target?.images ?? [];
+    const existingImages = target?.images;
     const prevComments = [...comments];
 
     setComments(prev =>

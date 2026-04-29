@@ -1199,7 +1199,7 @@ ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: st
     } catch { /* 무시 */ }
   }
 }));
-ipcMain.handle('supabase:edit-comment', wrapIpc(async (_e: unknown, commentId: string, text: string, mentions: string[], images: string[] = []) => {
+ipcMain.handle('supabase:edit-comment', wrapIpc(async (_e: unknown, commentId: string, text: string, mentions: string[], images?: string[]) => {
   await sbEditComment(commentId, text, mentions, images);
 }));
 ipcMain.handle('supabase:delete-comment', wrapIpc(async (_e: unknown, commentId: string) => {
