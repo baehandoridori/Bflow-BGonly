@@ -338,11 +338,24 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       }
     } catch (err) {
       console.error('[댓글 추가 실패]', err);
-      // 롤백 — 댓글 리스트 + 입력 텍스트 + 첨부 이미지 모두 복원해 재시도 가능하게
+      // 롤백 — 댓글 리스트는 항상 복원.
       setComments(comments);
       onCountChange?.(comments.length);
-      setInput(prevInput);
-      setAttachedImages(prevAttached);
+
+      // Codex P2 3차(2026-04-29): 전송 중 사용자가 새 드래프트를 입력했을 수 있다 (composer 는 in-flight 에도 편집 가능).
+      // 사용자 작업을 덮어쓰지 않게 functional updater 로 latest 값 확인 후, 비어있을 때만 prev 복원.
+      // 사용자가 새 작업을 시작했으면 prev 의 blob URL 만 revoke 해 leak 방지.
+      setInput(curr => (curr.length > 0 ? curr : prevInput));
+      setAttachedImages(curr => {
+        if (curr.length > 0) {
+          // 사용자가 새로 첨부 → prev URL 들 revoke 후 현재 유지
+          prevAttached.forEach(a => {
+            try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
+          });
+          return curr;
+        }
+        return prevAttached;
+      });
     } finally {
       setSubmitting(false);
     }
