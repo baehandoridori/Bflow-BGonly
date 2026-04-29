@@ -501,6 +501,8 @@ export interface ElectronAPI {
     id: string;
     partId: string;
     sceneId: string;
+    /** v1.15.9: 정확 씬 매칭용 UUID (catch-up navigateToScene 에서 활용) */
+    sceneUuid?: string | null;
     userId: string;
     userName: string;
     text: string;
