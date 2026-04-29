@@ -217,6 +217,11 @@ export function MemoWidget() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const memoDataRef = useRef(memoData);
   memoDataRef.current = memoData;
+  // 한솔 결정 (v1.15.7 Codex P1): unmount 저장 보호용 ref
+  // - loadedRef: 초기 데이터 로드 완료 여부 (false 면 default 상태 — 저장 금지)
+  // - dirtyRef: 사용자가 실제로 변경했는지 (false 면 무의미한 default 저장 금지)
+  const loadedRef = useRef(false);
+  const dirtyRef = useRef(false);
   const editorAreaRef = useRef<HTMLDivElement>(null);
 
   const activeEditor = editorByTab[memoData.activeTabId] ?? null;
@@ -238,11 +243,13 @@ export function MemoWidget() {
         console.error('[MemoWidget] 로드 실패:', err);
       }
       setLoaded(true);
+      loadedRef.current = true;  // Codex P1: unmount 저장 분기 게이트
     })();
   }, [memoKey, currentUserId]);
 
-  // 저장 (debounce, Supabase)
+  // 저장 (debounce, Supabase) — save() 호출 시점에 사용자가 변경했음을 의미하므로 dirty 마킹
   const save = useCallback((data: MemoData) => {
+    dirtyRef.current = true;  // Codex P1: unmount cleanup 이 default 상태 덮어쓰지 않게 게이트
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       try {
@@ -285,11 +292,15 @@ export function MemoWidget() {
   }, [memoKey]);
 
   // 언마운트 시 즉시 저장 — 한솔 보고 (v1.15.7): 플로팅 위젯 닫고 다시 열면 줄바꿈이 초기화됨.
-  // 기존엔 saveTimerRef.current 가 있을 때만 즉시 저장 → debounce 만료 + 새 변경 race 케이스에서 마지막
-  // 값이 누락될 수 있음. 조건 제거 + 항상 마지막 memoDataRef 를 Supabase 에 push.
+  // Codex P1 fix: 초기 로드 끝나기 전 unmount 또는 사용자가 변경 안 한 상태에서 저장하면
+  // default tabs/content 가 Supabase 에 덮어써져 *기존 메모가 삭제될 수 있음*. 다음 게이트 모두 통과해야 저장:
+  // (1) loadedRef.current — 초기 데이터 로드 완료
+  // (2) dirtyRef.current — 사용자가 실제로 변경 (save() 가 한 번이라도 호출됨)
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      // 게이트: 로드도 안 됐거나 사용자가 변경 안 했으면 저장 X
+      if (!loadedRef.current || !dirtyRef.current) return;
       const data = memoDataRef.current;
       (async () => {
         try {
