@@ -180,11 +180,14 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     return () => window.removeEventListener('keydown', onKey);
   }, [lightboxUrl]);
 
-  // 컴포넌트 언마운트 시 blob URL 정리.
-  // Codex P2(2026-04-29): 빈 deps 의 cleanup 은 초기 렌더 시 attachedImages([])만 capture →
-  // 이후 추가된 미리보기 URL 들은 revoke 되지 않아 메모리 누수. ref 로 latest 값 추적해서 unmount 시 정확히 정리.
+  // Codex P2(2026-04-29): cleanup + in-flight 롤백 정확도를 위한 latest 값 ref 추적.
+  // 빈 deps 의 cleanup 은 초기 렌더 값만 capture 하므로 ref 가 필수.
   const attachedImagesRef = useRef<AttachedImage[]>([]);
   useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
+  const inputValueRef = useRef('');
+  useEffect(() => { inputValueRef.current = input; }, [input]);
+
+  // 컴포넌트 언마운트 시 blob URL 정리
   useEffect(() => {
     return () => {
       attachedImagesRef.current.forEach(a => {
@@ -227,6 +230,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       const target = prev.find(a => a.id === id);
       if (target?.previewUrl) {
         try { URL.revokeObjectURL(target.previewUrl); } catch { /* ignore */ }
+      }
+      // Codex P2 4차(2026-04-29): 백그라운드 업로드가 이미 완료된 항목을 사용자가 X 로 제거하면
+      // Storage 의 객체도 함께 삭제 (orphan 파일 방지). fire-and-forget — 실패해도 UI 흐름 안 막음.
+      if (target?.uploadedUrl) {
+        storageService.deleteImage(target.uploadedUrl).catch(err => {
+          console.warn('[댓글 첨부 제거] Storage 삭제 실패:', err);
+        });
       }
       return prev.filter(a => a.id !== id);
     });
@@ -342,20 +352,19 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       setComments(comments);
       onCountChange?.(comments.length);
 
-      // Codex P2 3차(2026-04-29): 전송 중 사용자가 새 드래프트를 입력했을 수 있다 (composer 는 in-flight 에도 편집 가능).
-      // 사용자 작업을 덮어쓰지 않게 functional updater 로 latest 값 확인 후, 비어있을 때만 prev 복원.
-      // 사용자가 새 작업을 시작했으면 prev 의 blob URL 만 revoke 해 leak 방지.
-      setInput(curr => (curr.length > 0 ? curr : prevInput));
-      setAttachedImages(curr => {
-        if (curr.length > 0) {
-          // 사용자가 새로 첨부 → prev URL 들 revoke 후 현재 유지
-          prevAttached.forEach(a => {
-            try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
-          });
-          return curr;
-        }
-        return prevAttached;
-      });
+      // Codex P2 4차(2026-04-29): in-flight 동안 사용자가 새 텍스트 *또는* 새 이미지 첨부를 시작했는지
+      // 두 ref 로 함께 확인. 둘 중 하나라도 새 작업이 있으면 prev 복원하면 stale draft 와 섞임 → 덮어쓰지 않고
+      // prev blob URL 만 revoke 해 leak 방지. 새 작업이 전혀 없을 때만 prev 복원해 단순 재시도.
+      const userStartedNew =
+        inputValueRef.current.length > 0 || attachedImagesRef.current.length > 0;
+      if (userStartedNew) {
+        prevAttached.forEach(a => {
+          try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
+        });
+      } else {
+        setInput(prevInput);
+        setAttachedImages(prevAttached);
+      }
     } finally {
       setSubmitting(false);
     }
