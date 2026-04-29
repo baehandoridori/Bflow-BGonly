@@ -134,6 +134,7 @@ export interface SupabaseComment {
   userName: string;
   text: string;
   mentions: string[];
+  images: string[];
   createdAt: string;
   editedAt: string | null;
 }
@@ -902,6 +903,7 @@ export async function fetchMissedMentions(
         userName: c.user_name,
         text: c.text,
         mentions: c.mentions || [],
+        images: c.images || [],            // v1.15.12: 이미지 첨부
         createdAt: c.created_at,
         editedAt: c.edited_at,
       });
@@ -931,6 +933,7 @@ export async function readCommentsForPart(partUuid: string): Promise<SupabaseCom
     userName: c.user_name,
     text: c.text,
     mentions: c.mentions || [],
+    images: c.images || [],
     createdAt: c.created_at,
     editedAt: c.edited_at,
   }));
@@ -946,6 +949,7 @@ export async function addComment(
   text: string,
   mentions: string[],
   createdAt: string,
+  images: string[] = [],
 ): Promise<void> {
   // 이슈 F(2026-04-23) + Codex P1(2차): 댓글 경로의 sceneId는 scene.no (=sort_order).
   // sort_order 정확 매칭으로 scene_number 표기 규칙과 무관하게 정확히 식별.
@@ -967,30 +971,79 @@ export async function addComment(
     user_name: userName,
     text,
     mentions,
+    images,
     created_at: createdAt,
   });
   throwIfError(error);
   broadcastCommentAdded(sceneId, userName, userId, text, mentions);
 }
 
-/** 댓글 수정 */
+/** 댓글 수정.
+ *  Codex P1(2026-04-29): images 가 undefined 면 update payload 에서 빼서 기존 값 보존.
+ *  Sheets fallback 으로 attachment 정보를 모르는 댓글을 수정할 때 실 이미지 URL 들을 silently 덮어쓰지 않도록.
+ */
 export async function editComment(
   commentId: string,
   text: string,
   mentions: string[],
+  images?: string[],
 ): Promise<void> {
+  const updates: Record<string, unknown> = {
+    text, mentions, edited_at: new Date().toISOString(),
+  };
+  if (images !== undefined) updates.images = images;
   const { error } = await supabase
     .from('comments')
-    .update({ text, mentions, edited_at: new Date().toISOString() })
+    .update(updates)
     .eq('id', commentId);
   throwIfError(error);
   broadcastDataChange('comments', 'UPDATE');
 }
 
-/** 댓글 삭제 */
+/** 댓글 삭제.
+ *  Codex P2 10차(2026-04-30): comment row 삭제 시 images JSONB 에 저장된 storage 객체들도 함께 정리 →
+ *  댓글 삭제 후 storage 에 영구 orphan 파일이 쌓이는 문제 방지.
+ */
 export async function deleteComment(commentId: string): Promise<void> {
+  // 1) 행 삭제 전에 attached image URL 조회.
+  // Codex P2 12차(2026-04-30): maybeSingle 의 error 도 명시 체크 — 일시적 네트워크/PostgREST 에러로
+  // images 가 [] 로 silent fallback 되면 storage 객체가 정리되지 않은 채 row 만 삭제되어 orphan.
+  const { data: row, error: fetchErr } = await supabase
+    .from('comments')
+    .select('images')
+    .eq('id', commentId)
+    .maybeSingle();
+  if (fetchErr) {
+    console.warn('[deleteComment] images 조회 실패 — storage 정리 누락 가능:', fetchErr);
+  }
+  const images = (row?.images ?? []) as unknown[];
+
+  // 2) 댓글 row 삭제
   const { error } = await supabase.from('comments').delete().eq('id', commentId);
   throwIfError(error);
+
+  // 3) storage 객체 정리 (fire-and-forget — 실패해도 row 삭제 자체는 이미 성공)
+  const STORAGE_BUCKET = 'scene-images';
+  const paths = images
+    .filter((u): u is string => typeof u === 'string')
+    .map((url) => {
+      const m = url.match(/\/storage\/v1\/object\/public\/scene-images\/(.+)$/);
+      return m ? m[1] : null;
+    })
+    .filter((p): p is string => !!p);
+  if (paths.length > 0) {
+    // Codex P2 11차(2026-04-30): supabase.storage.remove() 는 API 실패 시 throw 대신 { data, error } 를 반환.
+    // try/catch 만으로는 잡지 못하므로 error 객체를 명시적으로 확인.
+    try {
+      const { error: storageErr } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
+      if (storageErr) {
+        console.warn('[deleteComment] storage 이미지 정리 실패 (orphan 가능):', storageErr);
+      }
+    } catch (err) {
+      console.warn('[deleteComment] storage 이미지 정리 예외:', err);
+    }
+  }
+
   broadcastDataChange('comments', 'DELETE');
 }
 

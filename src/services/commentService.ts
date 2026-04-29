@@ -19,6 +19,7 @@ export interface SceneComment {
   userName: string;
   text: string;
   mentions: string[];   // 태그된 사용자 이름 목록
+  images?: string[];    // Supabase Storage CDN URL — v1.15.12+ (이미지 첨부)
   createdAt: string;    // ISO 8601
   editedAt?: string;
 }
@@ -108,7 +109,7 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
     }
   } catch { /* 무시 */ }
 
-  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; createdAt: string; editedAt: string | null }[] = [];
+  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; images?: string[]; createdAt: string; editedAt: string | null }[] = [];
 
   let supabaseFailed = false;
   if (partUuids.length > 0) {
@@ -132,7 +133,10 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
         rawComments = (result.data ?? []).map((c) => ({
           id: c.commentId, partId: '', sceneId: c.sceneId,
           userId: c.userId, userName: c.userName, text: c.text,
-          mentions: c.mentions ?? [], createdAt: c.createdAt, editedAt: c.editedAt || null,
+          mentions: c.mentions ?? [],
+          // Codex P1(2026-04-29): images 를 undefined 로 둔다. Sheets fallback 은 attachment 정보를 모름 →
+          // 빈 배열로 채우면 그 댓글을 수정할 때 supabaseEditComment 가 실 이미지 URL 들을 빈 배열로 덮어쓰는 사고 발생.
+          createdAt: c.createdAt, editedAt: c.editedAt || null,
         }));
       }
     } catch { /* fallback도 실패 */ }
@@ -194,6 +198,8 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
       userName: c.userName,
       text: c.text,
       mentions: c.mentions ?? [],
+      // images: c.images 가 undefined 면 그대로 undefined (Sheets fallback) — 수정 시 덮어쓰지 않게.
+      images: c.images,
       createdAt: c.createdAt,
       editedAt: c.editedAt || undefined,
     });
@@ -246,7 +252,7 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
     await window.electronAPI.supabaseAddComment(
       comment.id, partUuid, sceneId,
       comment.userId, comment.userName, comment.text,
-      comment.mentions, comment.createdAt,
+      comment.mentions, comment.createdAt, comment.images ?? [],
     );
     // 캐시 업데이트 — 원본 sheet 캐시에만 낙관적 반영.
     // 반대 부서 sheet 캐시는 invalidate해서 다음 조회 시 통합 재조회로 반영 (중복 삽입 방지).
@@ -273,23 +279,24 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
 }
 
 export async function updateComment(
-  sceneKey: string, commentId: string, text: string, mentions: string[],
+  sceneKey: string, commentId: string, text: string, mentions: string[], images?: string[],
 ): Promise<void> {
   const editedAt = new Date().toISOString();
+  // Codex P1(2026-04-29): images 를 옵셔널로 둔다. undefined 면 supabase update 에서 images 컬럼 자체를 빼고
+  // 캐시도 덮어쓰지 않는다 — Sheets fallback 댓글의 실 이미지 URL 들이 silently 삭제되는 사고 방지.
+  const imagesPatch: Pick<SceneComment, 'images'> | Record<string, never> =
+    images !== undefined ? { images } : {};
 
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
-    await window.electronAPI.supabaseEditComment(commentId, text, mentions);
-    // 캐시 업데이트 — commentId 기준으로 모든 캐시/리스트를 순회 (BG·ACT 양쪽 매핑 반영)
+    await window.electronAPI.supabaseEditComment(commentId, text, mentions, images);
     sheetPartCache.forEach((store) => {
       for (const list of Object.values(store)) {
         const idx = list.findIndex(c => c.id === commentId);
-        if (idx >= 0) list[idx] = { ...list[idx], text, mentions, editedAt };
+        if (idx >= 0) list[idx] = { ...list[idx], text, mentions, ...imagesPatch, editedAt };
       }
     });
-    // 자기 창 뱃지/패널 즉시 갱신
     window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', { detail: { sheetName } }));
-    // 다른 창에 댓글 변경 알림
     window.electronAPI?.dataNotifyChange?.({
       type: 'comment', sheetName, sceneId, commentAction: 'edit',
     });
@@ -300,7 +307,7 @@ export async function updateComment(
   const list = all[sceneKey];
   if (!list) return;
   const idx = list.findIndex(c => c.id === commentId);
-  if (idx >= 0) list[idx] = { ...list[idx], text, mentions, editedAt };
+  if (idx >= 0) list[idx] = { ...list[idx], text, mentions, ...imagesPatch, editedAt };
   await saveLocal(all);
 }
 

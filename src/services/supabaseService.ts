@@ -133,12 +133,13 @@ export async function readCommentsFromSupabase(partUuid: string): Promise<unknow
 export async function addCommentToSupabase(
   commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string,
+  images: string[] = [],
 ): Promise<void> {
-  await window.electronAPI.supabaseAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt);
+  await window.electronAPI.supabaseAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images);
 }
 
-export async function editCommentInSupabase(commentId: string, text: string, mentions: string[]): Promise<void> {
-  await window.electronAPI.supabaseEditComment(commentId, text, mentions);
+export async function editCommentInSupabase(commentId: string, text: string, mentions: string[], images?: string[]): Promise<void> {
+  await window.electronAPI.supabaseEditComment(commentId, text, mentions, images);
 }
 
 export async function deleteCommentFromSupabase(commentId: string): Promise<void> {

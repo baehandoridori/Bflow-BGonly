@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5555"],
       "port": 5555
+    },
+    {
+      "name": "comment-mockup",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5557"],
+      "port": 5557
     }
   ]
 }
