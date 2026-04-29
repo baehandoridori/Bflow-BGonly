@@ -1000,10 +1000,40 @@ export async function editComment(
   broadcastDataChange('comments', 'UPDATE');
 }
 
-/** 댓글 삭제 */
+/** 댓글 삭제.
+ *  Codex P2 10차(2026-04-30): comment row 삭제 시 images JSONB 에 저장된 storage 객체들도 함께 정리 →
+ *  댓글 삭제 후 storage 에 영구 orphan 파일이 쌓이는 문제 방지.
+ */
 export async function deleteComment(commentId: string): Promise<void> {
+  // 1) 행 삭제 전에 attached image URL 조회
+  const { data: row } = await supabase
+    .from('comments')
+    .select('images')
+    .eq('id', commentId)
+    .maybeSingle();
+  const images = (row?.images ?? []) as unknown[];
+
+  // 2) 댓글 row 삭제
   const { error } = await supabase.from('comments').delete().eq('id', commentId);
   throwIfError(error);
+
+  // 3) storage 객체 정리 (fire-and-forget — 실패해도 row 삭제 자체는 이미 성공)
+  const STORAGE_BUCKET = 'scene-images';
+  const paths = images
+    .filter((u): u is string => typeof u === 'string')
+    .map((url) => {
+      const m = url.match(/\/storage\/v1\/object\/public\/scene-images\/(.+)$/);
+      return m ? m[1] : null;
+    })
+    .filter((p): p is string => !!p);
+  if (paths.length > 0) {
+    try {
+      await supabase.storage.from(STORAGE_BUCKET).remove(paths);
+    } catch (err) {
+      console.warn('[deleteComment] storage 이미지 정리 실패 (orphan 가능):', err);
+    }
+  }
+
   broadcastDataChange('comments', 'DELETE');
 }
 
