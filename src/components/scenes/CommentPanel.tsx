@@ -186,6 +186,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
   useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
   const inputValueRef = useRef('');
   useEffect(() => { inputValueRef.current = input; }, [input]);
+  // Codex P2 8차(2026-04-29): unmount 후 upload 완료 race 처리 — React 가 unmounted component 의 setState 를
+  // drop 하므로 setAttachedImages updater 안의 side-effect (deleteImage) 도 실행 안 됨 → orphan.
+  // mountedRef 로 unmount 여부를 직접 확인해 그 케이스에서 storage 즉시 정리.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // 컴포넌트 언마운트 시 blob URL 정리.
   // Codex P2 5차(2026-04-29): unmount 시점에 attachedImages 에 남아있는 항목은 모두 *전송 안 된 draft* 다
@@ -211,23 +216,31 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       const result = await storageService.uploadImage(sheetName, sceneId, 'comment', base64);
       if (result.ok && result.url) {
         const url = result.url;
-        // Codex P2 5차(2026-04-29): 업로드 race — 사용자가 진행 중에 X 로 이미 제거했을 수 있다.
-        // functional updater 안에서 항목 존재 여부 확인 후, 없으면 방금 업로드된 객체를 즉시 storage 에서 삭제.
-        setAttachedImages(prev => {
-          const exists = prev.some(a => a.id === id);
-          if (!exists) {
-            storageService.deleteImage(url).catch(err => {
-              console.warn('[댓글 이미지 race] 사용자 제거 후 도착한 업로드 객체 정리 실패:', err);
-            });
-            return prev;
-          }
-          return prev.map(a => a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a);
-        });
+        // Codex P2 8차(2026-04-29): unmount 후 upload 완료 시 React 가 setState drop → orphan 발생.
+        // mountedRef 로 직접 체크해 unmount 됐으면 즉시 storage 정리. setAttachedImages updater 안 side-effect 의존 X.
+        if (!mountedRef.current) {
+          storageService.deleteImage(url).catch(err => {
+            console.warn('[댓글 이미지 unmount race] 정리 실패:', err);
+          });
+          return;
+        }
+        // mounted 상태 — ref 로 사용자가 진행 중 X 로 제거했는지 확인.
+        const stillExists = attachedImagesRef.current.some(a => a.id === id);
+        if (!stillExists) {
+          storageService.deleteImage(url).catch(err => {
+            console.warn('[댓글 이미지 race] 사용자 제거 후 도착한 업로드 객체 정리 실패:', err);
+          });
+          return;
+        }
+        setAttachedImages(prev => prev.map(a =>
+          a.id === id ? { ...a, uploadedUrl: url, uploading: false } : a
+        ));
       } else {
         throw new Error(result.error || '업로드 실패');
       }
     } catch (err) {
       console.error('[댓글 이미지 업로드 실패]', err);
+      if (!mountedRef.current) return;       // unmount 후 setState drop 방지
       const msg = err instanceof Error ? err.message : String(err);
       setAttachedImages(prev => prev.map(a =>
         a.id === id ? { ...a, uploading: false, error: msg } : a
