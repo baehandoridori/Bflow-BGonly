@@ -834,12 +834,12 @@ export async function deleteUser(userId: string): Promise<void> {
       .eq('assignee', userName);
     if (scenesErr) console.warn('[deleteUser] scenes.assignee 비우기 실패:', scenesErr);
 
-    // 3) revisions.assignee 비우기 (revisions 테이블에도 assignee 컬럼 있음)
+    // 3) comp_revisions.assignee 비우기 (Codex P1: 실 테이블명 — 'revisions' 아님)
     const { error: revsErr } = await supabase
-      .from('revisions')
+      .from('comp_revisions')
       .update({ assignee: null })
       .eq('assignee', userName);
-    if (revsErr) console.warn('[deleteUser] revisions.assignee 비우기 실패:', revsErr);
+    if (revsErr) console.warn('[deleteUser] comp_revisions.assignee 비우기 실패:', revsErr);
   }
 
   // 4) user 삭제
