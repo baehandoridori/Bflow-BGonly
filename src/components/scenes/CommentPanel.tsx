@@ -300,18 +300,21 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
     setComments(next);
     onCountChange?.(next.length);
 
-    // 입력 영역 초기화 + blob URL 정리
+    // Codex P2(2026-04-29): blob URL revoke 와 attachedImages 초기화는 전송 성공 *후* 에 수행.
+    // 실패 시 사용자가 같은 페이로드(텍스트 + 첨부)로 재시도할 수 있어야 새 이미지 첨부 흐름의 신뢰성이 보장된다.
+    const prevInput = input;
+    const prevAttached = attachedImages;
     setInput('');
-    setAttachedImages(prev => {
-      prev.forEach(a => {
-        try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
-      });
-      return [];
-    });
     setShowMentions(false);
+    setAttachedImages([]);  // UI 에서는 즉시 비움 (낙관적), 실패 시 복원
 
     try {
       await addComment(sceneKey, comment);
+
+      // 성공 — 이전 미리보기 blob URL revoke (메모리 정리)
+      prevAttached.forEach(a => {
+        try { URL.revokeObjectURL(a.previewUrl); } catch { /* ignore */ }
+      });
 
       // 슬랙 멘션 웹훅 (기존 로직 보존)
       if (mentions.length > 0 && currentUser.slackId) {
@@ -335,8 +338,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       }
     } catch (err) {
       console.error('[댓글 추가 실패]', err);
+      // 롤백 — 댓글 리스트 + 입력 텍스트 + 첨부 이미지 모두 복원해 재시도 가능하게
       setComments(comments);
       onCountChange?.(comments.length);
+      setInput(prevInput);
+      setAttachedImages(prevAttached);
     } finally {
       setSubmitting(false);
     }
