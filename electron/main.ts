@@ -2572,14 +2572,18 @@ app.whenReady().then(async () => {
   // 두 번째 인스턴스면 초기화하지 않고 종료
   if (!gotTheLock) return;
 
+  // ★ 시작 직후 가장 먼저 스플래시 — 사용자에게 즉시 "켜졌다" 피드백을 준다.
+  //   v1.15.13: 이전에는 cleanupImageCache 의 동기 readdirSync + N×statSync 가
+  //   스플래시 노출을 막아 첫 창 표시까지 체감 지연이 컸음. 이미지 cleanup 은
+  //   시작 시점에 꼭 해야 할 일이 아니라, 메인 로드 후 백그라운드로 미룸.
+  createSplashWindow();
+  console.time('splash-to-main'); // 측정 시작 — 스플래시 노출 시점부터
+
   // 메인 창 bounds 미리 로드 — createWindow 전에 캐시 완료되어 있어야 첫 창부터 저장 크기로 뜸
   await preloadMainWindowBounds();
 
   // 위젯 위치 캐시 로드 (Phase 0-6)
   loadWidgetPositions();
-
-  // 이미지 캐시 정리 (500MB 초과 시 Drive 백업된 파일 자동 삭제)
-  cleanupImageCache();
 
   // bflow-img:// 프로토콜 핸들러: userData/images/ 폴더에서 이미지 서빙
   // standard URL이므로 hostname은 소문자로 변환됨 → pathname에 파일명 보관
@@ -2618,11 +2622,16 @@ app.whenReady().then(async () => {
     return new Response('Drive image not found', { status: 404 });
   });
 
-  console.time('splash-to-main'); // 측정 시작
-
-  createSplashWindow(); // 1. 가장 먼저 스플래시
-  createTray();        // 먼저 트레이 준비 (실패해도 앱은 계속)
+  createTray();        // 트레이 준비 (실패해도 앱은 계속)
   createWindow();
+
+  // ★ 이미지 캐시 정리는 백그라운드로 — 시작 지연의 가장 큰 원인이었음.
+  //   `fs.readdirSync` + N×`fs.statSync` 가 동기로 돌아 사용자 데이터 디렉토리에
+  //   이미지가 많을수록 비례해서 느려짐. 메인 창 로드 후 5초 뒤 한 번 정리해도
+  //   캐시 한도(500MB)는 충분히 지킬 수 있다.
+  setTimeout(() => {
+    try { cleanupImageCache(); } catch (err) { console.warn('[ImageCache] cleanup 실패:', err); }
+  }, 5_000);
 
   // 메인 로드 30초 타임아웃 (좀비 방지).
   // Task 2.3의 did-finish-load 핸들러에서 clearTimeout + 해제 처리.

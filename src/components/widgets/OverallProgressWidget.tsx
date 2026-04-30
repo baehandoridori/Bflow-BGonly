@@ -69,8 +69,6 @@ const RANDOM_MESSAGES: MotivMessage[] = [
   { text: '응후응후', author: '이혜민' },
   { text: 'る..', author: 'ちいかわ' },
   { text: '저는 서울에 사는 초등학생을 보면 너무 화나요', author: '이명훈' },
-  { text: '저 인스타 지울 수 있습니다', author: '강지융' },
-  { text: '근데 인스타에 연락처가 있어서 못지워요', author: '강지융' },
   { text: '네 ㅋㅋ 찌찌 ㅋㅋ', author: '원동우' },
   { text: '너 지웅이 좋아해?', author: '류이레' },
   { text: '우리 언젠가 분명히 잡혀갈거야.....', author: '정영준' },
