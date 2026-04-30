@@ -1,3 +1,9 @@
+// ─── 시작 속도 진단 (v1.15.13) ──────────────────────────────────────
+// main.ts 가 실행되는 시점에 가장 먼저 timestamp 를 잡아둔다. import 문 평가 *전*에
+// 측정해야 라이브러리 로딩 시간을 정확히 분리할 수 있음.
+const __t_main_first = Date.now();
+const __electron_startup_ms = process.uptime() * 1000; // BFLOW.exe 클릭 ~ main.ts 첫 줄 (Defender + chromium init)
+
 import { app, BrowserWindow, clipboard, ipcMain, protocol, net, desktopCapturer, screen, shell, Notification, Tray, Menu, nativeImage, dialog } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import * as gcal from './googleCalendar';
@@ -31,6 +37,9 @@ import {
   getVacPendingOpsCount,
   waitForVacPendingOps,
 } from './vacation';
+
+// ─── 시작 속도 진단 — imports 평가 끝난 시점 측정 ──
+const __t_imports_done = Date.now();
 
 // 앱 이름 설정 — AppData 경로에 영향
 app.name = 'Bflow-BGonly';
@@ -2572,11 +2581,15 @@ app.whenReady().then(async () => {
   // 두 번째 인스턴스면 초기화하지 않고 종료
   if (!gotTheLock) return;
 
+  // ─── 시작 속도 진단 — whenReady 진입 시점 ──
+  const __t_when_ready = Date.now();
+
   // ★ 시작 직후 가장 먼저 스플래시 — 사용자에게 즉시 "켜졌다" 피드백을 준다.
   //   v1.15.13: 이전에는 cleanupImageCache 의 동기 readdirSync + N×statSync 가
   //   스플래시 노출을 막아 첫 창 표시까지 체감 지연이 컸음. 이미지 cleanup 은
   //   시작 시점에 꼭 해야 할 일이 아니라, 메인 로드 후 백그라운드로 미룸.
   createSplashWindow();
+  const __t_after_splash = Date.now();
   console.time('splash-to-main'); // 측정 시작 — 스플래시 노출 시점부터
 
   // 메인 창 bounds 미리 로드 — createWindow 전에 캐시 완료되어 있어야 첫 창부터 저장 크기로 뜸
@@ -2685,6 +2698,28 @@ app.whenReady().then(async () => {
       // Windows: 프로세스 argv에서 딥링크 확인 (프로토콜 핸들러로 앱이 시작된 경우)
       const argDeepLink = process.argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
       if (argDeepLink) sendDeepLinkToRenderer(argDeepLink);
+
+      // ─── 시작 속도 진단 결과 IPC 전송 ──
+      // v1.15.13: 한솔 PC 환경에서 시작 지연(10~20초)의 진짜 범인을 찾기 위함.
+      //   stage_a = BFLOW.exe 클릭 → main.ts 첫 줄 (electron + Defender)
+      //   stage_b = main.ts 첫 줄 → imports 평가 끝 (라이브러리 로딩)
+      //   stage_c = imports 끝 → app.whenReady (electron 자체 ready 대기)
+      //   stage_d = whenReady 진입 → splash 표시
+      //   stage_e = splash 표시 → 메인 창 did-finish-load (vite + React mount)
+      const __t_did_finish_load = Date.now();
+      try {
+        mainWindow!.webContents.send('startup-perf', {
+          stage_a_electron_startup_ms: Math.round(__electron_startup_ms),
+          stage_b_imports_ms: Math.round(__t_imports_done - __t_main_first),
+          stage_c_until_ready_ms: Math.round(__t_when_ready - __t_imports_done),
+          stage_d_splash_ms: Math.round(__t_after_splash - __t_when_ready),
+          stage_e_main_load_ms: Math.round(__t_did_finish_load - __t_after_splash),
+          total_ms: Math.round(__electron_startup_ms + (__t_did_finish_load - __t_main_first)),
+          measuredAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('[startup-perf] send 실패:', err);
+      }
     });
   }
 

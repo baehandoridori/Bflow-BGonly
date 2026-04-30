@@ -105,6 +105,30 @@ export default function App() {
     return () => { cleanup?.(); };
   }, []);
 
+  // ─── 시작 속도 진단 결과 수신 (v1.15.13) ──
+  // 메인 프로세스가 단계별 측정 시간을 보내면 알림 패널에 누적해 한솔 PC 의 진짜 병목을 식별.
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onStartupPerf?.((perf) => {
+      const totalSec = (perf.total_ms / 1000).toFixed(1);
+      const a = (perf.stage_a_electron_startup_ms / 1000).toFixed(1);
+      const b = (perf.stage_b_imports_ms / 1000).toFixed(1);
+      const c = (perf.stage_c_until_ready_ms / 1000).toFixed(1);
+      const d = (perf.stage_d_splash_ms / 1000).toFixed(1);
+      const e = (perf.stage_e_main_load_ms / 1000).toFixed(1);
+      useNotificationStore.getState().addNotification({
+        type: 'system',
+        title: `🐢 시작 시간 분석 — 총 ${totalSec}초`,
+        body:
+          `A. Windows + electron 시작: ${a}초 (Defender 의심)\n` +
+          `B. 라이브러리 로딩: ${b}초\n` +
+          `C. ready 대기: ${c}초\n` +
+          `D. 스플래시 표시: ${d}초\n` +
+          `E. 메인 화면 그리기: ${e}초`,
+      });
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
   // currentUser 변경 시 메인 프로세스에 동기화 (활동 기록 자동 user_id/user_name 사용)
   useEffect(() => {
     window.electronAPI?.authSetCurrentUser?.(

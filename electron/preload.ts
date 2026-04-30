@@ -49,6 +49,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => { ipcRenderer.removeListener('app:saving-before-quit', handler); };
   },
 
+  // 시작 속도 진단 (v1.15.13): main process 가 측정한 단계별 시간 수신
+  onStartupPerf: (callback: (perf: {
+    stage_a_electron_startup_ms: number;
+    stage_b_imports_ms: number;
+    stage_c_until_ready_ms: number;
+    stage_d_splash_ms: number;
+    stage_e_main_load_ms: number;
+    total_ms: number;
+    measuredAt: string;
+  }) => void) => {
+    const handler = (_event: unknown, perf: Parameters<typeof callback>[0]) => callback(perf);
+    ipcRenderer.on('startup-perf', handler);
+    return () => { ipcRenderer.removeListener('startup-perf', handler); };
+  },
+
   // 네이티브 알림 (OS 데스크톱 알림)
   showNativeNotification: (title: string, body: string) =>
     ipcRenderer.invoke('notification:show-native', title, body),

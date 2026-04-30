@@ -407,6 +407,16 @@ export interface ElectronAPI {
   onSheetChanged: (callback: (delta?: SheetDelta) => void) => () => void;
   onRetryNotify?: (callback: (message: string) => void) => () => void;
   onSavingBeforeQuit?: (callback: (pendingCount: number) => void) => () => void;
+  // 시작 속도 진단 (v1.15.13)
+  onStartupPerf?: (callback: (perf: {
+    stage_a_electron_startup_ms: number;
+    stage_b_imports_ms: number;
+    stage_c_until_ready_ms: number;
+    stage_d_splash_ms: number;
+    stage_e_main_load_ms: number;
+    total_ms: number;
+    measuredAt: string;
+  }) => void) => () => void;
   // 네이티브 알림
   showNativeNotification?: (title: string, body: string) => Promise<void>;
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
