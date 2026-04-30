@@ -1,11 +1,51 @@
-import { useMemo, useState, useRef, useEffect } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Eye, Sparkles, Pencil, MessageSquare, RotateCw, Plus, Trash2, User, Grid3x3, Image as ImageIcon, ChevronRight } from 'lucide-react';
 import { useActivityStore } from '@/stores/useActivityStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
 import type { Activity, ActionType } from '@/types';
 import { groupActivities, formatRelativeTime, getActivityVerb } from './utils';
 import { ACTION_TYPE_COLOR, ACTION_TYPE_TO_GROUP } from './constants';
+
+/** 활동 라벨의 EP 접두("EP02 ") 부분을 사용자 지정 한글 에피소드 제목으로 교체.
+ *  형식 — record_activity 쪽: `EP{padStart(2,'0')} ${part_id} #${scene_number}`
+ *  customTitle 이 없으면 원본 라벨을 그대로 반환. */
+function formatActivitySceneLabel(
+  sceneLabel: string | null,
+  episodeNumber: number | null,
+  episodeTitles: Record<number, string>,
+): string {
+  if (!sceneLabel) return '';
+  if (episodeNumber == null) return sceneLabel;
+  const epPrefix = `EP${String(episodeNumber).padStart(2, '0')}`;
+  if (!sceneLabel.startsWith(epPrefix)) return sceneLabel;
+  const customTitle = episodeTitles[episodeNumber];
+  if (!customTitle) return sceneLabel;
+  return customTitle + sceneLabel.slice(epPrefix.length);
+}
+
+/** 활동의 sceneId(UUID) 로 episodes 트리에서 씬을 찾아, 씬 뷰 + 상세 모달까지 자동으로 연다.
+ *  ScenesView 의 pendingDeepLink useEffect 가 sheetName+sceneId 매칭 후 모달을 자동 오픈한다. */
+function navigateToActivityScene(activity: Activity): boolean {
+  if (!activity.sceneId) return false;
+  const episodes = useDataStore.getState().episodes;
+  for (const ep of episodes) {
+    for (const part of ep.parts) {
+      const found = part.scenes.find((s) => s.id === activity.sceneId);
+      if (found) {
+        const app = useAppStore.getState();
+        app.setSelectedEpisode(ep.episodeNumber);
+        app.setSelectedPart(part.partId);
+        app.setView('scenes');
+        app.setPendingDeepLink({ sheetName: part.sheetName, sceneId: found.sceneId });
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 function ActionIcon({ type, size = 11 }: { type: ActionType; size?: number }) {
   const props = { size };
@@ -75,15 +115,25 @@ interface FeedItemRowProps {
   activity: Activity;
   isSelf: boolean;
   isInsideGroup?: boolean;
+  episodeTitles: Record<number, string>;
 }
 
-function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
+function FeedItemRow({ activity, isSelf, isInsideGroup, episodeTitles }: FeedItemRowProps) {
   const verb = getActivityVerb(activity);
+  const displayLabel = formatActivitySceneLabel(activity.sceneLabel, activity.episodeNumber, episodeTitles);
+  const canNavigate = !!activity.sceneId;
+  const handleClick = useCallback(() => {
+    if (canNavigate) navigateToActivityScene(activity);
+  }, [activity, canNavigate]);
   return (
     <div
-      className={`flex gap-2.5 py-2 px-3.5 border-b border-bg-border/15 transition-colors hover:bg-bg-border/20 cursor-pointer relative ${
-        isSelf ? 'bg-accent/[0.04]' : ''
-      } ${isInsideGroup ? 'pl-12' : ''}`}
+      onClick={handleClick}
+      role={canNavigate ? 'button' : undefined}
+      tabIndex={canNavigate ? 0 : undefined}
+      onKeyDown={canNavigate ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(); } } : undefined}
+      className={`flex gap-2.5 py-2 px-3.5 border-b border-bg-border/15 transition-colors hover:bg-bg-border/20 ${
+        canNavigate ? 'cursor-pointer' : ''
+      } relative ${isSelf ? 'bg-accent/[0.04]' : ''} ${isInsideGroup ? 'pl-12' : ''}`}
     >
       {isSelf && !isInsideGroup && (
         <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent-sub" />
@@ -103,7 +153,7 @@ function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
           )}
           <Pictogram type={activity.actionType} />
           <span className="text-text-secondary">{verb}</span>
-          {activity.sceneLabel && (
+          {displayLabel && (
             <span
               className="px-1.5 py-[1px] rounded text-[11.5px] font-medium"
               style={{
@@ -111,7 +161,7 @@ function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
                 background: 'rgba(108, 92, 231, 0.1)',
               }}
             >
-              {activity.sceneLabel}
+              {displayLabel}
             </span>
           )}
         </div>
@@ -126,12 +176,18 @@ function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
 interface FeedGroupProps {
   items: Activity[];
   isSelf: boolean;
+  episodeTitles: Record<number, string>;
 }
 
-function FeedGroup({ items, isSelf }: FeedGroupProps) {
+function FeedGroup({ items, isSelf, episodeTitles }: FeedGroupProps) {
   const [open, setOpen] = useState(isSelf); // 본인 그룹은 자동 펼침
   const head = items[0];
   const verb = getActivityVerb(head);
+  // 묶음 헤더는 EP 단위 라벨만 표시(여러 씬을 묶을 수 있어 개별 sceneLabel 부적절).
+  // episodeTitles 가 있으면 한글 제목, 없으면 EP{num} fallback.
+  const groupLabel = head.episodeNumber != null
+    ? (episodeTitles[head.episodeNumber] || `EP${String(head.episodeNumber).padStart(2, '0')}`)
+    : head.sceneLabel;
 
   return (
     <div className={`border-b border-bg-border/15 ${isSelf ? 'bg-accent/[0.04]' : ''} relative`}>
@@ -149,12 +205,12 @@ function FeedGroup({ items, isSelf }: FeedGroupProps) {
             </span>
             <Pictogram type={head.actionType} />
             <span className="text-text-secondary">{verb}</span>
-            {head.sceneLabel && (
+            {groupLabel && (
               <span
                 className="px-1.5 py-[1px] rounded text-[11.5px] font-medium"
                 style={{ color: 'var(--color-accent-sub, #A29BFE)', background: 'rgba(108, 92, 231, 0.1)' }}
               >
-                {head.episodeNumber ? `EP${head.episodeNumber}` : head.sceneLabel}
+                {groupLabel}
               </span>
             )}
             <span className="text-[11px] text-text-secondary/60">· {items.length}건</span>
@@ -182,7 +238,7 @@ function FeedGroup({ items, isSelf }: FeedGroupProps) {
             className="overflow-hidden bg-bg-border/30"
           >
             {items.map((it) => (
-              <FeedItemRow key={it.id} activity={it} isSelf={isSelf} isInsideGroup />
+              <FeedItemRow key={it.id} activity={it} isSelf={isSelf} isInsideGroup episodeTitles={episodeTitles} />
             ))}
           </motion.div>
         )}
@@ -194,6 +250,7 @@ function FeedGroup({ items, isSelf }: FeedGroupProps) {
 export function ActivityFeed() {
   const { activities, filters, hasMore, isLoading, loadMore } = useActivityStore();
   const currentUser = useAuthStore((s) => s.currentUser);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 필터 적용 + 그룹화
@@ -234,10 +291,10 @@ export function ActivityFeed() {
       {feedItems.map((item) => {
         if (item.type === 'item') {
           const isSelf = item.activity.userId === currentUser?.id;
-          return <FeedItemRow key={item.activity.id} activity={item.activity} isSelf={isSelf} />;
+          return <FeedItemRow key={item.activity.id} activity={item.activity} isSelf={isSelf} episodeTitles={episodeTitles} />;
         } else {
           const isSelf = item.items[0].userId === currentUser?.id;
-          return <FeedGroup key={item.key} items={item.items} isSelf={isSelf} />;
+          return <FeedGroup key={item.key} items={item.items} isSelf={isSelf} episodeTitles={episodeTitles} />;
         }
       })}
       {isLoading && (
