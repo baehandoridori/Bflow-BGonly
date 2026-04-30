@@ -814,39 +814,21 @@ export async function updateUser(
   broadcastDataChange('users', 'UPDATE');
 }
 
-/** 사용자 삭제.
- *  한솔 결정 (v1.15.7): 퇴사자 처리. 삭제 *전* 그 사용자가 담당자였던 씬/리비전의 assignee 를 자동으로 비움(NULL).
- *  - scenes.assignee, revisions.assignee 만 정리 (둘 다 TEXT, NOT NULL 없음)
- *  - 댓글의 user_id/user_name, 활동 로그는 *역사적 기록* 으로 보존 (누가 작업했는지)
- *  - update 가 실패해도 user 삭제 자체는 진행 (warn 만, hard fail X)
+/** 사용자 삭제 — atomic.
+ *  v1.15.7: 퇴사자 처리. 담당자였던 씬/리비전의 assignee 를 자동으로 비움(NULL).
+ *  v1.15.13: 개인 데이터(개인 투두/메모/작업뷰/비공개 일정) 도 함께 정리.
+ *            (FK 막힘 + 한솔 요청)
+ *  v1.15.13 / Codex P1 후속:
+ *            모든 단계를 RPC `delete_user_cascade` 안에서 한 트랜잭션으로 묶어 atomic 보장.
+ *            기존에는 cleanup → user 삭제가 별개 쿼리라 user 삭제만 실패하면 cleanup 된
+ *            개인 데이터가 비가역 손실되는 partial-failure 시나리오가 있었음.
+ *            RPC 안에서 어느 한 단계라도 예외 발생 시 전체 ROLLBACK 으로 안전.
+ *  - 한 함수 안에서: assignee NULL 처리 → 개인 데이터 4종 삭제 → users 행 삭제
+ *  - 댓글(comments) 과 활동 로그(activity_log) 는 *역사 기록* 으로 보존
+ *  - user 가 존재하지 않으면 RPC 가 P0002 코드로 RAISE — 호출 측에서 throwIfError 가 잡음.
  */
 export async function deleteUser(userId: string): Promise<void> {
-  // 1) user_name 조회 — assignee 매칭 키
-  const { data: userRow } = await supabase
-    .from('users')
-    .select('name')
-    .eq('id', userId)
-    .maybeSingle();
-  const userName = userRow?.name;
-
-  if (userName) {
-    // 2) scenes.assignee 비우기
-    const { error: scenesErr } = await supabase
-      .from('scenes')
-      .update({ assignee: null })
-      .eq('assignee', userName);
-    if (scenesErr) console.warn('[deleteUser] scenes.assignee 비우기 실패:', scenesErr);
-
-    // 3) comp_revisions.assignee 비우기 (Codex P1: 실 테이블명 — 'revisions' 아님)
-    const { error: revsErr } = await supabase
-      .from('comp_revisions')
-      .update({ assignee: null })
-      .eq('assignee', userName);
-    if (revsErr) console.warn('[deleteUser] comp_revisions.assignee 비우기 실패:', revsErr);
-  }
-
-  // 4) user 삭제
-  const { error } = await supabase.from('users').delete().eq('id', userId);
+  const { error } = await supabase.rpc('delete_user_cascade', { p_user_id: userId });
   throwIfError(error);
   broadcastDataChange('users', 'DELETE');
 }

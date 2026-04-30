@@ -77,7 +77,14 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
           {n.title}
         </p>
         {n.body && (
-          <p title={n.body} className="text-[11px] text-text-secondary/65 mt-0.5 truncate">{n.body}</p>
+          <p
+            title={n.body}
+            className={`text-[11px] text-text-secondary/65 mt-0.5 ${
+              n.body.includes('\n') ? 'whitespace-pre-line break-words' : 'truncate'
+            }`}
+          >
+            {n.body}
+          </p>
         )}
         <span className="text-[10px] text-text-secondary/50 mt-1 block">{timeAgo(n.createdAt)}</span>
       </div>
