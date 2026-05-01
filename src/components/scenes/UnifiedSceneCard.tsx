@@ -78,26 +78,39 @@ export function UnifiedSceneCard({
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
   // 길이 변경 토글 (BG/ACT 양쪽 동기화)
-  // v1.16.0 fix #1: 직렬 await 시 BG 성공 후 ACT 실패하면 DB↔UI 영구 불일치. Promise.all 병렬로 부분 실패 창 최소화.
-  // v1.16.0 fix #2 (Codex 라운드 2): LD → SD 빠른 연타로 두 IPC 호출이 race → out-of-order commit 가능.
-  //                                  per-card in-flight ref 로 직렬화 (카드 인스턴스마다 별도 ref).
+  // v1.16.0 fix #1: 직렬 await → Promise.all 병렬로 부분 실패 창 최소화.
+  // v1.16.0 fix #2 (Codex 라운드 2): per-card in-flight ref 로 LD↔SD 연타 race 방지.
+  // v1.16.0 fix #3 (Codex 라운드 4): Promise.all reject 시 setEpisodes(prevEpisodes) 전체 롤백 →
+  //                                  BG 성공/ACT 실패 같은 부분 실패에서 성공한 DB 변경이 UI 에서 사라져 불일치.
+  //                                  Promise.allSettled + per-UUID 부분 롤백 (성공한 씬 유지).
   const lengthChangeInFlightRef = useRef(false);
   const handleSetLengthChange = async (value: 'LD' | 'SD' | null) => {
     if (lengthChangeInFlightRef.current) return;
     lengthChangeInFlightRef.current = true;
-    const prevEpisodes = useDataStore.getState().episodes;
     const valueStr = value ?? '';
-    // 낙관적: BG/ACT 모두 적용
+    // 변경 전 값 캐싱 (BG/ACT 별도)
+    const prevBg = bgScene?.lengthChange ?? null;
+    const prevAct = actScene?.lengthChange ?? null;
+    // 낙관적
     if (bgScene?.id) useDataStore.getState().updateSceneByUuid(bgScene.id, { lengthChange: value });
     if (actScene?.id) useDataStore.getState().updateSceneByUuid(actScene.id, { lengthChange: value });
     try {
-      const tasks: Array<Promise<unknown>> = [];
-      if (bgScene?.id) tasks.push(window.electronAPI?.supabaseUpdateSceneField?.(bgScene.id, 'lengthChange', valueStr) ?? Promise.resolve());
-      if (actScene?.id) tasks.push(window.electronAPI?.supabaseUpdateSceneField?.(actScene.id, 'lengthChange', valueStr) ?? Promise.resolve());
-      await Promise.all(tasks);
-    } catch (err) {
-      useDataStore.getState().setEpisodes(prevEpisodes);
-      console.error('[lengthChange] 저장 실패', err);
+      const targets: Array<{ uuid: string; prev: 'LD' | 'SD' | null }> = [];
+      if (bgScene?.id) targets.push({ uuid: bgScene.id, prev: prevBg });
+      if (actScene?.id) targets.push({ uuid: actScene.id, prev: prevAct });
+      const results = await Promise.allSettled(
+        targets.map((t) =>
+          window.electronAPI?.supabaseUpdateSceneField?.(t.uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
+        ),
+      );
+      // 실패한 uuid 만 부분 롤백
+      results.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          const t = targets[i];
+          useDataStore.getState().updateSceneByUuid(t.uuid, { lengthChange: t.prev });
+          console.error(`[lengthChange] ${t.uuid} 저장 실패`, result.reason);
+        }
+      });
     } finally {
       lengthChangeInFlightRef.current = false;
     }
