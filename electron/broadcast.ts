@@ -109,11 +109,14 @@ export function broadcastSceneUpdate(
   safeSend('scene-update', { sceneUuid, stage, value, senderId, ts: Date.now() });
 }
 
-/** 씬 필드 업데이트 broadcast 전송 */
+/** 씬 필드 업데이트 broadcast 전송.
+ *  v1.16.0: value 가 null 도 허용 (lengthChange 해제 시 NULL 의미를 피어에 정확히 전달).
+ *  string 만 받던 시절엔 빈 문자열로 보내고 수신부에서 정규화했지만,
+ *  단일 수신부에 의존하면 다른 컨슈머에서 store 가 오염될 수 있어 송신부에서 normalize 해서 전달. */
 export function broadcastSceneFieldUpdate(
   sceneUuid: string,
   field: string,
-  value: string,
+  value: string | null,
   senderId?: string,
 ): void {
   safeSend('scene-field-update', { sceneUuid, field, value, senderId, ts: Date.now() });

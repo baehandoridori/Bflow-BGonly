@@ -1013,10 +1013,9 @@ export default function App() {
 
       if (data.event === 'scene-field-update') {
         // 필드 변경 → UUID로 즉시 반영
-        const { sceneUuid, field, value, senderId } = data.payload as { sceneUuid: string; field: string; value: string; senderId?: string };
+        const { sceneUuid, field, value, senderId } = data.payload as { sceneUuid: string; field: string; value: string | null; senderId?: string };
         if (sceneUuid && field) {
-          // v1.16.0: lengthChange 필드는 '' (빈 문자열) 을 null 로 정규화
-          // (자기 앱은 낙관적 업데이트로 null 인데 broadcast 는 '' 라 피어 store 가 오염됨)
+          // v1.16.0: lengthChange 필드는 '' (빈 문자열) 을 null 로 정규화 (송신부에서도 normalize 하지만 안전망)
           const normalized = (field === 'lengthChange' && value === '') ? null : value;
           useDataStore.getState().updateSceneByUuid(sceneUuid, { [field]: normalized });
 

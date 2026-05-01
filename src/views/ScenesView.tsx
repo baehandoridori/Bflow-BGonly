@@ -2351,12 +2351,16 @@ export function ScenesView() {
   };
 
   // v1.16.0: 선택된 씬들에 길이 변경 라벨 일괄 토글 (LD/SD/null)
-  // v1.16.0 fix: 다른 일괄 작업(stage/delete/edit) 진행 중에는 우회 방지
+  // v1.16.0 fix #1: 다른 일괄 작업(stage/delete/edit) 진행 중에는 우회 방지
+  // v1.16.0 fix #2 (Codex review): LD → SD 빠른 연타로 두 batch 가 동시 실행되어 out-of-order commit 되는 문제
+  //                                자체 in-flight ref 로 직렬화. ref 라 리렌더 트리거 X.
+  const lengthChangeBulkInFlightRef = useRef(false);
   const handleBulkLengthChange = async (value: 'LD' | 'SD' | null) => {
-    if (isBulkInFlight) return;
+    if (isBulkInFlight || lengthChangeBulkInFlightRef.current) return;
     const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes, currentPart);
     if (uuids.length === 0) return;
 
+    lengthChangeBulkInFlightRef.current = true;
     const prevEpisodes = useDataStore.getState().episodes;
     const valueStr = value ?? '';
 
@@ -2374,6 +2378,8 @@ export function ScenesView() {
     } catch (err) {
       useDataStore.getState().setEpisodes(prevEpisodes);
       console.error('[bulk lengthChange] 저장 실패', err);
+    } finally {
+      lengthChangeBulkInFlightRef.current = false;
     }
   };
 

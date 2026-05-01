@@ -755,7 +755,8 @@ export async function updateSceneField(
     .update(update)
     .eq('id', sceneUuid);
   throwIfError(error);
-  broadcastSceneFieldUpdate(sceneUuid, field, value, senderId);
+  // v1.16.0 (Codex review fix): broadcast 시 normalized value 전송 — 수신부 의존 없이 모든 컨슈머가 일관 처리.
+  broadcastSceneFieldUpdate(sceneUuid, field, persistedValue, senderId);
 }
 
 // ═══════════════════════════════════════════════

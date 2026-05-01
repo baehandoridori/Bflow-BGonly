@@ -396,9 +396,11 @@ export function WidgetPopup({ widgetId, extraParams }: { widgetId: string; extra
         }
       }
       if (data.event === 'scene-field-update') {
-        const { sceneUuid, field, value } = data.payload as { sceneUuid: string; field: string; value: string };
+        const { sceneUuid, field, value } = data.payload as { sceneUuid: string; field: string; value: string | null };
         if (sceneUuid && field) {
-          useDataStore.getState().updateSceneByUuid(sceneUuid, { [field]: value });
+          // v1.16.0: lengthChange 안전망 (송신부에서 normalize 하지만 이중 보호)
+          const normalized = (field === 'lengthChange' && value === '') ? null : value;
+          useDataStore.getState().updateSceneByUuid(sceneUuid, { [field]: normalized });
           return;
         }
       }
