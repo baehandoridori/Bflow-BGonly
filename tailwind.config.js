@@ -16,6 +16,9 @@ module.exports = {
         },
         accent: 'rgb(var(--color-accent) / <alpha-value>)',
         'accent-sub': 'rgb(var(--color-accent-sub) / <alpha-value>)',
+        // 씬 길이 변경 (LD/SD)
+        'length-up': 'rgb(var(--color-length-up) / <alpha-value>)',
+        'length-down': 'rgb(var(--color-length-down) / <alpha-value>)',
         // 시멘틱 컬러 (라이트/다크 자동 대응)
         overlay: 'rgb(var(--color-overlay) / <alpha-value>)',
         'on-accent': 'rgb(var(--color-on-accent) / <alpha-value>)',

@@ -21,6 +21,7 @@ import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
+import { LengthIcon } from '@/components/scenes/LengthIcon';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
 import { BulkOperationStatus } from '@/components/scenes/BulkOperationStatus';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -2349,6 +2350,110 @@ export function ScenesView() {
     clearSelectedScenes();
   };
 
+  // v1.16.0: 선택된 씬들에 길이 변경 라벨 일괄 토글 (LD/SD/null)
+  // v1.16.0 fix #1: isBulkInFlight 가드
+  // v1.16.0 fix #2 (Codex 라운드 1): self in-flight ref
+  // v1.16.0 fix #3 (Codex 라운드 3): Promise.allSettled
+  // v1.16.0 fix #4 (Codex 라운드 7): unified 모드 mergedKey 단위 atomic
+  // v1.16.0 fix #5 (Codex 라운드 8): unified vs 단독 뷰 분기 — 단독 뷰는 selectedSceneIds 가 plain sceneId 라
+  //                                  prefix 제거만으로 mergedKey 매칭 실패 → bulk 가 동작 안 했음.
+  //                                  → 통합: mergedKey atomic, 단독: per-uuid 부분 롤백 (한 부서만 영향).
+  type Target = { uuid: string; prev: 'LD' | 'SD' | null };
+  const lengthChangeBulkInFlightRef = useRef(false);
+  const handleBulkLengthChange = async (value: 'LD' | 'SD' | null) => {
+    if (isBulkInFlight || lengthChangeBulkInFlightRef.current) return;
+    const valueStr = value ?? '';
+
+    if (selectedDepartment === 'all') {
+      // ─── 통합 뷰: mergedKey 단위 atomic (BG/ACT sync 보존) ───
+      type MergedTarget = { bg?: Target; act?: Target };
+      const mergedTargets = new Map<string, MergedTarget>();
+      for (const id of selectedSceneIds) {
+        if (!id.startsWith('bg:') && !id.startsWith('act:')) continue;
+        const mergedKey = id.replace(/^(bg|act):/, '');
+        if (mergedTargets.has(mergedKey)) continue;
+        const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
+        if (!merged) continue;
+        const target: MergedTarget = {};
+        if (merged.bgScene?.id) target.bg = { uuid: merged.bgScene.id, prev: merged.bgScene.lengthChange ?? null };
+        if (merged.actScene?.id) target.act = { uuid: merged.actScene.id, prev: merged.actScene.lengthChange ?? null };
+        if (target.bg || target.act) mergedTargets.set(mergedKey, target);
+      }
+      if (mergedTargets.size === 0) return;
+
+      lengthChangeBulkInFlightRef.current = true;
+      // 낙관적
+      for (const t of mergedTargets.values()) {
+        if (t.bg) useDataStore.getState().updateSceneByUuid(t.bg.uuid, { lengthChange: value });
+        if (t.act) useDataStore.getState().updateSceneByUuid(t.act.uuid, { lengthChange: value });
+      }
+
+      try {
+        await Promise.all(
+          Array.from(mergedTargets.values()).map(async (t) => {
+            const targets: Target[] = [];
+            if (t.bg) targets.push(t.bg);
+            if (t.act) targets.push(t.act);
+            const results = await Promise.allSettled(
+              targets.map((tt) =>
+                window.electronAPI?.supabaseUpdateSceneField?.(tt.uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
+              ),
+            );
+            const anyFailed = results.some((r) => r.status === 'rejected');
+            if (!anyFailed) return;
+            // BG/ACT sync 보존: 둘 다 prev 로 UI 롤백
+            for (const tt of targets) {
+              useDataStore.getState().updateSceneByUuid(tt.uuid, { lengthChange: tt.prev });
+            }
+            // 성공한 DB 호출은 best-effort reverse
+            results.forEach((r, i) => {
+              if (r.status === 'fulfilled') {
+                const tt = targets[i];
+                window.electronAPI?.supabaseUpdateSceneField?.(tt.uuid, 'lengthChange', tt.prev ?? '')
+                  .catch((err) => console.error(`[bulk lengthChange] reverse 실패 ${tt.uuid}`, err));
+              } else {
+                console.error(`[bulk lengthChange] ${targets[i].uuid} 실패`, r.reason);
+              }
+            });
+          }),
+        );
+      } finally {
+        lengthChangeBulkInFlightRef.current = false;
+      }
+    } else {
+      // ─── 단독 뷰 (BG 또는 ACT only): plain sceneId → Scene → uuid, per-uuid 부분 롤백 ───
+      // 단독 뷰는 한 부서만 영향이라 mergedKey atomic 무의미.
+      const scenes = resolveSelectedScenes(selectedSceneIds, allMergedScenes, selectedDepartment as 'bg' | 'acting', currentPart);
+      const targets: Target[] = scenes
+        .filter((s) => !!s.id)
+        .map((s) => ({ uuid: s.id!, prev: s.lengthChange ?? null }));
+      if (targets.length === 0) return;
+
+      lengthChangeBulkInFlightRef.current = true;
+      // 낙관적
+      for (const t of targets) {
+        useDataStore.getState().updateSceneByUuid(t.uuid, { lengthChange: value });
+      }
+
+      try {
+        const results = await Promise.allSettled(
+          targets.map((t) =>
+            window.electronAPI?.supabaseUpdateSceneField?.(t.uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
+          ),
+        );
+        results.forEach((r, i) => {
+          if (r.status === 'rejected') {
+            const t = targets[i];
+            useDataStore.getState().updateSceneByUuid(t.uuid, { lengthChange: t.prev });
+            console.error(`[bulk lengthChange] (단독) ${t.uuid} 실패`, r.reason);
+          }
+        });
+      } finally {
+        lengthChangeBulkInFlightRef.current = false;
+      }
+    }
+  };
+
   // 일괄 편집: 선택된 씬들의 assignee/memo/layoutId를 RPC로 일괄 갱신 (Tasks 13-17)
   const handleBulkEditSubmit = async (
     payload: { assignee?: string; memo?: string; layoutId?: string },
@@ -3895,7 +4000,11 @@ export function ScenesView() {
             <div className="flex items-center gap-2 pr-3 border-r border-bg-border shrink-0">
               <CheckSquare size={14} className="text-accent" />
               <span className="text-xs font-medium text-text-primary whitespace-nowrap leading-none">
-                {selectedSceneIds.size}개 선택
+                {/* v1.16.0: 통합 뷰는 mergedKey 기준 unique count (BG+ACT 양쪽 동시 선택을 1개로 표시) */}
+                {selectedDepartment === 'all'
+                  ? new Set([...selectedSceneIds].map((id) => id.replace(/^(bg|act):/, ''))).size
+                  : selectedSceneIds.size
+                }개 선택
               </span>
             </div>
 
@@ -3960,6 +4069,39 @@ export function ScenesView() {
                 </button>
               ))
             )}
+
+            <div className="w-px h-5 bg-bg-border shrink-0" />
+
+            {/* v1.16.0: 길이 변경 일괄 토글 */}
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-text-secondary leading-none whitespace-nowrap mr-0.5">길이</span>
+              <button
+                onClick={() => handleBulkLengthChange('LD')}
+                disabled={isBulkInFlight}
+                title="LD · Long Duration (길이 늘어남)"
+                className="h-7 px-2 text-[11px] font-medium rounded-md bg-length-up/10 text-length-up border border-length-up/30 hover:bg-length-up/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                <LengthIcon kind="LD" size="sm" />
+                <span>LD</span>
+              </button>
+              <button
+                onClick={() => handleBulkLengthChange('SD')}
+                disabled={isBulkInFlight}
+                title="SD · Short Duration (길이 줄어듦)"
+                className="h-7 px-2 text-[11px] font-medium rounded-md bg-length-down/10 text-length-down border border-length-down/30 hover:bg-length-down/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                <LengthIcon kind="SD" size="sm" />
+                <span>SD</span>
+              </button>
+              <button
+                onClick={() => handleBulkLengthChange(null)}
+                disabled={isBulkInFlight}
+                title="길이 변경 표시 해제"
+                className="h-7 px-2 text-[11px] font-medium rounded-md bg-bg-border/30 text-text-secondary border border-bg-border hover:bg-bg-border/50 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                해제
+              </button>
+            </div>
 
             <div className="w-px h-5 bg-bg-border shrink-0" />
 

@@ -38,6 +38,7 @@ import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
+import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
@@ -1012,9 +1013,11 @@ export default function App() {
 
       if (data.event === 'scene-field-update') {
         // 필드 변경 → UUID로 즉시 반영
-        const { sceneUuid, field, value, senderId } = data.payload as { sceneUuid: string; field: string; value: string; senderId?: string };
+        const { sceneUuid, field, value, senderId } = data.payload as { sceneUuid: string; field: string; value: string | null; senderId?: string };
         if (sceneUuid && field) {
-          useDataStore.getState().updateSceneByUuid(sceneUuid, { [field]: value });
+          // v1.16.0: lengthChange 필드는 '' (빈 문자열) 을 null 로 정규화 (송신부에서도 normalize 하지만 안전망)
+          const normalized = (field === 'lengthChange' && value === '') ? null : value;
+          useDataStore.getState().updateSceneByUuid(sceneUuid, { [field]: normalized });
 
           // 알림: 타인이 내 씬의 필드를 변경한 경우 (담당자 변경 등)
           const me = useAuthStore.getState().currentUser;
@@ -1379,6 +1382,7 @@ export default function App() {
 
   return (
     <>
+      <SvgIconDefs />
       <GradientBackdrop intensity="normal" enabled={globalGradientEnabled} />
       <MainLayout onRefresh={loadData}>{renderView()}</MainLayout>
       <SpotlightSearch />

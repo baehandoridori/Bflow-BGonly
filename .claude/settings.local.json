@@ -19,7 +19,8 @@
       "Bash(gh pr:*)",
       "Read(//g/공유 드라이브/JBBJ 자료실/한솔이의 두근두근 실험실/Bflow-BGonly//**)",
       "Read(//g/공유 드라이브/JBBJ 자료실/한솔이의 두근두근 실험실/Bflow-BGonly/**)",
-      "mcp__67cc0a56-abf9-4d18-9a05-e0e9d2c4761a__list_projects"
+      "mcp__67cc0a56-abf9-4d18-9a05-e0e9d2c4761a__list_projects",
+      "Bash(xargs wc *)"
     ]
   }
 }

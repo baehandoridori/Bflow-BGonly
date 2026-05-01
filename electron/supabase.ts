@@ -241,7 +241,7 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
     // Supabase IN 쿼리는 최대 수백 개까지 괜찮음
     const { data: sceneRows, error: sceneErr } = await supabase
       .from('scenes')
-      .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png')
+      .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change')
       .in('part_id', partIds)
       .order('sort_order');
     throwIfError(sceneErr);
@@ -317,6 +317,7 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
             done: s.done,
             review: s.review,
             png: s.png,
+            lengthChange: (s as { length_change?: 'LD' | 'SD' | null }).length_change ?? null,
           })),
         };
       }),
@@ -742,16 +743,20 @@ export async function updateSceneField(
     storyboardUrl: 'storyboard_url',
     guideUrl: 'guide_url',
     layoutId: 'layout',
+    lengthChange: 'length_change',
   };
   const dbField = fieldMap[field] || field;
-  const update: Record<string, unknown> = { [dbField]: value, updated_at: new Date().toISOString() };
+  // length_change: 빈 문자열은 NULL 로 저장 (CHECK constraint: NULL | 'LD' | 'SD' 만 허용)
+  const persistedValue = dbField === 'length_change' && value === '' ? null : value;
+  const update: Record<string, unknown> = { [dbField]: persistedValue, updated_at: new Date().toISOString() };
   if (senderId) update.updated_by = senderId;
   const { error } = await supabase
     .from('scenes')
     .update(update)
     .eq('id', sceneUuid);
   throwIfError(error);
-  broadcastSceneFieldUpdate(sceneUuid, field, value, senderId);
+  // v1.16.0 (Codex review fix): broadcast 시 normalized value 전송 — 수신부 의존 없이 모든 컨슈머가 일관 처리.
+  broadcastSceneFieldUpdate(sceneUuid, field, persistedValue, senderId);
 }
 
 // ═══════════════════════════════════════════════
