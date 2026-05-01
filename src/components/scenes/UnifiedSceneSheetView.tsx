@@ -377,8 +377,14 @@ export function UnifiedSceneSheetView({
   }, []);
 
   // 길이 변경 토글 (BG/ACT 양쪽 동기화)
-  // v1.16.0 fix: 직렬 await → Promise.all 병렬로 부분 실패 창 최소화
+  // v1.16.0 fix #1: 직렬 await → Promise.all 병렬로 부분 실패 창 최소화
+  // v1.16.0 fix #2 (Codex 라운드 2): per-scene race fix — 같은 mergedKey 에 대한 동시 호출 직렬화.
+  //                                   다른 row 는 동시 처리 가능하도록 mergedKey Set 으로 관리.
+  const lengthChangeInFlightRef = useRef<Set<string>>(new Set());
   const handleSetLengthChange = useCallback(async (merged: MergedScene, value: 'LD' | 'SD' | null) => {
+    const key = merged.mergedKey;
+    if (lengthChangeInFlightRef.current.has(key)) return;
+    lengthChangeInFlightRef.current.add(key);
     const prevEpisodes = useDataStore.getState().episodes;
     const valueStr = value ?? '';
     if (merged.bgScene?.id) useDataStore.getState().updateSceneByUuid(merged.bgScene.id, { lengthChange: value });
@@ -391,6 +397,8 @@ export function UnifiedSceneSheetView({
     } catch (err) {
       useDataStore.getState().setEpisodes(prevEpisodes);
       console.error('[lengthChange] 시트 저장 실패', err);
+    } finally {
+      lengthChangeInFlightRef.current.delete(key);
     }
   }, []);
   // 드래그 판정 — 단순 클릭이 범위 선택(중복 선택)으로 오해되지 않도록 임계값 설정

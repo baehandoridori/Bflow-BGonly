@@ -78,8 +78,13 @@ export function UnifiedSceneCard({
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
   // 길이 변경 토글 (BG/ACT 양쪽 동기화)
-  // v1.16.0 fix: 직렬 await 시 BG 성공 후 ACT 실패하면 DB↔UI 영구 불일치. Promise.all 병렬로 부분 실패 창 최소화.
+  // v1.16.0 fix #1: 직렬 await 시 BG 성공 후 ACT 실패하면 DB↔UI 영구 불일치. Promise.all 병렬로 부분 실패 창 최소화.
+  // v1.16.0 fix #2 (Codex 라운드 2): LD → SD 빠른 연타로 두 IPC 호출이 race → out-of-order commit 가능.
+  //                                  per-card in-flight ref 로 직렬화 (카드 인스턴스마다 별도 ref).
+  const lengthChangeInFlightRef = useRef(false);
   const handleSetLengthChange = async (value: 'LD' | 'SD' | null) => {
+    if (lengthChangeInFlightRef.current) return;
+    lengthChangeInFlightRef.current = true;
     const prevEpisodes = useDataStore.getState().episodes;
     const valueStr = value ?? '';
     // 낙관적: BG/ACT 모두 적용
@@ -93,6 +98,8 @@ export function UnifiedSceneCard({
     } catch (err) {
       useDataStore.getState().setEpisodes(prevEpisodes);
       console.error('[lengthChange] 저장 실패', err);
+    } finally {
+      lengthChangeInFlightRef.current = false;
     }
   };
 
