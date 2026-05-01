@@ -667,9 +667,11 @@ export function UnifiedSceneSheetView({
         <table className="w-full text-sm border-collapse">
           {/* ── 헤더 ── */}
           <thead className="sticky top-0 z-10">
-            {/* 부서 구분 서브헤더 (상단) — v1.16.0: 메모 컬럼 분리에 맞춰 colSpan 조정 (2→3) */}
+            {/* 부서 구분 서브헤더 (상단) — v1.16.0: 메모 컬럼 분리에 맞춰 colSpan 조정 (2→3)
+                v1.16.0 fix (Codex 라운드 8): layout 모드 분기 제거 — 본문/두 번째 헤더는 18칸인데
+                여기만 19칸이 되어 sticky 2단 헤더 정렬이 깨졌음. 한솔 결정 1-B 에 따라 컬럼 수는
+                일반 모드와 동일하므로 별도 분기 불필요. */}
             <tr className="bg-bg-card border-b border-bg-border/50">
-              {sceneGroupMode === 'layout' && <th />}
               <th colSpan={3} />
               <th className="px-2 py-1" />
               <th colSpan={2} />
