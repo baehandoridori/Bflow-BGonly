@@ -72,6 +72,14 @@ export interface Scene {
   png: boolean;
   completedBy?: string;  // 모든 단계 완료한 사용자 이름
   completedAt?: string;  // 완료 시각 (ISO 8601)
+  /**
+   * 씬 길이 변경 시각 라벨 (수동 토글, 영구 라벨 — 사용자가 해제 전까지 유지).
+   * - 'LD' = Long Duration (길이 늘어남, <-> SVG 라벨)
+   * - 'SD' = Short Duration (길이 줄어듦, >-< SVG 라벨)
+   * - null/undefined = 표시 없음
+   * 카드/시트 우클릭 메뉴로 토글.
+   */
+  lengthChange?: 'LD' | 'SD' | null;
 }
 
 // ─── 통합 씬 (BG + ACT 머지) ─────────────────

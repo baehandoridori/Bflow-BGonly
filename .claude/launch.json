@@ -18,6 +18,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5557"],
       "port": 5557
+    },
+    {
+      "name": "scene-meta-mockup",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5558"],
+      "port": 5558
     }
   ]
 }

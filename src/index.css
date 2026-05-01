@@ -81,6 +81,9 @@
   --shadow-alpha: 0.35;
   /* 시멘틱: accent 버튼 위 텍스트 (항상 흰색) */
   --color-on-accent: 255 255 255;
+  /* 시멘틱: 씬 길이 변경 (LD = 늘어남 / SD = 줄어듦) */
+  --color-length-up: 52 211 153;     /* #34D399 emerald-400 */
+  --color-length-down: 251 113 133;   /* #FB7185 rose-400 */
 }
 
 /* ─── 라이트 모드 오버라이드 ─── */
@@ -96,6 +99,9 @@
   --color-shadow: 0 0 0;
   --shadow-alpha: 0.12;
   --color-on-accent: 255 255 255;
+  /* 라이트 모드 길이 변경 색 (대비 강화) */
+  --color-length-up: 5 150 105;      /* #059669 emerald-600 */
+  --color-length-down: 220 38 38;     /* #DC2626 red-600 */
 }
 
 /* 앱 전체 텍스트 선택 방지 (드래그 시 파란색 하이라이트 제거) */

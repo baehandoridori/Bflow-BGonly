@@ -21,6 +21,7 @@ import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
+import { LengthIcon } from '@/components/scenes/LengthIcon';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
 import { BulkOperationStatus } from '@/components/scenes/BulkOperationStatus';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -2349,6 +2350,33 @@ export function ScenesView() {
     clearSelectedScenes();
   };
 
+  // v1.16.0: 선택된 씬들에 길이 변경 라벨 일괄 토글 (LD/SD/null)
+  // v1.16.0 fix: 다른 일괄 작업(stage/delete/edit) 진행 중에는 우회 방지
+  const handleBulkLengthChange = async (value: 'LD' | 'SD' | null) => {
+    if (isBulkInFlight) return;
+    const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes, currentPart);
+    if (uuids.length === 0) return;
+
+    const prevEpisodes = useDataStore.getState().episodes;
+    const valueStr = value ?? '';
+
+    // 낙관적: 선택된 모든 씬(BG+ACT 양쪽 포함)에 즉시 적용
+    for (const uuid of uuids) {
+      useDataStore.getState().updateSceneByUuid(uuid, { lengthChange: value });
+    }
+
+    try {
+      await Promise.all(
+        uuids.map((uuid) =>
+          window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
+        ),
+      );
+    } catch (err) {
+      useDataStore.getState().setEpisodes(prevEpisodes);
+      console.error('[bulk lengthChange] 저장 실패', err);
+    }
+  };
+
   // 일괄 편집: 선택된 씬들의 assignee/memo/layoutId를 RPC로 일괄 갱신 (Tasks 13-17)
   const handleBulkEditSubmit = async (
     payload: { assignee?: string; memo?: string; layoutId?: string },
@@ -3895,7 +3923,11 @@ export function ScenesView() {
             <div className="flex items-center gap-2 pr-3 border-r border-bg-border shrink-0">
               <CheckSquare size={14} className="text-accent" />
               <span className="text-xs font-medium text-text-primary whitespace-nowrap leading-none">
-                {selectedSceneIds.size}개 선택
+                {/* v1.16.0: 통합 뷰는 mergedKey 기준 unique count (BG+ACT 양쪽 동시 선택을 1개로 표시) */}
+                {selectedDepartment === 'all'
+                  ? new Set([...selectedSceneIds].map((id) => id.replace(/^(bg|act):/, ''))).size
+                  : selectedSceneIds.size
+                }개 선택
               </span>
             </div>
 
@@ -3960,6 +3992,39 @@ export function ScenesView() {
                 </button>
               ))
             )}
+
+            <div className="w-px h-5 bg-bg-border shrink-0" />
+
+            {/* v1.16.0: 길이 변경 일괄 토글 */}
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-text-secondary leading-none whitespace-nowrap mr-0.5">길이</span>
+              <button
+                onClick={() => handleBulkLengthChange('LD')}
+                disabled={isBulkInFlight}
+                title="LD · Long Duration (길이 늘어남)"
+                className="h-7 px-2 text-[11px] font-medium rounded-md bg-length-up/10 text-length-up border border-length-up/30 hover:bg-length-up/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                <LengthIcon kind="LD" size="sm" />
+                <span>LD</span>
+              </button>
+              <button
+                onClick={() => handleBulkLengthChange('SD')}
+                disabled={isBulkInFlight}
+                title="SD · Short Duration (길이 줄어듦)"
+                className="h-7 px-2 text-[11px] font-medium rounded-md bg-length-down/10 text-length-down border border-length-down/30 hover:bg-length-down/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                <LengthIcon kind="SD" size="sm" />
+                <span>SD</span>
+              </button>
+              <button
+                onClick={() => handleBulkLengthChange(null)}
+                disabled={isBulkInFlight}
+                title="길이 변경 표시 해제"
+                className="h-7 px-2 text-[11px] font-medium rounded-md bg-bg-border/30 text-text-secondary border border-bg-border hover:bg-bg-border/50 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                해제
+              </button>
+            </div>
 
             <div className="w-px h-5 bg-bg-border shrink-0" />
 

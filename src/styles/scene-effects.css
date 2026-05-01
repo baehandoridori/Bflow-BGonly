@@ -142,42 +142,150 @@
  * - 그룹 마지막 행: 아래쪽 3px 굵은 액센트 보더 + 추가 padding
  * - 행 양쪽: 얇은 액센트 보더로 카드 가장자리 흉내
  */
+/* v1.16.0 — 그룹 카드 디자인 개편 (한솔 결정):
+ * 좌우 보더 제거 → 빈 셀에서 보이던 짧은 세로선 사라짐.
+ * 대신 그룹 안 모든 행에 옅은 액센트 배경 → 한 덩어리로 묶여 보임.
+ * 그룹 위/아래 굵은 액센트 보더만 유지 → 그룹 단위 분리감 강화.
+ *
+ * Defensive reset: 그룹 행의 td/th에서 좌우 시각 분리(보더/아웃라인/그림자) 모두 제거.
+ * — 그룹 외 일반 행/헤더에는 영향 X (별도 셀렉터로 한정).
+ */
+.scene-group-header > td,
+.scene-group-header > th,
+.scene-row-group-mid > td,
+.scene-row-group-mid > th,
+.scene-row-group-last > td,
+.scene-row-group-last > th {
+  border-left: 0 !important;
+  border-right: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+
 .scene-group-header > td {
   background: rgb(var(--color-accent) / 0.18) !important;
   border-top: 3px solid rgb(var(--color-accent) / 0.85) !important;
   padding: 10px 12px !important;
 }
-.scene-group-header > td:first-child {
-  border-left: 2px solid rgb(var(--color-accent) / 0.6) !important;
-}
-.scene-group-header > td:last-child {
-  border-right: 2px solid rgb(var(--color-accent) / 0.6) !important;
-}
 
-.scene-row-group-mid > td:first-child {
-  border-left: 2px solid rgb(var(--color-accent) / 0.6) !important;
+.scene-row-group-mid {
+  border-bottom: none !important;
 }
-.scene-row-group-mid > td:last-child {
-  border-right: 2px solid rgb(var(--color-accent) / 0.6) !important;
+.scene-row-group-mid > td {
+  /* 그룹 내부 행 사이 가로/좌우 보더 모두 제거 → 한 덩어리 카드 느낌 */
+  border-bottom: none !important;
+  background: rgb(var(--color-accent) / 0.06) !important;
 }
 
 .scene-row-group-last > td {
   border-bottom: 3px solid rgb(var(--color-accent) / 0.85) !important;
   padding-bottom: 10px !important;
-}
-.scene-row-group-last > td:first-child {
-  border-left: 2px solid rgb(var(--color-accent) / 0.6) !important;
-  border-bottom-left-radius: 6px;
-}
-.scene-row-group-last > td:last-child {
-  border-right: 2px solid rgb(var(--color-accent) / 0.6) !important;
-  border-bottom-right-radius: 6px;
+  background: rgb(var(--color-accent) / 0.06) !important;
 }
 
-/* 그룹 사이 간격 — 빈 행으로 카드 분리감 */
+/* hover 시 그룹 행도 강조 (배경 미세하게 더 진하게) */
+.scene-row-group-mid:hover > td,
+.scene-row-group-last:hover > td {
+  background: rgb(var(--color-accent) / 0.12) !important;
+}
+
+/* 그룹 사이 간격 — 빈 행으로 카드 분리감 강화 (14→20px) */
 .scene-row-group-gap > td {
-  height: 14px !important;
+  height: 20px !important;
   padding: 0 !important;
   border: none !important;
   background: transparent !important;
+}
+
+/* ─────────────────────────────────────────────
+ * 씬 길이 변경 라벨 (LD = <-> 늘어남, SD = >-< 줄어듦)
+ * v1.16.0 — 한솔 결정: 영구 라벨, 카드/시트 우클릭 토글
+ * ───────────────────────────────────────────── */
+
+/* SVG 아이콘 베이스 (줄바꿈 안전 + 크기 고정) */
+.length-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+  width: 20px;
+  height: 10px;
+  overflow: visible;
+}
+.length-icon.sm { width: 16px; height: 8px; }
+.length-icon.lg { width: 26px; height: 13px; }
+
+/* 카드 헤더 우상단 칩 */
+.length-symbol {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 5px;
+  cursor: help;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+.length-symbol.up {
+  color: rgb(var(--color-length-up));
+  background: rgb(var(--color-length-up) / 0.15);
+  border: 1px solid rgb(var(--color-length-up) / 0.3);
+}
+.length-symbol.down {
+  color: rgb(var(--color-length-down));
+  background: rgb(var(--color-length-down) / 0.15);
+  border: 1px solid rgb(var(--color-length-down) / 0.3);
+}
+.length-symbol .length-icon {
+  width: 20px;
+  height: 10px;
+}
+
+/* 시트 셀 안 작은 칩 — 절대 잘리지 않게 */
+.length-symbol-sheet {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-right: 6px;
+  cursor: help;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.3;
+  vertical-align: middle;
+}
+.length-symbol-sheet.up {
+  color: rgb(var(--color-length-up));
+  background: rgb(var(--color-length-up) / 0.15);
+  border: 1px solid rgb(var(--color-length-up) / 0.28);
+}
+.length-symbol-sheet.down {
+  color: rgb(var(--color-length-down));
+  background: rgb(var(--color-length-down) / 0.15);
+  border: 1px solid rgb(var(--color-length-down) / 0.28);
+}
+.length-symbol-sheet .length-icon { width: 16px; height: 8px; }
+
+/* v1.16.0: 시트 뷰 리사이즈 중 transition 비활성화 (행 많을 때 렉 방지) */
+html.is-resizing .unified-scene-sheet,
+html.is-resizing .unified-scene-sheet *,
+html.is-resizing .unified-scene-sheet *::before,
+html.is-resizing .unified-scene-sheet *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* 시트 행 좌측 그라데이션 — 멀리서도 행 인지 */
+.sheet-row-length-up {
+  background: linear-gradient(90deg, rgb(var(--color-length-up) / 0.15) 0%, transparent 5%);
+}
+.sheet-row-length-down {
+  background: linear-gradient(90deg, rgb(var(--color-length-down) / 0.15) 0%, transparent 5%);
+}
+.sheet-row-length-up:hover {
+  background: linear-gradient(90deg, rgb(var(--color-length-up) / 0.18) 0%, rgb(var(--color-accent) / 0.04) 5%);
+}
+.sheet-row-length-down:hover {
+  background: linear-gradient(90deg, rgb(var(--color-length-down) / 0.18) 0%, rgb(var(--color-accent) / 0.04) 5%);
 }

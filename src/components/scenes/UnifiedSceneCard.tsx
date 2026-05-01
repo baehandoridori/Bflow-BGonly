@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { MessageCircle, Trash2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
@@ -6,8 +7,12 @@ import { sceneProgress } from '@/utils/calcStats';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Stage, Department } from '@/types';
 import { HighlightText } from '@/components/common/HighlightText';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { Confetti } from '@/components/ui/Confetti';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
+import { useDataStore } from '@/stores/useDataStore';
+import { LengthIcon } from './LengthIcon';
+import { SceneContextMenu } from './SceneContextMenu';
 
 // 씬 UUID에 대한 현재 일괄 작업 상태(pending / failed)를 조회
 function getPendingState(
@@ -69,6 +74,28 @@ export function UnifiedSceneCard({
   const cardRootRef = useRef<HTMLDivElement>(null);
   const prevHighlightedRef = useRef(false);
 
+  // 우클릭 컨텍스트 메뉴 상태
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+
+  // 길이 변경 토글 (BG/ACT 양쪽 동기화)
+  // v1.16.0 fix: 직렬 await 시 BG 성공 후 ACT 실패하면 DB↔UI 영구 불일치. Promise.all 병렬로 부분 실패 창 최소화.
+  const handleSetLengthChange = async (value: 'LD' | 'SD' | null) => {
+    const prevEpisodes = useDataStore.getState().episodes;
+    const valueStr = value ?? '';
+    // 낙관적: BG/ACT 모두 적용
+    if (bgScene?.id) useDataStore.getState().updateSceneByUuid(bgScene.id, { lengthChange: value });
+    if (actScene?.id) useDataStore.getState().updateSceneByUuid(actScene.id, { lengthChange: value });
+    try {
+      const tasks: Array<Promise<unknown>> = [];
+      if (bgScene?.id) tasks.push(window.electronAPI?.supabaseUpdateSceneField?.(bgScene.id, 'lengthChange', valueStr) ?? Promise.resolve());
+      if (actScene?.id) tasks.push(window.electronAPI?.supabaseUpdateSceneField?.(actScene.id, 'lengthChange', valueStr) ?? Promise.resolve());
+      await Promise.all(tasks);
+    } catch (err) {
+      useDataStore.getState().setEpisodes(prevEpisodes);
+      console.error('[lengthChange] 저장 실패', err);
+    }
+  };
+
   // 일괄 작업 상태 구독: delete/field-edit일 때 카드 전체, stage-toggle일 때 단계 셀에만 적용
   const activeOp = useBulkOperationsStore((s) => s.activeOp);
 
@@ -124,6 +151,14 @@ export function UnifiedSceneCard({
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  // BG/ACT 둘 중 하나라도 lengthChange 가 있으면 그 값 (BG 우선, 양쪽 동기화 정책)
+  const lengthChange = bgScene?.lengthChange ?? actScene?.lengthChange ?? null;
+
   return (
     <motion.div
       data-scene-id={mergedKey}
@@ -142,6 +177,7 @@ export function UnifiedSceneCard({
       }}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
+      onContextMenu={handleContextMenu}
       ref={cardRootRef}
       {...(isHighlighted ? {
         initial: { scale: 1.06 },
@@ -185,6 +221,14 @@ export function UnifiedSceneCard({
                 </span>
               );
             })()}
+            {lengthChange && (
+              <span
+                className={`length-symbol ${lengthChange === 'LD' ? 'up' : 'down'}`}
+                title={lengthChange === 'LD' ? 'LD · Long Duration (길이 늘어남)' : 'SD · Short Duration (길이 줄어듦)'}
+              >
+                <LengthIcon kind={lengthChange} />
+              </span>
+            )}
             <span className="bg-bg-primary/80 border border-bg-border/45 text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
               {combinedPct}%
             </span>
@@ -203,12 +247,31 @@ export function UnifiedSceneCard({
           </div>
         )}
 
-        {/* ── 메모 ── */}
-        {primaryScene.memo && (
-          <div className="mx-4 mt-1" data-no-lasso>
-            <p className="text-[11px] text-amber-400/70 leading-relaxed line-clamp-1">
-              <HighlightText text={primaryScene.memo} query={searchQuery} />
-            </p>
+        {/* ── 메모 (BG/ACT 양쪽 동시 노출 — 한쪽만 있으면 한 줄) ── */}
+        {(bgScene?.memo || actScene?.memo) && (
+          <div className="mx-4 mt-1 flex flex-col gap-0.5" data-no-lasso>
+            {bgScene?.memo && (
+              <div className="flex items-center gap-1.5 overflow-hidden">
+                <span className="text-[9px] font-bold tracking-wide px-1 py-px rounded text-blue-300 bg-blue-300/15 flex-shrink-0">BG</span>
+                <p className="text-[11px] text-amber-400/70 leading-relaxed truncate min-w-0">
+                  <PathLinkifiedText
+                    text={bgScene.memo}
+                    renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
+                  />
+                </p>
+              </div>
+            )}
+            {actScene?.memo && (
+              <div className="flex items-center gap-1.5 overflow-hidden">
+                <span className="text-[9px] font-bold tracking-wide px-1 py-px rounded text-pink-300 bg-pink-300/15 flex-shrink-0">ACT</span>
+                <p className="text-[11px] text-amber-400/70 leading-relaxed truncate min-w-0">
+                  <PathLinkifiedText
+                    text={actScene.memo}
+                    renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
+                  />
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -243,6 +306,18 @@ export function UnifiedSceneCard({
         <div className="px-4 pb-3 pt-1 relative overflow-visible">
           <Confetti active={celebrating} onComplete={onCelebrationEnd} />
         </div>
+
+        {/* ── 우클릭 컨텍스트 메뉴 (Portal — motion.div transform 영향 회피) ── */}
+        {ctxMenu && createPortal(
+          <SceneContextMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            current={lengthChange}
+            onSelect={handleSetLengthChange}
+            onClose={() => setCtxMenu(null)}
+          />,
+          document.body,
+        )}
     </motion.div>
   );
 }
