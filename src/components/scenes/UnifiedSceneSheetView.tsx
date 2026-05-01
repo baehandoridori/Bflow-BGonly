@@ -377,17 +377,18 @@ export function UnifiedSceneSheetView({
   }, []);
 
   // 길이 변경 토글 (BG/ACT 양쪽 동기화)
-  // v1.16.0 fix #1: 직렬 await → Promise.all 병렬로 부분 실패 창 최소화.
+  // v1.16.0 fix #1: 직렬 await → Promise.all 병렬.
   // v1.16.0 fix #2 (Codex 라운드 2): per-mergedKey Set 으로 same-row 동시 호출 직렬화.
-  // v1.16.0 fix #3 (Codex 라운드 4): Promise.all reject 시 전체 롤백 → 부분 실패에서 성공한 DB 변경이 UI 에서 사라져 불일치.
-  //                                  Promise.allSettled + per-UUID 부분 롤백 (성공한 씬 유지).
+  // v1.16.0 fix #3 (Codex 라운드 4): Promise.allSettled + per-UUID 부분 롤백.
+  // v1.16.0 fix #4 (Codex 라운드 6): per-UUID 부분 롤백이 BG/ACT sync invariant 깸 →
+  //                                  부분 실패 시 BG/ACT 둘 다 prev 로 롤백 (UI sync 보존).
+  //                                  성공한 DB 호출은 best-effort reverse 로 정합성 회복 시도.
   const lengthChangeInFlightRef = useRef<Set<string>>(new Set());
   const handleSetLengthChange = useCallback(async (merged: MergedScene, value: 'LD' | 'SD' | null) => {
     const key = merged.mergedKey;
     if (lengthChangeInFlightRef.current.has(key)) return;
     lengthChangeInFlightRef.current.add(key);
     const valueStr = value ?? '';
-    // 변경 전 값 캐싱 (BG/ACT 별도)
     const prevBg = merged.bgScene?.lengthChange ?? null;
     const prevAct = merged.actScene?.lengthChange ?? null;
     if (merged.bgScene?.id) useDataStore.getState().updateSceneByUuid(merged.bgScene.id, { lengthChange: value });
@@ -401,11 +402,22 @@ export function UnifiedSceneSheetView({
           window.electronAPI?.supabaseUpdateSceneField?.(t.uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
         ),
       );
+      const anyFailed = results.some((r) => r.status === 'rejected');
+      if (!anyFailed) return;
+
+      // BG/ACT sync 보존: 둘 다 prev 로 UI 롤백
+      for (const t of targets) {
+        useDataStore.getState().updateSceneByUuid(t.uuid, { lengthChange: t.prev });
+      }
+      // 성공한 DB 호출은 best-effort reverse
       results.forEach((result, i) => {
-        if (result.status === 'rejected') {
+        if (result.status === 'fulfilled') {
           const t = targets[i];
-          useDataStore.getState().updateSceneByUuid(t.uuid, { lengthChange: t.prev });
-          console.error(`[lengthChange] 시트 ${t.uuid} 저장 실패`, result.reason);
+          const prevStr = t.prev ?? '';
+          window.electronAPI?.supabaseUpdateSceneField?.(t.uuid, 'lengthChange', prevStr)
+            .catch((err) => console.error(`[lengthChange] 시트 reverse 실패 ${t.uuid}`, err));
+        } else {
+          console.error(`[lengthChange] 시트 ${targets[i].uuid} 저장 실패`, result.reason);
         }
       });
     } finally {

@@ -80,9 +80,11 @@ export function UnifiedSceneCard({
   // 길이 변경 토글 (BG/ACT 양쪽 동기화)
   // v1.16.0 fix #1: 직렬 await → Promise.all 병렬로 부분 실패 창 최소화.
   // v1.16.0 fix #2 (Codex 라운드 2): per-card in-flight ref 로 LD↔SD 연타 race 방지.
-  // v1.16.0 fix #3 (Codex 라운드 4): Promise.all reject 시 setEpisodes(prevEpisodes) 전체 롤백 →
-  //                                  BG 성공/ACT 실패 같은 부분 실패에서 성공한 DB 변경이 UI 에서 사라져 불일치.
-  //                                  Promise.allSettled + per-UUID 부분 롤백 (성공한 씬 유지).
+  // v1.16.0 fix #3 (Codex 라운드 4): Promise.allSettled + per-UUID 부분 롤백.
+  // v1.16.0 fix #4 (Codex 라운드 6): per-UUID 부분 롤백이 BG/ACT sync invariant 깸 →
+  //                                  표시 로직 (bgScene?.lengthChange ?? actScene?.lengthChange) 가 잘못된 라벨 표시 가능.
+  //                                  → 부분 실패 시 BG/ACT 둘 다 prev 로 롤백 (UI sync 보존).
+  //                                    성공한 DB 호출은 best-effort reverse 로 정합성 회복 시도.
   const lengthChangeInFlightRef = useRef(false);
   const handleSetLengthChange = async (value: 'LD' | 'SD' | null) => {
     if (lengthChangeInFlightRef.current) return;
@@ -103,12 +105,22 @@ export function UnifiedSceneCard({
           window.electronAPI?.supabaseUpdateSceneField?.(t.uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
         ),
       );
-      // 실패한 uuid 만 부분 롤백
+      const anyFailed = results.some((r) => r.status === 'rejected');
+      if (!anyFailed) return;
+
+      // BG/ACT sync 보존: 둘 다 prev 로 롤백 (UI 차원에서 mergedKey invariant 유지)
+      for (const t of targets) {
+        useDataStore.getState().updateSceneByUuid(t.uuid, { lengthChange: t.prev });
+      }
+      // 성공한 DB 호출은 best-effort reverse — DB 도 최대한 sync 되게
       results.forEach((result, i) => {
-        if (result.status === 'rejected') {
+        if (result.status === 'fulfilled') {
           const t = targets[i];
-          useDataStore.getState().updateSceneByUuid(t.uuid, { lengthChange: t.prev });
-          console.error(`[lengthChange] ${t.uuid} 저장 실패`, result.reason);
+          const prevStr = t.prev ?? '';
+          window.electronAPI?.supabaseUpdateSceneField?.(t.uuid, 'lengthChange', prevStr)
+            .catch((err) => console.error(`[lengthChange] reverse 실패 ${t.uuid}`, err));
+        } else {
+          console.error(`[lengthChange] ${targets[i].uuid} 저장 실패`, result.reason);
         }
       });
     } finally {
