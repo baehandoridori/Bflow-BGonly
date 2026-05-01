@@ -2351,51 +2351,77 @@ export function ScenesView() {
   };
 
   // v1.16.0: 선택된 씬들에 길이 변경 라벨 일괄 토글 (LD/SD/null)
-  // v1.16.0 fix #1: 다른 일괄 작업(stage/delete/edit) 진행 중에는 우회 방지
-  // v1.16.0 fix #2 (Codex 라운드 1): LD → SD 빠른 연타로 두 batch 가 동시 실행되어 out-of-order commit 되는 문제
-  //                                  자체 in-flight ref 로 직렬화. ref 라 리렌더 트리거 X.
-  // v1.16.0 fix #3 (Codex 라운드 3): Promise.all 첫 reject 시 즉시 전체 롤백 → 다른 성공한 호출이 DB 변경한 상태로 남아 UI↔DB 불일치.
-  //                                  Promise.allSettled 로 모두 끝나길 기다린 후 실패한 uuid 만 부분 롤백 (성공분은 유지).
+  // v1.16.0 fix #1: isBulkInFlight 가드 (다른 일괄 작업과 충돌 방지)
+  // v1.16.0 fix #2 (Codex 라운드 1): self in-flight ref 로 LD↔SD 연타 race 방지
+  // v1.16.0 fix #3 (Codex 라운드 3): Promise.allSettled + 부분 롤백 (per-UUID)
+  // v1.16.0 fix #4 (Codex 라운드 7): unified mode 에서 mergedKey 가 BG/ACT 두 UUID 로 매핑 →
+  //                                  per-UUID 부분 롤백이 한 mergedKey 의 BG/ACT 를 split 가능 (예: BG=LD, ACT=null).
+  //                                  → mergedKey 단위 atomic: 한 쪽 실패하면 그 mergedKey 의 BG/ACT 둘 다 prev 롤백.
+  //                                    성공한 DB 호출은 best-effort reverse 로 정합성 회복.
   const lengthChangeBulkInFlightRef = useRef(false);
   const handleBulkLengthChange = async (value: 'LD' | 'SD' | null) => {
     if (isBulkInFlight || lengthChangeBulkInFlightRef.current) return;
-    const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes, currentPart);
-    if (uuids.length === 0) return;
+
+    // mergedKey unique 추출 (selectedSceneIds 의 'bg:'/'act:' prefix 제거)
+    const mergedKeys = new Set<string>();
+    for (const id of selectedSceneIds) {
+      mergedKeys.add(id.replace(/^(bg|act):/, ''));
+    }
+
+    // 각 mergedKey → BG/ACT { uuid, prev } 정보 수집
+    type Target = { uuid: string; prev: 'LD' | 'SD' | null };
+    type MergedTarget = { bg?: Target; act?: Target };
+    const mergedTargets = new Map<string, MergedTarget>();
+    for (const key of mergedKeys) {
+      const merged = allMergedScenes.find((m) => m.mergedKey === key);
+      if (!merged) continue;
+      const target: MergedTarget = {};
+      if (merged.bgScene?.id) target.bg = { uuid: merged.bgScene.id, prev: merged.bgScene.lengthChange ?? null };
+      if (merged.actScene?.id) target.act = { uuid: merged.actScene.id, prev: merged.actScene.lengthChange ?? null };
+      if (target.bg || target.act) mergedTargets.set(key, target);
+    }
+
+    if (mergedTargets.size === 0) return;
 
     lengthChangeBulkInFlightRef.current = true;
     const valueStr = value ?? '';
 
-    // 변경 전 값 캐싱 (uuid 별 부분 롤백용)
-    const prevValues = new Map<string, 'LD' | 'SD' | null | undefined>();
-    for (const uuid of uuids) {
-      const scene = useDataStore.getState().findSceneByUuid(uuid);
-      prevValues.set(uuid, scene?.lengthChange ?? null);
-    }
-
-    // 낙관적: 선택된 모든 씬(BG+ACT 양쪽 포함)에 즉시 적용
-    for (const uuid of uuids) {
-      useDataStore.getState().updateSceneByUuid(uuid, { lengthChange: value });
+    // 낙관적: 모든 BG/ACT 즉시 적용
+    for (const t of mergedTargets.values()) {
+      if (t.bg) useDataStore.getState().updateSceneByUuid(t.bg.uuid, { lengthChange: value });
+      if (t.act) useDataStore.getState().updateSceneByUuid(t.act.uuid, { lengthChange: value });
     }
 
     try {
-      const results = await Promise.allSettled(
-        uuids.map((uuid) =>
-          window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
-        ),
+      // mergedKey 단위로 처리 — 각 mergedKey 의 BG/ACT 는 atomic
+      await Promise.all(
+        Array.from(mergedTargets.entries()).map(async ([, t]) => {
+          const targets: Target[] = [];
+          if (t.bg) targets.push(t.bg);
+          if (t.act) targets.push(t.act);
+          const results = await Promise.allSettled(
+            targets.map((tt) =>
+              window.electronAPI?.supabaseUpdateSceneField?.(tt.uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
+            ),
+          );
+          const anyFailed = results.some((r) => r.status === 'rejected');
+          if (!anyFailed) return;
+          // BG/ACT sync 보존: 이 mergedKey 의 둘 다 prev 로 UI 롤백
+          for (const tt of targets) {
+            useDataStore.getState().updateSceneByUuid(tt.uuid, { lengthChange: tt.prev });
+          }
+          // 성공한 DB 호출은 best-effort reverse
+          results.forEach((r, i) => {
+            if (r.status === 'fulfilled') {
+              const tt = targets[i];
+              window.electronAPI?.supabaseUpdateSceneField?.(tt.uuid, 'lengthChange', tt.prev ?? '')
+                .catch((err) => console.error(`[bulk lengthChange] reverse 실패 ${tt.uuid}`, err));
+            } else {
+              console.error(`[bulk lengthChange] ${targets[i].uuid} 실패`, r.reason);
+            }
+          });
+        }),
       );
-      // 실패한 uuid 만 부분 롤백 — 성공분은 DB 반영된 상태 유지
-      const failedUuids: string[] = [];
-      results.forEach((result, i) => {
-        if (result.status === 'rejected') {
-          const uuid = uuids[i];
-          failedUuids.push(uuid);
-          const prev = prevValues.get(uuid) ?? null;
-          useDataStore.getState().updateSceneByUuid(uuid, { lengthChange: prev });
-        }
-      });
-      if (failedUuids.length > 0) {
-        console.error(`[bulk lengthChange] ${failedUuids.length}/${uuids.length} 저장 실패`, failedUuids);
-      }
     } finally {
       lengthChangeBulkInFlightRef.current = false;
     }
