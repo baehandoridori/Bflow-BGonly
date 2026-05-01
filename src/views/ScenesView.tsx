@@ -2352,8 +2352,10 @@ export function ScenesView() {
 
   // v1.16.0: 선택된 씬들에 길이 변경 라벨 일괄 토글 (LD/SD/null)
   // v1.16.0 fix #1: 다른 일괄 작업(stage/delete/edit) 진행 중에는 우회 방지
-  // v1.16.0 fix #2 (Codex review): LD → SD 빠른 연타로 두 batch 가 동시 실행되어 out-of-order commit 되는 문제
-  //                                자체 in-flight ref 로 직렬화. ref 라 리렌더 트리거 X.
+  // v1.16.0 fix #2 (Codex 라운드 1): LD → SD 빠른 연타로 두 batch 가 동시 실행되어 out-of-order commit 되는 문제
+  //                                  자체 in-flight ref 로 직렬화. ref 라 리렌더 트리거 X.
+  // v1.16.0 fix #3 (Codex 라운드 3): Promise.all 첫 reject 시 즉시 전체 롤백 → 다른 성공한 호출이 DB 변경한 상태로 남아 UI↔DB 불일치.
+  //                                  Promise.allSettled 로 모두 끝나길 기다린 후 실패한 uuid 만 부분 롤백 (성공분은 유지).
   const lengthChangeBulkInFlightRef = useRef(false);
   const handleBulkLengthChange = async (value: 'LD' | 'SD' | null) => {
     if (isBulkInFlight || lengthChangeBulkInFlightRef.current) return;
@@ -2361,8 +2363,14 @@ export function ScenesView() {
     if (uuids.length === 0) return;
 
     lengthChangeBulkInFlightRef.current = true;
-    const prevEpisodes = useDataStore.getState().episodes;
     const valueStr = value ?? '';
+
+    // 변경 전 값 캐싱 (uuid 별 부분 롤백용)
+    const prevValues = new Map<string, 'LD' | 'SD' | null | undefined>();
+    for (const uuid of uuids) {
+      const scene = useDataStore.getState().findSceneByUuid(uuid);
+      prevValues.set(uuid, scene?.lengthChange ?? null);
+    }
 
     // 낙관적: 선택된 모든 씬(BG+ACT 양쪽 포함)에 즉시 적용
     for (const uuid of uuids) {
@@ -2370,14 +2378,24 @@ export function ScenesView() {
     }
 
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         uuids.map((uuid) =>
           window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
         ),
       );
-    } catch (err) {
-      useDataStore.getState().setEpisodes(prevEpisodes);
-      console.error('[bulk lengthChange] 저장 실패', err);
+      // 실패한 uuid 만 부분 롤백 — 성공분은 DB 반영된 상태 유지
+      const failedUuids: string[] = [];
+      results.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          const uuid = uuids[i];
+          failedUuids.push(uuid);
+          const prev = prevValues.get(uuid) ?? null;
+          useDataStore.getState().updateSceneByUuid(uuid, { lengthChange: prev });
+        }
+      });
+      if (failedUuids.length > 0) {
+        console.error(`[bulk lengthChange] ${failedUuids.length}/${uuids.length} 저장 실패`, failedUuids);
+      }
     } finally {
       lengthChangeBulkInFlightRef.current = false;
     }
