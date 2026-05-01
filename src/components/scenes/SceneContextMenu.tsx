@@ -59,6 +59,9 @@ export function SceneContextMenu({ x, y, current, onSelect, onClose }: SceneCont
       }}
       className="bg-bg-card border border-bg-border rounded-lg shadow-2xl p-1.5 select-none"
       onContextMenu={(e) => e.preventDefault()}
+      // v1.16.0 fix (Codex 라운드 5): 메뉴 컨테이너 click 도 부모 (카드/시트 행) 로 bubble 막음 — 안전망
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="px-2.5 py-1.5 text-[10px] font-bold text-text-secondary uppercase tracking-wider">
         씬 길이 변경
@@ -130,7 +133,13 @@ function MenuItem({ children, onClick, active, disabled, accent }: MenuItemProps
   return (
     <button
       role="menuitem"
-      onClick={disabled ? undefined : onClick}
+      // v1.16.0 fix (Codex 라운드 5): createPortal 이라도 React event 는 부모로 bubble.
+      //                              ancestor 의 onClick (카드 선택) 트리거 방지.
+      onClick={(e) => {
+        if (disabled) return;
+        e.stopPropagation();
+        onClick();
+      }}
       disabled={disabled}
       className={[
         'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[12px] text-left transition-colors',
