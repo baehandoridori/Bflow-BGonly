@@ -33,3 +33,29 @@ export function formatTimeShort(iso: string): string {
   const h12 = h % 12 || 12;
   return `${ampm} ${h12}:${m}`;
 }
+
+/**
+ * 24h 절대 타임스탬프 (한솔 요청: 년/월.일/시간/분 순).
+ * - 같은 날: "14:32"
+ * - 올해: "05.02 14:32"
+ * - 다른 해: "2026.05.02 14:32"
+ *
+ * `withYearAlways` true 시 항상 연도 포함.
+ */
+export function formatStamp(iso: string, opts: { withYearAlways?: boolean } = {}): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const Y = d.getFullYear();
+  const M = String(d.getMonth() + 1).padStart(2, '0');
+  const D = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  if (opts.withYearAlways) return `${Y}.${M}.${D} ${h}:${m}`;
+  if (Y !== now.getFullYear()) return `${Y}.${M}.${D} ${h}:${m}`;
+  if (d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+    return `${h}:${m}`;
+  }
+  return `${M}.${D} ${h}:${m}`;
+}

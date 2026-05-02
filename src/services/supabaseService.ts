@@ -225,8 +225,9 @@ export async function addPart(episodeNumber: number, partId: string, department?
 }
 
 /** 씬 추가 */
-export async function addScene(sheetName: string, sceneId: string, assignee: string, memo: string): Promise<void> {
-  await window.electronAPI.supabaseAddScene(sheetName, sceneId, assignee, memo);
+export async function addScene(sheetName: string, sceneId: string, assignee: string, memo: string): Promise<{ sceneUuid: string | null }> {
+  // IPC 가 { sceneUuid } 객체를 반환 — caller 가 활용할 수 있게 그대로 전달 (self-review fix 2026-05-02).
+  return await window.electronAPI.supabaseAddScene(sheetName, sceneId, assignee, memo) as { sceneUuid: string | null };
 }
 
 /** 씬 다건 추가 */
@@ -509,6 +510,8 @@ export async function listActivities(opts: {
   limit?: number;
   groups?: ActionGroup[];
   department?: 'bg' | 'acting' | null;
+  /** 특정 씬(들) 의 activity 만 — 씬 상세 모달의 히스토리 탭/댓글 인라인용. 2026-05-02 추가. */
+  sceneIds?: string[];
 }): Promise<Activity[]> {
   const rows = await window.electronAPI.activityList(opts);
   return (rows ?? []).map(rowToActivity);

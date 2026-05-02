@@ -9,6 +9,7 @@ import { sceneProgress } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 import { HighlightText } from '@/components/common/HighlightText';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
+import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 
 // ─── Props ───────────────────────────────────────────────────
 
@@ -131,11 +132,12 @@ function SheetEditableCell({
           style={{ overflow: 'visible', position: 'relative' }}
           onClick={(e) => e.stopPropagation()}
         >
-          <AssigneeSelect
+          <AssigneeMultiSelect
             value={draft}
-            onChange={(v) => { onSave(sceneIndex, field, v); onStopEditing(); }}
+            onChange={(v) => onSave(sceneIndex, field, v)}
             onClose={onStopEditing}
             className="w-full"
+            autoFocus
           />
         </td>
       );
@@ -181,7 +183,10 @@ function SheetEditableCell({
         onStartEditing();
       }}
     >
-      <HighlightText text={value || '-'} query={searchQuery} />
+      {type === 'assignee'
+        ? (value ? <AssigneeChipList value={value} size="sm" maxVisible={1} /> : <span className="text-text-secondary/50">-</span>)
+        : <HighlightText text={value || '-'} query={searchQuery} />
+      }
     </td>
   );
 }
