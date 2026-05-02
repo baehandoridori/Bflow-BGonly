@@ -601,13 +601,12 @@ export function UnifiedSceneDetailModal({
                       />
                     )}
 
-                    {tab === 'files' && revisionSheetName && revisionSceneId && (
+                    {tab === 'files' && revisionSceneKey && (
                       <SceneFilesTab
                         bgScene={bgScene}
                         primaryCommentKey={primaryCommentKey}
                         secondaryCommentKey={secondaryCommentKey || undefined}
-                        revisionSheetName={revisionSheetName}
-                        revisionSceneId={revisionSceneId}
+                        revisionSceneKey={revisionSceneKey}
                       />
                     )}
 

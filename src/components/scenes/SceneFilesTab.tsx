@@ -42,16 +42,19 @@ export interface SceneFilesTabProps {
   bgScene: Scene | null;
   primaryCommentKey: string;
   secondaryCommentKey?: string;
-  revisionSheetName: string;
-  revisionSceneId: string;
+  /**
+   * 리비전 fetch 용 정규화된 key — 반드시 modal 에서 buildSceneKey() 로 만든 결과 전달.
+   * raw `${sheetName}:${sceneId}` 사용 시 revisionService 의 alias/normalization 통과 못 해 누락 발생.
+   * (Codex P1 2026-05-03)
+   */
+  revisionSceneKey: string;
 }
 
 export function SceneFilesTab({
   bgScene,
   primaryCommentKey,
   secondaryCommentKey,
-  revisionSheetName,
-  revisionSceneId,
+  revisionSceneKey,
 }: SceneFilesTabProps) {
   const [items, setItems] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,10 +86,9 @@ export function SceneFilesTab({
         });
       }
 
-      // 2) 리비전 첨부
+      // 2) 리비전 첨부 — modal 이 buildSceneKey 로 정규화한 sceneKey 사용
       try {
-        const sceneKey = `${revisionSheetName}:${revisionSceneId}`;
-        const revs: CompRevision[] = await getRevisions(sceneKey);
+        const revs: CompRevision[] = revisionSceneKey ? await getRevisions(revisionSceneKey) : [];
         for (const r of revs) {
           if (r.imageUrl) {
             out.push({
@@ -139,7 +141,7 @@ export function SceneFilesTab({
 
     void collect();
     return () => { cancelled = true; };
-  }, [bgScene, primaryCommentKey, secondaryCommentKey, revisionSheetName, revisionSceneId]);
+  }, [bgScene, primaryCommentKey, secondaryCommentKey, revisionSceneKey]);
 
   const totalCount = items.length;
 
