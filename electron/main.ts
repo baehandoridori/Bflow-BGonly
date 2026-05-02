@@ -1012,7 +1012,8 @@ ipcMain.handle('supabase:soft-delete-part', wrapIpc(async (_e: unknown, sheetNam
 // ─── Scenes ───
 ipcMain.handle('supabase:add-scene', wrapIpc(async (_e: unknown, sheetName: string, sceneId: string, assignee: string, memo: string) => {
   const result = await sbAddScene(sheetName, sceneId, assignee, memo);
-  // 활동 기록 — addScene 반환값에 새 UUID 가 있으면 사용. 없으면 sheetName/sceneId 로 라벨만 구성
+  // 활동 기록 — sbAddScene 이 새 row UUID 를 반환하므로 그걸 sceneId 로 채운다 (한솔 결정 2026-05-02).
+  // 씬 모달의 useSceneActivities 가 sceneIds 필터로 정확히 매칭됨.
   if (currentActivityUser) {
     try {
       const sceneLabel = `${sheetName} #${sceneId}`;
@@ -1020,7 +1021,8 @@ ipcMain.handle('supabase:add-scene', wrapIpc(async (_e: unknown, sheetName: stri
       await sbRecordActivityLog({
         userId: currentActivityUser.id, userName: currentActivityUser.name,
         actionType: 'scene_add', actionGroup: 'scene',
-        sceneId: null, sceneLabel, episodeNumber: null, department: dept,
+        sceneId: result?.sceneUuid ?? null,
+        sceneLabel, episodeNumber: null, department: dept,
         detail: { sceneId },
       });
     } catch { /* 무시 */ }
@@ -1273,15 +1275,45 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
         const epNum = rev?.parts?.episodes?.episode_number ?? null;
         const partLabel = rev?.parts?.part_id ?? null;
 
+        // sceneNumber 매칭 — scene_number 컬럼 형식이 'a001' / '1' / '001' 중 하나일 수 있어
+        // 여러 후보를 순서대로 시도. 마지막 fallback 으로 part 의 모든 scenes fetch + 끝자리 정수 비교.
         let sceneUuid: string | null = null;
-        if (resolvedPartUuid) {
-          const { data: sceneRow } = await supabaseClient
-            .from('scenes')
-            .select('id')
-            .eq('part_id', resolvedPartUuid)
-            .eq('scene_number', sceneNumber)
-            .maybeSingle();
-          sceneUuid = (sceneRow as { id?: string } | null)?.id ?? null;
+        if (resolvedPartUuid && sceneNumber) {
+          const numeric = sceneNumber.replace(/\D/g, '');   // 'a035' → '035', '35' → '35'
+          const candidates = Array.from(new Set([
+            sceneNumber,
+            numeric,
+            numeric.replace(/^0+/, '') || numeric,           // '35'
+            numeric.padStart(3, '0'),                        // '035'
+            `a${numeric.padStart(3, '0')}`,                  // 'a035'
+            `ac${numeric.padStart(3, '0')}`,                 // 'ac035'
+          ]));
+          for (const candidate of candidates) {
+            const { data: sceneRow } = await supabaseClient
+              .from('scenes')
+              .select('id')
+              .eq('part_id', resolvedPartUuid)
+              .eq('scene_number', candidate)
+              .maybeSingle();
+            if (sceneRow) {
+              sceneUuid = (sceneRow as { id?: string }).id ?? null;
+              if (sceneUuid) break;
+            }
+          }
+          // 마지막 fallback — part 의 모든 scenes fetch 후 끝자리 정수 비교
+          if (!sceneUuid && numeric) {
+            const target = parseInt(numeric, 10);
+            if (Number.isFinite(target)) {
+              const { data: allScenes } = await supabaseClient
+                .from('scenes')
+                .select('id, scene_number')
+                .eq('part_id', resolvedPartUuid);
+              // 끝자리 정수가 같은 모든 후보 — 1개일 때만 안전하게 매칭, 충돌 시 null (false positive 방지)
+              const matches = (allScenes as { id: string; scene_number: string }[] | null ?? [])
+                .filter((s) => parseInt(s.scene_number.replace(/\D/g, ''), 10) === target);
+              sceneUuid = matches.length === 1 ? matches[0].id : null;
+            }
+          }
         }
 
         const dept = department === 'bg' || department === 'acting' ? department : null;
@@ -1300,8 +1332,12 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
   }));
 ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: string, updates: Record<string, string>) => {
   await sbUpdateRevision(id, updates);
-  // status === 'resolved' 변경만 활동 기록 — comp_revisions 에서 부서/에피소드 자동 조회 (Codex P2)
-  if (currentActivityUser && updates.status === 'resolved') {
+  // status 전이만 활동 기록 (in_progress / resolved). 한솔 결정 (2026-05-02): 진행중도 audit.
+  const statusActionType: ActionType | null =
+    updates.status === 'resolved' ? 'revision_resolve'
+    : updates.status === 'in_progress' ? 'revision_in_progress'
+    : null;
+  if (currentActivityUser && statusActionType) {
     try {
       const { data: revRow } = await supabaseClient
         .from('comp_revisions')
@@ -1319,27 +1355,59 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
       const epNum = rev?.parts?.episodes?.episode_number ?? null;
 
       // scene UUID 조회 — rev.scene_id 는 sceneKey 형식 (예: 'EP02:A:35') 이므로 파싱 + raw- 디코드 (Codex P2)
+      // sceneNumber 매칭은 revision_add 와 동일하게 다중 후보 시도 (한솔 피드백 2026-05-02).
       let sceneUuid: string | null = null;
       const sceneNumber = rev?.scene_id ? parseRevisionSceneKey(rev.scene_id) : null;
       if (rev?.part_id && sceneNumber) {
-        const { data: sceneRow } = await supabaseClient
-          .from('scenes')
-          .select('id')
-          .eq('part_id', rev.part_id)
-          .eq('scene_number', sceneNumber)
-          .maybeSingle();
-        sceneUuid = (sceneRow as { id?: string } | null)?.id ?? null;
+        const numeric = sceneNumber.replace(/\D/g, '');
+        const candidates = Array.from(new Set([
+          sceneNumber,
+          numeric,
+          numeric.replace(/^0+/, '') || numeric,
+          numeric.padStart(3, '0'),
+          `a${numeric.padStart(3, '0')}`,
+          `ac${numeric.padStart(3, '0')}`,
+        ]));
+        for (const candidate of candidates) {
+          const { data: sceneRow } = await supabaseClient
+            .from('scenes')
+            .select('id')
+            .eq('part_id', rev.part_id)
+            .eq('scene_number', candidate)
+            .maybeSingle();
+          if (sceneRow) {
+            sceneUuid = (sceneRow as { id?: string }).id ?? null;
+            if (sceneUuid) break;
+          }
+        }
+        if (!sceneUuid && numeric) {
+          const target = parseInt(numeric, 10);
+          if (Number.isFinite(target)) {
+            const { data: allScenes } = await supabaseClient
+              .from('scenes')
+              .select('id, scene_number')
+              .eq('part_id', rev.part_id);
+            const matches = (allScenes as { id: string; scene_number: string }[] | null ?? [])
+              .filter((s) => parseInt(s.scene_number.replace(/\D/g, ''), 10) === target);
+            sceneUuid = matches.length === 1 ? matches[0].id : null;
+          }
+        }
       }
 
       const sceneLabel = epNum && rev?.parts?.part_id && sceneNumber
         ? `EP${String(epNum).padStart(2, '0')} ${rev.parts.part_id} #${sceneNumber} 리비전 #${rev.revision_no ?? '?'}`
-        : `리비전 #${rev?.revision_no ?? '?'} 해결`;
+        : `리비전 #${rev?.revision_no ?? '?'}`;
       await sbRecordActivityLog({
         userId: currentActivityUser.id, userName: currentActivityUser.name,
-        actionType: 'revision_resolve', actionGroup: 'memo',
+        actionType: statusActionType, actionGroup: 'memo',
         sceneId: sceneUuid, sceneLabel,
         episodeNumber: epNum, department: dept,
-        detail: { revisionId: id },
+        detail: {
+          revisionId: id,
+          newStatus: updates.status,
+          // 해결 멘트(resolvedNote)가 같이 update 되면 detail 에 보존 — 댓글창/히스토리 인라인 표시용 (한솔 2026-05-02)
+          ...(updates.resolvedNote ? { resolvedNote: updates.resolvedNote.slice(0, 80) } : {}),
+        },
       });
     } catch { /* 무시 */ }
   }
@@ -1365,7 +1433,86 @@ function resolveTrustedCurrentUserId(): string | null {
 ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: string) => {
   const userId = resolveTrustedCurrentUserId();
   if (!userId) throw new Error('로그인이 필요합니다.');
+
+  // 삭제 전에 메타 조회 — 활동 기록용 (한솔 요청 2026-05-02).
+  let auditMeta: {
+    sceneUuid: string | null;
+    sceneLabel: string;
+    epNum: number | null;
+    dept: 'bg' | 'acting' | null;
+    revisionNo: number | null;
+  } | null = null;
+  if (currentActivityUser) {
+    try {
+      const { data: revRow } = await supabaseClient
+        .from('comp_revisions')
+        .select('scene_id, revision_no, department, part_id, parts(part_id, episodes(episode_number))')
+        .eq('id', id)
+        .single();
+      const rev = revRow as {
+        scene_id?: string;
+        revision_no?: number;
+        department?: string;
+        part_id?: string;
+        parts?: { part_id?: string; episodes?: { episode_number?: number } };
+      } | null;
+      const sceneNumber = rev?.scene_id ? parseRevisionSceneKey(rev.scene_id) : null;
+      const dept = (rev?.department === 'bg' || rev?.department === 'acting') ? rev.department : null;
+      const epNum = rev?.parts?.episodes?.episode_number ?? null;
+      const partLabel = rev?.parts?.part_id ?? null;
+
+      // sceneUuid 매칭 — revision_add 와 동일한 다중 후보 패턴
+      let sceneUuid: string | null = null;
+      if (rev?.part_id && sceneNumber) {
+        const numeric = sceneNumber.replace(/\D/g, '');
+        const candidates = Array.from(new Set([
+          sceneNumber, numeric,
+          numeric.replace(/^0+/, '') || numeric,
+          numeric.padStart(3, '0'),
+          `a${numeric.padStart(3, '0')}`,
+          `ac${numeric.padStart(3, '0')}`,
+        ]));
+        for (const c of candidates) {
+          const { data: sceneRow } = await supabaseClient
+            .from('scenes').select('id')
+            .eq('part_id', rev.part_id).eq('scene_number', c).maybeSingle();
+          if (sceneRow) { sceneUuid = (sceneRow as { id?: string }).id ?? null; if (sceneUuid) break; }
+        }
+        if (!sceneUuid && numeric) {
+          const target = parseInt(numeric, 10);
+          if (Number.isFinite(target)) {
+            const { data: allScenes } = await supabaseClient
+              .from('scenes').select('id, scene_number').eq('part_id', rev.part_id);
+            const matches = (allScenes as { id: string; scene_number: string }[] | null ?? [])
+              .filter((s) => parseInt(s.scene_number.replace(/\D/g, ''), 10) === target);
+            sceneUuid = matches.length === 1 ? matches[0].id : null;
+          }
+        }
+      }
+
+      const sceneLabel = epNum && partLabel && sceneNumber
+        ? `EP${String(epNum).padStart(2, '0')} ${partLabel} #${sceneNumber} 리비전 #${rev?.revision_no ?? '?'}`
+        : `리비전 #${rev?.revision_no ?? '?'}`;
+      auditMeta = {
+        sceneUuid, sceneLabel, epNum, dept,
+        revisionNo: rev?.revision_no ?? null,
+      };
+    } catch { /* 무시 — 메타 조회 실패해도 삭제는 진행 */ }
+  }
+
   await sbDeleteRevision(id, userId);
+
+  if (currentActivityUser && auditMeta) {
+    try {
+      await sbRecordActivityLog({
+        userId: currentActivityUser.id, userName: currentActivityUser.name,
+        actionType: 'revision_delete', actionGroup: 'memo',
+        sceneId: auditMeta.sceneUuid, sceneLabel: auditMeta.sceneLabel,
+        episodeNumber: auditMeta.epNum, department: auditMeta.dept,
+        detail: { revisionId: id, revisionNo: auditMeta.revisionNo },
+      });
+    } catch { /* 무시 */ }
+  }
 }));
 
 // ─── Metadata ───
@@ -1435,6 +1582,7 @@ ipcMain.handle('activity:list', wrapIpc(async (_e: unknown, opts: {
   limit?: number;
   groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
   department?: 'bg' | 'acting' | null;
+  sceneIds?: string[];
 }) => {
   return sbListActivities(opts ?? {});
 }));

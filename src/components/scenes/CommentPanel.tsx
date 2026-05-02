@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp } from 'lucide-react';
+import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 import {
@@ -19,12 +21,21 @@ import '@/styles/comment-panel.css';
 
 // ─── 타입 ───────────────────────────────────
 
+/** 시스템 이벤트 — 댓글 사이사이에 작은 줄로 인라인 표시 (씬 생성/완료/리비전 등) */
+export interface CommentInlineEvent {
+  id: string;
+  at: string;       // ISO 8601
+  text: string;     // 한 줄 텍스트 (예: "이다은이 BG 모든 단계를 완료했습니다")
+}
+
 interface CommentPanelProps {
   /** 기본 sceneKey. 새 댓글은 항상 이 키에 저장된다 */
   sceneKey: string;
   /** 통합 뷰 전용 — 이 키의 댓글도 함께 보여주되, 저장은 primary(sceneKey)에만 한다 */
   secondarySceneKey?: string;
   onCountChange?: (count: number) => void;
+  /** 댓글 사이에 시간순으로 끼어들어가는 시스템 이벤트 (씬 생성/완료/리비전 등) */
+  inlineEvents?: CommentInlineEvent[];
 }
 
 /** 내부 렌더링용 — 원본이 어느 sceneKey 에서 왔는지 추적 */
@@ -47,7 +58,7 @@ function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string }
 
 // ─── 메인 컴포넌트 ──────────────────────────
 
-export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: CommentPanelProps) {
+export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlineEvents }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
 
@@ -552,20 +563,50 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       onDrop={handleDrop}
       className="flex flex-col h-full relative"
     >
-      {/* 댓글 목록 */}
+      {/* 댓글 목록 — 시스템 이벤트(inlineEvents)와 시간순 머지 + 새 항목 슬라이드 인 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
-        {comments.length === 0 ? (
+        {comments.length === 0 && (!inlineEvents || inlineEvents.length === 0) ? (
           <div className="text-center py-10">
             <p className="text-text-secondary text-xs">아직 의견이 없습니다</p>
             <p className="text-text-secondary/40 text-[11px] mt-1">첫 의견을 남겨보세요</p>
           </div>
         ) : (
-          comments.map((comment) => {
+        <AnimatePresence initial={false}>
+          {mergeFeed(comments, inlineEvents ?? []).map((node) => {
+            if (node.kind === 'event') {
+              return (
+                <motion.div
+                  key={`evt:${node.event.id}`}
+                  layout="position"
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                  className="flex items-center gap-2 text-[10.5px] text-text-secondary/55 py-0.5"
+                >
+                  <span className="inline-block w-1 h-1 rounded-full bg-text-secondary/40" aria-hidden />
+                  <span className="flex-1 truncate">{node.event.text}</span>
+                  <span className="tabular-nums shrink-0">{formatTimeShort(node.event.at)}</span>
+                </motion.div>
+              );
+            }
+            const comment = node.comment;
             const isOwn = currentUser?.id === comment.userId;
             const isEditing = editingId === comment.id;
             const hasImages = (comment.images?.length ?? 0) > 0;
+            // 멘션 강조 — @나 가 mentions 에 들어있으면 좌측 4px accent 스트라이프 (한솔 결정 2026-05-02)
+            const mentionsMe = !!currentUser && (comment.mentions ?? []).includes(currentUser.name);
             return (
-              <div key={comment.id} className="group">
+              <motion.div
+                key={comment.id}
+                layout="position"
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className={cn('group relative', mentionsMe && 'pl-2')}
+                style={mentionsMe ? { borderLeft: '4px solid rgb(var(--color-accent))', borderRadius: 4 } : undefined}
+              >
                 {/* 메타 */}
                 <div className={`flex items-center gap-2 mb-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
                   {isOwn ? (
@@ -629,7 +670,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
                     ) : (
                       <div
                         className={`rounded-xl px-3.5 py-2.5 text-xs leading-relaxed break-words text-text-primary ${
-                          isOwn ? 'bg-emerald-500/20' : 'bg-bg-border/70'
+                          isOwn ? 'bg-accent/20 border border-accent/30' : 'bg-bg-border/70'
                         }`}
                       >
                         {comment.text && <div>{renderText(comment.text)}</div>}
@@ -676,9 +717,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
                     )}
                   </div>
                 </div>
-              </div>
+              </motion.div>
             );
-          })
+          })}
+        </AnimatePresence>
         )}
       </div>
 
@@ -707,9 +749,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
           className={`comment-input-card rounded-xl border px-2.5 pt-2 pb-1.5 ${focused && !draggingOver ? 'focused' : ''} ${draggingOver ? 'dragover' : ''}`}
           style={{
             background: 'rgb(var(--comment-card-elev-rgb))',
+            // 한솔 피드백(2026-05-02): focus 시 accent-sub(보라)가 박혀서 "보라색 고정"으로 보임 → 중립 흰색 알파로 변경
             borderColor: draggingOver
               ? 'rgb(var(--color-accent))'
-              : (focused ? 'rgb(var(--color-accent-sub))' : 'rgb(var(--color-bg-border))'),
+              : (focused ? 'rgba(255,255,255,0.16)' : 'rgb(var(--color-bg-border))'),
             maxHeight: inputCardMaxPx,
           }}
         >
@@ -860,4 +903,27 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange }: Com
       )}
     </div>
   );
+}
+
+// ─── 시스템 이벤트 + 댓글 시간순 머지 ─────────────────
+
+type FeedNode =
+  | { kind: 'comment'; comment: SceneCommentWithSource }
+  | { kind: 'event'; event: CommentInlineEvent };
+
+/** 댓글과 시스템 이벤트를 createdAt 시간순으로 합쳐 단일 피드 노드 배열로 변환. */
+function mergeFeed(
+  comments: SceneCommentWithSource[],
+  events: CommentInlineEvent[],
+): FeedNode[] {
+  const nodes: FeedNode[] = [
+    ...comments.map<FeedNode>((c) => ({ kind: 'comment', comment: c })),
+    ...events.map<FeedNode>((e) => ({ kind: 'event', event: e })),
+  ];
+  nodes.sort((a, b) => {
+    const ta = a.kind === 'comment' ? a.comment.createdAt : a.event.at;
+    const tb = b.kind === 'comment' ? b.comment.createdAt : b.event.at;
+    return new Date(ta).getTime() - new Date(tb).getTime();
+  });
+  return nodes;
 }

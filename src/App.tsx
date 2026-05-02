@@ -3,6 +3,8 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useActivityStore } from '@/stores/useActivityStore';
+import { subscribeToActivityRealtime } from '@/services/supabaseService';
 // 뷰 lazy 로딩 — 초기 번들에서 제외
 const Dashboard = lazy(() => import('@/views/Dashboard').then(m => ({ default: m.Dashboard })));
 const ScenesView = lazy(() => import('@/views/ScenesView').then(m => ({ default: m.ScenesView })));
@@ -111,6 +113,19 @@ export default function App() {
     window.electronAPI?.authSetCurrentUser?.(
       currentUser ? { id: currentUser.id, name: currentUser.name } : null,
     );
+  }, [currentUser]);
+
+  // 활동(activity_log) 글로벌 구독 + 초기 로드 — 로그인 후 1번.
+  // RecentActivityWidget 의 자체 구독은 idempotent 처리되어 중복 호출 안전.
+  // 한솔 결정 (2026-05-02): Realtime 을 위젯 lifecycle 에 묶지 말고 App 전역에서 항상 구독 →
+  // 위젯 안 떠 있어도 씬 모달이 실시간 audit 받음.
+  useEffect(() => {
+    if (!currentUser) return;
+    useActivityStore.getState().loadInitial();
+    const unsub = subscribeToActivityRealtime((row) => {
+      useActivityStore.getState().receiveRealtime(row);
+    });
+    return () => { unsub(); };
   }, [currentUser]);
 
   // 토스트 설정 (위치/시간) — 설정에서 로드

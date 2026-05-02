@@ -11,6 +11,7 @@ import { getMergedCommentBadgeCounts } from '@/utils/mergedSceneHelpers';
 import { HighlightText } from '@/components/common/HighlightText';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
+import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { useDataStore } from '@/stores/useDataStore';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
@@ -135,11 +136,12 @@ function SheetEditableCell({
           style={{ overflow: 'visible', position: 'relative' }}
           onClick={(e) => e.stopPropagation()}
         >
-          <AssigneeSelect
+          <AssigneeMultiSelect
             value={draft}
-            onChange={(v) => { onSave(v); onStopEditing(); }}
+            onChange={onSave}
             onClose={onStopEditing}
             className="w-full"
+            autoFocus
           />
         </td>
       );
@@ -192,6 +194,10 @@ function SheetEditableCell({
           text={value || '-'}
           renderTextSegment={(seg, idx) => <HighlightText key={idx} text={seg} query={searchQuery} />}
         />
+      ) : type === 'assignee' ? (
+        value
+          ? <AssigneeChipList value={value} size="sm" maxVisible={1} />
+          : <span className="text-text-secondary/50">-</span>
       ) : (
         <HighlightText text={value || '-'} query={searchQuery} />
       )}

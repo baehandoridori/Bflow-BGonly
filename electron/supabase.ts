@@ -235,13 +235,14 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
     id: string; part_id: string; scene_number: string; sort_order: number;
     memo: string; storyboard_url: string; guide_url: string; assignee: string;
     layout: string; lo: boolean; done: boolean; review: boolean; png: boolean;
+    created_at?: string | null; updated_at?: string | null;
   }[] = [];
 
   if (partIds.length > 0) {
     // Supabase IN 쿼리는 최대 수백 개까지 괜찮음
     const { data: sceneRows, error: sceneErr } = await supabase
       .from('scenes')
-      .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change')
+      .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change, created_at, updated_at')
       .in('part_id', partIds)
       .order('sort_order');
     throwIfError(sceneErr);
@@ -318,6 +319,8 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
             review: s.review,
             png: s.png,
             lengthChange: (s as { length_change?: 'LD' | 'SD' | null }).length_change ?? null,
+            createdAt: s.created_at || undefined,
+            updatedAt: s.updated_at || undefined,
           })),
         };
       }),
@@ -486,7 +489,7 @@ export async function addScene(
   sceneId: string,
   assignee: string,
   memo: string,
-): Promise<void> {
+): Promise<{ sceneUuid: string | null }> {
   const partUuid = await resolvePartId(sheetName);
   if (!partUuid) throw new Error(`파트를 찾을 수 없음: ${sheetName}`);
 
@@ -499,15 +502,21 @@ export async function addScene(
     .limit(1);
   const nextOrder = (maxRow?.[0]?.sort_order ?? 0) + 1;
 
-  const { error } = await supabase.from('scenes').insert({
-    part_id: partUuid,
-    scene_number: sceneId,
-    sort_order: nextOrder,
-    assignee,
-    memo,
-  });
+  // INSERT + RETURNING id — audit 에서 sceneId 채움 (한솔 결정 2026-05-02).
+  const { data, error } = await supabase
+    .from('scenes')
+    .insert({
+      part_id: partUuid,
+      scene_number: sceneId,
+      sort_order: nextOrder,
+      assignee,
+      memo,
+    })
+    .select('id')
+    .single();
   throwIfError(error);
   broadcastDataChange('scenes', 'INSERT');
+  return { sceneUuid: (data?.id as string) ?? null };
 }
 
 /** 씬 대량 추가 */
@@ -1767,7 +1776,8 @@ export async function readAllMemos(userId: string): Promise<Array<{
 export type ActionGroup = 'progress' | 'memo' | 'scene' | 'etc';
 export type ActionType =
   | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
-  | 'memo_update' | 'comment_add' | 'revision_add' | 'revision_resolve'
+  | 'memo_update' | 'comment_add'
+  | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
   | 'image_upload_storyboard' | 'image_upload_guide';
@@ -1835,6 +1845,8 @@ export async function listActivities(opts: {
   /** v1: 항상 미전달 — group 필터는 client-side 에서 적용 (hidden group 활동 보존, Codex P1) */
   groups?: ActionGroup[];
   department?: 'bg' | 'acting' | null;
+  /** 특정 씬(들) 의 activity 만 조회 — idx_activity_log_scene 인덱스 활용. 2026-05-02 추가. */
+  sceneIds?: string[];
 }): Promise<ActivityRow[]> {
   let q = supabase
     .from('activity_log')
@@ -1857,6 +1869,7 @@ export async function listActivities(opts: {
   }
   if (opts.groups && opts.groups.length > 0) q = q.in('action_group', opts.groups);
   if (opts.department) q = q.eq('department', opts.department);
+  if (opts.sceneIds && opts.sceneIds.length > 0) q = q.in('scene_id', opts.sceneIds);
 
   const { data, error } = await q;
   if (error) throw new Error(`listActivities failed: ${error.message}`);

@@ -98,7 +98,7 @@ export function installDevElectronAPI(): void {
     supabaseReadArchived: async () => [],
     supabaseAddPart: async () => {},
     supabaseSoftDeletePart: async () => {},
-    supabaseAddScene: async () => {},
+    supabaseAddScene: async () => ({ sceneUuid: null }),
     supabaseAddScenes: async () => {},
     supabaseDeleteScene: async () => {},
     supabaseUpdateSceneStage: async () => {},

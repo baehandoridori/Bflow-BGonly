@@ -80,6 +80,10 @@ export interface Scene {
    * 카드/시트 우클릭 메뉴로 토글.
    */
   lengthChange?: 'LD' | 'SD' | null;
+  /** 씬 row 등록 시각 (ISO 8601). Supabase scenes.created_at — 2026-05-02 추가 */
+  createdAt?: string;
+  /** 씬 row 마지막 갱신 시각 (ISO 8601). 단계 토글/필드 변경 시 자동 갱신 */
+  updatedAt?: string;
 }
 
 // ─── 통합 씬 (BG + ACT 머지) ─────────────────
@@ -379,7 +383,8 @@ export type BulkUpdateResult = {
 export type ActionGroup = 'progress' | 'memo' | 'scene' | 'etc';
 export type ActionType =
   | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
-  | 'memo_update' | 'comment_add' | 'revision_add' | 'revision_resolve'
+  | 'memo_update' | 'comment_add'
+  | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
   | 'image_upload_storyboard' | 'image_upload_guide';
@@ -491,7 +496,7 @@ export interface ElectronAPI {
   supabaseReadArchived: () => Promise<unknown[]>;
   supabaseAddPart: (episodeNumber: number, partId: string, department?: string) => Promise<void>;
   supabaseSoftDeletePart: (sheetName: string) => Promise<void>;
-  supabaseAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<void>;
+  supabaseAddScene: (sheetName: string, sceneId: string, assignee: string, memo: string) => Promise<{ sceneUuid: string | null }>;
   supabaseAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<void>;
   supabaseDeleteScene: (sceneUuid: string) => Promise<void>;
   supabaseUpdateSceneStage: (sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => Promise<void>;
@@ -597,6 +602,7 @@ export interface ElectronAPI {
     limit?: number;
     groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
     department?: 'bg' | 'acting' | null;
+    sceneIds?: string[];
   }) => Promise<any[]>;
   activityStats: (opts: {
     days?: number;

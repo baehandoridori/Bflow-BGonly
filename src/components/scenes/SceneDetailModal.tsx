@@ -20,6 +20,7 @@ import type { Scene, Stage, Department } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
 import * as storageService from '@/services/storageService';
 import { AssigneeSelect, getUserColor } from '@/components/common/AssigneeSelect';
+import { AssigneeMultiSelect } from '@/components/common/AssigneeMultiSelect';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
@@ -799,46 +800,15 @@ export function SceneDetailModal({
                       placeholder="예: a001"
                       onSave={(v) => onFieldUpdate(sceneIndex, 'sceneId', v)}
                     />
-                    {/* 담당자 — 다중 담당자 지원 (쉼표 구분) */}
+                    {/* 담당자 — AssigneeMultiSelect 통합 (한솔 결정 2026-05-02) */}
                     <div className="flex items-start gap-3 py-2.5 px-4 hover:bg-bg-primary/40 rounded-lg transition-colors">
                       <span className="text-xs text-text-secondary w-20 shrink-0 font-medium mt-1.5">담당자</span>
-                      <div className="flex-1 flex flex-wrap items-center gap-1.5">
-                        {(scene.assignee || '').split(',').map(s => s.trim()).filter(Boolean).map((name, i) => {
-                          const color = getUserColor(name);
-                          return (
-                            <span
-                              key={`${name}-${i}`}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                              style={{ backgroundColor: `${color}20`, color }}
-                            >
-                              {name}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const names = (scene.assignee || '').split(',').map(s => s.trim()).filter(Boolean);
-                                  names.splice(i, 1);
-                                  onFieldUpdate(sceneIndex, 'assignee', names.join(', '));
-                                }}
-                                className="ml-0.5 hover:opacity-60 cursor-pointer"
-                              >
-                                ×
-                              </button>
-                            </span>
-                          );
-                        })}
-                        <AssigneeSelect
-                          key={scene.assignee}
-                          value=""
-                          onChange={(v) => {
-                            if (!v) return;
-                            const existing = (scene.assignee || '').split(',').map(s => s.trim()).filter(Boolean);
-                            if (!existing.includes(v)) {
-                              existing.push(v);
-                              onFieldUpdate(sceneIndex, 'assignee', existing.join(', '));
-                            }
-                          }}
-                          placeholder={scene.assignee ? '+ 추가' : '담당자 입력'}
-                          className="flex-1 min-w-[80px]"
+                      <div className="flex-1">
+                        <AssigneeMultiSelect
+                          value={scene.assignee || ''}
+                          onChange={(v) => onFieldUpdate(sceneIndex, 'assignee', v)}
+                          placeholder="담당자 추가"
+                          className="w-full"
                         />
                       </div>
                     </div>

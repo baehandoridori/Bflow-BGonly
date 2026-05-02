@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast as sonnerToast } from 'sonner';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useAnimationControls } from 'framer-motion';
+import { formatStamp } from '@/utils/formatTime';
 import {
   X,
   Pencil,
@@ -11,18 +12,21 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  Film,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Scene, Stage, Department } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
-import { AssigneeSelect } from '@/components/common/AssigneeSelect';
+import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
-import { CommentPanel } from './CommentPanel';
+import { CommentPanel, type CommentInlineEvent } from './CommentPanel';
 import { RevisionPanel } from './RevisionPanel';
+import { SceneFilesTab } from './SceneFilesTab';
+import { SceneHistoryTab } from './SceneHistoryTab';
+import { useSceneActivities } from '@/hooks/useSceneActivities';
+import { describeActivity, deptPrefix } from './activityLabels';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
@@ -30,9 +34,44 @@ import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
- * 단독 SceneDetailModal 과 동일한 레이아웃 (본체 + 우측 댓글 + 우측 리비전 토글).
- * 본체만 좌/우 BG/ACT 분할 + 하단 도트 네비.
+ *
+ * SCENE-MODAL-A 디자인 적용 (mockup 핸드오프 §3 그라디언트 풀세트):
+ *  - 모달 chrome: 라운드 18, 그림자 강화, 배경 글로우 두 개 (보라+코랄)
+ *  - 부서 패널: 상단 2px 라이트 라인 + 보더 알파
+ *  - 본체 내 탭 구조 (상세 / 리비전·N) — 우측 토글 패널 제거
+ *  - 헤더 글래스 backdrop blur
+ *
+ * 보존 (한솔 결정 — "버튼 디자인 가만 놔두고"):
+ *  - 진행 단계 칩, 댓글 입력/전송, 헤더 아이콘 버튼, 부서 휴지통/추가, 이미지 슬롯 액션,
+ *    인라인 편집(담당자/메모) 모두 기존 그대로.
  */
+
+/**
+ * 모달 시각 토큰 — 한솔 결정 (2026-05-02): hardcode 보라/코랄 제거, 모두 테마 CSS variable.
+ *  - 글로우/탭 글로우/멘션 등 = accent / accent-sub (한솔 테마 따름)
+ *  - 부서 라이트 라인/보더 = 부서 자체 색 (DEPARTMENT_CONFIGS[dept].color) — 다른 화면과 일관성
+ *  - 위험 (씬 삭제) = red 시멘틱 (Tailwind red-400/500)
+ */
+const SMA = {
+  /** 글로우/탭/멘션 — 테마 accent */
+  accentRgb: 'rgb(var(--color-accent))',
+  accentSubRgb: 'rgb(var(--color-accent-sub))',
+  /** alpha 합성용 — `rgb(var(--color-accent) / 0.30)` 같은 형태 */
+  accentAlpha: (a: number) => `rgb(var(--color-accent) / ${a})`,
+  accentSubAlpha: (a: number) => `rgb(var(--color-accent-sub) / ${a})`,
+} as const;
+
+/** 부서 → 시각 색 (DEPARTMENT_CONFIGS 의 글로벌 부서 색 사용 — 다른 화면과 일관) */
+const deptVisualColor = (dept: Department): string => DEPARTMENT_CONFIGS[dept].color;
+
+/** 좌우 이동 슬라이드 — direction 1=다음(우→좌 슬라이드), -1=이전(좌→우 슬라이드)
+ * 한솔 요청(2026-05-02): 더 길고 부드럽게 — 거리 ±48px, duration 0.45s.
+ */
+const navVariants = {
+  enter: (dir: 1 | -1) => ({ x: dir > 0 ? 48 : -48, opacity: 0 }),
+  center: { x: 0, opacity: 1 },
+  exit:  (dir: 1 | -1) => ({ x: dir > 0 ? -48 : 48, opacity: 0 }),
+};
 
 export interface UnifiedSceneDetailModalProps {
   merged: MergedScene;
@@ -52,6 +91,8 @@ export interface UnifiedSceneDetailModalProps {
   partLabel?: string;
   episodeLabel?: string;
 }
+
+type TabKey = 'detail' | 'revisions' | 'files' | 'history';
 
 export function UnifiedSceneDetailModal({
   merged,
@@ -112,14 +153,87 @@ export function UnifiedSceneDetailModal({
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
 
   // UI state
+  const [tab, setTab] = useState<TabKey>('detail');
   const [commentCount, setCommentCount] = useState(0);
   const [revisionCount, setRevisionCount] = useState(0);
-  const [showRevisions, setShowRevisions] = useState(false);
   const [showImageModal, setShowImageModal] = useState<null | 'storyboard' | 'guide'>(null);
   const [imageLoading, setImageLoading] = useState<null | 'storyboard' | 'guide'>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<null | 'storyboard' | 'guide' | 'bg' | 'act' | 'both'>(null);
   const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
   const addingRef = useRef<{ bg: boolean; acting: boolean }>({ bg: false, acting: false });
+
+  // 좌우 이동 슬라이드 방향 (1=다음, -1=이전). 키보드/버튼/도트 모두 handleNavigate 경유.
+  const [navDirection, setNavDirection] = useState<1 | -1>(1);
+  const handleNavigate = useCallback((dir: 'prev' | 'next') => {
+    setNavDirection(dir === 'next' ? 1 : -1);
+    onNavigate?.(dir);
+  }, [onNavigate]);
+
+  // 모달 박스 + 댓글 패널 wrapper 의 좌우 흔들림 (한솔 요청: "본체와 댓글 창 같이 옆으로 움직임")
+  // navigate 시 wrapper 가 ±36px 슬라이드 → 본체와 댓글이 함께 밀림.
+  const wrapperControls = useAnimationControls();
+  const isFirstNavRef = useRef(true);
+  useEffect(() => {
+    if (isFirstNavRef.current) {
+      isFirstNavRef.current = false;
+      return;
+    }
+    wrapperControls.start({
+      x: [navDirection > 0 ? -56 : 56, 0],
+      transition: { duration: 0.55, ease: [0.16, 1, 0.3, 1], times: [0, 1] },
+    });
+    // navDirection 도 deps 에 넣으면 같은 방향 연속 navigate 시 효과 안 발동 — currentMergedIndex 만 추적.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMergedIndex]);
+
+  // 리비전 탭 라벨용 — open 우선, 없으면 전체
+  const revisionTabBadge = openRevCount > 0 ? openRevCount : (revisionCount > 0 ? revisionCount : 0);
+
+  // 헤더 합산 퍼센트 — 양쪽 다 있으면 평균, 한쪽만 있으면 그 쪽
+  const bgPct = bgScene ? sceneProgress(bgScene) : null;
+  const actPct = actScene ? sceneProgress(actScene) : null;
+  const totalPct =
+    bgPct !== null && actPct !== null ? Math.round((bgPct + actPct) / 2) : (bgPct ?? actPct ?? null);
+
+  // 모든 탭 + 댓글창 인라인이 공유하는 활동 데이터 — 모달이 단일 owner.
+  const sceneActivities = useSceneActivities([bgScene?.id, actScene?.id], 200);
+
+  // 댓글 패널 인라인 — 한솔 결정 (2026-05-02): "큰 이벤트만". 단계 개별 토글/담당자/레이아웃은 제외.
+  // 추가: Scene.completedAt + completedBy 로 "단계 전부 완료" derive (activity_log 별도 actionType 없음).
+  const inlineEvents: CommentInlineEvent[] = useMemo(() => {
+    const BIG_EVENT_TYPES = new Set([
+      'memo_update',
+      'image_upload_storyboard', 'image_upload_guide',
+      'scene_add',
+      'revision_add', 'revision_in_progress', 'revision_resolve', 'revision_delete',
+    ]);
+    const events: CommentInlineEvent[] = sceneActivities
+      .filter((a) => BIG_EVENT_TYPES.has(a.actionType))
+      .map<CommentInlineEvent>((a) => {
+        const v = describeActivity(a);
+        return {
+          id: a.id,
+          at: a.createdAt,
+          text: `${a.userName} ${deptPrefix(a.department)}${v.text}`,
+        };
+      });
+    // 단계 전부 완료 derive — Scene.completedAt + completedBy
+    if (bgScene?.completedAt && bgScene.completedBy) {
+      events.push({
+        id: `completed:bg:${bgScene.id ?? 'na'}`,
+        at: bgScene.completedAt,
+        text: `${bgScene.completedBy} BG · 모든 단계 완료`,
+      });
+    }
+    if (actScene?.completedAt && actScene.completedBy) {
+      events.push({
+        id: `completed:act:${actScene.id ?? 'na'}`,
+        at: actScene.completedAt,
+        text: `${actScene.completedBy} ACT · 모든 단계 완료`,
+      });
+    }
+    return events;
+  }, [sceneActivities, bgScene, actScene]);
 
   // ESC 닫기 + 좌우 화살표
   useEffect(() => {
@@ -133,12 +247,12 @@ export function UnifiedSceneDetailModal({
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (showImageModal) return;
-      if (e.key === 'ArrowLeft' && hasPrev) onNavigate?.('prev');
-      if (e.key === 'ArrowRight' && hasNext) onNavigate?.('next');
+      if (e.key === 'ArrowLeft' && hasPrev) handleNavigate('prev');
+      if (e.key === 'ArrowRight' && hasNext) handleNavigate('next');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, onNavigate, hasPrev, hasNext, showImageModal, deleteConfirm]);
+  }, [onClose, handleNavigate, hasPrev, hasNext, showImageModal, deleteConfirm]);
 
   // Ctrl+V 이미지 붙여넣기 (BG 만)
   useEffect(() => {
@@ -237,254 +351,323 @@ export function UnifiedSceneDetailModal({
         transition={{ duration: 0.15 }}
         className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/60 backdrop-blur-sm p-4"
         onMouseDown={(e) => {
-          // 모달 안에서 시작한 드래그가 바깥에서 끝나도 닫히지 않도록 mousedown 위치 추적
           backdropMouseDownRef.current = e.target === e.currentTarget;
         }}
         onClick={(e) => {
-          // mousedown이 backdrop에서 시작했고 click도 backdrop에서 발생한 경우만 닫음
           if (backdropMouseDownRef.current && e.target === e.currentTarget) {
             onClose();
           }
           backdropMouseDownRef.current = false;
         }}
       >
-        {/* ── flex 래퍼 — 본체 + 리비전 패널 + 댓글 ── */}
-        <div className="flex gap-3 items-stretch max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
-          {/* ── 본체 (좌 BG + 우 ACT) ── */}
+        {/* ── flex 래퍼 — 본체 + 댓글 (좌우 이동 시 같이 흔들기 위해 motion.div 로 감쌈) ── */}
+        <motion.div
+          animate={wrapperControls}
+          className="flex gap-3 items-stretch max-w-full max-h-full"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* ── 본체 ── */}
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 6 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="relative w-[min(720px,calc(100vw-26rem))] max-h-[90vh] flex flex-col bg-bg-card border border-bg-border rounded-2xl shadow-2xl"
+            className="relative w-[min(720px,calc(100vw-26rem))] h-[min(720px,90vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden"
+            style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
           >
-            {/* 헤더 */}
-            <div className="flex items-center gap-3 px-5 py-3 border-b border-bg-border/40 shrink-0">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-sm font-mono text-text-secondary/50">#{sceneNoDisplay}</span>
-                <span className="text-lg font-mono font-bold text-text-primary truncate">
-                  {unifiedSceneId || headScene.sceneId || '(씬번호 없음)'}
-                </span>
-                {headScene.layoutId && (
-                  <span className="text-xs italic text-text-secondary/50 shrink-0">L#{headScene.layoutId}</span>
-                )}
-                {(episodeLabel || partLabel) && (
-                  <span className="text-xs text-text-secondary/50 shrink-0">
-                    {[episodeLabel, partLabel].filter(Boolean).join(' / ')}
-                  </span>
-                )}
-              </div>
+            {/* §3-1 배경 글로우 두 개 — 시그니처 */}
+            <div
+              aria-hidden
+              style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  top: -100,
+                  left: -100,
+                  width: 400,
+                  height: 400,
+                  borderRadius: 999,
+                  background: `radial-gradient(circle, ${SMA.accentAlpha(0.19)} 0%, transparent 60%)`,
+                  filter: 'blur(40px)',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: -150,
+                  right: -100,
+                  width: 500,
+                  height: 500,
+                  borderRadius: 999,
+                  background: `radial-gradient(circle, ${SMA.accentSubAlpha(0.14)} 0%, transparent 60%)`,
+                  filter: 'blur(50px)',
+                }}
+              />
+            </div>
 
-              {/* 네비게이션 */}
-              {(hasPrev || hasNext) && (
-                <div className="ml-auto flex items-center gap-1">
-                  <button
-                    onClick={() => onNavigate?.('prev')}
-                    disabled={!hasPrev}
-                    className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="이전 씬"
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                  <span className="text-xs text-text-secondary/60 tabular-nums min-w-[3.5rem] text-center">
-                    {currentMergedIndex + 1} / {totalMerged}
-                  </span>
-                  <button
-                    onClick={() => onNavigate?.('next')}
-                    disabled={!hasNext}
-                    className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                    title="다음 씬"
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              )}
-
-              {(bgScene || actScene) && (
-                <button
-                  onClick={() => setDeleteConfirm('both')}
-                  className={cn(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-[11px] font-medium hover:bg-red-500/20 cursor-pointer transition-colors shrink-0',
-                    !(hasPrev || hasNext) && 'ml-auto',
-                  )}
-                  title="BG+ACT 모두 삭제"
-                >
-                  <Trash2 size={11} />
-                  씬 삭제
-                </button>
-              )}
-
-              <button
-                onClick={onClose}
-                className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 cursor-pointer transition-colors shrink-0"
-                title="닫기"
+            {/* 본체 컨텐츠 — 글로우 위에 얹기 */}
+            <div className="relative z-[1] flex flex-col h-full min-h-0">
+              {/* 헤더 (글래스) */}
+              <div
+                className="flex items-center gap-3 px-5 py-3 border-b border-bg-border/40 shrink-0"
+                style={{
+                  background: 'rgba(255,255,255,0.015)',
+                  backdropFilter: 'blur(20px)',
+                  WebkitBackdropFilter: 'blur(20px)',
+                }}
               >
-                <X size={16} />
-              </button>
-            </div>
+                <AnimatePresence mode="wait" custom={navDirection} initial={false}>
+                  <motion.div
+                    key={`hdr:${currentMergedIndex}:${unifiedSceneId}`}
+                    custom={navDirection}
+                    variants={navVariants}
+                    initial="enter"
+                    animate="center"
+                    exit="exit"
+                    transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                    className="flex items-center gap-2 min-w-0"
+                  >
+                    <span className="text-sm font-mono text-text-secondary/50">#{sceneNoDisplay}</span>
+                    <span className="text-lg font-mono font-bold text-text-primary truncate">
+                      {unifiedSceneId || headScene.sceneId || '(씬번호 없음)'}
+                    </span>
+                    {headScene.layoutId && (
+                      <span className="text-xs italic text-text-secondary/50 shrink-0">L#{headScene.layoutId}</span>
+                    )}
+                    {(episodeLabel || partLabel) && (
+                      <span className="text-xs text-text-secondary/50 shrink-0">
+                        {[episodeLabel, partLabel].filter(Boolean).join(' / ')}
+                      </span>
+                    )}
+                    {totalPct !== null && (
+                      <span
+                        className="text-[11px] font-bold text-text-primary px-2 py-0.5 rounded-full bg-white/[0.06] tabular-nums shrink-0"
+                        style={{ marginLeft: 6 }}
+                        title="BG · ACT 합산 진행률"
+                      >
+                        {totalPct}%
+                      </span>
+                    )}
+                  </motion.div>
+                </AnimatePresence>
 
-            {/* 본체: 스크롤 영역 */}
-            <div className="flex-1 overflow-auto min-h-0">
-              {/* 이미지 공통 (BG 기준) */}
-              {primaryScene && (
-                <div className="grid grid-cols-2 gap-3 px-5 pt-4 pb-2">
-                  <UnifiedImageSlot
-                    label="스토리보드"
-                    url={previewUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
-                    loading={imageLoading === 'storyboard'}
-                    canEdit={!!bgScene && !!bgSheetName}
-                    onPick={() => pickFile('storyboard')}
-                    onRemove={() => setDeleteConfirm('storyboard')}
-                    onView={() => setShowImageModal('storyboard')}
-                    onDropBlob={(b) => uploadImage(b, 'storyboard')}
-                  />
-                  <UnifiedImageSlot
-                    label="가이드"
-                    url={previewUrls.guide ?? bgScene?.guideUrl ?? ''}
-                    loading={imageLoading === 'guide'}
-                    canEdit={!!bgScene && !!bgSheetName}
-                    onPick={() => pickFile('guide')}
-                    onRemove={() => setDeleteConfirm('guide')}
-                    onView={() => setShowImageModal('guide')}
-                    onDropBlob={(b) => uploadImage(b, 'guide')}
-                  />
+                {/* 네비게이션 — handleNavigate 경유 (방향 추적) */}
+                {(hasPrev || hasNext) && (
+                  <div className="ml-auto flex items-center gap-1">
+                    <button
+                      onClick={() => handleNavigate('prev')}
+                      disabled={!hasPrev}
+                      className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                      title="이전 씬"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="text-xs text-text-secondary/60 tabular-nums min-w-[3.5rem] text-center">
+                      {currentMergedIndex + 1} / {totalMerged}
+                    </span>
+                    <button
+                      onClick={() => handleNavigate('next')}
+                      disabled={!hasNext}
+                      className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                      title="다음 씬"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+
+                {(bgScene || actScene) && (
+                  <button
+                    onClick={() => setDeleteConfirm('both')}
+                    className={cn(
+                      'flex items-center gap-1 px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-[11px] font-medium hover:bg-red-500/20 cursor-pointer transition-colors shrink-0',
+                      !(hasPrev || hasNext) && 'ml-auto',
+                    )}
+                    title="BG+ACT 모두 삭제"
+                  >
+                    <Trash2 size={11} />
+                    씬 삭제
+                  </button>
+                )}
+
+                <button
+                  onClick={onClose}
+                  className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 cursor-pointer transition-colors shrink-0"
+                  title="닫기"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* 탭 (상세 / 리비전·N / 파일 / 히스토리) */}
+              <div className="flex gap-1 px-5 border-b border-bg-border/40 shrink-0">
+                <TabButton active={tab === 'detail'} onClick={() => setTab('detail')}>
+                  상세
+                </TabButton>
+                <TabButton
+                  active={tab === 'revisions'}
+                  onClick={() => setTab('revisions')}
+                  badge={revisionTabBadge > 0 ? revisionTabBadge : undefined}
+                >
+                  리비전
+                </TabButton>
+                <TabButton active={tab === 'files'} onClick={() => setTab('files')}>
+                  파일
+                </TabButton>
+                <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
+                  히스토리
+                </TabButton>
+              </div>
+
+              {/* 본체: 탭에 따라 분기 + 좌우 이동 슬라이드 애니메이션 */}
+              <div className="flex-1 min-h-0 relative overflow-hidden">
+                <AnimatePresence mode="wait" custom={navDirection} initial={false}>
+                  <motion.div
+                    key={`body:${tab}:${currentMergedIndex}`}
+                    custom={navDirection}
+                    variants={navVariants}
+                    initial="enter"
+                    animate="center"
+                    exit="exit"
+                    transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                    className="h-full overflow-auto"
+                  >
+                    {tab === 'detail' && (
+                      <>
+                        {/* 이미지 (BG 기준) */}
+                        {primaryScene && (
+                          <div className="grid grid-cols-2 gap-3 px-5 pt-4 pb-2">
+                            <UnifiedImageSlot
+                              label="스토리보드"
+                              url={previewUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
+                              loading={imageLoading === 'storyboard'}
+                              canEdit={!!bgScene && !!bgSheetName}
+                              onPick={() => pickFile('storyboard')}
+                              onRemove={() => setDeleteConfirm('storyboard')}
+                              onView={() => setShowImageModal('storyboard')}
+                              onDropBlob={(b) => uploadImage(b, 'storyboard')}
+                            />
+                            <UnifiedImageSlot
+                              label="가이드"
+                              url={previewUrls.guide ?? bgScene?.guideUrl ?? ''}
+                              loading={imageLoading === 'guide'}
+                              canEdit={!!bgScene && !!bgSheetName}
+                              onPick={() => pickFile('guide')}
+                              onRemove={() => setDeleteConfirm('guide')}
+                              onView={() => setShowImageModal('guide')}
+                              onDropBlob={(b) => uploadImage(b, 'guide')}
+                            />
+                          </div>
+                        )}
+
+                        {/* 좌 BG | 우 ACT — 듀얼 패널 (mockup 분위기) */}
+                        <div className="grid grid-cols-2 gap-3 px-5 py-4">
+                          <DeptSection
+                            dept="bg"
+                            scene={bgScene}
+                            sheetName={bgSheetName}
+                            sceneIndex={bgSceneIndex}
+                            sceneId={bgScene?.sceneId ?? merged.sceneId}
+                            onToggle={onToggle}
+                            onFieldUpdate={onFieldUpdate}
+                            onDelete={() => setDeleteConfirm('bg')}
+                            onAdd={() => handleAddDept('bg')}
+                          />
+                          <DeptSection
+                            dept="acting"
+                            scene={actScene}
+                            sheetName={actSheetName}
+                            sceneIndex={actSceneIndex}
+                            sceneId={actScene?.sceneId ?? merged.sceneId}
+                            onToggle={onToggle}
+                            onFieldUpdate={onFieldUpdate}
+                            onDelete={() => setDeleteConfirm('act')}
+                            onAdd={() => handleAddDept('acting')}
+                          />
+                        </div>
+
+                        {/* 메타 줄 — 등록/수정 (Supabase scenes.created_at / updated_at) */}
+                        <SceneMetaRow bgScene={bgScene} actScene={actScene} />
+                      </>
+                    )}
+
+                    {tab === 'revisions' && revisionSheetName && revisionSceneId && (
+                      <RevisionPanel
+                        sheetName={revisionSheetName}
+                        sceneId={revisionSceneId}
+                        siblingSceneIds={revisionSiblingSceneIds}
+                        onCountChange={setRevisionCount}
+                      />
+                    )}
+
+                    {tab === 'files' && revisionSheetName && revisionSceneId && (
+                      <SceneFilesTab
+                        bgScene={bgScene}
+                        primaryCommentKey={primaryCommentKey}
+                        secondaryCommentKey={secondaryCommentKey || undefined}
+                        revisionSheetName={revisionSheetName}
+                        revisionSceneId={revisionSceneId}
+                      />
+                    )}
+
+                    {tab === 'history' && (
+                      <SceneHistoryTab activities={sceneActivities} />
+                    )}
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+
+              {/* 하단 도트 인디케이터 — merged 단위 (상세 탭에서만) */}
+              {tab === 'detail' && showSceneDots && onNavigate && (
+                <div className="flex items-center justify-center gap-1.5 pb-3 pt-2 shrink-0 border-t border-bg-border/30">
+                  {Array.from({ length: totalMerged }, (_, i) => {
+                    const isCurrent = i === currentMergedIndex;
+                    const showDot = totalMerged <= 9 ||
+                      i === 0 || i === totalMerged - 1 ||
+                      Math.abs(i - currentMergedIndex) <= 2;
+                    const showEllipsis = !showDot && (
+                      (i === 1 && currentMergedIndex > 3) ||
+                      (i === totalMerged - 2 && currentMergedIndex < totalMerged - 4)
+                    );
+                    if (showEllipsis) {
+                      return <span key={i} className="text-[8px] text-text-secondary/40 px-0.5">...</span>;
+                    }
+                    if (!showDot) return null;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          const diff = i - currentMergedIndex;
+                          const dir = diff < 0 ? 'prev' : 'next';
+                          const steps = Math.abs(diff);
+                          for (let j = 0; j < steps; j++) {
+                            setTimeout(() => handleNavigate(dir), j * 30);
+                          }
+                        }}
+                        className={cn(
+                          'rounded-full transition-all duration-300 cursor-pointer',
+                          isCurrent ? 'w-5 h-1.5 bg-accent' : 'w-1.5 h-1.5 bg-text-secondary/30 hover:bg-text-secondary/50',
+                        )}
+                        style={isCurrent ? { boxShadow: '0 0 6px rgb(var(--color-accent))' } : undefined}
+                        title={`씬 ${i + 1}`}
+                      />
+                    );
+                  })}
                 </div>
               )}
-
-              {/* 좌 BG | 우 ACT */}
-              <div className="grid grid-cols-2 gap-0 divide-x divide-bg-border/40">
-                <DeptSection
-                  dept="bg"
-                  scene={bgScene}
-                  sheetName={bgSheetName}
-                  sceneIndex={bgSceneIndex}
-                  // 대표 표시 번호(merged.sceneId) 가 아닌 실제 해당 부서 씬의 sceneId 를 전달 —
-                  // 정규화 매칭(ac001↔a001) 케이스에서 둘이 다를 수 있어 onToggle 이 no-op 되는 걸 방지.
-                  sceneId={bgScene?.sceneId ?? merged.sceneId}
-                  onToggle={onToggle}
-                  onFieldUpdate={onFieldUpdate}
-                  onDelete={() => setDeleteConfirm('bg')}
-                  onAdd={() => handleAddDept('bg')}
-                />
-                <DeptSection
-                  dept="acting"
-                  scene={actScene}
-                  sheetName={actSheetName}
-                  sceneIndex={actSceneIndex}
-                  sceneId={actScene?.sceneId ?? merged.sceneId}
-                  onToggle={onToggle}
-                  onFieldUpdate={onFieldUpdate}
-                  onDelete={() => setDeleteConfirm('act')}
-                  onAdd={() => handleAddDept('acting')}
-                />
-              </div>
             </div>
-
-            {/* 하단 도트 인디케이터 — merged 단위 */}
-            {showSceneDots && onNavigate && (
-              <div className="flex items-center justify-center gap-1.5 pb-3 pt-2 shrink-0 border-t border-bg-border/30">
-                {Array.from({ length: totalMerged }, (_, i) => {
-                  const isCurrent = i === currentMergedIndex;
-                  const showDot = totalMerged <= 9 ||
-                    i === 0 || i === totalMerged - 1 ||
-                    Math.abs(i - currentMergedIndex) <= 2;
-                  const showEllipsis = !showDot && (
-                    (i === 1 && currentMergedIndex > 3) ||
-                    (i === totalMerged - 2 && currentMergedIndex < totalMerged - 4)
-                  );
-                  if (showEllipsis) {
-                    return <span key={i} className="text-[8px] text-text-secondary/40 px-0.5">...</span>;
-                  }
-                  if (!showDot) return null;
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        const diff = i - currentMergedIndex;
-                        const dir = diff < 0 ? 'prev' : 'next';
-                        const steps = Math.abs(diff);
-                        for (let j = 0; j < steps; j++) {
-                          setTimeout(() => onNavigate(dir), j * 30);
-                        }
-                      }}
-                      className={cn(
-                        'rounded-full transition-all duration-300 cursor-pointer',
-                        isCurrent ? 'w-5 h-1.5 bg-accent' : 'w-1.5 h-1.5 bg-text-secondary/30 hover:bg-text-secondary/50',
-                      )}
-                      title={`씬 ${i + 1}`}
-                    />
-                  );
-                })}
-              </div>
-            )}
-
-            {/* ── 리비전 토글 탭 버튼 — 본체 우측에 튀어나오도록 absolute ── */}
-            <AnimatePresence>
-              {!showRevisions && (
-                <motion.button
-                  key="revision-tab"
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -8, transition: { duration: 0.15 } }}
-                  transition={{ delay: 0.15, duration: 0.2 }}
-                  onClick={() => setShowRevisions(true)}
-                  className="absolute -right-11 top-20 flex flex-col items-center gap-1 px-2 py-3 rounded-r-xl bg-bg-border/80 text-text-secondary hover:text-[#FDCB6E] transition-all cursor-pointer z-10"
-                  style={openRevCount > 0 ? { backgroundColor: 'rgba(253, 203, 110, 0.15)' } : {}}
-                  title="컴포지팅 리비전"
-                >
-                  <Film size={18} />
-                  {(openRevCount > 0 || revisionCount > 0) && (
-                    <span className="text-[10px] font-bold text-[#FDCB6E] tabular-nums">
-                      {openRevCount > 0 ? openRevCount : revisionCount}
-                    </span>
-                  )}
-                </motion.button>
-              )}
-            </AnimatePresence>
           </motion.div>
 
-          {/* ── 리비전 패널 (토글) ── */}
-          <AnimatePresence>
-            {showRevisions && revisionSheetName && revisionSceneId && (
-              <motion.div
-                key="revision-panel"
-                initial={{ opacity: 0, x: -30, width: 0 }}
-                animate={{ opacity: 1, x: 0, width: 320 }}
-                exit={{ opacity: 0, x: -30, width: 0, transition: { duration: 0.2 } }}
-                transition={{ duration: 0.25 }}
-                className="bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col shrink-0 overflow-hidden"
-              >
-                <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border shrink-0">
-                  <h3 className="text-sm font-medium text-text-primary flex items-center gap-2">
-                    <Film size={14} className="text-[#FDCB6E]" />
-                    컴포지팅 리비전
-                  </h3>
-                  <button
-                    onClick={() => setShowRevisions(false)}
-                    className="p-1 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/50 cursor-pointer transition-colors"
-                    title="닫기"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-                <RevisionPanel
-                  sheetName={revisionSheetName}
-                  sceneId={revisionSceneId}
-                  siblingSceneIds={revisionSiblingSceneIds}
-                  onCountChange={setRevisionCount}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* ── 댓글 패널 (상시 표시) ── */}
+          {/* ── 댓글 패널 (상시 표시) — 본체와 같은 높이 */}
           {primaryCommentKey && (
             <motion.div
               key="comment-panel"
               initial={{ opacity: 0, x: 30 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.25, delay: 0.1 }}
-              className="w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col shrink-0 overflow-hidden"
+              className="w-80 bg-bg-card shadow-2xl border border-bg-border h-[min(720px,90vh)] flex flex-col shrink-0 overflow-hidden"
+              style={{ borderRadius: 18 }}
             >
               <div className="px-4 py-3 border-b border-bg-border shrink-0">
                 <h3 className="text-sm font-medium text-text-primary">
@@ -498,10 +681,11 @@ export function UnifiedSceneDetailModal({
                 sceneKey={primaryCommentKey}
                 secondarySceneKey={secondaryCommentKey || undefined}
                 onCountChange={setCommentCount}
+                inlineEvents={inlineEvents}
               />
             </motion.div>
           )}
-        </div>
+        </motion.div>
       </motion.div>
 
       {/* 이미지 확대 */}
@@ -548,6 +732,84 @@ export function UnifiedSceneDetailModal({
   );
 }
 
+/* ── 탭 버튼 ── */
+
+function TabButton({
+  active,
+  onClick,
+  badge,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  badge?: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'relative px-3 py-2.5 text-[12.5px] font-bold cursor-pointer flex items-center gap-1.5 transition-colors',
+        active ? 'text-accent-sub' : 'text-text-secondary hover:text-text-primary',
+      )}
+    >
+      <span>{children}</span>
+      {typeof badge === 'number' && badge > 0 && (
+        <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-accent/20 text-accent-sub">
+          {badge}
+        </span>
+      )}
+      {active && (
+        <span
+          aria-hidden
+          className="absolute left-3 right-3 -bottom-px h-0.5 rounded-sm bg-accent"
+          style={{ boxShadow: '0 0 8px rgb(var(--color-accent))' }}
+        />
+      )}
+    </button>
+  );
+}
+
+/* ── 씬 메타 줄 (등록/수정) ── */
+
+function SceneMetaRow({ bgScene, actScene }: { bgScene: Scene | null; actScene: Scene | null }) {
+  // 둘 중 가장 빠른 createdAt = 씬 등록 시각
+  const created = pickEarliest([bgScene?.createdAt, actScene?.createdAt]);
+  // 둘 중 가장 늦은 updatedAt = 마지막 수정 시각
+  const updated = pickLatest([bgScene?.updatedAt, actScene?.updatedAt]);
+  // 모두 없으면 메타 줄 자체를 숨김
+  if (!created && !updated) return null;
+  return (
+    <div className="mx-5 mb-4 px-4 py-2.5 rounded-lg border border-bg-border/40 bg-white/[0.02] flex items-center gap-5 text-[11.5px]">
+      {created && <MetaItem label="등록" value={formatStamp(created, { withYearAlways: true })} />}
+      {updated && updated !== created && (
+        <MetaItem label="수정" value={formatStamp(updated, { withYearAlways: true })} />
+      )}
+    </div>
+  );
+}
+
+function MetaItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-text-secondary/60 text-[10px] mb-0.5">{label}</span>
+      <span className="text-text-primary tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function pickEarliest(items: Array<string | undefined>): string | undefined {
+  const valid = items.filter((s): s is string => !!s);
+  if (valid.length === 0) return undefined;
+  return valid.reduce((a, b) => (new Date(a).getTime() <= new Date(b).getTime() ? a : b));
+}
+function pickLatest(items: Array<string | undefined>): string | undefined {
+  const valid = items.filter((s): s is string => !!s);
+  if (valid.length === 0) return undefined;
+  return valid.reduce((a, b) => (new Date(a).getTime() >= new Date(b).getTime() ? a : b));
+}
+
 /* ── 부서 섹션 ── */
 
 function DeptSection({
@@ -572,15 +834,27 @@ function DeptSection({
   onAdd: () => void;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
+  const visualColor = deptVisualColor(dept);
 
+  // 빈 상태 — 부서 추가 버튼은 기존 그대로
   if (!scene || !sheetName) {
     return (
-      <div className="flex flex-col items-center justify-center py-14 px-6 text-center gap-3 min-h-[280px]">
-        <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: cfg.color }}>
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cfg.color }} />
+      <div
+        className="relative flex flex-col items-center justify-center py-14 px-6 text-center gap-3 min-h-[280px] rounded-xl overflow-hidden"
+        style={{
+          background: 'rgba(255,255,255,0.025)',
+          border: `1px solid ${visualColor}25`,
+        }}
+      >
+        <DeptTopLine color={visualColor} />
+        <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: visualColor }}>
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ backgroundColor: visualColor, boxShadow: `0 0 8px ${visualColor}` }}
+          />
           {cfg.shortLabel}
         </div>
-        <span className="text-xs text-text-secondary/50 italic">아직 등록되지 않았습니다</span>
+        <span className="text-xs text-text-secondary/50">아직 등록되지 않았습니다</span>
         <button
           onClick={onAdd}
           className="mt-2 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
@@ -596,11 +870,25 @@ function DeptSection({
   const pct = sceneProgress(scene);
 
   return (
-    <div className="p-5 flex flex-col gap-4">
+    <div
+      className="relative p-4 flex flex-col gap-4 rounded-xl overflow-hidden"
+      style={{
+        background: 'rgba(255,255,255,0.025)',
+        border: `1px solid ${visualColor}25`,
+      }}
+    >
+      <DeptTopLine color={visualColor} />
+
       <div className="flex items-center gap-2">
-        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cfg.color }} />
-        <span className="text-sm font-semibold" style={{ color: cfg.color }}>{cfg.shortLabel}</span>
-        <span className="ml-auto text-xs text-text-secondary tabular-nums">{pct}%</span>
+        <span
+          className="w-2.5 h-2.5 rounded-full shrink-0"
+          style={{ backgroundColor: visualColor, boxShadow: `0 0 8px ${visualColor}` }}
+        />
+        <span className="text-sm font-semibold" style={{ color: visualColor }}>
+          {cfg.shortLabel}
+        </span>
+        <span className="text-xs text-text-secondary/70">{cfg.label}</span>
+        <span className="ml-auto text-xs text-text-secondary tabular-nums font-semibold">{pct}%</span>
         <button
           onClick={onDelete}
           className="p-1 rounded-md text-text-secondary/50 hover:text-red-400 hover:bg-red-500/10 cursor-pointer transition-colors"
@@ -618,6 +906,7 @@ function DeptSection({
 
       <div>
         <span className="block text-xs text-text-secondary mb-1.5">진행 단계</span>
+        {/* 진행 단계 칩 — 기존 그대로 (한솔 결정: 버튼 디자인 유지) */}
         <div className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-1">
           {STAGES.map((stage, i) => {
             const done = scene[stage];
@@ -654,28 +943,49 @@ function DeptSection({
   );
 }
 
+/** §3-2 부서 패널 상단 그라디언트 라이트 라인 + 글로우 */
+function DeptTopLine({ color }: { color: string }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 2,
+        background: `linear-gradient(90deg, ${color}, transparent)`,
+        boxShadow: `0 0 8px ${color}80`,
+        pointerEvents: 'none',
+      }}
+    />
+  );
+}
+
 /* ── 인라인 담당자 ── */
 
 function InlineAssigneeRow({ label, value, onSave }: {
   label: string; value: string; onSave: (v: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  // 칩 단위 변경마다 즉시 저장 (한솔: 매번 commit 안전)
   return (
     <div>
       <span className="block text-xs text-text-secondary mb-1.5">{label}</span>
       {editing ? (
-        <AssigneeSelect
+        <AssigneeMultiSelect
           value={value}
-          onChange={(v) => { onSave(v); setEditing(false); }}
+          onChange={onSave}
           onClose={() => setEditing(false)}
           className="w-full"
+          autoFocus
         />
       ) : (
         <button
           onClick={() => setEditing(true)}
-          className="w-full text-left px-3 py-2 rounded-md border border-transparent hover:border-accent/30 hover:bg-accent/5 text-sm text-text-primary cursor-pointer transition-colors"
+          className="w-full text-left px-3 py-2 rounded-md border border-transparent hover:border-accent/30 hover:bg-accent/5 text-sm cursor-pointer transition-colors"
         >
-          {value || <span className="text-text-secondary/50 italic">담당자 없음</span>}
+          <AssigneeChipList value={value} />
         </button>
       )}
     </div>
@@ -728,11 +1038,12 @@ function InlineTextareaRow({ label, value, onSave }: {
       ) : (
         <div
           onClick={() => setEditing(true)}
-          className="w-full text-left px-3 py-2 rounded-md border border-transparent hover:border-accent/30 hover:bg-accent/5 text-sm text-text-primary min-h-[40px] cursor-pointer transition-colors whitespace-pre-wrap"
+          className="w-full text-left px-3 py-2 rounded-lg border border-transparent text-sm text-text-primary min-h-[40px] cursor-pointer transition-colors whitespace-pre-wrap hover:border-accent/30 hover:bg-accent/5"
+          style={{ background: value ? 'rgba(255,255,255,0.025)' : undefined }}
         >
           {value
             ? <PathLinkifiedText text={value} />
-            : <span className="text-text-secondary/50 italic">메모 없음</span>}
+            : <span className="text-text-secondary/50">메모 없음</span>}
           {value && (
             <Pencil size={12} className="inline-block ml-2 opacity-0 hover:opacity-60 transition-opacity" />
           )}

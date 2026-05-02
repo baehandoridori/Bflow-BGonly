@@ -15,29 +15,20 @@
   transition: height 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* 떠있는 입력 카드 */
+/* 떠있는 입력 카드 — mockup 분위기로 단순화 (그림자 약화 + 펄스 제거).
+ * 한솔 피드백(2026-05-02): focus 시 accent ring 도 보라처럼 보여서 중립 흰색 알파로. */
 .comment-input-card {
-  box-shadow: var(--comment-shadow-base), 0 0 0 1px rgb(var(--color-accent) / 0.08);
-  transition: border-color 200ms ease, box-shadow 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--comment-shadow-base);
+  transition: border-color 180ms ease, box-shadow 200ms ease;
 }
 .comment-input-card.focused {
-  animation: comment-input-pulse 2.4s ease-in-out infinite;
+  /* 중립 ring (accent 안 씀) */
+  box-shadow:
+    var(--comment-shadow-base),
+    0 0 0 1px rgba(255, 255, 255, 0.10);
 }
-@keyframes comment-input-pulse {
-  0%, 100% {
-    box-shadow:
-      var(--comment-shadow-base),
-      0 0 0 1px rgb(var(--color-accent) / 0.32);
-  }
-  50% {
-    box-shadow:
-      var(--comment-shadow-base),
-      0 0 0 6px rgb(var(--color-accent) / 0.18);
-  }
-}
-/* 드래그 중 입력 카드: 펄스 멈추고 진한 강조 */
+/* 드래그 중 입력 카드: 진한 강조 */
 .comment-input-card.dragover {
-  animation: none !important;
   box-shadow:
     var(--comment-shadow-base),
     0 0 0 2px rgb(var(--color-accent) / 0.6) !important;
