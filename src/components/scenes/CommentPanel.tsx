@@ -170,7 +170,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   // 새 댓글 시 스크롤
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [comments.length]);
+    // Codex R3 P2 (2026-05-03): inlineEvents 도 watch — system 활동만 도착해도 스크롤 따라가게.
+  }, [comments.length, inlineEvents?.length]);
 
   // 멘션 드롭다운 활성 항목 스크롤
   useEffect(() => {
