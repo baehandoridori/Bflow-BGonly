@@ -41,10 +41,22 @@ export function useSceneActivities(
     }
     let cancelled = false;
     supabaseService.listActivities({ sceneIds: validIds, limit })
-      .then((rows) => { if (!cancelled) setExtra(rows); })
+      .then((rows) => {
+        if (cancelled) return;
+        // Codex R2 P1 (2026-05-03): IPC 응답을 wholesale 로 덮으면 그 사이 Realtime 으로 들어온 항목이 사라짐.
+        // race 시나리오: Realtime callback 이 setExtra(prev=>[a, ...prev]) 로 새 row 추가 →
+        // 늦게 도착한 IPC 가 setExtra(rows) 로 덮어쓰는데, replication lag 으로 rows 에 그 새 row 없으면 누락.
+        // 해결: id 기준 merge. IPC 결과 + 기존 prev 의 fresh items.
+        setExtra((prev) => {
+          const map = new Map<string, Activity>();
+          for (const r of rows) map.set(r.id, r);
+          for (const a of prev) if (!map.has(a.id)) map.set(a.id, a);
+          return [...map.values()];
+        });
+      })
       .catch((err) => {
         console.warn('[useSceneActivities] IPC fetch 실패 — cache 만 사용:', err);
-        if (!cancelled) setExtra([]);
+        // 실패 시 prev 보존 (Realtime 항목 유지) — 빈 배열로 wipe 하지 않음
       });
     return () => { cancelled = true; };
   }, [validIds, limit]);

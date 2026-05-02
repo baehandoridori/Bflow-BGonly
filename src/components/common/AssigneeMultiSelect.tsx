@@ -190,7 +190,10 @@ export function AssigneeMultiSelect({
                 return;
               }
             }
-            if (e.key === 'Enter') {
+            // Codex R2 P2 (2026-05-03): 자동완성 매치 없을 때도 Tab/Enter 로 자유 칩 commit.
+            // 기존엔 filtered.length === 0 케이스에서 Tab 이 아무 작업 안 해 키보드만 쓰면
+            // 외부 인력 이름이 unmount 시 사라짐 (close/blur commit 만 의존).
+            if ((e.key === 'Enter' || e.key === 'Tab') && query.trim().length > 0) {
               e.preventDefault();
               commitQueryAsChip();
               return;
