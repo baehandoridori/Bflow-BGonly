@@ -26,6 +26,9 @@ function typeConfig(type: NotificationType) {
     case 'comment': return { icon: MessageSquare, color: '#6C5CE7', label: '댓글' };
     case 'milestone': return { icon: Award, color: '#00B894', label: '마일스톤' };
     case 'system': return { icon: Bell, color: '#8B8DA3', label: '시스템' };
+    // v1.18.0: 리비전 알림 — 댓글과 동일 시각 (MessageSquare + accent) 으로 통일.
+    // 추후 전용 아이콘 도입 시 분리 가능.
+    case 'revision': return { icon: MessageSquare, color: '#6C5CE7', label: '리비전' };
   }
 }
 
