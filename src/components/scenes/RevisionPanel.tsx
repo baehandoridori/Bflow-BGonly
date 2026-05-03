@@ -310,13 +310,12 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 자동 체크 대상자 — 부서 컴포지터 + 그 씬 담당자 (등록자 본인 제외).
-  // 부서가 추론 안 되면 빈 배열 (= 컴포지터 자동 체크 없음, 담당자만).
+  // 자동 체크 대상자 — 모든 컴포지터 + 그 씬 담당자 (등록자 본인 제외).
+  // v1.18.1 한솔 정정: 컴포지터는 부서로 나뉘지 않으므로 dept 인자 불필요.
   const defaultRecipients = useMemo(() => {
     if (!currentUser) return [];
-    const dept = effectiveDepartment ?? 'bg';
-    return calcDefaultRecipients(dept, scene, allUsers, currentUser.id);
-  }, [effectiveDepartment, scene, allUsers, currentUser]);
+    return calcDefaultRecipients(scene, allUsers, currentUser.id);
+  }, [scene, allUsers, currentUser]);
 
   useEffect(() => {
     loadRevisions();

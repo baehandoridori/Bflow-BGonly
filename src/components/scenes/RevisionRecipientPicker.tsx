@@ -176,9 +176,9 @@ export function RevisionRecipientPicker({
                 {u.name.charAt(0)}
               </span>
               <span>{u.name}</span>
-              {u.compositorDept && (
+              {u.isCompositor && (
                 <span className="text-[10px] text-text-secondary/60">
-                  {u.compositorDept} 컴포지터
+                  컴포지터
                 </span>
               )}
               {cked && (
@@ -228,9 +228,9 @@ export function RevisionRecipientPicker({
                   {u.name.charAt(0)}
                 </span>
                 <span className="text-[12px] text-text-primary">{u.name}</span>
-                {u.compositorDept && (
+                {u.isCompositor && (
                   <span className="text-[10px] text-text-secondary/50">
-                    {u.compositorDept} 컴포지터
+                    컴포지터
                   </span>
                 )}
               </button>

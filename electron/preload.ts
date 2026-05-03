@@ -101,7 +101,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:read-users'),
   supabaseAddUser: (user: unknown) =>
     ipcRenderer.invoke('supabase:add-user', user),
-  supabaseUpdateUser: (userId: string, updates: Record<string, string | null>) =>
+  supabaseUpdateUser: (userId: string, updates: Record<string, string | boolean | null>) =>
     ipcRenderer.invoke('supabase:update-user', userId, updates),
   supabaseDeleteUser: (userId: string) =>
     ipcRenderer.invoke('supabase:delete-user', userId),

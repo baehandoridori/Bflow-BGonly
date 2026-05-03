@@ -141,10 +141,10 @@ export interface AppUser {
   birthday?: string;   // Phase 0-4: 생일 (MM-DD)
   role?: string;       // Phase 0-4: 역할 (admin | user)
   /**
-   * v1.18.0: 부서별 컴포지터 지정 ('BG' | 'ACT' | null).
-   * 리비전 등록 폼에서 부서별 기본 알림 대상 노출용.
+   * v1.18.1: 컴포지터 단일 boolean (BG/ACT 부서 구분 없음).
+   * 한솔 정정: 컴포지터는 부서로 나뉘지 않음 — 리비전 등록 시 모든 컴포지터가 자동 알림 대상.
    */
-  compositorDept?: 'BG' | 'ACT' | null;
+  isCompositor?: boolean;
 }
 
 export interface UsersFile {
@@ -519,7 +519,7 @@ export interface ElectronAPI {
   supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) => Promise<void>;
   supabaseReadUsers: () => Promise<unknown[]>;
   supabaseAddUser: (user: unknown) => Promise<void>;
-  supabaseUpdateUser: (userId: string, updates: Record<string, string | null>) => Promise<void>;
+  supabaseUpdateUser: (userId: string, updates: Record<string, string | boolean | null>) => Promise<void>;
   supabaseDeleteUser: (userId: string) => Promise<void>;
   supabaseReadComments: (partUuid: string) => Promise<unknown[]>;
   /** 한솔 결정 (v1.15.5): 로그인 catch-up — last seen 이후 받은 멘션 댓글 일괄 조회 */

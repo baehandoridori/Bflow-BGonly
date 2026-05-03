@@ -227,15 +227,15 @@ export function getUserNames(users: AppUser[]): string[] {
 }
 
 /**
- * v1.18.0: 어드민 전용 — 부서별 컴포지터 지정/해제.
- * dept = 'BG' | 'ACT' 면 그 부서 컴포지터로 지정, null 이면 해제.
- * supabase users.compositor_dept 컬럼 직접 업데이트 (CHECK 제약: BG/ACT 또는 NULL).
+ * v1.18.1: 어드민 전용 — 컴포지터 지정/해제 (부서 구분 없음, 단일 BOOLEAN).
+ * 한솔 정정: 컴포지터는 BG/ACT 로 나뉘지 않는다.
+ * supabase users.is_compositor 컬럼 직접 업데이트.
  */
-export async function setCompositorDept(
+export async function setIsCompositor(
   userId: string,
-  dept: 'BG' | 'ACT' | null,
+  value: boolean,
 ): Promise<void> {
-  await window.electronAPI.supabaseUpdateUser(userId, { compositorDept: dept });
+  await window.electronAPI.supabaseUpdateUser(userId, { isCompositor: value });
 }
 
 /**

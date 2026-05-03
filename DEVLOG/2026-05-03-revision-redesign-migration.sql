@@ -9,12 +9,11 @@ ALTER TABLE comments
 CREATE INDEX IF NOT EXISTS idx_comments_revision_id
   ON comments(revision_id) WHERE revision_id IS NOT NULL;
 
--- 2. users.compositor_dept (부서별 컴포지터 지정)
+-- 2. users.is_compositor (컴포지터 역할 — 부서 구분 없음, 여러 명 가능)
 ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS compositor_dept TEXT NULL
-  CHECK (compositor_dept IN ('BG','ACT'));
-CREATE INDEX IF NOT EXISTS idx_users_compositor_dept
-  ON users(compositor_dept) WHERE compositor_dept IS NOT NULL;
+  ADD COLUMN IF NOT EXISTS is_compositor BOOLEAN DEFAULT false NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_is_compositor
+  ON users(is_compositor) WHERE is_compositor = true;
 
 -- 3. comp_revisions.notify_user_ids (알림 받을 사람 목록)
 ALTER TABLE comp_revisions
