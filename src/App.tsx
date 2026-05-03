@@ -829,8 +829,49 @@ export default function App() {
             user_id?: string;
             text?: string;
             mentions?: string[];
+            // v1.18.0: 리비전 맥락 댓글 식별 — 값 있으면 'revision' 알림 경로로 분기.
+            revision_id?: string | null;
           };
           const me = useAuthStore.getState().currentUser;
+
+          // v1.18.0: 리비전 맥락 댓글 → 'revision' 알림 (revisionAction='comment').
+          // 일반 댓글 알림 경로(isMentioned/isAssignee) 와 *분리* 해 중복 알림 방지.
+          // 조건: revision_id 있음 + 그 리비전 notifyUserIds 에 나 포함 + 내가 작성자 아님.
+          if (me && newComment.revision_id && newComment.user_id !== me.id) {
+            const notiSettings = notiSettingsRef.current;
+            if (notiSettings.commentNotify !== false) {
+              import('@/stores/useRevisionStore').then(({ useRevisionStore }) => {
+                const rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
+                if (!rev) return;
+                const targets = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
+                if (!targets.includes(me.id)) return;
+                // dedupe — 같은 댓글이 broadcast/realtime 두 경로로 들어와도 한 번만.
+                const dedupeKey = `revcomment:${newComment.user_id}:${newComment.revision_id}:${newComment.scene_id ?? ''}`;
+                if (!dedupeNotification(dedupeKey)) return;
+                // 씬 매칭 — comment_panel.css 카드 라우팅 위해 sceneId/sceneName 도 같이 채움.
+                const sceneByUuid = newComment.scene_uuid
+                  ? useDataStore.getState().findSceneByUuid(newComment.scene_uuid)
+                  : null;
+                const body = newComment.text
+                  ? (newComment.text.length > 60 ? newComment.text.slice(0, 60) + '...' : newComment.text)
+                  : `${newComment.user_name || '누군가'}님 댓글`;
+                dispatchNotification({
+                  type: 'revision',
+                  title: `리비전 댓글 — ${sceneByUuid?.sceneId || newComment.scene_id || ''}`,
+                  body,
+                  metadata: {
+                    sceneId: sceneByUuid?.id,
+                    sceneName: sceneByUuid?.sceneId,
+                    revisionId: newComment.revision_id,
+                    revisionAction: 'comment',
+                  } as Record<string, unknown>,
+                }, notiSettings);
+              }).catch(() => { /* 무시 */ });
+            }
+            // 리비전 맥락 댓글은 일반 댓글 알림 경로 스킵.
+            return;
+          }
+
           // 한솔 테스트용 (v1.15.0): 본인이 본인 태그한 경우에도 토스트 발동되도록 user_id 자기 비교 제거.
           // 실 운영 시 본인 댓글 알림이 의미없으면 다음 PR 에서 user_id !== me.id 조건 복원.
           if (me && newComment.user_id && newComment.scene_id) {
