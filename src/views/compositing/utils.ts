@@ -71,3 +71,53 @@ export interface SceneGroup {
   openCount: number;
   uniqueRequesters: string[];
 }
+
+// ─── v1.19.0: 검색 + 정렬 ──────────────────
+
+export type SortMode = 'recent' | 'oldest' | 'sceneNo' | 'comments';
+
+/**
+ * 본문/등록자/씬 이름에서 검색어 일치하는 리비전만 필터.
+ * 빈 쿼리면 전체 반환.
+ */
+export function filterRevisionsBySearch(
+  revisions: CompRevision[],
+  query: string,
+  sceneInfoMap: Map<string, SceneInfo>,
+): CompRevision[] {
+  if (!query.trim()) return revisions;
+  const q = query.toLowerCase();
+  return revisions.filter((r) => {
+    if (r.description?.toLowerCase().includes(q)) return true;
+    if (r.requesterName?.toLowerCase().includes(q)) return true;
+    const info = sceneInfoMap.get(r.sceneKey);
+    if (info?.sceneName?.toLowerCase().includes(q)) return true;
+    if (info?.sceneId?.toLowerCase().includes(q)) return true;
+    return false;
+  });
+}
+
+/**
+ * 정렬. commentCounts(rev.id → count) 가 없으면 댓글 정렬은 0으로 폴백.
+ */
+export function sortRevisions(
+  revisions: CompRevision[],
+  mode: SortMode,
+  commentCounts?: Map<string, number>,
+): CompRevision[] {
+  const sorted = [...revisions];
+  switch (mode) {
+    case 'recent':
+      return sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    case 'oldest':
+      return sorted.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    case 'sceneNo':
+      return sorted.sort((a, b) => a.sceneKey.localeCompare(b.sceneKey));
+    case 'comments':
+      return sorted.sort(
+        (a, b) => (commentCounts?.get(b.id) ?? 0) - (commentCounts?.get(a.id) ?? 0),
+      );
+    default:
+      return sorted;
+  }
+}

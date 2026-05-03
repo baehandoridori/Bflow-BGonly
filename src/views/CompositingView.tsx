@@ -1,14 +1,18 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Filter, ListFilter } from 'lucide-react';
+import { Filter, ListFilter, Search } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
 import type { CompRevision, RevisionStatus } from '@/types';
-import { parseSceneKey } from './compositing/utils';
-import type { SceneInfo, SceneGroup } from './compositing/utils';
+import {
+  parseSceneKey,
+  filterRevisionsBySearch,
+  sortRevisions,
+} from './compositing/utils';
+import type { SceneInfo, SceneGroup, SortMode } from './compositing/utils';
 import { SceneRow, EpisodeFilter } from './compositing/SceneGroupSection';
 import { DetailPanel } from './compositing/RevisionDetailPanel';
 
@@ -25,6 +29,8 @@ export default function CompositingView() {
   const [myTasksOnly, setMyTasksOnly] = useState(false);
   const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set());
   const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortMode, setSortMode] = useState<SortMode>('recent');
 
   // 선택된 리비전 객체
   const selectedRevision = useMemo(
@@ -44,7 +50,7 @@ export default function CompositingView() {
       for (const part of ep.parts) {
         for (const scene of part.scenes) {
           const sceneKey = buildSceneKey(part.sheetName, scene.sceneId);
-          const nextInfo = {
+          const nextInfo: SceneInfo = {
             sceneKey,
             sceneId: scene.sceneId,
             sceneNo: scene.no,
@@ -53,6 +59,10 @@ export default function CompositingView() {
             part: part.partId,
             department: part.department as 'bg' | 'acting',
             assignee: scene.assignee,
+            // v1.19.0: 씬 모달 점프용 보강
+            episodeNumber: ep.episodeNumber,
+            partId: part.partId,
+            sceneUuid: scene.id,
           };
           const existing = map.get(sceneKey);
           if (!existing || (existing.department !== 'bg' && nextInfo.department === 'bg')) {
@@ -63,6 +73,13 @@ export default function CompositingView() {
     }
     return map;
   }, [episodes]);
+
+  // v1.19.0: 검색 + 정렬 적용된 리비전. 그룹핑 단계 입력으로 사용.
+  // commentCounts 는 현재 도입되지 않음 — 댓글많은순은 향후 lazy load 통해 채울 수 있음.
+  const searchedSorted = useMemo(() => {
+    const filtered = filterRevisionsBySearch(revisions, searchQuery, sceneInfoMap);
+    return sortRevisions(filtered, sortMode);
+  }, [revisions, searchQuery, sortMode, sceneInfoMap]);
 
   // 선택된 리비전의 씬 정보
   const selectedRevisionSceneInfo = useMemo(
@@ -88,9 +105,9 @@ export default function CompositingView() {
       }
     }
 
-    // 리비전을 sceneKey로 그룹핑
+    // 리비전을 sceneKey로 그룹핑 (검색·정렬 적용된 결과 기준)
     const revByScene = new Map<string, CompRevision[]>();
-    for (const rev of revisions) {
+    for (const rev of searchedSorted) {
       const list = revByScene.get(rev.sceneKey) || [];
       list.push(rev);
       revByScene.set(rev.sceneKey, list);
@@ -199,7 +216,7 @@ export default function CompositingView() {
     });
 
     return groups;
-  }, [episodes, revisions, selectedEp, statusFilter, myTasksOnly, currentUser, sceneInfoMap]);
+  }, [episodes, searchedSorted, selectedEp, statusFilter, myTasksOnly, currentUser, sceneInfoMap]);
 
   // 통계
   const stats = useMemo(() => {
@@ -261,6 +278,33 @@ export default function CompositingView() {
               >
                 {expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
               </button>
+            </div>
+          </div>
+
+          {/* 검색 + 정렬 (Row 1) */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 min-w-0">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary/50" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="본문·씬·등록자 검색..."
+                className="w-full pl-8 pr-3 py-1.5 bg-bg-primary/80 border border-bg-border/60 rounded-md text-[13px] text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/60"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] text-text-secondary uppercase tracking-wider">정렬</span>
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                className="bg-bg-primary/80 border border-bg-border/60 rounded-md px-2 py-1.5 text-[12px] text-text-primary focus:outline-none focus:border-accent/60 cursor-pointer"
+              >
+                <option value="recent">최신순</option>
+                <option value="oldest">오래된순</option>
+                <option value="sceneNo">씬 번호순</option>
+                <option value="comments">댓글 많은순</option>
+              </select>
             </div>
           </div>
 
