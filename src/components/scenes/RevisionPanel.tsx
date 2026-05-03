@@ -10,7 +10,7 @@ import { buildSceneKey } from '@/services/revisionService';
 import { resizeBlob } from '@/utils/imageUtils';
 import type { CompRevision, RevisionStatus, Scene } from '@/types';
 import { formatTime } from '@/utils/formatTime';
-import { STATUS_CONFIG } from '@/constants/revision';
+import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { elevatedGlassStyle, floatingGlassStyle } from '@/utils/glassStyles';
 import { RevisionRecipientPicker } from './RevisionRecipientPicker';
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
@@ -132,38 +132,32 @@ function RevisionCard({
   return (
     <motion.div
       id={`rev-card-${revision.id}`}
+      data-status={revision.status}
       layout
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 10 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
-      className="rounded-xl p-3 border border-bg-border/60 group"
+      className="rev-card relative rounded-xl p-3 border border-bg-border/60 group"
       style={elevatedGlassStyle}
     >
-      {/* 헤더 */}
+      {/* 좌측 컬러 막대 — 미해결: 액센트 / 완료: 그린 */}
+      <span
+        className={`rev-side-bar${revision.status === 'resolved' ? ' rev-side-bar-done' : ''}`}
+        aria-hidden
+      />
+
+      {/* 헤더 — v1.18.0 재설계: re# 라벨 + 상태만 (우선순위/부서/프레임 표시 제거) */}
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-bold text-text-secondary">Rev.{revision.revisionNo}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className={`text-[12px] font-bold ${
+              revision.status === 'resolved' ? 'text-text-secondary' : 'text-accent-sub'
+            }`}
+          >
+            {revisionNoToLabel(revision.revisionNo)}
+          </span>
           <StatusBadge status={revision.status} />
-          {revision.priority && revision.priority !== 'normal' && (
-            <span
-              className="text-[10px] font-medium rounded px-1 py-0.5"
-              style={{
-                color: revision.priority === 'urgent' ? '#FF6B6B' : '#E17055',
-                backgroundColor: revision.priority === 'urgent' ? 'rgba(255, 107, 107, 0.15)' : 'rgba(225, 112, 85, 0.15)',
-              }}
-            >
-              {revision.priority === 'urgent' ? '긴급' : '높음'}
-            </span>
-          )}
-          {revision.frameNo && (
-            <span className="text-[10px] text-text-secondary/60 font-mono">{revision.frameNo}</span>
-          )}
-          {revision.department && (
-            <span className="text-[10px] text-text-secondary/70 uppercase">
-              {revision.department === 'bg' ? 'BG' : 'ACT'}
-            </span>
-          )}
         </div>
         {currentUser && (
           <div className="flex items-center gap-1.5">
@@ -182,7 +176,7 @@ function RevisionCard({
       </div>
 
       {/* 설명 */}
-      <p className="text-sm text-text-primary leading-relaxed mb-2 whitespace-pre-wrap">
+      <p className="rev-card-description text-sm text-text-primary leading-relaxed mb-2 whitespace-pre-wrap">
         {revision.description}
       </p>
 
@@ -399,7 +393,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
 
   const handleDelete = async (rev: CompRevision) => {
     const ok = await ConfirmDialog.show({
-      message: `Rev.${rev.revisionNo} 리비전을 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
+      message: `${revisionNoToLabel(rev.revisionNo)} 리비전을 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
       confirmLabel: '삭제',
       tone: 'danger',
     });

@@ -741,3 +741,34 @@ input[type="range"]::-webkit-slider-thumb {
 .rev-pulse {
   animation: rev-pulse-anim 1.2s ease-in-out 2;
 }
+
+/* v1.18.0: 리비전 카드 시각 강조 (시안 1).
+   - 미해결(open/in_progress) 카드: 좌측 액센트 막대 + 카드 테두리 액센트 + 그림자 강조
+   - 완료(resolved) 카드: 좌측 그린 막대 + opacity 약화 + 본문 취소선 */
+.rev-side-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 12px 0 0 12px;
+  background: rgb(var(--color-accent));
+  pointer-events: none;
+}
+.rev-side-bar-done {
+  background: #00B894;
+}
+.rev-card[data-status="resolved"] {
+  opacity: 0.7;
+}
+.rev-card[data-status="resolved"] .rev-card-description {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.rev-card[data-status="open"],
+.rev-card[data-status="in_progress"] {
+  border-color: rgb(var(--color-accent) / 0.55);
+  box-shadow:
+    0 0 0 1px rgb(var(--color-accent) / 0.18),
+    0 8px 18px rgb(var(--color-accent) / 0.12);
+}
