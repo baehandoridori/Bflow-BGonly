@@ -4,9 +4,9 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Undo2 } from 'lucide-react';
 import type { CompRevision, RevisionStatus } from '@/types';
-import { STATUS_CONFIG } from '@/constants/revision';
+import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { PathBadge } from '@/components/common/PathBadge';
-import { Avatar, PriorityBadge, StatusDropdown } from './sharedComponents';
+import { Avatar, StatusDropdown } from './sharedComponents';
 import { parsePathsFromText } from './utils';
 
 export function RevisionItem({
@@ -69,13 +69,23 @@ export function RevisionItem({
 
       {/* 설명 */}
       <div className="flex-1 min-w-0">
-        <p
-          className={`text-sm leading-relaxed ${
-            isResolved ? 'line-through text-text-secondary/50' : 'text-text-primary'
-          }`}
-        >
-          {descText || revision.description}
-        </p>
+        {/* re# 라벨 + 본문 */}
+        <div className="flex items-baseline gap-1.5">
+          <span
+            className={`text-[11px] font-mono font-bold shrink-0 ${
+              isResolved ? 'text-text-secondary/50' : 'text-accent-sub'
+            }`}
+          >
+            {revisionNoToLabel(revision.revisionNo)}
+          </span>
+          <p
+            className={`text-sm leading-relaxed ${
+              isResolved ? 'line-through text-text-secondary/50' : 'text-text-primary'
+            }`}
+          >
+            {descText || revision.description}
+          </p>
+        </div>
 
         {/* 경로 뱃지 */}
         {paths.length > 0 && (
@@ -133,14 +143,7 @@ export function RevisionItem({
         </AnimatePresence>
       </div>
 
-      {/* 프레임 번호 */}
-      {revision.frameNo && (
-        <span className="shrink-0 text-[11px] text-text-secondary/60 font-mono mt-0.5">
-          {revision.frameNo}
-        </span>
-      )}
-
-      {/* 상태 변경 */}
+      {/* 상태 변경 (호버 시 노출) */}
       {!isResolved ? (
         <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           <StatusDropdown currentStatus={revision.status} onSelect={handleStatusSelect} />
@@ -155,11 +158,6 @@ export function RevisionItem({
           되돌리기
         </button>
       )}
-
-      {/* 우선순위 뱃지 */}
-      <div className="shrink-0">
-        <PriorityBadge priority={revision.priority} />
-      </div>
     </motion.div>
   );
 }

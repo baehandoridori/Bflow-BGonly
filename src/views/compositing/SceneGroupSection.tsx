@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight, ChevronDown, AlertTriangle, Plus } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
-import type { CompRevision, RevisionStatus, RevisionPriority, Episode } from '@/types';
-import { StatusDots, AvatarStack } from './sharedComponents';
+import type { CompRevision, RevisionStatus, Episode } from '@/types';
+import { AvatarStack } from './sharedComponents';
 import { RevisionItem } from './RevisionItem';
 import { AddRevisionForm } from './AddRevisionForm';
 import type { SceneGroup } from './utils';
@@ -61,9 +61,8 @@ export function SceneRow({
           {info.sceneName || info.sceneId}
         </span>
 
-        {/* 오른쪽: 상태도트 + 아바타 + 미해결 뱃지 */}
+        {/* 오른쪽: 아바타 + 미해결 뱃지 */}
         <div className="ml-auto flex items-center gap-3 shrink-0">
-          <StatusDots revisions={revisions} />
           {uniqueRequesters.length > 0 && (
             <AvatarStack names={uniqueRequesters} max={4} size={22} />
           )}
@@ -99,11 +98,10 @@ export function SceneRow({
               {/* 리비전 아이템들 */}
               {[...revisions]
                 .sort((a, b) => {
-                  // 미해결 먼저, 그 안에서 우선순위순
+                  // 미해결 먼저, 그 안에서 최신순 (createdAt 내림차순)
                   if (a.status === 'resolved' && b.status !== 'resolved') return 1;
                   if (a.status !== 'resolved' && b.status === 'resolved') return -1;
-                  const order: Record<RevisionPriority, number> = { urgent: 0, high: 1, normal: 2 };
-                  return (order[a.priority] ?? 2) - (order[b.priority] ?? 2);
+                  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
                 })
                 .map((rev) => (
                   <RevisionItem

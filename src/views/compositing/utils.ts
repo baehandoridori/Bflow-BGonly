@@ -58,6 +58,10 @@ export interface SceneInfo {
   part: string;
   department: 'bg' | 'acting';
   assignee: string;
+  /** v1.19.0: 씬 모달 점프용 — 알려진 경우 정확한 정보 전달, 모르면 sceneKey에서 파싱 폴백 */
+  episodeNumber?: number;
+  partId?: string;
+  sceneUuid?: string;
 }
 
 export interface SceneGroup {

@@ -6,9 +6,7 @@ import { ImagePlus, X } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { resizeBlob } from '@/utils/imageUtils';
-import { PRIORITY_CONFIG } from '@/constants/revision';
 import { elevatedGlassStyle } from '@/utils/glassStyles';
-import type { RevisionPriority } from '@/types';
 
 export function AddRevisionForm({
   sceneKey,
@@ -22,8 +20,6 @@ export function AddRevisionForm({
   const { currentUser } = useAuthStore();
   const { createRevision } = useRevisionStore();
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<RevisionPriority>('normal');
-  const [frameNo, setFrameNo] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +61,8 @@ export function AddRevisionForm({
         lookupDepartment: department,
         requesterId: currentUser.id,
         requesterName: currentUser.name,
-        // 청크 3에서 폼 재설계 시 멘션 UI → 실제 user.id 배열 전달.
+        // v1.19.0: 컴포지팅 뷰에서 등록 시 알림 대상 미선택.
+        // 향후 RecipientPicker 통합 검토 (v1.20.0+).
         notifyUserIds: [],
       });
       onClose();
@@ -89,33 +86,6 @@ export function AddRevisionForm({
         style={elevatedGlassStyle}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 우선순위 선택 */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
-            {(['urgent', 'high', 'normal'] as const).map((p) => {
-              const cfg = PRIORITY_CONFIG[p];
-              return (
-                <button
-                  key={p}
-                  onClick={() => setPriority(p)}
-                  className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
-                    priority === p ? 'shadow-sm' : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                  style={priority === p ? { color: cfg.color, backgroundColor: cfg.bg } : undefined}
-                >
-                  {cfg.label}
-                </button>
-              );
-            })}
-          </div>
-          <input
-            value={frameNo}
-            onChange={(e) => setFrameNo(e.target.value)}
-            placeholder="F000"
-            className="w-16 px-2 py-1 text-[11px] bg-bg-primary rounded-md border border-bg-border text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-1 focus:ring-accent/50 font-mono"
-          />
-        </div>
-
         {/* 설명 */}
         <textarea
           ref={textareaRef}

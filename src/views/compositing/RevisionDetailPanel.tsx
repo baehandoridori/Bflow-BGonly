@@ -6,14 +6,13 @@ import {
   Clock,
   Circle,
   Check,
-  AlertTriangle,
   X,
   FolderOpen,
   Undo2,
 } from 'lucide-react';
 import type { CompRevision, RevisionStatus } from '@/types';
 import { formatDateTime } from '@/utils/formatTime';
-import { STATUS_CONFIG, PRIORITY_CONFIG } from '@/constants/revision';
+import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { elevatedGlassStyle } from '@/utils/glassStyles';
 import { Avatar } from './sharedComponents';
 import { parsePathsFromText, parseSceneKey } from './utils';
@@ -71,8 +70,11 @@ export function DetailPanel({
             </button>
           </div>
 
-          {/* 상태 + 우선순위 뱃지 */}
+          {/* re# 라벨 + 상태 뱃지 */}
           <div className="flex items-center gap-2 mb-5">
+            <span className="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold border border-accent/30">
+              {revisionNoToLabel(revision.revisionNo)}
+            </span>
             <span
               className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5"
               style={{ color: STATUS_CONFIG[revision.status].color, backgroundColor: STATUS_CONFIG[revision.status].bg }}
@@ -81,13 +83,6 @@ export function DetailPanel({
               {revision.status === 'in_progress' && <Clock size={10} />}
               {revision.status === 'resolved' && <Check size={10} />}
               {STATUS_CONFIG[revision.status].label}
-            </span>
-            <span
-              className="inline-flex items-center text-[11px] font-medium rounded-full px-2 py-0.5"
-              style={{ color: PRIORITY_CONFIG[revision.priority].color, backgroundColor: PRIORITY_CONFIG[revision.priority].bg }}
-            >
-              {revision.priority === 'urgent' && <AlertTriangle size={10} className="mr-0.5" />}
-              {PRIORITY_CONFIG[revision.priority].label}
             </span>
           </div>
 
@@ -143,22 +138,10 @@ export function DetailPanel({
 
           {/* 메타 정보 */}
           <div className="space-y-3 mb-5">
-            {revision.frameNo && (
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary">프레임</span>
-                <span className="text-xs font-bold text-text-primary font-mono">{revision.frameNo}</span>
-              </div>
-            )}
             <div className="flex items-center justify-between">
               <span className="text-xs text-text-secondary">씬</span>
               <span className="text-xs font-bold text-text-primary">{sceneInfo?.sceneId || sceneId}</span>
             </div>
-            {revision.department && (
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary">파트</span>
-                <span className="text-xs text-text-primary">{revision.department === 'bg' ? 'BG' : '액팅'}</span>
-              </div>
-            )}
             {revision.assignee && (
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-secondary">담당</span>
