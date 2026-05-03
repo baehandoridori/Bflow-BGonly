@@ -13,6 +13,7 @@ import { formatTime } from '@/utils/formatTime';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { elevatedGlassStyle, floatingGlassStyle } from '@/utils/glassStyles';
 import { RevisionRecipientPicker } from './RevisionRecipientPicker';
+import { RevisionCommentThread } from './RevisionCommentThread';
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 
 // ─── 상태 뱃지 ───────────────────────────────
@@ -100,10 +101,12 @@ function StatusDropdown({
 
 function RevisionCard({
   revision,
+  sceneKey,
   onStatusChange,
   onDelete,
 }: {
   revision: CompRevision;
+  sceneKey: string;
   onStatusChange: (status: RevisionStatus, note?: string) => void;
   onDelete?: () => void;
 }) {
@@ -249,6 +252,9 @@ function RevisionCard({
           </>
         )}
       </div>
+
+      {/* 카드 내 댓글 스레드 — v1.18.0 신규 */}
+      <RevisionCommentThread revisionId={revision.id} sceneKey={sceneKey} />
     </motion.div>
   );
 }
@@ -422,6 +428,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
               <RevisionCard
                 key={rev.id}
                 revision={rev}
+                sceneKey={sceneKey}
                 onStatusChange={(status, note) => handleStatusChange(rev.id, status, note)}
                 onDelete={() => handleDelete(rev)}
               />
