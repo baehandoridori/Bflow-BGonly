@@ -120,6 +120,12 @@ export interface CompRevision {
   createdAt: string;       // ISO 8601
   updatedAt: string;
   resolvedAt?: string;
+  /**
+   * v1.18.0: 알림 받을 사람 user.id 배열.
+   * 등록 시 폼에서 멘션한 사람들 + 등록자 본인. 댓글/상태 변경 시 이 목록에 알림 전송.
+   * 옵셔널 — 사용처에서 `?? []`로 가드. 레거시 데이터/생성 경로 호환.
+   */
+  notifyUserIds?: string[];
 }
 
 // ─── 사용자 & 인증 ─────────────────────────
@@ -134,6 +140,11 @@ export interface AppUser {
   hireDate?: string;   // Phase 0-4: 입사일 (YYYY-MM-DD)
   birthday?: string;   // Phase 0-4: 생일 (MM-DD)
   role?: string;       // Phase 0-4: 역할 (admin | user)
+  /**
+   * v1.18.0: 부서별 컴포지터 지정 ('BG' | 'ACT' | null).
+   * 리비전 등록 폼에서 부서별 기본 알림 대상 노출용.
+   */
+  compositorDept?: 'BG' | 'ACT' | null;
 }
 
 export interface UsersFile {

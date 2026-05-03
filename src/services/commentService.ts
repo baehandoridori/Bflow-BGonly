@@ -22,6 +22,11 @@ export interface SceneComment {
   images?: string[];    // Supabase Storage CDN URL — v1.15.12+ (이미지 첨부)
   createdAt: string;    // ISO 8601
   editedAt?: string;
+  /**
+   * v1.18.0: 리비전 맥락 댓글이면 해당 리비전 id, 일반 씬 댓글이면 null/undefined.
+   * 리비전 ↔ 댓글 단일 흐름 통합 — 리비전 패널에서 작성된 댓글은 이 필드로 연결.
+   */
+  revisionId?: string | null;
 }
 
 type CommentsStore = Record<string, SceneComment[]>;
