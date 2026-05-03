@@ -8,6 +8,7 @@ import type { CompRevision, RevisionStatus, Episode } from '@/types';
 import { AvatarStack } from './sharedComponents';
 import { RevisionItem } from './RevisionItem';
 import { AddRevisionForm } from './AddRevisionForm';
+import { SceneJumpButton } from './SceneJumpButton';
 import type { SceneGroup } from './utils';
 
 export function SceneRow({
@@ -33,9 +34,17 @@ export function SceneRow({
 
   return (
     <div className="border-b border-bg-border/40 last:border-b-0">
-      {/* 씬 헤더 */}
-      <button
+      {/* 씬 헤더 — div + role=button (내부에 SceneJumpButton 이라는 button 이 있어 button 중첩 회피) */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-bg-border/10 transition-colors cursor-pointer"
       >
         {/* 펼치기/접기 */}
@@ -61,7 +70,7 @@ export function SceneRow({
           {info.sceneName || info.sceneId}
         </span>
 
-        {/* 오른쪽: 아바타 + 미해결 뱃지 */}
+        {/* 오른쪽: 아바타 + 미해결 뱃지 + 씬 점프 */}
         <div className="ml-auto flex items-center gap-3 shrink-0">
           {uniqueRequesters.length > 0 && (
             <AvatarStack names={uniqueRequesters} max={4} size={22} />
@@ -75,8 +84,14 @@ export function SceneRow({
               {openCount} 미해결
             </span>
           )}
+          <SceneJumpButton
+            sceneKey={info.sceneKey}
+            episodeNumber={info.episodeNumber}
+            partId={info.partId}
+            sceneUuid={info.sceneUuid}
+          />
         </div>
-      </button>
+      </div>
 
       {/* 확장된 리비전 목록 */}
       <AnimatePresence>

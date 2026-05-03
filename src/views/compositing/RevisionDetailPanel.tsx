@@ -17,6 +17,7 @@ import { elevatedGlassStyle } from '@/utils/glassStyles';
 import { Avatar } from './sharedComponents';
 import { parsePathsFromText, parseSceneKey } from './utils';
 import type { SceneInfo } from './utils';
+import { SceneJumpButton } from './SceneJumpButton';
 
 export function DetailPanel({
   revision,
@@ -70,8 +71,8 @@ export function DetailPanel({
             </button>
           </div>
 
-          {/* re# 라벨 + 상태 뱃지 */}
-          <div className="flex items-center gap-2 mb-5">
+          {/* re# 라벨 + 상태 뱃지 + 씬 점프 */}
+          <div className="flex items-center gap-2 mb-5 flex-wrap">
             <span className="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold border border-accent/30">
               {revisionNoToLabel(revision.revisionNo)}
             </span>
@@ -84,6 +85,13 @@ export function DetailPanel({
               {revision.status === 'resolved' && <Check size={10} />}
               {STATUS_CONFIG[revision.status].label}
             </span>
+            <SceneJumpButton
+              sceneKey={revision.sceneKey}
+              variant="link"
+              episodeNumber={sceneInfo?.episodeNumber}
+              partId={sceneInfo?.partId}
+              sceneUuid={sceneInfo?.sceneUuid}
+            />
           </div>
 
           {/* 요청자 정보 */}
