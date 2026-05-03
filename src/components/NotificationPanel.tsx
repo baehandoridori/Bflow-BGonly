@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Bell, Check, Trash2, MessageSquare, RefreshCw, Award, ExternalLink } from 'lucide-react';
+import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -26,9 +26,9 @@ function typeConfig(type: NotificationType) {
     case 'comment': return { icon: MessageSquare, color: '#6C5CE7', label: '댓글' };
     case 'milestone': return { icon: Award, color: '#00B894', label: '마일스톤' };
     case 'system': return { icon: Bell, color: '#8B8DA3', label: '시스템' };
-    // v1.18.0: 리비전 알림 — 댓글과 동일 시각 (MessageSquare + accent) 으로 통일.
-    // 추후 전용 아이콘 도입 시 분리 가능.
-    case 'revision': return { icon: MessageSquare, color: '#6C5CE7', label: '리비전' };
+    // v1.18.0: 리비전 알림 — MessageSquareWarning 아이콘 + accent 색상.
+    // 댓글과 시각적으로 구분되도록 별도 아이콘 사용.
+    case 'revision': return { icon: MessageSquareWarning, color: 'rgb(var(--color-accent))', label: '리비전' };
   }
 }
 
@@ -173,6 +173,11 @@ function NotificationDropdown() {
   const handleNavigate = (n: AppNotification) => {
     const sceneId = n.metadata?.sceneId;
     const sceneName = n.metadata?.sceneName;
+    // v1.18.0: 리비전 알림 — 모달 자동 오픈 + revisions 탭 + focusRevisionId 강조.
+    // ScenesView 가 listen 하는 window CustomEvent 로 라우팅.
+    const isRevisionNotif = n.type === 'revision';
+    const revisionId = n.metadata?.revisionId;
+
     if (sceneId || sceneName) {
       // 씬 UUID/이름으로 에피소드를 찾아서 이동
       const episodes = useDataStore.getState().episodes;
@@ -188,6 +193,20 @@ function NotificationDropdown() {
             setHighlightSceneId(found.sceneId);
             setView('scenes');
             setPanelOpen(false);
+
+            // 리비전 알림이면 모달 자동 오픈 + 탭/포커스 신호 디스패치
+            if (isRevisionNotif) {
+              window.dispatchEvent(new CustomEvent('bflow:open-scene-modal', {
+                detail: {
+                  sceneUuid: found.id,
+                  sceneName: found.sceneId,
+                  episodeNumber: ep.episodeNumber,
+                  partId: part.partId,
+                  initialTab: 'revisions',
+                  focusRevisionId: revisionId,
+                },
+              }));
+            }
             return;
           }
         }
