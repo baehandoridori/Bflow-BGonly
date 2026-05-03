@@ -15,6 +15,11 @@ import {
 import type { SceneInfo, SceneGroup, SortMode } from './compositing/utils';
 import { SceneRow, EpisodeFilter } from './compositing/SceneGroupSection';
 import { DetailPanel } from './compositing/RevisionDetailPanel';
+import { EpisodeGroupSection } from './compositing/EpisodeGroupSection';
+import { ProgressKanbanSection } from './compositing/ProgressKanbanSection';
+
+// v1.19.0: 그룹화 모드
+type GroupMode = 'scene' | 'episode' | 'progress';
 
 // ─── 메인 뷰 ─────────────────────────────────
 
@@ -31,6 +36,7 @@ export default function CompositingView() {
   const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
+  const [groupMode, setGroupMode] = useState<GroupMode>('scene');
 
   // 선택된 리비전 객체
   const selectedRevision = useMemo(
@@ -272,12 +278,34 @@ export default function CompositingView() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={toggleAll}
-                className="px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors cursor-pointer"
-              >
-                {expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
-              </button>
+              {/* 그룹화 토글 */}
+              <div className="inline-flex bg-bg-primary rounded-lg p-1 gap-0.5 border border-bg-border/40">
+                {([
+                  { key: 'scene' as const, label: '씬별' },
+                  { key: 'episode' as const, label: '에피소드별' },
+                  { key: 'progress' as const, label: '진행률별' },
+                ]).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setGroupMode(key)}
+                    className={`px-3 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
+                      groupMode === key
+                        ? 'bg-accent text-white'
+                        : 'text-text-secondary hover:text-text-primary'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {groupMode === 'scene' && (
+                <button
+                  onClick={toggleAll}
+                  className="px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors cursor-pointer"
+                >
+                  {expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -371,7 +399,7 @@ export default function CompositingView() {
               <p className="text-sm">피드백이 있는 씬이 없습니다</p>
               <p className="text-xs mt-1">씬 상세에서 수정 요청을 등록해보세요</p>
             </div>
-          ) : (
+          ) : groupMode === 'scene' ? (
             <div className="divide-y divide-bg-border/20">
               {sceneGroups.map((group) => (
                 <SceneRow
@@ -385,6 +413,22 @@ export default function CompositingView() {
                 />
               ))}
             </div>
+          ) : groupMode === 'episode' ? (
+            <EpisodeGroupSection
+              sceneGroups={sceneGroups}
+              episodes={episodes}
+              expandedScenes={expandedScenes}
+              selectedRevisionId={selectedRevisionId}
+              onSelectRevision={handleSelectRevision}
+              onToggleScene={toggleScene}
+            />
+          ) : (
+            <ProgressKanbanSection
+              revisions={searchedSorted}
+              sceneInfoMap={sceneInfoMap}
+              selectedRevisionId={selectedRevisionId}
+              onSelectRevision={handleSelectRevision}
+            />
           )}
         </div>
       </div>
