@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리비전 보드 리뉴얼 — v1.19.0</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --color-bg-primary: 15 17 23;
+    --color-bg-card: 26 29 39;
+    --color-bg-border: 45 48 65;
+    --color-text-primary: 232 232 238;
+    --color-text-secondary: 139 141 163;
+    --color-accent: 108 92 231;
+    --color-accent-sub: 162 155 254;
+  }
+  [data-theme="cinema-red"]    { --color-accent: 225 29 72;  --color-accent-sub: 251 113 133; }
+  [data-theme="midnight-blue"] { --color-accent: 59 130 246; --color-accent-sub: 96 165 250; }
+  [data-theme="emerald"]       { --color-accent: 16 185 129; --color-accent-sub: 52 211 153; }
+  [data-theme="amber-gold"]    { --color-accent: 217 119 6;  --color-accent-sub: 245 158 11; }
+  [data-theme="nameko"]        { --color-accent: 129 77 65;  --color-accent-sub: 168 109 90; }
+  [data-mode="light"] {
+    --color-bg-primary: 248 249 252;
+    --color-bg-card: 255 255 255;
+    --color-bg-border: 215 217 230;
+    --color-text-primary: 28 29 38;
+    --color-text-secondary: 100 102 122;
+  }
+  body {
+    background: rgb(var(--color-bg-primary));
+    color: rgb(var(--color-text-primary));
+    font-family: 'Pretendard', -apple-system, system-ui, sans-serif;
+    transition: background-color .2s, color .2s;
+  }
+  .text-accent { color: rgb(var(--color-accent)); }
+  .text-accent-sub { color: rgb(var(--color-accent-sub)); }
+  .text-prim { color: rgb(var(--color-text-primary)); }
+  .text-sec { color: rgb(var(--color-text-secondary)); }
+  .text-sec-70 { color: rgb(var(--color-text-secondary) / .7); }
+  .text-sec-50 { color: rgb(var(--color-text-secondary) / .5); }
+  .bg-prim { background: rgb(var(--color-bg-primary)); }
+  .bg-prim-50 { background: rgb(var(--color-bg-primary) / .5); }
+  .bg-card { background: rgb(var(--color-bg-card)); }
+  .bg-card-70 { background: rgb(var(--color-bg-card) / .7); }
+  .bg-accent { background: rgb(var(--color-accent)); }
+  .bg-accent-15 { background: rgb(var(--color-accent) / .15); }
+  .bg-accent-08 { background: rgb(var(--color-accent) / .08); }
+  .bd-border { border-color: rgb(var(--color-bg-border)); }
+  .bd-border-40 { border-color: rgb(var(--color-bg-border) / .4); }
+  .bd-border-60 { border-color: rgb(var(--color-bg-border) / .6); }
+  .bd-accent-40 { border-color: rgb(var(--color-accent) / .4); }
+  .bd-accent-60 { border-color: rgb(var(--color-accent) / .6); }
+
+  /* 상태 색 */
+  .st-open { color:#FDCB6E; background:rgba(253,203,110,.15); }
+  .st-prog { color:#74B9FF; background:rgba(116,185,255,.15); }
+  .st-done { color:#00B894; background:rgba(0,184,148,.15); }
+
+  /* 리비전 카드 강조 (시안 1) */
+  .rev-card { position:relative; transition:border-color .2s, transform .15s; cursor:pointer; }
+  .rev-card.open { border-color: rgb(var(--color-accent) / .55); box-shadow: 0 0 0 1px rgb(var(--color-accent) / .18); }
+  .rev-card.done { opacity: 0.7; }
+  .rev-side { position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:8px 0 0 8px; }
+  .rev-side.open { background: rgb(var(--color-accent)); }
+  .rev-side.done { background:#00B894; }
+  .rev-card:hover { transform: translateY(-1px); border-color: rgb(var(--color-accent) / .7); }
+
+  /* 씬 그룹 헤더 */
+  .scene-row { transition: background-color .15s; }
+  .scene-row:hover { background: rgb(var(--color-bg-primary) / .5); }
+  .scene-row.has-open { border-left: 3px solid rgb(var(--color-accent)); }
+
+  /* 칸반 컬럼 */
+  .kanban-col { background: rgb(var(--color-bg-primary) / .4); }
+
+  /* 사이드바 (faux) */
+  .nav-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; cursor:pointer; font-size:13px; color: rgb(var(--color-text-secondary)); transition: all .15s; }
+  .nav-item:hover { background: rgb(var(--color-bg-primary) / .5); color: rgb(var(--color-text-primary)); }
+  .nav-item.active { background: rgb(var(--color-accent) / .15); color: rgb(var(--color-accent-sub)); font-weight:600; }
+  .nav-item .badge { margin-left:auto; background: rgb(var(--color-accent)); color:#fff; font-size:10px; padding:1px 6px; border-radius:9999px; font-weight:700; }
+
+  /* Pulse */
+  @keyframes pulse-accent {
+    0%,100% { box-shadow: 0 0 0 0 rgb(var(--color-accent) / .55); }
+    50% { box-shadow: 0 0 0 4px rgb(var(--color-accent) / .35); }
+  }
+</style>
+</head>
+<body data-mode="dark">
+
+<!-- TOP CONTROL BAR -->
+<div class="sticky top-0 z-50 backdrop-blur-xl border-b bd-border-40 bg-card-70">
+  <div class="max-w-[1500px] mx-auto px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+    <h1 class="text-base font-bold text-prim">리비전 보드 리뉴얼 v1.19.0</h1>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">그룹화</span>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-group="scene" class="group-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">씬별</button>
+        <button data-group="flat" class="group-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">평면(시간순)</button>
+        <button data-group="kanban" class="group-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">칸반(상태별)</button>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">테마</span>
+      <div class="flex gap-1.5">
+        <button data-theme="" class="theme-btn w-6 h-6 rounded-full ring-2 ring-white" style="background:#6C5CE7"></button>
+        <button data-theme="cinema-red" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#E11D48"></button>
+        <button data-theme="midnight-blue" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#3B82F6"></button>
+        <button data-theme="emerald" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#10B981"></button>
+        <button data-theme="amber-gold" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#D97706"></button>
+        <button data-theme="nameko" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#814D41"></button>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">모드</span>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-mode="dark" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">다크</button>
+        <button data-mode="light" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">라이트</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 메인: 사이드바 + 콘텐츠 -->
+<div class="max-w-[1500px] mx-auto flex">
+
+  <!-- 사이드바 (faux, 비활성) -->
+  <aside class="w-[180px] shrink-0 px-4 py-6 border-r bd-border-40 hidden lg:block">
+    <div class="text-[10px] uppercase tracking-widest text-sec-50 mb-2 px-3">B flow</div>
+    <nav class="space-y-0.5">
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        대시보드
+      </div>
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
+        씬 보드
+      </div>
+      <div class="nav-item active">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v3"/><circle cx="12" cy="13" r=".7" fill="currentColor"/></svg>
+        리비전
+        <span class="badge">7</span>
+      </div>
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M5 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"/></svg>
+        담당자
+      </div>
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        타임라인
+      </div>
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        설정
+      </div>
+    </nav>
+  </aside>
+
+  <!-- 콘텐츠 -->
+  <main class="flex-1 min-w-0 px-6 py-6">
+
+    <!-- 헤더 -->
+    <div class="mb-4 flex items-end justify-between gap-4 flex-wrap">
+      <div>
+        <h2 class="text-2xl font-bold text-prim">리비전 보드</h2>
+        <div class="text-[12px] text-sec-70 mt-1">12개 씬 · 23개 피드백 · 8개 미해결</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="px-3 py-1.5 text-xs font-semibold rounded-md border bd-border text-prim hover:bd-accent-60">모두 펼치기</button>
+        <button class="px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">+ 새 리비전</button>
+      </div>
+    </div>
+
+    <!-- 필터 바 -->
+    <div class="bg-card border bd-border-40 rounded-xl p-3 mb-4 space-y-3">
+      <!-- Row 1: 검색 + 정렬 -->
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="relative flex-1 min-w-[260px]">
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-sec-50" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="text" placeholder="본문·씬·등록자 검색..." class="w-full pl-8 pr-3 py-1.5 bg-prim/80 border bd-border-60 rounded-md text-[13px] focus:outline-none focus:border-accent/60">
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="text-[11px] text-sec uppercase tracking-wider">정렬</span>
+          <select class="bg-prim/80 border bd-border-60 rounded-md px-2 py-1.5 text-[12px] focus:outline-none focus:border-accent/60">
+            <option>최신순</option>
+            <option>오래된순</option>
+            <option>씬 번호순</option>
+            <option>댓글 많은순</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Row 2: 상태 + 에피소드 + 추가 필터 -->
+      <div class="flex flex-wrap items-center gap-3">
+        <!-- 상태 세그먼트 -->
+        <div class="inline-flex bg-prim rounded-md p-0.5 gap-0.5 border bd-border-40">
+          <button class="filter-btn px-2.5 py-1 text-[11px] font-semibold rounded text-prim bg-accent text-white">전체 <span class="opacity-70">23</span></button>
+          <button class="filter-btn px-2.5 py-1 text-[11px] font-semibold rounded text-sec hover:text-prim">대기 <span class="opacity-70">5</span></button>
+          <button class="filter-btn px-2.5 py-1 text-[11px] font-semibold rounded text-sec hover:text-prim">진행중 <span class="opacity-70">3</span></button>
+          <button class="filter-btn px-2.5 py-1 text-[11px] font-semibold rounded text-sec hover:text-prim">완료 <span class="opacity-70">15</span></button>
+        </div>
+
+        <span class="text-sec-50">·</span>
+
+        <!-- 에피소드 칩 -->
+        <div class="flex items-center gap-1">
+          <span class="text-[11px] text-sec uppercase tracking-wider mr-1">EP</span>
+          <button class="px-2 py-0.5 text-[11px] rounded-full bg-accent text-white font-semibold">전체</button>
+          <button class="px-2 py-0.5 text-[11px] rounded-full bg-prim/80 border bd-border-40 text-sec hover:text-prim">EP01</button>
+          <button class="px-2 py-0.5 text-[11px] rounded-full bg-prim/80 border bd-border-40 text-sec hover:text-prim">EP02</button>
+          <button class="px-2 py-0.5 text-[11px] rounded-full bg-prim/80 border bd-border-40 text-sec hover:text-prim">EP03</button>
+        </div>
+
+        <span class="text-sec-50">·</span>
+
+        <!-- 빠른 토글 -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <label class="inline-flex items-center gap-1.5 text-[12px] text-sec hover:text-prim cursor-pointer">
+            <input type="checkbox" class="accent-accent">
+            내 할 일만
+          </label>
+          <label class="inline-flex items-center gap-1.5 text-[12px] text-sec hover:text-prim cursor-pointer">
+            <input type="checkbox" class="accent-accent">
+            내가 등록한 것
+          </label>
+          <label class="inline-flex items-center gap-1.5 text-[12px] text-sec hover:text-prim cursor-pointer">
+            <input type="checkbox" class="accent-accent">
+            알림 받는 것
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── 그룹: 씬별 ───────── -->
+    <section id="view-scene" class="space-y-2">
+
+      <!-- 씬 1: 미해결 있음 (펼침) -->
+      <article class="bg-card border bd-border-40 rounded-xl overflow-hidden has-open">
+        <header class="scene-row has-open relative px-4 py-3 flex items-center gap-3 cursor-pointer">
+          <svg class="w-4 h-4 text-sec transition-transform rotate-90" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          <span class="text-[11px] font-mono text-sec-50">EP01·A·001</span>
+          <span class="text-[14px] font-mono font-bold text-prim">EP01 A 1</span>
+          <span class="text-[11px] text-amber-400/70 truncate flex-1">색감 어두움 + 캐릭터 위치 변경 필요</span>
+
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white flex items-center gap-1">
+              <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v3"/><circle cx="12" cy="13" r=".7" fill="currentColor"/></svg>
+              2
+            </span>
+            <div class="flex">
+              <span class="w-6 h-6 rounded-full -ml-1 inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#74B9FF;margin-left:0">이</span>
+              <span class="w-6 h-6 rounded-full -ml-1 inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#FDCB6E">박</span>
+              <span class="w-6 h-6 rounded-full -ml-1 inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#6C5CE7">김</span>
+            </div>
+          </div>
+
+          <button onclick="event.stopPropagation()" class="ml-1 p-1.5 rounded hover:bg-prim/50 text-sec hover:text-accent-sub" title="씬 상세 모달 열기">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
+          </button>
+        </header>
+
+        <div class="border-t bd-border-40 px-4 py-3 space-y-2">
+          <!-- Rev card 1: open -->
+          <div class="rev-card open bg-prim/40 border bd-border-40 rounded-lg p-3">
+            <span class="rev-side open"></span>
+            <div class="flex items-start gap-3 ml-1">
+              <span class="w-7 h-7 rounded-full inline-flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5" style="background:#6C5CE7">김</span>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap mb-1">
+                  <span class="text-[11px] font-bold text-accent-sub">re3</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-prog flex items-center gap-1">
+                    <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 6v6h4"/></svg>
+                    진행중
+                  </span>
+                  <span class="text-[10px] text-sec-70">김OO · 12분 전</span>
+                  <span class="text-[10px] text-sec-50">·</span>
+                  <span class="text-[10px] text-sec-70 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    댓글 3
+                  </span>
+                </div>
+                <div class="text-[12.5px] text-prim leading-relaxed">1번 씬 색감이 전체적으로 너무 어두워요. 캐릭터 얼굴 명도 +15, 배경 -10 정도로 부탁드려요.</div>
+              </div>
+              <div class="flex items-center gap-1 shrink-0">
+                <button class="text-[10px] px-2 py-1 rounded text-sec hover:text-prim hover:bg-prim/50">진행중 ▾</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Rev card 2: open -->
+          <div class="rev-card open bg-prim/40 border bd-border-40 rounded-lg p-3">
+            <span class="rev-side open"></span>
+            <div class="flex items-start gap-3 ml-1">
+              <span class="w-7 h-7 rounded-full inline-flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5" style="background:#FDCB6E">박</span>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap mb-1">
+                  <span class="text-[11px] font-bold text-accent-sub">re2</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-open flex items-center gap-1">
+                    <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+                    대기
+                  </span>
+                  <span class="text-[10px] text-sec-70">박OO · 1시간 전</span>
+                  <span class="text-[10px] text-sec-50">·</span>
+                  <span class="text-[10px] text-sec-70 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    댓글 0
+                  </span>
+                </div>
+                <div class="text-[12.5px] text-prim leading-relaxed">캐릭터 동작이 너무 느려 보여요. 좀 더 자연스럽게 부탁드려요.</div>
+              </div>
+              <div class="flex items-center gap-1 shrink-0">
+                <button class="text-[10px] px-2 py-1 rounded text-sec hover:text-prim hover:bg-prim/50">대기 ▾</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Rev card 3: done -->
+          <div class="rev-card done bg-prim/40 border bd-border-40 rounded-lg p-3">
+            <span class="rev-side done"></span>
+            <div class="flex items-start gap-3 ml-1">
+              <span class="w-7 h-7 rounded-full inline-flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5" style="background:#6C5CE7">김</span>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap mb-1">
+                  <span class="text-[11px] font-bold text-sec">re1</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-done flex items-center gap-1">
+                    <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M4.5 12.75l6 6 9-13.5"/></svg>
+                    완료
+                  </span>
+                  <span class="text-[10px] text-sec-70">김OO · 어제</span>
+                </div>
+                <div class="text-[12.5px] text-prim leading-relaxed line-through opacity-60">왼쪽 위 나무 위치 살짝 옮겨주세요.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 씬 2: 미해결 -->
+      <article class="bg-card border bd-border-40 rounded-xl overflow-hidden">
+        <header class="scene-row has-open relative px-4 py-3 flex items-center gap-3 cursor-pointer">
+          <svg class="w-4 h-4 text-sec" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          <span class="text-[11px] font-mono text-sec-50">EP01·A·006</span>
+          <span class="text-[14px] font-mono font-bold text-prim">EP01 A 6</span>
+          <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white flex items-center gap-1">
+              <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v3"/><circle cx="12" cy="13" r=".7" fill="currentColor"/></svg>
+              3
+            </span>
+            <div class="flex">
+              <span class="w-6 h-6 rounded-full inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#74B9FF">이</span>
+              <span class="w-6 h-6 rounded-full -ml-1 inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#A29BFE">조</span>
+            </div>
+          </div>
+          <button onclick="event.stopPropagation()" class="ml-1 p-1.5 rounded hover:bg-prim/50 text-sec hover:text-accent-sub" title="씬 상세 모달">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
+          </button>
+        </header>
+      </article>
+
+      <!-- 씬 3: 완료만 -->
+      <article class="bg-card border bd-border-40 rounded-xl overflow-hidden opacity-70">
+        <header class="scene-row relative px-4 py-3 flex items-center gap-3 cursor-pointer">
+          <svg class="w-4 h-4 text-sec" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          <span class="text-[11px] font-mono text-sec-50">EP01·B·002</span>
+          <span class="text-[14px] font-mono font-bold text-prim">EP01 B 2</span>
+          <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded-md font-medium bg-card border bd-border-40 text-sec-70 flex items-center gap-1">
+              <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4.5 12.75l6 6 9-13.5"/></svg>
+              2 완료
+            </span>
+            <div class="flex">
+              <span class="w-6 h-6 rounded-full inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#FDCB6E">박</span>
+            </div>
+          </div>
+          <button onclick="event.stopPropagation()" class="ml-1 p-1.5 rounded hover:bg-prim/50 text-sec hover:text-accent-sub" title="씬 상세 모달">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
+          </button>
+        </header>
+      </article>
+    </section>
+
+    <!-- ───────── 그룹: 평면 (시간순) ───────── -->
+    <section id="view-flat" class="space-y-2 hidden">
+      <!-- Row: 한 행 = 한 리비전, 씬 라벨 inline -->
+      <div class="rev-card open bg-card border bd-border-40 rounded-xl p-3">
+        <span class="rev-side open"></span>
+        <div class="flex items-start gap-3 ml-1">
+          <span class="w-7 h-7 rounded-full inline-flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5" style="background:#6C5CE7">김</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap mb-1">
+              <span class="text-[11px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold border border-accent/30 cursor-pointer hover:bg-accent/25">EP01 A 1</span>
+              <span class="text-[11px] font-bold text-accent-sub">re3</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-prog">진행중</span>
+              <span class="text-[10px] text-sec-70">김OO · 12분 전</span>
+              <span class="text-[10px] text-sec-50">· 댓글 3</span>
+            </div>
+            <div class="text-[12.5px] text-prim leading-relaxed">1번 씬 색감이 전체적으로 너무 어두워요. 캐릭터 얼굴 명도 +15...</div>
+          </div>
+          <button class="text-sec hover:text-accent-sub p-1.5 rounded hover:bg-prim/50" title="씬 상세 모달">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="rev-card open bg-card border bd-border-40 rounded-xl p-3">
+        <span class="rev-side open"></span>
+        <div class="flex items-start gap-3 ml-1">
+          <span class="w-7 h-7 rounded-full inline-flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5" style="background:#FDCB6E">박</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap mb-1">
+              <span class="text-[11px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold border border-accent/30 cursor-pointer hover:bg-accent/25">EP01 A 1</span>
+              <span class="text-[11px] font-bold text-accent-sub">re2</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-open">대기</span>
+              <span class="text-[10px] text-sec-70">박OO · 1시간 전</span>
+            </div>
+            <div class="text-[12.5px] text-prim leading-relaxed">캐릭터 동작이 너무 느려 보여요...</div>
+          </div>
+          <button class="text-sec hover:text-accent-sub p-1.5 rounded hover:bg-prim/50">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="rev-card open bg-card border bd-border-40 rounded-xl p-3">
+        <span class="rev-side open"></span>
+        <div class="flex items-start gap-3 ml-1">
+          <span class="w-7 h-7 rounded-full inline-flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5" style="background:#A29BFE">조</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap mb-1">
+              <span class="text-[11px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold border border-accent/30 cursor-pointer hover:bg-accent/25">EP01 A 6</span>
+              <span class="text-[11px] font-bold text-accent-sub">re3</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-open">대기</span>
+              <span class="text-[10px] text-sec-70">조OO · 2시간 전</span>
+            </div>
+            <div class="text-[12.5px] text-prim leading-relaxed">표정 좀 더 부드럽게 해주세요.</div>
+          </div>
+          <button class="text-sec hover:text-accent-sub p-1.5 rounded hover:bg-prim/50">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────── 그룹: 칸반 (상태별) ───────── -->
+    <section id="view-kanban" class="hidden grid grid-cols-3 gap-3">
+      <!-- 대기 -->
+      <div class="kanban-col rounded-xl p-3 space-y-2">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-[12px] font-bold text-prim flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full" style="background:#FDCB6E"></span>
+            대기
+          </h3>
+          <span class="text-[10px] text-sec-70">5</span>
+        </div>
+        <div class="rev-card open bg-card border bd-border-40 rounded-lg p-2.5">
+          <span class="rev-side open"></span>
+          <div class="ml-1">
+            <div class="flex items-center gap-1.5 mb-1">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 A 1</span>
+              <span class="text-[10px] font-bold text-accent-sub">re2</span>
+            </div>
+            <div class="text-[12px] text-prim mb-1.5 line-clamp-2">캐릭터 동작이 너무 느려 보여요. 좀 더 자연스럽게.</div>
+            <div class="text-[10px] text-sec-70">박OO · 1시간 전</div>
+          </div>
+        </div>
+        <div class="rev-card open bg-card border bd-border-40 rounded-lg p-2.5">
+          <span class="rev-side open"></span>
+          <div class="ml-1">
+            <div class="flex items-center gap-1.5 mb-1">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 A 6</span>
+              <span class="text-[10px] font-bold text-accent-sub">re3</span>
+            </div>
+            <div class="text-[12px] text-prim mb-1.5 line-clamp-2">표정 좀 더 부드럽게 해주세요.</div>
+            <div class="text-[10px] text-sec-70">조OO · 2시간 전</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 진행중 -->
+      <div class="kanban-col rounded-xl p-3 space-y-2">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-[12px] font-bold text-prim flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full" style="background:#74B9FF"></span>
+            진행중
+          </h3>
+          <span class="text-[10px] text-sec-70">3</span>
+        </div>
+        <div class="rev-card open bg-card border bd-border-40 rounded-lg p-2.5">
+          <span class="rev-side open"></span>
+          <div class="ml-1">
+            <div class="flex items-center gap-1.5 mb-1">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 A 1</span>
+              <span class="text-[10px] font-bold text-accent-sub">re3</span>
+            </div>
+            <div class="text-[12px] text-prim mb-1.5 line-clamp-2">색감 어두움. 명도 +15, 배경 -10.</div>
+            <div class="text-[10px] text-sec-70">김OO · 12분 전 · 댓글 3</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 완료 -->
+      <div class="kanban-col rounded-xl p-3 space-y-2">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-[12px] font-bold text-prim flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full" style="background:#00B894"></span>
+            완료
+          </h3>
+          <span class="text-[10px] text-sec-70">15</span>
+        </div>
+        <div class="rev-card done bg-card border bd-border-40 rounded-lg p-2.5">
+          <span class="rev-side done"></span>
+          <div class="ml-1">
+            <div class="flex items-center gap-1.5 mb-1">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 A 1</span>
+              <span class="text-[10px] font-bold text-sec">re1</span>
+            </div>
+            <div class="text-[12px] text-prim mb-1.5 line-clamp-2 line-through opacity-60">왼쪽 위 나무 위치 살짝 옮겨주세요.</div>
+            <div class="text-[10px] text-sec-70">김OO · 어제</div>
+          </div>
+        </div>
+        <div class="rev-card done bg-card border bd-border-40 rounded-lg p-2.5">
+          <span class="rev-side done"></span>
+          <div class="ml-1">
+            <div class="flex items-center gap-1.5 mb-1">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 B 2</span>
+              <span class="text-[10px] font-bold text-sec">re2</span>
+            </div>
+            <div class="text-[12px] text-prim mb-1.5 line-clamp-2 line-through opacity-60">동작 자연스럽게 수정.</div>
+            <div class="text-[10px] text-sec-70">박OO · 어제</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 안내문 -->
+    <div class="mt-8 grid grid-cols-2 gap-4">
+      <div class="bg-card border bd-border-40 rounded-xl p-4">
+        <div class="text-[11px] font-bold text-accent-sub mb-2 uppercase tracking-wider">개선된 점</div>
+        <ul class="text-[12px] text-sec leading-relaxed space-y-1.5">
+          <li>· 우선순위/부서/프레임번호 표시 제거 (v1.18.0 신표준)</li>
+          <li>· <strong class="text-prim">re#</strong> 넘버링 적용</li>
+          <li>· <strong class="text-prim">검색</strong> + <strong class="text-prim">정렬</strong> 추가</li>
+          <li>· <strong class="text-prim">"내가 등록한 것"</strong>, "알림 받는 것" 빠른 토글</li>
+          <li>· 그룹화 모드 3종: 씬별 / 평면(시간순) / 칸반(상태별)</li>
+          <li>· 카드 우측에 <strong class="text-prim">씬 모달 점프 버튼</strong> (외부 링크 아이콘)</li>
+        </ul>
+      </div>
+      <div class="bg-card border bd-border-40 rounded-xl p-4">
+        <div class="text-[11px] font-bold text-accent-sub mb-2 uppercase tracking-wider">상호작용</div>
+        <ul class="text-[12px] text-sec leading-relaxed space-y-1.5">
+          <li>· 씬 헤더 클릭 → 펼침/접힘</li>
+          <li>· 씬 헤더 우측 ↗ 버튼 → <strong class="text-prim">씬 상세 모달 열기</strong> (보드 안 떠나고 빠르게 이동)</li>
+          <li>· 평면/칸반에서 씬 라벨 칩 클릭 → 씬별 그룹으로 전환 + 그 씬 펼침</li>
+          <li>· 카드 클릭 → 우측 디테일 패널 열림 (현재와 동일)</li>
+          <li>· 상태 ▾ 드롭다운 → 인라인 변경</li>
+        </ul>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function setGroup(g) {
+  ['scene','flat','kanban'].forEach(k => {
+    document.getElementById(`view-${k}`).classList.toggle('hidden', k !== g);
+  });
+  document.querySelectorAll('.group-btn').forEach(b => {
+    if (b.dataset.group === g) {
+      b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim');
+    } else {
+      b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim');
+    }
+  });
+}
+function setTheme(t) {
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    if (b.dataset.theme === t) { b.classList.add('ring-2','ring-white'); b.classList.remove('ring-1','ring-white/20'); }
+    else { b.classList.remove('ring-2','ring-white'); b.classList.add('ring-1','ring-white/20'); }
+  });
+}
+function setMode(m) {
+  document.body.setAttribute('data-mode', m);
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    if (b.dataset.mode === m) { b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim'); }
+    else { b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim'); }
+  });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.group-btn').forEach(b => b.addEventListener('click', () => setGroup(b.dataset.group)));
+  document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+  document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+});
+</script>
+</body>
+</html>
