@@ -13,6 +13,8 @@ import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { useDataStore } from '@/stores/useDataStore';
+import { useRevisionStore } from '@/stores/useRevisionStore';
+import { buildSceneKey } from '@/services/revisionService';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
 
@@ -335,6 +337,38 @@ export function UnifiedSceneSheetView({
     if (!layoutGroups) return mergedScenes;
     return layoutGroups.flatMap(([, scenes]) => scenes);
   }, [layoutGroups, mergedScenes]);
+
+  // v1.18.0: 리비전 시각 표시 — 행마다 미해결 카운트 lookup.
+  // useRevisionStore.revisions 변경 시 재계산되도록 store selector 사용 (rerender 트리거).
+  // store 의 getOpenCount 는 revisionService.getRevisionLookupSceneKeys 로 alias 까지 처리하므로
+  // 단순 sceneKey 비교보다 안전하다.
+  const revisions = useRevisionStore((s) => s.revisions);
+  const getOpenCount = useRevisionStore((s) => s.getOpenCount);
+  const episodes = useDataStore((s) => s.episodes);
+  const revisionCountByMergedKey = useMemo(() => {
+    if (!bgSheetName && !actSheetName) return new Map<string, number>();
+    const sheetForKey = bgSheetName ?? actSheetName ?? '';
+    // sibling scene id 들 — 같은 part 안의 모든 scene id (한 번만 계산해 재사용)
+    let siblings: string[] = [];
+    for (const ep of episodes) {
+      const part = ep.parts.find((p) => p.sheetName === sheetForKey);
+      if (part) {
+        siblings = part.scenes.map((s) => s.sceneId);
+        break;
+      }
+    }
+    const map = new Map<string, number>();
+    for (const m of displayScenes) {
+      const primary = m.bgScene ?? m.actScene;
+      const sceneId = primary?.sceneId || m.sceneId || '';
+      if (!sheetForKey || !sceneId) continue;
+      const sceneKey = buildSceneKey(sheetForKey, sceneId, { siblingSceneIds: siblings });
+      const openCount = getOpenCount(sceneKey);
+      if (openCount > 0) map.set(m.mergedKey, openCount);
+    }
+    return map;
+    // revisions 도 deps 에 — store mutation 후 getOpenCount 결과가 바뀌므로 재계산 필요.
+  }, [revisions, getOpenCount, displayScenes, bgSheetName, actSheetName, episodes]);
 
   const layoutMeta = useMemo(() => {
     if (!layoutGroups) return new Map<MergedScene, { isFirst: boolean; isLast: boolean; groupSize: number; layoutKey: string }>();
@@ -773,6 +807,9 @@ export function UnifiedSceneSheetView({
               // v1.16.0: 길이 변경 라벨 (BG/ACT 양쪽 동기화 정책 — BG 우선)
               const lengthChange = bgScene?.lengthChange ?? actScene?.lengthChange ?? null;
 
+              // v1.18.0: 미해결 리비전 카운트 (행 좌측 막대 + 씬번호 셀 배지)
+              const openRevCount = revisionCountByMergedKey.get(mergedKey) ?? 0;
+
               return (
                 <Fragment key={mergedKey}>
                   {/* 한솔 결정 (1-B 시안 2 + 굵은 보더): 그룹 시작 위에 액센트 카드 박스 헤더 행 */}
@@ -793,7 +830,7 @@ export function UnifiedSceneSheetView({
                   )}
                   <tr
                     className={cn(
-                      'border-b border-bg-border/30 transition-colors group cursor-pointer',
+                      'relative border-b border-bg-border/30 transition-colors group cursor-pointer',
                       rowIndex % 2 === 0 ? 'bg-bg-card/20' : 'bg-bg-primary/10',
                       'hover:bg-accent/5',
                       isRowSelected && 'bg-accent/10 hover:bg-accent/15',
@@ -803,6 +840,8 @@ export function UnifiedSceneSheetView({
                       isLayoutMode && isLastInGroup && 'scene-row-group-last',
                       lengthChange === 'LD' && 'sheet-row-length-up',
                       lengthChange === 'SD' && 'sheet-row-length-down',
+                      // v1.18.0: 미해결 리비전 행 — 액센트 좌측 강조 (셀 배지와 함께 시각적 anchor)
+                      openRevCount > 0 && 'sheet-row-revision-open',
                     )}
                     onClick={(e) => {
                       if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
@@ -826,8 +865,15 @@ export function UnifiedSceneSheetView({
 
                   {/* 씬번호 + 레이아웃 뱃지 + 댓글 뱃지.
                       한솔 결정 (5번): 1+3 합본 효과 — 텍스트 네온 펄스 + wrap 회전 보더.
-                      v1.16.0: 길이 변경 라벨 LD/SD 칩 (씬번호 앞). */}
-                  <td className="px-2 py-1.5 font-mono text-xs" style={{ overflow: 'visible', whiteSpace: 'nowrap' }}>
+                      v1.16.0: 길이 변경 라벨 LD/SD 칩 (씬번호 앞).
+                      v1.18.0: 미해결 리비전 좌측 막대(셀 안 absolute) + 씬번호 옆 mini 카운트 배지. */}
+                  <td className="px-2 py-1.5 font-mono text-xs relative" style={{ overflow: 'visible', whiteSpace: 'nowrap' }}>
+                    {openRevCount > 0 && (
+                      <span
+                        aria-hidden
+                        className="absolute left-0 top-0 bottom-0 w-[3px] bg-accent pointer-events-none"
+                      />
+                    )}
                     <span className="flex items-center gap-2">
                       {lengthChange && (
                         <span
@@ -842,6 +888,14 @@ export function UnifiedSceneSheetView({
                           <HighlightText text={sceneId || primary.sceneId || '-'} query={searchQuery} />
                         </span>
                       </span>
+                      {openRevCount > 0 && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-accent text-white"
+                          title={`미해결 리비전 ${openRevCount}건`}
+                        >
+                          {openRevCount}
+                        </span>
+                      )}
                       {primary.layoutId && (
                         <span className="text-[11px] italic font-medium text-accent flex-shrink-0">
                           L#{primary.layoutId}

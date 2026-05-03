@@ -289,3 +289,11 @@ html.is-resizing .unified-scene-sheet *::after {
 .sheet-row-length-down:hover {
   background: linear-gradient(90deg, rgb(var(--color-length-down) / 0.18) 0%, rgb(var(--color-accent) / 0.04) 5%);
 }
+
+/* v1.18.0: 미해결 리비전 행 — 셀 좌측 막대(셀 안 absolute) + 옅은 행 배경 */
+.sheet-row-revision-open {
+  background: linear-gradient(90deg, rgb(var(--color-accent) / 0.10) 0%, transparent 5%);
+}
+.sheet-row-revision-open:hover {
+  background: linear-gradient(90deg, rgb(var(--color-accent) / 0.14) 0%, rgb(var(--color-accent) / 0.04) 5%);
+}
