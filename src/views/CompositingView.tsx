@@ -452,14 +452,16 @@ function AddRevisionForm({
     if (!description.trim() || !currentUser || submitting) return;
     setSubmitting(true);
     try {
-      await createRevision(sceneKey, {
+      await createRevision({
+        sceneKey,
         description: description.trim(),
-        priority,
-        frameNo: frameNo.trim() || undefined,
         imageUrl: imagePreview || undefined,
+        department,
         lookupDepartment: department,
         requesterId: currentUser.id,
         requesterName: currentUser.name,
+        // 청크 3에서 폼 재설계 시 멘션 UI → 실제 user.id 배열 전달.
+        notifyUserIds: [],
       });
       onClose();
     } catch (err) {

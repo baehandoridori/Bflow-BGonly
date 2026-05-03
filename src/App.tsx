@@ -942,6 +942,96 @@ export default function App() {
       if (table === 'comp_revisions') {
         invalidateRevisionsCache();
         window.dispatchEvent(new Event('bflow:revisions-invalidated'));
+
+        // v1.18.0: 본인이 notify_user_ids 에 포함되어 있으면 자체 알림 발송.
+        // 등록자 본인(requester) 액션은 스킵 (자기 알림 X).
+        const me = useAuthStore.getState().currentUser;
+        if (!me) return;
+
+        const notiSettings = notiSettingsRef.current;
+        // 댓글 알림과 같은 settings flag 재사용 (별도 토글 없음 — 추후 분리 가능)
+        if (notiSettings.commentNotify === false) return;
+
+        if (payload?.eventType === 'INSERT' && payload?.new) {
+          const row = payload.new as {
+            id?: string;
+            scene_id?: string;
+            requester_id?: string;
+            requester_name?: string;
+            description?: string;
+            revision_no?: number;
+            notify_user_ids?: string[] | null;
+          };
+          // 본인이 등록자면 스킵
+          if (row.requester_id === me.id) return;
+          // notify_user_ids 에 본인 없으면 스킵
+          const targets = Array.isArray(row.notify_user_ids) ? row.notify_user_ids : [];
+          if (!targets.includes(me.id)) return;
+
+          // sceneKey → 씬 매칭 (revisions 의 scene_id 는 'EP01:A:1' sceneKey 형식)
+          const sceneKey = row.scene_id || '';
+          const sceneNameForLabel = sceneKey.split(':').pop() || sceneKey;
+
+          dispatchNotification({
+            type: 'revision',
+            title: `새 리비전 — ${sceneNameForLabel}`,
+            body: row.description ? (row.description.length > 50 ? row.description.slice(0, 50) + '...' : row.description) : `${row.requester_name || '누군가'}님이 등록`,
+            metadata: {
+              sceneId: undefined,
+              sceneName: sceneNameForLabel,
+              revisionId: row.id,
+              revisionAction: 'add',
+            } as Record<string, unknown>,
+          }, notiSettings);
+          return;
+        }
+
+        if (payload?.eventType === 'UPDATE' && payload?.new) {
+          const newRow = payload.new as {
+            id?: string;
+            scene_id?: string;
+            requester_id?: string;
+            status?: string;
+            revision_no?: number;
+            resolved_by?: string | null;
+            notify_user_ids?: string[] | null;
+          };
+          const oldRow = payload.old as { status?: string } | undefined;
+          const targets = Array.isArray(newRow.notify_user_ids) ? newRow.notify_user_ids : [];
+          if (!targets.includes(me.id)) return;
+
+          // 상태 변경 detect — old.status !== new.status 일 때만 알림
+          if (!oldRow || oldRow.status === newRow.status) return;
+          // 본인이 변경한 거면 스킵 (resolved_by 가 본인 이름이면)
+          if (newRow.resolved_by === me.name) return;
+
+          let action: 'in_progress' | 'resolve';
+          let titlePrefix: string;
+          if (newRow.status === 'in_progress') {
+            action = 'in_progress';
+            titlePrefix = '리비전 진행중';
+          } else if (newRow.status === 'resolved') {
+            action = 'resolve';
+            titlePrefix = '리비전 완료';
+          } else {
+            // open 으로 되돌림 — 알림 X
+            return;
+          }
+
+          const sceneKey = newRow.scene_id || '';
+          const sceneNameForLabel = sceneKey.split(':').pop() || sceneKey;
+          dispatchNotification({
+            type: 'revision',
+            title: `${titlePrefix} — ${sceneNameForLabel}`,
+            metadata: {
+              sceneId: undefined,
+              sceneName: sceneNameForLabel,
+              revisionId: newRow.id,
+              revisionAction: action,
+            } as Record<string, unknown>,
+          }, notiSettings);
+          return;
+        }
         return;
       }
 

@@ -1,7 +1,26 @@
 import { create } from 'zustand';
-import type { CompRevision, Episode, RevisionPriority, RevisionStatus } from '@/types';
+import type { CompRevision, Episode, RevisionStatus } from '@/types';
 import * as revisionService from '@/services/revisionService';
 import { useDataStore } from '@/stores/useDataStore';
+
+/**
+ * v1.18.0: 리비전 등록 input. 우선순위/프레임/담당자 입력 UI 가 폼에서 제거되어
+ * (한솔 결정 — spec 2026-05-03) 자동값으로 처리. 호출자는 sceneKey/description/이미지/
+ * 알림 대상자/부서/등록자 정보만 전달.
+ */
+export interface CreateRevisionInput {
+  sceneKey: string;
+  description: string;
+  imageUrl?: string;
+  /** 부서 — sheetName 에서 추론한 값. 알림 자동 대상자 결정/저장용. */
+  department?: 'bg' | 'acting';
+  /** sceneKey → partUuid 역조회용 (BG/ACT 구분이 sceneKey 자체로는 불가능). */
+  lookupDepartment?: 'bg' | 'acting';
+  requesterId: string;
+  requesterName: string;
+  /** 알림 받을 사람 user.id 배열 (등록자 본인 포함 가능 — 자기 알림은 발송 시 스킵). */
+  notifyUserIds: string[];
+}
 
 interface RevisionState {
   revisions: CompRevision[];
@@ -15,20 +34,7 @@ interface RevisionState {
   updateRevisionOptimistic: (id: string, sceneKey: string, updates: Partial<CompRevision>) => void;
   deleteRevisionOptimistic: (id: string) => void;
 
-  createRevision: (
-    sceneKey: string,
-    data: {
-      description: string;
-      priority?: RevisionPriority;
-      frameNo?: string;
-      imageUrl?: string;
-      department?: 'bg' | 'acting';
-      lookupDepartment?: 'bg' | 'acting';
-      requesterId: string;
-      requesterName: string;
-      assignee?: string;
-    },
-  ) => Promise<CompRevision>;
+  createRevision: (input: CreateRevisionInput) => Promise<CompRevision>;
 
   updateStatus: (
     id: string,
@@ -129,8 +135,8 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
     });
   },
 
-  createRevision: async (sceneKey, data) => {
-    const revision = await revisionService.createRevision(sceneKey, data);
+  createRevision: async (input) => {
+    const revision = await revisionService.createRevision(input);
     get().addRevisionOptimistic(revision);
     return revision;
   },
