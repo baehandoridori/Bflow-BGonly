@@ -90,6 +90,10 @@ export interface UnifiedSceneDetailModalProps {
   totalMerged?: number;
   partLabel?: string;
   episodeLabel?: string;
+  /** v1.18.0: 알림 클릭 등 외부에서 모달 열 때 시작 탭 지정. */
+  initialTab?: TabKey;
+  /** v1.18.0: 'revisions' 탭에서 강조할 리비전 id — scrollIntoView + pulse 애니메이션. */
+  focusRevisionId?: string;
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
@@ -111,6 +115,8 @@ export function UnifiedSceneDetailModal({
   totalMerged = 0,
   partLabel,
   episodeLabel,
+  initialTab,
+  focusRevisionId,
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
@@ -152,10 +158,46 @@ export function UnifiedSceneDetailModal({
     : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
 
-  // UI state
-  const [tab, setTab] = useState<TabKey>('detail');
+  // UI state — v1.18.0: initialTab 으로 외부에서 시작 탭 지정 가능 (알림 클릭 시 'revisions' 등)
+  const [tab, setTab] = useState<TabKey>(initialTab ?? 'detail');
   const [commentCount, setCommentCount] = useState(0);
   const [revisionCount, setRevisionCount] = useState(0);
+
+  // v1.18.0: initialTab 변경 → 활성 탭 동기화 (모달이 마운트된 상태에서 다른 알림 클릭 시).
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
+
+  // v1.18.0: focusRevisionId 강조 — 활성 탭이 'revisions' 일 때 카드를 scrollIntoView + pulse 클래스 부여.
+  // 카드 element 는 RevisionCard 의 root motion.div 가 id={`rev-card-${revision.id}`} 로 설정.
+  useEffect(() => {
+    if (!focusRevisionId || tab !== 'revisions') return;
+
+    let cancelled = false;
+    let removeTimer: ReturnType<typeof setTimeout> | null = null;
+    // requestAnimationFrame 으로 다음 paint 대기 — 탭 전환 직후엔 카드가 아직 마운트 안 됐을 수 있음.
+    // 추가로 50ms delay 한 번 더 (RevisionPanel loadRevisions 비동기 완료 대기).
+    const attempt = (retries: number) => {
+      if (cancelled) return;
+      const el = document.getElementById(`rev-card-${focusRevisionId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('rev-pulse');
+        // animation 길이 (1.2s × 2회) 보다 약간 길게 → 자동 제거
+        removeTimer = setTimeout(() => {
+          el.classList.remove('rev-pulse');
+        }, 2600);
+      } else if (retries > 0) {
+        setTimeout(() => requestAnimationFrame(() => attempt(retries - 1)), 100);
+      }
+    };
+    requestAnimationFrame(() => attempt(8));
+
+    return () => {
+      cancelled = true;
+      if (removeTimer) clearTimeout(removeTimer);
+    };
+  }, [focusRevisionId, tab]);
   const [showImageModal, setShowImageModal] = useState<null | 'storyboard' | 'guide'>(null);
   const [imageLoading, setImageLoading] = useState<null | 'storyboard' | 'guide'>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<null | 'storyboard' | 'guide' | 'bg' | 'act' | 'both'>(null);

@@ -1573,6 +1573,13 @@ export function ScenesView() {
   const [sceneControlsCollapsedByContext, setSceneControlsCollapsedByContext] = useState<Record<string, boolean>>({});
   const scenePrefsRef = useRef<UserPreferences | null>(null);
 
+  // v1.18.0: 알림 클릭 등 외부에서 모달 자동 오픈 시 전달되는 라우팅 옵션.
+  // 'revisions' 탭으로 시작 + 특정 리비전 카드 강조 등.
+  const [modalRouting, setModalRouting] = useState<{
+    initialTab?: 'detail' | 'revisions' | 'files' | 'history';
+    focusRevisionId?: string;
+  } | null>(null);
+
   // 리비전 초기 로드
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
 
@@ -2042,6 +2049,56 @@ export function ScenesView() {
     sortKey,
     sortDir,
   });
+
+  // v1.18.0: 알림 패널에서 디스패치한 'bflow:open-scene-modal' → 모달 자동 오픈 + 탭/포커스.
+  // sceneUuid/sceneName 기반으로 mergedScenes 또는 currentPart.scenes 에서 매칭.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as {
+        sceneUuid?: string;
+        sceneName?: string;
+        episodeNumber?: number;
+        partId?: string;
+        initialTab?: 'detail' | 'revisions' | 'files' | 'history';
+        focusRevisionId?: string;
+      } | undefined;
+      if (!detail) return;
+
+      // 통합 모드 (selectedDepartment === 'all') 면 mergedScenes 에서 매칭
+      if (selectedDepartment === 'all') {
+        const target = mergedScenes.find((m) =>
+          (m.bgScene?.id && m.bgScene.id === detail.sceneUuid)
+          || (m.actScene?.id && m.actScene.id === detail.sceneUuid)
+          || (detail.sceneName && m.sceneId === detail.sceneName),
+        );
+        if (target) {
+          setDetailMerged(target);
+          setModalRouting({
+            initialTab: detail.initialTab,
+            focusRevisionId: detail.focusRevisionId,
+          });
+        }
+        return;
+      }
+
+      // 단일 부서 모드 — currentPart.scenes 에서 인덱스 찾기
+      if (currentPart) {
+        const idx = currentPart.scenes.findIndex((s) =>
+          (detail.sceneUuid && s.id === detail.sceneUuid)
+          || (detail.sceneName && s.sceneId === detail.sceneName),
+        );
+        if (idx >= 0) {
+          setDetailSceneIndex(idx);
+          setModalRouting({
+            initialTab: detail.initialTab,
+            focusRevisionId: detail.focusRevisionId,
+          });
+        }
+      }
+    };
+    window.addEventListener('bflow:open-scene-modal', handler);
+    return () => window.removeEventListener('bflow:open-scene-modal', handler);
+  }, [selectedDepartment, mergedScenes, currentPart, setDetailMerged]);
 
   // ACT 단독 뷰에서는 대응하는 BG 이미지를 폴백으로 사용한다.
   const actToBgImageMap = useMemo(() => {
@@ -4263,7 +4320,7 @@ export function ScenesView() {
             readOnlyGuideUrl={bgImageForAct?.guide ?? null}
             onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(detailSheetName, idx, field, value)}
             onToggle={(id, stage) => handleToggleForSheet(detailSheetName, id, stage)}
-            onClose={() => { setDetailSceneIndex(null); setDetailContext(null); }}
+            onClose={() => { setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
             hasPrev={hasPrev}
             hasNext={hasNext}
             totalScenes={filteredIndices.length}
@@ -4296,7 +4353,9 @@ export function ScenesView() {
             hasNext={hasNext}
             currentMergedIndex={curIdx >= 0 ? curIdx : 0}
             totalMerged={mergedScenes.length}
-            onClose={() => setDetailMerged(null)}
+            initialTab={modalRouting?.initialTab}
+            focusRevisionId={modalRouting?.focusRevisionId}
+            onClose={() => { setDetailMerged(null); setModalRouting(null); }}
             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}

@@ -721,3 +721,23 @@ input[type="range"]::-webkit-slider-thumb {
     justify-content: center;
   }
 }
+
+/* v1.18.0: 리비전 알림 클릭 → 카드 강조 펄스.
+   accent 토큰 + alpha 합성. focusRevisionId 지정 시 1.2s × 2회 펄스 후 클래스 자동 제거. */
+@keyframes rev-pulse-anim {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 rgb(var(--color-accent) / 0.55),
+      0 0 0 1px rgb(var(--color-accent) / 0.18),
+      0 6px 14px rgb(var(--color-accent) / 0.10);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px rgb(var(--color-accent) / 0.45),
+      0 0 0 1px rgb(var(--color-accent) / 0.7),
+      0 6px 14px rgb(var(--color-accent) / 0.25);
+  }
+}
+.rev-pulse {
+  animation: rev-pulse-anim 1.2s ease-in-out 2;
+}
