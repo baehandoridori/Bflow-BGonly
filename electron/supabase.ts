@@ -122,6 +122,8 @@ export interface SupabaseUser {
   birthday: string;
   isInitialPassword: boolean;
   createdAt: string;
+  /** v1.18.0: 부서별 컴포지터 지정. NULL = 일반 사용자. */
+  compositorDept?: 'BG' | 'ACT' | null;
 }
 
 export interface SupabaseComment {
@@ -791,6 +793,8 @@ export async function readUsers(): Promise<SupabaseUser[]> {
     birthday: u.birthday || '',
     isInitialPassword: u.is_initial_password ?? true,
     createdAt: u.created_at || '',
+    // v1.18.0: 부서별 컴포지터 지정 — DB CHECK 제약(BG/ACT) 보장 + null 허용
+    compositorDept: (u.compositor_dept === 'BG' || u.compositor_dept === 'ACT') ? u.compositor_dept : null,
   }));
 }
 
@@ -810,10 +814,13 @@ export async function addUser(user: SupabaseUser): Promise<void> {
   broadcastDataChange('users', 'INSERT');
 }
 
-/** 사용자 업데이트 */
+/** 사용자 업데이트.
+ *  v1.18.0: compositorDept(null 허용) 처리를 위해 value 타입을 string | null 로 확장.
+ *  Postgres update 는 null 을 명시적으로 SET … = NULL 로 적용하므로 그대로 전달.
+ */
 export async function updateUser(
   userId: string,
-  updates: Record<string, string>,
+  updates: Record<string, string | null>,
 ): Promise<void> {
   // camelCase → snake_case 변환
   const dbUpdates: Record<string, unknown> = {};
@@ -821,6 +828,7 @@ export async function updateUser(
     name: 'name', role: 'role', password: 'password',
     slackId: 'slack_id', hireDate: 'hire_date', birthday: 'birthday',
     isInitialPassword: 'is_initial_password',
+    compositorDept: 'compositor_dept',
   };
   for (const [k, v] of Object.entries(updates)) {
     dbUpdates[fieldMap[k] || k] = v;

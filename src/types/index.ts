@@ -517,7 +517,7 @@ export interface ElectronAPI {
   supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) => Promise<void>;
   supabaseReadUsers: () => Promise<unknown[]>;
   supabaseAddUser: (user: unknown) => Promise<void>;
-  supabaseUpdateUser: (userId: string, updates: Record<string, string>) => Promise<void>;
+  supabaseUpdateUser: (userId: string, updates: Record<string, string | null>) => Promise<void>;
   supabaseDeleteUser: (userId: string) => Promise<void>;
   supabaseReadComments: (partUuid: string) => Promise<unknown[]>;
   /** 한솔 결정 (v1.15.5): 로그인 catch-up — last seen 이후 받은 멘션 댓글 일괄 조회 */

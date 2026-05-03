@@ -227,6 +227,18 @@ export function getUserNames(users: AppUser[]): string[] {
 }
 
 /**
+ * v1.18.0: 어드민 전용 — 부서별 컴포지터 지정/해제.
+ * dept = 'BG' | 'ACT' 면 그 부서 컴포지터로 지정, null 이면 해제.
+ * supabase users.compositor_dept 컬럼 직접 업데이트 (CHECK 제약: BG/ACT 또는 NULL).
+ */
+export async function setCompositorDept(
+  userId: string,
+  dept: 'BG' | 'ACT' | null,
+): Promise<void> {
+  await window.electronAPI.supabaseUpdateUser(userId, { compositorDept: dept });
+}
+
+/**
  * 로컬 users.dat를 _USERS 탭으로 마이그레이션한다.
  * 시트에 사용자가 없고 로컬에 있을 때 실행.
  */

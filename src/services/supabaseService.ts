@@ -116,7 +116,7 @@ export async function addUserToSupabase(user: unknown): Promise<void> {
   await window.electronAPI.supabaseAddUser(user);
 }
 
-export async function updateUserInSupabase(userId: string, updates: Record<string, string>): Promise<void> {
+export async function updateUserInSupabase(userId: string, updates: Record<string, string | null>): Promise<void> {
   await window.electronAPI.supabaseUpdateUser(userId, updates);
 }
 

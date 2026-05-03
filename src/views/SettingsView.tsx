@@ -12,6 +12,8 @@ const LoginSection = lazy(() => import('@/components/settings/LoginSection').the
 const ProfileSection = lazy(() => import('@/components/settings/ProfileSection').then(m => ({ default: m.ProfileSection })));
 const NotificationSection = lazy(() => import('@/components/settings/NotificationSection').then(m => ({ default: m.NotificationSection })));
 const ShortcutsSection = lazy(() => import('@/components/settings/ShortcutsSection').then(m => ({ default: m.ShortcutsSection })));
+// v1.18.0: 어드민 전용 컴포지터 지정 섹션
+const CompositorSection = lazy(() => import('@/components/settings/CompositorSection').then(m => ({ default: m.CompositorSection })));
 import { loadPreferences } from '@/services/settingsService';
 import {
   type FontScale,
@@ -74,6 +76,8 @@ export function SettingsView() {
         return <LoginSection />;
       case 'shortcuts':
         return <ShortcutsSection />;
+      case 'compositor':
+        return <CompositorSection />;
       default:
         return null;
     }

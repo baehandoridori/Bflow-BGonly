@@ -1141,7 +1141,7 @@ ipcMain.handle('supabase:read-users', wrapIpc(async () => {
 ipcMain.handle('supabase:add-user', wrapIpc(async (_e: unknown, user: SupabaseUser) => {
   await sbAddUser(user);
 }));
-ipcMain.handle('supabase:update-user', wrapIpc(async (_e: unknown, userId: string, updates: Record<string, string>) => {
+ipcMain.handle('supabase:update-user', wrapIpc(async (_e: unknown, userId: string, updates: Record<string, string | null>) => {
   await sbUpdateUser(userId, updates);
 }));
 ipcMain.handle('supabase:delete-user', wrapIpc(async (_e: unknown, userId: string) => {
