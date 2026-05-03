@@ -1192,12 +1192,18 @@ ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: st
       const sceneLabel = epNum && part?.part_id
         ? `EP${String(epNum).padStart(2, '0')} ${part.part_id} #${sceneId}`
         : `씬 ${sceneId}`;
+      // v1.18.0: 리비전 맥락 댓글이면 revision_comment 로 기록 (일반 댓글은 comment_add 그대로).
+      // detail.revisionId 보존 — 활동 피드에서 클릭 시 라우팅에 활용 가능.
+      const isRevisionComment = !!revisionId;
       await sbRecordActivityLog({
         userId: currentActivityUser.id, userName: currentActivityUser.name,
-        actionType: 'comment_add', actionGroup: 'memo',
+        actionType: isRevisionComment ? 'revision_comment' : 'comment_add',
+        actionGroup: 'memo',
         sceneId: sceneUuid, sceneLabel,
         episodeNumber: epNum, department: dept,
-        detail: { commentId, textPreview: text.slice(0, 60) },
+        detail: isRevisionComment
+          ? { commentId, revisionId, textPreview: text.slice(0, 60) }
+          : { commentId, textPreview: text.slice(0, 60) },
       });
     } catch { /* 무시 */ }
   }

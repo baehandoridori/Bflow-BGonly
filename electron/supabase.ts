@@ -1813,6 +1813,8 @@ export type ActionType =
   | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
   | 'memo_update' | 'comment_add'
   | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
+  // v1.18.0: 리비전 맥락 댓글
+  | 'revision_comment'
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
   | 'image_upload_storyboard' | 'image_upload_guide';
