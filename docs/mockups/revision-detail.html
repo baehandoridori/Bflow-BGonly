@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리비전 상세 — 등록 폼 + 카드 + 댓글</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --color-bg-primary: 15 17 23;
+    --color-bg-card: 26 29 39;
+    --color-bg-border: 45 48 65;
+    --color-text-primary: 232 232 238;
+    --color-text-secondary: 139 141 163;
+    --color-accent: 108 92 231;
+    --color-accent-sub: 162 155 254;
+  }
+  [data-theme="cinema-red"]    { --color-accent: 225 29 72;  --color-accent-sub: 251 113 133; }
+  [data-theme="midnight-blue"] { --color-accent: 59 130 246; --color-accent-sub: 96 165 250; }
+  [data-theme="emerald"]       { --color-accent: 16 185 129; --color-accent-sub: 52 211 153; }
+  [data-theme="amber-gold"]    { --color-accent: 217 119 6;  --color-accent-sub: 245 158 11; }
+  [data-theme="nameko"]        { --color-accent: 129 77 65;  --color-accent-sub: 168 109 90; }
+  [data-mode="light"] {
+    --color-bg-primary: 248 249 252;
+    --color-bg-card: 255 255 255;
+    --color-bg-border: 215 217 230;
+    --color-text-primary: 28 29 38;
+    --color-text-secondary: 100 102 122;
+  }
+  body {
+    background: rgb(var(--color-bg-primary));
+    color: rgb(var(--color-text-primary));
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    transition: background-color .2s, color .2s;
+  }
+  .text-accent     { color: rgb(var(--color-accent)); }
+  .text-accent-sub { color: rgb(var(--color-accent-sub)); }
+  .text-prim       { color: rgb(var(--color-text-primary)); }
+  .text-sec        { color: rgb(var(--color-text-secondary)); }
+  .text-sec-70     { color: rgb(var(--color-text-secondary) / 0.7); }
+  .text-sec-50     { color: rgb(var(--color-text-secondary) / 0.5); }
+  .bg-prim         { background: rgb(var(--color-bg-primary)); }
+  .bg-prim-50      { background: rgb(var(--color-bg-primary) / 0.5); }
+  .bg-card         { background: rgb(var(--color-bg-card)); }
+  .bg-card-70      { background: rgb(var(--color-bg-card) / 0.7); }
+  .bg-accent       { background: rgb(var(--color-accent)); }
+  .bg-accent-15    { background: rgb(var(--color-accent) / 0.15); }
+  .bg-accent-10    { background: rgb(var(--color-accent) / 0.10); }
+  .bg-accent-08    { background: rgb(var(--color-accent) / 0.08); }
+  .bd-border       { border-color: rgb(var(--color-bg-border)); }
+  .bd-border-40    { border-color: rgb(var(--color-bg-border) / 0.4); }
+  .bd-border-60    { border-color: rgb(var(--color-bg-border) / 0.6); }
+  .bd-accent-40    { border-color: rgb(var(--color-accent) / 0.4); }
+  .bd-accent-60    { border-color: rgb(var(--color-accent) / 0.6); }
+  .ring-accent     { box-shadow: inset 0 0 0 2px rgb(var(--color-accent) / 0.85); }
+  .glow-accent     { box-shadow: 0 0 14px rgb(var(--color-accent) / 0.55); }
+
+  /* 우선순위/상태 색 */
+  .pri-urgent { color:#FF6B6B; background:rgba(255,107,107,0.15); }
+  .pri-high   { color:#E17055; background:rgba(225,112,85,0.15); }
+  .pri-normal { color:#74B9FF; background:rgba(116,185,255,0.15); }
+  .st-open    { color:#FDCB6E; background:rgba(253,203,110,0.15); }
+  .st-prog    { color:#74B9FF; background:rgba(116,185,255,0.15); }
+  .st-done    { color:#00B894; background:rgba(0,184,148,0.15); }
+
+  /* 리비전 카드 강조 (시안 1) */
+  .rev-card { position: relative; transition: border-color .2s, transform .15s; }
+  .rev-card.urgent { border-color: rgba(255,107,107,0.6); box-shadow: 0 0 0 1px rgba(255,107,107,0.2), 0 8px 18px rgba(255,107,107,0.12); }
+  .rev-card.normal { border-color: rgb(var(--color-accent) / 0.55); box-shadow: 0 0 0 1px rgb(var(--color-accent) / 0.2), 0 8px 18px rgb(var(--color-accent) / 0.12); }
+  .rev-card.done   { opacity: 0.7; }
+  .rev-side { position: absolute; left:0; top:0; bottom:0; width: 3px; border-radius: 12px 0 0 12px; }
+  .rev-side.urgent { background: #FF6B6B; }
+  .rev-side.normal { background: rgb(var(--color-accent)); }
+  .rev-side.done   { background: #00B894; }
+
+  /* 댓글 스레드 */
+  .comment-bubble { position: relative; }
+  .comment-bubble.me { background: rgb(var(--color-accent) / 0.10); border-color: rgb(var(--color-accent) / 0.3); }
+  .comment-bubble.other { background: rgb(var(--color-bg-primary) / 0.6); border-color: rgb(var(--color-bg-border) / 0.4); }
+
+  /* 토스트 + glass */
+  .glass { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+
+  /* 폼 input 스타일 */
+  .form-input {
+    background: rgb(var(--color-bg-primary) / 0.8);
+    border: 1px solid rgb(var(--color-bg-border) / 0.6);
+    color: rgb(var(--color-text-primary));
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    transition: border-color .15s;
+    width: 100%;
+  }
+  .form-input:focus { outline: none; border-color: rgb(var(--color-accent) / 0.7); }
+  textarea.form-input { resize: vertical; min-height: 88px; line-height: 1.55; }
+
+  .chip-toggle {
+    padding: 5px 10px; font-size: 11px; font-weight: 600; border-radius: 6px;
+    border: 1px solid rgb(var(--color-bg-border) / 0.5);
+    color: rgb(var(--color-text-secondary));
+    background: rgb(var(--color-bg-primary) / 0.5);
+    cursor: pointer; transition: all .15s;
+  }
+  .chip-toggle:hover { color: rgb(var(--color-text-primary)); }
+  .chip-toggle.active { color: #fff; }
+  .chip-toggle.active.pri-urgent-bg { background: #FF6B6B; border-color: #FF6B6B; }
+  .chip-toggle.active.pri-high-bg   { background: #E17055; border-color: #E17055; }
+  .chip-toggle.active.pri-normal-bg { background: rgb(var(--color-accent)); border-color: rgb(var(--color-accent)); }
+
+  /* 사용자 체크박스 칩 */
+  .user-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 9px 5px 5px; border-radius: 999px;
+    border: 1px solid rgb(var(--color-bg-border) / 0.5);
+    background: rgb(var(--color-bg-primary) / 0.5);
+    font-size: 12px; cursor: pointer; transition: all .15s;
+    color: rgb(var(--color-text-secondary));
+  }
+  .user-chip:hover { border-color: rgb(var(--color-accent) / 0.5); }
+  .user-chip.checked { background: rgb(var(--color-accent) / 0.15); border-color: rgb(var(--color-accent) / 0.6); color: rgb(var(--color-text-primary)); }
+  .user-chip .avatar {
+    width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #fff;
+  }
+  .user-chip .check {
+    width: 14px; height: 14px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    background: rgb(var(--color-accent)); color: #fff;
+    margin-left: 2px;
+  }
+  .user-chip:not(.checked) .check { display: none; }
+
+  /* 라벨 */
+  .field-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: rgb(var(--color-text-secondary)); margin-bottom: 6px; }
+
+  /* 모달 chrome */
+  .modal-chrome {
+    background: rgb(var(--color-bg-card));
+    border: 1px solid rgb(var(--color-bg-border) / 0.5);
+    border-radius: 18px;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.4);
+    position: relative;
+    overflow: hidden;
+  }
+  .modal-chrome::before {
+    content: ''; position: absolute; top: -40px; right: -40px; width: 240px; height: 240px;
+    background: radial-gradient(circle, rgb(var(--color-accent) / 0.14), transparent 70%);
+    pointer-events: none;
+  }
+  .modal-chrome::after {
+    content: ''; position: absolute; bottom: -40px; left: -40px; width: 240px; height: 240px;
+    background: radial-gradient(circle, rgb(var(--color-accent-sub) / 0.10), transparent 70%);
+    pointer-events: none;
+  }
+
+  /* 탭 */
+  .tab-btn { padding: 10px 14px; font-size: 12.5px; font-weight: 700; color: rgb(var(--color-text-secondary)); position: relative; cursor: pointer; transition: color .15s; display: flex; align-items: center; gap: 6px; }
+  .tab-btn:hover { color: rgb(var(--color-text-primary)); }
+  .tab-btn.active { color: rgb(var(--color-accent-sub)); }
+  .tab-btn.active::after {
+    content: ''; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
+    background: rgb(var(--color-accent)); border-radius: 2px;
+    box-shadow: 0 0 8px rgb(var(--color-accent));
+  }
+  .tab-badge { background: rgb(var(--color-accent) / 0.2); color: rgb(var(--color-accent-sub)); border-radius: 999px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+</style>
+</head>
+<body data-mode="dark">
+
+<!-- TOP CONTROL -->
+<div class="sticky top-0 z-50 backdrop-blur-xl border-b bd-border-40 bg-card-70">
+  <div class="max-w-[1400px] mx-auto px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-3">
+    <h1 class="text-base font-bold text-prim">리비전 상세 — 등록 폼 + 카드 + 댓글 스레드</h1>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">테마</span>
+      <div class="flex gap-1.5">
+        <button data-theme="" class="theme-btn w-7 h-7 rounded-full ring-2 ring-white" style="background:#6C5CE7"></button>
+        <button data-theme="cinema-red" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#E11D48"></button>
+        <button data-theme="midnight-blue" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#3B82F6"></button>
+        <button data-theme="emerald" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#10B981"></button>
+        <button data-theme="amber-gold" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#D97706"></button>
+        <button data-theme="nameko" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#814D41"></button>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">모드</span>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-mode="dark" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">다크</button>
+        <button data-mode="light" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">라이트</button>
+      </div>
+    </div>
+
+    <div class="ml-auto flex items-center gap-2">
+      <button id="toggle-form" class="px-3 py-1.5 text-xs font-semibold rounded-md border bd-border text-prim hover:bd-accent-60">+ 새 리비전</button>
+    </div>
+  </div>
+</div>
+
+<!-- 씬 상세 모달 (가짜) -->
+<div class="max-w-[1400px] mx-auto px-6 py-8">
+  <div class="modal-chrome">
+    <!-- 모달 헤더 -->
+    <div class="relative px-6 py-4 border-b bd-border-40 flex items-center justify-between glass">
+      <div class="flex items-center gap-3">
+        <div class="text-sm font-mono text-sec-50">#001</div>
+        <div class="text-lg font-mono font-bold text-prim">EP01 · A · 1</div>
+        <div class="text-[11px] px-2 py-0.5 rounded-full bg-accent-15 text-accent-sub font-bold">담당: 이○○ · 박○○</div>
+      </div>
+      <button class="text-sec hover:text-prim text-2xl leading-none">×</button>
+    </div>
+
+    <!-- 탭 -->
+    <div class="relative flex gap-1 px-5 border-b bd-border-40">
+      <div class="tab-btn">상세</div>
+      <div class="tab-btn active">
+        리비전 <span class="tab-badge">3</span>
+      </div>
+      <div class="tab-btn">파일</div>
+      <div class="tab-btn">히스토리</div>
+    </div>
+
+    <!-- 탭 콘텐츠 -->
+    <div class="relative p-5 space-y-4">
+
+      <!-- 등록 폼 (열린 상태) -->
+      <div id="form-panel" class="bg-prim-50 border bd-accent-40 rounded-xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path stroke-linecap="round" d="M12 7v3"/><circle cx="12" cy="13" r="0.7" fill="currentColor"/></svg>
+            <span class="text-[13px] font-bold text-prim">새 리비전 등록</span>
+          </div>
+          <button onclick="document.getElementById('form-panel').classList.add('hidden')" class="text-sec hover:text-prim text-base">×</button>
+        </div>
+
+        <div class="space-y-4">
+          <!-- 본문 -->
+          <div>
+            <div class="field-label">내용 <span class="text-accent">*</span></div>
+            <textarea class="form-input" placeholder="어떤 부분을 수정해야 하는지, 또는 무엇이 변경되었는지 적어주세요."></textarea>
+          </div>
+
+          <!-- 이미지 첨부 -->
+          <div>
+            <div class="field-label">이미지 첨부 (선택)</div>
+            <div class="flex items-center gap-2">
+              <label class="flex items-center gap-2 px-3 py-2 rounded-lg border bd-border-40 cursor-pointer hover:bd-accent-40 text-[12px] text-sec">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/></svg>
+                파일 선택
+              </label>
+              <span class="text-[11px] text-sec-50">또는 클립보드에서 붙여넣기 (Ctrl+V)</span>
+            </div>
+          </div>
+
+          <!-- 알림 받을 사람 -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <div class="field-label" style="margin-bottom: 0">알림 받을 사람 <span class="text-sec-50 font-normal normal-case">— 컴포지터 + 그 씬 담당자 자동 체크 (클릭으로 토글)</span></div>
+            </div>
+            <div class="flex flex-wrap gap-1.5 items-center">
+              <!-- 자동 체크된 사람들 -->
+              <div class="user-chip checked"><span class="avatar" style="background:#6C5CE7">김</span>김OO <span class="text-[10px] text-sec-50">BG 컴포지터</span><span class="check"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg></span></div>
+              <div class="user-chip checked"><span class="avatar" style="background:#E17055">정</span>정OO <span class="text-[10px] text-sec-50">ACT 컴포지터</span><span class="check"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg></span></div>
+              <div class="user-chip checked"><span class="avatar" style="background:#74B9FF">이</span>이OO <span class="text-[10px] text-sec-50">BG 담당</span><span class="check"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg></span></div>
+              <div class="user-chip checked"><span class="avatar" style="background:#FDCB6E">박</span>박OO <span class="text-[10px] text-sec-50">ACT 담당</span><span class="check"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg></span></div>
+
+              <!-- 추가 버튼 -->
+              <button id="add-recipient" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-dashed bd-border text-[12px] text-sec hover:text-prim hover:bd-accent-40">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                다른 사람 추가
+              </button>
+            </div>
+
+            <!-- 추가 검색 드롭다운 (숨김 → 버튼 클릭시 표시) -->
+            <div id="recipient-search" class="hidden mt-2 bg-card border bd-border-60 rounded-lg p-2 max-w-md">
+              <input type="text" placeholder="이름으로 검색..." class="form-input mb-2" style="padding: 6px 10px; font-size: 12px;">
+              <div class="space-y-0.5 max-h-40 overflow-y-auto">
+                <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-prim text-left">
+                  <span class="w-5 h-5 rounded-full text-[10px] font-bold text-white inline-flex items-center justify-center" style="background:#A29BFE">조</span>
+                  <span class="text-[12px] text-prim">조OO</span><span class="text-[10px] text-sec-50">감독</span>
+                </button>
+                <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-prim text-left">
+                  <span class="w-5 h-5 rounded-full text-[10px] font-bold text-white inline-flex items-center justify-center" style="background:#00B894">한</span>
+                  <span class="text-[12px] text-prim">한OO</span><span class="text-[10px] text-sec-50">매니저</span>
+                </button>
+                <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-prim text-left">
+                  <span class="w-5 h-5 rounded-full text-[10px] font-bold text-white inline-flex items-center justify-center" style="background:#FF6B6B">최</span>
+                  <span class="text-[12px] text-prim">최OO</span><span class="text-[10px] text-sec-50">BG 작업자</span>
+                </button>
+                <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-prim text-left">
+                  <span class="w-5 h-5 rounded-full text-[10px] font-bold text-white inline-flex items-center justify-center" style="background:#FDCB6E">윤</span>
+                  <span class="text-[12px] text-prim">윤OO</span><span class="text-[10px] text-sec-50">ACT 작업자</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 액션 -->
+          <div class="flex items-center justify-between pt-2 border-t bd-border-40">
+            <div class="text-[11px] text-sec-50">등록자: 한솔 · 등록 즉시 선택된 사람들에게 알림이 발송됩니다.</div>
+            <div class="flex gap-2">
+              <button class="px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">취소</button>
+              <button class="px-4 py-1.5 text-xs font-bold rounded-md bg-accent text-white hover:opacity-90">리비전 등록</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 리비전 카드 1: 진행중 + 댓글 펼침 -->
+      <div class="rev-card normal bg-card border bd-border-60 rounded-xl p-4">
+        <span class="rev-side normal"></span>
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-[12px] font-bold text-accent-sub">re3</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-prog flex items-center gap-1">
+              <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 6v6h4"/></svg>
+              진행중
+            </span>
+          </div>
+          <div class="flex items-center gap-1">
+            <button class="text-[10px] px-2 py-1 rounded text-sec hover:text-prim hover:bg-prim-50">진행중 ▾</button>
+            <button class="text-sec hover:text-prim p-1 rounded hover:bg-prim-50">⋯</button>
+          </div>
+        </div>
+        <div class="text-[13px] text-prim leading-relaxed mb-2">1번 씬 색감이 전체적으로 너무 어두워요. 캐릭터 얼굴 부분 명도 +15 정도, 배경은 -10 정도로 조정 부탁드려요.</div>
+        <!-- 첨부 이미지 썸네일 -->
+        <div class="mb-3 flex gap-2">
+          <div class="w-20 h-14 rounded-lg bg-gradient-to-br from-amber-300 to-pink-400 border bd-border-40 flex items-center justify-center text-[10px] text-white font-bold opacity-70">참고</div>
+          <div class="w-20 h-14 rounded-lg bg-gradient-to-br from-blue-400 to-purple-500 border bd-border-40 flex items-center justify-center text-[10px] text-white font-bold opacity-70">현재</div>
+        </div>
+        <div class="text-[11px] text-sec-70 mb-3 flex items-center gap-3">
+          <span>김OO 등록 · 12분 전</span>
+          <span class="text-sec-50">·</span>
+          <span class="flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+            댓글 3
+          </span>
+          <span class="text-sec-50">·</span>
+          <span>알림 보낸 곳: <span class="text-prim">이○○, 박○○, 정○○</span></span>
+        </div>
+
+        <!-- 댓글 스레드 -->
+        <div class="border-t bd-border-40 pt-3 space-y-2.5">
+          <div class="comment-bubble other border rounded-lg px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#74B9FF">이</span>
+                <span class="text-[11px] font-bold text-prim">이○○</span>
+              </div>
+              <span class="text-[10px] text-sec-50">10분 전</span>
+            </div>
+            <div class="text-[12px] text-prim">확인했어요. 작업 시작합니다.</div>
+          </div>
+          <div class="comment-bubble me border rounded-lg px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#6C5CE7">김</span>
+                <span class="text-[11px] font-bold text-accent-sub">김OO <span class="text-[9px] px-1 py-0.5 rounded ml-1" style="background:rgb(var(--color-accent)/0.2);color:rgb(var(--color-accent-sub))">컴포지터</span></span>
+              </div>
+              <span class="text-[10px] text-sec-50">8분 전</span>
+            </div>
+            <div class="text-[12px] text-prim">캐릭터 얼굴 쪽은 특히 입가 그림자가 너무 진해 보여요. 그쪽 위주로요.</div>
+          </div>
+          <div class="comment-bubble other border rounded-lg px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#74B9FF">이</span>
+                <span class="text-[11px] font-bold text-prim">이○○</span>
+              </div>
+              <span class="text-[10px] text-sec-50">2분 전</span>
+            </div>
+            <div class="text-[12px] text-prim">알겠습니다. 30분 정도 걸릴 것 같아요.</div>
+          </div>
+          <!-- 댓글 입력 -->
+          <div class="flex gap-2 pt-1">
+            <span class="w-6 h-6 rounded-full text-[10px] font-bold text-white inline-flex items-center justify-center shrink-0" style="background:#A29BFE">한</span>
+            <div class="flex-1 flex gap-2">
+              <input type="text" class="form-input flex-1" placeholder="댓글 남기기... (Enter 전송)" style="padding: 6px 10px; min-height: auto; font-size: 12px;">
+              <button class="px-3 py-1.5 text-xs font-bold rounded-md bg-accent text-white">전송</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 리비전 카드 2: 등록만 + 댓글 0 -->
+      <div class="rev-card normal bg-card border bd-border-60 rounded-xl p-4">
+        <span class="rev-side normal"></span>
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-[12px] font-bold text-accent-sub">re2</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-open flex items-center gap-1">
+              <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+              대기
+            </span>
+          </div>
+          <div class="flex items-center gap-1">
+            <button class="text-[10px] px-2 py-1 rounded text-sec hover:text-prim hover:bg-prim-50">대기 ▾</button>
+            <button class="text-sec hover:text-prim p-1 rounded hover:bg-prim-50">⋯</button>
+          </div>
+        </div>
+        <div class="text-[13px] text-prim leading-relaxed mb-2">캐릭터 동작이 너무 느려 보여요. 좀 더 자연스럽게 부탁드려요.</div>
+        <div class="text-[11px] text-sec-70 flex items-center gap-3">
+          <span>박OO 등록 · 1시간 전</span>
+          <span class="text-sec-50">·</span>
+          <span class="flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+            댓글 0
+          </span>
+          <span class="text-sec-50">·</span>
+          <span>알림 보낸 곳: <span class="text-prim">정○○, 박○○</span></span>
+        </div>
+      </div>
+
+      <!-- 리비전 카드 3: 완료 -->
+      <div class="rev-card done bg-card border bd-border-60 rounded-xl p-4">
+        <span class="rev-side done"></span>
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-[12px] font-bold text-sec">re1</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-done flex items-center gap-1">
+              <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              완료
+            </span>
+          </div>
+          <div class="flex items-center gap-1">
+            <button class="text-[10px] px-2 py-1 rounded text-sec hover:text-prim hover:bg-prim-50">완료 ▾</button>
+            <button class="text-sec hover:text-prim p-1 rounded hover:bg-prim-50">⋯</button>
+          </div>
+        </div>
+        <div class="text-[13px] text-prim leading-relaxed mb-2 line-through opacity-60">왼쪽 위 나무 위치 살짝 옮겨주세요.</div>
+        <div class="text-[11px] text-sec-70 flex items-center gap-3">
+          <span>김OO 등록 · 어제</span>
+          <span class="text-sec-50">·</span>
+          <span class="flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+            댓글 2
+          </span>
+          <span class="text-sec-50">·</span>
+          <span>이○○이 30분 후 완료 처리</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="mt-6 max-w-3xl mx-auto text-center text-[12px] text-sec-70">
+    <strong class="text-prim">알림 클릭 흐름:</strong> 벨/토스트/OS 알림 어디서든 클릭하면 → 그 씬 모달이 자동으로 열림 → 리비전 탭으로 이동 → 해당 리비전 카드로 자동 스크롤 + 강조 (1초 깜빡임).
+  </div>
+</div>
+
+<script>
+function setTheme(t) {
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    if (b.dataset.theme === t) {
+      b.classList.add('ring-2','ring-white'); b.classList.remove('ring-1','ring-white/20');
+    } else {
+      b.classList.remove('ring-2','ring-white'); b.classList.add('ring-1','ring-white/20');
+    }
+  });
+}
+function setMode(m) {
+  document.body.setAttribute('data-mode', m);
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    if (b.dataset.mode === m) {
+      b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim');
+    } else {
+      b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim');
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+  document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  document.getElementById('toggle-form').addEventListener('click', () => {
+    const f = document.getElementById('form-panel');
+    f.classList.toggle('hidden');
+    if (!f.classList.contains('hidden')) f.scrollIntoView({behavior:'smooth', block:'center'});
+  });
+
+  // 우선순위 칩 토글
+  document.querySelectorAll('.chip-toggle').forEach(c => {
+    c.addEventListener('click', () => {
+      c.parentElement.querySelectorAll('.chip-toggle').forEach(s => s.classList.remove('active'));
+      c.classList.add('active');
+    });
+  });
+
+  // 사용자 칩 토글
+  document.querySelectorAll('.user-chip').forEach(c => {
+    c.addEventListener('click', () => c.classList.toggle('checked'));
+  });
+
+  // 다른 사람 추가 버튼
+  const addBtn = document.getElementById('add-recipient');
+  const search = document.getElementById('recipient-search');
+  if (addBtn && search) {
+    addBtn.addEventListener('click', () => search.classList.toggle('hidden'));
+    // 검색 결과 클릭 시 칩으로 추가
+    search.querySelectorAll('button').forEach(b => {
+      b.addEventListener('click', () => {
+        const name = b.querySelector('.text-prim').textContent;
+        const role = b.querySelector('.text-sec-50').textContent;
+        const avatar = b.querySelector('span').cloneNode(true);
+        avatar.classList.remove('w-5','h-5');
+        avatar.classList.add('avatar');
+        const chip = document.createElement('div');
+        chip.className = 'user-chip checked';
+        chip.innerHTML = `${avatar.outerHTML}${name} <span class="text-[10px] text-sec-50">${role}</span><span class="check"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg></span>`;
+        chip.addEventListener('click', () => chip.classList.toggle('checked'));
+        addBtn.parentElement.insertBefore(chip, addBtn);
+        b.remove();
+      });
+    });
+  }
+});
+</script>
+</body>
+</html>

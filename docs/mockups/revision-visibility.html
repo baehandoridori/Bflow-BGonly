@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리비전 시각 표시 시안 비교 — B flow</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --color-bg-primary: 15 17 23;
+    --color-bg-card: 26 29 39;
+    --color-bg-border: 45 48 65;
+    --color-text-primary: 232 232 238;
+    --color-text-secondary: 139 141 163;
+    --color-accent: 108 92 231;
+    --color-accent-sub: 162 155 254;
+  }
+  [data-theme="cinema-red"]    { --color-accent: 225 29 72;  --color-accent-sub: 251 113 133; }
+  [data-theme="midnight-blue"] { --color-accent: 59 130 246; --color-accent-sub: 96 165 250; }
+  [data-theme="emerald"]       { --color-accent: 16 185 129; --color-accent-sub: 52 211 153; }
+  [data-theme="amber-gold"]    { --color-accent: 217 119 6;  --color-accent-sub: 245 158 11; }
+  [data-theme="nameko"]        { --color-accent: 129 77 65;  --color-accent-sub: 168 109 90; }
+  [data-mode="light"] {
+    --color-bg-primary: 248 249 252;
+    --color-bg-card: 255 255 255;
+    --color-bg-border: 215 217 230;
+    --color-text-primary: 28 29 38;
+    --color-text-secondary: 100 102 122;
+  }
+  body {
+    background: rgb(var(--color-bg-primary));
+    color: rgb(var(--color-text-primary));
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    transition: background-color 0.2s, color 0.2s;
+  }
+  .text-accent     { color: rgb(var(--color-accent)); }
+  .text-accent-sub { color: rgb(var(--color-accent-sub)); }
+  .text-prim       { color: rgb(var(--color-text-primary)); }
+  .text-sec        { color: rgb(var(--color-text-secondary)); }
+  .text-sec-70     { color: rgb(var(--color-text-secondary) / 0.7); }
+  .text-sec-50     { color: rgb(var(--color-text-secondary) / 0.5); }
+  .bg-prim         { background: rgb(var(--color-bg-primary)); }
+  .bg-card         { background: rgb(var(--color-bg-card)); }
+  .bg-card-70      { background: rgb(var(--color-bg-card) / 0.7); }
+  .bg-accent       { background: rgb(var(--color-accent)); }
+  .bg-accent-15    { background: rgb(var(--color-accent) / 0.15); }
+  .bg-accent-08    { background: rgb(var(--color-accent) / 0.08); }
+  .bg-accent-25    { background: rgb(var(--color-accent) / 0.25); }
+  .bd-border       { border-color: rgb(var(--color-bg-border)); }
+  .bd-border-40    { border-color: rgb(var(--color-bg-border) / 0.4); }
+  .bd-border-60    { border-color: rgb(var(--color-bg-border) / 0.6); }
+  .bd-accent-40    { border-color: rgb(var(--color-accent) / 0.4); }
+  .bd-accent-60    { border-color: rgb(var(--color-accent) / 0.6); }
+  .glow-accent     { box-shadow: 0 0 14px rgb(var(--color-accent) / 0.55); }
+  .ring-accent     { box-shadow: inset 0 0 0 2px rgb(var(--color-accent) / 0.85); }
+
+  /* 단계 색상 (BG 기준) */
+  .stage-lo  { background: #C4BCFA20; color: rgb(var(--color-text-secondary) / 0.6); }
+  .stage-comp{ background: #A599F520; color: rgb(var(--color-text-secondary) / 0.6); }
+  .stage-insp{ background: #8677EF20; color: rgb(var(--color-text-secondary) / 0.6); }
+  .stage-png { background: #6C5CE720; color: rgb(var(--color-text-secondary) / 0.6); }
+  .stage-lo.done   { background: #C4BCFA; color: #fff; font-weight: 700; }
+  .stage-comp.done { background: #A599F5; color: #fff; font-weight: 700; }
+  .stage-insp.done { background: #8677EF; color: #fff; font-weight: 700; }
+  .stage-png.done  { background: #6C5CE7; color: #fff; font-weight: 700; }
+
+  /* ACT 단계 색상 */
+  .stage-a1.done { background: #F5BEB3; color: #fff; font-weight: 700; }
+  .stage-a2.done { background: #EDA293; color: #fff; font-weight: 700; }
+  .stage-a3.done { background: #E58A76; color: #fff; font-weight: 700; }
+  .stage-a4.done { background: #E17055; color: #fff; font-weight: 700; }
+  .stage-a1{ background:#F5BEB320 } .stage-a2{ background:#EDA29320 }
+  .stage-a3{ background:#E58A7620 } .stage-a4{ background:#E1705520 }
+
+  /* 시안 1 — 강조 */
+  .v-strong .scene-card.has-rev      { border-color: rgb(var(--color-accent) / 0.6); box-shadow: 0 0 0 1px rgb(var(--color-accent) / 0.2), 0 8px 20px rgb(var(--color-accent) / 0.15); }
+  .v-strong .scene-card.has-rev-urgent { border-color: rgba(255,107,107,0.7); box-shadow: 0 0 0 1px rgba(255,107,107,0.25), 0 8px 20px rgba(255,107,107,0.18); }
+  .v-strong .rev-side-bar { display: block; }
+  .v-strong .rev-badge-strong { display: inline-flex; }
+  .v-strong .rev-badge-medium { display: none; }
+  .v-strong .rev-row-bar { display: block; }
+  .v-strong .rev-cell-badge-strong { display: inline-flex; }
+  .v-strong .rev-cell-badge-medium { display: none; }
+
+  /* 시안 2 — 적당 */
+  .v-medium .rev-side-bar { display: none; }
+  .v-medium .rev-badge-strong { display: none; }
+  .v-medium .rev-badge-medium { display: inline-flex; }
+  .v-medium .rev-row-bar { display: none; }
+  .v-medium .rev-cell-badge-strong { display: none; }
+  .v-medium .rev-cell-badge-medium { display: inline-flex; }
+
+  /* 시안 3 — 깔끔 */
+  .v-quiet .rev-side-bar { display: none; }
+  .v-quiet .rev-badge-strong, .v-quiet .rev-badge-medium { display: none; }
+  .v-quiet .rev-row-bar { display: none; }
+  .v-quiet .rev-cell-badge-strong, .v-quiet .rev-cell-badge-medium { display: none; }
+
+  /* 사이드 바 (좌측 컬러 막대) */
+  .rev-side-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 12px 0 0 12px; background: rgb(var(--color-accent)); }
+  .rev-side-bar.urgent { background: #FF6B6B; }
+  .rev-row-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: rgb(var(--color-accent)); }
+  .rev-row-bar.urgent { background: #FF6B6B; }
+
+  .scene-card { position: relative; transition: transform 0.15s ease, border-color 0.2s, box-shadow 0.2s; cursor: pointer; }
+  .scene-card:hover { transform: translateY(-2px); border-color: rgb(var(--color-accent) / 0.7); }
+
+  .toast-pop { animation: toastIn 0.4s ease-out; }
+  @keyframes toastIn { from { opacity:0; transform: translateX(20px); } to { opacity:1; transform: translateX(0); } }
+
+  /* 알림 패널 (우측 미니) */
+  .notif-item.unread { background: rgb(var(--color-accent) / 0.08); }
+  .notif-item.unread .notif-bar { background: rgb(var(--color-accent)); }
+  .notif-item.urgent .notif-bar { background: #FF6B6B; }
+  .notif-bar { position:absolute; left:0; top:0; bottom:0; width:2px; }
+
+  /* 아이콘 토글 — 4가지 후보 */
+  .rev-icon { display: none; }
+  [data-icon="msg-warn"] .rev-icon.icon-msg-warn { display: block; }
+  [data-icon="alert"]    .rev-icon.icon-alert    { display: block; }
+  [data-icon="msg-more"] .rev-icon.icon-msg-more { display: block; }
+  [data-icon="clipboard"] .rev-icon.icon-clipboard { display: block; }
+</style>
+</head>
+<body data-mode="dark" data-icon="msg-warn">
+
+<!-- TOP CONTROL BAR -->
+<div class="sticky top-0 z-50 backdrop-blur-xl border-b bd-border-40 bg-card-70">
+  <div class="max-w-[1400px] mx-auto px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-3">
+    <h1 class="text-base font-bold text-prim">리비전 시각 표시 시안 비교</h1>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">시안</span>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-variant="strong" class="variant-btn px-3 py-1.5 text-xs font-semibold rounded-md text-prim bg-accent text-white">1. 강조</button>
+        <button data-variant="medium" class="variant-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">2. 적당</button>
+        <button data-variant="quiet"  class="variant-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">3. 깔끔</button>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">뷰</span>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-view="board" class="view-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">보드</button>
+        <button data-view="sheet" class="view-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">시트</button>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">테마</span>
+      <div class="flex gap-1.5">
+        <button data-theme="" class="theme-btn w-7 h-7 rounded-full ring-2 ring-white" style="background:#6C5CE7" title="violet (기본)"></button>
+        <button data-theme="cinema-red" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#E11D48" title="cinema-red"></button>
+        <button data-theme="midnight-blue" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#3B82F6" title="midnight-blue"></button>
+        <button data-theme="emerald" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#10B981" title="emerald"></button>
+        <button data-theme="amber-gold" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#D97706" title="amber-gold"></button>
+        <button data-theme="nameko" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#814D41" title="nameko"></button>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">모드</span>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-mode="dark"  class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">다크</button>
+        <button data-mode="light" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">라이트</button>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">아이콘</span>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-icon="msg-warn" class="icon-btn px-2.5 py-1.5 rounded-md bg-accent text-white" title="A · 말풍선+!">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 7v3"/><circle cx="12" cy="13" r="0.6" fill="currentColor"/></svg>
+        </button>
+        <button data-icon="alert" class="icon-btn px-2.5 py-1.5 rounded-md text-sec hover:text-prim" title="B · 동그라미+!">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line stroke-linecap="round" x1="12" x2="12" y1="8" y2="12.5"/><circle cx="12" cy="16" r="0.6" fill="currentColor"/></svg>
+        </button>
+        <button data-icon="msg-more" class="icon-btn px-2.5 py-1.5 rounded-md text-sec hover:text-prim" title="C · 말풍선+...">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><circle cx="8" cy="12" r="0.7" fill="currentColor"/><circle cx="12" cy="12" r="0.7" fill="currentColor"/><circle cx="16" cy="12" r="0.7" fill="currentColor"/></svg>
+        </button>
+        <button data-icon="clipboard" class="icon-btn px-2.5 py-1.5 rounded-md text-sec hover:text-prim" title="D · 체크리스트">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path stroke-linecap="round" stroke-linejoin="round" d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path stroke-linecap="round" d="M9 12h6M9 16h4"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="ml-auto flex items-center gap-3">
+      <button id="show-toast" class="px-3 py-1.5 text-xs font-semibold rounded-md border bd-border text-prim hover:bd-accent-60">알림 미리보기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 시안 설명 -->
+<div class="max-w-[1400px] mx-auto px-6 pt-6">
+  <div id="variant-desc" class="text-sm text-sec mb-6"></div>
+</div>
+
+<!-- BOARD VIEW -->
+<div id="board-view" class="max-w-[1400px] mx-auto px-6 pb-12">
+  <h2 class="text-[11px] font-bold text-sec uppercase tracking-widest mb-4">보드 뷰 — 씬 카드 그리드</h2>
+  <div id="board-grid" class="grid grid-cols-3 gap-4"></div>
+</div>
+
+<!-- SHEET VIEW -->
+<div id="sheet-view" class="max-w-[1400px] mx-auto px-6 pb-12 hidden">
+  <h2 class="text-[11px] font-bold text-sec uppercase tracking-widest mb-4">시트 뷰 — 표 형태</h2>
+  <div class="bg-card border bd-border-40 rounded-xl overflow-hidden">
+    <table class="w-full text-sm border-collapse">
+      <thead class="bg-prim/40">
+        <tr>
+          <th class="text-left px-3 py-2.5 text-[11px] font-bold text-sec uppercase tracking-wider border-b bd-border-40 w-[110px]">씬</th>
+          <th class="text-left px-3 py-2.5 text-[11px] font-bold text-sec uppercase tracking-wider border-b bd-border-40">BG 메모</th>
+          <th class="text-left px-3 py-2.5 text-[11px] font-bold text-sec uppercase tracking-wider border-b bd-border-40">ACT 메모</th>
+          <th class="text-left px-3 py-2.5 text-[11px] font-bold text-sec uppercase tracking-wider border-b bd-border-40 w-24">BG 담당</th>
+          <th class="text-left px-3 py-2.5 text-[11px] font-bold text-sec uppercase tracking-wider border-b bd-border-40 w-24">ACT 담당</th>
+          <th class="text-center px-3 py-2.5 text-[11px] font-bold text-sec uppercase tracking-wider border-b bd-border-40 w-44">진행</th>
+        </tr>
+      </thead>
+      <tbody id="sheet-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 알림 토스트 데모 영역 -->
+<div id="toast-area" class="fixed top-20 right-6 z-[100] flex flex-col gap-2"></div>
+
+<!-- 알림 패널 미리보기 (우측 하단 미니) -->
+<div class="fixed bottom-6 right-6 z-50">
+  <div class="bg-card border bd-border-60 rounded-xl shadow-2xl w-[340px]">
+    <div class="px-4 py-3 border-b bd-border-40 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="text-[13px] font-bold text-prim">알림</span>
+        <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-accent text-white font-bold">3</span>
+      </div>
+      <button class="text-[11px] text-sec hover:text-prim">전체 읽음</button>
+    </div>
+    <div class="p-1.5 space-y-1 max-h-[320px] overflow-y-auto">
+      <div class="notif-item unread urgent relative px-3 py-2.5 rounded-lg flex gap-2.5 cursor-pointer hover:bg-prim">
+        <div class="notif-bar"></div>
+        <div id="notif-icon-slot" class="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style="background: #FF6B6B20; color: #FF6B6B">
+          <svg class="rev-icon icon-msg-warn w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path stroke-linecap="round" d="M12 7v3"/><circle cx="12" cy="13" r="0.7" fill="currentColor"/></svg>
+          <svg class="rev-icon icon-alert w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line stroke-linecap="round" x1="12" x2="12" y1="8" y2="12.5"/><circle cx="12" cy="16" r="0.7" fill="currentColor"/></svg>
+          <svg class="rev-icon icon-msg-more w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><circle cx="8" cy="12" r="0.8" fill="currentColor"/><circle cx="12" cy="12" r="0.8" fill="currentColor"/><circle cx="16" cy="12" r="0.8" fill="currentColor"/></svg>
+          <svg class="rev-icon icon-clipboard w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path stroke-linecap="round" stroke-linejoin="round" d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path stroke-linecap="round" d="M9 12h6M9 16h4"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[12px] font-semibold text-prim truncate">새 리비전 — EP01 A 1 <span class="text-[10px] px-1 py-0.5 rounded ml-1" style="background:#FF6B6B20;color:#FF6B6B">긴급</span></div>
+          <div class="text-[11px] text-sec-70 truncate">컴포지터 김OO: "1번 씬 색감 전체적으로 너무 어두워요. 조정 부탁..."</div>
+          <div class="text-[10px] text-sec-50 mt-0.5">방금 전</div>
+        </div>
+      </div>
+      <div class="notif-item unread relative px-3 py-2.5 rounded-lg flex gap-2.5 cursor-pointer hover:bg-prim">
+        <div class="notif-bar"></div>
+        <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0 bg-accent-15 text-accent">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[12px] font-semibold text-prim truncate">리비전 진행중 — EP01 A 4</div>
+          <div class="text-[11px] text-sec-70 truncate">이OO이 "[Rev.2] BG 추가 디테일" 작업을 시작했어요</div>
+          <div class="text-[10px] text-sec-50 mt-0.5">3분 전</div>
+        </div>
+      </div>
+      <div class="notif-item unread relative px-3 py-2.5 rounded-lg flex gap-2.5 cursor-pointer hover:bg-prim">
+        <div class="notif-bar"></div>
+        <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style="background:#00B89420;color:#00B894">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-[12px] font-semibold text-prim truncate">리비전 완료 — EP01 A 6</div>
+          <div class="text-[11px] text-sec-70 truncate">박OO: "확인 끝났습니다" + 완료 처리</div>
+          <div class="text-[10px] text-sec-50 mt-0.5">15분 전</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="text-[10px] text-sec-50 text-right mt-1.5 pr-2">↑ 알림 패널 미리보기 (벨 아이콘 클릭 시)</div>
+</div>
+
+<script>
+const scenes = [
+  { id:'EP01:A:1', label:'EP01 A 1', bgMemo:'1번 씬 색감 전체 어둠', actMemo:'', bgAssignee:'이○○', actAssignee:'박○○',
+    bg:[1,1,1,1], act:[1,1,1,0], rev:{open:1, in_progress:1, urgent:true, total:2} },
+  { id:'EP01:A:2', label:'EP01 A 2', bgMemo:'', actMemo:'', bgAssignee:'이○○', actAssignee:'박○○',
+    bg:[1,1,1,1], act:[1,1,1,1], rev:{open:1, in_progress:0, urgent:false, total:1} },
+  { id:'EP01:A:3', label:'EP01 A 3', bgMemo:'', actMemo:'', bgAssignee:'이○○', actAssignee:'-',
+    bg:[1,1,0,0], act:[1,0,0,0], rev:{open:0, in_progress:0, urgent:false, total:0} },
+  { id:'EP01:A:4', label:'EP01 A 4', bgMemo:'BG 추가 디테일 필요', actMemo:'', bgAssignee:'이○○', actAssignee:'박○○',
+    bg:[1,1,1,1], act:[1,1,1,1], rev:{open:0, in_progress:1, urgent:false, total:1} },
+  { id:'EP01:A:5', label:'EP01 A 5', bgMemo:'', actMemo:'캐릭터 표정', bgAssignee:'-', actAssignee:'박○○',
+    bg:[1,0,0,0], act:[1,1,0,0], rev:{open:0, in_progress:0, urgent:false, total:0} },
+  { id:'EP01:A:6', label:'EP01 A 6', bgMemo:'', actMemo:'', bgAssignee:'이○○', actAssignee:'박○○',
+    bg:[1,1,1,1], act:[1,1,1,1], rev:{open:2, in_progress:1, urgent:true, total:3} },
+  { id:'EP01:B:1', label:'EP01 B 1', bgMemo:'', actMemo:'', bgAssignee:'이○○', actAssignee:'박○○',
+    bg:[1,1,1,0], act:[1,1,0,0], rev:{open:0, in_progress:0, urgent:false, total:0} },
+  { id:'EP01:B:2', label:'EP01 B 2', bgMemo:'', actMemo:'동작 자연스럽게', bgAssignee:'이○○', actAssignee:'박○○',
+    bg:[1,1,1,1], act:[1,1,1,1], rev:{open:0, in_progress:0, urgent:false, total:1} },  // total:1 = resolved 1개
+  { id:'EP01:B:3', label:'EP01 B 3', bgMemo:'', actMemo:'', bgAssignee:'이○○', actAssignee:'박○○',
+    bg:[1,1,0,0], act:[1,1,0,0], rev:{open:1, in_progress:0, urgent:false, total:1} },
+];
+
+const variantDescriptions = {
+  strong: '<strong class="text-prim">시안 1 · 강조</strong> — 카드 좌측에 컬러 막대 + 우측 상단에 큰 배지 + 카드 테두리도 강조 색으로 변경. 긴급 리비전이 있으면 빨강. <strong class="text-prim">멀리서도 한눈에</strong> 보이지만, 조용한 작업 중에는 어수선해 보일 수 있음.',
+  medium: '<strong class="text-prim">시안 2 · 적당</strong> — 우측 상단에 작은 점 + 숫자 배지만. 카드 본체는 그대로. <strong class="text-prim">관심 있게 보면 보이고, 일반 작업은 방해하지 않음.</strong> 대부분의 협업 도구가 쓰는 균형점.',
+  quiet:  '<strong class="text-prim">시안 3 · 깔끔</strong> — 씬 리스트는 완전히 그대로. 리비전 존재 여부는 <strong class="text-prim">알림과 모달 안에서만</strong> 확인. 시야는 가장 깔끔하지만, 알림을 놓치면 모를 수 있음.'
+};
+
+let currentVariant = 'strong';
+let currentView = 'board';
+
+function revIconSvgSet(sizeClass) {
+  return `
+    <svg class="rev-icon icon-msg-warn ${sizeClass}" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 7v3"/>
+      <circle cx="12" cy="13" r="0.7" fill="currentColor"/>
+    </svg>
+    <svg class="rev-icon icon-alert ${sizeClass}" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10"/>
+      <line stroke-linecap="round" x1="12" x2="12" y1="8" y2="12.5"/>
+      <circle cx="12" cy="16" r="0.7" fill="currentColor"/>
+    </svg>
+    <svg class="rev-icon icon-msg-more ${sizeClass}" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>
+      <circle cx="8" cy="12" r="0.8" fill="currentColor"/>
+      <circle cx="12" cy="12" r="0.8" fill="currentColor"/>
+      <circle cx="16" cy="12" r="0.8" fill="currentColor"/>
+    </svg>
+    <svg class="rev-icon icon-clipboard ${sizeClass}" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+      <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+      <path stroke-linecap="round" stroke-linejoin="round" d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+      <path stroke-linecap="round" d="M9 12h6M9 16h4"/>
+    </svg>
+  `;
+}
+
+function getRevBadgeStrong(rev) {
+  if (!rev || (rev.open + rev.in_progress) === 0) return '';
+  const total = rev.open + rev.in_progress;
+  const urgent = rev.urgent;
+  const bgClass = urgent ? '' : 'bg-accent';
+  const bgStyle = urgent ? 'background:#FF6B6B' : '';
+  const glow    = urgent ? 'box-shadow:0 0 14px rgba(255,107,107,0.55)' : '';
+  return `<div class="rev-badge-strong absolute top-2.5 right-2.5 items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold text-white ${bgClass} glow-accent" style="${bgStyle};${glow}">
+    ${revIconSvgSet('w-2.5 h-2.5')}
+    ${total}
+  </div>`;
+}
+
+function getRevBadgeMedium(rev) {
+  if (!rev || (rev.open + rev.in_progress) === 0) return '';
+  const total = rev.open + rev.in_progress;
+  const urgent = rev.urgent;
+  const dotColor = urgent ? '#FF6B6B' : 'rgb(var(--color-accent))';
+  return `<div class="rev-badge-medium absolute top-2.5 right-2.5 items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-card border bd-border-40 text-prim">
+    <span class="w-1.5 h-1.5 rounded-full inline-block" style="background:${dotColor}"></span>
+    <span>${total}</span>
+  </div>`;
+}
+
+function getResolvedHint(rev) {
+  // 미해결 0개여도 처리완료된 게 있으면 작은 회색 표시 (시안 1, 2 모두)
+  if (!rev) return '';
+  const opened = rev.open + rev.in_progress;
+  const resolvedOnly = rev.total - opened;
+  if (opened === 0 && resolvedOnly > 0) {
+    return `<div class="absolute top-2.5 right-2.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium text-sec-70 bg-card border bd-border-40 flex items-center gap-1">
+      <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg> ${resolvedOnly}
+    </div>`;
+  }
+  return '';
+}
+
+function renderBoard() {
+  const grid = document.getElementById('board-grid');
+  grid.innerHTML = scenes.map(s => {
+    const opened = s.rev.open + s.rev.in_progress;
+    const cardClass = opened > 0 ? (s.rev.urgent ? 'has-rev has-rev-urgent' : 'has-rev') : '';
+    const sideBarClass = s.rev.urgent ? 'urgent' : '';
+    const sideBar = opened > 0 ? `<span class="rev-side-bar ${sideBarClass}"></span>` : '';
+    const badge = getRevBadgeStrong(s.rev) + getRevBadgeMedium(s.rev) + (opened === 0 ? getResolvedHint(s.rev) : '');
+
+    return `
+      <div class="scene-card ${cardClass} bg-card border bd-border-60 rounded-xl overflow-hidden">
+        ${sideBar}
+        ${badge}
+        <div class="px-4 pt-3.5 pb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-mono text-sec-50">#${s.id.split(':')[2].padStart(3,'0')}</span>
+            <span class="text-[15px] font-mono font-bold text-prim">${s.label}</span>
+          </div>
+          ${s.bgMemo ? `<div class="text-[11px] mt-1.5 flex gap-1.5 items-start"><span class="text-[10px] px-1 py-0.5 rounded font-bold" style="color:#7DD3FC;background:rgba(125,211,252,0.15)">BG</span><span class="text-amber-400/70">${s.bgMemo}</span></div>` : ''}
+          ${s.actMemo ? `<div class="text-[11px] mt-1 flex gap-1.5 items-start"><span class="text-[10px] px-1 py-0.5 rounded font-bold" style="color:#F9A8D4;background:rgba(249,168,212,0.15)">ACT</span><span class="text-amber-400/70">${s.actMemo}</span></div>` : ''}
+        </div>
+        <div class="px-4 pb-3 space-y-2">
+          <div class="flex items-center gap-1.5">
+            <span class="text-[10px] font-bold w-7 shrink-0" style="color:#6C5CE7">BG</span>
+            <div class="flex flex-1 rounded-lg bg-prim/70 border bd-border-40 p-1 gap-0.5">
+              ${['lo','comp','insp','png'].map((k,i) => `<div class="stage-${k} flex-1 text-[10px] text-center py-1 rounded-md font-medium ${s.bg[i] ? 'done':''}">${['LO','완료','검수','PNG'][i]}</div>`).join('')}
+            </div>
+            <span class="text-[10px] text-sec w-10 text-right shrink-0">${s.bgAssignee}</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[10px] font-bold w-7 shrink-0" style="color:#E17055">ACT</span>
+            <div class="flex flex-1 rounded-lg bg-prim/70 border bd-border-40 p-1 gap-0.5">
+              ${['a1','a2','a3','a4'].map((k,i) => `<div class="stage-${k} flex-1 text-[10px] text-center py-1 rounded-md font-medium ${s.act[i] ? 'done':''}">${['1원화','2원화','동화','최종'][i]}</div>`).join('')}
+            </div>
+            <span class="text-[10px] text-sec w-10 text-right shrink-0">${s.actAssignee}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderSheet() {
+  const tbody = document.getElementById('sheet-tbody');
+  tbody.innerHTML = scenes.map(s => {
+    const opened = s.rev.open + s.rev.in_progress;
+    const rowBarClass = s.rev.urgent ? 'urgent' : '';
+    const rowBar = opened > 0 ? `<span class="rev-row-bar ${rowBarClass}"></span>` : '';
+    const cellBadgeStrong = opened > 0 ? `<span class="rev-cell-badge-strong items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold text-white" style="background:${s.rev.urgent ? '#FF6B6B' : 'rgb(var(--color-accent))'}">${opened}</span>` : '';
+    const cellBadgeMedium = opened > 0 ? `<span class="rev-cell-badge-medium items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-card border bd-border-40 text-prim"><span class="w-1.5 h-1.5 rounded-full inline-block" style="background:${s.rev.urgent ? '#FF6B6B' : 'rgb(var(--color-accent))'}"></span>${opened}</span>` : '';
+
+    return `
+      <tr class="relative border-b bd-border-40 hover:bg-prim/40 cursor-pointer">
+        ${rowBar}
+        <td class="px-3 py-2.5 text-prim">
+          <div class="flex items-center gap-2">
+            <span class="text-[13px] font-mono font-bold">${s.label}</span>
+            ${cellBadgeStrong}
+            ${cellBadgeMedium}
+          </div>
+        </td>
+        <td class="px-3 py-2.5 text-[12px] text-amber-400/70">${s.bgMemo || '<span class="text-sec-50">—</span>'}</td>
+        <td class="px-3 py-2.5 text-[12px] text-amber-400/70">${s.actMemo || '<span class="text-sec-50">—</span>'}</td>
+        <td class="px-3 py-2.5 text-[12px] text-sec">${s.bgAssignee}</td>
+        <td class="px-3 py-2.5 text-[12px] text-sec">${s.actAssignee}</td>
+        <td class="px-3 py-2.5">
+          <div class="flex items-center gap-1 justify-center">
+            ${[0,1,2,3].map(i => `<div class="w-5 h-1.5 rounded-full" style="background:${s.bg[i] ? ['#C4BCFA','#A599F5','#8677EF','#6C5CE7'][i] : 'rgba(255,255,255,0.08)'}"></div>`).join('')}
+            <span class="mx-1.5 text-sec-50">|</span>
+            ${[0,1,2,3].map(i => `<div class="w-5 h-1.5 rounded-full" style="background:${s.act[i] ? ['#F5BEB3','#EDA293','#E58A76','#E17055'][i] : 'rgba(255,255,255,0.08)'}"></div>`).join('')}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function setVariant(v) {
+  currentVariant = v;
+  document.body.classList.remove('v-strong','v-medium','v-quiet');
+  document.body.classList.add(`v-${v}`);
+  document.querySelectorAll('.variant-btn').forEach(b => {
+    if (b.dataset.variant === v) {
+      b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim');
+    } else {
+      b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim');
+    }
+  });
+  document.getElementById('variant-desc').innerHTML = variantDescriptions[v];
+}
+
+function setView(v) {
+  currentView = v;
+  document.getElementById('board-view').classList.toggle('hidden', v !== 'board');
+  document.getElementById('sheet-view').classList.toggle('hidden', v !== 'sheet');
+  document.querySelectorAll('.view-btn').forEach(b => {
+    if (b.dataset.view === v) {
+      b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim');
+    } else {
+      b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim');
+    }
+  });
+}
+
+function setTheme(t) {
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    if (b.dataset.theme === t) {
+      b.classList.add('ring-2','ring-white'); b.classList.remove('ring-1','ring-white/20');
+    } else {
+      b.classList.remove('ring-2','ring-white'); b.classList.add('ring-1','ring-white/20');
+    }
+  });
+}
+
+function setMode(m) {
+  document.body.setAttribute('data-mode', m);
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    if (b.dataset.mode === m) {
+      b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim');
+    } else {
+      b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim');
+    }
+  });
+}
+
+function showToast() {
+  const area = document.getElementById('toast-area');
+  const t = document.createElement('div');
+  t.className = 'toast-pop bg-card border bd-border-60 rounded-xl shadow-2xl px-4 py-3 w-[320px] flex gap-3';
+  t.innerHTML = `
+    <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style="background:#FF6B6B20;color:#FF6B6B">
+      ${revIconSvgSet('w-4 h-4')}
+    </div>
+    <div class="flex-1 min-w-0">
+      <div class="text-[12px] font-bold text-prim">긴급 리비전 — EP01 A 1</div>
+      <div class="text-[11px] text-sec-70 mt-0.5">컴포지터 김OO이 새 리비전을 등록했어요</div>
+    </div>
+    <button onclick="this.parentElement.remove()" class="text-sec hover:text-prim text-lg leading-none">×</button>
+  `;
+  area.appendChild(t);
+  setTimeout(() => { if (t.parentElement) t.remove(); }, 5000);
+}
+
+function setIcon(name) {
+  document.body.setAttribute('data-icon', name);
+  document.querySelectorAll('.icon-btn').forEach(b => {
+    if (b.dataset.icon === name) {
+      b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim');
+    } else {
+      b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim');
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  renderBoard();
+  renderSheet();
+  setVariant('strong');
+
+  document.querySelectorAll('.variant-btn').forEach(b => b.addEventListener('click', () => setVariant(b.dataset.variant)));
+  document.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+  document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+  document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  document.querySelectorAll('.icon-btn').forEach(b => b.addEventListener('click', () => setIcon(b.dataset.icon)));
+  document.getElementById('show-toast').addEventListener('click', showToast);
+});
+</script>
+</body>
+</html>

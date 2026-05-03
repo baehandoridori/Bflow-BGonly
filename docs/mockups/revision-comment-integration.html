@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>댓글 통합 — 리비전 ↔ 씬 댓글 패널</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --color-bg-primary: 15 17 23;
+    --color-bg-card: 26 29 39;
+    --color-bg-border: 45 48 65;
+    --color-text-primary: 232 232 238;
+    --color-text-secondary: 139 141 163;
+    --color-accent: 108 92 231;
+    --color-accent-sub: 162 155 254;
+  }
+  [data-theme="cinema-red"]    { --color-accent: 225 29 72;  --color-accent-sub: 251 113 133; }
+  [data-theme="midnight-blue"] { --color-accent: 59 130 246; --color-accent-sub: 96 165 250; }
+  [data-theme="emerald"]       { --color-accent: 16 185 129; --color-accent-sub: 52 211 153; }
+  [data-theme="amber-gold"]    { --color-accent: 217 119 6;  --color-accent-sub: 245 158 11; }
+  [data-theme="nameko"]        { --color-accent: 129 77 65;  --color-accent-sub: 168 109 90; }
+  [data-mode="light"] {
+    --color-bg-primary: 248 249 252;
+    --color-bg-card: 255 255 255;
+    --color-bg-border: 215 217 230;
+    --color-text-primary: 28 29 38;
+    --color-text-secondary: 100 102 122;
+  }
+  body {
+    background: rgb(var(--color-bg-primary));
+    color: rgb(var(--color-text-primary));
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    transition: background-color .2s, color .2s;
+  }
+  .text-accent     { color: rgb(var(--color-accent)); }
+  .text-accent-sub { color: rgb(var(--color-accent-sub)); }
+  .text-prim       { color: rgb(var(--color-text-primary)); }
+  .text-sec        { color: rgb(var(--color-text-secondary)); }
+  .text-sec-70     { color: rgb(var(--color-text-secondary) / 0.7); }
+  .text-sec-50     { color: rgb(var(--color-text-secondary) / 0.5); }
+  .bg-prim         { background: rgb(var(--color-bg-primary)); }
+  .bg-prim-50      { background: rgb(var(--color-bg-primary) / 0.5); }
+  .bg-card         { background: rgb(var(--color-bg-card)); }
+  .bg-card-70      { background: rgb(var(--color-bg-card) / 0.7); }
+  .bg-accent       { background: rgb(var(--color-accent)); }
+  .bg-accent-15    { background: rgb(var(--color-accent) / 0.15); }
+  .bg-accent-08    { background: rgb(var(--color-accent) / 0.08); }
+  .bd-border       { border-color: rgb(var(--color-bg-border)); }
+  .bd-border-40    { border-color: rgb(var(--color-bg-border) / 0.4); }
+  .bd-border-60    { border-color: rgb(var(--color-bg-border) / 0.6); }
+  .bd-accent-40    { border-color: rgb(var(--color-accent) / 0.4); }
+  .bd-accent-60    { border-color: rgb(var(--color-accent) / 0.6); }
+
+  /* 리비전 카드 */
+  .rev-card { position: relative; transition: border-color .2s; }
+  .rev-card.normal { border-color: rgb(var(--color-accent) / 0.55); box-shadow: 0 0 0 1px rgb(var(--color-accent) / 0.18), 0 6px 14px rgb(var(--color-accent) / 0.10); }
+  .rev-side { position: absolute; left:0; top:0; bottom:0; width: 3px; border-radius: 12px 0 0 12px; background: rgb(var(--color-accent)); }
+
+  /* 댓글 버블 */
+  .comment-bubble.me    { background: rgb(var(--color-accent) / 0.10); border-color: rgb(var(--color-accent) / 0.3); }
+  .comment-bubble.other { background: rgb(var(--color-bg-primary) / 0.6); border-color: rgb(var(--color-bg-border) / 0.4); }
+
+  /* re 배지 (댓글 옆) */
+  .re-tag {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 1px 6px; border-radius: 4px; font-size: 9px; font-weight: 700;
+    background: rgb(var(--color-accent) / 0.15);
+    color: rgb(var(--color-accent-sub));
+    cursor: pointer; transition: all .15s;
+    border: 1px solid rgb(var(--color-accent) / 0.3);
+  }
+  .re-tag:hover { background: rgb(var(--color-accent) / 0.25); }
+
+  /* 강조 애니메이션 */
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(var(--color-accent) / 0.55), 0 0 0 1px rgb(var(--color-accent) / 0.18), 0 6px 14px rgb(var(--color-accent) / 0.10); }
+    50%      { box-shadow: 0 0 0 4px rgb(var(--color-accent) / 0.45), 0 0 0 1px rgb(var(--color-accent) / 0.7), 0 6px 14px rgb(var(--color-accent) / 0.25); }
+  }
+  .pulse { animation: pulse 1.2s ease-in-out 2; }
+
+  /* 모달 */
+  .modal-chrome {
+    background: rgb(var(--color-bg-card));
+    border: 1px solid rgb(var(--color-bg-border) / 0.5);
+    border-radius: 18px;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.4);
+    position: relative;
+    overflow: hidden;
+  }
+  .modal-chrome::before {
+    content: ''; position: absolute; top: -40px; right: -40px; width: 240px; height: 240px;
+    background: radial-gradient(circle, rgb(var(--color-accent) / 0.14), transparent 70%);
+    pointer-events: none;
+  }
+
+  .tab-btn { padding: 10px 14px; font-size: 12.5px; font-weight: 700; color: rgb(var(--color-text-secondary)); position: relative; cursor: pointer; transition: color .15s; display: flex; align-items: center; gap: 6px; }
+  .tab-btn.active { color: rgb(var(--color-accent-sub)); }
+  .tab-btn.active::after {
+    content: ''; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
+    background: rgb(var(--color-accent)); border-radius: 2px;
+    box-shadow: 0 0 8px rgb(var(--color-accent));
+  }
+  .tab-badge { background: rgb(var(--color-accent) / 0.2); color: rgb(var(--color-accent-sub)); border-radius: 999px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+
+  .form-input {
+    background: rgb(var(--color-bg-primary) / 0.8);
+    border: 1px solid rgb(var(--color-bg-border) / 0.6);
+    color: rgb(var(--color-text-primary));
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    width: 100%;
+  }
+  .form-input:focus { outline: none; border-color: rgb(var(--color-accent) / 0.7); }
+</style>
+</head>
+<body data-mode="dark">
+
+<!-- TOP CONTROL -->
+<div class="sticky top-0 z-50 backdrop-blur-xl border-b bd-border-40 bg-card-70">
+  <div class="max-w-[1500px] mx-auto px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-3">
+    <h1 class="text-base font-bold text-prim">댓글 통합 — 리비전 카드 ↔ 씬 댓글 패널</h1>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">테마</span>
+      <div class="flex gap-1.5">
+        <button data-theme="" class="theme-btn w-7 h-7 rounded-full ring-2 ring-white" style="background:#6C5CE7"></button>
+        <button data-theme="cinema-red" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#E11D48"></button>
+        <button data-theme="midnight-blue" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#3B82F6"></button>
+        <button data-theme="emerald" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#10B981"></button>
+        <button data-theme="amber-gold" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#D97706"></button>
+        <button data-theme="nameko" class="theme-btn w-7 h-7 rounded-full ring-1 ring-white/20" style="background:#814D41"></button>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">모드</span>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-mode="dark" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">다크</button>
+        <button data-mode="light" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">라이트</button>
+      </div>
+    </div>
+
+    <div class="ml-auto flex items-center gap-2">
+      <button id="demo-flow" class="px-3 py-1.5 text-xs font-bold rounded-md bg-accent text-white">▶ 흐름 데모 재생</button>
+    </div>
+  </div>
+</div>
+
+<!-- 안내 -->
+<div class="max-w-[1500px] mx-auto px-6 pt-6 pb-3">
+  <div class="text-[12px] text-sec leading-relaxed">
+    <strong class="text-prim">작동 원리:</strong> 좌측 모달 본체의 리비전 카드(re3) 안에서 적은 댓글은 우측 씬 댓글 패널에도 자동으로 흘러나오고 [re3] 배지가 붙습니다. 우측 패널에서 직접 적은 댓글은 라벨 없이 일반 씬 댓글로 남습니다. [re3] 배지 클릭 시 → 그 리비전 카드로 자동 스크롤 + 강조.
+  </div>
+</div>
+
+<!-- MODAL: 좌측 본체 + 우측 댓글 패널 -->
+<div class="max-w-[1500px] mx-auto px-6 pb-12">
+  <div class="modal-chrome">
+    <!-- 모달 헤더 -->
+    <div class="relative px-6 py-4 border-b bd-border-40 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="text-sm font-mono text-sec-50">#001</div>
+        <div class="text-lg font-mono font-bold text-prim">EP01 · A · 1</div>
+        <div class="text-[11px] px-2 py-0.5 rounded-full bg-accent-15 text-accent-sub font-bold">담당: 이○○ · 박○○</div>
+      </div>
+      <button class="text-sec hover:text-prim text-2xl leading-none">×</button>
+    </div>
+
+    <!-- 본체(좌) + 댓글 패널(우) -->
+    <div class="grid grid-cols-12 relative" style="min-height:760px">
+
+      <!-- ─── 좌측 본체 ─── -->
+      <div class="col-span-8 border-r bd-border-40 relative">
+        <!-- 탭 -->
+        <div class="flex gap-1 px-5 border-b bd-border-40">
+          <div class="tab-btn">상세</div>
+          <div class="tab-btn active">리비전 <span class="tab-badge">3</span></div>
+          <div class="tab-btn">파일</div>
+          <div class="tab-btn">히스토리</div>
+        </div>
+
+        <!-- 리비전 카드 영역 -->
+        <div class="p-5 space-y-3">
+
+          <!-- 카드: re3 (예시) -->
+          <div id="rev-card-3" class="rev-card normal bg-card border bd-border-60 rounded-xl p-3.5">
+            <span class="rev-side"></span>
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center gap-2">
+                <span class="text-[12px] font-bold text-accent-sub">re3</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1" style="color:#74B9FF;background:rgba(116,185,255,0.15)">
+                  <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 6v6h4"/></svg>
+                  진행중
+                </span>
+              </div>
+              <button class="text-sec hover:text-prim p-1 rounded hover:bg-prim-50">⋯</button>
+            </div>
+            <div class="text-[12.5px] text-prim leading-relaxed mb-2">1번 씬 색감이 전체적으로 너무 어두워요. 캐릭터 얼굴 명도 +15, 배경 -10 정도로 부탁드려요.</div>
+            <div class="text-[10.5px] text-sec-70 mb-2.5">김OO · 12분 전 · 댓글 3</div>
+
+            <!-- 카드 안 댓글 스레드 (간소화) -->
+            <div class="border-t bd-border-40 pt-2.5 space-y-1.5">
+              <div class="comment-bubble other border rounded-md px-2.5 py-1.5">
+                <div class="flex items-center justify-between mb-0.5">
+                  <span class="text-[10px] font-bold text-prim">이○○</span>
+                  <span class="text-[9px] text-sec-50">10분 전</span>
+                </div>
+                <div class="text-[11.5px] text-prim">확인했어요. 작업 시작합니다.</div>
+              </div>
+              <div class="comment-bubble me border rounded-md px-2.5 py-1.5">
+                <div class="flex items-center justify-between mb-0.5">
+                  <span class="text-[10px] font-bold text-accent-sub">김OO</span>
+                  <span class="text-[9px] text-sec-50">8분 전</span>
+                </div>
+                <div class="text-[11.5px] text-prim">캐릭터 얼굴 쪽은 입가 그림자 위주로요.</div>
+              </div>
+              <div class="comment-bubble other border rounded-md px-2.5 py-1.5">
+                <div class="flex items-center justify-between mb-0.5">
+                  <span class="text-[10px] font-bold text-prim">이○○</span>
+                  <span class="text-[9px] text-sec-50">2분 전</span>
+                </div>
+                <div class="text-[11.5px] text-prim">알겠습니다. 30분 정도 걸릴 것 같아요.</div>
+              </div>
+              <div id="card-input-row" class="flex gap-1.5 pt-1">
+                <input type="text" class="form-input flex-1" placeholder="re3 댓글 남기기..." style="font-size: 11.5px;">
+                <button class="px-2.5 py-1 text-[11px] font-bold rounded-md bg-accent text-white">전송</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 카드: re2 (간소화) -->
+          <div id="rev-card-2" class="rev-card normal bg-card border bd-border-60 rounded-xl p-3.5">
+            <span class="rev-side"></span>
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <span class="text-[12px] font-bold text-accent-sub">re2</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1" style="color:#FDCB6E;background:rgba(253,203,110,0.15)">
+                  <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+                  대기
+                </span>
+              </div>
+              <button class="text-sec hover:text-prim p-1 rounded hover:bg-prim-50">⋯</button>
+            </div>
+            <div class="text-[12.5px] text-prim mb-1">캐릭터 동작이 너무 느려 보여요. 좀 더 자연스럽게.</div>
+            <div class="text-[10.5px] text-sec-70">박OO · 1시간 전 · 댓글 0</div>
+          </div>
+
+          <!-- 카드: re1 (간소화, 완료) -->
+          <div id="rev-card-1" class="rev-card bg-card border bd-border-60 rounded-xl p-3.5 opacity-70">
+            <span class="rev-side" style="background:#00B894"></span>
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <span class="text-[12px] font-bold text-sec">re1</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-1" style="color:#00B894;background:rgba(0,184,148,0.15)">
+                  <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                  완료
+                </span>
+              </div>
+              <button class="text-sec hover:text-prim p-1 rounded hover:bg-prim-50">⋯</button>
+            </div>
+            <div class="text-[12.5px] text-prim mb-1 line-through opacity-60">왼쪽 위 나무 위치 살짝 옮겨주세요.</div>
+            <div class="text-[10.5px] text-sec-70">김OO · 어제 · 댓글 2</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ─── 우측 댓글 패널 ─── -->
+      <div class="col-span-4 flex flex-col" style="max-height:760px">
+        <div class="px-4 py-3 border-b bd-border-40 flex items-center justify-between">
+          <h3 class="text-[13px] font-bold text-prim flex items-center gap-2">
+            <svg class="w-4 h-4 text-sec" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+            댓글
+            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-accent-15 text-accent-sub">8</span>
+          </h3>
+          <div class="flex items-center gap-1">
+            <button title="re 댓글만 보기" class="text-[10px] px-2 py-1 rounded text-sec hover:text-prim hover:bg-prim-50">re만</button>
+            <button title="필터" class="text-sec hover:text-prim p-1">▾</button>
+          </div>
+        </div>
+
+        <!-- 댓글 흐름 -->
+        <div class="flex-1 overflow-y-auto p-3 space-y-2">
+
+          <!-- 일반 씬 댓글 -->
+          <div class="comment-bubble other border rounded-md px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#A29BFE">조</span>
+                <span class="text-[11px] font-bold text-prim">조OO</span>
+                <span class="text-[9px] text-sec-50">감독</span>
+              </div>
+              <span class="text-[10px] text-sec-50">2시간 전</span>
+            </div>
+            <div class="text-[12px] text-prim">이 씬 전체 톤 한번 다시 봐주세요.</div>
+          </div>
+
+          <!-- re1 맥락 댓글 (완료된 리비전) -->
+          <div class="comment-bubble other border rounded-md px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#6C5CE7">김</span>
+                <span class="text-[11px] font-bold text-prim">김OO</span>
+                <span class="re-tag" data-jump="rev-card-1">re1</span>
+              </div>
+              <span class="text-[10px] text-sec-50">어제</span>
+            </div>
+            <div class="text-[12px] text-prim">나무 옮겨 달라는 거 였어요.</div>
+          </div>
+          <div class="comment-bubble other border rounded-md px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#74B9FF">이</span>
+                <span class="text-[11px] font-bold text-prim">이○○</span>
+                <span class="re-tag" data-jump="rev-card-1">re1</span>
+              </div>
+              <span class="text-[10px] text-sec-50">어제</span>
+            </div>
+            <div class="text-[12px] text-prim">옮겼어요 확인 부탁.</div>
+          </div>
+
+          <!-- 일반 씬 댓글 -->
+          <div class="comment-bubble other border rounded-md px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#A29BFE">조</span>
+                <span class="text-[11px] font-bold text-prim">조OO</span>
+                <span class="text-[9px] text-sec-50">감독</span>
+              </div>
+              <span class="text-[10px] text-sec-50">1시간 전</span>
+            </div>
+            <div class="text-[12px] text-prim">전반적으로 좋아졌네요.</div>
+          </div>
+
+          <!-- re3 맥락 댓글 — 진행중 리비전, 카드 안 댓글과 동일 데이터 -->
+          <div class="comment-bubble other border rounded-md px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#74B9FF">이</span>
+                <span class="text-[11px] font-bold text-prim">이○○</span>
+                <span class="re-tag" data-jump="rev-card-3">re3</span>
+              </div>
+              <span class="text-[10px] text-sec-50">10분 전</span>
+            </div>
+            <div class="text-[12px] text-prim">확인했어요. 작업 시작합니다.</div>
+          </div>
+          <div class="comment-bubble me border rounded-md px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#6C5CE7">김</span>
+                <span class="text-[11px] font-bold text-accent-sub">김OO</span>
+                <span class="re-tag" data-jump="rev-card-3">re3</span>
+              </div>
+              <span class="text-[10px] text-sec-50">8분 전</span>
+            </div>
+            <div class="text-[12px] text-prim">캐릭터 얼굴 쪽은 입가 그림자 위주로요.</div>
+          </div>
+          <div class="comment-bubble other border rounded-md px-3 py-2">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#74B9FF">이</span>
+                <span class="text-[11px] font-bold text-prim">이○○</span>
+                <span class="re-tag" data-jump="rev-card-3">re3</span>
+              </div>
+              <span class="text-[10px] text-sec-50">2분 전</span>
+            </div>
+            <div class="text-[12px] text-prim">알겠습니다. 30분 정도 걸릴 것 같아요.</div>
+          </div>
+
+          <!-- 새로 들어올 댓글 자리 (데모) -->
+          <div id="incoming-slot"></div>
+
+        </div>
+
+        <!-- 패널 입력 -->
+        <div class="border-t bd-border-40 p-3">
+          <div class="flex gap-2">
+            <span class="w-6 h-6 rounded-full text-[10px] font-bold text-white inline-flex items-center justify-center shrink-0" style="background:#A29BFE">한</span>
+            <div class="flex-1">
+              <input type="text" class="form-input" placeholder="씬 댓글 남기기... (라벨 없음)" style="padding: 6px 10px; font-size: 12px;">
+              <div class="text-[10px] text-sec-50 mt-1">→ 여기서 적으면 일반 씬 댓글로 (라벨 없음). 리비전 댓글은 카드 안에서 적기.</div>
+            </div>
+            <button class="px-2.5 py-1 text-[11px] font-bold rounded-md bg-accent text-white self-start mt-0.5">전송</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 추가 안내 -->
+  <div class="mt-6 grid grid-cols-2 gap-4">
+    <div class="bg-card border bd-border-40 rounded-xl p-4">
+      <div class="text-[11px] font-bold text-accent-sub mb-2 uppercase tracking-wider">데이터 모델 (단순화)</div>
+      <div class="text-[12px] text-sec leading-relaxed">
+        모든 댓글은 같은 곳에 저장되고, 그 중 일부에는 "어느 리비전과 연결되어 있는가" 표시(<code class="text-accent-sub px-1 bg-accent-15 rounded">re3</code> 같은)가 붙어요. 그 표시가 있는 댓글은 → 리비전 카드 안 + 씬 댓글 패널 양쪽에 표시. 표시 없는 건 → 씬 댓글 패널에만 표시.
+      </div>
+    </div>
+    <div class="bg-card border bd-border-40 rounded-xl p-4">
+      <div class="text-[11px] font-bold text-accent-sub mb-2 uppercase tracking-wider">상호작용</div>
+      <ul class="text-[12px] text-sec leading-relaxed space-y-1.5">
+        <li>· 우측 패널의 <span class="re-tag" style="cursor:default">re3</span> 배지 <strong class="text-prim">클릭</strong> → 좌측 카드로 스크롤 + 1.2초 강조 애니메이션</li>
+        <li>· "<strong class="text-prim">re만</strong>" 버튼 클릭 → 일반 씬 댓글 숨김, re 라벨 댓글만 표시</li>
+        <li>· 카드 안 입력은 자동으로 그 카드의 [re#] 맥락이 붙음</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+function setTheme(t) {
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    if (b.dataset.theme === t) {
+      b.classList.add('ring-2','ring-white'); b.classList.remove('ring-1','ring-white/20');
+    } else {
+      b.classList.remove('ring-2','ring-white'); b.classList.add('ring-1','ring-white/20');
+    }
+  });
+}
+function setMode(m) {
+  document.body.setAttribute('data-mode', m);
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    if (b.dataset.mode === m) {
+      b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim');
+    } else {
+      b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim');
+    }
+  });
+}
+
+function jumpToCard(id) {
+  const card = document.getElementById(id);
+  if (!card) return;
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+  card.classList.remove('pulse');
+  void card.offsetWidth; // reflow
+  card.classList.add('pulse');
+}
+
+function demoFlow() {
+  // 카드 안에서 새 댓글이 추가되고 → 우측 패널에도 자동 추가되는 데모
+  const cardArea = document.querySelector('#rev-card-3 > div:last-child');
+  const cardBubble = document.createElement('div');
+  cardBubble.className = 'comment-bubble me border rounded-md px-2.5 py-1.5';
+  cardBubble.style.opacity = '0';
+  cardBubble.style.transform = 'translateY(8px)';
+  cardBubble.style.transition = 'all 0.4s';
+  cardBubble.innerHTML = `
+    <div class="flex items-center justify-between mb-0.5">
+      <span class="text-[10px] font-bold text-accent-sub">한솔</span>
+      <span class="text-[9px] text-sec-50">방금</span>
+    </div>
+    <div class="text-[11.5px] text-prim">잘 진행되고 있어요!</div>
+  `;
+  cardArea.insertBefore(cardBubble, document.getElementById('card-input-row'));
+  setTimeout(() => { cardBubble.style.opacity = '1'; cardBubble.style.transform = 'translateY(0)'; }, 50);
+
+  // 우측 패널에도 동일 댓글 추가
+  const panelBubble = document.createElement('div');
+  panelBubble.className = 'comment-bubble me border rounded-md px-3 py-2';
+  panelBubble.style.opacity = '0';
+  panelBubble.style.transform = 'translateY(8px)';
+  panelBubble.style.transition = 'all 0.4s';
+  panelBubble.innerHTML = `
+    <div class="flex items-center justify-between mb-0.5">
+      <div class="flex items-center gap-1.5">
+        <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#A29BFE">한</span>
+        <span class="text-[11px] font-bold text-accent-sub">한솔</span>
+        <span class="re-tag" data-jump="rev-card-3">re3</span>
+      </div>
+      <span class="text-[10px] text-sec-50">방금</span>
+    </div>
+    <div class="text-[12px] text-prim">잘 진행되고 있어요!</div>
+  `;
+  document.getElementById('incoming-slot').appendChild(panelBubble);
+  panelBubble.querySelector('.re-tag').addEventListener('click', (e) => jumpToCard(e.target.dataset.jump));
+  setTimeout(() => {
+    panelBubble.style.opacity = '1';
+    panelBubble.style.transform = 'translateY(0)';
+    panelBubble.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }, 200);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+  document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  document.querySelectorAll('.re-tag').forEach(t => t.addEventListener('click', (e) => {
+    e.stopPropagation();
+    jumpToCard(t.dataset.jump);
+  }));
+  document.getElementById('demo-flow').addEventListener('click', demoFlow);
+});
+</script>
+</body>
+</html>
