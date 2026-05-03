@@ -17,6 +17,7 @@ import { formatTimeShort } from '@/utils/formatTime';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
+import { RevisionCommentBadge } from './RevisionCommentBadge';
 import '@/styles/comment-panel.css';
 
 // ─── 타입 ───────────────────────────────────
@@ -80,6 +81,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
+
+  // v1.18.0: "re만" 필터 — 리비전 맥락 댓글(revisionId 있음)만 표시.
+  // 한솔 결정 (spec 2026-05-03): 댓글 패널에서 "리비전 댓글만" 빠르게 가려보고 싶을 때 토글.
+  // onCountChange 는 전체 카운트로 유지(외부 배지 표기 일관성), 시각 필터만 패널 내부 적용.
+  const [reOnly, setReOnly] = useState(false);
 
   // 드래그 + 라이트박스
   const [draggingOver, setDraggingOver] = useState(false);
@@ -520,6 +526,12 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     u.name.toLowerCase().includes(mentionFilter)
   );
 
+  // v1.18.0: re만 필터 — 토글 켜져 있으면 revisionId 있는 댓글만 노출.
+  const visibleComments = useMemo(
+    () => (reOnly ? comments.filter((c) => !!c.revisionId) : comments),
+    [comments, reOnly],
+  );
+
   const handleMentionClick = (userName: string) => {
     setHighlightUserName(userName);
     setView('team');
@@ -564,16 +576,38 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       onDrop={handleDrop}
       className="flex flex-col h-full relative"
     >
+      {/* v1.18.0: 상단 미니 툴바 — "re만" 필터 토글 (한솔 결정 spec 2026-05-03).
+          댓글 패널에서 리비전 맥락 댓글만 빠르게 골라보기 위함. */}
+      <div className="px-3 pt-2 pb-1 flex items-center justify-end shrink-0">
+        <button
+          type="button"
+          onClick={() => setReOnly((v) => !v)}
+          title={reOnly ? '리비전 댓글만 표시중 — 클릭해 전체 보기' : '리비전 댓글만 보기'}
+          className={cn(
+            'text-[10px] px-2 py-1 rounded transition-colors cursor-pointer font-bold',
+            reOnly
+              ? 'bg-accent text-white'
+              : 'text-text-secondary hover:text-text-primary hover:bg-bg-primary/50',
+          )}
+        >
+          re만
+        </button>
+      </div>
+
       {/* 댓글 목록 — 시스템 이벤트(inlineEvents)와 시간순 머지 + 새 항목 슬라이드 인 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
-        {comments.length === 0 && (!inlineEvents || inlineEvents.length === 0) ? (
+        {visibleComments.length === 0 && (!inlineEvents || inlineEvents.length === 0) ? (
           <div className="text-center py-10">
-            <p className="text-text-secondary text-xs">아직 의견이 없습니다</p>
-            <p className="text-text-secondary/40 text-[11px] mt-1">첫 의견을 남겨보세요</p>
+            <p className="text-text-secondary text-xs">
+              {reOnly ? '리비전 댓글이 없습니다' : '아직 의견이 없습니다'}
+            </p>
+            <p className="text-text-secondary/40 text-[11px] mt-1">
+              {reOnly ? '"re만" 토글을 끄면 일반 댓글이 보입니다' : '첫 의견을 남겨보세요'}
+            </p>
           </div>
         ) : (
         <AnimatePresence initial={false}>
-          {mergeFeed(comments, inlineEvents ?? []).map((node) => {
+          {mergeFeed(visibleComments, reOnly ? [] : (inlineEvents ?? [])).map((node) => {
             if (node.kind === 'event') {
               return (
                 <motion.div
@@ -628,6 +662,15 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                         {formatTimeShort(comment.createdAt)}
                       </span>
                     </>
+                  )}
+                  {/* v1.18.0: 리비전 맥락 댓글은 [re#] 칩 → 클릭 시 모달이 리비전 탭/카드로 점프 */}
+                  {comment.revisionId && (
+                    <RevisionCommentBadge
+                      revisionId={comment.revisionId}
+                      onJump={(revId) => {
+                        window.dispatchEvent(new CustomEvent('bflow:jump-to-revision', { detail: { revisionId: revId } }));
+                      }}
+                    />
                   )}
                   {comment.editedAt && (
                     <span className="text-[11px] text-text-secondary/30 italic">수정됨</span>

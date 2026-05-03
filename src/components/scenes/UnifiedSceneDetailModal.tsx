@@ -168,6 +168,37 @@ export function UnifiedSceneDetailModal({
     if (initialTab) setTab(initialTab);
   }, [initialTab]);
 
+  // v1.18.0: 댓글 패널의 [re#] 칩 클릭 → 리비전 탭 + 카드 강조 + 스레드 펼침.
+  // CommentPanel(같은 모달 내부) 이 'bflow:jump-to-revision' 을 dispatch 한다.
+  useEffect(() => {
+    function onJump(e: Event) {
+      const detail = (e as CustomEvent<{ revisionId?: string }>).detail;
+      const revisionId = detail?.revisionId;
+      if (!revisionId) return;
+      setTab('revisions');
+      // 다음 paint 에서 카드 scrollIntoView + pulse + 스레드 펼침 신호.
+      // 탭 전환 직후엔 카드가 아직 마운트 안 됐을 수 있어 retry 패턴(focusRevisionId 와 동일).
+      let retries = 8;
+      const attempt = () => {
+        const card = document.getElementById(`rev-card-${revisionId}`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.remove('rev-pulse');
+          // reflow trigger — 같은 카드 재클릭 시 애니메이션 재실행
+          void (card as HTMLElement).offsetWidth;
+          card.classList.add('rev-pulse');
+          // 카드 내 댓글 스레드 펼침 신호 (RevisionCommentThread 가 listen)
+          window.dispatchEvent(new CustomEvent('bflow:expand-revision', { detail: { revisionId } }));
+        } else if (retries-- > 0) {
+          setTimeout(() => requestAnimationFrame(attempt), 100);
+        }
+      };
+      requestAnimationFrame(attempt);
+    }
+    window.addEventListener('bflow:jump-to-revision', onJump);
+    return () => window.removeEventListener('bflow:jump-to-revision', onJump);
+  }, []);
+
   // v1.18.0: focusRevisionId 강조 — 활성 탭이 'revisions' 일 때 카드를 scrollIntoView + pulse 클래스 부여.
   // 카드 element 는 RevisionCard 의 root motion.div 가 id={`rev-card-${revision.id}`} 로 설정.
   useEffect(() => {
