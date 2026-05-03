@@ -576,7 +576,7 @@ export interface ElectronAPI {
   supabaseUpdatePrivateEvent: (id: string, updates: Record<string, unknown>) => Promise<void>;
   supabaseDeletePrivateEvent: (id: string) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
-  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<void>;
+  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
   supabaseDeleteRevision: (id: string) => Promise<void>;
   supabaseReadAllMetadata: () => Promise<unknown[]>;

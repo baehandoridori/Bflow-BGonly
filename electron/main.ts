@@ -1254,8 +1254,9 @@ ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
 }));
 ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, partUuid: string, sceneId: string,
     revisionNo: number, status: string, priority: string, description: string, frameNo: string,
-    imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => {
-    await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt);
+    imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
+    notifyUserIdsJson?: string) => {
+    await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt, notifyUserIdsJson);
     if (currentActivityUser) {
       try {
         // sceneId 가 sceneKey 형식 (예: 'EP02:A:35') 일 수 있으므로 파싱 + raw- prefix 디코드 (Codex P2)

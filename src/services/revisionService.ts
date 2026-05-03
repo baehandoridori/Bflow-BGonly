@@ -294,6 +294,7 @@ function rowToRevision(row: {
   resolvedBy: string; resolvedNote: string;
   createdAt: string; updatedAt: string; resolvedAt: string;
   priority?: string; frameNo?: string;
+  notifyUserIds?: string[] | null;
 }): CompRevision {
   const p = row.priority as RevisionPriority | undefined;
   const sceneKey = normalizeStoredRevisionSceneKey(row.sceneKey);
@@ -315,6 +316,7 @@ function rowToRevision(row: {
     createdAt: row.createdAt || '',
     updatedAt: row.updatedAt || '',
     resolvedAt: row.resolvedAt || undefined,
+    notifyUserIds: Array.isArray(row.notifyUserIds) ? row.notifyUserIds : undefined,
   };
 }
 
@@ -329,6 +331,7 @@ export async function loadAllRevisions(): Promise<RevisionsStore> {
     resolvedBy: string; resolvedNote: string;
     createdAt: string; updatedAt: string; resolvedAt: string;
     priority?: string; frameNo?: string;
+    notifyUserIds?: string[] | null;
   }[] = [];
 
   try {
@@ -393,26 +396,31 @@ function nextRevisionNo(store: RevisionsStore, sceneKeys: string[]): number {
   return Math.max(...existing.map(r => r.revisionNo)) + 1;
 }
 
-export async function createRevision(
-  sceneKey: string,
-  data: {
-    description: string;
-    priority?: RevisionPriority;
-    frameNo?: string;
-    imageUrl?: string;
-    department?: 'bg' | 'acting';
-    lookupDepartment?: 'bg' | 'acting';
-    requesterId: string;
-    requesterName: string;
-    assignee?: string;
-  },
-): Promise<CompRevision> {
-  const lookupSceneKeys = getRevisionLookupSceneKeys(sceneKey);
+/**
+ * v1.18.0: 리비전 등록 input 시그니처.
+ * 우선순위/프레임/담당자 입력 UI 가 폼에서 제거되어 (한솔 결정 — spec 2026-05-03)
+ * 자동값('normal' / '' / '') 으로 처리. 호출자는 핵심 데이터만 전달.
+ */
+export interface CreateRevisionServiceInput {
+  sceneKey: string;
+  description: string;
+  imageUrl?: string;
+  department?: 'bg' | 'acting';
+  lookupDepartment?: 'bg' | 'acting';
+  requesterId: string;
+  requesterName: string;
+  notifyUserIds: string[];
+}
+
+export async function createRevision(input: CreateRevisionServiceInput): Promise<CompRevision> {
+  const lookupSceneKeys = getRevisionLookupSceneKeys(input.sceneKey);
   const normalizedSceneKey = lookupSceneKeys[0];
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
-  const priority = data.priority || 'normal';
-  const department = data.department || data.lookupDepartment;
+  // v1.18.0 자동값: 우선순위/프레임/담당자 입력 UI 제거 → 항상 'normal' / '' / ''.
+  const priority: RevisionPriority = 'normal';
+  const department = input.department || input.lookupDepartment;
+  const notifyUserIds = Array.isArray(input.notifyUserIds) ? input.notifyUserIds : [];
 
   if (sheetsMode) {
     const store = await loadAllRevisions();
@@ -423,22 +431,24 @@ export async function createRevision(
       revisionNo,
       status: 'open',
       priority,
-      description: data.description,
-      frameNo: data.frameNo,
-      imageUrl: data.imageUrl,
+      description: input.description,
+      frameNo: undefined,
+      imageUrl: input.imageUrl,
       department,
-      requesterId: data.requesterId,
-      requesterName: data.requesterName,
-      assignee: data.assignee,
+      requesterId: input.requesterId,
+      requesterName: input.requesterName,
+      assignee: undefined,
       createdAt: now,
       updatedAt: now,
+      notifyUserIds,
     };
 
     // Supabase: partUuid + sceneId로 저장 (sceneKey를 그대로 partUuid 자리에 전달 — 서버에서 해석)
     await window.electronAPI.supabaseAddRevision(
       id, '', normalizedSceneKey, revisionNo, 'open', priority,
-      data.description, data.frameNo || '', data.imageUrl || '', department || '', data.lookupDepartment || department || '',
-      data.requesterId, data.requesterName, data.assignee || '', now,
+      input.description, '', input.imageUrl || '', department || '', input.lookupDepartment || department || '',
+      input.requesterId, input.requesterName, '', now,
+      JSON.stringify(notifyUserIds),
     );
 
     // 캐시 업데이트
@@ -457,15 +467,16 @@ export async function createRevision(
     revisionNo,
     status: 'open',
     priority,
-    description: data.description,
-    frameNo: data.frameNo,
-    imageUrl: data.imageUrl,
+    description: input.description,
+    frameNo: undefined,
+    imageUrl: input.imageUrl,
     department,
-    requesterId: data.requesterId,
-    requesterName: data.requesterName,
-    assignee: data.assignee,
+    requesterId: input.requesterId,
+    requesterName: input.requesterName,
+    assignee: undefined,
     createdAt: now,
     updatedAt: now,
+    notifyUserIds,
   };
 
   if (!all[normalizedSceneKey]) all[normalizedSceneKey] = [];

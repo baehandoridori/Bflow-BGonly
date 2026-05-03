@@ -1209,7 +1209,7 @@ export async function deleteRevision(id: string, requesterUserId: string): Promi
 }
 
 /** 모든 리비전 읽기 */
-export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey: string })[]> {
+export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey: string; notifyUserIds: string[] })[]> {
   const { data, error } = await supabase
     .from('comp_revisions')
     .select('*')
@@ -1257,6 +1257,7 @@ export async function addRevision(
   requesterName: string,
   assignee: string,
   createdAt: string,
+  notifyUserIdsJson?: string,
 ): Promise<void> {
   // partUuid가 비어있으면 sceneId(=sceneKey)에서 역조회
   let resolvedPartUuid = partUuid;
@@ -1293,6 +1294,18 @@ export async function addRevision(
     throw new Error(`리비전 저장 실패: 씬을 찾을 수 없음 (partUuid=${resolvedPartUuid}, sceneId=${sceneId})`);
   }
 
+  // v1.18.0: notify_user_ids — JSON 문자열로 전달받아 파싱.
+  // 잘못된 JSON 이면 빈 배열로 fallback (실패해도 알림만 못 받지 등록 자체는 성공).
+  let notifyUserIds: string[] = [];
+  if (notifyUserIdsJson) {
+    try {
+      const parsed = JSON.parse(notifyUserIdsJson);
+      if (Array.isArray(parsed)) notifyUserIds = parsed.filter((x) => typeof x === 'string');
+    } catch {
+      console.warn('[addRevision] notifyUserIdsJson 파싱 실패:', notifyUserIdsJson);
+    }
+  }
+
   const { error } = await supabase.from('comp_revisions').insert({
     id,
     part_id: resolvedPartUuid,
@@ -1309,6 +1322,7 @@ export async function addRevision(
     requester_name: requesterName,
     assignee,
     created_at: createdAt,
+    notify_user_ids: notifyUserIds,
   });
   throwIfError(error);
   broadcastDataChange('comp_revisions', 'INSERT');
@@ -1334,7 +1348,11 @@ export async function updateRevision(
   broadcastDataChange('comp_revisions', 'UPDATE');
 }
 
-function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string } {
+function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string; notifyUserIds: string[] } {
+  const rawNotify = r.notify_user_ids;
+  const notifyUserIds: string[] = Array.isArray(rawNotify)
+    ? (rawNotify.filter((x) => typeof x === 'string') as string[])
+    : [];
   return {
     id: r.id as string,
     partId: r.part_id as string,
@@ -1355,6 +1373,7 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
     createdAt: (r.created_at as string) || '',
     updatedAt: (r.updated_at as string) || '',
     resolvedAt: (r.resolved_at as string) || null,
+    notifyUserIds,
   };
 }
 
