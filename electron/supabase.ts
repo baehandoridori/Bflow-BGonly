@@ -137,6 +137,8 @@ export interface SupabaseComment {
   images: string[];
   createdAt: string;
   editedAt: string | null;
+  /** v1.18.0: 리비전 맥락 댓글이면 해당 리비전 id, 일반 씬 댓글이면 null. */
+  revisionId?: string | null;
 }
 
 export interface SupabaseRevision {
@@ -920,6 +922,7 @@ export async function fetchMissedMentions(
         images: c.images || [],            // v1.15.12: 이미지 첨부
         createdAt: c.created_at,
         editedAt: c.edited_at,
+        revisionId: c.revision_id ?? null, // v1.18.0: 리비전 맥락 댓글 표시용
       });
       if (matched.length >= limit) return matched;
     }
@@ -950,6 +953,8 @@ export async function readCommentsForPart(partUuid: string): Promise<SupabaseCom
     images: c.images || [],
     createdAt: c.created_at,
     editedAt: c.edited_at,
+    // v1.18.0: 리비전 ↔ 씬 댓글 단일 흐름 — revision_id 가 NULL 이면 일반 씬 댓글, 값 있으면 리비전 맥락 댓글.
+    revisionId: c.revision_id ?? null,
   }));
 }
 
@@ -964,6 +969,8 @@ export async function addComment(
   mentions: string[],
   createdAt: string,
   images: string[] = [],
+  /** v1.18.0: 리비전 맥락 댓글이면 해당 리비전 id, 일반 씬 댓글이면 null. */
+  revisionId: string | null = null,
 ): Promise<void> {
   // 이슈 F(2026-04-23) + Codex P1(2차): 댓글 경로의 sceneId는 scene.no (=sort_order).
   // sort_order 정확 매칭으로 scene_number 표기 규칙과 무관하게 정확히 식별.
@@ -987,6 +994,7 @@ export async function addComment(
     mentions,
     images,
     created_at: createdAt,
+    revision_id: revisionId || null,
   });
   throwIfError(error);
   broadcastCommentAdded(sceneId, userName, userId, text, mentions);

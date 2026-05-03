@@ -114,7 +114,7 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
     }
   } catch { /* 무시 */ }
 
-  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; images?: string[]; createdAt: string; editedAt: string | null }[] = [];
+  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; images?: string[]; createdAt: string; editedAt: string | null; revisionId?: string | null }[] = [];
 
   let supabaseFailed = false;
   if (partUuids.length > 0) {
@@ -207,6 +207,8 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
       images: c.images,
       createdAt: c.createdAt,
       editedAt: c.editedAt || undefined,
+      // v1.18.0: 리비전 맥락 댓글 식별용 — Supabase 경로만 채워지고 Sheets fallback 은 undefined.
+      revisionId: c.revisionId ?? null,
     });
   }
 
@@ -258,6 +260,8 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
       comment.id, partUuid, sceneId,
       comment.userId, comment.userName, comment.text,
       comment.mentions, comment.createdAt, comment.images ?? [],
+      // v1.18.0: revisionId 정식 전달 — null 이면 일반 씬 댓글, 값 있으면 리비전 맥락 댓글.
+      comment.revisionId ?? null,
     );
     // 캐시 업데이트 — 원본 sheet 캐시에만 낙관적 반영.
     // 반대 부서 sheet 캐시는 invalidate해서 다음 조회 시 통합 재조회로 반영 (중복 삽입 방지).

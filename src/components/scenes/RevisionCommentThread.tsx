@@ -106,9 +106,8 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
       images: [],
       createdAt: new Date().toISOString(),
       // v1.18.0 핵심: 이 댓글은 해당 리비전 맥락에 속함.
-      // TODO: 청크 4에서 supabaseAddComment IPC 시그니처에 revisionId 추가 후
-      // commentService.addComment 가 supabase 까지 전달하도록 정식화.
-      // 현재는 SceneComment 객체에 필드는 들어가지만 supabase insert 시 누락될 수 있음.
+      // commentService.addComment → supabase:add-comment IPC → addComment(... revisionId)
+      // 까지 정식 전달되어 comments.revision_id 컬럼에 저장된다 (청크 4 Task 14 정식화).
       revisionId,
     };
 
