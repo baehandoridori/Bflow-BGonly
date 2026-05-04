@@ -6,6 +6,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
+import { loadPartComments } from '@/services/commentService';
 import type { CompRevision, RevisionStatus } from '@/types';
 import {
   parseSceneKey,
@@ -40,6 +41,10 @@ export default function CompositingView() {
   const [groupMode, setGroupMode] = useState<GroupMode>('scene');
   // v1.19.5: 헤더에서 직접 새 리비전 등록 모달 열기
   const [newRevModalOpen, setNewRevModalOpen] = useState(false);
+  // v1.19.6: 리비전별 댓글 카운트 맵 (revisionId → count). 표시되는 sheetName 들의 댓글을 한 번 fetch 해 빌드.
+  const [commentCountByRev, setCommentCountByRev] = useState<Map<string, number>>(() => new Map());
+  // 댓글 변경(다른 창에서 추가/수정/삭제) 시 카운트 재빌드 트리거용 카운터
+  const [commentRefreshTick, setCommentRefreshTick] = useState(0);
 
   // 선택된 리비전 객체
   const selectedRevision = useMemo(
@@ -251,6 +256,53 @@ export default function CompositingView() {
     return { totalScenes, totalRevisions, totalOpen };
   }, [sceneGroups, revisions]);
 
+  // v1.19.6: 표시되는 sheetName 집합으로 댓글 fetch → revisionId 기준 카운트 맵 빌드.
+  // sceneGroups 의 info.sheetName 에서 unique 만 모아 loadPartComments 호출 (캐시되어 재호출은 가벼움).
+  // BG↔ACT 통합 조회는 commentService 가 이미 처리하므로 한쪽만 호출해도 양쪽 댓글이 들어옴 → 중복 제거 필요.
+  useEffect(() => {
+    const sheetNames = new Set<string>();
+    for (const g of sceneGroups) {
+      if (g.info.sheetName) sheetNames.add(g.info.sheetName);
+    }
+    if (sheetNames.size === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const stores = await Promise.all(
+          Array.from(sheetNames).map((sn) => loadPartComments(sn).catch(() => ({}))),
+        );
+        if (cancelled) return;
+        // revisionId → count (BG/ACT 통합 조회로 중복 들어올 수 있어 commentId 로 dedup)
+        const seenCommentIds = new Set<string>();
+        const counts = new Map<string, number>();
+        for (const store of stores) {
+          for (const list of Object.values(store)) {
+            for (const c of list) {
+              if (!c.revisionId) continue;
+              if (seenCommentIds.has(c.id)) continue;
+              seenCommentIds.add(c.id);
+              counts.set(c.revisionId, (counts.get(c.revisionId) || 0) + 1);
+            }
+          }
+        }
+        setCommentCountByRev(counts);
+      } catch (err) {
+        if (!cancelled) console.warn('[CompositingView] 댓글 카운트 빌드 실패:', err);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [sceneGroups, commentRefreshTick]);
+
+  // 댓글 변경 이벤트 — 다른 창에서 댓글 추가/수정/삭제 시 카운트 재빌드.
+  // commentService 가 invalidate 이벤트와 함께 캐시도 비우므로 다음 fetch 는 최신 데이터를 가져옴.
+  useEffect(() => {
+    const handler = () => setCommentRefreshTick((n) => n + 1);
+    window.addEventListener('bflow:comments-invalidated', handler);
+    return () => window.removeEventListener('bflow:comments-invalidated', handler);
+  }, []);
+
   // 씬 토글
   const toggleScene = useCallback((sceneKey: string) => {
     setExpandedScenes(prev => {
@@ -434,6 +486,7 @@ export default function CompositingView() {
                   group={group}
                   expanded={expandedScenes.has(group.sceneKey)}
                   selectedRevisionId={selectedRevisionId}
+                  commentCountByRev={commentCountByRev}
                   onToggle={() => toggleScene(group.sceneKey)}
                   onSelectRevision={handleSelectRevision}
                   onStatusChange={handleStatusChange}

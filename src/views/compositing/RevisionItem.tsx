@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bell, Undo2 } from 'lucide-react';
+import { Bell, MessageSquare, Undo2 } from 'lucide-react';
 import type { CompRevision, RevisionStatus } from '@/types';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { PathBadge } from '@/components/common/PathBadge';
@@ -13,11 +13,14 @@ import { parsePathsFromText } from './utils';
 export function RevisionItem({
   revision,
   isSelected,
+  commentCount = 0,
   onSelect,
   onStatusChange,
 }: {
   revision: CompRevision;
   isSelected: boolean;
+  /** v1.19.6: 이 리비전에 달린 댓글 개수. 0 이면 마커 표시 안 함. */
+  commentCount?: number;
   onSelect: () => void;
   onStatusChange: (status: RevisionStatus, note?: string) => void;
 }) {
@@ -123,16 +126,29 @@ export function RevisionItem({
           </div>
         )}
 
-        {/* 알림 대상 — v1.19.4: 작은 아바타 스택 + 종 아이콘 */}
-        {notifyNames.length > 0 && (
+        {/* 메타 라인 — v1.19.4: 알림 대상 / v1.19.6: 댓글 카운트 마커 */}
+        {(notifyNames.length > 0 || commentCount > 0) && (
           <div
-            className={`flex items-center gap-1.5 mt-1 ${
-              isResolved ? 'opacity-50' : ''
-            }`}
-            title={`알림 대상: ${notifyNames.join(', ')}`}
+            className={`flex items-center gap-3 mt-1 ${isResolved ? 'opacity-50' : ''}`}
           >
-            <Bell size={10} className="text-text-secondary/60 shrink-0" />
-            <AvatarStack names={notifyNames} max={4} size={16} />
+            {notifyNames.length > 0 && (
+              <div
+                className="flex items-center gap-1.5"
+                title={`알림 대상: ${notifyNames.join(', ')}`}
+              >
+                <Bell size={10} className="text-text-secondary/60 shrink-0" />
+                <AvatarStack names={notifyNames} max={4} size={16} />
+              </div>
+            )}
+            {commentCount > 0 && (
+              <span
+                className="flex items-center gap-1 text-[11px] text-text-secondary/70"
+                title={`댓글 ${commentCount}개`}
+              >
+                <MessageSquare size={10} className="shrink-0" />
+                {commentCount}
+              </span>
+            )}
           </div>
         )}
 

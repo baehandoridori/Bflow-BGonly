@@ -15,6 +15,7 @@ export function SceneRow({
   group,
   expanded,
   selectedRevisionId,
+  commentCountByRev,
   onToggle,
   onSelectRevision,
   onStatusChange,
@@ -22,6 +23,8 @@ export function SceneRow({
   group: SceneGroup;
   expanded: boolean;
   selectedRevisionId: string | null;
+  /** v1.19.6: revisionId → 댓글 개수. 0 이면 마커 표시 안 함. */
+  commentCountByRev?: Map<string, number>;
   onToggle: () => void;
   onSelectRevision: (rev: CompRevision) => void;
   onStatusChange: (revId: string, sceneKey: string, status: RevisionStatus, note?: string) => void;
@@ -141,6 +144,7 @@ export function SceneRow({
                     key={rev.id}
                     revision={rev}
                     isSelected={rev.id === selectedRevisionId}
+                    commentCount={commentCountByRev?.get(rev.id) ?? 0}
                     onSelect={() => onSelectRevision(rev)}
                     onStatusChange={(status, note) =>
                       onStatusChange(rev.id, rev.sceneKey, status, note)
