@@ -27,6 +27,15 @@ import { formatTimeShort } from '@/utils/formatTime';
 
 interface Props {
   revisionId: string;
+  /**
+   * commentService 형식 sceneKey (`sheetName:sceneNo`, 예: "EP01_A_BG:3").
+   *
+   * ⚠️ 리비전 시스템 sceneKey(`episode:part:sceneId`, 예: "EP01:A:1")와 형식이 다름.
+   * 호출 측에서 반드시 commentService 형식으로 변환해서 넘겨야 한다.
+   * 잘못된 형식이 전달되면 commentService.parseSceneKey 가 lastIndexOf(':')로 split해
+   * partUuid lookup 실패 → "씬을 찾을 수 없음 (partUuid=, sceneId=...)" 에러 발생
+   * (이슈: 2026-05-04, RevisionPanel 의 buildSceneKey 결과를 그대로 전달하던 v1.18.0 버그).
+   */
   sceneKey: string;
 }
 

@@ -101,12 +101,19 @@ function StatusDropdown({
 
 function RevisionCard({
   revision,
-  sceneKey,
+  commentSceneKey,
   onStatusChange,
   onDelete,
 }: {
   revision: CompRevision;
-  sceneKey: string;
+  /**
+   * commentService 형식 sceneKey (`sheetName:sceneNo`, 예: "EP01_A_BG:3").
+   * ⚠️ 리비전 시스템의 sceneKey(`episode:part:sceneId`, 예: "EP01:A:1")와 형식이 다름.
+   * 이 카드는 RevisionCommentThread 마운트에만 sceneKey를 사용하므로 commentService 형식으로 받는다.
+   * 잘못된 형식이 전달되면 commentService.parseSceneKey 가 lastIndexOf(':')로 split해
+   * partUuid lookup이 실패하고 "씬을 찾을 수 없음" 에러가 발생한다 (이슈: 2026-05-04).
+   */
+  commentSceneKey: string;
   onStatusChange: (status: RevisionStatus, note?: string) => void;
   onDelete?: () => void;
 }) {
@@ -254,7 +261,7 @@ function RevisionCard({
       </div>
 
       {/* 카드 내 댓글 스레드 — v1.18.0 신규 */}
-      <RevisionCommentThread revisionId={revision.id} sceneKey={sceneKey} />
+      <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} />
     </motion.div>
   );
 }
@@ -297,6 +304,10 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   const effectiveDepartment = department ?? inferDepartmentFromSheetName(sheetName);
 
   const sceneKey = buildSceneKey(sheetName, sceneId, { siblingSceneIds: effectiveSiblingSceneIds });
+  // commentService 가 사용하는 sceneKey 형식 (`sheetName:sceneNo`).
+  // 리비전 시스템의 sceneKey(`episode:part:sceneId`)와 다르므로 RevisionCommentThread 에 넘길 때
+  // 반드시 이 형식을 사용해야 한다 (이슈 2026-05-04: 댓글 저장 시 partUuid lookup 실패).
+  const commentSceneKey = `${sheetName}:${sceneId}`;
   const revisions = getRevisionsForScene(sceneKey);
   const sortedRevisions = [...revisions].sort((a, b) =>
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -427,7 +438,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
               <RevisionCard
                 key={rev.id}
                 revision={rev}
-                sceneKey={sceneKey}
+                commentSceneKey={commentSceneKey}
                 onStatusChange={(status, note) => handleStatusChange(rev.id, status, note)}
                 onDelete={() => handleDelete(rev)}
               />
