@@ -15,6 +15,7 @@ import { elevatedGlassStyle, floatingGlassStyle } from '@/utils/glassStyles';
 import { RevisionRecipientPicker } from './RevisionRecipientPicker';
 import { RevisionCommentThread } from './RevisionCommentThread';
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 
 // ─── 상태 뱃지 ───────────────────────────────
 
@@ -185,9 +186,9 @@ function RevisionCard({
         )}
       </div>
 
-      {/* 설명 */}
+      {/* 설명 — G:\ 경로는 PathBadge 아이콘 버튼으로 자동 변환 (메모/댓글과 동일 패턴) */}
       <p className="rev-card-description text-sm text-text-primary leading-relaxed mb-2 whitespace-pre-wrap">
-        {revision.description}
+        <PathLinkifiedText text={revision.description} />
       </p>
 
       {/* 이미지 썸네일 */}

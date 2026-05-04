@@ -28,6 +28,13 @@ export function SceneRow({
 }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const { info, revisions, openCount, uniqueRequesters } = group;
+  const episodes = useDataStore((s) => s.episodes);
+  const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
+  const epLabel = (() => {
+    const ep = episodes.find((e) => e.episodeNumber === info.episodeNumber);
+    if (ep) return getEpisodeDisplayName(ep);
+    return info.sheetName.split('_')[0] || 'EP?';
+  })();
 
   // 씬 ID 표시 (a001, SC001 등 원본 그대로)
   const sceneLabel = info.sceneId || `S${String(info.sceneNo).padStart(2, '0')}`;
@@ -152,7 +159,10 @@ export function SceneRow({
                       className="flex items-center gap-1 px-3 py-1.5 text-[11px] text-text-secondary/60 hover:text-accent transition-colors cursor-pointer rounded-lg hover:bg-accent/5"
                     >
                       <Plus size={12} />
-                      수정 요청 추가
+                      <span>
+                        <span className="text-accent-sub font-semibold">{epLabel}</span>
+                        {' '}{info.part} {info.sceneId} 에 추가 수정 요청
+                      </span>
                     </button>
                   </motion.div>
                 )}

@@ -1,4 +1,4 @@
-// ─── 피드백 상세 패널 ────────────────────────
+// ─── 상세내용 패널 ────────────────────────
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,6 +18,7 @@ import { Avatar } from './sharedComponents';
 import { parsePathsFromText, parseSceneKey } from './utils';
 import type { SceneInfo } from './utils';
 import { SceneJumpButton } from './SceneJumpButton';
+import { RevisionCommentThread } from '@/components/scenes/RevisionCommentThread';
 
 export function DetailPanel({
   revision,
@@ -62,7 +63,7 @@ export function DetailPanel({
         <div className="p-5">
           {/* 헤더 */}
           <div className="flex items-center justify-between mb-5">
-            <h3 className="text-sm font-semibold text-text-primary">피드백 상세</h3>
+            <h3 className="text-sm font-semibold text-text-primary">상세내용</h3>
             <button
               onClick={onClose}
               className="p-1 text-text-secondary hover:text-text-primary rounded-lg hover:bg-bg-border/50 transition-colors cursor-pointer"
@@ -229,26 +230,36 @@ export function DetailPanel({
             )}
           </AnimatePresence>
 
-          {/* 상태 변경 버튼 */}
+          {/* 상태 변경 버튼 — 워크플로우 순서: 진행 시작(위) → 해결 완료(아래) */}
+          {revision.status === 'open' && !showResolveNote && (
+            <button
+              onClick={() => handleStatusSelect('in_progress')}
+              className="w-full flex items-center justify-center gap-2 py-2.5 text-xs font-medium rounded-xl border transition-all cursor-pointer"
+              style={{ borderColor: STATUS_CONFIG.in_progress.color + '40', color: STATUS_CONFIG.in_progress.color }}
+            >
+              <Clock size={14} />
+              진행 시작
+            </button>
+          )}
           {revision.status !== 'resolved' && !showResolveNote && (
             <button
               onClick={() => handleStatusSelect('resolved')}
-              className="w-full flex items-center justify-center gap-2 py-3 text-sm font-medium rounded-xl text-white transition-all cursor-pointer hover:opacity-90"
+              className={`w-full flex items-center justify-center gap-2 py-3 text-sm font-medium rounded-xl text-white transition-all cursor-pointer hover:opacity-90${revision.status === 'open' ? ' mt-2' : ''}`}
               style={{ backgroundColor: STATUS_CONFIG.resolved.color }}
             >
               <Check size={16} />
               해결 완료로 변경
             </button>
           )}
-          {revision.status === 'open' && (
-            <button
-              onClick={() => handleStatusSelect('in_progress')}
-              className="w-full flex items-center justify-center gap-2 py-2.5 mt-2 text-xs font-medium rounded-xl border transition-all cursor-pointer"
-              style={{ borderColor: STATUS_CONFIG.in_progress.color + '40', color: STATUS_CONFIG.in_progress.color }}
-            >
-              <Clock size={14} />
-              진행 시작
-            </button>
+
+          {/* 리비전 댓글 스레드 — sceneInfo 가 있을 때만 (sheetName 필요) */}
+          {sceneInfo && (
+            <div className="mt-5 pt-5 border-t border-bg-border/40">
+              <RevisionCommentThread
+                revisionId={revision.id}
+                sceneKey={`${sceneInfo.sheetName}:${sceneInfo.sceneId}`}
+              />
+            </div>
           )}
         </div>
       </div>
