@@ -14,6 +14,7 @@ import type { CompRevision, RevisionStatus } from '@/types';
 import { formatDateTime } from '@/utils/formatTime';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { elevatedGlassStyle } from '@/utils/glassStyles';
+import { useAuthStore } from '@/stores/useAuthStore';
 import { Avatar } from './sharedComponents';
 import { parsePathsFromText, parseSceneKey } from './utils';
 import type { SceneInfo } from './utils';
@@ -34,6 +35,11 @@ export function DetailPanel({
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const { description: descText, paths: detailPaths } = parsePathsFromText(revision.description);
+  const allUsers = useAuthStore((s) => s.users);
+  // v1.19.4: notifyUserIds 를 사용자 객체로 변환 (이름 + 컴포지터 라벨 표시)
+  const notifyUsers = (revision.notifyUserIds ?? [])
+    .map((uid) => allUsers.find((u) => u.id === uid))
+    .filter((u): u is NonNullable<typeof u> => !!u);
 
   const handleResolve = () => {
     onStatusChange('resolved', resolveNote);
@@ -142,6 +148,29 @@ export function DetailPanel({
                 alt="첨부"
                 className="rounded-xl max-h-48 w-full object-contain border border-bg-border/40"
               />
+            </div>
+          )}
+
+          {/* 알림 받는 사람 — v1.19.4 신규 */}
+          {notifyUsers.length > 0 && (
+            <div className="mb-5">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-2">
+                알림 받는 사람
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {notifyUsers.map((u) => (
+                  <span
+                    key={u.id}
+                    className="inline-flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full bg-accent/10 border border-accent/30 text-[11px] text-text-primary"
+                  >
+                    <Avatar name={u.name} size={18} />
+                    <span>{u.name}</span>
+                    {u.isCompositor && (
+                      <span className="text-[10px] text-text-secondary/70">컴포지터</span>
+                    )}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 
