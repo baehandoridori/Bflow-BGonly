@@ -3,13 +3,17 @@
  *
  * 4단계 흐름 (mockup `docs/mockups/new-revision-flow.html` 그대로):
  *   1. 에피소드 선택 (커스텀 제목 chip — "두근두근 첫 등교")
- *   2. 파트 선택 (A / B / C / D 단위 + 부서 라벨 — sheetName 단위)
+ *   2. 파트 선택 (A / B / C / D 단위 — v1.19.6 부서 노출 제거)
  *   3. 씬 검색·선택 (검색 input + 자동완성 드롭다운 → 선택 칩)
  *   4. 본문 textarea + 이미지 첨부 + RevisionRecipientPicker (자동 체크 뱃지)
  *
  * 기존 씬 모달 RevisionPanel / 컴포지팅 AddRevisionForm 의 createRevision 호출 패턴과 동일하게
  * `useRevisionStore.createRevision({sceneKey, description, imageUrl, notifyUserIds, requesterId,
  *  requesterName, department, lookupDepartment})` 를 호출한다 (v1.18.0 신표준).
+ *
+ * v1.19.6: 한솔 결정으로 부서(BG/ACT) UI 분리 폐기.
+ * - 같은 part 라벨(예: "A")에 BG sheet + ACT sheet 두 개 있으면 BG sheet 우선 채택 (fallback ACT).
+ * - sceneKey 자체는 부서 무관(buildSceneKey 결과)이라 BG/ACT 어느 쪽으로 저장해도 같은 씬으로 합산됨.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -30,13 +34,6 @@ interface Props {
 }
 
 // ─── 헬퍼 ────────────────────────────────────────
-
-function partLabel(part: Part): string {
-  // 시트명에 부서가 명시돼 있으면 BG/ACT 라벨로 표기. 한 EP의 한 part 라벨(A 등)에
-  // BG sheet + ACT sheet 가 따로 존재할 수 있어 부서까지 명시해야 sheetName 확정 가능.
-  const dept = part.department === 'bg' ? 'BG' : 'ACT';
-  return `${part.partId} · ${dept}`;
-}
 
 function sceneMatchesQuery(scene: Scene, query: string): boolean {
   if (!query) return true;
@@ -78,6 +75,22 @@ export default function NewRevisionModal({ open, onClose }: Props) {
     if (selectedEpisodeNumber == null) return null;
     return episodes.find((ep) => ep.episodeNumber === selectedEpisodeNumber) ?? null;
   }, [episodes, selectedEpisodeNumber]);
+
+  // v1.19.6: 같은 EP 의 parts 를 partId 단위로 group — BG sheet 우선, 없으면 ACT.
+  // (sceneKey 자체가 부서 무관이라 어느 sheet 를 선택하든 결과는 같은 씬으로 합산됨)
+  const partLabels = useMemo(() => {
+    if (!selectedEpisode) return [] as { partId: string; part: Part }[];
+    const map = new Map<string, Part>();
+    for (const part of selectedEpisode.parts) {
+      const existing = map.get(part.partId);
+      if (!existing || part.department === 'bg') {
+        map.set(part.partId, part);
+      }
+    }
+    return Array.from(map.entries())
+      .map(([partId, part]) => ({ partId, part }))
+      .sort((a, b) => a.partId.localeCompare(b.partId));
+  }, [selectedEpisode]);
 
   const selectedPart: Part | null = useMemo(() => {
     if (!selectedEpisode || !selectedSheetName) return null;
@@ -133,10 +146,10 @@ export default function NewRevisionModal({ open, onClose }: Props) {
 
   useEffect(() => {
     if (!selectedEpisode) return;
-    if (selectedSheetName == null && selectedEpisode.parts.length === 1) {
-      setSelectedSheetName(selectedEpisode.parts[0].sheetName);
+    if (selectedSheetName == null && partLabels.length === 1) {
+      setSelectedSheetName(partLabels[0].part.sheetName);
     }
-  }, [selectedEpisode, selectedSheetName]);
+  }, [selectedEpisode, selectedSheetName, partLabels]);
 
   // ── 모달 닫힐 때 상태 리셋 ────
   useEffect(() => {
@@ -260,8 +273,9 @@ export default function NewRevisionModal({ open, onClose }: Props) {
   };
 
   // ── 렌더 ────
+  // v1.19.6: 부서(BG/ACT) 표기 제거 — 통합 sceneKey 라 의미 없음.
   const summary = selectedEpisode && selectedPart && selectedScene
-    ? `${getEpisodeDisplayName(selectedEpisode)} / ${selectedPart.partId} ${selectedPart.department === 'bg' ? '(BG)' : '(ACT)'} / #${selectedScene.no}`
+    ? `${getEpisodeDisplayName(selectedEpisode)} / ${selectedPart.partId} / #${selectedScene.no}`
     : '';
 
   return (
@@ -374,27 +388,27 @@ export default function NewRevisionModal({ open, onClose }: Props) {
             </div>
           </section>
 
-          {/* 2. 파트 */}
+          {/* 2. 파트 — v1.19.6: 부서(BG/ACT) 노출 제거. 같은 partId 의 BG/ACT 두 sheet 가 있으면 BG 우선 채택. */}
           <section>
             <div className="flex items-center justify-between mb-2">
               <label className="text-[11px] font-bold uppercase tracking-wider text-text-secondary">
                 2. 파트
               </label>
               {selectedPart && (
-                <span className="text-[11px] text-accent-sub">{partLabel(selectedPart)} ✓</span>
+                <span className="text-[11px] text-accent-sub">{selectedPart.partId} ✓</span>
               )}
             </div>
             <div className="flex flex-wrap gap-1.5">
               {!selectedEpisode ? (
                 <span className="text-[11px] text-text-secondary/60">먼저 에피소드를 선택하세요</span>
-              ) : selectedEpisode.parts.length === 0 ? (
+              ) : partLabels.length === 0 ? (
                 <span className="text-[11px] text-text-secondary/60">파트가 없습니다</span>
               ) : (
-                selectedEpisode.parts.map((part) => {
+                partLabels.map(({ partId, part }) => {
                   const active = part.sheetName === selectedSheetName;
                   return (
                     <button
-                      key={part.sheetName}
+                      key={partId}
                       onClick={() => handlePartSelect(part.sheetName)}
                       className={`px-2.5 py-1 text-[11px] font-semibold rounded-md border transition-colors cursor-pointer ${
                         active
@@ -402,7 +416,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
                           : 'bg-bg-primary/50 border-bg-border/50 text-text-secondary hover:text-text-primary hover:border-accent/50'
                       }`}
                     >
-                      {partLabel(part)}
+                      {partId}
                     </button>
                   );
                 })
