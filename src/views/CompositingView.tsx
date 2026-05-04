@@ -53,6 +53,14 @@ export default function CompositingView() {
   }, [dataConnected, loadRevisions]);
 
   // 씬 정보 맵 빌드 (에피소드 데이터 + 리비전 sceneKey 매칭)
+  //
+  // v1.19.6: 부서(BG/ACT) 분리 폐기.
+  // buildSceneKey 결과가 부서 무관(EP:Part:sceneId)이라 BG sheet 의 scene 과 ACT sheet 의 scene 이
+  // 같은 sceneKey 에 매핑된다. 따라서 같은 씬의 BG/ACT 리비전은 자연스럽게 한 그룹으로 합산된다.
+  //
+  // SceneInfo 합병 규칙:
+  // - sheetName/department: BG sheet 가 있으면 BG, 없으면 ACT (씬 모달 점프·댓글 라우팅 기준)
+  // - assignee/sceneName/sceneUuid: 마찬가지로 BG 우선, fallback ACT
   const sceneInfoMap = useMemo(() => {
     const map = new Map<string, SceneInfo>();
     for (const ep of episodes) {
@@ -74,6 +82,7 @@ export default function CompositingView() {
             sceneUuid: scene.id,
           };
           const existing = map.get(sceneKey);
+          // BG sheet 가 있으면 BG 정보를 우선 채택. 이미 BG 가 등록되어 있으면 ACT 는 무시 (덮어쓰기 X).
           if (!existing || (existing.department !== 'bg' && nextInfo.department === 'bg')) {
             map.set(sceneKey, nextInfo);
           }
@@ -97,18 +106,25 @@ export default function CompositingView() {
   );
 
   // 씬 그룹 빌드
+  //
+  // v1.19.6: sceneKey 단위 통합. buildSceneKey 가 부서 무관 키를 만들어 BG/ACT 가 같은 씬이면
+  // 한 그룹에 두 부서 리비전이 모두 합산된다. allSceneKeys 에 BG·ACT 가 모두 push 되어도
+  // sceneGroups 빌드 시 `seen.has(key)` 가드로 한 번만 그룹 생성.
   const sceneGroups = useMemo(() => {
     // 에피소드 필터링
     const filteredEps = selectedEp
       ? episodes.filter(ep => ep.episodeNumber === selectedEp)
       : episodes;
 
-    // 에피소드별 씬 목록 수집
+    // 에피소드별 씬 목록 수집 (BG/ACT 합산 → unique sceneKey 만 남김)
+    const seenKey = new Set<string>();
     const allSceneKeys: string[] = [];
     for (const ep of filteredEps) {
       for (const part of ep.parts) {
         for (const scene of part.scenes) {
           const key = buildSceneKey(part.sheetName, scene.sceneId);
+          if (seenKey.has(key)) continue;
+          seenKey.add(key);
           allSceneKeys.push(key);
         }
       }
