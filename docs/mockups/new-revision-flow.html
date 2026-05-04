@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>컴포지팅 — 새 리비전 흐름 (중앙 모달)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --color-bg-primary: 15 17 23;
+    --color-bg-card: 26 29 39;
+    --color-bg-border: 45 48 65;
+    --color-text-primary: 232 232 238;
+    --color-text-secondary: 139 141 163;
+    --color-accent: 108 92 231;
+    --color-accent-sub: 162 155 254;
+  }
+  [data-theme="cinema-red"]    { --color-accent: 225 29 72;  --color-accent-sub: 251 113 133; }
+  [data-theme="midnight-blue"] { --color-accent: 59 130 246; --color-accent-sub: 96 165 250; }
+  [data-theme="emerald"]       { --color-accent: 16 185 129; --color-accent-sub: 52 211 153; }
+  [data-mode="light"] {
+    --color-bg-primary: 248 249 252;
+    --color-bg-card: 255 255 255;
+    --color-bg-border: 215 217 230;
+    --color-text-primary: 28 29 38;
+    --color-text-secondary: 100 102 122;
+  }
+  body { background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary)); font-family: 'Pretendard', -apple-system, system-ui, sans-serif; }
+  .text-accent { color: rgb(var(--color-accent)); }
+  .text-accent-sub { color: rgb(var(--color-accent-sub)); }
+  .text-prim { color: rgb(var(--color-text-primary)); }
+  .text-sec { color: rgb(var(--color-text-secondary)); }
+  .text-sec-70 { color: rgb(var(--color-text-secondary) / .7); }
+  .text-sec-50 { color: rgb(var(--color-text-secondary) / .5); }
+  .bg-prim { background: rgb(var(--color-bg-primary)); }
+  .bg-prim-50 { background: rgb(var(--color-bg-primary) / .5); }
+  .bg-card { background: rgb(var(--color-bg-card)); }
+  .bg-card-70 { background: rgb(var(--color-bg-card) / .7); }
+  .bg-accent { background: rgb(var(--color-accent)); }
+  .bg-accent-15 { background: rgb(var(--color-accent) / .15); }
+  .bd-border { border-color: rgb(var(--color-bg-border)); }
+  .bd-border-40 { border-color: rgb(var(--color-bg-border) / .4); }
+  .bd-border-60 { border-color: rgb(var(--color-bg-border) / .6); }
+  .bd-accent-40 { border-color: rgb(var(--color-accent) / .4); }
+  .bd-accent-60 { border-color: rgb(var(--color-accent) / .6); }
+
+  .chip { padding: 5px 10px; font-size: 11px; font-weight: 600; border-radius: 6px; border: 1px solid rgb(var(--color-bg-border) / .5); color: rgb(var(--color-text-secondary)); background: rgb(var(--color-bg-primary) / .5); cursor: pointer; transition: all .15s; }
+  .chip:hover { border-color: rgb(var(--color-accent) / .5); color: rgb(var(--color-text-primary)); }
+  .chip.active { background: rgb(var(--color-accent)); border-color: rgb(var(--color-accent)); color: #fff; }
+
+  .step-dot { width: 24px; height: 24px; border-radius: 9999px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; border: 1px solid rgb(var(--color-bg-border) / .5); color: rgb(var(--color-text-secondary)); background: rgb(var(--color-bg-primary)); }
+  .step-dot.active { background: rgb(var(--color-accent)); border-color: rgb(var(--color-accent)); color: #fff; }
+  .step-dot.done { background: rgb(var(--color-accent) / .25); border-color: rgb(var(--color-accent) / .6); color: rgb(var(--color-accent-sub)); }
+  .step-line { flex: 1; height: 1px; background: rgb(var(--color-bg-border) / .4); }
+  .step-line.done { background: rgb(var(--color-accent) / .5); }
+
+  .modal-shadow { box-shadow: 0 32px 80px rgba(0,0,0,.5); }
+
+  .form-input { background: rgb(var(--color-bg-primary) / .8); border: 1px solid rgb(var(--color-bg-border) / .6); color: rgb(var(--color-text-primary)); border-radius: 8px; padding: 10px 12px; font-size: 13px; width: 100%; transition: border-color .15s; }
+  .form-input:focus { outline: none; border-color: rgb(var(--color-accent) / .7); }
+  textarea.form-input { resize: vertical; min-height: 88px; line-height: 1.55; }
+
+  .user-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 5px; border-radius: 9999px; border: 1px solid rgb(var(--color-bg-border) / .5); background: rgb(var(--color-bg-primary) / .5); font-size: 12px; cursor: pointer; transition: all .15s; color: rgb(var(--color-text-secondary)); }
+  .user-chip.checked { background: rgb(var(--color-accent) / .15); border-color: rgb(var(--color-accent) / .6); color: rgb(var(--color-text-primary)); }
+  .user-chip .avatar { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; }
+  .user-chip .check { width: 14px; height: 14px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgb(var(--color-accent)); color: #fff; margin-left: 2px; font-size: 9px; }
+  .user-chip:not(.checked) .check { display: none; }
+
+  /* 씬 선택 — 검색 + 드롭다운 + 칩 */
+  .scene-search-wrap { position: relative; }
+  .scene-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 280px; overflow-y: auto; background: rgb(var(--color-bg-card)); border: 1px solid rgb(var(--color-bg-border) / .6); border-radius: 8px; padding: 4px; z-index: 20; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .scene-row-btn { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 6px; cursor: pointer; transition: background-color .12s; text-align: left; }
+  .scene-row-btn:hover { background: rgb(var(--color-bg-primary) / .6); }
+  .scene-row-btn.active { background: rgb(var(--color-accent) / .15); }
+  .scene-pick-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 8px; border-radius: 8px; background: rgb(var(--color-accent) / .15); border: 1px solid rgb(var(--color-accent) / .5); }
+</style>
+</head>
+<body data-mode="dark">
+
+<!-- 컨트롤 바 -->
+<div class="sticky top-0 z-50 backdrop-blur-xl border-b bd-border-40 bg-card-70">
+  <div class="max-w-[1400px] mx-auto px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+    <h1 class="text-base font-bold text-prim">새 리비전 흐름 (중앙 모달)</h1>
+    <div class="text-[11px] text-sec-50">EP → 파트 → 씬(검색) → 내용</div>
+
+    <div class="ml-auto flex items-center gap-2">
+      <span class="text-[11px] text-sec uppercase tracking-wider">씬 단계</span>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-stage="search" class="stage-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">검색 중</button>
+        <button data-stage="picked" class="stage-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">선택됨</button>
+      </div>
+
+      <span class="text-[11px] text-sec uppercase tracking-wider ml-2">테마</span>
+      <div class="flex gap-1.5">
+        <button data-theme="" class="theme-btn w-6 h-6 rounded-full ring-2 ring-white" style="background:#6C5CE7"></button>
+        <button data-theme="cinema-red" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#E11D48"></button>
+        <button data-theme="midnight-blue" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#3B82F6"></button>
+        <button data-theme="emerald" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#10B981"></button>
+      </div>
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40 ml-2">
+        <button data-mode="dark" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">다크</button>
+        <button data-mode="light" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">라이트</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 보드 (faux 흐림) -->
+<div class="max-w-[1400px] mx-auto px-6 py-6 relative">
+  <div class="bg-card border bd-border-40 rounded-xl p-5 opacity-50 pointer-events-none mb-3">
+    <div class="flex items-end justify-between mb-3">
+      <div>
+        <h2 class="text-xl font-bold text-prim">씬 타임라인</h2>
+        <div class="text-[11px] text-sec-70 mt-0.5">12개 씬 · 23개 피드백 · 8 미해결</div>
+      </div>
+      <button class="px-3 py-1.5 text-xs font-bold rounded-md bg-accent text-white">+ 새 리비전</button>
+    </div>
+    <div class="space-y-2">
+      <div class="bg-prim/40 border bd-border-40 rounded-xl p-3 h-20"></div>
+      <div class="bg-prim/40 border bd-border-40 rounded-xl p-3 h-12"></div>
+    </div>
+  </div>
+
+  <!-- 모달 -->
+  <div class="fixed inset-0 flex items-center justify-center z-40 backdrop-blur-sm bg-black/40">
+    <div class="modal-shadow bg-card border bd-border-60 rounded-2xl w-[640px] max-h-[88vh] overflow-y-auto">
+      <!-- 헤더 -->
+      <div class="px-5 py-4 border-b bd-border-40 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v3"/><circle cx="12" cy="13" r=".7" fill="currentColor"/></svg>
+          <span class="text-[14px] font-bold text-prim">새 리비전 등록</span>
+        </div>
+        <button class="text-sec hover:text-prim text-xl leading-none">×</button>
+      </div>
+
+      <!-- 단계 인디케이터 -->
+      <div class="px-5 py-3 border-b bd-border-40 flex items-center gap-2 bg-prim/30">
+        <span class="step-dot done">✓</span>
+        <span class="step-line done"></span>
+        <span class="step-dot done">✓</span>
+        <span class="step-line done"></span>
+        <span class="step-dot active">3</span>
+        <span class="step-line"></span>
+        <span class="step-dot">4</span>
+        <span class="text-[11px] text-sec ml-3">씬 선택</span>
+      </div>
+
+      <!-- 본문 -->
+      <div class="p-5 space-y-4">
+        <!-- 1. 에피소드 (제목만) -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-[11px] font-bold text-sec uppercase tracking-wider">1. 에피소드</label>
+            <span class="text-[11px] text-accent-sub">두근두근 첫 등교 ✓</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button class="chip active">두근두근 첫 등교</button>
+            <button class="chip">실험실의 비밀</button>
+            <button class="chip">한밤의 모험</button>
+            <button class="chip">졸업식</button>
+          </div>
+        </div>
+
+        <!-- 2. 파트 -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-[11px] font-bold text-sec uppercase tracking-wider">2. 파트</label>
+            <span class="text-[11px] text-accent-sub">A ✓</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button class="chip active">A</button>
+            <button class="chip">B</button>
+            <button class="chip">C</button>
+            <button class="chip">D</button>
+          </div>
+        </div>
+
+        <!-- 3. 씬 — 검색 가능한 드롭다운 + 선택 칩 -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-[11px] font-bold text-sec uppercase tracking-wider">3. 씬</label>
+            <span id="scene-status" class="text-[11px] text-sec-50">검색해서 선택하세요</span>
+          </div>
+
+          <!-- 선택됨 상태 -->
+          <div id="scene-picked" class="hidden flex items-center justify-between gap-2 px-3 py-2.5 bg-prim/40 border bd-accent-40 rounded-lg">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span class="scene-pick-chip">
+                <span class="text-[11px] font-mono font-bold text-prim">A 1</span>
+              </span>
+              <span class="text-[12px] text-prim truncate">색감 어두움</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent text-white font-bold shrink-0">미해결 2</span>
+            </div>
+            <button onclick="setStage('search')" class="text-sec hover:text-prim text-base leading-none px-1" title="다른 씬 선택">×</button>
+          </div>
+
+          <!-- 검색 중 상태 -->
+          <div id="scene-search" class="scene-search-wrap">
+            <div class="relative">
+              <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-sec-50" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+              <input type="text" placeholder="씬 검색 (예: 1, a001, 색감)..." class="form-input pl-9" />
+            </div>
+            <div class="scene-dropdown">
+              <button class="scene-row-btn active" onclick="setStage('picked')">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 1</span>
+                <span class="text-[11px] text-sec truncate flex-1">색감 어두움</span>
+                <span class="text-[9px] px-1 py-0.5 rounded bg-accent text-white font-bold shrink-0">2</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 2</span>
+                <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 3</span>
+                <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 4</span>
+                <span class="text-[11px] text-sec truncate flex-1">BG 디테일 추가</span>
+                <span class="text-[9px] px-1 py-0.5 rounded bg-accent text-white font-bold shrink-0">1</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 5</span>
+                <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 6</span>
+                <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+                <span class="text-[9px] px-1 py-0.5 rounded bg-accent text-white font-bold shrink-0">3</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 7</span>
+                <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 8</span>
+                <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 9</span>
+                <span class="text-[11px] text-sec truncate flex-1">캐릭터 표정</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 10</span>
+                <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 11</span>
+                <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+              </button>
+              <button class="scene-row-btn">
+                <span class="text-[11px] font-mono font-bold text-prim w-12 shrink-0">A 12</span>
+                <span class="text-[11px] text-sec-50 truncate flex-1">—</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. 내용 + 알림 받을 사람 -->
+        <div class="border-t bd-border-40 pt-4 space-y-3">
+          <div class="flex items-baseline gap-2">
+            <label class="text-[11px] font-bold text-sec uppercase tracking-wider">4. 내용</label>
+            <span class="text-[11px] text-accent-sub">두근두근 첫 등교 / A / 1 에 추가</span>
+          </div>
+
+          <textarea class="form-input" placeholder="어떤 부분을 수정해야 하는지, 또는 무엇이 변경되었는지 적어주세요."></textarea>
+
+          <div class="flex items-center gap-3">
+            <label class="flex items-center gap-2 px-3 py-1.5 rounded-lg border bd-border-40 cursor-pointer hover:bd-accent-40 text-[12px] text-sec">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5-11 11"/></svg>
+              이미지 첨부
+            </label>
+            <span class="text-[11px] text-sec-50">또는 본문에 Ctrl+V</span>
+          </div>
+
+          <!-- 알림 받을 사람 — 자동 체크된 사람들이 모두 뱃지로 즉시 표시 -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <div>
+                <span class="text-[11px] font-bold text-sec uppercase tracking-wider">알림 받을 사람</span>
+                <span class="text-[10px] text-sec-50 ml-2 normal-case font-normal">자동 체크: 컴포지터 + 그 씬 담당자</span>
+              </div>
+              <span class="text-[10px] text-accent-sub">3명 자동 + 1명 추가 가능</span>
+            </div>
+            <div class="flex flex-wrap gap-1.5 items-center">
+              <!-- 자동 체크된 뱃지 — 모달 열리자마자 이렇게 보임 -->
+              <div class="user-chip checked">
+                <span class="avatar" style="background:#6C5CE7">김</span>
+                김OO <span class="text-[10px] text-sec-50">컴포지터</span>
+                <span class="check">✓</span>
+              </div>
+              <div class="user-chip checked">
+                <span class="avatar" style="background:#74B9FF">이</span>
+                이OO <span class="text-[10px] text-sec-50">BG 담당</span>
+                <span class="check">✓</span>
+              </div>
+              <div class="user-chip checked">
+                <span class="avatar" style="background:#FDCB6E">박</span>
+                박OO <span class="text-[10px] text-sec-50">ACT 담당</span>
+                <span class="check">✓</span>
+              </div>
+
+              <button class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-dashed bd-border text-[11px] text-sec hover:text-prim hover:bd-accent-40">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                다른 사람 추가
+              </button>
+            </div>
+            <div class="text-[10px] text-sec-50 mt-1.5">자동 체크된 사람도 클릭으로 해제할 수 있어요.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 액션 -->
+      <div class="px-5 py-3 border-t bd-border-40 flex items-center justify-between bg-prim/30 rounded-b-2xl sticky bottom-0">
+        <div class="text-[11px] text-sec-70">등록자: 한솔 · 등록 즉시 알림 전송</div>
+        <div class="flex gap-2">
+          <button class="px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">취소</button>
+          <button class="px-4 py-1.5 text-xs font-bold rounded-md bg-accent text-white">리비전 등록</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 안내 -->
+<div class="max-w-[1400px] mx-auto px-6 pb-12 mt-8 grid grid-cols-2 gap-3">
+  <div class="bg-card border bd-border-40 rounded-xl p-4">
+    <div class="text-[11px] font-bold text-accent-sub uppercase tracking-wider mb-2">한솔님 피드백 반영</div>
+    <ul class="text-[11px] text-sec leading-relaxed space-y-1">
+      <li>· 우측 패널 시안 제거 — 중앙 모달로 확정</li>
+      <li>· 에피소드 칩에서 <strong class="text-prim">EP01 prefix 제거</strong> — 제목만 ("두근두근 첫 등교")</li>
+      <li>· 씬 선택을 <strong class="text-prim">검색 가능한 드롭다운 + 선택 칩</strong>으로 변경 (그리드 → 사람 검색 패턴)</li>
+      <li>· 알림 받을 사람 — <strong class="text-prim">자동 체크된 사람이 뱃지로 즉시 표시</strong> (모달 열리자마자)</li>
+    </ul>
+  </div>
+  <div class="bg-card border bd-border-40 rounded-xl p-4">
+    <div class="text-[11px] font-bold text-accent-sub uppercase tracking-wider mb-2">씬 선택 UX 흐름</div>
+    <ul class="text-[11px] text-sec leading-relaxed space-y-1">
+      <li>· input 클릭 → 전체 씬 드롭다운 펼침 (스크롤 가능)</li>
+      <li>· 검색어 입력 → 자동완성 필터링 (씬번호·메모 매칭)</li>
+      <li>· 항목 클릭 → 검색 input 자리에 <strong class="text-prim">선택 칩 + 메모</strong> 표시</li>
+      <li>· 칩의 × 클릭 → 다시 검색 모드</li>
+      <li>· 미해결 카운트는 검색 결과 행 + 선택 칩에 같이 노출 (선택 전 컨텍스트)</li>
+      <li>· 상단 토글로 "검색 중 / 선택됨" 두 상태 직접 비교 가능</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+function setStage(s) {
+  document.getElementById('scene-search').classList.toggle('hidden', s !== 'search');
+  document.getElementById('scene-picked').classList.toggle('hidden', s !== 'picked');
+  document.getElementById('scene-status').textContent = s === 'picked' ? 'A 1 ✓' : '검색해서 선택하세요';
+  document.getElementById('scene-status').className = s === 'picked' ? 'text-[11px] text-accent-sub' : 'text-[11px] text-sec-50';
+  document.querySelectorAll('.stage-btn').forEach(b => {
+    if (b.dataset.stage === s) { b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim'); }
+    else { b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim'); }
+  });
+}
+function setTheme(t) {
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    if (b.dataset.theme === t) { b.classList.add('ring-2','ring-white'); b.classList.remove('ring-1','ring-white/20'); }
+    else { b.classList.remove('ring-2','ring-white'); b.classList.add('ring-1','ring-white/20'); }
+  });
+}
+function setMode(m) {
+  document.body.setAttribute('data-mode', m);
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    if (b.dataset.mode === m) { b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim'); }
+    else { b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim'); }
+  });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.stage-btn').forEach(b => b.addEventListener('click', () => setStage(b.dataset.stage)));
+  document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+  document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+  document.querySelectorAll('.chip').forEach(c => {
+    c.addEventListener('click', () => {
+      c.parentElement.querySelectorAll('.chip').forEach(s => s.classList.remove('active'));
+      c.classList.add('active');
+    });
+  });
+  document.querySelectorAll('.user-chip').forEach(c => {
+    c.addEventListener('click', () => c.classList.toggle('checked'));
+  });
+});
+</script>
+</body>
+</html>
