@@ -252,12 +252,15 @@ export function DetailPanel({
             </button>
           )}
 
-          {/* 리비전 댓글 스레드 — sceneInfo 가 있을 때만 (sheetName 필요) */}
+          {/* 리비전 댓글 스레드 — sceneInfo 가 있을 때만 (sheetName + sceneNo 필요).
+              ⚠️ sceneNo (DB sort_order, 숫자) 사용. raw sceneId("a001" 등) 사용 시
+              comment 저장 로직이 Number() 변환 후 sort_order 매칭 실패 → "씬을 찾을 수 없음" 에러
+              (이슈: 2026-05-04 #2). UnifiedSceneDetailModal:134 의 primaryCommentKey 와 동일 패턴. */}
           {sceneInfo && (
             <div className="mt-5 pt-5 border-t border-bg-border/40">
               <RevisionCommentThread
                 revisionId={revision.id}
-                sceneKey={`${sceneInfo.sheetName}:${sceneInfo.sceneId}`}
+                sceneKey={`${sceneInfo.sheetName}:${sceneInfo.sceneNo}`}
               />
             </div>
           )}

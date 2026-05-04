@@ -305,10 +305,12 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   const effectiveDepartment = department ?? inferDepartmentFromSheetName(sheetName);
 
   const sceneKey = buildSceneKey(sheetName, sceneId, { siblingSceneIds: effectiveSiblingSceneIds });
-  // commentService 가 사용하는 sceneKey 형식 (`sheetName:sceneNo`).
-  // 리비전 시스템의 sceneKey(`episode:part:sceneId`)와 다르므로 RevisionCommentThread 에 넘길 때
-  // 반드시 이 형식을 사용해야 한다 (이슈 2026-05-04: 댓글 저장 시 partUuid lookup 실패).
-  const commentSceneKey = `${sheetName}:${sceneId}`;
+  // commentService 가 사용하는 sceneKey 형식 (`sheetName:scene.no`).
+  // ⚠️ scene.no 는 DB sort_order(숫자). raw sceneId(예: "a001")가 아니다.
+  //   - 첫 번째 fix(2026-05-04 #1): sceneKey 형식 불일치 → sceneId 추출됨
+  //   - 두 번째 fix(2026-05-04 #2): comment 저장은 sceneId 를 Number()로 sort_order 변환해 scenes lookup → "a001" 같은 raw 값은 NaN 이라 실패
+  //   → CommentPanel(`UnifiedSceneDetailModal:134`)와 동일하게 scene.no 사용.
+  const commentSceneKey = scene ? `${sheetName}:${scene.no}` : '';
   const revisions = getRevisionsForScene(sceneKey);
   const sortedRevisions = [...revisions].sort((a, b) =>
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
