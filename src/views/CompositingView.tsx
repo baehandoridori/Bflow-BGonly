@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Filter, ListFilter, Search } from 'lucide-react';
+import { Filter, ListFilter, Plus, Search } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -17,6 +17,7 @@ import { SceneRow, EpisodeFilter } from './compositing/SceneGroupSection';
 import { DetailPanel } from './compositing/RevisionDetailPanel';
 import { EpisodeGroupSection } from './compositing/EpisodeGroupSection';
 import { ProgressKanbanSection } from './compositing/ProgressKanbanSection';
+import NewRevisionModal from './compositing/NewRevisionModal';
 
 // v1.19.0: 그룹화 모드
 type GroupMode = 'scene' | 'episode' | 'progress';
@@ -37,6 +38,8 @@ export default function CompositingView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
   const [groupMode, setGroupMode] = useState<GroupMode>('scene');
+  // v1.19.5: 헤더에서 직접 새 리비전 등록 모달 열기
+  const [newRevModalOpen, setNewRevModalOpen] = useState(false);
 
   // 선택된 리비전 객체
   const selectedRevision = useMemo(
@@ -306,6 +309,14 @@ export default function CompositingView() {
                   {expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
                 </button>
               )}
+              {/* v1.19.5: 헤더에서 직접 새 리비전 등록 */}
+              <button
+                onClick={() => setNewRevModalOpen(true)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer"
+              >
+                <Plus size={12} strokeWidth={2.5} />
+                새 리비전
+              </button>
             </div>
           </div>
 
@@ -447,6 +458,12 @@ export default function CompositingView() {
           />
         )}
       </AnimatePresence>
+
+      {/* v1.19.5: 새 리비전 등록 모달 (중앙) */}
+      <NewRevisionModal
+        open={newRevModalOpen}
+        onClose={() => setNewRevModalOpen(false)}
+      />
     </div>
   );
 }
