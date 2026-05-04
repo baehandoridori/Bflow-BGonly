@@ -1,12 +1,13 @@
 // ─── 리비전 아이템 (확장된 씬 내부) ──────────
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Undo2 } from 'lucide-react';
+import { Bell, Undo2 } from 'lucide-react';
 import type { CompRevision, RevisionStatus } from '@/types';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { PathBadge } from '@/components/common/PathBadge';
-import { Avatar, StatusDropdown } from './sharedComponents';
+import { useAuthStore } from '@/stores/useAuthStore';
+import { Avatar, AvatarStack, StatusDropdown } from './sharedComponents';
 import { parsePathsFromText } from './utils';
 
 export function RevisionItem({
@@ -24,6 +25,15 @@ export function RevisionItem({
   const [resolveNote, setResolveNote] = useState('');
   const isResolved = revision.status === 'resolved';
   const { description: descText, paths } = parsePathsFromText(revision.description);
+  const allUsers = useAuthStore((s) => s.users);
+  // v1.19.4: notifyUserIds → 사용자 이름 배열 (AvatarStack 용)
+  const notifyNames = useMemo(
+    () =>
+      (revision.notifyUserIds ?? [])
+        .map((uid) => allUsers.find((u) => u.id === uid)?.name)
+        .filter((n): n is string => !!n),
+    [revision.notifyUserIds, allUsers],
+  );
 
   const handleStatusSelect = (status: RevisionStatus) => {
     if (status === 'resolved') {
@@ -110,6 +120,19 @@ export function RevisionItem({
         {paths.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1">
             {paths.map((p, i) => <PathBadge key={i} path={p} resolved={isResolved} />)}
+          </div>
+        )}
+
+        {/* 알림 대상 — v1.19.4: 작은 아바타 스택 + 종 아이콘 */}
+        {notifyNames.length > 0 && (
+          <div
+            className={`flex items-center gap-1.5 mt-1 ${
+              isResolved ? 'opacity-50' : ''
+            }`}
+            title={`알림 대상: ${notifyNames.join(', ')}`}
+          >
+            <Bell size={10} className="text-text-secondary/60 shrink-0" />
+            <AvatarStack names={notifyNames} max={4} size={16} />
           </div>
         )}
 
