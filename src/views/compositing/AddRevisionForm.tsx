@@ -1,29 +1,49 @@
 // ─── 새 리비전 등록 폼 ──────────────────────
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { ImagePlus, X } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { resizeBlob } from '@/utils/imageUtils';
 import { elevatedGlassStyle } from '@/utils/glassStyles';
+import { RevisionRecipientPicker } from '@/components/scenes/RevisionRecipientPicker';
+import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 
 export function AddRevisionForm({
   sceneKey,
   department,
+  /**
+   * v1.19.4: 알림 대상 자동 체크 계산용 — assignee 있는 씬 정보(SceneInfo)를 받아 calcDefaultRecipients 호출.
+   * SceneGroupSection 이 group.info 를 그대로 넘긴다. assignee 만 있으면 충분 (Pick<Scene,'assignee'> 호환).
+   */
+  sceneAssignee,
   onClose,
 }: {
   sceneKey: string;
   department?: 'bg' | 'acting';
+  sceneAssignee?: string;
   onClose: () => void;
 }) {
-  const { currentUser } = useAuthStore();
+  const { currentUser, users: allUsers } = useAuthStore();
   const { createRevision } = useRevisionStore();
   const [description, setDescription] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [notifyIds, setNotifyIds] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 자동 체크 대상자 — 모든 컴포지터 + 그 씬 담당자 (등록자 본인 제외).
+  // RevisionPanel.tsx 의 defaultRecipients 와 동일 패턴.
+  const defaultRecipients = useMemo(() => {
+    if (!currentUser) return [];
+    return calcDefaultRecipients(
+      sceneAssignee ? { assignee: sceneAssignee } : null,
+      allUsers,
+      currentUser.id,
+    );
+  }, [sceneAssignee, allUsers, currentUser]);
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -61,9 +81,8 @@ export function AddRevisionForm({
         lookupDepartment: department,
         requesterId: currentUser.id,
         requesterName: currentUser.name,
-        // v1.19.0: 컴포지팅 뷰에서 등록 시 알림 대상 미선택.
-        // 향후 RecipientPicker 통합 검토 (v1.20.0+).
-        notifyUserIds: [],
+        // v1.19.4: RevisionRecipientPicker 가 계산한 알림 대상자 (자동 체크 ± 사용자 수정).
+        notifyUserIds: notifyIds,
       });
       onClose();
     } catch (err) {
@@ -113,6 +132,22 @@ export function AddRevisionForm({
             </button>
           </div>
         )}
+
+        {/* 알림 받을 사람 — v1.19.4: 컴포지터 + 그 씬 담당자 자동 체크 */}
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1 block">
+            알림 받을 사람
+            <span className="text-text-secondary/50 font-normal normal-case ml-1">
+              — 자동 체크된 사람을 클릭하면 제외됩니다
+            </span>
+          </label>
+          <RevisionRecipientPicker
+            allUsers={allUsers}
+            defaultCheckedIds={defaultRecipients}
+            excludeUserId={currentUser?.id || ''}
+            onChange={setNotifyIds}
+          />
+        </div>
 
         {/* 액션 */}
         <div className="flex items-center justify-between">

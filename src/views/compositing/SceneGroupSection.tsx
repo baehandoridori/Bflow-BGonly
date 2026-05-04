@@ -144,6 +144,7 @@ export function SceneRow({
                       key="form"
                       sceneKey={info.sceneKey}
                       department={info.department}
+                      sceneAssignee={info.assignee}
                       onClose={() => setShowAddForm(false)}
                     />
                 ) : (
