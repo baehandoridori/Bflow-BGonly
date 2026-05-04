@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Check, Clock, Circle, ChevronDown, ImagePlus, X, Trash2, MessageSquareWarning } from 'lucide-react';
+import { Plus, Check, Clock, Circle, ChevronDown, ImagePlus, X, Trash2, MessageSquareWarning, Bell } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -120,10 +120,19 @@ function RevisionCard({
 }) {
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
-  const { currentUser } = useAuthStore();
+  const { currentUser, users: allUsers } = useAuthStore();
   const canDelete = !!(
     currentUser && onDelete &&
     (currentUser.id === revision.requesterId || currentUser.role === 'admin')
+  );
+
+  // v1.19.4: notifyUserIds → 사용자 객체 (이름 + 컴포지터 라벨용)
+  const notifyUsers = useMemo(
+    () =>
+      (revision.notifyUserIds ?? [])
+        .map((uid) => allUsers.find((u) => u.id === uid))
+        .filter((u): u is NonNullable<typeof u> => !!u),
+    [revision.notifyUserIds, allUsers],
   );
 
   const handleStatusChange = (status: RevisionStatus) => {
@@ -249,7 +258,7 @@ function RevisionCard({
       )}
 
       {/* 푸터 */}
-      <div className="flex items-center gap-2 text-[11px] text-text-secondary/70">
+      <div className="flex items-center gap-2 text-[11px] text-text-secondary/70 flex-wrap">
         <span>{revision.requesterName}</span>
         <span>&middot;</span>
         <span>{formatTime(revision.createdAt)}</span>
@@ -257,6 +266,37 @@ function RevisionCard({
           <>
             <span>&middot;</span>
             <span style={{ color: STATUS_CONFIG.resolved.color }}>{revision.resolvedBy}이(가) 해결</span>
+          </>
+        )}
+        {/* 알림 대상 — v1.19.4: 종 아이콘 + user-chip 인라인 (4명 초과 시 +N) */}
+        {notifyUsers.length > 0 && (
+          <>
+            <span>&middot;</span>
+            <span
+              className="inline-flex items-center gap-1"
+              title={`알림 대상: ${notifyUsers.map((u) => u.name).join(', ')}`}
+            >
+              <Bell size={10} className="text-text-secondary/60 shrink-0" />
+              <span className="inline-flex items-center gap-1 flex-wrap">
+                {notifyUsers.slice(0, 4).map((u) => (
+                  <span
+                    key={u.id}
+                    className="inline-flex items-center gap-1 pl-0.5 pr-1.5 py-0.5 rounded-full bg-accent/10 border border-accent/25 text-[10px] text-text-primary"
+                  >
+                    <span
+                      className="w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-white"
+                      style={{ background: 'rgb(var(--color-accent))' }}
+                    >
+                      {u.name.charAt(0)}
+                    </span>
+                    <span>{u.name}</span>
+                  </span>
+                ))}
+                {notifyUsers.length > 4 && (
+                  <span className="text-[10px] text-text-secondary/60">+{notifyUsers.length - 4}</span>
+                )}
+              </span>
+            </span>
           </>
         )}
       </div>
