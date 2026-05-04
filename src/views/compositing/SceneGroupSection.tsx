@@ -61,16 +61,27 @@ export function SceneRow({
           )}
         </span>
 
-        {/* 씬 번호 뱃지 */}
-        <span
-          className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded border ${
-            expanded
-              ? 'text-accent border-accent/40 bg-accent/10'
-              : 'text-text-secondary border-bg-border bg-bg-primary/50'
-          }`}
-        >
-          {sceneLabel}
-        </span>
+        {/* v1.19.6: EP / 파트 / 씬 ID 메타 라벨 — 한 행에서 위치 파악 가능하게 */}
+        <div className="flex items-center gap-1.5 shrink-0 text-[11px]">
+          <span
+            className="text-text-secondary/70 truncate max-w-[140px]"
+            title={epLabel}
+          >
+            {epLabel}
+          </span>
+          <span className="text-text-secondary/40">/</span>
+          <span className="text-text-secondary font-medium">{info.part}</span>
+          <span className="text-text-secondary/40">/</span>
+          <span
+            className={`font-bold px-2 py-0.5 rounded border ${
+              expanded
+                ? 'text-accent border-accent/40 bg-accent/10'
+                : 'text-text-secondary border-bg-border bg-bg-primary/50'
+            }`}
+          >
+            {sceneLabel}
+          </span>
+        </div>
 
         {/* 씬 이름 */}
         <span className="font-medium text-sm text-text-primary truncate">
