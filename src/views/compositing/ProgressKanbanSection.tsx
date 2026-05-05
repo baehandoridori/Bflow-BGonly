@@ -4,6 +4,7 @@
 // mockup `revision-board-v3.html` view-progress 섹션 참조.
 
 import { useMemo } from 'react';
+import { MessageSquare } from 'lucide-react';
 import type { CompRevision } from '@/types';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { formatTimeShort } from '@/utils/formatTime';
@@ -16,11 +17,14 @@ export function ProgressKanbanSection({
   revisions,
   sceneInfoMap,
   selectedRevisionId,
+  commentCountByRev,
   onSelectRevision,
 }: {
   revisions: CompRevision[];
   sceneInfoMap: Map<string, SceneInfo>;
   selectedRevisionId: string | null;
+  /** v1.19.7: revisionId → 댓글 개수. 0 이면 마커 표시 안 함. 씬별 모드와 일관 유지. */
+  commentCountByRev?: Map<string, number>;
   onSelectRevision: (rev: CompRevision) => void;
 }) {
   const byStatus = useMemo(() => ({
@@ -37,6 +41,7 @@ export function ProgressKanbanSection({
         revisions={byStatus.open}
         sceneInfoMap={sceneInfoMap}
         selectedRevisionId={selectedRevisionId}
+        commentCountByRev={commentCountByRev}
         onSelectRevision={onSelectRevision}
       />
       <KanbanColumn
@@ -45,6 +50,7 @@ export function ProgressKanbanSection({
         revisions={byStatus.in_progress}
         sceneInfoMap={sceneInfoMap}
         selectedRevisionId={selectedRevisionId}
+        commentCountByRev={commentCountByRev}
         onSelectRevision={onSelectRevision}
       />
       <KanbanColumn
@@ -53,6 +59,7 @@ export function ProgressKanbanSection({
         revisions={byStatus.resolved}
         sceneInfoMap={sceneInfoMap}
         selectedRevisionId={selectedRevisionId}
+        commentCountByRev={commentCountByRev}
         onSelectRevision={onSelectRevision}
       />
     </div>
@@ -67,6 +74,7 @@ function KanbanColumn({
   revisions,
   sceneInfoMap,
   selectedRevisionId,
+  commentCountByRev,
   onSelectRevision,
 }: {
   title: string;
@@ -74,6 +82,7 @@ function KanbanColumn({
   revisions: CompRevision[];
   sceneInfoMap: Map<string, SceneInfo>;
   selectedRevisionId: string | null;
+  commentCountByRev?: Map<string, number>;
   onSelectRevision: (rev: CompRevision) => void;
 }) {
   const statusCfg = STATUS_CONFIG[statusKey];
@@ -97,6 +106,7 @@ function KanbanColumn({
             sceneInfo={sceneInfoMap.get(rev.sceneKey) ?? null}
             isSelected={rev.id === selectedRevisionId}
             isResolved={statusKey === 'resolved'}
+            commentCount={commentCountByRev?.get(rev.id) ?? 0}
             onSelect={() => onSelectRevision(rev)}
           />
         ))
@@ -112,12 +122,15 @@ function KanbanCard({
   sceneInfo,
   isSelected,
   isResolved,
+  commentCount = 0,
   onSelect,
 }: {
   rev: CompRevision;
   sceneInfo: SceneInfo | null;
   isSelected: boolean;
   isResolved: boolean;
+  /** v1.19.7: 댓글 개수 마커 — 씬별 모드와 일관 유지. */
+  commentCount?: number;
   onSelect: () => void;
 }) {
   // 씬 라벨: "EP01 A 1" 형태
@@ -176,8 +189,17 @@ function KanbanCard({
           >
             {rev.description}
           </div>
-          <div className="text-[10px] text-text-secondary/70 mt-1">
-            {rev.requesterName} · {formatTimeShort(rev.createdAt)}
+          <div className="flex items-center gap-2 text-[10px] text-text-secondary/70 mt-1">
+            <span>{rev.requesterName} · {formatTimeShort(rev.createdAt)}</span>
+            {commentCount > 0 && (
+              <span
+                className={`flex items-center gap-0.5 ${isResolved ? 'opacity-60' : ''}`}
+                title={`댓글 ${commentCount}개`}
+              >
+                <MessageSquare size={10} className="shrink-0" />
+                {commentCount}
+              </span>
+            )}
           </div>
         </div>
       </div>

@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, ChevronDown, AlertTriangle } from 'lucide-react';
+import { ChevronRight, ChevronDown, AlertTriangle, MessageSquare } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import type { CompRevision, RevisionStatus, Episode } from '@/types';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
@@ -64,6 +64,7 @@ export function EpisodeGroupSection({
   episodes,
   expandedScenes,
   selectedRevisionId,
+  commentCountByRev,
   onSelectRevision,
   onToggleScene,
 }: {
@@ -71,6 +72,8 @@ export function EpisodeGroupSection({
   episodes: Episode[];
   expandedScenes: Set<string>;
   selectedRevisionId: string | null;
+  /** v1.19.7: revisionId → 댓글 개수. 0 이면 마커 표시 안 함. 씬별 모드와 일관 유지. */
+  commentCountByRev?: Map<string, number>;
   onSelectRevision: (rev: CompRevision) => void;
   onToggleScene: (sceneKey: string) => void;
 }) {
@@ -146,6 +149,7 @@ export function EpisodeGroupSection({
                         sceneGroup={sg}
                         expanded={expandedScenes.has(sg.sceneKey)}
                         selectedRevisionId={selectedRevisionId}
+                        commentCountByRev={commentCountByRev}
                         onSelectRevision={onSelectRevision}
                         onToggleScene={() => onToggleScene(sg.sceneKey)}
                       />
@@ -167,12 +171,14 @@ function SceneNested({
   sceneGroup,
   expanded,
   selectedRevisionId,
+  commentCountByRev,
   onSelectRevision,
   onToggleScene,
 }: {
   sceneGroup: SceneGroup;
   expanded: boolean;
   selectedRevisionId: string | null;
+  commentCountByRev?: Map<string, number>;
   onSelectRevision: (rev: CompRevision) => void;
   onToggleScene: () => void;
 }) {
@@ -229,6 +235,7 @@ function SceneNested({
                   key={rev.id}
                   rev={rev}
                   isSelected={rev.id === selectedRevisionId}
+                  commentCount={commentCountByRev?.get(rev.id) ?? 0}
                   onSelect={() => onSelectRevision(rev)}
                 />
               ))}
@@ -245,10 +252,13 @@ function SceneNested({
 function MiniRevisionRow({
   rev,
   isSelected,
+  commentCount = 0,
   onSelect,
 }: {
   rev: CompRevision;
   isSelected: boolean;
+  /** v1.19.7: 댓글 개수 마커 — 씬별 모드와 일관 유지. */
+  commentCount?: number;
   onSelect: () => void;
 }) {
   const isResolved = rev.status === 'resolved';
@@ -272,6 +282,15 @@ function MiniRevisionRow({
       <span className={`truncate flex-1 min-w-0 ${isResolved ? 'line-through text-text-secondary/60' : 'text-text-primary'}`}>
         {rev.description}
       </span>
+      {commentCount > 0 && (
+        <span
+          className={`flex items-center gap-0.5 text-[10px] shrink-0 ${isResolved ? 'text-text-secondary/50' : 'text-text-secondary/70'}`}
+          title={`댓글 ${commentCount}개`}
+        >
+          <MessageSquare size={10} className="shrink-0" />
+          {commentCount}
+        </span>
+      )}
       <span className="text-[10px] text-text-secondary/70 shrink-0">{formatTimeShort(rev.createdAt)}</span>
     </button>
   );

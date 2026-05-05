@@ -499,6 +499,7 @@ export default function CompositingView() {
               episodes={episodes}
               expandedScenes={expandedScenes}
               selectedRevisionId={selectedRevisionId}
+              commentCountByRev={commentCountByRev}
               onSelectRevision={handleSelectRevision}
               onToggleScene={toggleScene}
             />
@@ -507,6 +508,7 @@ export default function CompositingView() {
               revisions={searchedSorted}
               sceneInfoMap={sceneInfoMap}
               selectedRevisionId={selectedRevisionId}
+              commentCountByRev={commentCountByRev}
               onSelectRevision={handleSelectRevision}
             />
           )}
