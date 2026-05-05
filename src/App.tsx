@@ -822,6 +822,7 @@ export default function App() {
           // comments 테이블 컬럼: scene_id 는 사실 scene.no(sort_order, 예: '1', '2'...).
           // 정확한 씬 매칭은 scene_uuid 컬럼 사용 (electron/supabase.ts:872 참고).
           const newComment = payload.new as {
+            id?: string;
             scene_id?: string;
             scene_uuid?: string;
             part_id?: string;
@@ -846,7 +847,9 @@ export default function App() {
                 const targets = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
                 if (!targets.includes(me.id)) return;
                 // dedupe — 같은 댓글이 broadcast/realtime 두 경로로 들어와도 한 번만.
-                const dedupeKey = `revcomment:${newComment.user_id}:${newComment.revision_id}:${newComment.scene_id ?? ''}`;
+                // 코덱스 P1 fix (2026-05-05): commentId 포함. 같은 사용자가 같은 리비전에
+                // 짧은 시간 내 여러 댓글 작성 시 두 번째부터 dedupe 충돌로 알림 손실되던 문제.
+                const dedupeKey = `revcomment:${newComment.id ?? ''}:${newComment.revision_id}`;
                 if (!dedupeNotification(dedupeKey)) return;
                 // 씬 매칭 — comment_panel.css 카드 라우팅 위해 sceneId/sceneName 도 같이 채움.
                 const sceneByUuid = newComment.scene_uuid
@@ -997,6 +1000,7 @@ export default function App() {
           const row = payload.new as {
             id?: string;
             scene_id?: string;
+            scene_uuid?: string;
             requester_id?: string;
             requester_name?: string;
             description?: string;
@@ -1020,14 +1024,17 @@ export default function App() {
           // sceneKey → 씬 매칭 (revisions 의 scene_id 는 'EP01:A:1' sceneKey 형식)
           const sceneKey = row.scene_id || '';
           const sceneNameForLabel = sceneKey.split(':').pop() || sceneKey;
+          // 코덱스 P1 fix (2026-05-05): metadata.sceneName 에 last-token('a001')만 저장하면
+          // 다른 EP/Part 의 같은 raw sceneId 와 reuse 충돌 → 알림 클릭 시 잘못된 씬으로 라우팅 가능.
+          // sceneId(UUID) 우선 매칭으로 정확도 보장. sceneName 은 sceneKey 전체 보존 (fallback 식별자).
 
           dispatchNotification({
             type: 'revision',
             title: `새 리비전 — ${sceneNameForLabel}`,
             body: row.description ? (row.description.length > 50 ? row.description.slice(0, 50) + '...' : row.description) : `${row.requester_name || '누군가'}님이 등록`,
             metadata: {
-              sceneId: undefined,
-              sceneName: sceneNameForLabel,
+              sceneId: row.scene_uuid,  // UUID 매칭 우선 (NotificationPanel:181 부근)
+              sceneName: sceneKey,       // sceneKey 전체 보존 — last-token reuse 충돌 방지
               revisionId: row.id,
               revisionAction: 'add',
             } as Record<string, unknown>,
@@ -1039,6 +1046,7 @@ export default function App() {
           const newRow = payload.new as {
             id?: string;
             scene_id?: string;
+            scene_uuid?: string;
             requester_id?: string;
             status?: string;
             revision_no?: number;
@@ -1081,12 +1089,14 @@ export default function App() {
 
           const sceneKey = newRow.scene_id || '';
           const sceneNameForLabel = sceneKey.split(':').pop() || sceneKey;
+          // 코덱스 P1 fix (2026-05-05): INSERT 분기와 동일 — sceneId(UUID) 우선,
+          // sceneName 은 sceneKey 전체 보존 (last-token reuse 충돌 방지).
           dispatchNotification({
             type: 'revision',
             title: `${titlePrefix} — ${sceneNameForLabel}`,
             metadata: {
-              sceneId: undefined,
-              sceneName: sceneNameForLabel,
+              sceneId: newRow.scene_uuid,
+              sceneName: sceneKey,
               revisionId: newRow.id,
               revisionAction: action,
             } as Record<string, unknown>,

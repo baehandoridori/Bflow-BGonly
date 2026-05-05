@@ -179,13 +179,35 @@ function NotificationDropdown() {
     const revisionId = n.metadata?.revisionId;
 
     if (sceneId || sceneName) {
+      // 코덱스 P1 fix (2026-05-05): sceneName 이 'EP01:A:a001' 형식 sceneKey 면
+      // EP/파트/sceneId 로 정확히 매칭 (raw sceneId 가 다른 EP 와 reuse 되어도 정확).
+      const sceneKeyParts = typeof sceneName === 'string' && sceneName.includes(':')
+        ? sceneName.split(':')
+        : null;
+      const sceneKeyEp = sceneKeyParts?.[0];   // 'EP01'
+      const sceneKeyPart = sceneKeyParts?.[1]; // 'A'
+      const sceneKeyId = sceneKeyParts?.[2];   // 'a001'
+
       // 씬 UUID/이름으로 에피소드를 찾아서 이동
       const episodes = useDataStore.getState().episodes;
       for (const ep of episodes) {
         for (const part of ep.parts) {
-          const found = part.scenes.find(s =>
-            (sceneId && s.id === sceneId) || (sceneName && s.sceneId === sceneName),
-          );
+          const found = part.scenes.find(s => {
+            // 1순위: UUID (가장 정확)
+            if (sceneId && s.id === sceneId) return true;
+            // 2순위: sceneKey 풀 매칭 ('EP01:A:a001' → ep.episodeNumber + part.partId + s.sceneId 모두 일치)
+            if (sceneKeyParts) {
+              const epLabelMatch = sceneKeyEp && (
+                String(ep.episodeNumber) === sceneKeyEp.replace(/\D/g, '') ||
+                ep.title === sceneKeyEp
+              );
+              const partLabelMatch = sceneKeyPart && part.partId === sceneKeyPart;
+              if (epLabelMatch && partLabelMatch && sceneKeyId && s.sceneId === sceneKeyId) return true;
+            }
+            // 3순위 (legacy): sceneName 이 단순 raw sceneId ('a001') 인 경우 — reuse 위험 있음
+            if (!sceneKeyParts && sceneName && s.sceneId === sceneName) return true;
+            return false;
+          });
           if (found) {
             // 한솔 보고 (v1.15.4): part 도 같이 이동해야 다른 파트의 씬으로 가도 펄스 이펙트가 보임
             setSelectedEpisode(ep.episodeNumber);
