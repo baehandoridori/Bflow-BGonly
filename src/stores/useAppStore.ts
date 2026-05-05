@@ -29,6 +29,23 @@ interface AppState {
   previousView: ViewMode | null;
   setView: (view: ViewMode) => void;
 
+  /**
+   * 다른 뷰에서 씬 모달 자동 오픈을 요청할 때 사용 (코덱스 P1 fix, 2026-05-05).
+   * `setView('scenes')` + 같은 tick `dispatchEvent('bflow:open-scene-modal')` 패턴은
+   * ScenesView 마운트 race로 listener 등록 전 이벤트 손실 가능. store 기반으로 전환:
+   *   1. SceneJumpButton/NotificationPanel: setView('scenes') + setPendingSceneModalRequest(detail)
+   *   2. ScenesView: 마운트 후 useEffect 로 request 감지 → 모달 오픈 + clear
+   */
+  pendingSceneModalRequest: {
+    sceneUuid?: string;
+    sceneName?: string;
+    episodeNumber?: number;
+    partId?: string;
+    initialTab?: 'detail' | 'revisions' | 'files' | 'history';
+    focusRevisionId?: string;
+  } | null;
+  setPendingSceneModalRequest: (req: AppState['pendingSceneModalRequest']) => void;
+
   // 씬 하이라이트 (스포트라이트/인원별 뷰에서 씬 이동 시 글로우 피드백)
   highlightSceneId: string | null;
   setHighlightSceneId: (id: string | null) => void;
@@ -160,6 +177,8 @@ export const useAppStore = create<AppState>((set) => ({
   currentView: 'dashboard',
   previousView: null,
   setView: (view) => set((s) => ({ currentView: view, previousView: s.currentView })),
+  pendingSceneModalRequest: null,
+  setPendingSceneModalRequest: (req) => set({ pendingSceneModalRequest: req }),
 
   selectedDepartment: 'all',
   setSelectedDepartment: (dept) => set({ selectedDepartment: dept }),

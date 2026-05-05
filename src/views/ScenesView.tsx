@@ -2100,6 +2100,48 @@ export function ScenesView() {
     return () => window.removeEventListener('bflow:open-scene-modal', handler);
   }, [selectedDepartment, mergedScenes, currentPart, setDetailMerged]);
 
+  // 코덱스 P1 fix (2026-05-05): pendingSceneModalRequest store 기반 처리.
+  // CustomEvent 패턴은 다른 뷰에서 dispatch 시 ScenesView 미마운트면 listener 없어 손실됨.
+  // store 사용 시 ScenesView 마운트 후 첫 tick 에서 useEffect 로 안정적 처리.
+  const pendingReq = useAppStore((s) => s.pendingSceneModalRequest);
+  const setPendingReq = useAppStore((s) => s.setPendingSceneModalRequest);
+  useEffect(() => {
+    if (!pendingReq) return;
+    const detail = pendingReq;
+
+    if (selectedDepartment === 'all') {
+      const target = mergedScenes.find((m) =>
+        (m.bgScene?.id && m.bgScene.id === detail.sceneUuid)
+        || (m.actScene?.id && m.actScene.id === detail.sceneUuid)
+        || (detail.sceneName && m.sceneId === detail.sceneName),
+      );
+      if (target) {
+        setDetailMerged(target);
+        setModalRouting({
+          initialTab: detail.initialTab,
+          focusRevisionId: detail.focusRevisionId,
+        });
+        setPendingReq(null);
+      }
+      return;
+    }
+
+    if (currentPart) {
+      const idx = currentPart.scenes.findIndex((s) =>
+        (detail.sceneUuid && s.id === detail.sceneUuid)
+        || (detail.sceneName && s.sceneId === detail.sceneName),
+      );
+      if (idx >= 0) {
+        setDetailSceneIndex(idx);
+        setModalRouting({
+          initialTab: detail.initialTab,
+          focusRevisionId: detail.focusRevisionId,
+        });
+        setPendingReq(null);
+      }
+    }
+  }, [pendingReq, selectedDepartment, mergedScenes, currentPart, setDetailMerged, setPendingReq]);
+
   // ACT 단독 뷰에서는 대응하는 BG 이미지를 폴백으로 사용한다.
   const actToBgImageMap = useMemo(() => {
     if (selectedDepartment !== 'acting') return null;

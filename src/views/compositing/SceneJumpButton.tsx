@@ -1,9 +1,11 @@
-// ─── 씬 모달 점프 버튼 (v1.19.0) ──────────
+// ─── 씬 모달 점프 버튼 (v1.19.0, 코덱스 P1 fix 2026-05-05) ──────────
 //
-// 'bflow:open-scene-modal' CustomEvent 발화 → ScenesView 가 listen 하여 모달 자동 오픈.
-// 알려진 episodeNumber/partId/sceneUuid 가 있으면 정확하게 전달, 없으면 sceneKey 파싱 폴백.
+// store-based pending modal request → ScenesView 마운트 후 안정 처리.
+// 컴포지팅 뷰처럼 ScenesView 가 미마운트인 상태에서도 setView('scenes') 후 자동 처리.
+// (이전 CustomEvent 패턴은 listener 등록 race 로 이벤트 손실 가능했음)
 
 import { ExternalLink } from 'lucide-react';
+import { useAppStore } from '@/stores/useAppStore';
 import { parseSceneKey } from './utils';
 
 interface Props {
@@ -21,22 +23,23 @@ export function SceneJumpButton({
   partId,
   sceneUuid,
 }: Props) {
+  const setView = useAppStore((s) => s.setView);
+  const setPendingSceneModalRequest = useAppStore((s) => s.setPendingSceneModalRequest);
+
   function handleJump(e: React.MouseEvent) {
     e.stopPropagation();
     const parsed = parseSceneKey(sceneKey);
     // ep 토큰은 보통 "EP01_A_BG" 같은 sheetName 인 경우가 많아 숫자만 파싱.
     const epNum = episodeNumber ?? (parseInt(parsed.ep.replace(/\D/g, ''), 10) || 0);
-    window.dispatchEvent(
-      new CustomEvent('bflow:open-scene-modal', {
-        detail: {
-          episodeNumber: epNum,
-          partId: partId ?? parsed.part,
-          sceneUuid,
-          sceneName: parsed.sceneId,
-          initialTab: 'revisions',
-        },
-      }),
-    );
+    // store 에 먼저 request 저장 → setView('scenes') → ScenesView 마운트 후 useEffect 가 처리.
+    setPendingSceneModalRequest({
+      episodeNumber: epNum,
+      partId: partId ?? parsed.part,
+      sceneUuid,
+      sceneName: parsed.sceneId,
+      initialTab: 'revisions',
+    });
+    setView('scenes');
   }
 
   if (variant === 'link') {

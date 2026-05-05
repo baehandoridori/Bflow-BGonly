@@ -194,18 +194,19 @@ function NotificationDropdown() {
             setView('scenes');
             setPanelOpen(false);
 
-            // 리비전 알림이면 모달 자동 오픈 + 탭/포커스 신호 디스패치
+            // 리비전 알림이면 모달 자동 오픈 + 탭/포커스.
+            // 코덱스 P1 fix (2026-05-05): store-based request → ScenesView 마운트 race 제거.
+            // 이전 CustomEvent dispatch 는 setView 와 같은 tick 에 발화되어 ScenesView listener
+            // 등록 전에 손실될 수 있었음.
             if (isRevisionNotif) {
-              window.dispatchEvent(new CustomEvent('bflow:open-scene-modal', {
-                detail: {
-                  sceneUuid: found.id,
-                  sceneName: found.sceneId,
-                  episodeNumber: ep.episodeNumber,
-                  partId: part.partId,
-                  initialTab: 'revisions',
-                  focusRevisionId: revisionId,
-                },
-              }));
+              useAppStore.getState().setPendingSceneModalRequest({
+                sceneUuid: found.id,
+                sceneName: found.sceneId,
+                episodeNumber: ep.episodeNumber,
+                partId: part.partId,
+                initialTab: 'revisions',
+                focusRevisionId: revisionId,
+              });
             }
             return;
           }
