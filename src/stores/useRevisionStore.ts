@@ -165,6 +165,14 @@ export const useRevisionStore = create<RevisionState>((set, get) => ({
         : { resolvedAt: undefined, resolvedBy: undefined, resolvedNote: undefined }),
     });
 
+    // 코덱스 P2 fix (4차, 2026-05-05): 본인 액션 self-mark — Realtime UPDATE 가 본인이 일으킨
+    // 변경이면 알림 스킵하기 위함. resolved_by 컬럼이 'in_progress' 변경에는 안 채워져
+    // 기존 가드(`resolved_by === me.name`) 가 in_progress 자기 액션을 못 걸렀던 문제 해결.
+    if (status === 'in_progress' || status === 'resolved') {
+      const action = status === 'resolved' ? 'resolve' : 'in_progress';
+      markSelfRevisionAction(id, action);
+    }
+
     try {
       await revisionService.updateRevisionStatus(id, sceneKey, status, extra);
     } catch (err) {
@@ -200,3 +208,33 @@ useDataStore.subscribe((state, previousState) => {
     revisionCountByScene: buildCountMap(revisionState.revisions),
   }));
 });
+
+// ─── 본인 액션 self-mark (코덱스 P2 fix 4차, 2026-05-05) ──────────────────
+// updateStatus 호출 시 5초 동안 그 revisionId+action 을 마크. App.tsx Realtime UPDATE
+// 핸들러가 이 마크를 체크해서 본인이 일으킨 변경의 알림은 스킵.
+// resolved_by 컬럼은 'resolved' 변경 시에만 채워져 in_progress 자기 액션을 못 걸렀음.
+
+const SELF_ACTION_TTL_MS = 5000;
+const _recentSelfRevisionActions = new Map<string, number>();
+
+export function markSelfRevisionAction(revisionId: string, action: 'in_progress' | 'resolve'): void {
+  const key = `${revisionId}:${action}`;
+  _recentSelfRevisionActions.set(key, Date.now());
+  setTimeout(() => {
+    const ts = _recentSelfRevisionActions.get(key);
+    if (ts && Date.now() - ts >= SELF_ACTION_TTL_MS) {
+      _recentSelfRevisionActions.delete(key);
+    }
+  }, SELF_ACTION_TTL_MS + 100);
+}
+
+export function isRecentSelfRevisionAction(revisionId: string, action: 'in_progress' | 'resolve'): boolean {
+  const key = `${revisionId}:${action}`;
+  const ts = _recentSelfRevisionActions.get(key);
+  if (!ts) return false;
+  if (Date.now() - ts >= SELF_ACTION_TTL_MS) {
+    _recentSelfRevisionActions.delete(key);
+    return false;
+  }
+  return true;
+}

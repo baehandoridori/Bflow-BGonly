@@ -44,6 +44,7 @@ import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
 // 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
@@ -1067,7 +1068,7 @@ export default function App() {
 
           // 상태 변경 detect — old.status !== new.status 일 때만 알림
           if (!oldRow || oldRow.status === newRow.status) return;
-          // 본인이 변경한 거면 스킵 (resolved_by 가 본인 이름이면)
+          // 본인이 변경한 거면 스킵 (resolved_by 가 본인 이름이면) — resolved 전용 가드.
           if (newRow.resolved_by === me.name) return;
 
           let action: 'in_progress' | 'resolve';
@@ -1082,6 +1083,10 @@ export default function App() {
             // open 으로 되돌림 — 알림 X
             return;
           }
+
+          // 코덱스 P2 fix (4차, 2026-05-05): in_progress 자기 액션은 resolved_by 미채워져
+          // 위 가드가 못 걸렀음. updateStatus 가 mark 해둔 self-action 체크로 차단.
+          if (newRow.id && isRecentSelfRevisionAction(newRow.id, action)) return;
 
           // v1.19.7: 같은 UPDATE 가 두 경로 또는 동일 status 로의 다른 필드 UPDATE 로 두 번 도착할 때 차단.
           // resolve 는 resolved_at 이, in_progress 는 updated_at 이 안정 타임스탬프 (같은 status 반복 변경이면 시간이 다름).

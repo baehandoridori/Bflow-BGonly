@@ -60,8 +60,13 @@ export function RevisionRecipientPicker({
 
   // defaultCheckedIds 가 바뀌면 (예: scene/dept 변경) 사용자의 명시적 unchecked 도 리셋.
   // — Picker 의 "기본값" 자체가 바뀐 것이므로 깨끗한 상태로 시작하는 게 자연스럽다.
+  // 코덱스 P1 fix (4차, 2026-05-05): reset 과 onChange emit 을 별도 effect 로 분리하면
+  // 두 번째 effect 가 stale uncheckedDefaults 로 onChange 를 호출 → 부모가 잘못된 list 받음.
+  // 이 effect 에서 reset + fresh 빈 배열로 즉시 emit 하여 동기화.
   useEffect(() => {
     setUncheckedDefaults([]);
+    emitChange([], extraIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultCheckedIds]);
 
   // 화면에 표시할 칩 목록: defaultCheckedIds + extraIds (등록자 제외, 중복 제거)
@@ -113,11 +118,8 @@ export function RevisionRecipientPicker({
     onChange(checked);
   }
 
-  // defaultCheckedIds/onChange 가 바뀔 때도 부모 sync 유지 (마운트 시 초기 알림 대상 통보)
-  useEffect(() => {
-    emitChange(uncheckedDefaults, extraIds);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultCheckedIds]);
+  // (코덱스 P1 fix 4차, 2026-05-05) — 위 useEffect 에서 reset + emit 을 한 번에 처리하도록
+  // 합쳤으므로 별도 sync effect 불필요. 마운트 시 초기 알림 대상 통보도 같은 경로로 발화.
 
   function toggle(id: string) {
     if (defaultCheckedIds.includes(id)) {
