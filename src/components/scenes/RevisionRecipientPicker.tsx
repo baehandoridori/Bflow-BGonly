@@ -58,14 +58,16 @@ export function RevisionRecipientPicker({
   const [query, setQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // defaultCheckedIds 가 바뀌면 (예: scene/dept 변경) 사용자의 명시적 unchecked 도 리셋.
+  // defaultCheckedIds 가 바뀌면 (예: scene/dept 변경) 모든 사용자 선택 상태 리셋.
   // — Picker 의 "기본값" 자체가 바뀐 것이므로 깨끗한 상태로 시작하는 게 자연스럽다.
   // 코덱스 P1 fix (4차, 2026-05-05): reset 과 onChange emit 을 별도 effect 로 분리하면
   // 두 번째 effect 가 stale uncheckedDefaults 로 onChange 를 호출 → 부모가 잘못된 list 받음.
-  // 이 effect 에서 reset + fresh 빈 배열로 즉시 emit 하여 동기화.
+  // 코덱스 P2 fix (10차, 2026-05-05): extraIds(수동 추가) 도 함께 reset — 이전 씬에서
+  // 수동 추가한 사람이 다음 폼으로 carry-over 되어 의도치 않은 알림이 가는 문제 해결.
   useEffect(() => {
     setUncheckedDefaults([]);
-    emitChange([], extraIds);
+    setExtraIds([]);
+    emitChange([], []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultCheckedIds]);
 
