@@ -420,6 +420,11 @@ export function SceneDetailModal({
   const [showImageModal, setShowImageModal] = useState(false);
   // 코덱스 P2 fix (5차, 2026-05-05): 알림 라우팅 시 initialTab='revisions' 면 리비전 패널 자동 펼침.
   const [showRevisions, setShowRevisions] = useState(initialTab === 'revisions');
+  // 코덱스 P2 fix (6차, 2026-05-05): 모달 인스턴스가 재사용되어 initialTab prop 이 나중에 바뀌면
+  // useState 초기값만으로는 sync 안 됨. effect 로 prop 변경 감지 → revisions 모드로 전환.
+  useEffect(() => {
+    if (initialTab === 'revisions') setShowRevisions(true);
+  }, [initialTab]);
 
   // 코덱스 P2 fix (5차, 2026-05-05): focusRevisionId 강조 — UnifiedSceneDetailModal:204 동일 패턴.
   // 단일 부서 모달에서도 알림 클릭 → 리비전 패널 펼침 + 해당 카드 scrollIntoView + pulse.

@@ -196,10 +196,13 @@ function NotificationDropdown() {
             // 1순위: UUID (가장 정확)
             if (sceneId && s.id === sceneId) return true;
             // 2순위: sceneKey 풀 매칭 ('EP01:A:a001' → ep.episodeNumber + part.partId + s.sceneId 모두 일치)
+            // 코덱스 P1 fix (6차, 2026-05-05): episode 토큰 정규화 — "EP01"→1, "EP1"→1 모두 같은 episodeNumber 매칭.
+            // 이전엔 String(ep.episodeNumber)='1' vs sceneKeyEp.replace(/\D/g,'')='01' → 문자열 mismatch.
             if (sceneKeyParts) {
-              const epLabelMatch = sceneKeyEp && (
-                String(ep.episodeNumber) === sceneKeyEp.replace(/\D/g, '') ||
-                ep.title === sceneKeyEp
+              const sceneKeyEpNum = sceneKeyEp ? Number(sceneKeyEp.replace(/\D/g, '')) : NaN;
+              const epLabelMatch = (
+                (Number.isFinite(sceneKeyEpNum) && ep.episodeNumber === sceneKeyEpNum) ||
+                (sceneKeyEp != null && ep.title === sceneKeyEp)
               );
               const partLabelMatch = sceneKeyPart && part.partId === sceneKeyPart;
               if (epLabelMatch && partLabelMatch && sceneKeyId && s.sceneId === sceneKeyId) return true;
