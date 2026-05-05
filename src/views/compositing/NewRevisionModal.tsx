@@ -97,11 +97,38 @@ export default function NewRevisionModal({ open, onClose }: Props) {
     return selectedEpisode.parts.find((p) => p.sheetName === selectedSheetName) ?? null;
   }, [selectedEpisode, selectedSheetName]);
 
+  // 코덱스 P1 fix (7차, 2026-05-05): 같은 partId 의 BG + ACT sheet scenes 를 union(dedup by sceneId).
+  // 이전엔 BG sheet 만 채택해 ACT-only 씬은 검색에 안 잡혀 등록 불가능. 한솔 정책상 사용자에겐
+  // 부서 비노출이지만 데이터 lookup 은 양쪽 sheet 합쳐야 정확하게 모든 씬을 보여줌.
+  const partScenesUnion = useMemo<{ scenes: Scene[]; sourceMap: Map<string, Part> }>(() => {
+    if (!selectedEpisode || !selectedPart) {
+      return { scenes: [], sourceMap: new Map() };
+    }
+    const allPartsSamePartId = selectedEpisode.parts.filter((p) => p.partId === selectedPart.partId);
+    const seen = new Set<string>();
+    const scenes: Scene[] = [];
+    const sourceMap = new Map<string, Part>();
+    // BG 우선 — 같은 sceneId 가 BG/ACT 둘 다에 있으면 BG 채택
+    const sortedParts = allPartsSamePartId.slice().sort((a, b) =>
+      (a.department === 'bg' ? 0 : 1) - (b.department === 'bg' ? 0 : 1),
+    );
+    for (const p of sortedParts) {
+      for (const s of p.scenes) {
+        if (seen.has(s.sceneId)) continue;
+        seen.add(s.sceneId);
+        scenes.push(s);
+        sourceMap.set(s.sceneId, p);
+      }
+    }
+    return { scenes, sourceMap };
+  }, [selectedEpisode, selectedPart]);
+
   const filteredScenes = useMemo(() => {
-    if (!selectedPart) return [] as Scene[];
-    const list = selectedPart.scenes.filter((s) => sceneMatchesQuery(s, sceneSearchQuery));
-    return list.slice().sort((a, b) => a.no - b.no);
-  }, [selectedPart, sceneSearchQuery]);
+    return partScenesUnion.scenes
+      .filter((s) => sceneMatchesQuery(s, sceneSearchQuery))
+      .slice()
+      .sort((a, b) => a.no - b.no);
+  }, [partScenesUnion.scenes, sceneSearchQuery]);
 
   const defaultRecipients = useMemo(() => {
     if (!currentUser) return [] as string[];
@@ -250,10 +277,14 @@ export default function NewRevisionModal({ open, onClose }: Props) {
     if (!canSubmit || !currentUser || !selectedPart || !selectedScene) return;
     setSubmitting(true);
     try {
-      const sceneKey = buildSceneKey(selectedPart.sheetName, selectedScene.sceneId, {
-        siblingSceneIds: selectedPart.scenes.map((s) => s.sceneId),
+      // 코덱스 P1 fix (7차, 2026-05-05): selectedScene 의 실제 source Part 사용.
+      // 같은 partId 의 BG/ACT 양쪽 scenes 를 union 했기 때문에, ACT-only 씬일 때
+      // selectedPart(BG primary) 가 아니라 그 씬이 실제 속한 ACT sheet 사용해야 정확.
+      const sourcePart = partScenesUnion.sourceMap.get(selectedScene.sceneId) ?? selectedPart;
+      const sceneKey = buildSceneKey(sourcePart.sheetName, selectedScene.sceneId, {
+        siblingSceneIds: sourcePart.scenes.map((s) => s.sceneId),
       });
-      const department = selectedPart.department === 'bg' ? 'bg' : 'acting';
+      const department = sourcePart.department === 'bg' ? 'bg' : 'acting';
       await createRevision({
         sceneKey,
         description: description.trim(),

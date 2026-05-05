@@ -111,8 +111,25 @@ export function sortRevisions(
       return sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     case 'oldest':
       return sorted.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    case 'sceneNo':
-      return sorted.sort((a, b) => a.sceneKey.localeCompare(b.sceneKey));
+    case 'sceneNo': {
+      // 코덱스 P2 fix (7차, 2026-05-05): localeCompare 는 lexicographic 이라 ":10" < ":2" 잘못된 순서.
+      // 같은 episode/part 내에서는 scene 번호 토큰의 숫자 비교, 다른 ep/part 면 sceneKey 사전식.
+      const sceneNumOf = (key: string): number => {
+        const last = key.split(':').pop() ?? '';
+        const m = last.match(/(\d+)/);
+        return m ? Number(m[1]) : 0;
+      };
+      const epPartOf = (key: string): string => {
+        const parts = key.split(':');
+        return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : key;
+      };
+      return sorted.sort((a, b) => {
+        const ea = epPartOf(a.sceneKey);
+        const eb = epPartOf(b.sceneKey);
+        if (ea !== eb) return ea.localeCompare(eb);
+        return sceneNumOf(a.sceneKey) - sceneNumOf(b.sceneKey);
+      });
+    }
     case 'comments':
       return sorted.sort(
         (a, b) => (commentCounts?.get(b.id) ?? 0) - (commentCounts?.get(a.id) ?? 0),
