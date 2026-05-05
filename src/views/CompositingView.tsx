@@ -512,8 +512,11 @@ export default function CompositingView() {
               onToggleScene={toggleScene}
             />
           ) : (
+            // 코덱스 P2 fix (10차, 2026-05-05): 진행률별 모드도 sceneGroups 의 필터 적용된 리비전들을 사용.
+            // searchedSorted 는 검색/정렬만 반영하고 selectedEp/statusFilter/myTasksOnly 무시 →
+            // 사용자가 EP/상태/내할일 토글 후 진행률별 보기로 전환하면 무관한 리비전이 보임.
             <ProgressKanbanSection
-              revisions={searchedSorted}
+              revisions={sceneGroups.flatMap((g) => g.revisions)}
               sceneInfoMap={sceneInfoMap}
               selectedRevisionId={selectedRevisionId}
               commentCountByRev={commentCountByRev}
