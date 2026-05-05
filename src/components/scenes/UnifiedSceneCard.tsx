@@ -211,11 +211,17 @@ export function UnifiedSceneCard({
     })();
     return buildSceneKey(revisionSheetName, revisionSceneId, { siblingSceneIds: siblings });
   }, [episodes, revisionSheetName, revisionSceneId]);
-  const sceneRevisions = useRevisionStore((s) =>
-    revisionSceneKey ? s.getRevisionsForScene(revisionSceneKey) : [],
+  // 코덱스 P2 fix (8차, 2026-05-05): selector 가 새 배열을 매번 반환하면 모든 카드가 어떤
+  // 리비전 변경에도 re-render 됨 (보드에 카드 많을 때 jank). 두 selector 모두 number 반환 →
+  // 카운트 안 변하면 카드 stable. resolved selector 가 getRevisionsForScene 을 호출해도
+  // 결과는 number 라 zustand 의 strict-equal 비교로 안정.
+  const openRevCount = useRevisionStore((s) =>
+    revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0,
   );
-  const openRevCount = sceneRevisions.filter((r) => r.status !== 'resolved').length;
-  const resolvedRevCount = sceneRevisions.filter((r) => r.status === 'resolved').length;
+  const resolvedRevCount = useRevisionStore((s) => {
+    if (!revisionSceneKey) return 0;
+    return s.getRevisionsForScene(revisionSceneKey).filter((r) => r.status === 'resolved').length;
+  });
 
   return (
     <motion.div

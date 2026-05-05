@@ -870,7 +870,9 @@ export default function App() {
                   title: `리비전 댓글 — ${sceneByUuid?.sceneId || newComment.scene_id || ''}`,
                   body,
                   metadata: {
-                    sceneId: sceneByUuid?.id,
+                    // 코덱스 P2 fix (8차, 2026-05-05): sceneByUuid 가 stale 캐시 등으로 null 일 때
+                    // newComment.scene_uuid 폴백 — 라우팅이 sceneId/sceneName 의존이라 누락 시 알림 클릭이 동작 안 함.
+                    sceneId: sceneByUuid?.id ?? newComment.scene_uuid,
                     sceneName: sceneByUuid?.sceneId,
                     revisionId: newComment.revision_id,
                     revisionAction: 'comment',
