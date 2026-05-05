@@ -259,18 +259,25 @@ export default function CompositingView() {
   // v1.19.6: 표시되는 sheetName 집합으로 댓글 fetch → revisionId 기준 카운트 맵 빌드.
   // sceneGroups 의 info.sheetName 에서 unique 만 모아 loadPartComments 호출 (캐시되어 재호출은 가벼움).
   // BG↔ACT 통합 조회는 commentService 가 이미 처리하므로 한쪽만 호출해도 양쪽 댓글이 들어옴 → 중복 제거 필요.
+  //
+  // v1.19.7: dep 안정화 — sceneGroups 객체 ref 가 필터/검색 변경에도 갱신되어 N개 sheet 가 매번 재fetch 되던 것을
+  // 정렬된 sheetName 키 문자열에 의존하도록 변경. (sheetName 에 콤마 없음이 보장되어 join(',') 안전.)
+  const sheetNamesKey = useMemo(
+    () =>
+      Array.from(new Set(sceneGroups.map((g) => g.info.sheetName).filter(Boolean)))
+        .sort()
+        .join(','),
+    [sceneGroups],
+  );
   useEffect(() => {
-    const sheetNames = new Set<string>();
-    for (const g of sceneGroups) {
-      if (g.info.sheetName) sheetNames.add(g.info.sheetName);
-    }
-    if (sheetNames.size === 0) return;
+    if (!sheetNamesKey) return;
+    const sheetNames = sheetNamesKey.split(',');
 
     let cancelled = false;
     (async () => {
       try {
         const stores = await Promise.all(
-          Array.from(sheetNames).map((sn) => loadPartComments(sn).catch(() => ({}))),
+          sheetNames.map((sn) => loadPartComments(sn).catch(() => ({}))),
         );
         if (cancelled) return;
         // revisionId → count (BG/ACT 통합 조회로 중복 들어올 수 있어 commentId 로 dedup)
@@ -293,7 +300,7 @@ export default function CompositingView() {
     })();
 
     return () => { cancelled = true; };
-  }, [sceneGroups, commentRefreshTick]);
+  }, [sheetNamesKey, commentRefreshTick]);
 
   // 댓글 변경 이벤트 — 다른 창에서 댓글 추가/수정/삭제 시 카운트 재빌드.
   // commentService 가 invalidate 이벤트와 함께 캐시도 비우므로 다음 fetch 는 최신 데이터를 가져옴.
