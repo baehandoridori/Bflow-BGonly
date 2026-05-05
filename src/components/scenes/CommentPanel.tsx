@@ -596,7 +596,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
 
       {/* 댓글 목록 — 시스템 이벤트(inlineEvents)와 시간순 머지 + 새 항목 슬라이드 인 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
-        {visibleComments.length === 0 && (!inlineEvents || inlineEvents.length === 0) ? (
+        {/* 코덱스 P3 fix (9차, 2026-05-05): reOnly 시 inlineEvents 는 어차피 mergeFeed 에서 drop 되므로
+            empty-state 판정에서도 inlineEvents 무시 → 리비전 댓글 0 + inline 만 있을 때 빈 영역 방지. */}
+        {visibleComments.length === 0 && (reOnly || !inlineEvents || inlineEvents.length === 0) ? (
           <div className="text-center py-10">
             <p className="text-text-secondary text-xs">
               {reOnly ? '리비전 댓글이 없습니다' : '아직 의견이 없습니다'}

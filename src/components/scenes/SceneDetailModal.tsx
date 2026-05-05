@@ -426,6 +426,33 @@ export function SceneDetailModal({
     if (initialTab === 'revisions') setShowRevisions(true);
   }, [initialTab]);
 
+  // 코덱스 P2 fix (9차, 2026-05-05): 댓글 패널의 [re#] 배지 클릭 → 리비전 패널 펼침 + 카드 강조.
+  // UnifiedSceneDetailModal:173 동일 패턴. 단일 부서 모달도 같은 동작 보장.
+  useEffect(() => {
+    function onJump(e: Event) {
+      const detail = (e as CustomEvent<{ revisionId?: string }>).detail;
+      const revisionId = detail?.revisionId;
+      if (!revisionId) return;
+      setShowRevisions(true);
+      let retries = 8;
+      const attempt = () => {
+        const card = document.getElementById(`rev-card-${revisionId}`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.remove('rev-pulse');
+          void (card as HTMLElement).offsetWidth;
+          card.classList.add('rev-pulse');
+          window.dispatchEvent(new CustomEvent('bflow:expand-revision', { detail: { revisionId } }));
+        } else if (retries-- > 0) {
+          setTimeout(() => requestAnimationFrame(attempt), 100);
+        }
+      };
+      requestAnimationFrame(attempt);
+    }
+    window.addEventListener('bflow:jump-to-revision', onJump);
+    return () => window.removeEventListener('bflow:jump-to-revision', onJump);
+  }, []);
+
   // 코덱스 P2 fix (5차, 2026-05-05): focusRevisionId 강조 — UnifiedSceneDetailModal:204 동일 패턴.
   // 단일 부서 모달에서도 알림 클릭 → 리비전 패널 펼침 + 해당 카드 scrollIntoView + pulse.
   useEffect(() => {
