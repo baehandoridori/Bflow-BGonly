@@ -1002,12 +1002,20 @@ export default function App() {
             description?: string;
             revision_no?: number;
             notify_user_ids?: string[] | null;
+            created_at?: string | null;
           };
           // 본인이 등록자면 스킵
           if (row.requester_id === me.id) return;
           // notify_user_ids 에 본인 없으면 스킵
           const targets = Array.isArray(row.notify_user_ids) ? row.notify_user_ids : [];
           if (!targets.includes(me.id)) return;
+
+          // v1.19.7: 같은 INSERT 가 broadcast/realtime 두 경로로 들어와도 한 번만.
+          // created_at 을 키에 포함해 같은 row 의 중복 이벤트만 차단 (다른 row 면 created_at 이 다름).
+          if (row.id) {
+            const dedupeKey = `revision:${row.id}:add:${row.created_at ?? ''}`;
+            if (!dedupeNotification(dedupeKey)) return;
+          }
 
           // sceneKey → 씬 매칭 (revisions 의 scene_id 는 'EP01:A:1' sceneKey 형식)
           const sceneKey = row.scene_id || '';
@@ -1036,6 +1044,8 @@ export default function App() {
             revision_no?: number;
             resolved_by?: string | null;
             notify_user_ids?: string[] | null;
+            updated_at?: string | null;
+            resolved_at?: string | null;
           };
           const oldRow = payload.old as { status?: string } | undefined;
           const targets = Array.isArray(newRow.notify_user_ids) ? newRow.notify_user_ids : [];
@@ -1057,6 +1067,16 @@ export default function App() {
           } else {
             // open 으로 되돌림 — 알림 X
             return;
+          }
+
+          // v1.19.7: 같은 UPDATE 가 두 경로 또는 동일 status 로의 다른 필드 UPDATE 로 두 번 도착할 때 차단.
+          // resolve 는 resolved_at 이, in_progress 는 updated_at 이 안정 타임스탬프 (같은 status 반복 변경이면 시간이 다름).
+          if (newRow.id) {
+            const stamp = action === 'resolve'
+              ? (newRow.resolved_at ?? newRow.updated_at ?? '')
+              : (newRow.updated_at ?? '');
+            const dedupeKey = `revision:${newRow.id}:${action}:${stamp}`;
+            if (!dedupeNotification(dedupeKey)) return;
           }
 
           const sceneKey = newRow.scene_id || '';
