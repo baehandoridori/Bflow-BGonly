@@ -841,9 +841,15 @@ export default function App() {
           if (me && newComment.revision_id && newComment.user_id !== me.id) {
             const notiSettings = notiSettingsRef.current;
             if (notiSettings.commentNotify !== false) {
-              import('@/stores/useRevisionStore').then(({ useRevisionStore }) => {
-                const rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
-                if (!rev) return;
+              import('@/stores/useRevisionStore').then(async ({ useRevisionStore }) => {
+                let rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
+                // 코덱스 P1 fix (3차, 2026-05-05): 리비전 store 가 비어있으면 (예: 다른 뷰에서
+                // 시작한 fresh 세션) 댓글 알림이 silent drop 되던 문제. lazy load 후 재시도.
+                if (!rev) {
+                  await useRevisionStore.getState().loadRevisions();
+                  rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
+                  if (!rev) return;
+                }
                 const targets = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
                 if (!targets.includes(me.id)) return;
                 // dedupe — 같은 댓글이 broadcast/realtime 두 경로로 들어와도 한 번만.

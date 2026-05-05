@@ -2103,12 +2103,25 @@ export function ScenesView() {
   // 코덱스 P1 fix (2026-05-05): pendingSceneModalRequest store 기반 처리.
   // CustomEvent 패턴은 다른 뷰에서 dispatch 시 ScenesView 미마운트면 listener 없어 손실됨.
   // store 사용 시 ScenesView 마운트 후 첫 tick 에서 useEffect 로 안정적 처리.
+  // 코덱스 P2 fix (3차, 2026-05-05): pending 의 episodeNumber/partId 가 현재 선택과 다르면
+  // 먼저 selectedEpisode/selectedPart 를 변경 → 다음 render 의 새 currentPart/mergedScenes 로 매칭.
   const pendingReq = useAppStore((s) => s.pendingSceneModalRequest);
   const setPendingReq = useAppStore((s) => s.setPendingSceneModalRequest);
   useEffect(() => {
     if (!pendingReq) return;
     const detail = pendingReq;
 
+    // 1) episode/part 컨텍스트 먼저 정렬 (다른 EP/Part 점프 시)
+    if (detail.episodeNumber !== undefined && selectedEpisode !== detail.episodeNumber) {
+      setSelectedEpisode(detail.episodeNumber);
+      return; // 다음 render 까지 대기
+    }
+    if (detail.partId && selectedPart !== detail.partId) {
+      setSelectedPart(detail.partId);
+      return; // 다음 render 까지 대기
+    }
+
+    // 2) 컨텍스트 일치 — 매칭 시도
     if (selectedDepartment === 'all') {
       const target = mergedScenes.find((m) =>
         (m.bgScene?.id && m.bgScene.id === detail.sceneUuid)
@@ -2140,7 +2153,7 @@ export function ScenesView() {
         setPendingReq(null);
       }
     }
-  }, [pendingReq, selectedDepartment, mergedScenes, currentPart, setDetailMerged, setPendingReq]);
+  }, [pendingReq, selectedDepartment, selectedEpisode, selectedPart, mergedScenes, currentPart, setDetailMerged, setPendingReq, setSelectedEpisode, setSelectedPart]);
 
   // ACT 단독 뷰에서는 대응하는 BG 이미지를 폴백으로 사용한다.
   const actToBgImageMap = useMemo(() => {
