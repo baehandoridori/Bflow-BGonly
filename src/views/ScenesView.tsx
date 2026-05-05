@@ -4376,6 +4376,8 @@ export function ScenesView() {
             onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(detailSheetName, idx, field, value)}
             onToggle={(id, stage) => handleToggleForSheet(detailSheetName, id, stage)}
             onClose={() => { setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
+            initialTab={modalRouting?.initialTab}
+            focusRevisionId={modalRouting?.focusRevisionId}
             hasPrev={hasPrev}
             hasNext={hasNext}
             totalScenes={filteredIndices.length}

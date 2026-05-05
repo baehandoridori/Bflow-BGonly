@@ -98,11 +98,12 @@ export default function CompositingView() {
   }, [episodes]);
 
   // v1.19.0: 검색 + 정렬 적용된 리비전. 그룹핑 단계 입력으로 사용.
-  // commentCounts 는 현재 도입되지 않음 — 댓글많은순은 향후 lazy load 통해 채울 수 있음.
+  // 코덱스 P2 fix (5차, 2026-05-05): "댓글 많은순" 정렬 시 commentCountByRev 전달.
+  // 이전엔 인자 누락으로 sortRevisions 가 모든 리비전을 0 으로 취급해 정렬 무효였음.
   const searchedSorted = useMemo(() => {
     const filtered = filterRevisionsBySearch(revisions, searchQuery, sceneInfoMap);
-    return sortRevisions(filtered, sortMode);
-  }, [revisions, searchQuery, sortMode, sceneInfoMap]);
+    return sortRevisions(filtered, sortMode, commentCountByRev);
+  }, [revisions, searchQuery, sortMode, sceneInfoMap, commentCountByRev]);
 
   // 선택된 리비전의 씬 정보
   const selectedRevisionSceneInfo = useMemo(
