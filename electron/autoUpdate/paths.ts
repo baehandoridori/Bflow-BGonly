@@ -59,12 +59,19 @@ export function localPendingVerificationMarker(): string {
 }
 
 /**
- * Drive desktop 가상 마운트의 표준 마커 폴더 — Drive 마운트 root에는 항상 이 중 하나가 있음.
- *  - 한국어 로케일: "공유 드라이브", "내 드라이브"
- *  - 영어 로케일:   "Shared drives", "My Drive"
- * 일반 C:, D: 같은 디스크 root에는 이 폴더가 없으므로 Drive와 일반 디스크를 정확히 구분.
+ * Drive 가상 마운트 마커 폴더.
+ *  - Drive desktop 가상 마운트(한국어): "공유 드라이브", "내 드라이브"
+ *  - Drive desktop 가상 마운트(영어):   "Shared drives", "My Drive"
+ *  - Legacy desktop sync:               "Google Drive", "GoogleDrive"
+ *
+ * Codex 7차 P1: 이전엔 legacy ~\Google Drive 마커가 누락되어 legacy 사용자는 self-installer
+ * skip 됐음. legacy 마커도 추가.
  */
-const DRIVE_MOUNT_MARKERS = ['공유 드라이브', '내 드라이브', 'Shared drives', 'My Drive'];
+const DRIVE_MOUNT_MARKERS = [
+  '공유 드라이브', '내 드라이브',
+  'Shared drives', 'My Drive',
+  'Google Drive', 'GoogleDrive',
+];
 
 /**
  * 현재 실행 *진입점* 경로 — portable 빌드 / 일반 빌드 모두 정확히 반환.
@@ -143,9 +150,13 @@ export function guessGoogleDriveRoots(): string[] {
  */
 export function findRemoteDistRoot(): string | null {
   const COMMON_TAIL = path.join('JBBJ 자료실', '한솔이의 두근두근 실험실', 'Bflow-BGonly', 'dist');
+  // Drive desktop 가상 마운트는 root 안에 "공유 드라이브"/"Shared drives" prefix 있음.
+  // Legacy ~\Google Drive root는 sync root 자체이므로 prefix 없이 COMMON_TAIL만 추가.
+  // Codex 7차 P1: 이전엔 legacy root에도 prefix prepend하던 문제 — null prefix 폴백 추가.
   const SUFFIXES = [
     path.join('공유 드라이브', COMMON_TAIL),
     path.join('Shared drives', COMMON_TAIL),
+    COMMON_TAIL, // legacy: prefix 없음
   ];
   const drives = guessGoogleDriveRoots();
   for (const drive of drives) {
