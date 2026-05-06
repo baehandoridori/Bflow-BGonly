@@ -33,6 +33,12 @@ export function FontFamilySection() {
   const familySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingFamilyRef = useRef<string | null>(null);
 
+  // 코덱스 PR #62 2차 P2: customFonts의 latest baseline 추적 ref.
+  // persistFontsList가 호출 시점 closure가 아닌 ref를 통해 baseline을 읽어 nextCustomFonts와
+  // diff 계산 → disk customFonts에 add/remove만 적용 (multi-window 안전).
+  const customFontsRef = useRef<CustomFont[]>([]);
+  useEffect(() => { customFontsRef.current = customFonts; }, [customFonts]);
+
   // 저장된 설정 로드
   useEffect(() => {
     let cancelled = false;
@@ -101,29 +107,48 @@ export function FontFamilySection() {
 
   /**
    * + 글꼴 추가 / 삭제처럼 customFonts 자체를 변경하는 흐름 — 즉시 저장.
-   * 사용자 explicit action이라 race 거의 없음(busy 플래그 + confirm dialog로 보호).
    *
-   * 코덱스 PR #62 리뷰 P1: persistFamilyOnly가 디바운스 큐에 stale family 값을 넣어둔
-   * 상태에서 사용자가 빠르게 글꼴 추가/삭제하면, 디바운스 콜백이 immediate save 후에
-   * 실행되어 stale fontFamily(이미 삭제된 custom 폰트 ID 등)로 disk를 덮어쓸 수 있음.
-   * persistFontsList가 발화되면 pending family 디바운스를 즉시 cancel.
+   * 코덱스 PR #62 1차 P1: persistFamilyOnly 디바운스가 stale family로 overwrite 막기 위해
+   * 진입 시 timer cancel.
+   *
+   * 코덱스 PR #62 2차 P2: 이전엔 nextCustomFonts(component-local state)를 disk에 통째 overwrite
+   * → 다른 window가 추가/삭제한 customFonts가 영구 손실. 해결: customFontsRef(local baseline)와
+   * nextCustomFonts의 diff = 이번 호출의 add/remove 의도. disk customFonts에 그것만 적용.
+   * 다른 window의 변경분도 보존.
    */
   const persistFontsList = useCallback(async (familyId: string, nextCustomFonts: CustomFont[]) => {
-    // ★ 디바운스 cancel — pending family 콜백이 stale 값으로 overwrite하지 못하게.
+    // ★ family 디바운스 cancel — pending stale family 콜백 overwrite 방지 (1차 P1).
     if (familySaveTimerRef.current) {
       clearTimeout(familySaveTimerRef.current);
       familySaveTimerRef.current = null;
     }
     pendingFamilyRef.current = null;
 
+    // baseline (이번 컴포넌트가 직전에 안 disk 상태) — ref로 latest 추적
+    const baseline = customFontsRef.current;
+    const baselineIds = new Set(baseline.map((f) => f.id));
+    const nextIds = new Set(nextCustomFonts.map((f) => f.id));
+    // 이번 호출에서 추가된 폰트 (baseline에 없고 next에 있는 것)
+    const addedNow = nextCustomFonts.filter((f) => !baselineIds.has(f.id));
+    // 이번 호출에서 삭제된 폰트 ID (baseline에 있고 next에 없는 것)
+    const removedIdsNow = baseline.filter((f) => !nextIds.has(f.id)).map((f) => f.id);
+
     applyFontFamily(familyId, nextCustomFonts);
     setFontFamily(familyId);
     setCustomFonts(nextCustomFonts);
     try {
       const prev = (await loadPreferences()) ?? {};
-      const merged = { ...prev, fontFamily: familyId, customFonts: nextCustomFonts };
+      const diskFonts = ((prev.customFonts ?? []) as CustomFont[]);
+      // disk → 이번 호출의 add/remove 의도만 적용 (다른 window 변경분 보존)
+      const mergedFonts: CustomFont[] = [
+        ...diskFonts.filter((d) => !removedIdsNow.includes(d.id)),
+        ...addedNow.filter((a) => !diskFonts.some((d) => d.id === a.id)),
+      ];
+      const merged = { ...prev, fontFamily: familyId, customFonts: mergedFonts };
       await savePreferences(merged);
       window.electronAPI?.preferencesBroadcastChange?.(merged);
+      // local state도 disk merge 결과로 동기화 — 다른 window의 새 폰트도 보임
+      setCustomFonts(mergedFonts);
     } catch (err) {
       console.error('[글꼴] customFonts 저장 실패:', err);
     }
