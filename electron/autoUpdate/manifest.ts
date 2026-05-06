@@ -23,9 +23,13 @@ export async function readManifest(filePath: string): Promise<Manifest | null> {
     const text = await fsp.readFile(filePath, 'utf-8');
     const parsed = JSON.parse(text);
     if (typeof parsed?.version !== 'string') return null;
+    // Codex 10차 P1: fileCount/totalBytes도 parse — 9차 통합성 검증이 silent 비활성되던 문제.
+    // 옛 manifest(필드 없음)는 undefined로 두고 checker에서 호환 폴백.
     return {
       version: parsed.version,
       buildAt: typeof parsed.buildAt === 'string' ? parsed.buildAt : '',
+      fileCount: typeof parsed.fileCount === 'number' ? parsed.fileCount : undefined,
+      totalBytes: typeof parsed.totalBytes === 'number' ? parsed.totalBytes : undefined,
     };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
