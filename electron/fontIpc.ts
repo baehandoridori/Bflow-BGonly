@@ -86,6 +86,12 @@ export function registerFontProtocol(): void {
 /**
  * 단일 폰트 파일을 fontDir에 복사하고 메타데이터 추출.
  * 실패 시 { error: ... } 반환 (throw 안 함 — 다중 추가 시 일부 성공/실패 허용).
+ *
+ * v1.20.x: 한솔님 보고 — `font.names` undefined로 TypeError 발생하던 문제 수정.
+ *   - `opentype.load` 대신 `fsp.readFile + opentype.parse`로 통일 (load는 nodejs 경로 인코딩 이슈 사례 있음)
+ *   - font/font.names null guard
+ *   - charToGlyph 호출도 try/catch로 보호 → names/cmap 누락된 비표준 폰트도 graceful 처리
+ *   - 메타 누락 시 파일명 fallback + hasKorean=false 보수적 가정
  */
 async function addFontFromPath(srcPath: string): Promise<CustomFont | { error: string }> {
   const ext = path.extname(srcPath).toLowerCase();
@@ -93,37 +99,57 @@ async function addFontFromPath(srcPath: string): Promise<CustomFont | { error: s
     return { error: `지원하지 않는 형식: ${ext || '(확장자 없음)'}` };
   }
 
-  let font: opentype.Font;
+  // 모든 형식을 fsp.readFile → ArrayBuffer → opentype.parse 한 흐름으로 통일.
+  let arrayBuf: ArrayBuffer;
   try {
+    const buf = await fsp.readFile(srcPath);
     if (ext === '.woff2') {
-      // wawoff2.decompress: WOFF2(Brotli) → TTF Uint8Array. 그 후 opentype.parse로 메타 추출.
-      const buf = await fsp.readFile(srcPath);
+      // wawoff2.decompress: WOFF2(Brotli) → TTF Uint8Array
       const ttfBytes = await wawoff2.decompress(buf);
-      // opentype.parse는 ArrayBuffer를 받음 — Uint8Array의 underlying buffer를 정확한 슬라이스로.
-      const ab = ttfBytes.buffer.slice(
+      arrayBuf = ttfBytes.buffer.slice(
         ttfBytes.byteOffset,
         ttfBytes.byteOffset + ttfBytes.byteLength,
       ) as ArrayBuffer;
-      font = opentype.parse(ab);
     } else {
-      // OTF/TTF/WOFF는 opentype.js가 직접 처리
-      font = await opentype.load(srcPath);
+      arrayBuf = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
     }
+  } catch (e) {
+    return { error: `폰트 파일 읽기 실패: ${(e as Error).message}` };
+  }
+
+  let font: opentype.Font | null = null;
+  try {
+    font = opentype.parse(arrayBuf);
   } catch (e) {
     return { error: `폰트 파일 파싱 실패: ${(e as Error).message}` };
   }
+  if (!font) {
+    return { error: '폰트 파일을 읽을 수 없습니다 (parse 결과 비정상).' };
+  }
 
+  // names가 undefined / 비어있을 수 있는 비표준 폰트 graceful 처리
+  const namesObj = (font.names ?? {}) as {
+    fontFamily?: { en?: string };
+    fullName?: { en?: string };
+    preferredFamily?: { en?: string };
+  };
+  const fallbackName = path.basename(srcPath, ext);
   const name =
-    font.names.fontFamily?.en
-    || font.names.fullName?.en
-    || font.names.preferredFamily?.en
-    || path.basename(srcPath, ext);
+    namesObj.fontFamily?.en
+    || namesObj.fullName?.en
+    || namesObj.preferredFamily?.en
+    || fallbackName;
 
-  const hasKorean = KOREAN_SAMPLE.every((c) => {
-    const g = font.charToGlyph(c);
-    // .notdef 글리프(인덱스 0)이면 미지원
-    return g && g.index !== 0;
-  });
+  // charToGlyph 호출도 보호 — cmap 테이블 누락된 폰트는 throw 함
+  let hasKorean = false;
+  try {
+    hasKorean = KOREAN_SAMPLE.every((c) => {
+      const g = font!.charToGlyph(c);
+      return !!g && g.index !== 0;
+    });
+  } catch {
+    hasKorean = false; // 검증 실패 시 보수적으로 false → 사용자에게 영문/숫자만 경고
+  }
 
   const id = `custom:${uuidv4()}`;
   const safeId = id.replace(/[^a-z0-9-]/gi, '_');
