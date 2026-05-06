@@ -6,7 +6,7 @@
  * - 추가 방법: '+ 글꼴 추가' 버튼 (탐색기) 또는 드래그앤드롭
  * - 한글 미지원 폰트는 추가하되 토스트 경고
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { CaseSensitive, Plus, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/utils/cn';
@@ -28,6 +28,11 @@ export function FontFamilySection() {
   const [dragging, setDragging] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
 
+  // Codex 8차 P2: family 칩 빠른 연타 시 concurrent load→save가 out-of-order로 끝나 stale 값이
+  // last write가 되던 race. SpacingSection 패턴과 동일하게 디바운스 + last-write-wins.
+  const familySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingFamilyRef = useRef<string | null>(null);
+
   // 저장된 설정 로드
   useEffect(() => {
     let cancelled = false;
@@ -42,23 +47,83 @@ export function FontFamilySection() {
     return () => { cancelled = true; };
   }, []);
 
-  // 변경 후 저장 + 적용 + 다른 창 동기화 (낙관적 업데이트 패턴)
-  const persistAndApply = useCallback(async (familyId: string, nextCustomFonts: CustomFont[]) => {
+  // Unmount 시 pending family 저장 즉시 flush
+  useEffect(() => {
+    return () => {
+      if (familySaveTimerRef.current) {
+        clearTimeout(familySaveTimerRef.current);
+        const pending = pendingFamilyRef.current;
+        if (pending) {
+          (async () => {
+            try {
+              const prev = (await loadPreferences()) ?? {};
+              const merged = { ...prev, fontFamily: pending };
+              await savePreferences(merged);
+              window.electronAPI?.preferencesBroadcastChange?.(merged);
+            } catch (err) {
+              console.error('[글꼴] flush 실패:', err);
+            }
+          })();
+        }
+      }
+    };
+  }, []);
+
+  /**
+   * Codex 8차 P1: family 변경 시 customFonts를 component-local state(mount 시 한 번 로드)에서
+   * 그대로 disk에 덮어쓰면, 다른 창이 추가/삭제한 폰트가 영구 erase됨.
+   * 해결: family-only 변경은 disk latest customFonts를 우선하고, family 필드만 갱신.
+   */
+  const persistFamilyOnly = useCallback((familyId: string, nextCustomFonts: CustomFont[]) => {
+    // UI 즉시 적용 (낙관적)
+    applyFontFamily(familyId, nextCustomFonts);
+    setFontFamily(familyId);
+    // 저장은 디바운스 — last-write-wins. 디바운스 동안 다른 창 변경이 들어오면
+    // 어차피 disk latest를 read하므로 안전.
+    pendingFamilyRef.current = familyId;
+    if (familySaveTimerRef.current) clearTimeout(familySaveTimerRef.current);
+    familySaveTimerRef.current = setTimeout(async () => {
+      const target = pendingFamilyRef.current;
+      pendingFamilyRef.current = null;
+      familySaveTimerRef.current = null;
+      if (target == null) return;
+      try {
+        const prev = (await loadPreferences()) ?? {};
+        // ★ customFonts는 disk latest 사용 — local state 덮어쓰지 않음
+        const merged = { ...prev, fontFamily: target };
+        await savePreferences(merged);
+        window.electronAPI?.preferencesBroadcastChange?.(merged);
+      } catch (err) {
+        console.error('[글꼴] family 저장 실패:', err);
+      }
+    }, 150);
+  }, []);
+
+  /**
+   * + 글꼴 추가 / 삭제처럼 customFonts 자체를 변경하는 흐름 — 즉시 저장.
+   * 사용자 explicit action이라 race 거의 없음(busy 플래그 + confirm dialog로 보호).
+   */
+  const persistFontsList = useCallback(async (familyId: string, nextCustomFonts: CustomFont[]) => {
     applyFontFamily(familyId, nextCustomFonts);
     setFontFamily(familyId);
     setCustomFonts(nextCustomFonts);
     try {
       const prev = (await loadPreferences()) ?? {};
-      await savePreferences({ ...prev, fontFamily: familyId, customFonts: nextCustomFonts });
-      window.electronAPI?.preferencesBroadcastChange?.({ fontFamily: familyId, customFonts: nextCustomFonts });
+      const merged = { ...prev, fontFamily: familyId, customFonts: nextCustomFonts };
+      await savePreferences(merged);
+      window.electronAPI?.preferencesBroadcastChange?.(merged);
     } catch (err) {
-      console.error('[글꼴] 설정 저장 실패:', err);
+      console.error('[글꼴] customFonts 저장 실패:', err);
     }
   }, []);
 
+  // 호환성: 기존 add/delete 경로의 이름 유지 (의미 = customFonts 포함 저장)
+  const persistAndApply = persistFontsList;
+
   const handleSelect = useCallback((id: string) => {
-    persistAndApply(id, customFonts);
-  }, [customFonts, persistAndApply]);
+    // family만 변경 — customFonts는 disk latest 보존
+    persistFamilyOnly(id, customFonts);
+  }, [customFonts, persistFamilyOnly]);
 
   // 폰트 추가 결과 처리 (Add 버튼/DnD 공통)
   const processAddResults = useCallback((
