@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from './supabase';
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fontAdd: () => ipcRenderer.invoke('font:add'),
   fontAddByPath: (filePaths: string[]) => ipcRenderer.invoke('font:add-by-path', filePaths),
   fontDelete: (font: { id: string; filename: string }) => ipcRenderer.invoke('font:delete', font),
+  // v1.20.0: 드래그앤드롭에서 File → 절대 경로 (Electron 32+에선 File.path 제거 → webUtils 사용 필수)
+  fontGetPathForFile: (file: File) => webUtils.getPathForFile(file),
 
   // 실시간 동기화: 다른 창이 데이터를 변경했을 때 델타 알림
   onDataChanged: (callback: (delta?: unknown) => void) => {

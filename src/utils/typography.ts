@@ -271,6 +271,15 @@ export const LETTER_SPACING_STEP = 0.005;
 
 // ─── DOM 적용 헬퍼 ──────────────────────────────────
 
+/**
+ * CSS `font-family` 값에 안전하게 끼워 넣을 수 있도록 single quote/backslash를 escape.
+ * 예: `Kid's Sans` → `Kid\\'s Sans` → `'Kid\\'s Sans'` 가 유효한 CSS 값이 됨.
+ * Codex 1차 P2: applyFontFamily / injectCustomFontFace / 렌더러 inline style 양쪽이 같은 규칙을 따라야 함.
+ */
+export function escapeFontFamilyName(name: string): string {
+  return name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 export function applyFontFamily(familyId: string, customFonts: CustomFont[] = []): void {
   const root = document.documentElement;
   let stack = FALLBACK_STACK;
@@ -279,7 +288,7 @@ export function applyFontFamily(familyId: string, customFonts: CustomFont[] = []
     const cf = customFonts.find((f) => f.id === familyId);
     if (cf) {
       injectCustomFontFace(cf);
-      stack = `'${cf.name}', ${FALLBACK_STACK}`;
+      stack = `'${escapeFontFamilyName(cf.name)}', ${FALLBACK_STACK}`;
     }
     // 못 찾으면 폴백 → DEFAULT_FONT_FAMILY와 동일 효과
   } else {
@@ -305,7 +314,7 @@ function injectCustomFontFace(font: CustomFont): void {
   const url = `bflow-font://${encodeURIComponent(font.filename)}`;
   const style = document.createElement('style');
   style.setAttribute('data-font-id', font.id);
-  style.textContent = `@font-face { font-family: '${font.name.replace(/'/g, "\\'")}'; src: url('${url}') format('${formatHint[font.format]}'); font-display: swap; }`;
+  style.textContent = `@font-face { font-family: '${escapeFontFamilyName(font.name)}'; src: url('${url}') format('${formatHint[font.format]}'); font-display: swap; }`;
   document.head.appendChild(style);
 }
 

@@ -43,6 +43,7 @@ export function installDevElectronAPI(): void {
       return [];
     },
     fontDelete: async () => ({ ok: true }),
+    fontGetPathForFile: () => '',
 
     usersRead: async () => ({
       users: MOCK_USERS.map(u => ({

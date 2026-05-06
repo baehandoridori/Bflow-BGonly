@@ -665,6 +665,8 @@ export interface ElectronAPI {
     | { error: string }
   >>;
   fontDelete: (font: { id: string; filename: string }) => Promise<{ ok: boolean; error?: string }>;
+  /** 드래그앤드롭에서 File 객체 → 절대 경로 (Electron 32+ webUtils.getPathForFile) */
+  fontGetPathForFile: (file: File) => string;
 
   // ─── Google Calendar ──────────────────────────────
   gcalIsAuthenticated: () => Promise<boolean>;

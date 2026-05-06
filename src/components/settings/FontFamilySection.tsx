@@ -16,6 +16,7 @@ import {
   DEFAULT_FONT_FAMILY,
   applyFontFamily,
   ensureCustomFontsLoaded,
+  escapeFontFamilyName,
   type CustomFont,
 } from '@/utils/typography';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
@@ -104,13 +105,13 @@ export function FontFamilySection() {
     e.preventDefault();
     e.stopPropagation();
     setDragging(false);
-    if (!window.electronAPI?.fontAddByPath) {
+    if (!window.electronAPI?.fontAddByPath || !window.electronAPI?.fontGetPathForFile) {
       toast.error('Electron API를 사용할 수 없습니다.');
       return;
     }
-    // Electron의 File 객체는 .path 속성을 노출 (브라우저 표준엔 없음)
+    // Electron 32+에선 File.path가 제거됨 → webUtils.getPathForFile 사용 (preload 경유)
     const paths = Array.from(e.dataTransfer.files)
-      .map((f) => (f as unknown as { path: string }).path)
+      .map((f) => window.electronAPI!.fontGetPathForFile(f))
       .filter(Boolean);
     if (paths.length === 0) {
       toast.error('드롭된 파일에서 경로를 읽을 수 없습니다.');
@@ -206,7 +207,7 @@ export function FontFamilySection() {
                     <button
                       onClick={() => handleSelect(font.id)}
                       className="cursor-pointer py-1 pr-1"
-                      style={{ fontFamily: `'${font.name}', system-ui, sans-serif` }}
+                      style={{ fontFamily: `'${escapeFontFamilyName(font.name)}', system-ui, sans-serif` }}
                       title={font.hasKorean ? font.name : `${font.name} (영문/숫자만 지원)`}
                     >
                       {font.name}

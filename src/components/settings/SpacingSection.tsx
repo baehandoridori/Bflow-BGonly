@@ -6,7 +6,7 @@
  * - "기본값 복원" 버튼 (다른 섹션과 일관)
  * - 즉시 적용 + savePreferences + 다른 창 동기화
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { AlignVerticalSpaceAround, RotateCcw } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { SettingsSection } from './SettingsSection';
@@ -22,6 +22,10 @@ import { loadPreferences, savePreferences } from '@/services/settingsService';
 export function SpacingSection() {
   const [lineHeight, setLineHeight] = useState<number>(DEFAULT_LINE_HEIGHT);
   const [letterSpacing, setLetterSpacing] = useState<number>(DEFAULT_LETTER_SPACING);
+  // Codex 1차 P2: 슬라이더 빠른 드래그 시 read-modify-write race로 stale 값이 디스크에 영구 저장될 수 있음.
+  // 해결: 저장만 디바운스(200ms) + 마지막 값을 ref로 잡아 정확히 한 번만 발화 → last-write-wins 보장.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingValuesRef = useRef<{ lh: number; ls: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,17 +37,44 @@ export function SpacingSection() {
     return () => { cancelled = true; };
   }, []);
 
-  const persist = useCallback(async (lh: number, ls: number) => {
+  // Unmount 시 pending 저장 즉시 flush — 슬라이더 조작 직후 탭 이동해도 손실 X
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        const pending = pendingValuesRef.current;
+        if (pending) {
+          // 비동기지만 fire-and-forget — unmount 시점이라 await 불필요
+          loadPreferences().then((prev) => {
+            savePreferences({ ...(prev ?? {}), lineHeight: pending.lh, letterSpacing: pending.ls });
+            window.electronAPI?.preferencesBroadcastChange?.({ lineHeight: pending.lh, letterSpacing: pending.ls });
+          }).catch((err) => console.error('[간격] flush 실패:', err));
+        }
+      }
+    };
+  }, []);
+
+  const persist = useCallback((lh: number, ls: number) => {
+    // 즉시 적용 (UI 반응성)
     applySpacing(lh, ls);
     setLineHeight(lh);
     setLetterSpacing(ls);
-    try {
-      const prev = (await loadPreferences()) ?? {};
-      await savePreferences({ ...prev, lineHeight: lh, letterSpacing: ls });
-      window.electronAPI?.preferencesBroadcastChange?.({ lineHeight: lh, letterSpacing: ls });
-    } catch (err) {
-      console.error('[간격] 설정 저장 실패:', err);
-    }
+    // 저장은 디바운스 — 마지막 값만 디스크에 (last-write-wins)
+    pendingValuesRef.current = { lh, ls };
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      const target = pendingValuesRef.current;
+      pendingValuesRef.current = null;
+      saveTimerRef.current = null;
+      if (!target) return;
+      try {
+        const prev = (await loadPreferences()) ?? {};
+        await savePreferences({ ...prev, lineHeight: target.lh, letterSpacing: target.ls });
+        window.electronAPI?.preferencesBroadcastChange?.({ lineHeight: target.lh, letterSpacing: target.ls });
+      } catch (err) {
+        console.error('[간격] 설정 저장 실패:', err);
+      }
+    }, 200);
   }, []);
 
   const handleReset = useCallback(() => {
