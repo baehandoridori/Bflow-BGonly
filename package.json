@@ -45,6 +45,7 @@
     "spoqa-han-sans": "^3.3.0",
     "tiptap-markdown": "^0.8.10",
     "uuid": "^14.0.0",
+    "wawoff2": "^2.0.1",
     "zustand": "^4.5.2"
   },
   "build": {

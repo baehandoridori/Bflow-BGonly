@@ -16,6 +16,11 @@ import { pathToFileURL } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 // opentype.js는 default export가 없어 namespace import 사용
 import * as opentype from 'opentype.js';
+// WOFF2는 Brotli 압축 → opentype.js가 직접 파싱 못 함. wawoff2가 WASM으로 TTF로 디컴프레션해줌.
+// (Codex 2차 P2 — 광고는 woff2 지원이지만 디컴프레션 누락으로 항상 실패하던 문제 수정)
+// CJS 패키지 + 타입 정의 없음 → require로 로드.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const wawoff2: { decompress(buf: Buffer | Uint8Array): Promise<Uint8Array> } = require('wawoff2');
 
 interface CustomFont {
   id: string;
@@ -90,7 +95,20 @@ async function addFontFromPath(srcPath: string): Promise<CustomFont | { error: s
 
   let font: opentype.Font;
   try {
-    font = await opentype.load(srcPath);
+    if (ext === '.woff2') {
+      // wawoff2.decompress: WOFF2(Brotli) → TTF Uint8Array. 그 후 opentype.parse로 메타 추출.
+      const buf = await fsp.readFile(srcPath);
+      const ttfBytes = await wawoff2.decompress(buf);
+      // opentype.parse는 ArrayBuffer를 받음 — Uint8Array의 underlying buffer를 정확한 슬라이스로.
+      const ab = ttfBytes.buffer.slice(
+        ttfBytes.byteOffset,
+        ttfBytes.byteOffset + ttfBytes.byteLength,
+      ) as ArrayBuffer;
+      font = opentype.parse(ab);
+    } else {
+      // OTF/TTF/WOFF는 opentype.js가 직접 처리
+      font = await opentype.load(srcPath);
+    }
   } catch (e) {
     return { error: `폰트 파일 파싱 실패: ${(e as Error).message}` };
   }
