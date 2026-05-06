@@ -20,6 +20,30 @@ import {
   localAppDir, localPendingDir, localBackupDir, localReadyMarker,
   localInstalledMarker, localPendingVerificationMarker,
 } from './paths';
+import { copyDirMirror } from './copy';
+
+/**
+ * Codex 8차 P1: rename은 cross-device·AV race·partial file-lock 등에서 실패할 수 있어
+ * fallback으로 copy + 원본 삭제. swap의 핵심 안전성을 보장 — rename 실패 시에도
+ * app/ 디렉토리가 사라지지 않게.
+ */
+async function moveDirRobust(src: string, dst: string): Promise<void> {
+  try {
+    renameSync(src, dst);
+    return;
+  } catch (renameErr) {
+    // rename 실패 → copy fallback (느리지만 락에 robust)
+    try {
+      await copyDirMirror(src, dst);
+      await fsp.rm(src, { recursive: true, force: true });
+    } catch (copyErr) {
+      throw new Error(
+        `rename 및 copy 모두 실패 (rename: ${(renameErr as Error).message}, `
+        + `copy: ${(copyErr as Error).message})`,
+      );
+    }
+  }
+}
 
 export async function hasPending(): Promise<boolean> {
   return existsSync(localReadyMarker());
@@ -51,24 +75,39 @@ export async function swapIfPending(): Promise<SwapResult> {
     console.warn('[swapper] 이전 backup 정리 실패 (무시):', err);
   }
 
-  // 2. app/ → backup/
-  try {
-    if (existsSync(app_)) {
-      renameSync(app_, backup_);
+  // 2. app/ → backup/  (rename + copy fallback)
+  let movedToBackup = false;
+  if (existsSync(app_)) {
+    try {
+      await moveDirRobust(app_, backup_);
+      movedToBackup = true;
+    } catch (err) {
+      return { ok: false, reason: `app→backup 실패: ${(err as Error).message}` };
     }
-  } catch (err) {
-    return { ok: false, reason: `app→backup rename 실패: ${(err as Error).message}` };
   }
 
-  // 3. pending/ → app/
+  // 3. pending/ → app/  (rename + copy fallback)
   try {
-    renameSync(pending_, app_);
-  } catch (err) {
-    // 복구 시도: backup → app으로 되돌림
-    try { renameSync(backup_, app_); } catch {
-      // 더 할 게 없음 — 사용자가 옛 바로가기로 self-installer 재진입
+    await moveDirRobust(pending_, app_);
+  } catch (pendingErr) {
+    // Codex 8차 P1: pending→app 실패 시 backup→app 복구 시도. backup 복구도 robust하게.
+    if (movedToBackup) {
+      try {
+        await moveDirRobust(backup_, app_);
+        return { ok: false, reason: `pending→app 실패 — backup 복구 완료: ${(pendingErr as Error).message}` };
+      } catch (recoverErr) {
+        // 양쪽 모두 실패 — app/ 부재 가능성. 다음 실행은 옛 G드라이브 BFLOW.exe로 self-installer
+        // 재진입하면 자동 복구됨 (기존 partial install 정리 → mirror copy 새로 받음).
+        return {
+          ok: false,
+          reason:
+            `pending→app + backup→app 모두 실패. app/ 부재 가능성 — `
+            + `옛 G드라이브 BFLOW.exe 클릭으로 자동 복구 가능. `
+            + `pending: ${(pendingErr as Error).message}; backup recovery: ${(recoverErr as Error).message}`,
+        };
+      }
     }
-    return { ok: false, reason: `pending→app rename 실패: ${(err as Error).message}` };
+    return { ok: false, reason: `pending→app 실패 (backup 없어 복구 없음): ${(pendingErr as Error).message}` };
   }
 
   // 4. .ready 마커 정리 — pending 안에 있던 마커가 swap으로 app/.ready가 됨
