@@ -102,8 +102,20 @@ export function FontFamilySection() {
   /**
    * + 글꼴 추가 / 삭제처럼 customFonts 자체를 변경하는 흐름 — 즉시 저장.
    * 사용자 explicit action이라 race 거의 없음(busy 플래그 + confirm dialog로 보호).
+   *
+   * 코덱스 PR #62 리뷰 P1: persistFamilyOnly가 디바운스 큐에 stale family 값을 넣어둔
+   * 상태에서 사용자가 빠르게 글꼴 추가/삭제하면, 디바운스 콜백이 immediate save 후에
+   * 실행되어 stale fontFamily(이미 삭제된 custom 폰트 ID 등)로 disk를 덮어쓸 수 있음.
+   * persistFontsList가 발화되면 pending family 디바운스를 즉시 cancel.
    */
   const persistFontsList = useCallback(async (familyId: string, nextCustomFonts: CustomFont[]) => {
+    // ★ 디바운스 cancel — pending family 콜백이 stale 값으로 overwrite하지 못하게.
+    if (familySaveTimerRef.current) {
+      clearTimeout(familySaveTimerRef.current);
+      familySaveTimerRef.current = null;
+    }
+    pendingFamilyRef.current = null;
+
     applyFontFamily(familyId, nextCustomFonts);
     setFontFamily(familyId);
     setCustomFonts(nextCustomFonts);
