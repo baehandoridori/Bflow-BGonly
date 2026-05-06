@@ -13,7 +13,9 @@ import { app, dialog, ipcMain, protocol, net } from 'electron';
 import { promises as fsp, existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { v4 as uuidv4 } from 'uuid';
+// Codex 7차 P1: uuid@14는 ESM-only → CJS Electron main 번들에서 require 시 ERR_REQUIRE_ESM
+// production 빌드 시 fontIpc 로드 시점에 main 프로세스 크래시 가능. Node 빌트인 randomUUID로 전환.
+import { randomUUID } from 'crypto';
 // opentype.js는 default export가 없어 namespace import 사용
 import * as opentype from 'opentype.js';
 // WOFF2는 Brotli 압축 → opentype.js가 직접 파싱 못 함. wawoff2가 WASM으로 TTF로 디컴프레션해줌.
@@ -151,7 +153,7 @@ async function addFontFromPath(srcPath: string): Promise<CustomFont | { error: s
     hasKorean = false; // 검증 실패 시 보수적으로 false → 사용자에게 영문/숫자만 경고
   }
 
-  const id = `custom:${uuidv4()}`;
+  const id = `custom:${randomUUID()}`;
   const safeId = id.replace(/[^a-z0-9-]/gi, '_');
   const filename = `${safeId}${ext}`;
   const dir = fontDir();
