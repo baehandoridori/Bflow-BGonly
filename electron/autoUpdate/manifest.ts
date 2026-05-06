@@ -2,11 +2,16 @@
  * v1.21.0 자동 업데이트 — manifest.json 읽기 + 버전 비교.
  * spec §3 빌드 산출물 형식: { version: "1.21.0", buildAt: "2026-05-07T...Z" }
  */
-import { promises as fsp } from 'fs';
+import { promises as fsp, statSync } from 'fs';
+import path from 'path';
 
 export interface Manifest {
   version: string;       // semver string
   buildAt: string;       // ISO 8601
+  /** Codex 9차 P1: 빌드 시점의 win-unpacked 파일 수 (sync 완전성 검증용). 옛 빌드 호환을 위해 optional. */
+  fileCount?: number;
+  /** 빌드 시점의 win-unpacked 총 byte 수 (sync 완전성 검증용). optional. */
+  totalBytes?: number;
 }
 
 /**
@@ -47,4 +52,29 @@ export function compareVersions(a: string, b: string): number {
     if (da < db) return -1;
   }
   return 0;
+}
+
+/**
+ * 디렉토리 안 모든 파일을 재귀로 세고 총 byte 합 계산.
+ * Codex 9차 P1: G드라이브 sync 완전성 검증 + mirror copy 사후 검증에 사용.
+ */
+export function countFilesAndBytes(root: string): { fileCount: number; totalBytes: number } {
+  let fileCount = 0;
+  let totalBytes = 0;
+  function walk(dir: string): void {
+    let entries;
+    try { entries = require('fs').readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile()) {
+        try {
+          fileCount++;
+          totalBytes += statSync(full).size;
+        } catch { /* skip 잠금/race */ }
+      }
+    }
+  }
+  walk(root);
+  return { fileCount, totalBytes };
 }

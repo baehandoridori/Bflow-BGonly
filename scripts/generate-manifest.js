@@ -17,11 +17,42 @@ if (!fs.existsSync(distDir)) {
   process.exit(1);
 }
 
+/**
+ * Codex 9차 P1: win-unpacked의 fileCount + totalBytes 기록.
+ * checker가 G드라이브 sync 완전성 검증 (원격 manifest와 실제 파일 트리 비교) +
+ * mirror copy 사후 검증 (로컬 pending이 원격과 일치하는지) 두 단계로 사용.
+ * partial sync/copy 상태에서 .ready 마커가 잘못 만들어져 broken app swap되는 사고 방지.
+ */
+const winUnpacked = path.join(distDir, 'win-unpacked');
+let fileCount = 0;
+let totalBytes = 0;
+function walk(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walk(full);
+    } else if (entry.isFile()) {
+      fileCount++;
+      totalBytes += fs.statSync(full).size;
+    }
+  }
+}
+if (fs.existsSync(winUnpacked)) {
+  walk(winUnpacked);
+} else {
+  console.warn('[generate-manifest] dist/win-unpacked 없음 — fileCount/totalBytes 0으로 기록');
+}
+
 const manifest = {
   version: pkg.version,
   buildAt: new Date().toISOString(),
+  fileCount,
+  totalBytes,
 };
 
 const out = path.join(distDir, 'manifest.json');
 fs.writeFileSync(out, JSON.stringify(manifest, null, 2) + '\n');
-console.log(`[generate-manifest] ${out} 생성 — v${manifest.version} @ ${manifest.buildAt}`);
+console.log(
+  `[generate-manifest] ${out} 생성 — v${manifest.version} @ ${manifest.buildAt} `
+  + `(${fileCount} files, ${(totalBytes / 1024 / 1024).toFixed(1)}MB)`,
+);
