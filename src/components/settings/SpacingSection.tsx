@@ -44,11 +44,17 @@ export function SpacingSection() {
         clearTimeout(saveTimerRef.current);
         const pending = pendingValuesRef.current;
         if (pending) {
-          // 비동기지만 fire-and-forget — unmount 시점이라 await 불필요
-          loadPreferences().then((prev) => {
-            savePreferences({ ...(prev ?? {}), lineHeight: pending.lh, letterSpacing: pending.ls });
-            window.electronAPI?.preferencesBroadcastChange?.({ lineHeight: pending.lh, letterSpacing: pending.ls });
-          }).catch((err) => console.error('[간격] flush 실패:', err));
+          // Codex 5차 P2: save 완료 전에 broadcast하면 다른 창이 stale 값을 읽을 수 있음
+          // → await 흐름으로 변경. async IIFE로 fire-and-forget but 내부 순서는 보장.
+          (async () => {
+            try {
+              const prev = (await loadPreferences()) ?? {};
+              await savePreferences({ ...prev, lineHeight: pending.lh, letterSpacing: pending.ls });
+              window.electronAPI?.preferencesBroadcastChange?.({ lineHeight: pending.lh, letterSpacing: pending.ls });
+            } catch (err) {
+              console.error('[간격] flush 실패:', err);
+            }
+          })();
         }
       }
     };

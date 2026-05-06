@@ -156,7 +156,13 @@ async function addFontFromPath(srcPath: string): Promise<CustomFont | { error: s
   const filename = `${safeId}${ext}`;
   const dir = fontDir();
   ensureFontDir();
-  await fsp.copyFile(srcPath, path.join(dir, filename));
+  // Codex 5차 P2: copyFile이 try/catch 밖이면 한 파일 실패 시 Promise.all 전체 배치가 reject됨.
+  // 이 함수는 { error } 반환으로 partial success를 허용하기로 설계됐으니 copyFile도 보호.
+  try {
+    await fsp.copyFile(srcPath, path.join(dir, filename));
+  } catch (e) {
+    return { error: `폰트 파일 복사 실패: ${(e as Error).message}` };
+  }
 
   return {
     id,
