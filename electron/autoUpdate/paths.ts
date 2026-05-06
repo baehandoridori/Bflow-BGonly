@@ -101,16 +101,26 @@ export function guessGoogleDriveRoots(): string[] {
  * 우리 dist가 들어있는 G드라이브 경로 추정. 후보를 스캔해 manifest.json + win-unpacked가
  * 같이 있는 폴더를 찾아 그 폴더 경로 반환. 없으면 null.
  *
- * Studio JBBJ 표준 경로 (DEVLOG/DEPLOYMENT.md §2): G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\dist\
+ * Studio JBBJ 표준 경로 (DEVLOG/DEPLOYMENT.md §2):
+ *   G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\dist\
+ *
+ * Codex 3차 P1: 영어 OS의 Drive desktop은 "Shared drives" 폴더로 노출되므로 두 prefix
+ * 모두 시도해야 한국어/영어 사용자 모두 자동 업데이트 동작.
  */
 export function findRemoteDistRoot(): string | null {
-  const SUFFIX = path.join('공유 드라이브', 'JBBJ 자료실', '한솔이의 두근두근 실험실', 'Bflow-BGonly', 'dist');
+  const COMMON_TAIL = path.join('JBBJ 자료실', '한솔이의 두근두근 실험실', 'Bflow-BGonly', 'dist');
+  const SUFFIXES = [
+    path.join('공유 드라이브', COMMON_TAIL),
+    path.join('Shared drives', COMMON_TAIL),
+  ];
   const drives = guessGoogleDriveRoots();
   for (const drive of drives) {
-    const candidate = path.join(drive, SUFFIX);
-    if (existsSync(path.join(candidate, 'manifest.json'))
-        && existsSync(path.join(candidate, 'win-unpacked', 'BFLOW.exe'))) {
-      return candidate;
+    for (const suffix of SUFFIXES) {
+      const candidate = path.join(drive, suffix);
+      if (existsSync(path.join(candidate, 'manifest.json'))
+          && existsSync(path.join(candidate, 'win-unpacked', 'BFLOW.exe'))) {
+        return candidate;
+      }
     }
   }
   return null;

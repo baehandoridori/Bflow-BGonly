@@ -39,8 +39,7 @@ export async function runFirstInstallIfNeeded(): Promise<InstallResult> {
 
   if (alreadyInstalled) {
     // spec §4.4: 옛 바로가기 폴백. 로컬 본체로 spawn하고 자기는 종료.
-    spawnDetached(localExe);
-    app.exit(0);
+    relaunchAndExit(localExe);
     return { exited: true };
   }
 
@@ -82,8 +81,7 @@ export async function runFirstInstallIfNeeded(): Promise<InstallResult> {
   await offerDefenderExclusion();
 
   // 새 위치에서 spawn + 자기 종료
-  spawnDetached(localExe);
-  app.exit(0);
+  relaunchAndExit(localExe);
   return { exited: true };
 }
 
@@ -180,15 +178,21 @@ async function offerDefenderExclusion(): Promise<void> {
 }
 
 /**
- * Codex 1차 P1: process.argv 전체를 forward.
- * Windows에서 bflow:// 프로토콜 링크는 launch arguments로 전달되므로, 옛 G드라이브
- * 바로가기로 슬랙 딥링크 클릭 시(spec §13 폴백) deep-link payload가 손실되지 않도록
- * 사용자가 넘긴 args를 그대로 전달한다.
+ * 자식 BFLOW.exe spawn → single-instance lock release → self 종료.
+ *
+ * Codex 1차 P1: process.argv를 forward — Windows에서 bflow:// 프로토콜 링크는 launch
+ * arguments로 전달되므로, 옛 G드라이브 바로가기로 슬랙 딥링크 클릭 시(spec §13 폴백)
+ * deep-link payload가 손실되지 않도록 사용자가 넘긴 args를 그대로 전달한다.
+ *
+ * Codex 3차 P2: app.releaseSingleInstanceLock() 호출 — 자식 process가 시작 시
+ * requestSingleInstanceLock()이 false 반환받아 "second instance"로 거부되는 상황 방지.
+ * parent가 아직 완전 exit 전이라도 lock은 명시적으로 해제하면 자식이 정상 lock 획득.
  *
  * process.argv[0] = self exe path, process.argv[1..] = 사용자 인자.
- * 내부 Electron 플래그는 그대로 둬도 BFLOW가 무시 (electron-builder portable이 알아서).
  */
-function spawnDetached(exe: string): void {
+function relaunchAndExit(exe: string): void {
   const args = process.argv.slice(1);
   spawn(exe, args, { detached: true, stdio: 'ignore' }).unref();
+  try { app.releaseSingleInstanceLock(); } catch { /* noop — lock 없을 수도 있음 */ }
+  app.exit(0);
 }
