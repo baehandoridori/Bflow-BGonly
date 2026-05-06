@@ -192,6 +192,11 @@ export function applyPreferencesToDOM(prefs: {
   fontScale?: string;
   fontCategoryScales?: Partial<FontCategoryScales>;
   fontCategoryColors?: FontCategoryColors;
+  // v1.20.0: 글꼴 시스템
+  fontFamily?: string;
+  lineHeight?: number;
+  letterSpacing?: number;
+  customFonts?: CustomFont[];
 }): void {
   const scale: FontScale = isFontScale(prefs.fontScale) ? prefs.fontScale : DEFAULT_FONT_SCALE;
   applyFontSettings({
@@ -204,4 +209,107 @@ export function applyPreferencesToDOM(prefs: {
     },
   });
   applyTextColors(prefs.fontCategoryColors ?? {});
+
+  // v1.20.0: 글꼴 / 간격
+  ensureCustomFontsLoaded(prefs.customFonts ?? []);
+  applyFontFamily(prefs.fontFamily ?? DEFAULT_FONT_FAMILY, prefs.customFonts ?? []);
+  applySpacing(
+    prefs.lineHeight ?? DEFAULT_LINE_HEIGHT,
+    prefs.letterSpacing ?? DEFAULT_LETTER_SPACING,
+  );
+}
+
+// ─── v1.20.0: 글꼴 서체 (Font Family) ───────────────
+
+export interface CustomFont {
+  /** `custom:${uuid}` 형식 — preferences.fontFamily에 직접 저장됨 */
+  id: string;
+  /** opentype.js로 추출한 메타 이름 (사용자에게 표시) */
+  name: string;
+  /** 디스크에 저장된 실제 파일명 (uuid.확장자) */
+  filename: string;
+  format: 'otf' | 'ttf' | 'woff' | 'woff2';
+  /** 한글 글리프 존재 여부 — false면 토스트 경고 */
+  hasKorean: boolean;
+  addedAt: string; // ISO 8601
+}
+
+export interface FontFamilyMeta {
+  id: string;
+  label: string;
+  /** CSS font-family stack (fallback 포함) */
+  cssStack: string;
+  group: 'modern' | 'soft' | 'serious' | 'character' | 'system';
+}
+
+const FALLBACK_STACK = `'Pretendard Variable', Pretendard, system-ui, sans-serif`;
+
+export const FONT_FAMILIES: FontFamilyMeta[] = [
+  { id: 'pretendard',    label: 'Pretendard',         cssStack: `'Pretendard Variable', Pretendard, system-ui, sans-serif`, group: 'modern' },
+  { id: 'inter',         label: 'Inter',              cssStack: `Inter, 'Pretendard Variable', Pretendard, system-ui, sans-serif`, group: 'modern' },
+  { id: 'noto-sans-kr',  label: 'Noto Sans KR',       cssStack: `'Noto Sans KR', system-ui, sans-serif`, group: 'modern' },
+  { id: 'ibm-plex-kr',   label: 'IBM Plex Sans KR',   cssStack: `'IBM Plex Sans KR', system-ui, sans-serif`, group: 'serious' },
+  { id: 'spoqa',         label: 'Spoqa Han Sans Neo', cssStack: `'Spoqa Han Sans Neo', system-ui, sans-serif`, group: 'serious' },
+  { id: 'nanum-gothic',  label: '나눔고딕',           cssStack: `'Nanum Gothic', system-ui, sans-serif`, group: 'soft' },
+  { id: 'gowun-dodum',   label: '고운 도담',          cssStack: `'Gowun Dodum', system-ui, sans-serif`, group: 'soft' },
+  { id: 'noto-serif-kr', label: '본명조',             cssStack: `'Noto Serif KR', serif`, group: 'character' },
+  { id: 'system',        label: '시스템 기본',        cssStack: `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`, group: 'system' },
+];
+
+export const DEFAULT_FONT_FAMILY = 'pretendard';
+
+// ─── 간격 (Line Height / Letter Spacing) ─────────────
+
+export const DEFAULT_LINE_HEIGHT = 1.55;
+export const DEFAULT_LETTER_SPACING = 0;
+export const LINE_HEIGHT_MIN = 1.2;
+export const LINE_HEIGHT_MAX = 2.0;
+export const LINE_HEIGHT_STEP = 0.05;
+export const LETTER_SPACING_MIN = -0.05;
+export const LETTER_SPACING_MAX = 0.10;
+export const LETTER_SPACING_STEP = 0.005;
+
+// ─── DOM 적용 헬퍼 ──────────────────────────────────
+
+export function applyFontFamily(familyId: string, customFonts: CustomFont[] = []): void {
+  const root = document.documentElement;
+  let stack = FALLBACK_STACK;
+
+  if (familyId.startsWith('custom:')) {
+    const cf = customFonts.find((f) => f.id === familyId);
+    if (cf) {
+      injectCustomFontFace(cf);
+      stack = `'${cf.name}', ${FALLBACK_STACK}`;
+    }
+    // 못 찾으면 폴백 → DEFAULT_FONT_FAMILY와 동일 효과
+  } else {
+    const meta = FONT_FAMILIES.find((f) => f.id === familyId);
+    if (meta) stack = meta.cssStack;
+  }
+
+  root.style.setProperty('--font-family', stack);
+}
+
+export function applySpacing(lineHeight: number, letterSpacing: number): void {
+  const root = document.documentElement;
+  root.style.setProperty('--text-line-height', String(lineHeight));
+  root.style.setProperty('--text-letter-spacing', `${letterSpacing}em`);
+}
+
+/** 사용자 폰트의 @font-face를 동적으로 <head>에 주입. 같은 id가 이미 있으면 skip. */
+function injectCustomFontFace(font: CustomFont): void {
+  if (document.querySelector(`style[data-font-id="${font.id}"]`)) return;
+  const formatHint: Record<CustomFont['format'], string> = {
+    otf: 'opentype', ttf: 'truetype', woff: 'woff', woff2: 'woff2',
+  };
+  const url = `bflow-font://${encodeURIComponent(font.filename)}`;
+  const style = document.createElement('style');
+  style.setAttribute('data-font-id', font.id);
+  style.textContent = `@font-face { font-family: '${font.name.replace(/'/g, "\\'")}'; src: url('${url}') format('${formatHint[font.format]}'); font-display: swap; }`;
+  document.head.appendChild(style);
+}
+
+/** 모든 사용자 폰트의 @font-face를 미리 주입 — 앱 시작 시 호출. */
+export function ensureCustomFontsLoaded(customFonts: CustomFont[]): void {
+  customFonts.forEach(injectCustomFontFace);
 }

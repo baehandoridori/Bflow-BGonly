@@ -9,6 +9,30 @@
   --text-body-scale: 1;
   --text-caption-scale: 1;
   --text-micro-scale: 1;
+
+  /* v1.20.0: 글꼴 시스템 */
+  --font-family: 'Pretendard Variable', Pretendard, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --text-line-height: 1.55;
+  --text-letter-spacing: 0em;
+}
+
+/* v1.20.0: 글꼴 family / 줄간격 / 자간 — applyFontFamily/applySpacing이 CSS 변수 갱신 */
+@layer base {
+  html, body {
+    font-family: var(--font-family);
+    line-height: var(--text-line-height);
+    letter-spacing: var(--text-letter-spacing);
+  }
+}
+
+/* v1.20.0: 숫자 자릿수 고정 — 사용자 옵션 없이 항상 적용
+   대상: 위젯·표·진행률·시간·날짜 등 숫자 영역.
+   한글에는 영향 없음 (font-variant-numeric은 숫자 글리프에만 작용). */
+[data-numeric],
+.tabular,
+.font-mono,
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* 타이포그래피 스케일 오버라이드: Tailwind 기본 클래스를 CSS 변수로 스케일링 */

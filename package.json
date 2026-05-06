@@ -1,6 +1,6 @@
 {
   "name": "bflow",
-  "version": "1.19.7",
+  "version": "1.20.0",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -15,6 +15,12 @@
   "license": "UNLICENSED",
   "private": true,
   "dependencies": {
+    "@fontsource/gowun-dodum": "^5.2.8",
+    "@fontsource/ibm-plex-sans-kr": "^5.2.8",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/nanum-gothic": "^5.2.7",
+    "@fontsource/noto-sans-kr": "^5.2.9",
+    "@fontsource/noto-serif-kr": "^5.2.9",
     "@liveblocks/client": "^3.14.1",
     "@liveblocks/react": "^3.14.1",
     "@supabase/supabase-js": "^2.99.1",
@@ -30,11 +36,15 @@
     "framer-motion": "^10.18.0",
     "googleapis": "^171.4.0",
     "lucide-react": "^0.303.0",
+    "opentype.js": "^1.3.5",
+    "pretendard": "^1.3.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-grid-layout": "^1.4.4",
     "sonner": "^2.0.7",
+    "spoqa-han-sans": "^3.3.0",
     "tiptap-markdown": "^0.8.10",
+    "uuid": "^14.0.0",
     "zustand": "^4.5.2"
   },
   "build": {

@@ -91,6 +91,20 @@ export interface UserPreferences {
   };
   fontColorPreset?: 'theme' | 'high-contrast' | 'soft' | 'mono' | 'custom';
 
+  // v1.20.0: 글꼴 시스템
+  /** 'pretendard' | 'inter' | ... | 'system' | `custom:${uuid}` */
+  fontFamily?: string;
+  lineHeight?: number;
+  letterSpacing?: number;
+  customFonts?: Array<{
+    id: string;
+    name: string;
+    filename: string;
+    format: 'otf' | 'ttf' | 'woff' | 'woff2';
+    hasKorean: boolean;
+    addedAt: string;
+  }>;
+
   // Phase 8-3: 플렉서스 애니메이션
   plexus?: {
     loginEnabled?: boolean;

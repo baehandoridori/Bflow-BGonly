@@ -33,6 +33,17 @@ export function installDevElectronAPI(): void {
   const mockAPI: ElectronAPI = {
     getDataPath: async () => '/dev/mock-data',
 
+    // v1.20.0: 사용자 폰트 — 개발 환경에선 stub (Electron dialog/fs 사용 불가)
+    fontAdd: async () => {
+      console.warn('[devMock] fontAdd: Electron 환경에서만 작동');
+      return [];
+    },
+    fontAddByPath: async () => {
+      console.warn('[devMock] fontAddByPath: Electron 환경에서만 작동');
+      return [];
+    },
+    fontDelete: async () => ({ ok: true }),
+
     usersRead: async () => ({
       users: MOCK_USERS.map(u => ({
         id: u.id, name: u.name, slackId: u.slackId,
