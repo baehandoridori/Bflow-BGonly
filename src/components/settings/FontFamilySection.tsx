@@ -134,7 +134,13 @@ export function FontFamilySection() {
   const handleDelete = useCallback(async (font: CustomFont) => {
     if (!confirm(`"${font.name}" 글꼴을 삭제하시겠습니까?`)) return;
     if (!window.electronAPI?.fontDelete) return;
-    await window.electronAPI.fontDelete({ id: font.id, filename: font.filename });
+    // Codex 6차 P2: IPC 결과 무시하고 항상 제거하면 파일 잠금/권한 실패 시 orphan 파일 발생.
+    // 성공 시에만 로컬 state/preferences에서 제거하고, 실패 시 토스트로 안내 + 재시도 가능.
+    const result = await window.electronAPI.fontDelete({ id: font.id, filename: font.filename });
+    if (!result?.ok) {
+      toast.error(`"${font.name}" 삭제 실패: ${result?.error ?? '알 수 없는 오류'} — 다시 시도해주세요.`);
+      return;
+    }
     const next = customFonts.filter((f) => f.id !== font.id);
     // 삭제 중이던 폰트가 현재 적용 중이면 → DEFAULT_FONT_FAMILY로 폴백
     const fallbackId = fontFamily === font.id ? DEFAULT_FONT_FAMILY : fontFamily;

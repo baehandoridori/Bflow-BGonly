@@ -272,12 +272,16 @@ export const LETTER_SPACING_STEP = 0.005;
 // ─── DOM 적용 헬퍼 ──────────────────────────────────
 
 /**
- * CSS `font-family` 값에 안전하게 끼워 넣을 수 있도록 single quote/backslash를 escape.
- * 예: `Kid's Sans` → `Kid\\'s Sans` → `'Kid\\'s Sans'` 가 유효한 CSS 값이 됨.
- * Codex 1차 P2: applyFontFamily / injectCustomFontFace / 렌더러 inline style 양쪽이 같은 규칙을 따라야 함.
+ * CSS `font-family` 값에 안전하게 끼워 넣을 수 있도록 sanitize + escape.
+ * - Codex 1차 P2: applyFontFamily / injectCustomFontFace / 렌더러 inline style 양쪽이 같은 규칙을 따라야 함.
+ * - Codex 6차 P3: CSS string은 raw newline/control char를 가질 수 없음 → 공백으로 정규화 후 backslash/quote escape.
+ *   예: `Kid's\nSans` → `Kid's Sans` → `Kid\\'s Sans` → `'Kid\\'s Sans'` 가 유효한 CSS 값.
  */
 export function escapeFontFamilyName(name: string): string {
-  return name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  // 1. 제어 문자(newline/CR/tab/form-feed/vertical-tab/NUL~US/DEL) → 공백 → trim
+  const sanitized = name.replace(/[ -]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // 2. backslash + single quote escape
+  return sanitized.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 export function applyFontFamily(familyId: string, customFonts: CustomFont[] = []): void {
