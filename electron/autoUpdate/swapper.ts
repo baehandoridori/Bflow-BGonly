@@ -18,7 +18,7 @@ import { promises as fsp, existsSync, renameSync } from 'fs';
 import path from 'path';
 import {
   localAppDir, localPendingDir, localBackupDir, localReadyMarker,
-  localInstalledMarker,
+  localInstalledMarker, localPendingVerificationMarker,
 } from './paths';
 
 export async function hasPending(): Promise<boolean> {
@@ -84,6 +84,16 @@ export async function swapIfPending(): Promise<SwapResult> {
     await fsp.writeFile(localInstalledMarker(), new Date().toISOString() + '\n', 'utf-8');
   } catch (err) {
     console.warn('[swapper] .installed 마커 작성 실패 (무시 — 다음 실행에서 재설치 트리거 가능):', err);
+  }
+
+  // 6. .pending-verification 마커 작성 — 새 빌드로 swap 직후이므로 *다음 실행*은 검증 모드.
+  //    healthCheck가 이 마커가 있을 때만 .start-attempt를 트래킹해 rollback 트리거.
+  //    그 외 일상 실행(평소 강제 종료·시스템 kill 등)은 검증 비활성으로 의도치 않은 롤백 X.
+  //    Codex 6차 P1.
+  try {
+    await fsp.writeFile(localPendingVerificationMarker(), new Date().toISOString() + '\n', 'utf-8');
+  } catch (err) {
+    console.warn('[swapper] .pending-verification 마커 작성 실패 (무시 — 자가 검증 비활성, 안전):', err);
   }
 
   return { ok: true };

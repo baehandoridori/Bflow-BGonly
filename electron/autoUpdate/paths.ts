@@ -47,6 +47,18 @@ export function localInstalledMarker(): string {
 }
 
 /**
+ * Swap 직후 첫 실행 검증 마커 — swapper가 swap 완료 후 작성, healthCheck가 해당 실행이
+ * 정상 메인 창 도달하면 삭제.
+ *
+ * Codex 6차 P1: 이전엔 .start-attempt만으로 rollback 트리거 → 강제 종료·시스템 kill 등
+ * 비손상 interruption도 bad build로 오인되어 backup 다운그레이드. 이 마커가 함께 있을
+ * 때 (= swap 직후 첫 실행)만 rollback 활성화.
+ */
+export function localPendingVerificationMarker(): string {
+  return path.join(localRoot(), '.pending-verification');
+}
+
+/**
  * Drive desktop 가상 마운트의 표준 마커 폴더 — Drive 마운트 root에는 항상 이 중 하나가 있음.
  *  - 한국어 로케일: "공유 드라이브", "내 드라이브"
  *  - 영어 로케일:   "Shared drives", "My Drive"
