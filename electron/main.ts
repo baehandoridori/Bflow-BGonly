@@ -18,6 +18,15 @@ import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-imag
 import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage } from './storage';
 // v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
 import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
+// v1.21.0: 자동 업데이트 시스템 (G드라이브 → 로컬 PC 본체로 swap)
+import {
+  runFirstInstallIfNeeded,
+  scheduleUpdateCheck,
+  hasPending,
+  swapIfPending,
+  checkLastStartAndRollback,
+  markStartSucceeded,
+} from './autoUpdate';
 import {
   initVacation,
   isVacationConnected,
@@ -633,6 +642,14 @@ function createWindow(): void {
       pendingDeepLink = null;
     }
     try { console.timeEnd('splash-to-main'); } catch {/* 이미 종료됨 */}
+
+    // ★ v1.21.0 자동 업데이트:
+    //   1) 정상 시작 표시 (자가 검증 마커 삭제)
+    //   2) 5초 후 백그라운드 업데이트 체크 (한 번만, 사용자 작업 영향 0)
+    markStartSucceeded().catch(() => { /* noop */ });
+    setTimeout(() => {
+      scheduleUpdateCheck().catch((err) => console.warn('[autoUpdate] 체크 실패:', err));
+    }, 5_000);
   });
 
   mainWindow.on('close', (e) => {
@@ -2735,14 +2752,31 @@ app.whenReady().then(async () => {
   // 두 번째 인스턴스면 초기화하지 않고 종료
   if (!gotTheLock) return;
 
+  // ★ v1.21.0 자동 업데이트:
+  //   G드라이브에서 직접 실행됐으면 self-installer로 로컬에 설치 후 새 위치에서 spawn.
+  //   이미 설치돼있는 경우는 즉시 로컬 spawn (옛 바로가기 폴백). 로컬 실행이면 통과.
+  const installResult = await runFirstInstallIfNeeded();
+  if (installResult.exited) return;
+
+  // ★ v1.21.0 자가 검증:
+  //   이전 시작이 메인 창까지 못 갔으면(.start-attempt 마커 잔존) backup → app 롤백.
+  //   여기서 작성한 새 마커는 mainWindow did-finish-load 시점에 markStartSucceeded()가 삭제.
+  await checkLastStartAndRollback();
+
+  // ★ v1.20.x perf (gifted-darwin-99908d 964241d 포트):
+  //   사용자에게 즉시 "켜졌다" 피드백을 주려면 스플래시를 가장 먼저 띄워야 함.
+  //   이전엔 cleanupImageCache의 동기 readdirSync + N×statSync가 사용자 데이터
+  //   디렉토리의 이미지 수에 비례해 첫 창 표시까지의 체감 지연을 만들었음.
+  createSplashWindow();
+  console.time('splash-to-main'); // 스플래시 노출 시점부터 메인 did-finish-load까지 측정
+
   // 메인 창 bounds 미리 로드 — createWindow 전에 캐시 완료되어 있어야 첫 창부터 저장 크기로 뜸
   await preloadMainWindowBounds();
 
   // 위젯 위치 캐시 로드 (Phase 0-6)
   loadWidgetPositions();
 
-  // 이미지 캐시 정리 (500MB 초과 시 Drive 백업된 파일 자동 삭제)
-  cleanupImageCache();
+  // ※ cleanupImageCache()는 시작 시점이 아니라 메인 창 로드 후 백그라운드로 미룸 (아래 setTimeout)
 
   // bflow-img:// 프로토콜 핸들러: userData/images/ 폴더에서 이미지 서빙
   // standard URL이므로 hostname은 소문자로 변환됨 → pathname에 파일명 보관
@@ -2785,11 +2819,18 @@ app.whenReady().then(async () => {
     return new Response('Drive image not found', { status: 404 });
   });
 
-  console.time('splash-to-main'); // 측정 시작
-
-  createSplashWindow(); // 1. 가장 먼저 스플래시
-  createTray();        // 먼저 트레이 준비 (실패해도 앱은 계속)
+  // (스플래시·console.time은 위 gotTheLock 체크 직후로 이동했음 — 시작 직후 즉시 노출 위해)
+  createTray();        // 트레이 준비 (실패해도 앱은 계속)
   createWindow();
+
+  // ★ v1.20.x perf (gifted-darwin-99908d 964241d 포트):
+  //   이미지 캐시 정리는 백그라운드로 — 시작 지연의 가장 큰 원인이었음.
+  //   `fs.readdirSync` + N×`fs.statSync` 가 동기로 돌아 사용자 데이터 디렉토리에
+  //   이미지가 많을수록 비례해서 느려짐. 메인 창 로드 후 5초 뒤 한 번 정리해도
+  //   캐시 한도(500MB)는 충분히 지킬 수 있다.
+  setTimeout(() => {
+    try { cleanupImageCache(); } catch (err) { console.warn('[ImageCache] cleanup 실패:', err); }
+  }, 5_000);
 
   // 메인 로드 30초 타임아웃 (좀비 방지).
   // Task 2.3의 did-finish-load 핸들러에서 clearTimeout + 해제 처리.
@@ -2888,33 +2929,52 @@ app.on('before-quit', (e) => {
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
   const totalPending = sheetsPending + vacPending;
+  // v1.21.0: 자동 업데이트 swap이 있으면 어떤 분기든 e.preventDefault + 비동기 chain 끝에 swap.
+  // 기존 fire-and-forget 분기도 swap 시점까지 대기 — race 위험 제거.
+  e.preventDefault();
+
+  // 메인 윈도우에 "저장 중" 알림 (pending 작업이 있는 경우만 의미 있음)
   if (totalPending > 0) {
-    e.preventDefault();
-
     console.log(`[종료] ${totalPending}개 작업 대기 중 (시트: ${sheetsPending}, 휴가: ${vacPending})... 완료 후 종료합니다.`);
-
-    // 메인 윈도우에 "저장 중" 알림
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:saving-before-quit', totalPending);
     }
-
-    // Watch 정리 + 시트 15초 + 휴가 60초 대기 후 종료
-    const watchWithTimeout = Promise.race([watchCleanup, new Promise<void>((r) => setTimeout(r, 5000))]);
-    Promise.all([
-      watchWithTimeout,
-      waitForAllPendingOps(15000),
-      waitForVacPendingOps(60000),
-    ]).then(([, sheetsDone, vacDone]) => {
-      if (!sheetsDone || !vacDone) {
-        console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
-      }
-      console.log('[종료] 저장 완료, 앱을 종료합니다');
-      app.quit();
-    });
-  } else {
-    // 대기 중 작업 없음: Watch 정리는 fire-and-forget (종료를 지연시키지 않음)
-    Promise.race([watchCleanup, new Promise<void>((r) => setTimeout(r, 2000))]).catch(() => {});
   }
+
+  const watchWithTimeout = Promise.race([
+    watchCleanup,
+    new Promise<void>((r) => setTimeout(r, totalPending > 0 ? 5000 : 2000)),
+  ]);
+
+  (async () => {
+    try {
+      if (totalPending > 0) {
+        const [, sheetsDone, vacDone] = await Promise.all([
+          watchWithTimeout,
+          waitForAllPendingOps(15000),
+          waitForVacPendingOps(60000),
+        ]);
+        if (!sheetsDone || !vacDone) {
+          console.warn('[종료] 타임아웃 — 일부 작업이 완료되지 않았을 수 있습니다');
+        } else {
+          console.log('[종료] 저장 완료, 앱을 종료합니다');
+        }
+      } else {
+        await watchWithTimeout.catch(() => { /* noop */ });
+      }
+
+      // ★ v1.21.0 자동 업데이트 swap (마지막 step)
+      if (await hasPending()) {
+        const result = await swapIfPending();
+        if (!result.ok) console.warn('[autoUpdate] swap 실패:', result.reason);
+        else console.log('[autoUpdate] swap 완료 — 다음 실행 = 새 버전');
+      }
+    } catch (err) {
+      console.warn('[종료] 정리/swap 예외:', err);
+    } finally {
+      app.exit(0);
+    }
+  })();
 });
 
 process.on('exit', () => {
