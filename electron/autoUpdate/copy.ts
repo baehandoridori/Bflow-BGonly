@@ -32,17 +32,27 @@ export async function copyDirMirror(
     await fsp.mkdir(path.dirname(dstFile), { recursive: true });
 
     let needCopy = true;
-    if (existsSync(dstFile)) {
+    let srcStat: import('fs').Stats | null = null;
+    try { srcStat = statSync(srcFile); } catch { /* skip; copy 시점에 throw */ }
+
+    if (existsSync(dstFile) && srcStat) {
       try {
-        const ss = statSync(srcFile);
         const ds = statSync(dstFile);
-        if (ss.size === ds.size && Math.abs(ss.mtimeMs - ds.mtimeMs) < 2000) {
+        if (srcStat.size === ds.size && Math.abs(srcStat.mtimeMs - ds.mtimeMs) < 2000) {
           needCopy = false;
         }
       } catch { /* stat 실패면 그냥 복사 */ }
     }
     if (needCopy) {
       await fsp.copyFile(srcFile, dstFile);
+      // Codex 4차 P2: copyFile 후 dst의 mtime이 현재 시각으로 새로 생성됨 → 다음 동기화에
+      // unchanged file이 changed로 인식되어 win-unpacked 188MB 매번 풀 카피되던 문제 수정.
+      // src의 atime/mtime을 그대로 복사해 mirror 비교가 안정적으로 동작.
+      if (srcStat) {
+        try { await fsp.utimes(dstFile, srcStat.atime, srcStat.mtime); } catch {
+          /* utimes 실패는 무시 — 다음 동기화 효율만 영향 (correctness 영향 X) */
+        }
+      }
     }
     copied++;
     onProgress?.(rel, copied, allFiles.length);

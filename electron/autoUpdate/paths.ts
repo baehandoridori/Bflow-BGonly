@@ -45,17 +45,29 @@ export function localBflowExe(): string {
 const DRIVE_MOUNT_MARKERS = ['공유 드라이브', '내 드라이브', 'Shared drives', 'My Drive'];
 
 /**
+ * 현재 실행 *진입점* 경로 — portable 빌드 / 일반 빌드 모두 정확히 반환.
+ *
+ * Codex 4차 P1: electron-builder의 `win.target: "portable"`는 실행 시 process.execPath가
+ * %TEMP%/<랜덤UUID>/BFLOW.exe (압축 풀린 임시 폴더)을 가리킴. 원래 launcher path
+ * (사용자가 클릭한 G드라이브의 BFLOW.exe)는 `PORTABLE_EXECUTABLE_FILE` 환경변수에 있음.
+ * 이 변수는 portable 모드 + 부트스트랩 시점에만 set됨 — 그 외(win-unpacked 실행 등)는 undefined.
+ *
+ * 따라서 Drive 감지는 PORTABLE_EXECUTABLE_FILE 우선, 없으면 process.execPath fallback.
+ */
+export function getLaunchExePath(): string {
+  return process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+}
+
+/**
  * 현재 실행 파일이 Google Drive 경로 하위에 있는지 추정.
  *
  * Codex 2차 P0: 이전엔 `guessGoogleDriveRoots()`로 받은 모든 drive root와 startsWith
- * 비교했는데, 1차 수정에서 A~Z 전체 scan으로 바뀌면서 일반 디스크(C:\, D:\) root 도
- * 후보에 포함 → 로컬 설치된 정상 PC에서도 항상 true 반환 → 무한 self-installer 루프.
- *
- * 새 휴리스틱: process.execPath에 Drive 마운트 마커("공유 드라이브" 등)가 포함됐는지
- * `includes`로 검사. drive letter 무관하게 정확히 Drive 경로만 매칭.
+ * 비교 → 일반 디스크(C:, D:)도 매치되어 무한 self-installer 루프. 마커 폴더 휴리스틱으로 수정.
+ * Codex 4차 P1: process.execPath만 검사 → portable 모드에서 Temp 경로만 보고 Drive 감지 실패.
+ * getLaunchExePath()로 진짜 launcher 경로 사용.
  */
 export function isRunningFromGoogleDrive(): boolean {
-  const exe = process.execPath.toLowerCase();
+  const exe = getLaunchExePath().toLowerCase();
   return DRIVE_MOUNT_MARKERS.some(
     (marker) => exe.includes(`${path.sep}${marker}${path.sep}`.toLowerCase())
                 || exe.includes(`/${marker}/`.toLowerCase()),
