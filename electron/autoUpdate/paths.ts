@@ -37,43 +37,64 @@ export function localBflowExe(): string {
 }
 
 /**
- * 현재 실행 파일이 G드라이브 경로 하위에 있는지 추정.
- * 한글 경로 안전성 — path 모듈만 사용 (정규식 직접 비교 X).
+ * Drive desktop 가상 마운트의 표준 마커 폴더 — Drive 마운트 root에는 항상 이 중 하나가 있음.
+ *  - 한국어 로케일: "공유 드라이브", "내 드라이브"
+ *  - 영어 로케일:   "Shared drives", "My Drive"
+ * 일반 C:, D: 같은 디스크 root에는 이 폴더가 없으므로 Drive와 일반 디스크를 정확히 구분.
+ */
+const DRIVE_MOUNT_MARKERS = ['공유 드라이브', '내 드라이브', 'Shared drives', 'My Drive'];
+
+/**
+ * 현재 실행 파일이 Google Drive 경로 하위에 있는지 추정.
+ *
+ * Codex 2차 P0: 이전엔 `guessGoogleDriveRoots()`로 받은 모든 drive root와 startsWith
+ * 비교했는데, 1차 수정에서 A~Z 전체 scan으로 바뀌면서 일반 디스크(C:\, D:\) root 도
+ * 후보에 포함 → 로컬 설치된 정상 PC에서도 항상 true 반환 → 무한 self-installer 루프.
+ *
+ * 새 휴리스틱: process.execPath에 Drive 마운트 마커("공유 드라이브" 등)가 포함됐는지
+ * `includes`로 검사. drive letter 무관하게 정확히 Drive 경로만 매칭.
  */
 export function isRunningFromGoogleDrive(): boolean {
-  const exe = process.execPath;
-  const candidates = guessGoogleDriveRoots();
-  for (const root of candidates) {
-    if (exe.toLowerCase().startsWith(root.toLowerCase())) return true;
-  }
-  return false;
+  const exe = process.execPath.toLowerCase();
+  return DRIVE_MOUNT_MARKERS.some(
+    (marker) => exe.includes(`${path.sep}${marker}${path.sep}`.toLowerCase())
+                || exe.includes(`/${marker}/`.toLowerCase()),
+  );
 }
 
 /**
  * G드라이브 desktop 동기화 루트 후보. Drive desktop은 사용자 환경에 따라 다른 drive
- * letter (다른 네트워크 드라이브가 G:~J:를 점유하면 Drive가 K: 이상에 마운트되기도)에
- * 마운트될 수 있어 모든 letter (A~Z)를 스캔. existsSync + statSync는 ms 수준이라
- * 26회 호출은 비용 무시 가능.
+ * letter에 마운트될 수 있어 A~Z 전체를 스캔하되, **Drive 마운트 마커 폴더가 있는 root
+ * 만** 통과시켜 일반 디스크는 제외.
  *
- * 추가로 레거시 desktop sync 폴더 (~\Google Drive)도 후보에 포함.
- *
- * Codex 1차 P2: 이전엔 G~J 4개만 체크해 다른 letter 마운트 환경에서 install 감지/
- * remote update discovery 모두 실패하던 문제 수정.
+ * 레거시 desktop sync 폴더(~\Google Drive)도 후보에 포함 — 거기는 폴더 자체가 마커.
  */
 export function guessGoogleDriveRoots(): string[] {
   const candidates: string[] = [];
-  // A~Z 전체 스캔 — Drive desktop이 어떤 letter에 마운트됐든 감지
-  for (let i = 65; i <= 90; i++) { // 'A'.charCodeAt(0) = 65, 'Z' = 90
-    candidates.push(`${String.fromCharCode(i)}:\\`);
+  // A~Z 전체 스캔, 단 Drive 마운트 마커 폴더가 있는 root만
+  for (let i = 65; i <= 90; i++) { // 'A' ~ 'Z'
+    const root = `${String.fromCharCode(i)}:\\`;
+    try {
+      if (!existsSync(root) || !statSync(root).isDirectory()) continue;
+    } catch { continue; }
+    const isDriveMount = DRIVE_MOUNT_MARKERS.some((marker) => {
+      try { return existsSync(path.join(root, marker)); } catch { return false; }
+    });
+    if (isDriveMount) candidates.push(root);
   }
-  // 레거시 데스크톱 sync 폴더
+  // 레거시 데스크톱 sync 폴더 (별도 마커 검사 X — 폴더 자체가 sync 루트)
   if (process.env.USERPROFILE) {
-    candidates.push(path.join(process.env.USERPROFILE, 'Google Drive'));
-    candidates.push(path.join(process.env.USERPROFILE, 'GoogleDrive'));
+    const legacyCandidates = [
+      path.join(process.env.USERPROFILE, 'Google Drive'),
+      path.join(process.env.USERPROFILE, 'GoogleDrive'),
+    ];
+    for (const c of legacyCandidates) {
+      try {
+        if (existsSync(c) && statSync(c).isDirectory()) candidates.push(c);
+      } catch { /* ignore */ }
+    }
   }
-  return candidates.filter((c) => {
-    try { return existsSync(c) && statSync(c).isDirectory(); } catch { return false; }
-  });
+  return candidates;
 }
 
 /**
