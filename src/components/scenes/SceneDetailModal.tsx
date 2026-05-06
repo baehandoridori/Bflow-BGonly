@@ -52,6 +52,12 @@ interface SceneDetailModalProps {
   hasNext?: boolean;
   totalScenes?: number;
   currentSceneIndex?: number;
+  /**
+   * 코덱스 P2 fix (5차, 2026-05-05): 단일 부서 모달도 알림 라우팅 지원.
+   * 알림 클릭으로 진입했을 때 초기 탭/포커스할 리비전 카드 지정. UnifiedSceneDetailModal 과 동일.
+   */
+  initialTab?: 'detail' | 'revisions' | 'files' | 'history';
+  focusRevisionId?: string;
 }
 
 // ─── 속성 행 컴포넌트 ──────────────────────────────
@@ -407,10 +413,69 @@ export function SceneDetailModal({
   hasNext = false,
   totalScenes = 0,
   currentSceneIndex = 0,
+  initialTab,
+  focusRevisionId,
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
-  const [showRevisions, setShowRevisions] = useState(false);
+  // 코덱스 P2 fix (5차, 2026-05-05): 알림 라우팅 시 initialTab='revisions' 면 리비전 패널 자동 펼침.
+  const [showRevisions, setShowRevisions] = useState(initialTab === 'revisions');
+  // 코덱스 P2 fix (6차, 2026-05-05): 모달 인스턴스가 재사용되어 initialTab prop 이 나중에 바뀌면
+  // useState 초기값만으로는 sync 안 됨. effect 로 prop 변경 감지 → revisions 모드로 전환.
+  useEffect(() => {
+    if (initialTab === 'revisions') setShowRevisions(true);
+  }, [initialTab]);
+
+  // 코덱스 P2 fix (9차, 2026-05-05): 댓글 패널의 [re#] 배지 클릭 → 리비전 패널 펼침 + 카드 강조.
+  // UnifiedSceneDetailModal:173 동일 패턴. 단일 부서 모달도 같은 동작 보장.
+  useEffect(() => {
+    function onJump(e: Event) {
+      const detail = (e as CustomEvent<{ revisionId?: string }>).detail;
+      const revisionId = detail?.revisionId;
+      if (!revisionId) return;
+      setShowRevisions(true);
+      let retries = 8;
+      const attempt = () => {
+        const card = document.getElementById(`rev-card-${revisionId}`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.remove('rev-pulse');
+          void (card as HTMLElement).offsetWidth;
+          card.classList.add('rev-pulse');
+          window.dispatchEvent(new CustomEvent('bflow:expand-revision', { detail: { revisionId } }));
+        } else if (retries-- > 0) {
+          setTimeout(() => requestAnimationFrame(attempt), 100);
+        }
+      };
+      requestAnimationFrame(attempt);
+    }
+    window.addEventListener('bflow:jump-to-revision', onJump);
+    return () => window.removeEventListener('bflow:jump-to-revision', onJump);
+  }, []);
+
+  // 코덱스 P2 fix (5차, 2026-05-05): focusRevisionId 강조 — UnifiedSceneDetailModal:204 동일 패턴.
+  // 단일 부서 모달에서도 알림 클릭 → 리비전 패널 펼침 + 해당 카드 scrollIntoView + pulse.
+  useEffect(() => {
+    if (!focusRevisionId || !showRevisions) return;
+    let cancelled = false;
+    let removeTimer: ReturnType<typeof setTimeout> | null = null;
+    const attempt = (retries: number) => {
+      if (cancelled) return;
+      const el = document.getElementById(`rev-card-${focusRevisionId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('rev-pulse');
+        removeTimer = setTimeout(() => { el.classList.remove('rev-pulse'); }, 2600);
+      } else if (retries > 0) {
+        setTimeout(() => requestAnimationFrame(() => attempt(retries - 1)), 100);
+      }
+    };
+    requestAnimationFrame(() => attempt(8));
+    return () => {
+      cancelled = true;
+      if (removeTimer) clearTimeout(removeTimer);
+    };
+  }, [focusRevisionId, showRevisions]);
   const [commentCount, setCommentCount] = useState(0);
   const [revisionCount, setRevisionCount] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState<'storyboard' | 'guide' | null>(null);

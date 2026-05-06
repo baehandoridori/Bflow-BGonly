@@ -227,6 +227,18 @@ export function getUserNames(users: AppUser[]): string[] {
 }
 
 /**
+ * v1.18.1: 어드민 전용 — 컴포지터 지정/해제 (부서 구분 없음, 단일 BOOLEAN).
+ * 한솔 정정: 컴포지터는 BG/ACT 로 나뉘지 않는다.
+ * supabase users.is_compositor 컬럼 직접 업데이트.
+ */
+export async function setIsCompositor(
+  userId: string,
+  value: boolean,
+): Promise<void> {
+  await window.electronAPI.supabaseUpdateUser(userId, { isCompositor: value });
+}
+
+/**
  * 로컬 users.dat를 _USERS 탭으로 마이그레이션한다.
  * 시트에 사용자가 없고 로컬에 있을 때 실행.
  */

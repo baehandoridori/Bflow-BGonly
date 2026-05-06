@@ -44,6 +44,7 @@ import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
 // 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
@@ -822,6 +823,7 @@ export default function App() {
           // comments 테이블 컬럼: scene_id 는 사실 scene.no(sort_order, 예: '1', '2'...).
           // 정확한 씬 매칭은 scene_uuid 컬럼 사용 (electron/supabase.ts:872 참고).
           const newComment = payload.new as {
+            id?: string;
             scene_id?: string;
             scene_uuid?: string;
             part_id?: string;
@@ -829,8 +831,59 @@ export default function App() {
             user_id?: string;
             text?: string;
             mentions?: string[];
+            // v1.18.0: 리비전 맥락 댓글 식별 — 값 있으면 'revision' 알림 경로로 분기.
+            revision_id?: string | null;
           };
           const me = useAuthStore.getState().currentUser;
+
+          // v1.18.0: 리비전 맥락 댓글 → 'revision' 알림 (revisionAction='comment').
+          // 일반 댓글 알림 경로(isMentioned/isAssignee) 와 *분리* 해 중복 알림 방지.
+          // 조건: revision_id 있음 + 그 리비전 notifyUserIds 에 나 포함 + 내가 작성자 아님.
+          if (me && newComment.revision_id && newComment.user_id !== me.id) {
+            const notiSettings = notiSettingsRef.current;
+            if (notiSettings.commentNotify !== false) {
+              import('@/stores/useRevisionStore').then(async ({ useRevisionStore }) => {
+                let rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
+                // 코덱스 P1 fix (3차, 2026-05-05): 리비전 store 가 비어있으면 (예: 다른 뷰에서
+                // 시작한 fresh 세션) 댓글 알림이 silent drop 되던 문제. lazy load 후 재시도.
+                if (!rev) {
+                  await useRevisionStore.getState().loadRevisions();
+                  rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
+                  if (!rev) return;
+                }
+                const targets = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
+                if (!targets.includes(me.id)) return;
+                // dedupe — 같은 댓글이 broadcast/realtime 두 경로로 들어와도 한 번만.
+                // 코덱스 P1 fix (2026-05-05): commentId 포함. 같은 사용자가 같은 리비전에
+                // 짧은 시간 내 여러 댓글 작성 시 두 번째부터 dedupe 충돌로 알림 손실되던 문제.
+                const dedupeKey = `revcomment:${newComment.id ?? ''}:${newComment.revision_id}`;
+                if (!dedupeNotification(dedupeKey)) return;
+                // 씬 매칭 — comment_panel.css 카드 라우팅 위해 sceneId/sceneName 도 같이 채움.
+                const sceneByUuid = newComment.scene_uuid
+                  ? useDataStore.getState().findSceneByUuid(newComment.scene_uuid)
+                  : null;
+                const body = newComment.text
+                  ? (newComment.text.length > 60 ? newComment.text.slice(0, 60) + '...' : newComment.text)
+                  : `${newComment.user_name || '누군가'}님 댓글`;
+                dispatchNotification({
+                  type: 'revision',
+                  title: `리비전 댓글 — ${sceneByUuid?.sceneId || newComment.scene_id || ''}`,
+                  body,
+                  metadata: {
+                    // 코덱스 P2 fix (8차, 2026-05-05): sceneByUuid 가 stale 캐시 등으로 null 일 때
+                    // newComment.scene_uuid 폴백 — 라우팅이 sceneId/sceneName 의존이라 누락 시 알림 클릭이 동작 안 함.
+                    sceneId: sceneByUuid?.id ?? newComment.scene_uuid,
+                    sceneName: sceneByUuid?.sceneId,
+                    revisionId: newComment.revision_id,
+                    revisionAction: 'comment',
+                  } as Record<string, unknown>,
+                }, notiSettings);
+              }).catch(() => { /* 무시 */ });
+            }
+            // 리비전 맥락 댓글은 일반 댓글 알림 경로 스킵.
+            return;
+          }
+
           // 한솔 테스트용 (v1.15.0): 본인이 본인 태그한 경우에도 토스트 발동되도록 user_id 자기 비교 제거.
           // 실 운영 시 본인 댓글 알림이 의미없으면 다음 PR 에서 user_id !== me.id 조건 복원.
           if (me && newComment.user_id && newComment.scene_id) {
@@ -942,6 +995,127 @@ export default function App() {
       if (table === 'comp_revisions') {
         invalidateRevisionsCache();
         window.dispatchEvent(new Event('bflow:revisions-invalidated'));
+
+        // v1.18.0: 본인이 notify_user_ids 에 포함되어 있으면 자체 알림 발송.
+        // 등록자 본인(requester) 액션은 스킵 (자기 알림 X).
+        const me = useAuthStore.getState().currentUser;
+        if (!me) return;
+
+        const notiSettings = notiSettingsRef.current;
+        // 댓글 알림과 같은 settings flag 재사용 (별도 토글 없음 — 추후 분리 가능)
+        if (notiSettings.commentNotify === false) return;
+
+        if (payload?.eventType === 'INSERT' && payload?.new) {
+          const row = payload.new as {
+            id?: string;
+            scene_id?: string;
+            scene_uuid?: string;
+            requester_id?: string;
+            requester_name?: string;
+            description?: string;
+            revision_no?: number;
+            notify_user_ids?: string[] | null;
+            created_at?: string | null;
+          };
+          // 본인이 등록자면 스킵
+          if (row.requester_id === me.id) return;
+          // notify_user_ids 에 본인 없으면 스킵
+          const targets = Array.isArray(row.notify_user_ids) ? row.notify_user_ids : [];
+          if (!targets.includes(me.id)) return;
+
+          // v1.19.7: 같은 INSERT 가 broadcast/realtime 두 경로로 들어와도 한 번만.
+          // created_at 을 키에 포함해 같은 row 의 중복 이벤트만 차단 (다른 row 면 created_at 이 다름).
+          if (row.id) {
+            const dedupeKey = `revision:${row.id}:add:${row.created_at ?? ''}`;
+            if (!dedupeNotification(dedupeKey)) return;
+          }
+
+          // sceneKey → 씬 매칭 (revisions 의 scene_id 는 'EP01:A:1' sceneKey 형식)
+          const sceneKey = row.scene_id || '';
+          const sceneNameForLabel = sceneKey.split(':').pop() || sceneKey;
+          // 코덱스 P1 fix (2026-05-05): metadata.sceneName 에 last-token('a001')만 저장하면
+          // 다른 EP/Part 의 같은 raw sceneId 와 reuse 충돌 → 알림 클릭 시 잘못된 씬으로 라우팅 가능.
+          // sceneId(UUID) 우선 매칭으로 정확도 보장. sceneName 은 sceneKey 전체 보존 (fallback 식별자).
+
+          dispatchNotification({
+            type: 'revision',
+            title: `새 리비전 — ${sceneNameForLabel}`,
+            body: row.description ? (row.description.length > 50 ? row.description.slice(0, 50) + '...' : row.description) : `${row.requester_name || '누군가'}님이 등록`,
+            metadata: {
+              sceneId: row.scene_uuid,  // UUID 매칭 우선 (NotificationPanel:181 부근)
+              sceneName: sceneKey,       // sceneKey 전체 보존 — last-token reuse 충돌 방지
+              revisionId: row.id,
+              revisionAction: 'add',
+            } as Record<string, unknown>,
+          }, notiSettings);
+          return;
+        }
+
+        if (payload?.eventType === 'UPDATE' && payload?.new) {
+          const newRow = payload.new as {
+            id?: string;
+            scene_id?: string;
+            scene_uuid?: string;
+            requester_id?: string;
+            status?: string;
+            revision_no?: number;
+            resolved_by?: string | null;
+            notify_user_ids?: string[] | null;
+            updated_at?: string | null;
+            resolved_at?: string | null;
+          };
+          const oldRow = payload.old as { status?: string } | undefined;
+          const targets = Array.isArray(newRow.notify_user_ids) ? newRow.notify_user_ids : [];
+          if (!targets.includes(me.id)) return;
+
+          // 상태 변경 detect — old.status !== new.status 일 때만 알림
+          if (!oldRow || oldRow.status === newRow.status) return;
+          // 본인이 변경한 거면 스킵 (resolved_by 가 본인 이름이면) — resolved 전용 가드.
+          if (newRow.resolved_by === me.name) return;
+
+          let action: 'in_progress' | 'resolve';
+          let titlePrefix: string;
+          if (newRow.status === 'in_progress') {
+            action = 'in_progress';
+            titlePrefix = '리비전 진행중';
+          } else if (newRow.status === 'resolved') {
+            action = 'resolve';
+            titlePrefix = '리비전 완료';
+          } else {
+            // open 으로 되돌림 — 알림 X
+            return;
+          }
+
+          // 코덱스 P2 fix (4차, 2026-05-05): in_progress 자기 액션은 resolved_by 미채워져
+          // 위 가드가 못 걸렀음. updateStatus 가 mark 해둔 self-action 체크로 차단.
+          if (newRow.id && isRecentSelfRevisionAction(newRow.id, action)) return;
+
+          // v1.19.7: 같은 UPDATE 가 두 경로 또는 동일 status 로의 다른 필드 UPDATE 로 두 번 도착할 때 차단.
+          // resolve 는 resolved_at 이, in_progress 는 updated_at 이 안정 타임스탬프 (같은 status 반복 변경이면 시간이 다름).
+          if (newRow.id) {
+            const stamp = action === 'resolve'
+              ? (newRow.resolved_at ?? newRow.updated_at ?? '')
+              : (newRow.updated_at ?? '');
+            const dedupeKey = `revision:${newRow.id}:${action}:${stamp}`;
+            if (!dedupeNotification(dedupeKey)) return;
+          }
+
+          const sceneKey = newRow.scene_id || '';
+          const sceneNameForLabel = sceneKey.split(':').pop() || sceneKey;
+          // 코덱스 P1 fix (2026-05-05): INSERT 분기와 동일 — sceneId(UUID) 우선,
+          // sceneName 은 sceneKey 전체 보존 (last-token reuse 충돌 방지).
+          dispatchNotification({
+            type: 'revision',
+            title: `${titlePrefix} — ${sceneNameForLabel}`,
+            metadata: {
+              sceneId: newRow.scene_uuid,
+              sceneName: sceneKey,
+              revisionId: newRow.id,
+              revisionAction: action,
+            } as Record<string, unknown>,
+          }, notiSettings);
+          return;
+        }
         return;
       }
 

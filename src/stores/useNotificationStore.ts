@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 // ─── 알림 타입 정의 ─────────────────────────────────
-export type NotificationType = 'scene_change' | 'comment' | 'milestone' | 'system';
+export type NotificationType = 'scene_change' | 'comment' | 'milestone' | 'system' | 'revision';
 
 export interface AppNotification {
   id: string;
@@ -18,6 +18,10 @@ export interface AppNotification {
     toStage?: string;
     changedBy?: string;
     commentId?: string;
+    /** v1.18.0: 리비전 알림 — 클릭 시 해당 리비전 패널로 이동 */
+    revisionId?: string;
+    /** v1.18.0: 리비전 알림 액션 종류 */
+    revisionAction?: 'add' | 'in_progress' | 'resolve' | 'comment';
   };
   isRead: boolean;
   createdAt: string; // ISO 8601

@@ -12,6 +12,8 @@ export const ACTION_TYPE_TO_GROUP: Record<ActionType, ActionGroup> = {
   revision_in_progress: 'memo',
   revision_resolve: 'memo',
   revision_delete: 'memo',
+  // v1.18.0: 리비전 댓글 — '메모/댓글' 그룹으로 묶어 일반 comment_add 와 같은 필터에 포함
+  revision_comment: 'memo',
   scene_add: 'scene',
   scene_delete: 'scene',
   assignee_change: 'etc',
@@ -32,6 +34,8 @@ export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
   revision_in_progress: '리비전 진행중',
   revision_resolve: '리비전 해결',
   revision_delete: '리비전 삭제',
+  // v1.18.0: 리비전 댓글
+  revision_comment: '리비전 댓글',
   scene_add: '씬 추가',
   scene_delete: '씬 삭제',
   assignee_change: '담당자 변경',
@@ -52,6 +56,8 @@ export const ACTION_TYPE_COLOR: Record<ActionType, string> = {
   revision_in_progress: '#5EBBC9',
   revision_resolve: '#81ECEC',
   revision_delete: '#FF7675',
+  // v1.18.0: 리비전 댓글 — 시안~카키 사이로 일반 comment_add 와 시각 구분
+  revision_comment: '#A0E7E5',
   scene_add: '#6FCF97',
   scene_delete: '#FF7675',
   assignee_change: '#95A5A6',

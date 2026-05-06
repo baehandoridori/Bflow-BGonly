@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { MessageCircle, Trash2 } from 'lucide-react';
+import { MessageCircle, MessageSquareWarning, Check, Trash2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { sceneProgress } from '@/utils/calcStats';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
@@ -11,6 +11,8 @@ import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { Confetti } from '@/components/ui/Confetti';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useRevisionStore } from '@/stores/useRevisionStore';
+import { buildSceneKey } from '@/services/revisionService';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
 
@@ -191,6 +193,36 @@ export function UnifiedSceneCard({
   // BG/ACT 둘 중 하나라도 lengthChange 가 있으면 그 값 (BG 우선, 양쪽 동기화 정책)
   const lengthChange = bgScene?.lengthChange ?? actScene?.lengthChange ?? null;
 
+  // v1.18.0: 리비전 시각 표시 — 미해결 개수 + 완료 개수 분리.
+  // sceneKey 빌드는 BG/ACT 공용 (buildSceneKey 가 EP:Part:sceneId 정규화).
+  // siblingSceneIds 는 별도 계산 비용을 피하려 빈 배열 — buildSceneKey 안에서 fallback 으로 part 정보 조회됨.
+  const episodes = useDataStore((s) => s.episodes);
+  const revisionSheetName = bgSheetName ?? actSheetName ?? '';
+  const revisionSceneId = primaryScene.sceneId || sceneId || '';
+  const revisionSceneKey = useMemo(() => {
+    if (!revisionSheetName || !revisionSceneId) return '';
+    // sibling scene id 들 — RevisionPanel/Modal 패턴과 동일.
+    const siblings: string[] = (() => {
+      for (const ep of episodes) {
+        const part = ep.parts.find((p) => p.sheetName === revisionSheetName);
+        if (part) return part.scenes.map((s) => s.sceneId);
+      }
+      return [];
+    })();
+    return buildSceneKey(revisionSheetName, revisionSceneId, { siblingSceneIds: siblings });
+  }, [episodes, revisionSheetName, revisionSceneId]);
+  // 코덱스 P2 fix (8차, 2026-05-05): selector 가 새 배열을 매번 반환하면 모든 카드가 어떤
+  // 리비전 변경에도 re-render 됨 (보드에 카드 많을 때 jank). 두 selector 모두 number 반환 →
+  // 카운트 안 변하면 카드 stable. resolved selector 가 getRevisionsForScene 을 호출해도
+  // 결과는 number 라 zustand 의 strict-equal 비교로 안정.
+  const openRevCount = useRevisionStore((s) =>
+    revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0,
+  );
+  const resolvedRevCount = useRevisionStore((s) => {
+    if (!revisionSceneKey) return 0;
+    return s.getRevisionsForScene(revisionSceneKey).filter((r) => r.status === 'resolved').length;
+  });
+
   return (
     <motion.div
       data-scene-id={mergedKey}
@@ -200,6 +232,8 @@ export function UnifiedSceneCard({
         'hover:shadow-[0_3px_8px_rgba(0,0,0,0.12),0_10px_24px_rgba(0,0,0,0.18)]',
         'scene-card-interactive',
         'hover:-translate-y-0.5 hover:border-accent/70',
+        // v1.18.0: 미해결 리비전 있는 카드 → 보더에 액센트 강조 (mockup revision-visibility.html 시안 1)
+        openRevCount > 0 && 'border-accent/60',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
         cardWholePendingClass,
@@ -218,6 +252,14 @@ export function UnifiedSceneCard({
       } : {})}
     >
         {isHighlighted && <div className="scene-highlight-bg" />}
+
+        {/* v1.18.0: 좌측 액센트 막대 — 미해결 리비전 있는 카드 표시 (mockup 시안 1) */}
+        {openRevCount > 0 && (
+          <span
+            aria-hidden
+            className="absolute left-0 top-0 bottom-0 w-1 bg-accent rounded-l-xl pointer-events-none"
+          />
+        )}
 
         {isSelected && (
           <div className="absolute top-2.5 right-2.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30">
@@ -241,6 +283,26 @@ export function UnifiedSceneCard({
             )}
           </div>
           <div className="flex items-center gap-1.5">
+            {/* v1.18.0: 리비전 시각 표시 — 미해결 우선, 없으면 완료 카운트.
+                isSelected 시 우측 상단의 체크 아이콘과 겹치지 않도록 헤더 인라인 배치 (좌측 막대도 함께 노출). */}
+            {openRevCount > 0 ? (
+              <span
+                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-accent text-white"
+                style={{ boxShadow: '0 0 14px rgb(var(--color-accent) / 0.55)' }}
+                title={`미해결 리비전 ${openRevCount}건`}
+              >
+                <MessageSquareWarning className="w-2.5 h-2.5" strokeWidth={2.4} />
+                {openRevCount}
+              </span>
+            ) : resolvedRevCount > 0 ? (
+              <span
+                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-bg-card border border-bg-border/40 text-text-secondary/70"
+                title={`완료된 리비전 ${resolvedRevCount}건`}
+              >
+                <Check className="w-2.5 h-2.5" strokeWidth={2.5} />
+                {resolvedRevCount}
+              </span>
+            ) : null}
             {/* Codex P2 6차(2026-04-23): 정확한 total 은 ScenesView 가 commentIdsByKey 로 계산해
                 `totalCommentCount` 로 전달. 없으면 Math.max 로 fallback (대부분 BG·ACT 동일값). */}
             {(() => {

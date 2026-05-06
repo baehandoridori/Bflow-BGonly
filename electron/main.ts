@@ -1141,7 +1141,7 @@ ipcMain.handle('supabase:read-users', wrapIpc(async () => {
 ipcMain.handle('supabase:add-user', wrapIpc(async (_e: unknown, user: SupabaseUser) => {
   await sbAddUser(user);
 }));
-ipcMain.handle('supabase:update-user', wrapIpc(async (_e: unknown, userId: string, updates: Record<string, string>) => {
+ipcMain.handle('supabase:update-user', wrapIpc(async (_e: unknown, userId: string, updates: Record<string, string | boolean | null>) => {
   await sbUpdateUser(userId, updates);
 }));
 ipcMain.handle('supabase:delete-user', wrapIpc(async (_e: unknown, userId: string) => {
@@ -1163,8 +1163,9 @@ ipcMain.handle('supabase:fetch-missed-mentions', wrapIpc(async (
   return sbFetchMissedMentions(userId, userName, since, limit ?? 50);
 }));
 ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
-  userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = []) => {
-  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images);
+  userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = [],
+  revisionId: string | null = null) => {
+  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId);
   // 활동 기록 — partUuid 로 부서/에피소드 + scene UUID 자동 조회
   // (sceneId 가 TEXT 형식이라 scenes 테이블 조회로 UUID 변환 — 그룹화 정확성 + 부서 필터 통과)
   if (currentActivityUser) {
@@ -1191,12 +1192,18 @@ ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: st
       const sceneLabel = epNum && part?.part_id
         ? `EP${String(epNum).padStart(2, '0')} ${part.part_id} #${sceneId}`
         : `씬 ${sceneId}`;
+      // v1.18.0: 리비전 맥락 댓글이면 revision_comment 로 기록 (일반 댓글은 comment_add 그대로).
+      // detail.revisionId 보존 — 활동 피드에서 클릭 시 라우팅에 활용 가능.
+      const isRevisionComment = !!revisionId;
       await sbRecordActivityLog({
         userId: currentActivityUser.id, userName: currentActivityUser.name,
-        actionType: 'comment_add', actionGroup: 'memo',
+        actionType: isRevisionComment ? 'revision_comment' : 'comment_add',
+        actionGroup: 'memo',
         sceneId: sceneUuid, sceneLabel,
         episodeNumber: epNum, department: dept,
-        detail: { commentId, textPreview: text.slice(0, 60) },
+        detail: isRevisionComment
+          ? { commentId, revisionId, textPreview: text.slice(0, 60) }
+          : { commentId, textPreview: text.slice(0, 60) },
       });
     } catch { /* 무시 */ }
   }
@@ -1254,8 +1261,9 @@ ipcMain.handle('supabase:read-revisions', wrapIpc(async () => {
 }));
 ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, partUuid: string, sceneId: string,
     revisionNo: number, status: string, priority: string, description: string, frameNo: string,
-    imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => {
-    await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt);
+    imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
+    notifyUserIdsJson?: string) => {
+    await sbAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt, notifyUserIdsJson);
     if (currentActivityUser) {
       try {
         // sceneId 가 sceneKey 형식 (예: 'EP02:A:35') 일 수 있으므로 파싱 + raw- prefix 디코드 (Codex P2)

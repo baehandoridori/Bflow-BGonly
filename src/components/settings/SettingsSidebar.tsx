@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Palette, Type, Keyboard, Sparkles, Monitor,
   KeyRound, Database, HelpCircle, UserCircle, Bell,
+  Layers,
   ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
+import { useAuthStore } from '@/stores/useAuthStore';
 
 export type SettingsTabId =
   | 'profile'
@@ -18,7 +20,9 @@ export type SettingsTabId =
   | 'startup'
   | 'login'
   | 'sheets'
-  | 'guide';
+  | 'guide'
+  // v1.18.0: 어드민 전용 — 부서별 컴포지터 지정
+  | 'compositor';
 
 interface Tab {
   id: SettingsTabId;
@@ -32,7 +36,7 @@ interface Group {
   tabs: Tab[];
 }
 
-const GROUPS: Group[] = [
+const BASE_GROUPS: Group[] = [
   {
     id: 'account',
     label: '계정',
@@ -69,14 +73,14 @@ const GROUPS: Group[] = [
   },
 ];
 
-// 탭 ID → 소속 그룹 ID 역인덱스 (선택된 탭이 접힌 그룹에 있으면 자동 펼침)
-const TAB_TO_GROUP: Record<SettingsTabId, string> = GROUPS.reduce(
-  (acc, g) => {
-    g.tabs.forEach((t) => { acc[t.id] = g.id; });
-    return acc;
-  },
-  {} as Record<SettingsTabId, string>,
-);
+// v1.18.0: 어드민 전용 — 컴포지터 지정 그룹
+const ADMIN_GROUP: Group = {
+  id: 'admin',
+  label: '관리자',
+  tabs: [
+    { id: 'compositor', label: '컴포지터', icon: <Layers size={16} /> },
+  ],
+};
 
 interface SettingsSidebarProps {
   active: SettingsTabId;
@@ -85,6 +89,22 @@ interface SettingsSidebarProps {
 
 export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  // v1.18.0: 어드민에게만 컴포지터 그룹 노출
+  const currentUser = useAuthStore((s) => s.currentUser);
+  const isAdmin = currentUser?.role === 'admin';
+  const groups = useMemo(() => (isAdmin ? [...BASE_GROUPS, ADMIN_GROUP] : BASE_GROUPS), [isAdmin]);
+
+  // 탭 ID → 소속 그룹 ID 역인덱스 (선택된 탭이 접힌 그룹에 있으면 자동 펼침)
+  const tabToGroup = useMemo<Record<SettingsTabId, string>>(() => {
+    return groups.reduce(
+      (acc, g) => {
+        g.tabs.forEach((t) => { acc[t.id] = g.id; });
+        return acc;
+      },
+      {} as Record<SettingsTabId, string>,
+    );
+  }, [groups]);
 
   // 초기 로드: preferences 에서 접힘 상태 복원
   useEffect(() => {
@@ -103,13 +123,13 @@ export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
   // 접힘 상태에 대해서도 펼침이 실행되어야 함. (collapsed 에서 owningGroup 제거 후
   // 재실행 시 early return 으로 무한 루프 없음.)
   useEffect(() => {
-    const owningGroup = TAB_TO_GROUP[active];
+    const owningGroup = tabToGroup[active];
     if (!owningGroup || !collapsed.has(owningGroup)) return;
     const next = new Set(collapsed);
     next.delete(owningGroup);
     setCollapsed(next);
     persist(next);
-  }, [active, collapsed]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, collapsed, tabToGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const persist = (next: Set<string>) => {
     loadPreferences().then((prefs) => {
@@ -127,7 +147,7 @@ export function SettingsSidebar({ active, onChange }: SettingsSidebarProps) {
 
   return (
     <nav className="w-[120px] shrink-0 sticky top-0 self-start flex flex-col gap-0.5">
-      {GROUPS.map((group, gi) => {
+      {groups.map((group, gi) => {
         const isCollapsed = collapsed.has(group.id);
         return (
           <div key={group.id}>

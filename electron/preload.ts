@@ -101,7 +101,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:read-users'),
   supabaseAddUser: (user: unknown) =>
     ipcRenderer.invoke('supabase:add-user', user),
-  supabaseUpdateUser: (userId: string, updates: Record<string, string>) =>
+  supabaseUpdateUser: (userId: string, updates: Record<string, string | boolean | null>) =>
     ipcRenderer.invoke('supabase:update-user', userId, updates),
   supabaseDeleteUser: (userId: string) =>
     ipcRenderer.invoke('supabase:delete-user', userId),
@@ -111,8 +111,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supabaseFetchMissedMentions: (userId: string, userName: string, since: string, limit?: number) =>
     ipcRenderer.invoke('supabase:fetch-missed-mentions', userId, userName, since, limit),
   supabaseAddComment: (commentId: string, partUuid: string, sceneId: string,
-    userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = []) =>
-    ipcRenderer.invoke('supabase:add-comment', commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images),
+    userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = [],
+    revisionId: string | null = null) =>
+    ipcRenderer.invoke('supabase:add-comment', commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId),
   supabaseEditComment: (commentId: string, text: string, mentions: string[], images?: string[]) =>
     ipcRenderer.invoke('supabase:edit-comment', commentId, text, mentions, images),
   supabaseDeleteComment: (commentId: string) =>
@@ -132,9 +133,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       id: string, partUuid: string, sceneId: string, revisionNo: number, status: string,
       priority: string, description: string, frameNo: string, imageUrl: string,
       department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
+      notifyUserIdsJson: string,
     ) =>
       ipcRenderer.invoke('supabase:add-revision', id, partUuid, sceneId, revisionNo, status,
-        priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt),
+        priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt,
+        notifyUserIdsJson),
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) =>
     ipcRenderer.invoke('supabase:update-revision', id, updates),
   supabaseDeleteRevision: (id: string) =>

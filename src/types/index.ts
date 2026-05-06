@@ -120,6 +120,12 @@ export interface CompRevision {
   createdAt: string;       // ISO 8601
   updatedAt: string;
   resolvedAt?: string;
+  /**
+   * v1.18.0: 알림 받을 사람 user.id 배열.
+   * 등록 시 폼에서 멘션한 사람들 + 등록자 본인. 댓글/상태 변경 시 이 목록에 알림 전송.
+   * 옵셔널 — 사용처에서 `?? []`로 가드. 레거시 데이터/생성 경로 호환.
+   */
+  notifyUserIds?: string[];
 }
 
 // ─── 사용자 & 인증 ─────────────────────────
@@ -134,6 +140,11 @@ export interface AppUser {
   hireDate?: string;   // Phase 0-4: 입사일 (YYYY-MM-DD)
   birthday?: string;   // Phase 0-4: 생일 (MM-DD)
   role?: string;       // Phase 0-4: 역할 (admin | user)
+  /**
+   * v1.18.1: 컴포지터 단일 boolean (BG/ACT 부서 구분 없음).
+   * 한솔 정정: 컴포지터는 부서로 나뉘지 않음 — 리비전 등록 시 모든 컴포지터가 자동 알림 대상.
+   */
+  isCompositor?: boolean;
 }
 
 export interface UsersFile {
@@ -385,6 +396,8 @@ export type ActionType =
   | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
   | 'memo_update' | 'comment_add'
   | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
+  // v1.18.0: 리비전 맥락 댓글 — 일반 comment_add 와 분리해 활동 피드에서 별도 표시
+  | 'revision_comment'
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
   | 'image_upload_storyboard' | 'image_upload_guide';
@@ -506,7 +519,7 @@ export interface ElectronAPI {
   supabaseUpdateSceneField: (sceneUuid: string, field: string, value: string, senderId?: string) => Promise<void>;
   supabaseReadUsers: () => Promise<unknown[]>;
   supabaseAddUser: (user: unknown) => Promise<void>;
-  supabaseUpdateUser: (userId: string, updates: Record<string, string>) => Promise<void>;
+  supabaseUpdateUser: (userId: string, updates: Record<string, string | boolean | null>) => Promise<void>;
   supabaseDeleteUser: (userId: string) => Promise<void>;
   supabaseReadComments: (partUuid: string) => Promise<unknown[]>;
   /** 한솔 결정 (v1.15.5): 로그인 catch-up — last seen 이후 받은 멘션 댓글 일괄 조회 */
@@ -523,7 +536,7 @@ export interface ElectronAPI {
     createdAt: string;
     editedAt?: string | null;
   }>>;
-  supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string, images?: string[]) => Promise<void>;
+  supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string, images?: string[], revisionId?: string | null) => Promise<void>;
   supabaseEditComment: (commentId: string, text: string, mentions: string[], images?: string[]) => Promise<void>;
   supabaseDeleteComment: (commentId: string) => Promise<void>;
   /** 비공개 캘린더 이벤트 — Google Calendar 비연동, Supabase 전용 */
@@ -565,7 +578,7 @@ export interface ElectronAPI {
   supabaseUpdatePrivateEvent: (id: string, updates: Record<string, unknown>) => Promise<void>;
   supabaseDeletePrivateEvent: (id: string) => Promise<void>;
   supabaseReadRevisions: () => Promise<unknown[]>;
-  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string) => Promise<void>;
+  supabaseAddRevision: (id: string, partUuid: string, sceneId: string, revisionNo: number, status: string, priority: string, description: string, frameNo: string, imageUrl: string, department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string, notifyUserIdsJson: string) => Promise<void>;
   supabaseUpdateRevision: (id: string, updates: Record<string, string>) => Promise<void>;
   supabaseDeleteRevision: (id: string) => Promise<void>;
   supabaseReadAllMetadata: () => Promise<unknown[]>;

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Check, Clock, Circle, ChevronDown, ImagePlus, X, Trash2 } from 'lucide-react';
+import { Plus, Check, Clock, Circle, ChevronDown, ImagePlus, X, Trash2, MessageSquareWarning, Bell } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -8,10 +8,14 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { resizeBlob } from '@/utils/imageUtils';
-import type { CompRevision, RevisionPriority, RevisionStatus } from '@/types';
+import type { CompRevision, RevisionStatus, Scene } from '@/types';
 import { formatTime } from '@/utils/formatTime';
-import { STATUS_CONFIG, PRIORITY_CONFIG } from '@/constants/revision';
+import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { elevatedGlassStyle, floatingGlassStyle } from '@/utils/glassStyles';
+import { RevisionRecipientPicker } from './RevisionRecipientPicker';
+import { RevisionCommentThread } from './RevisionCommentThread';
+import { calcDefaultRecipients } from '@/utils/revisionRecipients';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 
 // ─── 상태 뱃지 ───────────────────────────────
 
@@ -98,19 +102,37 @@ function StatusDropdown({
 
 function RevisionCard({
   revision,
+  commentSceneKey,
   onStatusChange,
   onDelete,
 }: {
   revision: CompRevision;
+  /**
+   * commentService 형식 sceneKey (`sheetName:sceneNo`, 예: "EP01_A_BG:3").
+   * ⚠️ 리비전 시스템의 sceneKey(`episode:part:sceneId`, 예: "EP01:A:1")와 형식이 다름.
+   * 이 카드는 RevisionCommentThread 마운트에만 sceneKey를 사용하므로 commentService 형식으로 받는다.
+   * 잘못된 형식이 전달되면 commentService.parseSceneKey 가 lastIndexOf(':')로 split해
+   * partUuid lookup이 실패하고 "씬을 찾을 수 없음" 에러가 발생한다 (이슈: 2026-05-04).
+   */
+  commentSceneKey: string;
   onStatusChange: (status: RevisionStatus, note?: string) => void;
   onDelete?: () => void;
 }) {
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
-  const { currentUser } = useAuthStore();
+  const { currentUser, users: allUsers } = useAuthStore();
   const canDelete = !!(
     currentUser && onDelete &&
     (currentUser.id === revision.requesterId || currentUser.role === 'admin')
+  );
+
+  // v1.19.4: notifyUserIds → 사용자 객체 (이름 + 컴포지터 라벨용)
+  const notifyUsers = useMemo(
+    () =>
+      (revision.notifyUserIds ?? [])
+        .map((uid) => allUsers.find((u) => u.id === uid))
+        .filter((u): u is NonNullable<typeof u> => !!u),
+    [revision.notifyUserIds, allUsers],
   );
 
   const handleStatusChange = (status: RevisionStatus) => {
@@ -129,38 +151,33 @@ function RevisionCard({
 
   return (
     <motion.div
+      id={`rev-card-${revision.id}`}
+      data-status={revision.status}
       layout
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 10 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
-      className="rounded-xl p-3 border border-bg-border/60 group"
+      className="rev-card relative rounded-xl p-3 border border-bg-border/60 group"
       style={elevatedGlassStyle}
     >
-      {/* 헤더 */}
+      {/* 좌측 컬러 막대 — 미해결: 액센트 / 완료: 그린 */}
+      <span
+        className={`rev-side-bar${revision.status === 'resolved' ? ' rev-side-bar-done' : ''}`}
+        aria-hidden
+      />
+
+      {/* 헤더 — v1.18.0 재설계: re# 라벨 + 상태만 (우선순위/부서/프레임 표시 제거) */}
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-bold text-text-secondary">Rev.{revision.revisionNo}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className={`text-[12px] font-bold ${
+              revision.status === 'resolved' ? 'text-text-secondary' : 'text-accent-sub'
+            }`}
+          >
+            {revisionNoToLabel(revision.revisionNo)}
+          </span>
           <StatusBadge status={revision.status} />
-          {revision.priority && revision.priority !== 'normal' && (
-            <span
-              className="text-[10px] font-medium rounded px-1 py-0.5"
-              style={{
-                color: revision.priority === 'urgent' ? '#FF6B6B' : '#E17055',
-                backgroundColor: revision.priority === 'urgent' ? 'rgba(255, 107, 107, 0.15)' : 'rgba(225, 112, 85, 0.15)',
-              }}
-            >
-              {revision.priority === 'urgent' ? '긴급' : '높음'}
-            </span>
-          )}
-          {revision.frameNo && (
-            <span className="text-[10px] text-text-secondary/60 font-mono">{revision.frameNo}</span>
-          )}
-          {revision.department && (
-            <span className="text-[10px] text-text-secondary/70 uppercase">
-              {revision.department === 'bg' ? 'BG' : 'ACT'}
-            </span>
-          )}
         </div>
         {currentUser && (
           <div className="flex items-center gap-1.5">
@@ -178,9 +195,9 @@ function RevisionCard({
         )}
       </div>
 
-      {/* 설명 */}
-      <p className="text-sm text-text-primary leading-relaxed mb-2 whitespace-pre-wrap">
-        {revision.description}
+      {/* 설명 — G:\ 경로는 PathBadge 아이콘 버튼으로 자동 변환 (메모/댓글과 동일 패턴) */}
+      <p className="rev-card-description text-sm text-text-primary leading-relaxed mb-2 whitespace-pre-wrap">
+        <PathLinkifiedText text={revision.description} />
       </p>
 
       {/* 이미지 썸네일 */}
@@ -241,7 +258,7 @@ function RevisionCard({
       )}
 
       {/* 푸터 */}
-      <div className="flex items-center gap-2 text-[11px] text-text-secondary/70">
+      <div className="flex items-center gap-2 text-[11px] text-text-secondary/70 flex-wrap">
         <span>{revision.requesterName}</span>
         <span>&middot;</span>
         <span>{formatTime(revision.createdAt)}</span>
@@ -251,7 +268,41 @@ function RevisionCard({
             <span style={{ color: STATUS_CONFIG.resolved.color }}>{revision.resolvedBy}이(가) 해결</span>
           </>
         )}
+        {/* 알림 대상 — v1.19.4: 종 아이콘 + user-chip 인라인 (4명 초과 시 +N) */}
+        {notifyUsers.length > 0 && (
+          <>
+            <span>&middot;</span>
+            <span
+              className="inline-flex items-center gap-1"
+              title={`알림 대상: ${notifyUsers.map((u) => u.name).join(', ')}`}
+            >
+              <Bell size={10} className="text-text-secondary/60 shrink-0" />
+              <span className="inline-flex items-center gap-1 flex-wrap">
+                {notifyUsers.slice(0, 4).map((u) => (
+                  <span
+                    key={u.id}
+                    className="inline-flex items-center gap-1 pl-0.5 pr-1.5 py-0.5 rounded-full bg-accent/10 border border-accent/25 text-[10px] text-text-primary"
+                  >
+                    <span
+                      className="w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-white"
+                      style={{ background: 'rgb(var(--color-accent))' }}
+                    >
+                      {u.name.charAt(0)}
+                    </span>
+                    <span>{u.name}</span>
+                  </span>
+                ))}
+                {notifyUsers.length > 4 && (
+                  <span className="text-[10px] text-text-secondary/60">+{notifyUsers.length - 4}</span>
+                )}
+              </span>
+            </span>
+          </>
+        )}
       </div>
+
+      {/* 카드 내 댓글 스레드 — v1.18.0 신규 */}
+      <RevisionCommentThread revisionId={revision.id} sceneKey={commentSceneKey} />
     </motion.div>
   );
 }
@@ -273,21 +324,33 @@ interface RevisionPanelProps {
 }
 
 export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department, onCountChange }: RevisionPanelProps) {
-  const { currentUser } = useAuthStore();
+  const { currentUser, users: allUsers } = useAuthStore();
   const { createRevision, updateStatus, loadRevisions, getRevisionsForScene, getOpenCount } = useRevisionStore();
   const episodes = useDataStore((s) => s.episodes);
-  const inferredSiblingSceneIds = useMemo(() => {
+
+  // 그 sheetName 의 part + 그 안에서 sceneId 매칭되는 scene 객체 (담당자 자동 체크용)
+  const { inferredSiblingSceneIds, scene } = useMemo<{ inferredSiblingSceneIds: string[]; scene: Scene | undefined }>(() => {
     for (const episode of episodes) {
       const part = episode.parts.find((candidate) => candidate.sheetName === sheetName);
-      if (part) return part.scenes.map((scene) => scene.sceneId);
+      if (part) {
+        return {
+          inferredSiblingSceneIds: part.scenes.map((s) => s.sceneId),
+          scene: part.scenes.find((s) => s.sceneId === sceneId),
+        };
+      }
     }
-
-    return [];
-  }, [episodes, sheetName]);
+    return { inferredSiblingSceneIds: [], scene: undefined };
+  }, [episodes, sheetName, sceneId]);
   const effectiveSiblingSceneIds = siblingSceneIds ?? inferredSiblingSceneIds;
   const effectiveDepartment = department ?? inferDepartmentFromSheetName(sheetName);
 
   const sceneKey = buildSceneKey(sheetName, sceneId, { siblingSceneIds: effectiveSiblingSceneIds });
+  // commentService 가 사용하는 sceneKey 형식 (`sheetName:scene.no`).
+  // ⚠️ scene.no 는 DB sort_order(숫자). raw sceneId(예: "a001")가 아니다.
+  //   - 첫 번째 fix(2026-05-04 #1): sceneKey 형식 불일치 → sceneId 추출됨
+  //   - 두 번째 fix(2026-05-04 #2): comment 저장은 sceneId 를 Number()로 sort_order 변환해 scenes lookup → "a001" 같은 raw 값은 NaN 이라 실패
+  //   → CommentPanel(`UnifiedSceneDetailModal:134`)와 동일하게 scene.no 사용.
+  const commentSceneKey = scene ? `${sheetName}:${scene.no}` : '';
   const revisions = getRevisionsForScene(sceneKey);
   const sortedRevisions = [...revisions].sort((a, b) =>
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -295,12 +358,18 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
 
   const [showForm, setShowForm] = useState(false);
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<RevisionPriority>('normal');
-  const [frameNo, setFrameNo] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [notifyIds, setNotifyIds] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 자동 체크 대상자 — 모든 컴포지터 + 그 씬 담당자 (등록자 본인 제외).
+  // v1.18.1 한솔 정정: 컴포지터는 부서로 나뉘지 않으므로 dept 인자 불필요.
+  const defaultRecipients = useMemo(() => {
+    if (!currentUser) return [];
+    return calcDefaultRecipients(scene, allUsers, currentUser.id);
+  }, [scene, allUsers, currentUser]);
 
   useEffect(() => {
     loadRevisions();
@@ -352,19 +421,20 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
     if (!description.trim() || !currentUser || submitting) return;
     setSubmitting(true);
     try {
-      await createRevision(sceneKey, {
+      await createRevision({
+        sceneKey,
         description: description.trim(),
-        priority,
-        frameNo: frameNo.trim() || undefined,
         imageUrl: imagePreview || undefined,
         department: effectiveDepartment,
+        lookupDepartment: effectiveDepartment,
         requesterId: currentUser.id,
         requesterName: currentUser.name,
+        // v1.18.0: RevisionRecipientPicker 가 계산한 알림 대상자 (자동 체크 ± 사용자 수정).
+        notifyUserIds: notifyIds,
       });
       setDescription('');
-      setPriority('normal');
-      setFrameNo('');
       setImagePreview(null);
+      setNotifyIds([]);
       setShowForm(false);
     } catch (err) {
       console.error('리비전 등록 실패:', err);
@@ -382,7 +452,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
 
   const handleDelete = async (rev: CompRevision) => {
     const ok = await ConfirmDialog.show({
-      message: `Rev.${rev.revisionNo} 리비전을 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
+      message: `${revisionNoToLabel(rev.revisionNo)} 리비전을 삭제하시겠습니까?\n첨부 이미지도 함께 제거됩니다.`,
       confirmLabel: '삭제',
       tone: 'danger',
     });
@@ -411,6 +481,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
               <RevisionCard
                 key={rev.id}
                 revision={rev}
+                commentSceneKey={commentSceneKey}
                 onStatusChange={(status, note) => handleStatusChange(rev.id, status, note)}
                 onDelete={() => handleDelete(rev)}
               />
@@ -419,7 +490,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
         )}
       </div>
 
-      {/* 수정 요청 폼 */}
+      {/* 수정 요청 폼 — v1.18.0 재설계: 우선순위/프레임/부서 제거 + 알림 받을 사람 칩 */}
       <div className="shrink-0 border-t border-bg-border">
         <AnimatePresence>
           {showForm ? (
@@ -431,74 +502,74 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
               transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
               className="overflow-hidden"
             >
-              <div className="px-4 py-3 space-y-3">
-                {/* 우선순위 + 프레임 */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary w-fit">
-                    {(['urgent', 'high', 'normal'] as const).map((p) => {
-                      const cfg = PRIORITY_CONFIG[p];
-                      return (
+              <div className="px-4 py-3">
+                <div className="bg-bg-primary/50 border border-accent/40 rounded-xl p-4 space-y-4">
+                  {/* 헤더 */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MessageSquareWarning className="w-4 h-4 text-accent" strokeWidth={2.4} />
+                      <span className="text-[13px] font-bold text-text-primary">새 리비전 등록</span>
+                    </div>
+                    <button
+                      onClick={() => { setShowForm(false); setDescription(''); setImagePreview(null); }}
+                      className="text-text-secondary hover:text-text-primary text-base leading-none cursor-pointer"
+                      title="닫기"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  {/* 본문 */}
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1.5 block">
+                      내용 <span className="text-accent">*</span>
+                    </label>
+                    <textarea
+                      ref={textareaRef}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      onPaste={handlePaste}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          e.preventDefault();
+                          handleSubmit();
+                        }
+                      }}
+                      placeholder="어떤 부분을 수정해야 하는지, 또는 무엇이 변경되었는지 적어주세요."
+                      className="w-full min-h-[88px] px-3 py-2 text-[13px] bg-bg-primary/80 border border-bg-border/60 rounded-lg text-text-primary placeholder:text-text-secondary/50 resize-y focus:outline-none focus:border-accent/60"
+                    />
+                  </div>
+
+                  {/* 이미지 첨부 */}
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1.5 block">
+                      이미지 첨부 <span className="text-text-secondary/50 font-normal normal-case">(선택)</span>
+                    </label>
+                    {imagePreview ? (
+                      <div className="relative w-fit">
+                        <img src={imagePreview} alt="preview" className="rounded-lg max-h-32 border border-bg-border/40" />
                         <button
-                          key={p}
-                          onClick={() => setPriority(p)}
-                          className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
-                            priority === p ? 'shadow-sm' : 'text-text-secondary hover:text-text-primary'
-                          }`}
-                          style={priority === p ? { color: cfg.color, backgroundColor: cfg.bg } : undefined}
+                          onClick={() => setImagePreview(null)}
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-bg-card border border-bg-border text-text-secondary hover:text-text-primary flex items-center justify-center cursor-pointer transition-colors"
+                          title="이미지 제거"
                         >
-                          {cfg.label}
+                          <X size={10} />
                         </button>
-                      );
-                    })}
-                  </div>
-                  <input
-                    value={frameNo}
-                    onChange={(e) => setFrameNo(e.target.value)}
-                    placeholder="F000"
-                    className="w-16 px-2 py-1 text-[11px] bg-bg-primary rounded-md border border-bg-border text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:ring-1 focus:ring-accent/50 font-mono"
-                  />
-                </div>
-
-                {/* 설명 입력 */}
-                <textarea
-                  ref={textareaRef}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  onPaste={handlePaste}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSubmit();
-                    }
-                  }}
-                  placeholder="수정 내용을 설명해주세요..."
-                  className="w-full px-3 py-2 text-sm bg-bg-primary rounded-lg border border-bg-border text-text-primary placeholder:text-text-secondary/50 resize-none focus:outline-none focus:ring-1 focus:ring-accent/50"
-                  rows={3}
-                />
-
-                {/* 이미지 프리뷰 */}
-                {imagePreview && (
-                  <div className="relative w-fit">
-                    <img src={imagePreview} alt="preview" className="rounded-lg max-h-24 border border-bg-border/40" />
-                    <button
-                      onClick={() => setImagePreview(null)}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center cursor-pointer hover:bg-red-400 transition-colors"
-                    >
-                      <X size={10} />
-                    </button>
-                  </div>
-                )}
-
-                {/* 액션 바 */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="p-1.5 text-text-secondary hover:text-text-primary rounded-lg hover:bg-bg-primary transition-colors cursor-pointer"
-                      title="이미지 첨부"
-                    >
-                      <ImagePlus size={16} />
-                    </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-bg-border/40 hover:border-accent/40 text-[12px] text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
+                        >
+                          <ImagePlus size={14} />
+                          파일 선택
+                        </button>
+                        <span className="text-[11px] text-text-secondary/50">
+                          또는 본문에 클립보드에서 붙여넣기 (Ctrl+V)
+                        </span>
+                      </div>
+                    )}
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -511,21 +582,43 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                       }}
                     />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => { setShowForm(false); setDescription(''); setImagePreview(null); }}
-                      className="px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
-                    >
-                      취소
-                    </button>
-                    <button
-                      onClick={handleSubmit}
-                      disabled={!description.trim() || submitting}
-                      className="px-4 py-1.5 text-xs font-medium rounded-lg text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                      style={{ backgroundColor: '#FDCB6E' }}
-                    >
-                      {submitting ? '등록 중...' : '등록'}
-                    </button>
+
+                  {/* 알림 받을 사람 */}
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-text-secondary mb-1.5 block">
+                      알림 받을 사람{' '}
+                      <span className="text-text-secondary/50 font-normal normal-case">
+                        — 컴포지터 + 그 씬 담당자 자동 체크 (클릭으로 토글)
+                      </span>
+                    </label>
+                    <RevisionRecipientPicker
+                      allUsers={allUsers}
+                      defaultCheckedIds={defaultRecipients}
+                      excludeUserId={currentUser?.id || ''}
+                      onChange={setNotifyIds}
+                    />
+                  </div>
+
+                  {/* 액션 바 */}
+                  <div className="flex items-center justify-between pt-2 border-t border-bg-border/40">
+                    <div className="text-[11px] text-text-secondary/60">
+                      등록자: {currentUser?.name ?? '—'} · 등록 즉시 선택된 사람들에게 알림이 발송됩니다.
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => { setShowForm(false); setDescription(''); setImagePreview(null); }}
+                        className="px-3 py-1.5 text-xs font-semibold text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={handleSubmit}
+                        disabled={!description.trim() || submitting}
+                        className="px-4 py-1.5 text-xs font-bold rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity"
+                      >
+                        {submitting ? '등록 중...' : '리비전 등록'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -543,7 +636,7 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
                 className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-xl border border-dashed border-bg-border text-text-secondary hover:text-accent hover:border-accent/40 transition-all cursor-pointer"
               >
                 <Plus size={14} />
-                수정 요청
+                새 리비전
               </button>
             </motion.div>
           )}

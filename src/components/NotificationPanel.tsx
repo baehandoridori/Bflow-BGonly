@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Bell, Check, Trash2, MessageSquare, RefreshCw, Award, ExternalLink } from 'lucide-react';
+import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -26,6 +26,9 @@ function typeConfig(type: NotificationType) {
     case 'comment': return { icon: MessageSquare, color: '#6C5CE7', label: '댓글' };
     case 'milestone': return { icon: Award, color: '#00B894', label: '마일스톤' };
     case 'system': return { icon: Bell, color: '#8B8DA3', label: '시스템' };
+    // v1.18.0: 리비전 알림 — MessageSquareWarning 아이콘 + accent 색상.
+    // 댓글과 시각적으로 구분되도록 별도 아이콘 사용.
+    case 'revision': return { icon: MessageSquareWarning, color: 'rgb(var(--color-accent))', label: '리비전' };
   }
 }
 
@@ -170,14 +173,44 @@ function NotificationDropdown() {
   const handleNavigate = (n: AppNotification) => {
     const sceneId = n.metadata?.sceneId;
     const sceneName = n.metadata?.sceneName;
+    // v1.18.0: 리비전 알림 — 모달 자동 오픈 + revisions 탭 + focusRevisionId 강조.
+    // ScenesView 가 listen 하는 window CustomEvent 로 라우팅.
+    const isRevisionNotif = n.type === 'revision';
+    const revisionId = n.metadata?.revisionId;
+
     if (sceneId || sceneName) {
+      // 코덱스 P1 fix (2026-05-05): sceneName 이 'EP01:A:a001' 형식 sceneKey 면
+      // EP/파트/sceneId 로 정확히 매칭 (raw sceneId 가 다른 EP 와 reuse 되어도 정확).
+      const sceneKeyParts = typeof sceneName === 'string' && sceneName.includes(':')
+        ? sceneName.split(':')
+        : null;
+      const sceneKeyEp = sceneKeyParts?.[0];   // 'EP01'
+      const sceneKeyPart = sceneKeyParts?.[1]; // 'A'
+      const sceneKeyId = sceneKeyParts?.[2];   // 'a001'
+
       // 씬 UUID/이름으로 에피소드를 찾아서 이동
       const episodes = useDataStore.getState().episodes;
       for (const ep of episodes) {
         for (const part of ep.parts) {
-          const found = part.scenes.find(s =>
-            (sceneId && s.id === sceneId) || (sceneName && s.sceneId === sceneName),
-          );
+          const found = part.scenes.find(s => {
+            // 1순위: UUID (가장 정확)
+            if (sceneId && s.id === sceneId) return true;
+            // 2순위: sceneKey 풀 매칭 ('EP01:A:a001' → ep.episodeNumber + part.partId + s.sceneId 모두 일치)
+            // 코덱스 P1 fix (6차, 2026-05-05): episode 토큰 정규화 — "EP01"→1, "EP1"→1 모두 같은 episodeNumber 매칭.
+            // 이전엔 String(ep.episodeNumber)='1' vs sceneKeyEp.replace(/\D/g,'')='01' → 문자열 mismatch.
+            if (sceneKeyParts) {
+              const sceneKeyEpNum = sceneKeyEp ? Number(sceneKeyEp.replace(/\D/g, '')) : NaN;
+              const epLabelMatch = (
+                (Number.isFinite(sceneKeyEpNum) && ep.episodeNumber === sceneKeyEpNum) ||
+                (sceneKeyEp != null && ep.title === sceneKeyEp)
+              );
+              const partLabelMatch = sceneKeyPart && part.partId === sceneKeyPart;
+              if (epLabelMatch && partLabelMatch && sceneKeyId && s.sceneId === sceneKeyId) return true;
+            }
+            // 3순위 (legacy): sceneName 이 단순 raw sceneId ('a001') 인 경우 — reuse 위험 있음
+            if (!sceneKeyParts && sceneName && s.sceneId === sceneName) return true;
+            return false;
+          });
           if (found) {
             // 한솔 보고 (v1.15.4): part 도 같이 이동해야 다른 파트의 씬으로 가도 펄스 이펙트가 보임
             setSelectedEpisode(ep.episodeNumber);
@@ -185,6 +218,21 @@ function NotificationDropdown() {
             setHighlightSceneId(found.sceneId);
             setView('scenes');
             setPanelOpen(false);
+
+            // 리비전 알림이면 모달 자동 오픈 + 탭/포커스.
+            // 코덱스 P1 fix (2026-05-05): store-based request → ScenesView 마운트 race 제거.
+            // 이전 CustomEvent dispatch 는 setView 와 같은 tick 에 발화되어 ScenesView listener
+            // 등록 전에 손실될 수 있었음.
+            if (isRevisionNotif) {
+              useAppStore.getState().setPendingSceneModalRequest({
+                sceneUuid: found.id,
+                sceneName: found.sceneId,
+                episodeNumber: ep.episodeNumber,
+                partId: part.partId,
+                initialTab: 'revisions',
+                focusRevisionId: revisionId,
+              });
+            }
             return;
           }
         }

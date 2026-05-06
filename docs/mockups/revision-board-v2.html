@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리비전 보드 v2 — Frame.io / ShotGrid / Linear 참고</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --color-bg-primary: 15 17 23;
+    --color-bg-card: 26 29 39;
+    --color-bg-border: 45 48 65;
+    --color-text-primary: 232 232 238;
+    --color-text-secondary: 139 141 163;
+    --color-accent: 108 92 231;
+    --color-accent-sub: 162 155 254;
+  }
+  [data-theme="cinema-red"]    { --color-accent: 225 29 72;  --color-accent-sub: 251 113 133; }
+  [data-theme="midnight-blue"] { --color-accent: 59 130 246; --color-accent-sub: 96 165 250; }
+  [data-theme="emerald"]       { --color-accent: 16 185 129; --color-accent-sub: 52 211 153; }
+  [data-theme="amber-gold"]    { --color-accent: 217 119 6;  --color-accent-sub: 245 158 11; }
+  [data-theme="nameko"]        { --color-accent: 129 77 65;  --color-accent-sub: 168 109 90; }
+  [data-mode="light"] {
+    --color-bg-primary: 248 249 252;
+    --color-bg-card: 255 255 255;
+    --color-bg-border: 215 217 230;
+    --color-text-primary: 28 29 38;
+    --color-text-secondary: 100 102 122;
+  }
+  body {
+    background: rgb(var(--color-bg-primary));
+    color: rgb(var(--color-text-primary));
+    font-family: 'Pretendard', -apple-system, system-ui, sans-serif;
+  }
+  .text-accent { color: rgb(var(--color-accent)); }
+  .text-accent-sub { color: rgb(var(--color-accent-sub)); }
+  .text-prim { color: rgb(var(--color-text-primary)); }
+  .text-sec { color: rgb(var(--color-text-secondary)); }
+  .text-sec-70 { color: rgb(var(--color-text-secondary) / .7); }
+  .text-sec-50 { color: rgb(var(--color-text-secondary) / .5); }
+  .bg-prim { background: rgb(var(--color-bg-primary)); }
+  .bg-prim-50 { background: rgb(var(--color-bg-primary) / .5); }
+  .bg-card { background: rgb(var(--color-bg-card)); }
+  .bg-card-70 { background: rgb(var(--color-bg-card) / .7); }
+  .bg-accent { background: rgb(var(--color-accent)); }
+  .bg-accent-15 { background: rgb(var(--color-accent) / .15); }
+  .bd-border { border-color: rgb(var(--color-bg-border)); }
+  .bd-border-40 { border-color: rgb(var(--color-bg-border) / .4); }
+  .bd-border-60 { border-color: rgb(var(--color-bg-border) / .6); }
+  .bd-accent-40 { border-color: rgb(var(--color-accent) / .4); }
+  .bd-accent-60 { border-color: rgb(var(--color-accent) / .6); }
+
+  .st-open { color:#FDCB6E; background:rgba(253,203,110,.15); }
+  .st-prog { color:#74B9FF; background:rgba(116,185,255,.15); }
+  .st-done { color:#00B894; background:rgba(0,184,148,.15); }
+
+  /* 리비전 카드 */
+  .rev-card { position:relative; transition: all .15s ease; cursor:pointer; }
+  .rev-card.open { border-color: rgb(var(--color-accent) / .55); box-shadow: 0 0 0 1px rgb(var(--color-accent) / .15); }
+  .rev-card.done { opacity: .65; }
+  .rev-card:hover { transform: translateY(-1px); border-color: rgb(var(--color-accent) / .8); box-shadow: 0 4px 12px rgb(var(--color-accent) / .15); }
+  .rev-card.selected { border-color: rgb(var(--color-accent)); box-shadow: 0 0 0 2px rgb(var(--color-accent) / .35); }
+  .rev-side { position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:8px 0 0 8px; }
+  .rev-side.open { background: rgb(var(--color-accent)); }
+  .rev-side.done { background:#00B894; }
+
+  /* 카드 호버 시 인라인 액션 노출 */
+  .rev-card .hover-actions { opacity: 0; transition: opacity .15s; }
+  .rev-card:hover .hover-actions, .rev-card:focus-within .hover-actions { opacity: 1; }
+
+  /* 썸네일 */
+  .thumb-grad-1 { background: linear-gradient(135deg, #fbbf24 0%, #f97316 50%, #ec4899 100%); }
+  .thumb-grad-2 { background: linear-gradient(135deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%); }
+  .thumb-grad-3 { background: linear-gradient(135deg, #10b981 0%, #14b8a6 50%, #06b6d4 100%); }
+  .thumb-grad-4 { background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); }
+
+  .nav-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; cursor:pointer; font-size:13px; color: rgb(var(--color-text-secondary)); }
+  .nav-item:hover { background: rgb(var(--color-bg-primary) / .5); color: rgb(var(--color-text-primary)); }
+  .nav-item.active { background: rgb(var(--color-accent) / .15); color: rgb(var(--color-accent-sub)); font-weight:600; }
+  .nav-item .badge { margin-left:auto; background: rgb(var(--color-accent)); color:#fff; font-size:10px; padding:1px 6px; border-radius:9999px; font-weight:700; }
+
+  /* 진행률 컬럼 */
+  .progress-col-bg { background: rgb(var(--color-bg-primary) / .35); }
+
+  /* 디테일 패널 */
+  .detail-panel { backdrop-filter: blur(20px); }
+</style>
+</head>
+<body data-mode="dark">
+
+<!-- TOP CONTROL -->
+<div class="sticky top-0 z-50 backdrop-blur-xl border-b bd-border-40 bg-card-70">
+  <div class="max-w-[1600px] mx-auto px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+    <h1 class="text-base font-bold text-prim">리비전 보드 v2</h1>
+    <div class="text-[11px] text-sec-50">참고: Frame.io · ShotGrid · Linear · GitHub Issues</div>
+
+    <div class="ml-auto flex items-center gap-4 flex-wrap">
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] text-sec uppercase tracking-wider">그룹화</span>
+        <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+          <button data-group="scene" class="group-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">씬별</button>
+          <button data-group="episode" class="group-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">에피소드별</button>
+          <button data-group="progress" class="group-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">진행률별</button>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] text-sec uppercase tracking-wider">테마</span>
+        <div class="flex gap-1.5">
+          <button data-theme="" class="theme-btn w-6 h-6 rounded-full ring-2 ring-white" style="background:#6C5CE7"></button>
+          <button data-theme="cinema-red" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#E11D48"></button>
+          <button data-theme="midnight-blue" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#3B82F6"></button>
+          <button data-theme="emerald" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#10B981"></button>
+          <button data-theme="amber-gold" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#D97706"></button>
+          <button data-theme="nameko" class="theme-btn w-6 h-6 rounded-full ring-1 ring-white/20" style="background:#814D41"></button>
+        </div>
+      </div>
+
+      <div class="inline-flex bg-prim rounded-lg p-1 gap-0.5 border bd-border-40">
+        <button data-mode="dark" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">다크</button>
+        <button data-mode="light" class="mode-btn px-3 py-1.5 text-xs font-semibold rounded-md text-sec hover:text-prim">라이트</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 메인 -->
+<div class="max-w-[1600px] mx-auto flex">
+
+  <!-- 사이드바 -->
+  <aside class="w-[180px] shrink-0 px-4 py-6 border-r bd-border-40 hidden lg:block">
+    <div class="text-[10px] uppercase tracking-widest text-sec-50 mb-2 px-3">B flow</div>
+    <nav class="space-y-0.5">
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        대시보드
+      </div>
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
+        씬 보드
+      </div>
+      <div class="nav-item active">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M7 21h10M9 17v4M15 17v4"/></svg>
+        컴포지팅
+        <span class="badge">8</span>
+      </div>
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M5 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"/></svg>
+        담당자
+      </div>
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        타임라인
+      </div>
+      <div class="nav-item">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/></svg>
+        설정
+      </div>
+    </nav>
+  </aside>
+
+  <!-- 콘텐츠 + 디테일 패널 -->
+  <main class="flex-1 min-w-0 flex">
+
+    <!-- 보드 영역 -->
+    <div class="flex-1 min-w-0 px-6 py-6">
+
+      <!-- 헤더: 타이틀 + 통계 + 새 리비전 -->
+      <div class="mb-4 flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <div class="text-[11px] text-sec-70 uppercase tracking-widest">컴포지팅 · 리비전</div>
+          <h2 class="text-2xl font-bold text-prim mt-0.5">리비전 보드</h2>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="px-3 py-1.5 text-xs font-semibold rounded-md border bd-border text-prim hover:bd-accent-60">모두 펼치기</button>
+          <button class="px-3 py-1.5 text-xs font-semibold rounded-md bg-accent text-white">+ 새 리비전</button>
+        </div>
+      </div>
+
+      <!-- ★ 개인 관점 탭 (가장 중요) -->
+      <div class="flex items-center gap-1 mb-3 border-b bd-border-40">
+        <button class="persona-btn px-3 py-2 text-[13px] font-semibold text-prim relative">
+          전체
+          <span class="ml-1 text-[10px] text-sec-70">23</span>
+          <span class="absolute left-0 right-0 -bottom-px h-[2px] bg-accent rounded-sm" style="box-shadow:0 0 8px rgb(var(--color-accent))"></span>
+        </button>
+        <button class="persona-btn px-3 py-2 text-[13px] font-semibold text-sec hover:text-prim relative flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          내가 받은
+          <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-accent text-white font-bold">5</span>
+        </button>
+        <button class="persona-btn px-3 py-2 text-[13px] font-semibold text-sec hover:text-prim relative flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          내가 보낸
+          <span class="text-[10px] text-sec-70">3</span>
+        </button>
+        <div class="ml-auto text-[11px] text-sec-50">8개 미해결 · 15개 완료</div>
+      </div>
+
+      <!-- 필터 바 -->
+      <div class="bg-card border bd-border-40 rounded-xl p-3 mb-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="relative flex-1 min-w-[240px]">
+            <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-sec-50" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" placeholder="본문·씬·등록자 검색..." class="w-full pl-8 pr-3 py-1.5 bg-prim/80 border bd-border-60 rounded-md text-[13px] focus:outline-none focus:border-accent/60">
+          </div>
+
+          <div class="inline-flex bg-prim rounded-md p-0.5 gap-0.5 border bd-border-40">
+            <button class="px-2.5 py-1 text-[11px] font-semibold rounded bg-accent text-white">전체 <span class="opacity-70">23</span></button>
+            <button class="px-2.5 py-1 text-[11px] font-semibold rounded text-sec hover:text-prim">대기 <span class="opacity-70">5</span></button>
+            <button class="px-2.5 py-1 text-[11px] font-semibold rounded text-sec hover:text-prim">진행중 <span class="opacity-70">3</span></button>
+            <button class="px-2.5 py-1 text-[11px] font-semibold rounded text-sec hover:text-prim">완료 <span class="opacity-70">15</span></button>
+          </div>
+
+          <div class="flex items-center gap-1.5">
+            <span class="text-[11px] text-sec uppercase tracking-wider">정렬</span>
+            <select class="bg-prim/80 border bd-border-60 rounded-md px-2 py-1 text-[12px] focus:outline-none focus:border-accent/60">
+              <option>최신순</option>
+              <option>오래된순</option>
+              <option>씬 번호순</option>
+              <option>댓글 많은순</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─────── 그룹: 씬별 ─────── -->
+      <section id="view-scene" class="space-y-3">
+
+        <!-- 씬 1 (펼침, 이미지 있는 카드 + 없는 카드 둘 다 포함) -->
+        <article class="bg-card border bd-border-60 rounded-xl overflow-hidden" style="border-left: 3px solid rgb(var(--color-accent));">
+          <header class="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-prim/30">
+            <svg class="w-4 h-4 text-sec rotate-90" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            <div class="flex items-baseline gap-2 flex-1 min-w-0">
+              <span class="text-[11px] font-mono text-sec-50">EP01·A·001</span>
+              <span class="text-[14px] font-mono font-bold text-prim">EP01 A 1</span>
+              <span class="text-[12px] text-amber-400/70 truncate">색감 어두움 + 캐릭터 위치 변경</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white flex items-center gap-1">
+                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v3"/><circle cx="12" cy="13" r=".7" fill="currentColor"/></svg>
+                2
+              </span>
+              <span class="text-[10px] text-sec-70">+ 1 완료</span>
+              <div class="flex">
+                <span class="w-6 h-6 rounded-full inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#74B9FF">이</span>
+                <span class="w-6 h-6 rounded-full -ml-1 inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#FDCB6E">박</span>
+                <span class="w-6 h-6 rounded-full -ml-1 inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#6C5CE7">김</span>
+              </div>
+              <button onclick="event.stopPropagation()" class="p-1.5 rounded hover:bg-accent/15 text-sec hover:text-accent-sub" title="씬 상세 모달 열기">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
+              </button>
+            </div>
+          </header>
+
+          <div class="border-t bd-border-40 p-3 space-y-2">
+
+            <!-- ★ 카드 A: 이미지 있음 (썸네일 + 메타 + 본문 + 호버 액션) -->
+            <div class="rev-card open bg-prim/40 border bd-border-40 rounded-xl overflow-hidden">
+              <span class="rev-side open"></span>
+              <div class="flex gap-3 p-3 ml-1">
+                <!-- 썸네일 영역 -->
+                <div class="shrink-0 w-32 h-20 thumb-grad-1 rounded-lg overflow-hidden relative cursor-pointer group">
+                  <div class="absolute inset-0 flex items-center justify-center text-white/80 font-bold text-[10px]">참고 이미지</div>
+                  <div class="absolute top-1 right-1 px-1 py-0.5 rounded bg-black/60 text-white text-[9px]">+1</div>
+                  <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/></svg>
+                  </div>
+                </div>
+                <!-- 본문 -->
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap mb-1">
+                    <span class="text-[11px] font-bold text-accent-sub">re3</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-prog flex items-center gap-1">
+                      <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 6v6h4"/></svg>
+                      진행중
+                    </span>
+                    <span class="text-[10px] text-sec-70 flex items-center gap-1">
+                      <span class="w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-white" style="background:#6C5CE7">김</span>
+                      김OO
+                    </span>
+                    <span class="text-[10px] text-sec-50">·</span>
+                    <span class="text-[10px] text-sec-70">12분 전</span>
+                    <span class="text-[10px] text-sec-50">·</span>
+                    <span class="text-[10px] text-sec-70 flex items-center gap-1">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      3
+                    </span>
+                  </div>
+                  <div class="text-[12.5px] text-prim leading-relaxed mb-2">1번 씬 색감이 전체적으로 너무 어두워요. 캐릭터 얼굴 명도 +15, 배경 -10 정도로 부탁드려요.</div>
+                  <!-- 호버 액션 -->
+                  <div class="hover-actions flex items-center gap-1">
+                    <button class="text-[10px] px-2 py-1 rounded bg-prim/80 border bd-border-40 text-sec hover:text-prim">진행중 ▾</button>
+                    <button class="text-[10px] px-2 py-1 rounded bg-prim/80 border bd-border-40 text-sec hover:text-prim flex items-center gap-1">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      댓글
+                    </button>
+                    <button class="text-[10px] px-2 py-1 rounded bg-prim/80 border bd-border-40 text-sec hover:text-accent-sub flex items-center gap-1" title="씬 상세 모달">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+                      씬 열기
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ★ 카드 B: 이미지 없음 (텍스트만, 더 슬림) -->
+            <div class="rev-card open bg-prim/40 border bd-border-40 rounded-xl">
+              <span class="rev-side open"></span>
+              <div class="p-3 ml-1">
+                <div class="flex items-center gap-2 flex-wrap mb-1">
+                  <span class="text-[11px] font-bold text-accent-sub">re2</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-open flex items-center gap-1">
+                    <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+                    대기
+                  </span>
+                  <span class="text-[10px] text-sec-70 flex items-center gap-1">
+                    <span class="w-3.5 h-3.5 rounded-full inline-flex items-center justify-center text-[8px] font-bold text-white" style="background:#FDCB6E">박</span>
+                    박OO
+                  </span>
+                  <span class="text-[10px] text-sec-50">·</span>
+                  <span class="text-[10px] text-sec-70">1시간 전</span>
+                  <span class="text-[10px] text-sec-50">·</span>
+                  <span class="text-[10px] text-sec-70 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    0
+                  </span>
+                  <span class="text-[10px] text-sec-50 ml-auto italic" style="font-style:normal">— 이미지 없음</span>
+                </div>
+                <div class="text-[12.5px] text-prim leading-relaxed mb-1">캐릭터 동작이 너무 느려 보여요. 좀 더 자연스럽게 부탁드려요.</div>
+                <div class="hover-actions flex items-center gap-1 mt-2">
+                  <button class="text-[10px] px-2 py-1 rounded bg-prim/80 border bd-border-40 text-sec hover:text-prim">대기 ▾</button>
+                  <button class="text-[10px] px-2 py-1 rounded bg-prim/80 border bd-border-40 text-sec hover:text-accent-sub flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+                    씬 열기
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ★ 카드 C: 완료 + 이미지 있음 (흐림) -->
+            <div class="rev-card done bg-prim/40 border bd-border-40 rounded-xl overflow-hidden">
+              <span class="rev-side done"></span>
+              <div class="flex gap-3 p-3 ml-1">
+                <div class="shrink-0 w-32 h-20 thumb-grad-3 rounded-lg overflow-hidden relative">
+                  <div class="absolute inset-0 flex items-center justify-center text-white/80 font-bold text-[10px]">완료 첨부</div>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap mb-1">
+                    <span class="text-[11px] font-bold text-sec">re1</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-done flex items-center gap-1">
+                      <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path d="M4.5 12.75l6 6 9-13.5"/></svg>
+                      완료
+                    </span>
+                    <span class="text-[10px] text-sec-70">김OO · 어제</span>
+                    <span class="text-[10px] text-sec-50">·</span>
+                    <span class="text-[10px] text-sec-70 flex items-center gap-1">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      2
+                    </span>
+                  </div>
+                  <div class="text-[12.5px] text-prim leading-relaxed line-through opacity-60">왼쪽 위 나무 위치 살짝 옮겨주세요.</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </article>
+
+        <!-- 씬 2 (접힘) -->
+        <article class="bg-card border bd-border-60 rounded-xl overflow-hidden" style="border-left: 3px solid rgb(var(--color-accent));">
+          <header class="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-prim/30">
+            <svg class="w-4 h-4 text-sec" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            <div class="flex items-baseline gap-2 flex-1 min-w-0">
+              <span class="text-[11px] font-mono text-sec-50">EP01·A·006</span>
+              <span class="text-[14px] font-mono font-bold text-prim">EP01 A 6</span>
+              <span class="text-[12px] text-sec-50 truncate">—</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white flex items-center gap-1">
+                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M12 7v3"/><circle cx="12" cy="13" r=".7" fill="currentColor"/></svg>
+                3
+              </span>
+              <div class="flex">
+                <span class="w-6 h-6 rounded-full inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#74B9FF">이</span>
+                <span class="w-6 h-6 rounded-full -ml-1 inline-flex items-center justify-center text-[9px] font-bold text-white border-2 border-bg-card" style="background:#A29BFE">조</span>
+              </div>
+              <button onclick="event.stopPropagation()" class="p-1.5 rounded hover:bg-accent/15 text-sec hover:text-accent-sub">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
+              </button>
+            </div>
+          </header>
+        </article>
+
+        <!-- 씬 3: 완료만 -->
+        <article class="bg-card border bd-border-40 rounded-xl overflow-hidden opacity-60">
+          <header class="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-prim/30">
+            <svg class="w-4 h-4 text-sec" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            <div class="flex items-baseline gap-2 flex-1 min-w-0">
+              <span class="text-[11px] font-mono text-sec-50">EP01·B·002</span>
+              <span class="text-[14px] font-mono font-bold text-prim">EP01 B 2</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-md font-medium bg-card border bd-border-40 text-sec-70 flex items-center gap-1">
+                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4.5 12.75l6 6 9-13.5"/></svg>
+                2 완료
+              </span>
+              <button onclick="event.stopPropagation()" class="p-1.5 rounded hover:bg-accent/15 text-sec hover:text-accent-sub">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M21 14v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"/></svg>
+              </button>
+            </div>
+          </header>
+        </article>
+
+      </section>
+
+      <!-- ─────── 그룹: 에피소드별 ─────── -->
+      <section id="view-episode" class="space-y-4 hidden">
+
+        <!-- EP01 -->
+        <article class="bg-card border bd-border-60 rounded-xl overflow-hidden" style="border-left: 3px solid rgb(var(--color-accent));">
+          <header class="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-prim/30">
+            <svg class="w-4 h-4 text-sec rotate-90" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            <div class="flex items-baseline gap-2 flex-1">
+              <span class="text-[16px] font-mono font-bold text-prim">EP01</span>
+              <span class="text-[12px] text-sec-70">두근두근 첫 등교</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white">5 미해결</span>
+              <span class="text-[10px] text-sec-70">3 씬 · 8 리비전</span>
+            </div>
+          </header>
+          <div class="border-t bd-border-40 p-3 space-y-2">
+            <!-- EP 안에서는 씬별로 한 단계 더 펼침 -->
+            <div class="bg-prim/30 border bd-border-40 rounded-lg p-2.5">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-[12px] font-mono font-bold text-prim">A 1</span>
+                <span class="text-[11px] text-amber-400/70">색감 어두움</span>
+                <span class="ml-auto text-[10px] px-1 py-0.5 rounded bg-accent text-white font-bold">2</span>
+              </div>
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-2 text-[12px]">
+                  <span class="text-[11px] font-bold text-accent-sub">re3</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-prog">진행중</span>
+                  <span class="text-prim truncate flex-1">색감 어두움. 명도 +15...</span>
+                  <span class="text-[10px] text-sec-70">12분</span>
+                </div>
+                <div class="flex items-center gap-2 text-[12px]">
+                  <span class="text-[11px] font-bold text-accent-sub">re2</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-open">대기</span>
+                  <span class="text-prim truncate flex-1">캐릭터 동작 자연스럽게...</span>
+                  <span class="text-[10px] text-sec-70">1h</span>
+                </div>
+              </div>
+            </div>
+            <div class="bg-prim/30 border bd-border-40 rounded-lg p-2.5">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-[12px] font-mono font-bold text-prim">A 6</span>
+                <span class="ml-auto text-[10px] px-1 py-0.5 rounded bg-accent text-white font-bold">3</span>
+              </div>
+              <div class="text-[11px] text-sec-70">3개 미해결 · 클릭하여 펼치기</div>
+            </div>
+          </div>
+        </article>
+
+        <!-- EP02 -->
+        <article class="bg-card border bd-border-60 rounded-xl overflow-hidden">
+          <header class="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-prim/30">
+            <svg class="w-4 h-4 text-sec" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            <div class="flex items-baseline gap-2 flex-1">
+              <span class="text-[16px] font-mono font-bold text-prim">EP02</span>
+              <span class="text-[12px] text-sec-70">실험실의 비밀</span>
+            </div>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white">3 미해결</span>
+          </header>
+        </article>
+
+      </section>
+
+      <!-- ─────── 그룹: 진행률별 (칸반) ─────── -->
+      <section id="view-progress" class="hidden grid grid-cols-3 gap-3">
+        <div class="progress-col-bg rounded-xl p-3 space-y-2">
+          <div class="flex items-center justify-between mb-2 px-1">
+            <h3 class="text-[12px] font-bold text-prim flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full" style="background:#FDCB6E"></span>
+              대기
+            </h3>
+            <span class="text-[10px] text-sec-70">5</span>
+          </div>
+
+          <!-- with thumb -->
+          <div class="rev-card open bg-card border bd-border-40 rounded-lg overflow-hidden">
+            <span class="rev-side open"></span>
+            <div class="ml-1">
+              <div class="w-full h-20 thumb-grad-1"></div>
+              <div class="p-2.5">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 A 1</span>
+                  <span class="text-[10px] font-bold text-accent-sub">re2</span>
+                </div>
+                <div class="text-[12px] text-prim mb-1.5 line-clamp-2">캐릭터 동작이 너무 느려요</div>
+                <div class="text-[10px] text-sec-70 flex items-center justify-between">
+                  <span>박OO · 1h</span>
+                  <span class="flex items-center gap-1">
+                    <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    0
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- without thumb -->
+          <div class="rev-card open bg-card border bd-border-40 rounded-lg p-2.5">
+            <span class="rev-side open"></span>
+            <div class="ml-1">
+              <div class="flex items-center gap-1.5 mb-1">
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 A 6</span>
+                <span class="text-[10px] font-bold text-accent-sub">re3</span>
+              </div>
+              <div class="text-[12px] text-prim mb-1.5 line-clamp-2">표정 좀 더 부드럽게 해주세요. 입꼬리 방향이 어색합니다.</div>
+              <div class="text-[10px] text-sec-70 flex items-center justify-between">
+                <span>조OO · 2h</span>
+                <span>—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="progress-col-bg rounded-xl p-3 space-y-2">
+          <div class="flex items-center justify-between mb-2 px-1">
+            <h3 class="text-[12px] font-bold text-prim flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full" style="background:#74B9FF"></span>
+              진행중
+            </h3>
+            <span class="text-[10px] text-sec-70">3</span>
+          </div>
+          <div class="rev-card open bg-card border bd-border-40 rounded-lg overflow-hidden">
+            <span class="rev-side open"></span>
+            <div class="ml-1">
+              <div class="w-full h-20 thumb-grad-2"></div>
+              <div class="p-2.5">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 A 1</span>
+                  <span class="text-[10px] font-bold text-accent-sub">re3</span>
+                </div>
+                <div class="text-[12px] text-prim mb-1.5 line-clamp-2">색감 어두움. 명도 +15, 배경 -10</div>
+                <div class="text-[10px] text-sec-70 flex items-center justify-between">
+                  <span>김OO · 12분</span>
+                  <span class="flex items-center gap-1">
+                    <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    3
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="progress-col-bg rounded-xl p-3 space-y-2">
+          <div class="flex items-center justify-between mb-2 px-1">
+            <h3 class="text-[12px] font-bold text-prim flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full" style="background:#00B894"></span>
+              완료
+            </h3>
+            <span class="text-[10px] text-sec-70">15</span>
+          </div>
+          <div class="rev-card done bg-card border bd-border-40 rounded-lg overflow-hidden">
+            <span class="rev-side done"></span>
+            <div class="ml-1">
+              <div class="w-full h-20 thumb-grad-3 opacity-60"></div>
+              <div class="p-2.5">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 A 1</span>
+                  <span class="text-[10px] font-bold text-sec">re1</span>
+                </div>
+                <div class="text-[12px] text-prim mb-1.5 line-clamp-2 line-through opacity-60">왼쪽 위 나무 위치 살짝 옮겨주세요.</div>
+                <div class="text-[10px] text-sec-70">김OO · 어제</div>
+              </div>
+            </div>
+          </div>
+          <div class="rev-card done bg-card border bd-border-40 rounded-lg p-2.5">
+            <span class="rev-side done"></span>
+            <div class="ml-1">
+              <div class="flex items-center gap-1.5 mb-1">
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold">EP01 B 2</span>
+                <span class="text-[10px] font-bold text-sec">re2</span>
+              </div>
+              <div class="text-[12px] text-prim mb-1.5 line-clamp-2 line-through opacity-60">동작 자연스럽게 수정.</div>
+              <div class="text-[10px] text-sec-70">박OO · 어제</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ★ 우측 디테일 패널 (선택된 카드 — Frame.io / Linear 스타일) -->
+    <aside class="w-[360px] shrink-0 border-l bd-border-40 detail-panel bg-card-70 hidden xl:flex flex-col" style="max-height: calc(100vh - 60px); position:sticky; top: 60px;">
+      <div class="p-4 border-b bd-border-40">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] font-bold text-accent-sub">re3</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-bold st-prog">진행중</span>
+          </div>
+          <button class="text-sec hover:text-prim text-lg leading-none">×</button>
+        </div>
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-[11px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold border border-accent/30">EP01 A 1</span>
+          <button class="text-[10px] text-accent-sub hover:underline flex items-center gap-1">
+            <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
+            씬 모달 열기
+          </button>
+        </div>
+        <div class="text-[12.5px] text-prim leading-relaxed">1번 씬 색감이 전체적으로 너무 어두워요. 캐릭터 얼굴 명도 +15, 배경 -10 정도로 부탁드려요.</div>
+      </div>
+
+      <!-- 첨부 이미지 -->
+      <div class="p-4 border-b bd-border-40">
+        <div class="text-[10px] font-bold uppercase tracking-wider text-sec mb-2">첨부 이미지 (2)</div>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="aspect-video thumb-grad-1 rounded-lg cursor-pointer hover:opacity-90"></div>
+          <div class="aspect-video thumb-grad-2 rounded-lg cursor-pointer hover:opacity-90"></div>
+        </div>
+      </div>
+
+      <!-- 메타 -->
+      <div class="p-4 border-b bd-border-40 space-y-2 text-[12px]">
+        <div class="flex items-center justify-between">
+          <span class="text-sec">등록자</span>
+          <div class="flex items-center gap-1.5">
+            <span class="w-4 h-4 rounded-full inline-flex items-center justify-center text-[9px] font-bold text-white" style="background:#6C5CE7">김</span>
+            <span class="text-prim">김OO</span>
+          </div>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-sec">알림 받는 사람</span>
+          <div class="flex">
+            <span class="w-5 h-5 rounded-full inline-flex items-center justify-center text-[9px] font-bold text-white border border-bg-card" style="background:#74B9FF">이</span>
+            <span class="w-5 h-5 rounded-full -ml-1 inline-flex items-center justify-center text-[9px] font-bold text-white border border-bg-card" style="background:#FDCB6E">박</span>
+            <span class="w-5 h-5 rounded-full -ml-1 inline-flex items-center justify-center text-[9px] font-bold text-white border border-bg-card" style="background:#A29BFE">조</span>
+          </div>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-sec">등록</span>
+          <span class="text-prim">12분 전</span>
+        </div>
+      </div>
+
+      <!-- 댓글 스레드 (인라인) -->
+      <div class="flex-1 overflow-y-auto p-4">
+        <div class="text-[10px] font-bold uppercase tracking-wider text-sec mb-3">댓글 (3)</div>
+        <div class="space-y-2">
+          <div class="border bd-border-40 bg-prim/40 rounded-lg p-2.5">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#74B9FF">이</span>
+                <span class="text-[11px] font-bold text-prim">이OO</span>
+              </div>
+              <span class="text-[10px] text-sec-50">10분</span>
+            </div>
+            <div class="text-[12px] text-prim">확인했어요. 작업 시작합니다.</div>
+          </div>
+          <div class="border border-accent/30 bg-accent/[0.10] rounded-lg p-2.5">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#6C5CE7">김</span>
+                <span class="text-[11px] font-bold text-accent-sub">김OO</span>
+              </div>
+              <span class="text-[10px] text-sec-50">8분</span>
+            </div>
+            <div class="text-[12px] text-prim">입가 그림자 위주로요.</div>
+          </div>
+          <div class="border bd-border-40 bg-prim/40 rounded-lg p-2.5">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center gap-1.5">
+                <span class="w-4 h-4 rounded-full text-[9px] font-bold text-white inline-flex items-center justify-center" style="background:#74B9FF">이</span>
+                <span class="text-[11px] font-bold text-prim">이OO</span>
+              </div>
+              <span class="text-[10px] text-sec-50">2분</span>
+            </div>
+            <div class="text-[12px] text-prim">알겠습니다. 30분 정도 걸릴 듯.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 인라인 액션 -->
+      <div class="p-3 border-t bd-border-40 flex gap-2">
+        <input type="text" placeholder="댓글 남기기... (Enter)" class="flex-1 px-2.5 py-1.5 bg-prim/80 border bd-border-60 rounded text-[12px] focus:outline-none focus:border-accent/60">
+        <button class="px-3 py-1.5 text-[11px] font-bold rounded bg-accent text-white">전송</button>
+      </div>
+    </aside>
+
+  </main>
+</div>
+
+<!-- 비교 안내 -->
+<div class="max-w-[1600px] mx-auto px-6 pb-12">
+  <div class="grid grid-cols-3 gap-3">
+    <div class="bg-card border bd-border-40 rounded-xl p-3">
+      <div class="text-[10px] font-bold uppercase tracking-wider text-accent-sub mb-2">참고 — Frame.io</div>
+      <div class="text-[11px] text-sec leading-relaxed">큰 썸네일 + 우측 코멘트 스레드. 영상 후반작업 표준. 본 mockup의 카드 좌측 썸네일 + 우측 디테일 패널 댓글 구조가 이 패턴.</div>
+    </div>
+    <div class="bg-card border bd-border-40 rounded-xl p-3">
+      <div class="text-[10px] font-bold uppercase tracking-wider text-accent-sub mb-2">참고 — Linear</div>
+      <div class="text-[11px] text-sec leading-relaxed">호버 시 인라인 액션 노출, 좌측 리스트 + 우측 디테일. 본 mockup의 카드 호버 액션과 우측 디테일 패널이 이 패턴.</div>
+    </div>
+    <div class="bg-card border bd-border-40 rounded-xl p-3">
+      <div class="text-[10px] font-bold uppercase tracking-wider text-accent-sub mb-2">참고 — GitHub Issues</div>
+      <div class="text-[11px] text-sec leading-relaxed">"내가 받은 이슈" / "내가 만든 이슈" 탭 분리. 본 mockup의 최상단 "전체 / 받은 / 보낸" 탭이 이 패턴.</div>
+    </div>
+  </div>
+
+  <div class="mt-4 grid grid-cols-2 gap-3">
+    <div class="bg-card border bd-border-40 rounded-xl p-3">
+      <div class="text-[10px] font-bold uppercase tracking-wider text-accent-sub mb-2">이미지 있을 때 vs 없을 때</div>
+      <ul class="text-[11px] text-sec leading-relaxed space-y-1">
+        <li>· <strong class="text-prim">씬별/에피소드별</strong>: 카드 좌측 128×80 썸네일 영역. 없으면 그 영역 자체가 사라지고 본문이 풀 폭. "— 이미지 없음" 안내 (메타 끝)</li>
+        <li>· <strong class="text-prim">진행률별(칸반)</strong>: 카드 상단 풀 폭 80px 썸네일. 없으면 영역 자체 생략, 카드가 더 컴팩트해짐</li>
+        <li>· 우측 디테일 패널: 첨부 이미지가 있을 때만 그리드 표시</li>
+      </ul>
+    </div>
+    <div class="bg-card border bd-border-40 rounded-xl p-3">
+      <div class="text-[10px] font-bold uppercase tracking-wider text-accent-sub mb-2">한솔님 요구사항 매핑</div>
+      <ul class="text-[11px] text-sec leading-relaxed space-y-1">
+        <li>· <strong class="text-prim">"내가 보낸 / 받은 한눈에"</strong> → 최상단 페르소나 탭 + 받은 것 5개 강조 뱃지</li>
+        <li>· <strong class="text-prim">"씬별 / 에피소드별 / 진행률별"</strong> → 그룹화 토글 3종 (한솔 명시 그대로)</li>
+        <li>· <strong class="text-prim">"필요시 씬 상세로"</strong> → 씬 헤더 우측 + 카드 호버 액션 + 디테일 패널 상단 모두 ↗ 버튼</li>
+        <li>· <strong class="text-prim">"쉽게 관리"</strong> → 우측 디테일 패널에서 인라인 댓글 + 상태 변경</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+function setGroup(g) {
+  ['scene','episode','progress'].forEach(k => {
+    document.getElementById(`view-${k}`).classList.toggle('hidden', k !== g);
+  });
+  document.querySelectorAll('.group-btn').forEach(b => {
+    if (b.dataset.group === g) {
+      b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim');
+    } else {
+      b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim');
+    }
+  });
+}
+function setTheme(t) {
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+  document.querySelectorAll('.theme-btn').forEach(b => {
+    if (b.dataset.theme === t) { b.classList.add('ring-2','ring-white'); b.classList.remove('ring-1','ring-white/20'); }
+    else { b.classList.remove('ring-2','ring-white'); b.classList.add('ring-1','ring-white/20'); }
+  });
+}
+function setMode(m) {
+  document.body.setAttribute('data-mode', m);
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    if (b.dataset.mode === m) { b.classList.add('bg-accent','text-white'); b.classList.remove('text-sec','hover:text-prim'); }
+    else { b.classList.remove('bg-accent','text-white'); b.classList.add('text-sec','hover:text-prim'); }
+  });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.group-btn').forEach(b => b.addEventListener('click', () => setGroup(b.dataset.group)));
+  document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+  document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+});
+</script>
+</body>
+</html>

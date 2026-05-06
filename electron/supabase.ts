@@ -122,6 +122,8 @@ export interface SupabaseUser {
   birthday: string;
   isInitialPassword: boolean;
   createdAt: string;
+  /** v1.18.1: 컴포지터 단일 boolean (BG/ACT 부서 구분 없음). */
+  isCompositor?: boolean;
 }
 
 export interface SupabaseComment {
@@ -137,6 +139,8 @@ export interface SupabaseComment {
   images: string[];
   createdAt: string;
   editedAt: string | null;
+  /** v1.18.0: 리비전 맥락 댓글이면 해당 리비전 id, 일반 씬 댓글이면 null. */
+  revisionId?: string | null;
 }
 
 export interface SupabaseRevision {
@@ -789,6 +793,8 @@ export async function readUsers(): Promise<SupabaseUser[]> {
     birthday: u.birthday || '',
     isInitialPassword: u.is_initial_password ?? true,
     createdAt: u.created_at || '',
+    // v1.18.1: 컴포지터 단일 boolean (한솔 정정 — BG/ACT 부서 구분 없음)
+    isCompositor: u.is_compositor === true,
   }));
 }
 
@@ -808,10 +814,13 @@ export async function addUser(user: SupabaseUser): Promise<void> {
   broadcastDataChange('users', 'INSERT');
 }
 
-/** 사용자 업데이트 */
+/** 사용자 업데이트.
+ *  v1.18.1: isCompositor(boolean) 처리를 위해 value 타입을 string | boolean | null 로 확장.
+ *  Postgres update 는 null 을 명시적으로 SET … = NULL 로 적용하므로 그대로 전달.
+ */
 export async function updateUser(
   userId: string,
-  updates: Record<string, string>,
+  updates: Record<string, string | boolean | null>,
 ): Promise<void> {
   // camelCase → snake_case 변환
   const dbUpdates: Record<string, unknown> = {};
@@ -819,6 +828,7 @@ export async function updateUser(
     name: 'name', role: 'role', password: 'password',
     slackId: 'slack_id', hireDate: 'hire_date', birthday: 'birthday',
     isInitialPassword: 'is_initial_password',
+    isCompositor: 'is_compositor',
   };
   for (const [k, v] of Object.entries(updates)) {
     dbUpdates[fieldMap[k] || k] = v;
@@ -920,6 +930,7 @@ export async function fetchMissedMentions(
         images: c.images || [],            // v1.15.12: 이미지 첨부
         createdAt: c.created_at,
         editedAt: c.edited_at,
+        revisionId: c.revision_id ?? null, // v1.18.0: 리비전 맥락 댓글 표시용
       });
       if (matched.length >= limit) return matched;
     }
@@ -950,6 +961,8 @@ export async function readCommentsForPart(partUuid: string): Promise<SupabaseCom
     images: c.images || [],
     createdAt: c.created_at,
     editedAt: c.edited_at,
+    // v1.18.0: 리비전 ↔ 씬 댓글 단일 흐름 — revision_id 가 NULL 이면 일반 씬 댓글, 값 있으면 리비전 맥락 댓글.
+    revisionId: c.revision_id ?? null,
   }));
 }
 
@@ -964,6 +977,8 @@ export async function addComment(
   mentions: string[],
   createdAt: string,
   images: string[] = [],
+  /** v1.18.0: 리비전 맥락 댓글이면 해당 리비전 id, 일반 씬 댓글이면 null. */
+  revisionId: string | null = null,
 ): Promise<void> {
   // 이슈 F(2026-04-23) + Codex P1(2차): 댓글 경로의 sceneId는 scene.no (=sort_order).
   // sort_order 정확 매칭으로 scene_number 표기 규칙과 무관하게 정확히 식별.
@@ -987,6 +1002,7 @@ export async function addComment(
     mentions,
     images,
     created_at: createdAt,
+    revision_id: revisionId || null,
   });
   throwIfError(error);
   broadcastCommentAdded(sceneId, userName, userId, text, mentions);
@@ -1209,7 +1225,7 @@ export async function deleteRevision(id: string, requesterUserId: string): Promi
 }
 
 /** 모든 리비전 읽기 */
-export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey: string })[]> {
+export async function readAllRevisions(): Promise<(SupabaseRevision & { sceneKey: string; notifyUserIds: string[] })[]> {
   const { data, error } = await supabase
     .from('comp_revisions')
     .select('*')
@@ -1257,6 +1273,7 @@ export async function addRevision(
   requesterName: string,
   assignee: string,
   createdAt: string,
+  notifyUserIdsJson?: string,
 ): Promise<void> {
   // partUuid가 비어있으면 sceneId(=sceneKey)에서 역조회
   let resolvedPartUuid = partUuid;
@@ -1293,6 +1310,18 @@ export async function addRevision(
     throw new Error(`리비전 저장 실패: 씬을 찾을 수 없음 (partUuid=${resolvedPartUuid}, sceneId=${sceneId})`);
   }
 
+  // v1.18.0: notify_user_ids — JSON 문자열로 전달받아 파싱.
+  // 잘못된 JSON 이면 빈 배열로 fallback (실패해도 알림만 못 받지 등록 자체는 성공).
+  let notifyUserIds: string[] = [];
+  if (notifyUserIdsJson) {
+    try {
+      const parsed = JSON.parse(notifyUserIdsJson);
+      if (Array.isArray(parsed)) notifyUserIds = parsed.filter((x) => typeof x === 'string');
+    } catch {
+      console.warn('[addRevision] notifyUserIdsJson 파싱 실패:', notifyUserIdsJson);
+    }
+  }
+
   const { error } = await supabase.from('comp_revisions').insert({
     id,
     part_id: resolvedPartUuid,
@@ -1309,6 +1338,7 @@ export async function addRevision(
     requester_name: requesterName,
     assignee,
     created_at: createdAt,
+    notify_user_ids: notifyUserIds,
   });
   throwIfError(error);
   broadcastDataChange('comp_revisions', 'INSERT');
@@ -1334,7 +1364,11 @@ export async function updateRevision(
   broadcastDataChange('comp_revisions', 'UPDATE');
 }
 
-function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string } {
+function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey: string; notifyUserIds: string[] } {
+  const rawNotify = r.notify_user_ids;
+  const notifyUserIds: string[] = Array.isArray(rawNotify)
+    ? (rawNotify.filter((x) => typeof x === 'string') as string[])
+    : [];
   return {
     id: r.id as string,
     partId: r.part_id as string,
@@ -1355,6 +1389,7 @@ function mapRevision(r: Record<string, unknown>): SupabaseRevision & { sceneKey:
     createdAt: (r.created_at as string) || '',
     updatedAt: (r.updated_at as string) || '',
     resolvedAt: (r.resolved_at as string) || null,
+    notifyUserIds,
   };
 }
 
@@ -1778,6 +1813,8 @@ export type ActionType =
   | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
   | 'memo_update' | 'comment_add'
   | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
+  // v1.18.0: 리비전 맥락 댓글
+  | 'revision_comment'
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
   | 'image_upload_storyboard' | 'image_upload_guide';

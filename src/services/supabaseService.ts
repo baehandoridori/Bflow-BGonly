@@ -116,7 +116,7 @@ export async function addUserToSupabase(user: unknown): Promise<void> {
   await window.electronAPI.supabaseAddUser(user);
 }
 
-export async function updateUserInSupabase(userId: string, updates: Record<string, string>): Promise<void> {
+export async function updateUserInSupabase(userId: string, updates: Record<string, string | null>): Promise<void> {
   await window.electronAPI.supabaseUpdateUser(userId, updates);
 }
 
@@ -134,8 +134,10 @@ export async function addCommentToSupabase(
   commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string,
   images: string[] = [],
+  /** v1.18.0: 리비전 맥락 댓글이면 해당 id, 일반 씬 댓글이면 null. */
+  revisionId: string | null = null,
 ): Promise<void> {
-  await window.electronAPI.supabaseAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images);
+  await window.electronAPI.supabaseAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId);
 }
 
 export async function editCommentInSupabase(commentId: string, text: string, mentions: string[], images?: string[]): Promise<void> {
@@ -156,8 +158,9 @@ export async function addRevisionToSupabase(
   id: string, partUuid: string, sceneId: string, revisionNo: number, status: string,
   priority: string, description: string, frameNo: string, imageUrl: string,
   department: string, lookupDepartment: string, requesterId: string, requesterName: string, assignee: string, createdAt: string,
+  notifyUserIdsJson: string = '[]',
 ): Promise<void> {
-  await window.electronAPI.supabaseAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt);
+  await window.electronAPI.supabaseAddRevision(id, partUuid, sceneId, revisionNo, status, priority, description, frameNo, imageUrl, department, lookupDepartment, requesterId, requesterName, assignee, createdAt, notifyUserIdsJson);
 }
 
 export async function updateRevisionInSupabase(id: string, updates: Record<string, string>): Promise<void> {
