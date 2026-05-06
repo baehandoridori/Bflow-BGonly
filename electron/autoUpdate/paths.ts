@@ -50,14 +50,21 @@ export function isRunningFromGoogleDrive(): boolean {
 }
 
 /**
- * G드라이브 desktop 동기화 루트 후보. Drive desktop의 standard mount letter들 +
- * 사용자 홈의 'Google Drive' 폴더(레거시). 존재하지 않는 후보는 자동 skip.
+ * G드라이브 desktop 동기화 루트 후보. Drive desktop은 사용자 환경에 따라 다른 drive
+ * letter (다른 네트워크 드라이브가 G:~J:를 점유하면 Drive가 K: 이상에 마운트되기도)에
+ * 마운트될 수 있어 모든 letter (A~Z)를 스캔. existsSync + statSync는 ms 수준이라
+ * 26회 호출은 비용 무시 가능.
+ *
+ * 추가로 레거시 desktop sync 폴더 (~\Google Drive)도 후보에 포함.
+ *
+ * Codex 1차 P2: 이전엔 G~J 4개만 체크해 다른 letter 마운트 환경에서 install 감지/
+ * remote update discovery 모두 실패하던 문제 수정.
  */
 export function guessGoogleDriveRoots(): string[] {
   const candidates: string[] = [];
-  // Drive desktop의 가상 마운트 (보통 G:, 일부 사용자는 H: 또는 다른 letter)
-  for (const letter of ['G', 'H', 'I', 'J']) {
-    candidates.push(`${letter}:\\`);
+  // A~Z 전체 스캔 — Drive desktop이 어떤 letter에 마운트됐든 감지
+  for (let i = 65; i <= 90; i++) { // 'A'.charCodeAt(0) = 65, 'Z' = 90
+    candidates.push(`${String.fromCharCode(i)}:\\`);
   }
   // 레거시 데스크톱 sync 폴더
   if (process.env.USERPROFILE) {

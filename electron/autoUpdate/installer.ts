@@ -179,6 +179,16 @@ async function offerDefenderExclusion(): Promise<void> {
   }
 }
 
+/**
+ * Codex 1차 P1: process.argv 전체를 forward.
+ * Windows에서 bflow:// 프로토콜 링크는 launch arguments로 전달되므로, 옛 G드라이브
+ * 바로가기로 슬랙 딥링크 클릭 시(spec §13 폴백) deep-link payload가 손실되지 않도록
+ * 사용자가 넘긴 args를 그대로 전달한다.
+ *
+ * process.argv[0] = self exe path, process.argv[1..] = 사용자 인자.
+ * 내부 Electron 플래그는 그대로 둬도 BFLOW가 무시 (electron-builder portable이 알아서).
+ */
 function spawnDetached(exe: string): void {
-  spawn(exe, [], { detached: true, stdio: 'ignore' }).unref();
+  const args = process.argv.slice(1);
+  spawn(exe, args, { detached: true, stdio: 'ignore' }).unref();
 }
