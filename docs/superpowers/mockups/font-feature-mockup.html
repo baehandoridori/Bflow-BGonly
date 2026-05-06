@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>B flow · 글꼴 변경 기능 — 디자인 목업</title>
+
+  <!-- Pretendard (한국 IT 사실상 표준) -->
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+
+  <!-- Spoqa Han Sans Neo -->
+  <link rel="stylesheet" href="https://spoqa.github.io/spoqa-han-sans/css/SpoqaHanSansNeo.css">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Nanum+Gothic:wght@400;700;800&family=Gowun+Dodum&family=Noto+Serif+KR:wght@400;500;600;700&display=swap">
+
+  <style>
+    :root {
+      --bg-primary: #0F1117;
+      --bg-card: #1A1D27;
+      --bg-card-2: #20232E;
+      --bg-border: #2D3041;
+      --text-primary: #E8E8EE;
+      --text-secondary: #8B8DA3;
+      --text-tertiary: #5C5F73;
+      --accent: #6C5CE7;
+      --accent-sub: #A29BFE;
+      --color-lo: #74B9FF;
+      --color-done: #A29BFE;
+      --color-review: #FDCB6E;
+      --color-png: #00B894;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+    }
+    body {
+      font-family: 'Pretendard', system-ui, sans-serif;
+      padding: 32px 32px 64px;
+      max-width: 1400px;
+      margin: 0 auto;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ── 헤더 ───────────────────────────── */
+    header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+    header .lead {
+      color: var(--text-secondary);
+      font-size: 13px;
+      margin-bottom: 28px;
+    }
+    header .lead b { color: var(--accent-sub); font-weight: 600; }
+
+    /* ── 섹션 헤더 ───────────────────────── */
+    .section {
+      margin-top: 36px;
+      padding-top: 24px;
+      border-top: 1px solid var(--bg-border);
+    }
+    .section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+    .section-num {
+      display: inline-block;
+      font-size: 11px;
+      color: var(--accent);
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .section-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      letter-spacing: -0.01em;
+    }
+    .section-desc {
+      color: var(--text-secondary);
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+
+    /* ── 글꼴 비교 그리드 ──────────────── */
+    .font-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+      gap: 14px;
+    }
+    .font-card {
+      background: var(--bg-card);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      padding: 18px;
+      transition: border-color .15s, transform .15s;
+      cursor: pointer;
+      position: relative;
+    }
+    .font-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .font-card.is-recommended {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent), 0 4px 16px rgba(108,92,231,0.18);
+    }
+    .font-card.is-recommended::before {
+      content: '★ 기본값 추천';
+      position: absolute;
+      top: -10px;
+      right: 14px;
+      background: var(--accent);
+      color: white;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 8px;
+      letter-spacing: 0.02em;
+    }
+
+    /* 카드 라벨은 항상 Pretendard로 통일 (식별용) */
+    .font-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px dashed var(--bg-border);
+      font-family: 'Pretendard', system-ui, sans-serif;
+    }
+    .font-name { font-size: 13px; font-weight: 600; }
+    .font-tag {
+      font-size: 10px;
+      color: var(--text-secondary);
+      padding: 2px 8px;
+      background: var(--bg-primary);
+      border-radius: 6px;
+    }
+
+    /* === 실제 글꼴이 적용되는 미리보기 영역 === */
+    .preview-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.01em; }
+    .preview-subtitle { font-size: 13px; color: var(--accent-sub); margin-bottom: 10px; font-weight: 500; }
+    .preview-body { font-size: 13px; line-height: 1.55; margin-bottom: 12px; }
+    .preview-numbers {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .preview-number { font-size: 17px; font-weight: 600; color: var(--color-png); }
+    .preview-caption { font-size: 11px; color: var(--text-secondary); }
+    .preview-eng { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+
+    /* 폰트 클래스 */
+    .font-pretendard .preview-title, .font-pretendard .preview-subtitle, .font-pretendard .preview-body, .font-pretendard .preview-number, .font-pretendard .preview-caption, .font-pretendard .preview-eng { font-family: 'Pretendard', system-ui, sans-serif; }
+    .font-inter .preview-title, .font-inter .preview-subtitle, .font-inter .preview-body, .font-inter .preview-number, .font-inter .preview-caption, .font-inter .preview-eng { font-family: 'Inter', 'Pretendard', system-ui, sans-serif; }
+    .font-noto-sans .preview-title, .font-noto-sans .preview-subtitle, .font-noto-sans .preview-body, .font-noto-sans .preview-number, .font-noto-sans .preview-caption, .font-noto-sans .preview-eng { font-family: 'Noto Sans KR', system-ui, sans-serif; }
+    .font-ibm .preview-title, .font-ibm .preview-subtitle, .font-ibm .preview-body, .font-ibm .preview-number, .font-ibm .preview-caption, .font-ibm .preview-eng { font-family: 'IBM Plex Sans KR', system-ui, sans-serif; }
+    .font-spoqa .preview-title, .font-spoqa .preview-subtitle, .font-spoqa .preview-body, .font-spoqa .preview-number, .font-spoqa .preview-caption, .font-spoqa .preview-eng { font-family: 'Spoqa Han Sans Neo', system-ui, sans-serif; }
+    .font-nanum .preview-title, .font-nanum .preview-subtitle, .font-nanum .preview-body, .font-nanum .preview-number, .font-nanum .preview-caption, .font-nanum .preview-eng { font-family: 'Nanum Gothic', system-ui, sans-serif; }
+    .font-gowun .preview-title, .font-gowun .preview-subtitle, .font-gowun .preview-body, .font-gowun .preview-number, .font-gowun .preview-caption, .font-gowun .preview-eng { font-family: 'Gowun Dodum', system-ui, sans-serif; }
+    .font-noto-serif .preview-title, .font-noto-serif .preview-subtitle, .font-noto-serif .preview-body, .font-noto-serif .preview-number, .font-noto-serif .preview-caption, .font-noto-serif .preview-eng { font-family: 'Noto Serif KR', serif; }
+    .font-system .preview-title, .font-system .preview-subtitle, .font-system .preview-body, .font-system .preview-number, .font-system .preview-caption, .font-system .preview-eng { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+    /* ── 설정 화면 목업 ──────────────────── */
+    .settings-mock {
+      background: var(--bg-card);
+      border: 1px solid var(--bg-border);
+      border-radius: 14px;
+      padding: 24px;
+      max-width: 720px;
+    }
+    .settings-section-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 14px;
+    }
+    .settings-section-title .icon {
+      width: 18px; height: 18px;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .settings-section-title .icon svg { width: 18px; height: 18px; stroke-width: 2; }
+    .new-badge {
+      font-size: 9px;
+      background: var(--accent);
+      color: white;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      margin-left: 4px;
+      letter-spacing: 0.04em;
+    }
+    .settings-block {
+      padding-bottom: 18px;
+      margin-bottom: 18px;
+      border-bottom: 1px solid var(--bg-border);
+    }
+    .settings-block:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    .settings-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .settings-label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      width: 80px;
+      flex-shrink: 0;
+    }
+    .chip-group { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip {
+      padding: 6px 12px;
+      background: var(--bg-primary);
+      border: 1px solid var(--bg-border);
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all .15s;
+      color: var(--text-secondary);
+    }
+    .chip:hover { border-color: var(--accent); color: var(--text-primary); }
+    .chip.active {
+      background: rgba(108,92,231,.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* 사용자 추가 글꼴 칩 (삭제 버튼 포함) */
+    .chip-with-delete {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px 6px 12px;
+      background: var(--bg-primary);
+      border: 1px solid var(--bg-border);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      transition: all .15s;
+    }
+    .chip-with-delete:hover { border-color: var(--accent); color: var(--text-primary); }
+    .chip-delete {
+      width: 18px; height: 18px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent; border: none;
+      border-radius: 4px;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      transition: all .15s;
+      padding: 0;
+    }
+    .chip-delete:hover { background: rgba(255, 100, 100, .15); color: #ff8888; }
+
+    /* + 글꼴 추가 버튼 */
+    .chip-add {
+      padding: 6px 12px;
+      background: transparent;
+      border: 1px dashed var(--bg-border);
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all .15s;
+      color: var(--accent-sub);
+      font-family: inherit;
+    }
+    .chip-add:hover {
+      border-color: var(--accent);
+      border-style: solid;
+      background: rgba(108,92,231,.08);
+      color: var(--accent);
+    }
+
+    .seg-group {
+      display: flex; gap: 2px; padding: 4px;
+      background: var(--bg-primary); border-radius: 9px; width: fit-content;
+    }
+    .seg {
+      padding: 6px 12px; font-size: 12px; cursor: pointer;
+      border-radius: 6px; color: var(--text-secondary);
+      transition: all .15s;
+    }
+    .seg:hover { color: var(--text-primary); }
+    .seg.active { background: var(--bg-card); color: var(--text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+
+    .slider-wrap {
+      flex: 1; display: flex; align-items: center; gap: 12px;
+      max-width: 360px;
+    }
+    .slider-wrap input[type=range] {
+      flex: 1;
+      accent-color: var(--accent);
+    }
+    .slider-value {
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+      min-width: 36px;
+      text-align: right;
+    }
+
+    .toggle {
+      width: 38px; height: 22px;
+      background: var(--bg-border); border-radius: 11px;
+      position: relative; cursor: pointer;
+      transition: background .15s;
+      flex-shrink: 0;
+    }
+    .toggle::after {
+      content: ''; width: 18px; height: 18px;
+      background: white; border-radius: 50%;
+      position: absolute; top: 2px; left: 2px;
+      transition: left .15s;
+    }
+    .toggle.on { background: var(--accent); }
+    .toggle.on::after { left: 18px; }
+
+    /* ── 비교 (전/후) ──────────────────── */
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .compare-cell {
+      background: var(--bg-card);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .compare-cell h3 {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 600;
+    }
+    .compare-cell .label-on { color: var(--accent); }
+    .compare-cell .label-off { color: var(--text-secondary); }
+
+    .preview-tight { line-height: 1.25; letter-spacing: -0.025em; font-size: 13px; }
+    .preview-normal { line-height: 1.55; letter-spacing: 0; font-size: 13px; }
+    .preview-loose { line-height: 1.95; letter-spacing: 0.05em; font-size: 13px; }
+    .gap-y-10 { margin-bottom: 10px; }
+
+    .num-stack { display: flex; flex-direction: column; gap: 4px; }
+    .num-stack .num { font-size: 16px; font-weight: 600; }
+    .num-default { font-variant-numeric: normal; }
+    .num-tabular { font-variant-numeric: tabular-nums; }
+
+    .footnote { color: var(--text-tertiary); font-size: 10px; margin-top: 10px; line-height: 1.5; }
+    .label-pill { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 6px; margin-bottom: 8px; font-weight: 500; letter-spacing: 0.02em; }
+    .pill-before { background: rgba(139,141,163,.18); color: var(--text-secondary); }
+    .pill-after { background: rgba(108,92,231,.18); color: var(--accent-sub); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>B flow · 글꼴 변경 기능 — 디자인 목업</h1>
+    <p class="lead">
+      한솔님 결정 기반 — <b>① 한 글꼴로 앱 전체 통일</b> · <b>② 줄간격·자간 조절</b> · <b>③ 숫자 정렬 옵션</b>.
+      섹션 1에서 마음에 드는 글꼴 분위기를 봐주시고, 섹션 2/3에서 실제 설정 화면과 적용 효과를 확인해주세요.
+    </p>
+  </header>
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 섹션 1: 글꼴 후보 9종 -->
+  <!-- ════════════════════════════════════════ -->
+  <section class="section">
+    <div class="section-num">SECTION 1 — 글꼴 후보</div>
+    <h2 class="section-title">9가지 글꼴 — 같은 위젯 콘텐츠를 9가지 글꼴로 한눈에 비교</h2>
+    <p class="section-desc">실제 우리 앱의 위젯 콘텐츠(제목·부제·본문·숫자·캡션)를 각 글꼴로 그려봤어요. 글꼴 이름은 안 외우셔도 돼요. <b>분위기 느낌</b>으로만 골라주세요.</p>
+
+    <div class="font-grid">
+      <!-- 1. Pretendard (추천) -->
+      <div class="font-card font-pretendard is-recommended">
+        <div class="font-meta">
+          <span class="font-name">Pretendard</span>
+          <span class="font-tag">모던 · 표준</span>
+        </div>
+        <div class="preview-title">전체 진행률</div>
+        <div class="preview-subtitle">EP01 · 마감 D-3</div>
+        <div class="preview-body">오늘 작업할 씬이 12개 남아있어요.</div>
+        <div class="preview-numbers">
+          <span class="preview-number">23.4%</span>
+          <span class="preview-number">8.7%</span>
+          <span class="preview-number">100%</span>
+        </div>
+        <div class="preview-caption">마지막 업데이트 14:32</div>
+        <div class="preview-eng">Studio JBBJ · BG Dashboard</div>
+      </div>
+
+      <!-- 2. Inter (영문 우선) -->
+      <div class="font-card font-inter">
+        <div class="font-meta">
+          <span class="font-name">Inter</span>
+          <span class="font-tag">영문 우선 · 모던</span>
+        </div>
+        <div class="preview-title">전체 진행률</div>
+        <div class="preview-subtitle">EP01 · 마감 D-3</div>
+        <div class="preview-body">오늘 작업할 씬이 12개 남아있어요.</div>
+        <div class="preview-numbers">
+          <span class="preview-number">23.4%</span>
+          <span class="preview-number">8.7%</span>
+          <span class="preview-number">100%</span>
+        </div>
+        <div class="preview-caption">마지막 업데이트 14:32</div>
+        <div class="preview-eng">Studio JBBJ · BG Dashboard</div>
+      </div>
+
+      <!-- 3. Noto Sans KR -->
+      <div class="font-card font-noto-sans">
+        <div class="font-meta">
+          <span class="font-name">Noto Sans KR</span>
+          <span class="font-tag">모던 · 부드러움</span>
+        </div>
+        <div class="preview-title">전체 진행률</div>
+        <div class="preview-subtitle">EP01 · 마감 D-3</div>
+        <div class="preview-body">오늘 작업할 씬이 12개 남아있어요.</div>
+        <div class="preview-numbers">
+          <span class="preview-number">23.4%</span>
+          <span class="preview-number">8.7%</span>
+          <span class="preview-number">100%</span>
+        </div>
+        <div class="preview-caption">마지막 업데이트 14:32</div>
+        <div class="preview-eng">Studio JBBJ · BG Dashboard</div>
+      </div>
+
+      <!-- 4. IBM Plex Sans KR -->
+      <div class="font-card font-ibm">
+        <div class="font-meta">
+          <span class="font-name">IBM Plex Sans KR</span>
+          <span class="font-tag">선명 · 진중</span>
+        </div>
+        <div class="preview-title">전체 진행률</div>
+        <div class="preview-subtitle">EP01 · 마감 D-3</div>
+        <div class="preview-body">오늘 작업할 씬이 12개 남아있어요.</div>
+        <div class="preview-numbers">
+          <span class="preview-number">23.4%</span>
+          <span class="preview-number">8.7%</span>
+          <span class="preview-number">100%</span>
+        </div>
+        <div class="preview-caption">마지막 업데이트 14:32</div>
+        <div class="preview-eng">Studio JBBJ · BG Dashboard</div>
+      </div>
+
+      <!-- 5. Spoqa Han Sans Neo -->
+      <div class="font-card font-spoqa">
+        <div class="font-meta">
+          <span class="font-name">Spoqa Han Sans Neo</span>
+          <span class="font-tag">선명 · 신뢰감</span>
+        </div>
+        <div class="preview-title">전체 진행률</div>
+        <div class="preview-subtitle">EP01 · 마감 D-3</div>
+        <div class="preview-body">오늘 작업할 씬이 12개 남아있어요.</div>
+        <div class="preview-numbers">
+          <span class="preview-number">23.4%</span>
+          <span class="preview-number">8.7%</span>
+          <span class="preview-number">100%</span>
+        </div>
+        <div class="preview-caption">마지막 업데이트 14:32</div>
+        <div class="preview-eng">Studio JBBJ · BG Dashboard</div>
+      </div>
+
+      <!-- 6. Nanum Gothic -->
+      <div class="font-card font-nanum">
+        <div class="font-meta">
+          <span class="font-name">나눔고딕</span>
+          <span class="font-tag">친숙 · 전통</span>
+        </div>
+        <div class="preview-title">전체 진행률</div>
+        <div class="preview-subtitle">EP01 · 마감 D-3</div>
+        <div class="preview-body">오늘 작업할 씬이 12개 남아있어요.</div>
+        <div class="preview-numbers">
+          <span class="preview-number">23.4%</span>
+          <span class="preview-number">8.7%</span>
+          <span class="preview-number">100%</span>
+        </div>
+        <div class="preview-caption">마지막 업데이트 14:32</div>
+        <div class="preview-eng">Studio JBBJ · BG Dashboard</div>
+      </div>
+
+      <!-- 7. Gowun Dodum -->
+      <div class="font-card font-gowun">
+        <div class="font-meta">
+          <span class="font-name">고운 도담</span>
+          <span class="font-tag">따뜻 · 부드러움</span>
+        </div>
+        <div class="preview-title">전체 진행률</div>
+        <div class="preview-subtitle">EP01 · 마감 D-3</div>
+        <div class="preview-body">오늘 작업할 씬이 12개 남아있어요.</div>
+        <div class="preview-numbers">
+          <span class="preview-number">23.4%</span>
+          <span class="preview-number">8.7%</span>
+          <span class="preview-number">100%</span>
+        </div>
+        <div class="preview-caption">마지막 업데이트 14:32</div>
+        <div class="preview-eng">Studio JBBJ · BG Dashboard</div>
+      </div>
+
+      <!-- 8. Noto Serif KR -->
+      <div class="font-card font-noto-serif">
+        <div class="font-meta">
+          <span class="font-name">본명조 (Noto Serif KR)</span>
+          <span class="font-tag">감성 · 정통</span>
+        </div>
+        <div class="preview-title">전체 진행률</div>
+        <div class="preview-subtitle">EP01 · 마감 D-3</div>
+        <div class="preview-body">오늘 작업할 씬이 12개 남아있어요.</div>
+        <div class="preview-numbers">
+          <span class="preview-number">23.4%</span>
+          <span class="preview-number">8.7%</span>
+          <span class="preview-number">100%</span>
+        </div>
+        <div class="preview-caption">마지막 업데이트 14:32</div>
+        <div class="preview-eng">Studio JBBJ · BG Dashboard</div>
+      </div>
+
+      <!-- 9. System Default (현재 상태) -->
+      <div class="font-card font-system">
+        <div class="font-meta">
+          <span class="font-name">시스템 기본 (현재)</span>
+          <span class="font-tag">OS 기본</span>
+        </div>
+        <div class="preview-title">전체 진행률</div>
+        <div class="preview-subtitle">EP01 · 마감 D-3</div>
+        <div class="preview-body">오늘 작업할 씬이 12개 남아있어요.</div>
+        <div class="preview-numbers">
+          <span class="preview-number">23.4%</span>
+          <span class="preview-number">8.7%</span>
+          <span class="preview-number">100%</span>
+        </div>
+        <div class="preview-caption">마지막 업데이트 14:32</div>
+        <div class="preview-eng">Studio JBBJ · BG Dashboard</div>
+      </div>
+    </div>
+
+    <p class="footnote">
+      카드 위에 마우스 올리면 강조됩니다 (실제 앱에선 클릭 → 적용). 윈도우에선 '시스템 기본'이 곧 '맑은 고딕(또는 Segoe UI)' 인데 자세히 보면 한자 호환을 위해 약간 어긋나는 게 보일 거예요.
+    </p>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 섹션 2: 새 글꼴 탭 UI -->
+  <!-- ════════════════════════════════════════ -->
+  <section class="section">
+    <div class="section-num">SECTION 2 — 설정 화면</div>
+    <h2 class="section-title">새 [글꼴] 탭 UI 목업</h2>
+    <p class="section-desc">기존 ‘글꼴 크기 / 글자 색상’ 두 섹션 위에 <b>글꼴 (서체)</b>이 추가되고, 아래에 <b>간격</b> 조절과 <b>숫자 정렬</b> 토글이 새로 들어갑니다. 디자인은 기존 패턴과 통일.</p>
+
+    <div class="settings-mock">
+      <!-- 글꼴 (NEW) -->
+      <div class="settings-block">
+        <div class="settings-section-title">
+          <span class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m3 15 4-8 4 8"/><path d="M4 13h6"/><circle cx="18" cy="12" r="3"/><path d="M21 9v6"/></svg></span>
+          글꼴 (서체)
+          <span class="new-badge">NEW</span>
+        </div>
+
+        <!-- 기본 글꼴 그룹 -->
+        <div class="settings-row" style="align-items: flex-start;">
+          <span class="settings-label" style="padding-top: 6px;">기본 글꼴</span>
+          <div class="chip-group">
+            <span class="chip active">Pretendard</span>
+            <span class="chip">Inter</span>
+            <span class="chip">Noto Sans KR</span>
+            <span class="chip">IBM Plex Sans KR</span>
+            <span class="chip">Spoqa Han Sans Neo</span>
+            <span class="chip">나눔고딕</span>
+            <span class="chip">고운 도담</span>
+            <span class="chip">본명조</span>
+            <span class="chip">시스템 기본</span>
+          </div>
+        </div>
+
+        <!-- 내 글꼴 그룹 (NEW) -->
+        <div class="settings-row" style="align-items: flex-start; margin-top: 10px;">
+          <span class="settings-label" style="padding-top: 6px;">내 글꼴</span>
+          <div class="chip-group">
+            <!-- 추가된 글꼴 예시 -->
+            <span class="chip-with-delete">
+              <span>산돌네오2</span>
+              <button class="chip-delete" title="삭제">×</button>
+            </span>
+            <span class="chip-with-delete">
+              <span>JBBJ 자체 폰트</span>
+              <button class="chip-delete" title="삭제">×</button>
+            </span>
+            <!-- + 추가 버튼 -->
+            <button class="chip chip-add" title="OTF/TTF/WOFF 파일 추가">＋ 글꼴 추가</button>
+          </div>
+        </div>
+        <p class="footnote" style="margin-top: 8px; display: flex; align-items: flex-start; gap: 6px;">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;color:#FDCB6E;flex-shrink:0;margin-top:1px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <span>추가하시는 글꼴의 라이선스는 본인이 확인해주세요. · 추가된 글꼴은 한솔님 PC에만 저장됩니다 (다른 팀원에게는 안 보임).</span>
+        </p>
+      </div>
+
+      <!-- 글꼴 크기 (기존) -->
+      <div class="settings-block">
+        <div class="settings-section-title">
+          <span class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg></span>
+          글꼴 크기
+          <span style="font-size: 10px; color: var(--text-tertiary); margin-left: 4px; font-weight: 400;">(기존)</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">빠른 조절</span>
+          <div class="seg-group">
+            <span class="seg">아주 작게</span>
+            <span class="seg">작게</span>
+            <span class="seg active">보통</span>
+            <span class="seg">크게</span>
+            <span class="seg">아주 크게</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 글자 색상 (기존) -->
+      <div class="settings-block">
+        <div class="settings-section-title">
+          <span class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg></span>
+          글자 색상
+          <span style="font-size: 10px; color: var(--text-tertiary); margin-left: 4px; font-weight: 400;">(기존)</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">프리셋</span>
+          <div class="chip-group">
+            <span class="chip active">테마 기본</span>
+            <span class="chip">고대비</span>
+            <span class="chip">부드러움</span>
+            <span class="chip">단색</span>
+            <span class="chip">사용자 지정</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 간격 (NEW) -->
+      <div class="settings-block">
+        <div class="settings-section-title">
+          <span class="icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="10" height="6" x="7" y="9" rx="2"/><path d="M22 20H2"/><path d="M22 4H2"/></svg></span>
+          간격
+          <span class="new-badge">NEW</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">줄간격</span>
+          <div class="slider-wrap">
+            <input type="range" min="1.2" max="2.0" step="0.05" value="1.55">
+            <span class="slider-value">1.55</span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">자간</span>
+          <div class="slider-wrap">
+            <input type="range" min="-0.05" max="0.1" step="0.005" value="0">
+            <span class="slider-value">0.00</span>
+          </div>
+        </div>
+        <p class="footnote">기본값 1.55 / 0 — 슬라이더 옆에 ‘기본값 복원’ 버튼 (다른 섹션과 동일 패턴)</p>
+      </div>
+
+      <!-- 숫자 정렬 — 토글 제거, 항상 ON으로 자동 적용 (한솔님 결정) -->
+    </div>
+    <p class="footnote" style="margin-top: 12px; max-width: 720px;">
+      ※ 숫자 자릿수 고정(<code style="color: var(--accent-sub); font-size: 10px;">tabular-nums</code>)은 별도 설정 없이 <b style="color: var(--accent-sub);">기본 적용</b>됩니다 — 위젯·표 어디서나 숫자가 일자로 정렬됩니다.
+    </p>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 섹션 3: 효과 비교 -->
+  <!-- ════════════════════════════════════════ -->
+  <section class="section">
+    <div class="section-num">SECTION 3 — 효과 비교</div>
+    <h2 class="section-title">간격·숫자 옵션이 실제로 뭘 바꾸나</h2>
+    <p class="section-desc">왼쪽이 ‘기본/적용 안 함’, 오른쪽이 ‘적용 후’입니다.</p>
+
+    <div class="compare">
+      <!-- 줄간격·자간 -->
+      <div class="compare-cell">
+        <h3>① 줄간격·자간</h3>
+
+        <span class="label-pill pill-before">BEFORE — 줄간격 1.25, 자간 -0.025em</span>
+        <p class="preview-tight">우리 BG 작업의 진척 상황을 한눈에 확인하세요. 오늘 처리할 씬이 12개, 검수 대기 4개, 완료 8개 있습니다. 마감일 D-3까지 남은 작업량을 분배해드립니다.</p>
+
+        <div style="height: 18px"></div>
+
+        <span class="label-pill pill-after">AFTER — 줄간격 1.95, 자간 +0.05em</span>
+        <p class="preview-loose">우리 BG 작업의 진척 상황을 한눈에 확인하세요. 오늘 처리할 씬이 12개, 검수 대기 4개, 완료 8개 있습니다. 마감일 D-3까지 남은 작업량을 분배해드립니다.</p>
+
+        <p class="footnote">긴 메모·댓글·씬 설명 영역에서 가독성 직접 ↑. 한솔님 1순위 동기 ‘가독성’에 가장 큰 효과.</p>
+      </div>
+
+      <!-- 숫자 정렬 -->
+      <div class="compare-cell">
+        <h3>② 숫자 정렬 (Tabular)</h3>
+
+        <span class="label-pill pill-before">BEFORE — 자릿수 폭 들쑥날쑥</span>
+        <div class="num-stack num-default">
+          <span class="num">23.4%</span>
+          <span class="num">8.7%</span>
+          <span class="num">100.0%</span>
+          <span class="num">5.2%</span>
+          <span class="num">76.8%</span>
+        </div>
+
+        <div style="height: 18px"></div>
+
+        <span class="label-pill pill-after">AFTER — 자릿수 일정, 일자로 정렬</span>
+        <div class="num-stack num-tabular">
+          <span class="num">23.4%</span>
+          <span class="num">8.7%</span>
+          <span class="num">100.0%</span>
+          <span class="num">5.2%</span>
+          <span class="num">76.8%</span>
+        </div>
+
+        <p class="footnote">진행률·시간·EP번호 등 우리 앱의 위젯 숫자가 표 형태로 깔끔하게 정렬됩니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 섹션 4: 글꼴 변경시 앱이 어떻게 보이는지 (작은 위젯 시연) -->
+  <!-- ════════════════════════════════════════ -->
+  <section class="section">
+    <div class="section-num">SECTION 4 — 실제 위젯 적용 예시</div>
+    <h2 class="section-title">진짜 위젯 위에 글꼴 적용했을 때</h2>
+    <p class="section-desc">우리 앱의 ‘에피소드 요약 위젯’을 모방한 미니 카드. 같은 위젯이 글꼴 3종에 따라 어떻게 달라지는지.</p>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;">
+      <!-- Mini widget 1: Pretendard -->
+      <div class="font-card font-pretendard" style="cursor: default;">
+        <div class="font-meta">
+          <span class="font-name">Pretendard</span>
+          <span class="font-tag">현재 추천</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
+          <div>
+            <div class="preview-title">EP02</div>
+            <div class="preview-caption">씬 24개 · 마감 5월 8일</div>
+          </div>
+          <div style="font-variant-numeric: tabular-nums; text-align: right;">
+            <div class="preview-number" style="font-size: 22px;">87.5%</div>
+            <div class="preview-caption">진행률</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; font-size: 11px;">
+          <span style="color: var(--color-lo);">LO 18</span>
+          <span style="color: var(--color-done);">완료 14</span>
+          <span style="color: var(--color-review);">검수 3</span>
+          <span style="color: var(--color-png);">PNG 9</span>
+        </div>
+      </div>
+
+      <!-- Mini widget 2: IBM Plex -->
+      <div class="font-card font-ibm" style="cursor: default;">
+        <div class="font-meta">
+          <span class="font-name">IBM Plex Sans KR</span>
+          <span class="font-tag">진중</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
+          <div>
+            <div class="preview-title">EP02</div>
+            <div class="preview-caption">씬 24개 · 마감 5월 8일</div>
+          </div>
+          <div style="font-variant-numeric: tabular-nums; text-align: right;">
+            <div class="preview-number" style="font-size: 22px;">87.5%</div>
+            <div class="preview-caption">진행률</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; font-size: 11px;">
+          <span style="color: var(--color-lo);">LO 18</span>
+          <span style="color: var(--color-done);">완료 14</span>
+          <span style="color: var(--color-review);">검수 3</span>
+          <span style="color: var(--color-png);">PNG 9</span>
+        </div>
+      </div>
+
+      <!-- Mini widget 3: Gowun Dodum -->
+      <div class="font-card font-gowun" style="cursor: default;">
+        <div class="font-meta">
+          <span class="font-name">고운 도담</span>
+          <span class="font-tag">부드러움</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
+          <div>
+            <div class="preview-title">EP02</div>
+            <div class="preview-caption">씬 24개 · 마감 5월 8일</div>
+          </div>
+          <div style="font-variant-numeric: tabular-nums; text-align: right;">
+            <div class="preview-number" style="font-size: 22px;">87.5%</div>
+            <div class="preview-caption">진행률</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; font-size: 11px;">
+          <span style="color: var(--color-lo);">LO 18</span>
+          <span style="color: var(--color-done);">완료 14</span>
+          <span style="color: var(--color-review);">검수 3</span>
+          <span style="color: var(--color-png);">PNG 9</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer style="margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--bg-border); color: var(--text-tertiary); font-size: 11px; display: flex; align-items: center; gap: 8px;">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+    <span>목업 — 실제 앱이 아니라 디자인 미리보기. 한솔님이 좋아하시는 글꼴 / 빼고 싶은 글꼴 / 추가 원하는 분위기를 말씀해주세요.</span>
+  </footer>
+</body>
+</html>
