@@ -2,8 +2,11 @@ import { lazy, Suspense, useState, useEffect } from 'react';
 import { SettingsSidebar, type SettingsTabId } from '@/components/settings/SettingsSidebar';
 // 설정 섹션 lazy 로딩 — 활성 탭 진입 시에만 로드
 const ThemeSection = lazy(() => import('@/components/settings/ThemeSection').then(m => ({ default: m.ThemeSection })));
+// v1.20.0: 글꼴(서체) + 간격
+const FontFamilySection = lazy(() => import('@/components/settings/FontFamilySection').then(m => ({ default: m.FontFamilySection })));
 const FontSizeSection = lazy(() => import('@/components/settings/FontSizeSection').then(m => ({ default: m.FontSizeSection })));
 const FontColorSection = lazy(() => import('@/components/settings/FontColorSection').then(m => ({ default: m.FontColorSection })));
+const SpacingSection = lazy(() => import('@/components/settings/SpacingSection').then(m => ({ default: m.SpacingSection })));
 const SheetsSection = lazy(() => import('@/components/settings/SheetsSection').then(m => ({ default: m.SheetsSection })));
 const GuideSection = lazy(() => import('@/components/settings/GuideSection').then(m => ({ default: m.GuideSection })));
 const StartupSection = lazy(() => import('@/components/settings/StartupSection').then(m => ({ default: m.StartupSection })));
@@ -55,6 +58,8 @@ export function SettingsView() {
       case 'font':
         return (
           <div className="flex flex-col gap-6">
+            {/* v1.20.0: 글꼴(서체) — 큐레이션 9종 + 사용자 추가 */}
+            <FontFamilySection />
             <FontSizeSection
               fontScale={fontScale}
               categoryScales={categoryScales}
@@ -62,6 +67,8 @@ export function SettingsView() {
               onCategoryScalesChange={setCategoryScales}
             />
             <FontColorSection />
+            {/* v1.20.0: 간격 (줄간격 + 자간) */}
+            <SpacingSection />
           </div>
         );
       case 'sheets':

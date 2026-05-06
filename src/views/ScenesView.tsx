@@ -779,6 +779,15 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
               <span className="text-[10px] font-bold leading-none">{revisionCount}</span>
             </span>
           )}
+          {/* v1.20.x: 분리(BG/ACT 단독) 카드 뷰에도 씬 길이 변경 라벨 표시 — UnifiedSceneCard와 동일 패턴 */}
+          {scene.lengthChange && (
+            <span
+              className={`length-symbol ${scene.lengthChange === 'LD' ? 'up' : 'down'}`}
+              title={scene.lengthChange === 'LD' ? 'LD · Long Duration (길이 늘어남)' : 'SD · Short Duration (길이 줄어듦)'}
+            >
+              <LengthIcon kind={scene.lengthChange} />
+            </span>
+          )}
           <span className="bg-bg-primary/80 border border-bg-border/45 text-text-primary px-2.5 py-1 rounded-full text-[12px] font-semibold tabular-nums">
             {pct}%
           </span>

@@ -655,6 +655,19 @@ export interface ElectronAPI {
   onVacationFailed: (cb: (payload: unknown) => void) => () => void;
   onVacationPendingChanged: (cb: (payload: unknown) => void) => () => void;
 
+  // ─── 사용자 폰트 (v1.20.0) ──────────────────────
+  fontAdd: () => Promise<Array<
+    | { id: string; name: string; filename: string; format: 'otf' | 'ttf' | 'woff' | 'woff2'; hasKorean: boolean; addedAt: string }
+    | { error: string }
+  >>;
+  fontAddByPath: (filePaths: string[]) => Promise<Array<
+    | { id: string; name: string; filename: string; format: 'otf' | 'ttf' | 'woff' | 'woff2'; hasKorean: boolean; addedAt: string }
+    | { error: string }
+  >>;
+  fontDelete: (font: { id: string; filename: string }) => Promise<{ ok: boolean; error?: string }>;
+  /** 드래그앤드롭에서 File 객체 → 절대 경로 (Electron 32+ webUtils.getPathForFile) */
+  fontGetPathForFile: (file: File) => string;
+
   // ─── Google Calendar ──────────────────────────────
   gcalIsAuthenticated: () => Promise<boolean>;
   gcalStartAuth: () => Promise<void>;

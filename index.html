@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>B flow</title>
   </head>
-  <body style="margin:0; background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary)); font-family:system-ui,sans-serif;">
+  <!-- v1.20.x: font-family를 inline에서 제거 — index.css의 var(--font-family)가 즉시 반영되도록.
+       이전엔 inline style의 specificity가 높아 글꼴 칩 클릭 시 즉시 업데이트 안 되던 버그(한솔님 보고). -->
+  <body style="margin:0; background: rgb(var(--color-bg-primary)); color: rgb(var(--color-text-primary));">
     <div id="root">
       <!-- React 마운트 전 로딩 표시 — 마운트 성공 시 React가 교체함 -->
       <div style="display:flex; align-items:center; justify-content:center; height:100vh; flex-direction:column; gap:12px;">

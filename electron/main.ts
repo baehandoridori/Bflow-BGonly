@@ -16,6 +16,8 @@ import {
 } from './sheets';
 import { uploadImage as driveUploadImage, setImageUploadUrl } from './drive-image';
 import { uploadImage as storageUploadImage, deleteImage as storageDeleteImage } from './storage';
+// v1.20.0: 사용자 폰트 IPC + bflow-font:// custom protocol
+import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import {
   initVacation,
   isVacationConnected,
@@ -40,7 +42,7 @@ app.commandLine.appendSwitch('js-flags', '--nolazy');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 
-// ─── 이미지 커스텀 프로토콜 등록 (app.ready 전에 호출 필수) ──
+// ─── 이미지 + 폰트 커스텀 프로토콜 등록 (app.ready 전에 호출 필수) ──
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'bflow-img',
@@ -49,6 +51,11 @@ protocol.registerSchemesAsPrivileged([
   {
     scheme: 'drive-img',
     privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
+  // v1.20.0: 사용자 폰트
+  {
+    scheme: 'bflow-font',
+    privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true },
   },
 ]);
 
@@ -2745,6 +2752,10 @@ app.whenReady().then(async () => {
     const fullPath = path.join(getDataPath(), 'images', fileName);
     return net.fetch(pathToFileURL(fullPath).toString());
   });
+
+  // v1.20.0: bflow-font:// 프로토콜 + IPC 핸들러 (사용자 폰트 추가/삭제/로드)
+  registerFontProtocol();
+  registerFontIpcHandlers();
 
   // drive-img:// 프로토콜 핸들러: Google Drive 이미지 프록시
   // uc?export=view URL은 Electron 렌더러에서 403 차단됨 → 메인 프로세스에서 대신 fetch

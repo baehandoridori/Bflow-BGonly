@@ -24,6 +24,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5558"],
       "port": 5558
+    },
+    {
+      "name": "font-mockup",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5559"],
+      "port": 5559
     }
   ]
 }
