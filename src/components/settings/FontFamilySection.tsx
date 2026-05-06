@@ -39,6 +39,11 @@ export function FontFamilySection() {
   const customFontsRef = useRef<CustomFont[]>([]);
   useEffect(() => { customFontsRef.current = customFonts; }, [customFonts]);
 
+  // 코덱스 PR #62 3차 P2: handleDrop이 busy 체크 안 해서 concurrent run 가능 (drop 두 번
+  // 빠르게) → 각 호출이 stale baseline에서 diff 계산 → last save wins → 일부 폰트 silent
+  // drop. busyRef로 동기 lock 추가 (setBusy는 비동기라 useState만으론 race).
+  const busyRef = useRef(false);
+
   // 저장된 설정 로드
   useEffect(() => {
     let cancelled = false;
@@ -189,19 +194,22 @@ export function FontFamilySection() {
       toast.error('Electron API를 사용할 수 없습니다.');
       return;
     }
+    if (busyRef.current) return; // 동기 lock — concurrent run 차단 (3차 P2)
+    busyRef.current = true;
     setBusy(true);
     try {
       const results = await window.electronAPI.fontAdd();
       const added = processAddResults(results);
       if (added.length > 0) {
-        const next = [...customFonts, ...added];
+        const next = [...customFontsRef.current, ...added];
         ensureCustomFontsLoaded(added); // 새로 추가된 것만 inject
         await persistAndApply(fontFamily, next);
       }
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
-  }, [customFonts, fontFamily, persistAndApply, processAddResults]);
+  }, [fontFamily, persistAndApply, processAddResults]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
@@ -211,6 +219,7 @@ export function FontFamilySection() {
       toast.error('Electron API를 사용할 수 없습니다.');
       return;
     }
+    if (busyRef.current) return; // 동기 lock — drop concurrent run 차단 (3차 P2)
     // Electron 32+에선 File.path가 제거됨 → webUtils.getPathForFile 사용 (preload 경유)
     const paths = Array.from(e.dataTransfer.files)
       .map((f) => window.electronAPI!.fontGetPathForFile(f))
@@ -219,37 +228,47 @@ export function FontFamilySection() {
       toast.error('드롭된 파일에서 경로를 읽을 수 없습니다.');
       return;
     }
+    busyRef.current = true;
     setBusy(true);
     try {
       const results = await window.electronAPI.fontAddByPath(paths);
       const added = processAddResults(results);
       if (added.length > 0) {
-        const next = [...customFonts, ...added];
+        const next = [...customFontsRef.current, ...added];
         ensureCustomFontsLoaded(added);
         await persistAndApply(fontFamily, next);
       }
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
-  }, [customFonts, fontFamily, persistAndApply, processAddResults]);
+  }, [fontFamily, persistAndApply, processAddResults]);
 
   const handleDelete = useCallback(async (font: CustomFont) => {
+    if (busyRef.current) return; // 동기 lock — concurrent delete/add 차단 (3차 P2)
     if (!confirm(`"${font.name}" 글꼴을 삭제하시겠습니까?`)) return;
+    if (busyRef.current) return; // confirm 동안 다른 작업 시작 가능 → 재체크
     if (!window.electronAPI?.fontDelete) return;
-    // Codex 6차 P2: IPC 결과 무시하고 항상 제거하면 파일 잠금/권한 실패 시 orphan 파일 발생.
-    // 성공 시에만 로컬 state/preferences에서 제거하고, 실패 시 토스트로 안내 + 재시도 가능.
-    const result = await window.electronAPI.fontDelete({ id: font.id, filename: font.filename });
-    if (!result?.ok) {
-      toast.error(`"${font.name}" 삭제 실패: ${result?.error ?? '알 수 없는 오류'} — 다시 시도해주세요.`);
-      return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      // Codex 6차 P2: IPC 결과 무시하고 항상 제거하면 파일 잠금/권한 실패 시 orphan 파일 발생.
+      const result = await window.electronAPI.fontDelete({ id: font.id, filename: font.filename });
+      if (!result?.ok) {
+        toast.error(`"${font.name}" 삭제 실패: ${result?.error ?? '알 수 없는 오류'} — 다시 시도해주세요.`);
+        return;
+      }
+      const next = customFontsRef.current.filter((f) => f.id !== font.id);
+      // 삭제 중이던 폰트가 현재 적용 중이면 → DEFAULT_FONT_FAMILY로 폴백
+      const fallbackId = fontFamily === font.id ? DEFAULT_FONT_FAMILY : fontFamily;
+      // <head>에서 @font-face 제거
+      document.querySelector(`style[data-font-id="${font.id}"]`)?.remove();
+      await persistAndApply(fallbackId, next);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
     }
-    const next = customFonts.filter((f) => f.id !== font.id);
-    // 삭제 중이던 폰트가 현재 적용 중이면 → DEFAULT_FONT_FAMILY로 폴백
-    const fallbackId = fontFamily === font.id ? DEFAULT_FONT_FAMILY : fontFamily;
-    // <head>에서 @font-face 제거
-    document.querySelector(`style[data-font-id="${font.id}"]`)?.remove();
-    await persistAndApply(fallbackId, next);
-  }, [customFonts, fontFamily, persistAndApply]);
+  }, [fontFamily, persistAndApply]);
 
   if (!hasLoaded) return null;
 
