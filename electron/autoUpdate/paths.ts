@@ -1,0 +1,191 @@
+/**
+ * v1.21.0 자동 업데이트 — 모든 경로 상수 + G드라이브 폴더 추정.
+ * 순수 함수만. fs 사이드 이펙트 X (existsSync 같은 lookup만 허용).
+ *
+ * spec §3 디렉토리 레이아웃:
+ *   %LOCALAPPDATA%\Bflow-BGonly\
+ *     ├ app\       ← 현재 사용 중 BFLOW (win-unpacked 통째로)
+ *     ├ pending\   ← 백그라운드로 받은 새 버전 (종료 시 swap 대기)
+ *     └ backup\    ← 이전 버전 1개 (긴급 롤백용)
+ */
+import { app } from 'electron';
+import { existsSync, statSync } from 'fs';
+import path from 'path';
+
+/** 로컬 본체 루트 — `%LOCALAPPDATA%\Bflow-BGonly\` */
+export function localRoot(): string {
+  // app.getPath('userData') = %APPDATA%\Bflow-BGonly (Roaming) — 사용자 데이터용.
+  // 우리는 LocalAppData를 별도로 사용 — sync 안 됨 + Roaming보다 디스크 빠름.
+  const localAppData = process.env.LOCALAPPDATA
+    || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+  return path.join(localAppData, 'Bflow-BGonly');
+}
+
+export const APP_DIR_NAME = 'app';
+export const PENDING_DIR_NAME = 'pending';
+export const BACKUP_DIR_NAME = 'backup';
+export const READY_MARKER = '.ready';
+
+export function localAppDir(): string { return path.join(localRoot(), APP_DIR_NAME); }
+export function localPendingDir(): string { return path.join(localRoot(), PENDING_DIR_NAME); }
+export function localBackupDir(): string { return path.join(localRoot(), BACKUP_DIR_NAME); }
+export function localReadyMarker(): string { return path.join(localPendingDir(), READY_MARKER); }
+
+/** `app/BFLOW.exe` */
+export function localBflowExe(): string {
+  return path.join(localAppDir(), 'BFLOW.exe');
+}
+
+/**
+ * 설치 완료 마커 — install()이 *완전히* 성공했을 때만 작성.
+ * Codex 5차 P1: 이전엔 BFLOW.exe 존재만으로 "이미 설치됨" 판단 → mid-copy 실패한
+ * partial install이 무한 startup failure trap이 되던 문제. 이 마커가 있어야 진짜
+ * 설치 완료로 간주.
+ */
+export function localInstalledMarker(): string {
+  return path.join(localAppDir(), '.installed');
+}
+
+/**
+ * Swap 직후 첫 실행 검증 마커 — swapper가 swap 완료 후 작성, healthCheck가 해당 실행이
+ * 정상 메인 창 도달하면 삭제.
+ *
+ * Codex 6차 P1: 이전엔 .start-attempt만으로 rollback 트리거 → 강제 종료·시스템 kill 등
+ * 비손상 interruption도 bad build로 오인되어 backup 다운그레이드. 이 마커가 함께 있을
+ * 때 (= swap 직후 첫 실행)만 rollback 활성화.
+ */
+export function localPendingVerificationMarker(): string {
+  return path.join(localRoot(), '.pending-verification');
+}
+
+/**
+ * Drive 가상 마운트 마커 폴더.
+ *  - Drive desktop 가상 마운트(한국어): "공유 드라이브", "내 드라이브"
+ *  - Drive desktop 가상 마운트(영어):   "Shared drives", "My Drive"
+ *  - Legacy desktop sync:               "Google Drive", "GoogleDrive"
+ *
+ * Codex 7차 P1: 이전엔 legacy ~\Google Drive 마커가 누락되어 legacy 사용자는 self-installer
+ * skip 됐음. legacy 마커도 추가.
+ */
+const DRIVE_MOUNT_MARKERS = [
+  '공유 드라이브', '내 드라이브',
+  'Shared drives', 'My Drive',
+  'Google Drive', 'GoogleDrive',
+];
+
+/**
+ * 현재 실행 *진입점* 경로 — portable 빌드 / 일반 빌드 모두 정확히 반환.
+ *
+ * Codex 4차 P1: electron-builder의 `win.target: "portable"`는 실행 시 process.execPath가
+ * %TEMP%/<랜덤UUID>/BFLOW.exe (압축 풀린 임시 폴더)을 가리킴. 원래 launcher path
+ * (사용자가 클릭한 G드라이브의 BFLOW.exe)는 `PORTABLE_EXECUTABLE_FILE` 환경변수에 있음.
+ * 이 변수는 portable 모드 + 부트스트랩 시점에만 set됨 — 그 외(win-unpacked 실행 등)는 undefined.
+ *
+ * 따라서 Drive 감지는 PORTABLE_EXECUTABLE_FILE 우선, 없으면 process.execPath fallback.
+ */
+export function getLaunchExePath(): string {
+  return process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+}
+
+/**
+ * 현재 실행 파일이 Google Drive 경로 하위에 있는지 추정.
+ *
+ * Codex 2차 P0: 이전엔 `guessGoogleDriveRoots()`로 받은 모든 drive root와 startsWith
+ * 비교 → 일반 디스크(C:, D:)도 매치되어 무한 self-installer 루프. 마커 폴더 휴리스틱으로 수정.
+ * Codex 4차 P1: process.execPath만 검사 → portable 모드에서 Temp 경로만 보고 Drive 감지 실패.
+ * getLaunchExePath()로 진짜 launcher 경로 사용.
+ */
+export function isRunningFromGoogleDrive(): boolean {
+  const exe = getLaunchExePath().toLowerCase();
+  return DRIVE_MOUNT_MARKERS.some(
+    (marker) => exe.includes(`${path.sep}${marker}${path.sep}`.toLowerCase())
+                || exe.includes(`/${marker}/`.toLowerCase()),
+  );
+}
+
+/**
+ * G드라이브 desktop 동기화 루트 후보. Drive desktop은 사용자 환경에 따라 다른 drive
+ * letter에 마운트될 수 있어 A~Z 전체를 스캔하되, **Drive 마운트 마커 폴더가 있는 root
+ * 만** 통과시켜 일반 디스크는 제외.
+ *
+ * 레거시 desktop sync 폴더(~\Google Drive)도 후보에 포함 — 거기는 폴더 자체가 마커.
+ */
+export function guessGoogleDriveRoots(): string[] {
+  const candidates: string[] = [];
+  // A~Z 전체 스캔, 단 Drive 마운트 마커 폴더가 있는 root만
+  for (let i = 65; i <= 90; i++) { // 'A' ~ 'Z'
+    const root = `${String.fromCharCode(i)}:\\`;
+    try {
+      if (!existsSync(root) || !statSync(root).isDirectory()) continue;
+    } catch { continue; }
+    const isDriveMount = DRIVE_MOUNT_MARKERS.some((marker) => {
+      try { return existsSync(path.join(root, marker)); } catch { return false; }
+    });
+    if (isDriveMount) candidates.push(root);
+  }
+  // 레거시 데스크톱 sync 폴더 (별도 마커 검사 X — 폴더 자체가 sync 루트)
+  if (process.env.USERPROFILE) {
+    const legacyCandidates = [
+      path.join(process.env.USERPROFILE, 'Google Drive'),
+      path.join(process.env.USERPROFILE, 'GoogleDrive'),
+    ];
+    for (const c of legacyCandidates) {
+      try {
+        if (existsSync(c) && statSync(c).isDirectory()) candidates.push(c);
+      } catch { /* ignore */ }
+    }
+  }
+  return candidates;
+}
+
+/**
+ * 우리 dist가 들어있는 G드라이브 경로 추정. 후보를 스캔해 manifest.json + win-unpacked가
+ * 같이 있는 폴더를 찾아 그 폴더 경로 반환. 없으면 null.
+ *
+ * Studio JBBJ 표준 경로 (DEVLOG/DEPLOYMENT.md §2):
+ *   G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\dist\
+ *
+ * Codex 3차 P1: 영어 OS의 Drive desktop은 "Shared drives" 폴더로 노출되므로 두 prefix
+ * 모두 시도해야 한국어/영어 사용자 모두 자동 업데이트 동작.
+ */
+export function findRemoteDistRoot(): string | null {
+  const COMMON_TAIL = path.join('JBBJ 자료실', '한솔이의 두근두근 실험실', 'Bflow-BGonly', 'dist');
+  // Drive desktop 가상 마운트는 root 안에 "공유 드라이브"/"Shared drives" prefix 있음.
+  // Legacy ~\Google Drive root는 sync root 자체이므로 prefix 없이 COMMON_TAIL만 추가.
+  // Codex 7차 P1: 이전엔 legacy root에도 prefix prepend하던 문제 — null prefix 폴백 추가.
+  const SUFFIXES = [
+    path.join('공유 드라이브', COMMON_TAIL),
+    path.join('Shared drives', COMMON_TAIL),
+    COMMON_TAIL, // legacy: prefix 없음
+  ];
+  const drives = guessGoogleDriveRoots();
+  for (const drive of drives) {
+    for (const suffix of SUFFIXES) {
+      const candidate = path.join(drive, suffix);
+      if (existsSync(path.join(candidate, 'manifest.json'))
+          && existsSync(path.join(candidate, 'win-unpacked', 'BFLOW.exe'))) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+/** G드라이브 dist의 win-unpacked 경로 (없으면 null) */
+export function findRemoteWinUnpacked(): string | null {
+  const root = findRemoteDistRoot();
+  return root ? path.join(root, 'win-unpacked') : null;
+}
+
+/** G드라이브 manifest.json 경로 (없으면 null) */
+export function findRemoteManifest(): string | null {
+  const root = findRemoteDistRoot();
+  if (!root) return null;
+  const m = path.join(root, 'manifest.json');
+  return existsSync(m) ? m : null;
+}
+
+/** 현재 실행 중인 BFLOW의 자기 버전 (package.json) */
+export function getOwnVersion(): string {
+  return app.getVersion();
+}

@@ -2,7 +2,7 @@
 
 > **프로젝트**: Studio JBBJ 프로덕션 진행 현황 대시보드 (BG + 액팅)
 > **타입**: Electron + React + TypeScript 독립 앱
-> **현재 상태**: Phase 0-1~0-3 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, Phase 8-0~8-1, 8-3~8-5 완료, Phase 9 M-0~M-5 완료, M-6 준비 완료 (빌드/배포만 남음). v1.18.0 — 리비전 전면 재설계(알림 통합·댓글 통합·컴포지터 역할) 완료.
+> **현재 상태**: Phase 0-1~0-3 완료, Phase 1~2 완료, Phase 4-1~4-3 완료, Phase 6 Step 1~4 완료, Phase 7-1~7-5 완료, Phase 8-0~8-1, 8-3~8-5 완료, Phase 9 M-0~M-5 완료, M-6 준비 완료 (빌드/배포만 남음)
 > **로드맵**: `ROADMAP.md` 참조 | **세션 가이드**: `CONTEXT.md` 참조
 >
 > **이력**: 원래 BG(배경) 전용 현황판(`Bflow-BGonly`)으로 시작했으나, 액팅까지 포함한 통합 앱이 되면서 정식 명칭 **B flow**로 전환됨. 레포 이름(`Bflow-BGonly`)과 `app.name`은 기존 사용자 데이터 경로(`%APPDATA%\Bflow-BGonly\`) 호환을 위해 유지.
@@ -97,9 +97,11 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 - **`CONTEXT.md`** — 세션 컨텍스트 가이드 (아키텍처, 파일 맵, 알려진 이슈, 스킬 활용법)
 - **`ROADMAP.md`** — 전체 개발 로드맵 (Phase 0~9, 기능별 상세 스펙)
+- **`DEVLOG/DEPLOYMENT.md`** — 배포 가이드 (배포 목적/경로/방식, 한솔 워크플로우, 자동 업데이트 시스템)
 - `tasks/lessons.md` — 과거 실수/패턴 기록 (세션 시작 시 검토)
 - `DEVLOG/supabase-migration-plan.md` — Supabase 마이그레이션 상세 계획서
 - `DEVLOG/supabase-init.sql` — Supabase DB 스키마 초기화 SQL
+- `DEVLOG/migrations/` — 라이브 DB 적용된 SQL 마이그레이션 기록
 - `BG_DASHBOARD_PLAN.md` — 초기 구현 계획서
 - Bflow 원본 (`/home/user/Bflow`) — 패턴 참고만 (읽기 전용, 수정 금지)
 
