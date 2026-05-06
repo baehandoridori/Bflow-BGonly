@@ -15,6 +15,7 @@ import {
   localAppDir,
   localPendingDir,
   localBflowExe,
+  localInstalledMarker,
 } from './paths';
 import { copyDirMirror } from './copy';
 
@@ -35,12 +36,26 @@ export async function runFirstInstallIfNeeded(): Promise<InstallResult> {
   }
 
   const localExe = localBflowExe();
-  const alreadyInstalled = existsSync(localExe);
+  // Codex 5차 P1: existsSync(BFLOW.exe)만으로 "이미 설치됨" 판단하면 mid-copy 실패한
+  // partial install이 무한 startup failure trap이 됨. .installed 마커가 *함께* 있을 때만
+  // 진짜 설치 완료로 간주. partial install 감지 시 깨끗이 정리 후 새 설치 흐름 진입.
+  const installedMarker = localInstalledMarker();
+  const fullyInstalled = existsSync(localExe) && existsSync(installedMarker);
+  const partialInstall = existsSync(localExe) && !existsSync(installedMarker);
 
-  if (alreadyInstalled) {
+  if (fullyInstalled) {
     // spec §4.4: 옛 바로가기 폴백. 로컬 본체로 spawn하고 자기는 종료.
     relaunchAndExit(localExe);
     return { exited: true };
+  }
+
+  if (partialInstall) {
+    console.warn('[installer] partial install 감지 (BFLOW.exe 있으나 .installed 마커 없음) → 정리 후 재설치');
+    try {
+      await fsp.rm(localAppDir(), { recursive: true, force: true });
+    } catch (err) {
+      console.warn('[installer] partial install 정리 실패 (무시, install이 mirror로 덮어씀):', err);
+    }
   }
 
   // 첫 설치 dialog (BrowserWindow 없이 standalone modal — 첫 실행이라 창 없음)
@@ -97,7 +112,15 @@ async function install(): Promise<void> {
   await fsp.mkdir(localAppDir(), { recursive: true });
   await copyDirMirror(remote, localAppDir());
 
-  // 바로가기 자동 생성 (실패해도 설치는 성공으로 간주)
+  // Codex 5차 P1: 모든 파일 mirror copy 완료 후에만 .installed 마커 작성. mid-copy 실패
+  // 시 throw로 빠져나가서 마커는 안 만들어짐 → 다음 실행 시 partial install로 인식.
+  await fsp.writeFile(
+    localInstalledMarker(),
+    new Date().toISOString() + '\n',
+    'utf-8',
+  );
+
+  // 바로가기 자동 생성 (실패해도 설치는 성공으로 간주 — 마커는 위에서 이미 작성)
   await createDesktopShortcut();
   await createStartMenuShortcut();
 }

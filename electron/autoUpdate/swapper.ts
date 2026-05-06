@@ -18,6 +18,7 @@ import { promises as fsp, existsSync, renameSync } from 'fs';
 import path from 'path';
 import {
   localAppDir, localPendingDir, localBackupDir, localReadyMarker,
+  localInstalledMarker,
 } from './paths';
 
 export async function hasPending(): Promise<boolean> {
@@ -75,6 +76,15 @@ export async function swapIfPending(): Promise<SwapResult> {
     const stale = path.join(app_, '.ready');
     if (existsSync(stale)) await fsp.unlink(stale);
   } catch { /* 무시 */ }
+
+  // 5. .installed 마커 작성 — swap된 새 app/도 정상 설치 상태로 표시.
+  //    이게 없으면 다음 실행 시 installer.ts가 partial install로 잘못 감지하고 G드라이브
+  //    click 시 정리·재설치 흐름 진입. 마커는 pending에서는 안 만들었으니 swap 후 명시 작성.
+  try {
+    await fsp.writeFile(localInstalledMarker(), new Date().toISOString() + '\n', 'utf-8');
+  } catch (err) {
+    console.warn('[swapper] .installed 마커 작성 실패 (무시 — 다음 실행에서 재설치 트리거 가능):', err);
+  }
 
   return { ok: true };
 }

@@ -37,6 +37,16 @@ export function localBflowExe(): string {
 }
 
 /**
+ * 설치 완료 마커 — install()이 *완전히* 성공했을 때만 작성.
+ * Codex 5차 P1: 이전엔 BFLOW.exe 존재만으로 "이미 설치됨" 판단 → mid-copy 실패한
+ * partial install이 무한 startup failure trap이 되던 문제. 이 마커가 있어야 진짜
+ * 설치 완료로 간주.
+ */
+export function localInstalledMarker(): string {
+  return path.join(localAppDir(), '.installed');
+}
+
+/**
  * Drive desktop 가상 마운트의 표준 마커 폴더 — Drive 마운트 root에는 항상 이 중 하나가 있음.
  *  - 한국어 로케일: "공유 드라이브", "내 드라이브"
  *  - 영어 로케일:   "Shared drives", "My Drive"
