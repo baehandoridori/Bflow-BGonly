@@ -1,6 +1,6 @@
 {
   "name": "bflow",
-  "version": "1.21.0",
+  "version": "1.21.1",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -60,10 +60,7 @@
       "package.json"
     ],
     "win": {
-      "target": "portable"
-    },
-    "portable": {
-      "artifactName": "BFLOW.exe"
+      "target": "dir"
     }
   },
   "devDependencies": {
