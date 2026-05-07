@@ -109,6 +109,23 @@ export default function App() {
     return () => { cleanup?.(); };
   }, []);
 
+  // v1.22.1: 자동 업데이트 다운로드 완료 알림 → "지금 재시작" 버튼 토스트.
+  // 사용자가 클릭 시 main이 app.relaunch + app.quit → before-quit hook의 swap 진행 →
+  // Electron이 새 BFLOW.exe로 자동 재시작 (1~2초 깜빡임).
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onUpdateReady?.((version) => {
+      sonnerToast.success(`새 버전 v${version} 사용 가능`, {
+        description: '지금 재시작하면 즉시 적용됩니다',
+        duration: Infinity,  // 사용자가 직접 닫을 때까지
+        action: {
+          label: '지금 재시작',
+          onClick: () => { window.electronAPI?.applyUpdateNow?.(); },
+        },
+      });
+    });
+    return () => { cleanup?.(); };
+  }, []);
+
   // currentUser 변경 시 메인 프로세스에 동기화 (활동 기록 자동 user_id/user_name 사용)
   useEffect(() => {
     window.electronAPI?.authSetCurrentUser?.(

@@ -433,6 +433,9 @@ export interface ElectronAPI {
   onSheetChanged: (callback: (delta?: SheetDelta) => void) => () => void;
   onRetryNotify?: (callback: (message: string) => void) => () => void;
   onSavingBeforeQuit?: (callback: (pendingCount: number) => void) => () => void;
+  // v1.22.1: 자동 업데이트 알림
+  onUpdateReady?: (callback: (version: string) => void) => () => void;
+  applyUpdateNow?: () => Promise<void>;
   // 네이티브 알림
   showNativeNotification?: (title: string, body: string) => Promise<void>;
   // 이미지 파일 저장/삭제 (하이브리드 이미지 스토리지)
