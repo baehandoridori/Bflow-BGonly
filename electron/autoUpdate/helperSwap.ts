@@ -137,7 +137,9 @@ try {
 Write-SwapLog "waiting for parent pid=${myPid}"
 try {
   $p = Get-Process -Id ${myPid} -ErrorAction SilentlyContinue
-  if ($p) { $p.WaitForExit(30000) | Out-Null }
+  # v1.22.7: 30s → 60s. slow shutdown(supabase realtime cleanup, watchCleanup 등 비동기
+  # chain 수십 초 가능)에서 30s 부족 → helper가 EBUSY swap 진행. 60s 안전 마진.
+  if ($p) { $p.WaitForExit(60000) | Out-Null }
 } catch {}
 
 # 다른 BFLOW 인스턴스도 모두 죽기 대기 (최대 15초)
