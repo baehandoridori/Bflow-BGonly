@@ -112,3 +112,13 @@ test('version center is always reachable and can refresh update state', async ()
   assert.match(types, /checkForUpdates\?: \(\) => Promise<UpdateInfo \| null>/);
   assert.match(main, /update:check-now/);
 });
+
+test('version center only checks updates from the refresh button', async () => {
+  const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
+
+  assert.match(modal, /onClick=\{handleRefresh\}/);
+  assert.doesNotMatch(
+    modal,
+    /useEffect\(\(\) => \{[\s\S]*void handleRefresh\(\);[\s\S]*\}, \[handleRefresh, updateCenterOpen, updateInfo\]\);/,
+  );
+});

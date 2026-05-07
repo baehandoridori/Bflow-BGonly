@@ -4,7 +4,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import type { UpdateInfo } from '@/types';
 
-function createFallbackUpdateInfo(message = '업데이트 상태를 아직 확인하지 않았습니다.'): UpdateInfo {
+function createFallbackUpdateInfo(message = '새로고침을 누르면 업데이트 상태를 확인합니다.'): UpdateInfo {
   return {
     status: 'up-to-date',
     currentVersion: __APP_VERSION__,
@@ -54,9 +54,11 @@ export function UpdateCenterModal() {
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const refreshInFlightRef = useRef(false);
 
   const handleRefresh = useCallback(async () => {
-    if (isRefreshing) return;
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
     setIsRefreshing(true);
     setRefreshError(null);
     try {
@@ -71,9 +73,10 @@ export function UpdateCenterModal() {
         status: 'failed',
       });
     } finally {
+      refreshInFlightRef.current = false;
       setIsRefreshing(false);
     }
-  }, [isRefreshing, setUpdateInfo]);
+  }, [setUpdateInfo]);
 
   useEffect(() => {
     if (!updateCenterOpen) return;
@@ -123,14 +126,10 @@ export function UpdateCenterModal() {
     };
   }, [updateCenterOpen, setUpdateCenterOpen]);
 
-  useEffect(() => {
-    if (!updateCenterOpen || updateInfo) return;
-    void handleRefresh();
-  }, [handleRefresh, updateCenterOpen, updateInfo]);
-
   if (!updateCenterOpen) return null;
 
   const displayInfo = updateInfo ?? createFallbackUpdateInfo();
+  const hasCheckedUpdate = updateInfo != null;
   const hasRemoteUpdate = displayInfo.latestVersion !== displayInfo.currentVersion
     && displayInfo.status !== 'suppressed'
     && displayInfo.status !== 'up-to-date';
@@ -145,30 +144,34 @@ export function UpdateCenterModal() {
     : null;
   const statusText = isRefreshing
     ? '확인 중'
-    : canApply
-      ? '즉시 적용 가능'
-      : isApplying
-        ? '적용 중'
-        : isPreparing
-          ? '준비 중'
-          : isFailed
-            ? '준비 실패'
-            : isSuppressed
-              ? '자동 중단'
-              : '최신 상태';
+    : !hasCheckedUpdate
+      ? '확인 대기'
+      : canApply
+        ? '즉시 적용 가능'
+        : isApplying
+          ? '적용 중'
+          : isPreparing
+            ? '준비 중'
+            : isFailed
+              ? '준비 실패'
+              : isSuppressed
+                ? '자동 중단'
+                : '최신 상태';
   const latestLabel = hasRemoteUpdate ? '준비된 최신 버전' : '업데이트 상태';
   const statusDescription = isRefreshing
     ? 'G드라이브 배포 정보를 다시 확인하고 있습니다.'
-    : canApply
-      ? '설치 파일이 로컬에 준비되었습니다. 적용하면 별도 진행 창이 뜬 뒤 새 버전으로 다시 열립니다.'
-      : isApplying
-        ? '업데이트 설치 창을 여는 중입니다. 앱이 잠시 닫혀도 정상 진행 중입니다.'
-        : displayInfo.message
-          ?? (isPreparing
-            ? '새 버전 설치 파일을 로컬로 준비하고 있습니다. 준비되면 여기서 바로 적용할 수 있습니다.'
-            : isFailed || isSuppressed
-              ? '자동 업데이트 상태를 확인한 뒤 필요하면 정식 설치 파일로 갱신합니다.'
-              : '현재 앱이 최신 상태입니다.');
+    : !hasCheckedUpdate
+      ? '새로고침을 누를 때만 G드라이브 배포 정보를 확인합니다.'
+      : canApply
+        ? '설치 파일이 로컬에 준비되었습니다. 적용하면 별도 진행 창이 뜬 뒤 새 버전으로 다시 열립니다.'
+        : isApplying
+          ? '업데이트 설치 창을 여는 중입니다. 앱이 잠시 닫혀도 정상 진행 중입니다.'
+          : displayInfo.message
+            ?? (isPreparing
+              ? '새 버전 설치 파일을 로컬로 준비하고 있습니다. 준비되면 여기서 바로 적용할 수 있습니다.'
+              : isFailed || isSuppressed
+                ? '자동 업데이트 상태를 확인한 뒤 필요하면 정식 설치 파일로 갱신합니다.'
+                : '현재 앱이 최신 상태입니다.');
   const notes = displayInfo.releaseNotes.length > 0
     ? displayInfo.releaseNotes
     : [{
