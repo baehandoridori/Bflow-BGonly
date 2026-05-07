@@ -1,6 +1,6 @@
 {
   "name": "bflow",
-  "version": "1.21.3",
+  "version": "1.22.0",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -61,7 +61,22 @@
       "package.json"
     ],
     "win": {
-      "target": "dir"
+      "target": [
+        "nsis",
+        "dir"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "B flow",
+      "menuCategory": false,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "artifactName": "BFLOW-Setup.${ext}"
     }
   },
   "devDependencies": {

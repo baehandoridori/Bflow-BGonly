@@ -2,34 +2,67 @@
  * v1.21.0 자동 업데이트 — 모든 경로 상수 + G드라이브 폴더 추정.
  * 순수 함수만. fs 사이드 이펙트 X (existsSync 같은 lookup만 허용).
  *
- * spec §3 디렉토리 레이아웃:
- *   %LOCALAPPDATA%\Bflow-BGonly\
- *     ├ app\       ← 현재 사용 중 BFLOW (win-unpacked 통째로)
- *     ├ pending\   ← 백그라운드로 받은 새 버전 (종료 시 swap 대기)
- *     └ backup\    ← 이전 버전 1개 (긴급 롤백용)
+ * v1.22.0: NSIS 설치 도입 → process.execPath 기준 동적 경로로 전환. NSIS 설치
+ * (`%LOCALAPPDATA%\Programs\BFLOW\`)와 기존 v1.21.x self-installer 설치
+ * (`%LOCALAPPDATA%\Bflow-BGonly\app\`) 모두 자동 인식.
+ *
+ * 디렉토리 레이아웃 (실행 위치에 따라 자동):
+ *   NSIS 설치:
+ *     %LOCALAPPDATA%\Programs\BFLOW\          ← localAppDir (실행 중)
+ *     %LOCALAPPDATA%\Programs\BFLOW-pending\  ← localPendingDir
+ *     %LOCALAPPDATA%\Programs\BFLOW-backup\   ← localBackupDir
+ *     %LOCALAPPDATA%\Bflow-BGonly\            ← localRoot (마커 전용)
+ *
+ *   v1.21.x self-installer 설치:
+ *     %LOCALAPPDATA%\Bflow-BGonly\app\         ← localAppDir
+ *     %LOCALAPPDATA%\Bflow-BGonly\app-pending\ ← localPendingDir
+ *     %LOCALAPPDATA%\Bflow-BGonly\app-backup\  ← localBackupDir
+ *     %LOCALAPPDATA%\Bflow-BGonly\            ← localRoot
+ *
+ * (개발 모드: process.execPath = electron.exe → 안전한 fallback 경로 사용)
  */
 import { app } from 'electron';
 import { existsSync, statSync } from 'fs';
 import path from 'path';
 
-/** 로컬 본체 루트 — `%LOCALAPPDATA%\Bflow-BGonly\` */
+/**
+ * 마커 파일들이 들어가는 root — 항상 `%LOCALAPPDATA%\Bflow-BGonly\`.
+ * 설치 위치(NSIS vs self-installer)와 무관하게 일관되게 마커를 한 곳에 모으기 위해 고정.
+ */
 export function localRoot(): string {
-  // app.getPath('userData') = %APPDATA%\Bflow-BGonly (Roaming) — 사용자 데이터용.
-  // 우리는 LocalAppData를 별도로 사용 — sync 안 됨 + Roaming보다 디스크 빠름.
   const localAppData = process.env.LOCALAPPDATA
     || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
   return path.join(localAppData, 'Bflow-BGonly');
 }
 
+/**
+ * 현재 실행 중인 BFLOW.exe의 폴더 — swap 대상.
+ * - NSIS 설치: `%LOCALAPPDATA%\Programs\BFLOW\`
+ * - v1.21.x self-installer: `%LOCALAPPDATA%\Bflow-BGonly\app\`
+ * - 개발 모드(process.execPath = electron.exe): 호환을 위해 v1.21.x 기본 경로 fallback
+ * - G드라이브 직접 실행: G드라이브 폴더 자체를 swap target으로 잡으면 안 되므로
+ *   v1.21.x self-installer 기본 경로 fallback (옛 호환성). swap은 그 dir을 대상으로
+ *   하고, BFLOW.exe는 G드라이브에서 실행 중이라 swap 시 영향 없음.
+ */
+export function localAppDir(): string {
+  if (!app.isPackaged) {
+    return path.join(localRoot(), 'app');  // dev fallback
+  }
+  if (isRunningFromGoogleDrive()) {
+    return path.join(localRoot(), 'app');  // G드라이브 직접 실행 — fallback
+  }
+  return path.dirname(process.execPath);
+}
+
+/** swap 대상 폴더의 형제 — pending/backup도 같은 부모 아래 형제로 둬서 atomic rename 가능. */
+export function localPendingDir(): string { return localAppDir() + '-pending'; }
+export function localBackupDir(): string { return localAppDir() + '-backup'; }
+export function localReadyMarker(): string { return path.join(localPendingDir(), '.ready'); }
+
 export const APP_DIR_NAME = 'app';
 export const PENDING_DIR_NAME = 'pending';
 export const BACKUP_DIR_NAME = 'backup';
 export const READY_MARKER = '.ready';
-
-export function localAppDir(): string { return path.join(localRoot(), APP_DIR_NAME); }
-export function localPendingDir(): string { return path.join(localRoot(), PENDING_DIR_NAME); }
-export function localBackupDir(): string { return path.join(localRoot(), BACKUP_DIR_NAME); }
-export function localReadyMarker(): string { return path.join(localPendingDir(), READY_MARKER); }
 
 /** `app/BFLOW.exe` */
 export function localBflowExe(): string {
