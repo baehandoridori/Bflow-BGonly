@@ -49,8 +49,6 @@ import '@fontsource/noto-serif-kr/latin-400.css';
 import '@fontsource/noto-serif-kr/latin-500.css';
 import '@fontsource/noto-serif-kr/latin-700.css';
 
-import 'spoqa-han-sans/css/SpoqaHanSansNeo.css';
-
 import './index.css';
 import './styles/path-link.css';
 import './styles/activity-widget.css';
