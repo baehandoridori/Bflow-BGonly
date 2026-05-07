@@ -47,6 +47,18 @@ export function localInstalledMarker(): string {
 }
 
 /**
+ * Self-heal 시도 실패 마커 (v1.21.3). fullyInstalled 분기에서 desktop/startMenu 바로가기가
+ * 모두 부재해 self-heal을 시도했으나 둘 다 실패한 경우 작성. 다음 실행부터 self-heal을
+ * skip해 매 실행마다 동일 dialog 띄우는 annoyance 방지.
+ *
+ * 사용자가 수동으로 .lnk를 만들면 ensureShortcutsExist의 existsSync 검사가 즉시 noop이
+ * 되므로 마커가 남아있어도 영향 없음.
+ */
+export function localSelfHealFailedMarker(): string {
+  return path.join(localRoot(), '.shortcut-self-heal-failed');
+}
+
+/**
  * Swap 직후 첫 실행 검증 마커 — swapper가 swap 완료 후 작성, healthCheck가 해당 실행이
  * 정상 메인 창 도달하면 삭제.
  *
