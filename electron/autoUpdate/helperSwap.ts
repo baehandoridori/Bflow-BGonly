@@ -180,22 +180,22 @@ function Move-DirRobust([string]$src, [string]$dst, [string]$stepName) {
   for ($i = 0; $i -lt $maxRetries; $i++) {
     try {
       Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
-      Write-SwapLog "$stepName: rename try $($i+1) OK"
+      Write-SwapLog "${stepName}: rename try $($i+1) OK"
       return $true
     } catch {
-      Write-SwapLog "$stepName: rename try $($i+1) 실패 — $($_.Exception.Message)"
+      Write-SwapLog "${stepName}: rename try $($i+1) 실패 — $($_.Exception.Message)"
       if ($i -lt ($maxRetries - 1)) { Start-Sleep -Milliseconds 500 }
     }
   }
   # rename 모두 실패 → copy fallback (느리지만 락에 robust)
-  Write-SwapLog "$stepName: copy fallback 시작"
+  Write-SwapLog "${stepName}: copy fallback 시작"
   try {
     Copy-Item -Path $src -Destination $dst -Recurse -Force -ErrorAction Stop
     Remove-Item -Path $src -Recurse -Force -ErrorAction Stop
-    Write-SwapLog "$stepName: copy fallback OK"
+    Write-SwapLog "${stepName}: copy fallback OK"
     return $true
   } catch {
-    Write-SwapLog "$stepName: copy fallback 실패 — $($_.Exception.Message)"
+    Write-SwapLog "${stepName}: copy fallback 실패 — $($_.Exception.Message)"
     return $false
   }
 }
@@ -341,7 +341,10 @@ if ($PSCommandPath) {
   try {
     const tempDir = os.tmpdir();
     const helperPs1 = path.join(tempDir, `bflow-helper-${process.pid}-${Date.now()}.ps1`);
-    writeFileSync(helperPs1, psScript, 'utf-8');
+    // v1.22.8: UTF-8 BOM 추가. PowerShell 5.1 + 일부 환경에서 BOM 없는 UTF-8을 ANSI로
+    // 해석 → script 안의 한글이 깨져 syntax 에러. BOM(﻿)을 prepend하면 PowerShell이
+    // UTF-8로 명시 인식.
+    writeFileSync(helperPs1, '﻿' + psScript, 'utf-8');
     earlyLog(`helper .ps1 written to ${helperPs1}`);
 
     // Codex 2차 P1: -File 모드는 execution policy 영향. Restricted/AllSigned 환경에서
