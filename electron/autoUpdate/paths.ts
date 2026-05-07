@@ -92,6 +92,25 @@ export function localSelfHealFailedMarker(): string {
 }
 
 /**
+ * Swap 시도 마커 (v1.22.3) — swapper가 swap 진입 직후 작성, 정상 종료·복구 양쪽 모두에서
+ * 정리. .ready만으로는 swap 실제 시도 여부를 판별 못 함(crash·kill·OS restart 시 .ready가
+ * 다운로드 직후 남음 → false positive). 시작 시 .ready + .swap-attempted 둘 다 있을 때만
+ * 진짜 swap 실패로 간주.
+ */
+export function localSwapAttemptedMarker(): string {
+  return path.join(localRoot(), '.swap-attempted');
+}
+
+/**
+ * Swap 실패 알림 후 자동 재시도 영구 중단 마커 (v1.22.3) — content는 own version. 같은
+ * version에선 자동업데이트 cycle skip(checker가 검사)하고, 사용자가 NSIS Setup 등으로
+ * 다른 version 설치 시 own이 갱신 → marker version과 다르면 자동 정리(자동업데이트 재개).
+ */
+export function localSwapSuppressedMarker(): string {
+  return path.join(localRoot(), '.swap-suppressed');
+}
+
+/**
  * Swap 직후 첫 실행 검증 마커 — swapper가 swap 완료 후 작성, healthCheck가 해당 실행이
  * 정상 메인 창 도달하면 삭제.
  *

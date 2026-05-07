@@ -2762,6 +2762,74 @@ if (!gotTheLock) {
   watchDeepLinkFile();
 }
 
+/**
+ * v1.22.3 — 시작 시 swap 실패 흔적이 남았는지 검사 → 1회 안내 dialog + 자동 재시도 중단.
+ *
+ * Codex 1차 P2 fix:
+ * 1) .ready만으론 swap 실제 시도 여부 판별 불가(crash·kill로 종료 시점에도 .ready가 남음
+ *    → false positive로 정상 pending payload 삭제). swapper가 진입 시 `.swap-attempted`를
+ *    함께 작성/정상 종료 시 정리하므로, 둘 다 있어야 진짜 swap 실패로 간주.
+ * 2) pending 정리만으론 자동 재시도 못 막음(다음 세션에 checker가 또 fetch → .ready 다시
+ *    작성 → 종료 시 또 swap 시도). `.swap-suppressed` (content = own version) 마커로
+ *    영구 suppression. 사용자가 NSIS Setup 등으로 다른 version 설치 시 own 갱신 → marker
+ *    version과 다르면 자동 정리되어 자동업데이트 재개.
+ */
+async function notifyAndCleanupOnSwapFailure(): Promise<void> {
+  try {
+    const path = await import('path');
+    const { existsSync, promises: fsp } = await import('fs');
+    const {
+      localReadyMarker, localPendingDir, localRoot,
+      localSwapAttemptedMarker, localSwapSuppressedMarker,
+    } = await import('./autoUpdate/paths');
+
+    // P2 #1: .ready + .swap-attempted 둘 다 있어야 진짜 swap 실패. 둘 중 하나만 있으면
+    // crash/kill 등으로 unclean exit한 케이스 — 자동업데이트 cycle이 알아서 처리.
+    if (!existsSync(localReadyMarker()) || !existsSync(localSwapAttemptedMarker())) return;
+
+    await dialog.showMessageBox({
+      type: 'warning',
+      title: 'B flow — 자동 업데이트 적용 실패',
+      message: '이전에 받은 새 버전을 적용하지 못했습니다',
+      detail:
+        '백그라운드에서 받아둔 새 버전을 종료 시 적용하려 했지만 실패했습니다.\n\n'
+        + 'G드라이브 dist 폴더의 BFLOW-Setup.exe를 다시 실행하면 최신 버전으로 갱신됩니다.\n\n'
+        + '문제 진단 로그:\n' + path.join(localRoot(), 'swap.log'),
+      buttons: ['확인'],
+    });
+
+    // P2 #2: suppression marker 작성 — checker가 own version과 같으면 fetch skip → 자동
+    // 재시도 영구 중단. 사용자가 NSIS Setup으로 다른 version 설치하면 own 갱신 → marker
+    // version과 다르면 marker 자동 정리하여 자동업데이트 재개.
+    try {
+      await fsp.writeFile(localSwapSuppressedMarker(), app.getVersion(), 'utf-8');
+    } catch (err) {
+      console.warn('[main] suppression marker 작성 실패 (무시):', err);
+    }
+
+    // pending + .swap-attempted 정리. .ready는 pending 안에 있어서 같이 사라짐.
+    //
+    // Codex 2차 P2: pending 정리 실패(EBUSY/EPERM 등)에도 .swap-attempted를 정리하면 다음
+    // 시작 시 .ready만 남아 dialog 트리거 조건(.ready + .swap-attempted) 안 맞아 silent
+    // 무한 retry. pending 정리 성공 시에만 .swap-attempted 정리하여 다음에도 dialog 표시.
+    let pendingCleaned = false;
+    try {
+      await fsp.rm(localPendingDir(), { recursive: true, force: true });
+      pendingCleaned = !existsSync(localPendingDir());
+    } catch (err) {
+      console.warn('[main] pending 정리 실패 (무시 — .swap-attempted 유지하여 다음 시작 시 또 알림):', err);
+    }
+    if (pendingCleaned) {
+      try {
+        await fsp.unlink(localSwapAttemptedMarker());
+      } catch { /* 무시 */ }
+    }
+  } catch (err) {
+    // 안내 자체에 문제가 있어도 부팅 막지 않음
+    console.warn('[main] swap 실패 안내 처리 실패 (무시):', err);
+  }
+}
+
 // macOS: open-url 이벤트
 app.on('open-url', (event, url) => {
   event.preventDefault();
@@ -2784,6 +2852,13 @@ app.whenReady().then(async () => {
   //   이전 시작이 메인 창까지 못 갔으면(.start-attempt 마커 잔존) backup → app 롤백.
   //   여기서 작성한 새 마커는 mainWindow did-finish-load 시점에 markStartSucceeded()가 삭제.
   await checkLastStartAndRollback();
+
+  // ★ v1.22.3 swap 실패 감지:
+  //   pending\.ready 마커가 시작 시점에 그대로 남아있으면 = 직전 종료 시 swap 시도가
+  //   실패했고 사용자는 옛 버전에 갇힌 상태. 매 시작마다 자동 재시도하기보다 한 번만
+  //   사용자에게 명시 안내(BFLOW-Setup.exe 권장 + swap.log 경로) + pending 정리.
+  //   사용자가 NSIS Setup으로 해결하면 자연스럽게 끝, 그 전엔 자동 시도 중단.
+  await notifyAndCleanupOnSwapFailure();
 
   // ★ v1.20.x perf (gifted-darwin-99908d 964241d 포트):
   //   사용자에게 즉시 "켜졌다" 피드백을 주려면 스플래시를 가장 먼저 띄워야 함.
