@@ -86,7 +86,7 @@ if (Test-Path $lockPath) {
     $oldContent = (Get-Content $lockPath -Raw -ErrorAction SilentlyContinue)
     if ($oldContent) { $oldContent = $oldContent.Trim() }
     # format: "PID|StartTimeTicks"
-    if ($oldContent -match '^(\d+)\|(\d+)$') {
+    if ($oldContent -match '^([0-9]+)[|]([0-9]+)$') {
       $oldPid = [int]$Matches[1]
       $oldStartTicks = [long]$Matches[2]
       $oldProc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
@@ -180,22 +180,22 @@ function Move-DirRobust([string]$src, [string]$dst, [string]$stepName) {
   for ($i = 0; $i -lt $maxRetries; $i++) {
     try {
       Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
-      Write-SwapLog "${stepName}: rename try $($i+1) OK"
+      Write-SwapLog "$($stepName): rename try $($i+1) OK"
       return $true
     } catch {
-      Write-SwapLog "${stepName}: rename try $($i+1) 실패 — $($_.Exception.Message)"
+      Write-SwapLog "$($stepName): rename try $($i+1) 실패 — $($_.Exception.Message)"
       if ($i -lt ($maxRetries - 1)) { Start-Sleep -Milliseconds 500 }
     }
   }
   # rename 모두 실패 → copy fallback (느리지만 락에 robust)
-  Write-SwapLog "${stepName}: copy fallback 시작"
+  Write-SwapLog "$($stepName): copy fallback 시작"
   try {
     Copy-Item -Path $src -Destination $dst -Recurse -Force -ErrorAction Stop
     Remove-Item -Path $src -Recurse -Force -ErrorAction Stop
-    Write-SwapLog "${stepName}: copy fallback OK"
+    Write-SwapLog "$($stepName): copy fallback OK"
     return $true
   } catch {
-    Write-SwapLog "${stepName}: copy fallback 실패 — $($_.Exception.Message)"
+    Write-SwapLog "$($stepName): copy fallback 실패 — $($_.Exception.Message)"
     return $false
   }
 }

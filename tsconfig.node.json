@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "composite": true,
+    "target": "ES2020",
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.node.tsbuildinfo",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",

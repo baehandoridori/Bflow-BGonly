@@ -142,12 +142,13 @@ DB 스키마 변경 시:
 
 ## 8. 배포 시 주의사항
 
-1. **빌드 검증**: 변경 후 반드시 `tsc --noEmit` + `vite build` 통과 확인 (CLAUDE.md 규칙)
+1. **빌드 검증**: 변경 후 반드시 `npm run typecheck` + `npm run test:auto-update` + `vite build` 통과 확인 (CLAUDE.md 규칙)
 2. **G드라이브 락**: 팀원이 BFLOW.exe 켜놓은 상태면 robocopy 가 일부 `.pak` 파일에서 락 에러. 다만 chromium 33 동일이라 src/dst 내용 같아 무시 가능.
 3. **node_modules in worktree**: git worktree 에는 node_modules 가 없음. `mklink /J node_modules C:\Bflow-BGonly\node_modules` (Windows junction) 으로 메인 디렉토리와 연결 후 빌드.
 4. **자동 머지/배포 금지** (메모리): PR 생성/G드라이브 robocopy/슬랙 게시는 한솔이 명시적으로 요청한 경우만.
 5. **업데이트 성공 판단**: 토스트 감지는 다운로드 완료 신호일 뿐이다. 실제 적용 성공은 helper swap 후 다음 실행 버전, `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[main]`/`[helper]` 로그, `.swap-attempted` 정리 여부로 판단한다.
 6. **manifest 변경 요약**: 앱의 업데이트 모달은 `DEVLOG/update-notes.json` → `dist/manifest.json.releaseNotes`를 표시한다. 새 배포 전 이 파일의 최신 항목을 갱신한다.
+7. **helper PowerShell 보간 주의**: `helperSwap.ts`의 PowerShell 스크립트는 TypeScript 백틱 문자열 안에 있다. PowerShell 변수는 `$($stepName)`처럼 쓰고 `${stepName}`을 쓰면 JavaScript 변수로 평가되어 helper가 시작되기 전에 실패한다.
 
 ---
 
