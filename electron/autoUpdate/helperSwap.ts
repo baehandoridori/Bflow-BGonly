@@ -156,12 +156,19 @@ if (${relaunchFlag}) {
 `;
 
   const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-  spawn('powershell.exe', [
+  // Codex 1차 P2: spawn 실패 시 ChildProcess가 'error' event emit. listener 없으면
+  // unhandled error로 quit flow 깨짐(constrained Windows, PATH 깨진 환경 등). listener
+  // 등록 후 unref — error는 console.warn으로만 swallow하여 main 종료를 막지 않음.
+  const child = spawn('powershell.exe', [
     '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
     '-EncodedCommand', encoded,
   ], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
-  }).unref();
+  });
+  child.once('error', (err) => {
+    console.warn('[helperSwap] PowerShell helper spawn 실패 (다음 시작 시 swap-attempted 마커로 dialog 안내):', err);
+  });
+  child.unref();
 }
