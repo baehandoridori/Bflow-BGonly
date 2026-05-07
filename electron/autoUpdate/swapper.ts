@@ -18,7 +18,7 @@ import { promises as fsp, existsSync, renameSync, appendFileSync } from 'fs';
 import path from 'path';
 import {
   localRoot, localAppDir, localPendingDir, localBackupDir, localReadyMarker,
-  localInstalledMarker, localPendingVerificationMarker,
+  localInstalledMarker, localPendingVerificationMarker, localSwapAttemptedMarker,
 } from './paths';
 import { copyDirMirror } from './copy';
 
@@ -100,11 +100,21 @@ export async function swapIfPending(): Promise<SwapResult> {
   const app_ = localAppDir();
   const pending_ = localPendingDir();
   const backup_ = localBackupDir();
+  const attemptedMarker = localSwapAttemptedMarker();
 
   logSwap(`=== swap start ===`);
   logSwap(`  app=${app_}`);
   logSwap(`  pending=${pending_}`);
   logSwap(`  backup=${backup_}`);
+
+  // v1.22.3: swap 진입 시점에 .swap-attempted 마커 작성. crash/kill로 종료된 케이스에서
+  // .ready만 검사하면 false positive(swap 실제 시도 없었는데 실패로 오인)가 발생.
+  // 이 마커가 함께 남아있어야 진짜 swap 실패. 정상 종료/복구 시 정리.
+  try {
+    await fsp.writeFile(attemptedMarker, new Date().toISOString() + '\n', 'utf-8');
+  } catch (err) {
+    logSwap(`  swap-attempted 마커 작성 실패 (무시) — ${(err as Error).message}`);
+  }
 
   // 1. 이전 backup 정리 — 1개만 유지하니 통째로 지움 (실패해도 무시)
   try {
@@ -196,6 +206,13 @@ export async function swapIfPending(): Promise<SwapResult> {
   } catch (err) {
     console.warn('[swapper] .pending-verification 마커 작성 실패 (무시 — 자가 검증 비활성, 안전):', err);
   }
+
+  // v1.22.3: swap 끝까지 성공한 경우만 .swap-attempted 정리. 실패 경로(catastrophic 또는
+  // 부분 실패)는 마커 유지 → 다음 시작 시 main.ts notifyAndCleanupOnSwapFailure가 dialog로
+  // 안내. 부분 실패(backup 복구 성공)도 사용자 입장에선 "옛 버전 그대로"이므로 알림 필요.
+  try {
+    if (existsSync(attemptedMarker)) await fsp.unlink(attemptedMarker);
+  } catch { /* 무시 */ }
 
   logSwap(`=== swap end: OK ===`);
   return { ok: true };

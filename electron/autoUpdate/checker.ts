@@ -12,6 +12,7 @@ import {
   findRemoteManifest,
   localPendingDir,
   localReadyMarker,
+  localSwapSuppressedMarker,
   getOwnVersion,
 } from './paths';
 import { readManifest, compareVersions, countFilesAndBytes, type Manifest } from './manifest';
@@ -32,6 +33,27 @@ import { copyDirMirror } from './copy';
  */
 export async function scheduleUpdateCheck(onReady?: (version: string) => void): Promise<void> {
   try {
+    const own = getOwnVersion();
+
+    // v1.22.3 P2 #2: suppression marker 검사. 직전에 swap 실패해서 사용자에게 안내한
+    // 상태면 자동 재시도 중단. own version과 marker version이 다르면(사용자가 NSIS Setup
+    // 등으로 갱신) marker 정리 후 자동업데이트 재개.
+    const suppressionMarker = localSwapSuppressedMarker();
+    if (existsSync(suppressionMarker)) {
+      try {
+        const recordedVersion = (await fsp.readFile(suppressionMarker, 'utf-8')).trim();
+        if (recordedVersion === own) {
+          console.log(`[autoUpdate] swap 실패 후 suppression 상태 (own=${own}) — fetch skip`);
+          return;
+        }
+        // own이 갱신됨 → marker 정리, 자동업데이트 재개
+        await fsp.unlink(suppressionMarker);
+        console.log(`[autoUpdate] suppression marker 정리 (recorded=${recordedVersion}, own=${own})`);
+      } catch (err) {
+        console.warn('[autoUpdate] suppression marker 처리 실패 (무시):', err);
+      }
+    }
+
     const remoteManifestPath = findRemoteManifest();
     if (!remoteManifestPath) {
       console.log('[autoUpdate] G드라이브 manifest 없음 — skip');
@@ -42,7 +64,6 @@ export async function scheduleUpdateCheck(onReady?: (version: string) => void): 
       console.log('[autoUpdate] G드라이브 manifest 읽기 실패 — skip');
       return;
     }
-    const own = getOwnVersion();
     const cmp = compareVersions(remote.version, own);
     if (cmp <= 0) {
       console.log(`[autoUpdate] 최신 (own=${own}, remote=${remote.version})`);

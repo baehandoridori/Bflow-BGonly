@@ -2763,16 +2763,29 @@ if (!gotTheLock) {
 }
 
 /**
- * v1.22.3 — 시작 시 swap 실패 흔적(.ready 마커)이 남았는지 검사. 남았다면 직전 종료에서
- * 자동업데이트 swap이 실패한 것 → 사용자에게 1회 안내 dialog + pending 정리. 사용자가
- * BFLOW-Setup.exe로 해결하도록 유도하고, 그 전엔 자동 재시도 중단.
+ * v1.22.3 — 시작 시 swap 실패 흔적이 남았는지 검사 → 1회 안내 dialog + 자동 재시도 중단.
+ *
+ * Codex 1차 P2 fix:
+ * 1) .ready만으론 swap 실제 시도 여부 판별 불가(crash·kill로 종료 시점에도 .ready가 남음
+ *    → false positive로 정상 pending payload 삭제). swapper가 진입 시 `.swap-attempted`를
+ *    함께 작성/정상 종료 시 정리하므로, 둘 다 있어야 진짜 swap 실패로 간주.
+ * 2) pending 정리만으론 자동 재시도 못 막음(다음 세션에 checker가 또 fetch → .ready 다시
+ *    작성 → 종료 시 또 swap 시도). `.swap-suppressed` (content = own version) 마커로
+ *    영구 suppression. 사용자가 NSIS Setup 등으로 다른 version 설치 시 own 갱신 → marker
+ *    version과 다르면 자동 정리되어 자동업데이트 재개.
  */
 async function notifyAndCleanupOnSwapFailure(): Promise<void> {
   try {
     const path = await import('path');
     const { existsSync, promises: fsp } = await import('fs');
-    const { localReadyMarker, localPendingDir, localRoot } = await import('./autoUpdate/paths');
-    if (!existsSync(localReadyMarker())) return;
+    const {
+      localReadyMarker, localPendingDir, localRoot,
+      localSwapAttemptedMarker, localSwapSuppressedMarker,
+    } = await import('./autoUpdate/paths');
+
+    // P2 #1: .ready + .swap-attempted 둘 다 있어야 진짜 swap 실패. 둘 중 하나만 있으면
+    // crash/kill 등으로 unclean exit한 케이스 — 자동업데이트 cycle이 알아서 처리.
+    if (!existsSync(localReadyMarker()) || !existsSync(localSwapAttemptedMarker())) return;
 
     await dialog.showMessageBox({
       type: 'warning',
@@ -2785,12 +2798,24 @@ async function notifyAndCleanupOnSwapFailure(): Promise<void> {
       buttons: ['확인'],
     });
 
-    // pending 정리 — 자동 재시도 중단. 사용자가 NSIS Setup으로 해결하도록 유도.
+    // P2 #2: suppression marker 작성 — checker가 own version과 같으면 fetch skip → 자동
+    // 재시도 영구 중단. 사용자가 NSIS Setup으로 다른 version 설치하면 own 갱신 → marker
+    // version과 다르면 marker 자동 정리하여 자동업데이트 재개.
+    try {
+      await fsp.writeFile(localSwapSuppressedMarker(), app.getVersion(), 'utf-8');
+    } catch (err) {
+      console.warn('[main] suppression marker 작성 실패 (무시):', err);
+    }
+
+    // pending + .swap-attempted 정리. .ready는 pending 안에 있어서 같이 사라짐.
     try {
       await fsp.rm(localPendingDir(), { recursive: true, force: true });
     } catch (err) {
       console.warn('[main] pending 정리 실패 (무시):', err);
     }
+    try {
+      await fsp.unlink(localSwapAttemptedMarker());
+    } catch { /* 무시 */ }
   } catch (err) {
     // 안내 자체에 문제가 있어도 부팅 막지 않음
     console.warn('[main] swap 실패 안내 처리 실패 (무시):', err);
