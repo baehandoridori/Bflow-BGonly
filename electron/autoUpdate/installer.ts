@@ -26,14 +26,21 @@ export interface InstallResult {
 }
 
 /**
- * NSIS 설치 PC 감지 — `%LOCALAPPDATA%\Programs\BFLOW\Uninstall BFLOW.exe` 존재 여부.
+ * NSIS 설치 PC 감지 — electron-builder의 oneClick + perMachine: false 기본 install dir은
+ * `%LOCALAPPDATA%\Programs\${name}\` (package.json의 `name` 필드, 소문자 'bflow'). 그 안에
+ * `Uninstall ${productName}.exe` ('BFLOW' 대문자)가 NSIS uninstaller 파일명.
+ *
  * v1.22.0+ 부터 NSIS가 첫 설치를 담당하므로 NSIS 흔적이 있으면 self-installer 흐름은
  * 무관 — 사용자가 잘못된 경로(G드라이브 win-unpacked)를 클릭한 상황으로 안내만.
+ *
+ * Codex 1차 P1: 이전엔 'Programs/BFLOW/' (대문자) 검사 → electron-builder는 'name' 필드를
+ * 폴더명으로 쓰므로 실제 install dir은 'Programs/bflow/' (소문자). 검사 miss → NSIS 설치
+ * PC가 G드라이브 win-unpacked 클릭 시 안내 dialog 없이 옛 self-installer 흐름 진입.
  */
 function isNsisInstalled(): boolean {
   const localAppData = process.env.LOCALAPPDATA
     || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
-  return existsSync(path.join(localAppData, 'Programs', 'BFLOW', 'Uninstall BFLOW.exe'));
+  return existsSync(path.join(localAppData, 'Programs', 'bflow', 'Uninstall BFLOW.exe'));
 }
 
 /**
