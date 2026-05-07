@@ -162,6 +162,8 @@ function LiquidGlassLogo({ onClick }: { onClick: () => void }) {
 
 export function Sidebar() {
   const { currentView, setView, sidebarExpanded, toggleSidebarExpanded } = useAppStore();
+  const updateInfo = useAppStore((s) => s.updateInfo);
+  const setUpdateCenterOpen = useAppStore((s) => s.setUpdateCenterOpen);
   const totalOpenRevisions = useRevisionStore((s) => s.totalOpenRevisionCount);
   const [showSplash, setShowSplash] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -169,6 +171,20 @@ export function Sidebar() {
 
   const isExpanded = sidebarExpanded;
   const isVisuallyExpanded = isExpanded || isHovered;
+  const hasRemoteUpdate = Boolean(
+    updateInfo
+    && updateInfo.latestVersion !== updateInfo.currentVersion
+    && updateInfo.status !== 'suppressed'
+    && updateInfo.status !== 'up-to-date',
+  );
+  const hasUpdateIssue = updateInfo?.status === 'failed' || updateInfo?.status === 'suppressed';
+  const versionButtonTitle = !updateInfo
+    ? `현재 버전 v${__APP_VERSION__}`
+    : hasRemoteUpdate
+      ? `새 버전 v${updateInfo.latestVersion} 확인`
+      : hasUpdateIssue
+        ? updateInfo.message ?? '자동 업데이트 상태 확인'
+        : `현재 최신 버전 v${__APP_VERSION__}`;
 
   const handleToggle = useCallback(async () => {
     toggleSidebarExpanded();
@@ -270,7 +286,28 @@ export function Sidebar() {
             />
           </button>
           <span className="text-[11px] text-text-secondary/50 font-mono whitespace-nowrap">
-            v{__APP_VERSION__}
+            <button
+              type="button"
+              onClick={() => {
+                if (updateInfo) setUpdateCenterOpen(true);
+              }}
+              className={cn(
+                'relative rounded-lg px-2 py-1 font-mono text-[11px] transition-all duration-200',
+                hasRemoteUpdate
+                  ? 'cursor-pointer text-accent-sub bg-accent/10 border border-accent/25 shadow-[0_0_18px_rgb(var(--color-accent)/0.14)] hover:bg-accent/18 hover:border-accent/40'
+                  : hasUpdateIssue
+                    ? 'cursor-pointer text-[#FDCB6E] bg-[#FDCB6E]/10 border border-[#FDCB6E]/25 hover:bg-[#FDCB6E]/15'
+                    : updateInfo
+                      ? 'cursor-pointer text-text-secondary/70 border border-bg-border/40 hover:text-text-primary hover:bg-bg-border/35'
+                      : 'cursor-default text-text-secondary/50 border border-transparent',
+              )}
+              title={versionButtonTitle}
+            >
+              v{__APP_VERSION__}
+              {hasRemoteUpdate && (
+                <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[#FDCB6E] shadow-[0_0_0_4px_rgba(253,203,110,0.13)]" />
+              )}
+            </button>
           </span>
         </div>
       </aside>

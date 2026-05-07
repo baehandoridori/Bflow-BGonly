@@ -50,6 +50,30 @@ const manifest = {
   totalBytes,
 };
 
+const releaseNotesPath = path.join(root, 'DEVLOG', 'update-notes.json');
+if (fs.existsSync(releaseNotesPath)) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(releaseNotesPath, 'utf-8'));
+    if (Array.isArray(parsed)) {
+      manifest.releaseNotes = parsed
+        .filter((note) => (
+          note
+          && typeof note === 'object'
+          && Array.isArray(note.items)
+          && note.items.some((item) => typeof item === 'string' && item.trim())
+        ))
+        .slice(0, 3)
+        .map((note) => ({
+          version: typeof note.version === 'string' ? note.version : pkg.version,
+          title: typeof note.title === 'string' ? note.title : '',
+          items: note.items.filter((item) => typeof item === 'string' && item.trim()).slice(0, 5),
+        }));
+    }
+  } catch (err) {
+    console.warn('[generate-manifest] update-notes.json 읽기 실패 — releaseNotes 없이 진행:', err);
+  }
+}
+
 const out = path.join(distDir, 'manifest.json');
 fs.writeFileSync(out, JSON.stringify(manifest, null, 2) + '\n');
 console.log(

@@ -416,6 +416,22 @@ export interface Activity {
   createdAt: string;
 }
 
+export interface UpdateReleaseNote {
+  version: string;
+  title: string;
+  items: string[];
+}
+
+export interface UpdateInfo {
+  status: 'available' | 'downloading' | 'ready' | 'up-to-date' | 'failed' | 'suppressed';
+  currentVersion: string;
+  latestVersion: string;
+  buildAt: string;
+  ready: boolean;
+  releaseNotes: UpdateReleaseNote[];
+  message?: string;
+}
+
 // ─── Electron API (preload에서 노출) ─────────
 
 export interface ElectronAPI {
@@ -434,7 +450,9 @@ export interface ElectronAPI {
   onRetryNotify?: (callback: (message: string) => void) => () => void;
   onSavingBeforeQuit?: (callback: (pendingCount: number) => void) => () => void;
   // v1.22.1: 자동 업데이트 알림
-  onUpdateReady?: (callback: (version: string) => void) => () => void;
+  getUpdateState?: () => Promise<UpdateInfo | null>;
+  onUpdateState?: (callback: (state: UpdateInfo | null) => void) => () => void;
+  onUpdateReady?: (callback: (version: string, state?: UpdateInfo) => void) => () => void;
   applyUpdateNow?: () => Promise<void>;
   // 네이티브 알림
   showNativeNotification?: (title: string, body: string) => Promise<void>;

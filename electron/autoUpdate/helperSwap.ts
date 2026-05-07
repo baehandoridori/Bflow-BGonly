@@ -18,7 +18,7 @@
  *   6. (옵션) helper가 새 BFLOW.exe spawn
  */
 import { spawn } from 'child_process';
-import { writeFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, existsSync, mkdirSync, appendFileSync } from 'fs';
 import path from 'path';
 import os from 'os';
 import {
@@ -295,13 +295,10 @@ if ($PSCommandPath) {
   // 즉시 진단 — main process가 빠르게 종료되기 전에 swap.log에 spawn 시도 기록
   const earlyLog = (msg: string) => {
     try {
-      const fs = require('fs') as typeof import('fs');
-      const path = require('path') as typeof import('path');
-      const { localRoot } = require('./paths') as typeof import('./paths');
-      const root = localRoot();
-      if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
-      fs.appendFileSync(
-        path.join(root, 'swap.log'),
+      const logRoot = localRoot();
+      if (!existsSync(logRoot)) mkdirSync(logRoot, { recursive: true });
+      appendFileSync(
+        path.join(logRoot, 'swap.log'),
         `${new Date().toISOString()} [main] ${msg}\n`,
         'utf-8',
       );
@@ -311,7 +308,6 @@ if ($PSCommandPath) {
   earlyLog(`spawnSwapHelper start — relaunch=${opts.relaunch}`);
 
   // 1차 시도: 직접 powershell spawn (기존 방식)
-  let directOk = false;
   try {
     const child = spawn('powershell.exe', psArgs, {
       detached: true,
@@ -320,7 +316,6 @@ if ($PSCommandPath) {
     });
     child.once('spawn', () => {
       earlyLog(`direct spawn OK — child pid=${child.pid}`);
-      directOk = true;
     });
     child.once('error', (err) => {
       earlyLog(`direct spawn ERROR — ${err.message}`);

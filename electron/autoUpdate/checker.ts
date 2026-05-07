@@ -15,8 +15,42 @@ import {
   localSwapSuppressedMarker,
   getOwnVersion,
 } from './paths';
-import { readManifest, compareVersions, countFilesAndBytes, type Manifest } from './manifest';
+import { readManifest, compareVersions, countFilesAndBytes, type Manifest, type ReleaseNote } from './manifest';
 import { copyDirMirror } from './copy';
+
+export type UpdateStatus = 'available' | 'downloading' | 'ready' | 'up-to-date' | 'failed' | 'suppressed';
+
+export interface UpdateInfo {
+  status: UpdateStatus;
+  currentVersion: string;
+  latestVersion: string;
+  buildAt: string;
+  ready: boolean;
+  releaseNotes: ReleaseNote[];
+  message?: string;
+}
+
+function buildUpdateInfo(
+  status: UpdateStatus,
+  currentVersion: string,
+  manifest: Pick<Manifest, 'version' | 'buildAt' | 'releaseNotes'>,
+  ready: boolean,
+  message?: string,
+): UpdateInfo {
+  return {
+    status,
+    currentVersion,
+    latestVersion: manifest.version,
+    buildAt: manifest.buildAt,
+    ready,
+    releaseNotes: manifest.releaseNotes ?? [],
+    message,
+  };
+}
+
+function pendingManifestPath(): string {
+  return path.join(localPendingDir(), '.update-manifest.json');
+}
 
 /**
  * 백그라운드 체크 — 한 번만 실행. 실패는 console.warn만.
@@ -31,55 +65,102 @@ import { copyDirMirror } from './copy';
  * (옛 다운로드 + 그 사이 새 manifest push 시나리오). 실제 pending payload의 version을
  * 읽어 알려준다.
  */
-export async function scheduleUpdateCheck(onReady?: (version: string) => void): Promise<void> {
+export async function scheduleUpdateCheck(
+  onReady?: (info: UpdateInfo) => void,
+  onState?: (info: UpdateInfo) => void,
+): Promise<void> {
   try {
-    const own = getOwnVersion();
-
-    // v1.22.3 P2 #2: suppression marker 검사. 직전에 swap 실패해서 사용자에게 안내한
-    // 상태면 자동 재시도 중단. own version과 marker version이 다르면(사용자가 NSIS Setup
-    // 등으로 갱신) marker 정리 후 자동업데이트 재개.
-    const suppressionMarker = localSwapSuppressedMarker();
-    if (existsSync(suppressionMarker)) {
-      try {
-        const recordedVersion = (await fsp.readFile(suppressionMarker, 'utf-8')).trim();
-        if (recordedVersion === own) {
-          console.log(`[autoUpdate] swap 실패 후 suppression 상태 (own=${own}) — fetch skip`);
-          return;
-        }
-        // own이 갱신됨 → marker 정리, 자동업데이트 재개
-        await fsp.unlink(suppressionMarker);
-        console.log(`[autoUpdate] suppression marker 정리 (recorded=${recordedVersion}, own=${own})`);
-      } catch (err) {
-        console.warn('[autoUpdate] suppression marker 처리 실패 (무시):', err);
-      }
-    }
-
-    const remoteManifestPath = findRemoteManifest();
-    if (!remoteManifestPath) {
-      console.log('[autoUpdate] G드라이브 manifest 없음 — skip');
-      return;
-    }
-    const remote = await readManifest(remoteManifestPath);
-    if (!remote) {
-      console.log('[autoUpdate] G드라이브 manifest 읽기 실패 — skip');
-      return;
-    }
-    const cmp = compareVersions(remote.version, own);
-    if (cmp <= 0) {
-      console.log(`[autoUpdate] 최신 (own=${own}, remote=${remote.version})`);
-      return;
-    }
-    console.log(`[autoUpdate] 새 버전 감지: ${own} → ${remote.version}. 백그라운드 다운로드 시작.`);
-    const downloaded = await downloadToPending(remote);
-    if (downloaded) {
-      console.log(`[autoUpdate] 다운로드 완료. 다음 종료 시 swap.`);
-      // pending이 이미 ready였을 수도 있으므로 실제 pending payload version 우선.
-      const pendingVer = await readPendingVersion();
-      onReady?.(pendingVer ?? remote.version);
-    }
+    const result = await prepareUpdate(onState);
+    if (result?.ready) onReady?.(result);
   } catch (err) {
     console.warn('[autoUpdate] 체크 실패:', err);
   }
+}
+
+export async function prepareUpdate(onState?: (info: UpdateInfo) => void): Promise<UpdateInfo | null> {
+  const own = getOwnVersion();
+
+  // v1.22.3 P2 #2: suppression marker 검사. 직전에 swap 실패해서 사용자에게 안내한
+  // 상태면 자동 재시도 중단. own version과 marker version이 다르면(사용자가 NSIS Setup
+  // 등으로 갱신) marker 정리 후 자동업데이트 재개.
+  const suppressionMarker = localSwapSuppressedMarker();
+  if (existsSync(suppressionMarker)) {
+    try {
+      const recordedVersion = (await fsp.readFile(suppressionMarker, 'utf-8')).trim();
+      if (recordedVersion === own) {
+        console.log(`[autoUpdate] swap 실패 후 suppression 상태 (own=${own}) — fetch skip`);
+        const info: UpdateInfo = {
+          status: 'suppressed',
+          currentVersion: own,
+          latestVersion: own,
+          buildAt: '',
+          ready: false,
+          releaseNotes: [],
+          message: '이전 업데이트 적용 실패 후 자동 재시도가 중단된 상태입니다.',
+        };
+        onState?.(info);
+        return info;
+      }
+      // own이 갱신됨 → marker 정리, 자동업데이트 재개
+      await fsp.unlink(suppressionMarker);
+      console.log(`[autoUpdate] suppression marker 정리 (recorded=${recordedVersion}, own=${own})`);
+    } catch (err) {
+      console.warn('[autoUpdate] suppression marker 처리 실패 (무시):', err);
+    }
+  }
+
+  const pendingInfo = await readPendingUpdateInfo(own);
+  if (pendingInfo) {
+    console.log(`[autoUpdate] pending이 이미 ready 상태 — v${pendingInfo.latestVersion}`);
+    onState?.(pendingInfo);
+    return pendingInfo;
+  }
+  if (existsSync(localReadyMarker())) {
+    console.log('[autoUpdate] stale pending ready 감지 — 원격 비교 전 pending 정리');
+    await fsp.rm(localPendingDir(), { recursive: true, force: true });
+  }
+
+  const remoteManifestPath = findRemoteManifest();
+  if (!remoteManifestPath) {
+    console.log('[autoUpdate] G드라이브 manifest 없음 — skip');
+    return null;
+  }
+  const remote = await readManifest(remoteManifestPath);
+  if (!remote) {
+    console.log('[autoUpdate] G드라이브 manifest 읽기 실패 — skip');
+    return null;
+  }
+  const cmp = compareVersions(remote.version, own);
+  if (cmp <= 0) {
+    console.log(`[autoUpdate] 최신 (own=${own}, remote=${remote.version})`);
+    const info = buildUpdateInfo('up-to-date', own, remote, false);
+    onState?.(info);
+    return info;
+  }
+
+  const available = buildUpdateInfo('available', own, remote, false);
+  onState?.(available);
+  console.log(`[autoUpdate] 새 버전 감지: ${own} → ${remote.version}. 백그라운드 다운로드 시작.`);
+
+  onState?.(buildUpdateInfo('downloading', own, remote, false));
+  const downloaded = await downloadToPending(remote);
+  if (downloaded) {
+    console.log(`[autoUpdate] 다운로드 완료. 다음 종료 시 swap.`);
+    const readyInfo = await readPendingUpdateInfo(own)
+      ?? buildUpdateInfo('ready', own, remote, true);
+    onState?.(readyInfo);
+    return readyInfo;
+  }
+
+  const failed = buildUpdateInfo(
+    'failed',
+    own,
+    remote,
+    false,
+    'G드라이브 동기화가 아직 끝나지 않아 다음 실행 또는 다음 체크에서 다시 시도합니다.',
+  );
+  onState?.(failed);
+  return failed;
 }
 
 /**
@@ -98,16 +179,47 @@ async function readPendingVersion(): Promise<string | null> {
   }
 }
 
+export async function readPendingUpdateInfo(currentVersion = getOwnVersion()): Promise<UpdateInfo | null> {
+  if (!existsSync(localReadyMarker())) return null;
+  const pendingVer = await readPendingVersion();
+  if (!pendingVer) return null;
+  if (compareVersions(pendingVer, currentVersion) <= 0) return null;
+  let manifest: Pick<Manifest, 'version' | 'buildAt' | 'releaseNotes'> = {
+    version: pendingVer,
+    buildAt: '',
+    releaseNotes: [],
+  };
+  try {
+    const parsed = await readManifest(pendingManifestPath());
+    if (parsed) {
+      manifest = {
+        version: parsed.version === pendingVer ? parsed.version : pendingVer,
+        buildAt: parsed.buildAt,
+        releaseNotes: parsed.releaseNotes ?? [],
+      };
+    }
+  } catch {
+    // 옛 pending payload와 호환: package.json version만으로도 준비 상태를 표시한다.
+  }
+  return buildUpdateInfo('ready', currentVersion, manifest, true);
+}
+
 async function downloadToPending(remoteManifest: Manifest): Promise<boolean> {
   const remoteWinUnpacked = findRemoteWinUnpacked();
   if (!remoteWinUnpacked) throw new Error('원격 win-unpacked 없음');
 
-  // pending이 .ready 상태(이전 다운로드 완료)인 경우는 그대로 둠 — swap만 기다림.
-  // v1.22.1: 이미 ready여도 토스트는 띄워야 함(이전 세션에서 사용자가 못 봤을 수 있음).
+  // pending이 .ready 상태(이전 다운로드 완료)여도 실제 pending payload가 현재 버전보다
+  // 최신인지 확인한다. .ready만 남은 stale/무효 pending을 그대로 두면 토스트는 뜨지만
+  // helper가 교체할 새 앱이 없어 "감지는 되는데 업데이트가 안 됨" 상태가 반복된다.
   const ready = localReadyMarker();
   if (existsSync(ready)) {
-    console.log('[autoUpdate] pending이 이미 ready 상태 — 추가 다운로드 skip');
-    return true;
+    const readyInfo = await readPendingUpdateInfo(getOwnVersion());
+    if (readyInfo) {
+      console.log(`[autoUpdate] pending이 이미 ready 상태 — 추가 다운로드 skip (v${readyInfo.latestVersion})`);
+      return true;
+    }
+    console.log('[autoUpdate] stale pending ready 감지 — pending 정리 후 새로 다운로드');
+    await fsp.rm(localPendingDir(), { recursive: true, force: true });
   }
 
   // Codex 9차 P1: 원격 sync 완전성 사전 검증.
@@ -154,6 +266,7 @@ async function downloadToPending(remoteManifest: Manifest): Promise<boolean> {
   }
 
   // .ready 마커 — swapper가 이걸 보고 swap 실행
+  await fsp.writeFile(pendingManifestPath(), JSON.stringify(remoteManifest, null, 2) + '\n', 'utf-8');
   await fsp.writeFile(ready, new Date().toISOString(), 'utf-8');
   return true;
 }

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptFilter } from '@/types';
+import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptFilter, UpdateInfo } from '@/types';
 import type { ThemeColors } from '@/themes';
 import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
 
@@ -109,6 +109,12 @@ interface AppState {
   // [레거시] 글로벌 토스트 — Sonner toast()로 전환 완료, 호환용 유지
   toast: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null;
   setToast: (msg: string | { message: string; type?: 'info' | 'success' | 'error' | 'warning' | 'critical' } | null) => void;
+
+  // 자동 업데이트 상태 — 좌하단 버전 버튼/업데이트 센터/토스트가 공유
+  updateInfo: UpdateInfo | null;
+  updateCenterOpen: boolean;
+  setUpdateInfo: (info: UpdateInfo | null) => void;
+  setUpdateCenterOpen: (open: boolean) => void;
 
   // 테마
   themeId: string;
@@ -239,6 +245,11 @@ export const useAppStore = create<AppState>((set) => ({
 
   toast: null,
   setToast: (msg) => set({ toast: msg }),
+
+  updateInfo: null,
+  updateCenterOpen: false,
+  setUpdateInfo: (info) => set({ updateInfo: info }),
+  setUpdateCenterOpen: (open) => set({ updateCenterOpen: open }),
 
   themeId: 'violet',
   customThemeColors: null,
