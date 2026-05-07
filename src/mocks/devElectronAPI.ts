@@ -61,6 +61,8 @@ export function installDevElectronAPI(): void {
     onSheetChanged: noop,
     onRetryNotify: noop,
     onSavingBeforeQuit: noop,
+    onUpdateReady: noop,
+    applyUpdateNow: async () => {},
 
     showNativeNotification: async (title: string, body: string) => {
       console.log(`[DEV 알림] ${title}: ${body}`);

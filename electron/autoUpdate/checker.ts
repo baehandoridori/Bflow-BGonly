@@ -18,11 +18,19 @@ import { readManifest, compareVersions, countFilesAndBytes, type Manifest } from
 import { copyDirMirror } from './copy';
 
 /**
- * 백그라운드 체크 — 한 번만 실행. 실패는 console.warn만 (사용자 알림 X — UX 패턴 A).
+ * 백그라운드 체크 — 한 번만 실행. 실패는 console.warn만.
  *
  * 호출자: main.ts의 mainWindow.webContents.once('did-finish-load') → setTimeout 5초 후.
+ *
+ * v1.22.1: 다운로드 + .ready 마커 작성이 완료되면 onReady 콜백 호출. main.ts가
+ * 이를 받아 renderer에 'update:ready' IPC 송신 → 토스트 띄움.
+ *
+ * Codex 1차 P2: pending이 이미 ready인 케이스에서 *현재 fetch한 manifest version*을
+ * 토스트로 알리면 misleading — pending에 들어있는 실제 build version과 다를 수 있음
+ * (옛 다운로드 + 그 사이 새 manifest push 시나리오). 실제 pending payload의 version을
+ * 읽어 알려준다.
  */
-export async function scheduleUpdateCheck(): Promise<void> {
+export async function scheduleUpdateCheck(onReady?: (version: string) => void): Promise<void> {
   try {
     const remoteManifestPath = findRemoteManifest();
     if (!remoteManifestPath) {
@@ -41,22 +49,44 @@ export async function scheduleUpdateCheck(): Promise<void> {
       return;
     }
     console.log(`[autoUpdate] 새 버전 감지: ${own} → ${remote.version}. 백그라운드 다운로드 시작.`);
-    await downloadToPending(remote);
-    console.log(`[autoUpdate] 다운로드 완료. 다음 종료 시 swap.`);
+    const downloaded = await downloadToPending(remote);
+    if (downloaded) {
+      console.log(`[autoUpdate] 다운로드 완료. 다음 종료 시 swap.`);
+      // pending이 이미 ready였을 수도 있으므로 실제 pending payload version 우선.
+      const pendingVer = await readPendingVersion();
+      onReady?.(pendingVer ?? remote.version);
+    }
   } catch (err) {
     console.warn('[autoUpdate] 체크 실패:', err);
   }
 }
 
-async function downloadToPending(remoteManifest: Manifest): Promise<void> {
+/**
+ * pending 폴더 안의 실제 빌드 version 읽기 — `pending/resources/app/package.json`.
+ * pending이 옛 fetch 결과라면 fresh manifest와 version이 다를 수 있어, 토스트 표시는
+ * 이 함수 결과를 우선 사용해야 swap 후 실제 적용될 version과 일치.
+ */
+async function readPendingVersion(): Promise<string | null> {
+  try {
+    const pkgPath = path.join(localPendingDir(), 'resources', 'app', 'package.json');
+    const content = await fsp.readFile(pkgPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    return typeof parsed?.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function downloadToPending(remoteManifest: Manifest): Promise<boolean> {
   const remoteWinUnpacked = findRemoteWinUnpacked();
   if (!remoteWinUnpacked) throw new Error('원격 win-unpacked 없음');
 
   // pending이 .ready 상태(이전 다운로드 완료)인 경우는 그대로 둠 — swap만 기다림.
+  // v1.22.1: 이미 ready여도 토스트는 띄워야 함(이전 세션에서 사용자가 못 봤을 수 있음).
   const ready = localReadyMarker();
   if (existsSync(ready)) {
     console.log('[autoUpdate] pending이 이미 ready 상태 — 추가 다운로드 skip');
-    return;
+    return true;
   }
 
   // Codex 9차 P1: 원격 sync 완전성 사전 검증.
@@ -74,13 +104,13 @@ async function downloadToPending(remoteManifest: Manifest): Promise<void> {
         + `${expected.totalBytes}B, 실제: ${remoteActual.fileCount}files/${remoteActual.totalBytes}B). `
         + `다음 체크 cycle에서 재시도.`,
       );
-      return; // .ready 작성 X
+      return false; // .ready 작성 X
     }
   }
   // 호환 폴백 — 옛 manifest(fileCount 없음)는 핵심 파일 (BFLOW.exe) 존재만 검증
   if (!expected && !existsSync(path.join(remoteWinUnpacked, 'BFLOW.exe'))) {
     console.log('[autoUpdate] G드라이브 win-unpacked에 BFLOW.exe 없음 — sync 미완료, 다음 cycle 재시도');
-    return;
+    return false;
   }
 
   const pending = localPendingDir();
@@ -98,10 +128,11 @@ async function downloadToPending(remoteManifest: Manifest): Promise<void> {
         + `${localActual.totalBytes}B) ≠ manifest(${expected.fileCount}files/`
         + `${expected.totalBytes}B). .ready 작성 skip — 다음 cycle 재시도.`,
       );
-      return; // .ready 작성 X
+      return false; // .ready 작성 X
     }
   }
 
   // .ready 마커 — swapper가 이걸 보고 swap 실행
   await fsp.writeFile(ready, new Date().toISOString(), 'utf-8');
+  return true;
 }

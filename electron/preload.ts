@@ -56,6 +56,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => { ipcRenderer.removeListener('app:saving-before-quit', handler); };
   },
 
+  // v1.22.1: 자동 업데이트 알림 — 백그라운드 fetch 완료 시 토스트 띄우기
+  onUpdateReady: (callback: (version: string) => void) => {
+    const handler = (_event: unknown, version: string) => callback(version);
+    ipcRenderer.on('update:ready', handler);
+    return () => { ipcRenderer.removeListener('update:ready', handler); };
+  },
+  // 사용자가 토스트의 "지금 재시작" 클릭 시 — main이 swap 후 자동 재실행
+  applyUpdateNow: () => ipcRenderer.invoke('update:apply-now') as Promise<void>,
+
   // 네이티브 알림 (OS 데스크톱 알림)
   showNativeNotification: (title: string, body: string) =>
     ipcRenderer.invoke('notification:show-native', title, body),
