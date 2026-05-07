@@ -1,14 +1,14 @@
 {
   "name": "bflow",
-  "version": "1.22.13",
+  "version": "1.22.14",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "test:auto-update": "node --test ./tests/autoUpdateHelperSwap.test.ts ./tests/autoUpdateManifest.test.ts ./tests/autoUpdateFailurePolicy.test.ts",
+    "test:auto-update": "node --test ./tests/autoUpdateHelperSwap.test.ts ./tests/autoUpdateManifest.test.ts ./tests/autoUpdateFailurePolicy.test.ts ./tests/autoUpdateInstallerFlow.test.ts",
     "build": "npm run typecheck && npm run test:auto-update && vite build && electron-builder && node scripts/generate-manifest.js",
-    "build:vite": "npm run typecheck && npm run test:auto-update && vite build && node scripts/generate-manifest.js",
+    "build:vite": "npm run typecheck && npm run test:auto-update && vite build && node scripts/generate-manifest.js --allow-missing-installer",
     "preview": "vite preview",
     "electron:dev": "vite build && electron .",
     "lint": "eslint src --ext ts,tsx"

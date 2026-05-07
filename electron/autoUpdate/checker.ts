@@ -1,24 +1,42 @@
 /**
- * v1.21.0 자동 업데이트 — 메인 창 로드 후 5초 뒤 한 번 호출.
- * G드라이브 manifest와 자기 버전 비교 → 새 버전이면 pending/으로 변경분 복사
- * + .ready 마커 생성. swap은 swapper.ts가 종료 시 처리.
+ * 자동 업데이트 준비 단계.
  *
- * spec §4.2 일상 사용 시나리오 step 4.
+ * v1.22.14부터는 win-unpacked 폴더 전체를 직접 mirror/swap하지 않는다. G드라이브의
+ * NSIS installer(BFLOW-Setup.exe)를 로컬 캐시에 받아두고, 적용 시 앱 종료 후 installer를
+ * 실행한다. Windows가 실행 중 앱 폴더를 잠그는 문제를 installer 책임으로 넘기기 위함.
  */
-import { promises as fsp, existsSync } from 'fs';
+import {
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  promises as fsp,
+  statSync,
+} from 'fs';
+import { pipeline } from 'stream/promises';
 import path from 'path';
 import {
-  findRemoteWinUnpacked,
+  INSTALLER_FILE_NAME,
+  findRemoteInstaller,
   findRemoteManifest,
+  localInstallerExePath,
+  localInstallerManifestPath,
+  localInstallerPendingDir,
+  localInstallerReadyMarker,
   localPendingDir,
   localReadyMarker,
   localSwapSuppressedMarker,
   getOwnVersion,
 } from './paths';
-import { readManifest, compareVersions, countFilesAndBytes, type Manifest, type ReleaseNote } from './manifest';
-import { copyDirMirror } from './copy';
+import { readManifest, compareVersions, type Manifest, type ReleaseNote } from './manifest';
 
-export type UpdateStatus = 'available' | 'downloading' | 'ready' | 'up-to-date' | 'failed' | 'suppressed';
+export type UpdateStatus =
+  | 'available'
+  | 'downloading'
+  | 'ready'
+  | 'applying'
+  | 'up-to-date'
+  | 'failed'
+  | 'suppressed';
 
 export interface UpdateInfo {
   status: UpdateStatus;
@@ -28,14 +46,16 @@ export interface UpdateInfo {
   ready: boolean;
   releaseNotes: ReleaseNote[];
   message?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
 }
 
 function buildUpdateInfo(
   status: UpdateStatus,
   currentVersion: string,
-  manifest: Pick<Manifest, 'version' | 'buildAt' | 'releaseNotes'>,
+  manifest: Pick<Manifest, 'version' | 'buildAt' | 'releaseNotes' | 'installer'>,
   ready: boolean,
-  message?: string,
+  extra: Pick<UpdateInfo, 'message' | 'downloadedBytes' | 'totalBytes'> = {},
 ): UpdateInfo {
   return {
     status,
@@ -44,26 +64,14 @@ function buildUpdateInfo(
     buildAt: manifest.buildAt,
     ready,
     releaseNotes: manifest.releaseNotes ?? [],
-    message,
+    downloadedBytes: extra.downloadedBytes,
+    totalBytes: extra.totalBytes ?? manifest.installer?.sizeBytes,
+    message: extra.message,
   };
 }
 
-function pendingManifestPath(): string {
-  return path.join(localPendingDir(), '.update-manifest.json');
-}
-
 /**
- * 백그라운드 체크 — 한 번만 실행. 실패는 console.warn만.
- *
- * 호출자: main.ts의 mainWindow.webContents.once('did-finish-load') → setTimeout 5초 후.
- *
- * v1.22.1: 다운로드 + .ready 마커 작성이 완료되면 onReady 콜백 호출. main.ts가
- * 이를 받아 renderer에 'update:ready' IPC 송신 → 토스트 띄움.
- *
- * Codex 1차 P2: pending이 이미 ready인 케이스에서 *현재 fetch한 manifest version*을
- * 토스트로 알리면 misleading — pending에 들어있는 실제 build version과 다를 수 있음
- * (옛 다운로드 + 그 사이 새 manifest push 시나리오). 실제 pending payload의 version을
- * 읽어 알려준다.
+ * 백그라운드 체크. 실패는 앱 사용을 막지 않고 상태만 알린다.
  */
 export async function scheduleUpdateCheck(
   onReady?: (info: UpdateInfo) => void,
@@ -80,15 +88,12 @@ export async function scheduleUpdateCheck(
 export async function prepareUpdate(onState?: (info: UpdateInfo) => void): Promise<UpdateInfo | null> {
   const own = getOwnVersion();
 
-  // v1.22.3 P2 #2: suppression marker 검사. 직전에 swap 실패해서 사용자에게 안내한
-  // 상태면 자동 재시도 중단. own version과 marker version이 다르면(사용자가 NSIS Setup
-  // 등으로 갱신) marker 정리 후 자동업데이트 재개.
   const suppressionMarker = localSwapSuppressedMarker();
   if (existsSync(suppressionMarker)) {
     try {
       const recordedVersion = (await fsp.readFile(suppressionMarker, 'utf-8')).trim();
       if (recordedVersion === own) {
-        console.log(`[autoUpdate] swap 실패 후 suppression 상태 (own=${own}) — fetch skip`);
+        console.log(`[autoUpdate] 적용 실패 후 suppression 상태 (own=${own}) — fetch skip`);
         const info: UpdateInfo = {
           status: 'suppressed',
           currentVersion: own,
@@ -101,7 +106,6 @@ export async function prepareUpdate(onState?: (info: UpdateInfo) => void): Promi
         onState?.(info);
         return info;
       }
-      // own이 갱신됨 → marker 정리, 자동업데이트 재개
       await fsp.unlink(suppressionMarker);
       console.log(`[autoUpdate] suppression marker 정리 (recorded=${recordedVersion}, own=${own})`);
     } catch (err) {
@@ -109,15 +113,13 @@ export async function prepareUpdate(onState?: (info: UpdateInfo) => void): Promi
     }
   }
 
+  await cleanupLegacyWinUnpackedPendingIfNeeded();
+
   const pendingInfo = await readPendingUpdateInfo(own);
   if (pendingInfo) {
-    console.log(`[autoUpdate] pending이 이미 ready 상태 — v${pendingInfo.latestVersion}`);
+    console.log(`[autoUpdate] installer pending이 이미 ready 상태 — v${pendingInfo.latestVersion}`);
     onState?.(pendingInfo);
     return pendingInfo;
-  }
-  if (existsSync(localReadyMarker())) {
-    console.log('[autoUpdate] stale pending ready 감지 — 원격 비교 전 pending 정리');
-    await fsp.rm(localPendingDir(), { recursive: true, force: true });
   }
 
   const remoteManifestPath = findRemoteManifest();
@@ -138,135 +140,175 @@ export async function prepareUpdate(onState?: (info: UpdateInfo) => void): Promi
     return info;
   }
 
-  const available = buildUpdateInfo('available', own, remote, false);
+  const available = buildUpdateInfo('available', own, remote, false, {
+    message: '새 버전을 확인했습니다. 설치 파일을 로컬로 준비합니다.',
+  });
   onState?.(available);
-  console.log(`[autoUpdate] 새 버전 감지: ${own} → ${remote.version}. 백그라운드 다운로드 시작.`);
+  console.log(`[autoUpdate] 새 버전 감지: ${own} → ${remote.version}. installer 다운로드 시작.`);
 
-  onState?.(buildUpdateInfo('downloading', own, remote, false));
-  const downloaded = await downloadToPending(remote);
+  onState?.(buildUpdateInfo('downloading', own, remote, false, {
+    message: '설치 파일을 로컬로 받는 중입니다.',
+    downloadedBytes: 0,
+  }));
+
+  let downloaded = false;
+  try {
+    downloaded = await downloadInstallerToPending(remote, own, onState);
+  } catch (err) {
+    console.warn('[autoUpdate] installer 다운로드 실패:', err);
+  }
+
   if (downloaded) {
-    console.log(`[autoUpdate] 다운로드 완료. 다음 종료 시 swap.`);
+    console.log('[autoUpdate] installer 다운로드 완료. 적용 준비됨.');
     const readyInfo = await readPendingUpdateInfo(own)
-      ?? buildUpdateInfo('ready', own, remote, true);
+      ?? buildUpdateInfo('ready', own, remote, true, {
+        message: '업데이트 설치 파일이 준비되었습니다.',
+      });
     onState?.(readyInfo);
     return readyInfo;
   }
 
-  const failed = buildUpdateInfo(
-    'failed',
-    own,
-    remote,
-    false,
-    'G드라이브 동기화가 아직 끝나지 않아 다음 실행 또는 다음 체크에서 다시 시도합니다.',
-  );
+  const failed = buildUpdateInfo('failed', own, remote, false, {
+    message: 'G드라이브 동기화가 아직 끝나지 않아 다음 실행 또는 다음 체크에서 다시 시도합니다.',
+  });
   onState?.(failed);
   return failed;
 }
 
-/**
- * pending 폴더 안의 실제 빌드 version 읽기 — `pending/resources/app/package.json`.
- * pending이 옛 fetch 결과라면 fresh manifest와 version이 다를 수 있어, 토스트 표시는
- * 이 함수 결과를 우선 사용해야 swap 후 실제 적용될 version과 일치.
- */
-async function readPendingVersion(): Promise<string | null> {
-  try {
-    const pkgPath = path.join(localPendingDir(), 'resources', 'app', 'package.json');
-    const content = await fsp.readFile(pkgPath, 'utf-8');
-    const parsed = JSON.parse(content);
-    return typeof parsed?.version === 'string' ? parsed.version : null;
-  } catch {
+export async function readPendingUpdateInfo(currentVersion = getOwnVersion()): Promise<UpdateInfo | null> {
+  if (!existsSync(localInstallerReadyMarker())) return null;
+  if (!existsSync(localInstallerExePath())) {
+    await cleanupInstallerPending('installer exe missing');
     return null;
   }
+
+  const parsed = await readManifest(localInstallerManifestPath());
+  if (!parsed) {
+    await cleanupInstallerPending('manifest missing');
+    return null;
+  }
+  if (compareVersions(parsed.version, currentVersion) <= 0) {
+    await cleanupInstallerPending(`stale installer ${parsed.version}`);
+    return null;
+  }
+
+  const localSize = safeFileSize(localInstallerExePath());
+  const expectedSize = parsed.installer?.sizeBytes;
+  if (expectedSize != null && localSize != null && localSize !== expectedSize) {
+    await cleanupInstallerPending(`partial installer ${localSize}/${expectedSize}`);
+    return null;
+  }
+
+  return buildUpdateInfo('ready', currentVersion, parsed, true, {
+    message: '업데이트 설치 파일이 준비되었습니다. 적용하면 앱이 잠시 닫힌 뒤 다시 열립니다.',
+    downloadedBytes: localSize ?? expectedSize,
+    totalBytes: expectedSize ?? localSize,
+  });
 }
 
-export async function readPendingUpdateInfo(currentVersion = getOwnVersion()): Promise<UpdateInfo | null> {
-  if (!existsSync(localReadyMarker())) return null;
-  const pendingVer = await readPendingVersion();
-  if (!pendingVer) return null;
-  if (compareVersions(pendingVer, currentVersion) <= 0) return null;
-  let manifest: Pick<Manifest, 'version' | 'buildAt' | 'releaseNotes'> = {
-    version: pendingVer,
-    buildAt: '',
-    releaseNotes: [],
-  };
-  try {
-    const parsed = await readManifest(pendingManifestPath());
-    if (parsed) {
-      manifest = {
-        version: parsed.version === pendingVer ? parsed.version : pendingVer,
-        buildAt: parsed.buildAt,
-        releaseNotes: parsed.releaseNotes ?? [],
-      };
-    }
-  } catch {
-    // 옛 pending payload와 호환: package.json version만으로도 준비 상태를 표시한다.
-  }
-  return buildUpdateInfo('ready', currentVersion, manifest, true);
-}
+async function downloadInstallerToPending(
+  remoteManifest: Manifest,
+  currentVersion: string,
+  onState?: (info: UpdateInfo) => void,
+): Promise<boolean> {
+  const existingReady = await readPendingUpdateInfo(currentVersion);
+  if (existingReady) return true;
 
-async function downloadToPending(remoteManifest: Manifest): Promise<boolean> {
-  const remoteWinUnpacked = findRemoteWinUnpacked();
-  if (!remoteWinUnpacked) throw new Error('원격 win-unpacked 없음');
+  await cleanupInstallerPending('fresh download');
 
-  // pending이 .ready 상태(이전 다운로드 완료)여도 실제 pending payload가 현재 버전보다
-  // 최신인지 확인한다. .ready만 남은 stale/무효 pending을 그대로 두면 토스트는 뜨지만
-  // helper가 교체할 새 앱이 없어 "감지는 되는데 업데이트가 안 됨" 상태가 반복된다.
-  const ready = localReadyMarker();
-  if (existsSync(ready)) {
-    const readyInfo = await readPendingUpdateInfo(getOwnVersion());
-    if (readyInfo) {
-      console.log(`[autoUpdate] pending이 이미 ready 상태 — 추가 다운로드 skip (v${readyInfo.latestVersion})`);
-      return true;
-    }
-    console.log('[autoUpdate] stale pending ready 감지 — pending 정리 후 새로 다운로드');
-    await fsp.rm(localPendingDir(), { recursive: true, force: true });
-  }
+  const installerFileName = remoteManifest.installer?.fileName || INSTALLER_FILE_NAME;
+  const remoteInstaller = findRemoteInstaller(installerFileName);
+  if (!remoteInstaller) throw new Error(`원격 installer 없음: ${installerFileName}`);
 
-  // Codex 9차 P1: 원격 sync 완전성 사전 검증.
-  // Drive sync는 비동기 — manifest.json이 win-unpacked의 큰 파일들보다 먼저 도착 가능.
-  // partial 상태에서 mirror copy + .ready 작성하면 broken app으로 swap됨.
-  const expected = remoteManifest.fileCount != null && remoteManifest.totalBytes != null
-    ? { fileCount: remoteManifest.fileCount, totalBytes: remoteManifest.totalBytes }
-    : null;
-
-  if (expected) {
-    const remoteActual = countFilesAndBytes(remoteWinUnpacked);
-    if (remoteActual.fileCount !== expected.fileCount || remoteActual.totalBytes !== expected.totalBytes) {
-      console.log(
-        `[autoUpdate] G드라이브 sync 미완료 (manifest: ${expected.fileCount}files/`
-        + `${expected.totalBytes}B, 실제: ${remoteActual.fileCount}files/${remoteActual.totalBytes}B). `
-        + `다음 체크 cycle에서 재시도.`,
-      );
-      return false; // .ready 작성 X
-    }
-  }
-  // 호환 폴백 — 옛 manifest(fileCount 없음)는 핵심 파일 (BFLOW.exe) 존재만 검증
-  if (!expected && !existsSync(path.join(remoteWinUnpacked, 'BFLOW.exe'))) {
-    console.log('[autoUpdate] G드라이브 win-unpacked에 BFLOW.exe 없음 — sync 미완료, 다음 cycle 재시도');
+  const remoteSize = safeFileSize(remoteInstaller);
+  const expectedSize = remoteManifest.installer?.sizeBytes ?? remoteSize;
+  if (expectedSize != null && remoteSize != null && remoteSize !== expectedSize) {
+    console.log(
+      `[autoUpdate] G드라이브 installer sync 미완료 `
+      + `(manifest=${expectedSize}B, actual=${remoteSize}B). 다음 cycle에서 재시도.`,
+    );
     return false;
   }
 
-  const pending = localPendingDir();
-  await fsp.mkdir(pending, { recursive: true });
+  const pendingDir = localInstallerPendingDir();
+  await fsp.mkdir(pendingDir, { recursive: true });
+  const localInstaller = localInstallerExePath();
+  const partialInstaller = `${localInstaller}.part`;
 
-  // mirror 복사 (변경된 파일만)
-  await copyDirMirror(remoteWinUnpacked, pending);
-
-  // 사후 검증: 로컬 pending이 원격 manifest와 일치하는지 — copy 도중 네트워크 끊김 등 partial 케이스 차단.
-  if (expected) {
-    const localActual = countFilesAndBytes(pending);
-    if (localActual.fileCount !== expected.fileCount || localActual.totalBytes !== expected.totalBytes) {
-      console.warn(
-        `[autoUpdate] mirror copy partial — 로컬 pending(${localActual.fileCount}files/`
-        + `${localActual.totalBytes}B) ≠ manifest(${expected.fileCount}files/`
-        + `${expected.totalBytes}B). .ready 작성 skip — 다음 cycle 재시도.`,
-      );
-      return false; // .ready 작성 X
-    }
+  try {
+    await copyInstallerFile(remoteInstaller, partialInstaller, expectedSize, (copied, total) => {
+      onState?.(buildUpdateInfo('downloading', currentVersion, remoteManifest, false, {
+        message: '설치 파일을 로컬로 받는 중입니다.',
+        downloadedBytes: copied,
+        totalBytes: total,
+      }));
+    });
+    await fsp.rename(partialInstaller, localInstaller);
+  } catch (err) {
+    await fsp.rm(partialInstaller, { force: true }).catch(() => undefined);
+    throw err;
   }
 
-  // .ready 마커 — swapper가 이걸 보고 swap 실행
-  await fsp.writeFile(pendingManifestPath(), JSON.stringify(remoteManifest, null, 2) + '\n', 'utf-8');
-  await fsp.writeFile(ready, new Date().toISOString(), 'utf-8');
+  const localSize = safeFileSize(localInstaller);
+  if (expectedSize != null && localSize !== expectedSize) {
+    console.warn(`[autoUpdate] installer copy partial — local=${localSize}B, expected=${expectedSize}B`);
+    await cleanupInstallerPending('partial copy');
+    return false;
+  }
+
+  const manifestForPending: Manifest = {
+    ...remoteManifest,
+    installer: {
+      fileName: INSTALLER_FILE_NAME,
+      sizeBytes: expectedSize,
+    },
+  };
+  await fsp.writeFile(localInstallerManifestPath(), JSON.stringify(manifestForPending, null, 2) + '\n', 'utf-8');
+  await fsp.writeFile(localInstallerReadyMarker(), new Date().toISOString(), 'utf-8');
   return true;
+}
+
+async function copyInstallerFile(
+  src: string,
+  dst: string,
+  totalBytes: number | undefined,
+  onProgress: (copiedBytes: number, totalBytes: number | undefined) => void,
+): Promise<void> {
+  let copiedBytes = 0;
+  let lastEmit = 0;
+  const emit = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastEmit < 250) return;
+    lastEmit = now;
+    onProgress(copiedBytes, totalBytes);
+  };
+
+  const reader = createReadStream(src);
+  reader.on('data', (chunk) => {
+    copiedBytes += chunk.length;
+    emit();
+  });
+  emit(true);
+  await pipeline(reader, createWriteStream(dst));
+  emit(true);
+}
+
+async function cleanupInstallerPending(reason: string): Promise<void> {
+  if (!existsSync(localInstallerPendingDir())) return;
+  console.log(`[autoUpdate] installer pending 정리 (${reason})`);
+  await fsp.rm(localInstallerPendingDir(), { recursive: true, force: true });
+}
+
+async function cleanupLegacyWinUnpackedPendingIfNeeded(): Promise<void> {
+  if (!existsSync(localReadyMarker())) return;
+  console.log('[autoUpdate] legacy win-unpacked pending 감지 — installer 방식 전환을 위해 정리');
+  await fsp.rm(localPendingDir(), { recursive: true, force: true });
+}
+
+function safeFileSize(filePath: string): number | undefined {
+  try {
+    return statSync(filePath).size;
+  } catch {
+    return undefined;
+  }
 }

@@ -12,6 +12,11 @@ export interface Manifest {
   fileCount?: number;
   /** 빌드 시점의 win-unpacked 총 byte 수 (sync 완전성 검증용). optional. */
   totalBytes?: number;
+  /** v1.22.14: directory swap 대신 로컬 캐시 후 실행할 NSIS installer 메타데이터. */
+  installer?: {
+    fileName: string;
+    sizeBytes?: number;
+  };
   /** 앱 안 업데이트 센터에 표시할 짧은 변경 요약. */
   releaseNotes?: ReleaseNote[];
 }
@@ -56,6 +61,7 @@ export async function readManifest(filePath: string): Promise<Manifest | null> {
       buildAt: typeof parsed.buildAt === 'string' ? parsed.buildAt : '',
       fileCount: typeof parsed.fileCount === 'number' ? parsed.fileCount : undefined,
       totalBytes: typeof parsed.totalBytes === 'number' ? parsed.totalBytes : undefined,
+      installer: normalizeInstaller(parsed.installer),
       releaseNotes: normalizeReleaseNotes(parsed.releaseNotes),
     };
   } catch (err) {
@@ -63,6 +69,16 @@ export async function readManifest(filePath: string): Promise<Manifest | null> {
     console.warn('[autoUpdate] manifest 읽기 실패:', filePath, err);
     return null;
   }
+}
+
+function normalizeInstaller(value: unknown): Manifest['installer'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const installer = value as Record<string, unknown>;
+  if (typeof installer.fileName !== 'string' || installer.fileName.trim().length === 0) return undefined;
+  return {
+    fileName: installer.fileName,
+    sizeBytes: typeof installer.sizeBytes === 'number' ? installer.sizeBytes : undefined,
+  };
 }
 
 /**

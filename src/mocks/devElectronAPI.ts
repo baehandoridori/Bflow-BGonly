@@ -61,6 +61,8 @@ export function installDevElectronAPI(): void {
     onSheetChanged: noop,
     onRetryNotify: noop,
     onSavingBeforeQuit: noop,
+    getUpdateState: async () => null,
+    onUpdateState: noop,
     onUpdateReady: noop,
     applyUpdateNow: async () => {},
 

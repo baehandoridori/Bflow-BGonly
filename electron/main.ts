@@ -23,8 +23,9 @@ import {
   runFirstInstallIfNeeded,
   scheduleUpdateCheck,
   prepareUpdate,
-  hasPending,
-  spawnSwapHelper,
+  readPendingUpdateInfo,
+  hasPendingInstallerUpdate,
+  spawnInstallerUpdateHelper,
   checkLastStartAndRollback,
   markStartSucceeded,
   type UpdateInfo,
@@ -32,11 +33,16 @@ import {
 import {
   localPendingDir,
   localReadyMarker,
+  localInstallerAttemptedMarker,
+  localInstallerManifestPath,
+  localInstallerPendingDir,
+  localInstallerReadyMarker,
   localRoot,
   localSwapAttemptedMarker,
   localSwapSuppressedMarker,
 } from './autoUpdate/paths';
 import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy';
+import { compareVersions, readManifest } from './autoUpdate/manifest';
 import {
   initVacation,
   isVacationConnected,
@@ -316,7 +322,9 @@ function splashTextForUpdate(info: UpdateInfo): { title: string; detail: string 
     case 'downloading':
       return { title: `새 버전 v${info.latestVersion} 준비 중`, detail: '최대 10초까지만 기다린 뒤 오래 걸리면 현재 버전으로 엽니다.' };
     case 'ready':
-      return { title: `새 버전 v${info.latestVersion} 준비 완료`, detail: '최신 버전으로 다시 여는 중입니다.' };
+      return { title: `새 버전 v${info.latestVersion} 준비 완료`, detail: '업데이트 설치 창을 열 준비가 끝났습니다.' };
+    case 'applying':
+      return { title: `새 버전 v${info.latestVersion} 적용 중`, detail: '앱이 잠시 닫히고 설치 진행 창이 표시됩니다.' };
     case 'failed':
       return { title: '현재 버전으로 여는 중', detail: info.message ?? '업데이트 준비가 끝나지 않아 현재 버전으로 먼저 엽니다.' };
     default:
@@ -364,11 +372,16 @@ async function runStartupUpdateGate(): Promise<boolean> {
 
   startupUpdateContinuation = null;
   if (result?.ready) {
-    const text = splashTextForUpdate(result);
+    const applyingInfo: UpdateInfo = {
+      ...result,
+      status: 'applying',
+      message: '업데이트 설치 창을 열고 있습니다. 설치가 끝나면 앱이 다시 열립니다.',
+    };
+    publishUpdateInfo(applyingInfo);
+    const text = splashTextForUpdate(applyingInfo);
     setSplashStatus(text.title, text.detail);
-    await writeSwapAttemptedMarker();
-    spawnSwapHelper({ relaunch: true });
-    console.log(`[autoUpdate] startup swap helper spawned (relaunch=true, version=${result.latestVersion})`);
+    spawnInstallerUpdateHelper({ relaunch: true });
+    console.log(`[autoUpdate] startup installer helper spawned (relaunch=true, version=${result.latestVersion})`);
     isQuitting = true;
     app.exit(0);
     return true;
@@ -888,19 +901,26 @@ function migrateLegacyUsersFileIfNeeded(): void {
 
 // v1.22.1: 자동 업데이트 토스트 — 사용자가 "지금 재시작" 클릭 시 호출.
 //
-// v1.22.4: in-process swap이 file lock(EBUSY) 때문에 항상 실패 → detached PowerShell
-// helper로 위임. main.quit() → before-quit hook이 spawnSwapHelper 호출 → BFLOW 종료
-// 후 helper가 swap + 새 BFLOW spawn. updateRelaunchScheduled 플래그로 helper에게
-// "재시작 의도" 전달.
+// v1.22.14: directory swap 대신 로컬에 받아둔 NSIS installer를 앱 종료 후 실행한다.
+// renderer에는 먼저 applying 상태를 보내고, before-quit hook이 installer helper를 띄운다.
+// updateRelaunchScheduled 플래그로 helper에게 "설치 후 재시작 의도"를 전달한다.
 //
 // Codex 1차 P2 (v1.22.1): one-shot guard. relaunch 예약은 한 종료 사이클당 한 번만.
 let updateRelaunchScheduled = false;
 ipcMain.handle('update:get-state', () => currentUpdateInfo);
 
-ipcMain.handle('update:apply-now', () => {
+ipcMain.handle('update:apply-now', async () => {
   if (updateRelaunchScheduled) return;
   updateRelaunchScheduled = true;
-  app.quit();
+  const readyInfo = await readPendingUpdateInfo().catch(() => null);
+  if (readyInfo) {
+    publishUpdateInfo({
+      ...readyInfo,
+      status: 'applying',
+      message: '업데이트 설치 창을 여는 중입니다. 앱이 잠시 후 닫힙니다.',
+    });
+  }
+  setTimeout(() => app.quit(), 650);
 });
 
 ipcMain.handle('users:read', () => {
@@ -3003,12 +3023,58 @@ async function notifyAndCleanupOnSwapFailure(): Promise<void> {
   }
 }
 
+async function notifyAndCleanupOnInstallerFailure(): Promise<void> {
+  try {
+    if (!fs.existsSync(localInstallerReadyMarker()) || !fs.existsSync(localInstallerAttemptedMarker())) return;
+    const pendingVersion = await readPendingInstallerVersionForFailureCleanup();
+    const currentVersion = app.getVersion();
+
+    if (pendingVersion && compareVersions(pendingVersion, currentVersion) <= 0) {
+      console.log(
+        `[autoUpdate] stale installer failure cleanup (pending=${pendingVersion}, current=${currentVersion})`,
+      );
+      await cleanupInstallerPendingAndAttemptedMarker();
+      return;
+    }
+
+    await dialog.showMessageBox({
+      type: 'warning',
+      title: 'B flow — 자동 업데이트 설치 실패',
+      message: '이전에 받은 새 버전 설치가 끝나지 않았습니다',
+      detail:
+        '자동 업데이트 설치 파일을 실행했지만, Windows 파일 잠금이나 설치 실패로 새 버전 적용이 완료되지 않았습니다.\n\n'
+        + 'G드라이브 dist 폴더의 BFLOW-Setup.exe를 다시 실행하면 최신 버전으로 갱신됩니다.\n\n'
+        + '문제 진단 로그:\n' + path.join(localRoot(), 'swap.log'),
+      buttons: ['확인'],
+    });
+
+    try {
+      await fs.promises.writeFile(localSwapSuppressedMarker(), currentVersion, 'utf-8');
+    } catch (err) {
+      console.warn('[main] installer suppression marker 작성 실패 (무시):', err);
+    }
+
+    await cleanupInstallerPendingAndAttemptedMarker();
+  } catch (err) {
+    console.warn('[main] installer 실패 안내 처리 실패 (무시):', err);
+  }
+}
+
 async function readPendingPackageVersionForFailureCleanup(): Promise<string | null> {
   try {
     const pkgPath = path.join(localPendingDir(), 'resources', 'app', 'package.json');
     const content = await fs.promises.readFile(pkgPath, 'utf-8');
     const parsed = JSON.parse(content);
     return typeof parsed?.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readPendingInstallerVersionForFailureCleanup(): Promise<string | null> {
+  try {
+    const manifest = await readManifest(localInstallerManifestPath());
+    return manifest?.version ?? null;
   } catch {
     return null;
   }
@@ -3030,6 +3096,21 @@ async function cleanupPendingAndSwapAttemptedMarker(): Promise<void> {
   if (pendingCleaned) {
     try {
       await fs.promises.unlink(localSwapAttemptedMarker());
+    } catch { /* 무시 */ }
+  }
+}
+
+async function cleanupInstallerPendingAndAttemptedMarker(): Promise<void> {
+  let pendingCleaned = false;
+  try {
+    await fs.promises.rm(localInstallerPendingDir(), { recursive: true, force: true });
+    pendingCleaned = !fs.existsSync(localInstallerPendingDir());
+  } catch (err) {
+    console.warn('[main] installer pending 정리 실패 (무시 — .installer-attempted 유지하여 다음 시작 시 또 알림):', err);
+  }
+  if (pendingCleaned) {
+    try {
+      await fs.promises.unlink(localInstallerAttemptedMarker());
     } catch { /* 무시 */ }
   }
 }
@@ -3063,6 +3144,7 @@ app.whenReady().then(async () => {
   //   사용자에게 명시 안내(BFLOW-Setup.exe 권장 + swap.log 경로) + pending 정리.
   //   사용자가 NSIS Setup으로 해결하면 자연스럽게 끝, 그 전엔 자동 시도 중단.
   await notifyAndCleanupOnSwapFailure();
+  await notifyAndCleanupOnInstallerFailure();
 
   // ★ v1.22.9 swap.log rotation:
   //   진단 로그가 swap 사이클마다 누적 — 1MB 초과 시 swap.log.old로 archive하고
@@ -3274,17 +3356,12 @@ app.on('before-quit', (e) => {
         await watchWithTimeout.catch(() => { /* noop */ });
       }
 
-      // ★ v1.22.4 자동 업데이트 swap (마지막 step)
-      // in-process swap은 BFLOW.exe가 살아있는 상태라 EBUSY로 실패. detached PowerShell
-      // helper에게 위임 → main process 종료 후 helper가 BFLOW process 죽기 wait + swap +
-      // (옵션) 재시작. updateRelaunchScheduled 플래그가 helper에게 "사용자 의도가 재시작
-      // (apply-now 토스트)인지 / 단순 종료인지" 전달.
-      if (await hasPending()) {
-        // swap 진입 마커 작성 — helper가 실패하더라도 다음 main 시작 시 dialog 트리거 조건
-        // (.ready + .swap-attempted)을 만족시켜 사용자에게 알림.
-        await writeSwapAttemptedMarker();
-        spawnSwapHelper({ relaunch: updateRelaunchScheduled });
-        console.log(`[autoUpdate] swap helper spawned (relaunch=${updateRelaunchScheduled})`);
+      // ★ v1.22.14 자동 업데이트 적용 (마지막 step)
+      // 실행 중 앱 폴더를 직접 rename/copy하지 않고, 로컬에 받아둔 NSIS installer를 앱
+      // 종료 후 helper가 실행한다. helper는 별도 진행 창을 띄우고 완료 후 필요 시 재실행.
+      if (await hasPendingInstallerUpdate()) {
+        spawnInstallerUpdateHelper({ relaunch: updateRelaunchScheduled });
+        console.log(`[autoUpdate] installer helper spawned (relaunch=${updateRelaunchScheduled})`);
       }
     } catch (err) {
       console.warn('[종료] 정리/swap 예외:', err);

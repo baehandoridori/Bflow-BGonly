@@ -217,6 +217,31 @@ await deleteScene(sheetName, sceneIndex);        // 2) 내부에서 resolveScene
 
 ---
 
+## 2026-05-08: 실행 중 앱 폴더를 직접 swap하지 말고 installer를 실행할 것
+
+### 증상
+- `v1.22.12 → v1.22.13`에서 helper 실행 자체는 성공했지만, `bflow` 폴더를 `bflow-backup`으로 옮기는 단계가 실패했다.
+- rename 실패 후 copy fallback이 몇 초 이상 걸리고, 결국 앱은 재시작되지 않았다.
+
+### 근본 원인
+- Windows/Defender/인덱서가 실행 직후 앱 설치 폴더를 잠깐 잡으면 directory rename/copy가 예측 불가능해진다.
+- 앱 폴더를 직접 갈아끼우는 구조는 hotfix가 잦은 팀 배포에서 실패 비용과 대기 시간이 크다.
+
+### 교훈
+- Electron/NSIS 배포에서는 이미 만들어지는 `BFLOW-Setup.exe`를 업데이트 적용 단위로 삼는 편이 안전하다.
+- 앱은 G드라이브에서 installer를 로컬 `installer-pending`으로 받아두고, 적용 시 앱 종료 후 installer helper가 `/S`로 실행한다.
+- installer helper는 현재 BFLOW 프로세스가 완전히 종료된 뒤 installer를 실행해야 한다. helper를 띄웠다는 이유만으로 바로 `BFLOW-Setup.exe`를 시작하면 실행 중 앱 파일 잠금과 다시 충돌한다.
+- 배포용 manifest는 `BFLOW-Setup.exe`가 있을 때만 생성해야 한다. installer 없는 manifest는 모든 클라이언트에게 쓸 수 없는 최신 버전을 알리는 사고가 된다.
+- 사용자가 버튼을 누른 뒤 아무 화면도 없으면 실패처럼 느낀다. renderer는 `applying` 상태를 먼저 표시하고, 앱 종료 후 helper는 별도 진행 창을 띄워야 한다.
+
+### 적용 위치
+- `electron/autoUpdate/checker.ts` — win-unpacked mirror 대신 installer 캐시 다운로드
+- `electron/autoUpdate/installerApply.ts` — installer helper + 진행 창 + 재실행
+- `src/components/update/UpdateCenterModal.tsx` — 다운로드 진행률/적용 중 상태 표시
+- `tests/autoUpdateInstallerFlow.test.ts` — win-unpacked swap 회귀 방지
+
+---
+
 ## 2026-04-21: 통합 사이드바에서 "그룹 항목" 기능 누락
 
 ### 증상

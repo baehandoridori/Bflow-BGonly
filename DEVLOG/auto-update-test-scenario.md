@@ -1,7 +1,7 @@
 # 자동 업데이트 E2E 테스트 시나리오
 
-> 기준 버전: `v1.22.12`
-> 목적: 토스트 감지뿐 아니라 실제 helper swap 적용까지 검증한다. `v1.22.10 → v1.22.11` 실패 찌꺼기가 남은 PC도 복구 경로에 포함한다.
+> 기준 버전: `v1.22.14`
+> 목적: 토스트 감지뿐 아니라 실제 installer helper 적용까지 검증한다. `v1.22.10 → v1.22.13` swap 실패 찌꺼기가 남은 PC도 복구 경로에 포함한다.
 > 주의: PR 생성, 머지, 정식 빌드, G드라이브 배포는 모두 한솔 명시 동의 후 진행.
 
 ---
@@ -12,7 +12,8 @@
 - `%LOCALAPPDATA%\Bflow-BGonly\swap.log`가 있으면 백업하거나 삭제해 이번 테스트 로그를 구분한다.
 - 실패 복구 테스트에서는 `%LOCALAPPDATA%\Programs\BFLOW-pending`, `%LOCALAPPDATA%\Bflow-BGonly\.swap-attempted`, `%LOCALAPPDATA%\Bflow-BGonly\.swap-suppressed` 상태를 먼저 기록한다.
 - 배포 시 `manifest.json`은 항상 마지막에 갱신한다.
-- 성공 판정은 토스트가 아니라 다음 실행 버전과 `swap.log`의 `[main]`/`[helper]` 로그로 한다.
+- 배포용 `manifest.json`에는 `installer.fileName = BFLOW-Setup.exe`와 `installer.sizeBytes`가 있어야 한다.
+- 성공 판정은 토스트가 아니라 다음 실행 버전과 `swap.log`의 `[installer-main]`/`[installer]` 로그로 한다.
 
 ---
 
@@ -23,7 +24,7 @@
 절차:
 
 1. 한솔에게 PR 생성/머지/정식 빌드/G드라이브 배포 동의를 각각 확인한다.
-2. `v1.22.12` 변경을 PR/머지한다.
+2. `v1.22.14` 변경을 PR/머지한다.
 3. 한솔 PC에서 정식 배포 빌드를 만든다.
 4. G드라이브 dist에 배포하되 `manifest.json`을 마지막에 올린다.
 5. 테스트 PC에서 기존 구버전 앱을 완전히 종료한다.
@@ -32,9 +33,9 @@
 기대 결과:
 
 - 스플래시에 업데이트 확인/준비 문구가 보인다.
-- 10초 안에 준비되면 helper swap 후 최신 앱이 다시 열린다.
-- 좌하단 버전이 `v1.22.12`로 보인다.
-- `%LOCALAPPDATA%\Bflow-BGonly\swap.log`에 `[main] spawnSwapHelper start`, `[helper] PowerShell helper alive`, `swap OK`가 남는다.
+- 10초 안에 준비되면 installer helper 진행 창이 보이고, 설치 후 최신 앱이 다시 열린다.
+- 좌하단 버전이 `v1.22.14`로 보인다.
+- `%LOCALAPPDATA%\Bflow-BGonly\swap.log`에 `[installer-main]`, `[installer] installer apply OK`가 남는다.
 
 ---
 
@@ -44,10 +45,10 @@
 
 절차:
 
-1. `v1.22.12` 앱을 켜둔 상태로 둔다.
+1. `v1.22.14` 앱을 켜둔 상태로 둔다.
 2. 한솔에게 PR 생성/머지/정식 빌드/G드라이브 배포 동의를 각각 확인한다.
-3. 테스트용 패치 버전을 `v1.22.13`으로 준비한다.
-4. `DEVLOG/update-notes.json`의 최신 항목도 `1.22.13`으로 바꾼다.
+3. 테스트용 패치 버전을 `v1.22.15`로 준비한다.
+4. `DEVLOG/update-notes.json`의 최신 항목도 `1.22.15`로 바꾼다.
 5. PR/머지/정식 배포 빌드/G드라이브 배포를 진행한다.
 6. 앱을 그대로 켜둔 상태에서 최대 5분 기다린다.
 
@@ -56,15 +57,16 @@
 - 지속 토스트가 뜬다.
 - 좌하단 버전 버튼에 배지가 표시된다.
 - 버전 버튼 클릭 시 업데이트 모달이 열린다.
-- 모달에서 현재 버전 `v1.22.12`, 최신 버전 `v1.22.13`이 구분된다.
+- 모달에서 현재 버전 `v1.22.14`, 최신 버전 `v1.22.15`가 구분된다.
 - 최신 버전 카드가 테마 액센트 색상으로 펄스 글로우된다.
 - `즉시 적용 가능` 버튼 hover 시 `즉시 업데이트`로 자연스럽게 전환된다.
+- 준비 중에는 설치 파일 다운로드 진행률이 보인다.
 
 ---
 
 ## 3. 즉시 업데이트 적용 테스트
 
-목표: 토스트/모달에서 즉시 업데이트를 눌렀을 때 저장 대기 후 helper swap으로 새 버전이 열린다.
+목표: 토스트/모달에서 즉시 업데이트를 눌렀을 때 저장 대기 후 installer helper로 새 버전이 열린다.
 
 절차:
 
@@ -75,9 +77,11 @@
 기대 결과:
 
 - 저장 중인 작업이 있으면 먼저 저장 대기 안내가 나온다.
-- helper swap 후 앱이 재실행된다.
-- 좌하단 버전이 `v1.22.13`으로 바뀐다.
-- `swap.log`에 `[main]`, `[helper]`, `swap OK`, `new BFLOW spawned`가 남는다.
+- 앱이 닫힌 뒤 별도 업데이트 적용 진행 창이 표시된다.
+- 진행 창은 BFLOW 프로세스가 종료된 뒤 installer를 실행한다. `swap.log`에 `waiting for parent`, `BFLOW processes all exited`, `installer started` 순서가 남아야 한다.
+- installer helper 후 앱이 재실행된다.
+- 좌하단 버전이 `v1.22.15`로 바뀐다.
+- `swap.log`에 `[installer-main]`, `[installer]`, `installer apply OK`, `BFLOW relaunched`가 남는다.
 
 ---
 
@@ -107,25 +111,26 @@
 - 시작 시 업데이트 성공
 - 앱 실행 중 업데이트 감지 성공
 - `지금 업데이트` 또는 앱 종료 후 실제 버전 상승
-- `swap.log`에 `[main]`/`[helper]` 로그가 남음
+- `swap.log`에 `[installer-main]`/`[installer]` 로그가 남음
+- `%LOCALAPPDATA%\Bflow-BGonly\installer-pending`이 성공 후 정리됨
 
 ---
 
-## 6. v1.22.10/1.22.11 실패 찌꺼기 복구 테스트
+## 6. v1.22.10~v1.22.13 swap 실패 찌꺼기 복구 테스트
 
-목표: 예전 실패로 남은 `BFLOW-pending`과 `.swap-attempted`가 `v1.22.12` 수동 설치 후 새 버전 감지를 막지 않는다.
+목표: 예전 실패로 남은 `BFLOW-pending`, `.swap-attempted`, `.swap-suppressed`가 `v1.22.14` 수동 설치 후 새 installer 방식 감지를 막지 않는다.
 
 절차:
 
 1. 수동 설치 전 현재 상태를 기록한다: 설치 버전, pending 버전, `.ready`, `.swap-attempted`, `.swap-suppressed`.
-2. `v1.22.12`의 `BFLOW-Setup.exe`를 실행해 수동 설치한다.
+2. `v1.22.14`의 `BFLOW-Setup.exe`를 실행해 수동 설치한다.
 3. 첫 실행 후 pending 버전이 현재 버전 이하이면 앱이 조용히 pending과 `.swap-attempted`를 정리하는지 확인한다.
 4. `.swap-suppressed`가 `1.22.12`로 새로 생기지 않아야 한다.
-5. 이어서 `v1.22.13`을 배포하고, 앱 실행 중 업데이트 감지/적용 테스트를 진행한다.
+5. 이어서 `v1.22.15`를 배포하고, 앱 실행 중 업데이트 감지/적용 테스트를 진행한다.
 
 성공 기준:
 
-- 수동 설치 직후 좌하단 버전이 `v1.22.12`다.
+- 수동 설치 직후 좌하단 버전이 `v1.22.14`다.
 - 오래된 `BFLOW-pending`과 `.swap-attempted`가 정리된다.
 - `.swap-suppressed`가 없거나 현재 버전과 다른 오래된 값이면 자동 정리된다.
-- `v1.22.13` 배포 후 토스트/모달이 뜨고, `지금 업데이트` 후 앱이 `v1.22.13`으로 재실행된다.
+- `v1.22.15` 배포 후 토스트/모달이 뜨고, `지금 업데이트` 후 앱이 `v1.22.15`로 재실행된다.

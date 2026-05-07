@@ -423,13 +423,15 @@ export interface UpdateReleaseNote {
 }
 
 export interface UpdateInfo {
-  status: 'available' | 'downloading' | 'ready' | 'up-to-date' | 'failed' | 'suppressed';
+  status: 'available' | 'downloading' | 'ready' | 'applying' | 'up-to-date' | 'failed' | 'suppressed';
   currentVersion: string;
   latestVersion: string;
   buildAt: string;
   ready: boolean;
   releaseNotes: UpdateReleaseNote[];
   message?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
 }
 
 // ─── Electron API (preload에서 노출) ─────────

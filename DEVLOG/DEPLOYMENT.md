@@ -37,13 +37,15 @@ Studio JBBJ 팀(~20명)이 *동일한 빌드*를 *항상 최신 상태로* 사�
 
 ```
 dist/
-├── BFLOW.exe              ← portable 단일 exe (157MB, 임시 폴더에 압축 풀어 실행)
+├── BFLOW-Setup.exe        ← ★ 자동 업데이트/수동 설치 기준 파일
+├── latest.yml             ← electron-builder NSIS 메타데이터
+├── manifest.json          ← ★ 업데이트 감지 신호. 반드시 마지막에 업로드
 ├── builder-debug.yml
 ├── index.html             ← Vite renderer 진입점
 ├── assets/                ← Vite 빌드 청크 (~30개 .js)
 ├── splash/                ← 스플래시 HTML + opening_image_cropped.png
-└── win-unpacked/          ← 풀린 형태 (188MB)
-    ├── BFLOW.exe          ← ★ 팀원이 실제 실행하는 exe
+└── win-unpacked/          ← electron-builder dir 산출물. 사용자 실행 기준 아님
+    ├── BFLOW.exe          ← 진단/빌드 검증용 산출물
     ├── chrome_*.pak       ← electron 33의 chromium 리소스
     ├── locales/           ← 다국어 리소스
     ├── resources/app/     ← 앱 코드(dist + dist-electron) + node_modules
@@ -82,16 +84,16 @@ robocopy <local dist> <G드라이브 dist> /MIR /R:1 /W:1          # G드라이�
 
 ---
 
-## 5. 새 배포 방식 — 자동 업데이트 시스템 (v1.22.10 기준)
+## 5. 새 배포 방식 — 자동 업데이트 시스템 (v1.22.14 기준)
 
 자세한 디자인: `docs/superpowers/specs/2026-05-01-auto-update-design.md`
 
 ### 컨셉
 - **G드라이브** = 한솔의 "배포 창고"
 - **팀원 PC 로컬 폴더** = 실행 환경
-- 앱 시작 시: 스플래시에서 업데이트 상태 안내 → 최대 10초 동안 최신 버전 준비 → 준비 완료 시 helper swap 후 최신 버전으로 재실행
+- 앱 시작 시: 스플래시에서 업데이트 상태 안내 → 최대 10초 동안 최신 installer 준비 → 준비 완료 시 installer helper 실행 후 최신 버전으로 재실행
 - 10초 초과/실패 시: 현재 버전으로 먼저 진입 → 앱 안 좌하단 버전 버튼/업데이트 모달에서 계속 상태 표시
-- 앱 사용 중: 5분 주기로 manifest 재확인 → 백그라운드로 새 버전 다운로드 → `지금 업데이트` 또는 앱 종료 시 helper swap
+- 앱 사용 중: 5분 주기로 manifest 재확인 → 백그라운드로 `BFLOW-Setup.exe`를 로컬 캐시에 다운로드 → `지금 업데이트` 또는 앱 종료 시 installer helper 실행
 
 ### 한솔 워크플로우
 ```powershell
@@ -100,7 +102,7 @@ robocopy "C:\Bflow-BGonly\dist" "G:\공유 드라이브\JBBJ 자료실\한솔이
 Copy-Item "C:\Bflow-BGonly\dist\manifest.json" "G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\dist\manifest.json" -Force
 ```
 
-중요: `manifest.json`은 업데이트 감지 신호다. 파일 업로드가 끝나기 전에 manifest가 먼저 바뀌면 팀원 앱이 반쯤 올라간 빌드를 최신으로 판단할 수 있다. 배포 자동화는 반드시 `win-unpacked`/설치 파일 업로드를 끝낸 뒤 `manifest.json`을 마지막에 갱신해야 한다.
+중요: `manifest.json`은 업데이트 감지 신호다. 파일 업로드가 끝나기 전에 manifest가 먼저 바뀌면 팀원 앱이 반쯤 올라간 빌드를 최신으로 판단할 수 있다. 배포 자동화는 반드시 `BFLOW-Setup.exe`, `win-unpacked`, `latest.yml` 업로드를 끝낸 뒤 `manifest.json`을 마지막에 갱신해야 한다. `scripts/generate-manifest.js`는 배포용 manifest 생성 시 `BFLOW-Setup.exe`가 없으면 실패해야 정상이다. `--allow-missing-installer`는 개발용 `build:vite`에서만 허용한다.
 
 ### 팀원 첫 설치 (한 번만)
 1. 기존 바로가기(G드라이브 가리키는 것) 또는 G드라이브의 BFLOW.exe 더블클릭
@@ -109,10 +111,10 @@ Copy-Item "C:\Bflow-BGonly\dist\manifest.json" "G:\공유 드라이브\JBBJ 자�
 
 ### 팀원 일상 사용
 1. **바탕화면 새 바로가기** (자동 생성된 것, 로컬 본체 가리킴) 더블클릭 → 1~2초 시작
-2. 시작 직후 스플래시에서 manifest.json 읽기 → 자기 버전과 비교 → 새 버전이면 최대 10초 동안 먼저 다운로드
-3. 10초 안에 준비 완료: helper가 `app\` → `backup\`, `pending\` → `app\` swap 후 새 BFLOW.exe 재실행
-4. 10초 초과/실패: 현재 버전으로 먼저 열고, 다운로드가 끝나면 좌하단 버전 버튼/토스트/업데이트 모달로 표시
-5. `지금 업데이트` 클릭 또는 앱 종료: 저장 대기 후 helper swap. 다음 실행 또는 재실행 = 새 버전
+2. 시작 직후 스플래시에서 manifest.json 읽기 → 자기 버전과 비교 → 새 버전이면 최대 10초 동안 로컬 installer 캐시 준비
+3. 10초 안에 준비 완료: helper가 로컬 `installer-pending\BFLOW-Setup.exe`를 실행하고 설치 진행 창을 표시한 뒤 새 BFLOW.exe 재실행
+4. 10초 초과/실패: 현재 버전으로 먼저 열고, installer 다운로드가 끝나면 좌하단 버전 버튼/토스트/업데이트 모달로 표시
+5. `지금 업데이트` 클릭 또는 앱 종료: 저장 대기 후 installer helper 실행. 다음 실행 또는 재실행 = 새 버전
 6. 앱을 계속 켜둔 상태에서 한솔이 새 버전을 올리면, 앱이 5분 주기로 manifest를 다시 확인해 같은 알림 흐름으로 진입
 
 ### 옛 바로가기 (한솔이 사전에 만든 G드라이브 가리키는 .lnk)
@@ -146,9 +148,10 @@ DB 스키마 변경 시:
 2. **G드라이브 락**: 팀원이 BFLOW.exe 켜놓은 상태면 robocopy 가 일부 `.pak` 파일에서 락 에러. 다만 chromium 33 동일이라 src/dst 내용 같아 무시 가능.
 3. **node_modules in worktree**: git worktree 에는 node_modules 가 없음. `mklink /J node_modules C:\Bflow-BGonly\node_modules` (Windows junction) 으로 메인 디렉토리와 연결 후 빌드.
 4. **자동 머지/배포 금지** (메모리): PR 생성/G드라이브 robocopy/슬랙 게시는 한솔이 명시적으로 요청한 경우만.
-5. **업데이트 성공 판단**: 토스트 감지는 다운로드 완료 신호일 뿐이다. 실제 적용 성공은 helper swap 후 다음 실행 버전, `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[main]`/`[helper]` 로그, `.swap-attempted` 정리 여부로 판단한다.
+5. **업데이트 성공 판단**: 토스트 감지는 다운로드 완료 신호일 뿐이다. 실제 적용 성공은 installer helper 후 다음 실행 버전, `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[installer-main]`/`[installer]` 로그, `%LOCALAPPDATA%\Bflow-BGonly\installer-pending` 정리 여부로 판단한다.
 6. **manifest 변경 요약**: 앱의 업데이트 모달은 `DEVLOG/update-notes.json` → `dist/manifest.json.releaseNotes`를 표시한다. 새 배포 전 이 파일의 최신 항목을 갱신한다.
-7. **helper PowerShell 보간 주의**: `helperSwap.ts`의 PowerShell 스크립트는 TypeScript 백틱 문자열 안에 있다. PowerShell 변수는 `$($stepName)`처럼 쓰고 `${stepName}`을 쓰면 JavaScript 변수로 평가되어 helper가 시작되기 전에 실패한다.
+7. **helper 실행 순서**: `installerApply.ts` helper는 현재 BFLOW 프로세스 종료를 기다린 뒤 `BFLOW-Setup.exe /S`를 실행해야 한다. 앱이 살아있는 동안 installer를 시작하면 Windows 파일 잠금으로 실패할 수 있다.
+8. **helper PowerShell 보간 주의**: `helperSwap.ts`/`installerApply.ts`의 PowerShell 스크립트는 TypeScript 백틱 문자열 안에 있다. PowerShell 변수는 `$($stepName)`처럼 쓰고 `${stepName}`을 쓰면 JavaScript 변수로 평가되어 helper가 시작되기 전에 실패한다.
 
 ---
 

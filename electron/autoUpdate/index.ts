@@ -6,6 +6,8 @@ export { runFirstInstallIfNeeded } from './installer';
 export type { InstallResult } from './installer';
 export { scheduleUpdateCheck, prepareUpdate, readPendingUpdateInfo } from './checker';
 export type { UpdateInfo, UpdateStatus } from './checker';
+export { hasPendingInstallerUpdate, spawnInstallerUpdateHelper } from './installerApply';
+export type { InstallerUpdateHelperOptions } from './installerApply';
 export { swapIfPending, hasPending } from './swapper';
 export type { SwapResult } from './swapper';
 export { spawnSwapHelper } from './helperSwap';
