@@ -35,6 +35,7 @@ import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
+import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
@@ -45,6 +46,7 @@ import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
+import type { UpdateInfo } from '@/types';
 
 // Lazy chunk 로드 실패(네트워크 끊김, 빌드 artifact 누락) 시 블랭크 스크린 방지용 ErrorBoundary.
 // 이 컴포넌트 자체는 파일 외부로 분리하지 않고 로컬에 유지 — 인증 모달/메인 뷰 한정으로만 사용.
@@ -74,6 +76,7 @@ export default function App() {
   // Sonner 토스트 브릿지: 기존 setToast 호출을 Sonner로 전달
   const setStoreToast = useAppStore((s) => s.setToast);
   const storeToast = useAppStore((s) => s.toast);
+  const setUpdateInfo = useAppStore((s) => s.setUpdateInfo);
 
   // 전역 그라데이션 배경 토글 (모든 뷰 뒤에 표시, 로그인/스플래시 포함)
   const globalGradientEnabled = useAppStore((s) => s.plexusSettings.globalGradientEnabled !== false);
@@ -109,22 +112,44 @@ export default function App() {
     return () => { cleanup?.(); };
   }, []);
 
-  // v1.22.1: 자동 업데이트 다운로드 완료 알림 → "지금 재시작" 버튼 토스트.
+  // 자동 업데이트 상태: 좌하단 버전 버튼/모달/토스트가 같은 상태를 공유.
+  useEffect(() => {
+    window.electronAPI?.getUpdateState?.()
+      .then((state) => {
+        if (state) setUpdateInfo(state);
+      })
+      .catch(() => { /* update state is best effort */ });
+    const cleanup = window.electronAPI?.onUpdateState?.((state) => {
+      setUpdateInfo(state);
+    });
+    return () => { cleanup?.(); };
+  }, [setUpdateInfo]);
+
+  // v1.22.1: 자동 업데이트 다운로드 완료 알림 → "지금 업데이트" 버튼 토스트.
   // 사용자가 클릭 시 main이 app.relaunch + app.quit → before-quit hook의 swap 진행 →
   // Electron이 새 BFLOW.exe로 자동 재시작 (1~2초 깜빡임).
   useEffect(() => {
-    const cleanup = window.electronAPI?.onUpdateReady?.((version) => {
+    const cleanup = window.electronAPI?.onUpdateReady?.((version, state) => {
+      const updateState: UpdateInfo = state ?? {
+        status: 'ready',
+        currentVersion: __APP_VERSION__,
+        latestVersion: version,
+        buildAt: '',
+        ready: true,
+        releaseNotes: [],
+      };
+      setUpdateInfo(updateState);
       sonnerToast.success(`새 버전 v${version} 사용 가능`, {
-        description: '지금 재시작하면 즉시 적용됩니다',
+        description: '저장 마무리 후 새 버전으로 다시 열립니다',
         duration: Infinity,  // 사용자가 직접 닫을 때까지
         action: {
-          label: '지금 재시작',
+          label: '지금 업데이트',
           onClick: () => { window.electronAPI?.applyUpdateNow?.(); },
         },
       });
     });
     return () => { cleanup?.(); };
-  }, []);
+  }, [setUpdateInfo]);
 
   // currentUser 변경 시 메인 프로세스에 동기화 (활동 기록 자동 user_id/user_name 사용)
   useEffect(() => {
@@ -1614,6 +1639,7 @@ export default function App() {
 
       {/* Promise 기반 확인 다이얼로그 호스트 */}
       <ConfirmDialogHost />
+      <UpdateCenterModal />
 
       {/* Sonner 토스트 — 테마 색상 연동 + 스르륵 애니메이션 + 호버 펼침 */}
       <Toaster

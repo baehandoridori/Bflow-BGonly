@@ -1,7 +1,7 @@
 # B flow — 배포 가이드
 
 > 다른 Claude 세션 또는 신규 합류자가 이 프로젝트의 배포 구조를 빠르게 이해하기 위한 문서.
-> 마지막 갱신: 2026-05-01
+> 마지막 갱신: 2026-05-08
 
 ---
 
@@ -54,7 +54,7 @@ dist/
 
 ---
 
-## 4. 배포 방식 (현재)
+## 4. 배포 방식 (기존)
 
 ### 한솔 워크플로우
 ```bash
@@ -65,13 +65,13 @@ robocopy <local dist> <G드라이브 dist> /MIR /R:1 /W:1          # G드라이�
 
 `/MIR` = mirror. G드라이브에서 source에 없는 파일은 자동 삭제 (옛 빌드 잔재 정리). ExitCode 0~7 = 정상.
 
-### 팀원 워크플로우 (현재 = 변경 *예정*)
+### 팀원 워크플로우 (기존)
 
 1. 신규 팀원: G드라이브 `dist\win-unpacked\BFLOW.exe` 의 바로가기를 바탕화면에 복사 (한솔이 사전에 만들어 둔 .lnk 파일을 공유)
 2. 매 사용: 바탕화면 바로가기 더블클릭 → G드라이브의 BFLOW.exe 직접 실행
 3. 자동 업데이트: Google Drive 동기화가 알아서 새 빌드를 PC로 sync. 다음에 바로가기로 다시 켜면 새 버전.
 
-### 현재 방식의 한계 (2026-05-01 측정)
+### 기존 방식의 한계 (2026-05-01 측정)
 
 | 측정 | 1차 실행 | 2차 실행 |
 |---|---|---|
@@ -82,20 +82,25 @@ robocopy <local dist> <G드라이브 dist> /MIR /R:1 /W:1          # G드라이�
 
 ---
 
-## 5. 새 배포 방식 — 자동 업데이트 시스템 (도입 예정, 2026-05-01~)
+## 5. 새 배포 방식 — 자동 업데이트 시스템 (v1.22.10 기준)
 
 자세한 디자인: `docs/superpowers/specs/2026-05-01-auto-update-design.md`
 
 ### 컨셉
-- **G드라이브** = 한솔의 "배포 창고" (변경 0)
-- **팀원 PC 로컬 폴더** = 실행 환경 (새로 도입)
-- 앱이 *백그라운드로* G드라이브 폴더를 모니터링 → 새 버전 감지 → 로컬 임시 폴더로 복사 → 다음 재시작 시 swap
+- **G드라이브** = 한솔의 "배포 창고"
+- **팀원 PC 로컬 폴더** = 실행 환경
+- 앱 시작 시: 스플래시에서 업데이트 상태 안내 → 최대 10초 동안 최신 버전 준비 → 준비 완료 시 helper swap 후 최신 버전으로 재실행
+- 10초 초과/실패 시: 현재 버전으로 먼저 진입 → 앱 안 좌하단 버전 버튼/업데이트 모달에서 계속 상태 표시
+- 앱 사용 중: 5분 주기로 manifest 재확인 → 백그라운드로 새 버전 다운로드 → `지금 업데이트` 또는 앱 종료 시 helper swap
 
-### 한솔 워크플로우 (변경 0)
-```bash
-npm run build              # 빌드 시 manifest.json 자동 추가 생성
-robocopy ... dist ...      # G드라이브 동기화 (지금 그대로)
+### 한솔 워크플로우
+```powershell
+npm run build
+robocopy "C:\Bflow-BGonly\dist" "G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\dist" /MIR /R:1 /W:1 /XF manifest.json
+Copy-Item "C:\Bflow-BGonly\dist\manifest.json" "G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\dist\manifest.json" -Force
 ```
+
+중요: `manifest.json`은 업데이트 감지 신호다. 파일 업로드가 끝나기 전에 manifest가 먼저 바뀌면 팀원 앱이 반쯤 올라간 빌드를 최신으로 판단할 수 있다. 배포 자동화는 반드시 `win-unpacked`/설치 파일 업로드를 끝낸 뒤 `manifest.json`을 마지막에 갱신해야 한다.
 
 ### 팀원 첫 설치 (한 번만)
 1. 기존 바로가기(G드라이브 가리키는 것) 또는 G드라이브의 BFLOW.exe 더블클릭
@@ -104,9 +109,11 @@ robocopy ... dist ...      # G드라이브 동기화 (지금 그대로)
 
 ### 팀원 일상 사용
 1. **바탕화면 새 바로가기** (자동 생성된 것, 로컬 본체 가리킴) 더블클릭 → 1~2초 시작
-2. 백그라운드: 앱이 PC의 G드라이브 폴더에서 manifest.json 읽기 → 자기 버전과 비교 → 새 버전이면 `%LOCALAPPDATA%\Bflow-BGonly\pending\` 에 다운로드
-3. 다음 종료 시 swap (`pending\` ↔ `app\`)
-4. 다음 실행 = 새 버전 (또 1~2초)
+2. 시작 직후 스플래시에서 manifest.json 읽기 → 자기 버전과 비교 → 새 버전이면 최대 10초 동안 먼저 다운로드
+3. 10초 안에 준비 완료: helper가 `app\` → `backup\`, `pending\` → `app\` swap 후 새 BFLOW.exe 재실행
+4. 10초 초과/실패: 현재 버전으로 먼저 열고, 다운로드가 끝나면 좌하단 버전 버튼/토스트/업데이트 모달로 표시
+5. `지금 업데이트` 클릭 또는 앱 종료: 저장 대기 후 helper swap. 다음 실행 또는 재실행 = 새 버전
+6. 앱을 계속 켜둔 상태에서 한솔이 새 버전을 올리면, 앱이 5분 주기로 manifest를 다시 확인해 같은 알림 흐름으로 진입
 
 ### 옛 바로가기 (한솔이 사전에 만든 G드라이브 가리키는 .lnk)
 - 폐기. 누군가 다시 눌러도 self-installer 가 "이미 설치되어 있음" 감지 → 로컬 본체 자동 실행 + 안내. 사고 없음.
@@ -139,6 +146,8 @@ DB 스키마 변경 시:
 2. **G드라이브 락**: 팀원이 BFLOW.exe 켜놓은 상태면 robocopy 가 일부 `.pak` 파일에서 락 에러. 다만 chromium 33 동일이라 src/dst 내용 같아 무시 가능.
 3. **node_modules in worktree**: git worktree 에는 node_modules 가 없음. `mklink /J node_modules C:\Bflow-BGonly\node_modules` (Windows junction) 으로 메인 디렉토리와 연결 후 빌드.
 4. **자동 머지/배포 금지** (메모리): PR 생성/G드라이브 robocopy/슬랙 게시는 한솔이 명시적으로 요청한 경우만.
+5. **업데이트 성공 판단**: 토스트 감지는 다운로드 완료 신호일 뿐이다. 실제 적용 성공은 helper swap 후 다음 실행 버전, `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[main]`/`[helper]` 로그, `.swap-attempted` 정리 여부로 판단한다.
+6. **manifest 변경 요약**: 앱의 업데이트 모달은 `DEVLOG/update-notes.json` → `dist/manifest.json.releaseNotes`를 표시한다. 새 배포 전 이 파일의 최신 항목을 갱신한다.
 
 ---
 
@@ -160,4 +169,5 @@ DB 스키마 롤백:
 - [ROADMAP.md](../ROADMAP.md) — 개발 로드맵
 - [supabase-init.sql](./supabase-init.sql) — DB 초기 스키마
 - [supabase-migration-plan.md](./supabase-migration-plan.md) — Supabase 마이그레이션 상세
-- `docs/superpowers/specs/2026-05-01-auto-update-design.md` — 자동 업데이트 시스템 디자인 (작성 예정)
+- [auto-update-test-scenario.md](./auto-update-test-scenario.md) — 자동 업데이트 E2E 테스트 체크리스트
+- `docs/superpowers/specs/2026-05-01-auto-update-design.md` — 자동 업데이트 시스템 디자인 및 v1.22.10 결정 이력

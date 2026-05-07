@@ -57,8 +57,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // v1.22.1: 자동 업데이트 알림 — 백그라운드 fetch 완료 시 토스트 띄우기
-  onUpdateReady: (callback: (version: string) => void) => {
-    const handler = (_event: unknown, version: string) => callback(version);
+  getUpdateState: () => ipcRenderer.invoke('update:get-state'),
+  onUpdateState: (callback: (state: unknown | null) => void) => {
+    const handler = (_event: unknown, state: unknown | null) => callback(state);
+    ipcRenderer.on('update:state', handler);
+    return () => { ipcRenderer.removeListener('update:state', handler); };
+  },
+  onUpdateReady: (callback: (version: string, state?: unknown) => void) => {
+    const handler = (_event: unknown, version: string, state?: unknown) => callback(version, state);
     ipcRenderer.on('update:ready', handler);
     return () => { ipcRenderer.removeListener('update:ready', handler); };
   },

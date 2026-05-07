@@ -17,21 +17,101 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      font-family: "Pretendard", "Noto Sans KR", sans-serif;
+      color: #E8E8EE;
+    }
+    .splash-card {
+      width: 320px;
+      height: 320px;
+      border-radius: 28px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(108, 92, 231, 0.22), transparent 36%),
+        linear-gradient(180deg, rgba(26, 29, 39, 0.88), rgba(15, 17, 23, 0.92));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 24px 60px rgba(0,0,0,0.34);
+      backdrop-filter: blur(18px) saturate(1.35);
+      -webkit-backdrop-filter: blur(18px) saturate(1.35);
+      animation: fadeIn 0.3s ease-out;
     }
     img {
-      width: 220px;
-      height: 220px;
+      width: 180px;
+      height: 180px;
       object-fit: contain;
-      animation: fadeIn 0.3s ease-out;
       filter: drop-shadow(0 6px 16px rgba(0,0,0,0.35));
+    }
+    .status {
+      width: 250px;
+      min-height: 54px;
+      margin-top: 8px;
+      text-align: center;
+    }
+    .status-title {
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.35;
+      letter-spacing: 0;
+      color: #F4F5FA;
+      transition: opacity 0.2s ease;
+    }
+    .status-detail {
+      margin-top: 5px;
+      font-size: 11px;
+      line-height: 1.45;
+      letter-spacing: 0;
+      color: #8B8DA3;
+      transition: opacity 0.2s ease;
+    }
+    .progress {
+      width: 130px;
+      height: 3px;
+      margin-top: 14px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .progress span {
+      display: block;
+      width: 45%;
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #74B9FF, #A29BFE, #FDCB6E);
+      animation: slide 1.25s ease-in-out infinite;
     }
     @keyframes fadeIn {
       from { opacity: 0; transform: scale(0.92); }
       to   { opacity: 1; transform: scale(1); }
     }
+    @keyframes slide {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(260%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .splash-card, .progress span {
+        animation: none;
+      }
+    }
   </style>
 </head>
 <body>
-  <img src="./opening_image_cropped.png" alt="B flow">
+  <div class="splash-card">
+    <img src="./opening_image_cropped.png" alt="B flow">
+    <div class="status" aria-live="polite">
+      <div id="status-title" class="status-title">B flow 여는 중</div>
+      <div id="status-detail" class="status-detail">필요한 준비를 확인하고 있습니다.</div>
+    </div>
+    <div class="progress"><span></span></div>
+  </div>
+  <script>
+    window.__setBflowSplashStatus = function (title, detail) {
+      var titleEl = document.getElementById('status-title');
+      var detailEl = document.getElementById('status-detail');
+      if (titleEl && title) titleEl.textContent = title;
+      if (detailEl) detailEl.textContent = detail || '';
+    };
+  </script>
 </body>
 </html>

@@ -1,8 +1,11 @@
 # Auto-Update System Design — B flow
 
 > 작성: 2026-05-01
-> 상태: 디자인 (한솔 review 대기)
+> 상태: v1.22.10 기준 구현 방향으로 갱신 (2026-05-08)
 > 관련 문서: [DEVLOG/DEPLOYMENT.md](../../../DEVLOG/DEPLOYMENT.md)
+
+> 2026-05-08 정정: 초기 설계의 "무알림, 앱 켤 때만, 다음 재시작 시 적용"은 폐기했다.
+> 현재 결정은 시작 시 10초 update gate + 앱 사용 중 지속 토스트/버전 버튼/업데이트 모달 + helper swap 적용이다.
 
 ---
 
@@ -30,12 +33,12 @@
 
 | 항목 | 결정 |
 |---|---|
-| UX 패턴 | A. 조용히 알아서, 다음 재시작 시 적용 |
+| UX 패턴 | 스플래시 10초 update gate + 앱 안 지속 알림 + 사용자가 `지금 업데이트` 가능 |
 | 다운로드 위치 | G드라이브 그대로 (한솔 워크플로우 변경 0) |
 | 전달 방식 | PC의 G드라이브 동기화에 맡김 (앱이 PC의 G드라이브 폴더 모니터링) |
 | 첫 설치 | 첫 실행 시 PC에 자동 설치 (self-installer 패턴) |
-| 체크 시점 | 앱 켤 때만 (단순) |
-| 사용자 알림 | 무알림 (G드라이브 패턴과 체감 동일) |
+| 체크 시점 | 앱 시작 시 먼저 확인, 앱 진입 후에는 5분 주기로 manifest 재확인 |
+| 사용자 알림 | 스플래시 텍스트, 지속 토스트, 좌하단 버전 버튼 배지, 업데이트 상세 모달 |
 | Defender | 첫 설치 시 제외 등록 dialog 한 번 (옵션) |
 
 ---
@@ -106,27 +109,33 @@ robocopy <local dist> <G드라이브 dist> /MIR
  → G드라이브 sync → 모든 팀원 PC 의 G드라이브 폴더에 도착
 ```
 
-### 4.2 팀원 실행 (정상 동작)
+### 4.2 팀원 실행 (v1.22.10 정상 동작)
 
 ```
 1. 바탕화면 바로가기 더블클릭
 2. → %LOCALAPPDATA%\Bflow-BGonly\app\BFLOW.exe 실행 (1~2초, Defender 캐시됨)
-3. 메인 창 로드
-4. [백그라운드] checkUpdate() — 5초 후 한 번 호출
+3. 스플래시 표시
+4. update gate — 최대 10초 동안 최신 버전 준비
    ├ G드라이브 폴더 경로 추정 (Drive desktop 표준 경로 후보)
    ├ <G드라이브 폴더>/manifest.json 읽기
    ├ 자기 버전(package.json) 과 비교
-   └ 새 버전이면 → downloadUpdate()
+   └ 새 버전이면 → prepareUpdate()
         ├ <G드라이브 win-unpacked>/* → %LOCALAPPDATA%\...\pending\* 로 복사 (변경분만, robocopy 패턴)
+        ├ pending\.update-manifest.json 기록 (버전/변경 내역)
         └ pending\.ready 마커 파일 생성 (swap 신호)
-5. 사용자 작업 — 영향 없음
-6. 종료 (트레이 종료 또는 X)
-   ├ swapIfPending() — quit hook
-   │   ├ pending\.ready 존재 시
-   │   ├ app\ → backup\ (이전 버전 보관)
-   │   └ pending\ → app\ (새 버전 활성화)
-   └ 종료
-7. 다음 실행 = 새 버전 (또 1~2초)
+5. 10초 안에 준비 완료
+   ├ helper swap 실행
+   └ 새 BFLOW.exe 재실행 = 최신 버전
+6. 10초 초과/실패
+   ├ 현재 버전으로 먼저 메인 창 로드
+   ├ 준비가 끝나면 지속 토스트 + 좌하단 버전 버튼 배지 표시
+   └ 상세 모달에서 현재 버전/최신 버전/업데이트 내역 표시
+7. 앱 사용 중 한솔이 새 빌드를 올린 경우
+   ├ 5분 주기 manifest 재확인
+   └ 새 버전 감지 시 같은 다운로드/토스트/모달 흐름 진입
+8. 사용자가 `지금 업데이트` 클릭 또는 앱 종료
+   ├ 저장 대기 후 helper swap
+   └ 재실행 또는 다음 실행 = 새 버전
 ```
 
 ### 4.3 첫 실행 (self-installer)
@@ -212,7 +221,8 @@ app.on('before-quit', async (event) => {
 | G드라이브 폴더 못 찾음 (사용자가 Drive 안 켰거나 경로 다름) | 그냥 자기 버전으로 실행. `console.warn` 만. 사용자 알림 X. |
 | manifest.json 못 읽음 (sync 진행중, 파일 깨짐) | 같음 — fallback 으로 자기 버전 실행 |
 | 다운로드 중 네트워크/Drive sync 끊김 | pending\ 에 부분 파일 남을 수 있음 → 다음 시작 시 정합성 검사 (`.ready` 마커 없으면 폐기) |
-| swap 실패 (락) | app\ 그대로 두고 pending\ 도 그대로. 다음 종료 시 재시도. |
+| swap 실패 (락) | app\ 그대로 두고 pending\ 도 그대로. `.swap-attempted` + `.ready` 조합으로 다음 시작 시 실패를 감지하고 안내. |
+| stale pending (`.ready`만 남거나 현재 버전 이하) | pending을 정리하고 원격 manifest 기준으로 새로 다운로드. 토스트만 뜨고 적용 안 되는 반복 상태를 차단. |
 | 새 버전 깨졌음 (앱 시작 실패) | `backup\` 의 이전 버전을 자동으로 `app\` 으로 되돌리는 안전장치 (5초 안에 메인 창 못 띄우면 롤백) |
 | Defender 제외 등록 거부 | 그냥 진행. 다음에 설정에서 다시 시도 가능. |
 | 권한 부족 (LocalAppData 쓰기 불가, 매우 드뭄) | 사용자에게 명확한 에러 메시지 + 폴백으로 G드라이브 실행 |
@@ -264,8 +274,15 @@ const manifest = {
 fs.writeFileSync('dist/manifest.json', JSON.stringify(manifest, null, 2));
 ```
 
-### G드라이브 동기화 (변경 0)
-지금처럼 robocopy. dist/manifest.json 도 같이 sync 됨.
+### G드라이브 동기화 (manifest-last 필수)
+한솔의 큰 흐름은 유지하되, `manifest.json`은 업데이트 감지 신호라서 반드시 마지막에 올린다.
+
+```powershell
+robocopy <local dist> <G드라이브 dist> /MIR /R:1 /W:1 /XF manifest.json
+Copy-Item <local dist>\manifest.json <G드라이브 dist>\manifest.json -Force
+```
+
+이 순서를 어기면 팀원 앱이 아직 덜 올라간 빌드를 최신으로 판단할 수 있다.
 
 ---
 
@@ -297,8 +314,10 @@ fs.writeFileSync('dist/manifest.json', JSON.stringify(manifest, null, 2));
 |---|---|
 | 신규 팀원 — G드라이브 BFLOW 첫 클릭 | self-installer dialog → PC 설치 → 자동 재실행 → 로그인 화면 |
 | 일상 사용 — 바탕화면 바로가기 더블클릭 | 1~2초 시작 (Defender 캐시) |
-| 한솔이 새 빌드 push 직후 | 백그라운드 다운로드, 사용자 작업 영향 없음. 다음 종료 시 swap. 그 다음 실행 = 새 버전 |
+| 한솔이 새 빌드 push 직후, 앱 미실행 | 시작 스플래시에서 최대 10초 준비. 준비되면 최신 버전으로 바로 재실행, 늦으면 현재 버전으로 먼저 진입 |
+| 한솔이 새 빌드 push 직후, 앱 실행 중 | 5분 주기 체크에서 감지 후 백그라운드 다운로드, 지속 토스트/버전 버튼/모달 표시. `지금 업데이트` 또는 종료 시 swap |
 | G드라이브 sync 안 끝남 | 그냥 자기 버전으로 실행 (sync 끝난 다음 실행 시 받음) |
+| 토스트는 떴는데 다음 실행 버전이 그대로 | `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[main]`/`[helper]` 로그와 stale pending 여부 확인 |
 | 새 버전 깨짐 (앱 시작 실패) | `backup\` 자동 롤백, 다음 실행 = 이전 버전 |
 | 옛 바로가기 (G드라이브 가리키는 거) 클릭 — 이미 설치된 경우 | 토스트 안내 + 로컬 본체 실행 |
 | Defender 제외 등록 거부 | 정상 동작. 새 빌드 직후 첫 실행만 약간 느림 (~10초). 이후 정상 (1~2초) |
@@ -344,5 +363,5 @@ Windows registry 에 등록된 `bflow://` 핸들러 BFLOW.exe 경로가 OS 가 �
 ## 14. 결정 보류 / 후속 검토
 
 - **코드 서명 인증서** (연 100$+): SmartScreen 우회로 첫 실행도 즉시 빠름. 도입 비용/필요성 검토.
-- **manifest.json 형식 확장**: 변경 사항 (changelog) 등 추가 메타. 지금은 version + buildAt 만.
+- **manifest.json 형식 확장**: v1.22.10부터 `releaseNotes` 포함. 원본은 `DEVLOG/update-notes.json`.
 - **여러 환경 지원**: 한솔 PC 외에 외근 (Drive sync 안 됨) 등에서도 받게 하려면 Supabase Storage 옵션 추가 검토 (현재 scope 밖).

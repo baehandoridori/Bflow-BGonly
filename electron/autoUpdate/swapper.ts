@@ -19,8 +19,10 @@ import path from 'path';
 import {
   localRoot, localAppDir, localPendingDir, localBackupDir, localReadyMarker,
   localInstalledMarker, localPendingVerificationMarker, localSwapAttemptedMarker,
+  localSwapSuppressedMarker, getOwnVersion,
 } from './paths';
 import { copyDirMirror } from './copy';
+import { compareVersions } from './manifest';
 
 /**
  * v1.22.2 swap 단계별 진단 로그 — `%LOCALAPPDATA%\Bflow-BGonly\swap.log`.
@@ -84,8 +86,51 @@ async function moveDirRobust(src: string, dst: string, label: string): Promise<v
   }
 }
 
-export async function hasPending(): Promise<boolean> {
-  return existsSync(localReadyMarker());
+async function readPendingPackageVersion(): Promise<string | null> {
+  try {
+    const pkgPath = path.join(localPendingDir(), 'resources', 'app', 'package.json');
+    const content = await fsp.readFile(pkgPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    return typeof parsed?.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function isSwapSuppressedForCurrentVersion(currentVersion: string): Promise<boolean> {
+  const marker = localSwapSuppressedMarker();
+  if (!existsSync(marker)) return false;
+  try {
+    const recordedVersion = (await fsp.readFile(marker, 'utf-8')).trim();
+    if (recordedVersion === currentVersion) return true;
+    await fsp.unlink(marker);
+    logSwap(`  stale suppression marker 정리 (recorded=${recordedVersion}, current=${currentVersion})`);
+  } catch (err) {
+    logSwap(`  suppression marker 확인 실패 — ${(err as Error).message}`);
+  }
+  return false;
+}
+
+export async function hasPending(currentVersion = getOwnVersion()): Promise<boolean> {
+  if (!existsSync(localReadyMarker())) return false;
+  if (await isSwapSuppressedForCurrentVersion(currentVersion)) {
+    logSwap(`  swap skip: suppression active (current=${currentVersion})`);
+    return false;
+  }
+
+  const pendingVersion = await readPendingPackageVersion();
+  if (!pendingVersion || compareVersions(pendingVersion, currentVersion) <= 0) {
+    logSwap(
+      `  stale pending ready 정리 (pending=${pendingVersion ?? 'unknown'}, current=${currentVersion})`,
+    );
+    try {
+      await fsp.rm(localPendingDir(), { recursive: true, force: true });
+    } catch (err) {
+      logSwap(`  stale pending 정리 실패 — ${(err as Error).message}`);
+    }
+    return false;
+  }
+  return true;
 }
 
 export interface SwapResult {

@@ -19,6 +19,7 @@
 3. **낙관적 업데이트 패턴**: 모든 데이터 변경은 즉시 UI 반영 → Supabase 동기화 → 실패 시 롤백
 4. **Supabase 단일 경로**: 새 기능은 `supabaseService` 경유로만 구현 (Sheets 분기 추가 금지)
 5. **IPC 구조 유지**: 렌더러에서 직접 Supabase 호출 금지, 반드시 IPC → 메인 → Supabase
+6. **자동 업데이트 배포 원칙**: G드라이브에는 빌드 파일을 먼저 모두 올리고 `manifest.json`을 마지막에 갱신한다. 앱은 manifest를 보고 업데이트를 감지하므로, 반쯤 올라간 빌드가 최신으로 보이면 안 된다.
 
 ---
 
@@ -93,11 +94,22 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 ---
 
+## 자동 업데이트 원칙
+
+- 팀원은 로컬 PC에 설치된 BFLOW 본체를 실행한다. G드라이브는 배포 창고 역할만 한다.
+- 앱 시작 시 스플래시에서 업데이트 상태를 안내하고, 새 버전 준비는 최대 10초까지만 기다린다. 10초 안에 준비되지 않으면 현재 버전으로 먼저 진입한다.
+- 앱 사용 중에는 5분 주기로 manifest를 다시 확인해 새 버전을 백그라운드로 받아두고, 좌하단 버전 버튼과 업데이트 모달에서 계속 표시한다.
+- 실제 교체는 `지금 업데이트`를 누르거나 앱 종료 시 helper swap으로 수행한다. 토스트가 떴다는 것만으로 업데이트 성공으로 판단하지 말고, `swap.log`의 `[main]`/`[helper]` 로그와 다음 실행 버전을 확인한다.
+- `helperSwap.ts`의 초기 로그는 정적 import된 `fs/path/localRoot`만 사용해야 한다. 프로덕션 번들에서 `require('./paths')` 같은 동적 require는 silent fail 위험이 있다.
+
+---
+
 ## 참조 문서
 
 - **`CONTEXT.md`** — 세션 컨텍스트 가이드 (아키텍처, 파일 맵, 알려진 이슈, 스킬 활용법)
 - **`ROADMAP.md`** — 전체 개발 로드맵 (Phase 0~9, 기능별 상세 스펙)
 - **`DEVLOG/DEPLOYMENT.md`** — 배포 가이드 (배포 목적/경로/방식, 한솔 워크플로우, 자동 업데이트 시스템)
+- **`DEVLOG/auto-update-test-scenario.md`** — 자동 업데이트 E2E 테스트 체크리스트
 - `tasks/lessons.md` — 과거 실수/패턴 기록 (세션 시작 시 검토)
 - `DEVLOG/supabase-migration-plan.md` — Supabase 마이그레이션 상세 계획서
 - `DEVLOG/supabase-init.sql` — Supabase DB 스키마 초기화 SQL

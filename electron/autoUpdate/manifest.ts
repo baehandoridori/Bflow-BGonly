@@ -2,7 +2,7 @@
  * v1.21.0 자동 업데이트 — manifest.json 읽기 + 버전 비교.
  * spec §3 빌드 산출물 형식: { version: "1.21.0", buildAt: "2026-05-07T...Z" }
  */
-import { promises as fsp, statSync } from 'fs';
+import { promises as fsp, readdirSync, statSync } from 'fs';
 import path from 'path';
 
 export interface Manifest {
@@ -12,6 +12,32 @@ export interface Manifest {
   fileCount?: number;
   /** 빌드 시점의 win-unpacked 총 byte 수 (sync 완전성 검증용). optional. */
   totalBytes?: number;
+  /** 앱 안 업데이트 센터에 표시할 짧은 변경 요약. */
+  releaseNotes?: ReleaseNote[];
+}
+
+export interface ReleaseNote {
+  version: string;
+  title: string;
+  items: string[];
+}
+
+function normalizeReleaseNotes(value: unknown): ReleaseNote[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const notes: ReleaseNote[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const note = entry as Record<string, unknown>;
+    if (!Array.isArray(note.items)) continue;
+    const items = note.items.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+    if (items.length === 0) continue;
+    notes.push({
+      version: typeof note.version === 'string' ? note.version : '',
+      title: typeof note.title === 'string' ? note.title : '',
+      items,
+    });
+  }
+  return notes.length > 0 ? notes : undefined;
 }
 
 /**
@@ -30,6 +56,7 @@ export async function readManifest(filePath: string): Promise<Manifest | null> {
       buildAt: typeof parsed.buildAt === 'string' ? parsed.buildAt : '',
       fileCount: typeof parsed.fileCount === 'number' ? parsed.fileCount : undefined,
       totalBytes: typeof parsed.totalBytes === 'number' ? parsed.totalBytes : undefined,
+      releaseNotes: normalizeReleaseNotes(parsed.releaseNotes),
     };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
@@ -67,7 +94,7 @@ export function countFilesAndBytes(root: string): { fileCount: number; totalByte
   let totalBytes = 0;
   function walk(dir: string): void {
     let entries;
-    try { entries = require('fs').readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       const full = path.join(dir, e.name);
       if (e.isDirectory()) walk(full);

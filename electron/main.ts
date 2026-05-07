@@ -22,11 +22,20 @@ import { registerFontProtocol, registerFontIpcHandlers } from './fontIpc';
 import {
   runFirstInstallIfNeeded,
   scheduleUpdateCheck,
+  prepareUpdate,
   hasPending,
   spawnSwapHelper,
   checkLastStartAndRollback,
   markStartSucceeded,
+  type UpdateInfo,
 } from './autoUpdate';
+import {
+  localPendingDir,
+  localReadyMarker,
+  localRoot,
+  localSwapAttemptedMarker,
+  localSwapSuppressedMarker,
+} from './autoUpdate/paths';
 import {
   initVacation,
   isVacationConnected,
@@ -88,6 +97,13 @@ let showTrayHintInFlight = false;
 // 최근 브로드캐스트된 세션 정보 캐시 → 새로 열리는 플로팅 위젯 창에 즉시 전달
 // (메인 프로세스 재시작 시 null로 초기화됨 — 메인 창이 첫 로그인 broadcast를 쏘면 다시 캐싱)
 let lastKnownSession: unknown = null;
+let currentUpdateInfo: UpdateInfo | null = null;
+let startupUpdateContinuation: Promise<UpdateInfo | null> | null = null;
+const STARTUP_UPDATE_TIMEOUT_MS = 10_000;
+const RUNTIME_UPDATE_CHECK_INTERVAL_MS = 5 * 60_000;
+let runtimeUpdateCheckTimer: ReturnType<typeof setInterval> | null = null;
+let runtimeUpdateCheckInFlight = false;
+let lastNotifiedReadyVersion: string | null = null;
 
 /** 아이콘 경로 해석: dev(electron/)와 prod(dist-electron/) + app.getAppPath() 순회 */
 function resolveTrayIconPath(): string {
@@ -220,8 +236,8 @@ function createSplashWindow(): void {
     return;
   }
   splashWin = new BrowserWindow({
-    width: 300,
-    height: 300,
+    width: 360,
+    height: 360,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -240,6 +256,20 @@ function createSplashWindow(): void {
   });
 }
 
+function setSplashStatus(title: string, detail = ''): void {
+  if (!splashWin || splashWin.isDestroyed()) return;
+  const script = `window.__setBflowSplashStatus?.(${JSON.stringify(title)}, ${JSON.stringify(detail)});`;
+  const send = () => {
+    if (!splashWin || splashWin.isDestroyed()) return;
+    splashWin.webContents.executeJavaScript(script).catch(() => { /* splash status is best effort */ });
+  };
+  if (splashWin.webContents.isLoading()) {
+    splashWin.webContents.once('did-finish-load', send);
+  } else {
+    send();
+  }
+}
+
 function closeSplash(): void {
   if (splashWin && !splashWin.isDestroyed()) {
     // closable:false 창은 close() 거부 → destroy() 사용
@@ -251,6 +281,116 @@ function closeSplash(): void {
     }
   }
   splashWin = null;
+}
+
+function publishUpdateInfo(info: UpdateInfo | null): void {
+  currentUpdateInfo = info && info.status !== 'up-to-date' ? info : null;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update:state', currentUpdateInfo);
+  }
+}
+
+function notifyUpdateReady(info: UpdateInfo): void {
+  publishUpdateInfo(info);
+  if (lastNotifiedReadyVersion === info.latestVersion) return;
+  lastNotifiedReadyVersion = info.latestVersion;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update:ready', info.latestVersion, info);
+  }
+}
+
+async function writeSwapAttemptedMarker(): Promise<void> {
+  try {
+    await fs.promises.mkdir(localRoot(), { recursive: true });
+    await fs.promises.writeFile(localSwapAttemptedMarker(), new Date().toISOString() + '\n', 'utf-8');
+  } catch (err) {
+    console.warn('[autoUpdate] .swap-attempted 마커 작성 실패 (무시):', err);
+  }
+}
+
+function splashTextForUpdate(info: UpdateInfo): { title: string; detail: string } {
+  switch (info.status) {
+    case 'available':
+      return { title: `새 버전 v${info.latestVersion} 확인됨`, detail: '앱을 열기 전에 먼저 준비하고 있습니다.' };
+    case 'downloading':
+      return { title: `새 버전 v${info.latestVersion} 준비 중`, detail: '최대 10초까지만 기다린 뒤 오래 걸리면 현재 버전으로 엽니다.' };
+    case 'ready':
+      return { title: `새 버전 v${info.latestVersion} 준비 완료`, detail: '최신 버전으로 다시 여는 중입니다.' };
+    case 'failed':
+      return { title: '현재 버전으로 여는 중', detail: info.message ?? '업데이트 준비가 끝나지 않아 현재 버전으로 먼저 엽니다.' };
+    default:
+      return { title: '현재 버전으로 여는 중', detail: '' };
+  }
+}
+
+async function runStartupUpdateGate(): Promise<boolean> {
+  setSplashStatus('업데이트 확인 중', '새 버전이 있으면 최대 10초 안에서 먼저 준비합니다.');
+  let lastStartupUpdateInfo: UpdateInfo | null = null;
+  const updatePromise = prepareUpdate((info) => {
+    lastStartupUpdateInfo = info;
+    const text = splashTextForUpdate(info);
+    setSplashStatus(text.title, text.detail);
+    publishUpdateInfo(info);
+  }).catch((err) => {
+    console.warn('[autoUpdate] startup update gate 실패 — 현재 버전으로 계속 실행:', err);
+    if (lastStartupUpdateInfo && lastStartupUpdateInfo.status !== 'up-to-date') {
+      const failedInfo: UpdateInfo = {
+        ...lastStartupUpdateInfo,
+        status: 'failed',
+        ready: false,
+        message: '업데이트 준비 중 문제가 있어 현재 버전으로 먼저 엽니다. 앱 안에서 다시 시도 상태를 확인할 수 있습니다.',
+      };
+      const text = splashTextForUpdate(failedInfo);
+      setSplashStatus(text.title, text.detail);
+      publishUpdateInfo(failedInfo);
+      return failedInfo;
+    }
+    setSplashStatus('현재 버전으로 여는 중', '업데이트 확인 중 문제가 있어 현재 버전으로 먼저 엽니다.');
+    publishUpdateInfo(null);
+    return null;
+  });
+  startupUpdateContinuation = updatePromise;
+
+  const timeout = new Promise<'timeout'>((resolve) => {
+    setTimeout(() => resolve('timeout'), STARTUP_UPDATE_TIMEOUT_MS);
+  });
+  const result = await Promise.race([updatePromise, timeout]);
+
+  if (result === 'timeout') {
+    setSplashStatus('현재 버전으로 여는 중', '업데이트 준비가 계속 진행되면 앱 안에서 알려드립니다.');
+    return false;
+  }
+
+  startupUpdateContinuation = null;
+  if (result?.ready) {
+    const text = splashTextForUpdate(result);
+    setSplashStatus(text.title, text.detail);
+    await writeSwapAttemptedMarker();
+    spawnSwapHelper({ relaunch: true });
+    console.log(`[autoUpdate] startup swap helper spawned (relaunch=true, version=${result.latestVersion})`);
+    isQuitting = true;
+    app.exit(0);
+    return true;
+  }
+
+  publishUpdateInfo(result && result.status !== 'up-to-date' ? result : null);
+  return false;
+}
+
+function startRuntimeUpdateChecks(
+  onReady: (info: UpdateInfo) => void,
+  onState: (info: UpdateInfo) => void,
+): void {
+  if (runtimeUpdateCheckTimer) return;
+  runtimeUpdateCheckTimer = setInterval(() => {
+    if (runtimeUpdateCheckInFlight) return;
+    runtimeUpdateCheckInFlight = true;
+    scheduleUpdateCheck(onReady, onState)
+      .catch((err) => console.warn('[autoUpdate] 주기 체크 실패:', err))
+      .finally(() => {
+        runtimeUpdateCheckInFlight = false;
+      });
+  }, RUNTIME_UPDATE_CHECK_INTERVAL_MS);
 }
 
 function createTray(): void {
@@ -649,13 +789,37 @@ function createWindow(): void {
     //      manifest.json (수백 byte) read 한 번이라 매우 가벼움. fetch는 어차피 비동기
     //      백그라운드 진행이라 메인 창 사용성에 영향 X.
     markStartSucceeded().catch(() => { /* noop */ });
-    scheduleUpdateCheck((version) => {
+    if (currentUpdateInfo && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('update:state', currentUpdateInfo);
+    }
+    const handleUpdateReady = (info: UpdateInfo) => {
       // v1.22.1: 다운로드 + .ready 마커 작성 완료 → renderer에 토스트 띄우기 신호.
       // 사용자가 "지금 재시작" 클릭 시 update:apply-now → swap + relaunch.
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('update:ready', version);
-      }
-    }).catch((err) => console.warn('[autoUpdate] 체크 실패:', err));
+      notifyUpdateReady(info);
+    };
+    const handleUpdateState = (info: UpdateInfo) => {
+      publishUpdateInfo(info);
+    };
+    if (startupUpdateContinuation) {
+      const pendingStartupCheck = startupUpdateContinuation;
+      pendingStartupCheck
+        .then((info) => {
+          if (!info || isQuitting) return;
+          if (info.ready) notifyUpdateReady(info);
+          else publishUpdateInfo(info);
+        })
+        .catch((err) => console.warn('[autoUpdate] startup continuation 실패:', err))
+        .finally(() => {
+          if (startupUpdateContinuation === pendingStartupCheck) startupUpdateContinuation = null;
+          startRuntimeUpdateChecks(handleUpdateReady, handleUpdateState);
+        });
+    } else {
+      scheduleUpdateCheck(handleUpdateReady, handleUpdateState)
+        .catch((err) => console.warn('[autoUpdate] 체크 실패:', err))
+        .finally(() => {
+          startRuntimeUpdateChecks(handleUpdateReady, handleUpdateState);
+        });
+    }
   });
 
   mainWindow.on('close', (e) => {
@@ -730,6 +894,8 @@ function migrateLegacyUsersFileIfNeeded(): void {
 //
 // Codex 1차 P2 (v1.22.1): one-shot guard. relaunch 예약은 한 종료 사이클당 한 번만.
 let updateRelaunchScheduled = false;
+ipcMain.handle('update:get-state', () => currentUpdateInfo);
+
 ipcMain.handle('update:apply-now', () => {
   if (updateRelaunchScheduled) return;
   updateRelaunchScheduled = true;
@@ -2779,17 +2945,14 @@ if (!gotTheLock) {
  */
 async function rotateSwapLogIfNeeded(): Promise<void> {
   try {
-    const path = await import('path');
-    const { promises: fsp, statSync, existsSync } = await import('fs');
-    const { localRoot } = await import('./autoUpdate/paths');
     const logPath = path.join(localRoot(), 'swap.log');
-    if (!existsSync(logPath)) return;
-    const size = statSync(logPath).size;
+    if (!fs.existsSync(logPath)) return;
+    const size = fs.statSync(logPath).size;
     const MAX = 1024 * 1024;  // 1MB
     if (size <= MAX) return;
     const archivePath = path.join(localRoot(), 'swap.log.old');
-    if (existsSync(archivePath)) await fsp.unlink(archivePath);
-    await fsp.rename(logPath, archivePath);
+    if (fs.existsSync(archivePath)) await fs.promises.unlink(archivePath);
+    await fs.promises.rename(logPath, archivePath);
     console.log(`[main] swap.log rotated (${size} bytes → swap.log.old)`);
   } catch (err) {
     console.warn('[main] swap.log rotation 실패 (무시):', err);
@@ -2798,16 +2961,9 @@ async function rotateSwapLogIfNeeded(): Promise<void> {
 
 async function notifyAndCleanupOnSwapFailure(): Promise<void> {
   try {
-    const path = await import('path');
-    const { existsSync, promises: fsp } = await import('fs');
-    const {
-      localReadyMarker, localPendingDir, localRoot,
-      localSwapAttemptedMarker, localSwapSuppressedMarker,
-    } = await import('./autoUpdate/paths');
-
     // P2 #1: .ready + .swap-attempted 둘 다 있어야 진짜 swap 실패. 둘 중 하나만 있으면
     // crash/kill 등으로 unclean exit한 케이스 — 자동업데이트 cycle이 알아서 처리.
-    if (!existsSync(localReadyMarker()) || !existsSync(localSwapAttemptedMarker())) return;
+    if (!fs.existsSync(localReadyMarker()) || !fs.existsSync(localSwapAttemptedMarker())) return;
 
     await dialog.showMessageBox({
       type: 'warning',
@@ -2824,7 +2980,7 @@ async function notifyAndCleanupOnSwapFailure(): Promise<void> {
     // 재시도 영구 중단. 사용자가 NSIS Setup으로 다른 version 설치하면 own 갱신 → marker
     // version과 다르면 marker 자동 정리하여 자동업데이트 재개.
     try {
-      await fsp.writeFile(localSwapSuppressedMarker(), app.getVersion(), 'utf-8');
+      await fs.promises.writeFile(localSwapSuppressedMarker(), app.getVersion(), 'utf-8');
     } catch (err) {
       console.warn('[main] suppression marker 작성 실패 (무시):', err);
     }
@@ -2836,14 +2992,14 @@ async function notifyAndCleanupOnSwapFailure(): Promise<void> {
     // 무한 retry. pending 정리 성공 시에만 .swap-attempted 정리하여 다음에도 dialog 표시.
     let pendingCleaned = false;
     try {
-      await fsp.rm(localPendingDir(), { recursive: true, force: true });
-      pendingCleaned = !existsSync(localPendingDir());
+      await fs.promises.rm(localPendingDir(), { recursive: true, force: true });
+      pendingCleaned = !fs.existsSync(localPendingDir());
     } catch (err) {
       console.warn('[main] pending 정리 실패 (무시 — .swap-attempted 유지하여 다음 시작 시 또 알림):', err);
     }
     if (pendingCleaned) {
       try {
-        await fsp.unlink(localSwapAttemptedMarker());
+        await fs.promises.unlink(localSwapAttemptedMarker());
       } catch { /* 무시 */ }
     }
   } catch (err) {
@@ -2887,12 +3043,13 @@ app.whenReady().then(async () => {
   //   새 swap.log 시작. 옛 archive는 1세대만 유지 (다음 rotation 시 덮어씀).
   await rotateSwapLogIfNeeded();
 
-  // ★ v1.20.x perf (gifted-darwin-99908d 964241d 포트):
-  //   사용자에게 즉시 "켜졌다" 피드백을 주려면 스플래시를 가장 먼저 띄워야 함.
-  //   이전엔 cleanupImageCache의 동기 readdirSync + N×statSync가 사용자 데이터
-  //   디렉토리의 이미지 수에 비례해 첫 창 표시까지의 체감 지연을 만들었음.
+  // ★ v1.22.10 startup update gate:
+  //   스플래시를 먼저 띄운 뒤 원격 최신 버전을 최대 10초까지만 준비한다.
+  //   준비 완료 시 helper swap으로 최신 버전을 다시 열고, 시간 초과/실패 시 현재 버전으로 진입.
   createSplashWindow();
   console.time('splash-to-main'); // 스플래시 노출 시점부터 메인 did-finish-load까지 측정
+  const relaunchingForStartupUpdate = await runStartupUpdateGate();
+  if (relaunchingForStartupUpdate) return;
 
   // 메인 창 bounds 미리 로드 — createWindow 전에 캐시 완료되어 있어야 첫 창부터 저장 크기로 뜸
   await preloadMainWindowBounds();
@@ -3049,6 +3206,10 @@ app.on('before-quit', (e) => {
     tray.destroy();
     tray = null;
   }
+  if (runtimeUpdateCheckTimer) {
+    clearInterval(runtimeUpdateCheckTimer);
+    runtimeUpdateCheckTimer = null;
+  }
 
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
@@ -3093,17 +3254,9 @@ app.on('before-quit', (e) => {
       // (옵션) 재시작. updateRelaunchScheduled 플래그가 helper에게 "사용자 의도가 재시작
       // (apply-now 토스트)인지 / 단순 종료인지" 전달.
       if (await hasPending()) {
-        try {
-          // swap 진입 마커 작성 — helper가 시작될 텐데 helper가 실패하더라도 다음 main
-          // 시작 시 dialog 트리거 조건(.ready + .swap-attempted)을 만족시켜 사용자에게 알림.
-          const path = await import('path');
-          const fsp = (await import('fs')).promises;
-          const { localRoot, localSwapAttemptedMarker } = await import('./autoUpdate/paths');
-          await fsp.mkdir(localRoot(), { recursive: true });
-          await fsp.writeFile(localSwapAttemptedMarker(), new Date().toISOString() + '\n', 'utf-8');
-        } catch (err) {
-          console.warn('[autoUpdate] .swap-attempted 마커 작성 실패 (무시):', err);
-        }
+        // swap 진입 마커 작성 — helper가 실패하더라도 다음 main 시작 시 dialog 트리거 조건
+        // (.ready + .swap-attempted)을 만족시켜 사용자에게 알림.
+        await writeSwapAttemptedMarker();
         spawnSwapHelper({ relaunch: updateRelaunchScheduled });
         console.log(`[autoUpdate] swap helper spawned (relaunch=${updateRelaunchScheduled})`);
       }
