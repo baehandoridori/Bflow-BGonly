@@ -18,6 +18,9 @@
  *   6. (옵션) helper가 새 BFLOW.exe spawn
  */
 import { spawn } from 'child_process';
+import { writeFileSync, existsSync, mkdirSync } from 'fs';
+import path from 'path';
+import os from 'os';
 import {
   localAppDir, localPendingDir, localBackupDir, localRoot, localBflowExe,
 } from './paths';
@@ -64,14 +67,30 @@ Write-SwapLog "[start] PowerShell helper alive — pid=$PID parent=${myPid}"
 # v1.22.6: helper 동시 실행 race 방지 — direct spawn + cmd wrapper 둘 다 발화 시 둘 다
 # PowerShell이 spawn되면 backup 정리 + step2 rename 등에서 충돌. 첫 번째 helper가 lock
 # file을 잡고 swap 진행, 두 번째는 즉시 종료.
+#
+# Codex 1차 P2: CreateNew는 file 존재만 검사. crash로 lock 남으면 영원히 블록. PID 기록
+# + stale lock 검사 (기존 PID가 살아있는지). 살아있으면 다른 helper 실행 중 → exit.
+# 죽었으면 stale → 갈아치움.
 $lockPath = Join-Path $root 'swap.lock'
-$lockHandle = $null
 try {
-  $lockHandle = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-  Write-SwapLog "lock acquired"
+  if (Test-Path $lockPath) {
+    $oldPid = (Get-Content $lockPath -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($oldPid -match '^\d+$') {
+      $oldProc = Get-Process -Id ([int]$oldPid) -ErrorAction SilentlyContinue
+      if ($oldProc -and $oldProc.ProcessName -like 'powershell*') {
+        Write-SwapLog "another helper running (PID $oldPid alive, name=$($oldProc.ProcessName)) — exiting"
+        exit 0
+      }
+      Write-SwapLog "stale lock (PID $oldPid not alive or not ours) — clearing"
+    } else {
+      Write-SwapLog "lock file content invalid — clearing"
+    }
+    Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+  }
+  $PID | Out-File -FilePath $lockPath -NoNewline -Encoding ASCII
+  Write-SwapLog "lock acquired by PID $PID"
 } catch {
-  Write-SwapLog "another helper already running (lock held) — exiting"
-  exit 0
+  Write-SwapLog "lock acquisition 예외 (무시, 계속 진행): $($_.Exception.Message)"
 }
 
 Write-SwapLog "waiting for parent pid=${myPid}"
@@ -143,7 +162,7 @@ $movedToBackup = $false
 if (Test-Path $appDir) {
   if (-not (Move-DirRobust $appDir $backupDir 'step2 app->backup')) {
     Write-SwapLog "swap end: FAIL (step2)"
-    if ($lockHandle) { try { $lockHandle.Close() } catch {}; Remove-Item $lockPath -Force -ErrorAction SilentlyContinue }
+    Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
     exit 1
   }
   $movedToBackup = $true
@@ -198,12 +217,9 @@ if (${relaunchFlag}) {
   }
 }
 
-# 9. lock file 정리 — finally 블록처럼 동작. 모든 step에서 exit 1 한 경우엔 trap으로
-# 정리 못 하지만 PowerShell process가 종료되면 OS가 file handle release → 다음 helper가
-# CreateNew로 잡을 수 있음. 명시 정리는 success path 에서만.
-if ($lockHandle) {
-  try { $lockHandle.Close() } catch {}
-  if (Test-Path $lockPath) { Remove-Item $lockPath -Force -ErrorAction SilentlyContinue }
+# 9. lock file 정리 (success path)
+if (Test-Path $lockPath) {
+  Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
   Write-SwapLog "lock released"
 }
 `;
@@ -263,12 +279,22 @@ if ($lockHandle) {
   // 2차 fallback: cmd /c start /B powershell ... — Node spawn detached의 quirky 케이스
   // (Windows에서 stdio:'ignore' + 빠른 main exit 시 자식 spawn 실패) 우회. cmd.exe가
   // 중간 wrapper로 PowerShell을 띄움 → cmd 자체는 짧게 살고 PowerShell은 fully detached.
-  // 1차가 정상 작동하면 2차는 redundant이지만 안전망 — PowerShell 두 번 spawn돼도 helper
-  // script가 idempotent(.ready 검사 + .swap-attempted 마커)라 race로 깨지지 않음.
+  // 1차가 정상 작동하면 2차는 redundant이지만 안전망 — helper script lock으로 race 방지.
+  //
+  // Codex 1차 P1: cmd.exe command line 길이 제한 8191자. helper script base64 (~15K)는
+  // EncodedCommand로 직접 넘기면 cmd 한계 초과 → cmd wrapper deterministic fail. 해결:
+  // helper script를 임시 .ps1 파일로 작성하고 cmd가 그 짧은 path만 인자로 받음.
   try {
+    const tempDir = os.tmpdir();
+    const helperPs1 = path.join(tempDir, `bflow-helper-${process.pid}-${Date.now()}.ps1`);
+    writeFileSync(helperPs1, psScript, 'utf-8');
+    earlyLog(`helper .ps1 written to ${helperPs1}`);
+
     const cmdArgs = [
       '/c', 'start', '/B', '""',  // start /B = window 없이 background, "" = title
-      'powershell.exe', ...psArgs,
+      'powershell.exe',
+      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
+      '-File', helperPs1,
     ];
     const cmdChild = spawn('cmd.exe', cmdArgs, {
       detached: true,
@@ -276,7 +302,7 @@ if ($lockHandle) {
       windowsHide: true,
     });
     cmdChild.once('spawn', () => {
-      earlyLog(`cmd wrapper spawn OK — child pid=${cmdChild.pid}`);
+      earlyLog(`cmd wrapper spawn OK — child pid=${cmdChild.pid}, helper file=${helperPs1}`);
     });
     cmdChild.once('error', (err) => {
       earlyLog(`cmd wrapper spawn ERROR — ${err.message}`);
