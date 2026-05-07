@@ -64,33 +64,35 @@ function Write-SwapLog($msg) {
 # 자체 실행이 실패한 것. 보이면 PowerShell은 시작됐고 다음 단계에서 fail.
 Write-SwapLog "[start] PowerShell helper alive — pid=$PID parent=${myPid}"
 
-# v1.22.6: helper 동시 실행 race 방지 — direct spawn + cmd wrapper 둘 다 발화 시 둘 다
-# PowerShell이 spawn되면 backup 정리 + step2 rename 등에서 충돌. 첫 번째 helper가 lock
-# file을 잡고 swap 진행, 두 번째는 즉시 종료.
+# v1.22.6: helper 동시 실행 race 방지 (direct spawn + cmd wrapper 둘 다 발화 가능).
 #
-# Codex 1차 P2: CreateNew는 file 존재만 검사. crash로 lock 남으면 영원히 블록. PID 기록
-# + stale lock 검사 (기존 PID가 살아있는지). 살아있으면 다른 helper 실행 중 → exit.
-# 죽었으면 stale → 갈아치움.
+# Codex 2차 P1: atomic acquire — Test-Path + Out-File는 race 가능. [System.IO.File]::Open
+# 'CreateNew' + 'None' share는 OS-level atomic — file 존재 시 IOException throw.
+# Codex 2차 P2: PID 재사용 회피 — process 검사 대신 file mtime 5분 timeout으로 stale
+# 검출. crash로 남은 lock은 mtime 오래되어 자동 정리됨.
 $lockPath = Join-Path $root 'swap.lock'
-try {
-  if (Test-Path $lockPath) {
-    $oldPid = (Get-Content $lockPath -Raw -ErrorAction SilentlyContinue).Trim()
-    if ($oldPid -match '^\d+$') {
-      $oldProc = Get-Process -Id ([int]$oldPid) -ErrorAction SilentlyContinue
-      if ($oldProc -and $oldProc.ProcessName -like 'powershell*') {
-        Write-SwapLog "another helper running (PID $oldPid alive, name=$($oldProc.ProcessName)) — exiting"
-        exit 0
-      }
-      Write-SwapLog "stale lock (PID $oldPid not alive or not ours) — clearing"
-    } else {
-      Write-SwapLog "lock file content invalid — clearing"
+$lockHandle = $null
+
+# 1. stale lock 사전 정리 (mtime 5분 초과)
+if (Test-Path $lockPath) {
+  try {
+    $age = (Get-Date) - (Get-Item $lockPath).LastWriteTime
+    if ($age.TotalMinutes -gt 5) {
+      Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+      Write-SwapLog "stale lock (age=$([int]$age.TotalMinutes)min) cleared"
     }
-    Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
-  }
-  $PID | Out-File -FilePath $lockPath -NoNewline -Encoding ASCII
-  Write-SwapLog "lock acquired by PID $PID"
+  } catch {}
+}
+
+# 2. atomic acquire
+try {
+  $lockHandle = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+  Write-SwapLog "lock acquired by PID $PID (atomic CreateNew)"
+} catch [System.IO.IOException] {
+  Write-SwapLog "another helper holding lock — exiting"
+  exit 0
 } catch {
-  Write-SwapLog "lock acquisition 예외 (무시, 계속 진행): $($_.Exception.Message)"
+  Write-SwapLog "lock 획득 예외 (계속 진행): $($_.Exception.Message)"
 }
 
 Write-SwapLog "waiting for parent pid=${myPid}"
@@ -162,6 +164,7 @@ $movedToBackup = $false
 if (Test-Path $appDir) {
   if (-not (Move-DirRobust $appDir $backupDir 'step2 app->backup')) {
     Write-SwapLog "swap end: FAIL (step2)"
+    if ($lockHandle) { try { $lockHandle.Close() } catch {} }
     Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
     exit 1
   }
@@ -217,7 +220,8 @@ if (${relaunchFlag}) {
   }
 }
 
-# 9. lock file 정리 (success path)
+# 9. lock file 정리 (success path) — handle close + file delete
+if ($lockHandle) { try { $lockHandle.Close() } catch {} }
 if (Test-Path $lockPath) {
   Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
   Write-SwapLog "lock released"
