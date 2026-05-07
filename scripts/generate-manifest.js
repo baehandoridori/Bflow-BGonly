@@ -10,6 +10,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
+const allowMissingInstaller = process.argv.includes('--allow-missing-installer');
 
 const distDir = path.join(root, 'dist');
 if (!fs.existsSync(distDir)) {
@@ -49,6 +50,22 @@ const manifest = {
   fileCount,
   totalBytes,
 };
+
+const installerFileName = 'BFLOW-Setup.exe';
+const installerPath = path.join(distDir, installerFileName);
+if (fs.existsSync(installerPath)) {
+  manifest.installer = {
+    fileName: installerFileName,
+    sizeBytes: fs.statSync(installerPath).size,
+  };
+} else {
+  const message = '[generate-manifest] BFLOW-Setup.exe 없음 — 배포용 manifest를 만들 수 없습니다.';
+  if (!allowMissingInstaller) {
+    console.error(`${message} electron-builder 완료 후 다시 실행하세요.`);
+    process.exit(1);
+  }
+  console.warn(`${message} --allow-missing-installer 플래그로 개발용 manifest만 생성합니다.`);
+}
 
 const releaseNotesPath = path.join(root, 'DEVLOG', 'update-notes.json');
 if (fs.existsSync(releaseNotesPath)) {

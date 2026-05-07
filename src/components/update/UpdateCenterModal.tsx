@@ -15,6 +15,12 @@ function formatBuildTime(value: string): string {
   });
 }
 
+function formatBytes(value?: number): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '';
+  const mb = value / 1024 / 1024;
+  return `${mb.toFixed(mb >= 100 ? 0 : 1)}MB`;
+}
+
 export function UpdateCenterModal() {
   const updateInfo = useAppStore((s) => s.updateInfo);
   const updateCenterOpen = useAppStore((s) => s.updateCenterOpen);
@@ -76,26 +82,34 @@ export function UpdateCenterModal() {
   const hasRemoteUpdate = updateInfo.latestVersion !== updateInfo.currentVersion
     && updateInfo.status !== 'suppressed'
     && updateInfo.status !== 'up-to-date';
-  const canApply = updateInfo.ready && hasRemoteUpdate;
   const isPreparing = hasRemoteUpdate && (updateInfo.status === 'available' || updateInfo.status === 'downloading');
+  const isApplying = updateInfo.status === 'applying';
+  const canApply = updateInfo.ready && hasRemoteUpdate && !isApplying;
   const isFailed = updateInfo.status === 'failed';
   const isSuppressed = updateInfo.status === 'suppressed';
   const shouldHighlightLatest = hasRemoteUpdate && !isFailed;
+  const downloadPercent = updateInfo.totalBytes && updateInfo.downloadedBytes != null
+    ? Math.min(100, Math.max(0, Math.round((updateInfo.downloadedBytes / updateInfo.totalBytes) * 100)))
+    : null;
   const statusText = canApply
     ? '즉시 적용 가능'
-    : isPreparing
-      ? '준비 중'
-      : isFailed
-        ? '준비 실패'
-        : isSuppressed
-          ? '자동 중단'
-          : '최신 상태';
+    : isApplying
+      ? '적용 중'
+      : isPreparing
+        ? '준비 중'
+        : isFailed
+          ? '준비 실패'
+          : isSuppressed
+            ? '자동 중단'
+            : '최신 상태';
   const latestLabel = hasRemoteUpdate ? '준비된 최신 버전' : '업데이트 상태';
   const statusDescription = canApply
-    ? '저장을 마무리한 뒤 새 버전으로 다시 열립니다.'
+    ? '설치 파일이 로컬에 준비되었습니다. 적용하면 별도 진행 창이 뜬 뒤 새 버전으로 다시 열립니다.'
+    : isApplying
+      ? '업데이트 설치 창을 여는 중입니다. 앱이 잠시 닫혀도 정상 진행 중입니다.'
     : updateInfo.message
       ?? (isPreparing
-        ? '새 버전을 준비하고 있습니다. 준비되면 여기서 바로 적용할 수 있습니다.'
+        ? '새 버전 설치 파일을 로컬로 준비하고 있습니다. 준비되면 여기서 바로 적용할 수 있습니다.'
         : isFailed || isSuppressed
           ? '자동 업데이트 상태를 확인한 뒤 필요하면 정식 설치 파일로 갱신합니다.'
           : '현재 앱이 최신 상태입니다.');
@@ -201,7 +215,7 @@ export function UpdateCenterModal() {
                   )}
                 >
                   <span className="relative z-10 inline-flex items-center gap-1.5">
-                    {canApply ? <Download size={13} /> : <RefreshCw size={13} className={cn(isPreparing && 'animate-spin')} />}
+                    {canApply ? <Download size={13} /> : <RefreshCw size={13} className={cn((isPreparing || isApplying) && 'animate-spin')} />}
                     <span className="relative inline-block h-4 min-w-[76px] overflow-hidden text-center">
                       {canApply ? (
                         <>
@@ -222,6 +236,26 @@ export function UpdateCenterModal() {
               <p className="relative z-10 mt-2 text-xs leading-relaxed text-text-secondary">
                 {statusDescription}
               </p>
+              {(isPreparing || isApplying) && updateInfo.totalBytes && (
+                <div className="relative z-10 mt-3">
+                  <div className="h-1.5 overflow-hidden rounded-full bg-bg-border/70">
+                    <div
+                      className={cn(
+                        'h-full rounded-full bg-gradient-to-r from-accent to-accent-sub transition-all duration-300',
+                        isApplying && 'bflow-update-progress-pulse',
+                      )}
+                      style={{ width: `${downloadPercent ?? 100}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-text-secondary/75">
+                    {isApplying
+                      ? '설치 적용 중'
+                      : downloadPercent != null
+                        ? `${downloadPercent}% 준비됨 · ${formatBytes(updateInfo.downloadedBytes)} / ${formatBytes(updateInfo.totalBytes)}`
+                        : `설치 파일 준비 중 · ${formatBytes(updateInfo.totalBytes)}`}
+                  </p>
+                </div>
+              )}
               {buildTime && (
                 <p className="relative z-10 mt-2 text-[11px] text-text-secondary/70">
                   빌드 시각 {buildTime}

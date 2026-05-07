@@ -1,0 +1,80 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+async function readRepoFile(...parts: string[]): Promise<string> {
+  return readFile(path.join(process.cwd(), ...parts), 'utf-8');
+}
+
+test('auto-update downloads the NSIS installer instead of mirroring win-unpacked', async () => {
+  const checker = await readRepoFile('electron', 'autoUpdate', 'checker.ts');
+
+  assert.match(checker, /downloadInstallerToPending/);
+  assert.match(checker, /localInstallerReadyMarker/);
+  assert.doesNotMatch(checker, /findRemoteWinUnpacked/);
+  assert.doesNotMatch(checker, /copyDirMirror/);
+});
+
+test('update apply path uses installer helper, not directory swap helper', async () => {
+  const main = await readRepoFile('electron', 'main.ts');
+
+  assert.match(main, /spawnInstallerUpdateHelper/);
+  assert.match(main, /hasPendingInstallerUpdate/);
+  assert.doesNotMatch(main, /spawnSwapHelper\(\{ relaunch: updateRelaunchScheduled \}\)/);
+});
+
+test('installer helper waits for BFLOW to exit before running setup', async () => {
+  const helper = await readRepoFile('electron', 'autoUpdate', 'installerApply.ts');
+
+  assert.match(helper, /\$parentPid/);
+  assert.match(helper, /Wait-ForBflowExit/);
+  assert.match(helper, /Wait-ForParentExit/);
+  assert.match(
+    helper,
+    /if \(-not \(Wait-ForParentExit\)\)[\s\S]*if \(-not \(Wait-ForBflowExit\)\)[\s\S]*Start-Process -FilePath \$installer/,
+  );
+});
+
+test('startup failure handling includes installer pending markers', async () => {
+  const main = await readRepoFile('electron', 'main.ts');
+
+  assert.match(main, /notifyAndCleanupOnInstallerFailure/);
+  assert.match(main, /localInstallerReadyMarker/);
+  assert.match(main, /localInstallerAttemptedMarker/);
+  assert.match(main, /localInstallerPendingDir/);
+});
+
+test('manifest records installer metadata for sync validation', async () => {
+  const generator = await readRepoFile('scripts', 'generate-manifest.js');
+  const manifest = await readRepoFile('electron', 'autoUpdate', 'manifest.ts');
+
+  assert.match(generator, /BFLOW-Setup\.exe/);
+  assert.match(generator, /installer/);
+  assert.match(generator, /allow-missing-installer/);
+  assert.match(generator, /process\.exit\(1\)/);
+  assert.match(manifest, /installer\?:/);
+  assert.match(manifest, /sizeBytes\?: number/);
+});
+
+test('remote dist root can be discovered from installer artifacts', async () => {
+  const paths = await readRepoFile('electron', 'autoUpdate', 'paths.ts');
+  const rootBody = paths.slice(
+    paths.indexOf('export function findRemoteDistRoot'),
+    paths.indexOf('/** G드라이브 dist의 win-unpacked 경로'),
+  );
+
+  assert.match(rootBody, /manifest\.json/);
+  assert.match(rootBody, /INSTALLER_FILE_NAME/);
+  assert.doesNotMatch(rootBody, /win-unpacked/);
+});
+
+test('renderer update state can represent installer applying progress', async () => {
+  const checker = await readRepoFile('electron', 'autoUpdate', 'checker.ts');
+  const types = await readRepoFile('src', 'types', 'index.ts');
+
+  assert.match(checker, /'applying'/);
+  assert.match(types, /'applying'/);
+  assert.match(types, /downloadedBytes\?: number/);
+  assert.match(types, /totalBytes\?: number/);
+});

@@ -63,6 +63,28 @@ export const APP_DIR_NAME = 'app';
 export const PENDING_DIR_NAME = 'pending';
 export const BACKUP_DIR_NAME = 'backup';
 export const READY_MARKER = '.ready';
+export const INSTALLER_FILE_NAME = 'BFLOW-Setup.exe';
+
+/**
+ * v1.22.14: directory swap 대신 NSIS installer를 로컬 캐시에 받아두고 적용한다.
+ * 설치 파일은 앱 실행 폴더 밖(localRoot)에 둬서 앱 종료 후 installer가 기존 app dir을
+ * 교체할 때 자기 자신을 잠그지 않게 한다.
+ */
+export function localInstallerPendingDir(): string {
+  return path.join(localRoot(), 'installer-pending');
+}
+export function localInstallerReadyMarker(): string {
+  return path.join(localInstallerPendingDir(), '.ready');
+}
+export function localInstallerManifestPath(): string {
+  return path.join(localInstallerPendingDir(), '.update-manifest.json');
+}
+export function localInstallerExePath(): string {
+  return path.join(localInstallerPendingDir(), INSTALLER_FILE_NAME);
+}
+export function localInstallerAttemptedMarker(): string {
+  return path.join(localRoot(), '.installer-attempted');
+}
 
 /** `app/BFLOW.exe` */
 export function localBflowExe(): string {
@@ -203,7 +225,7 @@ export function guessGoogleDriveRoots(): string[] {
 }
 
 /**
- * 우리 dist가 들어있는 G드라이브 경로 추정. 후보를 스캔해 manifest.json + win-unpacked가
+ * 우리 dist가 들어있는 G드라이브 경로 추정. 후보를 스캔해 manifest.json + NSIS installer가
  * 같이 있는 폴더를 찾아 그 폴더 경로 반환. 없으면 null.
  *
  * Studio JBBJ 표준 경로 (DEVLOG/DEPLOYMENT.md §2):
@@ -227,7 +249,7 @@ export function findRemoteDistRoot(): string | null {
     for (const suffix of SUFFIXES) {
       const candidate = path.join(drive, suffix);
       if (existsSync(path.join(candidate, 'manifest.json'))
-          && existsSync(path.join(candidate, 'win-unpacked', 'BFLOW.exe'))) {
+          && existsSync(path.join(candidate, INSTALLER_FILE_NAME))) {
         return candidate;
       }
     }
@@ -247,6 +269,14 @@ export function findRemoteManifest(): string | null {
   if (!root) return null;
   const m = path.join(root, 'manifest.json');
   return existsSync(m) ? m : null;
+}
+
+/** G드라이브 dist의 NSIS installer 경로 (없으면 null) */
+export function findRemoteInstaller(fileName = INSTALLER_FILE_NAME): string | null {
+  const root = findRemoteDistRoot();
+  if (!root) return null;
+  const installer = path.join(root, fileName);
+  return existsSync(installer) ? installer : null;
 }
 
 /** 현재 실행 중인 BFLOW의 자기 버전 (package.json) */
