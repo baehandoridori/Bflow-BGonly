@@ -23,7 +23,7 @@ import {
   runFirstInstallIfNeeded,
   scheduleUpdateCheck,
   hasPending,
-  swapIfPending,
+  spawnSwapHelper,
   checkLastStartAndRollback,
   markStartSucceeded,
 } from './autoUpdate';
@@ -722,18 +722,17 @@ function migrateLegacyUsersFileIfNeeded(): void {
 }
 
 // v1.22.1: 자동 업데이트 토스트 — 사용자가 "지금 재시작" 클릭 시 호출.
-// app.relaunch()는 다음 프로세스 spawn을 예약, app.quit()이 before-quit hook을
-// 트리거 → 그 안에서 swapIfPending이 pending → app 폴더 rename. 종료 후 Electron이
-// 같은 process.execPath(이제 새 BFLOW.exe를 가리킴)로 spawn → 새 버전 자동 시작.
 //
-// Codex 1차 P2: app.relaunch()는 매 호출마다 spawn을 큐잉 → 사용자가 토스트 버튼을
-// 빠르게 두 번 누르거나 invoke가 race로 중복 호출되면 종료 후 multiple instance가
-// spawn됨. one-shot guard로 한 종료 사이클당 한 번만 relaunch 예약.
+// v1.22.4: in-process swap이 file lock(EBUSY) 때문에 항상 실패 → detached PowerShell
+// helper로 위임. main.quit() → before-quit hook이 spawnSwapHelper 호출 → BFLOW 종료
+// 후 helper가 swap + 새 BFLOW spawn. updateRelaunchScheduled 플래그로 helper에게
+// "재시작 의도" 전달.
+//
+// Codex 1차 P2 (v1.22.1): one-shot guard. relaunch 예약은 한 종료 사이클당 한 번만.
 let updateRelaunchScheduled = false;
 ipcMain.handle('update:apply-now', () => {
   if (updateRelaunchScheduled) return;
   updateRelaunchScheduled = true;
-  app.relaunch();
   app.quit();
 });
 
@@ -3060,11 +3059,25 @@ app.on('before-quit', (e) => {
         await watchWithTimeout.catch(() => { /* noop */ });
       }
 
-      // ★ v1.21.0 자동 업데이트 swap (마지막 step)
+      // ★ v1.22.4 자동 업데이트 swap (마지막 step)
+      // in-process swap은 BFLOW.exe가 살아있는 상태라 EBUSY로 실패. detached PowerShell
+      // helper에게 위임 → main process 종료 후 helper가 BFLOW process 죽기 wait + swap +
+      // (옵션) 재시작. updateRelaunchScheduled 플래그가 helper에게 "사용자 의도가 재시작
+      // (apply-now 토스트)인지 / 단순 종료인지" 전달.
       if (await hasPending()) {
-        const result = await swapIfPending();
-        if (!result.ok) console.warn('[autoUpdate] swap 실패:', result.reason);
-        else console.log('[autoUpdate] swap 완료 — 다음 실행 = 새 버전');
+        try {
+          // swap 진입 마커 작성 — helper가 시작될 텐데 helper가 실패하더라도 다음 main
+          // 시작 시 dialog 트리거 조건(.ready + .swap-attempted)을 만족시켜 사용자에게 알림.
+          const path = await import('path');
+          const fsp = (await import('fs')).promises;
+          const { localRoot, localSwapAttemptedMarker } = await import('./autoUpdate/paths');
+          await fsp.mkdir(localRoot(), { recursive: true });
+          await fsp.writeFile(localSwapAttemptedMarker(), new Date().toISOString() + '\n', 'utf-8');
+        } catch (err) {
+          console.warn('[autoUpdate] .swap-attempted 마커 작성 실패 (무시):', err);
+        }
+        spawnSwapHelper({ relaunch: updateRelaunchScheduled });
+        console.log(`[autoUpdate] swap helper spawned (relaunch=${updateRelaunchScheduled})`);
       }
     } catch (err) {
       console.warn('[종료] 정리/swap 예외:', err);
