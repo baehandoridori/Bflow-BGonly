@@ -57,6 +57,23 @@ function Write-SwapLog($msg) {
   } catch {}
 }
 
+# v1.22.6: helper script 시작 시점 즉시 ping. 이 로그가 swap.log에 안 보이면 PowerShell
+# 자체 실행이 실패한 것. 보이면 PowerShell은 시작됐고 다음 단계에서 fail.
+Write-SwapLog "[start] PowerShell helper alive — pid=$PID parent=${myPid}"
+
+# v1.22.6: helper 동시 실행 race 방지 — direct spawn + cmd wrapper 둘 다 발화 시 둘 다
+# PowerShell이 spawn되면 backup 정리 + step2 rename 등에서 충돌. 첫 번째 helper가 lock
+# file을 잡고 swap 진행, 두 번째는 즉시 종료.
+$lockPath = Join-Path $root 'swap.lock'
+$lockHandle = $null
+try {
+  $lockHandle = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+  Write-SwapLog "lock acquired"
+} catch {
+  Write-SwapLog "another helper already running (lock held) — exiting"
+  exit 0
+}
+
 Write-SwapLog "waiting for parent pid=${myPid}"
 try {
   $p = Get-Process -Id ${myPid} -ErrorAction SilentlyContinue
@@ -126,6 +143,7 @@ $movedToBackup = $false
 if (Test-Path $appDir) {
   if (-not (Move-DirRobust $appDir $backupDir 'step2 app->backup')) {
     Write-SwapLog "swap end: FAIL (step2)"
+    if ($lockHandle) { try { $lockHandle.Close() } catch {}; Remove-Item $lockPath -Force -ErrorAction SilentlyContinue }
     exit 1
   }
   $movedToBackup = $true
@@ -142,6 +160,7 @@ if (-not (Move-DirRobust $pendingDir $appDir 'step3 pending->app')) {
       Write-SwapLog "recover FAIL — app/ 부재 가능성"
     }
   }
+  if ($lockHandle) { try { $lockHandle.Close() } catch {}; Remove-Item $lockPath -Force -ErrorAction SilentlyContinue }
   exit 1
 }
 
@@ -178,22 +197,92 @@ if (${relaunchFlag}) {
     Write-SwapLog "spawn FAIL: $($_.Exception.Message)"
   }
 }
+
+# 9. lock file 정리 — finally 블록처럼 동작. 모든 step에서 exit 1 한 경우엔 trap으로
+# 정리 못 하지만 PowerShell process가 종료되면 OS가 file handle release → 다음 helper가
+# CreateNew로 잡을 수 있음. 명시 정리는 success path 에서만.
+if ($lockHandle) {
+  try { $lockHandle.Close() } catch {}
+  if (Test-Path $lockPath) { Remove-Item $lockPath -Force -ErrorAction SilentlyContinue }
+  Write-SwapLog "lock released"
+}
 `;
 
   const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-  // Codex 1차 P2: spawn 실패 시 ChildProcess가 'error' event emit. listener 없으면
-  // unhandled error로 quit flow 깨짐(constrained Windows, PATH 깨진 환경 등). listener
-  // 등록 후 unref — error는 console.warn으로만 swallow하여 main 종료를 막지 않음.
-  const child = spawn('powershell.exe', [
+
+  // v1.22.6: spawn 자체가 실패하는 케이스 진단 + cmd.exe wrapper fallback.
+  //
+  // v1.22.4의 detached spawn이 한솔 PC에서 [helper] 로그를 단 한 번도 남기지 못함 →
+  // PowerShell 자체는 정상 동작 확인됐고 helper script도 정상이지만, Node child_process
+  // .spawn detached + windowsHide + stdio:'ignore' 조합이 어떤 이유로 실제 process를
+  // 띄우지 못하는 듯. 'spawn' event listener로 실제 spawn 여부 확인 + cmd /c start 패턴
+  // 으로 fallback.
+  const psArgs = [
     '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
     '-EncodedCommand', encoded,
-  ], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-  });
-  child.once('error', (err) => {
-    console.warn('[helperSwap] PowerShell helper spawn 실패 (다음 시작 시 swap-attempted 마커로 dialog 안내):', err);
-  });
-  child.unref();
+  ];
+
+  // 즉시 진단 — main process가 빠르게 종료되기 전에 swap.log에 spawn 시도 기록
+  const earlyLog = (msg: string) => {
+    try {
+      const fs = require('fs') as typeof import('fs');
+      const path = require('path') as typeof import('path');
+      const { localRoot } = require('./paths') as typeof import('./paths');
+      const root = localRoot();
+      if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+      fs.appendFileSync(
+        path.join(root, 'swap.log'),
+        `${new Date().toISOString()} [main] ${msg}\n`,
+        'utf-8',
+      );
+    } catch { /* best effort */ }
+  };
+
+  earlyLog(`spawnSwapHelper start — relaunch=${opts.relaunch}`);
+
+  // 1차 시도: 직접 powershell spawn (기존 방식)
+  let directOk = false;
+  try {
+    const child = spawn('powershell.exe', psArgs, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.once('spawn', () => {
+      earlyLog(`direct spawn OK — child pid=${child.pid}`);
+      directOk = true;
+    });
+    child.once('error', (err) => {
+      earlyLog(`direct spawn ERROR — ${err.message}`);
+    });
+    child.unref();
+  } catch (err) {
+    earlyLog(`direct spawn 예외 — ${(err as Error).message}`);
+  }
+
+  // 2차 fallback: cmd /c start /B powershell ... — Node spawn detached의 quirky 케이스
+  // (Windows에서 stdio:'ignore' + 빠른 main exit 시 자식 spawn 실패) 우회. cmd.exe가
+  // 중간 wrapper로 PowerShell을 띄움 → cmd 자체는 짧게 살고 PowerShell은 fully detached.
+  // 1차가 정상 작동하면 2차는 redundant이지만 안전망 — PowerShell 두 번 spawn돼도 helper
+  // script가 idempotent(.ready 검사 + .swap-attempted 마커)라 race로 깨지지 않음.
+  try {
+    const cmdArgs = [
+      '/c', 'start', '/B', '""',  // start /B = window 없이 background, "" = title
+      'powershell.exe', ...psArgs,
+    ];
+    const cmdChild = spawn('cmd.exe', cmdArgs, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    cmdChild.once('spawn', () => {
+      earlyLog(`cmd wrapper spawn OK — child pid=${cmdChild.pid}`);
+    });
+    cmdChild.once('error', (err) => {
+      earlyLog(`cmd wrapper spawn ERROR — ${err.message}`);
+    });
+    cmdChild.unref();
+  } catch (err) {
+    earlyLog(`cmd wrapper 예외 — ${(err as Error).message}`);
+  }
 }
