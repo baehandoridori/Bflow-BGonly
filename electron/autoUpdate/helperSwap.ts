@@ -68,25 +68,49 @@ Write-SwapLog "[start] PowerShell helper alive — pid=$PID parent=${myPid}"
 #
 # Codex 2차 P1: atomic acquire — Test-Path + Out-File는 race 가능. [System.IO.File]::Open
 # 'CreateNew' + 'None' share는 OS-level atomic — file 존재 시 IOException throw.
-# Codex 2차 P2: PID 재사용 회피 — process 검사 대신 file mtime 5분 timeout으로 stale
-# 검출. crash로 남은 lock은 mtime 오래되어 자동 정리됨.
+# Codex 3차 P2: PID + mtime 둘 다 검사 (단일 mtime 5분은 slow copy fallback에서 active
+# lock을 stale로 오인). PID 죽었으면 확실 stale (PID 재사용은 mtime으로 방어).
+# mtime 30분 fallback — slow AV 환경에서 swap이 분 단위 걸려도 안전 마진.
 $lockPath = Join-Path $root 'swap.lock'
 $lockHandle = $null
 
-# 1. stale lock 사전 정리 (mtime 5분 초과)
+# 1. stale lock 사전 정리: PID 죽음 (확실) 또는 mtime > 30분 (PID 재사용 방어)
 if (Test-Path $lockPath) {
+  $isStale = $false
   try {
-    $age = (Get-Date) - (Get-Item $lockPath).LastWriteTime
-    if ($age.TotalMinutes -gt 5) {
-      Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
-      Write-SwapLog "stale lock (age=$([int]$age.TotalMinutes)min) cleared"
+    $oldContent = (Get-Content $lockPath -Raw -ErrorAction SilentlyContinue)
+    if ($oldContent) { $oldContent = $oldContent.Trim() }
+    if ($oldContent -match '^\d+$') {
+      $oldPid = [int]$oldContent
+      $oldProc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+      if (-not $oldProc) {
+        $isStale = $true
+        Write-SwapLog "stale lock (PID $oldPid dead) — cleared"
+      } else {
+        $age = (Get-Date) - (Get-Item $lockPath).LastWriteTime
+        if ($age.TotalMinutes -gt 30) {
+          $isStale = $true
+          Write-SwapLog "stale lock (PID $oldPid alive but age=$([int]$age.TotalMinutes)min > 30 — likely PID reuse) — cleared"
+        }
+      }
+    } else {
+      $isStale = $true
+      Write-SwapLog "stale lock (invalid PID content) — cleared"
     }
-  } catch {}
+  } catch {
+    $isStale = $true
+  }
+  if ($isStale) {
+    Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+  }
 }
 
-# 2. atomic acquire
+# 2. atomic acquire + PID 기록
 try {
   $lockHandle = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+  $pidBytes = [System.Text.Encoding]::ASCII.GetBytes("$PID")
+  $lockHandle.Write($pidBytes, 0, $pidBytes.Length)
+  $lockHandle.Flush()
   Write-SwapLog "lock acquired by PID $PID (atomic CreateNew)"
 } catch [System.IO.IOException] {
   Write-SwapLog "another helper holding lock — exiting"
@@ -294,10 +318,14 @@ if (Test-Path $lockPath) {
     writeFileSync(helperPs1, psScript, 'utf-8');
     earlyLog(`helper .ps1 written to ${helperPs1}`);
 
+    // Codex 2차 P1: -File 모드는 execution policy 영향. Restricted/AllSigned 환경에서
+    // 스크립트 실행 차단 → fallback 무력화. -ExecutionPolicy Bypass로 우회.
+    // (-EncodedCommand 모드는 in-memory script라 정책 영향 없음 — direct spawn은 OK)
     const cmdArgs = [
       '/c', 'start', '/B', '""',  // start /B = window 없이 background, "" = title
       'powershell.exe',
       '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
+      '-ExecutionPolicy', 'Bypass',
       '-File', helperPs1,
     ];
     const cmdChild = spawn('cmd.exe', cmdArgs, {
