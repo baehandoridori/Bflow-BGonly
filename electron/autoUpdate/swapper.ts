@@ -14,34 +14,66 @@
  *
  * spec §4.2 step 6, §6 "swap 실패 / 새 버전 깨짐" 처리.
  */
-import { promises as fsp, existsSync, renameSync } from 'fs';
+import { promises as fsp, existsSync, renameSync, appendFileSync } from 'fs';
 import path from 'path';
 import {
-  localAppDir, localPendingDir, localBackupDir, localReadyMarker,
+  localRoot, localAppDir, localPendingDir, localBackupDir, localReadyMarker,
   localInstalledMarker, localPendingVerificationMarker,
 } from './paths';
 import { copyDirMirror } from './copy';
 
 /**
+ * v1.22.2 swap 단계별 진단 로그 — `%LOCALAPPDATA%\Bflow-BGonly\swap.log`.
+ * swap이 어디서 실패했는지 사용자 환경에서도 추적 가능하도록 파일에 기록.
+ * sync write — swap은 짧고 결정론적이어야 하므로 비동기 큐잉 X.
+ */
+function logSwap(line: string): void {
+  try {
+    const logPath = path.join(localRoot(), 'swap.log');
+    appendFileSync(logPath, `${new Date().toISOString()} ${line}\n`, 'utf-8');
+  } catch {
+    /* 로깅 실패는 swap 자체를 막지 않음 — best effort */
+  }
+}
+
+/**
  * Codex 8차 P1: rename은 cross-device·AV race·partial file-lock 등에서 실패할 수 있어
  * fallback으로 copy + 원본 삭제. swap의 핵심 안전성을 보장 — rename 실패 시에도
  * app/ 디렉토리가 사라지지 않게.
+ *
+ * v1.22.2: rename 자체에 짧은 retry 추가 (file lock이 일시적 — Defender 검사 직후 등 —
+ * 인 케이스 회피). copy fallback은 느리고 7000파일 통째로 다시 쓰므로 가능한 한 rename
+ * 으로 해결.
  */
-async function moveDirRobust(src: string, dst: string): Promise<void> {
-  try {
-    renameSync(src, dst);
-    return;
-  } catch (renameErr) {
-    // rename 실패 → copy fallback (느리지만 락에 robust)
+async function moveDirRobust(src: string, dst: string, label: string): Promise<void> {
+  const RENAME_RETRIES = 3;
+  const RENAME_DELAY_MS = 500;
+  let lastRenameErr: unknown = null;
+  for (let i = 0; i < RENAME_RETRIES; i++) {
     try {
-      await copyDirMirror(src, dst);
-      await fsp.rm(src, { recursive: true, force: true });
-    } catch (copyErr) {
-      throw new Error(
-        `rename 및 copy 모두 실패 (rename: ${(renameErr as Error).message}, `
-        + `copy: ${(copyErr as Error).message})`,
-      );
+      renameSync(src, dst);
+      logSwap(`  ${label}: rename OK (try ${i + 1})`);
+      return;
+    } catch (renameErr) {
+      lastRenameErr = renameErr;
+      logSwap(`  ${label}: rename try ${i + 1} 실패 — ${(renameErr as Error).message}`);
+      if (i < RENAME_RETRIES - 1) {
+        await new Promise((r) => setTimeout(r, RENAME_DELAY_MS));
+      }
     }
+  }
+  // rename retry 모두 실패 → copy fallback (느리지만 락에 robust)
+  logSwap(`  ${label}: copy fallback 시작`);
+  try {
+    await copyDirMirror(src, dst);
+    await fsp.rm(src, { recursive: true, force: true });
+    logSwap(`  ${label}: copy fallback OK`);
+  } catch (copyErr) {
+    logSwap(`  ${label}: copy fallback 실패 — ${(copyErr as Error).message}`);
+    throw new Error(
+      `rename(${RENAME_RETRIES}회) 및 copy 모두 실패 (rename: ${(lastRenameErr as Error).message}, `
+      + `copy: ${(copyErr as Error).message})`,
+    );
   }
 }
 
@@ -57,6 +89,9 @@ export interface SwapResult {
 /**
  * pending → app swap. before-quit hook에서 호출.
  * 동기 rename 사용 — 짧고 결정론적이어야 함.
+ *
+ * v1.22.2: 단계별 진단 로그 + rename retry. swap 실패 사유를 사용자 환경에서도
+ * 추적 가능 (`%LOCALAPPDATA%\Bflow-BGonly\swap.log`).
  */
 export async function swapIfPending(): Promise<SwapResult> {
   const ready = localReadyMarker();
@@ -66,13 +101,21 @@ export async function swapIfPending(): Promise<SwapResult> {
   const pending_ = localPendingDir();
   const backup_ = localBackupDir();
 
+  logSwap(`=== swap start ===`);
+  logSwap(`  app=${app_}`);
+  logSwap(`  pending=${pending_}`);
+  logSwap(`  backup=${backup_}`);
+
   // 1. 이전 backup 정리 — 1개만 유지하니 통째로 지움 (실패해도 무시)
   try {
     if (existsSync(backup_)) {
       await fsp.rm(backup_, { recursive: true, force: true });
+      logSwap(`  step1 backup 정리 OK`);
+    } else {
+      logSwap(`  step1 backup 없음 — skip`);
     }
   } catch (err) {
-    console.warn('[swapper] 이전 backup 정리 실패 (무시):', err);
+    logSwap(`  step1 backup 정리 실패 (무시) — ${(err as Error).message}`);
   }
 
   // v1.22.0: NSIS Uninstall.exe 보존. NSIS 인스톨러로 설치된 경우 install dir에
@@ -85,8 +128,9 @@ export async function swapIfPending(): Promise<SwapResult> {
   if (existsSync(oldUninstall) && !existsSync(newUninstall)) {
     try {
       await fsp.copyFile(oldUninstall, newUninstall);
+      logSwap(`  Uninstall.exe 보존 OK`);
     } catch (err) {
-      console.warn('[swapper] NSIS Uninstall.exe 보존 실패 (무시 — 자동업데이트 자체엔 무영향):', err);
+      logSwap(`  Uninstall.exe 보존 실패 (무시) — ${(err as Error).message}`);
     }
   }
 
@@ -94,34 +138,37 @@ export async function swapIfPending(): Promise<SwapResult> {
   let movedToBackup = false;
   if (existsSync(app_)) {
     try {
-      await moveDirRobust(app_, backup_);
+      await moveDirRobust(app_, backup_, 'step2 app→backup');
       movedToBackup = true;
     } catch (err) {
+      logSwap(`=== swap end: FAIL (app→backup) — ${(err as Error).message}`);
       return { ok: false, reason: `app→backup 실패: ${(err as Error).message}` };
     }
+  } else {
+    logSwap(`  step2 app 부재 — skip`);
   }
 
   // 3. pending/ → app/  (rename + copy fallback)
   try {
-    await moveDirRobust(pending_, app_);
+    await moveDirRobust(pending_, app_, 'step3 pending→app');
   } catch (pendingErr) {
     // Codex 8차 P1: pending→app 실패 시 backup→app 복구 시도. backup 복구도 robust하게.
     if (movedToBackup) {
       try {
-        await moveDirRobust(backup_, app_);
+        await moveDirRobust(backup_, app_, 'step3-recover backup→app');
+        logSwap(`=== swap end: FAIL (pending→app, backup recovered) — ${(pendingErr as Error).message}`);
         return { ok: false, reason: `pending→app 실패 — backup 복구 완료: ${(pendingErr as Error).message}` };
       } catch (recoverErr) {
-        // 양쪽 모두 실패 — app/ 부재 가능성. 다음 실행은 옛 G드라이브 BFLOW.exe로 self-installer
-        // 재진입하면 자동 복구됨 (기존 partial install 정리 → mirror copy 새로 받음).
+        logSwap(`=== swap end: CATASTROPHIC (app/ 부재) — pending: ${(pendingErr as Error).message}; backup recovery: ${(recoverErr as Error).message}`);
         return {
           ok: false,
           reason:
-            `pending→app + backup→app 모두 실패. app/ 부재 가능성 — `
-            + `옛 G드라이브 BFLOW.exe 클릭으로 자동 복구 가능. `
+            `pending→app + backup→app 모두 실패. app/ 부재 가능성. `
             + `pending: ${(pendingErr as Error).message}; backup recovery: ${(recoverErr as Error).message}`,
         };
       }
     }
+    logSwap(`=== swap end: FAIL (pending→app, backup 없음) — ${(pendingErr as Error).message}`);
     return { ok: false, reason: `pending→app 실패 (backup 없어 복구 없음): ${(pendingErr as Error).message}` };
   }
 
@@ -150,5 +197,6 @@ export async function swapIfPending(): Promise<SwapResult> {
     console.warn('[swapper] .pending-verification 마커 작성 실패 (무시 — 자가 검증 비활성, 안전):', err);
   }
 
+  logSwap(`=== swap end: OK ===`);
   return { ok: true };
 }
