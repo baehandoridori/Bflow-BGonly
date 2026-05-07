@@ -56,6 +56,8 @@
       "dist-electron/**/*",
       "public/splash/**",
       "node_modules/**/*",
+      "!node_modules/@fontsource/**",
+      "!node_modules/pretendard/**",
       "package.json"
     ],
     "win": {
