@@ -18,6 +18,9 @@
  *   6. (옵션) helper가 새 BFLOW.exe spawn
  */
 import { spawn } from 'child_process';
+import { writeFileSync, existsSync, mkdirSync } from 'fs';
+import path from 'path';
+import os from 'os';
 import {
   localAppDir, localPendingDir, localBackupDir, localRoot, localBflowExe,
 } from './paths';
@@ -55,6 +58,80 @@ function Write-SwapLog($msg) {
     if (-not (Test-Path $root)) { New-Item -ItemType Directory -Force -Path $root | Out-Null }
     Add-Content -Path (Join-Path $root 'swap.log') -Value "$(Get-Date -Format 'o') [helper] $msg"
   } catch {}
+}
+
+# v1.22.6: helper script 시작 시점 즉시 ping. 이 로그가 swap.log에 안 보이면 PowerShell
+# 자체 실행이 실패한 것. 보이면 PowerShell은 시작됐고 다음 단계에서 fail.
+Write-SwapLog "[start] PowerShell helper alive — pid=$PID parent=${myPid}"
+
+# v1.22.6: helper 동시 실행 race 방지 (direct spawn + cmd wrapper 둘 다 발화 가능).
+#
+# Codex 4차 P2: live PID + age check도 race 위험 (active helper의 slow copy가 mtime
+# 임계 초과 시 정리 → race). PID + 시작 timestamp(Ticks)로 정확 검증 — process가
+# StartTime까지 일치해야 active. PID 재사용 시 StartTime 다름 → stale 판정.
+$lockPath = Join-Path $root 'swap.lock'
+$lockHandle = $null
+
+# 우리 PID의 StartTime을 lock에 기록할 준비
+try {
+  $myStartTicks = (Get-Process -Id $PID).StartTime.Ticks
+} catch {
+  $myStartTicks = 0
+}
+
+# 1. stale lock 사전 정리: PID 죽었거나 StartTime 불일치(PID 재사용)면 stale
+if (Test-Path $lockPath) {
+  $isStale = $true
+  try {
+    $oldContent = (Get-Content $lockPath -Raw -ErrorAction SilentlyContinue)
+    if ($oldContent) { $oldContent = $oldContent.Trim() }
+    # format: "PID|StartTimeTicks"
+    if ($oldContent -match '^(\d+)\|(\d+)$') {
+      $oldPid = [int]$Matches[1]
+      $oldStartTicks = [long]$Matches[2]
+      $oldProc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+      if ($oldProc) {
+        try {
+          if ($oldProc.StartTime.Ticks -eq $oldStartTicks) {
+            $isStale = $false  # 진짜 active
+            Write-SwapLog "active helper (PID $oldPid, start match) — exiting"
+          } else {
+            Write-SwapLog "stale lock (PID $oldPid reused — StartTime mismatch) — cleared"
+          }
+        } catch {
+          # StartTime 접근 실패 (권한 등) → 보수적으로 active로 간주
+          $isStale = $false
+          Write-SwapLog "PID $oldPid alive but StartTime unreadable — assuming active (exit)"
+        }
+      } else {
+        Write-SwapLog "stale lock (PID $oldPid dead) — cleared"
+      }
+    } else {
+      Write-SwapLog "stale lock (invalid format) — cleared"
+    }
+  } catch {}
+  if (-not $isStale) {
+    # active helper 진행 중 — 우리는 lock 안 잡고 종료. .ps1 self cleanup만.
+    if ($PSCommandPath) { try { Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {} }
+    exit 0
+  }
+  Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+}
+
+# 2. atomic acquire + PID|StartTime 기록
+try {
+  $lockHandle = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+  $payload = "$PID|$myStartTicks"
+  $payloadBytes = [System.Text.Encoding]::ASCII.GetBytes($payload)
+  $lockHandle.Write($payloadBytes, 0, $payloadBytes.Length)
+  $lockHandle.Flush()
+  Write-SwapLog "lock acquired by PID $PID (atomic CreateNew)"
+} catch [System.IO.IOException] {
+  Write-SwapLog "another helper holding lock — exiting"
+  if ($PSCommandPath) { try { Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {} }
+  exit 0
+} catch {
+  Write-SwapLog "lock 획득 예외 (계속 진행): $($_.Exception.Message)"
 }
 
 Write-SwapLog "waiting for parent pid=${myPid}"
@@ -126,6 +203,9 @@ $movedToBackup = $false
 if (Test-Path $appDir) {
   if (-not (Move-DirRobust $appDir $backupDir 'step2 app->backup')) {
     Write-SwapLog "swap end: FAIL (step2)"
+    if ($lockHandle) { try { $lockHandle.Close() } catch {} }
+    Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+    if ($PSCommandPath) { try { Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {} }
     exit 1
   }
   $movedToBackup = $true
@@ -142,6 +222,7 @@ if (-not (Move-DirRobust $pendingDir $appDir 'step3 pending->app')) {
       Write-SwapLog "recover FAIL — app/ 부재 가능성"
     }
   }
+  if ($lockHandle) { try { $lockHandle.Close() } catch {}; Remove-Item $lockPath -Force -ErrorAction SilentlyContinue }
   exit 1
 }
 
@@ -178,22 +259,112 @@ if (${relaunchFlag}) {
     Write-SwapLog "spawn FAIL: $($_.Exception.Message)"
   }
 }
+
+# 9. lock file 정리 (success path) — handle close + file delete
+if ($lockHandle) { try { $lockHandle.Close() } catch {} }
+if (Test-Path $lockPath) {
+  Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+  Write-SwapLog "lock released"
+}
+
+# 10. Codex 4차 P3: temp .ps1 self-cleanup. cmd wrapper가 helper를 -File 모드로 실행한
+# 케이스에서 %TEMP%\bflow-helper-{pid}-{ts}.ps1이 누적됨. PowerShell -File 모드는 시작
+# 시 file 내용 read 후 메모리 script로 보유 → file lock 안 잡으므로 자기 자신 삭제 가능.
+# (-EncodedCommand 모드는 $PSCommandPath null이라 Remove-Item noop)
+if ($PSCommandPath) {
+  try { Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {}
+}
 `;
 
   const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-  // Codex 1차 P2: spawn 실패 시 ChildProcess가 'error' event emit. listener 없으면
-  // unhandled error로 quit flow 깨짐(constrained Windows, PATH 깨진 환경 등). listener
-  // 등록 후 unref — error는 console.warn으로만 swallow하여 main 종료를 막지 않음.
-  const child = spawn('powershell.exe', [
+
+  // v1.22.6: spawn 자체가 실패하는 케이스 진단 + cmd.exe wrapper fallback.
+  //
+  // v1.22.4의 detached spawn이 한솔 PC에서 [helper] 로그를 단 한 번도 남기지 못함 →
+  // PowerShell 자체는 정상 동작 확인됐고 helper script도 정상이지만, Node child_process
+  // .spawn detached + windowsHide + stdio:'ignore' 조합이 어떤 이유로 실제 process를
+  // 띄우지 못하는 듯. 'spawn' event listener로 실제 spawn 여부 확인 + cmd /c start 패턴
+  // 으로 fallback.
+  const psArgs = [
     '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
     '-EncodedCommand', encoded,
-  ], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-  });
-  child.once('error', (err) => {
-    console.warn('[helperSwap] PowerShell helper spawn 실패 (다음 시작 시 swap-attempted 마커로 dialog 안내):', err);
-  });
-  child.unref();
+  ];
+
+  // 즉시 진단 — main process가 빠르게 종료되기 전에 swap.log에 spawn 시도 기록
+  const earlyLog = (msg: string) => {
+    try {
+      const fs = require('fs') as typeof import('fs');
+      const path = require('path') as typeof import('path');
+      const { localRoot } = require('./paths') as typeof import('./paths');
+      const root = localRoot();
+      if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+      fs.appendFileSync(
+        path.join(root, 'swap.log'),
+        `${new Date().toISOString()} [main] ${msg}\n`,
+        'utf-8',
+      );
+    } catch { /* best effort */ }
+  };
+
+  earlyLog(`spawnSwapHelper start — relaunch=${opts.relaunch}`);
+
+  // 1차 시도: 직접 powershell spawn (기존 방식)
+  let directOk = false;
+  try {
+    const child = spawn('powershell.exe', psArgs, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.once('spawn', () => {
+      earlyLog(`direct spawn OK — child pid=${child.pid}`);
+      directOk = true;
+    });
+    child.once('error', (err) => {
+      earlyLog(`direct spawn ERROR — ${err.message}`);
+    });
+    child.unref();
+  } catch (err) {
+    earlyLog(`direct spawn 예외 — ${(err as Error).message}`);
+  }
+
+  // 2차 fallback: cmd /c start /B powershell ... — Node spawn detached의 quirky 케이스
+  // (Windows에서 stdio:'ignore' + 빠른 main exit 시 자식 spawn 실패) 우회. cmd.exe가
+  // 중간 wrapper로 PowerShell을 띄움 → cmd 자체는 짧게 살고 PowerShell은 fully detached.
+  // 1차가 정상 작동하면 2차는 redundant이지만 안전망 — helper script lock으로 race 방지.
+  //
+  // Codex 1차 P1: cmd.exe command line 길이 제한 8191자. helper script base64 (~15K)는
+  // EncodedCommand로 직접 넘기면 cmd 한계 초과 → cmd wrapper deterministic fail. 해결:
+  // helper script를 임시 .ps1 파일로 작성하고 cmd가 그 짧은 path만 인자로 받음.
+  try {
+    const tempDir = os.tmpdir();
+    const helperPs1 = path.join(tempDir, `bflow-helper-${process.pid}-${Date.now()}.ps1`);
+    writeFileSync(helperPs1, psScript, 'utf-8');
+    earlyLog(`helper .ps1 written to ${helperPs1}`);
+
+    // Codex 2차 P1: -File 모드는 execution policy 영향. Restricted/AllSigned 환경에서
+    // 스크립트 실행 차단 → fallback 무력화. -ExecutionPolicy Bypass로 우회.
+    // (-EncodedCommand 모드는 in-memory script라 정책 영향 없음 — direct spawn은 OK)
+    const cmdArgs = [
+      '/c', 'start', '/B', '""',  // start /B = window 없이 background, "" = title
+      'powershell.exe',
+      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', helperPs1,
+    ];
+    const cmdChild = spawn('cmd.exe', cmdArgs, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    cmdChild.once('spawn', () => {
+      earlyLog(`cmd wrapper spawn OK — child pid=${cmdChild.pid}, helper file=${helperPs1}`);
+    });
+    cmdChild.once('error', (err) => {
+      earlyLog(`cmd wrapper spawn ERROR — ${err.message}`);
+    });
+    cmdChild.unref();
+  } catch (err) {
+    earlyLog(`cmd wrapper 예외 — ${(err as Error).message}`);
+  }
 }
