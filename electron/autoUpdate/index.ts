@@ -7,5 +7,7 @@ export type { InstallResult } from './installer';
 export { scheduleUpdateCheck } from './checker';
 export { swapIfPending, hasPending } from './swapper';
 export type { SwapResult } from './swapper';
+export { spawnSwapHelper } from './helperSwap';
+export type { SwapHelperOptions } from './helperSwap';
 export { checkLastStartAndRollback, markStartSucceeded } from './healthCheck';
 export type { HealthResult } from './healthCheck';
