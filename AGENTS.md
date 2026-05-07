@@ -15,7 +15,7 @@
    - 코드 구조, 패턴 참고만 가능
    - 파일 수정, 커밋, 푸시 일절 금지
    - 모든 개발은 반드시 `Bflow-BGonly` 레포에서만 진행
-2. **빌드 검증**: 코드 변경 후 반드시 `tsc --noEmit` + `vite build` 통과 확인
+2. **빌드 검증**: 코드 변경 후 반드시 `npm run typecheck` + `npm run test:auto-update` + `vite build` 통과 확인
 3. **낙관적 업데이트 패턴**: 모든 데이터 변경은 즉시 UI 반영 → 백그라운드 동기화
 4. **테스트 모드 동등성**: 모든 기능은 테스트 모드에서도 100% 동작해야 함
 5. **자동 업데이트 배포 원칙**: G드라이브에는 빌드 파일을 먼저 모두 올리고 `manifest.json`을 마지막에 갱신할 것. 앱은 manifest를 보고 최신 버전을 감지하므로, 반쯤 올라간 빌드가 최신으로 보이면 안 됨.
@@ -93,6 +93,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 - 앱 사용 중에는 5분 주기로 manifest를 다시 확인해 새 버전을 백그라운드로 받아두고, 토스트 + 좌하단 버전 버튼 + 업데이트 모달로 계속 표시한다. 모달에는 현재 버전과 최신 버전을 명확히 강조한다.
 - 실제 적용은 `지금 업데이트` 클릭 또는 앱 종료 시 helper swap으로 수행된다. 토스트가 떴다는 것만으로 성공 판단 금지. 다음 실행 버전과 `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[main]`/`[helper]` 로그를 확인한다.
 - `helperSwap.ts`의 early logging은 정적 import된 `fs/path/localRoot`만 사용한다. 프로덕션 번들에서 `require('./paths')` 같은 동적 require는 silent fail 위험이 있다.
+- `helperSwap.ts`처럼 TypeScript 백틱 문자열 안에 PowerShell을 넣을 때 PowerShell 변수는 `$($name)` 형태로 쓴다. `${name}`은 JavaScript 보간으로 실행되어 helper 시작 전 `ReferenceError`를 만들 수 있다.
 
 ---
 

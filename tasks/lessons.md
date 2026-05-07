@@ -192,6 +192,31 @@ await deleteScene(sheetName, sceneIndex);        // 2) 내부에서 resolveScene
 
 ---
 
+## 2026-05-08: TypeScript 백틱 안의 PowerShell 변수는 `${...}`로 쓰지 말 것
+
+### 증상
+- 자동 업데이트 토스트와 pending 다운로드는 성공했지만, `지금 업데이트` 클릭 후 앱만 종료되고 새 버전으로 교체되지 않았다.
+- `%LOCALAPPDATA%\Bflow-BGonly\.swap-attempted`는 생겼지만 `swap.log`에 `[main] spawnSwapHelper start`조차 남지 않았다.
+
+### 근본 원인
+- `helperSwap.ts`의 PowerShell helper 스크립트가 TypeScript 백틱 문자열 안에 들어 있는데, PowerShell 변수 `$stepName`을 고치면서 `${stepName}`으로 작성했다.
+- `${stepName}`은 PowerShell 문법이 아니라 JavaScript 템플릿 보간으로 먼저 평가된다. 런타임에 `stepName` JS 변수가 없어 `ReferenceError`가 발생했고, helper script 생성/earlyLog/spawn까지 도달하지 못했다.
+- 기존 `tsc --noEmit`은 `src`만 검사해서 `electron/**` 타입 오류를 잡지 못했다.
+
+### 교훈
+- PowerShell 스크립트를 TypeScript 백틱 안에 넣을 때는 PowerShell 변수 보간을 `$($stepName)`처럼 쓴다.
+- Electron main 코드 변경은 `npm run typecheck`로 `src`와 `electron`을 모두 검사해야 한다.
+- 토스트 감지나 `.ready` 생성은 업데이트 성공이 아니다. 성공 판정은 다음 실행 버전, `.swap-attempted` 정리, `swap.log`의 `[main]`/`[helper]` 로그로 한다.
+- 수동 설치로 현재 버전이 pending 버전보다 높아진 경우, 남은 `.ready + .swap-attempted`는 현재 버전 실패가 아니라 오래된 실패 찌꺼기다. 이때 `.swap-suppressed`를 현재 버전으로 쓰면 다음 업데이트 감지를 막는다.
+
+### 적용 위치
+- `electron/autoUpdate/helperSwap.ts` — `${stepName}` → `$($stepName)` 수정
+- `tests/autoUpdateHelperSwap.test.ts` — 같은 회귀를 잡는 테스트 추가
+- `electron/autoUpdate/failurePolicy.ts` — 수동 설치 후 오래된 pending 실패 상태 판별
+- `package.json`, `tsconfig.node.json` — Electron main 타입체크와 자동 업데이트 회귀 테스트를 빌드 경로에 포함
+
+---
+
 ## 2026-04-21: 통합 사이드바에서 "그룹 항목" 기능 누락
 
 ### 증상

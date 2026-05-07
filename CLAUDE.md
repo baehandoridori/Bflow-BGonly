@@ -15,7 +15,7 @@
    - 코드 구조, 패턴 참고만 가능
    - 파일 수정, 커밋, 푸시 일절 금지
    - 모든 개발은 반드시 `Bflow-BGonly` 레포에서만 진행
-2. **빌드 검증**: 코드 변경 후 반드시 `tsc --noEmit` + `vite build` 통과 확인
+2. **빌드 검증**: 코드 변경 후 반드시 `npm run typecheck` + `npm run test:auto-update` + `vite build` 통과 확인
 3. **낙관적 업데이트 패턴**: 모든 데이터 변경은 즉시 UI 반영 → Supabase 동기화 → 실패 시 롤백
 4. **Supabase 단일 경로**: 새 기능은 `supabaseService` 경유로만 구현 (Sheets 분기 추가 금지)
 5. **IPC 구조 유지**: 렌더러에서 직접 Supabase 호출 금지, 반드시 IPC → 메인 → Supabase
@@ -81,7 +81,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 1. **플랜 우선**: 비자명한 작업(3단계+)은 플랜 모드 진입. 틀어지면 STOP 후 재계획.
 2. **서브에이전트 활용**: 리서치/탐색/병렬 분석은 서브에이전트에 위임. 메인 컨텍스트 깨끗하게 유지.
 3. **자기개선**: 수정 받으면 `tasks/lessons.md`에 패턴 기록. 동일 실수 반복 방지.
-4. **완료 전 검증**: 작동 증명 없이 완료 표시 금지. tsc + 빌드 + 동작 확인.
+4. **완료 전 검증**: 작동 증명 없이 완료 표시 금지. typecheck + 관련 테스트 + 빌드 + 동작 확인.
 5. **자율 버그 수정**: 버그 리포트 받으면 지시 없이 바로 수정. 로그/오류 직접 추적.
 6. **단순함 우선**: 최소한의 코드 영향. 과잉 설계 금지. 근본 원인 해결.
 
@@ -101,6 +101,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 - 앱 사용 중에는 5분 주기로 manifest를 다시 확인해 새 버전을 백그라운드로 받아두고, 좌하단 버전 버튼과 업데이트 모달에서 계속 표시한다.
 - 실제 교체는 `지금 업데이트`를 누르거나 앱 종료 시 helper swap으로 수행한다. 토스트가 떴다는 것만으로 업데이트 성공으로 판단하지 말고, `swap.log`의 `[main]`/`[helper]` 로그와 다음 실행 버전을 확인한다.
 - `helperSwap.ts`의 초기 로그는 정적 import된 `fs/path/localRoot`만 사용해야 한다. 프로덕션 번들에서 `require('./paths')` 같은 동적 require는 silent fail 위험이 있다.
+- `helperSwap.ts`처럼 TypeScript 백틱 문자열 안에 PowerShell을 넣을 때 PowerShell 변수는 `$($name)` 형태로 쓴다. `${name}`은 JavaScript 보간으로 실행되어 helper 시작 전 `ReferenceError`를 만들 수 있다.
 
 ---
 

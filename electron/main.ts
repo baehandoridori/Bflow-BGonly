@@ -36,6 +36,7 @@ import {
   localSwapAttemptedMarker,
   localSwapSuppressedMarker,
 } from './autoUpdate/paths';
+import { isStaleSwapFailureForCurrentVersion } from './autoUpdate/failurePolicy';
 import {
   initVacation,
   isVacationConnected,
@@ -2964,6 +2965,16 @@ async function notifyAndCleanupOnSwapFailure(): Promise<void> {
     // P2 #1: .ready + .swap-attempted 둘 다 있어야 진짜 swap 실패. 둘 중 하나만 있으면
     // crash/kill 등으로 unclean exit한 케이스 — 자동업데이트 cycle이 알아서 처리.
     if (!fs.existsSync(localReadyMarker()) || !fs.existsSync(localSwapAttemptedMarker())) return;
+    const pendingVersion = await readPendingPackageVersionForFailureCleanup();
+    const currentVersion = app.getVersion();
+
+    if (isStaleSwapFailureForCurrentVersion(currentVersion, pendingVersion)) {
+      console.log(
+        `[autoUpdate] stale swap failure cleanup (pending=${pendingVersion}, current=${currentVersion})`,
+      );
+      await cleanupPendingAndSwapAttemptedMarker();
+      return;
+    }
 
     await dialog.showMessageBox({
       type: 'warning',
@@ -2980,31 +2991,46 @@ async function notifyAndCleanupOnSwapFailure(): Promise<void> {
     // 재시도 영구 중단. 사용자가 NSIS Setup으로 다른 version 설치하면 own 갱신 → marker
     // version과 다르면 marker 자동 정리하여 자동업데이트 재개.
     try {
-      await fs.promises.writeFile(localSwapSuppressedMarker(), app.getVersion(), 'utf-8');
+      await fs.promises.writeFile(localSwapSuppressedMarker(), currentVersion, 'utf-8');
     } catch (err) {
       console.warn('[main] suppression marker 작성 실패 (무시):', err);
     }
 
-    // pending + .swap-attempted 정리. .ready는 pending 안에 있어서 같이 사라짐.
-    //
-    // Codex 2차 P2: pending 정리 실패(EBUSY/EPERM 등)에도 .swap-attempted를 정리하면 다음
-    // 시작 시 .ready만 남아 dialog 트리거 조건(.ready + .swap-attempted) 안 맞아 silent
-    // 무한 retry. pending 정리 성공 시에만 .swap-attempted 정리하여 다음에도 dialog 표시.
-    let pendingCleaned = false;
-    try {
-      await fs.promises.rm(localPendingDir(), { recursive: true, force: true });
-      pendingCleaned = !fs.existsSync(localPendingDir());
-    } catch (err) {
-      console.warn('[main] pending 정리 실패 (무시 — .swap-attempted 유지하여 다음 시작 시 또 알림):', err);
-    }
-    if (pendingCleaned) {
-      try {
-        await fs.promises.unlink(localSwapAttemptedMarker());
-      } catch { /* 무시 */ }
-    }
+    await cleanupPendingAndSwapAttemptedMarker();
   } catch (err) {
     // 안내 자체에 문제가 있어도 부팅 막지 않음
     console.warn('[main] swap 실패 안내 처리 실패 (무시):', err);
+  }
+}
+
+async function readPendingPackageVersionForFailureCleanup(): Promise<string | null> {
+  try {
+    const pkgPath = path.join(localPendingDir(), 'resources', 'app', 'package.json');
+    const content = await fs.promises.readFile(pkgPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    return typeof parsed?.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+async function cleanupPendingAndSwapAttemptedMarker(): Promise<void> {
+  // pending + .swap-attempted 정리. .ready는 pending 안에 있어서 같이 사라짐.
+  //
+  // Codex 2차 P2: pending 정리 실패(EBUSY/EPERM 등)에도 .swap-attempted를 정리하면 다음
+  // 시작 시 .ready만 남아 dialog 트리거 조건(.ready + .swap-attempted) 안 맞아 silent
+  // 무한 retry. pending 정리 성공 시에만 .swap-attempted 정리하여 다음에도 dialog 표시.
+  let pendingCleaned = false;
+  try {
+    await fs.promises.rm(localPendingDir(), { recursive: true, force: true });
+    pendingCleaned = !fs.existsSync(localPendingDir());
+  } catch (err) {
+    console.warn('[main] pending 정리 실패 (무시 — .swap-attempted 유지하여 다음 시작 시 또 알림):', err);
+  }
+  if (pendingCleaned) {
+    try {
+      await fs.promises.unlink(localSwapAttemptedMarker());
+    } catch { /* 무시 */ }
   }
 }
 
