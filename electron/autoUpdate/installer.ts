@@ -16,6 +16,7 @@ import {
   localPendingDir,
   localBflowExe,
   localInstalledMarker,
+  localSelfHealFailedMarker,
 } from './paths';
 import { copyDirMirror } from './copy';
 
@@ -44,6 +45,11 @@ export async function runFirstInstallIfNeeded(): Promise<InstallResult> {
   const partialInstall = existsSync(localExe) && !existsSync(installedMarker);
 
   if (fullyInstalled) {
+    // v1.21.3 self-heal: desktop/startMenu 바로가기 둘 다 부재 시 보충 시도.
+    // v1.21.1 install이 shell.writeShortcutLink silent fail로 바로가기 없이
+    // 끝난 PC를 위한 안전망 — v1.21.2 PowerShell COM 폴백을 활용해 보충.
+    // 실패해도 relaunch는 막지 않음 (.shortcut-self-heal-failed 마커로 재시도 억제).
+    await ensureShortcutsExist();
     // spec §4.4: 옛 바로가기 폴백. 로컬 본체로 spawn하고 자기는 종료.
     relaunchAndExit(localExe);
     return { exited: true };
@@ -125,6 +131,34 @@ async function install(): Promise<void> {
   const desktopOk = await createDesktopShortcut();
   const startMenuOk = await createStartMenuShortcut();
   if (!desktopOk && !startMenuOk) {
+    await notifyShortcutFailure();
+  }
+}
+
+/**
+ * v1.21.3 self-heal — fullyInstalled 분기에서 호출. desktop OR startMenu .lnk 중
+ * 하나라도 있으면 noop. 둘 다 부재 시 보충 시도하되, 이전에 실패한 적 있으면
+ * (.shortcut-self-heal-failed 마커) skip해 매 실행 dialog spam 방지.
+ */
+async function ensureShortcutsExist(): Promise<void> {
+  const desktopLnk = path.join(process.env.USERPROFILE || '', 'Desktop', 'B flow.lnk');
+  const startMenuLnk = path.join(
+    process.env.APPDATA || '',
+    'Microsoft', 'Windows', 'Start Menu', 'Programs', 'B flow.lnk',
+  );
+  if (existsSync(desktopLnk) || existsSync(startMenuLnk)) return;
+
+  const failedMarker = localSelfHealFailedMarker();
+  if (existsSync(failedMarker)) return;
+
+  const desktopOk = await createDesktopShortcut();
+  const startMenuOk = await createStartMenuShortcut();
+  if (!desktopOk && !startMenuOk) {
+    try {
+      await fsp.writeFile(failedMarker, new Date().toISOString() + '\n', 'utf-8');
+    } catch (err) {
+      console.warn('[installer] self-heal failed marker 작성 실패 (무시):', err);
+    }
     await notifyShortcutFailure();
   }
 }
