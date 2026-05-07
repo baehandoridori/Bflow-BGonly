@@ -75,6 +75,21 @@ export async function swapIfPending(): Promise<SwapResult> {
     console.warn('[swapper] 이전 backup 정리 실패 (무시):', err);
   }
 
+  // v1.22.0: NSIS Uninstall.exe 보존. NSIS 인스톨러로 설치된 경우 install dir에
+  // `Uninstall BFLOW.exe`가 있고, 그게 없으면 Windows "프로그램 추가/제거"의 BFLOW
+  // 항목이 깨짐. swap = pending → app dir rename이라 새 app dir엔 Uninstall이 없음.
+  // swap 직전에 pending으로 copy해 swap 후에도 보존.
+  const uninstallName = 'Uninstall BFLOW.exe';
+  const oldUninstall = path.join(app_, uninstallName);
+  const newUninstall = path.join(pending_, uninstallName);
+  if (existsSync(oldUninstall) && !existsSync(newUninstall)) {
+    try {
+      await fsp.copyFile(oldUninstall, newUninstall);
+    } catch (err) {
+      console.warn('[swapper] NSIS Uninstall.exe 보존 실패 (무시 — 자동업데이트 자체엔 무영향):', err);
+    }
+  }
+
   // 2. app/ → backup/  (rename + copy fallback)
   let movedToBackup = false;
   if (existsSync(app_)) {

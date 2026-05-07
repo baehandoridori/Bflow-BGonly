@@ -26,14 +26,46 @@ export interface InstallResult {
 }
 
 /**
+ * NSIS 설치 PC 감지 — `%LOCALAPPDATA%\Programs\BFLOW\Uninstall BFLOW.exe` 존재 여부.
+ * v1.22.0+ 부터 NSIS가 첫 설치를 담당하므로 NSIS 흔적이 있으면 self-installer 흐름은
+ * 무관 — 사용자가 잘못된 경로(G드라이브 win-unpacked)를 클릭한 상황으로 안내만.
+ */
+function isNsisInstalled(): boolean {
+  const localAppData = process.env.LOCALAPPDATA
+    || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+  return existsSync(path.join(localAppData, 'Programs', 'BFLOW', 'Uninstall BFLOW.exe'));
+}
+
+/**
  * main.ts의 app.whenReady 진입 직후 한 번 호출.
- * - G드라이브에서 실행됐고 로컬 본체 없으면 → 첫 설치 (dialog → 복사 → spawn).
- * - G드라이브에서 실행됐고 로컬 본체 있으면 → 즉시 로컬 spawn (옛 바로가기 폴백).
  * - 로컬에서 실행됐으면 → 그냥 정상 진행 (return { exited: false }).
+ * - G드라이브에서 실행됐고 NSIS로 이미 설치돼 있으면 → 안내 dialog + 종료
+ *   (사용자가 잘못된 경로를 클릭한 경우. v1.22.0+ NSIS Setup이 정식 첫 설치).
+ * - G드라이브에서 실행됐고 v1.21.x self-installer로 설치돼 있으면 → 즉시 로컬 spawn (옛 바로가기 폴백).
+ * - G드라이브에서 실행됐고 미설치 + NSIS 없음 → 옛 self-installer 첫 설치 흐름 (호환).
+ *   (정상 경로는 BFLOW-Setup.exe 클릭이지만 사용자가 win-unpacked\BFLOW.exe를 클릭한
+ *    edge case 호환 — 매우 느리지만 동작은 함.)
  */
 export async function runFirstInstallIfNeeded(): Promise<InstallResult> {
   if (!isRunningFromGoogleDrive()) {
     return { exited: false };
+  }
+
+  // v1.22.0: NSIS 설치 PC면 안내 dialog만 띄우고 종료. 자동업데이트는 데스크톱 바로가기로
+  // 시작된 BFLOW가 백그라운드에서 처리하므로 G드라이브 직접 실행 자체가 불필요.
+  if (isNsisInstalled()) {
+    await dialog.showMessageBox({
+      type: 'warning',
+      title: 'B flow — 잘못된 실행 경로',
+      message: '데스크톱의 "B flow" 바로가기를 사용해주세요',
+      detail:
+        'G드라이브에서 직접 실행하면 매우 느립니다.\n\n'
+        + '이미 PC에 설치되어 있으니 바탕화면 또는 시작 메뉴의 "B flow" 바로가기를 사용하세요.\n\n'
+        + '(자동 업데이트는 백그라운드에서 처리되므로 G드라이브 직접 실행은 불필요합니다.)',
+      buttons: ['확인'],
+    });
+    app.exit(0);
+    return { exited: true };
   }
 
   const localExe = localBflowExe();
