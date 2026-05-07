@@ -93,29 +93,54 @@ if ((Test-Path $oldUninstall) -and (-not (Test-Path $newUninstall))) {
   }
 }
 
-# 2. app -> backup
-try {
-  if (Test-Path $appDir) {
-    Move-Item -Path $appDir -Destination $backupDir -Force -ErrorAction Stop
-    Write-SwapLog "step2 app->backup OK"
+# Codex 2차 P1: rename + retry + copy fallback (이전 swapIfPending의 moveDirRobust 패턴
+# 복원). BFLOW 종료 후라 EBUSY 자체는 거의 없어야 하지만 AV 검사·Windows search indexer
+# 등 transient lock에 대비. retry → copy fallback 으로 safety net.
+function Move-DirRobust([string]$src, [string]$dst, [string]$stepName) {
+  $maxRetries = 3
+  for ($i = 0; $i -lt $maxRetries; $i++) {
+    try {
+      Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
+      Write-SwapLog "$stepName: rename try $($i+1) OK"
+      return $true
+    } catch {
+      Write-SwapLog "$stepName: rename try $($i+1) 실패 — $($_.Exception.Message)"
+      if ($i -lt ($maxRetries - 1)) { Start-Sleep -Milliseconds 500 }
+    }
   }
-} catch {
-  Write-SwapLog "step2 FAIL: $($_.Exception.Message)"
-  exit 1
+  # rename 모두 실패 → copy fallback (느리지만 락에 robust)
+  Write-SwapLog "$stepName: copy fallback 시작"
+  try {
+    Copy-Item -Path $src -Destination $dst -Recurse -Force -ErrorAction Stop
+    Remove-Item -Path $src -Recurse -Force -ErrorAction Stop
+    Write-SwapLog "$stepName: copy fallback OK"
+    return $true
+  } catch {
+    Write-SwapLog "$stepName: copy fallback 실패 — $($_.Exception.Message)"
+    return $false
+  }
+}
+
+# 2. app -> backup
+$movedToBackup = $false
+if (Test-Path $appDir) {
+  if (-not (Move-DirRobust $appDir $backupDir 'step2 app->backup')) {
+    Write-SwapLog "swap end: FAIL (step2)"
+    exit 1
+  }
+  $movedToBackup = $true
 }
 
 # 3. pending -> app
-try {
-  Move-Item -Path $pendingDir -Destination $appDir -Force -ErrorAction Stop
-  Write-SwapLog "step3 pending->app OK"
-} catch {
-  Write-SwapLog "step3 FAIL: $($_.Exception.Message)"
+if (-not (Move-DirRobust $pendingDir $appDir 'step3 pending->app')) {
+  Write-SwapLog "swap end: FAIL (step3)"
   # 복구 시도
-  try {
-    Move-Item -Path $backupDir -Destination $appDir -Force -ErrorAction Stop
-    Write-SwapLog "recover backup->app OK"
-  } catch {
-    Write-SwapLog "recover FAIL: $($_.Exception.Message) — app/ 부재 가능성"
+  if ($movedToBackup) {
+    if (Move-DirRobust $backupDir $appDir 'recover backup->app') {
+      Write-SwapLog "recover OK — 옛 버전 그대로 유지"
+    } else {
+      Write-SwapLog "recover FAIL — app/ 부재 가능성"
+    }
   }
   exit 1
 }
