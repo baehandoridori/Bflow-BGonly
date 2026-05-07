@@ -249,7 +249,10 @@ export const FONT_FAMILIES: FontFamilyMeta[] = [
   { id: 'inter',         label: 'Inter',              cssStack: `Inter, 'Pretendard Variable', Pretendard, system-ui, sans-serif`, group: 'modern' },
   { id: 'noto-sans-kr',  label: 'Noto Sans KR',       cssStack: `'Noto Sans KR', system-ui, sans-serif`, group: 'modern' },
   { id: 'ibm-plex-kr',   label: 'IBM Plex Sans KR',   cssStack: `'IBM Plex Sans KR', system-ui, sans-serif`, group: 'serious' },
-  { id: 'spoqa',         label: 'Spoqa Han Sans Neo', cssStack: `'Spoqa Han Sans Neo', system-ui, sans-serif`, group: 'serious' },
+  // Spoqa Han Sans Neo: 패키지가 모든 weight×모든 format(woff2/woff/ttf)을 한 덩어리로 묶어
+  // 빌드 size 30~50MB 차지. fontsource처럼 subset 분리 X → 큐레이션에서 제외 (한솔 결정,
+  // PR #62 4차 P2 대안). 옛 preferences에 'spoqa' 남아있으면 applyFontFamily가 FALLBACK_STACK
+  // (Pretendard)로 자동 폴백.
   { id: 'nanum-gothic',  label: '나눔고딕',           cssStack: `'Nanum Gothic', system-ui, sans-serif`, group: 'soft' },
   { id: 'gowun-dodum',   label: '고운 도담',          cssStack: `'Gowun Dodum', system-ui, sans-serif`, group: 'soft' },
   { id: 'noto-serif-kr', label: '본명조',             cssStack: `'Noto Serif KR', serif`, group: 'character' },

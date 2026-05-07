@@ -4,25 +4,50 @@ import App from './App';
 import { WidgetPopup } from './views/WidgetPopup';
 
 // v1.20.0: 글꼴 시스템 — 큐레이션 9종 중 8종 (시스템 기본은 OS 글꼴, import 불필요)
-// Pretendard Variable: 가변 폰트 1개 파일 → 모든 weight 자동 처리, 가장 효율적
+//
+// 코덱스 PR #62 3차 P1: @fontsource의 weight별 .css는 *모든 subset*(한자 unified
+// ideographs, cyrillic, greek 등)을 포함시켜 빌드 size가 1GB로 폭증. Studio JBBJ
+// 사용자는 한국어+영어/숫자 위주이므로 `korean-<weight>.css` + `latin-<weight>.css`
+// subset만 명시 import → CJK 한자/cyrillic/greek 등 제외 → 빌드 size 70%+ 감소.
+//
+// Pretendard Variable: 가변 폰트 1개 파일 → 모든 weight 자동 처리.
 import 'pretendard/dist/web/variable/pretendardvariable.css';
-import '@fontsource/inter/400.css';
-import '@fontsource/inter/500.css';
-import '@fontsource/inter/600.css';
-import '@fontsource/inter/700.css';
-import '@fontsource/noto-sans-kr/400.css';
-import '@fontsource/noto-sans-kr/500.css';
-import '@fontsource/noto-sans-kr/700.css';
-import '@fontsource/ibm-plex-sans-kr/400.css';
-import '@fontsource/ibm-plex-sans-kr/500.css';
-import '@fontsource/ibm-plex-sans-kr/700.css';
-import '@fontsource/nanum-gothic/400.css';
-import '@fontsource/nanum-gothic/700.css';
-import '@fontsource/gowun-dodum/400.css';
-import '@fontsource/noto-serif-kr/400.css';
-import '@fontsource/noto-serif-kr/500.css';
-import '@fontsource/noto-serif-kr/700.css';
-import 'spoqa-han-sans/css/SpoqaHanSansNeo.css';
+
+// Inter — 영문 우선. latin subset만.
+import '@fontsource/inter/latin-400.css';
+import '@fontsource/inter/latin-500.css';
+import '@fontsource/inter/latin-600.css';
+import '@fontsource/inter/latin-700.css';
+
+// 한국어 폰트들 — korean + latin subset (한자/cyrillic/greek 등 제외).
+import '@fontsource/noto-sans-kr/korean-400.css';
+import '@fontsource/noto-sans-kr/korean-500.css';
+import '@fontsource/noto-sans-kr/korean-700.css';
+import '@fontsource/noto-sans-kr/latin-400.css';
+import '@fontsource/noto-sans-kr/latin-500.css';
+import '@fontsource/noto-sans-kr/latin-700.css';
+
+import '@fontsource/ibm-plex-sans-kr/korean-400.css';
+import '@fontsource/ibm-plex-sans-kr/korean-500.css';
+import '@fontsource/ibm-plex-sans-kr/korean-700.css';
+import '@fontsource/ibm-plex-sans-kr/latin-400.css';
+import '@fontsource/ibm-plex-sans-kr/latin-500.css';
+import '@fontsource/ibm-plex-sans-kr/latin-700.css';
+
+import '@fontsource/nanum-gothic/korean-400.css';
+import '@fontsource/nanum-gothic/korean-700.css';
+import '@fontsource/nanum-gothic/latin-400.css';
+import '@fontsource/nanum-gothic/latin-700.css';
+
+import '@fontsource/gowun-dodum/korean-400.css';
+import '@fontsource/gowun-dodum/latin-400.css';
+
+import '@fontsource/noto-serif-kr/korean-400.css';
+import '@fontsource/noto-serif-kr/korean-500.css';
+import '@fontsource/noto-serif-kr/korean-700.css';
+import '@fontsource/noto-serif-kr/latin-400.css';
+import '@fontsource/noto-serif-kr/latin-500.css';
+import '@fontsource/noto-serif-kr/latin-700.css';
 
 import './index.css';
 import './styles/path-link.css';
