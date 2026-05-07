@@ -120,32 +120,43 @@ async function install(): Promise<void> {
     'utf-8',
   );
 
-  // 바로가기 자동 생성 (실패해도 설치는 성공으로 간주 — 마커는 위에서 이미 작성)
-  await createDesktopShortcut();
-  await createStartMenuShortcut();
+  // 바로가기 자동 생성 — 실패해도 설치는 성공(마커 위에서 작성). 단 desktop+startMenu
+  // 둘 다 실패하면 사용자에게 수동 안내 dialog 띄움 (v1.21.2: 한솔 PC 케이스).
+  const desktopOk = await createDesktopShortcut();
+  const startMenuOk = await createStartMenuShortcut();
+  if (!desktopOk && !startMenuOk) {
+    await notifyShortcutFailure();
+  }
 }
 
-async function createDesktopShortcut(): Promise<void> {
+async function createDesktopShortcut(): Promise<boolean> {
   const desktop = path.join(process.env.USERPROFILE || '', 'Desktop');
-  if (!existsSync(desktop)) return;
-  await createShortcut(path.join(desktop, 'B flow.lnk'));
+  if (!existsSync(desktop)) return false;
+  return createShortcut(path.join(desktop, 'B flow.lnk'));
 }
 
-async function createStartMenuShortcut(): Promise<void> {
+async function createStartMenuShortcut(): Promise<boolean> {
   const startMenu = path.join(
     process.env.APPDATA || '',
     'Microsoft', 'Windows', 'Start Menu', 'Programs',
   );
-  if (!existsSync(startMenu)) return;
-  await createShortcut(path.join(startMenu, 'B flow.lnk'));
+  if (!existsSync(startMenu)) return false;
+  return createShortcut(path.join(startMenu, 'B flow.lnk'));
 }
 
 /**
- * Electron의 shell.writeShortcutLink는 Windows에서만 작동. iconPath를 BFLOW.exe로 설정해
- * BFLOW 자체 아이콘 사용.
+ * 1차: Electron `shell.writeShortcutLink`. Windows에서만 작동. 일부 환경(한국어 OS,
+ * 막 mirror copy 끝난 BFLOW.exe를 icon으로 지정 등)에서 silent하게 false 반환하는
+ * 케이스가 v1.21.1 한솔 PC에서 재현됨 → PowerShell COM fallback 필요.
+ *
+ * 2차: PowerShell `WScript.Shell` COM. `shell.writeShortcutLink` 실패 시 폴백.
+ *      이전 한솔 PC에서 수동으로 통한 경로.
+ *
+ * 둘 다 실패 → 호출자가 사용자에게 안내 dialog (notifyShortcutFailure).
  */
-async function createShortcut(lnkPath: string): Promise<void> {
+async function createShortcut(lnkPath: string): Promise<boolean> {
   const exe = localBflowExe();
+  // 1차 시도: Electron 내장
   try {
     const ok = shell.writeShortcutLink(lnkPath, 'create', {
       target: exe,
@@ -153,10 +164,77 @@ async function createShortcut(lnkPath: string): Promise<void> {
       iconIndex: 0,
       description: 'B flow — Studio JBBJ 워크플로우 대시보드',
     });
-    if (!ok) console.warn('[installer] 바로가기 생성 실패:', lnkPath);
+    if (ok && existsSync(lnkPath)) return true;
+    console.warn('[installer] shell.writeShortcutLink false 반환:', lnkPath);
   } catch (err) {
-    console.warn('[installer] 바로가기 예외:', lnkPath, err);
+    console.warn('[installer] shell.writeShortcutLink 예외:', lnkPath, err);
   }
+  // 2차 폴백: PowerShell WScript.Shell COM
+  try {
+    const ok = await createShortcutPowerShell(lnkPath, exe);
+    if (ok && existsSync(lnkPath)) return true;
+    console.warn('[installer] PowerShell COM fallback 실패:', lnkPath);
+  } catch (err) {
+    console.warn('[installer] PowerShell COM 예외:', lnkPath, err);
+  }
+  return false;
+}
+
+/**
+ * PowerShell 자식 프로세스에서 WScript.Shell COM으로 .lnk 작성. 외부 프로세스라
+ * Electron 내부 COM 호환성 문제(electron 33 + 한국어 OS quirk 등)를 회피한다.
+ *
+ * 보안: 사용자 입력이 들어가는 경로(lnkPath, exe)는 PowerShell single-quoted string에
+ * 넣되 single quote(')는 ''로 escape — `'` 문자가 path에 있으면 (이론상 가능) 그대로
+ * 안전하게 처리됨. spawn argv 분리 + -EncodedCommand로 quoting 이중 방어.
+ */
+async function createShortcutPowerShell(lnkPath: string, exe: string): Promise<boolean> {
+  const escLnk = lnkPath.replace(/'/g, "''");
+  const escExe = exe.replace(/'/g, "''");
+  const escWorkDir = path.dirname(exe).replace(/'/g, "''");
+  const psScript = [
+    `$ErrorActionPreference = 'Stop'`,
+    `$wsh = New-Object -ComObject WScript.Shell`,
+    `$sc = $wsh.CreateShortcut('${escLnk}')`,
+    `$sc.TargetPath = '${escExe}'`,
+    `$sc.IconLocation = '${escExe},0'`,
+    `$sc.WorkingDirectory = '${escWorkDir}'`,
+    `$sc.Description = 'B flow - Studio JBBJ workflow dashboard'`,
+    `$sc.Save()`,
+  ].join('; ');
+  // -EncodedCommand: PowerShell이 base64(UTF-16LE) 디코드 후 실행 → shell quoting/escaping
+  // 이슈 회피. PowerShell이 -EncodedCommand 파라미터를 표준 base64로 받기 때문에 안전.
+  const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+  return new Promise<boolean>((resolve) => {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+      { stdio: 'ignore', windowsHide: true },
+    );
+    child.once('exit', (code) => resolve(code === 0));
+    child.once('error', (err) => {
+      console.warn('[installer] PowerShell spawn 오류:', err);
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * 자동 바로가기 생성이 desktop + startMenu 둘 다 실패한 케이스. 사용자가 다음번에 또
+ * G드라이브 BFLOW.exe를 찾아 클릭(매번 14초+ Defender 검사)하지 않도록 로컬 exe 경로를
+ * 명시 안내한다.
+ */
+async function notifyShortcutFailure(): Promise<void> {
+  await dialog.showMessageBox({
+    type: 'warning',
+    title: 'B flow — 바로가기 자동 생성 실패',
+    message: '바로가기를 자동으로 만들지 못했습니다',
+    detail:
+      '아래 경로의 BFLOW.exe로 직접 바로가기를 만들어주세요 — '
+      + '앞으로는 G드라이브 대신 그 바로가기를 사용하면 1~2초 안에 시작됩니다.\n\n'
+      + localBflowExe(),
+    buttons: ['확인'],
+  });
 }
 
 /**
