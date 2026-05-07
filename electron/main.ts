@@ -2808,14 +2808,22 @@ async function notifyAndCleanupOnSwapFailure(): Promise<void> {
     }
 
     // pending + .swap-attempted 정리. .ready는 pending 안에 있어서 같이 사라짐.
+    //
+    // Codex 2차 P2: pending 정리 실패(EBUSY/EPERM 등)에도 .swap-attempted를 정리하면 다음
+    // 시작 시 .ready만 남아 dialog 트리거 조건(.ready + .swap-attempted) 안 맞아 silent
+    // 무한 retry. pending 정리 성공 시에만 .swap-attempted 정리하여 다음에도 dialog 표시.
+    let pendingCleaned = false;
     try {
       await fsp.rm(localPendingDir(), { recursive: true, force: true });
+      pendingCleaned = !existsSync(localPendingDir());
     } catch (err) {
-      console.warn('[main] pending 정리 실패 (무시):', err);
+      console.warn('[main] pending 정리 실패 (무시 — .swap-attempted 유지하여 다음 시작 시 또 알림):', err);
     }
-    try {
-      await fsp.unlink(localSwapAttemptedMarker());
-    } catch { /* 무시 */ }
+    if (pendingCleaned) {
+      try {
+        await fsp.unlink(localSwapAttemptedMarker());
+      } catch { /* 무시 */ }
+    }
   } catch (err) {
     // 안내 자체에 문제가 있어도 부팅 막지 않음
     console.warn('[main] swap 실패 안내 처리 실패 (무시):', err);

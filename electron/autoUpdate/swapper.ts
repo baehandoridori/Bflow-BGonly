@@ -14,7 +14,7 @@
  *
  * spec §4.2 step 6, §6 "swap 실패 / 새 버전 깨짐" 처리.
  */
-import { promises as fsp, existsSync, renameSync, appendFileSync } from 'fs';
+import { promises as fsp, existsSync, renameSync, appendFileSync, mkdirSync } from 'fs';
 import path from 'path';
 import {
   localRoot, localAppDir, localPendingDir, localBackupDir, localReadyMarker,
@@ -26,10 +26,17 @@ import { copyDirMirror } from './copy';
  * v1.22.2 swap 단계별 진단 로그 — `%LOCALAPPDATA%\Bflow-BGonly\swap.log`.
  * swap이 어디서 실패했는지 사용자 환경에서도 추적 가능하도록 파일에 기록.
  * sync write — swap은 짧고 결정론적이어야 하므로 비동기 큐잉 X.
+ *
+ * v1.22.3 P1: NSIS 첫 설치 PC는 self-installer install() 흐름을 거치지 않아
+ * `localRoot()` 디렉토리(`%LOCALAPPDATA%\Bflow-BGonly\`)가 미리 만들어져 있지 않을 수
+ * 있음. 부모 dir 보장 후 write — 이게 없으면 ENOENT로 silent fail하고 진짜 swap 실패도
+ * 추적 불가.
  */
 function logSwap(line: string): void {
   try {
-    const logPath = path.join(localRoot(), 'swap.log');
+    const root = localRoot();
+    if (!existsSync(root)) mkdirSync(root, { recursive: true });
+    const logPath = path.join(root, 'swap.log');
     appendFileSync(logPath, `${new Date().toISOString()} ${line}\n`, 'utf-8');
   } catch {
     /* 로깅 실패는 swap 자체를 막지 않음 — best effort */
@@ -110,7 +117,12 @@ export async function swapIfPending(): Promise<SwapResult> {
   // v1.22.3: swap 진입 시점에 .swap-attempted 마커 작성. crash/kill로 종료된 케이스에서
   // .ready만 검사하면 false positive(swap 실제 시도 없었는데 실패로 오인)가 발생.
   // 이 마커가 함께 남아있어야 진짜 swap 실패. 정상 종료/복구 시 정리.
+  //
+  // Codex 2차 P1: NSIS 첫 설치 PC는 self-installer install() 흐름을 거치지 않아
+  // localRoot() 디렉토리가 미리 만들어져 있지 않을 수 있음. write 전 mkdir 보장 —
+  // 이게 없으면 ENOENT로 silent fail하고 진짜 swap 실패 시 dialog 안 떠서 retry loop.
   try {
+    await fsp.mkdir(localRoot(), { recursive: true });
     await fsp.writeFile(attemptedMarker, new Date().toISOString() + '\n', 'utf-8');
   } catch (err) {
     logSwap(`  swap-attempted 마커 작성 실패 (무시) — ${(err as Error).message}`);
