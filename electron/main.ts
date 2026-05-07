@@ -725,7 +725,14 @@ function migrateLegacyUsersFileIfNeeded(): void {
 // app.relaunch()는 다음 프로세스 spawn을 예약, app.quit()이 before-quit hook을
 // 트리거 → 그 안에서 swapIfPending이 pending → app 폴더 rename. 종료 후 Electron이
 // 같은 process.execPath(이제 새 BFLOW.exe를 가리킴)로 spawn → 새 버전 자동 시작.
+//
+// Codex 1차 P2: app.relaunch()는 매 호출마다 spawn을 큐잉 → 사용자가 토스트 버튼을
+// 빠르게 두 번 누르거나 invoke가 race로 중복 호출되면 종료 후 multiple instance가
+// spawn됨. one-shot guard로 한 종료 사이클당 한 번만 relaunch 예약.
+let updateRelaunchScheduled = false;
 ipcMain.handle('update:apply-now', () => {
+  if (updateRelaunchScheduled) return;
+  updateRelaunchScheduled = true;
   app.relaunch();
   app.quit();
 });

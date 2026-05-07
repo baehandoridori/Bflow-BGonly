@@ -24,6 +24,11 @@ import { copyDirMirror } from './copy';
  *
  * v1.22.1: 다운로드 + .ready 마커 작성이 완료되면 onReady 콜백 호출. main.ts가
  * 이를 받아 renderer에 'update:ready' IPC 송신 → 토스트 띄움.
+ *
+ * Codex 1차 P2: pending이 이미 ready인 케이스에서 *현재 fetch한 manifest version*을
+ * 토스트로 알리면 misleading — pending에 들어있는 실제 build version과 다를 수 있음
+ * (옛 다운로드 + 그 사이 새 manifest push 시나리오). 실제 pending payload의 version을
+ * 읽어 알려준다.
  */
 export async function scheduleUpdateCheck(onReady?: (version: string) => void): Promise<void> {
   try {
@@ -47,10 +52,28 @@ export async function scheduleUpdateCheck(onReady?: (version: string) => void): 
     const downloaded = await downloadToPending(remote);
     if (downloaded) {
       console.log(`[autoUpdate] 다운로드 완료. 다음 종료 시 swap.`);
-      onReady?.(remote.version);
+      // pending이 이미 ready였을 수도 있으므로 실제 pending payload version 우선.
+      const pendingVer = await readPendingVersion();
+      onReady?.(pendingVer ?? remote.version);
     }
   } catch (err) {
     console.warn('[autoUpdate] 체크 실패:', err);
+  }
+}
+
+/**
+ * pending 폴더 안의 실제 빌드 version 읽기 — `pending/resources/app/package.json`.
+ * pending이 옛 fetch 결과라면 fresh manifest와 version이 다를 수 있어, 토스트 표시는
+ * 이 함수 결과를 우선 사용해야 swap 후 실제 적용될 version과 일치.
+ */
+async function readPendingVersion(): Promise<string | null> {
+  try {
+    const pkgPath = path.join(localPendingDir(), 'resources', 'app', 'package.json');
+    const content = await fsp.readFile(pkgPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    return typeof parsed?.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
   }
 }
 
