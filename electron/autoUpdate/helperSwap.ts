@@ -66,54 +66,69 @@ Write-SwapLog "[start] PowerShell helper alive — pid=$PID parent=${myPid}"
 
 # v1.22.6: helper 동시 실행 race 방지 (direct spawn + cmd wrapper 둘 다 발화 가능).
 #
-# Codex 2차 P1: atomic acquire — Test-Path + Out-File는 race 가능. [System.IO.File]::Open
-# 'CreateNew' + 'None' share는 OS-level atomic — file 존재 시 IOException throw.
-# Codex 3차 P2: PID + mtime 둘 다 검사 (단일 mtime 5분은 slow copy fallback에서 active
-# lock을 stale로 오인). PID 죽었으면 확실 stale (PID 재사용은 mtime으로 방어).
-# mtime 30분 fallback — slow AV 환경에서 swap이 분 단위 걸려도 안전 마진.
+# Codex 4차 P2: live PID + age check도 race 위험 (active helper의 slow copy가 mtime
+# 임계 초과 시 정리 → race). PID + 시작 timestamp(Ticks)로 정확 검증 — process가
+# StartTime까지 일치해야 active. PID 재사용 시 StartTime 다름 → stale 판정.
 $lockPath = Join-Path $root 'swap.lock'
 $lockHandle = $null
 
-# 1. stale lock 사전 정리: PID 죽음 (확실) 또는 mtime > 30분 (PID 재사용 방어)
+# 우리 PID의 StartTime을 lock에 기록할 준비
+try {
+  $myStartTicks = (Get-Process -Id $PID).StartTime.Ticks
+} catch {
+  $myStartTicks = 0
+}
+
+# 1. stale lock 사전 정리: PID 죽었거나 StartTime 불일치(PID 재사용)면 stale
 if (Test-Path $lockPath) {
-  $isStale = $false
+  $isStale = $true
   try {
     $oldContent = (Get-Content $lockPath -Raw -ErrorAction SilentlyContinue)
     if ($oldContent) { $oldContent = $oldContent.Trim() }
-    if ($oldContent -match '^\d+$') {
-      $oldPid = [int]$oldContent
+    # format: "PID|StartTimeTicks"
+    if ($oldContent -match '^(\d+)\|(\d+)$') {
+      $oldPid = [int]$Matches[1]
+      $oldStartTicks = [long]$Matches[2]
       $oldProc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
-      if (-not $oldProc) {
-        $isStale = $true
-        Write-SwapLog "stale lock (PID $oldPid dead) — cleared"
-      } else {
-        $age = (Get-Date) - (Get-Item $lockPath).LastWriteTime
-        if ($age.TotalMinutes -gt 30) {
-          $isStale = $true
-          Write-SwapLog "stale lock (PID $oldPid alive but age=$([int]$age.TotalMinutes)min > 30 — likely PID reuse) — cleared"
+      if ($oldProc) {
+        try {
+          if ($oldProc.StartTime.Ticks -eq $oldStartTicks) {
+            $isStale = $false  # 진짜 active
+            Write-SwapLog "active helper (PID $oldPid, start match) — exiting"
+          } else {
+            Write-SwapLog "stale lock (PID $oldPid reused — StartTime mismatch) — cleared"
+          }
+        } catch {
+          # StartTime 접근 실패 (권한 등) → 보수적으로 active로 간주
+          $isStale = $false
+          Write-SwapLog "PID $oldPid alive but StartTime unreadable — assuming active (exit)"
         }
+      } else {
+        Write-SwapLog "stale lock (PID $oldPid dead) — cleared"
       }
     } else {
-      $isStale = $true
-      Write-SwapLog "stale lock (invalid PID content) — cleared"
+      Write-SwapLog "stale lock (invalid format) — cleared"
     }
-  } catch {
-    $isStale = $true
+  } catch {}
+  if (-not $isStale) {
+    # active helper 진행 중 — 우리는 lock 안 잡고 종료. .ps1 self cleanup만.
+    if ($PSCommandPath) { try { Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {} }
+    exit 0
   }
-  if ($isStale) {
-    Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
-  }
+  Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
 }
 
-# 2. atomic acquire + PID 기록
+# 2. atomic acquire + PID|StartTime 기록
 try {
   $lockHandle = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-  $pidBytes = [System.Text.Encoding]::ASCII.GetBytes("$PID")
-  $lockHandle.Write($pidBytes, 0, $pidBytes.Length)
+  $payload = "$PID|$myStartTicks"
+  $payloadBytes = [System.Text.Encoding]::ASCII.GetBytes($payload)
+  $lockHandle.Write($payloadBytes, 0, $payloadBytes.Length)
   $lockHandle.Flush()
   Write-SwapLog "lock acquired by PID $PID (atomic CreateNew)"
 } catch [System.IO.IOException] {
   Write-SwapLog "another helper holding lock — exiting"
+  if ($PSCommandPath) { try { Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {} }
   exit 0
 } catch {
   Write-SwapLog "lock 획득 예외 (계속 진행): $($_.Exception.Message)"
@@ -190,6 +205,7 @@ if (Test-Path $appDir) {
     Write-SwapLog "swap end: FAIL (step2)"
     if ($lockHandle) { try { $lockHandle.Close() } catch {} }
     Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
+    if ($PSCommandPath) { try { Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {} }
     exit 1
   }
   $movedToBackup = $true
@@ -249,6 +265,14 @@ if ($lockHandle) { try { $lockHandle.Close() } catch {} }
 if (Test-Path $lockPath) {
   Remove-Item $lockPath -Force -ErrorAction SilentlyContinue
   Write-SwapLog "lock released"
+}
+
+# 10. Codex 4차 P3: temp .ps1 self-cleanup. cmd wrapper가 helper를 -File 모드로 실행한
+# 케이스에서 %TEMP%\bflow-helper-{pid}-{ts}.ps1이 누적됨. PowerShell -File 모드는 시작
+# 시 file 내용 read 후 메모리 script로 보유 → file lock 안 잡으므로 자기 자신 삭제 가능.
+# (-EncodedCommand 모드는 $PSCommandPath null이라 Remove-Item noop)
+if ($PSCommandPath) {
+  try { Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {}
 }
 `;
 
