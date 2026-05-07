@@ -1,7 +1,20 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, RefreshCw, X } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
+import type { UpdateInfo } from '@/types';
+
+function createFallbackUpdateInfo(message = '업데이트 상태를 아직 확인하지 않았습니다.'): UpdateInfo {
+  return {
+    status: 'up-to-date',
+    currentVersion: __APP_VERSION__,
+    latestVersion: __APP_VERSION__,
+    buildAt: '',
+    ready: false,
+    releaseNotes: [],
+    message,
+  };
+}
 
 function formatBuildTime(value: string): string {
   if (!value) return '';
@@ -15,6 +28,15 @@ function formatBuildTime(value: string): string {
   });
 }
 
+function formatCheckedAt(date: Date | null): string {
+  if (!date) return '';
+  return date.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function formatBytes(value?: number): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '';
   const mb = value / 1024 / 1024;
@@ -24,13 +46,37 @@ function formatBytes(value?: number): string {
 export function UpdateCenterModal() {
   const updateInfo = useAppStore((s) => s.updateInfo);
   const updateCenterOpen = useAppStore((s) => s.updateCenterOpen);
+  const setUpdateInfo = useAppStore((s) => s.setUpdateInfo);
   const setUpdateCenterOpen = useAppStore((s) => s.setUpdateCenterOpen);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setRefreshError(null);
+    try {
+      const nextInfo = await window.electronAPI?.checkForUpdates?.();
+      setUpdateInfo(nextInfo ?? createFallbackUpdateInfo('G드라이브 업데이트 정보를 찾지 못했습니다. 현재 버전으로 계속 사용할 수 있습니다.'));
+      setLastCheckedAt(new Date());
+    } catch {
+      const message = '업데이트 상태를 새로 확인하지 못했습니다. 잠시 후 다시 시도해주세요.';
+      setRefreshError(message);
+      setUpdateInfo({
+        ...createFallbackUpdateInfo(message),
+        status: 'failed',
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [isRefreshing, setUpdateInfo]);
+
   useEffect(() => {
-    if (!updateInfo || !updateCenterOpen) return;
+    if (!updateCenterOpen) return;
 
     previouslyFocusedRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -75,63 +121,79 @@ export function UpdateCenterModal() {
       document.removeEventListener('keydown', handleKeyDown);
       previouslyFocusedRef.current?.focus?.();
     };
-  }, [updateInfo, updateCenterOpen, setUpdateCenterOpen]);
+  }, [updateCenterOpen, setUpdateCenterOpen]);
 
-  if (!updateInfo || !updateCenterOpen) return null;
+  useEffect(() => {
+    if (!updateCenterOpen || updateInfo) return;
+    void handleRefresh();
+  }, [handleRefresh, updateCenterOpen, updateInfo]);
 
-  const hasRemoteUpdate = updateInfo.latestVersion !== updateInfo.currentVersion
-    && updateInfo.status !== 'suppressed'
-    && updateInfo.status !== 'up-to-date';
-  const isPreparing = hasRemoteUpdate && (updateInfo.status === 'available' || updateInfo.status === 'downloading');
-  const isApplying = updateInfo.status === 'applying';
-  const canApply = updateInfo.ready && hasRemoteUpdate && !isApplying;
-  const isFailed = updateInfo.status === 'failed';
-  const isSuppressed = updateInfo.status === 'suppressed';
+  if (!updateCenterOpen) return null;
+
+  const displayInfo = updateInfo ?? createFallbackUpdateInfo();
+  const hasRemoteUpdate = displayInfo.latestVersion !== displayInfo.currentVersion
+    && displayInfo.status !== 'suppressed'
+    && displayInfo.status !== 'up-to-date';
+  const isPreparing = hasRemoteUpdate && (displayInfo.status === 'available' || displayInfo.status === 'downloading');
+  const isApplying = displayInfo.status === 'applying';
+  const canApply = displayInfo.ready && hasRemoteUpdate && !isApplying;
+  const isFailed = displayInfo.status === 'failed';
+  const isSuppressed = displayInfo.status === 'suppressed';
   const shouldHighlightLatest = hasRemoteUpdate && !isFailed;
-  const downloadPercent = updateInfo.totalBytes && updateInfo.downloadedBytes != null
-    ? Math.min(100, Math.max(0, Math.round((updateInfo.downloadedBytes / updateInfo.totalBytes) * 100)))
+  const downloadPercent = displayInfo.totalBytes && displayInfo.downloadedBytes != null
+    ? Math.min(100, Math.max(0, Math.round((displayInfo.downloadedBytes / displayInfo.totalBytes) * 100)))
     : null;
-  const statusText = canApply
-    ? '즉시 적용 가능'
-    : isApplying
-      ? '적용 중'
-      : isPreparing
-        ? '준비 중'
-        : isFailed
-          ? '준비 실패'
-          : isSuppressed
-            ? '자동 중단'
-            : '최신 상태';
+  const statusText = isRefreshing
+    ? '확인 중'
+    : canApply
+      ? '즉시 적용 가능'
+      : isApplying
+        ? '적용 중'
+        : isPreparing
+          ? '준비 중'
+          : isFailed
+            ? '준비 실패'
+            : isSuppressed
+              ? '자동 중단'
+              : '최신 상태';
   const latestLabel = hasRemoteUpdate ? '준비된 최신 버전' : '업데이트 상태';
-  const statusDescription = canApply
-    ? '설치 파일이 로컬에 준비되었습니다. 적용하면 별도 진행 창이 뜬 뒤 새 버전으로 다시 열립니다.'
-    : isApplying
-      ? '업데이트 설치 창을 여는 중입니다. 앱이 잠시 닫혀도 정상 진행 중입니다.'
-    : updateInfo.message
-      ?? (isPreparing
-        ? '새 버전 설치 파일을 로컬로 준비하고 있습니다. 준비되면 여기서 바로 적용할 수 있습니다.'
-        : isFailed || isSuppressed
-          ? '자동 업데이트 상태를 확인한 뒤 필요하면 정식 설치 파일로 갱신합니다.'
-          : '현재 앱이 최신 상태입니다.');
-  const notes = updateInfo.releaseNotes.length > 0
-    ? updateInfo.releaseNotes
+  const statusDescription = isRefreshing
+    ? 'G드라이브 배포 정보를 다시 확인하고 있습니다.'
+    : canApply
+      ? '설치 파일이 로컬에 준비되었습니다. 적용하면 별도 진행 창이 뜬 뒤 새 버전으로 다시 열립니다.'
+      : isApplying
+        ? '업데이트 설치 창을 여는 중입니다. 앱이 잠시 닫혀도 정상 진행 중입니다.'
+        : displayInfo.message
+          ?? (isPreparing
+            ? '새 버전 설치 파일을 로컬로 준비하고 있습니다. 준비되면 여기서 바로 적용할 수 있습니다.'
+            : isFailed || isSuppressed
+              ? '자동 업데이트 상태를 확인한 뒤 필요하면 정식 설치 파일로 갱신합니다.'
+              : '현재 앱이 최신 상태입니다.');
+  const notes = displayInfo.releaseNotes.length > 0
+    ? displayInfo.releaseNotes
     : [{
-      version: updateInfo.latestVersion,
-      title: isFailed || isSuppressed ? '업데이트 상태 안내' : '업데이트 준비 완료',
+      version: displayInfo.latestVersion,
+      title: isFailed || isSuppressed ? '업데이트 상태 안내' : '업데이트 내역 확인',
       items: [
         isSuppressed
           ? '이전 업데이트 적용 실패 후 자동 재시도가 중단되어 있습니다. 정식 설치 파일로 갱신하거나 진단 로그를 확인해야 합니다.'
           : isFailed
-            ? updateInfo.message ?? '업데이트 준비 중 문제가 발생했습니다. 다음 확인 때 다시 시도합니다.'
+            ? displayInfo.message ?? '업데이트 준비 중 문제가 발생했습니다. 다음 확인 때 다시 시도합니다.'
             : hasRemoteUpdate
               ? '새 버전이 준비되어 있습니다. 지금 업데이트하거나 앱을 종료할 때 적용할 수 있습니다.'
-              : '현재 앱이 최신 버전입니다.',
+              : '새로고침을 누르면 G드라이브 배포 정보에서 버전별 업데이트 내역을 다시 불러옵니다.',
       ],
     }];
-  const buildTime = formatBuildTime(updateInfo.buildAt);
+  const buildTime = formatBuildTime(displayInfo.buildAt);
+  const checkedAtText = formatCheckedAt(lastCheckedAt);
 
   const handleApply = () => {
     if (!canApply) return;
+    setUpdateInfo({
+      ...displayInfo,
+      status: 'applying',
+      message: '업데이트 설치 창을 여는 중입니다. 앱이 잠시 후 닫힙니다.',
+    });
     window.electronAPI?.applyUpdateNow?.();
   };
 
@@ -151,18 +213,37 @@ export function UpdateCenterModal() {
             <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">Version Center</p>
             <h2 id="update-center-title" className="mt-2 text-xl font-bold text-text-primary tracking-tight">업데이트 내역</h2>
             <p className="mt-1 text-sm text-text-secondary leading-relaxed">
-              현재 사용 중인 버전과 준비된 최신 버전을 확인할 수 있습니다.
+              현재 버전, 최신 버전, 버전별 변경 내역을 확인합니다.
             </p>
+            {checkedAtText && (
+              <p className="mt-1 text-[11px] text-text-secondary/70">마지막 확인 {checkedAtText}</p>
+            )}
           </div>
-          <button
-            ref={closeButtonRef}
-            type="button"
-            onClick={() => setUpdateCenterOpen(false)}
-            className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-bg-border/50 transition-colors cursor-pointer"
-            aria-label="업데이트 내역 닫기"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isRefreshing || isApplying}
+              className={cn(
+                'inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-xs font-semibold transition-colors',
+                isRefreshing || isApplying
+                  ? 'cursor-default border-bg-border bg-bg-border/20 text-text-secondary'
+                  : 'cursor-pointer border-accent/30 bg-accent/10 text-accent-sub hover:bg-accent/18',
+              )}
+            >
+              <RefreshCw size={14} className={cn(isRefreshing && 'animate-spin')} />
+              새로고침
+            </button>
+            <button
+              ref={closeButtonRef}
+              type="button"
+              onClick={() => setUpdateCenterOpen(false)}
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-bg-border/50 transition-colors cursor-pointer"
+              aria-label="업데이트 내역 닫기"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="p-6 overflow-y-auto max-h-[calc(86vh-96px)]">
@@ -170,7 +251,7 @@ export function UpdateCenterModal() {
             <div className="rounded-2xl border border-bg-border/60 bg-bg-primary/35 p-4">
               <p className="text-xs text-text-secondary">현재 사용 중</p>
               <p className="mt-2 text-2xl font-bold text-text-primary tracking-tight">
-                v{updateInfo.currentVersion}
+                v{displayInfo.currentVersion}
               </p>
               <p className="mt-2 text-xs leading-relaxed text-text-secondary">
                 지금 이 버전으로 작업하고 있습니다. 업데이트 전까지 현재 화면은 유지됩니다.
@@ -199,7 +280,7 @@ export function UpdateCenterModal() {
                         : 'text-text-primary',
                   )}
                 >
-                  v{updateInfo.latestVersion}
+                  v{displayInfo.latestVersion}
                 </p>
                 <button
                   type="button"
@@ -215,7 +296,7 @@ export function UpdateCenterModal() {
                   )}
                 >
                   <span className="relative z-10 inline-flex items-center gap-1.5">
-                    {canApply ? <Download size={13} /> : <RefreshCw size={13} className={cn((isPreparing || isApplying) && 'animate-spin')} />}
+                    {canApply ? <Download size={13} /> : <RefreshCw size={13} className={cn((isPreparing || isApplying || isRefreshing) && 'animate-spin')} />}
                     <span className="relative inline-block h-4 min-w-[76px] overflow-hidden text-center">
                       {canApply ? (
                         <>
@@ -236,7 +317,10 @@ export function UpdateCenterModal() {
               <p className="relative z-10 mt-2 text-xs leading-relaxed text-text-secondary">
                 {statusDescription}
               </p>
-              {(isPreparing || isApplying) && updateInfo.totalBytes && (
+              {refreshError && (
+                <p className="relative z-10 mt-2 text-[11px] text-[#FDCB6E]">{refreshError}</p>
+              )}
+              {(isPreparing || isApplying) && displayInfo.totalBytes && (
                 <div className="relative z-10 mt-3">
                   <div className="h-1.5 overflow-hidden rounded-full bg-bg-border/70">
                     <div
@@ -251,8 +335,8 @@ export function UpdateCenterModal() {
                     {isApplying
                       ? '설치 적용 중'
                       : downloadPercent != null
-                        ? `${downloadPercent}% 준비됨 · ${formatBytes(updateInfo.downloadedBytes)} / ${formatBytes(updateInfo.totalBytes)}`
-                        : `설치 파일 준비 중 · ${formatBytes(updateInfo.totalBytes)}`}
+                        ? `${downloadPercent}% 준비됨 · ${formatBytes(displayInfo.downloadedBytes)} / ${formatBytes(displayInfo.totalBytes)}`
+                        : `설치 파일 준비 중 · ${formatBytes(displayInfo.totalBytes)}`}
                   </p>
                 </div>
               )}
@@ -272,10 +356,10 @@ export function UpdateCenterModal() {
               >
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-text-primary">
-                    {note.title || `v${note.version || updateInfo.latestVersion}`}
+                    {note.title || `v${note.version || displayInfo.latestVersion}`}
                   </p>
                   <span className="shrink-0 rounded-full border border-bg-border/70 px-2.5 py-1 text-[11px] font-mono text-text-secondary">
-                    v{note.version || updateInfo.latestVersion}
+                    v{note.version || displayInfo.latestVersion}
                   </span>
                 </div>
                 <ul className="mt-3 space-y-2">

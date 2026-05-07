@@ -106,7 +106,9 @@ let showTrayHintInFlight = false;
 let lastKnownSession: unknown = null;
 let currentUpdateInfo: UpdateInfo | null = null;
 let startupUpdateContinuation: Promise<UpdateInfo | null> | null = null;
+let manualUpdateCheckInFlight: Promise<UpdateInfo | null> | null = null;
 const STARTUP_UPDATE_TIMEOUT_MS = 10_000;
+const INSTALLER_HELPER_START_TIMEOUT_MS = 5_000;
 const RUNTIME_UPDATE_CHECK_INTERVAL_MS = 5 * 60_000;
 let runtimeUpdateCheckTimer: ReturnType<typeof setInterval> | null = null;
 let runtimeUpdateCheckInFlight = false;
@@ -306,6 +308,20 @@ function notifyUpdateReady(info: UpdateInfo): void {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForInstallerHelperStart(timeoutMs = INSTALLER_HELPER_START_TIMEOUT_MS): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(localInstallerAttemptedMarker())) return true;
+    await sleep(120);
+  }
+  console.warn(`[autoUpdate] installer helper start marker timeout (${timeoutMs}ms)`);
+  return false;
+}
+
 async function writeSwapAttemptedMarker(): Promise<void> {
   try {
     await fs.promises.mkdir(localRoot(), { recursive: true });
@@ -382,6 +398,18 @@ async function runStartupUpdateGate(): Promise<boolean> {
     setSplashStatus(text.title, text.detail);
     spawnInstallerUpdateHelper({ relaunch: true });
     console.log(`[autoUpdate] startup installer helper spawned (relaunch=true, version=${result.latestVersion})`);
+    if (!await waitForInstallerHelperStart()) {
+      const failedInfo: UpdateInfo = {
+        ...result,
+        status: 'failed',
+        ready: false,
+        message: '업데이트 설치 helper가 시작 확인을 남기지 못해 현재 버전으로 먼저 엽니다. 버전 버튼에서 다시 확인할 수 있습니다.',
+      };
+      publishUpdateInfo(failedInfo);
+      const failedText = splashTextForUpdate(failedInfo);
+      setSplashStatus(failedText.title, failedText.detail);
+      return false;
+    }
     isQuitting = true;
     app.exit(0);
     return true;
@@ -908,6 +936,41 @@ function migrateLegacyUsersFileIfNeeded(): void {
 // Codex 1차 P2 (v1.22.1): one-shot guard. relaunch 예약은 한 종료 사이클당 한 번만.
 let updateRelaunchScheduled = false;
 ipcMain.handle('update:get-state', () => currentUpdateInfo);
+
+ipcMain.handle('update:check-now', async () => {
+  if (manualUpdateCheckInFlight) return manualUpdateCheckInFlight;
+
+  manualUpdateCheckInFlight = (async () => {
+    const info = await prepareUpdate((state) => {
+      publishUpdateInfo(state);
+    });
+    if (info?.ready) {
+      notifyUpdateReady(info);
+    } else {
+      publishUpdateInfo(info && info.status !== 'up-to-date' ? info : null);
+    }
+    return info;
+  })();
+
+  try {
+    return await manualUpdateCheckInFlight;
+  } catch (err) {
+    console.warn('[autoUpdate] manual check 실패:', err);
+    const failedInfo: UpdateInfo = {
+      status: 'failed',
+      currentVersion: app.getVersion(),
+      latestVersion: app.getVersion(),
+      buildAt: '',
+      ready: false,
+      releaseNotes: [],
+      message: '업데이트 상태를 새로 확인하지 못했습니다. 잠시 후 다시 시도해주세요.',
+    };
+    publishUpdateInfo(failedInfo);
+    return failedInfo;
+  } finally {
+    manualUpdateCheckInFlight = null;
+  }
+});
 
 ipcMain.handle('update:apply-now', async () => {
   if (updateRelaunchScheduled) return;

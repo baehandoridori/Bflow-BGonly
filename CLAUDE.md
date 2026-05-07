@@ -101,6 +101,8 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 - 앱 사용 중에는 5분 주기로 manifest를 다시 확인해 새 버전을 백그라운드로 받아두고, 좌하단 버전 버튼과 업데이트 모달에서 계속 표시한다.
 - 실제 교체는 `지금 업데이트`를 누르거나 앱 종료 시 installer helper로 수행한다. 앱 폴더를 직접 rename/copy하지 말고, 로컬 `installer-pending\BFLOW-Setup.exe`를 실행해 갱신한다.
 - installer helper는 현재 BFLOW 프로세스가 완전히 종료된 뒤 `BFLOW-Setup.exe /S`를 실행해야 한다. 앱이 살아있는 동안 installer를 시작하면 Windows 파일 잠금으로 실패할 수 있다.
+- 앱 시작 자동 적용은 `.installer-attempted` 시작 확인 마커가 생긴 뒤에만 종료한다. helper 시작 확인 없이 앱을 닫으면 바로가기 실행이 계속 실패하는 루프가 생긴다.
+- 좌하단 버전 버튼은 업데이트 유무와 무관하게 항상 업데이트 내역 모달을 열고, 모달의 `새로고침`은 `update:check-now` IPC로 배포 manifest를 다시 확인한다.
 - 배포용 `manifest.json`은 `BFLOW-Setup.exe`가 있을 때만 생성한다. `--allow-missing-installer`는 개발용 `build:vite`에서만 사용한다.
 - 토스트가 떴다는 것만으로 업데이트 성공으로 판단하지 말고, 다음 실행 버전과 `swap.log`의 `[installer-main]`/`[installer]` 로그, `installer-pending` 정리 여부를 확인한다.
 - 설치/적용 중에는 사용자가 상황을 알 수 있어야 한다. renderer는 `applying` 상태를 표시하고, 앱 종료 후 helper는 별도 진행 창을 띄운다.
