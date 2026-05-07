@@ -36,6 +36,25 @@ test('installer helper waits for BFLOW to exit before running setup', async () =
   );
 });
 
+test('installer helper uses cmd wrapper file launch and records start marker', async () => {
+  const helper = await readRepoFile('electron', 'autoUpdate', 'installerApply.ts');
+
+  assert.match(helper, /cmd\.exe/);
+  assert.match(helper, /cmd wrapper spawn OK/);
+  assert.match(helper, /-File', helperPs1/);
+  assert.match(helper, /Set-Content -Path \$attemptedMarker/);
+});
+
+test('startup update gate waits for installer helper start before exiting', async () => {
+  const main = await readRepoFile('electron', 'main.ts');
+
+  assert.match(main, /waitForInstallerHelperStart/);
+  assert.match(
+    main,
+    /spawnInstallerUpdateHelper\(\{ relaunch: true \}\);[\s\S]*await waitForInstallerHelperStart\(\)[\s\S]*app\.exit\(0\)/,
+  );
+});
+
 test('startup failure handling includes installer pending markers', async () => {
   const main = await readRepoFile('electron', 'main.ts');
 
@@ -77,4 +96,19 @@ test('renderer update state can represent installer applying progress', async ()
   assert.match(types, /'applying'/);
   assert.match(types, /downloadedBytes\?: number/);
   assert.match(types, /totalBytes\?: number/);
+});
+
+test('version center is always reachable and can refresh update state', async () => {
+  const sidebar = await readRepoFile('src', 'components', 'layout', 'Sidebar.tsx');
+  const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
+  const preload = await readRepoFile('electron', 'preload.ts');
+  const types = await readRepoFile('src', 'types', 'index.ts');
+  const main = await readRepoFile('electron', 'main.ts');
+
+  assert.match(sidebar, /setUpdateCenterOpen\(true\)/);
+  assert.doesNotMatch(sidebar, /if \(updateInfo\) setUpdateCenterOpen\(true\)/);
+  assert.match(modal, /checkForUpdates/);
+  assert.match(preload, /checkForUpdates/);
+  assert.match(types, /checkForUpdates\?: \(\) => Promise<UpdateInfo \| null>/);
+  assert.match(main, /update:check-now/);
 });

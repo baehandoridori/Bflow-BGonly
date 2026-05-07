@@ -179,7 +179,7 @@ export function Sidebar() {
   );
   const hasUpdateIssue = updateInfo?.status === 'failed' || updateInfo?.status === 'suppressed';
   const versionButtonTitle = !updateInfo
-    ? `현재 버전 v${__APP_VERSION__}`
+    ? `현재 버전 v${__APP_VERSION__} · 업데이트 내역 열기`
     : hasRemoteUpdate
       ? `새 버전 v${updateInfo.latestVersion} 확인`
       : hasUpdateIssue
@@ -288,9 +288,7 @@ export function Sidebar() {
           <span className="text-[11px] text-text-secondary/50 font-mono whitespace-nowrap">
             <button
               type="button"
-              onClick={() => {
-                if (updateInfo) setUpdateCenterOpen(true);
-              }}
+              onClick={() => setUpdateCenterOpen(true)}
               className={cn(
                 'relative rounded-lg px-2 py-1 font-mono text-[11px] transition-all duration-200',
                 hasRemoteUpdate
@@ -299,7 +297,7 @@ export function Sidebar() {
                     ? 'cursor-pointer text-[#FDCB6E] bg-[#FDCB6E]/10 border border-[#FDCB6E]/25 hover:bg-[#FDCB6E]/15'
                     : updateInfo
                       ? 'cursor-pointer text-text-secondary/70 border border-bg-border/40 hover:text-text-primary hover:bg-bg-border/35'
-                      : 'cursor-default text-text-secondary/50 border border-transparent',
+                      : 'cursor-pointer text-text-secondary/60 border border-bg-border/25 hover:text-text-primary hover:bg-bg-border/30',
               )}
               title={versionButtonTitle}
             >

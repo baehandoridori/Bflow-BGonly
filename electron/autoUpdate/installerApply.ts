@@ -252,6 +252,7 @@ function Show-ProgressWindowUntilExit($proc) {
 }
 
 Write-UpdateLog "installer helper start — relaunch=$relaunch"
+try { Set-Content -Path $attemptedMarker -Value (Get-Date -Format 'o') -Force -ErrorAction SilentlyContinue } catch {}
 try {
   if (-not (Test-Path $installer)) {
     Write-UpdateLog "installer missing: $installer"
@@ -259,7 +260,6 @@ try {
     Start-BflowIfNeeded
     exit 1
   }
-  try { Set-Content -Path $attemptedMarker -Value (Get-Date -Format 'o') -Force -ErrorAction SilentlyContinue } catch {}
 
   if (-not (Wait-ForParentExit)) {
     Mark-Failure
@@ -306,21 +306,24 @@ try {
     writeFileSync(helperPs1, '\uFEFF' + psScript, 'utf-8');
     logUpdate(`installer helper .ps1 written to ${helperPs1}`);
 
-    const child = spawn('powershell.exe', [
-      '-NoProfile',
+    const cmdArgs = [
+      '/c', 'start', '/B', '""',
+      'powershell.exe',
+      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
       '-ExecutionPolicy', 'Bypass',
       '-Sta',
       '-File', helperPs1,
-    ], {
+    ];
+    const child = spawn('cmd.exe', cmdArgs, {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
     });
     child.once('spawn', () => {
-      logUpdate(`installer helper spawn OK — child pid=${child.pid}`);
+      logUpdate(`installer helper cmd wrapper spawn OK — child pid=${child.pid}, helper file=${helperPs1}`);
     });
     child.once('error', (err) => {
-      logUpdate(`installer helper spawn ERROR — ${err.message}`);
+      logUpdate(`installer helper cmd wrapper spawn ERROR — ${err.message}`);
     });
     child.unref();
   } catch (err) {

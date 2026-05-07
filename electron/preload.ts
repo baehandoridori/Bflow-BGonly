@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // v1.22.1: 자동 업데이트 알림 — 백그라운드 fetch 완료 시 토스트 띄우기
   getUpdateState: () => ipcRenderer.invoke('update:get-state'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check-now'),
   onUpdateState: (callback: (state: unknown | null) => void) => {
     const handler = (_event: unknown, state: unknown | null) => callback(state);
     ipcRenderer.on('update:state', handler);

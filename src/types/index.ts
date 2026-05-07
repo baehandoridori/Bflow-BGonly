@@ -453,6 +453,7 @@ export interface ElectronAPI {
   onSavingBeforeQuit?: (callback: (pendingCount: number) => void) => () => void;
   // v1.22.1: 자동 업데이트 알림
   getUpdateState?: () => Promise<UpdateInfo | null>;
+  checkForUpdates?: () => Promise<UpdateInfo | null>;
   onUpdateState?: (callback: (state: UpdateInfo | null) => void) => () => void;
   onUpdateReady?: (callback: (version: string, state?: UpdateInfo) => void) => () => void;
   applyUpdateNow?: () => Promise<void>;
