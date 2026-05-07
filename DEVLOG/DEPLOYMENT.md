@@ -151,7 +151,7 @@ DB 스키마 변경 시:
 5. **업데이트 성공 판단**: 토스트 감지는 다운로드 완료 신호일 뿐이다. 실제 적용 성공은 installer helper 후 다음 실행 버전, `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[installer-main]`/`[installer]` 로그, `%LOCALAPPDATA%\Bflow-BGonly\installer-pending` 정리 여부로 판단한다.
 6. **manifest 변경 요약**: 앱의 업데이트 모달은 `DEVLOG/update-notes.json` → `dist/manifest.json.releaseNotes`를 표시한다. 새 배포 전 이 파일의 최신 항목을 갱신한다.
 7. **helper 실행 순서**: `installerApply.ts` helper는 현재 BFLOW 프로세스 종료를 기다린 뒤 `BFLOW-Setup.exe /S`를 실행해야 한다. 앱이 살아있는 동안 installer를 시작하면 Windows 파일 잠금으로 실패할 수 있다.
-8. **버전 버튼 UX**: 좌하단 버전 버튼은 업데이트가 없어도 항상 열려야 한다. 모달 안의 `새로고침`은 `update:check-now` IPC로 배포 manifest를 다시 읽어 현재/최신 버전과 버전별 업데이트 내역을 갱신한다.
+8. **버전 버튼 UX**: 좌하단 버전 버튼은 업데이트가 없어도 항상 열려야 한다. 모달은 열자마자 자동 확인하지 않고, 모달 안의 `새로고침`을 눌렀을 때만 `update:check-now` IPC로 배포 manifest를 다시 읽어 현재/최신 버전과 버전별 업데이트 내역을 갱신한다.
 9. **helper PowerShell 보간 주의**: `helperSwap.ts`/`installerApply.ts`의 PowerShell 스크립트는 TypeScript 백틱 문자열 안에 있다. PowerShell 변수는 `$($stepName)`처럼 쓰고 `${stepName}`을 쓰면 JavaScript 변수로 평가되어 helper가 시작되기 전에 실패한다.
 
 ---
