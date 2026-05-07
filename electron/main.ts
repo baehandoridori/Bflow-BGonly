@@ -645,17 +645,17 @@ function createWindow(): void {
 
     // ★ v1.21.0 자동 업데이트:
     //   1) 정상 시작 표시 (자가 검증 마커 삭제)
-    //   2) 5초 후 백그라운드 업데이트 체크 (한 번만, 사용자 작업 영향 0)
+    //   2) v1.22.5: 5s → 즉시 (한솔: "토스트가 좀 늦게 떠"). manifest 비교는 G드라이브
+    //      manifest.json (수백 byte) read 한 번이라 매우 가벼움. fetch는 어차피 비동기
+    //      백그라운드 진행이라 메인 창 사용성에 영향 X.
     markStartSucceeded().catch(() => { /* noop */ });
-    setTimeout(() => {
-      scheduleUpdateCheck((version) => {
-        // v1.22.1: 다운로드 + .ready 마커 작성 완료 → renderer에 토스트 띄우기 신호.
-        // 사용자가 "지금 재시작" 클릭 시 update:apply-now → swap + relaunch.
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('update:ready', version);
-        }
-      }).catch((err) => console.warn('[autoUpdate] 체크 실패:', err));
-    }, 5_000);
+    scheduleUpdateCheck((version) => {
+      // v1.22.1: 다운로드 + .ready 마커 작성 완료 → renderer에 토스트 띄우기 신호.
+      // 사용자가 "지금 재시작" 클릭 시 update:apply-now → swap + relaunch.
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('update:ready', version);
+      }
+    }).catch((err) => console.warn('[autoUpdate] 체크 실패:', err));
   });
 
   mainWindow.on('close', (e) => {
