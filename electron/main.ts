@@ -2773,6 +2773,29 @@ if (!gotTheLock) {
  *    영구 suppression. 사용자가 NSIS Setup 등으로 다른 version 설치 시 own 갱신 → marker
  *    version과 다르면 자동 정리되어 자동업데이트 재개.
  */
+/**
+ * v1.22.9 swap.log rotation — 진단 로그가 무한히 누적되지 않도록 1MB 초과 시 archive.
+ * swap.log → swap.log.old로 rename (1세대만 유지). best effort, 실패해도 startup 안 막음.
+ */
+async function rotateSwapLogIfNeeded(): Promise<void> {
+  try {
+    const path = await import('path');
+    const { promises: fsp, statSync, existsSync } = await import('fs');
+    const { localRoot } = await import('./autoUpdate/paths');
+    const logPath = path.join(localRoot(), 'swap.log');
+    if (!existsSync(logPath)) return;
+    const size = statSync(logPath).size;
+    const MAX = 1024 * 1024;  // 1MB
+    if (size <= MAX) return;
+    const archivePath = path.join(localRoot(), 'swap.log.old');
+    if (existsSync(archivePath)) await fsp.unlink(archivePath);
+    await fsp.rename(logPath, archivePath);
+    console.log(`[main] swap.log rotated (${size} bytes → swap.log.old)`);
+  } catch (err) {
+    console.warn('[main] swap.log rotation 실패 (무시):', err);
+  }
+}
+
 async function notifyAndCleanupOnSwapFailure(): Promise<void> {
   try {
     const path = await import('path');
@@ -2858,6 +2881,11 @@ app.whenReady().then(async () => {
   //   사용자에게 명시 안내(BFLOW-Setup.exe 권장 + swap.log 경로) + pending 정리.
   //   사용자가 NSIS Setup으로 해결하면 자연스럽게 끝, 그 전엔 자동 시도 중단.
   await notifyAndCleanupOnSwapFailure();
+
+  // ★ v1.22.9 swap.log rotation:
+  //   진단 로그가 swap 사이클마다 누적 — 1MB 초과 시 swap.log.old로 archive하고
+  //   새 swap.log 시작. 옛 archive는 1세대만 유지 (다음 rotation 시 덮어씀).
+  await rotateSwapLogIfNeeded();
 
   // ★ v1.20.x perf (gifted-darwin-99908d 964241d 포트):
   //   사용자에게 즉시 "켜졌다" 피드백을 주려면 스플래시를 가장 먼저 띄워야 함.
