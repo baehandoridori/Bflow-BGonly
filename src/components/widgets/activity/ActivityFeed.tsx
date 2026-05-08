@@ -1,11 +1,18 @@
-import { useMemo, useState, useRef, useEffect } from 'react';
+import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Eye, Sparkles, Pencil, MessageSquare, RotateCw, Plus, Trash2, User, Grid3x3, Image as ImageIcon, ChevronRight } from 'lucide-react';
 import { useActivityStore } from '@/stores/useActivityStore';
 import { useAuthStore } from '@/stores/useAuthStore';
-import type { Activity, ActionType } from '@/types';
+import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
+import type { Activity, ActionType, Episode } from '@/types';
 import { groupActivities, formatRelativeTime, getActivityVerb } from './utils';
 import { ACTION_TYPE_COLOR, ACTION_TYPE_TO_GROUP } from './constants';
+import {
+  formatActivityGroupLabel,
+  formatActivitySceneLabel,
+  resolveActivitySceneNavigation,
+} from './feedNavigation';
 
 function ActionIcon({ type, size = 11 }: { type: ActionType; size?: number }) {
   const props = { size };
@@ -75,15 +82,37 @@ interface FeedItemRowProps {
   activity: Activity;
   isSelf: boolean;
   isInsideGroup?: boolean;
+  episodes: Episode[];
+  episodeTitles: Record<number, string>;
 }
 
-function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
+function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles }: FeedItemRowProps) {
   const verb = getActivityVerb(activity);
+  const displayLabel = formatActivitySceneLabel(activity.sceneLabel, activity.episodeNumber, episodeTitles);
+  const navTarget = resolveActivitySceneNavigation(activity, episodes);
+  const canNavigate = !!navTarget;
+  const handleClick = useCallback(() => {
+    if (!navTarget) return;
+    const app = useAppStore.getState();
+    app.setSelectedEpisode(navTarget.episodeNumber);
+    app.setSelectedPart(navTarget.partId);
+    app.setView('scenes');
+    app.setPendingDeepLink({ sheetName: navTarget.sheetName, sceneId: navTarget.sceneId });
+  }, [navTarget]);
   return (
     <div
-      className={`flex gap-2.5 py-2 px-3.5 border-b border-bg-border/15 transition-colors hover:bg-bg-border/20 cursor-pointer relative ${
-        isSelf ? 'bg-accent/[0.04]' : ''
-      } ${isInsideGroup ? 'pl-12' : ''}`}
+      onClick={handleClick}
+      role={canNavigate ? 'button' : undefined}
+      tabIndex={canNavigate ? 0 : undefined}
+      onKeyDown={canNavigate ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleClick();
+        }
+      } : undefined}
+      className={`flex gap-2.5 py-2 px-3.5 border-b border-bg-border/15 transition-colors hover:bg-bg-border/20 ${
+        canNavigate ? 'cursor-pointer' : ''
+      } relative ${isSelf ? 'bg-accent/[0.04]' : ''} ${isInsideGroup ? 'pl-12' : ''}`}
     >
       {isSelf && !isInsideGroup && (
         <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent-sub" />
@@ -103,7 +132,7 @@ function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
           )}
           <Pictogram type={activity.actionType} />
           <span className="text-text-secondary">{verb}</span>
-          {activity.sceneLabel && (
+          {displayLabel && (
             <span
               className="px-1.5 py-[1px] rounded text-[11.5px] font-medium"
               style={{
@@ -111,7 +140,7 @@ function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
                 background: 'rgba(108, 92, 231, 0.1)',
               }}
             >
-              {activity.sceneLabel}
+              {displayLabel}
             </span>
           )}
         </div>
@@ -126,12 +155,15 @@ function FeedItemRow({ activity, isSelf, isInsideGroup }: FeedItemRowProps) {
 interface FeedGroupProps {
   items: Activity[];
   isSelf: boolean;
+  episodes: Episode[];
+  episodeTitles: Record<number, string>;
 }
 
-function FeedGroup({ items, isSelf }: FeedGroupProps) {
+function FeedGroup({ items, isSelf, episodes, episodeTitles }: FeedGroupProps) {
   const [open, setOpen] = useState(isSelf); // 본인 그룹은 자동 펼침
   const head = items[0];
   const verb = getActivityVerb(head);
+  const groupLabel = formatActivityGroupLabel(head, episodeTitles);
 
   return (
     <div className={`border-b border-bg-border/15 ${isSelf ? 'bg-accent/[0.04]' : ''} relative`}>
@@ -149,12 +181,12 @@ function FeedGroup({ items, isSelf }: FeedGroupProps) {
             </span>
             <Pictogram type={head.actionType} />
             <span className="text-text-secondary">{verb}</span>
-            {head.sceneLabel && (
+            {groupLabel && (
               <span
                 className="px-1.5 py-[1px] rounded text-[11.5px] font-medium"
                 style={{ color: 'var(--color-accent-sub, #A29BFE)', background: 'rgba(108, 92, 231, 0.1)' }}
               >
-                {head.episodeNumber ? `EP${head.episodeNumber}` : head.sceneLabel}
+                {groupLabel}
               </span>
             )}
             <span className="text-[11px] text-text-secondary/60">· {items.length}건</span>
@@ -182,7 +214,14 @@ function FeedGroup({ items, isSelf }: FeedGroupProps) {
             className="overflow-hidden bg-bg-border/30"
           >
             {items.map((it) => (
-              <FeedItemRow key={it.id} activity={it} isSelf={isSelf} isInsideGroup />
+              <FeedItemRow
+                key={it.id}
+                activity={it}
+                isSelf={isSelf}
+                isInsideGroup
+                episodes={episodes}
+                episodeTitles={episodeTitles}
+              />
             ))}
           </motion.div>
         )}
@@ -194,6 +233,8 @@ function FeedGroup({ items, isSelf }: FeedGroupProps) {
 export function ActivityFeed() {
   const { activities, filters, hasMore, isLoading, loadMore } = useActivityStore();
   const currentUser = useAuthStore((s) => s.currentUser);
+  const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 필터 적용 + 그룹화
@@ -234,10 +275,26 @@ export function ActivityFeed() {
       {feedItems.map((item) => {
         if (item.type === 'item') {
           const isSelf = item.activity.userId === currentUser?.id;
-          return <FeedItemRow key={item.activity.id} activity={item.activity} isSelf={isSelf} />;
+          return (
+            <FeedItemRow
+              key={item.activity.id}
+              activity={item.activity}
+              isSelf={isSelf}
+              episodes={episodes}
+              episodeTitles={episodeTitles}
+            />
+          );
         } else {
           const isSelf = item.items[0].userId === currentUser?.id;
-          return <FeedGroup key={item.key} items={item.items} isSelf={isSelf} />;
+          return (
+            <FeedGroup
+              key={item.key}
+              items={item.items}
+              isSelf={isSelf}
+              episodes={episodes}
+              episodeTitles={episodeTitles}
+            />
+          );
         }
       })}
       {isLoading && (
