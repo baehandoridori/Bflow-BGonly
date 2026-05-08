@@ -14,6 +14,7 @@ import {
   resolveActivitySceneNavigation,
 } from './feedNavigation';
 import { activityMatchesCell } from '../RecentActivityWidget';
+import { getRangeBoundary } from './timeRange';
 
 function ActionIcon({ type, size = 11 }: { type: ActionType; size?: number }) {
   const props = { size };
@@ -253,7 +254,7 @@ function FeedGroup({ items, isSelf, episodes, episodeTitles, highlight, dimmed, 
 }
 
 export function ActivityFeed() {
-  const { activities, filters, hasMore, isLoading, loadMore, cellFilter, timeUnit } = useActivityStore();
+  const { activities, filters, hasMore, isLoading, loadMore, cellFilter, timeUnit, rangeIdx } = useActivityStore();
   const currentUser = useAuthStore((s) => s.currentUser);
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
@@ -266,11 +267,12 @@ export function ActivityFeed() {
     return groupActivities(filtered);
   }, [activities, filters]);
 
-  // 셀 필터 매칭 헬퍼
+  // 셀 필터 매칭 헬퍼 (codex 3차 P1: range 경계도 검증)
+  const currentRange = useMemo(() => getRangeBoundary(timeUnit, rangeIdx), [timeUnit, rangeIdx]);
   const matches = useCallback((a: Activity) => {
     if (!cellFilter) return false;
-    return activityMatchesCell(a, timeUnit, cellFilter);
-  }, [cellFilter, timeUnit]);
+    return activityMatchesCell(a, timeUnit, cellFilter, currentRange);
+  }, [cellFilter, timeUnit, currentRange]);
 
   // 셀 필터 적용 시 첫 매칭 항목으로 자동 스크롤
   useEffect(() => {

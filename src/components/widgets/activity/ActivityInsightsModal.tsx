@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { useActivityStore, type InsightsRange } from '@/stores/useActivityStore';
+import { useAppStore } from '@/stores/useAppStore';
 import { MonthDowHeatmapCard } from './cards/MonthDowHeatmapCard';
 import { StageBreakdownCard } from './cards/StageBreakdownCard';
 import { UserBreakdownCard } from './cards/UserBreakdownCard';
@@ -13,14 +14,21 @@ export function ActivityInsightsModal({ open, onClose }: { open: boolean; onClos
   const { insights, insightsLoading, insightsRange, loadInsights, setInsightsRange } = useActivityStore();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
+  // v1.23.0 codex 3차 P1: dept 변경 감지 — 다른 부서 데이터 노출 방지
+  const dashboardDeptFilter = useAppStore((s) => s.dashboardDeptFilter);
+  const lastDeptRef = useRef(dashboardDeptFilter);
+
   useEffect(() => {
     if (!open) return;
-    // v1.23.0 (codex 1차 P2): setInsightsRange 가 이미 loadInsights 를 부른다.
-    // 여기서는 모달 첫 진입 시 캐시 없을 때 1회만 (in-flight 동시에 들어가면 중복).
-    if (!insights && !insightsLoading) loadInsights(insightsRange);
+    // dept 가 바뀌면 강제 reload (store 의 cachedInsightsDept 도 같이 갱신됨)
+    const deptChanged = lastDeptRef.current !== dashboardDeptFilter;
+    lastDeptRef.current = dashboardDeptFilter;
+    if (deptChanged || (!insights && !insightsLoading)) {
+      loadInsights(insightsRange);
+    }
     const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
     return () => window.clearTimeout(focusTimer);
-  }, [open, insights, insightsLoading, insightsRange, loadInsights]);
+  }, [open, insights, insightsLoading, insightsRange, loadInsights, dashboardDeptFilter]);
 
   useEffect(() => {
     if (!open) return;

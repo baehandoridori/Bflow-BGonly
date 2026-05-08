@@ -89,6 +89,11 @@ function getCurrentDepartment(): 'bg' | 'acting' | null {
   return null;
 }
 
+// v1.23.0 codex 3차 P2: stale insights 응답 차단 토큰
+let insightsRequestId = 0;
+// v1.23.0 codex 3차 P1: 캐시한 insights 의 dept 추적 (dept 변경 시 invalidate)
+let cachedInsightsDept: 'bg' | 'acting' | null | undefined = undefined;
+
 function getCurrentGroupsForServer(filters: Set<ActionGroup>): ActionGroup[] | undefined {
   // 4그룹 모두 ON이면 굳이 보낼 필요 없음 (서버에 array 비싸지 않지만 명시성)
   if (filters.size === 4) return undefined;
@@ -152,6 +157,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   insights: null,
   insightsLoading: false,
   insightsRange: 'year',
+  // codex 3차 P1: dept 변경 감지용 캐시 키
+  // codex 3차 P2: 빠른 range 전환 시 stale 응답 차단용 토큰
+  // (둘 다 closure 변수로 보관, store 상태에는 노출 X)
 
   async loadInitial() {
     set({ isLoading: true, error: null });
@@ -347,11 +355,21 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
     const start = new Date(now.getFullYear(), now.getMonth() - months, now.getDate()).toISOString();
     const department = getCurrentDepartment();
+    // codex 3차 P1: dept 변경 시 캐시 무효화 (다른 dept 데이터 노출 방지)
+    if (cachedInsightsDept !== undefined && cachedInsightsDept !== department) {
+      set({ insights: null });
+    }
+    // codex 3차 P2: 요청 토큰 — stale 응답이 최신 덮어쓰는 race 차단
+    const myRequestId = ++insightsRequestId;
     set({ insightsLoading: true });
     try {
       const data = await supabaseService.getActivityInsights({ rangeStart: start, rangeEnd: end, department });
+      // 더 최신 요청이 이미 있다면 이 응답은 버림
+      if (myRequestId !== insightsRequestId) return;
+      cachedInsightsDept = department;
       set({ insights: data as ActivityInsightsRaw, insightsLoading: false });
     } catch (err) {
+      if (myRequestId !== insightsRequestId) return;
       console.warn('[activity] insights load failed:', err);
       set({ insightsLoading: false });
     }

@@ -79,11 +79,12 @@ export function RecentActivityWidget() {
     return `${period} 가장 활발: ${dayLabel(w.day)}요일 ${w.hour}–${w.hour + 2}시 (${w.count}건)`;
   }, [statsGrid, timeUnit, rangeIdx, activities.length]);
 
-  // 셀 매칭 건수 (피드 기준)
+  // 셀 매칭 건수 (피드 기준) — codex 3차 P1: range 경계도 검증
+  const currentRange = useMemo(() => getRangeBoundary(timeUnit, rangeIdx), [timeUnit, rangeIdx]);
   const cellMatchCount = useMemo(() => {
     if (!cellFilter) return 0;
-    return activities.filter((a) => activityMatchesCell(a, timeUnit, cellFilter)).length;
-  }, [cellFilter, activities, timeUnit]);
+    return activities.filter((a) => activityMatchesCell(a, timeUnit, cellFilter, currentRange)).length;
+  }, [cellFilter, activities, timeUnit, currentRange]);
 
   return (
     <>
@@ -310,14 +311,25 @@ function CellFilterBanner({ filter, matchCount, timeUnit, onClear }: {
   );
 }
 
-/** 활동 createdAt이 (timeUnit, cellFilter) 매칭하는지 KST 기준 */
+/**
+ * 활동 createdAt이 (timeUnit, cellFilter) 매칭하는지 KST 기준.
+ * v1.23.0 (codex 3차 P1): 과거 range 탐색 시 잘못된 highlight 방지를 위해
+ * range 경계도 함께 검증. 같은 요일·시간이어도 다른 주/달/년이면 매칭 X.
+ */
 export function activityMatchesCell(
   activity: { createdAt: string },
   timeUnit: TimeUnit,
   filter: CellFilter,
+  range?: { startISO: string; endISO: string },
 ): boolean {
   const t = new Date(activity.createdAt);
   if (Number.isNaN(t.getTime())) return false;
+  if (range) {
+    const ms = t.getTime();
+    const startMs = new Date(range.startISO).getTime();
+    const endMs = new Date(range.endISO).getTime();
+    if (ms < startMs || ms >= endMs) return false;
+  }
   const kst = new Date(t.getTime() + 9 * 3_600_000);
   if (timeUnit === 'year') {
     const month = kst.getUTCMonth();      // 0-based
