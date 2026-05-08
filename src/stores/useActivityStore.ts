@@ -119,13 +119,15 @@ function incrementGrid(
   timeUnit: TimeUnit,
 ): GroupedCount[][] {
   const dt = new Date(createdAt);
-  const kstStr = dt.toLocaleString('en-US', { timeZone: 'Asia/Seoul', hour12: false });
-  const kst = new Date(kstStr);
-  if (Number.isNaN(kst.getTime())) return grid;
-  const dow = kst.getDay();
+  if (Number.isNaN(dt.getTime())) return grid;
+  // codex 15차 P2: toLocaleString 재파싱은 자정에 '24:xx' 같은 형태로 emit 되어 Invalid Date 가능.
+  //   epoch + KST offset 으로 직접 계산해서 silently dropping 방지.
+  const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+  const kst = new Date(dt.getTime() + KST_OFFSET_MS);
+  const dow = kst.getUTCDay();
   const displayDay = (dow + 6) % 7;
-  const hour = kst.getHours();
-  const month = kst.getMonth(); // 0-based
+  const hour = kst.getUTCHours();
+  const month = kst.getUTCMonth(); // 0-based
 
   if (timeUnit === 'year') {
     // grid: 12 × 7 (month × dow)
