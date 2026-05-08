@@ -93,6 +93,8 @@ function getCurrentDepartment(): 'bg' | 'acting' | null {
 let insightsRequestId = 0;
 // v1.23.0 codex 3차 P1: 캐시한 insights 의 dept 추적 (dept 변경 시 invalidate)
 let cachedInsightsDept: 'bg' | 'acting' | null | undefined = undefined;
+// v1.23.0 codex 4차 P1: stale stats 응답 차단 토큰 (빠른 단위/range 전환)
+let statsRequestId = 0;
 
 function getCurrentGroupsForServer(filters: Set<ActionGroup>): ActionGroup[] | undefined {
   // 4그룹 모두 ON이면 굳이 보낼 필요 없음 (서버에 array 비싸지 않지만 명시성)
@@ -229,6 +231,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   async loadStats() {
     // v1.23.0: 시간 단위/기간에 따라 v2 RPC 호출
+    // codex 4차 P1: 빠른 단위/range 전환 시 stale 응답이 최신 grid 덮어쓰는 race 차단
+    const myRequestId = ++statsRequestId;
     try {
       const { timeUnit, rangeIdx, filters } = get();
       const department = getCurrentDepartment();
@@ -242,8 +246,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         department,
         groups,
       });
+      if (myRequestId !== statsRequestId) return;
       set({ statsGrid: buildHeatmapGridV2(stats, granularity) });
     } catch (err) {
+      if (myRequestId !== statsRequestId) return;
       console.warn('[activity] stats v2 load failed:', err);
     }
   },
@@ -350,10 +356,20 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     void get().loadInsights(range);
   },
   async loadInsights(range) {
-    const months = range === 'year' ? 12 : range === 'half' ? 6 : 3;
+    // codex 4차 P2: year 모드는 calendar year (1/1~12/31)로 강제 — rolling 12개월일 때
+    // 같은 month 가 시작·끝에 들어가 monthDowGrid 가 distortion(두 5월이 합쳐짐).
+    // half/quarter 는 rolling N개월 (month bucket overlap 없으므로 distortion 없음).
     const now = new Date();
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-    const start = new Date(now.getFullYear(), now.getMonth() - months, now.getDate()).toISOString();
+    let start: string;
+    let end: string;
+    if (range === 'year') {
+      start = new Date(now.getFullYear(), 0, 1).toISOString();
+      end = new Date(now.getFullYear() + 1, 0, 1).toISOString();
+    } else {
+      const months = range === 'half' ? 6 : 3;
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+      start = new Date(now.getFullYear(), now.getMonth() - months, now.getDate()).toISOString();
+    }
     const department = getCurrentDepartment();
     // codex 3차 P1: dept 변경 시 캐시 무효화 (다른 dept 데이터 노출 방지)
     if (cachedInsightsDept !== undefined && cachedInsightsDept !== department) {
