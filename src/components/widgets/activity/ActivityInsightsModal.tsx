@@ -25,7 +25,9 @@ export function ActivityInsightsModal({ open, onClose }: { open: boolean; onClos
     lastDeptRef.current = dashboardDeptFilter;
     // codex 7차 P1: insightsError 가 있으면 무한 재요청 루프 방지를 위해 자동 재시도 X.
     //   사용자가 "다시 시도" 버튼 클릭 또는 range/dept 변경 시에만 재요청.
-    const shouldFetch = (deptChanged && !insightsLoading)
+    // codex 11차 P1: dept 변경은 loading 중이어도 새 요청 보내야 함.
+    //   loadInsights 의 requestId 토큰이 stale 응답 자동 차단하므로 안전.
+    const shouldFetch = deptChanged
       || (!insights && !insightsLoading && !insightsError);
     if (shouldFetch) {
       loadInsights(insightsRange);
