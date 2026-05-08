@@ -825,7 +825,7 @@ function createWindow(): void {
     }
     try { console.timeEnd('splash-to-main'); } catch {/* 이미 종료됨 */}
 
-    // ★ v1.21.0 자동 업데이트:
+    // ★ 자동 업데이트:
     //   1) 정상 시작 표시 (자가 검증 마커 삭제)
     //   2) v1.22.5: 5s → 즉시 (한솔: "토스트가 좀 늦게 떠"). manifest 비교는 G드라이브
     //      manifest.json (수백 byte) read 한 번이라 매우 가벼움. fetch는 어차피 비동기
@@ -835,8 +835,8 @@ function createWindow(): void {
       mainWindow.webContents.send('update:state', currentUpdateInfo);
     }
     const handleUpdateReady = (info: UpdateInfo) => {
-      // v1.22.1: 다운로드 + .ready 마커 작성 완료 → renderer에 토스트 띄우기 신호.
-      // 사용자가 "지금 재시작" 클릭 시 update:apply-now → swap + relaunch.
+      // installer 다운로드 + .ready 마커 작성 완료 → renderer에 토스트 띄우기 신호.
+      // 사용자가 "지금 업데이트" 클릭 시 update:apply-now → installer helper + relaunch.
       notifyUpdateReady(info);
     };
     const handleUpdateState = (info: UpdateInfo) => {
@@ -3190,18 +3190,18 @@ app.whenReady().then(async () => {
   // 두 번째 인스턴스면 초기화하지 않고 종료
   if (!gotTheLock) return;
 
-  // ★ v1.21.0 자동 업데이트:
-  //   G드라이브에서 직접 실행됐으면 self-installer로 로컬에 설치 후 새 위치에서 spawn.
-  //   이미 설치돼있는 경우는 즉시 로컬 spawn (옛 바로가기 폴백). 로컬 실행이면 통과.
+  // ★ 자동 업데이트 첫 실행 처리:
+  //   정식 첫 설치는 NSIS(BFLOW-Setup.exe)가 담당한다. 이 함수는 G드라이브 win-unpacked를
+  //   직접 누른 경우 안내하거나 v1.21.x self-installer 설치본을 로컬 실행으로 넘긴다.
   const installResult = await runFirstInstallIfNeeded();
   if (installResult.exited) return;
 
-  // ★ v1.21.0 자가 검증:
+  // ★ 레거시 self-installer 자가 검증:
   //   이전 시작이 메인 창까지 못 갔으면(.start-attempt 마커 잔존) backup → app 롤백.
   //   여기서 작성한 새 마커는 mainWindow did-finish-load 시점에 markStartSucceeded()가 삭제.
   await checkLastStartAndRollback();
 
-  // ★ v1.22.3 swap 실패 감지:
+  // ★ v1.22.3 레거시 swap 실패 감지:
   //   pending\.ready 마커가 시작 시점에 그대로 남아있으면 = 직전 종료 시 swap 시도가
   //   실패했고 사용자는 옛 버전에 갇힌 상태. 매 시작마다 자동 재시도하기보다 한 번만
   //   사용자에게 명시 안내(BFLOW-Setup.exe 권장 + swap.log 경로) + pending 정리.
@@ -3216,7 +3216,7 @@ app.whenReady().then(async () => {
 
   // ★ v1.22.10 startup update gate:
   //   스플래시를 먼저 띄운 뒤 원격 최신 버전을 최대 10초까지만 준비한다.
-  //   준비 완료 시 helper swap으로 최신 버전을 다시 열고, 시간 초과/실패 시 현재 버전으로 진입.
+  //   준비 완료 시 installer helper로 최신 버전을 다시 열고, 시간 초과/실패 시 현재 버전으로 진입.
   createSplashWindow();
   console.time('splash-to-main'); // 스플래시 노출 시점부터 메인 did-finish-load까지 측정
   const relaunchingForStartupUpdate = await runStartupUpdateGate();
@@ -3385,8 +3385,8 @@ app.on('before-quit', (e) => {
   const sheetsPending = getPendingOpsCount();
   const vacPending = getVacPendingOpsCount();
   const totalPending = sheetsPending + vacPending;
-  // v1.21.0: 자동 업데이트 swap이 있으면 어떤 분기든 e.preventDefault + 비동기 chain 끝에 swap.
-  // 기존 fire-and-forget 분기도 swap 시점까지 대기 — race 위험 제거.
+  // 자동 업데이트 installer 적용이 있으면 어떤 분기든 e.preventDefault + 비동기 chain 끝에 적용.
+  // 기존 fire-and-forget 분기도 installer helper spawn 시점까지 대기 — race 위험 제거.
   e.preventDefault();
 
   // 메인 윈도우에 "저장 중" 알림 (pending 작업이 있는 경우만 의미 있음)
@@ -3427,7 +3427,7 @@ app.on('before-quit', (e) => {
         console.log(`[autoUpdate] installer helper spawned (relaunch=${updateRelaunchScheduled})`);
       }
     } catch (err) {
-      console.warn('[종료] 정리/swap 예외:', err);
+      console.warn('[종료] 정리/installer 적용 예외:', err);
     } finally {
       app.exit(0);
     }

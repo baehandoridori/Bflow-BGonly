@@ -15,7 +15,7 @@
    - 코드 구조, 패턴 참고만 가능
    - 파일 수정, 커밋, 푸시 일절 금지
    - 모든 개발은 반드시 `Bflow-BGonly` 레포에서만 진행
-2. **빌드 검증**: 코드 변경 후 반드시 `npm run typecheck` + `npm run test:auto-update` + `vite build` 통과 확인
+2. **빌드 검증**: 코드 변경 후 반드시 `npm run typecheck` + 관련 테스트 + `npm run build:vite` 통과 확인. 정식 배포는 `npm run build`까지 확인
 3. **낙관적 업데이트 패턴**: 모든 데이터 변경은 즉시 UI 반영 → Supabase 동기화 → 실패 시 롤백
 4. **Supabase 단일 경로**: 새 기능은 `supabaseService` 경유로만 구현 (Sheets 분기 추가 금지)
 5. **IPC 구조 유지**: 렌더러에서 직접 Supabase 호출 금지, 반드시 IPC → 메인 → Supabase
@@ -115,6 +115,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 - **`CONTEXT.md`** — 세션 컨텍스트 가이드 (아키텍처, 파일 맵, 알려진 이슈, 스킬 활용법)
 - **`ROADMAP.md`** — 전체 개발 로드맵 (Phase 0~9, 기능별 상세 스펙)
+- **`DEVLOG/AUTO_UPDATE_OPERATIONS.md`** — 자동 업데이트 운영 기준 (현재 구현/배포 방식의 1차 기준)
 - **`DEVLOG/DEPLOYMENT.md`** — 배포 가이드 (배포 목적/경로/방식, 한솔 워크플로우, 자동 업데이트 시스템)
 - **`DEVLOG/auto-update-test-scenario.md`** — 자동 업데이트 E2E 테스트 체크리스트
 - `tasks/lessons.md` — 과거 실수/패턴 기록 (세션 시작 시 검토)
@@ -134,5 +135,5 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 ---
 
-*문서 버전: 2026-03-14*
+*문서 버전: 2026-05-08*
 *작성: Claude × 한솔 (Studio JBBJ)*

@@ -1,11 +1,12 @@
 # Auto-Update System Design — B flow
 
 > 작성: 2026-05-01
-> 상태: v1.22.10 기준 구현 방향으로 갱신 (2026-05-08)
-> 관련 문서: [DEVLOG/DEPLOYMENT.md](../../../DEVLOG/DEPLOYMENT.md)
+> 상태: 초기 설계/결정 이력 보관용. 현재 운영 기준은 `DEVLOG/AUTO_UPDATE_OPERATIONS.md`
+> 관련 문서: [DEVLOG/AUTO_UPDATE_OPERATIONS.md](../../../DEVLOG/AUTO_UPDATE_OPERATIONS.md), [DEVLOG/DEPLOYMENT.md](../../../DEVLOG/DEPLOYMENT.md)
 
 > 2026-05-08 정정: 초기 설계의 "무알림, 앱 켤 때만, 다음 재시작 시 적용"은 폐기했다.
-> 현재 결정은 시작 시 10초 update gate + 앱 사용 중 지속 토스트/버전 버튼/업데이트 모달 + helper swap 적용이다.
+> 현재 결정은 시작 시 10초 update gate + 앱 사용 중 지속 토스트/버전 버튼/업데이트 모달 + installer helper 적용이다.
+> 이 문서 아래에 남아있는 `pending` 폴더 swap, `helper swap`, `win-unpacked` 직접 mirror 설명은 v1.21~v1.22.13의 역사 기록이다. 새 구현은 `BFLOW-Setup.exe` 기반 installer helper를 따라야 한다.
 
 ---
 
@@ -20,7 +21,7 @@
 | G드라이브 직접 | 17.3초 | 14.6초 (캐시 거의 없음) |
 | 로컬 디스크 | 14.7초 | **1.6초** ⚡ |
 
-**처방**: 사용자 PC 에 BFLOW 본체를 한 번 복사해 두고 *로컬에서 실행*. 새 빌드는 G드라이브에서 *백그라운드로 받아 swap*. Defender 가 같은 파일 (mtime 안정) 을 캐시 효과적으로 인식 → 재실행 1~2초.
+**처방**: 사용자 PC 에 BFLOW 본체를 설치해 두고 *로컬에서 실행*. 새 빌드는 G드라이브에서 `BFLOW-Setup.exe`를 백그라운드로 받아 앱 종료 후 installer helper로 적용한다. Defender 가 같은 설치 경로를 캐시 효과적으로 인식 → 재실행 속도 안정화.
 
 부수 목표:
 - 한솔 워크플로우 변경 0 (지금처럼 빌드 + G드라이브 robocopy)
@@ -43,7 +44,9 @@
 
 ---
 
-## 3. 컴포넌트 구성
+## 3. 초기 컴포넌트 구성 기록
+
+> 주의: 이 섹션은 초기 directory swap 설계 기록이다. 현재 구현은 `DEVLOG/AUTO_UPDATE_OPERATIONS.md`의 파일 맵을 따른다.
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -109,22 +112,22 @@ robocopy <local dist> <G드라이브 dist> /MIR
  → G드라이브 sync → 모든 팀원 PC 의 G드라이브 폴더에 도착
 ```
 
-### 4.2 팀원 실행 (v1.22.10 정상 동작)
+### 4.2 팀원 실행 (현재 구현 요약)
 
 ```
 1. 바탕화면 바로가기 더블클릭
-2. → %LOCALAPPDATA%\Bflow-BGonly\app\BFLOW.exe 실행 (1~2초, Defender 캐시됨)
+2. → %LOCALAPPDATA%\Programs\BFLOW\BFLOW.exe 또는 Programs\bflow\BFLOW.exe 실행
 3. 스플래시 표시
 4. update gate — 최대 10초 동안 최신 버전 준비
    ├ G드라이브 폴더 경로 추정 (Drive desktop 표준 경로 후보)
    ├ <G드라이브 폴더>/manifest.json 읽기
    ├ 자기 버전(package.json) 과 비교
    └ 새 버전이면 → prepareUpdate()
-        ├ <G드라이브 win-unpacked>/* → %LOCALAPPDATA%\...\pending\* 로 복사 (변경분만, robocopy 패턴)
-        ├ pending\.update-manifest.json 기록 (버전/변경 내역)
-        └ pending\.ready 마커 파일 생성 (swap 신호)
+        ├ <G드라이브 dist>\BFLOW-Setup.exe → %LOCALAPPDATA%\Bflow-BGonly\installer-pending\BFLOW-Setup.exe
+        ├ installer-pending\.update-manifest.json 기록 (버전/변경 내역)
+        └ installer-pending\.ready 마커 파일 생성
 5. 10초 안에 준비 완료
-   ├ helper swap 실행
+   ├ installer helper 실행
    └ 새 BFLOW.exe 재실행 = 최신 버전
 6. 10초 초과/실패
    ├ 현재 버전으로 먼저 메인 창 로드
@@ -134,7 +137,7 @@ robocopy <local dist> <G드라이브 dist> /MIR
    ├ 5분 주기 manifest 재확인
    └ 새 버전 감지 시 같은 다운로드/토스트/모달 흐름 진입
 8. 사용자가 `지금 업데이트` 클릭 또는 앱 종료
-   ├ 저장 대기 후 helper swap
+   ├ 저장 대기 후 installer helper 실행
    └ 재실행 또는 다음 실행 = 새 버전
 ```
 

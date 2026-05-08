@@ -1,10 +1,8 @@
 /**
- * v1.21.0 자동 업데이트 — 디렉토리 mirror.
- * robocopy 패턴(변경된 파일만 복사 + 사라진 파일 제거)을 Node fs로 직접 구현.
- * 외부 robocopy.exe 의존성 X — CI/Mac 호환.
+ * 레거시 directory mirror helper.
  *
- * 우리 win-unpacked는 ~188MB이라 메모리·시간 OK. 변경분만 복사라 일상 update에서는 보통
- * 0~수 MB만 실제 I/O.
+ * 현재 자동 업데이트 적용은 BFLOW-Setup.exe installer helper가 담당한다.
+ * 이 파일은 v1.21 self-installer fallback과 레거시 swapper 호환 경로에서만 사용한다.
  */
 import { promises as fsp, existsSync, statSync } from 'fs';
 import path from 'path';

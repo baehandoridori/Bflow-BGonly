@@ -2,7 +2,7 @@
 
 > **용도**: 새 Claude 세션이 이 레포에서 작업할 때 빠르게 파악하기 위한 가이드.
 > **최종 갱신**: 2026-05-08
-> **반드시 함께 읽을 문서**: `CLAUDE.md` (필수 규칙), `ROADMAP.md` (전체 개발 계획)
+> **반드시 함께 읽을 문서**: `CLAUDE.md` (필수 규칙), `ROADMAP.md` (전체 개발 계획), `DEVLOG/AUTO_UPDATE_OPERATIONS.md` (자동 업데이트 운영 기준)
 
 ---
 
@@ -84,25 +84,27 @@
 
 **목표**: 팀원은 로컬 PC에 설치된 BFLOW를 실행하고, G드라이브는 새 빌드를 받아오는 배포 창고로만 사용한다. G드라이브에서 직접 exe를 계속 실행하면 Windows Defender 검사 때문에 시작 시간이 길어진다.
 
-**v1.22.10 기준 동작**:
+**v1.22.19 기준 동작**:
 
 - 앱 시작 시 스플래시에서 업데이트 확인/준비 상태를 안내한다.
-- 새 버전 준비는 최대 10초까지만 기다린다. 10초 안에 준비되면 helper swap 후 최신 버전으로 재실행하고, 오래 걸리면 현재 버전으로 먼저 연다.
+- 새 버전 준비는 최대 10초까지만 기다린다. 10초 안에 준비되면 installer helper가 로컬에 받아둔 `BFLOW-Setup.exe`를 실행하고 최신 버전으로 재실행한다. 오래 걸리면 현재 버전으로 먼저 연다.
 - 앱 사용 중에는 5분 주기로 manifest를 다시 확인하고, 새 버전이 준비되면 지속 토스트, 좌하단 버전 버튼 배지, 업데이트 상세 모달로 표시한다.
-- 실제 적용은 `지금 업데이트` 클릭 또는 앱 종료 시 helper swap으로 수행된다.
-- 토스트는 "다운로드 준비 완료" 신호일 뿐이다. 적용 성공은 다음 실행 버전, `%LOCALAPPDATA%\Bflow-BGonly\swap.log`, `.swap-attempted` 정리 여부로 확인한다.
+- 실제 적용은 `지금 업데이트` 클릭 또는 앱 종료 시 `installerApply.ts`의 installer helper로 수행된다. 실행 중 앱 폴더를 직접 rename/copy하지 않는다.
+- 토스트는 "다운로드 준비 완료" 신호일 뿐이다. 적용 성공은 다음 실행 버전, `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[installer-main]`/`[installer]` 로그, `%LOCALAPPDATA%\Bflow-BGonly\installer-pending` 정리 여부로 확인한다.
 - 배포 시 `manifest.json`은 반드시 마지막에 갱신한다. 앱이 manifest를 최신 신호로 사용하므로 반쯤 올라간 빌드를 최신으로 판단하게 만들면 안 된다.
-- helper 초기 로그는 정적 import만 사용한다. `require('./paths')` 같은 동적 require는 프로덕션 번들에서 silent fail을 만들 수 있다.
+- 좌하단 버전 모달은 열 때 자동 확인하지 않고, 사용자가 `새로고침`을 눌렀을 때만 `update:check-now`로 확인한다. 새로고침 중에는 기존 표시 내용을 유지해야 한다.
+- `DEVLOG/update-notes.json`의 과거 항목은 모달에서 펼쳐 보는 기록이다. 삭제하지 말고 새 항목을 맨 위에 추가한다.
 
 관련 파일:
 
 | 파일 | 역할 |
 |------|------|
-| `electron/autoUpdate/checker.ts` | manifest 비교, pending 다운로드, 상태 IPC용 `UpdateInfo` 생성 |
-| `electron/autoUpdate/helperSwap.ts` | 앱 종료 후 PowerShell helper로 `pending` → 현재 앱 폴더 swap |
-| `electron/main.ts` | 시작 10초 update gate, 토스트/모달 상태 IPC, 종료 시 swap 위임 |
+| `electron/autoUpdate/checker.ts` | manifest 비교, installer 다운로드, 상태 IPC용 `UpdateInfo` 생성 |
+| `electron/autoUpdate/installerApply.ts` | 앱 종료 후 PowerShell helper로 `BFLOW-Setup.exe /S` 실행 |
+| `electron/main.ts` | 시작 10초 update gate, 토스트/모달 상태 IPC, 종료 시 installer 적용 위임 |
 | `src/components/update/UpdateCenterModal.tsx` | 업데이트 상세 모달 |
 | `DEVLOG/update-notes.json` | 배포별 변경 요약. 빌드 시 `dist/manifest.json.releaseNotes`로 들어감 |
+| `DEVLOG/AUTO_UPDATE_OPERATIONS.md` | 자동 업데이트 운영 기준 |
 | `DEVLOG/DEPLOYMENT.md` | 배포 운영 가이드 |
 
 ---
@@ -182,7 +184,7 @@
 
 1. **`/home/user/Bflow` 레포는 절대 수정 금지** — 참고 전용
 2. **모든 개발은 `/home/user/Bflow-BGonly`에서만**
-3. **빌드 검증**: `tsc --noEmit` + `vite build` 통과 필수
+3. **빌드 검증**: `npm run typecheck` + 관련 테스트 + `npm run build:vite` 또는 정식 배포 시 `npm run build` 통과 필수
 4. **`package.json`에 `"type": "module"` 쓰지 말 것** — Electron은 CJS
 
 ### 패턴 규칙

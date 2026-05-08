@@ -1,6 +1,11 @@
 /**
- * v1.22.4 자동 업데이트 swap helper — detached PowerShell process로 BFLOW.exe 완전
- * 종료 후 swap. file lock 회피.
+ * 레거시 directory swap helper.
+ *
+ * v1.22.14 이후 현재 자동 업데이트 적용 경로는 installerApply.ts다.
+ * 이 파일은 v1.21~v1.22.13 실패 상태 진단/호환용으로 남아있으며 새 적용 경로로
+ * 되살리면 안 된다.
+ *
+ * v1.22.4 당시에는 detached PowerShell process로 BFLOW.exe 완전 종료 후 swap을 시도했다.
  *
  * 배경: v1.22.3까지 swap을 main process before-quit hook 안에서 in-process 실행.
  * Windows에서 실행 중인 .exe(또는 메모리 매핑된 .dll/.pak)가 들어있는 부모 디렉토리는

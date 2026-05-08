@@ -1,8 +1,9 @@
 /**
- * v1.21.0 self-installer — 첫 실행 시 G드라이브 BFLOW.exe가 자기 자신을
- * `%LOCALAPPDATA%\Bflow-BGonly\app\` 로 복사하고 바로가기 + Defender 옵션.
+ * 첫 실행/잘못된 실행 경로 처리.
  *
- * spec §4.3 (첫 실행), §4.4 (옛 바로가기 폴백) 참조.
+ * 현재 정식 첫 설치는 G드라이브 dist의 BFLOW-Setup.exe(NSIS)가 담당한다.
+ * 이 파일은 사용자가 옛 G드라이브 win-unpacked\BFLOW.exe를 직접 눌렀을 때 안내하거나,
+ * v1.21.x self-installer 설치본을 계속 로컬 실행으로 넘기는 호환 경로를 담당한다.
  */
 import { app, dialog, shell } from 'electron';
 import { promises as fsp, existsSync } from 'fs';

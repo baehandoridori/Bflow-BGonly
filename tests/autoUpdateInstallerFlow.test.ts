@@ -139,3 +139,10 @@ test('version center can expand previous release notes', async () => {
   assert.match(modal, /hiddenReleaseNoteCount/);
   assert.match(modal, /이전 업데이트 내역/);
 });
+
+test('manifest generation keeps full release note history for the version center', async () => {
+  const generator = await readRepoFile('scripts', 'generate-manifest.js');
+
+  assert.match(generator, /releaseNotes/);
+  assert.doesNotMatch(generator, /\.slice\(0,\s*3\)[\s\S]*\.map\(\(note\)/);
+});
