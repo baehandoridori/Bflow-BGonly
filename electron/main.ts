@@ -1888,6 +1888,8 @@ ipcMain.handle('activity:list', wrapIpc(async (_e: unknown, opts: {
   groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
   department?: 'bg' | 'acting' | null;
   sceneIds?: string[];
+  rangeStart?: string;
+  rangeEnd?: string;
 }) => {
   return sbListActivities(opts ?? {});
 }));

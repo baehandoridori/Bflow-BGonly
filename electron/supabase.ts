@@ -1860,6 +1860,9 @@ export async function listActivities(opts: {
   department?: 'bg' | 'acting' | null;
   /** 특정 씬(들) 의 activity 만 조회 — idx_activity_log_scene 인덱스 활용. 2026-05-02 추가. */
   sceneIds?: string[];
+  /** v1.23.0: 시간 단위 탐색 시 해당 range 만 조회 (Codex 8차 P1) */
+  rangeStart?: string;
+  rangeEnd?: string;
 }): Promise<ActivityRow[]> {
   let q = supabase
     .from('activity_log')
@@ -1883,6 +1886,8 @@ export async function listActivities(opts: {
   if (opts.groups && opts.groups.length > 0) q = q.in('action_group', opts.groups);
   if (opts.department) q = q.eq('department', opts.department);
   if (opts.sceneIds && opts.sceneIds.length > 0) q = q.in('scene_id', opts.sceneIds);
+  if (opts.rangeStart) q = q.gte('created_at', opts.rangeStart);
+  if (opts.rangeEnd) q = q.lt('created_at', opts.rangeEnd);
 
   const { data, error } = await q;
   if (error) throw new Error(`listActivities failed: ${error.message}`);

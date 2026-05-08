@@ -234,6 +234,9 @@ function FeedGroup({ items, isSelf, episodes, episodeTitles, highlight, dimmed, 
           >
             {items.map((it) => {
               const innerMatch = matches ? matches(it) : false;
+              // codex 8차 P2: 그룹이 매칭이지만 펼치면 안에 비매칭 row 도 dim
+              // (cellFilter 가 켜진 상태에서만 dim — matches 함수 자체가 cellFilter 를 본다)
+              const innerDim = matches !== undefined && !innerMatch && items.some(matches);
               return (
                 <FeedItemRow
                   key={it.id}
@@ -243,6 +246,7 @@ function FeedGroup({ items, isSelf, episodes, episodeTitles, highlight, dimmed, 
                   episodes={episodes}
                   episodeTitles={episodeTitles}
                   highlight={innerMatch}
+                  dimmed={innerDim}
                 />
               );
             })}

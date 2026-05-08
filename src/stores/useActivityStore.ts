@@ -170,8 +170,15 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const department = getCurrentDepartment();
-      // group 필터는 client-side (ActivityFeed) — hidden group 활동도 store 에 보존 (Codex P1)
-      const rows = await supabaseService.listActivities({ limit: PAGE_SIZE, department });
+      // codex 8차 P1: 현재 timeUnit/rangeIdx 의 range 안 활동만 페치 → 피드가 히트맵과 일관
+      const { timeUnit, rangeIdx } = get();
+      const { startISO, endISO } = getRangeBoundary(timeUnit, rangeIdx);
+      const rows = await supabaseService.listActivities({
+        limit: PAGE_SIZE,
+        department,
+        rangeStart: startISO,
+        rangeEnd: endISO,
+      });
       // 1) 기존 store 에서 현재 부서와 일치하지 않는 활동 제거 — 부서 필터 변경 시 옛 부서 row 제거
       //    (department === null 이면 'all' 모드라 모든 활동 유지)
       // 2) 그 후 fetch 결과와 UUID dedupe merge — realtime 으로 들어온 활동 보존 (race 방지, Codex P2)
@@ -206,10 +213,14 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set({ isLoading: true });
     try {
       const department = getCurrentDepartment();
+      // codex 8차 P1: range 안 활동만 페이지 페치
+      const { timeUnit, rangeIdx } = get();
+      const { startISO, endISO } = getRangeBoundary(timeUnit, rangeIdx);
       // (createdAt, id) tuple cursor — 같은 timestamp row 누락 방지 (Codex P1)
       const cursor = `${last.createdAt}|${last.id}`;
       const rows = await supabaseService.listActivities({
         before: cursor, limit: PAGE_SIZE, department,
+        rangeStart: startISO, rangeEnd: endISO,
       });
       const sevenDaysAgo = Date.now() - 7 * 86_400_000;
       const filtered = rows.filter((r) => new Date(r.createdAt).getTime() >= sevenDaysAgo);
@@ -333,18 +344,22 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   },
 
   // ─── v1.23.0: 시간 단위 / 기간 / 셀 필터 ───
+  // codex 8차 P1: 범위 변경 시 loadInitial 도 호출 → 피드가 새 range 데이터로 reload
   setTimeUnit(unit) {
     try { localStorage.setItem(TIME_UNIT_KEY, unit); } catch { /* ignore */ }
-    set({ timeUnit: unit, rangeIdx: 0, cellFilter: null });
+    set({ timeUnit: unit, rangeIdx: 0, cellFilter: null, hasMore: true });
     void get().loadStats();
+    void get().loadInitial();
   },
   setRangeIdx(idx) {
-    set({ rangeIdx: Math.max(0, idx), cellFilter: null });
+    set({ rangeIdx: Math.max(0, idx), cellFilter: null, hasMore: true });
     void get().loadStats();
+    void get().loadInitial();
   },
   goToCurrentRange() {
-    set({ rangeIdx: 0, cellFilter: null });
+    set({ rangeIdx: 0, cellFilter: null, hasMore: true });
     void get().loadStats();
+    void get().loadInitial();
   },
   applyCellFilter(filter) {
     set({ cellFilter: filter });

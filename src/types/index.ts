@@ -690,6 +690,9 @@ export interface ElectronAPI {
     groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
     department?: 'bg' | 'acting' | null;
     sceneIds?: string[];
+    /** v1.23.0: 시간 단위 탐색 시 range 필터 */
+    rangeStart?: string;
+    rangeEnd?: string;
   }) => Promise<any[]>;
   activityStats: (opts: {
     days?: number;

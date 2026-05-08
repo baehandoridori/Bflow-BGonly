@@ -200,6 +200,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
     department?: 'bg' | 'acting' | null;
     sceneIds?: string[];
+    rangeStart?: string;
+    rangeEnd?: string;
   }) => ipcRenderer.invoke('activity:list', opts),
   activityStats: (opts: {
     days?: number;

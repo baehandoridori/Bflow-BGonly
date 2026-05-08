@@ -515,6 +515,9 @@ export async function listActivities(opts: {
   department?: 'bg' | 'acting' | null;
   /** 특정 씬(들) 의 activity 만 — 씬 상세 모달의 히스토리 탭/댓글 인라인용. 2026-05-02 추가. */
   sceneIds?: string[];
+  /** v1.23.0: 시간 단위 탐색 시 range 필터 (Codex 8차 P1) */
+  rangeStart?: string;
+  rangeEnd?: string;
 }): Promise<Activity[]> {
   const rows = await window.electronAPI.activityList(opts);
   return (rows ?? []).map(rowToActivity);
