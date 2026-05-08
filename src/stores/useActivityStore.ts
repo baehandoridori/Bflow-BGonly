@@ -265,13 +265,17 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const activeGroups = get().filters.groups;
     const inActiveGroup = activeGroups.size === 4 || activeGroups.has(activity.actionGroup);
 
-    // v1.23.0 (codex 1차 P1): 현재 보고 있는 시간 범위(timeUnit + rangeIdx) 밖의
-    // realtime 활동을 incrementGrid 로 적용하면 과거 view 가 오염된다.
-    // 범위 안일 때만 grid 갱신, 범위 밖이면 grid 변경 없이 activities 만 prepend.
+    // v1.23.0 (codex 1차 P1, 2차 P2): 현재 시간 범위(timeUnit + rangeIdx) 밖의
+    // realtime 활동을 incrementGrid 로 적용하면 과거 view 가 오염됨.
+    // 문자열 비교는 ISO variant(+00:00 vs .000Z)에 취약하니 epoch ms 로 비교.
     const { timeUnit, rangeIdx } = get();
     const { startISO, endISO } = getRangeBoundary(timeUnit, rangeIdx);
-    const createdAt = activity.createdAt;
-    const inRange = createdAt >= startISO && createdAt < endISO;
+    const createdAtMs = new Date(activity.createdAt).getTime();
+    const startMs = new Date(startISO).getTime();
+    const endMs = new Date(endISO).getTime();
+    const inRange = Number.isFinite(createdAtMs)
+      && createdAtMs >= startMs
+      && createdAtMs < endMs;
 
     set((s) => {
       // UUID 중복 → 무시
