@@ -889,6 +889,9 @@ DECLARE
   v_result jsonb := '{}'::jsonb;
 BEGIN
   -- 1) monthDowGrid: 12개월 × 7요일 (1년치 종합 히트맵)
+  --    NOTE (codex 4·14차 P2 인지): rolling 12개월 윈도우에서 같은 month 가 시작·끝에 overlap 가능.
+  --    v1.23.0 은 month bucket 합산을 의도적으로 유지 — 카드 부제로 사용자 안내 추가.
+  --    v1.24 에서 (year, month) 튜플 그룹핑 + 별도 분석 페이지로 정밀 분리 예정.
   v_result := v_result || jsonb_build_object('monthDowGrid', COALESCE((
     SELECT jsonb_agg(jsonb_build_object('month', m, 'dow', d, 'count', c))
     FROM (

@@ -43,7 +43,10 @@ export function MonthDowHeatmapCard({ data }: Props) {
       <div className="flex items-start justify-between mb-3">
         <div>
           <div className="text-[14px] font-semibold">요일×월 종합 히트맵</div>
-          <div className="text-[11px] text-text-secondary mt-0.5">최근 12개월 활동 분포 — 어느 시기·요일에 일이 몰리는지 확인</div>
+          <div className="text-[11px] text-text-secondary mt-0.5">
+            최근 12개월 활동 분포 — 같은 월은 합산해서 표시 (예: 작년 5월 + 올해 5월).
+            정확한 연도별 비교는 v1.24 분석 페이지에서 제공 예정.
+          </div>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-text-secondary">
           <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: intensityBg(1) }} />적음</span>
