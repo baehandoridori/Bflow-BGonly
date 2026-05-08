@@ -309,9 +309,14 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     set((s) => {
       // UUID 중복 → 무시
       if (s.activities.some((a) => a.id === activity.id)) return s;
-      const newActs = [activity, ...s.activities].slice(0, MAX_CACHED);
+      // codex 10차 P2: range 밖 활동은 activities 캐시에도 prepend 안 함 — MAX_CACHED 한도 안에서
+      // in-range row 가 evict 되어 페이지네이션/빈 상태 이상 방지. lastSeenCreatedAt 은 backfill
+      // 기준점 유지 위해 항상 갱신.
+      const nextActivities = inRange
+        ? [activity, ...s.activities].slice(0, MAX_CACHED)
+        : s.activities;
       return {
-        activities: newActs,
+        activities: nextActivities,
         lastSeenCreatedAt: activity.createdAt,
         statsGrid: (inActiveGroup && inRange)
           ? incrementGrid(s.statsGrid, activity.createdAt, activity.actionGroup, s.timeUnit)
