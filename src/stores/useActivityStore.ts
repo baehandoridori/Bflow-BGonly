@@ -356,20 +356,23 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     void get().loadInsights(range);
   },
   async loadInsights(range) {
-    // codex 4차 P2: year 모드는 calendar year (1/1~12/31)로 강제 — rolling 12개월일 때
-    // 같은 month 가 시작·끝에 들어가 monthDowGrid 가 distortion(두 5월이 합쳐짐).
-    // half/quarter 는 rolling N개월 (month bucket overlap 없으므로 distortion 없음).
-    const now = new Date();
-    let start: string;
-    let end: string;
-    if (range === 'year') {
-      start = new Date(now.getFullYear(), 0, 1).toISOString();
-      end = new Date(now.getFullYear() + 1, 0, 1).toISOString();
-    } else {
-      const months = range === 'half' ? 6 : 3;
-      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-      start = new Date(now.getFullYear(), now.getMonth() - months, now.getDate()).toISOString();
-    }
+    // codex 5차 P2: rolling N개월로 — UI 라벨 "최근 1년"과 일치.
+    //   year(12개월): 같은 month가 시작·끝에 1번 overlap → minor distortion 1개월분.
+    //   사양서 의도("최근 N개월")가 우선이라 수용.
+    // codex 5차 P2: KST 기준으로 경계 계산 — SQL 의 AT TIME ZONE 'Asia/Seoul' 과 정확히 매칭.
+    //   다른 타임존 클라이언트에서 day/month 경계가 어긋나는 문제 방지.
+    const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+    const months = range === 'year' ? 12 : range === 'half' ? 6 : 3;
+    const nowKst = new Date(Date.now() + KST_OFFSET_MS);
+    const y = nowKst.getUTCFullYear();
+    const m = nowKst.getUTCMonth();
+    const d = nowKst.getUTCDate();
+    // KST 의 다음 날 자정 (= 오늘 끝, 미래 0건 month 미포함)
+    const endKst = new Date(Date.UTC(y, m, d + 1));
+    // KST 기준 N개월 전 같은 날 자정
+    const startKst = new Date(Date.UTC(y, m - months, d));
+    const start = new Date(startKst.getTime() - KST_OFFSET_MS).toISOString();
+    const end = new Date(endKst.getTime() - KST_OFFSET_MS).toISOString();
     const department = getCurrentDepartment();
     // codex 3차 P1: dept 변경 시 캐시 무효화 (다른 dept 데이터 노출 방지)
     if (cachedInsightsDept !== undefined && cachedInsightsDept !== department) {
