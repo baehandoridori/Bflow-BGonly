@@ -122,3 +122,20 @@ test('version center only checks updates from the refresh button', async () => {
     /useEffect\(\(\) => \{[\s\S]*void handleRefresh\(\);[\s\S]*\}, \[handleRefresh, updateCenterOpen, updateInfo\]\);/,
   );
 });
+
+test('version center keeps its visible content stable while refresh is running', async () => {
+  const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
+
+  assert.match(modal, /frozenUpdateInfoRef/);
+  assert.match(modal, /isRefreshing\s*\?\s*frozenUpdateInfoRef\.current/);
+  assert.match(modal, /min-h-\[210px\]/);
+});
+
+test('version center can expand previous release notes', async () => {
+  const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
+
+  assert.match(modal, /showAllReleaseNotes/);
+  assert.match(modal, /visibleNotes/);
+  assert.match(modal, /hiddenReleaseNoteCount/);
+  assert.match(modal, /이전 업데이트 내역/);
+});
