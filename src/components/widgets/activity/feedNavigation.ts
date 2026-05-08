@@ -7,7 +7,12 @@ export interface ActivitySceneNavigationTarget {
   sceneId: string;
 }
 
-/** EP 접두("EP02 ")를 사용자가 지정한 에피소드 제목으로 교체한다. */
+/**
+ * v1.23.0: 가운데점(·) 분리 포맷.
+ * 입력: "EP02 E #15"  →  출력: "그림자국 · E · #15"
+ * 에피소드 제목 없으면: "EP02 · E · #15"
+ * 단순 EP 접두만 있는 경우: "EP02"  →  "그림자국" (또는 "EP02")
+ */
 export function formatActivitySceneLabel(
   sceneLabel: string | null,
   episodeNumber: number | null,
@@ -15,11 +20,16 @@ export function formatActivitySceneLabel(
 ): string {
   if (!sceneLabel) return '';
   if (episodeNumber == null) return sceneLabel;
+
   const epPrefix = `EP${String(episodeNumber).padStart(2, '0')}`;
+  const epDisplay = episodeTitles[episodeNumber] || epPrefix;
+
   if (!sceneLabel.startsWith(epPrefix)) return sceneLabel;
-  const customTitle = episodeTitles[episodeNumber];
-  if (!customTitle) return sceneLabel;
-  return customTitle + sceneLabel.slice(epPrefix.length);
+  const remainder = sceneLabel.slice(epPrefix.length).trim();
+  if (!remainder) return epDisplay;
+
+  const parts = remainder.split(/\s+/).filter(Boolean);
+  return [epDisplay, ...parts].join(' · ');
 }
 
 /** 묶음 헤더는 특정 씬 번호 대신 에피소드 단위 라벨만 표시한다. */
