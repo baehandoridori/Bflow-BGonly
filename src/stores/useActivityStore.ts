@@ -97,6 +97,9 @@ let insightsRequestId = 0;
 let cachedInsightsDept: 'bg' | 'acting' | null | undefined = undefined;
 // v1.23.0 codex 4차 P1: stale stats 응답 차단 토큰 (빠른 단위/range 전환)
 let statsRequestId = 0;
+// v1.23.0 codex 13차 P1: stale initial/more 응답 차단 토큰 (range 전환 중 결과 mixing 방지)
+let initialRequestId = 0;
+let moreRequestId = 0;
 
 function getCurrentGroupsForServer(filters: Set<ActionGroup>): ActionGroup[] | undefined {
   // 4그룹 모두 ON이면 굳이 보낼 필요 없음 (서버에 array 비싸지 않지만 명시성)
@@ -167,6 +170,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   // (둘 다 closure 변수로 보관, store 상태에는 노출 X)
 
   async loadInitial() {
+    // codex 13차 P1: 빠른 단위/range 전환 시 stale 응답이 최신 activities 덮어쓰는 race 차단
+    const myRequestId = ++initialRequestId;
     set({ isLoading: true, error: null });
     try {
       const department = getCurrentDepartment();
@@ -179,6 +184,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         rangeStart: startISO,
         rangeEnd: endISO,
       });
+      if (myRequestId !== initialRequestId) return;
       // 1) 기존 store 에서 현재 부서·range 둘 다 일치하는 활동만 보존 — 부서/range 변경 시 stale row 제거
       //    (department === null 이면 부서 무시, range 는 항상 검사)
       // 2) 그 후 fetch 결과와 UUID dedupe merge — realtime 으로 들어온 활동 보존 (race 방지, Codex P2)
@@ -206,6 +212,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       });
       await get().loadStats();
     } catch (err) {
+      if (myRequestId !== initialRequestId) return;
       set({ error: err instanceof Error ? err.message : String(err), isLoading: false });
     }
   },
@@ -215,6 +222,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     if (!hasMore || isLoading) return;
     const last = activities[activities.length - 1];
     if (!last) return;
+    // codex 13차 P1: range/unit 전환 중 in-flight 응답이 새 view 에 mixing 되는 race 차단
+    const myRequestId = ++moreRequestId;
+    const initialIdSnapshot = initialRequestId;
     set({ isLoading: true });
     try {
       const department = getCurrentDepartment();
@@ -227,6 +237,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         before: cursor, limit: PAGE_SIZE, department,
         rangeStart: startISO, rangeEnd: endISO,
       });
+      // 더 최신 loadMore 또는 loadInitial(범위 전환) 이 일어났으면 결과 버림
+      if (myRequestId !== moreRequestId || initialIdSnapshot !== initialRequestId) return;
       // codex 9차 P1: 7일 cutoff 는 v1.22 의 7일치 위젯 가정에서 온 잔재.
       //   range 기반 페이지네이션에서는 month/year 보기에서 7일 이전 row 가 모두 잘려 페이지네이션이 일찍 끊김.
       //   range 필터는 이미 서버에서 적용되므로 클라이언트 cutoff 불필요.
@@ -245,6 +257,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         };
       });
     } catch (err) {
+      if (myRequestId !== moreRequestId || initialIdSnapshot !== initialRequestId) return;
       set({ error: err instanceof Error ? err.message : String(err), isLoading: false });
     }
   },
