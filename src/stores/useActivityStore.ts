@@ -265,6 +265,14 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const activeGroups = get().filters.groups;
     const inActiveGroup = activeGroups.size === 4 || activeGroups.has(activity.actionGroup);
 
+    // v1.23.0 (codex 1차 P1): 현재 보고 있는 시간 범위(timeUnit + rangeIdx) 밖의
+    // realtime 활동을 incrementGrid 로 적용하면 과거 view 가 오염된다.
+    // 범위 안일 때만 grid 갱신, 범위 밖이면 grid 변경 없이 activities 만 prepend.
+    const { timeUnit, rangeIdx } = get();
+    const { startISO, endISO } = getRangeBoundary(timeUnit, rangeIdx);
+    const createdAt = activity.createdAt;
+    const inRange = createdAt >= startISO && createdAt < endISO;
+
     set((s) => {
       // UUID 중복 → 무시
       if (s.activities.some((a) => a.id === activity.id)) return s;
@@ -272,7 +280,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       return {
         activities: newActs,
         lastSeenCreatedAt: activity.createdAt,
-        statsGrid: inActiveGroup
+        statsGrid: (inActiveGroup && inRange)
           ? incrementGrid(s.statsGrid, activity.createdAt, activity.actionGroup, s.timeUnit)
           : s.statsGrid,
       };

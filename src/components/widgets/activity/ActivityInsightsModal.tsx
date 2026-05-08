@@ -15,10 +15,12 @@ export function ActivityInsightsModal({ open, onClose }: { open: boolean; onClos
 
   useEffect(() => {
     if (!open) return;
-    if (!insights) loadInsights(insightsRange);
+    // v1.23.0 (codex 1차 P2): setInsightsRange 가 이미 loadInsights 를 부른다.
+    // 여기서는 모달 첫 진입 시 캐시 없을 때 1회만 (in-flight 동시에 들어가면 중복).
+    if (!insights && !insightsLoading) loadInsights(insightsRange);
     const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
     return () => window.clearTimeout(focusTimer);
-  }, [open, insights, insightsRange, loadInsights]);
+  }, [open, insights, insightsLoading, insightsRange, loadInsights]);
 
   useEffect(() => {
     if (!open) return;

@@ -339,8 +339,9 @@ export function ActivityFeed() {
         } else {
           const isSelf = item.items[0].userId === currentUser?.id;
           const groupHasMatch = item.items.some(matches);
-          const groupAllMatch = item.items.every(matches);
           const groupDimmed = !!cellFilter && !groupHasMatch;
+          // v1.23.0 (codex 1차 P2): 매칭이 하나라도 있으면 그룹 강조.
+          // every() 로는 그룹 접힌 상태에서 사용자가 매칭을 못 보는 회귀 발생.
           return (
             <FeedGroup
               key={item.key}
@@ -348,7 +349,7 @@ export function ActivityFeed() {
               isSelf={isSelf}
               episodes={episodes}
               episodeTitles={episodeTitles}
-              highlight={groupAllMatch && !!cellFilter}
+              highlight={groupHasMatch && !!cellFilter}
               dimmed={groupDimmed}
               highlightRef={groupHasMatch ? claimFirstMatch() : undefined}
               matches={matches}
