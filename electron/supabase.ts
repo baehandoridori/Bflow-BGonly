@@ -1914,6 +1914,77 @@ export async function getActivityStats(opts: {
   return (data ?? []) as ActivityStatBucket[];
 }
 
+// ============================================================
+// v1.23.0: get_activity_stats_v2 (시간 단위 확장)
+// granularity: 'hour-of-day-x-dow' | 'month-x-dow' | 'month-totals'
+// 응답: { bucket1, bucket2, total, count_progress/memo/scene/etc }
+// ============================================================
+
+export interface ActivityStatBucketV2 {
+  bucket1: number;
+  bucket2: number;
+  total: number;
+  count_progress: number;
+  count_memo: number;
+  count_scene: number;
+  count_etc: number;
+}
+
+export async function getActivityStatsV2(opts: {
+  rangeStart: string;
+  rangeEnd: string;
+  granularity: 'hour-of-day-x-dow' | 'month-x-dow' | 'month-totals';
+  department?: 'bg' | 'acting' | null;
+  groups?: ActionGroup[];
+}): Promise<ActivityStatBucketV2[]> {
+  const { data, error } = await supabase.rpc('get_activity_stats_v2', {
+    p_range_start: opts.rangeStart,
+    p_range_end: opts.rangeEnd,
+    p_granularity: opts.granularity,
+    p_department: opts.department ?? null,
+    p_groups: opts.groups ?? null,
+  });
+  if (error) throw new Error(`getActivityStatsV2 failed: ${error.message}`);
+  return (data ?? []) as ActivityStatBucketV2[];
+}
+
+// ============================================================
+// v1.23.0: get_activity_insights (분석 모달 7카드 raw data)
+// ============================================================
+
+export interface ActivityInsightsRawServer {
+  monthDowGrid: Array<{ month: number; dow: number; count: number }>;
+  userBreakdown: Array<{ userId: string; userName: string; count: number }>;
+  userBreakdownTotal: number;
+  stageBreakdown: { lo: number; done: number; review: number; png: number };
+  topScenes: Array<{
+    sceneId: string;
+    sceneLabel: string | null;
+    episodeNumber: number | null;
+    total: number;
+    revCount: number;
+    memoCount: number;
+    stageCount: number;
+  }>;
+  weeklyCompleted: Array<{ weekStart: string; completedSceneCount: number }>;
+  sceneFlow: Record<string, never>;
+  episodeProgress: unknown[];
+}
+
+export async function getActivityInsights(opts: {
+  rangeStart: string;
+  rangeEnd: string;
+  department?: 'bg' | 'acting' | null;
+}): Promise<ActivityInsightsRawServer> {
+  const { data, error } = await supabase.rpc('get_activity_insights', {
+    p_range_start: opts.rangeStart,
+    p_range_end: opts.rangeEnd,
+    p_department: opts.department ?? null,
+  });
+  if (error) throw new Error(`getActivityInsights failed: ${error.message}`);
+  return data as ActivityInsightsRawServer;
+}
+
 export async function backfillActivities(since: string, limit = 200): Promise<ActivityRow[]> {
   const { data, error } = await supabase
     .from('activity_log')

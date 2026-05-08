@@ -536,6 +536,26 @@ export async function getActivityStats(opts: {
   return await window.electronAPI.activityStats(opts);
 }
 
+/** v1.23.0: 시간 단위 + 기간 기반 통계 */
+export async function getActivityStatsV2(opts: {
+  rangeStart: string;
+  rangeEnd: string;
+  granularity: 'hour-of-day-x-dow' | 'month-x-dow' | 'month-totals';
+  department?: 'bg' | 'acting' | null;
+  groups?: ActionGroup[];
+}) {
+  return await window.electronAPI.activityStatsV2(opts);
+}
+
+/** v1.23.0: 분석 모달 7카드 raw data */
+export async function getActivityInsights(opts: {
+  rangeStart: string;
+  rangeEnd: string;
+  department?: 'bg' | 'acting' | null;
+}) {
+  return await window.electronAPI.activityInsights(opts);
+}
+
 export async function backfillActivities(since: string): Promise<Activity[]> {
   const rows = await window.electronAPI.activityBackfill(since);
   return (rows ?? []).map(rowToActivity);
