@@ -189,6 +189,7 @@ export function Sidebar() {
   })();
   const [versionTipShow, setVersionTipShow] = useState(false);
   const versionTipTimer = useRef<ReturnType<typeof setTimeout>>();
+  const versionAnchorRef = useRef<HTMLSpanElement>(null);
   const handleVersionEnter = useCallback(() => {
     if (versionTipTimer.current) clearTimeout(versionTipTimer.current);
     versionTipTimer.current = setTimeout(() => setVersionTipShow(true), 250);
@@ -298,6 +299,7 @@ export function Sidebar() {
             />
           </button>
           <span
+            ref={versionAnchorRef}
             className="relative text-[11px] text-text-secondary/50 font-mono whitespace-nowrap"
             onMouseEnter={handleVersionEnter}
             onMouseLeave={handleVersionLeave}
@@ -324,15 +326,16 @@ export function Sidebar() {
                 <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[#FDCB6E] shadow-[0_0_0_4px_rgba(253,203,110,0.13)]" />
               )}
             </button>
-            <VersionHoverTip
-              show={versionTipShow}
-              state={hoverState}
-              currentVersion={__APP_VERSION__}
-              latestVersion={updateInfo?.latestVersion ?? __APP_VERSION__}
-              buildAt={formattedBuildAt}
-              message={updateInfo?.message}
-            />
           </span>
+          <VersionHoverTip
+            show={versionTipShow}
+            anchorRef={versionAnchorRef}
+            state={hoverState}
+            currentVersion={__APP_VERSION__}
+            latestVersion={updateInfo?.latestVersion ?? __APP_VERSION__}
+            buildAt={formattedBuildAt}
+            message={updateInfo?.message}
+          />
         </div>
       </aside>
 

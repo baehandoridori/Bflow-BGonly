@@ -1,13 +1,20 @@
 /**
  * v1.23.0: 좌하단 버전 버튼 호버 시 우측에 나타나는 floating 툴팁.
  * 브라우저 기본 title 속성이 좁은 사이드바 영역 밖으로 삐져나오는 문제 해결.
+ *
+ * 주의: 사이드바가 overflow:hidden 이라 absolute 자식이 잘림 → createPortal 로 body 에 직접 렌더.
+ *       getBoundingClientRect 로 anchor 좌표 계산.
  */
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { UpdateInfo } from '@/types';
 
 export type VersionHoverState = 'latest' | 'available' | 'failed' | 'suppressed' | 'checking';
 
 interface Props {
   show: boolean;
+  /** anchor element (호버 트리거 div) — 좌표 계산용 */
+  anchorRef: React.RefObject<HTMLElement>;
   state: VersionHoverState;
   currentVersion: string;
   latestVersion: string;
@@ -15,7 +22,27 @@ interface Props {
   message?: string;
 }
 
-export function VersionHoverTip({ show, state, currentVersion, latestVersion, buildAt, message }: Props) {
+export function VersionHoverTip({ show, anchorRef, state, currentVersion, latestVersion, buildAt, message }: Props) {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  useEffect(() => {
+    if (!show) return;
+    const update = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPos({ left: rect.right + 12, top: rect.top + rect.height / 2 });
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [show, anchorRef]);
+
+  if (!pos) return null;
+
   const labelKey = state === 'latest' ? '최신 상태'
                 : state === 'available' ? `새 버전 v${latestVersion} 준비됨`
                 : state === 'failed' ? '업데이트 실패'
@@ -25,10 +52,11 @@ export function VersionHoverTip({ show, state, currentVersion, latestVersion, bu
              : (state === 'failed' || state === 'suppressed') ? 'text-[#FDCB6E]'
              : 'text-text-secondary';
 
-  return (
+  return createPortal(
     <div
       role="tooltip"
-      className={`absolute left-[calc(100%+12px)] top-1/2 -translate-y-1/2 bg-bg-card/97 border border-bg-border rounded-[10px] px-3.5 py-2.5 min-w-[240px] max-w-[300px] shadow-[0_18px_40px_rgba(0,0,0,0.45)] text-[12px] text-text-primary z-[60] pointer-events-none transition-opacity duration-150 ${show ? 'opacity-100' : 'opacity-0'}`}
+      className={`fixed z-[10050] bg-bg-card/97 border border-bg-border rounded-[10px] px-3.5 py-2.5 min-w-[240px] max-w-[300px] shadow-[0_18px_40px_rgba(0,0,0,0.45)] text-[12px] text-text-primary pointer-events-none transition-opacity duration-150 ${show ? 'opacity-100' : 'opacity-0'}`}
+      style={{ left: pos.left, top: pos.top, transform: 'translateY(-50%)' }}
     >
       {/* 좌측 화살표 */}
       <div
@@ -68,7 +96,8 @@ export function VersionHoverTip({ show, state, currentVersion, latestVersion, bu
           <b className="text-text-primary">{buildAt}</b>
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

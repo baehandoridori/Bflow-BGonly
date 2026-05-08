@@ -95,16 +95,37 @@ function getCurrentGroupsForServer(filters: Set<ActionGroup>): ActionGroup[] | u
   return [...filters];
 }
 
-/** stats grid 의 해당 셀 +1 — Realtime 신규 시 즉시 반영 (총합 + 그룹별 둘 다 갱신) */
-function incrementGrid(grid: GroupedCount[][], createdAt: string, group: ActionGroup): GroupedCount[][] {
+/**
+ * stats grid 의 해당 셀 +1 — Realtime 신규 시 즉시 반영 (총합 + 그룹별 둘 다 갱신).
+ * v1.23.0: timeUnit 별로 grid 모양이 다름 (week/month: 7×24, year: 12×7).
+ * 잘못된 인덱싱 시 grid 그대로 반환 + 호출자가 loadStats 로 서버 truth 재요청.
+ */
+function incrementGrid(
+  grid: GroupedCount[][],
+  createdAt: string,
+  group: ActionGroup,
+  timeUnit: TimeUnit,
+): GroupedCount[][] {
   const dt = new Date(createdAt);
-  // KST 변환 — getTimezoneOffset 은 분 단위
   const kstStr = dt.toLocaleString('en-US', { timeZone: 'Asia/Seoul', hour12: false });
   const kst = new Date(kstStr);
   if (Number.isNaN(kst.getTime())) return grid;
-  const dow = kst.getDay(); // 0=일 ~ 6=토
-  const displayDay = (dow + 6) % 7; // 표시 0=월 ~ 6=일
+  const dow = kst.getDay();
+  const displayDay = (dow + 6) % 7;
   const hour = kst.getHours();
+  const month = kst.getMonth(); // 0-based
+
+  if (timeUnit === 'year') {
+    // grid: 12 × 7 (month × dow)
+    if (month < 0 || month >= 12 || displayDay < 0 || displayDay >= 7) return grid;
+    const next = grid.map((row) => row.map((c) => ({ ...c })));
+    const cell = next[month]?.[displayDay];
+    if (!cell) return grid;
+    cell.total += 1;
+    cell[group] += 1;
+    return next;
+  }
+  // week / month: 7 × 24
   if (displayDay < 0 || displayDay >= 7 || hour < 0 || hour >= 24) return grid;
   const next = grid.map((row) => row.map((c) => ({ ...c })));
   const cell = next[displayDay][hour];
@@ -251,7 +272,9 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
       return {
         activities: newActs,
         lastSeenCreatedAt: activity.createdAt,
-        statsGrid: inActiveGroup ? incrementGrid(s.statsGrid, activity.createdAt, activity.actionGroup) : s.statsGrid,
+        statsGrid: inActiveGroup
+          ? incrementGrid(s.statsGrid, activity.createdAt, activity.actionGroup, s.timeUnit)
+          : s.statsGrid,
       };
     });
   },
