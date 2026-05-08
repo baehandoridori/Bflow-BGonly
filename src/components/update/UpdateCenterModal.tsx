@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Download, RefreshCw, X } from 'lucide-react';
+import { Check, ChevronDown, Download, RefreshCw, X } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import type { UpdateInfo } from '@/types';
@@ -223,10 +223,11 @@ export function UpdateCenterModal() {
         aria-modal="true"
         aria-labelledby="update-center-title"
         tabIndex={-1}
-        className="w-full max-w-[720px] max-h-[86vh] overflow-hidden rounded-2xl border border-bg-border bg-bg-card/95 shadow-2xl shadow-black/40"
+        className="w-full max-w-[720px] flex flex-col overflow-hidden rounded-2xl border border-bg-border bg-bg-card/95 shadow-2xl shadow-black/40"
+        style={{ height: '86vh' }}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-bg-border/50">
+        <div className="shrink-0 flex items-start justify-between gap-4 px-6 py-5 border-b border-bg-border/50">
           <div>
             <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">Version Center</p>
             <h2 id="update-center-title" className="mt-2 text-xl font-bold text-text-primary tracking-tight">업데이트 내역</h2>
@@ -264,7 +265,7 @@ export function UpdateCenterModal() {
           </div>
         </div>
 
-        <div className="p-6 overflow-y-auto max-h-[calc(86vh-96px)]">
+        <div className="px-6 pt-5 pb-3 shrink-0">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="min-h-[170px] rounded-2xl border border-bg-border/60 bg-bg-primary/35 p-4">
               <p className="text-xs text-text-secondary">현재 사용 중</p>
@@ -365,94 +366,124 @@ export function UpdateCenterModal() {
               )}
             </div>
           </div>
+        </div>
 
-          <div className="mt-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-text-primary">버전별 업데이트 내역</p>
-                <p className="mt-1 text-xs text-text-secondary">
-                  최근 변경 사항과 이전 버전의 수정 내역을 함께 확인합니다.
-                </p>
-              </div>
-              {hiddenReleaseNoteCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllReleaseNotes((value) => !value)}
-                  aria-expanded={showAllReleaseNotes}
-                  className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-bg-border/70 bg-bg-primary/30 px-3 py-2 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/35 hover:text-accent-sub hover:bg-accent/10 cursor-pointer"
-                >
-                  {showAllReleaseNotes
-                    ? '이전 업데이트 내역 접기'
-                    : `이전 업데이트 내역 ${hiddenReleaseNoteCount}개 보기`}
-                  <ChevronDown
-                    size={14}
-                    className={cn(
-                      'transition-transform duration-200',
-                      showAllReleaseNotes && 'rotate-180',
-                    )}
-                  />
-                </button>
-              )}
-            </div>
+        {/* v1.23.0: PR 타임라인 헤더 (shrink-0) */}
+        <div className="shrink-0 px-6 pt-2 pb-3 flex items-center justify-between border-t border-bg-border/40">
+          <div>
+            <p className="text-sm font-semibold text-text-primary">버전별 업데이트 내역</p>
+            <p className="mt-0.5 text-[11px] text-text-secondary">PR 타임라인 형태로 누적 표시</p>
+          </div>
+          {hiddenReleaseNoteCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAllReleaseNotes((value) => !value)}
+              aria-expanded={showAllReleaseNotes}
+              className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-bg-border/70 bg-bg-primary/30 px-3 py-2 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/35 hover:text-accent-sub hover:bg-accent/10 cursor-pointer"
+            >
+              {showAllReleaseNotes
+                ? '이전 버전 접기'
+                : `이전 버전 ${hiddenReleaseNoteCount}개 더 보기`}
+              <ChevronDown
+                size={14}
+                className={cn(
+                  'transition-transform duration-200',
+                  showAllReleaseNotes && 'rotate-180',
+                )}
+              />
+            </button>
+          )}
+        </div>
 
+        {/* v1.23.0: PR 타임라인 본체 (flex-1, 새로고침해도 모달 외형 안 흔들림) */}
+        <div className={cn(
+          'flex-1 overflow-y-auto px-6 pb-4 transition-opacity duration-200',
+          isRefreshing && 'opacity-90',
+        )}>
+          <div className="relative pl-9 pt-2">
             <div
+              className="absolute left-[11px] top-2 bottom-2 w-px"
+              style={{ background: 'linear-gradient(to bottom, rgba(108,92,231,0.38), rgba(108,92,231,0.06) 92%)' }}
+            />
+            {visibleNotes.map((note, noteIndex) => {
+              const isLatestNote = note.version === displayInfo.latestVersion && shouldHighlightLatest;
+              const orderNo = notes.length - noteIndex;
+              return (
+                <div key={`${note.version}-${note.title}-${noteIndex}`} className="relative pb-5">
+                  <div
+                    className={cn(
+                      'absolute left-0 -ml-[11px] top-1 w-6 h-6 rounded-full flex items-center justify-center',
+                      isLatestNote
+                        ? 'bg-gradient-to-br from-accent-sub to-accent border-2 border-white/15 shadow-[0_0_0_4px_rgba(162,155,254,0.16),0_0_18px_rgba(108,92,231,0.36)]'
+                        : 'bg-bg-card border-2 border-accent-sub/55 shadow-[0_0_0_4px_rgba(108,92,231,0.08)]',
+                    )}
+                  >
+                    {isLatestNote
+                      ? <Check size={11} className="text-white" />
+                      : <span className="text-[10px] text-accent-sub font-mono">{orderNo}</span>}
+                  </div>
+                  <div className={cn(
+                    'rounded-2xl border p-4',
+                    isLatestNote
+                      ? 'border-accent/30 bg-accent/[0.06]'
+                      : 'border-bg-border/55 bg-bg-primary/30',
+                  )}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <p className="text-sm font-semibold text-text-primary truncate">
+                          {note.title || `v${note.version || displayInfo.latestVersion}`}
+                        </p>
+                        {isLatestNote && (
+                          <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-accent-sub/20 text-accent-sub font-semibold uppercase tracking-wider">
+                            Latest
+                          </span>
+                        )}
+                      </div>
+                      <span className="shrink-0 rounded-full border border-bg-border/70 px-2.5 py-1 text-[11px] font-mono text-text-secondary">
+                        v{note.version || displayInfo.latestVersion}
+                      </span>
+                    </div>
+                    <ul className="mt-3 space-y-1.5">
+                      {note.items.map((item, itemIndex) => (
+                        <li key={`${item}-${itemIndex}`} className="flex gap-2 text-[12.5px] leading-relaxed text-text-secondary">
+                          <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-accent-sub/70" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* v1.23.0: 푸터 (shrink-0) */}
+        <div className="shrink-0 px-6 py-4 border-t border-bg-border/40 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <p className="text-xs leading-relaxed text-text-secondary">
+            업데이트가 준비되지 않았거나 실패해도 현재 버전으로 먼저 작업할 수 있습니다.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setUpdateCenterOpen(false)}
+              className="px-4 py-2 rounded-xl border border-bg-border text-sm text-text-secondary hover:text-text-primary hover:bg-bg-border/35 transition-colors cursor-pointer"
+            >
+              닫기
+            </button>
+            <button
+              type="button"
+              disabled={!canApply}
+              onClick={handleApply}
               className={cn(
-                'mt-3 min-h-[210px] space-y-3 transition-opacity duration-200',
-                isRefreshing && 'opacity-90',
+                'px-4 py-2 rounded-xl border text-sm font-semibold transition-colors',
+                canApply
+                  ? 'border-accent/35 bg-accent/15 text-accent-sub hover:bg-accent/25 cursor-pointer'
+                  : 'border-bg-border bg-bg-border/20 text-text-secondary cursor-default',
               )}
             >
-              {visibleNotes.map((note, noteIndex) => (
-                <div
-                  key={`${note.version}-${note.title}-${noteIndex}`}
-                  className="rounded-2xl border border-bg-border/55 bg-bg-primary/25 p-4"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-text-primary">
-                      {note.title || `v${note.version || displayInfo.latestVersion}`}
-                    </p>
-                    <span className="shrink-0 rounded-full border border-bg-border/70 px-2.5 py-1 text-[11px] font-mono text-text-secondary">
-                      v{note.version || displayInfo.latestVersion}
-                    </span>
-                  </div>
-                  <ul className="mt-3 space-y-2">
-                    {note.items.map((item, itemIndex) => (
-                      <li key={`${item}-${itemIndex}`} className="flex gap-2 text-sm leading-relaxed text-text-secondary">
-                        <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent/70" />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <p className="text-xs leading-relaxed text-text-secondary">
-              업데이트가 준비되지 않았거나 실패해도 현재 버전으로 먼저 작업할 수 있습니다.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setUpdateCenterOpen(false)}
-                className="px-4 py-2 rounded-xl border border-bg-border text-sm text-text-secondary hover:text-text-primary hover:bg-bg-border/35 transition-colors cursor-pointer"
-              >
-                닫기
-              </button>
-              <button
-                type="button"
-                disabled={!canApply}
-                onClick={handleApply}
-                className={cn(
-                  'px-4 py-2 rounded-xl border text-sm font-semibold transition-colors',
-                  canApply
-                    ? 'border-accent/35 bg-accent/15 text-accent-sub hover:bg-accent/25 cursor-pointer'
-                    : 'border-bg-border bg-bg-border/20 text-text-secondary cursor-default',
-                )}
-              >
-                지금 업데이트
-              </button>
-            </div>
+              지금 업데이트
+            </button>
           </div>
         </div>
       </div>
