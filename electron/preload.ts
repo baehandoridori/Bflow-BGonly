@@ -200,12 +200,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
     department?: 'bg' | 'acting' | null;
     sceneIds?: string[];
+    rangeStart?: string;
+    rangeEnd?: string;
   }) => ipcRenderer.invoke('activity:list', opts),
   activityStats: (opts: {
     days?: number;
     groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
     department?: 'bg' | 'acting' | null;
   }) => ipcRenderer.invoke('activity:stats', opts),
+  // v1.23.0
+  activityStatsV2: (opts: {
+    rangeStart: string;
+    rangeEnd: string;
+    granularity: 'hour-of-day-x-dow' | 'month-x-dow' | 'month-totals';
+    department?: 'bg' | 'acting' | null;
+    groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+  }) => ipcRenderer.invoke('activity:stats-v2', opts),
+  activityInsights: (opts: {
+    rangeStart: string;
+    rangeEnd: string;
+    department?: 'bg' | 'acting' | null;
+  }) => ipcRenderer.invoke('activity:insights', opts),
   activityBackfill: (since: string) => ipcRenderer.invoke('activity:backfill', since),
   activityStorageInfo: () => ipcRenderer.invoke('activity:storage-info'),
   onActivityRealtimeInsert: (callback: (row: unknown) => void) => {

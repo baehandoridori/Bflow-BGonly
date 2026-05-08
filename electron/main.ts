@@ -1156,6 +1156,8 @@ import {
   getPrivateEventOwner as sbGetPrivateEventOwner,
   listActivities as sbListActivities,
   getActivityStats as sbGetActivityStats,
+  getActivityStatsV2 as sbGetActivityStatsV2,
+  getActivityInsights as sbGetActivityInsights,
   backfillActivities as sbBackfillActivities,
   getActivityStorageInfo as sbGetActivityStorageInfo,
 } from './supabase';
@@ -1886,6 +1888,8 @@ ipcMain.handle('activity:list', wrapIpc(async (_e: unknown, opts: {
   groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
   department?: 'bg' | 'acting' | null;
   sceneIds?: string[];
+  rangeStart?: string;
+  rangeEnd?: string;
 }) => {
   return sbListActivities(opts ?? {});
 }));
@@ -1896,6 +1900,26 @@ ipcMain.handle('activity:stats', wrapIpc(async (_e: unknown, opts: {
   department?: 'bg' | 'acting' | null;
 }) => {
   return sbGetActivityStats(opts ?? {});
+}));
+
+// v1.23.0: 시간 단위 + 기간 기반 통계
+ipcMain.handle('activity:stats-v2', wrapIpc(async (_e: unknown, opts: {
+  rangeStart: string;
+  rangeEnd: string;
+  granularity: 'hour-of-day-x-dow' | 'month-x-dow' | 'month-totals';
+  department?: 'bg' | 'acting' | null;
+  groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+}) => {
+  return sbGetActivityStatsV2(opts);
+}));
+
+// v1.23.0: 분석 모달 7카드 raw data
+ipcMain.handle('activity:insights', wrapIpc(async (_e: unknown, opts: {
+  rangeStart: string;
+  rangeEnd: string;
+  department?: 'bg' | 'acting' | null;
+}) => {
+  return sbGetActivityInsights(opts);
 }));
 
 ipcMain.handle('activity:backfill', wrapIpc(async (_e: unknown, since: string) => {

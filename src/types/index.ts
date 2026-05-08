@@ -416,6 +416,56 @@ export interface Activity {
   createdAt: string;
 }
 
+// ─── v1.23.0: 시간 단위 + 분석 모달 ─────────────
+
+/** 최근 작업 위젯 시간 단위 */
+export type TimeUnit = 'week' | 'month' | 'year';
+
+/** 단위 + 기간 인덱스(0=현재, 1=이전 주/달/년 ...) */
+export interface TimeRange {
+  unit: TimeUnit;
+  rangeIdx: number;
+}
+
+/** 히트맵 셀 클릭 필터 (bucket 의미는 granularity 에 따라 달라짐) */
+export interface CellFilter {
+  bucket1: number;  // hour-of-day-x-dow: dow / month-x-dow: month(0-based)
+  bucket2: number;  // hour-of-day-x-dow: hour / month-x-dow: dow
+}
+
+/** get_activity_stats_v2 RPC 한 row */
+export interface ActivityStatRowV2 {
+  bucket1: number;
+  bucket2: number;
+  total: number;
+  count_progress: number;
+  count_memo: number;
+  count_scene: number;
+  count_etc: number;
+}
+
+/** get_activity_insights RPC 응답 (분석 모달 raw data) */
+export interface ActivityInsightsRaw {
+  monthDowGrid: Array<{ month: number; dow: number; count: number }>;
+  userBreakdown: Array<{ userId: string; userName: string; count: number }>;
+  userBreakdownTotal: number;
+  stageBreakdown: { lo: number; done: number; review: number; png: number };
+  topScenes: Array<{
+    sceneId: string;
+    sceneLabel: string | null;
+    episodeNumber: number | null;
+    total: number;
+    revCount: number;
+    memoCount: number;
+    stageCount: number;
+  }>;
+  weeklyCompleted: Array<{ weekStart: string; completedSceneCount: number }>;
+  /** v1.23.0: 클라이언트 보강 (RPC 는 빈 객체 반환) */
+  sceneFlow: Record<string, never>;
+  /** v1.23.0: 클라이언트 보강 (RPC 는 빈 배열 반환) */
+  episodeProgress: unknown[];
+}
+
 export interface UpdateReleaseNote {
   version: string;
   title: string;
@@ -640,6 +690,9 @@ export interface ElectronAPI {
     groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
     department?: 'bg' | 'acting' | null;
     sceneIds?: string[];
+    /** v1.23.0: 시간 단위 탐색 시 range 필터 */
+    rangeStart?: string;
+    rangeEnd?: string;
   }) => Promise<any[]>;
   activityStats: (opts: {
     days?: number;
@@ -654,6 +707,20 @@ export interface ElectronAPI {
     count_scene: number;
     count_etc: number;
   }>>;
+  /** v1.23.0: 시간 단위 + 기간 기반 통계 (히트맵·막대 데이터 소스) */
+  activityStatsV2: (opts: {
+    rangeStart: string;
+    rangeEnd: string;
+    granularity: 'hour-of-day-x-dow' | 'month-x-dow' | 'month-totals';
+    department?: 'bg' | 'acting' | null;
+    groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+  }) => Promise<ActivityStatRowV2[]>;
+  /** v1.23.0: 분석 모달 7카드 raw data 한 번에 */
+  activityInsights: (opts: {
+    rangeStart: string;
+    rangeEnd: string;
+    department?: 'bg' | 'acting' | null;
+  }) => Promise<ActivityInsightsRaw>;
   activityBackfill: (since: string) => Promise<any[]>;
   activityStorageInfo: () => Promise<{ count: number; sizeMB: number }>;
   onActivityRealtimeInsert: (cb: (row: any) => void) => () => void;

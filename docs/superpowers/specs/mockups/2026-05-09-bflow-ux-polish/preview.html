@@ -1,0 +1,1596 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>B flow · 2026-05-09 UX 폴리싱 시안</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-primary:#0F1117;
+    --bg-card:#1A1D27;
+    --bg-border:#2D3041;
+    --text-primary:#E8E8EE;
+    --text-secondary:#8B8DA3;
+    --accent:#6C5CE7;
+    --accent-sub:#A29BFE;
+    --stage-lo:#74B9FF;
+    --stage-done:#A29BFE;
+    --stage-review:#FDCB6E;
+    --stage-png:#00B894;
+    --memo:#FF8FA3;
+    --comment:#FFA94D;
+    --revision:#4DD0E1;
+    --scene-add:#6FCF97;
+    --scene-del:#FF7675;
+    --etc:#95A5A6;
+  }
+  html,body{
+    background:var(--bg-primary);
+    color:var(--text-primary);
+    font-family:'Pretendard',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    letter-spacing:-0.005em;
+  }
+  .mono{font-family:'JetBrains Mono',monospace;}
+
+  /* ========= 공통 레이아웃 ========= */
+  .pane{display:none}
+  .pane.active{display:block}
+  .nav-item.active{background:rgba(108,92,231,0.15);color:var(--accent-sub);border-left-color:var(--accent-sub);}
+
+  /* ========= 위젯 카드 톤 (B flow 글래스 위젯) ========= */
+  .widget-card{
+    background:rgba(26,29,39,0.92);
+    border:1px solid rgba(45,48,65,0.7);
+    border-radius:14px;
+    backdrop-filter:blur(18px) saturate(1.2);
+    box-shadow:0 8px 24px rgba(0,0,0,0.32),0 0 0 1px rgba(255,255,255,0.02) inset;
+  }
+  .glass-pill{
+    background:rgba(255,255,255,0.04);
+    border:1px solid rgba(255,255,255,0.06);
+    border-radius:8px;
+  }
+  .glass-pill.active{
+    background:rgba(108,92,231,0.18);
+    border-color:rgba(108,92,231,0.32);
+    color:var(--accent-sub);
+    box-shadow:inset 0 0 0 1px rgba(108,92,231,0.25);
+  }
+
+  /* ========= 히트맵 셀 ========= */
+  .hm-cell{
+    aspect-ratio:1/1;
+    border-radius:3px;
+    cursor:pointer;
+    transition:transform .12s ease, outline .12s ease;
+  }
+  .hm-cell:hover{transform:scale(1.18);outline:1px solid rgba(255,255,255,0.35);outline-offset:1px;z-index:5;position:relative}
+  .hm-cell.selected{outline:2px solid #FFE5A0;outline-offset:1px;z-index:6;position:relative;box-shadow:0 0 12px rgba(253,203,110,0.4)}
+  .hm-l0{background:rgba(108,92,231,0.06)}
+  .hm-l1{background:rgba(108,92,231,0.18)}
+  .hm-l2{background:rgba(108,92,231,0.36)}
+  .hm-l3{background:rgba(108,92,231,0.58)}
+  .hm-l4{background:rgba(108,92,231,0.85);box-shadow:0 0 8px rgba(108,92,231,0.3)}
+
+  /* ========= 피드 항목 ========= */
+  .feed-row{
+    border-bottom:1px solid rgba(45,48,65,0.4);
+    transition:background .15s ease, box-shadow .35s ease, opacity .25s ease;
+    padding:8px 14px;
+    cursor:pointer;
+  }
+  .feed-row:hover{background:rgba(45,48,65,0.3)}
+  .feed-row.self{background:rgba(108,92,231,0.04);border-left:2px solid var(--accent-sub);padding-left:12px;}
+  .feed-row.highlight{background:rgba(253,203,110,0.08);box-shadow:inset 3px 0 0 #FFE5A0}
+  @keyframes pulseHL{0%,100%{box-shadow:inset 3px 0 0 #FFE5A0,0 0 0 0 rgba(253,203,110,0)}50%{box-shadow:inset 3px 0 0 #FFE5A0,0 0 18px rgba(253,203,110,0.22)}}
+  .feed-row.highlight{animation:pulseHL 1.6s ease-in-out 0s 3}
+  /* 필터 모드: 매칭 안 된 행은 흐리게 */
+  #feedList.filter-active .feed-row:not(.highlight){opacity:0.30}
+  #feedList.filter-active .feed-row:not(.highlight):hover{opacity:0.65}
+
+  .pictogram{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;flex-shrink:0}
+
+  /* ========= 라벨 칩 (씬 라벨) ========= */
+  .scene-chip{
+    padding:1px 8px;
+    border-radius:6px;
+    font-size:11.5px;
+    font-weight:500;
+    color:var(--accent-sub);
+    background:rgba(108,92,231,0.10);
+    line-height:1.45;
+    white-space:nowrap;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+  }
+  .scene-chip .sep{color:var(--accent);opacity:0.55;font-weight:400;font-size:10.5px;letter-spacing:0.02em}
+
+  /* ========= 화살표 / 토글 버튼 ========= */
+  .icon-btn{
+    width:28px;height:28px;border-radius:7px;
+    display:inline-flex;align-items:center;justify-content:center;
+    color:var(--text-secondary);cursor:pointer;
+    transition:all .15s ease;
+  }
+  .icon-btn:hover{color:var(--text-primary);background:rgba(255,255,255,0.04)}
+  .icon-btn:disabled{opacity:0.35;cursor:not-allowed}
+
+  /* ========= 모달 (분석 / 업데이트) ========= */
+  .modal-backdrop{
+    position:fixed;inset:0;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);
+    z-index:50;display:flex;align-items:center;justify-content:center;padding:24px;
+    opacity:0;pointer-events:none;transition:opacity .2s ease;
+  }
+  .modal-backdrop.open{opacity:1;pointer-events:auto}
+  .modal-shell{
+    background:rgba(26,29,39,0.96);
+    border:1px solid rgba(45,48,65,0.7);
+    border-radius:18px;
+    box-shadow:0 24px 60px rgba(0,0,0,0.5);
+    transform:translateY(8px) scale(0.985);transition:transform .25s cubic-bezier(.2,.8,.3,1.05);
+    overflow:hidden;
+  }
+  .modal-backdrop.open .modal-shell{transform:translateY(0) scale(1)}
+
+  /* ========= 시간 토글 ========= */
+  .time-toggle{
+    background:rgba(45,48,65,0.4);
+    padding:2px;border-radius:9px;display:inline-flex;gap:2px;
+  }
+  .time-toggle button{
+    padding:5px 11px;border-radius:7px;font-size:11px;color:var(--text-secondary);cursor:pointer;
+    transition:all .15s ease;font-weight:500;
+  }
+  .time-toggle button.active{
+    background:rgba(108,92,231,0.22);color:var(--accent-sub);
+    box-shadow:inset 0 0 0 1px rgba(108,92,231,0.32);
+  }
+
+  /* ========= PR 타임라인 (업데이트 모달) ========= */
+  .pr-rail{position:relative}
+  .pr-rail::before{
+    content:'';position:absolute;left:11px;top:8px;bottom:0;width:2px;
+    background:linear-gradient(to bottom, rgba(108,92,231,0.38), rgba(108,92,231,0.06) 92%);
+  }
+  .pr-node{
+    position:absolute;left:0;width:24px;height:24px;border-radius:999px;
+    background:var(--bg-card);border:2px solid var(--accent-sub);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 0 0 4px rgba(108,92,231,0.10);
+  }
+  .pr-node.latest{
+    background:linear-gradient(135deg,#A29BFE,#6C5CE7);
+    border-color:rgba(255,255,255,0.18);
+    box-shadow:0 0 0 4px rgba(162,155,254,0.18),0 0 18px rgba(108,92,231,0.4);
+  }
+  .pr-node svg{width:11px;height:11px;color:#fff}
+
+  /* ========= 슬라이더 (자간/줄간격) ========= */
+  .b-slider{appearance:none;height:6px;border-radius:999px;background:rgba(45,48,65,0.7);outline:none;cursor:pointer}
+  .b-slider::-webkit-slider-thumb{
+    appearance:none;width:16px;height:16px;border-radius:999px;
+    background:var(--accent-sub);border:2px solid var(--bg-card);box-shadow:0 0 0 1px rgba(108,92,231,0.4);
+    cursor:pointer;
+  }
+
+  /* ========= 사이드바 + 버전 툴팁 시연 ========= */
+  .sb-stub{
+    width:64px;background:linear-gradient(180deg,rgba(108,92,231,0.05) 0%,rgba(162,155,254,0.10) 100%),var(--bg-card);
+    border-right:1px solid var(--bg-border);
+    height:480px;border-radius:14px;
+    position:relative;display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:10px;
+  }
+  .sb-stub .nav-icon{
+    width:40px;height:40px;border-radius:10px;color:var(--text-secondary);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    transition:background .15s ease,color .15s ease;
+  }
+  .sb-stub .nav-icon:hover{color:var(--text-primary);background:rgba(45,48,65,0.4)}
+  .sb-stub .nav-icon.active{background:rgba(108,92,231,0.20);color:var(--accent)}
+  .sb-stub .version-pill{
+    margin-top:auto;padding:4px 8px;border:1px solid rgba(45,48,65,0.4);border-radius:7px;
+    font-family:'JetBrains Mono',monospace;font-size:11px;color:rgba(139,141,163,0.7);cursor:pointer;
+    transition:all .15s ease;position:relative;
+  }
+  .sb-stub .version-pill:hover{color:var(--text-primary);background:rgba(45,48,65,0.35)}
+  .sb-stub .version-pill.has-update{
+    color:var(--accent-sub);background:rgba(108,92,231,0.10);
+    border-color:rgba(108,92,231,0.25);
+    box-shadow:0 0 18px rgba(108,92,231,0.14);
+  }
+  .sb-stub .version-pill.has-update::after{
+    content:'';position:absolute;right:-3px;top:-3px;width:8px;height:8px;border-radius:999px;
+    background:#FDCB6E;box-shadow:0 0 0 4px rgba(253,203,110,0.13);
+  }
+
+  .floating-tip{
+    position:absolute;left:calc(100% + 12px);top:50%;transform:translateY(-50%);
+    background:rgba(26,29,39,0.97);border:1px solid rgba(45,48,65,0.85);border-radius:10px;
+    padding:10px 14px;min-width:240px;max-width:300px;box-shadow:0 18px 40px rgba(0,0,0,0.45);
+    font-size:12px;line-height:1.55;color:var(--text-primary);
+    opacity:0;pointer-events:none;transition:opacity .15s ease, transform .18s ease;
+    transform:translate(4px,-50%);z-index:30;
+  }
+  .floating-tip.show{opacity:1;transform:translate(0,-50%)}
+  .floating-tip::before{
+    content:'';position:absolute;right:100%;top:50%;transform:translateY(-50%);
+    width:0;height:0;border-style:solid;border-width:7px 8px 7px 0;
+    border-color:transparent rgba(45,48,65,0.85) transparent transparent;
+  }
+  .floating-tip .label-key{font-size:10.5px;text-transform:uppercase;letter-spacing:0.14em;color:rgba(162,155,254,0.7);margin-bottom:4px}
+  .floating-tip .row{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--text-secondary)}
+  .floating-tip .row b{color:var(--text-primary);font-weight:500}
+
+  /* ========= 분석 모달 카드 ========= */
+  .insight-card{
+    background:rgba(15,17,23,0.65);border:1px solid rgba(45,48,65,0.6);border-radius:14px;
+    padding:18px;
+  }
+  .bigmap-cell{aspect-ratio:1/1;border-radius:2px}
+
+  /* ========= 자간/줄간격 미리보기 박스 ========= */
+  .preview-box{
+    background:rgba(15,17,23,0.6);border:1px dashed rgba(45,48,65,0.7);border-radius:10px;
+    padding:14px 16px;color:var(--text-primary);font-size:13px;
+    transition:line-height .15s ease, letter-spacing .15s ease;
+  }
+
+  /* ========= 인사이트 배너 ========= */
+  .insight-banner{
+    display:flex;align-items:center;gap:8px;
+    background:rgba(108,92,231,0.08);border:1px solid rgba(108,92,231,0.20);
+    border-radius:10px;padding:9px 12px;font-size:12.5px;color:var(--text-primary);
+    cursor:pointer;transition:background .15s ease;
+  }
+  .insight-banner:hover{background:rgba(108,92,231,0.13)}
+
+  /* ========= 셀 호버 툴팁 ========= */
+  .cell-tip{
+    position:fixed;z-index:80;
+    background:rgba(26,29,39,0.97);border:1px solid rgba(45,48,65,0.85);border-radius:10px;
+    padding:10px 12px;min-width:160px;font-size:11.5px;
+    color:var(--text-primary);box-shadow:0 12px 32px rgba(0,0,0,0.45);
+    pointer-events:none;opacity:0;transition:opacity .12s ease;
+    transform:translate(-50%,calc(-100% - 10px));
+  }
+  .cell-tip.show{opacity:1}
+
+  /* ========= 토글 화살표 효과 ========= */
+  @keyframes slideRange{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:translateX(0)}}
+  .range-label-anim{animation:slideRange .2s ease}
+</style>
+</head>
+<body>
+
+<div class="flex min-h-screen">
+  <!-- ===================== 좌측 네비게이션 ===================== -->
+  <nav class="w-64 border-r border-[var(--bg-border)] flex flex-col p-4 gap-1 sticky top-0 h-screen">
+    <div class="px-3 pb-4 mb-1 border-b border-[var(--bg-border)]">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold"
+             style="background:linear-gradient(135deg,#6C5CE7,#A29BFE);box-shadow:0 4px 12px rgba(108,92,231,0.4)">B</div>
+        <div>
+          <div class="text-sm font-semibold tracking-tight">B flow</div>
+          <div class="text-[10.5px] text-[var(--text-secondary)]">UX 폴리싱 시안 · 2026-05-09</div>
+        </div>
+      </div>
+    </div>
+
+    <button data-target="pane-recent" class="nav-item active text-left px-3 py-2.5 rounded-lg text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(45,48,65,0.3)] border-l-2 border-transparent transition-colors">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-[var(--accent-sub)]"></span>
+        <span>① 최근 작업 위젯</span>
+      </div>
+      <div class="text-[10.5px] text-[var(--text-secondary)]/70 mt-0.5 pl-3.5">시간 토글 + 라벨 + 히트맵 클릭</div>
+    </button>
+
+    <button data-target="pane-analysis" class="nav-item text-left px-3 py-2.5 rounded-lg text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(45,48,65,0.3)] border-l-2 border-transparent transition-colors">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#A29BFE]"></span>
+        <span>② 활동 분석 모달</span>
+      </div>
+      <div class="text-[10.5px] text-[var(--text-secondary)]/70 mt-0.5 pl-3.5">3개 인사이트 카드 (1년치)</div>
+    </button>
+
+    <button data-target="pane-spacing" class="nav-item text-left px-3 py-2.5 rounded-lg text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(45,48,65,0.3)] border-l-2 border-transparent transition-colors">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#FDCB6E]"></span>
+        <span>③ 자간/줄간격 미리보기</span>
+      </div>
+      <div class="text-[10.5px] text-[var(--text-secondary)]/70 mt-0.5 pl-3.5">슬라이더 + 장문 단락</div>
+    </button>
+
+    <button data-target="pane-update" class="nav-item text-left px-3 py-2.5 rounded-lg text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(45,48,65,0.3)] border-l-2 border-transparent transition-colors">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#00B894]"></span>
+        <span>④ 업데이트 내역 모달</span>
+      </div>
+      <div class="text-[10.5px] text-[var(--text-secondary)]/70 mt-0.5 pl-3.5">PR 타임라인 + 높이 고정</div>
+    </button>
+
+    <button data-target="pane-version" class="nav-item text-left px-3 py-2.5 rounded-lg text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(45,48,65,0.3)] border-l-2 border-transparent transition-colors">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#74B9FF]"></span>
+        <span>⑤ 버전 버튼 호버 툴팁</span>
+      </div>
+      <div class="text-[10.5px] text-[var(--text-secondary)]/70 mt-0.5 pl-3.5">사이드바 우측 floating</div>
+    </button>
+
+    <div class="mt-auto px-3 pt-4 border-t border-[var(--bg-border)] text-[10.5px] text-[var(--text-secondary)]/70 leading-relaxed">
+      <div class="text-[var(--accent-sub)] font-medium mb-1">시안 사용법</div>
+      각 시안은 인터랙션 가능합니다. 토글/슬라이더/모달을 직접 눌러보세요. 데이터는 실제 형식이지만 임의 더미값이에요.
+    </div>
+  </nav>
+
+  <!-- ===================== 우측 콘텐츠 영역 ===================== -->
+  <main class="flex-1 p-8 max-w-[1400px]">
+
+    <!-- ========================================================= -->
+    <!-- 시안 ① 최근 작업 위젯 -->
+    <!-- ========================================================= -->
+    <section id="pane-recent" class="pane active">
+      <header class="mb-6">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">시안 ①</div>
+        <h1 class="text-2xl font-bold mt-1">최근 작업 위젯 — 시간 토글 + 라벨 개선 + 히트맵 클릭</h1>
+        <p class="text-sm text-[var(--text-secondary)] mt-2 leading-relaxed">
+          ① 헤더에 <b class="text-[var(--text-primary)]">7일 / 한달 / 1년</b> 단위 토글 + 좌우 화살표 추가 ·
+          ② 씬 라벨을 <span class="scene-chip"><span>그림자국</span><span class="sep">·</span><span>E</span><span class="sep">·</span><span>#15</span></span> 형태로 ·
+          ③ 히트맵 셀 클릭 시 피드 자동 스크롤 + 하이라이트
+        </p>
+      </header>
+
+      <!-- 위젯 본체 -->
+      <div class="widget-card max-w-[640px] overflow-hidden">
+        <!-- 위젯 헤더 -->
+        <div class="px-4 py-3 border-b border-[var(--bg-border)]/60 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-3.5 h-3.5 text-[var(--accent-sub)]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <h3 class="text-[13px] font-semibold text-[var(--text-primary)]">최근 작업</h3>
+          </div>
+
+          <!-- 시간 단위 토글 + 화살표 + 분석 버튼 -->
+          <div class="flex items-center gap-2">
+            <!-- 좌우 화살표 + 라벨 + 오늘로 -->
+            <div class="flex items-center gap-0.5 mr-1">
+              <button class="icon-btn" id="rangeBack" title="이전 기간">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <div id="rangeLabel" class="text-[11px] font-medium text-[var(--text-primary)] min-w-[100px] text-center range-label-anim">이번 주 (5/4–5/10)</div>
+              <button class="icon-btn" id="rangeFwd" title="다음 기간">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <!-- 현재 기간으로 즉시 이동 (currentRangeIdx > 0 일 때만 표시) -->
+              <button id="rangeToday" class="ml-1 px-1.5 py-1 rounded-md text-[10px] font-semibold text-[var(--accent-sub)] bg-[rgba(108,92,231,0.10)] border border-[rgba(108,92,231,0.25)] hover:bg-[rgba(108,92,231,0.18)] cursor-pointer transition-colors hidden" title="현재 기간으로 즉시 이동">
+                오늘
+              </button>
+            </div>
+
+            <!-- 단위 토글 -->
+            <div class="time-toggle" id="timeToggle">
+              <button data-unit="week" class="active">주</button>
+              <button data-unit="month">달</button>
+              <button data-unit="year">년</button>
+            </div>
+
+            <!-- 분석 버튼 -->
+            <button id="openAnalysisBtn" class="icon-btn" title="활동 분석 보기">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 3v18h18"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 14l4-4 4 4 6-6"/>
+              </svg>
+            </button>
+
+            <button class="icon-btn" title="팝아웃">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 3h7v7M21 3l-9 9M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 인사이트 배너 -->
+        <div class="px-4 pt-3 pb-1.5">
+          <div class="insight-banner" id="insightBanner">
+            <svg class="w-3.5 h-3.5 text-[var(--accent-sub)]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span id="insightText">이번 주 가장 활발: 화요일 14–16시 (32건)</span>
+          </div>
+        </div>
+
+        <!-- 골든타임 시각화 (히트맵) -->
+        <div class="px-4 pt-2 pb-1">
+          <div id="heatmapWrap" class="grid items-center gap-[2px]" style="grid-template-columns:22px repeat(24,1fr)"></div>
+        </div>
+
+        <!-- 4그룹 필터 칩 -->
+        <div class="px-4 pt-3 pb-2 flex items-center gap-1.5 flex-wrap">
+          <button class="glass-pill active px-2.5 py-1 text-[11px] cursor-pointer">전체 122</button>
+          <button class="glass-pill active px-2.5 py-1 text-[11px] flex items-center gap-1.5 cursor-pointer">
+            <span class="w-1.5 h-1.5 rounded-full" style="background:#74B9FF"></span>작업 진행 64
+          </button>
+          <button class="glass-pill active px-2.5 py-1 text-[11px] flex items-center gap-1.5 cursor-pointer">
+            <span class="w-1.5 h-1.5 rounded-full" style="background:#FF8FA3"></span>메모/댓글 32
+          </button>
+          <button class="glass-pill active px-2.5 py-1 text-[11px] flex items-center gap-1.5 cursor-pointer">
+            <span class="w-1.5 h-1.5 rounded-full" style="background:#6FCF97"></span>씬 16
+          </button>
+          <button class="glass-pill px-2.5 py-1 text-[11px] flex items-center gap-1.5 cursor-pointer text-[var(--text-secondary)]">
+            <span class="w-1.5 h-1.5 rounded-full" style="background:#95A5A6"></span>기타 10
+          </button>
+        </div>
+
+        <!-- 피드 라벨 -->
+        <div class="px-4 pt-1.5 pb-1 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]/60">최근 활동</div>
+
+        <!-- 셀 클릭 필터 배너 (히트맵 셀 클릭 시 노출) -->
+        <div id="cellFilterBanner" class="mx-4 mb-2 hidden items-center justify-between gap-2 px-3 py-2 rounded-lg" style="background:rgba(253,203,110,0.10);border:1px solid rgba(253,203,110,0.30)">
+          <div class="flex items-center gap-2 text-[11.5px]">
+            <svg class="w-3.5 h-3.5 text-[#FDCB6E]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="9"/></svg>
+            <span class="text-[var(--text-primary)]"><b id="cellFilterTitle">화 14시</b> 활동만 강조 중</span>
+            <span id="cellFilterCount" class="text-[var(--text-secondary)]">· 5건</span>
+          </div>
+          <button id="cellFilterClear" class="text-[11px] text-[var(--text-secondary)] hover:text-[#FDCB6E] cursor-pointer flex items-center gap-1 px-2 py-1 rounded hover:bg-[rgba(253,203,110,0.10)] transition-colors">
+            전체 보기
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <!-- 피드 -->
+        <div id="feedList" class="max-h-[420px] overflow-y-auto"></div>
+      </div>
+
+      <!-- 안내 -->
+      <div class="mt-6 max-w-[640px] text-[12px] text-[var(--text-secondary)] leading-relaxed space-y-1.5">
+        <div><b class="text-[var(--text-primary)]">시도해 보세요:</b></div>
+        <div>· <b class="text-[var(--accent-sub)]">단위 토글</b> 클릭 → 주/달/년 전환되며 라벨이 바뀝니다</div>
+        <div>· <b class="text-[var(--accent-sub)]">화살표</b> 클릭 → 한 단위씩 이전/다음으로 이동</div>
+        <div>· <b class="text-[var(--accent-sub)]">히트맵 셀</b> 클릭 → 피드에서 해당 시간대 활동이 노란색으로 펄스 + 자동 스크롤</div>
+        <div>· <b class="text-[var(--accent-sub)]">분석 버튼</b> (📊) 클릭 → 1년치 분석 모달 열림</div>
+        <div>· <b class="text-[var(--accent-sub)]">피드 항목</b> 클릭 → 실제 앱에서는 해당 씬으로 이동 (시안에서는 토스트만)</div>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 시안 ② 활동 분석 모달 -->
+    <!-- ========================================================= -->
+    <section id="pane-analysis" class="pane">
+      <header class="mb-6">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">시안 ②</div>
+        <h1 class="text-2xl font-bold mt-1">활동 분석 모달 — 1년치 인사이트 카드</h1>
+        <p class="text-sm text-[var(--text-secondary)] mt-2 leading-relaxed">
+          위젯 헤더의 <b class="text-[var(--text-primary)]">📊 분석 버튼</b>을 누르면 열리는 큰 모달.
+          한솔님이 고른 3가지 인사이트를 카드로 배치 — <b>1년치 종합 히트맵 / 씬→완료 평균 소요 시간 / 담당자별 활동 비중</b>.
+        </p>
+      </header>
+
+      <button id="openAnalysisBtn2" class="px-4 py-2 rounded-xl bg-[rgba(108,92,231,0.18)] text-[var(--accent-sub)] border border-[rgba(108,92,231,0.32)] text-sm font-semibold cursor-pointer hover:bg-[rgba(108,92,231,0.25)] transition-colors">
+        분석 모달 열기
+      </button>
+
+      <!-- 미리보기 (인라인 표시도 함께) -->
+      <div class="mt-8">
+        <div class="text-[11px] uppercase tracking-wider text-[var(--text-secondary)] mb-3">인라인 미리보기 (모달 내용 그대로)</div>
+        <div id="analysisInline"></div>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 시안 ③ 자간/줄간격 미리보기 -->
+    <!-- ========================================================= -->
+    <section id="pane-spacing" class="pane">
+      <header class="mb-6">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">시안 ③</div>
+        <h1 class="text-2xl font-bold mt-1">자간/줄간격 — 슬라이더 아래 장문 미리보기</h1>
+        <p class="text-sm text-[var(--text-secondary)] mt-2 leading-relaxed">
+          기존 설정창 톤(아이콘 + 제목 + 보더 카드) 그대로 유지.
+          슬라이더 아래에 <b class="text-[var(--text-primary)]">실제 메모 길이의 한글 단락</b>을 붙여 두어 조정 즉시 가독성 변화를 확인.
+          각 슬라이더 옆에 <b class="text-[var(--text-primary)]">기본값 마커</b> 표시.
+        </p>
+      </header>
+
+      <!-- 설정 섹션 카드 -->
+      <div class="widget-card max-w-[680px] p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-[rgba(108,92,231,0.12)] flex items-center justify-center">
+              <svg class="w-[18px] h-[18px] text-[var(--accent)]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 3v18M19 3v18M5 7h14M5 12h14M5 17h14"/></svg>
+            </div>
+            <div>
+              <div class="text-[14px] font-semibold">간격</div>
+              <div class="text-[11px] text-[var(--text-secondary)]">긴 메모·댓글·씬 설명 영역의 가독성을 조정합니다</div>
+            </div>
+          </div>
+          <button id="spacingResetBtn" class="hidden flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[rgba(45,48,65,0.3)] transition-colors cursor-pointer">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/></svg>
+            기본값 복원
+          </button>
+        </div>
+
+        <!-- 줄간격 -->
+        <div class="space-y-4">
+          <div>
+            <div class="flex items-center gap-3">
+              <div class="w-16 shrink-0">
+                <div class="text-xs font-medium text-[var(--text-primary)]">줄간격</div>
+                <div class="text-[10px] text-[var(--text-secondary)]/60">위·아래 여백</div>
+              </div>
+              <div class="flex-1 relative">
+                <input id="lhSlider" type="range" min="1.2" max="2.0" step="0.05" value="1.55" class="b-slider w-full"/>
+                <!-- 기본값 마커 (1.55 = 0.4375 위치) -->
+                <div class="absolute top-[14px] w-px h-2 bg-[var(--accent-sub)]/60" style="left:43.75%"></div>
+                <div class="absolute top-[18px] -translate-x-1/2 text-[9px] text-[var(--accent-sub)]/70" style="left:43.75%">기본 1.55</div>
+              </div>
+              <span id="lhValue" class="w-12 text-right text-xs mono text-[var(--text-secondary)]/60">1.55</span>
+            </div>
+          </div>
+
+          <!-- 자간 -->
+          <div>
+            <div class="flex items-center gap-3">
+              <div class="w-16 shrink-0">
+                <div class="text-xs font-medium text-[var(--text-primary)]">자간</div>
+                <div class="text-[10px] text-[var(--text-secondary)]/60">글자 사이</div>
+              </div>
+              <div class="flex-1 relative">
+                <input id="lsSlider" type="range" min="-0.05" max="0.10" step="0.005" value="0" class="b-slider w-full"/>
+                <!-- 기본값 마커 (0 = 33.3% 위치) -->
+                <div class="absolute top-[14px] w-px h-2 bg-[var(--accent-sub)]/60" style="left:33.33%"></div>
+                <div class="absolute top-[18px] -translate-x-1/2 text-[9px] text-[var(--accent-sub)]/70" style="left:33.33%">기본 0</div>
+              </div>
+              <span id="lsValue" class="w-12 text-right text-xs mono text-[var(--text-secondary)]/60">0.000</span>
+            </div>
+          </div>
+
+          <!-- 미리보기 단락 -->
+          <div class="pt-4">
+            <div class="text-[10.5px] uppercase tracking-wider text-[var(--text-secondary)]/60 mb-1.5">미리보기</div>
+            <div id="spacingPreview" class="preview-box" style="line-height:1.55;letter-spacing:0em">
+              EP02 그림자국 · E파트 #15 메모 ─ 캐릭터 시선이 카메라를 따라가야 합니다.
+              배경 라인 정리 후 LO 단계에서 한 번 더 컬러 체크 부탁드려요. 액팅 쪽
+              민수 담당이라 슬랙으로 따로 한 번 말씀드릴게요. 컷 길이가 짧아서 키 5장
+              정도면 충분할 것 같고, 마지막에 fade-out 처리는 컴프 단계에서 같이
+              잡으면 좋겠습니다. 기본값(줄간격 1.55, 자간 0)은 한글 가독성 테스트
+              결과 가장 균형이 좋았습니다 — 길게 적는 메모/리비전 노트에서 효과가
+              가장 큽니다.
+            </div>
+            <div class="mt-2 text-[10.5px] text-[var(--text-secondary)]/60 leading-relaxed">
+              조정 즉시 위 단락의 줄간격과 자간이 바뀝니다. 만족스러운 값을 찾으면 다른 창에도 동기화됩니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 시안 ④ 업데이트 모달 (PR 타임라인) -->
+    <!-- ========================================================= -->
+    <section id="pane-update" class="pane">
+      <header class="mb-6">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">시안 ④</div>
+        <h1 class="text-2xl font-bold mt-1">업데이트 내역 모달 — GitHub PR 타임라인 스타일</h1>
+        <p class="text-sm text-[var(--text-secondary)] mt-2 leading-relaxed">
+          이전 카드형 → <b class="text-[var(--text-primary)]">세로 타임라인</b>으로 변경. 각 버전이 점·연결선으로 이어지고 최신은 글로우 강조.
+          <br/>새로고침 시 <b class="text-[var(--text-primary)]">모달 높이가 86vh로 고정</b>되어 외곽이 흔들리지 않고, 내부 타임라인만 스크롤됩니다.
+        </p>
+      </header>
+
+      <button id="openUpdateBtn" class="px-4 py-2 rounded-xl bg-[rgba(108,92,231,0.18)] text-[var(--accent-sub)] border border-[rgba(108,92,231,0.32)] text-sm font-semibold cursor-pointer hover:bg-[rgba(108,92,231,0.25)] transition-colors">
+        업데이트 내역 모달 열기
+      </button>
+
+      <!-- 인라인 미리보기도 같이 -->
+      <div class="mt-8">
+        <div class="text-[11px] uppercase tracking-wider text-[var(--text-secondary)] mb-3">인라인 미리보기</div>
+        <div id="updateInline"></div>
+      </div>
+    </section>
+
+    <!-- ========================================================= -->
+    <!-- 시안 ⑤ 사이드바 + 버전 호버 툴팁 -->
+    <!-- ========================================================= -->
+    <section id="pane-version" class="pane">
+      <header class="mb-6">
+        <div class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">시안 ⑤</div>
+        <h1 class="text-2xl font-bold mt-1">버전 버튼 호버 — 우측 floating 툴팁</h1>
+        <p class="text-sm text-[var(--text-secondary)] mt-2 leading-relaxed">
+          현재는 브라우저 기본 <code class="mono text-[var(--accent-sub)] text-[11px] px-1.5 py-0.5 rounded bg-[rgba(108,92,231,0.10)]">title</code> 속성이라
+          텍스트가 길어지면 사이드바 영역 밖으로 삐져나옵니다. 사이드바 다른 항목과 동일한 패턴(우측 floating 툴팁)으로 통일.
+        </p>
+      </header>
+
+      <div class="flex gap-8 items-start">
+        <!-- 사이드바 시연 -->
+        <div class="sb-stub">
+          <div class="nav-icon active">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          </div>
+          <div class="nav-icon">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+          </div>
+          <div class="nav-icon">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3" cy="6" r="1"/><circle cx="3" cy="12" r="1"/><circle cx="3" cy="18" r="1"/></svg>
+          </div>
+          <div class="nav-icon">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M2 21v-2a4 4 0 0 1 3-3.87"/><circle cx="17" cy="7" r="4"/></svg>
+          </div>
+
+          <!-- 버전 버튼 + 호버 시 우측 툴팁 -->
+          <div class="version-pill has-update" id="versionPill">
+            v1.22.20
+            <!-- floating 툴팁 -->
+            <div class="floating-tip" id="versionTip">
+              <div class="label-key">새 버전 v1.23.0 준비됨</div>
+              <div class="text-[12.5px] text-[var(--text-primary)] mb-2 leading-relaxed">
+                <span class="text-[var(--accent-sub)]">⬇</span> 설치 파일이 로컬에 준비되었습니다. 클릭하면 업데이트 내역 모달이 열립니다.
+              </div>
+              <div class="row"><span>현재 버전</span><b class="mono">v1.22.20</b></div>
+              <div class="row"><span>준비된 버전</span><b class="mono text-[var(--accent-sub)]">v1.23.0</b></div>
+              <div class="row"><span>빌드 시각</span><b>05/09 14:32</b></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 설명 -->
+        <div class="flex-1 max-w-[480px] space-y-4 text-[13px] text-[var(--text-secondary)] leading-relaxed">
+          <div class="widget-card p-5 space-y-3">
+            <div class="text-[var(--text-primary)] font-semibold text-[14px]">왼쪽 v1.22.20 위에 마우스를 올려 보세요</div>
+            <div class="text-[12px]">
+              · 사이드바 우측에 floating 툴팁이 나타납니다 (브라우저 기본 title 사용 X)<br/>
+              · 다른 사이드바 항목들과 동일한 floating 패턴<br/>
+              · 새 버전이 있으면 핵심 정보(현재/준비/빌드 시각) 한 눈에<br/>
+              · 클릭하면 시안 ④(업데이트 내역 모달)가 열림
+            </div>
+          </div>
+          <div class="widget-card p-5 space-y-3">
+            <div class="text-[var(--text-primary)] font-semibold text-[13px]">상태별 톤</div>
+            <div class="space-y-2 text-[12px]">
+              <div class="flex items-center gap-3">
+                <span class="version-pill has-update" style="margin:0">v1.22.20</span>
+                <span>새 버전 준비됨 — 보라 배지 + 황색 점</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="version-pill" style="margin:0;color:#FDCB6E;background:rgba(253,203,110,0.10);border-color:rgba(253,203,110,0.25)">v1.22.20</span>
+                <span>업데이트 실패/중단 — 황색 강조</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="version-pill" style="margin:0">v1.22.20</span>
+                <span>최신 상태 — 무채색 자연 톤</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ===================== 분석 모달 ===================== -->
+<div class="modal-backdrop" id="analysisModal">
+  <div class="modal-shell w-full max-w-[1080px] max-h-[88vh] overflow-hidden flex flex-col">
+    <div class="px-7 py-5 border-b border-[var(--bg-border)]/60 flex items-start justify-between">
+      <div>
+        <div class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">Activity Insights</div>
+        <h2 class="text-xl font-bold tracking-tight mt-1.5">활동 분석</h2>
+        <p class="text-sm text-[var(--text-secondary)] mt-1 leading-relaxed">최근 1년치 활동 데이터로 본 팀 작업 패턴.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <select class="bg-[rgba(45,48,65,0.4)] border border-[var(--bg-border)] rounded-lg px-3 py-2 text-[12px] text-[var(--text-primary)]">
+          <option>최근 1년</option>
+          <option>최근 6개월</option>
+          <option>최근 3개월</option>
+        </select>
+        <button onclick="closeModal('analysisModal')" class="icon-btn"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+    </div>
+    <div class="p-7 overflow-y-auto" id="analysisModalBody"></div>
+  </div>
+</div>
+
+<!-- ===================== 업데이트 모달 ===================== -->
+<div class="modal-backdrop" id="updateModal">
+  <div class="modal-shell w-full max-w-[760px] flex flex-col" id="updateModalShell" style="height:86vh">
+    <div class="px-6 py-5 border-b border-[var(--bg-border)]/60 flex items-start justify-between gap-4">
+      <div>
+        <div class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">Version Center</div>
+        <h2 class="text-xl font-bold tracking-tight mt-1.5">업데이트 내역</h2>
+        <p class="text-sm text-[var(--text-secondary)] mt-1 leading-relaxed">현재 버전, 최신 버전, 버전별 변경 내역을 한 줄 타임라인으로 확인합니다.</p>
+        <p class="text-[11px] text-[var(--text-secondary)]/70 mt-1" id="updateLastChecked">마지막 확인 14:32:15</p>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button id="updateRefreshBtn" class="inline-flex h-9 items-center gap-2 rounded-xl border border-[rgba(108,92,231,0.32)] bg-[rgba(108,92,231,0.10)] text-[var(--accent-sub)] hover:bg-[rgba(108,92,231,0.18)] px-3 text-xs font-semibold transition-colors cursor-pointer">
+          <svg id="updateRefreshIcon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          새로고침
+        </button>
+        <button onclick="closeModal('updateModal')" class="icon-btn"><svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+    </div>
+
+    <!-- 상단 카드 (현재 / 최신) - 높이 고정 -->
+    <div class="px-6 pt-5 pb-4 grid grid-cols-2 gap-3 shrink-0">
+      <div class="rounded-2xl border border-[var(--bg-border)]/70 bg-[rgba(15,17,23,0.45)] p-4">
+        <div class="text-xs text-[var(--text-secondary)]">현재 사용 중</div>
+        <div class="mt-2 text-2xl font-bold tracking-tight mono">v1.22.20</div>
+        <div class="mt-2 text-[11px] text-[var(--text-secondary)] leading-relaxed">지금 이 버전으로 작업하고 있습니다.</div>
+      </div>
+      <div class="rounded-2xl border border-[rgba(108,92,231,0.32)] bg-[rgba(108,92,231,0.10)] p-4 relative overflow-hidden">
+        <div class="text-xs text-[var(--text-secondary)]">준비된 최신 버전</div>
+        <div class="mt-2 flex items-center justify-between gap-2">
+          <div class="text-2xl font-bold mono text-[var(--accent-sub)] tracking-tight">v1.23.0</div>
+          <button class="px-3 py-1.5 rounded-full border border-[rgba(108,92,231,0.42)] bg-[rgba(108,92,231,0.18)] text-[var(--accent-sub)] text-[11px] font-semibold hover:bg-[rgba(108,92,231,0.28)] transition-colors cursor-pointer">
+            <span class="inline-flex items-center gap-1.5">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              즉시 적용 가능
+            </span>
+          </button>
+        </div>
+        <div class="mt-2 text-[11px] text-[var(--text-secondary)] leading-relaxed">설치 파일이 로컬에 준비되었습니다. 적용하면 별도 진행 창이 뜬 뒤 새 버전으로 다시 열립니다.</div>
+        <div class="mt-2 text-[11px] text-[var(--text-secondary)]/70">빌드 시각 05/09 14:32</div>
+      </div>
+    </div>
+
+    <!-- 타임라인 영역 - 내부 스크롤 (모달 자체 높이 고정이라 새로고침해도 안 흔들림) -->
+    <div class="px-6 pt-2 pb-3 shrink-0 flex items-center justify-between border-t border-[var(--bg-border)]/40">
+      <div>
+        <div class="text-sm font-semibold">버전별 업데이트 내역</div>
+        <div class="text-[11px] text-[var(--text-secondary)]">최근 변경부터 PR 타임라인 형태로 누적 표시</div>
+      </div>
+      <button id="toggleAllVersions" class="text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-sub)] flex items-center gap-1 cursor-pointer">
+        이전 버전 더 보기
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-6 pb-6">
+      <div class="pr-rail pl-9 pt-2" id="prTimeline"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 셀 호버 툴팁 -->
+<div class="cell-tip" id="cellTip"></div>
+
+<!-- 토스트 -->
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl bg-[var(--bg-card)] border border-[var(--bg-border)] text-[12.5px] text-[var(--text-primary)] shadow-2xl opacity-0 transition-all duration-200 z-[100] pointer-events-none"></div>
+
+<script>
+/* ============================== 데이터 ============================== */
+
+// 24x7 (요일x시간) 임의 더미 — 화요일 14-15시가 최대
+const DAYS = ['월','화','수','목','금','토','일'];
+
+// 시드 기반 의사 난수 — 같은 키는 항상 같은 패턴 (기간 변경 시 데이터가 일관되게 변동)
+function seedRand(seed){
+  let s = seed;
+  return ()=>{ s = (s*9301+49297)%233280; return s/233280; };
+}
+
+function genHeatmap(seed, intensity=1){
+  const r = seedRand(seed);
+  const grid = Array.from({length:7},()=>Array.from({length:24},()=>0));
+  for(let h=0;h<24;h++){
+    grid[0][h] = h>=10&&h<=18 ? Math.floor(r()*4*intensity)+1 : Math.floor(r()*2);
+    grid[1][h] = h>=13&&h<=16 ? Math.floor(8*intensity)+Math.floor(r()*8) : (h>=10?2+Math.floor(r()*4):Math.floor(r()*2));
+    grid[2][h] = h>=11&&h<=17 ? 3+Math.floor(r()*5*intensity) : Math.floor(r()*2);
+    grid[3][h] = h>=14&&h<=18 ? Math.floor(4*intensity)+Math.floor(r()*6) : Math.floor(r()*2);
+    grid[4][h] = h>=10&&h<=15 ? 3+Math.floor(r()*4*intensity) : Math.floor(r()*2);
+    grid[5][h] = h>=14&&h<=20 ? 1+Math.floor(r()*3) : 0;
+    grid[6][h] = 0;
+  }
+  return grid;
+}
+
+let HEATMAP_W = genHeatmap(101, 1);
+
+const STAGE_COLOR = {lo:'#74B9FF',done:'#A29BFE',review:'#FDCB6E',png:'#00B894'};
+const ACTION_COLOR = {memo:'#FF8FA3',comment:'#FFA94D',revision:'#4DD0E1',scene_add:'#6FCF97',scene_del:'#FF7675',etc:'#95A5A6'};
+
+// 피드 더미 (기간별로 다른 세트)
+const FEED_BY_KEY = {
+  // 이번 주 — 화요일 14시에 5건, 화 13시 1건, 어제(월) 17~18시, 토요일 11시
+  'week:0': [
+    {id:'f1', user:'한솔', self:true, action:'lo', verb:'LO 완료', ep:'그림자국', part:'E', cut:'#15', day:1, hour:14, time:'방금'},
+    {id:'f2', user:'한솔', self:true, action:'memo', verb:'메모 작성', ep:'그림자국', part:'E', cut:'#16', day:1, hour:14, time:'2분 전'},
+    {id:'f3', user:'민수', self:false, action:'done', verb:'완료', ep:'그림자국', part:'E', cut:'#15', day:1, hour:14, time:'5분 전'},
+    {id:'f4', user:'민수', self:false, action:'comment', verb:'댓글 작성', ep:'그림자국', part:'B', cut:'#22', day:1, hour:14, time:'8분 전'},
+    {id:'f5', user:'지영', self:false, action:'review', verb:'검수 완료', ep:'그림자국', part:'A', cut:'#03', day:1, hour:14, time:'14분 전'},
+    {id:'f6', user:'지영', self:false, action:'scene_add', verb:'씬 추가', ep:'겨울나무', part:'C', cut:'#01', day:1, hour:13, time:'1시간 전'},
+    {id:'f7', user:'성훈', self:false, action:'png', verb:'PNG 완료', ep:'그림자국', part:'E', cut:'#11', day:0, hour:18, time:'어제 18:23'},
+    {id:'f8', user:'한솔', self:true, action:'lo', verb:'LO 해제', ep:'겨울나무', part:'C', cut:'#02', day:0, hour:17, time:'어제 17:11'},
+    {id:'f9', user:'민수', self:false, action:'revision', verb:'리비전 등록', ep:'그림자국', part:'B', cut:'#22', day:0, hour:15, time:'어제 15:04'},
+    {id:'f10', user:'지영', self:false, action:'memo', verb:'메모 작성', ep:'겨울나무', part:'D', cut:'#08', day:5, hour:11, time:'2일 전'},
+    {id:'f11', user:'성훈', self:false, action:'done', verb:'완료', ep:'그림자국', part:'A', cut:'#06', day:5, hour:11, time:'2일 전'},
+  ],
+  // 지난 주
+  'week:1': [
+    {id:'p1', user:'한솔', self:true, action:'review', verb:'검수 완료', ep:'그림자국', part:'B', cut:'#08', day:3, hour:15, time:'4일 전'},
+    {id:'p2', user:'민수', self:false, action:'png', verb:'PNG 완료', ep:'그림자국', part:'A', cut:'#02', day:3, hour:15, time:'4일 전'},
+    {id:'p3', user:'성훈', self:false, action:'lo', verb:'LO 완료', ep:'겨울나무', part:'D', cut:'#11', day:2, hour:11, time:'5일 전'},
+    {id:'p4', user:'지영', self:false, action:'comment', verb:'댓글 작성', ep:'그림자국', part:'C', cut:'#04', day:2, hour:11, time:'5일 전'},
+    {id:'p5', user:'한솔', self:true, action:'memo', verb:'메모 작성', ep:'겨울나무', part:'B', cut:'#19', day:1, hour:10, time:'6일 전'},
+    {id:'p6', user:'성훈', self:false, action:'scene_add', verb:'씬 추가', ep:'겨울나무', part:'C', cut:'#02', day:0, hour:14, time:'7일 전'},
+  ],
+  // 한 달 전체
+  'month:0':[
+    {id:'m1', user:'한솔', self:true, action:'lo', verb:'LO 완료', ep:'그림자국', part:'E', cut:'#15', day:1, hour:14, time:'오늘'},
+    {id:'m2', user:'민수', self:false, action:'png', verb:'PNG 완료', ep:'그림자국', part:'C', cut:'#03', day:3, hour:16, time:'3일 전'},
+    {id:'m3', user:'지영', self:false, action:'review', verb:'검수 완료', ep:'겨울나무', part:'A', cut:'#11', day:2, hour:11, time:'1주 전'},
+    {id:'m4', user:'성훈', self:false, action:'done', verb:'완료', ep:'그림자국', part:'B', cut:'#22', day:0, hour:18, time:'1주 전'},
+    {id:'m5', user:'한솔', self:true, action:'memo', verb:'메모 작성', ep:'겨울나무', part:'D', cut:'#04', day:4, hour:13, time:'2주 전'},
+    {id:'m6', user:'준석', self:false, action:'revision', verb:'리비전 등록', ep:'그림자국', part:'A', cut:'#08', day:1, hour:15, time:'3주 전'},
+  ],
+  // 1년 전체 (대표 사례)
+  'year:0':[
+    {id:'y1', user:'한솔', self:true, action:'png', verb:'PNG 완료', ep:'그림자국', part:'E', cut:'#15', day:1, hour:14, time:'오늘'},
+    {id:'y2', user:'민수', self:false, action:'review', verb:'검수 완료', ep:'겨울나무', part:'C', cut:'#02', day:3, hour:16, time:'1개월 전'},
+    {id:'y3', user:'지영', self:false, action:'lo', verb:'LO 완료', ep:'그림자국', part:'A', cut:'#11', day:2, hour:11, time:'3개월 전'},
+    {id:'y4', user:'성훈', self:false, action:'scene_add', verb:'씬 추가', ep:'겨울나무', part:'D', cut:'#08', day:0, hour:18, time:'5개월 전'},
+    {id:'y5', user:'한솔', self:true, action:'memo', verb:'메모 작성', ep:'그림자국', part:'B', cut:'#04', day:4, hour:13, time:'9개월 전'},
+  ],
+};
+function getFeed(){
+  const key = `${currentUnit==='week'?'week':currentUnit==='month'?'month':'year'}:${currentRangeIdx===0?0:1}`;
+  return FEED_BY_KEY[key] || FEED_BY_KEY[`${currentUnit==='week'?'week':currentUnit==='month'?'month':'year'}:0`];
+}
+
+const ACTION_GROUP = {
+  lo:'progress',done:'progress',review:'progress',png:'progress',
+  memo:'memo',comment:'memo',revision:'memo',
+  scene_add:'scene',scene_del:'scene',
+  etc:'etc',
+};
+
+const ACTION_ICONS = {
+  lo:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>',
+  done:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>',
+  review:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  png:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.8 5.8 21 7 14 2 9.3 9 8.5"/></svg>',
+  memo:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
+  comment:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  revision:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 5.64 5.64L23 10"/></svg>',
+  scene_add:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  scene_del:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>',
+  etc:'<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/></svg>',
+};
+
+function colorFor(action){
+  if(['lo','done','review','png'].includes(action)) return STAGE_COLOR[action];
+  return ACTION_COLOR[action]||'#95A5A6';
+}
+
+function userColor(name){
+  let h=0; for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))%360;
+  return `linear-gradient(135deg,hsl(${h},70%,65%),hsl(${(h+30)%360},70%,75%))`;
+}
+
+/* ============================== 좌측 네비게이션 ============================== */
+document.querySelectorAll('.nav-item').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.target).classList.add('active');
+  });
+});
+
+/* ============================== 시안 ① 위젯 ============================== */
+// 시간 토글
+const TOGGLE_LABELS = {
+  week:['이번 주 (5/4–5/10)','지난 주 (4/27–5/3)','2주 전 (4/20–4/26)','3주 전 (4/13–4/19)'],
+  month:['이번 달 (5월)','지난 달 (4월)','3월','2월','1월'],
+  year:['2026년','2025년','2024년'],
+};
+const TODAY_LABEL = {week:'이번 주', month:'이번 달', year:'올해'};
+let currentUnit = 'week';
+let currentRangeIdx = 0;
+
+function refreshRangeLabel(){
+  const lbl = document.getElementById('rangeLabel');
+  const arr = TOGGLE_LABELS[currentUnit];
+  const idx = Math.min(currentRangeIdx, arr.length-1);
+  lbl.textContent = arr[idx];
+  lbl.classList.remove('range-label-anim');
+  void lbl.offsetWidth;
+  lbl.classList.add('range-label-anim');
+
+  // 인사이트 텍스트 (단위 + 기간 idx 별로)
+  const insight = document.getElementById('insightText');
+  if(currentUnit==='week'){
+    insight.textContent = idx===0
+      ? '이번 주 가장 활발: 화요일 14–16시 (32건)'
+      : `${arr[idx]} 정점: 목요일 15–17시 (24건)`;
+  }
+  if(currentUnit==='month'){
+    insight.textContent = idx===0
+      ? '5월 정점: 월·화 14–17시 (전체 41%)'
+      : `${arr[idx]} 정점: 화·수 13–16시 (전체 38%)`;
+  }
+  if(currentUnit==='year'){
+    insight.textContent = idx===0
+      ? '2026년 BG 활발 시기: 4–6월, 액팅: 9–11월'
+      : '2025년 정점: 11월 (시즌 마감 영향)';
+  }
+
+  // 다음 화살표 — currentRangeIdx==0이면 disabled (미래로 못 감)
+  const fwd = document.getElementById('rangeFwd');
+  fwd.disabled = currentRangeIdx === 0;
+  fwd.style.opacity = currentRangeIdx === 0 ? 0.25 : 1;
+  fwd.style.cursor = currentRangeIdx === 0 ? 'not-allowed' : 'pointer';
+
+  // "오늘" 버튼 — 현재 기간 아닐 때만 노출, 라벨도 단위별로
+  const todayBtn = document.getElementById('rangeToday');
+  if(currentRangeIdx === 0){
+    todayBtn.classList.add('hidden');
+  } else {
+    todayBtn.classList.remove('hidden');
+    todayBtn.textContent = TODAY_LABEL[currentUnit];
+  }
+
+  // 데이터(히트맵 + 피드) 함께 갱신 — 시드를 단위·기간 조합으로 결정해 일관된 패턴
+  const seed = (currentUnit.charCodeAt(0)*31 + currentRangeIdx*101) || 101;
+  const intensity = currentUnit==='year' ? 1.6 : currentUnit==='month' ? 1.25 : (idx===0?1:0.7);
+  HEATMAP_W = genHeatmap(seed, intensity);
+  renderHeatmap();
+  renderFeed();
+  clearCellFilter();
+}
+
+document.querySelectorAll('#timeToggle button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('#timeToggle button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentUnit = btn.dataset.unit;
+    currentRangeIdx = 0;
+    refreshRangeLabel();
+  });
+});
+
+document.getElementById('rangeBack').addEventListener('click',()=>{
+  if(currentRangeIdx<TOGGLE_LABELS[currentUnit].length-1) currentRangeIdx++;
+  refreshRangeLabel();
+});
+document.getElementById('rangeFwd').addEventListener('click',()=>{
+  if(currentRangeIdx>0) currentRangeIdx--;
+  refreshRangeLabel();
+});
+document.getElementById('rangeToday').addEventListener('click',()=>{
+  if(currentRangeIdx === 0) return;
+  currentRangeIdx = 0;
+  refreshRangeLabel();
+  showToast(`${TODAY_LABEL[currentUnit]}(으)로 이동했어요`);
+});
+
+// 히트맵 렌더
+function renderHeatmap(){
+  const wrap = document.getElementById('heatmapWrap');
+  let html = '<div></div>';
+  for(let h=0;h<24;h++){
+    html += `<div class="text-[9px] text-[var(--text-secondary)]/55 text-center">${[0,6,12,18].includes(h)?h:''}</div>`;
+  }
+  for(let d=0;d<7;d++){
+    html += `<div class="text-[10px] text-[var(--text-secondary)] text-right pr-1.5">${DAYS[d]}</div>`;
+    for(let h=0;h<24;h++){
+      const v = HEATMAP_W[d][h];
+      let lv=0; if(v===0)lv=0; else if(v<=2)lv=1; else if(v<=5)lv=2; else if(v<=10)lv=3; else lv=4;
+      html += `<div class="hm-cell hm-l${lv}" data-day="${d}" data-hour="${h}" data-count="${v}"></div>`;
+    }
+  }
+  wrap.innerHTML = html;
+
+  // 호버/클릭
+  const tip = document.getElementById('cellTip');
+  wrap.querySelectorAll('.hm-cell').forEach(cell=>{
+    cell.addEventListener('mousemove',e=>{
+      const d=cell.dataset.day,h=cell.dataset.hour,c=cell.dataset.count;
+      tip.innerHTML = `<div class="font-semibold text-[var(--accent-sub)] text-[12px]">${DAYS[d]} ${h}시 <span class="text-[var(--text-secondary)] font-normal">· 총 ${c}건</span></div>` +
+        (c>0?`<div class="text-[10.5px] text-[var(--text-secondary)] mt-1.5 leading-relaxed">작업 ${Math.floor(c*0.5)} · 메모 ${Math.floor(c*0.3)} · 씬 ${Math.floor(c*0.1)} · 기타 ${Math.floor(c*0.1)}</div>`:`<div class="text-[10.5px] text-[var(--text-secondary)] mt-1">활동 없음</div>`);
+      tip.style.left = e.clientX+'px';
+      tip.style.top = e.clientY+'px';
+      tip.classList.add('show');
+    });
+    cell.addEventListener('mouseleave',()=>tip.classList.remove('show'));
+
+    cell.addEventListener('click',()=>{
+      const d = +cell.dataset.day, h = +cell.dataset.hour;
+      // 같은 셀 다시 클릭하면 해제
+      if(activeCellFilter && activeCellFilter.day===d && activeCellFilter.hour===h){
+        clearCellFilter();
+      } else {
+        applyCellFilter(d, h);
+      }
+    });
+  });
+}
+
+// 피드 렌더 (현재 기간 데이터 기준)
+function renderFeed(){
+  const list = document.getElementById('feedList');
+  const items = getFeed();
+  list.innerHTML = items.map(item=>{
+    const color = colorFor(item.action);
+    return `
+      <div class="feed-row ${item.self?'self':''}" data-day="${item.day}" data-hour="${item.hour}" data-id="${item.id}" onclick="showToast('실제 앱: ${item.ep} ${item.part} ${item.cut} 씬으로 이동')">
+        <div class="flex gap-2.5 items-start">
+          <div class="w-7 h-7 rounded-full text-[11px] font-bold text-white border border-white/10 flex items-center justify-center shrink-0" style="background:${userColor(item.user)}">${item.user.charAt(0)}</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 text-[12.5px] flex-wrap">
+              <span class="font-semibold text-[var(--text-primary)]">${item.user}${item.self?'<span class="ml-1 text-[10.5px] text-[var(--accent-sub)]">(나)</span>':''}</span>
+              <span class="pictogram" style="background:${color}33;color:${color}">${ACTION_ICONS[item.action]||''}</span>
+              <span class="text-[var(--text-secondary)]">${item.verb}</span>
+              <span class="scene-chip">
+                <span>${item.ep}</span><span class="sep">·</span><span>${item.part}</span><span class="sep">·</span><span>${item.cut}</span>
+              </span>
+            </div>
+            <div class="text-[11px] text-[var(--text-secondary)]/60 mt-0.5">${item.time}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  // 필터 활성 상태였으면 한 번 더 적용
+  if(activeCellFilter) applyCellFilter(activeCellFilter.day, activeCellFilter.hour, false);
+}
+
+let activeCellFilter = null;
+
+function applyCellFilter(day, hour, scroll=true){
+  activeCellFilter = {day, hour};
+  const list = document.getElementById('feedList');
+  list.classList.add('filter-active');
+
+  const rows = list.querySelectorAll('.feed-row');
+  let firstMatch = null;
+  let matchCount = 0;
+  rows.forEach(r=>{
+    r.classList.remove('highlight');
+    if(+r.dataset.day===day && +r.dataset.hour===hour){
+      r.classList.add('highlight');
+      matchCount++;
+      if(!firstMatch) firstMatch = r;
+    }
+  });
+
+  // 셀 selected 동기화
+  document.querySelectorAll('.hm-cell.selected').forEach(c=>c.classList.remove('selected'));
+  const cell = document.querySelector(`.hm-cell[data-day="${day}"][data-hour="${hour}"]`);
+  if(cell) cell.classList.add('selected');
+
+  // 배너
+  const banner = document.getElementById('cellFilterBanner');
+  banner.classList.remove('hidden');
+  banner.classList.add('flex');
+  document.getElementById('cellFilterTitle').textContent = `${DAYS[day]} ${hour}시`;
+  document.getElementById('cellFilterCount').textContent =
+    matchCount > 0 ? `· ${matchCount}건` : '· 이 시간대엔 활동이 없어요';
+
+  if(matchCount > 0 && firstMatch && scroll){
+    firstMatch.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+}
+
+function clearCellFilter(){
+  activeCellFilter = null;
+  const list = document.getElementById('feedList');
+  list.classList.remove('filter-active');
+  list.querySelectorAll('.feed-row.highlight').forEach(r=>r.classList.remove('highlight'));
+  document.querySelectorAll('.hm-cell.selected').forEach(c=>c.classList.remove('selected'));
+  const banner = document.getElementById('cellFilterBanner');
+  banner.classList.add('hidden');
+  banner.classList.remove('flex');
+}
+
+document.getElementById('cellFilterClear').addEventListener('click', clearCellFilter);
+
+renderHeatmap();
+renderFeed();
+refreshRangeLabel();
+
+/* ============================== 시안 ② 분석 모달 ============================== */
+function buildAnalysisHTML(){
+  // 1) 1년치 종합 히트맵 (요일x월) — 12 x 7
+  let bigmap = '<div class="grid gap-[3px]" style="grid-template-columns:36px repeat(12,1fr)">';
+  bigmap += '<div></div>';
+  ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'].forEach(m=>{
+    bigmap += `<div class="text-[9.5px] text-[var(--text-secondary)] text-center">${m}</div>`;
+  });
+  for(let d=0;d<7;d++){
+    bigmap += `<div class="text-[10px] text-[var(--text-secondary)] text-right pr-1">${DAYS[d]}</div>`;
+    for(let m=0;m<12;m++){
+      const v = Math.floor(Math.random()*120);
+      let lv=0; if(v===0)lv=0; else if(v<20)lv=1; else if(v<50)lv=2; else if(v<90)lv=3; else lv=4;
+      bigmap += `<div class="bigmap-cell hm-l${lv}" title="${DAYS[d]} ${m+1}월 — ${v}건"></div>`;
+    }
+  }
+  bigmap += '</div>';
+
+  // 2) 씬 → LO → 완료 흐름 — 가로 막대
+  const stages = [
+    {name:'씬 생성', avg:'0일', subtext:'시작점', color:'#6FCF97', pct:0},
+    {name:'LO 완료', avg:'2.4일', subtext:'평균 2.4일 소요', color:'#74B9FF', pct:35},
+    {name:'완료', avg:'5.1일', subtext:'LO 후 +2.7일', color:'#A29BFE', pct:60},
+    {name:'검수 통과', avg:'7.8일', subtext:'완료 후 +2.7일', color:'#FDCB6E', pct:80},
+    {name:'PNG 출력', avg:'9.2일', subtext:'검수 후 +1.4일', color:'#00B894', pct:100},
+  ];
+  let flow = '<div class="space-y-3">';
+  stages.forEach(s=>{
+    flow += `
+      <div class="flex items-center gap-3">
+        <div class="w-20 shrink-0">
+          <div class="text-[12px] font-medium">${s.name}</div>
+          <div class="text-[10.5px] text-[var(--text-secondary)]">${s.avg}</div>
+        </div>
+        <div class="flex-1 h-7 rounded-lg bg-[rgba(45,48,65,0.4)] relative overflow-hidden">
+          <div class="h-full rounded-lg" style="width:${s.pct}%;background:linear-gradient(90deg,${s.color}50,${s.color})"></div>
+          <div class="absolute inset-0 flex items-center px-3 text-[10.5px] text-[var(--text-secondary)]">${s.subtext}</div>
+        </div>
+      </div>
+    `;
+  });
+  flow += '</div>';
+
+  // 3) 담당자별 활동 비중
+  const people = [
+    {name:'한솔', count:284, pct:88, color:'#A29BFE'},
+    {name:'민수', count:241, pct:75, color:'#74B9FF'},
+    {name:'지영', count:198, pct:62, color:'#6FCF97'},
+    {name:'성훈', count:152, pct:48, color:'#FDCB6E'},
+    {name:'준석', count:98, pct:31, color:'#FF8FA3'},
+    {name:'다른 4명', count:106, pct:33, color:'#95A5A6'},
+  ];
+  let bar = '<div class="space-y-2">';
+  people.forEach(p=>{
+    bar += `
+      <div class="flex items-center gap-3">
+        <div class="w-16 shrink-0 text-[12px] font-medium">${p.name}</div>
+        <div class="flex-1 h-6 rounded-md bg-[rgba(45,48,65,0.4)] overflow-hidden">
+          <div class="h-full rounded-md" style="width:${p.pct}%;background:linear-gradient(90deg,${p.color}40,${p.color})"></div>
+        </div>
+        <div class="w-12 shrink-0 text-right text-[11.5px] mono text-[var(--text-secondary)]">${p.count}건</div>
+      </div>
+    `;
+  });
+  bar += '</div>';
+
+  return `
+    <div class="space-y-5">
+      <!-- 카드 1: 1년치 종합 히트맵 -->
+      <div class="insight-card">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <div class="text-[14px] font-semibold">요일×월 종합 히트맵</div>
+            <div class="text-[11px] text-[var(--text-secondary)] mt-0.5">최근 12개월 활동 분포 — 어느 시기·요일에 일이 몰리는지 확인</div>
+          </div>
+          <div class="flex items-center gap-3 text-[10px] text-[var(--text-secondary)]">
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm hm-l1"></span>적음</span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm hm-l2"></span></span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm hm-l3"></span></span>
+            <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm hm-l4"></span>많음</span>
+          </div>
+        </div>
+        ${bigmap}
+        <div class="mt-3 text-[11px] text-[var(--text-secondary)] leading-relaxed bg-[rgba(108,92,231,0.06)] border border-[rgba(108,92,231,0.18)] rounded-lg px-3 py-2">
+          <span class="text-[var(--accent-sub)] font-semibold">자동 인사이트:</span>
+          <span class="text-[var(--text-primary)]">2026년 BG 정점은 <b>4–6월 화요일·수요일</b>, 액팅은 <b>9–11월 목요일</b>이 가장 활발했습니다.</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-5">
+        <!-- 카드 2: 씬→완료 흐름 -->
+        <div class="insight-card">
+          <div class="text-[14px] font-semibold mb-1">씬 생성 → 완료 평균 소요</div>
+          <div class="text-[11px] text-[var(--text-secondary)] mb-4">씬 하나가 단계를 거쳐 완성되기까지 걸리는 평균 시간</div>
+          ${flow}
+          <div class="mt-3 text-[11px] text-[var(--text-secondary)] leading-relaxed bg-[rgba(108,92,231,0.06)] border border-[rgba(108,92,231,0.18)] rounded-lg px-3 py-2">
+            <span class="text-[var(--accent-sub)] font-semibold">평균 9.2일</span>
+            <span class="text-[var(--text-primary)]">— LO~완료 사이가 병목, 검수→PNG는 가장 빠름</span>
+          </div>
+        </div>
+
+        <!-- 카드 3: 담당자별 비중 -->
+        <div class="insight-card">
+          <div class="text-[14px] font-semibold mb-1">담당자별 활동 비중</div>
+          <div class="text-[11px] text-[var(--text-secondary)] mb-4">상위 5명 + 기타 — 1년 누적 활동 건수</div>
+          ${bar}
+          <div class="mt-3 text-[11px] text-[var(--text-secondary)] leading-relaxed bg-[rgba(108,92,231,0.06)] border border-[rgba(108,92,231,0.18)] rounded-lg px-3 py-2">
+            <span class="text-[var(--accent-sub)] font-semibold">총 1,079건</span>
+            <span class="text-[var(--text-primary)]">— 한솔·민수가 전체의 49% (가장 적극)</span>
+          </div>
+        </div>
+
+        <!-- 카드 4: 단계별 작업 비중 (도넛) -->
+        <div class="insight-card">
+          <div class="text-[14px] font-semibold mb-1">단계별 작업 비중</div>
+          <div class="text-[11px] text-[var(--text-secondary)] mb-4">전체 토글 활동 중 LO/완료/검수/PNG 각 비율 (1년 누적)</div>
+          <div class="flex items-center gap-5">
+            <!-- 도넛 차트 (SVG) -->
+            <div class="relative">
+              <svg width="140" height="140" viewBox="0 0 140 140">
+                <!-- LO 32% -->
+                <circle cx="70" cy="70" r="55" fill="none" stroke="#74B9FF" stroke-width="22"
+                  stroke-dasharray="110.6 345.6" stroke-dashoffset="0" transform="rotate(-90 70 70)"/>
+                <!-- 완료 28% (offset = -110.6) -->
+                <circle cx="70" cy="70" r="55" fill="none" stroke="#A29BFE" stroke-width="22"
+                  stroke-dasharray="96.8 345.6" stroke-dashoffset="-110.6" transform="rotate(-90 70 70)"/>
+                <!-- 검수 22% -->
+                <circle cx="70" cy="70" r="55" fill="none" stroke="#FDCB6E" stroke-width="22"
+                  stroke-dasharray="76.0 345.6" stroke-dashoffset="-207.4" transform="rotate(-90 70 70)"/>
+                <!-- PNG 18% -->
+                <circle cx="70" cy="70" r="55" fill="none" stroke="#00B894" stroke-width="22"
+                  stroke-dasharray="62.2 345.6" stroke-dashoffset="-283.4" transform="rotate(-90 70 70)"/>
+                <text x="70" y="68" text-anchor="middle" fill="#E8E8EE" font-size="20" font-weight="700">685</text>
+                <text x="70" y="86" text-anchor="middle" fill="#8B8DA3" font-size="10">총 단계 활동</text>
+              </svg>
+            </div>
+            <div class="flex-1 space-y-2">
+              <div class="flex items-center gap-2 text-[12px]">
+                <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:#74B9FF"></span>
+                <span class="flex-1">LO</span>
+                <span class="mono text-[var(--text-secondary)]">32%</span>
+                <span class="mono text-[10.5px] text-[var(--text-secondary)]/70 w-12 text-right">219건</span>
+              </div>
+              <div class="flex items-center gap-2 text-[12px]">
+                <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:#A29BFE"></span>
+                <span class="flex-1">완료</span>
+                <span class="mono text-[var(--text-secondary)]">28%</span>
+                <span class="mono text-[10.5px] text-[var(--text-secondary)]/70 w-12 text-right">192건</span>
+              </div>
+              <div class="flex items-center gap-2 text-[12px]">
+                <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:#FDCB6E"></span>
+                <span class="flex-1">검수</span>
+                <span class="mono text-[var(--text-secondary)]">22%</span>
+                <span class="mono text-[10.5px] text-[var(--text-secondary)]/70 w-12 text-right">151건</span>
+              </div>
+              <div class="flex items-center gap-2 text-[12px]">
+                <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background:#00B894"></span>
+                <span class="flex-1">PNG</span>
+                <span class="mono text-[var(--text-secondary)]">18%</span>
+                <span class="mono text-[10.5px] text-[var(--text-secondary)]/70 w-12 text-right">123건</span>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 text-[11px] text-[var(--text-secondary)] leading-relaxed bg-[rgba(108,92,231,0.06)] border border-[rgba(108,92,231,0.18)] rounded-lg px-3 py-2">
+            <span class="text-[var(--accent-sub)] font-semibold">LO·완료가 60%</span>
+            <span class="text-[var(--text-primary)]">— 초중반 단계가 대부분, PNG까지 가는 비중은 작음</span>
+          </div>
+        </div>
+
+        <!-- 카드 5: 에피소드별 완성도 + 활동량 -->
+        <div class="insight-card">
+          <div class="text-[14px] font-semibold mb-1">에피소드별 완성도 + 활동량</div>
+          <div class="text-[11px] text-[var(--text-secondary)] mb-4">각 EP의 PNG 진행률(=완성도)과 누적 활동 — 활발히 진행 중인 EP 식별</div>
+          <div class="space-y-3">
+            ${[
+              {ep:'EP01 그림자국', pct:96, act:312, sub:'마무리 단계'},
+              {ep:'EP02 겨울나무', pct:78, act:268, sub:'활발 진행'},
+              {ep:'EP03 바람의 결', pct:54, act:198, sub:'중반'},
+              {ep:'EP04 잠든 도시', pct:31, act:144, sub:'초반'},
+              {ep:'EP05 새벽의 끝', pct:8, act:38, sub:'착수'},
+            ].map(e=>`
+              <div>
+                <div class="flex items-center justify-between text-[12px] mb-1">
+                  <span class="font-medium">${e.ep}</span>
+                  <span class="flex items-center gap-2">
+                    <span class="text-[10.5px] text-[var(--text-secondary)]">${e.sub}</span>
+                    <span class="mono text-[var(--text-secondary)]">${e.act}건</span>
+                    <span class="mono font-semibold text-[var(--accent-sub)] w-9 text-right">${e.pct}%</span>
+                  </span>
+                </div>
+                <div class="h-2 rounded-full bg-[rgba(45,48,65,0.4)] overflow-hidden">
+                  <div class="h-full rounded-full" style="width:${e.pct}%;background:linear-gradient(90deg,#A29BFE,#6C5CE7)"></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          <div class="mt-3 text-[11px] text-[var(--text-secondary)] leading-relaxed bg-[rgba(108,92,231,0.06)] border border-[rgba(108,92,231,0.18)] rounded-lg px-3 py-2">
+            <span class="text-[var(--accent-sub)] font-semibold">EP02가 가장 활발</span>
+            <span class="text-[var(--text-primary)]">— 진행률은 EP01이 앞서지만 최근 활동량은 EP02가 더 많음</span>
+          </div>
+        </div>
+
+        <!-- 카드 6: 작업이 많이 손니 씬 Top 10 -->
+        <div class="insight-card">
+          <div class="text-[14px] font-semibold mb-1">작업이 많이 손이 가는 씬 Top 10</div>
+          <div class="text-[11px] text-[var(--text-secondary)] mb-4">리비전·메모·재작업이 누적된 씬 — 병목·난항 씬 발견</div>
+          <div class="space-y-1.5">
+            ${[
+              {rank:1, ep:'그림자국', part:'B', cut:'#22', total:42, rev:8, mem:14, stages:20, hot:true},
+              {rank:2, ep:'겨울나무', part:'C', cut:'#01', total:38, rev:6, mem:12, stages:20, hot:true},
+              {rank:3, ep:'그림자국', part:'E', cut:'#15', total:31, rev:4, mem:9, stages:18},
+              {rank:4, ep:'바람의 결', part:'A', cut:'#03', total:28, rev:5, mem:7, stages:16},
+              {rank:5, ep:'겨울나무', part:'D', cut:'#08', total:24, rev:3, mem:6, stages:15},
+              {rank:6, ep:'그림자국', part:'A', cut:'#06', total:22, rev:2, mem:5, stages:15},
+              {rank:7, ep:'바람의 결', part:'C', cut:'#11', total:19, rev:2, mem:4, stages:13},
+              {rank:8, ep:'잠든 도시', part:'B', cut:'#02', total:17, rev:1, mem:4, stages:12},
+              {rank:9, ep:'겨울나무', part:'A', cut:'#09', total:15, rev:1, mem:3, stages:11},
+              {rank:10, ep:'그림자국', part:'D', cut:'#04', total:14, rev:1, mem:3, stages:10},
+            ].map(s=>`
+              <div class="flex items-center gap-3 px-2 py-1.5 rounded-lg ${s.hot?'bg-[rgba(255,118,117,0.06)] border border-[rgba(255,118,117,0.18)]':'hover:bg-[rgba(45,48,65,0.3)]'} cursor-pointer transition-colors">
+                <span class="mono text-[11.5px] w-5 text-right ${s.hot?'text-[#FF7675]':'text-[var(--text-secondary)]'}">${s.rank}</span>
+                <span class="scene-chip"><span>${s.ep}</span><span class="sep">·</span><span>${s.part}</span><span class="sep">·</span><span>${s.cut}</span></span>
+                <div class="flex-1 flex items-center gap-2 text-[10.5px] text-[var(--text-secondary)] ml-2">
+                  <span>리비전 ${s.rev}</span><span class="opacity-30">·</span>
+                  <span>메모 ${s.mem}</span><span class="opacity-30">·</span>
+                  <span>단계 ${s.stages}</span>
+                </div>
+                <span class="mono text-[12px] font-semibold ${s.hot?'text-[#FF7675]':'text-[var(--text-primary)]'}">${s.total}</span>
+              </div>
+            `).join('')}
+          </div>
+          <div class="mt-3 text-[11px] text-[var(--text-secondary)] leading-relaxed bg-[rgba(255,118,117,0.06)] border border-[rgba(255,118,117,0.18)] rounded-lg px-3 py-2">
+            <span class="text-[#FF7675] font-semibold">상위 2개가 빨강 강조</span>
+            <span class="text-[var(--text-primary)]">— 활동이 평균 대비 2배 이상. 우선 살펴볼 씬</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 카드 7: 주별 완료 씬 수 트렌드 (full-width) -->
+      <div class="insight-card">
+        <div class="flex items-start justify-between mb-1">
+          <div>
+            <div class="text-[14px] font-semibold">주별 완료 씬 수 트렌드</div>
+            <div class="text-[11px] text-[var(--text-secondary)] mt-0.5">최근 12주 동안 PNG까지 완성된 씬 개수 — 팀 처리 속도 추이</div>
+          </div>
+          <div class="flex items-center gap-3 text-[10.5px] text-[var(--text-secondary)]">
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm" style="background:linear-gradient(180deg,#A29BFE,#6C5CE7)"></span>완료 씬</span>
+            <span class="flex items-center gap-1.5"><span class="w-3 h-px" style="background:#FDCB6E"></span>4주 평균</span>
+          </div>
+        </div>
+        ${(()=>{
+          const weeks = [
+            {label:'-11w', count:8},
+            {label:'-10w', count:11},
+            {label:'-9w', count:9},
+            {label:'-8w', count:13},
+            {label:'-7w', count:10},
+            {label:'-6w', count:14},
+            {label:'-5w', count:12},
+            {label:'-4w', count:15},
+            {label:'-3w', count:13},
+            {label:'-2w', count:14},
+            {label:'-1w', count:16},
+            {label:'이번 주', count:18, current:true},
+          ];
+          const max = Math.max(...weeks.map(w=>w.count));
+          const recent4 = weeks.slice(-5,-1).reduce((s,w)=>s+w.count,0)/4;
+          return `
+            <div class="mt-4 relative" style="height:160px">
+              <!-- 평균선 (4주 평균) -->
+              <div class="absolute left-0 right-0 border-t border-dashed border-[#FDCB6E]/55"
+                   style="bottom:${(recent4/max)*100}%"></div>
+              <div class="absolute right-0 text-[9.5px] text-[#FDCB6E]/85 mono" style="bottom:calc(${(recent4/max)*100}% + 2px)">평균 ${recent4.toFixed(1)}</div>
+              <!-- 막대들 -->
+              <div class="grid items-end gap-2 h-full" style="grid-template-columns:repeat(${weeks.length},1fr);padding-bottom:18px">
+                ${weeks.map(w=>{
+                  const pct = (w.count/max)*100;
+                  const bg = w.current
+                    ? 'linear-gradient(to top,#FDCB6E,#FFE5A0)'
+                    : 'linear-gradient(to top,#6C5CE7,#A29BFE)';
+                  return `<div class="rounded-t-md relative" style="height:${pct}%;background:${bg}">
+                    <span class="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px] mono ${w.current?'text-[#FDCB6E] font-semibold':'text-[var(--text-secondary)]'}">${w.count}</span>
+                    <span class="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[9.5px] text-[var(--text-secondary)] whitespace-nowrap">${w.label}</span>
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>
+            <div class="mt-3 text-[11px] text-[var(--text-secondary)] leading-relaxed bg-[rgba(108,92,231,0.06)] border border-[rgba(108,92,231,0.18)] rounded-lg px-3 py-2">
+              <span class="text-[var(--accent-sub)] font-semibold">이번 주 18개</span>
+              <span class="text-[var(--text-primary)]">— 최근 4주 평균(${recent4.toFixed(1)}개) 대비 <b class="text-[#6FCF97]">+${Math.round((18/recent4-1)*100)}%</b>. 처리 속도 가속 중</span>
+            </div>
+          `;
+        })()}
+      </div>
+    </div>
+  `;
+}
+const analysisHTML = buildAnalysisHTML();
+document.getElementById('analysisModalBody').innerHTML = analysisHTML;
+document.getElementById('analysisInline').innerHTML = analysisHTML;
+
+document.getElementById('openAnalysisBtn').addEventListener('click',()=>openModal('analysisModal'));
+document.getElementById('openAnalysisBtn2').addEventListener('click',()=>openModal('analysisModal'));
+
+/* ============================== 시안 ③ 자간/줄간격 ============================== */
+const lhSlider = document.getElementById('lhSlider');
+const lsSlider = document.getElementById('lsSlider');
+const lhValue = document.getElementById('lhValue');
+const lsValue = document.getElementById('lsValue');
+const preview = document.getElementById('spacingPreview');
+const resetBtn = document.getElementById('spacingResetBtn');
+
+function applySpacing(){
+  const lh = parseFloat(lhSlider.value);
+  const ls = parseFloat(lsSlider.value);
+  preview.style.lineHeight = lh;
+  preview.style.letterSpacing = ls+'em';
+  lhValue.textContent = lh.toFixed(2);
+  const lsStr = (ls>=0?'+':'')+ls.toFixed(3);
+  lsValue.textContent = lsStr;
+  lhValue.classList.toggle('text-[var(--accent-sub)]', lh!==1.55);
+  lhValue.classList.toggle('text-[var(--text-secondary)]/60', lh===1.55);
+  lsValue.classList.toggle('text-[var(--accent-sub)]', ls!==0);
+  lsValue.classList.toggle('text-[var(--text-secondary)]/60', ls===0);
+  resetBtn.classList.toggle('hidden', lh===1.55 && ls===0);
+}
+lhSlider.addEventListener('input',applySpacing);
+lsSlider.addEventListener('input',applySpacing);
+resetBtn.addEventListener('click',()=>{
+  lhSlider.value = 1.55; lsSlider.value = 0; applySpacing();
+});
+
+/* ============================== 시안 ④ 업데이트 모달 (PR 타임라인) ============================== */
+const VERSIONS = [
+  {v:'1.23.0', date:'2026-05-09', latest:true, title:'활동 위젯 시간 단위 + 분석 모달 추가', items:[
+    '최근 작업 위젯에 7일/한달/1년 단위 토글 + 좌우 화살표',
+    '히트맵 셀 클릭 시 피드 자동 스크롤 + 하이라이트',
+    '활동 분석 모달 신설 — 1년치 인사이트 카드 3종',
+    '씬 라벨 포맷 정리 (그림자국 · E · #15)',
+    '버전 버튼 호버 우측 floating 툴팁'
+  ]},
+  {v:'1.22.20', date:'2026-05-08', title:'최근 작업 이동과 사용자 삭제 RPC 보강', items:[
+    '활동 피드 항목 클릭 시 해당 씬으로 이동',
+    '사용자 삭제 RPC에 활동 기록 정리 포함'
+  ]},
+  {v:'1.22.19', date:'2026-05-07', title:'자동 업데이트 운영 문서 정리와 내역 보존 보강', items:[
+    'AUTO_UPDATE_OPERATIONS.md 갱신',
+    '업데이트 manifest 갱신 순서 명문화',
+    '실패 시 release note 보존 정책'
+  ]},
+  {v:'1.22.18', date:'2026-05-06', title:'업데이트 모달 표시 안정화와 이전 내역 펼치기 추가', items:[
+    '이전 업데이트 내역 N개 보기/접기 토글',
+    '업데이트 메시지 폴백 처리'
+  ]},
+  {v:'1.22.17', date:'2026-05-05', title:'업데이트 모달 새로고침을 수동 확인으로 제한', items:[
+    '모달 진입 시 자동 갱신 제거',
+    '새로고침 버튼 클릭으로만 manifest 재확인'
+  ]},
+  {v:'1.22.16', date:'2026-05-04', title:'자동 업데이트 helper 시작 확인 및 버전 모달 새로고침 추가', items:[
+    'installer-attempted 마커로 helper 시작 확인',
+    '버전 모달 새로고침 버튼 신설'
+  ]},
+];
+
+function buildTimelineHTML(showAll){
+  const list = showAll?VERSIONS:VERSIONS.slice(0,3);
+  return list.map((v,i)=>{
+    const isLatest = !!v.latest;
+    return `
+      <div class="relative pb-6">
+        <div class="pr-node ${isLatest?'latest':''}">
+          ${isLatest?'<svg viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" fill="none"><polyline points="20 6 9 17 4 12"/></svg>':'<span class="text-[var(--accent-sub)] text-[10px] mono">'+(VERSIONS.length-i)+'</span>'}
+        </div>
+        <div class="rounded-2xl border ${isLatest?'border-[rgba(108,92,231,0.32)] bg-[rgba(108,92,231,0.06)]':'border-[var(--bg-border)]/60 bg-[rgba(15,17,23,0.4)]'} p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="text-[14px] font-semibold">${v.title}</span>
+              ${isLatest?'<span class="text-[10px] px-2 py-0.5 rounded-full bg-[rgba(162,155,254,0.20)] text-[var(--accent-sub)] font-semibold">LATEST</span>':''}
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="mono text-[11px] text-[var(--text-secondary)]">${v.date}</span>
+              <span class="mono text-[11px] px-2 py-0.5 rounded-full border border-[var(--bg-border)] text-[var(--text-secondary)]">v${v.v}</span>
+            </div>
+          </div>
+          <ul class="mt-3 space-y-1.5">
+            ${v.items.map(it=>`<li class="flex gap-2 text-[12.5px] leading-relaxed text-[var(--text-secondary)]"><span class="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--accent-sub)]/70"></span><span>${it}</span></li>`).join('')}
+          </ul>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+let allOpen = false;
+function refreshTimeline(){
+  document.getElementById('prTimeline').innerHTML = buildTimelineHTML(allOpen);
+  document.getElementById('toggleAllVersions').innerHTML = allOpen
+    ? '이전 버전 접기 <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>'
+    : `이전 버전 ${VERSIONS.length-3}개 더 보기 <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>`;
+}
+refreshTimeline();
+document.getElementById('toggleAllVersions').addEventListener('click',()=>{allOpen=!allOpen;refreshTimeline();});
+
+document.getElementById('openUpdateBtn').addEventListener('click',()=>openModal('updateModal'));
+
+// 새로고침 버튼: 회전 애니 + 마지막 확인 시각만 갱신, 모달 외형 변동 X
+document.getElementById('updateRefreshBtn').addEventListener('click',()=>{
+  const icon = document.getElementById('updateRefreshIcon');
+  icon.style.animation = 'spin 0.9s linear infinite';
+  showToast('업데이트 상태를 확인하고 있습니다…');
+  setTimeout(()=>{
+    icon.style.animation = '';
+    const now = new Date();
+    document.getElementById('updateLastChecked').textContent =
+      `마지막 확인 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    showToast('최신 상태로 갱신했습니다 ─ 모달 크기는 변하지 않았어요');
+  }, 1100);
+});
+
+// 인라인 업데이트 모달 미리보기
+document.getElementById('updateInline').innerHTML = `
+  <div class="modal-shell flex flex-col" style="height:680px;width:760px;max-width:100%;transform:none">
+    <div class="px-6 py-5 border-b border-[var(--bg-border)]/60 flex items-start justify-between gap-4">
+      <div>
+        <div class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">Version Center</div>
+        <h2 class="text-xl font-bold tracking-tight mt-1.5">업데이트 내역</h2>
+        <p class="text-sm text-[var(--text-secondary)] mt-1 leading-relaxed">현재 버전, 최신 버전, 버전별 변경 내역을 한 줄 타임라인으로.</p>
+        <p class="text-[11px] text-[var(--text-secondary)]/70 mt-1">마지막 확인 14:32:15</p>
+      </div>
+      <button class="inline-flex h-9 items-center gap-2 rounded-xl border border-[rgba(108,92,231,0.32)] bg-[rgba(108,92,231,0.10)] text-[var(--accent-sub)] px-3 text-xs font-semibold">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        새로고침
+      </button>
+    </div>
+    <div class="px-6 pt-5 pb-4 grid grid-cols-2 gap-3 shrink-0">
+      <div class="rounded-2xl border border-[var(--bg-border)]/70 bg-[rgba(15,17,23,0.45)] p-4">
+        <div class="text-xs text-[var(--text-secondary)]">현재 사용 중</div>
+        <div class="mt-2 text-2xl font-bold tracking-tight mono">v1.22.20</div>
+        <div class="mt-2 text-[11px] text-[var(--text-secondary)]">지금 이 버전으로 작업하고 있습니다.</div>
+      </div>
+      <div class="rounded-2xl border border-[rgba(108,92,231,0.32)] bg-[rgba(108,92,231,0.10)] p-4">
+        <div class="text-xs text-[var(--text-secondary)]">준비된 최신 버전</div>
+        <div class="mt-2 text-2xl font-bold mono text-[var(--accent-sub)] tracking-tight">v1.23.0</div>
+        <div class="mt-2 text-[11px] text-[var(--text-secondary)]">설치 파일이 로컬에 준비되었습니다.</div>
+      </div>
+    </div>
+    <div class="px-6 pt-2 pb-3 shrink-0 flex items-center justify-between border-t border-[var(--bg-border)]/40">
+      <div>
+        <div class="text-sm font-semibold">버전별 업데이트 내역</div>
+        <div class="text-[11px] text-[var(--text-secondary)]">PR 타임라인 형태로 누적 표시</div>
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto px-6 pb-6">
+      <div class="pr-rail pl-9 pt-2">${buildTimelineHTML(false)}</div>
+    </div>
+  </div>
+`;
+
+/* ============================== 시안 ⑤ 버전 호버 툴팁 ============================== */
+const versionPill = document.getElementById('versionPill');
+const versionTip = document.getElementById('versionTip');
+let tipTimer;
+versionPill.addEventListener('mouseenter',()=>{
+  clearTimeout(tipTimer);
+  tipTimer = setTimeout(()=>versionTip.classList.add('show'), 250);
+});
+versionPill.addEventListener('mouseleave',()=>{
+  clearTimeout(tipTimer);
+  versionTip.classList.remove('show');
+});
+versionPill.addEventListener('click',()=>openModal('updateModal'));
+
+/* ============================== 공통: 모달 / 토스트 ============================== */
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+window.openModal = openModal; window.closeModal = closeModal;
+// 백드롭 클릭으로 닫기
+document.querySelectorAll('.modal-backdrop').forEach(m=>{
+  m.addEventListener('click',e=>{ if(e.target===m) closeModal(m.id); });
+});
+// ESC
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    document.querySelectorAll('.modal-backdrop.open').forEach(m=>m.classList.remove('open'));
+  }
+});
+
+// 토스트
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.opacity = 1; t.style.transform = 'translate(-50%, 0)';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ t.style.opacity = 0; t.style.transform = 'translate(-50%, 8px)'; }, 2200);
+}
+window.showToast = showToast;
+
+// 회전 키프레임 (새로고침 아이콘)
+const styleSheet = document.createElement('style');
+styleSheet.textContent = `@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`;
+document.head.appendChild(styleSheet);
+</script>
+
+</body>
+</html>

@@ -13,6 +13,8 @@ import {
   formatActivitySceneLabel,
   resolveActivitySceneNavigation,
 } from './feedNavigation';
+import { activityMatchesCell } from '../RecentActivityWidget';
+import { getRangeBoundary } from './timeRange';
 
 function ActionIcon({ type, size = 11 }: { type: ActionType; size?: number }) {
   const props = { size };
@@ -84,9 +86,14 @@ interface FeedItemRowProps {
   isInsideGroup?: boolean;
   episodes: Episode[];
   episodeTitles: Record<number, string>;
+  /** v1.23.0: 셀 필터 적용 시 매칭 강조 */
+  highlight?: boolean;
+  /** v1.23.0: 셀 필터 적용 시 비매칭 dim */
+  dimmed?: boolean;
+  highlightRef?: React.Ref<HTMLDivElement>;
 }
 
-function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles }: FeedItemRowProps) {
+function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles, highlight, dimmed, highlightRef }: FeedItemRowProps) {
   const verb = getActivityVerb(activity);
   const displayLabel = formatActivitySceneLabel(activity.sceneLabel, activity.episodeNumber, episodeTitles);
   const navTarget = resolveActivitySceneNavigation(activity, episodes);
@@ -101,6 +108,7 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles 
   }, [navTarget]);
   return (
     <div
+      ref={highlightRef}
       onClick={handleClick}
       role={canNavigate ? 'button' : undefined}
       tabIndex={canNavigate ? 0 : undefined}
@@ -110,9 +118,11 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles 
           handleClick();
         }
       } : undefined}
-      className={`flex gap-2.5 py-2 px-3.5 border-b border-bg-border/15 transition-colors hover:bg-bg-border/20 ${
+      className={`flex gap-2.5 py-2 px-3.5 border-b border-bg-border/15 transition-all duration-200 hover:bg-bg-border/20 ${
         canNavigate ? 'cursor-pointer' : ''
-      } relative ${isSelf ? 'bg-accent/[0.04]' : ''} ${isInsideGroup ? 'pl-12' : ''}`}
+      } relative ${isSelf ? 'bg-accent/[0.04]' : ''} ${isInsideGroup ? 'pl-12' : ''} ${
+        highlight ? 'bg-[#FDCB6E]/10 shadow-[inset_3px_0_0_#FFE5A0]' : ''
+      } ${dimmed ? 'opacity-30' : ''}`}
     >
       {isSelf && !isInsideGroup && (
         <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent-sub" />
@@ -157,16 +167,25 @@ interface FeedGroupProps {
   isSelf: boolean;
   episodes: Episode[];
   episodeTitles: Record<number, string>;
+  highlight?: boolean;
+  dimmed?: boolean;
+  highlightRef?: React.Ref<HTMLDivElement>;
+  matches?: (a: Activity) => boolean;
 }
 
-function FeedGroup({ items, isSelf, episodes, episodeTitles }: FeedGroupProps) {
+function FeedGroup({ items, isSelf, episodes, episodeTitles, highlight, dimmed, highlightRef, matches }: FeedGroupProps) {
   const [open, setOpen] = useState(isSelf); // 본인 그룹은 자동 펼침
   const head = items[0];
   const verb = getActivityVerb(head);
   const groupLabel = formatActivityGroupLabel(head, episodeTitles);
 
   return (
-    <div className={`border-b border-bg-border/15 ${isSelf ? 'bg-accent/[0.04]' : ''} relative`}>
+    <div
+      ref={highlightRef}
+      className={`border-b border-bg-border/15 ${isSelf ? 'bg-accent/[0.04]' : ''} relative transition-all duration-200 ${
+        highlight ? 'bg-[#FDCB6E]/10 shadow-[inset_3px_0_0_#FFE5A0]' : ''
+      } ${dimmed ? 'opacity-30' : ''}`}
+    >
       {isSelf && <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent-sub" />}
       <div
         className="flex gap-2.5 py-2 px-3.5 cursor-pointer transition-colors hover:bg-bg-border/20"
@@ -213,16 +232,24 @@ function FeedGroup({ items, isSelf, episodes, episodeTitles }: FeedGroupProps) {
             transition={{ duration: 0.2 }}
             className="overflow-hidden bg-bg-border/30"
           >
-            {items.map((it) => (
-              <FeedItemRow
-                key={it.id}
-                activity={it}
-                isSelf={isSelf}
-                isInsideGroup
-                episodes={episodes}
-                episodeTitles={episodeTitles}
-              />
-            ))}
+            {items.map((it) => {
+              const innerMatch = matches ? matches(it) : false;
+              // codex 8차 P2: 그룹이 매칭이지만 펼치면 안에 비매칭 row 도 dim
+              // (cellFilter 가 켜진 상태에서만 dim — matches 함수 자체가 cellFilter 를 본다)
+              const innerDim = matches !== undefined && !innerMatch && items.some(matches);
+              return (
+                <FeedItemRow
+                  key={it.id}
+                  activity={it}
+                  isSelf={isSelf}
+                  isInsideGroup
+                  episodes={episodes}
+                  episodeTitles={episodeTitles}
+                  highlight={innerMatch}
+                  dimmed={innerDim}
+                />
+              );
+            })}
           </motion.div>
         )}
       </AnimatePresence>
@@ -231,17 +258,43 @@ function FeedGroup({ items, isSelf, episodes, episodeTitles }: FeedGroupProps) {
 }
 
 export function ActivityFeed() {
-  const { activities, filters, hasMore, isLoading, loadMore } = useActivityStore();
+  const { activities, filters, hasMore, isLoading, loadMore, cellFilter, timeUnit, rangeIdx } = useActivityStore();
   const currentUser = useAuthStore((s) => s.currentUser);
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const containerRef = useRef<HTMLDivElement>(null);
+  const firstHighlightRef = useRef<HTMLDivElement>(null);
 
-  // 필터 적용 + 그룹화
+  // 셀 필터 매칭 헬퍼 (codex 3차 P1: range 경계도 검증)
+  const currentRange = useMemo(() => getRangeBoundary(timeUnit, rangeIdx), [timeUnit, rangeIdx]);
+
+  // 필터 적용 + range 슬라이스 + 그룹화
+  // codex 6차 P1: timeUnit/rangeIdx 변경 시 피드도 해당 range 로 잘라야 히트맵과 일관.
+  // 캐시된 activities 가 부족하면 빈 상태로 표시 (서버 페치는 향후 추가 가능).
   const feedItems = useMemo(() => {
-    const filtered = activities.filter((a) => filters.groups.has(ACTION_TYPE_TO_GROUP[a.actionType]));
+    const startMs = new Date(currentRange.startISO).getTime();
+    const endMs = new Date(currentRange.endISO).getTime();
+    const filtered = activities.filter((a) => {
+      if (!filters.groups.has(ACTION_TYPE_TO_GROUP[a.actionType])) return false;
+      const t = new Date(a.createdAt).getTime();
+      return Number.isFinite(t) && t >= startMs && t < endMs;
+    });
     return groupActivities(filtered);
-  }, [activities, filters]);
+  }, [activities, filters, currentRange]);
+  const matches = useCallback((a: Activity) => {
+    if (!cellFilter) return false;
+    return activityMatchesCell(a, timeUnit, cellFilter, currentRange);
+  }, [cellFilter, timeUnit, currentRange]);
+
+  // 셀 필터 적용 시 첫 매칭 항목으로 자동 스크롤
+  useEffect(() => {
+    if (!cellFilter) return;
+    // 다음 tick 에 scroll (DOM 그려진 후)
+    const t = setTimeout(() => {
+      firstHighlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [cellFilter, feedItems]);
 
   // 무한 스크롤
   useEffect(() => {
@@ -270,11 +323,21 @@ export function ActivityFeed() {
     );
   }
 
+  // 첫 매칭 (cellFilter 있을 때만) — scroll target
+  let firstMatchAssigned = false;
+  const claimFirstMatch = (): React.Ref<HTMLDivElement> | undefined => {
+    if (!cellFilter || firstMatchAssigned) return undefined;
+    firstMatchAssigned = true;
+    return firstHighlightRef;
+  };
+
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto">
       {feedItems.map((item) => {
         if (item.type === 'item') {
           const isSelf = item.activity.userId === currentUser?.id;
+          const isMatch = matches(item.activity);
+          const isDimmed = !!cellFilter && !isMatch;
           return (
             <FeedItemRow
               key={item.activity.id}
@@ -282,10 +345,17 @@ export function ActivityFeed() {
               isSelf={isSelf}
               episodes={episodes}
               episodeTitles={episodeTitles}
+              highlight={isMatch}
+              dimmed={isDimmed}
+              highlightRef={isMatch ? claimFirstMatch() : undefined}
             />
           );
         } else {
           const isSelf = item.items[0].userId === currentUser?.id;
+          const groupHasMatch = item.items.some(matches);
+          const groupDimmed = !!cellFilter && !groupHasMatch;
+          // v1.23.0 (codex 1차 P2): 매칭이 하나라도 있으면 그룹 강조.
+          // every() 로는 그룹 접힌 상태에서 사용자가 매칭을 못 보는 회귀 발생.
           return (
             <FeedGroup
               key={item.key}
@@ -293,6 +363,10 @@ export function ActivityFeed() {
               isSelf={isSelf}
               episodes={episodes}
               episodeTitles={episodeTitles}
+              highlight={groupHasMatch && !!cellFilter}
+              dimmed={groupDimmed}
+              highlightRef={groupHasMatch ? claimFirstMatch() : undefined}
+              matches={matches}
             />
           );
         }

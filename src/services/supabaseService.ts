@@ -515,6 +515,9 @@ export async function listActivities(opts: {
   department?: 'bg' | 'acting' | null;
   /** 특정 씬(들) 의 activity 만 — 씬 상세 모달의 히스토리 탭/댓글 인라인용. 2026-05-02 추가. */
   sceneIds?: string[];
+  /** v1.23.0: 시간 단위 탐색 시 range 필터 (Codex 8차 P1) */
+  rangeStart?: string;
+  rangeEnd?: string;
 }): Promise<Activity[]> {
   const rows = await window.electronAPI.activityList(opts);
   return (rows ?? []).map(rowToActivity);
@@ -534,6 +537,26 @@ export async function getActivityStats(opts: {
   count_etc: number;
 }>> {
   return await window.electronAPI.activityStats(opts);
+}
+
+/** v1.23.0: 시간 단위 + 기간 기반 통계 */
+export async function getActivityStatsV2(opts: {
+  rangeStart: string;
+  rangeEnd: string;
+  granularity: 'hour-of-day-x-dow' | 'month-x-dow' | 'month-totals';
+  department?: 'bg' | 'acting' | null;
+  groups?: ActionGroup[];
+}) {
+  return await window.electronAPI.activityStatsV2(opts);
+}
+
+/** v1.23.0: 분석 모달 7카드 raw data */
+export async function getActivityInsights(opts: {
+  rangeStart: string;
+  rangeEnd: string;
+  department?: 'bg' | 'acting' | null;
+}) {
+  return await window.electronAPI.activityInsights(opts);
 }
 
 export async function backfillActivities(since: string): Promise<Activity[]> {

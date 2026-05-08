@@ -126,9 +126,12 @@ test('version center only checks updates from the refresh button', async () => {
 test('version center keeps its visible content stable while refresh is running', async () => {
   const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
 
+  // 응답 도착 전 기존 표시 정보 유지
   assert.match(modal, /frozenUpdateInfoRef/);
   assert.match(modal, /isRefreshing\s*\?\s*frozenUpdateInfoRef\.current/);
-  assert.match(modal, /min-h-\[210px\]/);
+  // v1.23.0: 모달 외형 안정화는 86vh 고정 + flex-col + 내부 영역 분할로 보장
+  assert.match(modal, /height:\s*'86vh'/);
+  assert.match(modal, /flex flex-col/);
 });
 
 test('version center can expand previous release notes', async () => {
@@ -137,7 +140,8 @@ test('version center can expand previous release notes', async () => {
   assert.match(modal, /showAllReleaseNotes/);
   assert.match(modal, /visibleNotes/);
   assert.match(modal, /hiddenReleaseNoteCount/);
-  assert.match(modal, /이전 업데이트 내역/);
+  // v1.23.0: PR 타임라인 스타일로 변경 — '이전 버전 N개 더 보기'
+  assert.match(modal, /이전 버전/);
 });
 
 test('manifest generation keeps full release note history for the version center', async () => {

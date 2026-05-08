@@ -7,6 +7,7 @@ import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
+import { VersionHoverTip, deriveHoverState } from './VersionHoverTip';
 
 const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: '대시보드', icon: <LayoutDashboard size={20} /> },
@@ -178,13 +179,25 @@ export function Sidebar() {
     && updateInfo.status !== 'up-to-date',
   );
   const hasUpdateIssue = updateInfo?.status === 'failed' || updateInfo?.status === 'suppressed';
-  const versionButtonTitle = !updateInfo
-    ? `현재 버전 v${__APP_VERSION__} · 업데이트 내역 열기`
-    : hasRemoteUpdate
-      ? `새 버전 v${updateInfo.latestVersion} 확인`
-      : hasUpdateIssue
-        ? updateInfo.message ?? '자동 업데이트 상태 확인'
-        : `현재 최신 버전 v${__APP_VERSION__}`;
+  // v1.23.0: 브라우저 기본 title 대신 floating 툴팁 사용 (사이드바 좁아 native title 이 창 밖으로 삐져나오는 문제 해결)
+  const hoverState = deriveHoverState(updateInfo);
+  const formattedBuildAt = (() => {
+    if (!updateInfo?.buildAt) return undefined;
+    const d = new Date(updateInfo.buildAt);
+    if (Number.isNaN(d.getTime())) return undefined;
+    return d.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  })();
+  const [versionTipShow, setVersionTipShow] = useState(false);
+  const versionTipTimer = useRef<ReturnType<typeof setTimeout>>();
+  const versionAnchorRef = useRef<HTMLSpanElement>(null);
+  const handleVersionEnter = useCallback(() => {
+    if (versionTipTimer.current) clearTimeout(versionTipTimer.current);
+    versionTipTimer.current = setTimeout(() => setVersionTipShow(true), 250);
+  }, []);
+  const handleVersionLeave = useCallback(() => {
+    if (versionTipTimer.current) clearTimeout(versionTipTimer.current);
+    setVersionTipShow(false);
+  }, []);
 
   const handleToggle = useCallback(async () => {
     toggleSidebarExpanded();
@@ -285,7 +298,12 @@ export function Sidebar() {
               className={cn('transition-transform duration-200', isExpanded && 'rotate-180')}
             />
           </button>
-          <span className="text-[11px] text-text-secondary/50 font-mono whitespace-nowrap">
+          <span
+            ref={versionAnchorRef}
+            className="relative text-[11px] text-text-secondary/50 font-mono whitespace-nowrap"
+            onMouseEnter={handleVersionEnter}
+            onMouseLeave={handleVersionLeave}
+          >
             <button
               type="button"
               onClick={() => setUpdateCenterOpen(true)}
@@ -299,7 +317,9 @@ export function Sidebar() {
                       ? 'cursor-pointer text-text-secondary/70 border border-bg-border/40 hover:text-text-primary hover:bg-bg-border/35'
                       : 'cursor-pointer text-text-secondary/60 border border-bg-border/25 hover:text-text-primary hover:bg-bg-border/30',
               )}
-              title={versionButtonTitle}
+              aria-label={hoverState === 'available'
+                ? `새 버전 v${updateInfo?.latestVersion} 준비됨 · 업데이트 내역 열기`
+                : '업데이트 내역 열기'}
             >
               v{__APP_VERSION__}
               {hasRemoteUpdate && (
@@ -307,6 +327,15 @@ export function Sidebar() {
               )}
             </button>
           </span>
+          <VersionHoverTip
+            show={versionTipShow}
+            anchorRef={versionAnchorRef}
+            state={hoverState}
+            currentVersion={__APP_VERSION__}
+            latestVersion={updateInfo?.latestVersion ?? __APP_VERSION__}
+            buildAt={formattedBuildAt}
+            message={updateInfo?.message}
+          />
         </div>
       </aside>
 
