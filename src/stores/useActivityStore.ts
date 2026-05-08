@@ -369,8 +369,14 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const d = nowKst.getUTCDate();
     // KST 의 다음 날 자정 (= 오늘 끝, 미래 0건 month 미포함)
     const endKst = new Date(Date.UTC(y, m, d + 1));
-    // KST 기준 N개월 전 같은 날 자정
-    const startKst = new Date(Date.UTC(y, m - months, d));
+    // codex 6차 P1: month subtraction overflow 방지 (5/31 - 3개월 = 3/3 같은 rollover).
+    // 시작 month 의 마지막 날로 clamp 해서 의도한 N개월 윈도우 보존.
+    const targetMonthRaw = m - months;
+    const targetYear = y + Math.floor(targetMonthRaw / 12);
+    const targetMonth = ((targetMonthRaw % 12) + 12) % 12;
+    const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+    const safeDay = Math.min(d, lastDay);
+    const startKst = new Date(Date.UTC(targetYear, targetMonth, safeDay));
     const start = new Date(startKst.getTime() - KST_OFFSET_MS).toISOString();
     const end = new Date(endKst.getTime() - KST_OFFSET_MS).toISOString();
     const department = getCurrentDepartment();

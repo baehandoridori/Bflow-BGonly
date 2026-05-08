@@ -10,7 +10,7 @@ import { ActivityFeed } from './activity/ActivityFeed';
 import { ActivityInsightsModal } from './activity/ActivityInsightsModal';
 import { getRangeBoundary, todayLabelFor } from './activity/timeRange';
 import { pickGoldenWindow, dayLabel, EMPTY_GROUPED_COUNT, type GroupedCount } from './activity/utils';
-import { GROUP_LABEL, GROUP_DOT_COLOR } from './activity/constants';
+import { ACTION_TYPE_TO_GROUP, GROUP_LABEL, GROUP_DOT_COLOR } from './activity/constants';
 import { subscribeToActivityRealtime } from '@/services/supabaseService';
 import type { ActionGroup, CellFilter, TimeUnit } from '@/types';
 
@@ -31,6 +31,7 @@ export function RecentActivityWidget() {
     rangeIdx,
     cellFilter,
     activities,
+    filters,
     loadInitial,
     receiveRealtime,
     applyCellFilter,
@@ -79,12 +80,15 @@ export function RecentActivityWidget() {
     return `${period} 가장 활발: ${dayLabel(w.day)}요일 ${w.hour}–${w.hour + 2}시 (${w.count}건)`;
   }, [statsGrid, timeUnit, rangeIdx, activities.length]);
 
-  // 셀 매칭 건수 (피드 기준) — codex 3차 P1: range 경계도 검증
+  // 셀 매칭 건수 (피드 기준) — codex 3차 P1: range 검증, 6차 P2: group 필터도 일치
   const currentRange = useMemo(() => getRangeBoundary(timeUnit, rangeIdx), [timeUnit, rangeIdx]);
   const cellMatchCount = useMemo(() => {
     if (!cellFilter) return 0;
-    return activities.filter((a) => activityMatchesCell(a, timeUnit, cellFilter, currentRange)).length;
-  }, [cellFilter, activities, timeUnit, currentRange]);
+    return activities.filter((a) => {
+      if (!filters.groups.has(ACTION_TYPE_TO_GROUP[a.actionType])) return false;
+      return activityMatchesCell(a, timeUnit, cellFilter, currentRange);
+    }).length;
+  }, [cellFilter, activities, timeUnit, currentRange, filters]);
 
   return (
     <>

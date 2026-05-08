@@ -261,14 +261,22 @@ export function ActivityFeed() {
   const containerRef = useRef<HTMLDivElement>(null);
   const firstHighlightRef = useRef<HTMLDivElement>(null);
 
-  // 필터 적용 + 그룹화
-  const feedItems = useMemo(() => {
-    const filtered = activities.filter((a) => filters.groups.has(ACTION_TYPE_TO_GROUP[a.actionType]));
-    return groupActivities(filtered);
-  }, [activities, filters]);
-
   // 셀 필터 매칭 헬퍼 (codex 3차 P1: range 경계도 검증)
   const currentRange = useMemo(() => getRangeBoundary(timeUnit, rangeIdx), [timeUnit, rangeIdx]);
+
+  // 필터 적용 + range 슬라이스 + 그룹화
+  // codex 6차 P1: timeUnit/rangeIdx 변경 시 피드도 해당 range 로 잘라야 히트맵과 일관.
+  // 캐시된 activities 가 부족하면 빈 상태로 표시 (서버 페치는 향후 추가 가능).
+  const feedItems = useMemo(() => {
+    const startMs = new Date(currentRange.startISO).getTime();
+    const endMs = new Date(currentRange.endISO).getTime();
+    const filtered = activities.filter((a) => {
+      if (!filters.groups.has(ACTION_TYPE_TO_GROUP[a.actionType])) return false;
+      const t = new Date(a.createdAt).getTime();
+      return Number.isFinite(t) && t >= startMs && t < endMs;
+    });
+    return groupActivities(filtered);
+  }, [activities, filters, currentRange]);
   const matches = useCallback((a: Activity) => {
     if (!cellFilter) return false;
     return activityMatchesCell(a, timeUnit, cellFilter, currentRange);
