@@ -179,14 +179,19 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         rangeStart: startISO,
         rangeEnd: endISO,
       });
-      // 1) 기존 store 에서 현재 부서와 일치하지 않는 활동 제거 — 부서 필터 변경 시 옛 부서 row 제거
-      //    (department === null 이면 'all' 모드라 모든 활동 유지)
+      // 1) 기존 store 에서 현재 부서·range 둘 다 일치하는 활동만 보존 — 부서/range 변경 시 stale row 제거
+      //    (department === null 이면 부서 무시, range 는 항상 검사)
       // 2) 그 후 fetch 결과와 UUID dedupe merge — realtime 으로 들어온 활동 보존 (race 방지, Codex P2)
       // 3) createdAt 역순 정렬 후 MAX_CACHED 만큼 슬라이스
+      // codex 12차 P1: range 로도 필터해야 loadMore cursor 가 stale row 가리켜 빈 페이지 받는 회귀 방지.
+      const startMs = new Date(startISO).getTime();
+      const endMs = new Date(endISO).getTime();
       set((s) => {
-        const validExisting = department === null
-          ? s.activities
-          : s.activities.filter((a) => a.department === department);
+        const validExisting = s.activities.filter((a) => {
+          if (department !== null && a.department !== department) return false;
+          const t = new Date(a.createdAt).getTime();
+          return Number.isFinite(t) && t >= startMs && t < endMs;
+        });
         const existingIds = new Set(validExisting.map((a) => a.id));
         const fresh = rows.filter((r) => !existingIds.has(r.id));
         const merged = [...validExisting, ...fresh]
