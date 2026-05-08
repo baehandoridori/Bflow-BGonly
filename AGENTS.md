@@ -94,7 +94,8 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 - 실제 적용은 `지금 업데이트` 클릭 또는 앱 종료 시 installer helper로 수행된다. 앱 폴더를 직접 rename/copy하지 말 것. 토스트가 떴다는 것만으로 성공 판단 금지. 다음 실행 버전과 `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[installer-main]`/`[installer]` 로그를 확인한다.
 - installer helper는 현재 BFLOW 프로세스가 완전히 종료된 뒤 `BFLOW-Setup.exe /S`를 실행해야 한다. 앱이 살아있는 동안 installer를 시작하면 Windows 파일 잠금으로 실패할 수 있다.
 - 앱 시작 자동 적용은 `.installer-attempted` 시작 확인 마커가 생긴 뒤에만 종료해야 한다. helper 시작 확인 없이 앱을 닫으면 사용자가 바로가기를 눌러도 앱이 계속 안 뜨는 루프가 생긴다.
-- 좌하단 버전 버튼은 업데이트 유무와 무관하게 항상 업데이트 내역 모달을 열어야 한다. 모달은 열자마자 자동 확인하지 않고, 사용자가 `새로고침`을 눌렀을 때만 `update:check-now`로 배포 상태를 다시 확인한다.
+- 좌하단 버전 버튼은 업데이트 유무와 무관하게 항상 업데이트 내역 모달을 열어야 한다. 모달은 열자마자 자동 확인하지 않고, 사용자가 `새로고침`을 눌렀을 때만 `update:check-now`로 배포 상태를 다시 확인한다. 새로고침 중에는 기존 표시 내용을 유지해 중간 상태 때문에 레이아웃이 흔들리지 않게 한다.
+- 업데이트 내역 모달은 최신 몇 개 내역을 기본 표시하고, 과거 release note는 사용자가 펼쳐 볼 수 있어야 한다. `DEVLOG/update-notes.json` 항목을 누락하지 말 것.
 - 배포용 `manifest.json`은 `BFLOW-Setup.exe`가 있을 때만 생성한다. `--allow-missing-installer`는 개발용 `build:vite`에서만 사용한다.
 - 설치/적용 중에는 사용자가 상황을 알 수 있어야 한다. renderer는 `applying` 상태를 표시하고, 앱 종료 후 helper는 별도 진행 창을 띄운다.
 - PowerShell helper를 TypeScript 백틱 문자열 안에 넣을 때 PowerShell 변수는 `$($name)` 형태로 쓴다. `${name}`은 JavaScript 보간으로 실행되어 helper 시작 전 `ReferenceError`를 만들 수 있다.

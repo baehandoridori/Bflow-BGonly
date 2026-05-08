@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, RefreshCw, X } from 'lucide-react';
+import { ChevronDown, Download, RefreshCw, X } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
 import type { UpdateInfo } from '@/types';
@@ -51,13 +51,16 @@ export function UpdateCenterModal() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+  const [showAllReleaseNotes, setShowAllReleaseNotes] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   const refreshInFlightRef = useRef(false);
+  const frozenUpdateInfoRef = useRef<UpdateInfo | null>(null);
 
   const handleRefresh = useCallback(async () => {
     if (refreshInFlightRef.current) return;
+    frozenUpdateInfoRef.current = updateInfo;
     refreshInFlightRef.current = true;
     setIsRefreshing(true);
     setRefreshError(null);
@@ -76,7 +79,13 @@ export function UpdateCenterModal() {
       refreshInFlightRef.current = false;
       setIsRefreshing(false);
     }
-  }, [setUpdateInfo]);
+  }, [setUpdateInfo, updateInfo]);
+
+  useEffect(() => {
+    if (!isRefreshing && updateInfo) {
+      frozenUpdateInfoRef.current = updateInfo;
+    }
+  }, [isRefreshing, updateInfo]);
 
   useEffect(() => {
     if (!updateCenterOpen) return;
@@ -128,8 +137,9 @@ export function UpdateCenterModal() {
 
   if (!updateCenterOpen) return null;
 
-  const displayInfo = updateInfo ?? createFallbackUpdateInfo();
-  const hasCheckedUpdate = updateInfo != null;
+  const visibleUpdateInfo = isRefreshing ? frozenUpdateInfoRef.current ?? updateInfo : updateInfo;
+  const displayInfo = visibleUpdateInfo ?? createFallbackUpdateInfo();
+  const hasCheckedUpdate = visibleUpdateInfo != null;
   const hasRemoteUpdate = displayInfo.latestVersion !== displayInfo.currentVersion
     && displayInfo.status !== 'suppressed'
     && displayInfo.status !== 'up-to-date';
@@ -187,6 +197,11 @@ export function UpdateCenterModal() {
               : '새로고침을 누르면 G드라이브 배포 정보에서 버전별 업데이트 내역을 다시 불러옵니다.',
       ],
     }];
+  const defaultVisibleReleaseNoteCount = 3;
+  const hiddenReleaseNoteCount = Math.max(0, notes.length - defaultVisibleReleaseNoteCount);
+  const visibleNotes = showAllReleaseNotes
+    ? notes
+    : notes.slice(0, defaultVisibleReleaseNoteCount);
   const buildTime = formatBuildTime(displayInfo.buildAt);
   const checkedAtText = formatCheckedAt(lastCheckedAt);
 
@@ -251,7 +266,7 @@ export function UpdateCenterModal() {
 
         <div className="p-6 overflow-y-auto max-h-[calc(86vh-96px)]">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-bg-border/60 bg-bg-primary/35 p-4">
+            <div className="min-h-[170px] rounded-2xl border border-bg-border/60 bg-bg-primary/35 p-4">
               <p className="text-xs text-text-secondary">현재 사용 중</p>
               <p className="mt-2 text-2xl font-bold text-text-primary tracking-tight">
                 v{displayInfo.currentVersion}
@@ -263,7 +278,7 @@ export function UpdateCenterModal() {
 
             <div
               className={cn(
-                'rounded-2xl border p-4',
+                'min-h-[170px] rounded-2xl border p-4',
                 shouldHighlightLatest
                   ? 'bflow-update-latest-card border-accent/35 bg-accent/10'
                   : isFailed || isSuppressed
@@ -351,30 +366,65 @@ export function UpdateCenterModal() {
             </div>
           </div>
 
-          <div className="mt-5 space-y-3">
-            {notes.map((note, noteIndex) => (
-              <div
-                key={`${note.version}-${note.title}-${noteIndex}`}
-                className="rounded-2xl border border-bg-border/55 bg-bg-primary/25 p-4"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-text-primary">
-                    {note.title || `v${note.version || displayInfo.latestVersion}`}
-                  </p>
-                  <span className="shrink-0 rounded-full border border-bg-border/70 px-2.5 py-1 text-[11px] font-mono text-text-secondary">
-                    v{note.version || displayInfo.latestVersion}
-                  </span>
-                </div>
-                <ul className="mt-3 space-y-2">
-                  {note.items.map((item, itemIndex) => (
-                    <li key={`${item}-${itemIndex}`} className="flex gap-2 text-sm leading-relaxed text-text-secondary">
-                      <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent/70" />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
+          <div className="mt-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-text-primary">버전별 업데이트 내역</p>
+                <p className="mt-1 text-xs text-text-secondary">
+                  최근 변경 사항과 이전 버전의 수정 내역을 함께 확인합니다.
+                </p>
               </div>
-            ))}
+              {hiddenReleaseNoteCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllReleaseNotes((value) => !value)}
+                  aria-expanded={showAllReleaseNotes}
+                  className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-bg-border/70 bg-bg-primary/30 px-3 py-2 text-xs font-semibold text-text-secondary transition-colors hover:border-accent/35 hover:text-accent-sub hover:bg-accent/10 cursor-pointer"
+                >
+                  {showAllReleaseNotes
+                    ? '이전 업데이트 내역 접기'
+                    : `이전 업데이트 내역 ${hiddenReleaseNoteCount}개 보기`}
+                  <ChevronDown
+                    size={14}
+                    className={cn(
+                      'transition-transform duration-200',
+                      showAllReleaseNotes && 'rotate-180',
+                    )}
+                  />
+                </button>
+              )}
+            </div>
+
+            <div
+              className={cn(
+                'mt-3 min-h-[210px] space-y-3 transition-opacity duration-200',
+                isRefreshing && 'opacity-90',
+              )}
+            >
+              {visibleNotes.map((note, noteIndex) => (
+                <div
+                  key={`${note.version}-${note.title}-${noteIndex}`}
+                  className="rounded-2xl border border-bg-border/55 bg-bg-primary/25 p-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-text-primary">
+                      {note.title || `v${note.version || displayInfo.latestVersion}`}
+                    </p>
+                    <span className="shrink-0 rounded-full border border-bg-border/70 px-2.5 py-1 text-[11px] font-mono text-text-secondary">
+                      v{note.version || displayInfo.latestVersion}
+                    </span>
+                  </div>
+                  <ul className="mt-3 space-y-2">
+                    {note.items.map((item, itemIndex) => (
+                      <li key={`${item}-${itemIndex}`} className="flex gap-2 text-sm leading-relaxed text-text-secondary">
+                        <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent/70" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="mt-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
