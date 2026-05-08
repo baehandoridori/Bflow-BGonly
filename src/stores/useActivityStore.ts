@@ -36,6 +36,8 @@ interface ActivityState {
   // v1.23.0: 분석 모달 캐시
   insights: ActivityInsightsRaw | null;
   insightsLoading: boolean;
+  /** v1.23.0 codex 7차 P1: 실패 추적 — useEffect 가 무한 재요청 루프 빠지지 않게 */
+  insightsError: string | null;
   insightsRange: InsightsRange;
 
   loadInitial(): Promise<void>;
@@ -158,6 +160,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   cellFilter: null,
   insights: null,
   insightsLoading: false,
+  insightsError: null,
   insightsRange: 'year',
   // codex 3차 P1: dept 변경 감지용 캐시 키
   // codex 3차 P2: 빠른 range 전환 시 stale 응답 차단용 토큰
@@ -352,7 +355,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   // ─── v1.23.0: 분석 모달 ───
   setInsightsRange(range) {
-    set({ insightsRange: range, insights: null });
+    set({ insightsRange: range, insights: null, insightsError: null });
     void get().loadInsights(range);
   },
   async loadInsights(range) {
@@ -386,17 +389,20 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     }
     // codex 3차 P2: 요청 토큰 — stale 응답이 최신 덮어쓰는 race 차단
     const myRequestId = ++insightsRequestId;
-    set({ insightsLoading: true });
+    set({ insightsLoading: true, insightsError: null });
     try {
       const data = await supabaseService.getActivityInsights({ rangeStart: start, rangeEnd: end, department });
       // 더 최신 요청이 이미 있다면 이 응답은 버림
       if (myRequestId !== insightsRequestId) return;
       cachedInsightsDept = department;
-      set({ insights: data as ActivityInsightsRaw, insightsLoading: false });
+      set({ insights: data as ActivityInsightsRaw, insightsLoading: false, insightsError: null });
     } catch (err) {
       if (myRequestId !== insightsRequestId) return;
-      console.warn('[activity] insights load failed:', err);
-      set({ insightsLoading: false });
+      // codex 7차 P1: insightsError 에 메시지 기록 — useEffect 가 (!insights && !loading) 만 보면
+      // 실패 후 즉시 재요청 무한 루프. error 가 set 되어 있으면 재요청 안 함.
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('[activity] insights load failed:', message);
+      set({ insightsLoading: false, insightsError: message });
     }
   },
 }));

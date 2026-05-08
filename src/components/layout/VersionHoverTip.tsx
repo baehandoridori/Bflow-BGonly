@@ -101,14 +101,17 @@ export function VersionHoverTip({ show, anchorRef, state, currentVersion, latest
   );
 }
 
-/** UpdateInfo → VersionHoverState 매퍼 */
+/**
+ * UpdateInfo → VersionHoverState 매퍼.
+ * v1.23.0 codex 7차 P2: failed/suppressed 가 hasRemote 보다 우선 — 실패 상태인데
+ * latestVersion 이 더 높을 때 'available' 로 잘못 표시되지 않도록.
+ */
 export function deriveHoverState(updateInfo: UpdateInfo | null | undefined): VersionHoverState {
   if (!updateInfo) return 'checking';
-  const hasRemote = updateInfo.latestVersion !== updateInfo.currentVersion
-    && updateInfo.status !== 'up-to-date'
-    && updateInfo.status !== 'suppressed';
-  if (hasRemote) return 'available';
   if (updateInfo.status === 'failed') return 'failed';
   if (updateInfo.status === 'suppressed') return 'suppressed';
+  const hasRemote = updateInfo.latestVersion !== updateInfo.currentVersion
+    && updateInfo.status !== 'up-to-date';
+  if (hasRemote) return 'available';
   return 'latest';
 }

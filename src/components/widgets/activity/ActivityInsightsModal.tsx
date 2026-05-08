@@ -11,7 +11,7 @@ import { SceneFlowCard } from './cards/SceneFlowCard';
 import { EpisodeProgressCard } from './cards/EpisodeProgressCard';
 
 export function ActivityInsightsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { insights, insightsLoading, insightsRange, loadInsights, setInsightsRange } = useActivityStore();
+  const { insights, insightsLoading, insightsError, insightsRange, loadInsights, setInsightsRange } = useActivityStore();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // v1.23.0 codex 3차 P1: dept 변경 감지 — 다른 부서 데이터 노출 방지
@@ -23,12 +23,16 @@ export function ActivityInsightsModal({ open, onClose }: { open: boolean; onClos
     // dept 가 바뀌면 강제 reload (store 의 cachedInsightsDept 도 같이 갱신됨)
     const deptChanged = lastDeptRef.current !== dashboardDeptFilter;
     lastDeptRef.current = dashboardDeptFilter;
-    if (deptChanged || (!insights && !insightsLoading)) {
+    // codex 7차 P1: insightsError 가 있으면 무한 재요청 루프 방지를 위해 자동 재시도 X.
+    //   사용자가 "다시 시도" 버튼 클릭 또는 range/dept 변경 시에만 재요청.
+    const shouldFetch = (deptChanged && !insightsLoading)
+      || (!insights && !insightsLoading && !insightsError);
+    if (shouldFetch) {
       loadInsights(insightsRange);
     }
     const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
     return () => window.clearTimeout(focusTimer);
-  }, [open, insights, insightsLoading, insightsRange, loadInsights, dashboardDeptFilter]);
+  }, [open, insights, insightsLoading, insightsError, insightsRange, loadInsights, dashboardDeptFilter]);
 
   useEffect(() => {
     if (!open) return;
@@ -87,6 +91,21 @@ export function ActivityInsightsModal({ open, onClose }: { open: boolean; onClos
         <div className="p-7 overflow-y-auto flex-1">
           {insightsLoading && !insights && (
             <div className="text-center text-text-secondary py-12 text-[13px]">불러오는 중...</div>
+          )}
+          {insightsError && !insightsLoading && (
+            <div className="text-center py-12 space-y-3">
+              <p className="text-[13px] text-[#FDCB6E]">분석 데이터를 불러오지 못했습니다.</p>
+              <p className="text-[11px] text-text-secondary leading-relaxed max-w-md mx-auto">
+                {insightsError}
+              </p>
+              <button
+                type="button"
+                onClick={() => loadInsights(insightsRange)}
+                className="px-3 py-1.5 rounded-lg border border-accent/35 bg-accent/10 text-accent-sub text-[12px] font-semibold hover:bg-accent/20 transition-colors cursor-pointer"
+              >
+                다시 시도
+              </button>
+            </div>
           )}
           {insights && (
             <div className="space-y-5">
