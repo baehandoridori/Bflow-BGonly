@@ -222,19 +222,20 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
         before: cursor, limit: PAGE_SIZE, department,
         rangeStart: startISO, rangeEnd: endISO,
       });
-      const sevenDaysAgo = Date.now() - 7 * 86_400_000;
-      const filtered = rows.filter((r) => new Date(r.createdAt).getTime() >= sevenDaysAgo);
+      // codex 9차 P1: 7일 cutoff 는 v1.22 의 7일치 위젯 가정에서 온 잔재.
+      //   range 기반 페이지네이션에서는 month/year 보기에서 7일 이전 row 가 모두 잘려 페이지네이션이 일찍 끊김.
+      //   range 필터는 이미 서버에서 적용되므로 클라이언트 cutoff 불필요.
       // functional set — fetch in-flight 중에 들어온 realtime/loadInitial 업데이트를 덮어쓰지 않음 (Codex P2)
       // closure 가 캡처한 activities 가 아닌 최신 store state(s.activities) 와 UUID dedupe merge.
       set((s) => {
         const existingIds = new Set(s.activities.map((a) => a.id));
-        const fresh = filtered.filter((r) => !existingIds.has(r.id));
+        const fresh = rows.filter((r) => !existingIds.has(r.id));
         const merged = [...s.activities, ...fresh]
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .slice(0, MAX_CACHED);
         return {
           activities: merged,
-          hasMore: rows.length === PAGE_SIZE && filtered.length === rows.length && merged.length < MAX_CACHED,
+          hasMore: rows.length === PAGE_SIZE && merged.length < MAX_CACHED,
           isLoading: false,
         };
       });
