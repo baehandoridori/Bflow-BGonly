@@ -15,8 +15,8 @@
    - 코드 구조, 패턴 참고만 가능
    - 파일 수정, 커밋, 푸시 일절 금지
    - 모든 개발은 반드시 `Bflow-BGonly` 레포에서만 진행
-2. **빌드 검증**: 코드 변경 후 반드시 `npm run typecheck` + `npm run test:auto-update` + `vite build` 통과 확인
-3. **낙관적 업데이트 패턴**: 모든 데이터 변경은 즉시 UI 반영 → 백그라운드 동기화
+2. **빌드 검증**: 코드 변경 후 반드시 `npm run typecheck` + 관련 테스트 + `npm run build:vite` 통과 확인. 정식 배포는 `npm run build`까지 확인
+3. **낙관적 업데이트 패턴**: 모든 데이터 변경은 즉시 UI 반영 → Supabase 동기화 → 실패 시 롤백
 4. **테스트 모드 동등성**: 모든 기능은 테스트 모드에서도 100% 동작해야 함
 5. **자동 업데이트 배포 원칙**: G드라이브에는 빌드 파일을 먼저 모두 올리고 `manifest.json`을 마지막에 갱신할 것. 앱은 manifest를 보고 최신 버전을 감지하므로, 반쯤 올라간 빌드가 최신으로 보이면 안 됨.
 
@@ -25,9 +25,9 @@
 ## 프로젝트 개요
 
 Studio JBBJ 팀(~20명)이 에피소드별 BG/액팅 씬의 진행 상황을 실시간 추적하는 Electron 앱.
-Google Sheets를 단일 진실의 원천(SSOT)으로 사용. 여러 사용자가 동시에 앱을 열어두고 협업.
+Supabase(PostgreSQL + Realtime)를 단일 진실의 원천(SSOT)으로 사용. Google Sheets/Drive 계열 코드는 이미지·레거시 호환 일부에 남아 있다.
 
-**동기화**: 체크박스 토글 → 로컬 즉시 반영(낙관적) → Google Sheets 저장 → 실패 시 롤백 + 재시도. 다른 사용자 변경은 주기적 폴링으로 감지.
+**동기화**: 체크박스 토글 → 로컬 즉시 반영(낙관적) → Supabase 저장 → 실패 시 롤백. 다른 사용자 변경은 Realtime WebSocket으로 수신.
 
 ---
 
@@ -39,7 +39,7 @@ Google Sheets를 단일 진실의 원천(SSOT)으로 사용. 여러 사용자가
 | 배포 | `G:\공유 드라이브\JBBJ 자료실\한솔이의 두근두근 실험실\Bflow-BGonly\` |
 | 개인 설정 | `%APPDATA%\Bflow-BGonly\` (layout.json, preferences.json) |
 
-**데이터**: 씬/에피소드/체크박스 → Google Sheets, 위젯 레이아웃/개인 설정 → %APPDATA% 로컬 파일
+**데이터**: 씬/에피소드/체크박스/메모/개인일정 → Supabase, 위젯 레이아웃/개인 설정 → %APPDATA% 로컬 파일
 
 ### 제약 사항
 
@@ -113,6 +113,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 
 - **`CONTEXT.md`** — 세션 컨텍스트 가이드 (아키텍처, 파일 맵, 알려진 이슈, 스킬 활용법)
 - **`ROADMAP.md`** — 전체 개발 로드맵 (Phase 0~7, 기능별 상세 스펙)
+- **`DEVLOG/AUTO_UPDATE_OPERATIONS.md`** — 자동 업데이트 운영 기준 (최신 배포 방식의 1차 기준)
 - **`DEVLOG/auto-update-test-scenario.md`** — 자동 업데이트 E2E 테스트 체크리스트
 - `tasks/lessons.md` — 과거 실수/패턴 기록 (세션 시작 시 검토)
 - `BG_DASHBOARD_PLAN.md` — 초기 구현 계획서

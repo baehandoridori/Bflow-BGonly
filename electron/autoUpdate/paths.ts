@@ -1,5 +1,5 @@
 /**
- * v1.21.0 자동 업데이트 — 모든 경로 상수 + G드라이브 폴더 추정.
+ * 자동 업데이트 경로 상수 + G드라이브 폴더 추정.
  * 순수 함수만. fs 사이드 이펙트 X (existsSync 같은 lookup만 허용).
  *
  * v1.22.0: NSIS 설치 도입 → process.execPath 기준 동적 경로로 전환. NSIS 설치
@@ -36,13 +36,12 @@ export function localRoot(): string {
 }
 
 /**
- * 현재 실행 중인 BFLOW.exe의 폴더 — swap 대상.
+ * 현재 실행 중인 BFLOW.exe의 폴더.
  * - NSIS 설치: `%LOCALAPPDATA%\Programs\BFLOW\`
  * - v1.21.x self-installer: `%LOCALAPPDATA%\Bflow-BGonly\app\`
  * - 개발 모드(process.execPath = electron.exe): 호환을 위해 v1.21.x 기본 경로 fallback
- * - G드라이브 직접 실행: G드라이브 폴더 자체를 swap target으로 잡으면 안 되므로
- *   v1.21.x self-installer 기본 경로 fallback (옛 호환성). swap은 그 dir을 대상으로
- *   하고, BFLOW.exe는 G드라이브에서 실행 중이라 swap 시 영향 없음.
+ * - G드라이브 직접 실행: G드라이브 폴더 자체를 로컬 앱 위치로 잡으면 안 되므로
+ *   v1.21.x self-installer 기본 경로 fallback (옛 호환성).
  */
 export function localAppDir(): string {
   if (!app.isPackaged) {
@@ -54,7 +53,7 @@ export function localAppDir(): string {
   return path.dirname(process.execPath);
 }
 
-/** swap 대상 폴더의 형제 — pending/backup도 같은 부모 아래 형제로 둬서 atomic rename 가능. */
+/** 레거시 directory swap용 경로. 현재 installer 기반 적용 경로는 localInstaller* 함수가 기준. */
 export function localPendingDir(): string { return localAppDir() + '-pending'; }
 export function localBackupDir(): string { return localAppDir() + '-backup'; }
 export function localReadyMarker(): string { return path.join(localPendingDir(), '.ready'); }
@@ -114,7 +113,7 @@ export function localSelfHealFailedMarker(): string {
 }
 
 /**
- * Swap 시도 마커 (v1.22.3) — swapper가 swap 진입 직후 작성, 정상 종료·복구 양쪽 모두에서
+ * 레거시 swap 시도 마커 (v1.22.3) — swapper가 swap 진입 직후 작성, 정상 종료·복구 양쪽 모두에서
  * 정리. .ready만으로는 swap 실제 시도 여부를 판별 못 함(crash·kill·OS restart 시 .ready가
  * 다운로드 직후 남음 → false positive). 시작 시 .ready + .swap-attempted 둘 다 있을 때만
  * 진짜 swap 실패로 간주.
@@ -124,7 +123,7 @@ export function localSwapAttemptedMarker(): string {
 }
 
 /**
- * Swap 실패 알림 후 자동 재시도 영구 중단 마커 (v1.22.3) — content는 own version. 같은
+ * 업데이트 적용 실패 알림 후 자동 재시도 영구 중단 마커 (v1.22.3) — content는 own version. 같은
  * version에선 자동업데이트 cycle skip(checker가 검사)하고, 사용자가 NSIS Setup 등으로
  * 다른 version 설치 시 own이 갱신 → marker version과 다르면 자동 정리(자동업데이트 재개).
  */
@@ -133,7 +132,7 @@ export function localSwapSuppressedMarker(): string {
 }
 
 /**
- * Swap 직후 첫 실행 검증 마커 — swapper가 swap 완료 후 작성, healthCheck가 해당 실행이
+ * 레거시 swap 직후 첫 실행 검증 마커 — swapper가 swap 완료 후 작성, healthCheck가 해당 실행이
  * 정상 메인 창 도달하면 삭제.
  *
  * Codex 6차 P1: 이전엔 .start-attempt만으로 rollback 트리거 → 강제 종료·시스템 kill 등

@@ -242,6 +242,28 @@ await deleteScene(sheetName, sceneIndex);        // 2) 내부에서 resolveScene
 
 ---
 
+## 2026-05-08: UI가 펼치기를 지원해도 manifest가 잘라내면 과거 내역은 안 보인다
+
+### 증상
+- 업데이트 모달에는 "이전 업데이트 내역 보기" UI가 있었지만, 실제 배포 manifest에는 최신 3개 release note만 들어갔다.
+- 결과적으로 모달의 펼치기 기능이 있어도 사용자는 오래된 버전 내역을 볼 수 없었다.
+
+### 근본 원인
+- `UpdateCenterModal.tsx`는 `releaseNotes` 배열 전체를 펼칠 수 있게 만들었지만, `scripts/generate-manifest.js`가 `DEVLOG/update-notes.json`을 읽을 때 `.slice(0, 3)`으로 잘라냈다.
+- UI 요구사항과 배포 데이터 생성 규칙을 같이 검토하지 않아 생긴 불일치다.
+
+### 교훈
+- 버전 모달처럼 manifest 데이터를 표시하는 UI를 바꿀 때는 `DEVLOG/update-notes.json` → `scripts/generate-manifest.js` → `dist/manifest.json` → renderer 표시까지 전체 파이프라인을 확인한다.
+- `DEVLOG/update-notes.json`의 과거 항목은 앱에서 펼쳐 보는 사용자 기록이다. 삭제하지 말고, manifest 생성에서도 자르지 않는다.
+- 자동 업데이트 관련 최신 운영 기준은 `DEVLOG/AUTO_UPDATE_OPERATIONS.md`를 우선한다. 옛 plan/spec의 directory swap 설명은 역사 기록이다.
+
+### 적용 위치
+- `scripts/generate-manifest.js` — releaseNotes 전체 이력 보존
+- `tests/autoUpdateInstallerFlow.test.ts` — manifest 생성기가 releaseNotes를 최신 3개로 자르지 않는 회귀 테스트
+- `DEVLOG/AUTO_UPDATE_OPERATIONS.md` — 현재 운영 기준 문서
+
+---
+
 ## 2026-04-21: 통합 사이드바에서 "그룹 항목" 기능 누락
 
 ### 증상

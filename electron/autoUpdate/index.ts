@@ -1,6 +1,9 @@
 /**
- * v1.21.0 자동 업데이트 — main.ts가 import하는 단일 진입점.
- * 다른 모듈은 main.ts가 직접 import하지 않음 — index만 import.
+ * 자동 업데이트 모듈 진입점.
+ *
+ * 현재 적용 경로는 BFLOW-Setup.exe를 로컬 installer-pending에 준비한 뒤
+ * installerApply.ts helper가 앱 종료 후 실행하는 방식이다. helperSwap/swapper export는
+ * v1.21~v1.22.13 레거시 복구/호환 코드용으로 남아있다.
  */
 export { runFirstInstallIfNeeded } from './installer';
 export type { InstallResult } from './installer';

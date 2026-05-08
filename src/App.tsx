@@ -125,9 +125,9 @@ export default function App() {
     return () => { cleanup?.(); };
   }, [setUpdateInfo]);
 
-  // v1.22.1: 자동 업데이트 다운로드 완료 알림 → "지금 업데이트" 버튼 토스트.
-  // 사용자가 클릭 시 main이 app.relaunch + app.quit → before-quit hook의 swap 진행 →
-  // Electron이 새 BFLOW.exe로 자동 재시작 (1~2초 깜빡임).
+  // 자동 업데이트 다운로드 완료 알림 → "지금 업데이트" 버튼 토스트.
+  // 사용자가 클릭 시 main이 applying 상태를 기록하고 app.quit → before-quit hook이
+  // installer helper를 띄움 → 설치 후 BFLOW.exe 재실행.
   useEffect(() => {
     const cleanup = window.electronAPI?.onUpdateReady?.((version, state) => {
       const updateState: UpdateInfo = state ?? {

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * v1.21.0 자동 업데이트 — 빌드 후 dist/manifest.json 자동 생성.
- * `npm run build` 마지막 step. 한솔 손 거치지 않음.
+ * 자동 업데이트 manifest 생성.
  *
- * 출력 형식 (spec §3): { "version": "1.21.0", "buildAt": "ISO8601" }
+ * `npm run build` 마지막 step에서 dist/manifest.json을 만든다.
+ * 현재 배포 방식은 G드라이브 dist를 배포 채널로 두고, 앱이 manifest를 읽어
+ * 로컬 캐시에 BFLOW-Setup.exe를 받아둔 뒤 installer helper로 적용한다.
  */
 const fs = require('fs');
 const path = require('path');
@@ -19,10 +20,9 @@ if (!fs.existsSync(distDir)) {
 }
 
 /**
- * Codex 9차 P1: win-unpacked의 fileCount + totalBytes 기록.
- * checker가 G드라이브 sync 완전성 검증 (원격 manifest와 실제 파일 트리 비교) +
- * mirror copy 사후 검증 (로컬 pending이 원격과 일치하는지) 두 단계로 사용.
- * partial sync/copy 상태에서 .ready 마커가 잘못 만들어져 broken app swap되는 사고 방지.
+ * win-unpacked의 fileCount + totalBytes 기록.
+ * 지금 적용 단위는 BFLOW-Setup.exe지만, win-unpacked도 배포 산출물이라 배포 상태
+ * 검증과 사람이 보는 sanity check에 사용한다.
  */
 const winUnpacked = path.join(distDir, 'win-unpacked');
 let fileCount = 0;
@@ -79,7 +79,6 @@ if (fs.existsSync(releaseNotesPath)) {
           && Array.isArray(note.items)
           && note.items.some((item) => typeof item === 'string' && item.trim())
         ))
-        .slice(0, 3)
         .map((note) => ({
           version: typeof note.version === 'string' ? note.version : pkg.version,
           title: typeof note.title === 'string' ? note.title : '',

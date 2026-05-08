@@ -1,6 +1,8 @@
 /**
- * v1.21.0 자동 업데이트 — manifest.json 읽기 + 버전 비교.
- * spec §3 빌드 산출물 형식: { version: "1.21.0", buildAt: "2026-05-07T...Z" }
+ * 자동 업데이트 manifest.json 읽기 + 버전 비교.
+ *
+ * 현재 manifest는 version/buildAt 외에 installer 메타데이터와 releaseNotes를 포함한다.
+ * 앱은 이 파일을 최신 버전 감지 신호로 사용하므로 배포 시 반드시 마지막에 갱신한다.
  */
 import { promises as fsp, readdirSync, statSync } from 'fs';
 import path from 'path';
@@ -103,7 +105,7 @@ export function compareVersions(a: string, b: string): number {
 
 /**
  * 디렉토리 안 모든 파일을 재귀로 세고 총 byte 합 계산.
- * Codex 9차 P1: G드라이브 sync 완전성 검증 + mirror copy 사후 검증에 사용.
+ * 현재 적용 단위는 installer지만, win-unpacked 배포 산출물 sanity check에 사용한다.
  */
 export function countFilesAndBytes(root: string): { fileCount: number; totalBytes: number } {
   let fileCount = 0;

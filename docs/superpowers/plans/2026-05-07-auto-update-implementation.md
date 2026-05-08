@@ -1,5 +1,7 @@
 # Auto-Update System Implementation Plan (v1.21.0)
 
+> **역사 기록 주의:** 이 계획서는 v1.21.0 초기 directory swap 구현 계획이다. v1.22.14 이후 실제 운영 기준은 `DEVLOG/AUTO_UPDATE_OPERATIONS.md`의 `BFLOW-Setup.exe` 기반 installer helper 방식이다. 새 작업에서 이 계획서의 `pending/` mirror, `app/` swap 절차를 그대로 구현하지 말 것.
+
 > **For agentic workers:** Use superpowers:executing-plans (subagent-driven-development는 상태 공유가 많은 main.ts 통합 작업이라 단일 세션이 안전). Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** B flow를 G드라이브 직접 실행에서 → 로컬 PC 실행으로 옮긴다. 매 실행 13초+(Defender 캐시 무력) → **재실행 1~2초**. 새 빌드는 G드라이브에서 백그라운드로 받아 종료 시 swap.

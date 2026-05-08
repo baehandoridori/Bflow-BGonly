@@ -1,7 +1,8 @@
 # B flow — 배포 가이드
 
-> 다른 Claude 세션 또는 신규 합류자가 이 프로젝트의 배포 구조를 빠르게 이해하기 위한 문서.
+> 다른 Claude/Codex 세션 또는 신규 합류자가 이 프로젝트의 배포 구조를 빠르게 이해하기 위한 문서.
 > 마지막 갱신: 2026-05-08
+> 자동 업데이트 운영의 1차 기준은 [`AUTO_UPDATE_OPERATIONS.md`](./AUTO_UPDATE_OPERATIONS.md)이다.
 
 ---
 
@@ -11,7 +12,7 @@ Studio JBBJ 팀(~20명)이 *동일한 빌드*를 *항상 최신 상태로* 사�
 
 - **자주 업데이트**: 한솔이 매일 여러 번 hotfix/기능 push 하는 워크플로우
 - **단일 진실 공급원(SSOT)**: 팀원 모두가 같은 버전을 쓰지 않으면 협업 데이터(Supabase)와 불일치
-- **수동 설치 비용 0**: 한솔이 매번 빌드 → 팀원 자동 반영 (각자 installer 돌리는 워크플로우는 거부)
+- **일상 업데이트 수동 설치 비용 0**: 첫 설치/복구는 `BFLOW-Setup.exe`를 쓸 수 있지만, 이후 hotfix는 한솔이 빌드/배포하면 팀원 앱이 자동 감지/적용
 
 → **G드라이브 공유 폴더**가 배포 채널의 핵심. 모든 팀원이 G드라이브 동기화를 사용 중이라 자연스러운 채널이 됨.
 
@@ -56,7 +57,7 @@ dist/
 
 ---
 
-## 4. 배포 방식 (기존)
+## 4. 배포 방식 (폐기된 기존 방식)
 
 ### 한솔 워크플로우
 ```bash
@@ -67,7 +68,7 @@ robocopy <local dist> <G드라이브 dist> /MIR /R:1 /W:1          # G드라이�
 
 `/MIR` = mirror. G드라이브에서 source에 없는 파일은 자동 삭제 (옛 빌드 잔재 정리). ExitCode 0~7 = 정상.
 
-### 팀원 워크플로우 (기존)
+### 팀원 워크플로우 (폐기됨)
 
 1. 신규 팀원: G드라이브 `dist\win-unpacked\BFLOW.exe` 의 바로가기를 바탕화면에 복사 (한솔이 사전에 만들어 둔 .lnk 파일을 공유)
 2. 매 사용: 바탕화면 바로가기 더블클릭 → G드라이브의 BFLOW.exe 직접 실행
@@ -84,9 +85,10 @@ robocopy <local dist> <G드라이브 dist> /MIR /R:1 /W:1          # G드라이�
 
 ---
 
-## 5. 새 배포 방식 — 자동 업데이트 시스템 (v1.22.14 기준)
+## 5. 현재 배포 방식 — installer 기반 자동 업데이트 (v1.22.19 기준)
 
-자세한 디자인: `docs/superpowers/specs/2026-05-01-auto-update-design.md`
+운영 기준: `DEVLOG/AUTO_UPDATE_OPERATIONS.md`
+초기 설계 기록: `docs/superpowers/specs/2026-05-01-auto-update-design.md`
 
 ### 컨셉
 - **G드라이브** = 한솔의 "배포 창고"
@@ -104,13 +106,13 @@ Copy-Item "C:\Bflow-BGonly\dist\manifest.json" "G:\공유 드라이브\JBBJ 자�
 
 중요: `manifest.json`은 업데이트 감지 신호다. 파일 업로드가 끝나기 전에 manifest가 먼저 바뀌면 팀원 앱이 반쯤 올라간 빌드를 최신으로 판단할 수 있다. 배포 자동화는 반드시 `BFLOW-Setup.exe`, `win-unpacked`, `latest.yml` 업로드를 끝낸 뒤 `manifest.json`을 마지막에 갱신해야 한다. `scripts/generate-manifest.js`는 배포용 manifest 생성 시 `BFLOW-Setup.exe`가 없으면 실패해야 정상이다. `--allow-missing-installer`는 개발용 `build:vite`에서만 허용한다.
 
-### 팀원 첫 설치 (한 번만)
-1. 기존 바로가기(G드라이브 가리키는 것) 또는 G드라이브의 BFLOW.exe 더블클릭
-2. 앱이 "처음 실행" 감지 → 자기를 `%LOCALAPPDATA%\Bflow-BGonly\app\` 에 복사 → 바탕화면에 새 바로가기 자동 생성 → 새 위치에서 재시작
-3. (옵션) Windows Defender 제외 등록 dialog 한 번 노출 → "허용" 클릭 시 새 빌드 받은 직후 첫 실행도 빠름
+### 팀원 첫 설치/복구 (한 번만)
+1. 정식 경로는 G드라이브 `dist\BFLOW-Setup.exe` 실행이다.
+2. 설치 후 바탕화면/시작 메뉴에 `B flow` 바로가기가 생기고, 이후에는 그 바로가기를 사용한다.
+3. 누군가 옛 G드라이브 `win-unpacked\BFLOW.exe`를 다시 누르면 앱은 "이미 설치됨" 안내를 띄우거나 레거시 self-installer fallback으로 로컬 실행을 유도한다. 이 경로는 호환용이며 일상 사용 경로가 아니다.
 
 ### 팀원 일상 사용
-1. **바탕화면 새 바로가기** (자동 생성된 것, 로컬 본체 가리킴) 더블클릭 → 1~2초 시작
+1. **바탕화면/시작 메뉴 `B flow` 바로가기** (로컬 설치본 가리킴) 더블클릭 → 빠른 시작
 2. 시작 직후 스플래시에서 manifest.json 읽기 → 자기 버전과 비교 → 새 버전이면 최대 10초 동안 로컬 installer 캐시 준비
 3. 10초 안에 준비 완료: helper가 로컬 `installer-pending\BFLOW-Setup.exe`를 실행하고 설치 진행 창을 표시한 뒤 새 BFLOW.exe 재실행. 단, helper 시작 확인 마커(`.installer-attempted`)가 생기지 않으면 현재 버전으로 먼저 열고 사용자가 버전 모달에서 다시 확인한다.
 4. 10초 초과/실패: 현재 버전으로 먼저 열고, installer 다운로드가 끝나면 좌하단 버전 버튼/토스트/업데이트 모달로 표시
@@ -144,10 +146,10 @@ DB 스키마 변경 시:
 
 ## 8. 배포 시 주의사항
 
-1. **빌드 검증**: 변경 후 반드시 `npm run typecheck` + `npm run test:auto-update` + `vite build` 통과 확인 (CLAUDE.md 규칙)
+1. **빌드 검증**: 변경 후 반드시 `npm run typecheck` + `npm run test:auto-update` + `npm run build:vite` 통과 확인. 정식 배포는 `npm run build`까지 확인
 2. **G드라이브 락**: 팀원이 BFLOW.exe 켜놓은 상태면 robocopy 가 일부 `.pak` 파일에서 락 에러. 다만 chromium 33 동일이라 src/dst 내용 같아 무시 가능.
 3. **node_modules in worktree**: git worktree 에는 node_modules 가 없음. `mklink /J node_modules C:\Bflow-BGonly\node_modules` (Windows junction) 으로 메인 디렉토리와 연결 후 빌드.
-4. **자동 머지/배포 금지** (메모리): PR 생성/G드라이브 robocopy/슬랙 게시는 한솔이 명시적으로 요청한 경우만.
+4. **머지/배포 권한**: 현재 운영 합의상 자동 업데이트 작업을 한솔이 요청한 경우 Codex가 PR 생성, 리뷰 대응, 머지, 정식 빌드, G드라이브 배포, 실제 업데이트 모니터링까지 진행할 수 있다. 단, DB 스키마 변경, 팀 전체 공지, 슬랙 게시는 별도 지시를 받는다.
 5. **업데이트 성공 판단**: 토스트 감지는 다운로드 완료 신호일 뿐이다. 실제 적용 성공은 installer helper 후 다음 실행 버전, `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[installer-main]`/`[installer]` 로그, `%LOCALAPPDATA%\Bflow-BGonly\installer-pending` 정리 여부로 판단한다.
 6. **manifest 변경 요약**: 앱의 업데이트 모달은 `DEVLOG/update-notes.json` → `dist/manifest.json.releaseNotes`를 표시한다. 새 배포 전 이 파일의 최신 항목을 갱신한다.
 7. **helper 실행 순서**: `installerApply.ts` helper는 현재 BFLOW 프로세스 종료를 기다린 뒤 `BFLOW-Setup.exe /S`를 실행해야 한다. 앱이 살아있는 동안 installer를 시작하면 Windows 파일 잠금으로 실패할 수 있다.
@@ -172,6 +174,7 @@ DB 스키마 롤백:
 ## 10. 참조
 
 - [CLAUDE.md](../CLAUDE.md) — 프로젝트 전체 규칙
+- [AUTO_UPDATE_OPERATIONS.md](./AUTO_UPDATE_OPERATIONS.md) — 자동 업데이트 운영 기준
 - [ROADMAP.md](../ROADMAP.md) — 개발 로드맵
 - [supabase-init.sql](./supabase-init.sql) — DB 초기 스키마
 - [supabase-migration-plan.md](./supabase-migration-plan.md) — Supabase 마이그레이션 상세

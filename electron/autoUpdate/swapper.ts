@@ -1,5 +1,9 @@
 /**
- * v1.21.0 자동 업데이트 — before-quit hook에서 호출.
+ * 레거시 directory swapper.
+ *
+ * v1.22.14 이후 현재 자동 업데이트 적용 경로는 installerApply.ts다.
+ * 이 파일은 v1.21~v1.22.13 실패 상태 복구/호환용으로 남아있다.
+ *
  * pending/.ready 가 있으면 app/ → backup/, pending/ → app/ 으로 swap.
  *
  * 락 안전성:
@@ -12,7 +16,7 @@
  *   그래도 일부 시나리오에서 락이 걸릴 수 있으므로(드물게 antivirus 등) 실패 시 graceful
  *   처리: app/ → backup 시도가 실패하면 그대로 두고 swap 안 함. 다음 종료 시 재시도.
  *
- * spec §4.2 step 6, §6 "swap 실패 / 새 버전 깨짐" 처리.
+ * 초기 spec §4.2 step 6, §6 "swap 실패 / 새 버전 깨짐" 처리.
  */
 import { promises as fsp, existsSync, renameSync, appendFileSync, mkdirSync } from 'fs';
 import path from 'path';
