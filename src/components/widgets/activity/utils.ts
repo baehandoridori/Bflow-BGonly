@@ -1,4 +1,4 @@
-import type { Activity, ActionType, Department, Stage } from '@/types';
+import type { Activity, ActionType, ActivityStatRowV2, Department, Stage } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { ACTION_TYPE_LABEL } from './constants';
 import { GROUP_WINDOW_MS } from './constants';
@@ -210,6 +210,72 @@ export function intensityGlow(level: 0 | 1 | 2 | 3 | 4): string {
 const DAY_LABELS = ['월', '화', '수', '목', '금', '토', '일'];
 export function dayLabel(idx: number): string {
   return DAY_LABELS[idx] ?? '';
+}
+
+/**
+ * v1.23.0: granularity 별 격자 빌드.
+ * - hour-of-day-x-dow: bucket1=dow(0=일), bucket2=hour. 표시용 7×24 (월=0).
+ * - month-x-dow: bucket1=month(1~12), bucket2=dow. 표시용 12×7 (월=0).
+ * - month-totals: bucket1=month, 12×1.
+ */
+export function buildHeatmapGridV2(
+  stats: ActivityStatRowV2[],
+  granularity: 'hour-of-day-x-dow' | 'month-x-dow' | 'month-totals',
+): GroupedCount[][] {
+  if (granularity === 'hour-of-day-x-dow') {
+    const grid: GroupedCount[][] = Array.from({ length: 7 }, () =>
+      Array.from({ length: 24 }, () => ({ ...EMPTY_GROUPED_COUNT })),
+    );
+    for (const s of stats) {
+      const displayDay = (s.bucket1 + 6) % 7;
+      if (displayDay >= 0 && displayDay < 7 && s.bucket2 >= 0 && s.bucket2 < 24) {
+        grid[displayDay][s.bucket2] = {
+          total: s.total,
+          progress: s.count_progress ?? 0,
+          memo: s.count_memo ?? 0,
+          scene: s.count_scene ?? 0,
+          etc: s.count_etc ?? 0,
+        };
+      }
+    }
+    return grid;
+  }
+  if (granularity === 'month-x-dow') {
+    const grid: GroupedCount[][] = Array.from({ length: 12 }, () =>
+      Array.from({ length: 7 }, () => ({ ...EMPTY_GROUPED_COUNT })),
+    );
+    for (const s of stats) {
+      const monthIdx = s.bucket1 - 1;
+      const displayDow = (s.bucket2 + 6) % 7;
+      if (monthIdx >= 0 && monthIdx < 12 && displayDow >= 0 && displayDow < 7) {
+        grid[monthIdx][displayDow] = {
+          total: s.total,
+          progress: s.count_progress ?? 0,
+          memo: s.count_memo ?? 0,
+          scene: s.count_scene ?? 0,
+          etc: s.count_etc ?? 0,
+        };
+      }
+    }
+    return grid;
+  }
+  // month-totals — 12×1
+  const grid: GroupedCount[][] = Array.from({ length: 12 }, () =>
+    Array.from({ length: 1 }, () => ({ ...EMPTY_GROUPED_COUNT })),
+  );
+  for (const s of stats) {
+    const monthIdx = s.bucket1 - 1;
+    if (monthIdx >= 0 && monthIdx < 12) {
+      grid[monthIdx][0] = {
+        total: s.total,
+        progress: s.count_progress ?? 0,
+        memo: s.count_memo ?? 0,
+        scene: s.count_scene ?? 0,
+        etc: s.count_etc ?? 0,
+      };
+    }
+  }
+  return grid;
 }
 
 /** 상대 시간 표시 — 24시간 미만 상대, 이상 절대 */

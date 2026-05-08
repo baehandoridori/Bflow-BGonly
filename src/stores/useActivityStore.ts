@@ -1,15 +1,18 @@
 import { create } from 'zustand';
-import type { Activity, ActionGroup } from '@/types';
+import type { Activity, ActionGroup, TimeUnit, CellFilter, ActivityInsightsRaw } from '@/types';
 import * as supabaseService from '@/services/supabaseService';
 import { useAppStore } from './useAppStore';
 import { useAuthStore } from './useAuthStore';
-import { buildHeatmapGrid, EMPTY_GROUPED_COUNT, type GroupedCount } from '@/components/widgets/activity/utils';
+import { buildHeatmapGrid, buildHeatmapGridV2, EMPTY_GROUPED_COUNT, type GroupedCount } from '@/components/widgets/activity/utils';
 import { MAX_CACHED, PAGE_SIZE } from '@/components/widgets/activity/constants';
+import { getRangeBoundary, granularityFor } from '@/components/widgets/activity/timeRange';
 
 const FILTERS_KEY = 'bflow_activity_filters';
 const MODE_KEY = 'bflow_activity_golden_mode';
+const TIME_UNIT_KEY = 'bflow_activity_time_unit';
 
 export type GoldenMode = 'heatmap' | 'hour' | 'day';
+export type InsightsRange = 'year' | 'half' | 'quarter';
 
 interface ActivityState {
   activities: Activity[];
@@ -25,6 +28,16 @@ interface ActivityState {
   filters: { groups: Set<ActionGroup> };
   goldenMode: GoldenMode;
 
+  // v1.23.0: 시간 단위 + 기간 + 셀 필터
+  timeUnit: TimeUnit;
+  rangeIdx: number;
+  cellFilter: CellFilter | null;
+
+  // v1.23.0: 분석 모달 캐시
+  insights: ActivityInsightsRaw | null;
+  insightsLoading: boolean;
+  insightsRange: InsightsRange;
+
   loadInitial(): Promise<void>;
   loadMore(): Promise<void>;
   loadStats(): Promise<void>;
@@ -33,6 +46,15 @@ interface ActivityState {
   setFilter(group: ActionGroup, on: boolean): void;
   setAllFilters(on: boolean): void;
   setGoldenMode(mode: GoldenMode): void;
+
+  // v1.23.0
+  setTimeUnit(unit: TimeUnit): void;
+  setRangeIdx(idx: number): void;
+  goToCurrentRange(): void;
+  applyCellFilter(filter: CellFilter): void;
+  clearCellFilter(): void;
+  loadInsights(range: InsightsRange): Promise<void>;
+  setInsightsRange(range: InsightsRange): void;
 }
 
 function loadFilters(): Set<ActionGroup> {
@@ -51,6 +73,13 @@ function loadMode(): GoldenMode {
     if (v === 'heatmap' || v === 'hour' || v === 'day') return v;
   } catch { /* ignore */ }
   return 'heatmap';
+}
+function loadTimeUnit(): TimeUnit {
+  try {
+    const v = localStorage.getItem(TIME_UNIT_KEY) as TimeUnit | null;
+    if (v === 'week' || v === 'month' || v === 'year') return v;
+  } catch { /* ignore */ }
+  return 'week';
 }
 
 function getCurrentDepartment(): 'bg' | 'acting' | null {
@@ -96,6 +125,12 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   hasMore: true,
   filters: { groups: loadFilters() },
   goldenMode: loadMode(),
+  timeUnit: loadTimeUnit(),
+  rangeIdx: 0,
+  cellFilter: null,
+  insights: null,
+  insightsLoading: false,
+  insightsRange: 'year',
 
   async loadInitial() {
     set({ isLoading: true, error: null });
@@ -164,14 +199,23 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   },
 
   async loadStats() {
+    // v1.23.0: 시간 단위/기간에 따라 v2 RPC 호출
     try {
+      const { timeUnit, rangeIdx, filters } = get();
       const department = getCurrentDepartment();
-      const groups = getCurrentGroupsForServer(get().filters.groups);
-      // 그룹 필터가 켜진 상태면 서버 집계도 같은 그룹만 — 차트와 피드 일관성 유지
-      const stats = await supabaseService.getActivityStats({ days: 7, department, groups });
-      set({ statsGrid: buildHeatmapGrid(stats) });
+      const groups = getCurrentGroupsForServer(filters.groups);
+      const { startISO, endISO } = getRangeBoundary(timeUnit, rangeIdx);
+      const granularity = granularityFor(timeUnit);
+      const stats = await supabaseService.getActivityStatsV2({
+        rangeStart: startISO,
+        rangeEnd: endISO,
+        granularity,
+        department,
+        groups,
+      });
+      set({ statsGrid: buildHeatmapGridV2(stats, granularity) });
     } catch (err) {
-      console.warn('[activity] stats load failed:', err);
+      console.warn('[activity] stats v2 load failed:', err);
     }
   },
 
@@ -234,6 +278,48 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   setGoldenMode(mode) {
     try { localStorage.setItem(MODE_KEY, mode); } catch { /* ignore */ }
     set({ goldenMode: mode });
+  },
+
+  // ─── v1.23.0: 시간 단위 / 기간 / 셀 필터 ───
+  setTimeUnit(unit) {
+    try { localStorage.setItem(TIME_UNIT_KEY, unit); } catch { /* ignore */ }
+    set({ timeUnit: unit, rangeIdx: 0, cellFilter: null });
+    void get().loadStats();
+  },
+  setRangeIdx(idx) {
+    set({ rangeIdx: Math.max(0, idx), cellFilter: null });
+    void get().loadStats();
+  },
+  goToCurrentRange() {
+    set({ rangeIdx: 0, cellFilter: null });
+    void get().loadStats();
+  },
+  applyCellFilter(filter) {
+    set({ cellFilter: filter });
+  },
+  clearCellFilter() {
+    set({ cellFilter: null });
+  },
+
+  // ─── v1.23.0: 분석 모달 ───
+  setInsightsRange(range) {
+    set({ insightsRange: range, insights: null });
+    void get().loadInsights(range);
+  },
+  async loadInsights(range) {
+    const months = range === 'year' ? 12 : range === 'half' ? 6 : 3;
+    const now = new Date();
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+    const start = new Date(now.getFullYear(), now.getMonth() - months, now.getDate()).toISOString();
+    const department = getCurrentDepartment();
+    set({ insightsLoading: true });
+    try {
+      const data = await supabaseService.getActivityInsights({ rangeStart: start, rangeEnd: end, department });
+      set({ insights: data as ActivityInsightsRaw, insightsLoading: false });
+    } catch (err) {
+      console.warn('[activity] insights load failed:', err);
+      set({ insightsLoading: false });
+    }
   },
 }));
 
