@@ -121,24 +121,46 @@ export function UnifiedSceneDetailModal({
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
-  // v1.23.2 (#1 재설계): localDeptOverride 제거. 한솔 의도 = 토글 클릭이 전역 부서 모드 변경 +
-  // 모달 닫음 → 사용자가 같은 컷 다시 클릭 시 새 부서 모드의 모달이 열림 ("이동").
-  // codex 2차 P1: ScenesView 가 useAppStore.selectedDepartment 로 라우팅 — 그것도 같이 변경 안 하면
-  //   같은 통합 모달이 다시 열려서 토글 무효. dashboardDeptFilter (대시보드 위젯용) 도 함께 변경하여 일관성 유지.
+  // v1.23.3 (#2 한솔 보고): 토글 클릭 시 전역 부서 모드 변경 + 같은 컷 모달 자동 재오픈 ("판딩").
+  //   v1.23.2 의 "닫고 다시 클릭하라" 보다 직관적. setPendingSceneModalRequest 로 ScenesView 가 자동 처리.
   const selectedDepartment = useAppStore((s) => s.selectedDepartment);
   const setSelectedDepartment = useAppStore((s) => s.setSelectedDepartment);
   const setDashboardDeptFilter = useAppStore((s) => s.setDashboardDeptFilter);
+  const setPendingSceneModalRequest = useAppStore((s) => s.setPendingSceneModalRequest);
   const handleDeptToggle = useCallback((next: 'all' | 'bg' | 'acting') => {
     if (next === selectedDepartment) return;
+    // codex 1차 P1: target dept 에 씬이 있는지 검사 — 없으면 pending request 보내지 않음 (stale 방지).
+    //   next='bg' → bgScene 필요, 'acting' → actScene, 'all' → 둘 중 하나라도.
+    const targetScene =
+      next === 'bg' ? bgScene
+      : next === 'acting' ? actScene
+      : (bgScene ?? actScene);
+    const targetUuid = targetScene?.id;
+    // codex 3차 P2: sceneId 가 빈 문자열일 수도 있어 || fallback (?? 는 빈 문자열 그대로 반환).
+    const targetSceneName = targetScene?.sceneId || merged.sceneId;
+    const hasTarget = !!targetUuid;
+
     setSelectedDepartment(next);
     setDashboardDeptFilter(next);
-    const label = next === 'all' ? '통합' : next === 'bg' ? '배경' : '액팅';
-    sonnerToast.success(`${label} 모드로 전환했어요`, {
-      description: '같은 컷을 다시 클릭하면 ' + label + ' 모달이 열립니다',
-      duration: 3000,
-    });
     onClose();
-  }, [selectedDepartment, setSelectedDepartment, setDashboardDeptFilter, onClose]);
+
+    const label = next === 'all' ? '통합' : next === 'bg' ? 'BG' : '액팅';
+    if (hasTarget) {
+      // ScenesView 가 새 selectedDepartment 로 reload 후 pending 처리 — 약간 지연.
+      setTimeout(() => {
+        setPendingSceneModalRequest({
+          sceneUuid: targetUuid,
+          sceneName: targetSceneName ?? undefined,
+        });
+      }, 120);
+      sonnerToast.success(`${label} 모드로 전환 — 같은 컷 모달 다시 엽니다`, { duration: 1800 });
+    } else {
+      sonnerToast.info(`${label} 모드로 전환했어요`, {
+        description: '이 컷은 ' + label + ' 데이터가 없어 모달이 다시 열리지 않습니다.',
+        duration: 2400,
+      });
+    }
+  }, [selectedDepartment, setSelectedDepartment, setDashboardDeptFilter, setPendingSceneModalRequest, onClose, bgScene, actScene, merged.sceneId]);
   // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
   const backdropMouseDownRef = useRef(false);
 

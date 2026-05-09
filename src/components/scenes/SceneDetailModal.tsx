@@ -28,6 +28,8 @@ import { CommentPanel } from './CommentPanel';
 import { RevisionPanel } from './RevisionPanel';
 import { getComments } from '@/services/commentService';
 import { useRevisionStore } from '@/stores/useRevisionStore';
+import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
 
 // ─── 타입 ──────────────────────────────────────────
@@ -811,6 +813,10 @@ export function SceneDetailModal({
                 <span className="text-sm font-mono text-text-secondary mr-2">
                   {Math.round(pct)}%
                 </span>
+
+                {/* v1.23.3 (#2 한솔 보고): BG/ACT 모달에서도 부서 토글 가능 — 통합/다른 부서로 이동 */}
+                <DeptToggle scene={scene} sceneIdName={scene.sceneId || String(scene.no)} sheetName={sheetName} onClose={onClose} />
+
                 <button
                   onClick={onClose}
                   className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-primary rounded-lg transition-colors cursor-pointer"
@@ -1151,5 +1157,89 @@ export function SceneDetailModal({
         />
       )}
     </AnimatePresence>
+  );
+}
+
+/**
+ * v1.23.3 (#2): BG/ACT 상세 모달 헤더의 부서 토글.
+ * 클릭 시 selectedDepartment(+dashboardDeptFilter) 변경 + 모달 닫음 + 같은 컷 자동 재오픈 (pendingSceneModalRequest).
+ * UnifiedSceneDetailModal 의 handleDeptToggle 과 동일 패턴.
+ */
+function DeptToggle({ scene, sceneIdName, sheetName, onClose }: { scene: Scene; sceneIdName: string; sheetName: string; onClose: () => void }) {
+  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
+  const setSelectedDepartment = useAppStore((s) => s.setSelectedDepartment);
+  const setDashboardDeptFilter = useAppStore((s) => s.setDashboardDeptFilter);
+  const setPendingSceneModalRequest = useAppStore((s) => s.setPendingSceneModalRequest);
+  const dataEpisodes = useDataStore((s) => s.episodes);
+
+  const handle = useCallback((next: 'all' | 'bg' | 'acting') => {
+    if (next === selectedDepartment) return;
+    // codex 3차 P2: scene.sceneId 가 빈 문자열일 수 있음 — || 로 fallback (?? 는 빈 문자열도 truthy 취급).
+    const sceneIdValue = scene.sceneId || sceneIdName;
+
+    // codex 1·2차 P1: target dept 에 같은 sceneId 의 씬이 존재하는지 검사 — 없으면 pending 안 보냄.
+    //   2차 P1: 같은 sceneId 가 다른 EP/Part 에서 reuse 될 수 있어 cross-context 매칭 위험.
+    //     현재 sheetName 으로 EP+Part 컨텍스트 찾고, target dept 의 같은 EP+partId 인 part 안에서만 매칭.
+    let targetUuid: string | undefined = scene.id;
+    let hasTarget = next === 'all';
+    if (next !== 'all' && sceneIdValue) {
+      // 1) 현재 sheetName 의 EP+partId 컨텍스트 찾기
+      let currentEpisodeNumber: number | undefined;
+      let currentPartId: string | undefined;
+      for (const ep of dataEpisodes) {
+        const part = ep.parts.find((p) => p.sheetName === sheetName);
+        if (part) {
+          currentEpisodeNumber = ep.episodeNumber;
+          currentPartId = part.partId;
+          break;
+        }
+      }
+      // 2) 같은 EP + partId + target dept 인 part 안에서만 sceneId 매칭
+      if (currentEpisodeNumber != null && currentPartId != null) {
+        const epRow = dataEpisodes.find((e) => e.episodeNumber === currentEpisodeNumber);
+        const targetPart = epRow?.parts.find((p) => p.partId === currentPartId && p.department === next);
+        const found = targetPart?.scenes.find((s) => s.sceneId === sceneIdValue);
+        if (found) {
+          targetUuid = found.id;
+          hasTarget = true;
+        }
+      }
+    }
+
+    setSelectedDepartment(next);
+    setDashboardDeptFilter(next);
+    onClose();
+
+    const label = next === 'all' ? '통합' : next === 'bg' ? 'BG' : '액팅';
+    if (hasTarget) {
+      setTimeout(() => {
+        setPendingSceneModalRequest({ sceneUuid: targetUuid, sceneName: sceneIdValue ?? undefined });
+      }, 120);
+      sonnerToast.success(`${label} 모드로 전환 — 같은 컷 모달 다시 엽니다`, { duration: 1800 });
+    } else {
+      sonnerToast.info(`${label} 모드로 전환했어요`, {
+        description: '이 컷은 ' + label + ' 데이터가 없어 모달이 다시 열리지 않습니다.',
+        duration: 2400,
+      });
+    }
+  }, [selectedDepartment, setSelectedDepartment, setDashboardDeptFilter, setPendingSceneModalRequest, scene.id, scene.sceneId, sceneIdName, onClose, dataEpisodes]);
+
+  return (
+    <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0 mr-1">
+      {(['all', 'bg', 'acting'] as const).map((d) => (
+        <button
+          key={d}
+          onClick={() => handle(d)}
+          className={cn(
+            'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
+            selectedDepartment === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
+          )}
+          style={selectedDepartment === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
+          title={d === 'all' ? '통합 모드로 전환' : d === 'bg' ? 'BG 모드로 전환' : '액팅 모드로 전환'}
+        >
+          {d === 'all' ? '통합' : d === 'bg' ? 'BG' : '액팅'}
+        </button>
+      ))}
+    </div>
   );
 }

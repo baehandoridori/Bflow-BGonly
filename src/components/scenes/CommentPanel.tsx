@@ -103,10 +103,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
 
   // ── 입력 카드 + textarea 한계 계산 ──
   // 패널 전체 높이의 30% 까지 입력 카드가 자란다. 그 이상은 textarea 안에서 스크롤.
-  // textarea 가 hard cap (taMaxPx) 을 넘지 않게 막아 toolbar 영역이 카드 maxHeight 안에 항상 보이게 보장.
-  // v1.23.2 (#3): v1.23.1 의 cap 320px 으로도 부족 — 입력 wrapper 가 shrink-0 없어 grow 무제한.
-  //   wrapper 에 shrink-0 추가 + cap 을 220px 으로 더 단단히. 두 변경이 같이 가야 회귀 완전 해소.
-  const inputCardMaxPx = Math.min(220, Math.max(120, Math.floor(panelHeight * 0.30)));
+  // v1.23.3 (#1 진짜 fix): 카드 자체에 overflow-hidden + flex-col + textarea flex-1 로 재구성.
+  //   기존 cap 220 도 overflow:visible 카드라 콘텐츠가 모달 밖으로 흘러넘쳐 회귀.
+  //   카드를 flex-col 로 만들고 footer 가 항상 보이도록 textarea 가 자체 scroll 처리.
+  //   추가로 cap 도 180 으로 더 단단히.
+  const inputCardMaxPx = Math.min(180, Math.max(120, Math.floor(panelHeight * 0.30)));
   const imageRowHeight = attachedImages.length > 0 ? 88 : 0;       // 썸네일 64 + 위아래 여백 + pb-1
   const FOOTER_H = 56;                                              // toolbar(h-7) + mt-1.5 + border + pt-1.5 + 카드 padding(pt-2 + pb-1.5)
   const taMaxPx = Math.max(40, inputCardMaxPx - imageRowHeight - FOOTER_H);
@@ -796,7 +797,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
 
         <div
           onPaste={handlePaste}
-          className={`comment-input-card rounded-xl border px-2.5 pt-2 pb-1.5 ${focused && !draggingOver ? 'focused' : ''} ${draggingOver ? 'dragover' : ''}`}
+          // v1.23.3 (#1 진짜 fix): flex-col + overflow-hidden — footer 항상 보이고 textarea 만 자체 scroll.
+          className={`comment-input-card rounded-xl border px-2.5 pt-2 pb-1.5 flex flex-col overflow-hidden ${focused && !draggingOver ? 'focused' : ''} ${draggingOver ? 'dragover' : ''}`}
           style={{
             background: 'rgb(var(--comment-card-elev-rgb))',
             // 한솔 피드백(2026-05-02): focus 시 accent-sub(보라)가 박혀서 "보라색 고정"으로 보임 → 중립 흰색 알파로 변경
@@ -837,7 +839,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
             </div>
           )}
 
-          {/* textarea — 풀 너비 */}
+          {/* textarea — 풀 너비, v1.23.3 (#1): flex-1 + min-h-0 으로 카드 내 남은 공간 모두 차지하되 footer 보존 */}
           <textarea
             ref={inputRef}
             value={input}
@@ -846,7 +848,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
             onBlur={() => setFocused(false)}
             placeholder="댓글 입력... (Ctrl+V / 드래그로 이미지)"
             rows={1}
-            className="comment-input-textarea block w-full px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto"
+            className="comment-input-textarea block w-full px-2 py-1.5 text-xs resize-none outline-none bg-transparent leading-relaxed text-text-primary placeholder:text-text-secondary/40 overflow-y-auto flex-1 min-h-0"
             style={{ height: taHeight, maxHeight: taMaxPx, boxSizing: 'border-box' }}
             onKeyDown={(e) => {
               // @멘션 키보드 탐색
@@ -886,8 +888,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
             hidden
             onChange={handleFileChange}
           />
-          {/* 하단 toolbar — 좌측 첨부, 우측 전송 (cowork 스타일) */}
-          <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-bg-border/40">
+          {/* 하단 toolbar — 좌측 첨부, 우측 전송 (cowork 스타일). v1.23.3 (#1): shrink-0 명시 — 항상 보임 보장 */}
+          <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-bg-border/40 shrink-0">
             <button
               onClick={() => fileInputRef.current?.click()}
               className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-card hover:text-text-primary transition-colors cursor-pointer"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Activity, BarChart3, ChevronLeft, ChevronRight, Clock, Disc, Grid3x3, X } from 'lucide-react';
 import { Widget } from './Widget';
@@ -225,9 +225,19 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
   // codex 1차 P3: year 모드에서는 effective chart mode 가 강제 heatmap 이라
   //   토글 active 상태도 effective 기준으로 표시 — 저장된 goldenMode 가 hour/day 여도 heatmap 이 active.
   const effectiveChartModeForToggle: 'heatmap' | 'hour' | 'day' = chartToggleDisabled ? 'heatmap' : goldenMode;
+  // v1.23.3 (#3): 반응형 — 헤더 폭 좁으면 차트 모드 토글 텍스트 숨기고 아이콘만.
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [narrowMode, setNarrowMode] = useState(false);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setNarrowMode(entry.contentRect.width < 480));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
-    <div className="flex items-center gap-2">
+    <div ref={headerRef} className="flex items-center gap-2">
       <div className="flex items-center gap-0.5">
         <button
           onClick={() => setRangeIdx(rangeIdx + 1)}
@@ -269,7 +279,7 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
         ))}
       </div>
 
-      {/* v1.23.1 (#3): 차트 모드 토글 — 히트맵/시간대/요일 (year 모드는 비활성) */}
+      {/* v1.23.1 (#3): 차트 모드 토글 — 히트맵/시간대/요일 (year 모드는 비활성). v1.23.3: 좁은 헤더 narrowMode → 아이콘만 */}
       <div className={`flex gap-[2px] bg-bg-border/40 p-[2px] rounded-[7px] ${chartToggleDisabled ? 'opacity-40' : ''}`}>
         <ChartModeButton
           active={effectiveChartModeForToggle === 'heatmap'}
@@ -278,6 +288,7 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
           icon={<Grid3x3 size={11} />}
           label="히트맵"
           title="히트맵 모드"
+          showLabel={!narrowMode}
         />
         <ChartModeButton
           active={effectiveChartModeForToggle === 'hour'}
@@ -285,7 +296,8 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
           onClick={() => !chartToggleDisabled && setGoldenMode('hour')}
           icon={<BarChart3 size={11} />}
           label="시간대"
-          title={chartToggleDisabled ? '년 모드에서는 비활성' : '시간대 막대'}
+          title={chartToggleDisabled ? '년 모드에서는 비활성' : '시간대 차트'}
+          showLabel={!narrowMode}
         />
         <ChartModeButton
           active={effectiveChartModeForToggle === 'day'}
@@ -293,7 +305,8 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
           onClick={() => !chartToggleDisabled && setGoldenMode('day')}
           icon={<Activity size={11} />}
           label="요일"
-          title={chartToggleDisabled ? '년 모드에서는 비활성' : '요일 막대'}
+          title={chartToggleDisabled ? '년 모드에서는 비활성' : '요일 차트'}
+          showLabel={!narrowMode}
         />
       </div>
 
@@ -309,22 +322,22 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
   );
 }
 
-function ChartModeButton({ active, disabled, onClick, icon, label, title }: {
-  active: boolean; disabled: boolean; onClick: () => void; icon: React.ReactNode; label: string; title: string;
+function ChartModeButton({ active, disabled, onClick, icon, label, title, showLabel = true }: {
+  active: boolean; disabled: boolean; onClick: () => void; icon: React.ReactNode; label: string; title: string; showLabel?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      title={title}
-      // v1.23.2 (#2): whitespace-nowrap + flex-shrink-0 로 좁은 위젯 헤더에서도 글자 한 자씩 줄바꿈 방지.
+      title={showLabel ? title : `${label} — ${title}`}
+      // v1.23.3 (#3): 반응형 — 헤더 폭 좁으면 (showLabel=false) 아이콘만 노출.
       className={`flex items-center gap-1 px-2 py-1 rounded-[5px] cursor-pointer transition-all text-[10.5px] whitespace-nowrap shrink-0 ${
         active ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary'
       } disabled:cursor-not-allowed disabled:hover:text-text-secondary`}
       style={active ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
     >
       {icon}
-      <span className="whitespace-nowrap">{label}</span>
+      {showLabel && <span className="whitespace-nowrap">{label}</span>}
     </button>
   );
 }

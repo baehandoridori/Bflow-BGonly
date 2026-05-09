@@ -859,3 +859,18 @@ input[type="range"]::-webkit-slider-thumb {
     0 0 0 1px rgb(var(--color-accent) / 0.18),
     0 8px 18px rgb(var(--color-accent) / 0.12);
 }
+
+/* v1.23.3 (#4): 막대 차트 정점 펄스 — 노란색 글로우 + 살짝 깜빡 */
+@keyframes bflow-peak-bar-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(253, 203, 110, 0.5), 0 0 12px rgba(253, 203, 110, 0.45);
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(253, 203, 110, 0.18), 0 0 22px rgba(253, 203, 110, 0.7);
+    filter: brightness(1.15);
+  }
+}
+.bflow-peak-pulse {
+  animation: bflow-peak-bar-pulse 1.6s ease-in-out infinite;
+}
