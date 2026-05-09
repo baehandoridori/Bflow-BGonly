@@ -815,7 +815,7 @@ export function SceneDetailModal({
                 </span>
 
                 {/* v1.23.3 (#2 한솔 보고): BG/ACT 모달에서도 부서 토글 가능 — 통합/다른 부서로 이동 */}
-                <DeptToggle scene={scene} sceneIdName={scene.sceneId || String(scene.no)} onClose={onClose} />
+                <DeptToggle scene={scene} sceneIdName={scene.sceneId || String(scene.no)} sheetName={sheetName} onClose={onClose} />
 
                 <button
                   onClick={onClose}
@@ -1165,7 +1165,7 @@ export function SceneDetailModal({
  * 클릭 시 selectedDepartment(+dashboardDeptFilter) 변경 + 모달 닫음 + 같은 컷 자동 재오픈 (pendingSceneModalRequest).
  * UnifiedSceneDetailModal 의 handleDeptToggle 과 동일 패턴.
  */
-function DeptToggle({ scene, sceneIdName, onClose }: { scene: Scene; sceneIdName: string; onClose: () => void }) {
+function DeptToggle({ scene, sceneIdName, sheetName, onClose }: { scene: Scene; sceneIdName: string; sheetName: string; onClose: () => void }) {
   const selectedDepartment = useAppStore((s) => s.selectedDepartment);
   const setSelectedDepartment = useAppStore((s) => s.setSelectedDepartment);
   const setDashboardDeptFilter = useAppStore((s) => s.setDashboardDeptFilter);
@@ -1176,23 +1176,32 @@ function DeptToggle({ scene, sceneIdName, onClose }: { scene: Scene; sceneIdName
     if (next === selectedDepartment) return;
     const sceneIdValue = scene.sceneId ?? sceneIdName;
 
-    // codex 1차 P1: target dept 에 같은 sceneId 의 씬이 존재하는지 검사 — 없으면 pending 안 보냄.
-    //   현재 scene 은 한 부서 데이터만. 같은 sceneId 의 다른 부서 씬은 useDataStore 에서 찾아야.
-    //   'all' 모드는 통합 뷰라 항상 가능.
+    // codex 1·2차 P1: target dept 에 같은 sceneId 의 씬이 존재하는지 검사 — 없으면 pending 안 보냄.
+    //   2차 P1: 같은 sceneId 가 다른 EP/Part 에서 reuse 될 수 있어 cross-context 매칭 위험.
+    //     현재 sheetName 으로 EP+Part 컨텍스트 찾고, target dept 의 같은 EP+partId 인 part 안에서만 매칭.
     let targetUuid: string | undefined = scene.id;
     let hasTarget = next === 'all';
     if (next !== 'all' && sceneIdValue) {
+      // 1) 현재 sheetName 의 EP+partId 컨텍스트 찾기
+      let currentEpisodeNumber: number | undefined;
+      let currentPartId: string | undefined;
       for (const ep of dataEpisodes) {
-        for (const part of ep.parts) {
-          if (part.department !== next) continue;
-          const found = part.scenes.find((s) => s.sceneId === sceneIdValue);
-          if (found) {
-            targetUuid = found.id;
-            hasTarget = true;
-            break;
-          }
+        const part = ep.parts.find((p) => p.sheetName === sheetName);
+        if (part) {
+          currentEpisodeNumber = ep.episodeNumber;
+          currentPartId = part.partId;
+          break;
         }
-        if (hasTarget) break;
+      }
+      // 2) 같은 EP + partId + target dept 인 part 안에서만 sceneId 매칭
+      if (currentEpisodeNumber != null && currentPartId != null) {
+        const epRow = dataEpisodes.find((e) => e.episodeNumber === currentEpisodeNumber);
+        const targetPart = epRow?.parts.find((p) => p.partId === currentPartId && p.department === next);
+        const found = targetPart?.scenes.find((s) => s.sceneId === sceneIdValue);
+        if (found) {
+          targetUuid = found.id;
+          hasTarget = true;
+        }
       }
     }
 
