@@ -32,7 +32,7 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, DEFAULT_THEME_ID } from '@/themes';
+import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
@@ -445,7 +445,12 @@ export default function App() {
 
           // CSS 적용
           if (effectiveThemeId === 'custom' && customHex) {
-            const colors = deriveThemeFromAccent(customHex.accent, customHex.sub, savedMode);
+            // v1.23.2 codex 2차 P1: 저장된 customColors (preferences.json) 가 있으면 그것을 그대로 사용.
+            //   ThemeSection.handleCustomApply 가 v1.23.2 부터 프리셋 base + 액센트만 override 패턴이라
+            //   저장된 customColors 가 사용자 의도. deriveThemeFromAccent 다시 호출하면 라이트 모드 회색 회귀.
+            //   savedTheme.customColors 가 없는 옛 데이터만 deriveThemeFromAccent 폴백.
+            const colors = savedTheme.customColors
+              ?? deriveThemeFromAccent(customHex.accent, customHex.sub, savedMode);
             applyTheme(colors, savedMode);
             setThemeId('custom');
             setColorMode(savedMode);
@@ -739,9 +744,18 @@ export default function App() {
     const { customAccentHex, customSubHex, setCustomThemeColors } = useAppStore.getState();
 
     if (themeId === 'custom') {
-      // Case A: hex 두 개 모두 유효 → 현재 colorMode로 재파생
+      // Case A: hex 두 개 모두 유효
       if (customAccentHex && customSubHex) {
-        const colors = deriveThemeFromAccent(customAccentHex, customSubHex, colorMode);
+        // v1.23.2 codex 3차 P1: customThemeColors 가 ThemeSection.handleCustomApply 에서 만든
+        //   "프리셋 base + 액센트 override" 형태면 그것을 우선 사용 (라이트 모드 배경 그대로 보존).
+        //   customThemeColors 가 없거나 accent 가 hex 와 불일치하면 (옛 데이터/마이그레이션) deriveThemeFromAccent 폴백.
+        //   colorMode 변경 시 어색하면 사용자가 다시 커스텀 적용 — 일관된 사용자 의도 우선.
+        const accentMatches = customThemeColors
+          && customThemeColors.accent === hexToRgb(customAccentHex)
+          && customThemeColors.accentSub === hexToRgb(customSubHex);
+        const colors = accentMatches
+          ? customThemeColors!
+          : deriveThemeFromAccent(customAccentHex, customSubHex, colorMode);
         applyTheme(colors, colorMode);
         // 얕은 비교로 동일한 결과면 setState를 건너뛰어 effect 재실행 루프 방지
         const same =
