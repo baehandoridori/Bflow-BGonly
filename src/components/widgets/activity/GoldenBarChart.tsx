@@ -204,17 +204,10 @@ function LineAreaChart({ mode, buckets, totals, max, peakIdx, onBarHover, toolti
     return { x, y, value: v, idx: i };
   });
 
-  // smooth path (간단한 Catmull-Rom → Bezier)
+  // v1.23.4 (#1 한솔 보고): 곡선이 어색 → 각 점을 단순 직선으로 연결 (polyline).
   const linePath = useMemo(() => {
     if (points.length === 0) return '';
-    let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
-    for (let i = 1; i < points.length; i++) {
-      const prev = points[i - 1];
-      const cur = points[i];
-      const cpx = (prev.x + cur.x) / 2;
-      d += ` Q ${cpx.toFixed(1)} ${prev.y.toFixed(1)} ${cur.x.toFixed(1)} ${cur.y.toFixed(1)}`;
-    }
-    return d;
+    return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
   }, [points]);
 
   const areaPath = useMemo(() => {
