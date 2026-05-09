@@ -144,9 +144,26 @@ test('version center can expand previous release notes', async () => {
   assert.match(modal, /이전 버전/);
 });
 
+test('version center renders categorized release note items', async () => {
+  const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
+
+  assert.match(modal, /RELEASE_NOTE_CATEGORY_META/);
+  assert.match(modal, /normalizeReleaseNoteItem/);
+  assert.match(modal, /summary/);
+  assert.match(modal, /description/);
+});
+
 test('manifest generation keeps full release note history for the version center', async () => {
   const generator = await readRepoFile('scripts', 'generate-manifest.js');
 
   assert.match(generator, /releaseNotes/);
   assert.doesNotMatch(generator, /\.slice\(0,\s*3\)[\s\S]*\.map\(\(note\)/);
+});
+
+test('manifest generation preserves categorized release note items', async () => {
+  const generator = await readRepoFile('scripts', 'generate-manifest.js');
+
+  assert.match(generator, /category/);
+  assert.match(generator, /summary/);
+  assert.match(generator, /description/);
 });

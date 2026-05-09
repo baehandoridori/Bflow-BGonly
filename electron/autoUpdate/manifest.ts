@@ -26,7 +26,30 @@ export interface Manifest {
 export interface ReleaseNote {
   version: string;
   title: string;
-  items: string[];
+  items: ReleaseNoteItem[];
+}
+
+export type ReleaseNoteItem = string | {
+  category?: string;
+  summary: string;
+  description?: string;
+};
+
+function normalizeReleaseNoteItem(value: unknown): ReleaseNoteItem | null {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text ? text : null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  const item = value as Record<string, unknown>;
+  const summary = typeof item.summary === 'string' ? item.summary.trim() : '';
+  const description = typeof item.description === 'string' ? item.description.trim() : '';
+  if (!summary && !description) return null;
+  return {
+    category: typeof item.category === 'string' && item.category.trim() ? item.category.trim() : undefined,
+    summary: summary || description,
+    description,
+  };
 }
 
 function normalizeReleaseNotes(value: unknown): ReleaseNote[] | undefined {
@@ -36,7 +59,9 @@ function normalizeReleaseNotes(value: unknown): ReleaseNote[] | undefined {
     if (!entry || typeof entry !== 'object') continue;
     const note = entry as Record<string, unknown>;
     if (!Array.isArray(note.items)) continue;
-    const items = note.items.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+    const items = note.items
+      .map(normalizeReleaseNoteItem)
+      .filter((item): item is ReleaseNoteItem => item !== null);
     if (items.length === 0) continue;
     notes.push({
       version: typeof note.version === 'string' ? note.version : '',

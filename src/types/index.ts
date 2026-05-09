@@ -466,10 +466,18 @@ export interface ActivityInsightsRaw {
   episodeProgress: unknown[];
 }
 
+export type UpdateReleaseNoteCategory = 'feature' | 'change' | 'bugfix' | 'ux' | 'stability' | 'docs';
+
+export type UpdateReleaseNoteItem = string | {
+  category?: UpdateReleaseNoteCategory | string;
+  summary: string;
+  description?: string;
+};
+
 export interface UpdateReleaseNote {
   version: string;
   title: string;
-  items: string[];
+  items: UpdateReleaseNoteItem[];
 }
 
 export interface UpdateInfo {

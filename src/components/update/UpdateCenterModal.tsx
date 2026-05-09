@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, Download, RefreshCw, X } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
 import { cn } from '@/utils/cn';
-import type { UpdateInfo } from '@/types';
+import type { UpdateInfo, UpdateReleaseNoteItem } from '@/types';
 
 function createFallbackUpdateInfo(message = '새로고침을 누르면 업데이트 상태를 확인합니다.'): UpdateInfo {
   return {
@@ -41,6 +41,67 @@ function formatBytes(value?: number): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '';
   const mb = value / 1024 / 1024;
   return `${mb.toFixed(mb >= 100 ? 0 : 1)}MB`;
+}
+
+const RELEASE_NOTE_CATEGORY_META = {
+  feature: {
+    label: '기능 추가',
+    boxClass: 'border-[#00B894]/30 bg-[#00B894]/[0.06]',
+    labelClass: 'text-[#00B894]',
+  },
+  change: {
+    label: '기능 수정',
+    boxClass: 'border-[#74B9FF]/30 bg-[#74B9FF]/[0.06]',
+    labelClass: 'text-[#74B9FF]',
+  },
+  bugfix: {
+    label: '버그 수정',
+    boxClass: 'border-[#FDCB6E]/35 bg-[#FDCB6E]/[0.07]',
+    labelClass: 'text-[#FDCB6E]',
+  },
+  ux: {
+    label: '사용성 개선',
+    boxClass: 'border-accent/30 bg-accent/[0.06]',
+    labelClass: 'text-accent-sub',
+  },
+  stability: {
+    label: '안정화',
+    boxClass: 'border-[#A29BFE]/30 bg-[#A29BFE]/[0.06]',
+    labelClass: 'text-[#A29BFE]',
+  },
+  docs: {
+    label: '문서/운영',
+    boxClass: 'border-bg-border/60 bg-bg-card/35',
+    labelClass: 'text-text-secondary',
+  },
+} as const;
+
+type ReleaseNoteCategory = keyof typeof RELEASE_NOTE_CATEGORY_META;
+
+function resolveReleaseNoteCategory(category?: string): ReleaseNoteCategory {
+  return category && category in RELEASE_NOTE_CATEGORY_META
+    ? category as ReleaseNoteCategory
+    : 'change';
+}
+
+function normalizeReleaseNoteItem(item: UpdateReleaseNoteItem): {
+  category: ReleaseNoteCategory;
+  summary: string;
+  description: string;
+} {
+  if (typeof item === 'string') {
+    return {
+      category: 'change',
+      summary: item,
+      description: '',
+    };
+  }
+  const summary = item.summary?.trim() || item.description?.trim() || '';
+  return {
+    category: resolveReleaseNoteCategory(item.category),
+    summary,
+    description: item.description?.trim() || '',
+  };
 }
 
 export function UpdateCenterModal() {
@@ -443,14 +504,31 @@ export function UpdateCenterModal() {
                         v{note.version || displayInfo.latestVersion}
                       </span>
                     </div>
-                    <ul className="mt-3 space-y-1.5">
-                      {note.items.map((item, itemIndex) => (
-                        <li key={`${item}-${itemIndex}`} className="flex gap-2 text-[12.5px] leading-relaxed text-text-secondary">
-                          <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-accent-sub/70" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mt-3 space-y-2">
+                      {note.items.map((item, itemIndex) => {
+                        const normalizedItem = normalizeReleaseNoteItem(item);
+                        const meta = RELEASE_NOTE_CATEGORY_META[normalizedItem.category];
+                        if (!normalizedItem.summary) return null;
+                        return (
+                          <div
+                            key={`${normalizedItem.category}-${normalizedItem.summary}-${itemIndex}`}
+                            className={cn('rounded-xl border px-3 py-2.5', meta.boxClass)}
+                          >
+                            <p className={cn('text-[10px] font-bold tracking-[0.14em]', meta.labelClass)}>
+                              {meta.label}
+                            </p>
+                            <p className="mt-1 text-[12.5px] font-semibold leading-relaxed text-text-primary">
+                              {normalizedItem.summary}
+                            </p>
+                            {normalizedItem.description && (
+                              <p className="mt-1 text-[11.5px] leading-relaxed text-text-secondary">
+                                {normalizedItem.description}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               );
