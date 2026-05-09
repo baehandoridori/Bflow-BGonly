@@ -293,7 +293,10 @@ function closeSplash(): void {
 }
 
 function publishUpdateInfo(info: UpdateInfo | null): void {
-  currentUpdateInfo = info && info.status !== 'up-to-date' ? info : null;
+  // v1.23.1 (#4): up-to-date 상태에서도 release notes 보존 — 사용자가 모달에서 이전 버전 history 볼 수 있어야 함.
+  //   기존: up-to-date → currentUpdateInfo=null → 모달 진입 시 createFallbackUpdateInfo() 의 빈 releaseNotes 사용 → 토글 버튼도 안 뜸.
+  //   변경: up-to-date 도 그대로 보존. Sidebar/Modal 의 hasRemoteUpdate 등은 status 자체로 판단하므로 회귀 X.
+  currentUpdateInfo = info;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('update:state', currentUpdateInfo);
   }
@@ -415,7 +418,8 @@ async function runStartupUpdateGate(): Promise<boolean> {
     return true;
   }
 
-  publishUpdateInfo(result && result.status !== 'up-to-date' ? result : null);
+  // v1.23.1 (#4): up-to-date 도 보존 (release notes 사용자에게 보여야 함)
+  publishUpdateInfo(result ?? null);
   return false;
 }
 
@@ -947,7 +951,8 @@ ipcMain.handle('update:check-now', async () => {
     if (info?.ready) {
       notifyUpdateReady(info);
     } else {
-      publishUpdateInfo(info && info.status !== 'up-to-date' ? info : null);
+      // v1.23.1 (#4): up-to-date 도 보존 (release notes 사용자에게 보여야 함)
+      publishUpdateInfo(info ?? null);
     }
     return info;
   })();

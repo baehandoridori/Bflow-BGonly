@@ -39,6 +39,26 @@ export function ThemeSection() {
     setEditingCustom(false);
   };
 
+  // v1.23.1 (#8): 커스텀 편집 진입 시 현재 활성 프리셋 accent 로 미리 채움.
+  //   기존: 항상 #6C5CE7 violet 으로 시작 → 사용자가 emerald/red preset 사용 중이어도 보라로 리셋.
+  //   사용자가 "현재 색에서 살짝만 바꾸고 싶다" 패턴 지원. customThemeColors 가 이미 있으면 그것 사용.
+  const handleEnterCustom = useCallback(() => {
+    if (themeId === 'custom' && customThemeColors) {
+      setCustomAccent(rgbToHex(customThemeColors.accent));
+      setCustomSub(rgbToHex(customThemeColors.accentSub));
+    } else {
+      const preset = getPreset(themeId);
+      if (preset) {
+        setCustomAccent(rgbToHex(preset.colors.accent));
+        setCustomSub(rgbToHex(preset.colors.accentSub));
+      } else {
+        setCustomAccent('#6C5CE7');
+        setCustomSub('#A29BFE');
+      }
+    }
+    setEditingCustom(true);
+  }, [themeId, customThemeColors]);
+
   // 커스텀 편집 중 실시간 배경 3색 프리뷰 (잘못된 hex 입력 시 null → 프리뷰 숨김)
   const previewColors = useMemo(() => {
     if (!HEX_RE.test(customAccent) || !HEX_RE.test(customSub)) return null;
@@ -117,7 +137,7 @@ export function ThemeSection() {
 
         {/* 커스텀 버튼 */}
         <button
-          onClick={() => setEditingCustom(true)}
+          onClick={handleEnterCustom}
           className={cn(
             'relative flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all cursor-pointer',
             themeId === 'custom'

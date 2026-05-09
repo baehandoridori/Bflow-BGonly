@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, BarChart3, ChevronLeft, ChevronRight, Clock, Disc, X } from 'lucide-react';
+import { Activity, BarChart3, ChevronLeft, ChevronRight, Clock, Disc, Grid3x3, X } from 'lucide-react';
 import { Widget } from './Widget';
 import { useActivityStore } from '@/stores/useActivityStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { GoldenHeatmap } from './activity/GoldenHeatmap';
+import { GoldenBarChart } from './activity/GoldenBarChart';
 import { ActivityFilterChips } from './activity/ActivityFilterChips';
 import { ActivityFeed } from './activity/ActivityFeed';
 import { ActivityInsightsModal } from './activity/ActivityInsightsModal';
@@ -32,11 +33,15 @@ export function RecentActivityWidget() {
     cellFilter,
     activities,
     filters,
+    goldenMode,
+    setGoldenMode,
     loadInitial,
     receiveRealtime,
     applyCellFilter,
     clearCellFilter,
   } = useActivityStore();
+  // year 모드는 12×7 grid 라 hour/day bar chart 와 호환 안 됨 → 강제로 heatmap.
+  const effectiveChartMode = timeUnit === 'year' ? 'heatmap' : goldenMode;
 
   const [tooltip, setTooltip] = useState<TooltipState>({
     visible: false,
@@ -108,29 +113,40 @@ export function RecentActivityWidget() {
             </div>
           </div>
 
-          {/* 골든타임 히트맵 (단위 통합) */}
+          {/* 골든타임 시각화 — v1.23.1 (#3): 차트 모드별 분기 (heatmap/hour/day) */}
           <div className="px-3.5 pt-3 pb-1 flex-shrink-0">
-            <GoldenHeatmap
-              mode={timeUnit === 'year' ? 'year' : 'week-or-month'}
-              cellFilter={cellFilter}
-              onCellClick={(b1, b2) => {
-                if (cellFilter && cellFilter.bucket1 === b1 && cellFilter.bucket2 === b2) {
-                  clearCellFilter();
-                } else {
-                  applyCellFilter({ bucket1: b1, bucket2: b2 });
-                }
-              }}
-              onCellHover={(info) => {
-                if (!info) { hideTooltip(); return; }
-                setTooltip({
-                  visible: true,
-                  title: info.title,
-                  cell: info.cell,
-                  x: info.x,
-                  y: info.y,
-                });
-              }}
-            />
+            {effectiveChartMode === 'heatmap' && (
+              <GoldenHeatmap
+                mode={timeUnit === 'year' ? 'year' : 'week-or-month'}
+                cellFilter={cellFilter}
+                onCellClick={(b1, b2) => {
+                  if (cellFilter && cellFilter.bucket1 === b1 && cellFilter.bucket2 === b2) {
+                    clearCellFilter();
+                  } else {
+                    applyCellFilter({ bucket1: b1, bucket2: b2 });
+                  }
+                }}
+                onCellHover={(info) => {
+                  if (!info) { hideTooltip(); return; }
+                  setTooltip({
+                    visible: true,
+                    title: info.title,
+                    cell: info.cell,
+                    x: info.x,
+                    y: info.y,
+                  });
+                }}
+              />
+            )}
+            {(effectiveChartMode === 'hour' || effectiveChartMode === 'day') && (
+              <GoldenBarChart
+                mode={effectiveChartMode}
+                onBarHover={(info) => {
+                  if (!info) { hideTooltip(); return; }
+                  setTooltip({ visible: true, title: info.label, cell: info.cell, x: info.x, y: info.y });
+                }}
+              />
+            )}
           </div>
 
           {/* 필터 칩 */}
@@ -200,10 +216,15 @@ export function RecentActivityWidget() {
 }
 
 function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
-  const { timeUnit, rangeIdx, setTimeUnit, setRangeIdx, goToCurrentRange } = useActivityStore();
+  const { timeUnit, rangeIdx, setTimeUnit, setRangeIdx, goToCurrentRange, goldenMode, setGoldenMode } = useActivityStore();
   const { label } = useMemo(() => getRangeBoundary(timeUnit, rangeIdx), [timeUnit, rangeIdx]);
   const todayLabel = todayLabelFor(timeUnit);
   const fwdDisabled = rangeIdx === 0;
+  // year 모드는 차트 모드 토글 비활성 (12×7 grid 가 hour/day bar 와 호환 안 됨)
+  const chartToggleDisabled = timeUnit === 'year';
+  // codex 1차 P3: year 모드에서는 effective chart mode 가 강제 heatmap 이라
+  //   토글 active 상태도 effective 기준으로 표시 — 저장된 goldenMode 가 hour/day 여도 heatmap 이 active.
+  const effectiveChartModeForToggle: 'heatmap' | 'hour' | 'day' = chartToggleDisabled ? 'heatmap' : goldenMode;
 
   return (
     <div className="flex items-center gap-2">
@@ -248,6 +269,34 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
         ))}
       </div>
 
+      {/* v1.23.1 (#3): 차트 모드 토글 — 히트맵/시간대/요일 (year 모드는 비활성) */}
+      <div className={`flex gap-[2px] bg-bg-border/40 p-[2px] rounded-[7px] ${chartToggleDisabled ? 'opacity-40' : ''}`}>
+        <ChartModeButton
+          active={effectiveChartModeForToggle === 'heatmap'}
+          disabled={chartToggleDisabled}
+          onClick={() => !chartToggleDisabled && setGoldenMode('heatmap')}
+          icon={<Grid3x3 size={11} />}
+          label="히트맵"
+          title="히트맵 모드"
+        />
+        <ChartModeButton
+          active={effectiveChartModeForToggle === 'hour'}
+          disabled={chartToggleDisabled}
+          onClick={() => !chartToggleDisabled && setGoldenMode('hour')}
+          icon={<BarChart3 size={11} />}
+          label="시간대"
+          title={chartToggleDisabled ? '년 모드에서는 비활성' : '시간대 막대'}
+        />
+        <ChartModeButton
+          active={effectiveChartModeForToggle === 'day'}
+          disabled={chartToggleDisabled}
+          onClick={() => !chartToggleDisabled && setGoldenMode('day')}
+          icon={<Activity size={11} />}
+          label="요일"
+          title={chartToggleDisabled ? '년 모드에서는 비활성' : '요일 막대'}
+        />
+      </div>
+
       <button
         onClick={onOpenInsights}
         className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:text-accent-sub hover:bg-accent/10 cursor-pointer transition-colors"
@@ -257,6 +306,25 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
         <BarChart3 size={14} />
       </button>
     </div>
+  );
+}
+
+function ChartModeButton({ active, disabled, onClick, icon, label, title }: {
+  active: boolean; disabled: boolean; onClick: () => void; icon: React.ReactNode; label: string; title: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`flex items-center gap-1 px-2 py-1 rounded-[5px] cursor-pointer transition-all text-[10.5px] ${
+        active ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary'
+      } disabled:cursor-not-allowed disabled:hover:text-text-secondary`}
+      style={active ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
   );
 }
 

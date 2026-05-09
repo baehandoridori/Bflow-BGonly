@@ -104,7 +104,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   // ── 입력 카드 + textarea 한계 계산 ──
   // 패널 전체 높이의 35% 까지 입력 카드가 자란다. 그 이상은 textarea 안에서 스크롤.
   // textarea 가 hard cap (taMaxPx) 을 넘지 않게 막아 toolbar 영역이 카드 maxHeight 안에 항상 보이게 보장.
-  const inputCardMaxPx = Math.max(140, Math.floor(panelHeight * 0.35));
+  // v1.23.1 (한솔 보고): 부모 모달이 flex layout 에서 min-h-0 처리 안 되면 panelHeight 가 모달 밖까지
+  //   부풀어 입력 카드가 전송 버튼까지 모달 바깥으로 나감. 절대 상한 320px 으로 안전망.
+  const inputCardMaxPx = Math.min(320, Math.max(140, Math.floor(panelHeight * 0.35)));
   const imageRowHeight = attachedImages.length > 0 ? 88 : 0;       // 썸네일 64 + 위아래 여백 + pb-1
   const FOOTER_H = 56;                                              // toolbar(h-7) + mt-1.5 + border + pt-1.5 + 카드 padding(pt-2 + pb-1.5)
   const taMaxPx = Math.max(40, inputCardMaxPx - imageRowHeight - FOOTER_H);
