@@ -222,6 +222,9 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
   const fwdDisabled = rangeIdx === 0;
   // year 모드는 차트 모드 토글 비활성 (12×7 grid 가 hour/day bar 와 호환 안 됨)
   const chartToggleDisabled = timeUnit === 'year';
+  // codex 1차 P3: year 모드에서는 effective chart mode 가 강제 heatmap 이라
+  //   토글 active 상태도 effective 기준으로 표시 — 저장된 goldenMode 가 hour/day 여도 heatmap 이 active.
+  const effectiveChartModeForToggle: 'heatmap' | 'hour' | 'day' = chartToggleDisabled ? 'heatmap' : goldenMode;
 
   return (
     <div className="flex items-center gap-2">
@@ -269,7 +272,7 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
       {/* v1.23.1 (#3): 차트 모드 토글 — 히트맵/시간대/요일 (year 모드는 비활성) */}
       <div className={`flex gap-[2px] bg-bg-border/40 p-[2px] rounded-[7px] ${chartToggleDisabled ? 'opacity-40' : ''}`}>
         <ChartModeButton
-          active={goldenMode === 'heatmap'}
+          active={effectiveChartModeForToggle === 'heatmap'}
           disabled={chartToggleDisabled}
           onClick={() => !chartToggleDisabled && setGoldenMode('heatmap')}
           icon={<Grid3x3 size={11} />}
@@ -277,7 +280,7 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
           title="히트맵 모드"
         />
         <ChartModeButton
-          active={goldenMode === 'hour'}
+          active={effectiveChartModeForToggle === 'hour'}
           disabled={chartToggleDisabled}
           onClick={() => !chartToggleDisabled && setGoldenMode('hour')}
           icon={<BarChart3 size={11} />}
@@ -285,7 +288,7 @@ function HeaderControls({ onOpenInsights }: { onOpenInsights: () => void }) {
           title={chartToggleDisabled ? '년 모드에서는 비활성' : '시간대 막대'}
         />
         <ChartModeButton
-          active={goldenMode === 'day'}
+          active={effectiveChartModeForToggle === 'day'}
           disabled={chartToggleDisabled}
           onClick={() => !chartToggleDisabled && setGoldenMode('day')}
           icon={<Activity size={11} />}

@@ -249,6 +249,14 @@ function NotificationDropdown() {
         type: 'warning',
         message: '씬을 자동으로 찾지 못했어요. 씬 뷰에서 직접 확인해주세요.',
       });
+    } else if (n.type === 'comment' || n.type === 'scene_change' || n.type === 'revision') {
+      // v1.23.1 codex 1차 P2: metadata 가 비어있어도 씬 관련 알림이면 씬 뷰로만이라도 이동 + 안내.
+      //   #6 fix (hasNavigateTarget 관대화) 가 만든 broken UX (버튼 클릭해도 아무 일 X) 보완.
+      setView('scenes');
+      useAppStore.getState().setToast?.({
+        type: 'info',
+        message: '알림에 씬 정보가 부족해요. 씬 뷰에서 직접 찾아주세요.',
+      });
     }
     setPanelOpen(false);
   };
