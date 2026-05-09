@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Palette, Check, Sun, Moon, Paintbrush } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
-import { THEME_PRESETS, rgbToHex, getPreset, getLightColors, deriveThemeFromAccent, HEX_RE } from '@/themes';
+import { THEME_PRESETS, DEFAULT_THEME_ID, rgbToHex, hexToRgb, getPreset, getLightColors, HEX_RE, type ThemeColors } from '@/themes';
 import { cn } from '@/utils/cn';
 import { SettingsSection } from './SettingsSection';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
@@ -31,7 +31,19 @@ export function ThemeSection() {
   };
 
   const handleCustomApply = () => {
-    const colors = deriveThemeFromAccent(customAccent, customSub, colorMode);
+    // v1.23.2 (#4): 한솔 의도 = 액센트만 변경, 배경/텍스트는 현재 활성 프리셋 그대로 유지.
+    //   기존 deriveThemeFromAccent 는 액센트 hue 에서 배경 derive → 라이트 모드 배경이
+    //   어두운 회색 톤으로 깨짐. 프리셋 배경 (light: getLightColors / dark: preset.colors)
+    //   에서 base 가져온 후 accent/accentSub 만 사용자 hex 로 override.
+    const baseId = themeId === 'custom' ? DEFAULT_THEME_ID : themeId;
+    const baseColors: ThemeColors = colorMode === 'light'
+      ? getLightColors(baseId)
+      : (getPreset(baseId)?.colors ?? getPreset(DEFAULT_THEME_ID)!.colors);
+    const colors: ThemeColors = {
+      ...baseColors,
+      accent: hexToRgb(customAccent),
+      accentSub: hexToRgb(customSub),
+    };
     setCustomAccentHex(customAccent);
     setCustomSubHex(customSub);
     setThemeId('custom');
@@ -60,10 +72,19 @@ export function ThemeSection() {
   }, [themeId, customThemeColors]);
 
   // 커스텀 편집 중 실시간 배경 3색 프리뷰 (잘못된 hex 입력 시 null → 프리뷰 숨김)
-  const previewColors = useMemo(() => {
+  // v1.23.2 (#4): handleCustomApply 와 같은 패턴 — 프리셋 배경 + 액센트만 override.
+  const previewColors = useMemo<ThemeColors | null>(() => {
     if (!HEX_RE.test(customAccent) || !HEX_RE.test(customSub)) return null;
-    return deriveThemeFromAccent(customAccent, customSub, colorMode);
-  }, [customAccent, customSub, colorMode]);
+    const baseId = themeId === 'custom' ? DEFAULT_THEME_ID : themeId;
+    const baseColors = colorMode === 'light'
+      ? getLightColors(baseId)
+      : (getPreset(baseId)?.colors ?? getPreset(DEFAULT_THEME_ID)!.colors);
+    return {
+      ...baseColors,
+      accent: hexToRgb(customAccent),
+      accentSub: hexToRgb(customSub),
+    };
+  }, [customAccent, customSub, colorMode, themeId]);
 
   return (
     <>

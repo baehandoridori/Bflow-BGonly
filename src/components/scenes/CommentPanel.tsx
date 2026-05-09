@@ -102,11 +102,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   const dragCounter = useRef(0);
 
   // ── 입력 카드 + textarea 한계 계산 ──
-  // 패널 전체 높이의 35% 까지 입력 카드가 자란다. 그 이상은 textarea 안에서 스크롤.
+  // 패널 전체 높이의 30% 까지 입력 카드가 자란다. 그 이상은 textarea 안에서 스크롤.
   // textarea 가 hard cap (taMaxPx) 을 넘지 않게 막아 toolbar 영역이 카드 maxHeight 안에 항상 보이게 보장.
-  // v1.23.1 (한솔 보고): 부모 모달이 flex layout 에서 min-h-0 처리 안 되면 panelHeight 가 모달 밖까지
-  //   부풀어 입력 카드가 전송 버튼까지 모달 바깥으로 나감. 절대 상한 320px 으로 안전망.
-  const inputCardMaxPx = Math.min(320, Math.max(140, Math.floor(panelHeight * 0.35)));
+  // v1.23.2 (#3): v1.23.1 의 cap 320px 으로도 부족 — 입력 wrapper 가 shrink-0 없어 grow 무제한.
+  //   wrapper 에 shrink-0 추가 + cap 을 220px 으로 더 단단히. 두 변경이 같이 가야 회귀 완전 해소.
+  const inputCardMaxPx = Math.min(220, Math.max(120, Math.floor(panelHeight * 0.30)));
   const imageRowHeight = attachedImages.length > 0 ? 88 : 0;       // 썸네일 64 + 위아래 여백 + pb-1
   const FOOTER_H = 56;                                              // toolbar(h-7) + mt-1.5 + border + pt-1.5 + 카드 padding(pt-2 + pb-1.5)
   const taMaxPx = Math.max(40, inputCardMaxPx - imageRowHeight - FOOTER_H);
@@ -772,8 +772,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
         )}
       </div>
 
-      {/* 입력 영역 — 떠있는 카드 (위 댓글 영역과 시각적 분리) */}
-      <div className="px-3 pb-3 pt-3 relative">
+      {/* 입력 영역 — 떠있는 카드 (위 댓글 영역과 시각적 분리)
+          v1.23.2 (#3): shrink-0 명시 — 부모 column flex 안에서 압축 안 되도록 하되,
+          반대로 자식 카드의 maxHeight cap (inputCardMaxPx) 으로 wrapper 가 넘쳐 grow 하는 것도 방지. */}
+      <div className="px-3 pb-3 pt-3 relative shrink-0">
         {/* @멘션 자동완성 */}
         {showMentions && filteredUsers.length > 0 && (
           <div ref={mentionDropdownRef} className="absolute bottom-full left-3 right-3 mb-1 bg-bg-card border border-bg-border rounded-lg shadow-lg max-h-32 overflow-y-auto z-30">

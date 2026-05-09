@@ -317,13 +317,14 @@ function ChartModeButton({ active, disabled, onClick, icon, label, title }: {
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`flex items-center gap-1 px-2 py-1 rounded-[5px] cursor-pointer transition-all text-[10.5px] ${
+      // v1.23.2 (#2): whitespace-nowrap + flex-shrink-0 로 좁은 위젯 헤더에서도 글자 한 자씩 줄바꿈 방지.
+      className={`flex items-center gap-1 px-2 py-1 rounded-[5px] cursor-pointer transition-all text-[10.5px] whitespace-nowrap shrink-0 ${
         active ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary'
       } disabled:cursor-not-allowed disabled:hover:text-text-secondary`}
       style={active ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
     >
       {icon}
-      <span>{label}</span>
+      <span className="whitespace-nowrap">{label}</span>
     </button>
   );
 }
