@@ -68,22 +68,34 @@ if (fs.existsSync(installerPath)) {
 }
 
 const releaseNotesPath = path.join(root, 'DEVLOG', 'update-notes.json');
+function normalizeReleaseNoteItem(item) {
+  if (typeof item === 'string') {
+    const text = item.trim();
+    return text ? text : null;
+  }
+  if (!item || typeof item !== 'object') return null;
+  const summary = typeof item.summary === 'string' ? item.summary.trim() : '';
+  const description = typeof item.description === 'string' ? item.description.trim() : '';
+  if (!summary && !description) return null;
+  return {
+    category: typeof item.category === 'string' && item.category.trim() ? item.category.trim() : undefined,
+    summary: summary || description,
+    description,
+  };
+}
+
 if (fs.existsSync(releaseNotesPath)) {
   try {
     const parsed = JSON.parse(fs.readFileSync(releaseNotesPath, 'utf-8'));
     if (Array.isArray(parsed)) {
       manifest.releaseNotes = parsed
-        .filter((note) => (
-          note
-          && typeof note === 'object'
-          && Array.isArray(note.items)
-          && note.items.some((item) => typeof item === 'string' && item.trim())
-        ))
+        .filter((note) => note && typeof note === 'object' && Array.isArray(note.items))
         .map((note) => ({
           version: typeof note.version === 'string' ? note.version : pkg.version,
           title: typeof note.title === 'string' ? note.title : '',
-          items: note.items.filter((item) => typeof item === 'string' && item.trim()).slice(0, 5),
-        }));
+          items: note.items.map(normalizeReleaseNoteItem).filter(Boolean).slice(0, 5),
+        }))
+        .filter((note) => note.items.length > 0);
     }
   } catch (err) {
     console.warn('[generate-manifest] update-notes.json 읽기 실패 — releaseNotes 없이 진행:', err);

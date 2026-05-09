@@ -46,6 +46,51 @@ test('readManifest preserves structured release notes for update center UI', asy
   }
 });
 
+test('readManifest preserves categorized release note items', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'bflow-manifest-'));
+  const manifestPath = path.join(dir, 'manifest.json');
+
+  await writeFile(manifestPath, JSON.stringify({
+    version: '1.23.4',
+    buildAt: '2026-05-09T00:00:00.000Z',
+    releaseNotes: [
+      {
+        version: '1.23.4',
+        title: '댓글과 최근 작업 차트 표시를 다듬었습니다',
+        items: [
+          {
+            category: 'bugfix',
+            summary: '댓글 입력 영역 안정화',
+            description: '댓글이 많이 쌓인 상태에서도 입력창과 전송 버튼이 패널 안에 안정적으로 보입니다.',
+          },
+          '기존 문자열 항목도 계속 표시합니다.',
+        ],
+      },
+    ],
+  }), 'utf-8');
+
+  try {
+    const manifest = await readManifest(manifestPath);
+
+    assert.deepEqual(manifest?.releaseNotes, [
+      {
+        version: '1.23.4',
+        title: '댓글과 최근 작업 차트 표시를 다듬었습니다',
+        items: [
+          {
+            category: 'bugfix',
+            summary: '댓글 입력 영역 안정화',
+            description: '댓글이 많이 쌓인 상태에서도 입력창과 전송 버튼이 패널 안에 안정적으로 보입니다.',
+          },
+          '기존 문자열 항목도 계속 표시합니다.',
+        ],
+      },
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('readManifest ignores malformed release note entries', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'bflow-manifest-'));
   const manifestPath = path.join(dir, 'manifest.json');
