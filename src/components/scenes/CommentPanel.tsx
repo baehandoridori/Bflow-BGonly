@@ -86,6 +86,17 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   // 한솔 결정 (spec 2026-05-03): 댓글 패널에서 "리비전 댓글만" 빠르게 가려보고 싶을 때 토글.
   // onCountChange 는 전체 카운트로 유지(외부 배지 표기 일관성), 시각 필터만 패널 내부 적용.
   const [reOnly, setReOnly] = useState(false);
+  // v1.23.4 (#3 한솔): 활동(inlineEvents) 감추기 — 댓글만 보기. localStorage 영속.
+  const [hideActivity, setHideActivity] = useState<boolean>(() => {
+    try { return localStorage.getItem('bflow_comment_hide_activity') === '1'; } catch { return false; }
+  });
+  const toggleHideActivity = useCallback(() => {
+    setHideActivity((v) => {
+      const next = !v;
+      try { localStorage.setItem('bflow_comment_hide_activity', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   // 드래그 + 라이트박스
   const [draggingOver, setDraggingOver] = useState(false);
@@ -577,11 +588,29 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className="flex flex-col h-full relative"
+      // v1.23.4 (#2 진짜 root cause): h-full 만으로는 부모 column flex 안에서 의도된 height 차지 못함
+      //   → 부모(모달 패널) 가 column flex 인데 헤더 외 두 번째 자식인 CommentPanel 이 flex-1 없으면
+      //     CommentPanel 의 h-full = 100% of parent (부모 전체 height) → 헤더 자리만큼 overflow.
+      //   flex-1 + min-h-0 으로 변경: 부모의 남은 공간 정확히 차지 + 자식들이 자체 scroll 가능.
+      //   h-full 도 같이 두어 부모가 column flex 가 아닌 경우(legacy)에도 작동.
+      className="flex flex-col h-full flex-1 min-h-0 relative"
     >
       {/* v1.18.0: 상단 미니 툴바 — "re만" 필터 토글 (한솔 결정 spec 2026-05-03).
-          댓글 패널에서 리비전 맥락 댓글만 빠르게 골라보기 위함. */}
-      <div className="px-3 pt-2 pb-1 flex items-center justify-end shrink-0">
+          v1.23.4 (#3 한솔): "활동 감추기" 토글 추가 — 시스템 활동(단계 변경 등) 숨기고 댓글만 표시. */}
+      <div className="px-3 pt-2 pb-1 flex items-center justify-end gap-1 shrink-0">
+        <button
+          type="button"
+          onClick={toggleHideActivity}
+          title={hideActivity ? '활동 숨기는 중 — 클릭해 다시 표시' : '시스템 활동(단계 변경 등) 숨기고 댓글만 보기'}
+          className={cn(
+            'text-[10px] px-2 py-1 rounded transition-colors cursor-pointer font-bold',
+            hideActivity
+              ? 'bg-accent text-white'
+              : 'text-text-secondary hover:text-text-primary hover:bg-bg-primary/50',
+          )}
+        >
+          활동 감추기
+        </button>
         <button
           type="button"
           onClick={() => setReOnly((v) => !v)}
@@ -601,7 +630,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0 select-text">
         {/* 코덱스 P3 fix (9차, 2026-05-05): reOnly 시 inlineEvents 는 어차피 mergeFeed 에서 drop 되므로
             empty-state 판정에서도 inlineEvents 무시 → 리비전 댓글 0 + inline 만 있을 때 빈 영역 방지. */}
-        {visibleComments.length === 0 && (reOnly || !inlineEvents || inlineEvents.length === 0) ? (
+        {visibleComments.length === 0 && (reOnly || hideActivity || !inlineEvents || inlineEvents.length === 0) ? (
           <div className="text-center py-10">
             <p className="text-text-secondary text-xs">
               {reOnly ? '리비전 댓글이 없습니다' : '아직 의견이 없습니다'}
@@ -612,7 +641,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
           </div>
         ) : (
         <AnimatePresence initial={false}>
-          {mergeFeed(visibleComments, reOnly ? [] : (inlineEvents ?? [])).map((node) => {
+          {mergeFeed(visibleComments, (reOnly || hideActivity) ? [] : (inlineEvents ?? [])).map((node) => {
             if (node.kind === 'event') {
               return (
                 <motion.div
