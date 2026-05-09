@@ -33,12 +33,14 @@ export function ThemeSection() {
   const handleCustomApply = () => {
     // v1.23.2 (#4): 한솔 의도 = 액센트만 변경, 배경/텍스트는 현재 활성 프리셋 그대로 유지.
     //   기존 deriveThemeFromAccent 는 액센트 hue 에서 배경 derive → 라이트 모드 배경이
-    //   어두운 회색 톤으로 깨짐. 프리셋 배경 (light: getLightColors / dark: preset.colors)
-    //   에서 base 가져온 후 accent/accentSub 만 사용자 hex 로 override.
-    const baseId = themeId === 'custom' ? DEFAULT_THEME_ID : themeId;
-    const baseColors: ThemeColors = colorMode === 'light'
-      ? getLightColors(baseId)
-      : (getPreset(baseId)?.colors ?? getPreset(DEFAULT_THEME_ID)!.colors);
+    //   어두운 회색 톤으로 깨짐. 프리셋 배경 에서 base 가져온 후 accent/accentSub 만 override.
+    // codex 1차 P2: themeId === 'custom' 일 때는 customThemeColors 보존
+    //   (emerald→커스텀 적용→재편집 시 default(violet) 배경으로 점프 방지).
+    const baseColors: ThemeColors = (themeId === 'custom' && customThemeColors)
+      ? customThemeColors
+      : colorMode === 'light'
+        ? getLightColors(themeId)
+        : (getPreset(themeId)?.colors ?? getPreset(DEFAULT_THEME_ID)!.colors);
     const colors: ThemeColors = {
       ...baseColors,
       accent: hexToRgb(customAccent),
@@ -72,19 +74,20 @@ export function ThemeSection() {
   }, [themeId, customThemeColors]);
 
   // 커스텀 편집 중 실시간 배경 3색 프리뷰 (잘못된 hex 입력 시 null → 프리뷰 숨김)
-  // v1.23.2 (#4): handleCustomApply 와 같은 패턴 — 프리셋 배경 + 액센트만 override.
+  // v1.23.2 (#4 + codex 1차 P2): handleCustomApply 와 같은 패턴 — 프리셋 또는 기존 커스텀 배경 + 액센트만 override.
   const previewColors = useMemo<ThemeColors | null>(() => {
     if (!HEX_RE.test(customAccent) || !HEX_RE.test(customSub)) return null;
-    const baseId = themeId === 'custom' ? DEFAULT_THEME_ID : themeId;
-    const baseColors = colorMode === 'light'
-      ? getLightColors(baseId)
-      : (getPreset(baseId)?.colors ?? getPreset(DEFAULT_THEME_ID)!.colors);
+    const baseColors = (themeId === 'custom' && customThemeColors)
+      ? customThemeColors
+      : colorMode === 'light'
+        ? getLightColors(themeId)
+        : (getPreset(themeId)?.colors ?? getPreset(DEFAULT_THEME_ID)!.colors);
     return {
       ...baseColors,
       accent: hexToRgb(customAccent),
       accentSub: hexToRgb(customSub),
     };
-  }, [customAccent, customSub, colorMode, themeId]);
+  }, [customAccent, customSub, colorMode, themeId, customThemeColors]);
 
   return (
     <>
