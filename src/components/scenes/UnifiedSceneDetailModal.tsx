@@ -136,7 +136,8 @@ export function UnifiedSceneDetailModal({
       : next === 'acting' ? actScene
       : (bgScene ?? actScene);
     const targetUuid = targetScene?.id;
-    const targetSceneName = targetScene?.sceneId ?? merged.sceneId;
+    // codex 3차 P2: sceneId 가 빈 문자열일 수도 있어 || fallback (?? 는 빈 문자열 그대로 반환).
+    const targetSceneName = targetScene?.sceneId || merged.sceneId;
     const hasTarget = !!targetUuid;
 
     setSelectedDepartment(next);

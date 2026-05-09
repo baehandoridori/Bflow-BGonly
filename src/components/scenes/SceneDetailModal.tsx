@@ -1174,7 +1174,8 @@ function DeptToggle({ scene, sceneIdName, sheetName, onClose }: { scene: Scene; 
 
   const handle = useCallback((next: 'all' | 'bg' | 'acting') => {
     if (next === selectedDepartment) return;
-    const sceneIdValue = scene.sceneId ?? sceneIdName;
+    // codex 3차 P2: scene.sceneId 가 빈 문자열일 수 있음 — || 로 fallback (?? 는 빈 문자열도 truthy 취급).
+    const sceneIdValue = scene.sceneId || sceneIdName;
 
     // codex 1·2차 P1: target dept 에 같은 sceneId 의 씬이 존재하는지 검사 — 없으면 pending 안 보냄.
     //   2차 P1: 같은 sceneId 가 다른 EP/Part 에서 reuse 될 수 있어 cross-context 매칭 위험.
