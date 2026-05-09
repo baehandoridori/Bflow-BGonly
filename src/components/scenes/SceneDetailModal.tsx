@@ -29,6 +29,7 @@ import { RevisionPanel } from './RevisionPanel';
 import { getComments } from '@/services/commentService';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
 
 // ─── 타입 ──────────────────────────────────────────
@@ -1169,22 +1170,49 @@ function DeptToggle({ scene, sceneIdName, onClose }: { scene: Scene; sceneIdName
   const setSelectedDepartment = useAppStore((s) => s.setSelectedDepartment);
   const setDashboardDeptFilter = useAppStore((s) => s.setDashboardDeptFilter);
   const setPendingSceneModalRequest = useAppStore((s) => s.setPendingSceneModalRequest);
+  const dataEpisodes = useDataStore((s) => s.episodes);
 
   const handle = useCallback((next: 'all' | 'bg' | 'acting') => {
     if (next === selectedDepartment) return;
-    const targetUuid = scene.id;
-    const targetSceneName = scene.sceneId ?? sceneIdName;
+    const sceneIdValue = scene.sceneId ?? sceneIdName;
+
+    // codex 1차 P1: target dept 에 같은 sceneId 의 씬이 존재하는지 검사 — 없으면 pending 안 보냄.
+    //   현재 scene 은 한 부서 데이터만. 같은 sceneId 의 다른 부서 씬은 useDataStore 에서 찾아야.
+    //   'all' 모드는 통합 뷰라 항상 가능.
+    let targetUuid: string | undefined = scene.id;
+    let hasTarget = next === 'all';
+    if (next !== 'all' && sceneIdValue) {
+      for (const ep of dataEpisodes) {
+        for (const part of ep.parts) {
+          if (part.department !== next) continue;
+          const found = part.scenes.find((s) => s.sceneId === sceneIdValue);
+          if (found) {
+            targetUuid = found.id;
+            hasTarget = true;
+            break;
+          }
+        }
+        if (hasTarget) break;
+      }
+    }
+
     setSelectedDepartment(next);
     setDashboardDeptFilter(next);
     onClose();
-    if (targetUuid || targetSceneName) {
-      setTimeout(() => {
-        setPendingSceneModalRequest({ sceneUuid: targetUuid, sceneName: targetSceneName ?? undefined });
-      }, 120);
-    }
+
     const label = next === 'all' ? '통합' : next === 'bg' ? 'BG' : '액팅';
-    sonnerToast.success(`${label} 모드로 전환 — 같은 컷 모달 다시 엽니다`, { duration: 1800 });
-  }, [selectedDepartment, setSelectedDepartment, setDashboardDeptFilter, setPendingSceneModalRequest, scene.id, scene.sceneId, sceneIdName, onClose]);
+    if (hasTarget) {
+      setTimeout(() => {
+        setPendingSceneModalRequest({ sceneUuid: targetUuid, sceneName: sceneIdValue ?? undefined });
+      }, 120);
+      sonnerToast.success(`${label} 모드로 전환 — 같은 컷 모달 다시 엽니다`, { duration: 1800 });
+    } else {
+      sonnerToast.info(`${label} 모드로 전환했어요`, {
+        description: '이 컷은 ' + label + ' 데이터가 없어 모달이 다시 열리지 않습니다.',
+        duration: 2400,
+      });
+    }
+  }, [selectedDepartment, setSelectedDepartment, setDashboardDeptFilter, setPendingSceneModalRequest, scene.id, scene.sceneId, sceneIdName, onClose, dataEpisodes]);
 
   return (
     <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0 mr-1">

@@ -129,13 +129,22 @@ export function UnifiedSceneDetailModal({
   const setPendingSceneModalRequest = useAppStore((s) => s.setPendingSceneModalRequest);
   const handleDeptToggle = useCallback((next: 'all' | 'bg' | 'acting') => {
     if (next === selectedDepartment) return;
-    // 현재 컷 정보 기억 — 모드 변경 후 같은 컷으로 자동 재오픈
-    const targetUuid = bgScene?.id ?? actScene?.id;
-    const targetSceneName = bgScene?.sceneId ?? actScene?.sceneId ?? merged.sceneId;
+    // codex 1차 P1: target dept 에 씬이 있는지 검사 — 없으면 pending request 보내지 않음 (stale 방지).
+    //   next='bg' → bgScene 필요, 'acting' → actScene, 'all' → 둘 중 하나라도.
+    const targetScene =
+      next === 'bg' ? bgScene
+      : next === 'acting' ? actScene
+      : (bgScene ?? actScene);
+    const targetUuid = targetScene?.id;
+    const targetSceneName = targetScene?.sceneId ?? merged.sceneId;
+    const hasTarget = !!targetUuid;
+
     setSelectedDepartment(next);
     setDashboardDeptFilter(next);
     onClose();
-    if (targetUuid || targetSceneName) {
+
+    const label = next === 'all' ? '통합' : next === 'bg' ? 'BG' : '액팅';
+    if (hasTarget) {
       // ScenesView 가 새 selectedDepartment 로 reload 후 pending 처리 — 약간 지연.
       setTimeout(() => {
         setPendingSceneModalRequest({
@@ -143,9 +152,13 @@ export function UnifiedSceneDetailModal({
           sceneName: targetSceneName ?? undefined,
         });
       }, 120);
+      sonnerToast.success(`${label} 모드로 전환 — 같은 컷 모달 다시 엽니다`, { duration: 1800 });
+    } else {
+      sonnerToast.info(`${label} 모드로 전환했어요`, {
+        description: '이 컷은 ' + label + ' 데이터가 없어 모달이 다시 열리지 않습니다.',
+        duration: 2400,
+      });
     }
-    const label = next === 'all' ? '통합' : next === 'bg' ? 'BG' : '액팅';
-    sonnerToast.success(`${label} 모드로 전환 — 같은 컷 모달 다시 엽니다`, { duration: 1800 });
   }, [selectedDepartment, setSelectedDepartment, setDashboardDeptFilter, setPendingSceneModalRequest, onClose, bgScene, actScene, merged.sceneId]);
   // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
   const backdropMouseDownRef = useRef(false);
