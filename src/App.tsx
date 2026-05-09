@@ -445,7 +445,12 @@ export default function App() {
 
           // CSS 적용
           if (effectiveThemeId === 'custom' && customHex) {
-            const colors = deriveThemeFromAccent(customHex.accent, customHex.sub, savedMode);
+            // v1.23.2 codex 2차 P1: 저장된 customColors (preferences.json) 가 있으면 그것을 그대로 사용.
+            //   ThemeSection.handleCustomApply 가 v1.23.2 부터 프리셋 base + 액센트만 override 패턴이라
+            //   저장된 customColors 가 사용자 의도. deriveThemeFromAccent 다시 호출하면 라이트 모드 회색 회귀.
+            //   savedTheme.customColors 가 없는 옛 데이터만 deriveThemeFromAccent 폴백.
+            const colors = savedTheme.customColors
+              ?? deriveThemeFromAccent(customHex.accent, customHex.sub, savedMode);
             applyTheme(colors, savedMode);
             setThemeId('custom');
             setColorMode(savedMode);

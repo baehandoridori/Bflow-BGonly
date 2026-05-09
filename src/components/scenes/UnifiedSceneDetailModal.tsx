@@ -121,13 +121,16 @@ export function UnifiedSceneDetailModal({
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
-  // v1.23.2 (#1 재설계): localDeptOverride 제거. 한솔 의도 = 토글 클릭이 전역 dashboardDeptFilter 변경 +
+  // v1.23.2 (#1 재설계): localDeptOverride 제거. 한솔 의도 = 토글 클릭이 전역 부서 모드 변경 +
   // 모달 닫음 → 사용자가 같은 컷 다시 클릭 시 새 부서 모드의 모달이 열림 ("이동").
-  // 모달은 dashboardDeptFilter 그대로 read 해서 표시 분기.
-  const dashboardDeptFilter = useAppStore((s) => s.dashboardDeptFilter);
+  // codex 2차 P1: ScenesView 가 useAppStore.selectedDepartment 로 라우팅 — 그것도 같이 변경 안 하면
+  //   같은 통합 모달이 다시 열려서 토글 무효. dashboardDeptFilter (대시보드 위젯용) 도 함께 변경하여 일관성 유지.
+  const selectedDepartment = useAppStore((s) => s.selectedDepartment);
+  const setSelectedDepartment = useAppStore((s) => s.setSelectedDepartment);
   const setDashboardDeptFilter = useAppStore((s) => s.setDashboardDeptFilter);
   const handleDeptToggle = useCallback((next: 'all' | 'bg' | 'acting') => {
-    if (next === dashboardDeptFilter) return;
+    if (next === selectedDepartment) return;
+    setSelectedDepartment(next);
     setDashboardDeptFilter(next);
     const label = next === 'all' ? '통합' : next === 'bg' ? '배경' : '액팅';
     sonnerToast.success(`${label} 모드로 전환했어요`, {
@@ -135,7 +138,7 @@ export function UnifiedSceneDetailModal({
       duration: 3000,
     });
     onClose();
-  }, [dashboardDeptFilter, setDashboardDeptFilter, onClose]);
+  }, [selectedDepartment, setSelectedDepartment, setDashboardDeptFilter, onClose]);
   // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
   const backdropMouseDownRef = useRef(false);
 
@@ -580,7 +583,7 @@ export function UnifiedSceneDetailModal({
                   </button>
                 )}
 
-                {/* v1.23.2 (#1 재설계): 토글 클릭 = 전역 dashboardDeptFilter 변경 + 모달 닫음 → 같은 컷 다시 클릭 시 새 부서 모달. */}
+                {/* v1.23.2 (#1 재설계): 토글 = 전역 selectedDepartment(+dashboardDeptFilter) 변경 + 모달 닫음 → 같은 컷 다시 클릭 시 새 부서 모달. */}
                 <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0">
                   {(['all', 'bg', 'acting'] as const).map((d) => (
                     <button
@@ -588,9 +591,9 @@ export function UnifiedSceneDetailModal({
                       onClick={() => handleDeptToggle(d)}
                       className={cn(
                         'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all whitespace-nowrap',
-                        dashboardDeptFilter === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
+                        selectedDepartment === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
                       )}
-                      style={dashboardDeptFilter === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
+                      style={selectedDepartment === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
                       title={d === 'all' ? '통합 모드로 전환 (모달 닫고 다시 클릭하면 BG+액팅 모달)' : d === 'bg' ? '배경 모드로 전환' : '액팅 모드로 전환'}
                     >
                       {d === 'all' ? '통합' : d === 'bg' ? 'BG' : '액팅'}
