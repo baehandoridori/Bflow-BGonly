@@ -31,7 +31,10 @@ export function VersionHoverTip({ show, anchorRef, state, currentVersion, latest
     const update = () => {
       const rect = anchorRef.current?.getBoundingClientRect();
       if (!rect) return;
-      setPos({ left: rect.right + 12, top: rect.top + rect.height / 2 });
+      const nextLeft = rect.right + 12;
+      const nextTop = rect.top + rect.height / 2;
+      // codex 2차 P3: 좌표 동일하면 setPos 스킵 → 매 프레임 re-render 낭비 방지.
+      setPos((prev) => (prev && prev.left === nextLeft && prev.top === nextTop ? prev : { left: nextLeft, top: nextTop }));
     };
     // v1.23.1 (#2): 사이드바 호버 펼침 애니메이션(350ms cubic-bezier) 동안 anchor 좌표가
     //   계속 이동하는데, scroll/resize 이벤트만으로는 변화를 못 잡아 tip 위치가 stale →
