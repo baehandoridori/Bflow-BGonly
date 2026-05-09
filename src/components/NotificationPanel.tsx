@@ -38,7 +38,12 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
   const removeNotification = useNotificationStore((s) => s.removeNotification);
   const cfg = typeConfig(n.type);
   const Icon = cfg.icon;
-  const hasNavigateTarget = !!(n.metadata?.sceneId || n.metadata?.sceneName);
+  // v1.23.1 (#6): 멘션·댓글 알림은 metadata 가 비어 있어도 "씬 보기" 버튼 노출.
+  //   다른 PC 사용자가 멘션 보낼 때 useDataStore 에 그 씬이 없어 metadata=undefined 가 되는
+  //   케이스가 있는데, 그래도 본문 클릭 navigate 가 자체 fallback 으로 처리하므로 버튼 노출이 안전.
+  const hasMetadataTarget = !!(n.metadata?.sceneId || n.metadata?.sceneName);
+  const isSceneRelated = n.type === 'comment' || n.type === 'scene_change' || n.type === 'revision';
+  const hasNavigateTarget = hasMetadataTarget || isSceneRelated;
 
   const handleItemClick = () => {
     if (!n.isRead) markAsRead(n.id);

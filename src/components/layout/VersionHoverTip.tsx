@@ -27,15 +27,25 @@ export function VersionHoverTip({ show, anchorRef, state, currentVersion, latest
 
   useEffect(() => {
     if (!show) return;
+    let frame: number | null = null;
     const update = () => {
       const rect = anchorRef.current?.getBoundingClientRect();
       if (!rect) return;
       setPos({ left: rect.right + 12, top: rect.top + rect.height / 2 });
     };
+    // v1.23.1 (#2): 사이드바 호버 펼침 애니메이션(350ms cubic-bezier) 동안 anchor 좌표가
+    //   계속 이동하는데, scroll/resize 이벤트만으로는 변화를 못 잡아 tip 위치가 stale →
+    //   사이드바 안쪽에 잘못 그려져 안 보이는 회귀. RAF 루프로 tip 떠 있는 동안 매 프레임 동기화.
+    const loop = () => {
+      update();
+      frame = requestAnimationFrame(loop);
+    };
     update();
+    frame = requestAnimationFrame(loop);
     window.addEventListener('scroll', update, true);
     window.addEventListener('resize', update);
     return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
     };

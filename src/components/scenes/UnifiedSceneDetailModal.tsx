@@ -29,6 +29,7 @@ import { useSceneActivities } from '@/hooks/useSceneActivities';
 import { describeActivity, deptPrefix } from './activityLabels';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { useAppStore } from '@/stores/useAppStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
 
@@ -120,6 +121,10 @@ export function UnifiedSceneDetailModal({
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
+  // v1.23.1 (#1): 모달 내부 부서 모드 — 전역 dashboardDeptFilter 와 별개로 모달이 자체 보유.
+  // 최근 작업 위젯에서 BG 모드로 모달 진입 후, 같은 씬의 액팅 데이터도 같이 보고 싶을 때 사용.
+  const dashboardDeptFilter = useAppStore((s) => s.dashboardDeptFilter);
+  const [localDeptOverride, setLocalDeptOverride] = useState<'all' | 'bg' | 'acting'>(dashboardDeptFilter);
   // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
   const backdropMouseDownRef = useRef(false);
 
@@ -564,6 +569,24 @@ export function UnifiedSceneDetailModal({
                   </button>
                 )}
 
+                {/* v1.23.1 (#1): 모달 안에서 부서 모드 토글 — BG/액팅/통합. 모달 내부 표시만 변경 (전역 dept filter 안 건드림). */}
+                <div className="flex gap-[2px] bg-bg-border/40 p-[2px] rounded-md shrink-0">
+                  {(['all', 'bg', 'acting'] as const).map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setLocalDeptOverride(d)}
+                      className={cn(
+                        'px-2 py-1 rounded-[4px] text-[10.5px] cursor-pointer transition-all',
+                        localDeptOverride === d ? 'bg-accent/22 text-accent-sub' : 'text-text-secondary hover:text-text-primary',
+                      )}
+                      style={localDeptOverride === d ? { boxShadow: 'inset 0 0 0 1px rgba(108, 92, 231, 0.32)' } : {}}
+                      title={d === 'all' ? '통합 (BG + 액팅)' : d === 'bg' ? '배경만' : '액팅만'}
+                    >
+                      {d === 'all' ? '통합' : d === 'bg' ? 'BG' : '액팅'}
+                    </button>
+                  ))}
+                </div>
+
                 <button
                   onClick={onClose}
                   className="p-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-border/40 cursor-pointer transition-colors shrink-0"
@@ -634,30 +657,37 @@ export function UnifiedSceneDetailModal({
                           </div>
                         )}
 
-                        {/* 좌 BG | 우 ACT — 듀얼 패널 (mockup 분위기) */}
-                        <div className="grid grid-cols-2 gap-3 px-5 py-4">
-                          <DeptSection
-                            dept="bg"
-                            scene={bgScene}
-                            sheetName={bgSheetName}
-                            sceneIndex={bgSceneIndex}
-                            sceneId={bgScene?.sceneId ?? merged.sceneId}
-                            onToggle={onToggle}
-                            onFieldUpdate={onFieldUpdate}
-                            onDelete={() => setDeleteConfirm('bg')}
-                            onAdd={() => handleAddDept('bg')}
-                          />
-                          <DeptSection
-                            dept="acting"
-                            scene={actScene}
-                            sheetName={actSheetName}
-                            sceneIndex={actSceneIndex}
-                            sceneId={actScene?.sceneId ?? merged.sceneId}
-                            onToggle={onToggle}
-                            onFieldUpdate={onFieldUpdate}
-                            onDelete={() => setDeleteConfirm('act')}
-                            onAdd={() => handleAddDept('acting')}
-                          />
+                        {/* 좌 BG | 우 ACT — 듀얼 패널. v1.23.1 (#1): localDeptOverride 에 따라 한쪽만 노출. */}
+                        <div className={cn(
+                          'gap-3 px-5 py-4',
+                          localDeptOverride === 'all' ? 'grid grid-cols-2' : 'flex flex-col',
+                        )}>
+                          {(localDeptOverride === 'all' || localDeptOverride === 'bg') && (
+                            <DeptSection
+                              dept="bg"
+                              scene={bgScene}
+                              sheetName={bgSheetName}
+                              sceneIndex={bgSceneIndex}
+                              sceneId={bgScene?.sceneId ?? merged.sceneId}
+                              onToggle={onToggle}
+                              onFieldUpdate={onFieldUpdate}
+                              onDelete={() => setDeleteConfirm('bg')}
+                              onAdd={() => handleAddDept('bg')}
+                            />
+                          )}
+                          {(localDeptOverride === 'all' || localDeptOverride === 'acting') && (
+                            <DeptSection
+                              dept="acting"
+                              scene={actScene}
+                              sheetName={actSheetName}
+                              sceneIndex={actSceneIndex}
+                              sceneId={actScene?.sceneId ?? merged.sceneId}
+                              onToggle={onToggle}
+                              onFieldUpdate={onFieldUpdate}
+                              onDelete={() => setDeleteConfirm('act')}
+                              onAdd={() => handleAddDept('acting')}
+                            />
+                          )}
                         </div>
 
                         {/* 메타 줄 — 등록/수정 (Supabase scenes.created_at / updated_at) */}

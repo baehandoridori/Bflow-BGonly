@@ -1240,11 +1240,13 @@ export default function App() {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.sceneChange !== false) {
                 const stageLabel = stage === 'lo' ? 'LO' : stage === 'done' ? '완료' : stage === 'review' ? '검수' : stage === 'png' ? 'PNG' : stage;
+                // v1.23.1 (#7): 누가 변경했는지 명시 — senderId 로 user 이름 조회.
+                const senderName = useAuthStore.getState().users.find((u) => u.id === senderId)?.name ?? '다른 사용자';
                 dispatchNotification({
                   type: 'scene_change',
-                  title: `${scene.sceneId || sceneUuid} — ${stageLabel} ${value ? '✓' : '✗'}`,
-                  body: `다른 사용자가 내 씬의 단계를 변경했습니다`,
-                  metadata: { sceneId: sceneUuid, sceneName: scene.sceneId, fromStage: stage, toStage: value ? 'on' : 'off' },
+                  title: `${senderName}님이 ${scene.sceneId || sceneUuid} ${stageLabel} ${value ? '✓ 완료' : '✗ 해제'}`,
+                  body: `${stageLabel} 단계가 ${value ? '완료' : '해제'} 처리되었습니다`,
+                  metadata: { sceneId: sceneUuid, sceneName: scene.sceneId, fromStage: stage, toStage: value ? 'on' : 'off', changedBy: senderName },
                 }, notiSettings);
               }
             }
@@ -1268,11 +1270,13 @@ export default function App() {
             if (scene && scene.assignee === me.name) {
               const notiSettings = notiSettingsRef.current;
               if (notiSettings.sceneChange !== false) {
+                // v1.23.1 (#7): 누가 변경했는지 명시.
+                const senderName = useAuthStore.getState().users.find((u) => u.id === senderId)?.name ?? '다른 사용자';
                 dispatchNotification({
                   type: 'scene_change',
-                  title: `${scene.sceneId || sceneUuid} — ${field} 변경`,
-                  body: `다른 사용자가 내 씬의 정보를 수정했습니다`,
-                  metadata: { sceneId: sceneUuid, sceneName: scene.sceneId },
+                  title: `${senderName}님이 ${scene.sceneId || sceneUuid} 정보를 수정`,
+                  body: `${field} 항목이 변경되었습니다`,
+                  metadata: { sceneId: sceneUuid, sceneName: scene.sceneId, changedBy: senderName },
                 }, notiSettings);
               }
             }
