@@ -32,6 +32,12 @@ export interface SceneComment {
    * 부모 댓글 삭제 시 SET NULL → 답글이 일반 댓글로 떨어진다 (Slack 동작과 일치).
    */
   parentCommentId?: string | null;
+  /**
+   * v1.24.0 코덱스 P1: 댓글이 *실제로 저장된* sheetName:sceneNo (storage origin).
+   * 답글 저장 시 부모와 같은 sheet 에 쓰기 위해 사용 — UI dedup 의 _sourceKey 보다 신뢰할 수 있는
+   * persisted source. raw row 의 partId + scene_id 로부터 도출.
+   */
+  storageKey?: string;
 }
 
 type CommentsStore = Record<string, SceneComment[]>;
@@ -202,6 +208,13 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
 
     const key = `${sheetName}:${targetSceneNo}`;
     if (!store[key]) store[key] = [];
+    // v1.24.0 코덱스 P1: 답글 저장 시 부모와 같은 sheet 에 쓰기 위해 storage origin 도 함께 stamp.
+    //   raw row 의 partId(UUID) → sourcePart.sheetName, scene_id (sort_order) 그대로 사용.
+    //   Sheets fallback 은 partId 가 비어있어 storageKey undefined → 호출자 fallback to sceneKey.
+    const sourcePart = c.partId ? partByUuid.get(c.partId) : undefined;
+    const storageKey = sourcePart?.sheetName
+      ? `${sourcePart.sheetName}:${c.sceneId}`
+      : undefined;
     store[key].push({
       id: c.id,
       userId: c.userId,
@@ -216,6 +229,8 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
       revisionId: c.revisionId ?? null,
       // v1.24.0: 1단계 대댓글 부모 참조 — Supabase 만 채워짐.
       parentCommentId: c.parentCommentId ?? null,
+      // v1.24.0 코덱스 P1: 실제 storage origin (UI dedup 의 _sourceKey 보다 신뢰).
+      storageKey,
     });
   }
 
