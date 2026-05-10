@@ -489,7 +489,7 @@ export function UnifiedSceneDetailModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 6 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="relative w-[min(720px,calc(100vw-26rem))] h-[min(720px,90vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden"
+            className="relative w-[min(720px,calc(100vw-26rem))] h-[min(900px,92vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden"
             style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
           >
             {/* §3-1 배경 글로우 두 개 — 시그니처 */}
@@ -800,7 +800,7 @@ export function UnifiedSceneDetailModal({
               initial={{ opacity: 0, x: 30 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.25, delay: 0.1 }}
-              className="w-80 bg-bg-card shadow-2xl border border-bg-border h-[min(720px,90vh)] flex flex-col shrink-0 overflow-hidden"
+              className="w-80 bg-bg-card shadow-2xl border border-bg-border h-[min(900px,92vh)] flex flex-col shrink-0 overflow-hidden"
               style={{ borderRadius: 18 }}
             >
               <div className="px-4 py-3 border-b border-bg-border shrink-0">

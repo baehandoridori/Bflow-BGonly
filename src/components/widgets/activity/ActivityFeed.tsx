@@ -285,16 +285,19 @@ export function ActivityFeed() {
   // 필터 적용 + range 슬라이스 + 그룹화
   // codex 6차 P1: timeUnit/rangeIdx 변경 시 피드도 해당 range 로 잘라야 히트맵과 일관.
   // 캐시된 activities 가 부족하면 빈 상태로 표시 (서버 페치는 향후 추가 가능).
+  // v1.24.1 한솔 보고 fix: filters.groups.size === 0 일 때 *모두 통과*로 처리 — 사용자가 실수로
+  //   모든 그룹 토글 끄면 이전엔 텅 빈 위젯이 보였음. 0 개면 "필터 X" 의미로 모두 표시.
+  const allGroupsOff = filters.groups.size === 0;
   const feedItems = useMemo(() => {
     const startMs = new Date(currentRange.startISO).getTime();
     const endMs = new Date(currentRange.endISO).getTime();
     const filtered = activities.filter((a) => {
-      if (!filters.groups.has(ACTION_TYPE_TO_GROUP[a.actionType])) return false;
+      if (!allGroupsOff && !filters.groups.has(ACTION_TYPE_TO_GROUP[a.actionType])) return false;
       const t = new Date(a.createdAt).getTime();
       return Number.isFinite(t) && t >= startMs && t < endMs;
     });
     return groupActivities(filtered);
-  }, [activities, filters, currentRange]);
+  }, [activities, filters, currentRange, allGroupsOff]);
   const matches = useCallback((a: Activity) => {
     if (!cellFilter) return false;
     return activityMatchesCell(a, timeUnit, cellFilter, currentRange);
@@ -332,6 +335,35 @@ export function ActivityFeed() {
           <div className="text-text-secondary/40 text-[11px] mt-1">
             첫 변경이 발생하면 여기에 표시됩니다
           </div>
+          <button
+            type="button"
+            onClick={() => useActivityStore.getState().loadInitial()}
+            className="mt-3 px-3 py-1 text-[11px] rounded border border-bg-border/60 text-text-secondary hover:text-text-primary hover:bg-bg-border/40 cursor-pointer"
+          >
+            새로고침
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // v1.24.1 한솔 보고 fix: activities 는 있는데 *필터링/range 후 0 건* 인 경우 명확한 안내 + 새로고침.
+  //   이전엔 빈 영역만 보여 "위젯이 텅 빔" 으로 인식됐음.
+  if (feedItems.length === 0 && !isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-center px-6 py-10">
+        <div className="text-text-secondary/60 text-xs max-w-[260px]">
+          현재 기간/필터에 해당하는 활동이 없습니다
+          <div className="text-text-secondary/40 text-[11px] mt-1.5 leading-relaxed">
+            위쪽의 기간 단위(주/월/년)·기간 화살표 또는 그룹 필터를 조정해보세요. 캐시가 비어있으면 새로고침으로 다시 받습니다.
+          </div>
+          <button
+            type="button"
+            onClick={() => useActivityStore.getState().loadInitial()}
+            className="mt-3 px-3 py-1 text-[11px] rounded border border-accent/40 text-accent hover:bg-accent/10 cursor-pointer"
+          >
+            새로고침
+          </button>
         </div>
       </div>
     );

@@ -1,6 +1,6 @@
 {
   "name": "bflow",
-  "version": "1.24.0",
+  "version": "1.24.1",
   "description": "B flow - Studio JBBJ 워크플로우 대시보드",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -34,6 +34,7 @@
     "@tiptap/extension-underline": "^2.27.2",
     "@tiptap/react": "^2.27.2",
     "@tiptap/starter-kit": "^2.27.2",
+    "bflow": "file:.claude/worktrees/hardcore-bardeen-8d3837",
     "clsx": "^2.1.0",
     "framer-motion": "^10.18.0",
     "googleapis": "^171.4.0",
