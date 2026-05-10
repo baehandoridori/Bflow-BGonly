@@ -276,6 +276,8 @@ function NotificationDropdown() {
               });
             } else if (isCommentLikeNotif && commentId) {
               // v1.24.0: 댓글/멘션 알림 — 모달 자동 오픈 + 해당 댓글 자동 스크롤 + 펄스.
+              // 코덱스 P1 fix (2026-05-10): forceDeptFilter:'all' 강제. counterpart assignee 알림을
+              //   반대 부서 필터에서 클릭할 때 단일 부서 매칭 실패하던 회귀 차단 (ActivityFeed 점프와 일관).
               useAppStore.getState().setPendingSceneModalRequest({
                 sceneUuid: found.id,
                 sceneName: found.sceneId,
@@ -283,6 +285,7 @@ function NotificationDropdown() {
                 partId: part.partId,
                 initialTab: 'detail',
                 focusCommentId: commentId,
+                forceDeptFilter: 'all',
               });
             }
             return;

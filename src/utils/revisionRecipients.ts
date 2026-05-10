@@ -51,14 +51,20 @@ function namesToUsers(names: readonly string[], allUsers: readonly AppUser[]): A
  * - 등록자 본인(excludeUserId) 제외
  * - 중복 제거
  *
- * @param scene 대상 씬 (assignee 필드 사용)
+ * v1.24.0 한솔 보고: BG sheet 에서 리비전 등록 시 같은 컷의 ACT 작업자도 자동 태그되어야 한다
+ *   (반대도 동일). 단일 scene 만 보면 한쪽 부서 작업자가 누락되는 회귀.
+ *   → counterpartScene 옵션으로 BG↔ACT 양쪽 scene 의 assignee 모두 수집.
+ *
+ * @param scene 대상 씬 (assignee 필드 사용) — 보통 등록 부서의 씬
  * @param allUsers 전체 사용자 목록 (AuthStore.users)
  * @param excludeUserId 제외할 사용자 id (보통 등록자 본인)
+ * @param counterpartScene v1.24.0: BG↔ACT 같은 컷 반대 부서 scene (assignee 추가 수집용)
  */
 export function calcDefaultRecipients(
   scene: Pick<Scene, 'assignee'> | null | undefined,
   allUsers: readonly AppUser[],
   excludeUserId?: string,
+  counterpartScene?: Pick<Scene, 'assignee'> | null,
 ): string[] {
   const ids = new Set<string>();
 
@@ -67,13 +73,16 @@ export function calcDefaultRecipients(
     if (u.id && u.id !== excludeUserId) ids.add(u.id);
   }
 
-  // 2) 씬 담당자
-  if (scene) {
-    const assigneeNames = parseAssigneeNames(scene.assignee);
+  // 2) 씬 담당자 — 등록 부서 + counterpart 부서 양쪽 모두
+  const collectFromScene = (s: Pick<Scene, 'assignee'> | null | undefined) => {
+    if (!s) return;
+    const assigneeNames = parseAssigneeNames(s.assignee);
     for (const u of namesToUsers(assigneeNames, allUsers)) {
       if (u.id && u.id !== excludeUserId) ids.add(u.id);
     }
-  }
+  };
+  collectFromScene(scene);
+  collectFromScene(counterpartScene);
 
   return Array.from(ids);
 }

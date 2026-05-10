@@ -499,6 +499,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     ) {
       mentions.push(replyTarget.userName);
     }
+    // v1.24.0 코덱스 P1 fix: 답글은 부모 댓글의 *원래 sceneKey* 에 저장한다.
+    //   통합(BG+ACT) 모달에서 secondarySceneKey 로 로드된 댓글에 답글을 달 때,
+    //   primary sceneKey 에 저장하면 부모/답글이 다른 sheet 에 흩어져 단일 부서 모달에서 누락된다.
+    //   replyTarget._sourceKey 가 있으면 그쪽으로 저장 (BG↔ACT 일관성 유지).
+    const targetSceneKey = replyTarget?._sourceKey ?? sceneKey;
     const comment: SceneCommentWithSource = {
       id: crypto.randomUUID(),
       userId: currentUser.id,
@@ -509,7 +514,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       createdAt: new Date().toISOString(),
       // v1.24.0: 답글이면 부모 댓글 id, 아니면 null.
       parentCommentId: replyTarget?.id ?? null,
-      _sourceKey: sceneKey,
+      _sourceKey: targetSceneKey,
     };
 
     // 낙관적 UI
@@ -534,7 +539,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     setReplyTarget(null);
 
     try {
-      await addComment(sceneKey, comment);
+      // v1.24.0: 답글이면 targetSceneKey (부모 sourceKey) 로 저장 → 부모/답글이 같은 sheet 에 모임.
+      await addComment(targetSceneKey, comment);
 
       // 성공 — 이전 미리보기 blob URL revoke (메모리 정리)
       prevAttached.forEach(a => {

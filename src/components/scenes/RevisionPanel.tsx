@@ -328,18 +328,35 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
   const { createRevision, updateStatus, loadRevisions, getRevisionsForScene, getOpenCount } = useRevisionStore();
   const episodes = useDataStore((s) => s.episodes);
 
-  // 그 sheetName 의 part + 그 안에서 sceneId 매칭되는 scene 객체 (담당자 자동 체크용)
-  const { inferredSiblingSceneIds, scene } = useMemo<{ inferredSiblingSceneIds: string[]; scene: Scene | undefined }>(() => {
+  // 그 sheetName 의 part + 그 안에서 sceneId 매칭되는 scene 객체 (담당자 자동 체크용).
+  // v1.24.0: counterpart 부서 scene 도 함께 찾는다 — calcDefaultRecipients 가 BG↔ACT 양쪽
+  //   assignee 모두 자동 체크할 수 있게. 한솔 보고: BG 에서 등록할 때 ACT 작업자 누락되던 문제 fix.
+  const { inferredSiblingSceneIds, scene, counterpartScene } = useMemo<{
+    inferredSiblingSceneIds: string[];
+    scene: Scene | undefined;
+    counterpartScene: Scene | undefined;
+  }>(() => {
+    const counterpartSheetName = sheetName.endsWith('_BG')
+      ? sheetName.slice(0, -3) + '_ACT'
+      : sheetName.endsWith('_ACT')
+        ? sheetName.slice(0, -4) + '_BG'
+        : null;
     for (const episode of episodes) {
       const part = episode.parts.find((candidate) => candidate.sheetName === sheetName);
-      if (part) {
-        return {
-          inferredSiblingSceneIds: part.scenes.map((s) => s.sceneId),
-          scene: part.scenes.find((s) => s.sceneId === sceneId),
-        };
-      }
+      if (!part) continue;
+      const ownScene = part.scenes.find((s) => s.sceneId === sceneId);
+      // counterpart 는 같은 episode 안에서만 매칭 (alias-collision 방지).
+      const counterpartPart = counterpartSheetName
+        ? episode.parts.find((p) => p.sheetName === counterpartSheetName)
+        : null;
+      const cpScene = counterpartPart?.scenes.find((s) => s.sceneId === sceneId);
+      return {
+        inferredSiblingSceneIds: part.scenes.map((s) => s.sceneId),
+        scene: ownScene,
+        counterpartScene: cpScene,
+      };
     }
-    return { inferredSiblingSceneIds: [], scene: undefined };
+    return { inferredSiblingSceneIds: [], scene: undefined, counterpartScene: undefined };
   }, [episodes, sheetName, sceneId]);
   const effectiveSiblingSceneIds = siblingSceneIds ?? inferredSiblingSceneIds;
   const effectiveDepartment = department ?? inferDepartmentFromSheetName(sheetName);
@@ -366,10 +383,11 @@ export function RevisionPanel({ sheetName, sceneId, siblingSceneIds, department,
 
   // 자동 체크 대상자 — 모든 컴포지터 + 그 씬 담당자 (등록자 본인 제외).
   // v1.18.1 한솔 정정: 컴포지터는 부서로 나뉘지 않으므로 dept 인자 불필요.
+  // v1.24.0 한솔 보고 fix: counterpartScene 도 같이 넘겨 BG↔ACT 양쪽 작업자 모두 자동 체크.
   const defaultRecipients = useMemo(() => {
     if (!currentUser) return [];
-    return calcDefaultRecipients(scene, allUsers, currentUser.id);
-  }, [scene, allUsers, currentUser]);
+    return calcDefaultRecipients(scene, allUsers, currentUser.id, counterpartScene);
+  }, [scene, counterpartScene, allUsers, currentUser]);
 
   useEffect(() => {
     loadRevisions();

@@ -957,6 +957,9 @@ export default function App() {
               }).catch(() => { /* 무시 */ });
             }
             // 리비전 맥락 댓글은 일반 댓글 알림 경로 스킵.
+            // 코덱스 P2 fix (2026-05-10): early return *전* 캐시 무효화. 안 그러면 리비전 댓글이
+            //   캐시에 stale 한 상태로 남아 일반 댓글 뷰에서 누락됨 (broadcast 가 늦거나 끊긴 케이스).
+            invalidatePartCache();
             return;
           }
 
