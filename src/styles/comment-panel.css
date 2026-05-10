@@ -84,9 +84,11 @@
   to { opacity: 1; }
 }
 .comment-lightbox-image {
-  max-width: 92vw;
-  /* 썸네일 strip(약 110px) + 헤더(약 80px) 영역 확보 */
-  max-height: calc(100vh - 220px);
+  /* v1.24.2: 부모 flex column 의 메인 이미지 영역(flex-1) 안에서 자동 fit. */
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
   object-fit: contain;
   animation: comment-lightbox-image-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }

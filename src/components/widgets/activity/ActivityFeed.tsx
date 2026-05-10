@@ -99,7 +99,13 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles,
   const navTarget = resolveActivitySceneNavigation(activity, episodes);
   const canNavigate = !!navTarget;
   const handleClick = useCallback(() => {
-    if (!navTarget) return;
+    if (!navTarget) {
+      // v1.24.2: navTarget 매칭 실패 시 디버깅 로그 — 한솔 보고된 "활동 클릭 안 됨" 추적용.
+      //   activity.sceneId(UUID) 가 useDataStore.episodes 의 어떤 scene.id 와도 매칭 안 됨.
+      //   원인: 데이터 sync 안 됨, sceneId 형식 차이, 또는 episodes 비어있음.
+      console.warn('[ActivityFeed] navTarget 매칭 실패 — sceneId:', activity.sceneId, 'actionType:', activity.actionType);
+      return;
+    }
     const app = useAppStore.getState();
     // v1.24.0: 댓글 활동이면 commentId 추출 → 모달 진입 시 자동 스크롤 + 펄스.
     let commentId: string | undefined;
@@ -109,6 +115,14 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles,
       if (typeof cid === 'string') commentId = cid;
     }
     // v1.24.0: 모든 활동 클릭 시 통합(부서 무관) 모드로 모달 → 부서 사각지대 제거.
+    // v1.24.2 디버깅 로그: 한솔 보고된 "안 열림" 케이스 추적용.
+    console.log('[ActivityFeed] click → 모달 요청', {
+      sceneUuid: activity.sceneId,
+      sceneName: navTarget.sceneId,
+      episodeNumber: navTarget.episodeNumber,
+      partId: navTarget.partId,
+      commentId,
+    });
     app.setView('scenes');
     app.setPendingSceneModalRequest({
       sceneUuid: activity.sceneId ?? undefined,
