@@ -334,11 +334,15 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
     await window.electronAPI.supabaseDeleteComment(commentId);
     // 캐시에서 제거 — commentId 기준으로 모든 캐시/리스트 순회 (BG·ACT 양쪽 반영)
+    // v1.24.0 P1 #5: 부모 삭제 시 답글의 parentCommentId 도 NULL 갱신 (DB ON DELETE SET NULL 과 일관).
+    //   안 그러면 답글이 stale 한 parentCommentId 를 들고 있어 "원답글이 삭제된 답글" orphan 배지가 잘못 노출됨.
     sheetPartCache.forEach((store) => {
       for (const key of Object.keys(store)) {
         const list = store[key];
-        const filtered = list.filter(c => c.id !== commentId);
-        if (filtered.length !== list.length) {
+        const filtered = list.filter(c => c.id !== commentId).map((c) =>
+          c.parentCommentId === commentId ? { ...c, parentCommentId: null } : c,
+        );
+        if (filtered.length !== list.length || filtered.some((c, i) => c !== list[i])) {
           if (filtered.length === 0) delete store[key];
           else store[key] = filtered;
         }

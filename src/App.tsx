@@ -962,7 +962,9 @@ export default function App() {
           // v1.24.0: 본인 댓글 알림 차단 — 같은 PC에서 작성한 댓글에 본인이 알림받는 건 노이즈.
           // (한솔 테스트용 v1.15.0 의 user_id !== me.id 제거를 본 PR 에서 복원.)
           if (me && newComment.user_id && newComment.user_id !== me.id && newComment.scene_id) {
-            const dedupeKey = `comment:${newComment.user_id}:${newComment.scene_id}`;
+            // v1.24.0: dedupeKey 에 commentId 포함 → 같은 사용자가 같은 씬에 짧은 시간 내 여러 댓글 작성 시
+            //   broadcast/realtime dedupe 가 두 번째부터 충돌해 silent drop 되던 문제 방지.
+            const dedupeKey = `comment:${newComment.user_id}:${newComment.scene_id}:${newComment.id ?? ''}`;
             if (!dedupeNotification(dedupeKey)) { /* 이미 broadcast로 처리됨 */ }
             else {
               const notiSettings = notiSettingsRef.current;
@@ -1061,9 +1063,11 @@ export default function App() {
                     : isCounterpartAssignee
                     ? '함께 작업 중인 씬에 댓글'
                     : '내가 댓글 단 씬에 새 댓글';
+                  // v1.24.0 P1 #10: 더블스페이스 방지 — sceneId 가 비면 prefix 자체 생략.
+                  const sceneIdLabel = scene?.sceneId ? `${scene.sceneId} ` : '';
                   dispatchNotification({
                     type: 'comment',
-                    title: `${author}님이 ${scene?.sceneId || ''} ${reason}`,
+                    title: `${author}님이 ${sceneIdLabel}${reason}`,
                     body: bodyShort,
                     metadata: baseMetadata,
                   }, notiSettings);
@@ -1346,35 +1350,96 @@ export default function App() {
         // 댓글 추가 broadcast → 캐시 무효화 + 알림
         invalidatePartCache();
         window.dispatchEvent(new Event('bflow:comments-invalidated'));
-        const { sceneId: commentSceneId, userName: commentUserName, userId: commentUserId, text: commentText, mentions: commentMentions } = data.payload as {
-          sceneId?: string; userName?: string; userId?: string; text?: string; mentions?: string[];
+        // v1.24.0 P0 #1: realtime INSERT 분기와 동일한 mention/comment 분기 적용.
+        //   broadcast 페이로드에 commentId/parentCommentId/partId 가 포함되어 두 경로 어느 쪽이든 같은 분기 가능.
+        const {
+          sceneId: commentSceneNumber,  // sort_order text — findSceneBySceneId 매칭용
+          userName: commentUserName,
+          userId: commentUserId,
+          text: commentText,
+          mentions: commentMentions,
+          commentId: commentCid,
+          parentCommentId: commentParent,
+          partId: commentPartId,
+        } = data.payload as {
+          sceneId?: string;
+          userName?: string;
+          userId?: string;
+          text?: string;
+          mentions?: string[];
+          commentId?: string | null;
+          parentCommentId?: string | null;
+          partId?: string | null;
         };
         const me = useAuthStore.getState().currentUser;
-        if (me && commentUserId && commentUserId !== me.id && commentSceneId) {
-          const dedupeKey = `comment:${commentUserId}:${commentSceneId}`;
+        if (me && commentUserId && commentUserId !== me.id && commentSceneNumber) {
+          const dedupeKey = `comment:${commentUserId}:${commentSceneNumber}:${commentCid ?? ''}`;
           if (!dedupeNotification(dedupeKey)) { /* 이미 Realtime으로 처리됨 */ }
           else if (notiSettingsRef.current.commentNotify === false) { /* 알림 끔 */ }
           else {
             const notiSettings = notiSettingsRef.current;
-            const scene = useDataStore.getState().findSceneBySceneId(commentSceneId!);
-            const isMentioned = Array.isArray(commentMentions) && commentMentions.includes(me.name);
-            const isAssignee = scene && scene.assignee === me.name;
+            // partId 있으면 정확 매칭, 없으면 fallback (alias collision 위험 있지만 단일 데이터인 경우 OK)
+            let scene: ReturnType<typeof useDataStore.getState>['episodes'][number]['parts'][number]['scenes'][number] | null = null;
+            if (commentPartId) {
+              const targetNo = Number(commentSceneNumber);
+              if (Number.isFinite(targetNo)) {
+                for (const ep of useDataStore.getState().episodes) {
+                  for (const part of ep.parts) {
+                    if (part.id !== commentPartId) continue;
+                    const found = part.scenes.find((s) => Number(s.no) === targetNo);
+                    if (found) { scene = found; break; }
+                  }
+                  if (scene) break;
+                }
+              }
+            }
+            if (!scene) {
+              scene = useDataStore.getState().findSceneBySceneId(commentSceneNumber!) ?? null;
+            }
 
-            if (isMentioned) {
-              // @멘션된 경우: 씬 담당 여부와 무관하게 알림
+            const isMentioned = Array.isArray(commentMentions) && commentMentions.includes(me.name);
+            const assigneeNames = scene ? parseAssigneeList(scene.assignee) : [];
+            const isAssignee = assigneeNames.includes(me.name);
+            const counterpartNames = scene ? collectCounterpartAssigneeNames(scene) : [];
+            const isCounterpartAssignee = counterpartNames.includes(me.name);
+            const isReplyToMe = commentParent ? isCommentByUser(commentParent, me.id) : false;
+            const isThreadParticipant = scene
+              ? hasUserCommentedOnScene(commentPartId ?? null, scene, me.id)
+              : false;
+
+            const baseMetadata: Record<string, unknown> = {
+              sceneId: scene?.id,
+              sceneName: scene?.sceneId,
+              commentId: commentCid ?? undefined,
+              ...(commentParent ? { parentCommentId: commentParent } : {}),
+            };
+            const bodyShort = commentText
+              ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText)
+              : undefined;
+            const author = commentUserName || '누군가';
+            const sceneIdLabel = scene?.sceneId ? `${scene.sceneId} ` : '';
+
+            if (isMentioned || isReplyToMe) {
+              const title = isMentioned
+                ? `${author}님이 나를 태그했습니다`
+                : `${author}님이 내 댓글에 답글을 남겼습니다`;
               dispatchNotification({
-                type: 'comment',
-                title: `${commentUserName || '누군가'}님이 나를 태그했습니다`,
-                body: commentText ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText) : undefined,
-                metadata: scene ? { sceneId: scene.id, sceneName: scene.sceneId } : undefined,
+                type: 'mention',
+                title,
+                body: bodyShort,
+                metadata: { ...baseMetadata, mentionedBy: author },
               }, notiSettings);
-            } else if (isAssignee) {
-              // 내 씬에 댓글이 달린 경우
+            } else if (isAssignee || isCounterpartAssignee || isThreadParticipant) {
+              const reason = isAssignee
+                ? '내 씬에 댓글'
+                : isCounterpartAssignee
+                ? '함께 작업 중인 씬에 댓글'
+                : '내가 댓글 단 씬에 새 댓글';
               dispatchNotification({
                 type: 'comment',
-                title: `${commentUserName || '누군가'}님이 댓글을 남겼습니다`,
-                body: commentText ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText) : undefined,
-                metadata: { sceneId: scene!.id, sceneName: scene!.sceneId },
+                title: `${author}님이 ${sceneIdLabel}${reason}`,
+                body: bodyShort,
+                metadata: baseMetadata,
               }, notiSettings);
             }
           }

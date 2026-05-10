@@ -26,25 +26,55 @@ export function parseAssigneeList(assignee: string | undefined | null): string[]
 
 /**
  * BG↔ACT 같은 씬의 counterpart 부서 담당자 이름 수집.
- * 같은 episode 의 같은 scene_number(부서 무관) 기준으로 매칭.
- * 자기 씬과 같은 sceneId 를 가진 다른 part 의 scenes 에서 assignee 수집.
+ *
+ * v1.24.0 P0 #3 fix: 같은 sceneId (예: 'a001') 가 EP01·EP02 양쪽에 흔하므로
+ *   *반드시 같은 episode 안*에서만 매칭. 또한 BG↔ACT 부서쌍에 한정 (sheetName 접미사 _BG/_ACT 매칭) →
+ *   _REF/_EFX 같은 제3 파트 매칭 차단.
+ *
+ * 알고리즘:
+ *   1) 자기 씬이 속한 part 와 episode 식별 (ds.episodes 순회 1회).
+ *   2) 같은 episode 의 part 중 sheetName 이 BG↔ACT counterpart 인 part 만 후보로 한정.
+ *   3) 후보 part 의 scenes 에서 같은 sceneId (lowercase trim) 를 가진 씬의 assignee 수집.
  */
 export function collectCounterpartAssigneeNames(scene: Scene): string[] {
   const sceneNumber = (scene.sceneId || '').trim().toLowerCase();
   if (!sceneNumber) return [];
 
-  const names: string[] = [];
   const ds = useDataStore.getState();
-  for (const ep of ds.episodes) {
+  // 1) 자기 씬의 episode + part 식별
+  let myEpisodeIdx = -1;
+  let mySheetName: string | null = null;
+  outer: for (let i = 0; i < ds.episodes.length; i++) {
+    const ep = ds.episodes[i];
     for (const part of ep.parts) {
-      for (const s of part.scenes) {
-        if (s.id === scene.id) continue; // 같은 씬은 본 분기에서 별도 처리
-        const sNumber = (s.sceneId || '').trim().toLowerCase();
-        if (sNumber !== sceneNumber) continue;
-        for (const name of parseAssigneeList(s.assignee)) {
-          if (!names.includes(name)) names.push(name);
-        }
+      if (part.scenes.some((s) => s.id === scene.id)) {
+        myEpisodeIdx = i;
+        mySheetName = part.sheetName ?? null;
+        break outer;
       }
+    }
+  }
+  if (myEpisodeIdx < 0 || !mySheetName) return [];
+
+  // 2) BG↔ACT counterpart sheetName 계산
+  const counterpartSheetName = mySheetName.endsWith('_BG')
+    ? mySheetName.slice(0, -3) + '_ACT'
+    : mySheetName.endsWith('_ACT')
+      ? mySheetName.slice(0, -4) + '_BG'
+      : null;
+  if (!counterpartSheetName) return [];
+
+  // 3) 같은 episode 의 counterpart part 에서만 매칭
+  const ep = ds.episodes[myEpisodeIdx];
+  const counterpartPart = ep.parts.find((p) => p.sheetName === counterpartSheetName);
+  if (!counterpartPart) return [];
+
+  const names: string[] = [];
+  for (const s of counterpartPart.scenes) {
+    const sNumber = (s.sceneId || '').trim().toLowerCase();
+    if (sNumber !== sceneNumber) continue;
+    for (const name of parseAssigneeList(s.assignee)) {
+      if (!names.includes(name)) names.push(name);
     }
   }
   return names;

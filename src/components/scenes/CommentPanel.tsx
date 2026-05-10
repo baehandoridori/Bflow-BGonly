@@ -212,36 +212,58 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   }, [comments.length, inlineEvents?.length]);
 
   // v1.24.0: focusCommentId prop 변경 시 → 자동 스크롤 + 일시 펄스. 답글이면 부모 자동 펼침.
+  // P0 #2 fix: cleanup 누수 + comments 의존성으로 인한 펄스 무한 재시작 회귀 방지.
+  //   - comments 의존성 제거 (다른 사람 댓글 추가 시 effect 재실행 X)
+  //   - 두 setTimeout 모두 effect cleanup 에서 명시적으로 clear.
+  //   - 답글 펼침은 별도 effect 로 분리 (target 검색에 comments 필요하지만 펄스 재시작과 무관).
   useEffect(() => {
     if (!focusCommentId) return;
     setFocusedCommentId(focusCommentId);
-    // 답글이면 부모 expand 보장
+    let t2: ReturnType<typeof setTimeout> | null = null;
+    const t1 = setTimeout(() => {
+      const el = commentRefs.current.get(focusCommentId);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      t2 = setTimeout(() => setFocusedCommentId(null), 1700);
+    }, 100);
+    return () => {
+      clearTimeout(t1);
+      if (t2) clearTimeout(t2);
+    };
+  }, [focusCommentId]);
+
+  // v1.24.0: focusCommentId 가 답글이면 부모 댓글 펼침 보장. comments 가 늦게 도착해도 처리.
+  useEffect(() => {
+    if (!focusCommentId) return;
     const target = comments.find((c) => c.id === focusCommentId);
     if (target?.parentCommentId) {
       setCollapsedThreads((prev) => {
+        if (!prev.has(target.parentCommentId!)) return prev;
         const next = new Set(prev);
         next.delete(target.parentCommentId!);
         return next;
       });
     }
-    // 다음 tick 에 ref 매핑 후 scroll
-    const t = setTimeout(() => {
-      const el = commentRefs.current.get(focusCommentId);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // 펄스는 1.6s 후 자동 해제
-      const t2 = setTimeout(() => setFocusedCommentId(null), 1700);
-      // cleanup 은 아래 useEffect cleanup 에서 처리
-      return () => clearTimeout(t2);
-    }, 100);
-    return () => clearTimeout(t);
   }, [focusCommentId, comments]);
 
-  // v1.24.0: 답글 모드 진입 시 입력창에 부모 작성자 자동 멘션 프리셋 (현재 입력이 비어있을 때만).
+  // v1.24.0: 답글 모드 진입 시 입력창에 부모 작성자 자동 멘션 프리셋.
+  // P1 #6 fix: 비어있을 때만 prefix 추가 + *기존 입력이 다른 답글 prefix(@xxx )로 시작*하면 prefix 만 교체.
+  //   이전 코드는 사용자가 답글 버튼 누른 직후 다른 답글 버튼 누르면 첫 prefix 가 stale 하게 남았음.
   useEffect(() => {
     if (!replyTarget) return;
-    if (input.trim().length > 0) return;
     if (currentUser && replyTarget.userName === currentUser.name) return;
-    setInput(`@${replyTarget.userName} `);
+    const newPrefix = `@${replyTarget.userName} `;
+    setInput((prev) => {
+      const trimmed = prev.trimStart();
+      if (trimmed.length === 0) return newPrefix;
+      // 기존 prefix(@xxx ) 가 다른 사용자면 교체. 같은 사용자면 그대로.
+      const existingMentionMatch = trimmed.match(/^@(\S+)\s/);
+      if (existingMentionMatch) {
+        if (existingMentionMatch[1] === replyTarget.userName) return prev;
+        return newPrefix + trimmed.slice(existingMentionMatch[0].length);
+      }
+      // 사용자가 일반 텍스트 작성 중이면 건드리지 않음.
+      return prev;
+    });
     inputRef.current?.focus();
   }, [replyTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 

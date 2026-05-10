@@ -973,7 +973,11 @@ export async function addComment(
     throw new Error(`댓글 저장 실패: 씬을 찾을 수 없음 (partUuid=${partUuid}, sceneId=${sceneId})`);
   }
 
-  const { error } = await supabase.from('comments').insert({
+  // v1.24.0 P1 #9: parent_comment_id / revision_id 가 null 이면 payload 에서 키 자체 제거 →
+  //   마이그레이션 미적용 환경(컬럼 없음)에서도 일반 댓글은 정상 작성 가능. 답글/리비전 댓글만 마이그 필요.
+  // 또한 self-reference 차단(P1 #7) — 같은 id 가 부모로 들어오면 null 처리.
+  const safeParent = parentCommentId && parentCommentId !== commentId ? parentCommentId : null;
+  const insertPayload: Record<string, unknown> = {
     id: commentId,
     part_id: partUuid,
     scene_id: sceneId,
@@ -984,11 +988,14 @@ export async function addComment(
     mentions,
     images,
     created_at: createdAt,
-    revision_id: revisionId || null,
-    parent_comment_id: parentCommentId || null,
-  });
+  };
+  if (revisionId) insertPayload.revision_id = revisionId;
+  if (safeParent) insertPayload.parent_comment_id = safeParent;
+  const { error } = await supabase.from('comments').insert(insertPayload);
   throwIfError(error);
-  broadcastCommentAdded(sceneId, userName, userId, text, mentions);
+  // v1.24.0 P0 #1: broadcast 페이로드에 commentId/parentCommentId/partId 추가 →
+  //   렌더러가 realtime/broadcast 어느 쪽에서 먼저 도착하든 같은 알림 분기 호출 가능.
+  broadcastCommentAdded(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid);
 }
 
 /** 댓글 수정.
