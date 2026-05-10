@@ -92,7 +92,11 @@ export function isCommentByUser(commentId: string, userId: string): boolean {
 
 /**
  * 해당 씬에 자기가 이미 댓글을 단 적 있는지 (스레드 참여자 식별).
- * partUuid 와 scene.no 로 sceneKey 후보를 만들어 캐시 동기 조회.
+ *
+ * v1.24.0 코덱스 P1 fix (2026-05-10): BG↔ACT counterpart sheet 의 댓글도 함께 확인.
+ *   같은 컷의 토론은 BG/ACT 어느 쪽 sheet 에서든 시작될 수 있으므로, 한쪽만 보면
+ *   "ACT 에 먼저 댓글 단 사람이 BG 새 댓글에 자동 알림 못 받음" 회귀가 발생.
+ *   counterpart sheetName 도 매칭 + 같은 episode 안의 같은 sceneId 씬의 sceneKey 도 조회.
  */
 export function hasUserCommentedOnScene(
   partUuid: string | undefined | null,
@@ -101,19 +105,46 @@ export function hasUserCommentedOnScene(
 ): boolean {
   if (!partUuid) return false;
   const ds = useDataStore.getState();
-  let sheetName: string | null = null;
-  for (const ep of ds.episodes) {
-    for (const part of ep.parts) {
+  // 1) 자기 part 의 sheetName + episode 식별 (1회 순회)
+  let mySheetName: string | null = null;
+  let myEpisodeIdx = -1;
+  outer: for (let i = 0; i < ds.episodes.length; i++) {
+    for (const part of ds.episodes[i].parts) {
       if (part.id === partUuid) {
-        sheetName = part.sheetName ?? null;
-        break;
+        mySheetName = part.sheetName ?? null;
+        myEpisodeIdx = i;
+        break outer;
       }
     }
-    if (sheetName) break;
   }
-  if (!sheetName) return false;
-  const sceneKey = `${sheetName}:${scene.no}`;
-  const cached = peekCachedComments(sceneKey);
-  if (!cached) return false;
-  return cached.some((c) => c.userId === userId);
+  if (!mySheetName) return false;
+
+  // 2) 자기 sheetName 의 sceneKey 캐시 조회
+  const ownSceneKey = `${mySheetName}:${scene.no}`;
+  const ownCached = peekCachedComments(ownSceneKey);
+  if (ownCached?.some((c) => c.userId === userId)) return true;
+
+  // 3) BG↔ACT counterpart sheetName 의 sceneKey 도 조회. 같은 episode 안에서만 매칭 (alias-collision 방지).
+  const counterpartSheetName = mySheetName.endsWith('_BG')
+    ? mySheetName.slice(0, -3) + '_ACT'
+    : mySheetName.endsWith('_ACT')
+      ? mySheetName.slice(0, -4) + '_BG'
+      : null;
+  if (counterpartSheetName && myEpisodeIdx >= 0) {
+    const ep = ds.episodes[myEpisodeIdx];
+    const counterpartPart = ep.parts.find((p) => p.sheetName === counterpartSheetName);
+    if (counterpartPart) {
+      // counterpart 의 같은 sceneId 씬을 찾아 그 scene.no 로 sceneKey 구성 (BG/ACT scene.no 비대칭 안전).
+      const counterpartScene = counterpartPart.scenes.find(
+        (s) => (s.sceneId || '').trim().toLowerCase() === (scene.sceneId || '').trim().toLowerCase(),
+      );
+      if (counterpartScene) {
+        const cpSceneKey = `${counterpartSheetName}:${counterpartScene.no}`;
+        const cpCached = peekCachedComments(cpSceneKey);
+        if (cpCached?.some((c) => c.userId === userId)) return true;
+      }
+    }
+  }
+
+  return false;
 }
