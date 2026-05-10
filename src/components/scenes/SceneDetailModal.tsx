@@ -1088,6 +1088,8 @@ export function SceneDetailModal({
               }
               onCountChange={setCommentCount}
               focusCommentId={focusCommentId}
+              // v1.24.0: 라이트박스 상단 라벨 — sheetName 에서 EP/파트 추출 + scene.sceneId.
+              sceneLabel={`${sheetName.replace(/_/g, ' ').replace(/^EP0?/, 'EP')}${scene.sceneId ? ` #${scene.sceneId}` : ''}`}
             />
           </motion.div>
         </motion.div>

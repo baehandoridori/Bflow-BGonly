@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, ChevronDown, ChevronRight, Reply } from 'lucide-react';
+import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, ChevronDown, ChevronRight, Reply, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -39,6 +39,20 @@ interface CommentPanelProps {
   inlineEvents?: CommentInlineEvent[];
   /** v1.24.0: 외부 점프 시 자동 스크롤 + 펄스 강조할 댓글 id. 답글이면 부모 자동 펼침. */
   focusCommentId?: string | null;
+  /** v1.24.0: 댓글 이미지 라이트박스 상단에 표시할 씬 라벨 (예: "EP01 A컷 #03"). */
+  sceneLabel?: string;
+}
+
+/**
+ * v1.24.0: 댓글 이미지 라이트박스 상태.
+ * 한 댓글의 이미지 배열을 좌우 네비게이션 가능. 키보드 ArrowLeft/Right 동작.
+ * 상단 헤더에 씬 라벨 + 작성자 + 댓글 텍스트 일부 노출.
+ */
+interface CommentLightboxState {
+  images: string[];
+  index: number;
+  userName: string;
+  commentText: string;
 }
 
 /** 내부 렌더링용 — 원본이 어느 sceneKey 에서 왔는지 추적 */
@@ -61,7 +75,7 @@ function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string }
 
 // ─── 메인 컴포넌트 ──────────────────────────
 
-export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlineEvents, focusCommentId }: CommentPanelProps) {
+export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlineEvents, focusCommentId, sceneLabel }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
 
@@ -123,7 +137,27 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
 
   // 드래그 + 라이트박스
   const [draggingOver, setDraggingOver] = useState(false);
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // v1.24.0: 단일 URL → 이미지 배열 + 인덱스 + 컨텍스트 로 확장. 좌우 네비게이션 + 키보드 화살표 지원.
+  const [lightbox, setLightbox] = useState<CommentLightboxState | null>(null);
+  const openLightbox = useCallback((images: string[], index: number, comment: SceneComment) => {
+    if (!images || images.length === 0) return;
+    setLightbox({
+      images,
+      index: Math.max(0, Math.min(index, images.length - 1)),
+      userName: comment.userName,
+      commentText: comment.text,
+    });
+  }, []);
+  const closeLightbox = useCallback(() => setLightbox(null), []);
+  const lightboxStep = useCallback((dir: 1 | -1) => {
+    setLightbox((prev) => {
+      if (!prev) return prev;
+      const len = prev.images.length;
+      if (len <= 1) return prev;
+      const next = (prev.index + dir + len) % len;
+      return { ...prev, index: next };
+    });
+  }, []);
 
   // 패널 높이 측정 — 입력 카드 35% 한계 계산
   const [panelHeight, setPanelHeight] = useState(0);
@@ -281,15 +315,32 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     items[mentionIndex]?.scrollIntoView({ block: 'nearest' });
   }, [mentionIndex, showMentions]);
 
-  // 라이트박스 ESC 닫기
+  // v1.24.0: 라이트박스 키보드 — Escape 닫기 + ArrowLeft/Right 로 한 댓글 내 이미지 이동.
+  // stopPropagation 으로 모달 prev/next (← →) 와 충돌 차단 — 라이트박스 활성 시 화살표는 *이미지만* 이동.
   useEffect(() => {
-    if (!lightboxUrl) return;
+    if (!lightbox) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setLightboxUrl(null);
+      if (e.key === 'Escape') {
+        closeLightbox();
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopPropagation();
+        lightboxStep(-1);
+        return;
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation();
+        lightboxStep(1);
+        return;
+      }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [lightboxUrl]);
+    // capture: true → 모달의 ArrowLeft/Right 핸들러보다 먼저 잡아 stopPropagation 으로 모달 prev/next 차단.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [lightbox, closeLightbox, lightboxStep]);
 
   // Codex P2(2026-04-29): cleanup + in-flight 롤백 정확도를 위한 latest 값 ref 추적.
   // 빈 deps 의 cleanup 은 초기 렌더 값만 capture 하므로 ref 가 필수.
@@ -927,7 +978,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                                 alt=""
                                 className="rounded-md w-full object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
                                 style={{ maxHeight: 160 }}
-                                onClick={() => setLightboxUrl(url)}
+                                onClick={() => openLightbox(comment.images!, i, comment)}
                                 loading="lazy"
                               />
                             ))}
@@ -1061,7 +1112,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                                         alt=""
                                         className="rounded w-full object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
                                         style={{ maxHeight: 120 }}
-                                        onClick={() => setLightboxUrl(url)}
+                                        onClick={() => openLightbox(reply.images!, i, reply)}
                                         loading="lazy"
                                       />
                                     ))}
@@ -1277,27 +1328,99 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
         </div>
       )}
 
-      {/* 라이트박스 (이미지 클릭 시 확대) */}
-      {lightboxUrl && (
+      {/* v1.24.0: 라이트박스 — 댓글 이미지 좌우 네비게이션 + 상단 컨텍스트 헤더 + 키보드 화살표.
+          한 댓글 안의 이미지만 순회 (다른 댓글로 넘어가지 않음). 이미지 1장이면 화살표 숨김. */}
+      {lightbox && (
         <div
           className="comment-lightbox-backdrop cursor-zoom-out"
-          onClick={() => setLightboxUrl(null)}
+          onClick={closeLightbox}
           role="dialog"
           aria-modal="true"
+          aria-label="댓글 이미지 확대 보기"
         >
+          {/* 상단 헤더 — 씬 라벨 + 작성자 + 댓글 본문 일부 */}
+          <div
+            className="absolute top-0 left-0 right-0 px-6 pt-4 pb-3 z-10 pointer-events-none flex items-start justify-between gap-4"
+            style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)' }}
+          >
+            <div className="flex-1 min-w-0 text-white pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 text-[11px] text-white/70">
+                {sceneLabel && (
+                  <>
+                    <span className="px-1.5 py-0.5 rounded bg-white/10 font-medium">{sceneLabel}</span>
+                    <span className="text-white/40">·</span>
+                  </>
+                )}
+                <span className="font-semibold text-white">{lightbox.userName}</span>
+                <span className="text-white/40">·</span>
+                <span className="tabular-nums">{lightbox.index + 1} / {lightbox.images.length}</span>
+              </div>
+              {lightbox.commentText && (
+                <p className="text-[13px] text-white/90 mt-1.5 line-clamp-2 max-w-2xl">{lightbox.commentText}</p>
+              )}
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); closeLightbox(); }}
+              className="pointer-events-auto w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors cursor-pointer flex-shrink-0"
+              title="닫기 (ESC)"
+              aria-label="닫기"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* 좌측 화살표 — 이미지 2장 이상일 때만 */}
+          {lightbox.images.length > 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); lightboxStep(-1); }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-black/50 hover:bg-black/75 text-white flex items-center justify-center transition-colors cursor-pointer"
+              title="이전 이미지 (←)"
+              aria-label="이전 이미지"
+            >
+              <ChevronLeftIcon size={26} />
+            </button>
+          )}
+
           <img
-            src={lightboxUrl}
-            alt=""
+            src={lightbox.images[lightbox.index]}
+            alt={`${lightbox.userName}의 댓글 이미지 ${lightbox.index + 1}/${lightbox.images.length}`}
             className="comment-lightbox-image cursor-default"
             onClick={(e) => e.stopPropagation()}
+            key={`${lightbox.index}-${lightbox.images[lightbox.index]}`}
           />
-          <button
-            onClick={() => setLightboxUrl(null)}
-            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors cursor-pointer"
-            title="닫기 (ESC)"
-          >
-            <X size={20} />
-          </button>
+
+          {/* 우측 화살표 */}
+          {lightbox.images.length > 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); lightboxStep(1); }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-black/50 hover:bg-black/75 text-white flex items-center justify-center transition-colors cursor-pointer"
+              title="다음 이미지 (→)"
+              aria-label="다음 이미지"
+            >
+              <ChevronRightIcon size={26} />
+            </button>
+          )}
+
+          {/* 하단 인디케이터 — 이미지 2장 이상일 때만 */}
+          {lightbox.images.length > 1 && (
+            <div
+              className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10 pointer-events-none"
+              style={{ background: 'rgba(0,0,0,0.4)', borderRadius: 999, padding: '6px 12px' }}
+            >
+              {lightbox.images.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setLightbox((prev) => prev ? { ...prev, index: i } : prev); }}
+                  className={cn(
+                    'pointer-events-auto rounded-full transition-all cursor-pointer',
+                    i === lightbox.index ? 'w-6 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/40 hover:bg-white/70',
+                  )}
+                  aria-label={`${i + 1}번 이미지로 이동`}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

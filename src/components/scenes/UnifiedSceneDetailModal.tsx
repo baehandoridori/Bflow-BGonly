@@ -817,6 +817,10 @@ export function UnifiedSceneDetailModal({
                 onCountChange={setCommentCount}
                 inlineEvents={inlineEvents}
                 focusCommentId={focusCommentId}
+                // v1.24.0: 댓글 이미지 라이트박스 상단 라벨용 — "EP01 / A컷 #03" 형태로 전달.
+                sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
+                  .filter(Boolean)
+                  .join(' / ')}
               />
             </motion.div>
           )}
