@@ -27,6 +27,11 @@ export interface SceneComment {
    * 리비전 ↔ 댓글 단일 흐름 통합 — 리비전 패널에서 작성된 댓글은 이 필드로 연결.
    */
   revisionId?: string | null;
+  /**
+   * v1.24.0: 1단계 대댓글(slack/linear 스타일)이면 부모 댓글 id, 일반 댓글이면 null/undefined.
+   * 부모 댓글 삭제 시 SET NULL → 답글이 일반 댓글로 떨어진다 (Slack 동작과 일치).
+   */
+  parentCommentId?: string | null;
 }
 
 type CommentsStore = Record<string, SceneComment[]>;
@@ -114,7 +119,7 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
     }
   } catch { /* 무시 */ }
 
-  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; images?: string[]; createdAt: string; editedAt: string | null; revisionId?: string | null }[] = [];
+  let rawComments: { id: string; partId: string; sceneId: string; userId: string; userName: string; text: string; mentions: string[]; images?: string[]; createdAt: string; editedAt: string | null; revisionId?: string | null; parentCommentId?: string | null }[] = [];
 
   let supabaseFailed = false;
   if (partUuids.length > 0) {
@@ -209,6 +214,8 @@ export async function loadPartComments(sheetName: string): Promise<CommentsStore
       editedAt: c.editedAt || undefined,
       // v1.18.0: 리비전 맥락 댓글 식별용 — Supabase 경로만 채워지고 Sheets fallback 은 undefined.
       revisionId: c.revisionId ?? null,
+      // v1.24.0: 1단계 대댓글 부모 참조 — Supabase 만 채워짐.
+      parentCommentId: c.parentCommentId ?? null,
     });
   }
 
@@ -262,6 +269,8 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
       comment.mentions, comment.createdAt, comment.images ?? [],
       // v1.18.0: revisionId 정식 전달 — null 이면 일반 씬 댓글, 값 있으면 리비전 맥락 댓글.
       comment.revisionId ?? null,
+      // v1.24.0: 1단계 대댓글 부모 id 정식 전달.
+      comment.parentCommentId ?? null,
     );
     // 캐시 업데이트 — 원본 sheet 캐시에만 낙관적 반영.
     // 반대 부서 sheet 캐시는 invalidate해서 다음 조회 시 통합 재조회로 반영 (중복 삽입 방지).
@@ -350,6 +359,42 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
   all[sceneKey] = list.filter(c => c.id !== commentId);
   if (all[sceneKey].length === 0) delete all[sceneKey];
   await saveLocal(all);
+}
+
+/**
+ * v1.24.0: 캐시에서 동기적으로 댓글 목록 조회 (없으면 null).
+ * 비동기 로드 트리거 X — 알림 핸들러 같은 hot path 에서 false-negative safe 한 빠른 조회용.
+ */
+export function peekCachedComments(sceneKey: string): SceneComment[] | null {
+  if (sheetsMode) {
+    const { sheetName } = parseSceneKey(sceneKey);
+    const store = sheetPartCache.get(sheetName);
+    if (!store) return null;
+    return store[sceneKey] ? [...store[sceneKey]] : [];
+  }
+  if (!localCache) return null;
+  return localCache[sceneKey] ? [...localCache[sceneKey]] : [];
+}
+
+/**
+ * v1.24.0: 캐시에서 commentId 로 댓글 단건 동기 조회. sheetName 모를 때 모든 캐시 순회 (소량이라 부담 X).
+ */
+export function findCommentInCache(commentId: string): SceneComment | null {
+  if (sheetsMode) {
+    for (const store of sheetPartCache.values()) {
+      for (const list of Object.values(store)) {
+        const found = list.find((c) => c.id === commentId);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  if (!localCache) return null;
+  for (const list of Object.values(localCache)) {
+    const found = list.find((c) => c.id === commentId);
+    if (found) return found;
+  }
+  return null;
 }
 
 /** 텍스트에서 @멘션 추출 */

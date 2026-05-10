@@ -618,7 +618,7 @@ export interface ElectronAPI {
     createdAt: string;
     editedAt?: string | null;
   }>>;
-  supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string, images?: string[], revisionId?: string | null) => Promise<void>;
+  supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string, images?: string[], revisionId?: string | null, parentCommentId?: string | null) => Promise<void>;
   supabaseEditComment: (commentId: string, text: string, mentions: string[], images?: string[]) => Promise<void>;
   supabaseDeleteComment: (commentId: string) => Promise<void>;
   /** 비공개 캘린더 이벤트 — Google Calendar 비연동, Supabase 전용 */

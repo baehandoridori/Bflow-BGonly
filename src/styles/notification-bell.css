@@ -1,0 +1,54 @@
+/* v1.24.0 — 헤더 알림 벨 강조 + 미읽 카운트 배지 그라데이션 */
+
+/* 자동 알림(차분한 글로우 — bellGlow 2.0s ease-out infinite) */
+.bell-glow-soft {
+  animation: bell-glow-soft-anim 2.0s ease-out infinite;
+}
+@keyframes bell-glow-soft-anim {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 rgba(108, 92, 231, 0.30),
+      0 0 12px rgba(108, 92, 231, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 5px rgba(108, 92, 231, 0),
+      0 0 18px rgba(108, 92, 231, 0.40);
+  }
+}
+
+/* 멘션 포함(강한 펄스 — mentionPing 1.6s ease-out infinite) */
+.bell-glow-mention {
+  animation: bell-glow-mention-anim 1.6s ease-out infinite;
+}
+@keyframes bell-glow-mention-anim {
+  0%   { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.65); }
+  60%  { box-shadow: 0 0 0 10px rgba(108, 92, 231, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0); }
+}
+
+/* 카운트 배지 — 자동 알림(보라 그라데이션) */
+.badge-grad {
+  background: linear-gradient(135deg, #6C5CE7 0%, #8678FF 100%);
+  box-shadow: 0 0 0 1.5px rgba(108, 92, 231, 0.25), 0 2px 8px rgba(108, 92, 231, 0.45);
+}
+
+/* 카운트 배지 — 멘션 포함(빨강→보라 그라데이션, 더 강한 시각 신호) */
+.badge-grad-strong {
+  background: linear-gradient(135deg, #FF6B6B 0%, #FF8E8E 50%, #6C5CE7 100%);
+  box-shadow: 0 0 0 1.5px rgba(255, 107, 107, 0.30), 0 2px 10px rgba(255, 107, 107, 0.55);
+}
+
+/* 멘션 배지 (알림 항목 행 안 '@' 표기) */
+.mention-badge {
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.25), rgba(108, 92, 231, 0.12));
+  border: 1px solid rgba(108, 92, 231, 0.45);
+}
+
+/* prefers-reduced-motion — 모든 무한 애니메이션 OFF */
+@media (prefers-reduced-motion: reduce) {
+  .bell-glow-soft,
+  .bell-glow-mention {
+    animation: none !important;
+  }
+}

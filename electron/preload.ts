@@ -135,8 +135,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:fetch-missed-mentions', userId, userName, since, limit),
   supabaseAddComment: (commentId: string, partUuid: string, sceneId: string,
     userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = [],
-    revisionId: string | null = null) =>
-    ipcRenderer.invoke('supabase:add-comment', commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId),
+    revisionId: string | null = null, parentCommentId: string | null = null) =>
+    ipcRenderer.invoke('supabase:add-comment', commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId),
   supabaseEditComment: (commentId: string, text: string, mentions: string[], images?: string[]) =>
     ipcRenderer.invoke('supabase:edit-comment', commentId, text, mentions, images),
   supabaseDeleteComment: (commentId: string) =>

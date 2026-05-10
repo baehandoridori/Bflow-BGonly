@@ -101,11 +101,25 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles,
   const handleClick = useCallback(() => {
     if (!navTarget) return;
     const app = useAppStore.getState();
-    app.setSelectedEpisode(navTarget.episodeNumber);
-    app.setSelectedPart(navTarget.partId);
+    // v1.24.0: 댓글 활동이면 commentId 추출 → 모달 진입 시 자동 스크롤 + 펄스.
+    let commentId: string | undefined;
+    if (activity.actionType === 'comment_add' || activity.actionType === 'revision_comment') {
+      const detailObj = activity.detail as Record<string, unknown> | null | undefined;
+      const cid = detailObj?.commentId;
+      if (typeof cid === 'string') commentId = cid;
+    }
+    // v1.24.0: 모든 활동 클릭 시 통합(부서 무관) 모드로 모달 → 부서 사각지대 제거.
     app.setView('scenes');
-    app.setPendingDeepLink({ sheetName: navTarget.sheetName, sceneId: navTarget.sceneId });
-  }, [navTarget]);
+    app.setPendingSceneModalRequest({
+      sceneUuid: activity.sceneId ?? undefined,
+      sceneName: navTarget.sceneId,
+      episodeNumber: navTarget.episodeNumber,
+      partId: navTarget.partId,
+      initialTab: 'detail',
+      focusCommentId: commentId,
+      forceDeptFilter: 'all',
+    });
+  }, [navTarget, activity]);
   return (
     <div
       ref={highlightRef}

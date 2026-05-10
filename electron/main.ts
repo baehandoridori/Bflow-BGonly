@@ -1466,8 +1466,8 @@ ipcMain.handle('supabase:fetch-missed-mentions', wrapIpc(async (
 }));
 ipcMain.handle('supabase:add-comment', wrapIpc(async (_e: unknown, commentId: string, partUuid: string, sceneId: string,
   userId: string, userName: string, text: string, mentions: string[], createdAt: string, images: string[] = [],
-  revisionId: string | null = null) => {
-  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId);
+  revisionId: string | null = null, parentCommentId: string | null = null) => {
+  await sbAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId);
   // 활동 기록 — partUuid 로 부서/에피소드 + scene UUID 자동 조회
   // (sceneId 가 TEXT 형식이라 scenes 테이블 조회로 UUID 변환 — 그룹화 정확성 + 부서 필터 통과)
   if (currentActivityUser) {
@@ -1635,7 +1635,8 @@ ipcMain.handle('supabase:add-revision', wrapIpc(async (_e: unknown, id: string, 
           actionType: 'revision_add', actionGroup: 'memo',
           sceneId: sceneUuid, sceneLabel,
           episodeNumber: epNum, department: dept,
-          detail: { revisionId: id, descriptionPreview: description.slice(0, 60) },
+          // v1.24.0: revisionNumber 도 detail 에 저장 → activityLabels 가 "re#N" 표기.
+          detail: { revisionId: id, revisionNumber: revisionNo, descriptionPreview: description.slice(0, 60) },
         });
       } catch { /* 무시 */ }
     }
@@ -1714,6 +1715,8 @@ ipcMain.handle('supabase:update-revision', wrapIpc(async (_e: unknown, id: strin
         episodeNumber: epNum, department: dept,
         detail: {
           revisionId: id,
+          // v1.24.0: 차수 + description 도 같이 보존 → activityLabels 가 "re#N · 메모" 표기 가능.
+          ...(typeof rev?.revision_no === 'number' ? { revisionNumber: rev.revision_no } : {}),
           newStatus: updates.status,
           // 해결 멘트(resolvedNote)가 같이 update 되면 detail 에 보존 — 댓글창/히스토리 인라인 표시용 (한솔 2026-05-02)
           ...(updates.resolvedNote ? { resolvedNote: updates.resolvedNote.slice(0, 80) } : {}),
@@ -1819,7 +1822,8 @@ ipcMain.handle('supabase:delete-revision', wrapIpc(async (_e: unknown, id: strin
         actionType: 'revision_delete', actionGroup: 'memo',
         sceneId: auditMeta.sceneUuid, sceneLabel: auditMeta.sceneLabel,
         episodeNumber: auditMeta.epNum, department: auditMeta.dept,
-        detail: { revisionId: id, revisionNo: auditMeta.revisionNo },
+        // v1.24.0: revisionNumber 키로 통일 (activityLabels.ts 와 동일).
+        detail: { revisionId: id, revisionNumber: auditMeta.revisionNo },
       });
     } catch { /* 무시 */ }
   }

@@ -141,6 +141,8 @@ export interface SupabaseComment {
   editedAt: string | null;
   /** v1.18.0: 리비전 맥락 댓글이면 해당 리비전 id, 일반 씬 댓글이면 null. */
   revisionId?: string | null;
+  /** v1.24.0: 1단계 대댓글이면 부모 댓글 id, 일반 댓글이면 null. */
+  parentCommentId?: string | null;
 }
 
 export interface SupabaseRevision {
@@ -939,6 +941,8 @@ export async function readCommentsForPart(partUuid: string): Promise<SupabaseCom
     editedAt: c.edited_at,
     // v1.18.0: 리비전 ↔ 씬 댓글 단일 흐름 — revision_id 가 NULL 이면 일반 씬 댓글, 값 있으면 리비전 맥락 댓글.
     revisionId: c.revision_id ?? null,
+    // v1.24.0: 1단계 대댓글 부모 참조. NULL 이면 일반 댓글.
+    parentCommentId: c.parent_comment_id ?? null,
   }));
 }
 
@@ -955,6 +959,8 @@ export async function addComment(
   images: string[] = [],
   /** v1.18.0: 리비전 맥락 댓글이면 해당 리비전 id, 일반 씬 댓글이면 null. */
   revisionId: string | null = null,
+  /** v1.24.0: 1단계 대댓글이면 부모 댓글 id, 일반 댓글이면 null. */
+  parentCommentId: string | null = null,
 ): Promise<void> {
   // 이슈 F(2026-04-23) + Codex P1(2차): 댓글 경로의 sceneId는 scene.no (=sort_order).
   // sort_order 정확 매칭으로 scene_number 표기 규칙과 무관하게 정확히 식별.
@@ -979,6 +985,7 @@ export async function addComment(
     images,
     created_at: createdAt,
     revision_id: revisionId || null,
+    parent_comment_id: parentCommentId || null,
   });
   throwIfError(error);
   broadcastCommentAdded(sceneId, userName, userId, text, mentions);

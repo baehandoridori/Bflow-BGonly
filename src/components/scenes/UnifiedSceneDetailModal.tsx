@@ -95,6 +95,8 @@ export interface UnifiedSceneDetailModalProps {
   initialTab?: TabKey;
   /** v1.18.0: 'revisions' 탭에서 강조할 리비전 id — scrollIntoView + pulse 애니메이션. */
   focusRevisionId?: string;
+  /** v1.24.0: 댓글 패널에서 강조할 댓글 id — 자동 스크롤 + comment-target-pulse. */
+  focusCommentId?: string;
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
@@ -118,6 +120,7 @@ export function UnifiedSceneDetailModal({
   episodeLabel,
   initialTab,
   focusRevisionId,
+  focusCommentId,
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
@@ -813,6 +816,7 @@ export function UnifiedSceneDetailModal({
                 secondarySceneKey={secondaryCommentKey || undefined}
                 onCountChange={setCommentCount}
                 inlineEvents={inlineEvents}
+                focusCommentId={focusCommentId}
               />
             </motion.div>
           )}

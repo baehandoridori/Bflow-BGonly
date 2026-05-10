@@ -89,3 +89,27 @@
   from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
 }
+
+/* v1.24.0 — 외부 점프 시 해당 댓글 일시 강조 (1.6s ease-out 1회) */
+.comment-target-pulse {
+  border-radius: 6px;
+  animation: comment-target-pulse-anim 1.6s ease-out 1;
+}
+@keyframes comment-target-pulse-anim {
+  0%   { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0.55); }
+  60%  { box-shadow: 0 0 0 10px rgba(108, 92, 231, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0); }
+}
+
+/* v1.24.0 — Slack 스타일 묶음. 같은 사용자 연속 댓글은 위쪽 마진 좁힘 (시각적 그룹화) */
+.comment-grouped-with-prev {
+  margin-top: -8px !important;
+}
+
+/* prefers-reduced-motion — 모든 애니메이션 OFF */
+@media (prefers-reduced-motion: reduce) {
+  .comment-target-pulse,
+  .comment-drop-icon {
+    animation: none !important;
+  }
+}

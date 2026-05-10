@@ -1492,7 +1492,7 @@ export function ScenesView() {
   const colorMode = useAppStore((s) => s.colorMode);
   const revisionCountByScene = useRevisionStore((s) => s.revisionCountByScene);
   const { sortKey, sortDir, statusFilter, sceneViewMode, sceneGroupMode } = useAppStore();
-  const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment } = useAppStore();
+  const { setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSearchQuery, setSelectedDepartment, setDashboardDeptFilter } = useAppStore();
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
   const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
@@ -1584,9 +1584,11 @@ export function ScenesView() {
 
   // v1.18.0: 알림 클릭 등 외부에서 모달 자동 오픈 시 전달되는 라우팅 옵션.
   // 'revisions' 탭으로 시작 + 특정 리비전 카드 강조 등.
+  // v1.24.0: focusCommentId 추가 — 알림/활동 점프 시 댓글 자동 스크롤 + 펄스.
   const [modalRouting, setModalRouting] = useState<{
     initialTab?: 'detail' | 'revisions' | 'files' | 'history';
     focusRevisionId?: string;
+    focusCommentId?: string;
   } | null>(null);
 
   // 리비전 초기 로드
@@ -2070,6 +2072,7 @@ export function ScenesView() {
         partId?: string;
         initialTab?: 'detail' | 'revisions' | 'files' | 'history';
         focusRevisionId?: string;
+        focusCommentId?: string;
       } | undefined;
       if (!detail) return;
 
@@ -2085,6 +2088,7 @@ export function ScenesView() {
           setModalRouting({
             initialTab: detail.initialTab,
             focusRevisionId: detail.focusRevisionId,
+            focusCommentId: detail.focusCommentId,
           });
         }
         return;
@@ -2101,6 +2105,7 @@ export function ScenesView() {
           setModalRouting({
             initialTab: detail.initialTab,
             focusRevisionId: detail.focusRevisionId,
+            focusCommentId: detail.focusCommentId,
           });
         }
       }
@@ -2119,6 +2124,13 @@ export function ScenesView() {
   useEffect(() => {
     if (!pendingReq) return;
     const detail = pendingReq;
+
+    // v1.24.0: forceDeptFilter — 점프 시 부서 토글 강제 (최근 작업 위젯 → 'all').
+    if (detail.forceDeptFilter && detail.forceDeptFilter !== selectedDepartment) {
+      setSelectedDepartment(detail.forceDeptFilter);
+      setDashboardDeptFilter(detail.forceDeptFilter);
+      return; // 다음 render 까지 대기
+    }
 
     // 1) episode/part 컨텍스트 먼저 정렬 (다른 EP/Part 점프 시)
     if (detail.episodeNumber !== undefined && selectedEpisode !== detail.episodeNumber) {
@@ -2142,6 +2154,7 @@ export function ScenesView() {
         setModalRouting({
           initialTab: detail.initialTab,
           focusRevisionId: detail.focusRevisionId,
+          focusCommentId: detail.focusCommentId,
         });
         setPendingReq(null);
       }
@@ -2158,6 +2171,7 @@ export function ScenesView() {
         setModalRouting({
           initialTab: detail.initialTab,
           focusRevisionId: detail.focusRevisionId,
+          focusCommentId: detail.focusCommentId,
         });
         setPendingReq(null);
       }
@@ -4387,6 +4401,7 @@ export function ScenesView() {
             onClose={() => { setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}
+            focusCommentId={modalRouting?.focusCommentId}
             hasPrev={hasPrev}
             hasNext={hasNext}
             totalScenes={filteredIndices.length}
@@ -4421,6 +4436,7 @@ export function ScenesView() {
             totalMerged={mergedScenes.length}
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}
+            focusCommentId={modalRouting?.focusCommentId}
             onClose={() => { setDetailMerged(null); setModalRouting(null); }}
             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}

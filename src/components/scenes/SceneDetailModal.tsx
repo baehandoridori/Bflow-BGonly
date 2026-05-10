@@ -60,6 +60,8 @@ interface SceneDetailModalProps {
    */
   initialTab?: 'detail' | 'revisions' | 'files' | 'history';
   focusRevisionId?: string;
+  /** v1.24.0: 댓글 점프용 — 모달 진입 시 자동 스크롤 + 펄스. */
+  focusCommentId?: string;
 }
 
 // ─── 속성 행 컴포넌트 ──────────────────────────────
@@ -417,6 +419,7 @@ export function SceneDetailModal({
   currentSceneIndex = 0,
   initialTab,
   focusRevisionId,
+  focusCommentId,
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
@@ -1084,6 +1087,7 @@ export function SceneDetailModal({
                   : undefined
               }
               onCountChange={setCommentCount}
+              focusCommentId={focusCommentId}
             />
           </motion.div>
         </motion.div>

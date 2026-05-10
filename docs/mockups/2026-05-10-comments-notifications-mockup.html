@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>B flow — 댓글/알림 디자인 시안 (2026-05-10)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          bg: '#0F1117',
+          card: '#1A1D27',
+          'card-2': '#20232E',
+          border: '#2D3041',
+          'border-2': '#3A3D4D',
+          text: '#E8E8EE',
+          muted: '#8B8DA3',
+          accent: '#6C5CE7',
+          'accent-soft': 'rgba(108,92,231,0.18)',
+          lo: '#74B9FF',
+          done: '#A29BFE',
+          review: '#FDCB6E',
+          png: '#00B894',
+          danger: '#FF6B6B',
+        },
+        gridTemplateColumns: {
+          '24': 'repeat(24, minmax(0, 1fr))',
+        },
+        gridColumn: {
+          'span-18': 'span 18 / span 18',
+          'span-24': 'span 24 / span 24',
+        },
+      },
+    },
+  };
+</script>
+<style>
+  :root {
+    --bg: #0F1117;
+    --card: #1A1D27;
+    --border: #2D3041;
+    --text: #E8E8EE;
+    --muted: #8B8DA3;
+    --accent: #6C5CE7;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+
+  /* ── 펄스 — 댓글로 점프했을 때 ── */
+  @keyframes targetPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(108,92,231,0.55), inset 0 0 0 1px rgba(108,92,231,0.55); }
+    60%  { box-shadow: 0 0 0 10px rgba(108,92,231,0), inset 0 0 0 1px rgba(108,92,231,0.20); }
+    100% { box-shadow: 0 0 0 0 rgba(108,92,231,0), inset 0 0 0 1px rgba(108,92,231,0.0); }
+  }
+  .anim-target-pulse { animation: targetPulse 1.6s ease-out 1; }
+
+  /* ── 알림 벨 글로우 ── */
+  @keyframes bellGlow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(108,92,231,0.4), 0 0 14px rgba(108,92,231,0.25); }
+    50%      { box-shadow: 0 0 0 6px rgba(108,92,231,0), 0 0 22px rgba(108,92,231,0.5); }
+  }
+  .anim-bell-glow { animation: bellGlow 2.0s ease-out infinite; }
+
+  /* ── 멘션 알림 — 더 강한 펄스 ── */
+  @keyframes mentionPing {
+    0%   { box-shadow: 0 0 0 0 rgba(108,92,231,0.7); }
+    70%  { box-shadow: 0 0 0 12px rgba(108,92,231,0); }
+    100% { box-shadow: 0 0 0 0 rgba(108,92,231,0); }
+  }
+  .anim-mention-ping { animation: mentionPing 1.6s ease-out infinite; }
+
+  /* ── 카운트 배지 그라데이션 ── */
+  .badge-grad {
+    background: linear-gradient(135deg, #6C5CE7 0%, #8678FF 100%);
+    box-shadow: 0 0 0 2px rgba(108,92,231,0.3), 0 4px 10px rgba(108,92,231,0.45);
+  }
+  .badge-grad-strong {
+    background: linear-gradient(135deg, #FF6B6B 0%, #FF8E8E 50%, #6C5CE7 100%);
+    box-shadow: 0 0 0 2px rgba(255,107,107,0.3), 0 4px 12px rgba(255,107,107,0.45);
+  }
+
+  /* ── 리비전 댓글 카드 ── */
+  .reply-line {
+    position: absolute;
+    left: 18px;
+    top: 36px;
+    bottom: 8px;
+    width: 2px;
+    background: linear-gradient(to bottom, rgba(108,92,231,0.5), rgba(108,92,231,0.05));
+    border-radius: 999px;
+  }
+
+  /* ── 멘션 배지 ── */
+  .mention-badge {
+    background: linear-gradient(135deg, rgba(108,92,231,0.25), rgba(108,92,231,0.12));
+    border: 1px solid rgba(108,92,231,0.45);
+  }
+
+  /* ── 슬라이드 인 ── */
+  @keyframes slideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  .anim-slide-in { animation: slideIn 220ms ease-out; }
+
+  /* ── 카드 스파클 ── */
+  @keyframes shimmerOnce {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .shimmer-once {
+    background-image: linear-gradient(110deg, transparent 30%, rgba(108,92,231,0.15) 50%, transparent 70%);
+    background-size: 200% 100%;
+    animation: shimmerOnce 1.8s ease-out 1;
+  }
+
+  /* prefers-reduced-motion */
+  @media (prefers-reduced-motion: reduce) {
+    .anim-target-pulse, .anim-bell-glow, .anim-mention-ping, .anim-slide-in, .shimmer-once {
+      animation: none !important;
+    }
+  }
+
+  /* 스크롤바 */
+  .scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 999px; }
+  .scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+</style>
+</head>
+<body class="min-h-screen text-[14px]">
+
+<!-- ─────────────── 상단 헤더 ─────────────── -->
+<header class="sticky top-0 z-40 backdrop-blur-md bg-bg/80 border-b border-border">
+  <div class="max-w-[1400px] mx-auto flex items-center justify-between px-6 h-14">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center"
+           style="background: linear-gradient(135deg,#6C5CE7,#A29BFE)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12h8M8 8h6M8 16h4"/></svg>
+      </div>
+      <div>
+        <div class="font-semibold tracking-tight">B flow — 댓글/알림 디자인 시안</div>
+        <div class="text-[11px] text-muted">2026-05-10 · Studio JBBJ · 인터랙티브 시안</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 text-xs text-muted">
+      <span>다크 테마</span>
+      <span class="w-1 h-1 rounded-full bg-muted/50"></span>
+      <span>Pretendard</span>
+      <span class="w-1 h-1 rounded-full bg-muted/50"></span>
+      <span>1400px 기준</span>
+    </div>
+  </div>
+  <!-- 탭 -->
+  <nav class="max-w-[1400px] mx-auto px-6 flex items-center gap-1 -mb-px">
+    <button data-tab="replies"       class="tab-btn px-4 py-2.5 text-[13px] border-b-2 transition-colors">1. 대댓글 A/B/C</button>
+    <button data-tab="grouping"      class="tab-btn px-4 py-2.5 text-[13px] border-b-2 transition-colors">2. 댓글 묶음</button>
+    <button data-tab="notifications" class="tab-btn px-4 py-2.5 text-[13px] border-b-2 transition-colors">3. 알림 강조</button>
+    <button data-tab="revisions"     class="tab-btn px-4 py-2.5 text-[13px] border-b-2 transition-colors">4. 리비전 표기</button>
+    <button data-tab="input"         class="tab-btn px-4 py-2.5 text-[13px] border-b-2 transition-colors">5. 댓글 입력</button>
+    <button data-tab="widget"        class="tab-btn px-4 py-2.5 text-[13px] border-b-2 transition-colors">6. 위젯 레이아웃</button>
+  </nav>
+</header>
+
+<main class="max-w-[1400px] mx-auto px-6 py-8">
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     탭 1 — 대댓글 A/B/C
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section data-pane="replies" class="space-y-6">
+  <header class="flex items-end justify-between">
+    <div>
+      <h1 class="text-xl font-semibold">대댓글 1단계 — 시각 표현 시안 비교</h1>
+      <p class="text-muted text-[13px] mt-1">동일한 데이터를 세 가지 표현으로 비교. 각 시안 내에서 "답글 N개" 또는 작성자 호버 인터랙션 가능.</p>
+    </div>
+    <div class="flex items-center gap-1 p-1 bg-card border border-border rounded-lg">
+      <button data-variant="A" class="variant-btn px-3 py-1.5 text-[12px] rounded-md transition-colors">A. 인라인 들여쓰기</button>
+      <button data-variant="B" class="variant-btn px-3 py-1.5 text-[12px] rounded-md transition-colors">B. 슬랙 펼침</button>
+      <button data-variant="C" class="variant-btn px-3 py-1.5 text-[12px] rounded-md transition-colors">C. 인용 박스</button>
+    </div>
+  </header>
+
+  <!-- 모달 시뮬레이션 -->
+  <div class="rounded-xl border border-border bg-card overflow-hidden shadow-2xl">
+    <!-- 모달 헤더 -->
+    <div class="px-5 py-3 border-b border-border flex items-center justify-between bg-gradient-to-b from-card to-bg/40">
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] px-2 py-0.5 rounded bg-accent-soft text-accent font-medium">EP01</span>
+        <span class="text-[15px] font-semibold">A컷 #03 — 옥상에서 바라본 도시</span>
+        <span class="text-[12px] text-muted">BG · 한솔 · 진행 중</span>
+      </div>
+      <button class="w-7 h-7 rounded hover:bg-border/50 flex items-center justify-center text-muted hover:text-text transition-colors" aria-label="닫기">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="grid grid-cols-[1fr_360px]">
+      <!-- 좌: 모달 본문 (간소) -->
+      <div class="p-5 border-r border-border min-h-[480px] bg-[radial-gradient(ellipse_at_top,rgba(108,92,231,0.06),transparent_60%)]">
+        <div class="rounded-lg border border-border bg-bg/40 aspect-[16/10] flex items-center justify-center text-muted text-xs">
+          (씬 이미지 영역)
+        </div>
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <div class="rounded-lg border border-border p-3">
+            <div class="text-[11px] text-muted mb-1">단계</div>
+            <div class="flex gap-1.5">
+              <span class="px-2 py-0.5 rounded text-[11px]" style="background:rgba(116,185,255,0.18);color:#74B9FF">LO</span>
+              <span class="px-2 py-0.5 rounded text-[11px]" style="background:rgba(162,155,254,0.18);color:#A29BFE">완료</span>
+              <span class="px-2 py-0.5 rounded text-[11px] bg-border/40 text-muted">검수</span>
+              <span class="px-2 py-0.5 rounded text-[11px] bg-border/40 text-muted">PNG</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-border p-3">
+            <div class="text-[11px] text-muted mb-1">담당자</div>
+            <div class="text-[13px]">한솔, 다은</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 우: 댓글 패널 (시안 영역) -->
+      <aside class="bg-bg/40 flex flex-col min-h-[480px]">
+        <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span class="font-medium text-[13px]">댓글</span>
+            <span class="text-[11px] text-muted">5</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <button class="px-2 py-1 text-[11px] rounded text-muted hover:bg-border/40 hover:text-text">re만</button>
+            <button class="px-2 py-1 text-[11px] rounded text-muted hover:bg-border/40 hover:text-text">활동 감추기</button>
+          </div>
+        </div>
+
+        <div class="flex-1 overflow-y-auto scrollbar p-3 space-y-3" id="comment-list">
+          <!-- 동적 렌더링 -->
+        </div>
+
+        <!-- 입력 -->
+        <div class="border-t border-border p-3">
+          <div class="rounded-lg border border-border bg-card-2 p-2.5 focus-within:border-accent transition-colors">
+            <textarea class="w-full bg-transparent outline-none resize-none text-[13px] placeholder-muted" rows="2" placeholder="댓글을 입력하세요. @로 멘션"></textarea>
+            <div class="flex items-center justify-between mt-1">
+              <div class="flex items-center gap-1 text-muted">
+                <button class="w-7 h-7 rounded hover:bg-border/50 flex items-center justify-center" title="이미지">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                </button>
+                <button class="w-7 h-7 rounded hover:bg-border/50 flex items-center justify-center" title="멘션">
+                  <span class="text-[12px] font-medium">@</span>
+                </button>
+              </div>
+              <button class="px-3 py-1 rounded text-[12px] bg-accent text-white hover:bg-accent/85 transition-colors">전송</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- 시안별 트레이드오프 -->
+  <div class="grid grid-cols-3 gap-4">
+    <div class="variant-card rounded-lg border border-border bg-card p-4" data-variant-card="A">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] px-2 py-0.5 rounded bg-accent-soft text-accent font-semibold">A</span>
+        <span class="text-[11px] text-muted">GitHub · Notion 스타일</span>
+      </div>
+      <h3 class="font-medium mb-1">인라인 들여쓰기 + 좌측 라인</h3>
+      <ul class="text-[12px] text-muted space-y-1 list-disc list-inside">
+        <li>👍 한 흐름에서 맥락 즉시 파악</li>
+        <li>👍 모든 답글이 항상 보임</li>
+        <li>👎 답글 많으면 세로 부피 증가</li>
+        <li>👎 좁은 패널에서 텍스트 폭 좁아짐</li>
+      </ul>
+    </div>
+    <div class="variant-card rounded-lg border border-border bg-card p-4" data-variant-card="B">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] px-2 py-0.5 rounded bg-accent-soft text-accent font-semibold">B</span>
+        <span class="text-[11px] text-muted">Slack · Linear 스타일</span>
+      </div>
+      <h3 class="font-medium mb-1">슬랙 스타일 펼침 (답글 N개)</h3>
+      <ul class="text-[12px] text-muted space-y-1 list-disc list-inside">
+        <li>👍 메인 흐름 가장 깔끔</li>
+        <li>👍 답글 많은 댓글 처리에 강함</li>
+        <li>👎 답글 보려면 클릭 한 번 더</li>
+        <li>👎 인라인보다 인지 부담</li>
+      </ul>
+    </div>
+    <div class="variant-card rounded-lg border border-border bg-card p-4" data-variant-card="C">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] px-2 py-0.5 rounded bg-accent-soft text-accent font-semibold">C</span>
+        <span class="text-[11px] text-muted">Twitter · Linear 스타일</span>
+      </div>
+      <h3 class="font-medium mb-1">인용 박스 (Quoted reply)</h3>
+      <ul class="text-[12px] text-muted space-y-1 list-disc list-inside">
+        <li>👍 들여쓰기 없어 폭 절약</li>
+        <li>👍 답글이 메인 흐름에 자연스럽게</li>
+        <li>👎 누구의 답글인지 약간 덜 명확</li>
+        <li>👎 깊은 스레드는 부적합 (1단계 한정 OK)</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     탭 2 — 댓글 묶음
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section data-pane="grouping" class="hidden space-y-6">
+  <header>
+    <h1 class="text-xl font-semibold">댓글 묶음 — Slack 스타일</h1>
+    <p class="text-muted text-[13px] mt-1">같은 사용자가 연속해서 쓰면 이름·아바타·시간 생략하고 텍스트만 묶음. 다른 사용자가 쓰거나 시스템 이벤트가 끼어들면 끊김.</p>
+  </header>
+
+  <div class="grid grid-cols-2 gap-6">
+    <!-- 좌: 묶기 OFF (현재) -->
+    <div class="rounded-xl border border-border bg-card overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <span class="text-[12px] text-muted">현재 (묶기 없음)</span>
+        <span class="text-[11px] text-muted">매 댓글마다 이름·시간 반복</span>
+      </div>
+      <div class="p-4 space-y-3 min-h-[420px]">
+        <!-- 한솔 1 -->
+        <div class="flex gap-2.5">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">한</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">한솔</span><span class="text-[10.5px] text-muted">14:02</span></div>
+            <div class="text-[13px] mt-0.5">옥상 씬 LO 일단 올렸어요. 시선 방향 확인 부탁드려요</div>
+          </div>
+        </div>
+        <!-- 한솔 2 -->
+        <div class="flex gap-2.5">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">한</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">한솔</span><span class="text-[10.5px] text-muted">14:03</span></div>
+            <div class="text-[13px] mt-0.5">+ 캐릭터 동선은 우→좌 입니다</div>
+          </div>
+        </div>
+        <!-- 한솔 3 -->
+        <div class="flex gap-2.5">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">한</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">한솔</span><span class="text-[10.5px] text-muted">14:03</span></div>
+            <div class="text-[13px] mt-0.5">레퍼런스도 첨부 드렸어요</div>
+          </div>
+        </div>
+        <!-- 다은 -->
+        <div class="flex gap-2.5">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">다</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">다은</span><span class="text-[10.5px] text-muted">14:11</span></div>
+            <div class="text-[13px] mt-0.5">확인했습니다. 뒤쪽 빌딩 라인 한 톤 어둡게 부탁드려요</div>
+          </div>
+        </div>
+        <!-- 한솔 4 -->
+        <div class="flex gap-2.5">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">한</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">한솔</span><span class="text-[10.5px] text-muted">14:14</span></div>
+            <div class="text-[13px] mt-0.5">반영해서 다시 올릴게요</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 우: 묶기 ON (제안) -->
+    <div class="rounded-xl border border-accent/40 bg-card overflow-hidden ring-1 ring-accent/20">
+      <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <span class="text-[12px] text-accent font-medium">제안 (Slack 스타일 묶기)</span>
+        <span class="text-[11px] text-muted">연속이면 무제한 · 다른 사용자/시스템 끼어들면 끊김</span>
+      </div>
+      <div class="p-4 space-y-1 min-h-[420px]">
+        <!-- 한솔 묶음 -->
+        <div class="group relative rounded-md hover:bg-border/15 transition-colors">
+          <div class="flex gap-2.5 px-1.5 py-1 rounded-md">
+            <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">한</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">한솔</span><span class="text-[10.5px] text-muted">14:02</span></div>
+              <div class="text-[13px] mt-0.5">옥상 씬 LO 일단 올렸어요. 시선 방향 확인 부탁드려요</div>
+            </div>
+          </div>
+          <div class="grouped-line">
+            <div class="ml-[44px] pl-2.5 py-0.5 hover:bg-border/15 rounded-md group/sub relative">
+              <span class="absolute left-[-32px] top-1/2 -translate-y-1/2 text-[10px] text-muted opacity-0 group-hover/sub:opacity-100 transition-opacity">14:03</span>
+              <div class="text-[13px]">+ 캐릭터 동선은 우→좌 입니다</div>
+            </div>
+            <div class="ml-[44px] pl-2.5 py-0.5 hover:bg-border/15 rounded-md group/sub relative">
+              <span class="absolute left-[-32px] top-1/2 -translate-y-1/2 text-[10px] text-muted opacity-0 group-hover/sub:opacity-100 transition-opacity">14:03</span>
+              <div class="text-[13px]">레퍼런스도 첨부 드렸어요</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 다은 (다른 사용자 → 끊김) -->
+        <div class="group relative rounded-md hover:bg-border/15 transition-colors mt-3">
+          <div class="flex gap-2.5 px-1.5 py-1 rounded-md">
+            <div class="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">다</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">다은</span><span class="text-[10.5px] text-muted">14:11</span></div>
+              <div class="text-[13px] mt-0.5">확인했습니다. 뒤쪽 빌딩 라인 한 톤 어둡게 부탁드려요</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 한솔 (다시 시작 → 새 묶음 헤더) -->
+        <div class="group relative rounded-md hover:bg-border/15 transition-colors mt-3">
+          <div class="flex gap-2.5 px-1.5 py-1 rounded-md">
+            <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">한</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">한솔</span><span class="text-[10.5px] text-muted">14:14</span></div>
+              <div class="text-[13px] mt-0.5">반영해서 다시 올릴게요</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 시스템 이벤트 끼어듦 케이스 -->
+  <div class="rounded-xl border border-border bg-card overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-border">
+      <span class="text-[12px] font-medium">엣지 케이스 — 시스템 이벤트가 끼어든 경우 묶음 끊김</span>
+    </div>
+    <div class="p-4 space-y-1 max-w-2xl">
+      <!-- 한솔 -->
+      <div class="flex gap-2.5 px-1.5 py-1">
+        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">한</div>
+        <div class="flex-1">
+          <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">한솔</span><span class="text-[10.5px] text-muted">14:02</span></div>
+          <div class="text-[13px] mt-0.5">LO 올렸습니다</div>
+        </div>
+      </div>
+      <!-- 시스템 이벤트 -->
+      <div class="ml-[44px] my-1.5 flex items-center gap-2 text-[11.5px] text-muted">
+        <div class="h-px flex-1 bg-border/50"></div>
+        <span class="px-2 py-0.5 rounded-full border border-border/60 bg-bg/40">
+          <svg class="inline -mt-0.5" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
+          한솔이 BG 단계를 LO → 완료로 변경
+        </span>
+        <span class="text-muted/70">14:08</span>
+        <div class="h-px flex-1 bg-border/50"></div>
+      </div>
+      <!-- 한솔 (재시작) -->
+      <div class="flex gap-2.5 px-1.5 py-1">
+        <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">한</div>
+        <div class="flex-1">
+          <div class="flex items-baseline gap-2"><span class="font-medium text-[12.5px]">한솔</span><span class="text-[10.5px] text-muted">14:09</span></div>
+          <div class="text-[13px] mt-0.5">완료 처리했어요. 검수 부탁드립니다</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 결정 기준 -->
+  <div class="rounded-lg border border-border bg-card p-4 text-[12.5px] text-muted">
+    <div class="font-medium text-text mb-2">묶음 규칙 (확정)</div>
+    <ul class="space-y-1 list-disc list-inside">
+      <li>같은 <code class="bg-border/40 px-1 rounded">userId</code> 연속이면 무제한 묶음 (시간 무관)</li>
+      <li>다른 사용자가 쓰면 끊김 (필수)</li>
+      <li>시스템 활동 이벤트(단계 변경, 메모 수정 등)가 사이에 있으면 끊김 (선택 — 추천)</li>
+      <li>묶인 답글은 기본 시간 숨김, 호버 시 좌측에 시간 표시</li>
+      <li>이름·아바타·날짜 헤더는 첫 댓글에만 노출</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     탭 3 — 알림 강조
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section data-pane="notifications" class="hidden space-y-6">
+  <header>
+    <h1 class="text-xl font-semibold">안 본 알림 — 시각적 강조 (2단계)</h1>
+    <p class="text-muted text-[13px] mt-1">헤더 벨에 그라데이션 + 부드러운 펄스. 멘션은 액센트 색 좌측 바 + @ 배지, 자동 알림은 회색 좌측 바 + 텍스트만으로 시각 차별화.</p>
+  </header>
+
+  <!-- 헤더 벨 시뮬레이션 -->
+  <div class="rounded-xl border border-border bg-card overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+      <span class="text-[12px] font-medium">헤더 벨 상태별 시안</span>
+      <div class="flex items-center gap-1 text-[11px]">
+        <span class="text-muted mr-2">상태 전환:</span>
+        <button data-bell="0" class="bell-state-btn px-2 py-1 rounded border border-border hover:bg-border/40">0</button>
+        <button data-bell="1" class="bell-state-btn px-2 py-1 rounded border border-border hover:bg-border/40">1</button>
+        <button data-bell="5" class="bell-state-btn px-2 py-1 rounded border border-border hover:bg-border/40">5</button>
+        <button data-bell="mention" class="bell-state-btn px-2 py-1 rounded border border-border hover:bg-border/40">멘션 포함</button>
+      </div>
+    </div>
+
+    <div class="p-8 grid grid-cols-4 gap-4">
+      <!-- 0 -->
+      <div class="rounded-lg border border-border bg-bg/40 p-6 text-center">
+        <div class="inline-flex items-center justify-center w-10 h-10 rounded-lg hover:bg-border/40 transition-colors text-muted mb-3">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        </div>
+        <div class="text-[11px] text-muted">안 읽음 0</div>
+      </div>
+      <!-- 1 -->
+      <div class="rounded-lg border border-border bg-bg/40 p-6 text-center">
+        <div class="relative inline-flex items-center justify-center w-10 h-10 rounded-lg hover:bg-border/40 transition-colors anim-bell-glow">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E8E8EE" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          <span class="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full text-[10px] flex items-center justify-center text-white font-semibold badge-grad">1</span>
+        </div>
+        <div class="text-[11px] text-muted mt-3">자동 알림 1개</div>
+      </div>
+      <!-- 5 -->
+      <div class="rounded-lg border border-border bg-bg/40 p-6 text-center">
+        <div class="relative inline-flex items-center justify-center w-10 h-10 rounded-lg hover:bg-border/40 transition-colors anim-bell-glow">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E8E8EE" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          <span class="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full text-[10px] flex items-center justify-center text-white font-semibold badge-grad">5</span>
+        </div>
+        <div class="text-[11px] text-muted mt-3">자동 알림 5개</div>
+      </div>
+      <!-- 멘션 -->
+      <div class="rounded-lg border border-accent/40 bg-accent/[0.05] p-6 text-center ring-1 ring-accent/15">
+        <div class="relative inline-flex items-center justify-center w-10 h-10 rounded-lg hover:bg-border/40 transition-colors anim-mention-ping">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A29BFE" stroke-width="2.4"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          <span class="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] flex items-center justify-center text-white font-bold badge-grad-strong">3</span>
+        </div>
+        <div class="text-[11px] text-accent mt-3 font-medium">멘션 포함</div>
+      </div>
+    </div>
+
+    <div class="px-4 py-3 border-t border-border bg-bg/40 text-[12px] text-muted">
+      <span class="text-text font-medium">규칙 — </span>
+      자동 알림만 있을 때는 차분한 글로우 + 보라 배지 / 멘션이 1개라도 포함되면 강한 펄스 + 그라데이션(빨강→보라) 배지로 즉시 인지 가능.
+    </div>
+  </div>
+
+  <!-- 알림 패널 시뮬레이션 -->
+  <div class="grid grid-cols-[1fr_360px] gap-6">
+    <div class="rounded-xl border border-border bg-card p-5">
+      <h3 class="font-medium mb-3">알림 항목 — 상태별 시각차</h3>
+      <div class="space-y-3 text-[12.5px] text-muted">
+        <div>
+          <div class="font-medium text-text mb-1">멘션 (Mentioned)</div>
+          <ul class="list-disc list-inside space-y-0.5">
+            <li>좌측 바: <span class="text-accent font-medium">액센트 색 (rgb(--accent))</span></li>
+            <li>제목 행 우측에 <code class="bg-border/40 px-1 rounded">@</code> 배지 (배경: 액센트 소프트)</li>
+            <li>본문은 굵게 + 풀 컬러 텍스트</li>
+            <li>전체 카드 배경 액센트 0.10 alpha</li>
+          </ul>
+        </div>
+        <div>
+          <div class="font-medium text-text mb-1">자동 알림 (씬 작업자)</div>
+          <ul class="list-disc list-inside space-y-0.5">
+            <li>좌측 바: <span class="text-muted">회색 (border-2)</span></li>
+            <li>제목/본문은 일반 두께</li>
+            <li>전체 카드 배경 accent 0.04 alpha (살짝 톤만)</li>
+            <li>아이콘 색은 type 색 (댓글: accent, 변경: 파랑)</li>
+          </ul>
+        </div>
+        <div>
+          <div class="font-medium text-text mb-1">읽음 (Read)</div>
+          <ul class="list-disc list-inside space-y-0.5">
+            <li>좌측 바: 투명</li>
+            <li>제목/본문 70% opacity</li>
+            <li>호버 시만 살짝 카드 배경 변화</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- 알림 패널 -->
+    <div class="rounded-xl border border-border bg-card overflow-hidden">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between bg-bg/40">
+        <div class="flex items-center gap-2">
+          <span class="font-medium text-[13px]">알림</span>
+          <span class="text-[11px] text-accent font-medium">5 새 알림</span>
+        </div>
+        <button class="text-[11px] text-muted hover:text-text">모두 읽음</button>
+      </div>
+      <div class="p-2 space-y-1 max-h-[420px] overflow-y-auto scrollbar">
+        <!-- 멘션 -->
+        <div class="relative rounded-lg p-3 bg-accent/[0.10] hover:bg-accent/[0.15] cursor-pointer transition-colors flex gap-2.5 group">
+          <div class="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-accent"></div>
+          <svg class="w-4 h-4 mt-0.5 text-accent flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="text-[12.5px] font-semibold truncate">다은이 회원님을 멘션했어요</span>
+              <span class="text-[9px] mention-badge px-1.5 rounded text-accent font-bold">@</span>
+            </div>
+            <p class="text-[11.5px] mt-0.5 truncate">@한솔 옥상 씬 LO 한 번만 더 봐주세요</p>
+            <span class="text-[10px] text-muted mt-1 block">방금 전</span>
+          </div>
+        </div>
+
+        <!-- 자동 (씬 댓글) -->
+        <div class="relative rounded-lg p-3 hover:bg-border/15 cursor-pointer transition-colors flex gap-2.5 bg-accent/[0.04]">
+          <div class="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-border-2"></div>
+          <svg class="w-4 h-4 mt-0.5 text-accent/80 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <div class="flex-1 min-w-0">
+            <div class="text-[12.5px] truncate">EP01 A컷 #03에 새 댓글</div>
+            <p class="text-[11.5px] text-muted mt-0.5 truncate">영준: 빌딩 실루엣 더 진하게…</p>
+            <span class="text-[10px] text-muted mt-1 block">3분 전</span>
+          </div>
+        </div>
+
+        <!-- 자동 (리비전) -->
+        <div class="relative rounded-lg p-3 hover:bg-border/15 cursor-pointer transition-colors flex gap-2.5 bg-accent/[0.04]">
+          <div class="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-border-2"></div>
+          <svg class="w-4 h-4 mt-0.5 text-accent/80 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M3.86 16.78a2 2 0 0 0 1.74 3h12.8a2 2 0 0 0 1.74-3L13.74 4a2 2 0 0 0-3.48 0z"/></svg>
+          <div class="flex-1 min-w-0">
+            <div class="text-[12.5px] truncate">리비전 #2 등록 — A컷 #03</div>
+            <p class="text-[11.5px] text-muted mt-0.5 truncate">캐릭터 시선 방향 수정 요청</p>
+            <span class="text-[10px] text-muted mt-1 block">12분 전</span>
+          </div>
+        </div>
+
+        <!-- 멘션 (안 읽음) -->
+        <div class="relative rounded-lg p-3 bg-accent/[0.10] hover:bg-accent/[0.15] cursor-pointer transition-colors flex gap-2.5">
+          <div class="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-accent"></div>
+          <svg class="w-4 h-4 mt-0.5 text-accent flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="text-[12.5px] font-semibold truncate">영준이 답글에 회원님을 멘션</span>
+              <span class="text-[9px] mention-badge px-1.5 rounded text-accent font-bold">@</span>
+            </div>
+            <p class="text-[11.5px] mt-0.5 truncate">@한솔 한솔님 의견 반영했어요</p>
+            <span class="text-[10px] text-muted mt-1 block">25분 전</span>
+          </div>
+        </div>
+
+        <!-- 읽음 -->
+        <div class="relative rounded-lg p-3 hover:bg-border/15 cursor-pointer transition-colors flex gap-2.5 opacity-60">
+          <svg class="w-4 h-4 mt-0.5 text-muted flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <div class="flex-1 min-w-0">
+            <div class="text-[12.5px] truncate text-muted">EP01 B컷 #02 — 단계 변경</div>
+            <p class="text-[11.5px] text-muted mt-0.5 truncate">한솔: LO → 완료</p>
+            <span class="text-[10px] text-muted mt-1 block">2시간 전</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     탭 4 — 리비전 표기
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section data-pane="revisions" class="hidden space-y-6">
+  <header>
+    <h1 class="text-xl font-semibold">활동 로그 — 리비전 차수 + 메모 표기</h1>
+    <p class="text-muted text-[13px] mt-1">상세 모달의 활동 줄(인라인 이벤트), 리비전 알림, 최근 작업 위젯 모두 같은 패턴으로 식별 가능하게.</p>
+  </header>
+
+  <div class="grid grid-cols-2 gap-6">
+    <!-- 좌: 현재 (모호) -->
+    <div class="rounded-xl border border-border bg-card overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-border">
+        <span class="text-[12px] text-muted">현재 — 어떤 리비전인지 모호</span>
+      </div>
+      <div class="p-4 space-y-2 text-[12.5px]">
+        <div class="flex items-center gap-2 text-muted">
+          <span class="w-1 h-1 rounded-full bg-muted/50"></span>
+          <span>한솔이 리비전을 등록했습니다</span>
+          <span class="ml-auto text-[10.5px]">14:08</span>
+        </div>
+        <div class="flex items-center gap-2 text-muted">
+          <span class="w-1 h-1 rounded-full bg-muted/50"></span>
+          <span>다은이 리비전 진행 중으로 변경</span>
+          <span class="ml-auto text-[10.5px]">15:22</span>
+        </div>
+        <div class="flex items-center gap-2 text-muted">
+          <span class="w-1 h-1 rounded-full bg-muted/50"></span>
+          <span>한솔이 리비전을 완료했습니다</span>
+          <span class="ml-auto text-[10.5px]">17:40</span>
+        </div>
+        <div class="flex items-center gap-2 text-muted">
+          <span class="w-1 h-1 rounded-full bg-muted/50"></span>
+          <span>다은이 리비전을 등록했습니다</span>
+          <span class="ml-auto text-[10.5px]">18:02</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 우: 제안 -->
+    <div class="rounded-xl border border-accent/40 bg-card overflow-hidden ring-1 ring-accent/20">
+      <div class="px-4 py-2.5 border-b border-border">
+        <span class="text-[12px] text-accent font-medium">제안 — 차수 + 메모 앞 30자</span>
+      </div>
+      <div class="p-4 space-y-2 text-[12.5px]">
+        <button class="group w-full flex items-center gap-2 text-left rounded-md hover:bg-border/15 px-1.5 py-1 transition-colors" title="이 리비전으로 점프">
+          <span class="px-1.5 py-0.5 text-[10px] rounded bg-accent-soft text-accent font-mono font-bold">re#1</span>
+          <span class="text-muted">한솔이 등록 ·</span>
+          <span class="text-text font-medium truncate flex-1">캐릭터 시선 방향 수정 요청</span>
+          <span class="text-[10.5px] text-muted">14:08</span>
+          <svg class="w-3 h-3 text-muted opacity-0 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M7 7h10v10"/></svg>
+        </button>
+        <button class="group w-full flex items-center gap-2 text-left rounded-md hover:bg-border/15 px-1.5 py-1 transition-colors">
+          <span class="px-1.5 py-0.5 text-[10px] rounded bg-accent-soft text-accent font-mono font-bold">re#1</span>
+          <span class="text-muted">다은이 진행 중 ·</span>
+          <span class="text-text font-medium truncate flex-1">캐릭터 시선 방향 수정 요청</span>
+          <span class="text-[10.5px] text-muted">15:22</span>
+          <svg class="w-3 h-3 text-muted opacity-0 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M7 7h10v10"/></svg>
+        </button>
+        <button class="group w-full flex items-center gap-2 text-left rounded-md hover:bg-border/15 px-1.5 py-1 transition-colors">
+          <span class="px-1.5 py-0.5 text-[10px] rounded font-mono font-bold" style="background:rgba(0,184,148,0.18);color:#00B894">re#1 ✓</span>
+          <span class="text-muted">한솔이 완료 ·</span>
+          <span class="text-text font-medium truncate flex-1">캐릭터 시선 방향 수정 요청</span>
+          <span class="text-[10.5px] text-muted">17:40</span>
+          <svg class="w-3 h-3 text-muted opacity-0 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M7 7h10v10"/></svg>
+        </button>
+        <button class="group w-full flex items-center gap-2 text-left rounded-md hover:bg-border/15 px-1.5 py-1 transition-colors">
+          <span class="px-1.5 py-0.5 text-[10px] rounded bg-accent-soft text-accent font-mono font-bold">re#2</span>
+          <span class="text-muted">다은이 등록 ·</span>
+          <span class="text-text font-medium truncate flex-1">뒤쪽 빌딩 톤 어둡게…</span>
+          <span class="text-[10.5px] text-muted">18:02</span>
+          <svg class="w-3 h-3 text-muted opacity-0 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M7 7h10v10"/></svg>
+        </button>
+        <div class="text-[11px] text-muted pt-2 border-t border-border/50 mt-2">
+          호버 시 우측에 점프 아이콘 → 클릭하면 리비전 탭으로 전환 + 카드 펄스
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 다른 위치에서의 활용 -->
+  <div class="grid grid-cols-3 gap-4">
+    <div class="rounded-lg border border-border bg-card p-4">
+      <h3 class="font-medium mb-2 text-[13px]">최근 작업 위젯</h3>
+      <div class="space-y-2">
+        <div class="rounded-md p-2 hover:bg-border/15 cursor-pointer transition-colors">
+          <div class="text-[11px] text-muted mb-0.5">EP01 A컷 #03 · BG</div>
+          <div class="flex items-center gap-1.5 text-[12.5px]">
+            <span class="px-1 py-px text-[9px] rounded bg-accent-soft text-accent font-mono font-bold">re#2</span>
+            <span class="font-medium truncate">뒤쪽 빌딩 톤 어둡게…</span>
+          </div>
+          <div class="text-[10.5px] text-muted mt-0.5">다은 · 5분 전</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-border bg-card p-4">
+      <h3 class="font-medium mb-2 text-[13px]">알림 패널</h3>
+      <div class="rounded-md p-3 bg-accent/[0.04] flex gap-2 cursor-pointer hover:bg-accent/[0.10]">
+        <svg class="w-4 h-4 mt-0.5 text-accent/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M3.86 16.78a2 2 0 0 0 1.74 3h12.8a2 2 0 0 0 1.74-3L13.74 4a2 2 0 0 0-3.48 0z"/></svg>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1 text-[12px]">
+            <span class="font-medium truncate">리비전 #2 등록</span>
+          </div>
+          <div class="text-[11px] text-muted truncate">A컷 #03 · 뒤쪽 빌딩 톤 어둡게…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-border bg-card p-4">
+      <h3 class="font-medium mb-2 text-[13px]">리비전 패널 카드</h3>
+      <div class="rounded-md border border-accent/40 bg-accent/[0.06] p-3">
+        <div class="flex items-center gap-1.5 mb-1">
+          <span class="px-1.5 py-0.5 text-[10px] rounded bg-accent-soft text-accent font-mono font-bold">re#2</span>
+          <span class="text-[11px] text-muted">진행 중</span>
+        </div>
+        <div class="text-[12.5px] font-medium truncate">뒤쪽 빌딩 라인 한 톤 어둡게 부탁드려요…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-border bg-card p-4 text-[12.5px] text-muted">
+    <div class="font-medium text-text mb-2">표기 규칙 (확정)</div>
+    <ul class="space-y-1 list-disc list-inside">
+      <li><code class="bg-border/40 px-1 rounded">re#N</code> 차수 배지 + 리비전 메모 앞 30자(말줄임표 포함)</li>
+      <li>완료된 리비전은 ✓ 마크 + 그린 색 (BG단계 PNG 색과 일치)</li>
+      <li>호버 시 점프 아이콘 노출, 클릭 시 해당 리비전 카드로 펄스 강조 점프</li>
+      <li>활동 로그·최근 작업 위젯·알림·리비전 패널 모두 동일 패턴 (시각 일관성)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     탭 5 — 댓글 입력
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section data-pane="input" class="hidden space-y-6">
+  <header>
+    <h1 class="text-xl font-semibold">댓글 입력 패널 — 일반/대댓글 모드</h1>
+    <p class="text-muted text-[13px] mt-1">대댓글 입력 시 입력창 상단에 답글 컨텍스트(원댓글 작성자·요약) 노출, X 버튼으로 취소 가능. 자동으로 원댓글 작성자 멘션 프리셋.</p>
+  </header>
+
+  <div class="grid grid-cols-2 gap-6">
+    <!-- 일반 -->
+    <div class="rounded-xl border border-border bg-card overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-border">
+        <span class="text-[12px] text-muted">일반 입력</span>
+      </div>
+      <div class="p-4">
+        <div class="rounded-lg border border-border bg-card-2 p-3 focus-within:border-accent transition-colors">
+          <textarea class="w-full bg-transparent outline-none resize-none text-[13px] placeholder-muted" rows="3" placeholder="댓글을 입력하세요. @로 멘션, Ctrl+V로 이미지 붙여넣기"></textarea>
+          <div class="flex items-center justify-between mt-2">
+            <div class="flex items-center gap-1 text-muted">
+              <button class="w-8 h-8 rounded hover:bg-border/40 flex items-center justify-center" title="이미지 첨부">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+              </button>
+              <button class="w-8 h-8 rounded hover:bg-border/40 flex items-center justify-center" title="멘션">
+                <span class="text-[13px] font-medium">@</span>
+              </button>
+            </div>
+            <button class="px-3 py-1.5 rounded text-[12.5px] bg-accent text-white hover:bg-accent/85 transition-colors">전송</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 대댓글 모드 -->
+    <div class="rounded-xl border border-accent/40 bg-card overflow-hidden ring-1 ring-accent/20">
+      <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <span class="text-[12px] text-accent font-medium">대댓글 입력 모드</span>
+        <span class="text-[11px] text-muted">"답글" 버튼 클릭 시 진입</span>
+      </div>
+      <div class="p-4">
+        <div class="rounded-lg border border-accent/50 bg-card-2 overflow-hidden focus-within:border-accent transition-colors">
+          <!-- 답글 컨텍스트 헤더 -->
+          <div class="px-3 py-2 border-b border-border/60 bg-accent/[0.06] flex items-start gap-2">
+            <svg class="w-3.5 h-3.5 text-accent mt-0.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17l-5-5 5-5M4 12h12a4 4 0 0 1 0 8h-1"/></svg>
+            <div class="flex-1 min-w-0">
+              <div class="text-[11px] text-accent font-medium">한솔에게 답글</div>
+              <div class="text-[11.5px] text-muted truncate mt-0.5">옥상 씬 LO 일단 올렸어요. 시선 방향 확인 부탁드려요</div>
+            </div>
+            <button class="w-5 h-5 rounded hover:bg-border/50 flex items-center justify-center text-muted hover:text-text flex-shrink-0" title="답글 취소">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <!-- 입력 -->
+          <div class="p-3">
+            <textarea class="w-full bg-transparent outline-none resize-none text-[13px] placeholder-muted" rows="3" placeholder="@한솔 시선 정면이 아닌 우측 빌딩 쪽이 맞나요?">@한솔 </textarea>
+            <div class="flex items-center justify-between mt-2">
+              <div class="flex items-center gap-1 text-muted">
+                <button class="w-8 h-8 rounded hover:bg-border/40 flex items-center justify-center" title="이미지 첨부">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                </button>
+                <button class="w-8 h-8 rounded hover:bg-border/40 flex items-center justify-center bg-accent-soft text-accent" title="멘션 (자동)">
+                  <span class="text-[13px] font-medium">@</span>
+                </button>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="px-3 py-1.5 rounded text-[12.5px] text-muted hover:bg-border/40 transition-colors">취소</button>
+                <button class="px-3 py-1.5 rounded text-[12.5px] bg-accent text-white hover:bg-accent/85 transition-colors flex items-center gap-1.5">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17l-5-5 5-5M4 12h12a4 4 0 0 1 0 8h-1"/></svg>
+                  답글
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 멘션 자동완성 -->
+  <div class="rounded-xl border border-border bg-card overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-border">
+      <span class="text-[12px] font-medium">멘션 자동완성 — @ 입력 시</span>
+    </div>
+    <div class="p-4 grid grid-cols-2 gap-6">
+      <div class="rounded-lg border border-border bg-card-2 p-3">
+        <textarea class="w-full bg-transparent outline-none resize-none text-[13px] placeholder-muted" rows="2">@</textarea>
+      </div>
+      <div class="rounded-lg border border-border bg-card-2 overflow-hidden">
+        <div class="px-3 py-2 text-[11px] text-muted border-b border-border/60">담당자</div>
+        <button class="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent/[0.08] transition-colors text-left">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">한</div>
+          <div class="flex-1">
+            <div class="text-[12.5px] font-medium">한솔</div>
+            <div class="text-[10.5px] text-muted">BG 담당</div>
+          </div>
+          <span class="text-[10px] text-muted px-1.5 py-0.5 rounded bg-border/40">↵</span>
+        </button>
+        <button class="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent/[0.08] transition-colors text-left">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">다</div>
+          <div class="flex-1">
+            <div class="text-[12.5px] font-medium">다은</div>
+            <div class="text-[10.5px] text-muted">BG 담당</div>
+          </div>
+        </button>
+        <div class="px-3 py-2 text-[11px] text-muted border-y border-border/60">스레드 참여자</div>
+        <button class="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent/[0.08] transition-colors text-left">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-rose-400 to-rose-600 flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">영</div>
+          <div class="flex-1">
+            <div class="text-[12.5px] font-medium">영준</div>
+            <div class="text-[10.5px] text-muted">최근 댓글 작성자</div>
+          </div>
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     탭 6 — 위젯 레이아웃
+     ═══════════════════════════════════════════════════════════════════════ -->
+<section data-pane="widget" class="hidden space-y-6">
+  <header>
+    <h1 class="text-xl font-semibold">"최근 작업" 위젯 — 기본 레이아웃 추가</h1>
+    <p class="text-muted text-[13px] mt-1">ALL/DEPT/EP 세 기본 레이아웃에 모두 추가. 하단 전체 폭(12 col × h=20). 신규 사용자만 자동 적용 — 기존 사용자의 커스텀 레이아웃은 보존.</p>
+  </header>
+
+  <!-- 24 col 그리드 시뮬레이션 -->
+  <div class="space-y-4">
+    <!-- ALL_LAYOUT -->
+    <div class="rounded-xl border border-border bg-card overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <span class="text-[12px] font-medium">ALL_LAYOUT (통합 모드)</span>
+        <span class="text-[11px] text-muted">24 col grid · y=60에 12 col h=20 추가</span>
+      </div>
+      <div class="p-4">
+        <div class="grid grid-cols-24 gap-1 text-[11px]">
+          <!-- 기존 위젯들 -->
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-16">전체 진행률<div class="text-muted text-[10px]">6×20</div></div>
+          <div class="col-span-12 row-span-2 rounded bg-border/30 p-2 h-16">부서별 비교<div class="text-muted text-[10px]">12×20</div></div>
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-16">담당자 카드<div class="text-muted text-[10px]">6×20</div></div>
+          <div class="col-span-12 row-span-2 rounded bg-border/30 p-2 h-20 mt-1">에피소드 요약<div class="text-muted text-[10px]">12×25</div></div>
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-20 mt-1">내 할일<div class="text-muted text-[10px]">6×25</div></div>
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-20 mt-1">캘린더<div class="text-muted text-[10px]">6×25</div></div>
+          <div class="col-span-12 row-span-2 rounded bg-border/30 p-2 h-12 mt-1">메모<div class="text-muted text-[10px]">12×15</div></div>
+          <div class="col-span-12 row-span-2 rounded p-2 h-16 mt-1 bg-accent/15 border border-accent/40 ring-1 ring-accent/30">
+            <div class="text-accent font-medium">최근 작업 (NEW)</div>
+            <div class="text-muted text-[10px]">12×20 · y=60</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEPT_LAYOUT -->
+    <div class="rounded-xl border border-border bg-card overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <span class="text-[12px] font-medium">DEPT_LAYOUT (BG 또는 ACT 단독)</span>
+        <span class="text-[11px] text-muted">동일 위치에 추가</span>
+      </div>
+      <div class="p-4">
+        <div class="grid grid-cols-24 gap-1 text-[11px]">
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-16">전체 진행률<div class="text-muted text-[10px]">6×20</div></div>
+          <div class="col-span-12 row-span-2 rounded bg-border/30 p-2 h-16">단계별 진행률<div class="text-muted text-[10px]">12×20</div></div>
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-16">담당자 카드<div class="text-muted text-[10px]">6×20</div></div>
+          <div class="col-span-12 row-span-2 rounded bg-border/30 p-2 h-20 mt-1">에피소드 요약<div class="text-muted text-[10px]">12×25</div></div>
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-20 mt-1">내 할일<div class="text-muted text-[10px]">6×25</div></div>
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-20 mt-1">캘린더<div class="text-muted text-[10px]">6×25</div></div>
+          <div class="col-span-12 row-span-2 rounded bg-border/30 p-2 h-12 mt-1">메모<div class="text-muted text-[10px]">12×15</div></div>
+          <div class="col-span-12 row-span-2 rounded p-2 h-16 mt-1 bg-accent/15 border border-accent/40">
+            <div class="text-accent font-medium">최근 작업 (NEW)</div>
+            <div class="text-muted text-[10px]">12×20 · y=60</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EP_LAYOUT -->
+    <div class="rounded-xl border border-border bg-card overflow-hidden">
+      <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <span class="text-[12px] font-medium">EP_LAYOUT (에피소드 진입)</span>
+        <span class="text-[11px] text-muted">y=45에 추가</span>
+      </div>
+      <div class="p-4">
+        <div class="grid grid-cols-24 gap-1 text-[11px]">
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-16">EP 전체 진행률<div class="text-muted text-[10px]">6×20</div></div>
+          <div class="col-span-12 row-span-2 rounded bg-border/30 p-2 h-16">EP 부서별 비교<div class="text-muted text-[10px]">12×20</div></div>
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-16">EP 담당자 카드<div class="text-muted text-[10px]">6×20</div></div>
+          <div class="col-span-12 row-span-2 rounded bg-border/30 p-2 h-20 mt-1">EP 파트별 진행률<div class="text-muted text-[10px]">12×25</div></div>
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-20 mt-1">EP 단계별<div class="text-muted text-[10px]">6×25</div></div>
+          <div class="col-span-6 row-span-2 rounded bg-border/30 p-2 h-20 mt-1">내 할일<div class="text-muted text-[10px]">6×25</div></div>
+          <div class="col-span-12 row-span-2 rounded p-2 h-16 mt-1 bg-accent/15 border border-accent/40">
+            <div class="text-accent font-medium">최근 작업 (NEW)</div>
+            <div class="text-muted text-[10px]">12×20 · y=45</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-border bg-card p-4 text-[12.5px] text-muted">
+    <div class="font-medium text-text mb-2">기존 사용자 처리</div>
+    <ul class="space-y-1 list-disc list-inside">
+      <li>이미 widgetLayout 저장된 사용자 → 그대로 유지 (자동 추가 안 함)</li>
+      <li>위젯 추가 메뉴에서 "최근 작업" 선택해 수동 추가 가능 (이전과 동일)</li>
+      <li>레이아웃 초기화 버튼 사용 시 새 기본 레이아웃 적용</li>
+      <li>씬에서 위젯 클릭 → dashboardDeptFilter='all' 자동 + 통합 상세 모달</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<!-- 푸터 -->
+<footer class="max-w-[1400px] mx-auto px-6 py-8 mt-8 border-t border-border text-center text-muted text-[12px]">
+  B flow · Studio JBBJ · 2026-05-10 · 인터랙티브 디자인 시안 (단일 HTML)
+  <div class="mt-1 text-[11px] opacity-60">prefers-reduced-motion 시 모든 애니메이션 자동 비활성화</div>
+</footer>
+
+<script>
+  // ── 탭 전환 ──
+  const tabs = document.querySelectorAll('.tab-btn');
+  const panes = document.querySelectorAll('[data-pane]');
+  function setTab(name) {
+    tabs.forEach((t) => {
+      const active = t.dataset.tab === name;
+      t.classList.toggle('text-text', active);
+      t.classList.toggle('border-accent', active);
+      t.classList.toggle('font-semibold', active);
+      t.classList.toggle('text-muted', !active);
+      t.classList.toggle('border-transparent', !active);
+      t.classList.toggle('hover:text-text', !active);
+    });
+    panes.forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== name));
+  }
+  tabs.forEach((t) => t.addEventListener('click', () => setTab(t.dataset.tab)));
+  setTab('replies');
+
+  // ── 대댓글 시안 데이터 ──
+  const COMMENT_DATA = [
+    {
+      id: 'c1', user: '한솔', avatar: 'bg-gradient-to-br from-blue-400 to-blue-600', short: '한',
+      time: '14:02', text: '옥상 씬 LO 일단 올렸어요. 시선 방향 확인 부탁드려요',
+      replies: [
+        { id: 'r1', user: '다은', avatar: 'bg-gradient-to-br from-emerald-400 to-emerald-600', short: '다', time: '14:11', text: '@한솔 시선 정면이 아닌 우측 빌딩 쪽이 맞나요?' },
+        { id: 'r2', user: '한솔', avatar: 'bg-gradient-to-br from-blue-400 to-blue-600', short: '한', time: '14:14', text: '@다은 네 우측 빌딩 쪽이 맞아요. 빌딩 윗부분에 시선 머무는 거로요' },
+      ],
+    },
+    {
+      id: 'c2', user: '영준', avatar: 'bg-gradient-to-br from-rose-400 to-rose-600', short: '영',
+      time: '15:30', text: '뒤쪽 빌딩 실루엣은 더 진하게 가도 좋을 것 같아요', replies: [],
+    },
+  ];
+
+  // ── 시안 렌더링 ──
+  function svgIcon(name) {
+    const map = {
+      reply: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 17l-5-5 5-5M4 12h12a4 4 0 0 1 0 8h-1"/></svg>',
+      heart: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+      more: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>',
+      chevron: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>',
+    };
+    return map[name] || '';
+  }
+
+  function renderComment(c, variant) {
+    const replyCount = c.replies.length;
+    let repliesHtml = '';
+
+    if (variant === 'A') {
+      // 인라인 들여쓰기 + 좌측 라인 + 접기/펼치기 토글
+      if (replyCount > 0) {
+        repliesHtml = `
+          <div class="ml-3.5 mt-1.5">
+            <button class="reply-toggle-a inline-flex items-center gap-1 text-[11px] text-muted hover:text-accent transition-colors" data-comment="${c.id}">
+              <span class="reply-arrow inline-block transition-transform" style="transform: rotate(0deg)">${svgIcon('chevron')}</span>
+              <span class="toggle-label">답글 ${replyCount}개 접기</span>
+            </button>
+          </div>
+          <div class="reply-thread relative mt-1.5 ml-3.5 pl-3.5 border-l-2 border-accent/30 space-y-2.5" data-thread="${c.id}">
+            ${c.replies.map((r) => `
+              <div class="flex gap-2 anim-slide-in">
+                <div class="w-6 h-6 rounded-full ${r.avatar} flex-shrink-0 flex items-center justify-center text-[10px] font-semibold">${r.short}</div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-baseline gap-1.5"><span class="font-medium text-[12px]">${r.user}</span><span class="text-[10px] text-muted">${r.time}</span></div>
+                  <div class="text-[12.5px] mt-0.5">${r.text.replace(/(@\\S+)/g, '<span class="text-accent font-medium">$1</span>')}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+    } else if (variant === 'B') {
+      // 슬랙 스타일 펼침
+      if (replyCount > 0) {
+        repliesHtml = `
+          <button class="reply-toggle mt-2 ml-9 inline-flex items-center gap-1.5 text-[11.5px] text-accent font-medium hover:underline" data-comment="${c.id}">
+            <div class="flex -space-x-1.5">
+              ${c.replies.slice(0, 2).map((r) => `<div class="w-4 h-4 rounded-full ${r.avatar} ring-1 ring-card flex items-center justify-center text-[8px] font-semibold">${r.short}</div>`).join('')}
+            </div>
+            <span>답글 ${replyCount}개</span>
+            <span class="text-[10px] text-muted">${c.replies[replyCount-1].time}</span>
+            <span class="reply-arrow">${svgIcon('chevron')}</span>
+          </button>
+          <div class="reply-thread mt-2 ml-9 hidden space-y-2.5 pt-2 border-t border-border/50" data-thread="${c.id}">
+            ${c.replies.map((r) => `
+              <div class="flex gap-2 anim-slide-in">
+                <div class="w-6 h-6 rounded-full ${r.avatar} flex-shrink-0 flex items-center justify-center text-[10px] font-semibold">${r.short}</div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-baseline gap-1.5"><span class="font-medium text-[12px]">${r.user}</span><span class="text-[10px] text-muted">${r.time}</span></div>
+                  <div class="text-[12.5px] mt-0.5">${r.text.replace(/(@\\S+)/g, '<span class="text-accent font-medium">$1</span>')}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+    } else if (variant === 'C') {
+      // 인용 박스
+      if (replyCount > 0) {
+        repliesHtml = c.replies.map((r) => `
+          <div class="mt-2 anim-slide-in">
+            <div class="rounded-lg border border-border bg-bg/30 overflow-hidden">
+              <div class="px-2.5 py-1.5 border-b border-border/60 flex items-center gap-1.5 text-[11px] text-muted bg-card/40">
+                ${svgIcon('reply')}
+                <span><span class="text-accent font-medium">${r.user}</span>가 <span class="font-medium">${c.user}</span>에게 답글</span>
+                <span class="ml-auto text-[10px]">${r.time}</span>
+              </div>
+              <div class="p-2.5 text-[12.5px]">${r.text.replace(/(@\\S+)/g, '<span class="text-accent font-medium">$1</span>')}</div>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    return `
+      <div class="group relative">
+        <div class="flex gap-2.5">
+          <div class="w-7 h-7 rounded-full ${c.avatar} flex-shrink-0 flex items-center justify-center text-[11px] font-semibold">${c.short}</div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2">
+              <span class="font-medium text-[12.5px]">${c.user}</span>
+              <span class="text-[10.5px] text-muted">${c.time}</span>
+            </div>
+            <div class="text-[13px] mt-0.5">${c.text}</div>
+            <div class="flex items-center gap-2 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button class="text-[11px] text-muted hover:text-accent flex items-center gap-1 reply-btn" data-target="${c.id}">${svgIcon('reply')}<span>답글</span></button>
+              <button class="text-[11px] text-muted hover:text-text flex items-center gap-1">${svgIcon('heart')}<span>좋아요</span></button>
+              <button class="text-[11px] text-muted hover:text-text">${svgIcon('more')}</button>
+            </div>
+            ${repliesHtml}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderComments(variant) {
+    const list = document.getElementById('comment-list');
+    if (!list) return;
+    list.innerHTML = COMMENT_DATA.map((c) => renderComment(c, variant)).join('');
+
+    // B안 — 슬랙 펼침 토글 (기본 접힘)
+    list.querySelectorAll('.reply-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.comment;
+        const thread = list.querySelector(`[data-thread="${id}"]`);
+        const arrow = btn.querySelector('.reply-arrow');
+        if (!thread) return;
+        if (thread.classList.contains('hidden')) {
+          thread.classList.remove('hidden');
+          if (arrow) arrow.style.transform = 'rotate(180deg)';
+        } else {
+          thread.classList.add('hidden');
+          if (arrow) arrow.style.transform = '';
+        }
+      });
+    });
+
+    // A안 — 인라인 들여쓰기 토글 (기본 펼침)
+    list.querySelectorAll('.reply-toggle-a').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.comment;
+        const thread = list.querySelector(`[data-thread="${id}"]`);
+        const arrow = btn.querySelector('.reply-arrow');
+        const label = btn.querySelector('.toggle-label');
+        if (!thread) return;
+        const replyCount = thread.querySelectorAll('.flex.gap-2').length;
+        if (thread.classList.contains('hidden')) {
+          thread.classList.remove('hidden');
+          if (arrow) arrow.style.transform = 'rotate(0deg)';
+          if (label) label.textContent = `답글 ${replyCount}개 접기`;
+        } else {
+          thread.classList.add('hidden');
+          if (arrow) arrow.style.transform = 'rotate(-90deg)';
+          if (label) label.textContent = `답글 ${replyCount}개 펼치기`;
+        }
+      });
+    });
+
+    // 카드 강조
+    document.querySelectorAll('.variant-card').forEach((card) => {
+      card.classList.toggle('ring-2', card.dataset.variantCard === variant);
+      card.classList.toggle('ring-accent/50', card.dataset.variantCard === variant);
+      card.classList.toggle('border-accent/40', card.dataset.variantCard === variant);
+      card.classList.toggle('border-border', card.dataset.variantCard !== variant);
+    });
+  }
+
+  document.querySelectorAll('.variant-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.variant-btn').forEach((b) => {
+        b.classList.toggle('bg-accent', b === btn);
+        b.classList.toggle('text-white', b === btn);
+        b.classList.toggle('text-muted', b !== btn);
+        b.classList.toggle('hover:bg-border/40', b !== btn);
+      });
+      renderComments(btn.dataset.variant);
+    });
+  });
+
+  // 초기 — A 시안
+  document.querySelector('[data-variant="A"]').click();
+
+  // 탭 활성 초기 스타일
+  document.querySelectorAll('.tab-btn').forEach((t) => {
+    t.classList.add('border-transparent');
+  });
+  setTab('replies');
+</script>
+</body>
+</html>

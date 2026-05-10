@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp } from 'lucide-react';
+import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, ChevronDown, ChevronRight, Reply } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -37,6 +37,8 @@ interface CommentPanelProps {
   onCountChange?: (count: number) => void;
   /** 댓글 사이에 시간순으로 끼어들어가는 시스템 이벤트 (씬 생성/완료/리비전 등) */
   inlineEvents?: CommentInlineEvent[];
+  /** v1.24.0: 외부 점프 시 자동 스크롤 + 펄스 강조할 댓글 id. 답글이면 부모 자동 펼침. */
+  focusCommentId?: string | null;
 }
 
 /** 내부 렌더링용 — 원본이 어느 sceneKey 에서 왔는지 추적 */
@@ -59,7 +61,7 @@ function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string }
 
 // ─── 메인 컴포넌트 ──────────────────────────
 
-export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlineEvents }: CommentPanelProps) {
+export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlineEvents, focusCommentId }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
 
@@ -81,6 +83,22 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
+
+  // v1.24.0: 답글 입력 모드 — 클릭 시 입력 카드 상단에 답글 컨텍스트 헤더 노출 + parentCommentId 채워서 저장.
+  const [replyTarget, setReplyTarget] = useState<SceneCommentWithSource | null>(null);
+  // v1.24.0: 부모 댓글 별 답글 접힘 상태 (기본 펼침 — 처음 진입 시 모두 펼친 상태).
+  const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(new Set());
+  const toggleThread = useCallback((parentId: string) => {
+    setCollapsedThreads((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) next.delete(parentId);
+      else next.add(parentId);
+      return next;
+    });
+  }, []);
+  // v1.24.0: 외부 점프 시 강조할 댓글 id. focusCommentId prop 변경 또는 jump 이벤트로 set.
+  const [focusedCommentId, setFocusedCommentId] = useState<string | null>(focusCommentId ?? null);
+  const commentRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
   // v1.18.0: "re만" 필터 — 리비전 맥락 댓글(revisionId 있음)만 표시.
   // 한솔 결정 (spec 2026-05-03): 댓글 패널에서 "리비전 댓글만" 빠르게 가려보고 싶을 때 토글.
@@ -192,6 +210,40 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     // Codex R3 P2 (2026-05-03): inlineEvents 도 watch — system 활동만 도착해도 스크롤 따라가게.
   }, [comments.length, inlineEvents?.length]);
+
+  // v1.24.0: focusCommentId prop 변경 시 → 자동 스크롤 + 일시 펄스. 답글이면 부모 자동 펼침.
+  useEffect(() => {
+    if (!focusCommentId) return;
+    setFocusedCommentId(focusCommentId);
+    // 답글이면 부모 expand 보장
+    const target = comments.find((c) => c.id === focusCommentId);
+    if (target?.parentCommentId) {
+      setCollapsedThreads((prev) => {
+        const next = new Set(prev);
+        next.delete(target.parentCommentId!);
+        return next;
+      });
+    }
+    // 다음 tick 에 ref 매핑 후 scroll
+    const t = setTimeout(() => {
+      const el = commentRefs.current.get(focusCommentId);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 펄스는 1.6s 후 자동 해제
+      const t2 = setTimeout(() => setFocusedCommentId(null), 1700);
+      // cleanup 은 아래 useEffect cleanup 에서 처리
+      return () => clearTimeout(t2);
+    }, 100);
+    return () => clearTimeout(t);
+  }, [focusCommentId, comments]);
+
+  // v1.24.0: 답글 모드 진입 시 입력창에 부모 작성자 자동 멘션 프리셋 (현재 입력이 비어있을 때만).
+  useEffect(() => {
+    if (!replyTarget) return;
+    if (input.trim().length > 0) return;
+    if (currentUser && replyTarget.userName === currentUser.name) return;
+    setInput(`@${replyTarget.userName} `);
+    inputRef.current?.focus();
+  }, [replyTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 멘션 드롭다운 활성 항목 스크롤
   useEffect(() => {
@@ -361,6 +413,14 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     setSubmitting(true);
 
     const mentions = extractMentions(input, users.map(u => u.name));
+    // v1.24.0: 답글이면 부모 작성자도 mentions 에 포함 (자동 멘션 — 슬랙 알림/멘션 알림 트리거).
+    if (
+      replyTarget &&
+      replyTarget.userName !== currentUser.name &&
+      !mentions.includes(replyTarget.userName)
+    ) {
+      mentions.push(replyTarget.userName);
+    }
     const comment: SceneCommentWithSource = {
       id: crypto.randomUUID(),
       userId: currentUser.id,
@@ -369,6 +429,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       mentions,
       images: uploadedImageUrls,
       createdAt: new Date().toISOString(),
+      // v1.24.0: 답글이면 부모 댓글 id, 아니면 null.
+      parentCommentId: replyTarget?.id ?? null,
       _sourceKey: sceneKey,
     };
 
@@ -384,11 +446,14 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     // setState 와 동시에 ref 도 즉시 동기화하여 cleanup 이 항상 최신 상태(빈 배열) 를 본다.
     const prevInput = input;
     const prevAttached = attachedImages;
+    const prevReplyTarget = replyTarget;
     setInput('');
     inputValueRef.current = '';
     setShowMentions(false);
     setAttachedImages([]);
     attachedImagesRef.current = [];
+    // v1.24.0: 답글 전송 후 답글 모드 해제 (성공/실패 무관 — 실패 시 아래에서 복원).
+    setReplyTarget(null);
 
     try {
       await addComment(sceneKey, comment);
@@ -459,6 +524,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       } else {
         setInput(prevInput);
         setAttachedImages(prevAttached);
+        // v1.24.0: 답글 전송 실패 시 답글 모드도 복원해 사용자가 그대로 재시도 가능.
+        if (prevReplyTarget) setReplyTarget(prevReplyTarget);
       }
     } finally {
       setSubmitting(false);
@@ -544,6 +611,48 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   const visibleComments = useMemo(
     () => (reOnly ? comments.filter((c) => !!c.revisionId) : comments),
     [comments, reOnly],
+  );
+
+  // v1.24.0: 메인 흐름은 부모 댓글만(parentCommentId 없음). 답글은 별도 그룹.
+  const topLevelComments = useMemo(
+    () => visibleComments.filter((c) => !c.parentCommentId),
+    [visibleComments],
+  );
+
+  /**
+   * v1.24.0: parentCommentId 별 답글 그룹. 시간 오름차순 정렬.
+   * 부모 댓글이 visibleComments 에 없으면 (re만 토글 등) 답글도 메인 흐름에 표시 (orphan 방지).
+   */
+  const repliesByParent = useMemo(() => {
+    const map = new Map<string, SceneCommentWithSource[]>();
+    const topIds = new Set(topLevelComments.map((c) => c.id));
+    for (const c of visibleComments) {
+      if (!c.parentCommentId) continue;
+      if (!topIds.has(c.parentCommentId)) continue; // orphan — 메인 흐름으로 떨어뜨림
+      const arr = map.get(c.parentCommentId) ?? [];
+      arr.push(c);
+      map.set(c.parentCommentId, arr);
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    }
+    return map;
+  }, [visibleComments, topLevelComments]);
+
+  /** orphan 답글 — 부모가 visibleComments 에 없는 답글. 메인 흐름에 일반 댓글로 노출. */
+  const orphanReplies = useMemo(() => {
+    const topIds = new Set(topLevelComments.map((c) => c.id));
+    return visibleComments.filter(
+      (c) => !!c.parentCommentId && !topIds.has(c.parentCommentId),
+    );
+  }, [visibleComments, topLevelComments]);
+
+  /** 메인 흐름 = topLevel + orphan replies. 시간순 정렬은 mergeFeed 가 처리. */
+  const mainFlowComments = useMemo(
+    () => [...topLevelComments, ...orphanReplies].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    ),
+    [topLevelComments, orphanReplies],
   );
 
   const handleMentionClick = (userName: string) => {
@@ -641,42 +750,61 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
           </div>
         ) : (
         <AnimatePresence initial={false}>
-          {mergeFeed(visibleComments, (reOnly || hideActivity) ? [] : (inlineEvents ?? [])).map((node) => {
-            if (node.kind === 'event') {
+          {(() => {
+            const feed = mergeFeed(mainFlowComments, (reOnly || hideActivity) ? [] : (inlineEvents ?? []));
+            let prevUserId: string | null = null;
+            return feed.map((node) => {
+              if (node.kind === 'event') {
+                // v1.24.0: 시스템 활동이 끼어들면 묶음 끊김 (확정 규칙).
+                prevUserId = null;
+                return (
+                  <motion.div
+                    key={`evt:${node.event.id}`}
+                    layout="position"
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                    className="flex items-center gap-2 text-[10.5px] text-text-secondary/55 py-0.5"
+                  >
+                    <span className="inline-block w-1 h-1 rounded-full bg-text-secondary/40" aria-hidden />
+                    <span className="flex-1 truncate">{node.event.text}</span>
+                    <span className="tabular-nums shrink-0">{formatTimeShort(node.event.at)}</span>
+                  </motion.div>
+                );
+              }
+              const comment = node.comment;
+              // v1.24.0: 묶음 — 같은 사용자가 연속이면 메타 숨김 (Slack 스타일).
+              const isGroupedWithPrev = prevUserId === comment.userId;
+              prevUserId = comment.userId;
+              const isOwn = currentUser?.id === comment.userId;
+              const isEditing = editingId === comment.id;
+              const hasImages = (comment.images?.length ?? 0) > 0;
+              // 멘션 강조 — @나 가 mentions 에 들어있으면 좌측 4px accent 스트라이프 (한솔 결정 2026-05-02)
+              const mentionsMe = !!currentUser && (comment.mentions ?? []).includes(currentUser.name);
+              const isFocused = focusedCommentId === comment.id;
+              const replies = repliesByParent.get(comment.id) ?? [];
+              const threadCollapsed = collapsedThreads.has(comment.id);
+              const isOrphanReply = !!comment.parentCommentId;
               return (
-                <motion.div
-                  key={`evt:${node.event.id}`}
-                  layout="position"
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                  className="flex items-center gap-2 text-[10.5px] text-text-secondary/55 py-0.5"
-                >
-                  <span className="inline-block w-1 h-1 rounded-full bg-text-secondary/40" aria-hidden />
-                  <span className="flex-1 truncate">{node.event.text}</span>
-                  <span className="tabular-nums shrink-0">{formatTimeShort(node.event.at)}</span>
-                </motion.div>
-              );
-            }
-            const comment = node.comment;
-            const isOwn = currentUser?.id === comment.userId;
-            const isEditing = editingId === comment.id;
-            const hasImages = (comment.images?.length ?? 0) > 0;
-            // 멘션 강조 — @나 가 mentions 에 들어있으면 좌측 4px accent 스트라이프 (한솔 결정 2026-05-02)
-            const mentionsMe = !!currentUser && (comment.mentions ?? []).includes(currentUser.name);
-            return (
               <motion.div
                 key={comment.id}
+                ref={(el) => { commentRefs.current.set(comment.id, el); }}
                 layout="position"
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className={cn('group relative', mentionsMe && 'pl-2')}
+                className={cn(
+                  'group relative',
+                  mentionsMe && 'pl-2',
+                  isFocused && 'comment-target-pulse',
+                  isGroupedWithPrev && 'comment-grouped-with-prev',
+                )}
                 style={mentionsMe ? { borderLeft: '4px solid rgb(var(--color-accent))', borderRadius: 4 } : undefined}
               >
-                {/* 메타 */}
+                {/* 메타 — v1.24.0: 같은 사용자 연속 묶음일 땐 헤더 숨김 (시간만 호버 시 좌측). */}
+                {!isGroupedWithPrev && (
                 <div className={`flex items-center gap-2 mb-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
                   {isOwn ? (
                     <>
@@ -706,10 +834,17 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                       }}
                     />
                   )}
+                  {/* v1.24.0: orphan reply (부모 댓글 사라진 답글) 표시 */}
+                  {isOrphanReply && (
+                    <span className="text-[10px] text-text-secondary/50 inline-flex items-center gap-0.5" title="원댓글이 삭제된 답글">
+                      <CornerDownRight size={10} />원답글
+                    </span>
+                  )}
                   {comment.editedAt && (
                     <span className="text-[11px] text-text-secondary/30 italic">수정됨</span>
                   )}
                 </div>
+                )}
 
                 {/* 말풍선 */}
                 <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
@@ -774,30 +909,167 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                       </div>
                     )}
 
-                    {/* 수정/삭제 (자기 댓글만) */}
-                    {isOwn && !isEditing && (
-                      <div className="absolute top-0 -left-14 flex gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => { setEditingId(comment.id); setEditText(comment.text); }}
-                          className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
-                          title="수정"
-                        >
-                          <Pencil size={12} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(comment.id)}
-                          className="p-1 rounded hover:bg-status-none/20 text-text-secondary hover:text-status-none transition-colors cursor-pointer"
-                          title="삭제"
-                        >
-                          <Trash2 size={12} />
-                        </button>
+                    {/* 수정/삭제 (자기 댓글만) + v1.24.0 답글 버튼 (모든 댓글) */}
+                    {!isEditing && (
+                      <div
+                        className={cn(
+                          'absolute top-0 flex gap-0.5 opacity-0 group-hover/bubble:opacity-100 transition-opacity',
+                          isOwn ? '-left-20' : '-right-8',
+                        )}
+                      >
+                        {/* v1.24.0: 답글 버튼 — 부모 댓글에만 노출 (1단계 한정). 답글에는 답글 비허용. */}
+                        {!isOrphanReply && (
+                          <button
+                            onClick={() => setReplyTarget(comment)}
+                            className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-accent transition-colors cursor-pointer"
+                            title="답글"
+                          >
+                            <Reply size={12} />
+                          </button>
+                        )}
+                        {isOwn && (
+                          <>
+                            <button
+                              onClick={() => { setEditingId(comment.id); setEditText(comment.text); }}
+                              className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+                              title="수정"
+                            >
+                              <Pencil size={12} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(comment.id)}
+                              className="p-1 rounded hover:bg-status-none/20 text-text-secondary hover:text-status-none transition-colors cursor-pointer"
+                              title="삭제"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
                 </div>
+
+                {/* v1.24.0: 답글 스레드 — 부모 댓글 아래 인라인 들여쓰기 + 좌측 라인 + 토글 */}
+                {replies.length > 0 && (
+                  <div className="mt-1.5 ml-3 pl-3 border-l-2 border-accent/30 space-y-2">
+                    <button
+                      onClick={() => toggleThread(comment.id)}
+                      className="inline-flex items-center gap-1 text-[11px] text-text-secondary hover:text-accent transition-colors"
+                      title={threadCollapsed ? '답글 펼치기' : '답글 접기'}
+                    >
+                      {threadCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+                      <span>답글 {replies.length}개 {threadCollapsed ? '펼치기' : '접기'}</span>
+                    </button>
+                    {!threadCollapsed && replies.map((reply, ri) => {
+                      const replyIsOwn = currentUser?.id === reply.userId;
+                      const replyIsEditing = editingId === reply.id;
+                      const replyHasImages = (reply.images?.length ?? 0) > 0;
+                      const replyMentionsMe = !!currentUser && (reply.mentions ?? []).includes(currentUser.name);
+                      const replyIsFocused = focusedCommentId === reply.id;
+                      // 답글 묶음 — 답글 내부에서도 같은 사용자 연속이면 메타 숨김.
+                      const replyIsGrouped = ri > 0 && replies[ri - 1].userId === reply.userId;
+                      return (
+                        <div
+                          key={reply.id}
+                          ref={(el) => { commentRefs.current.set(reply.id, el); }}
+                          className={cn(
+                            'group/reply relative',
+                            replyMentionsMe && 'pl-1.5',
+                            replyIsFocused && 'comment-target-pulse',
+                            replyIsGrouped && 'comment-grouped-with-prev',
+                          )}
+                          style={replyMentionsMe ? { borderLeft: '3px solid rgb(var(--color-accent))', borderRadius: 3 } : undefined}
+                        >
+                          {!replyIsGrouped && (
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className="text-[11px] font-semibold text-text-primary">{reply.userName}</span>
+                              <span className="text-[10px] text-text-secondary/50">{formatTimeShort(reply.createdAt)}</span>
+                              {reply.editedAt && (
+                                <span className="text-[10px] text-text-secondary/30 italic">수정됨</span>
+                              )}
+                            </div>
+                          )}
+                          <div className="relative group/replybubble">
+                            {replyIsEditing ? (
+                              <div>
+                                <textarea
+                                  value={editText}
+                                  onChange={(e) => setEditText(e.target.value)}
+                                  className="w-full bg-bg-primary border border-bg-border rounded-md px-2 py-1.5 text-[11.5px] text-text-primary resize-none focus:outline-none focus:border-accent"
+                                  rows={2}
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault();
+                                      handleEdit(reply.id);
+                                    }
+                                    if (e.key === 'Escape') setEditingId(null);
+                                  }}
+                                />
+                                <div className="flex gap-2 mt-1 justify-end">
+                                  <button
+                                    onClick={() => setEditingId(null)}
+                                    className="px-2 py-0.5 text-[10.5px] text-text-secondary border border-bg-border rounded hover:bg-bg-border/50 cursor-pointer"
+                                  >취소</button>
+                                  <button
+                                    onClick={() => handleEdit(reply.id)}
+                                    className="px-2 py-0.5 text-[10.5px] text-white bg-accent rounded hover:bg-accent/80 cursor-pointer"
+                                  >저장</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div
+                                className={`rounded-lg px-2.5 py-1.5 text-[11.5px] leading-relaxed break-words text-text-primary ${
+                                  replyIsOwn ? 'bg-accent/15 border border-accent/25' : 'bg-bg-border/50'
+                                }`}
+                              >
+                                {reply.text && <div>{renderText(reply.text)}</div>}
+                                {replyHasImages && (
+                                  <div className={`grid gap-1 ${reply.text ? 'mt-1.5' : ''} ${reply.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                                    {reply.images!.map((url, i) => (
+                                      <img
+                                        key={i}
+                                        src={url}
+                                        alt=""
+                                        className="rounded w-full object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
+                                        style={{ maxHeight: 120 }}
+                                        onClick={() => setLightboxUrl(url)}
+                                        loading="lazy"
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {replyIsOwn && !replyIsEditing && (
+                              <div className="absolute top-0 -right-7 flex gap-0.5 opacity-0 group-hover/replybubble:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => { setEditingId(reply.id); setEditText(reply.text); }}
+                                  className="p-0.5 rounded hover:bg-bg-border/50 text-text-secondary hover:text-text-primary cursor-pointer"
+                                  title="수정"
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(reply.id)}
+                                  className="p-0.5 rounded hover:bg-status-none/20 text-text-secondary hover:text-status-none cursor-pointer"
+                                  title="삭제"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </motion.div>
             );
-          })}
+            });
+          })()}
         </AnimatePresence>
         )}
       </div>
@@ -833,10 +1105,29 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
             // 한솔 피드백(2026-05-02): focus 시 accent-sub(보라)가 박혀서 "보라색 고정"으로 보임 → 중립 흰색 알파로 변경
             borderColor: draggingOver
               ? 'rgb(var(--color-accent))'
+              : replyTarget
+              ? 'rgba(108,92,231,0.6)' // v1.24.0: 답글 모드 시 보라 강조
               : (focused ? 'rgba(255,255,255,0.16)' : 'rgb(var(--color-bg-border))'),
             maxHeight: inputCardMaxPx,
           }}
         >
+          {/* v1.24.0: 답글 컨텍스트 헤더 — 답글 모드일 때만 카드 상단에 노출 */}
+          {replyTarget && (
+            <div className="flex items-start gap-2 mb-2 px-2 py-1.5 -mx-2.5 -mt-2 border-b border-accent/30 bg-accent/[0.06] rounded-t-xl">
+              <CornerDownRight size={12} className="text-accent mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10.5px] text-accent font-medium">{replyTarget.userName}에게 답글</div>
+                <div className="text-[11px] text-text-secondary/70 truncate mt-0.5">{replyTarget.text || '(이미지 첨부)'}</div>
+              </div>
+              <button
+                onClick={() => setReplyTarget(null)}
+                className="w-5 h-5 rounded hover:bg-bg-border/50 flex items-center justify-center text-text-secondary hover:text-text-primary cursor-pointer flex-shrink-0"
+                title="답글 취소"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          )}
           {/* 이미지 썸네일 줄 */}
           {attachedImages.length > 0 && (
             <div className="flex gap-2 mb-2 overflow-x-auto pb-1" style={{ height: 76 }}>
