@@ -357,10 +357,14 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
     return;
   }
 
+  // local fallback (오프라인/테스트). 코덱스 P2 fix (2026-05-10): 답글 parentCommentId 도 NULL 갱신 →
+  //   sheetsMode 분기와 일관된 ON DELETE SET NULL 동작 (orphan 답글 잘못된 표기 방지).
   const all = await loadLocalAll();
   const list = all[sceneKey];
   if (!list) return;
-  all[sceneKey] = list.filter(c => c.id !== commentId);
+  all[sceneKey] = list
+    .filter(c => c.id !== commentId)
+    .map(c => (c.parentCommentId === commentId ? { ...c, parentCommentId: null } : c));
   if (all[sceneKey].length === 0) delete all[sceneKey];
   await saveLocal(all);
 }

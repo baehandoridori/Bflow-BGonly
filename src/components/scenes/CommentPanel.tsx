@@ -85,7 +85,12 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   const [mentionIndex, setMentionIndex] = useState(0);
 
   // v1.24.0: 답글 입력 모드 — 클릭 시 입력 카드 상단에 답글 컨텍스트 헤더 노출 + parentCommentId 채워서 저장.
+  // 코덱스 P2 fix (2026-05-10): sceneKey 변경 시 reset 필수 — 안 그러면 다른 씬으로 이동 후 전송 시
+  //   cross-scene parentCommentId 가 박혀 orphan 답글 + 잘못된 부모 작성자에게 알림 발송.
   const [replyTarget, setReplyTarget] = useState<SceneCommentWithSource | null>(null);
+  useEffect(() => {
+    setReplyTarget(null);
+  }, [sceneKey]);
   // v1.24.0: 부모 댓글 별 답글 접힘 상태 (기본 펼침 — 처음 진입 시 모두 펼친 상태).
   const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(new Set());
   const toggleThread = useCallback((parentId: string) => {

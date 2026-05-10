@@ -887,10 +887,11 @@ export default function App() {
       const { table, payload } = event;
       console.log(`[App Realtime] 이벤트 수신: table=${table}, type=${payload?.eventType}`);
 
-      // 댓글 변경 → 캐시 무효화 + 알림
+      // 댓글 변경 → 알림 분기 평가 → 캐시 무효화
+      // 코덱스 P1 fix (2026-05-10): invalidatePartCache() 가 알림 분기 *전*에 있으면 isCommentByUser/
+      //   hasUserCommentedOnScene 가 캐시 비어진 상태에서 호출되어 false 반환 → 답글-자동멘션·스레드 참여자
+      //   알림이 silent skip. invalidate 는 분기 평가 *후* 로 옮기고, 호출 시점도 try/finally 로 보장.
       if (table === 'comments') {
-        invalidatePartCache();
-
         // INSERT 이벤트: 다른 사용자가 내 씬에 댓글 / @멘션 시 알림
         if (payload?.eventType === 'INSERT' && payload?.new) {
           // comments 테이블 컬럼: scene_id 는 사실 scene.no(sort_order, 예: '1', '2'...).
@@ -1076,6 +1077,10 @@ export default function App() {
             }
           }
         }
+        // 코덱스 P1 fix (2026-05-10): 알림 분기 평가가 끝난 *후* 캐시 무효화 →
+        //   isCommentByUser/hasUserCommentedOnScene 가 fresh 한 cache 를 사용해 답글-자동멘션·스레드 참여자
+        //   알림을 정확히 발송. invalidate 는 다음 조회 시점에 fresh load 트리거.
+        invalidatePartCache();
         return;
       }
 
@@ -1347,9 +1352,9 @@ export default function App() {
       }
 
       if (data.event === 'comment-added') {
-        // 댓글 추가 broadcast → 캐시 무효화 + 알림
-        invalidatePartCache();
-        window.dispatchEvent(new Event('bflow:comments-invalidated'));
+        // 댓글 추가 broadcast → 알림 분기 평가 → 캐시 무효화
+        // 코덱스 P1 fix (2026-05-10): invalidate 를 알림 분기 *후* 로 이동. 이전엔 cache miss 로
+        //   isCommentByUser/hasUserCommentedOnScene 가 false 반환 → 답글/스레드 알림 누락.
         // v1.24.0 P0 #1: realtime INSERT 분기와 동일한 mention/comment 분기 적용.
         //   broadcast 페이로드에 commentId/parentCommentId/partId 가 포함되어 두 경로 어느 쪽이든 같은 분기 가능.
         const {
@@ -1444,6 +1449,9 @@ export default function App() {
             }
           }
         }
+        // 코덱스 P1 fix: 알림 분기 *후* 캐시 무효화 + 댓글 패널 리로드 신호.
+        invalidatePartCache();
+        window.dispatchEvent(new Event('bflow:comments-invalidated'));
         return;
       }
 
