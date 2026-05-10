@@ -25,6 +25,7 @@ import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { CommentPanel } from './CommentPanel';
+import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
 import { RevisionPanel } from './RevisionPanel';
 import { getComments } from '@/services/commentService';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -1079,18 +1080,20 @@ export function SceneDetailModal({
             <div className="px-4 py-3 border-b border-bg-border shrink-0">
               <h3 className="text-sm font-medium text-text-primary">댓글 및 활동</h3>
             </div>
-            <CommentPanel
-              sceneKey={sceneKey}
-              secondarySceneKey={
-                counterpartSheetName && counterpartSceneNo != null
-                  ? `${counterpartSheetName}:${counterpartSceneNo}`
-                  : undefined
-              }
-              onCountChange={setCommentCount}
-              focusCommentId={focusCommentId}
-              // v1.24.0: 라이트박스 상단 라벨 — sheetName 에서 EP/파트 추출 + scene.sceneId.
-              sceneLabel={`${sheetName.replace(/_/g, ' ').replace(/^EP0?/, 'EP')}${scene.sceneId ? ` #${scene.sceneId}` : ''}`}
-            />
+            <CommentPanelErrorBoundary panelId="single">
+              <CommentPanel
+                sceneKey={sceneKey}
+                secondarySceneKey={
+                  counterpartSheetName && counterpartSceneNo != null
+                    ? `${counterpartSheetName}:${counterpartSceneNo}`
+                    : undefined
+                }
+                onCountChange={setCommentCount}
+                focusCommentId={focusCommentId}
+                // v1.24.0: 라이트박스 상단 라벨 — sheetName 에서 EP/파트 추출 + scene.sceneId.
+                sceneLabel={`${sheetName.replace(/_/g, ' ').replace(/^EP0?/, 'EP')}${scene.sceneId ? ` #${scene.sceneId}` : ''}`}
+              />
+            </CommentPanelErrorBoundary>
           </motion.div>
         </motion.div>
       </motion.div>

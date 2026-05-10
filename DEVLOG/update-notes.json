@@ -1,5 +1,21 @@
 [
   {
+    "version": "1.24.3",
+    "title": "댓글 패널 에러 안전망 추가",
+    "items": [
+      {
+        "category": "stability",
+        "summary": "댓글 패널이 일시적 오류로 멈춰도 다른 기능은 그대로",
+        "description": "댓글 영역에 에러 안전망(ErrorBoundary)을 둘러 vendor-ui 같은 외부 라이브러리 오류가 발생해도 모달의 다른 탭/이미지/리비전 기능은 영향받지 않습니다. 다시 시도 버튼으로 복구."
+      },
+      {
+        "category": "stability",
+        "summary": "댓글 오류 시 콘솔에 상세 진단 정보",
+        "description": "에러 발생 시 [CommentPanel ErrorBoundary] 로그로 component stack과 메시지가 콘솔에 찍혀 다음 hotfix를 빠르게 적용할 수 있습니다."
+      }
+    ]
+  },
+  {
     "version": "1.24.2",
     "title": "댓글 이미지 갤러리 통합 + 활동 클릭 디버깅",
     "items": [

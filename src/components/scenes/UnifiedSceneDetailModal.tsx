@@ -22,6 +22,7 @@ import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { CommentPanel, type CommentInlineEvent } from './CommentPanel';
+import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
 import { RevisionPanel } from './RevisionPanel';
 import { SceneFilesTab } from './SceneFilesTab';
 import { SceneHistoryTab } from './SceneHistoryTab';
@@ -811,17 +812,19 @@ export function UnifiedSceneDetailModal({
                   )}
                 </h3>
               </div>
-              <CommentPanel
-                sceneKey={primaryCommentKey}
-                secondarySceneKey={secondaryCommentKey || undefined}
-                onCountChange={setCommentCount}
-                inlineEvents={inlineEvents}
-                focusCommentId={focusCommentId}
-                // v1.24.0: 댓글 이미지 라이트박스 상단 라벨용 — "EP01 / A컷 #03" 형태로 전달.
-                sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
-                  .filter(Boolean)
-                  .join(' / ')}
-              />
+              <CommentPanelErrorBoundary panelId="unified">
+                <CommentPanel
+                  sceneKey={primaryCommentKey}
+                  secondarySceneKey={secondaryCommentKey || undefined}
+                  onCountChange={setCommentCount}
+                  inlineEvents={inlineEvents}
+                  focusCommentId={focusCommentId}
+                  // v1.24.0: 댓글 이미지 라이트박스 상단 라벨용 — "EP01 / A컷 #03" 형태로 전달.
+                  sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
+                    .filter(Boolean)
+                    .join(' / ')}
+                />
+              </CommentPanelErrorBoundary>
             </motion.div>
           )}
         </motion.div>
