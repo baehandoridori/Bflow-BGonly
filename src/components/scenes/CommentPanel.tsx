@@ -255,18 +255,40 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   //   - comments 의존성 제거 (다른 사람 댓글 추가 시 effect 재실행 X)
   //   - 두 setTimeout 모두 effect cleanup 에서 명시적으로 clear.
   //   - 답글 펼침은 별도 effect 로 분리 (target 검색에 comments 필요하지만 펄스 재시작과 무관).
+  // 코덱스 P1 fix (2026-05-10): cold cache + 느린 supabase fetch 시 100ms 후 단 1회 시도라
+  //   commentRefs 가 비어있어 점프 silent fail. 200ms 간격으로 최대 ~2초 재시도 (10회) → 댓글 마운트 후
+  //   첫 발견 시점에 scroll. 끝까지 못 찾으면 펄스만 잠깐 뒤 해제 (무한 retry X — 펄스 무한 재시작 방지).
   useEffect(() => {
     if (!focusCommentId) return;
     setFocusedCommentId(focusCommentId);
-    let t2: ReturnType<typeof setTimeout> | null = null;
-    const t1 = setTimeout(() => {
+    let attempts = 0;
+    let scrolled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let clearTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const tryScroll = () => {
+      if (scrolled) return;
       const el = commentRefs.current.get(focusCommentId);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      t2 = setTimeout(() => setFocusedCommentId(null), 1700);
-    }, 100);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        scrolled = true;
+        clearTimer = setTimeout(() => setFocusedCommentId(null), 1700);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 10) {
+        retryTimer = setTimeout(tryScroll, 200);
+      } else {
+        // 포기 — 펄스만 짧게 해제 (사용자에게 "찾으려 했음" 시각 피드백 잔존).
+        clearTimer = setTimeout(() => setFocusedCommentId(null), 200);
+      }
+    };
+
+    retryTimer = setTimeout(tryScroll, 100);
     return () => {
-      clearTimeout(t1);
-      if (t2) clearTimeout(t2);
+      scrolled = true; // 후속 retryTimer 콜백 차단
+      if (retryTimer) clearTimeout(retryTimer);
+      if (clearTimer) clearTimeout(clearTimer);
     };
   }, [focusCommentId]);
 
