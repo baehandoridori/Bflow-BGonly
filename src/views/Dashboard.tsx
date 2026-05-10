@@ -288,6 +288,8 @@ const DEPT_LAYOUT: Layout[] = [
   { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
   { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
   { i: 'memo', x: 0, y: 45, w: 12, h: 15, minW: 2, minH: 2 },
+  // v1.24.0: 최근 작업 위젯 — 신규 사용자 기본 레이아웃에 포함 (하단 전체 폭).
+  { i: 'recent-activity', x: 0, y: 60, w: 24, h: 20, minW: 4, minH: 4 },
 ];
 
 /* ── 통합 레이아웃 (24칸 그리드, rowHeight=16px) ── */
@@ -299,6 +301,8 @@ const ALL_LAYOUT: Layout[] = [
   { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
   { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
   { i: 'memo', x: 0, y: 45, w: 12, h: 15, minW: 2, minH: 2 },
+  // v1.24.0: 최근 작업 위젯 — 신규 사용자 기본 레이아웃에 포함 (하단 전체 폭).
+  { i: 'recent-activity', x: 0, y: 60, w: 24, h: 20, minW: 4, minH: 4 },
 ];
 
 /* ── 에피소드 대시보드 기본 레이아웃 (24칸 그리드) ── */
@@ -309,6 +313,8 @@ const EP_LAYOUT: Layout[] = [
   { i: 'ep-part-progress', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
   { i: 'ep-stage-bars', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
   { i: 'my-tasks', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
+  // v1.24.0: 최근 작업 — 에피소드 컨텍스트에서도 동일하게 노출.
+  { i: 'recent-activity', x: 0, y: 45, w: 24, h: 20, minW: 4, minH: 4 },
 ];
 
 /* ── 파트 전용 위젯 타입 (2단계 선택) ── */

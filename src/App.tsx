@@ -45,6 +45,12 @@ import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+import {
+  parseAssigneeList,
+  collectCounterpartAssigneeNames,
+  isCommentByUser,
+  hasUserCommentedOnScene,
+} from '@/utils/sceneNotificationRecipients';
 import { isRecentSelfRevisionAction } from '@/stores/useRevisionStore';
 import type { UpdateInfo } from '@/types';
 
@@ -881,10 +887,11 @@ export default function App() {
       const { table, payload } = event;
       console.log(`[App Realtime] 이벤트 수신: table=${table}, type=${payload?.eventType}`);
 
-      // 댓글 변경 → 캐시 무효화 + 알림
+      // 댓글 변경 → 알림 분기 평가 → 캐시 무효화
+      // 코덱스 P1 fix (2026-05-10): invalidatePartCache() 가 알림 분기 *전*에 있으면 isCommentByUser/
+      //   hasUserCommentedOnScene 가 캐시 비어진 상태에서 호출되어 false 반환 → 답글-자동멘션·스레드 참여자
+      //   알림이 silent skip. invalidate 는 분기 평가 *후* 로 옮기고, 호출 시점도 try/finally 로 보장.
       if (table === 'comments') {
-        invalidatePartCache();
-
         // INSERT 이벤트: 다른 사용자가 내 씬에 댓글 / @멘션 시 알림
         if (payload?.eventType === 'INSERT' && payload?.new) {
           // comments 테이블 컬럼: scene_id 는 사실 scene.no(sort_order, 예: '1', '2'...).
@@ -900,6 +907,8 @@ export default function App() {
             mentions?: string[];
             // v1.18.0: 리비전 맥락 댓글 식별 — 값 있으면 'revision' 알림 경로로 분기.
             revision_id?: string | null;
+            // v1.24.0: 1단계 대댓글이면 부모 댓글 id. 답글 알림 분기에 사용.
+            parent_comment_id?: string | null;
           };
           const me = useAuthStore.getState().currentUser;
 
@@ -948,13 +957,18 @@ export default function App() {
               }).catch(() => { /* 무시 */ });
             }
             // 리비전 맥락 댓글은 일반 댓글 알림 경로 스킵.
+            // 코덱스 P2 fix (2026-05-10): early return *전* 캐시 무효화. 안 그러면 리비전 댓글이
+            //   캐시에 stale 한 상태로 남아 일반 댓글 뷰에서 누락됨 (broadcast 가 늦거나 끊긴 케이스).
+            invalidatePartCache();
             return;
           }
 
-          // 한솔 테스트용 (v1.15.0): 본인이 본인 태그한 경우에도 토스트 발동되도록 user_id 자기 비교 제거.
-          // 실 운영 시 본인 댓글 알림이 의미없으면 다음 PR 에서 user_id !== me.id 조건 복원.
-          if (me && newComment.user_id && newComment.scene_id) {
-            const dedupeKey = `comment:${newComment.user_id}:${newComment.scene_id}`;
+          // v1.24.0: 본인 댓글 알림 차단 — 같은 PC에서 작성한 댓글에 본인이 알림받는 건 노이즈.
+          // (한솔 테스트용 v1.15.0 의 user_id !== me.id 제거를 본 PR 에서 복원.)
+          if (me && newComment.user_id && newComment.user_id !== me.id && newComment.scene_id) {
+            // v1.24.0: dedupeKey 에 commentId 포함 → 같은 사용자가 같은 씬에 짧은 시간 내 여러 댓글 작성 시
+            //   broadcast/realtime dedupe 가 두 번째부터 충돌해 silent drop 되던 문제 방지.
+            const dedupeKey = `comment:${newComment.user_id}:${newComment.scene_id}:${newComment.id ?? ''}`;
             if (!dedupeNotification(dedupeKey)) { /* 이미 broadcast로 처리됨 */ }
             else {
               const notiSettings = notiSettingsRef.current;
@@ -980,7 +994,23 @@ export default function App() {
                 })();
                 const scene = sceneByUuid ?? sceneByPartAndNo ?? null;
                 const isMentioned = Array.isArray(newComment.mentions) && newComment.mentions.includes(me.name);
-                const isAssignee = scene && scene.assignee === me.name;
+                // v1.24.0: assignee 가 콤마 구분 다중 담당자면 split → 자기 이름 포함 여부 매칭.
+                // 동일 sceneNo 의 BG↔ACT counterpart 부서 assignee 도 함께 검사 (한 댓글이 양쪽 공유 → 양쪽 작업자 모두 알림).
+                const assigneeNames = scene ? parseAssigneeList(scene.assignee) : [];
+                const isAssignee = assigneeNames.includes(me.name);
+                const counterpartAssigneeNames = scene
+                  ? collectCounterpartAssigneeNames(scene)
+                  : [];
+                const isCounterpartAssignee = counterpartAssigneeNames.includes(me.name);
+                // v1.24.0: 답글 부모 작성자 → 자동 멘션 (자기 댓글에 답글 받음).
+                let isReplyToMe = false;
+                if (newComment.parent_comment_id) {
+                  isReplyToMe = isCommentByUser(newComment.parent_comment_id, me.id);
+                }
+                // v1.24.0: 스레드 참여자 — 해당 씬 댓글 캐시에 자기 userId 댓글이 있는지.
+                const isThreadParticipant = scene
+                  ? hasUserCommentedOnScene(newComment.part_id, scene, me.id)
+                  : false;
 
                 // 한솔 진단용 (v1.15.4): scene 매칭 실패 원인을 콘솔에서 정확히 파악하기 위한 로그.
                 // 강선영 PC 등 다른 사용자에서 멘션 알림 받을 때 scene 못 찾는 케이스 진단.
@@ -1005,30 +1035,55 @@ export default function App() {
                   });
                 }
 
-                if (isMentioned) {
+                // v1.24.0: 알림 분기 — 강한 시각 신호(mention) > 차분한 자동 알림(comment) 우선순위.
+                // mention 조건: 명시 @멘션 OR 자기 댓글에 답글 (자동 멘션).
+                // comment 조건: 씬 담당자(BG/ACT 모두) OR 스레드 참여자. mention 이 우선이면 comment 는 발송 안 함.
+                const baseMetadata: Record<string, unknown> = {
+                  sceneId: scene?.id ?? newComment.scene_uuid,
+                  sceneName: scene?.sceneId,
+                  commentId: newComment.id,
+                };
+                if (newComment.parent_comment_id) {
+                  baseMetadata.parentCommentId = newComment.parent_comment_id;
+                }
+                const bodyShort = newComment.text
+                  ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text)
+                  : undefined;
+                const author = newComment.user_name || '누군가';
+
+                if (isMentioned || isReplyToMe) {
+                  const title = isMentioned
+                    ? `${author}님이 나를 태그했습니다`
+                    : `${author}님이 내 댓글에 답글을 남겼습니다`;
                   dispatchNotification({
-                    type: 'comment',
-                    title: `${newComment.user_name || '누군가'}님이 나를 태그했습니다`,
-                    body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
-                    // scene 정확히 찾았으면 UUID + 사용자 sceneId. 못 찾아도 scene_uuid 라도 넣어 '씬 보기' 버튼은 항상 노출
-                    // (한솔 보고 v1.15.3: 다른 PC 사용자가 멘션 받았을 때 useDataStore 에 그 씬이 없어 metadata=undefined → 버튼 누락)
-                    // navigateToScene 이 매칭 실패하면 자체 fallback 으로 씬 뷰 이동 + 안내
-                    metadata: scene
-                      ? { sceneId: scene.id, sceneName: scene.sceneId }
-                      : (newComment.scene_uuid ? { sceneId: newComment.scene_uuid } : undefined),
+                    type: 'mention',
+                    title,
+                    body: bodyShort,
+                    metadata: { ...baseMetadata, mentionedBy: author },
                   }, notiSettings);
-                } else if (isAssignee) {
+                } else if (isAssignee || isCounterpartAssignee || isThreadParticipant) {
+                  const reason = isAssignee
+                    ? '내 씬에 댓글'
+                    : isCounterpartAssignee
+                    ? '함께 작업 중인 씬에 댓글'
+                    : '내가 댓글 단 씬에 새 댓글';
+                  // v1.24.0 P1 #10: 더블스페이스 방지 — sceneId 가 비면 prefix 자체 생략.
+                  const sceneIdLabel = scene?.sceneId ? `${scene.sceneId} ` : '';
                   dispatchNotification({
                     type: 'comment',
-                    title: `${newComment.user_name || '누군가'}님이 댓글을 남겼습니다`,
-                    body: newComment.text ? (newComment.text.length > 50 ? newComment.text.slice(0, 50) + '...' : newComment.text) : undefined,
-                    metadata: { sceneId: scene!.id, sceneName: scene!.sceneId },
+                    title: `${author}님이 ${sceneIdLabel}${reason}`,
+                    body: bodyShort,
+                    metadata: baseMetadata,
                   }, notiSettings);
                 }
               }
             }
           }
         }
+        // 코덱스 P1 fix (2026-05-10): 알림 분기 평가가 끝난 *후* 캐시 무효화 →
+        //   isCommentByUser/hasUserCommentedOnScene 가 fresh 한 cache 를 사용해 답글-자동멘션·스레드 참여자
+        //   알림을 정확히 발송. invalidate 는 다음 조회 시점에 fresh load 트리거.
+        invalidatePartCache();
         return;
       }
 
@@ -1300,42 +1355,106 @@ export default function App() {
       }
 
       if (data.event === 'comment-added') {
-        // 댓글 추가 broadcast → 캐시 무효화 + 알림
-        invalidatePartCache();
-        window.dispatchEvent(new Event('bflow:comments-invalidated'));
-        const { sceneId: commentSceneId, userName: commentUserName, userId: commentUserId, text: commentText, mentions: commentMentions } = data.payload as {
-          sceneId?: string; userName?: string; userId?: string; text?: string; mentions?: string[];
+        // 댓글 추가 broadcast → 알림 분기 평가 → 캐시 무효화
+        // 코덱스 P1 fix (2026-05-10): invalidate 를 알림 분기 *후* 로 이동. 이전엔 cache miss 로
+        //   isCommentByUser/hasUserCommentedOnScene 가 false 반환 → 답글/스레드 알림 누락.
+        // v1.24.0 P0 #1: realtime INSERT 분기와 동일한 mention/comment 분기 적용.
+        //   broadcast 페이로드에 commentId/parentCommentId/partId 가 포함되어 두 경로 어느 쪽이든 같은 분기 가능.
+        const {
+          sceneId: commentSceneNumber,  // sort_order text — findSceneBySceneId 매칭용
+          userName: commentUserName,
+          userId: commentUserId,
+          text: commentText,
+          mentions: commentMentions,
+          commentId: commentCid,
+          parentCommentId: commentParent,
+          partId: commentPartId,
+        } = data.payload as {
+          sceneId?: string;
+          userName?: string;
+          userId?: string;
+          text?: string;
+          mentions?: string[];
+          commentId?: string | null;
+          parentCommentId?: string | null;
+          partId?: string | null;
         };
         const me = useAuthStore.getState().currentUser;
-        if (me && commentUserId && commentUserId !== me.id && commentSceneId) {
-          const dedupeKey = `comment:${commentUserId}:${commentSceneId}`;
+        if (me && commentUserId && commentUserId !== me.id && commentSceneNumber) {
+          const dedupeKey = `comment:${commentUserId}:${commentSceneNumber}:${commentCid ?? ''}`;
           if (!dedupeNotification(dedupeKey)) { /* 이미 Realtime으로 처리됨 */ }
           else if (notiSettingsRef.current.commentNotify === false) { /* 알림 끔 */ }
           else {
             const notiSettings = notiSettingsRef.current;
-            const scene = useDataStore.getState().findSceneBySceneId(commentSceneId!);
-            const isMentioned = Array.isArray(commentMentions) && commentMentions.includes(me.name);
-            const isAssignee = scene && scene.assignee === me.name;
+            // partId 있으면 정확 매칭, 없으면 fallback (alias collision 위험 있지만 단일 데이터인 경우 OK)
+            let scene: ReturnType<typeof useDataStore.getState>['episodes'][number]['parts'][number]['scenes'][number] | null = null;
+            if (commentPartId) {
+              const targetNo = Number(commentSceneNumber);
+              if (Number.isFinite(targetNo)) {
+                for (const ep of useDataStore.getState().episodes) {
+                  for (const part of ep.parts) {
+                    if (part.id !== commentPartId) continue;
+                    const found = part.scenes.find((s) => Number(s.no) === targetNo);
+                    if (found) { scene = found; break; }
+                  }
+                  if (scene) break;
+                }
+              }
+            }
+            if (!scene) {
+              scene = useDataStore.getState().findSceneBySceneId(commentSceneNumber!) ?? null;
+            }
 
-            if (isMentioned) {
-              // @멘션된 경우: 씬 담당 여부와 무관하게 알림
+            const isMentioned = Array.isArray(commentMentions) && commentMentions.includes(me.name);
+            const assigneeNames = scene ? parseAssigneeList(scene.assignee) : [];
+            const isAssignee = assigneeNames.includes(me.name);
+            const counterpartNames = scene ? collectCounterpartAssigneeNames(scene) : [];
+            const isCounterpartAssignee = counterpartNames.includes(me.name);
+            const isReplyToMe = commentParent ? isCommentByUser(commentParent, me.id) : false;
+            const isThreadParticipant = scene
+              ? hasUserCommentedOnScene(commentPartId ?? null, scene, me.id)
+              : false;
+
+            const baseMetadata: Record<string, unknown> = {
+              sceneId: scene?.id,
+              sceneName: scene?.sceneId,
+              commentId: commentCid ?? undefined,
+              ...(commentParent ? { parentCommentId: commentParent } : {}),
+            };
+            const bodyShort = commentText
+              ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText)
+              : undefined;
+            const author = commentUserName || '누군가';
+            const sceneIdLabel = scene?.sceneId ? `${scene.sceneId} ` : '';
+
+            if (isMentioned || isReplyToMe) {
+              const title = isMentioned
+                ? `${author}님이 나를 태그했습니다`
+                : `${author}님이 내 댓글에 답글을 남겼습니다`;
               dispatchNotification({
-                type: 'comment',
-                title: `${commentUserName || '누군가'}님이 나를 태그했습니다`,
-                body: commentText ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText) : undefined,
-                metadata: scene ? { sceneId: scene.id, sceneName: scene.sceneId } : undefined,
+                type: 'mention',
+                title,
+                body: bodyShort,
+                metadata: { ...baseMetadata, mentionedBy: author },
               }, notiSettings);
-            } else if (isAssignee) {
-              // 내 씬에 댓글이 달린 경우
+            } else if (isAssignee || isCounterpartAssignee || isThreadParticipant) {
+              const reason = isAssignee
+                ? '내 씬에 댓글'
+                : isCounterpartAssignee
+                ? '함께 작업 중인 씬에 댓글'
+                : '내가 댓글 단 씬에 새 댓글';
               dispatchNotification({
                 type: 'comment',
-                title: `${commentUserName || '누군가'}님이 댓글을 남겼습니다`,
-                body: commentText ? (commentText.length > 50 ? commentText.slice(0, 50) + '...' : commentText) : undefined,
-                metadata: { sceneId: scene!.id, sceneName: scene!.sceneId },
+                title: `${author}님이 ${sceneIdLabel}${reason}`,
+                body: bodyShort,
+                metadata: baseMetadata,
               }, notiSettings);
             }
           }
         }
+        // 코덱스 P1 fix: 알림 분기 *후* 캐시 무효화 + 댓글 패널 리로드 신호.
+        invalidatePartCache();
+        window.dispatchEvent(new Event('bflow:comments-invalidated'));
         return;
       }
 

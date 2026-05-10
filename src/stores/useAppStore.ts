@@ -43,6 +43,10 @@ interface AppState {
     partId?: string;
     initialTab?: 'detail' | 'revisions' | 'files' | 'history';
     focusRevisionId?: string;
+    /** v1.24.0: 모달 진입 시 자동 스크롤 + 펄스 강조할 댓글 id (알림/활동 점프용). */
+    focusCommentId?: string;
+    /** v1.24.0: 모달 진입 시 부서 토글을 강제할 모드 (최근 작업 위젯 → 'all' 자동). */
+    forceDeptFilter?: 'all' | 'bg' | 'acting';
   } | null;
   setPendingSceneModalRequest: (req: AppState['pendingSceneModalRequest']) => void;
 

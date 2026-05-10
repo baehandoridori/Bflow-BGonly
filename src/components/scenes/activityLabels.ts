@@ -73,27 +73,41 @@ export function describeActivity(activity: Activity): ActivityVisual {
     case 'comment_add':
       return { Icon: MessageSquare, text: '댓글 작성', tone: TONE.comment };
     case 'revision_add': {
-      // 등록 시 description 멘트 (있으면) 같이 표시 — 한솔 2026-05-02
+      // v1.24.0: 차수(re#N) + description 멘트 (앞 30자). 차수는 detail.revisionNumber 가 있을 때만.
       const desc = readDetailString(detail, 'descriptionPreview');
+      const num = readDetailNumber(detail, 'revisionNumber');
+      const prefix = num ? `re#${num}` : '리비전';
       return {
         Icon: Film,
-        text: desc ? `리비전 등록 — “${trimText(desc, 40)}”` : '리비전 등록',
+        text: desc ? `${prefix} 등록 — “${trimText(desc, 30)}”` : `${prefix} 등록`,
         tone: TONE.revision,
       };
     }
-    case 'revision_in_progress':
-      return { Icon: Film, text: '리비전 진행중', tone: TONE.progress };
+    case 'revision_in_progress': {
+      const num = readDetailNumber(detail, 'revisionNumber');
+      const desc = readDetailString(detail, 'descriptionPreview');
+      const prefix = num ? `re#${num}` : '리비전';
+      return {
+        Icon: Film,
+        text: desc ? `${prefix} 진행중 — “${trimText(desc, 30)}”` : `${prefix} 진행중`,
+        tone: TONE.progress,
+      };
+    }
     case 'revision_resolve': {
-      // 해결 시 resolvedNote 멘트 (있으면) 같이 표시
-      const note = readDetailString(detail, 'resolvedNote');
+      // v1.24.0: 차수(re#N) + resolvedNote 또는 description 멘트.
+      const note = readDetailString(detail, 'resolvedNote') || readDetailString(detail, 'descriptionPreview');
+      const num = readDetailNumber(detail, 'revisionNumber');
+      const prefix = num ? `re#${num} ✓` : '리비전';
       return {
         Icon: Sparkles,
-        text: note ? `리비전 해결 — “${trimText(note, 40)}”` : '리비전 해결',
+        text: note ? `${prefix} 해결 — “${trimText(note, 30)}”` : `${prefix} 해결`,
         tone: TONE.resolved,
       };
     }
-    case 'revision_delete':
-      return { Icon: Trash2, text: '리비전 삭제', tone: TONE.scenedel };
+    case 'revision_delete': {
+      const num = readDetailNumber(detail, 'revisionNumber');
+      return { Icon: Trash2, text: num ? `re#${num} 삭제` : '리비전 삭제', tone: TONE.scenedel };
+    }
     case 'scene_add':
       return { Icon: Plus, text: '씬 생성', tone: TONE.scene };
     case 'scene_delete':
@@ -127,6 +141,11 @@ function readDetailBool(detail: Activity['detail'], key: string): boolean | unde
   if (!detail || typeof detail !== 'object') return undefined;
   const v = (detail as Record<string, unknown>)[key];
   return typeof v === 'boolean' ? v : undefined;
+}
+function readDetailNumber(detail: Activity['detail'], key: string): number | undefined {
+  if (!detail || typeof detail !== 'object') return undefined;
+  const v = (detail as Record<string, unknown>)[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
 function trimText(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + '…' : s;

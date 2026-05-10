@@ -140,8 +140,23 @@ export function broadcastCommentAdded(
   userId: string,
   text: string,
   mentions?: string[],
+  /** v1.24.0: realtime 경로와 동일한 분기를 위해 commentId/parentCommentId/partId 도 함께 broadcast.
+   *  렌더러는 두 경로(broadcast + realtime) 어느 쪽에서 먼저 도착하든 같은 알림 분기를 호출해야 한다. */
+  commentId?: string,
+  parentCommentId?: string | null,
+  partId?: string,
 ): void {
-  safeSend('comment-added', { sceneId, userName, userId, text, mentions: mentions ?? [], ts: Date.now() });
+  safeSend('comment-added', {
+    sceneId,
+    userName,
+    userId,
+    text,
+    mentions: mentions ?? [],
+    commentId: commentId ?? null,
+    parentCommentId: parentCommentId ?? null,
+    partId: partId ?? null,
+    ts: Date.now(),
+  });
 }
 
 /** Broadcast 채널 해제 */

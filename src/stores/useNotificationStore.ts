@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 
 // ─── 알림 타입 정의 ─────────────────────────────────
-export type NotificationType = 'scene_change' | 'comment' | 'milestone' | 'system' | 'revision';
+/**
+ * 알림 타입 (v1.24.0)
+ * - 'comment': 자동 알림 (씬 작업자에게 발송, 차분한 톤)
+ * - 'mention': 명시적 멘션 (@-멘션·답글 자동 멘션, 강한 톤 + 펄스)
+ * - 'revision': 리비전 등록/진행/완료 알림
+ * - 'scene_change' / 'milestone' / 'system': 기존 동작 유지
+ */
+export type NotificationType = 'scene_change' | 'comment' | 'mention' | 'milestone' | 'system' | 'revision';
 
 export interface AppNotification {
   id: string;
@@ -14,6 +21,7 @@ export interface AppNotification {
     partId?: string;
     sceneId?: string;
     sceneName?: string;
+    sheetName?: string;
     fromStage?: string;
     toStage?: string;
     changedBy?: string;
@@ -22,6 +30,10 @@ export interface AppNotification {
     revisionId?: string;
     /** v1.18.0: 리비전 알림 액션 종류 */
     revisionAction?: 'add' | 'in_progress' | 'resolve' | 'comment';
+    /** v1.24.0: 답글 알림이면 부모 댓글 id (점프 시 펼침 처리용) */
+    parentCommentId?: string;
+    /** v1.24.0: 멘션 알림 발신자 식별용 (자동 멘션과 직접 멘션 구분) */
+    mentionedBy?: string;
   };
   isRead: boolean;
   createdAt: string; // ISO 8601
@@ -35,18 +47,32 @@ function countUnread(notifications: AppNotification[]): number {
   return notifications.filter((x) => !x.isRead).length;
 }
 
-/** notifications 변경 시 unreadCount 함께 set */
+/**
+ * v1.24.0: 안 읽은 멘션 카운트 — 헤더 벨이 강한 펄스로 전환되는 트리거.
+ * type==='mention' 만 멘션으로 간주 (자동 'comment' 알림은 차분한 톤).
+ */
+function countUnreadMentions(notifications: AppNotification[]): number {
+  return notifications.filter((x) => !x.isRead && x.type === 'mention').length;
+}
+
+/** notifications 변경 시 unreadCount + unreadMentionCount 함께 set */
 function setNotifications(
   set: (partial: Partial<NotificationState>) => void,
   notifications: AppNotification[],
 ) {
-  set({ notifications, unreadCount: countUnread(notifications) });
+  set({
+    notifications,
+    unreadCount: countUnread(notifications),
+    unreadMentionCount: countUnreadMentions(notifications),
+  });
 }
 
 interface NotificationState {
   notifications: AppNotification[];
   /** 파생 상태: notifications에서 계산 */
   readonly unreadCount: number;
+  /** v1.24.0: 안 읽은 멘션 카운트 — 헤더 벨 강한 펄스 분기 */
+  readonly unreadMentionCount: number;
   panelOpen: boolean;
 
   // 액션
@@ -75,6 +101,7 @@ async function persistToDisk(notifications: AppNotification[]) {
 export const useNotificationStore = create<NotificationState>((set, get) => ({
   notifications: [],
   unreadCount: 0,
+  unreadMentionCount: 0,
   panelOpen: false,
 
   addNotification: (n) => {

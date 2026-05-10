@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink } from 'lucide-react';
+import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
+import '@/styles/notification-bell.css';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
 function timeAgo(iso: string): string {
@@ -23,7 +24,9 @@ function timeAgo(iso: string): string {
 function typeConfig(type: NotificationType) {
   switch (type) {
     case 'scene_change': return { icon: RefreshCw, color: '#74B9FF', label: '씬 변경' };
-    case 'comment': return { icon: MessageSquare, color: '#6C5CE7', label: '댓글' };
+    case 'comment': return { icon: MessageSquare, color: '#8B8DA3', label: '댓글' };
+    // v1.24.0: 멘션 — '@' 아이콘 + accent 색상. 댓글과 명확히 구분.
+    case 'mention': return { icon: AtSign, color: 'rgb(var(--color-accent))', label: '멘션' };
     case 'milestone': return { icon: Award, color: '#00B894', label: '마일스톤' };
     case 'system': return { icon: Bell, color: '#8B8DA3', label: '시스템' };
     // v1.18.0: 리비전 알림 — MessageSquareWarning 아이콘 + accent 색상.
@@ -42,8 +45,10 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
   //   다른 PC 사용자가 멘션 보낼 때 useDataStore 에 그 씬이 없어 metadata=undefined 가 되는
   //   케이스가 있는데, 그래도 본문 클릭 navigate 가 자체 fallback 으로 처리하므로 버튼 노출이 안전.
   const hasMetadataTarget = !!(n.metadata?.sceneId || n.metadata?.sceneName);
-  const isSceneRelated = n.type === 'comment' || n.type === 'scene_change' || n.type === 'revision';
+  const isSceneRelated = n.type === 'comment' || n.type === 'mention' || n.type === 'scene_change' || n.type === 'revision';
   const hasNavigateTarget = hasMetadataTarget || isSceneRelated;
+  // v1.24.0: 멘션 알림 — 더 강한 시각 신호 (액센트 좌측 바 + @ 배지 + 카드 배경 진한 alpha).
+  const isMention = n.type === 'mention';
 
   const handleItemClick = () => {
     if (!n.isRead) markAsRead(n.id);
@@ -60,13 +65,23 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
         'group/noti relative w-full text-left px-3 py-2.5 flex gap-2.5 transition-colors cursor-pointer rounded-lg',
         n.isRead
           ? 'hover:bg-bg-border/15'
-          : 'bg-accent/[0.08] hover:bg-accent/[0.12]',
+          // v1.24.0: 멘션은 카드 배경 더 진하게, 자동 알림은 차분.
+          : isMention
+            ? 'bg-accent/[0.13] hover:bg-accent/[0.18]'
+            : 'bg-accent/[0.04] hover:bg-accent/[0.08]',
       )}
     >
-      {/* 미읽 바 */}
-      <div className="flex-shrink-0 w-0.5 self-stretch rounded-full" style={{
-        backgroundColor: n.isRead ? 'transparent' : cfg.color,
-      }} />
+      {/* 미읽 바 — v1.24.0: 멘션은 액센트 색, 자동은 회색 (시각 차별화) */}
+      <div
+        className="flex-shrink-0 w-[3px] self-stretch rounded-full"
+        style={{
+          backgroundColor: n.isRead
+            ? 'transparent'
+            : isMention
+              ? 'rgb(var(--color-accent))'
+              : 'rgb(var(--color-bg-border) / 1.4)',
+        }}
+      />
 
       {/* 아이콘 */}
       <div className="flex-shrink-0 mt-0.5">
@@ -75,15 +90,21 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
 
       {/* 내용 — truncate 된 텍스트는 호버 시 GlobalTooltip 으로 전체 노출 */}
       <div className="flex-1 min-w-0">
-        <p
-          title={n.title}
-          className={cn(
-            'text-[12px] leading-tight truncate',
-            n.isRead ? 'text-text-secondary/80' : 'text-text-primary font-medium',
+        <div className="flex items-center gap-1.5 min-w-0">
+          <p
+            title={n.title}
+            className={cn(
+              'text-[12px] leading-tight truncate flex-1 min-w-0',
+              n.isRead ? 'text-text-secondary/80' : isMention ? 'text-text-primary font-semibold' : 'text-text-primary font-medium',
+            )}
+          >
+            {n.title}
+          </p>
+          {/* v1.24.0: 멘션 배지 — '@' 표기로 일반 댓글 알림과 즉시 구분 */}
+          {isMention && !n.isRead && (
+            <span className="flex-shrink-0 text-[9px] font-bold text-accent px-1.5 py-0.5 rounded mention-badge">@</span>
           )}
-        >
-          {n.title}
-        </p>
+        </div>
         {n.body && (
           <p title={n.body} className="text-[11px] text-text-secondary/65 mt-0.5 truncate">{n.body}</p>
         )}
@@ -130,21 +151,34 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
 
 // ─── 벨 아이콘 버튼 ──────────────────────────────────
 export function NotificationBell() {
-  const { unreadCount, panelOpen, togglePanel } = useNotificationStore();
+  const { unreadCount, unreadMentionCount, panelOpen, togglePanel } = useNotificationStore();
+  // v1.24.0: 시각 강조 분기 — 멘션 우선, 자동 알림은 차분한 글로우, 안 읽음 0개면 일반.
+  const hasMention = unreadMentionCount > 0;
+  const hasUnread = unreadCount > 0;
 
   return (
     <div className="relative">
       <button
         onClick={togglePanel}
-        title="알림"
+        title={hasMention ? `멘션 ${unreadMentionCount}개 포함 ${unreadCount}개 새 알림` : `${unreadCount}개 새 알림`}
         className={cn(
           'p-2 rounded-lg transition-colors relative cursor-pointer',
-          panelOpen ? 'bg-accent/15 text-accent' : 'hover:bg-bg-border/50',
+          panelOpen
+            ? 'bg-accent/15 text-accent'
+            : 'hover:bg-bg-border/50',
+          // v1.24.0: 안 읽음 시 strong 글로우, 멘션 포함 시 강한 펄스 추가.
+          !panelOpen && hasUnread && !hasMention && 'bell-glow-soft',
+          !panelOpen && hasMention && 'bell-glow-mention',
         )}
       >
-        <Bell size={18} />
-        {unreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold leading-none">
+        <Bell size={18} className={cn(hasMention && !panelOpen && 'text-accent')} />
+        {hasUnread && (
+          <span
+            className={cn(
+              'absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full text-white text-[9px] font-bold leading-none',
+              hasMention ? 'badge-grad-strong' : 'badge-grad',
+            )}
+          >
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
@@ -182,6 +216,9 @@ function NotificationDropdown() {
     // ScenesView 가 listen 하는 window CustomEvent 로 라우팅.
     const isRevisionNotif = n.type === 'revision';
     const revisionId = n.metadata?.revisionId;
+    // v1.24.0: 댓글/멘션 알림 — 모달 자동 오픈 + 해당 댓글 자동 스크롤 + 펄스.
+    const isCommentLikeNotif = n.type === 'comment' || n.type === 'mention';
+    const commentId = n.metadata?.commentId;
 
     if (sceneId || sceneName) {
       // 코덱스 P1 fix (2026-05-05): sceneName 이 'EP01:A:a001' 형식 sceneKey 면
@@ -237,6 +274,19 @@ function NotificationDropdown() {
                 initialTab: 'revisions',
                 focusRevisionId: revisionId,
               });
+            } else if (isCommentLikeNotif && commentId) {
+              // v1.24.0: 댓글/멘션 알림 — 모달 자동 오픈 + 해당 댓글 자동 스크롤 + 펄스.
+              // 코덱스 P1 fix (2026-05-10): forceDeptFilter:'all' 강제. counterpart assignee 알림을
+              //   반대 부서 필터에서 클릭할 때 단일 부서 매칭 실패하던 회귀 차단 (ActivityFeed 점프와 일관).
+              useAppStore.getState().setPendingSceneModalRequest({
+                sceneUuid: found.id,
+                sceneName: found.sceneId,
+                episodeNumber: ep.episodeNumber,
+                partId: part.partId,
+                initialTab: 'detail',
+                focusCommentId: commentId,
+                forceDeptFilter: 'all',
+              });
             }
             return;
           }
@@ -249,9 +299,8 @@ function NotificationDropdown() {
         type: 'warning',
         message: '씬을 자동으로 찾지 못했어요. 씬 뷰에서 직접 확인해주세요.',
       });
-    } else if (n.type === 'comment' || n.type === 'scene_change' || n.type === 'revision') {
-      // v1.23.1 codex 1차 P2: metadata 가 비어있어도 씬 관련 알림이면 씬 뷰로만이라도 이동 + 안내.
-      //   #6 fix (hasNavigateTarget 관대화) 가 만든 broken UX (버튼 클릭해도 아무 일 X) 보완.
+    } else if (n.type === 'comment' || n.type === 'mention' || n.type === 'scene_change' || n.type === 'revision') {
+      // v1.23.1 codex 1차 P2 + v1.24.0: metadata 가 비어있어도 씬 관련 알림이면 씬 뷰로 이동 + 안내.
       setView('scenes');
       useAppStore.getState().setToast?.({
         type: 'info',

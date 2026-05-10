@@ -136,8 +136,10 @@ export async function addCommentToSupabase(
   images: string[] = [],
   /** v1.18.0: 리비전 맥락 댓글이면 해당 id, 일반 씬 댓글이면 null. */
   revisionId: string | null = null,
+  /** v1.24.0: 1단계 대댓글이면 부모 댓글 id, 일반 댓글이면 null. */
+  parentCommentId: string | null = null,
 ): Promise<void> {
-  await window.electronAPI.supabaseAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId);
+  await window.electronAPI.supabaseAddComment(commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId);
 }
 
 export async function editCommentInSupabase(commentId: string, text: string, mentions: string[], images?: string[]): Promise<void> {

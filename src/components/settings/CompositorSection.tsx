@@ -34,11 +34,17 @@ export function CompositorSection() {
 
   const [compositorIds, setCompositorIds] = useState<Set<string>>(initial);
   const [saving, setSaving] = useState(false);
+  // v1.24.0 한솔 보고 fix: dirty 상태일 때 외부 allUsers reload 가 사용자 입력을 덮어쓰던 race 방어.
+  //   App.tsx 라인 632 의 currentUser 의존 loadUsers, broadcast 'users' UPDATE 등이 입력 도중 trigger 되면
+  //   useEffect 가 setCompositorIds(initial) 로 덮어 사용자가 체크한 상태가 풀렸음.
+  //   → dirty 플래그로 사용자가 토글 중일 땐 외부 reload 무시. 저장 완료 후에만 fresh state 동기화.
+  const [dirty, setDirty] = useState(false);
 
-  // 외부 사용자 목록 변경 시 (다른 어드민이 동시 변경했거나 reload 한 경우) 로컬 set 동기화
+  // 외부 사용자 목록 변경 시 (다른 어드민이 동시 변경했거나 reload 한 경우) 로컬 set 동기화 — dirty 일 땐 보존
   useEffect(() => {
+    if (dirty) return;
     setCompositorIds(initial);
-  }, [initial]);
+  }, [initial, dirty]);
 
   if (!isAdmin) return null;
 
@@ -56,11 +62,14 @@ export function CompositorSection() {
       next.add(id);
     }
     setCompositorIds(next);
+    setDirty(true);
   }
 
   async function handleSave() {
     if (!hasChanges || saving) return;
     setSaving(true);
+    const expectedSize = compositorIds.size;
+    const expectedIds = new Set(compositorIds); // snapshot before async
     try {
       // 변경된 사용자만 일괄 업데이트
       await Promise.all(
@@ -69,10 +78,26 @@ export function CompositorSection() {
       // store 새로고침 — App.tsx 의 useEffect 와 동일 패턴 (loadUsers → setUsers)
       const fresh = await loadUsers();
       setUsers(fresh);
-      toast.success(`${dirtyUsers.length}명의 컴포지터 정보를 저장했습니다.`);
+
+      // v1.24.0 한솔 보고 fix: 저장 후 verify — DB 가 실제로 반영했는지 fresh read 로 확인.
+      //   silent fail (마이그레이션 미적용·RLS 차단 등) 시 toast 성공만 뜨던 문제 차단 → 명확한 에러로.
+      const actualIds = new Set(fresh.filter((u) => u.isCompositor === true).map((u) => u.id));
+      const mismatched = [...expectedIds].some((id) => !actualIds.has(id))
+        || [...actualIds].some((id) => !expectedIds.has(id));
+      if (mismatched) {
+        toast.error(
+          'DB 반영이 확인되지 않았습니다. is_compositor 컬럼/마이그레이션 또는 권한을 점검해주세요.',
+          { duration: 8000 },
+        );
+        // dirty 유지 → 사용자 변경 보존, 재시도 가능
+      } else {
+        setDirty(false);
+        toast.success(`${expectedSize}명을 컴포지터로 저장했습니다.`);
+      }
     } catch (err) {
       console.error('[CompositorSection] 저장 실패:', err);
-      toast.error('컴포지터 저장에 실패했습니다.');
+      toast.error('컴포지터 저장에 실패했습니다. 콘솔에서 상세 오류를 확인하세요.');
+      // 실패 시 dirty 유지 — 재시도 가능
     } finally {
       setSaving(false);
     }
