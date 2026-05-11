@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
-import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged } from './broadcast';
+import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastScenePhaseUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged } from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
 
 // ─── 일괄 작업 타입 ─────────────────────────────
@@ -327,6 +327,10 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
             lengthChange: (s as { length_change?: 'LD' | 'SD' | null }).length_change ?? null,
             createdAt: s.created_at || undefined,
             updatedAt: s.updated_at || undefined,
+            // v1.25.0~ 액팅 단계 토글 (BG 씬은 NULL 유지)
+            sceneState: (s as { scene_state?: string | null }).scene_state ?? null,
+            workRound: (s as { work_round?: number | null }).work_round ?? 0,
+            feedbackRound: (s as { feedback_round?: number | null }).feedback_round ?? 0,
           })),
         };
       }),
@@ -596,6 +600,27 @@ export async function updateSceneStage(
   broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
 }
 
+/** v1.25.0~ 액팅 씬 단계 상태 + 차수 업데이트 (한 번의 트랜잭션으로 3컬럼 동기화).
+ *  spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md (섹션 7-3) */
+export async function updateScenePhase(
+  sceneUuid: string,
+  sceneState: 'wait' | 'work' | 'feedback' | 'done',
+  workRound: number,
+  feedbackRound: number,
+  updatedBy?: string,
+): Promise<void> {
+  const update: Record<string, unknown> = {
+    scene_state: sceneState,
+    work_round: workRound,
+    feedback_round: feedbackRound,
+    updated_at: new Date().toISOString(),
+  };
+  if (updatedBy) update.updated_by = updatedBy;
+  const { error } = await supabase.from('scenes').update(update).eq('id', sceneUuid);
+  throwIfError(error);
+  broadcastScenePhaseUpdate(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
+}
+
 /** 대량 씬 체크박스 토글 (부분 실패 허용) — RPC 경유 */
 export async function bulkUpdateSceneStages(
   updates: BulkStageUpdate[],
@@ -797,6 +822,8 @@ export async function readUsers(): Promise<SupabaseUser[]> {
     createdAt: u.created_at || '',
     // v1.18.1: 컴포지터 단일 boolean (한솔 정정 — BG/ACT 부서 구분 없음)
     isCompositor: u.is_compositor === true,
+    // v1.25.0~: 액팅 검수자 (컴포지터와 독립)
+    isActingSupervisor: u.is_acting_supervisor === true,
   }));
 }
 
@@ -831,6 +858,7 @@ export async function updateUser(
     slackId: 'slack_id', hireDate: 'hire_date', birthday: 'birthday',
     isInitialPassword: 'is_initial_password',
     isCompositor: 'is_compositor',
+    isActingSupervisor: 'is_acting_supervisor',
   };
   for (const [k, v] of Object.entries(updates)) {
     dbUpdates[fieldMap[k] || k] = v;

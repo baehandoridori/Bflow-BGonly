@@ -23,6 +23,12 @@ function createChannel(onReceive: BroadcastListener): RealtimeChannel {
     .on('broadcast', { event: 'scene-field-update' }, ({ payload }) => {
       onReceive('scene-field-update', payload as Record<string, unknown>);
     })
+    .on('broadcast', { event: 'scene-phase-update' }, ({ payload }) => {
+      onReceive('scene-phase-update', payload as Record<string, unknown>);
+    })
+    .on('broadcast', { event: 'acting-feedback-request' }, ({ payload }) => {
+      onReceive('acting-feedback-request', payload as Record<string, unknown>);
+    })
     .on('broadcast', { event: 'data-change' }, ({ payload }) => {
       onReceive('data-change', payload as Record<string, unknown>);
     })
@@ -125,6 +131,39 @@ export function broadcastSceneFieldUpdate(
 /** 구조적 변경 (에피소드/파트/씬 추가·삭제 등) broadcast 전송 */
 export function broadcastDataChange(table: string, action: string, senderId?: string): void {
   safeSend('data-change', { table, action, senderId, ts: Date.now() });
+}
+
+/** v1.25.0~ 액팅 씬 단계 변경 broadcast (sceneState + workRound + feedbackRound 한 번에). */
+export function broadcastScenePhaseUpdate(
+  sceneUuid: string,
+  sceneState: string,
+  workRound: number,
+  feedbackRound: number,
+  senderId?: string,
+): void {
+  safeSend('scene-phase-update', { sceneUuid, sceneState, workRound, feedbackRound, senderId, ts: Date.now() });
+}
+
+/** v1.25.0~ 액팅 피드백 요청 알림 broadcast.
+ *  recipients 안에 자신의 user.id 가 있는 클라이언트만 토스트 표시.
+ *  spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md (섹션 7) */
+export interface FeedbackBroadcastPayload {
+  sceneUuid: string;
+  sceneId: string;
+  sheetName: string;
+  episodeNumber: number;
+  senderId: string;
+  senderName: string;
+  fromState: string;
+  toState: string;
+  workRound: number;
+  feedbackRound: number;
+  recipients: string[];
+  message?: string;
+  ts: number;
+}
+export function broadcastActingFeedbackRequest(payload: Omit<FeedbackBroadcastPayload, 'ts'>): void {
+  safeSend('acting-feedback-request', { ...payload, ts: Date.now() });
 }
 
 /** 캘린더(공개 GCal 이벤트 + 개인 비공개 이벤트) 변경 broadcast.

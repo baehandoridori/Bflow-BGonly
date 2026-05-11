@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { Episode, Scene, DashboardStats, Department, Stage } from '@/types';
+import type { Episode, Scene, DashboardStats, Department, Stage, ScenePhaseState } from '@/types';
+import { SCENE_PHASE_ROUND_MIN, SCENE_PHASE_ROUND_MAX } from '@/types';
 import { calcDashboardStats } from '@/utils/calcStats';
 
 interface DataState {
@@ -37,6 +38,29 @@ interface DataState {
   // 명시적 값 적용 (delta 수신용 — 토글이 아니라 값 직접 세팅)
   setSceneStageValue: (sheetName: string, sceneId: string, stage: Stage, value: boolean) => void;
   setSceneFieldBySceneId: (sheetName: string, sceneId: string, field: string, value: string) => void;
+
+  /**
+   * v1.25.0~: 액팅 씬 단계 상태 변경 (낙관적). 진입 시점에 차수 자동 동기화.
+   * spec 4-2 전이 규칙 적용:
+   *  - 대기 → 작업중: workRound = 1 (기존 0 일 때)
+   *  - 작업중 → 피드백 대기: feedbackRound = workRound 동기화
+   *  - 피드백 대기 → 작업중: workRound = feedbackRound + 1 (자동 +1)
+   *  - 어떤 상태 → 대기 또는 완료: round 모두 0
+   *  - 어떤 상태 → 피드백 대기 (직접 점프): feedbackRound = max(1, 기존)
+   */
+  setScenePhaseOptimistic: (
+    sheetName: string,
+    sceneId: string,
+    newState: ScenePhaseState
+  ) => void;
+
+  /** 차수 +/- 수동 조정. 활성 칩 안 ▴▾ 버튼용. [1, 99] 범위 클램프. */
+  bumpScenePhaseRoundOptimistic: (
+    sheetName: string,
+    sceneId: string,
+    kind: 'work' | 'feedback',
+    delta: 1 | -1
+  ) => void;
 
   addEpisodeOptimistic: (episodeNumber: number, department?: Department) => void;
   addPartOptimistic: (episodeNumber: number, partId: string, department?: Department) => void;
@@ -114,6 +138,72 @@ export const useDataStore = create<DataState>((set, get) => ({
             scenes: part.scenes.map((scene) => {
               if (scene.sceneId !== sceneId) return scene;
               return { ...scene, [stage]: value };
+            }),
+          };
+        }),
+      };
+    });
+    set(applyUpdate(get, episodes));
+  },
+
+  setScenePhaseOptimistic: (sheetName, sceneId, newState) => {
+    const episodes = get().episodes.map((ep) => {
+      if (!ep.parts.some((p) => p.sheetName === sheetName)) return ep;
+      return {
+        ...ep,
+        parts: ep.parts.map((part) => {
+          if (part.sheetName !== sheetName) return part;
+          return {
+            ...part,
+            scenes: part.scenes.map((scene) => {
+              if (scene.sceneId !== sceneId) return scene;
+              const prev = scene.sceneState ?? null;
+              const prevWork = scene.workRound ?? 0;
+              const prevFb = scene.feedbackRound ?? 0;
+              let workRound = prevWork;
+              let feedbackRound = prevFb;
+              if (newState === 'wait' || newState === 'done') {
+                workRound = 0;
+                feedbackRound = 0;
+              } else if (newState === 'work') {
+                if (prev === 'feedback') {
+                  workRound = prevFb + 1; // 자동 +1
+                } else if (prev !== 'work') {
+                  workRound = Math.max(1, prevWork || 1);
+                }
+                // prev === 'work' 이면 그대로 유지
+              } else if (newState === 'feedback') {
+                if (prev === 'work') {
+                  feedbackRound = prevWork; // 라운드 동기화
+                } else if (prev !== 'feedback') {
+                  feedbackRound = Math.max(1, prevFb || 1);
+                }
+              }
+              return { ...scene, sceneState: newState, workRound, feedbackRound };
+            }),
+          };
+        }),
+      };
+    });
+    set(applyUpdate(get, episodes));
+  },
+
+  bumpScenePhaseRoundOptimistic: (sheetName, sceneId, kind, delta) => {
+    const episodes = get().episodes.map((ep) => {
+      if (!ep.parts.some((p) => p.sheetName === sheetName)) return ep;
+      return {
+        ...ep,
+        parts: ep.parts.map((part) => {
+          if (part.sheetName !== sheetName) return part;
+          return {
+            ...part,
+            scenes: part.scenes.map((scene) => {
+              if (scene.sceneId !== sceneId) return scene;
+              const cur = kind === 'work' ? (scene.workRound ?? 0) : (scene.feedbackRound ?? 0);
+              const next = Math.max(SCENE_PHASE_ROUND_MIN, Math.min(SCENE_PHASE_ROUND_MAX, cur + delta));
+              return kind === 'work'
+                ? { ...scene, workRound: next }
+                : { ...scene, feedbackRound: next };
             }),
           };
         }),

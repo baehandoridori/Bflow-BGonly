@@ -3,8 +3,10 @@ import { toast as sonnerToast } from 'sonner';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
-import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
-import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene } from '@/types';
+import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS } from '@/types';
+import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState } from '@/types';
+import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
+import { updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
 import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 import {
@@ -1488,6 +1490,10 @@ export function ScenesView() {
   const deleteSceneOptimistic = useDataStore((s) => s.deleteSceneOptimistic);
   const updateSceneFieldOptimistic = useDataStore((s) => s.updateSceneFieldOptimistic);
   const setEpisodes = useDataStore((s) => s.setEpisodes);
+  // v1.25.0~ 액팅 단계 토글 액션
+  const setScenePhaseOptimistic = useDataStore((s) => s.setScenePhaseOptimistic);
+  const bumpScenePhaseRoundOptimistic = useDataStore((s) => s.bumpScenePhaseRoundOptimistic);
+  const findSceneBySceneId = useDataStore((s) => s.findSceneBySceneId);
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery, selectedDepartment } = useAppStore();
   const colorMode = useAppStore((s) => s.colorMode);
   const revisionCountByScene = useRevisionStore((s) => s.revisionCountByScene);
@@ -1500,6 +1506,187 @@ export function ScenesView() {
   const isBulkInFlight = useBulkOperationsStore((s) => s.activeOp?.status === 'in-flight');
   const isLight = colorMode === 'light';
 
+  // v1.25.0~ 피드백 대기 확인 모달 상태
+  const [feedbackModal, setFeedbackModal] = useState<{
+    open: boolean;
+    sheetName: string;
+    sceneId: string;
+    scene: Scene;
+    episodeNumber: number;
+    fromState: ScenePhaseState;
+    fromWorkRound: number;
+    fromFeedbackRound: number;
+  } | null>(null);
+
+  // v1.25.0~ 액팅 토글 핸들러
+  const handleActPhaseStateClick = useCallback(
+    async (sheetName: string, sceneId: string, newState: ScenePhaseState) => {
+      const scene = findSceneBySceneId(sceneId);
+      if (!scene?.id) return;
+      // 낙관적 업데이트 (전이 규칙은 store 안에서 처리)
+      const prevState = scene.sceneState ?? 'wait';
+      const prevWork = scene.workRound ?? 0;
+      const prevFb = scene.feedbackRound ?? 0;
+      setScenePhaseOptimistic(sheetName, sceneId, newState);
+      // 새 round 값을 store와 동일한 규칙으로 다시 계산해 Supabase 동기화
+      let workRound = prevWork;
+      let feedbackRound = prevFb;
+      if (newState === 'wait' || newState === 'done') {
+        workRound = 0;
+        feedbackRound = 0;
+      } else if (newState === 'work') {
+        if (prevState === 'feedback') workRound = prevFb + 1;
+        else if (prevState !== 'work') workRound = Math.max(1, prevWork || 1);
+      } else if (newState === 'feedback') {
+        if (prevState === 'work') feedbackRound = prevWork;
+        else if (prevState !== 'feedback') feedbackRound = Math.max(1, prevFb || 1);
+      }
+      try {
+        await updateScenePhaseInSupabase(scene.id, newState, workRound, feedbackRound, currentUser?.id);
+      } catch (err) {
+        console.error('[ScenesView] 단계 변경 실패:', err);
+        sonnerToast.error('단계 변경 저장에 실패했습니다.');
+        // 롤백
+        setScenePhaseOptimistic(sheetName, sceneId, prevState);
+      }
+    },
+    [findSceneBySceneId, setScenePhaseOptimistic, currentUser?.id],
+  );
+
+  const handleActFeedbackRequest = useCallback(
+    (sheetName: string, sceneId: string) => {
+      const scene = findSceneBySceneId(sceneId);
+      if (!scene) return;
+      const ep = episodes.find((e) => e.parts.some((p) => p.sheetName === sheetName));
+      if (!ep) return;
+      setFeedbackModal({
+        open: true,
+        sheetName,
+        sceneId,
+        scene,
+        episodeNumber: ep.episodeNumber,
+        fromState: scene.sceneState ?? 'wait',
+        fromWorkRound: scene.workRound ?? 0,
+        fromFeedbackRound: scene.feedbackRound ?? 0,
+      });
+    },
+    [episodes, findSceneBySceneId],
+  );
+
+  const handleActRoundBump = useCallback(
+    async (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => {
+      const scene = findSceneBySceneId(sceneId);
+      if (!scene?.id) return;
+      const prevWork = scene.workRound ?? 0;
+      const prevFb = scene.feedbackRound ?? 0;
+      bumpScenePhaseRoundOptimistic(sheetName, sceneId, kind, delta);
+      const newWork = kind === 'work' ? Math.max(1, Math.min(99, prevWork + delta)) : prevWork;
+      const newFb = kind === 'feedback' ? Math.max(1, Math.min(99, prevFb + delta)) : prevFb;
+      try {
+        await updateScenePhaseInSupabase(
+          scene.id,
+          scene.sceneState ?? 'wait',
+          newWork,
+          newFb,
+          currentUser?.id,
+        );
+      } catch (err) {
+        console.error('[ScenesView] 차수 변경 실패:', err);
+        sonnerToast.error('차수 변경 저장에 실패했습니다.');
+        bumpScenePhaseRoundOptimistic(sheetName, sceneId, kind, delta === 1 ? -1 : 1);
+      }
+    },
+    [findSceneBySceneId, bumpScenePhaseRoundOptimistic, currentUser?.id],
+  );
+
+  // 피드백 모달 — 알림 보내기 (상태 변경 + broadcast)
+  const sendFeedbackWithNotification = useCallback(
+    async (recipientIds: string[]) => {
+      if (!feedbackModal) return;
+      const { sheetName, sceneId, scene, episodeNumber, fromState, fromWorkRound, fromFeedbackRound } = feedbackModal;
+      if (!scene.id) {
+        setFeedbackModal(null);
+        return;
+      }
+      const targetRound = fromState === 'work' ? fromWorkRound : Math.max(1, fromFeedbackRound || 1);
+
+      // 1) 상태 변경 (낙관적 + Supabase)
+      setScenePhaseOptimistic(sheetName, sceneId, 'feedback');
+      try {
+        await updateScenePhaseInSupabase(scene.id, 'feedback', fromWorkRound, targetRound, currentUser?.id);
+      } catch (err) {
+        console.error('[ScenesView] 피드백 대기 저장 실패:', err);
+        sonnerToast.error('피드백 대기 저장에 실패했습니다.');
+        setScenePhaseOptimistic(sheetName, sceneId, fromState);
+        setFeedbackModal(null);
+        return;
+      }
+
+      // 2) 알림 발송 (recipients 가 비어있으면 skip)
+      if (recipientIds.length > 0) {
+        try {
+          await dispatchActingFeedbackNotification({
+            sceneUuid: scene.id,
+            sceneId,
+            sheetName,
+            episodeNumber,
+            senderId: currentUser?.id ?? '',
+            senderName: currentUser?.name ?? '익명',
+            fromState,
+            toState: 'feedback',
+            workRound: fromWorkRound,
+            feedbackRound: targetRound,
+            recipients: recipientIds,
+          });
+          sonnerToast.success(`${recipientIds.length}명에게 피드백 알림을 보냈습니다.`);
+        } catch (err) {
+          console.error('[ScenesView] 피드백 알림 발송 실패:', err);
+          sonnerToast.error('알림 발송에 실패했습니다. 상태는 변경됐어요.');
+        }
+      }
+
+      setFeedbackModal(null);
+    },
+    [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic],
+  );
+
+  // 피드백 모달 — 알림 없이 상태만 변경
+  const silentChangeToFeedback = useCallback(async () => {
+    if (!feedbackModal) return;
+    const { sheetName, sceneId, scene, fromState, fromWorkRound, fromFeedbackRound } = feedbackModal;
+    if (!scene.id) {
+      setFeedbackModal(null);
+      return;
+    }
+    const targetRound = fromState === 'work' ? fromWorkRound : Math.max(1, fromFeedbackRound || 1);
+    setScenePhaseOptimistic(sheetName, sceneId, 'feedback');
+    try {
+      await updateScenePhaseInSupabase(scene.id, 'feedback', fromWorkRound, targetRound, currentUser?.id);
+      sonnerToast.success('상태만 변경했습니다 (알림 없음).');
+    } catch (err) {
+      console.error('[ScenesView] 피드백 대기(조용히) 저장 실패:', err);
+      sonnerToast.error('피드백 대기 저장에 실패했습니다.');
+      setScenePhaseOptimistic(sheetName, sceneId, fromState);
+    }
+    setFeedbackModal(null);
+  }, [feedbackModal, currentUser?.id, setScenePhaseOptimistic]);
+
+  const fromStateLabel = useMemo(() => {
+    if (!feedbackModal) return '';
+    const { fromState, fromWorkRound } = feedbackModal;
+    const label = SCENE_PHASE_LABELS[fromState];
+    if (fromState === 'work') return `${label} ${fromWorkRound || 1}차`;
+    if (fromState === 'feedback') return `${label} ${feedbackModal.fromFeedbackRound || 1}차`;
+    return label;
+  }, [feedbackModal]);
+
+  const targetFeedbackRound = useMemo(() => {
+    if (!feedbackModal) return 1;
+    const { fromState, fromWorkRound, fromFeedbackRound } = feedbackModal;
+    if (fromState === 'work') return Math.max(1, fromWorkRound || 1);
+    return Math.max(1, fromFeedbackRound || 1);
+  }, [feedbackModal]);
+
   // 글로우 CSS 주입 + 하이라이트 자동 해제 (3.6초 후)
   useEffect(() => {
     if (highlightSceneId) {
@@ -1508,6 +1695,52 @@ export function ScenesView() {
       return () => clearTimeout(timer);
     }
   }, [highlightSceneId, setHighlightSceneId]);
+
+  // v1.25.0~ 액팅 피드백 요청 알림 수신 + 씬 점프 신호 수신
+  useEffect(() => {
+    const offBroadcast = window.electronAPI.onSupabaseBroadcast((event: unknown) => {
+      const e = event as { event?: string; payload?: Record<string, unknown> };
+      if (e?.event !== 'acting-feedback-request') return;
+      const p = e.payload as {
+        sceneUuid: string; sceneId: string; sheetName: string;
+        episodeNumber: number; senderId: string; senderName: string;
+        recipients: string[];
+      } | undefined;
+      if (!p || !currentUser?.id) return;
+      if (!Array.isArray(p.recipients) || !p.recipients.includes(currentUser.id)) return;
+      if (p.senderId === currentUser.id) return; // 자기 자신 제외 (백업)
+
+      const epLabel = `EP${String(p.episodeNumber).padStart(2, '0')}`;
+      // 인앱 sonner 토스트 — 점프 액션 포함
+      sonnerToast.info(`${p.senderName}님이 피드백을 요청했습니다`, {
+        description: `${epLabel} · ${p.sceneId}`,
+        action: {
+          label: '씬 보기',
+          onClick: () => {
+            setView('scenes');
+            setHighlightSceneId(p.sceneId);
+          },
+        },
+        duration: 8000,
+      });
+      // Windows 네이티브 토스트 + 클릭 시 점프 (main 에서 처리)
+      window.electronAPI.notifyFeedbackToast({
+        title: 'B flow — 피드백 요청',
+        body: `${p.senderName}님이 ${epLabel} ${p.sceneId} 검수를 요청했습니다.`,
+        sceneJump: { sheetName: p.sheetName, sceneId: p.sceneId, sceneUuid: p.sceneUuid },
+      }).catch(() => { /* 토스트 실패는 무시 */ });
+    });
+
+    const offJump = window.electronAPI.onFeedbackJumpToScene((payload) => {
+      setView('scenes');
+      setHighlightSceneId(payload.sceneId);
+    });
+
+    return () => {
+      offBroadcast?.();
+      offJump?.();
+    };
+  }, [currentUser?.id, setView, setHighlightSceneId]);
 
   const deletePartOptimistic = useDataStore((s) => s.deletePartOptimistic);
   const deleteEpisodeOptimistic = useDataStore((s) => s.deleteEpisodeOptimistic);
@@ -3844,6 +4077,9 @@ export function ScenesView() {
                               if (bgPart) toggleSelectedScene(`bg:${m.mergedKey}`);
                               if (actPart) toggleSelectedScene(`act:${m.mergedKey}`);
                             }}
+                            onActPhaseStateClick={handleActPhaseStateClick}
+                            onActFeedbackRequest={handleActFeedbackRequest}
+                            onActRoundBump={handleActRoundBump}
                           />
                         );
                       })}
@@ -4729,6 +4965,20 @@ export function ScenesView() {
           </div>
         );
       })()}
+
+      {/* v1.25.0~ 액팅 피드백 대기 확인 모달 */}
+      {feedbackModal && (
+        <FeedbackRequestModal
+          open={feedbackModal.open}
+          scene={feedbackModal.scene}
+          episodeLabel={`EP${String(feedbackModal.episodeNumber).padStart(2, '0')}`}
+          targetRound={targetFeedbackRound}
+          fromLabel={fromStateLabel}
+          onCancel={() => setFeedbackModal(null)}
+          onSendWithNotification={sendFeedbackWithNotification}
+          onSilentChange={silentChangeToFeedback}
+        />
+      )}
     </div>
   );
 }

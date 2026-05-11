@@ -112,6 +112,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:delete-scene', sceneUuid),
   supabaseUpdateSceneStage: (sceneUuid: string, stage: string, value: boolean, updatedBy?: string) =>
     ipcRenderer.invoke('supabase:update-scene-stage', sceneUuid, stage, value, updatedBy),
+  // v1.25.0~ 액팅 단계 토글 (sceneState + workRound + feedbackRound 한 번에)
+  supabaseUpdateScenePhase: (
+    sceneUuid: string,
+    sceneState: 'wait' | 'work' | 'feedback' | 'done',
+    workRound: number,
+    feedbackRound: number,
+    updatedBy?: string,
+  ) =>
+    ipcRenderer.invoke('supabase:update-scene-phase', sceneUuid, sceneState, workRound, feedbackRound, updatedBy),
+  // v1.25.0~ 액팅 피드백 알림 디스패치
+  supabaseDispatchFeedbackNotification: (payload: unknown) =>
+    ipcRenderer.invoke('supabase:dispatch-feedback-notification', payload),
+  // v1.25.0~ Windows 네이티브 토스트 + 클릭 시 씬으로 점프
+  notifyFeedbackToast: (payload: unknown) =>
+    ipcRenderer.invoke('notify:feedback-toast', payload),
   supabaseBulkUpdateSceneStages: (updates: BulkStageUpdate[], updatedBy: string) =>
     ipcRenderer.invoke('supabase:bulk-update-scene-stages', updates, updatedBy) as Promise<BulkUpdateResult[]>,
   supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) =>
@@ -256,6 +271,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: unknown, data: unknown) => callback(data);
     ipcRenderer.on('supabase:broadcast-event', handler);
     return () => ipcRenderer.removeListener('supabase:broadcast-event', handler);
+  },
+
+  // v1.25.0~ 액팅 피드백 토스트 클릭 → 씬 점프 신호 수신
+  onFeedbackJumpToScene: (
+    callback: (payload: { sheetName: string; sceneId: string; sceneUuid: string }) => void,
+  ) => {
+    const handler = (
+      _event: unknown,
+      data: { sheetName: string; sceneId: string; sceneUuid: string },
+    ) => callback(data);
+    ipcRenderer.on('feedback:jump-to-scene', handler);
+    return () => ipcRenderer.removeListener('feedback:jump-to-scene', handler);
   },
 
   // GAS 연결 (이미지 업로드용 Apps Script 웹 앱)

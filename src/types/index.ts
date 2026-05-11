@@ -55,6 +55,31 @@ export const STAGE_COLORS: Record<Stage, string> = {
   png: '#6C5CE7',
 };
 
+// ─── 액팅 씬 단계 상태 (v1.25.0~) ────────────
+// 한 씬이 한 시점에 가질 수 있는 단일 상태. 차수(round)는 작업중/피드백 대기에서만 표시.
+// spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md
+export type ScenePhaseState = 'wait' | 'work' | 'feedback' | 'done';
+
+export const SCENE_PHASES: ScenePhaseState[] = ['wait', 'work', 'feedback', 'done'];
+
+export const SCENE_PHASE_LABELS: Record<ScenePhaseState, string> = {
+  wait: '대기',
+  work: '작업중',
+  feedback: '피드백 대기',
+  done: '완료',
+};
+
+export const SCENE_PHASE_COLORS: Record<ScenePhaseState, string> = {
+  wait: '#6E7388',
+  work: '#74B9FF',
+  feedback: '#FDCB6E',
+  done: '#00B894',
+};
+
+/** 차수 최소/최대 (UI ▴▾ 범위 제한) */
+export const SCENE_PHASE_ROUND_MIN = 1;
+export const SCENE_PHASE_ROUND_MAX = 99;
+
 // ─── 씬 ──────────────────────────────────────
 
 export interface Scene {
@@ -84,6 +109,16 @@ export interface Scene {
   createdAt?: string;
   /** 씬 row 마지막 갱신 시각 (ISO 8601). 단계 토글/필드 변경 시 자동 갱신 */
   updatedAt?: string;
+  /**
+   * v1.25.0~: 액팅 씬 단계 상태 (대기/작업중/피드백 대기/완료).
+   * BG 씬은 NULL 유지 (기존 lo/done/review/png 사용).
+   * spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md
+   */
+  sceneState?: ScenePhaseState | null;
+  /** 작업중 라운드 번호 (1~99). state !== 'work' 일 때 0 또는 마지막 값 유지 */
+  workRound?: number;
+  /** 피드백 대기 라운드 번호 (1~99). state !== 'feedback' 일 때 0 또는 마지막 값 유지 */
+  feedbackRound?: number;
 }
 
 // ─── 통합 씬 (BG + ACT 머지) ─────────────────
@@ -145,6 +180,11 @@ export interface AppUser {
    * 한솔 정정: 컴포지터는 부서로 나뉘지 않음 — 리비전 등록 시 모든 컴포지터가 자동 알림 대상.
    */
   isCompositor?: boolean;
+  /**
+   * v1.25.0~: 액팅 검수자(애니메이팅 수퍼바이저) 플래그.
+   * 컴포지터와 독립적 — 동시 겸임 가능. 액팅 씬에서 "피드백 대기" 누를 때 알림 받음.
+   */
+  isActingSupervisor?: boolean;
 }
 
 export interface UsersFile {
@@ -595,6 +635,39 @@ export interface ElectronAPI {
   supabaseAddScenes: (sheetName: string, scenes: { sceneId: string; assignee: string; memo: string }[]) => Promise<void>;
   supabaseDeleteScene: (sceneUuid: string) => Promise<void>;
   supabaseUpdateSceneStage: (sceneUuid: string, stage: string, value: boolean, updatedBy?: string) => Promise<void>;
+  /** v1.25.0~ 액팅 단계 토글 (sceneState + workRound + feedbackRound 한 번에 동기화) */
+  supabaseUpdateScenePhase: (
+    sceneUuid: string,
+    sceneState: ScenePhaseState,
+    workRound: number,
+    feedbackRound: number,
+    updatedBy?: string,
+  ) => Promise<void>;
+  /** v1.25.0~ 액팅 피드백 알림 디스패치 — 다른 클라이언트에 broadcast */
+  supabaseDispatchFeedbackNotification: (payload: {
+    sceneUuid: string;
+    sceneId: string;
+    sheetName: string;
+    episodeNumber: number;
+    senderId: string;
+    senderName: string;
+    fromState: string;
+    toState: string;
+    workRound: number;
+    feedbackRound: number;
+    recipients: string[];
+    message?: string;
+  }) => Promise<void>;
+  /** v1.25.0~ Windows 네이티브 토스트 + 클릭 시 씬으로 점프 */
+  notifyFeedbackToast: (payload: {
+    title: string;
+    body: string;
+    sceneJump: { sheetName: string; sceneId: string; sceneUuid: string };
+  }) => Promise<void>;
+  /** v1.25.0~ 피드백 토스트 클릭 → 씬 점프 신호 수신 */
+  onFeedbackJumpToScene: (
+    callback: (payload: { sheetName: string; sceneId: string; sceneUuid: string }) => void,
+  ) => () => void;
   supabaseBulkUpdateSceneStages: (updates: BulkStageUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkUpdateSceneFields: (updates: BulkFieldUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;

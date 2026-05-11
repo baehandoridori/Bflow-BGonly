@@ -239,6 +239,18 @@ export async function setIsCompositor(
 }
 
 /**
+ * v1.25.0~: 어드민 전용 — 액팅 검수자(애니메이팅 수퍼바이저) 지정/해제.
+ * 컴포지터와 독립적인 별도 boolean. 한 사람이 둘 다 가능.
+ * spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md (섹션 6)
+ */
+export async function setIsActingSupervisor(
+  userId: string,
+  value: boolean,
+): Promise<void> {
+  await window.electronAPI.supabaseUpdateUser(userId, { isActingSupervisor: value });
+}
+
+/**
  * 로컬 users.dat를 _USERS 탭으로 마이그레이션한다.
  * 시트에 사용자가 없고 로컬에 있을 때 실행.
  */
