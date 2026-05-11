@@ -1324,6 +1324,47 @@ export default function App() {
         }
       }
 
+      // v1.25.0~ 액팅 단계 토글 broadcast — sceneState/workRound/feedbackRound 한 번에
+      // 코덱스 1차 P2 #3 fix: 다른 클라이언트가 즉시 반영해야 함 (Realtime 만 의존하면 폴링 지연).
+      if (data.event === 'scene-phase-update') {
+        const { sceneUuid, sceneState, workRound, feedbackRound, senderId } = data.payload as {
+          sceneUuid: string;
+          sceneState: 'wait' | 'work' | 'feedback' | 'done';
+          workRound: number;
+          feedbackRound: number;
+          senderId?: string;
+        };
+        if (sceneUuid && sceneState) {
+          useDataStore.getState().updateSceneByUuid(sceneUuid, {
+            sceneState,
+            workRound: workRound ?? 0,
+            feedbackRound: feedbackRound ?? 0,
+          });
+          // 자기 자신이 보낸 변경은 알림 스킵 (이미 로컬 토스트 표시됨)
+          const me = useAuthStore.getState().currentUser;
+          if (me && senderId && senderId !== me.id) {
+            const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
+            if (scene && scene.assignee === me.name) {
+              const notiSettings = notiSettingsRef.current;
+              if (notiSettings.sceneChange !== false) {
+                const senderName = useAuthStore.getState().users.find((u) => u.id === senderId)?.name ?? '다른 사용자';
+                const stateLabel = sceneState === 'wait' ? '대기'
+                  : sceneState === 'work' ? `작업중 ${workRound}차`
+                  : sceneState === 'feedback' ? `피드백 대기 ${feedbackRound}차`
+                  : '완료';
+                dispatchNotification({
+                  type: 'scene_change',
+                  title: `${senderName}님이 ${scene.sceneId || sceneUuid} → ${stateLabel}`,
+                  body: `액팅 씬 단계가 ${stateLabel} 로 변경되었습니다`,
+                  metadata: { sceneId: sceneUuid, sceneName: scene.sceneId, toStage: sceneState, changedBy: senderName },
+                }, notiSettings);
+              }
+            }
+          }
+          return;
+        }
+      }
+
       if (data.event === 'scene-field-update') {
         // 필드 변경 → UUID로 즉시 반영
         const { sceneUuid, field, value, senderId } = data.payload as { sceneUuid: string; field: string; value: string | null; senderId?: string };

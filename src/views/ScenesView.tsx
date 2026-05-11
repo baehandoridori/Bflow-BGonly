@@ -1493,7 +1493,9 @@ export function ScenesView() {
   // v1.25.0~ 액팅 단계 토글 액션
   const setScenePhaseOptimistic = useDataStore((s) => s.setScenePhaseOptimistic);
   const bumpScenePhaseRoundOptimistic = useDataStore((s) => s.bumpScenePhaseRoundOptimistic);
-  const findSceneBySceneId = useDataStore((s) => s.findSceneBySceneId);
+  // 코덱스 1차 P1: sheet 안에서만 sceneId 매칭 (글로벌 검색 금지)
+  const findSceneInSheet = useDataStore((s) => s.findSceneInSheet);
+  const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery, selectedDepartment } = useAppStore();
   const colorMode = useAppStore((s) => s.colorMode);
   const revisionCountByScene = useRevisionStore((s) => s.revisionCountByScene);
@@ -1519,12 +1521,16 @@ export function ScenesView() {
   } | null>(null);
 
   // v1.25.0~ 액팅 토글 핸들러
+  // 코덱스 1차 P1 #1 fix: 글로벌 findSceneBySceneId 대신 findSceneInSheet 사용 — 같은 sceneId 가
+  //   다른 에피소드/파트에 있어도 정확히 해당 sheet 의 씬만 매칭.
+  // 코덱스 1차 P1 #2 fix: 롤백 시 updateSceneByUuid 로 sceneState/workRound/feedbackRound 셋 모두
+  //   명시적 복원. setScenePhaseOptimistic 만 부르면 전이 규칙이 다시 적용되어 차수가 잘못 복구됨.
   const handleActPhaseStateClick = useCallback(
     async (sheetName: string, sceneId: string, newState: ScenePhaseState) => {
-      const scene = findSceneBySceneId(sceneId);
+      const scene = findSceneInSheet(sheetName, sceneId);
       if (!scene?.id) return;
-      // 낙관적 업데이트 (전이 규칙은 store 안에서 처리)
-      const prevState = scene.sceneState ?? 'wait';
+      const sceneUuid = scene.id;
+      const prevState: ScenePhaseState = scene.sceneState ?? 'wait';
       const prevWork = scene.workRound ?? 0;
       const prevFb = scene.feedbackRound ?? 0;
       setScenePhaseOptimistic(sheetName, sceneId, newState);
@@ -1542,20 +1548,24 @@ export function ScenesView() {
         else if (prevState !== 'feedback') feedbackRound = Math.max(1, prevFb || 1);
       }
       try {
-        await updateScenePhaseInSupabase(scene.id, newState, workRound, feedbackRound, currentUser?.id);
+        await updateScenePhaseInSupabase(sceneUuid, newState, workRound, feedbackRound, currentUser?.id);
       } catch (err) {
         console.error('[ScenesView] 단계 변경 실패:', err);
         sonnerToast.error('단계 변경 저장에 실패했습니다.');
-        // 롤백
-        setScenePhaseOptimistic(sheetName, sceneId, prevState);
+        // 명시적 롤백 — sceneState 뿐 아니라 workRound/feedbackRound 까지 셋 모두 복원
+        updateSceneByUuid(sceneUuid, {
+          sceneState: prevState,
+          workRound: prevWork,
+          feedbackRound: prevFb,
+        });
       }
     },
-    [findSceneBySceneId, setScenePhaseOptimistic, currentUser?.id],
+    [findSceneInSheet, setScenePhaseOptimistic, updateSceneByUuid, currentUser?.id],
   );
 
   const handleActFeedbackRequest = useCallback(
     (sheetName: string, sceneId: string) => {
-      const scene = findSceneBySceneId(sceneId);
+      const scene = findSceneInSheet(sheetName, sceneId);
       if (!scene) return;
       const ep = episodes.find((e) => e.parts.some((p) => p.sheetName === sheetName));
       if (!ep) return;
@@ -1570,33 +1580,34 @@ export function ScenesView() {
         fromFeedbackRound: scene.feedbackRound ?? 0,
       });
     },
-    [episodes, findSceneBySceneId],
+    [episodes, findSceneInSheet],
   );
 
   const handleActRoundBump = useCallback(
     async (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => {
-      const scene = findSceneBySceneId(sceneId);
+      const scene = findSceneInSheet(sheetName, sceneId);
       if (!scene?.id) return;
+      const sceneUuid = scene.id;
+      const prevState: ScenePhaseState = scene.sceneState ?? 'wait';
       const prevWork = scene.workRound ?? 0;
       const prevFb = scene.feedbackRound ?? 0;
       bumpScenePhaseRoundOptimistic(sheetName, sceneId, kind, delta);
       const newWork = kind === 'work' ? Math.max(1, Math.min(99, prevWork + delta)) : prevWork;
       const newFb = kind === 'feedback' ? Math.max(1, Math.min(99, prevFb + delta)) : prevFb;
       try {
-        await updateScenePhaseInSupabase(
-          scene.id,
-          scene.sceneState ?? 'wait',
-          newWork,
-          newFb,
-          currentUser?.id,
-        );
+        await updateScenePhaseInSupabase(sceneUuid, prevState, newWork, newFb, currentUser?.id);
       } catch (err) {
         console.error('[ScenesView] 차수 변경 실패:', err);
         sonnerToast.error('차수 변경 저장에 실패했습니다.');
-        bumpScenePhaseRoundOptimistic(sheetName, sceneId, kind, delta === 1 ? -1 : 1);
+        // 명시적 롤백 — bump 역방향 호출 대신 explicit 값 set
+        updateSceneByUuid(sceneUuid, {
+          sceneState: prevState,
+          workRound: prevWork,
+          feedbackRound: prevFb,
+        });
       }
     },
-    [findSceneBySceneId, bumpScenePhaseRoundOptimistic, currentUser?.id],
+    [findSceneInSheet, bumpScenePhaseRoundOptimistic, updateSceneByUuid, currentUser?.id],
   );
 
   // 피드백 모달 — 알림 보내기 (상태 변경 + broadcast)
@@ -1611,13 +1622,19 @@ export function ScenesView() {
       const targetRound = fromState === 'work' ? fromWorkRound : Math.max(1, fromFeedbackRound || 1);
 
       // 1) 상태 변경 (낙관적 + Supabase)
+      const sceneUuid = scene.id;
       setScenePhaseOptimistic(sheetName, sceneId, 'feedback');
       try {
-        await updateScenePhaseInSupabase(scene.id, 'feedback', fromWorkRound, targetRound, currentUser?.id);
+        await updateScenePhaseInSupabase(sceneUuid, 'feedback', fromWorkRound, targetRound, currentUser?.id);
       } catch (err) {
         console.error('[ScenesView] 피드백 대기 저장 실패:', err);
         sonnerToast.error('피드백 대기 저장에 실패했습니다.');
-        setScenePhaseOptimistic(sheetName, sceneId, fromState);
+        // 코덱스 1차 P1 #2 fix: 명시적 복원 (전이 규칙 재적용 차단)
+        updateSceneByUuid(sceneUuid, {
+          sceneState: fromState,
+          workRound: fromWorkRound,
+          feedbackRound: feedbackModal.fromFeedbackRound,
+        });
         setFeedbackModal(null);
         return;
       }
@@ -1626,7 +1643,7 @@ export function ScenesView() {
       if (recipientIds.length > 0) {
         try {
           await dispatchActingFeedbackNotification({
-            sceneUuid: scene.id,
+            sceneUuid,
             sceneId,
             sheetName,
             episodeNumber,
@@ -1647,7 +1664,7 @@ export function ScenesView() {
 
       setFeedbackModal(null);
     },
-    [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic],
+    [feedbackModal, currentUser?.id, currentUser?.name, setScenePhaseOptimistic, updateSceneByUuid],
   );
 
   // 피드백 모달 — 알림 없이 상태만 변경
@@ -1658,18 +1675,24 @@ export function ScenesView() {
       setFeedbackModal(null);
       return;
     }
+    const sceneUuid = scene.id;
     const targetRound = fromState === 'work' ? fromWorkRound : Math.max(1, fromFeedbackRound || 1);
     setScenePhaseOptimistic(sheetName, sceneId, 'feedback');
     try {
-      await updateScenePhaseInSupabase(scene.id, 'feedback', fromWorkRound, targetRound, currentUser?.id);
+      await updateScenePhaseInSupabase(sceneUuid, 'feedback', fromWorkRound, targetRound, currentUser?.id);
       sonnerToast.success('상태만 변경했습니다 (알림 없음).');
     } catch (err) {
       console.error('[ScenesView] 피드백 대기(조용히) 저장 실패:', err);
       sonnerToast.error('피드백 대기 저장에 실패했습니다.');
-      setScenePhaseOptimistic(sheetName, sceneId, fromState);
+      // 코덱스 1차 P1 #2 fix: 명시적 복원
+      updateSceneByUuid(sceneUuid, {
+        sceneState: fromState,
+        workRound: fromWorkRound,
+        feedbackRound: fromFeedbackRound,
+      });
     }
     setFeedbackModal(null);
-  }, [feedbackModal, currentUser?.id, setScenePhaseOptimistic]);
+  }, [feedbackModal, currentUser?.id, setScenePhaseOptimistic, updateSceneByUuid]);
 
   const fromStateLabel = useMemo(() => {
     if (!feedbackModal) return '';

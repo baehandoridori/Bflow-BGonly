@@ -77,6 +77,11 @@ interface DataState {
   findSceneByUuid: (uuid: string) => Scene | undefined;
   /** sceneId(사용자 지정 ID)로 씬 검색 */
   findSceneBySceneId: (sceneId: string) => Scene | undefined;
+  /**
+   * v1.25.0~ 시트 안에서 sceneId 로 씬 검색 (글로벌 검색이 아니라 특정 sheet 내).
+   * 코덱스 1차 리뷰 P1 fix: 같은 sceneId 가 다른 에피소드/파트에 있어도 정확히 그 시트의 씬만 반환.
+   */
+  findSceneInSheet: (sheetName: string, sceneId: string) => Scene | undefined;
 }
 
 function applyUpdate(get: () => DataState, episodes: Episode[]) {
@@ -345,6 +350,16 @@ export const useDataStore = create<DataState>((set, get) => ({
       for (const part of ep.parts) {
         const scene = part.scenes.find((s) => s.sceneId === sceneId);
         if (scene) return scene;
+      }
+    }
+    return undefined;
+  },
+
+  findSceneInSheet: (sheetName, sceneId) => {
+    for (const ep of get().episodes) {
+      for (const part of ep.parts) {
+        if (part.sheetName !== sheetName) continue;
+        return part.scenes.find((s) => s.sceneId === sceneId);
       }
     }
     return undefined;
