@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>피드백 대기 확인 팝업 시안</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg: #0F1117;
+    --card: #1A1D27;
+    --card-2: #20232E;
+    --border: #2D3041;
+    --border-2: #3A3D4D;
+    --text: #E8E8EE;
+    --muted: #8B8DA3;
+    --accent: #6C5CE7;
+    --st-wait: #6E7388;
+    --st-work: #74B9FF;
+    --st-feedback: #FDCB6E;
+    --st-done: #00B894;
+    --danger: #FF6B6B;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+    letter-spacing: -0.01em;
+  }
+  .glass {
+    background: linear-gradient(180deg, rgba(26,29,39,0.96) 0%, rgba(20,22,30,0.96) 100%);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .header-tag {
+    display: inline-block; padding: 3px 10px;
+    border-radius: 999px; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .modal-backdrop {
+    background: rgba(8, 9, 14, 0.78);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .modal-shell {
+    background: linear-gradient(180deg, #1E2030 0%, #181A26 100%);
+    border: 1px solid var(--border-2);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    width: 100%;
+    max-width: 520px;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    font-size: 11px; font-weight: 700;
+    border-radius: 999px;
+  }
+  .pill-work     { background: var(--st-work); color: #0F1117; }
+  .pill-feedback { background: var(--st-feedback); color: #0F1117; }
+  .arrow-pill {
+    font-size: 12px; color: var(--muted); opacity: 0.6;
+    margin: 0 6px;
+  }
+  .recipient-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 11px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.04);
+    transition: all 0.15s ease;
+    cursor: pointer;
+    user-select: none;
+  }
+  .recipient-row:hover { background: rgba(255,255,255,0.045); }
+  .recipient-row[data-checked="true"] {
+    background: rgba(108,92,231,0.10);
+    border-color: rgba(108,92,231,0.35);
+  }
+  .avatar {
+    width: 28px; height: 28px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #4C5566 0%, #2D3041 100%);
+    color: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11.5px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .avatar.super { background: linear-gradient(135deg, #FDCB6E 0%, #E17055 100%); color: #0F1117; }
+  .checkbox {
+    width: 18px; height: 18px;
+    border-radius: 5px;
+    border: 1.5px solid var(--border-2);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; color: transparent;
+    flex-shrink: 0;
+  }
+  .recipient-row[data-checked="true"] .checkbox {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .role-tag {
+    font-size: 9.5px; font-weight: 700;
+    padding: 1.5px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .role-super { background: rgba(253,203,110,0.16); color: #FDCB6E; }
+  .role-comp  { background: rgba(108,92,231,0.16); color: #B7AEFF; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 9px 14px;
+    border-radius: 10px;
+    font-size: 12.5px; font-weight: 700;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { filter: brightness(1.1); }
+  .btn-ghost { background: transparent; color: var(--muted); border-color: var(--border-2); }
+  .btn-ghost:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+  .btn-silent { background: rgba(255,255,255,0.04); color: var(--text); border-color: var(--border-2); }
+  .btn-silent:hover { background: rgba(255,255,255,0.07); }
+
+  .alt-line {
+    border-top: 1px dashed var(--border);
+    position: relative;
+    text-align: center;
+    margin: 14px 0 10px;
+  }
+  .alt-line span {
+    position: relative; top: -10px;
+    background: #1A1D27;
+    padding: 0 10px;
+    font-size: 10.5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="max-w-[1100px] mx-auto px-8 pt-10 pb-4">
+  <span class="header-tag" style="background: rgba(108,92,231,0.15); color: #B7AEFF;">
+    추가 결정 · 피드백 대기 확인 팝업
+  </span>
+  <h1 class="text-2xl font-bold mt-3" style="color: var(--text);">
+    "피드백 대기" 누르면 → 누구에게 알릴지 한 번 확인하는 창
+  </h1>
+  <p class="text-sm mt-2" style="color: var(--muted);">
+    카드/시트/상세 모달 어디서 눌러도 동일하게 뜨는 작은 확인 모달.
+    아래는 시안 — 체크박스/버튼 모두 눌러볼 수 있습니다.
+  </p>
+</header>
+
+<main class="max-w-[1100px] mx-auto px-8 pb-20">
+
+  <section class="modal-backdrop rounded-2xl p-10 flex items-center justify-center" style="min-height: 580px;">
+    <div class="modal-shell">
+
+      <!-- 헤더 -->
+      <div class="px-6 pt-6 pb-4 border-b" style="border-color: var(--border);">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-bold" style="color: var(--text);">피드백 대기로 보내기</h2>
+            <p class="text-xs mt-1" style="color: var(--muted);">
+              선택된 검수자에게 알림이 발송됩니다.
+            </p>
+          </div>
+          <button class="text-[var(--muted)] hover:text-white text-xl leading-none">×</button>
+        </div>
+      </div>
+
+      <!-- 씬 정보 -->
+      <div class="px-6 pt-5 pb-4">
+        <div class="flex items-center gap-3 mb-1">
+          <span class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--muted);">EP01 · 액팅</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-base font-bold">SC_001</span>
+          <span class="text-xs" style="color: var(--muted);">담당 · 김아무</span>
+        </div>
+        <div class="mt-3 flex items-center">
+          <span class="pill pill-work">작업중 2차</span>
+          <span class="arrow-pill">→</span>
+          <span class="pill pill-feedback">피드백 대기 2차</span>
+        </div>
+      </div>
+
+      <!-- 수신자 -->
+      <div class="px-6 pb-2">
+        <div class="text-[11px] font-bold uppercase tracking-wider mb-2" style="color: var(--muted);">
+          알림 받을 사람 (3 명 선택됨)
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="recipient-row" data-checked="true" onclick="toggleRecipient(this)">
+            <div class="checkbox">✓</div>
+            <div class="avatar super">김</div>
+            <div class="flex-1">
+              <div class="text-[13px] font-semibold">김감독</div>
+            </div>
+            <span class="role-tag role-super">액팅 검수자</span>
+          </div>
+
+          <div class="recipient-row" data-checked="true" onclick="toggleRecipient(this)">
+            <div class="checkbox">✓</div>
+            <div class="avatar super">박</div>
+            <div class="flex-1">
+              <div class="text-[13px] font-semibold">박감독</div>
+            </div>
+            <span class="role-tag role-super">액팅 검수자</span>
+          </div>
+
+          <div class="recipient-row" data-checked="true" onclick="toggleRecipient(this)">
+            <div class="checkbox">✓</div>
+            <div class="avatar super">이</div>
+            <div class="flex-1">
+              <div class="text-[13px] font-semibold">이감독</div>
+            </div>
+            <span class="role-tag role-super">액팅 검수자</span>
+          </div>
+        </div>
+
+        <div class="alt-line"><span>추가 멘션 (선택)</span></div>
+
+        <div class="space-y-1.5">
+          <div class="recipient-row" data-checked="false" onclick="toggleRecipient(this)">
+            <div class="checkbox">✓</div>
+            <div class="avatar">정</div>
+            <div class="flex-1">
+              <div class="text-[13px] font-semibold">정아무</div>
+            </div>
+            <span class="role-tag role-comp">컴포지터</span>
+          </div>
+          <div class="recipient-row" data-checked="false" onclick="toggleRecipient(this)">
+            <div class="checkbox">✓</div>
+            <div class="avatar">최</div>
+            <div class="flex-1">
+              <div class="text-[13px] font-semibold">최아무</div>
+              <div class="text-[10.5px]" style="color: var(--muted);">SC_001 의 BG 담당</div>
+            </div>
+          </div>
+        </div>
+
+        <button class="mt-2 text-[11.5px]" style="color: var(--accent);">+ 다른 팀원 검색해서 추가</button>
+      </div>
+
+      <!-- 푸터 -->
+      <div class="px-6 py-4 mt-2 border-t flex items-center justify-end gap-2" style="border-color: var(--border);">
+        <button class="btn btn-ghost">취소</button>
+        <button class="btn btn-silent">알림 없이 상태만 변경</button>
+        <button class="btn btn-primary">알림 보내기 (3 명)</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="mt-10 glass p-6">
+    <h3 class="text-base font-bold" style="color: #B7AEFF;">시안의 핵심 동작</h3>
+    <ul class="mt-3 space-y-2 text-sm" style="color: var(--text); opacity: 0.92;">
+      <li>① <b>피드백 대기</b> 칩을 누르면 (카드/시트/상세 모달 어디서든) <b>이 모달이 먼저 뜸</b>. 모달을 거치지 않으면 상태는 안 바뀜.</li>
+      <li>② <b>액팅 검수자 풀</b> 멤버 전원이 <b>기본 체크</b>. 빼고 싶은 사람은 줄을 눌러 체크 해제.</li>
+      <li>③ <b>추가 멘션 (선택)</b> 영역에 컴포지터, 그 씬의 BG 담당자가 후보로 자동 노출. 더 필요하면 <b>"+ 다른 팀원 검색"</b>으로 사내 누구든 추가 가능.</li>
+      <li>④ 푸터 3 버튼:
+        <ul class="ml-5 mt-1 space-y-1" style="color: var(--muted);">
+          <li>• <b>취소</b> — 상태도 변경 안 함, 모달 닫힘. (잘못 클릭 방지 1차)</li>
+          <li>• <b>알림 없이 상태만 변경</b> — 칩만 피드백 대기 N차로 바뀌고 아무에게도 알림 안 감.</li>
+          <li>• <b>알림 보내기 (N명)</b> — 상태 변경 + 선택된 N명에게 토스트/인앱 알림.</li>
+        </ul>
+      </li>
+      <li>⑤ "다음에 이 씬에 다시 피드백 대기 누를 때 마지막 선택을 기억" 옵션도 고려 가능 (한솔님 의견 필요).</li>
+    </ul>
+  </section>
+
+  <section class="mt-6 glass p-6" style="background: linear-gradient(135deg, rgba(108,92,231,0.06), rgba(108,92,231,0.02));">
+    <h3 class="text-base font-bold" style="color: #B7AEFF;">한솔님 — 마지막 디테일 확인</h3>
+    <p class="text-sm mt-2" style="color: var(--text); opacity: 0.92;">
+      모양은 위 시안대로 가도 OK 인지, 그리고 아래 두 가지 작은 결정을 알려주세요:
+    </p>
+    <ol class="mt-3 space-y-3 text-sm" style="color: var(--text);">
+      <li><b>"추가 멘션"</b> 후보에 자동으로 무엇이 보이게 할까요?
+        <ul class="ml-5 mt-1 text-[12px]" style="color: var(--muted);">
+          <li>(a) 컴포지터 풀 + 그 씬 BG 담당 (시안과 동일)</li>
+          <li>(b) 비워두고 사용자가 직접 "+ 검색" 으로만 추가</li>
+        </ul>
+      </li>
+      <li><b>"알림 없이 상태만 변경"</b> 버튼을 둘까요?
+        <ul class="ml-5 mt-1 text-[12px]" style="color: var(--muted);">
+          <li>(a) 둠 — 잘못 눌렀거나 알림이 부담스러울 때 유용 (시안과 동일)</li>
+          <li>(b) 없앰 — 피드백 대기는 항상 알림이 가도록 강제 (책임 명확)</li>
+        </ul>
+      </li>
+    </ol>
+  </section>
+
+</main>
+
+<script>
+  function toggleRecipient(el) {
+    const cur = el.dataset.checked === 'true';
+    el.dataset.checked = (!cur).toString();
+    const checked = document.querySelectorAll('.recipient-row[data-checked="true"]').length;
+    const lbl = document.querySelector('.btn-primary');
+    if (lbl) lbl.textContent = `알림 보내기 (${checked} 명)`;
+    const subtitle = document.querySelector('.text-\\[11px\\].font-bold');
+    if (subtitle) subtitle.textContent = `알림 받을 사람 (${checked} 명 선택됨)`;
+  }
+</script>
+
+</body>
+</html>

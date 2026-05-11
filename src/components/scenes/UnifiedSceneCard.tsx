@@ -5,7 +5,8 @@ import { MessageCircle, MessageSquareWarning, Check, Trash2 } from 'lucide-react
 import { cn } from '@/utils/cn';
 import { sceneProgress } from '@/utils/calcStats';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
-import type { MergedScene, Stage, Department } from '@/types';
+import type { MergedScene, Stage, Department, ScenePhaseState } from '@/types';
+import { ScenePhaseToggle } from './ScenePhaseToggle';
 import { HighlightText } from '@/components/common/HighlightText';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { Confetti } from '@/components/ui/Confetti';
@@ -48,6 +49,10 @@ interface UnifiedSceneCardProps {
   onSelect: () => void;
   onCtrlSelect?: () => void;
   onShiftSelect?: () => void;
+  // v1.25.0~ 액팅 단계 토글 핸들러 (전달되면 액팅 씬에서 ScenePhaseToggle 렌더)
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
+  onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
 }
 
 export function UnifiedSceneCard({
@@ -69,6 +74,9 @@ export function UnifiedSceneCard({
   onSelect,
   onCtrlSelect,
   onShiftSelect,
+  onActPhaseStateClick,
+  onActFeedbackRequest,
+  onActRoundBump,
 }: UnifiedSceneCardProps) {
   const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
@@ -393,6 +401,9 @@ export function UnifiedSceneCard({
             onToggle={onToggle}
             onDelete={onDelete}
             activeOp={activeOp}
+            onActPhaseStateClick={onActPhaseStateClick}
+            onActFeedbackRequest={onActFeedbackRequest}
+            onActRoundBump={onActRoundBump}
           />
         </div>
 
@@ -427,6 +438,9 @@ function DeptSection({
   onToggle,
   onDelete,
   activeOp,
+  onActPhaseStateClick,
+  onActFeedbackRequest,
+  onActRoundBump,
 }: {
   dept: Department;
   scene: import('@/types').Scene | null;
@@ -437,6 +451,9 @@ function DeptSection({
   onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
   onDelete: (sheetName: string, sceneIndex: number) => void;
   activeOp: PendingOp | null;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
+  onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
 
@@ -487,34 +504,49 @@ function DeptSection({
           </button>
         </div>
       </div>
-      <div className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5">
-        {STAGES.map((stage, i) => {
-          const isDone = scene[stage];
-          const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
+      {/* v1.25.0~: 액팅 부서 + 핸들러 모두 전달된 경우 새 ScenePhaseToggle 사용 */}
+      {dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
+        <div
+          className="rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1.5 flex justify-center"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ScenePhaseToggle
+            scene={scene}
+            onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
+            onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
+            onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
+          />
+        </div>
+      ) : (
+        <div className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5">
+          {STAGES.map((stage, i) => {
+            const isDone = scene[stage];
+            const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
 
-          return (
-            <button
-              key={stage}
-              onClick={(e) => { e.stopPropagation(); onToggle(sheetName, sceneId, stage); }}
-              className={cn(
-                'flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer whitespace-nowrap overflow-hidden text-ellipsis',
-                !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
-                stageCellPendingClass(stage),
-              )}
-              style={
-                isDone
-                  ? isCurrent
-                    ? { backgroundColor: cfg.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${cfg.color}40` }
-                    : { backgroundColor: `${cfg.color}20`, color: cfg.color }
-                  : undefined
-              }
-              title={cfg.stageLabels[stage]}
-            >
-              {cfg.stageLabels[stage]}
-            </button>
-          );
-        })}
-      </div>
+            return (
+              <button
+                key={stage}
+                onClick={(e) => { e.stopPropagation(); onToggle(sheetName, sceneId, stage); }}
+                className={cn(
+                  'flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer whitespace-nowrap overflow-hidden text-ellipsis',
+                  !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
+                  stageCellPendingClass(stage),
+                )}
+                style={
+                  isDone
+                    ? isCurrent
+                      ? { backgroundColor: cfg.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${cfg.color}40` }
+                      : { backgroundColor: `${cfg.color}20`, color: cfg.color }
+                    : undefined
+                }
+                title={cfg.stageLabels[stage]}
+              >
+                {cfg.stageLabels[stage]}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@
  * window.electronAPI → IPC → 메인 프로세스
  */
 
-import type { Episode, Stage, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult, Activity, ActionGroup } from '../types';
+import type { Episode, Stage, ScenePhaseState, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult, Activity, ActionGroup } from '../types';
 
 // 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
 export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
@@ -69,6 +69,35 @@ export async function deleteSceneFromSupabase(sceneUuid: string): Promise<void> 
 
 export async function updateSceneStageInSupabase(sceneUuid: string, stage: Stage, value: boolean, updatedBy?: string): Promise<void> {
   await window.electronAPI.supabaseUpdateSceneStage(sceneUuid, stage, value, updatedBy);
+}
+
+/** v1.25.0~ 액팅 씬 단계 + 차수 Supabase 동기화 (sceneState/workRound/feedbackRound 한 번에) */
+export async function updateScenePhaseInSupabase(
+  sceneUuid: string,
+  sceneState: ScenePhaseState,
+  workRound: number,
+  feedbackRound: number,
+  updatedBy?: string,
+): Promise<void> {
+  await window.electronAPI.supabaseUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
+}
+
+/** v1.25.0~ 액팅 피드백 알림 발송 — broadcast 채널로 다른 클라이언트 전파 */
+export async function dispatchActingFeedbackNotification(payload: {
+  sceneUuid: string;
+  sceneId: string;
+  sheetName: string;
+  episodeNumber: number;
+  senderId: string;
+  senderName: string;
+  fromState: string;
+  toState: string;
+  workRound: number;
+  feedbackRound: number;
+  recipients: string[];
+  message?: string;
+}): Promise<void> {
+  await window.electronAPI.supabaseDispatchFeedbackNotification(payload);
 }
 
 /**

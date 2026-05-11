@@ -17,6 +17,8 @@ const NotificationSection = lazy(() => import('@/components/settings/Notificatio
 const ShortcutsSection = lazy(() => import('@/components/settings/ShortcutsSection').then(m => ({ default: m.ShortcutsSection })));
 // v1.18.0: 어드민 전용 컴포지터 지정 섹션
 const CompositorSection = lazy(() => import('@/components/settings/CompositorSection').then(m => ({ default: m.CompositorSection })));
+// v1.25.0~: 어드민 전용 액팅 검수자(애니메이팅 수퍼바이저) 지정 섹션
+const ActingSupervisorSection = lazy(() => import('@/components/settings/ActingSupervisorSection').then(m => ({ default: m.ActingSupervisorSection })));
 import { loadPreferences } from '@/services/settingsService';
 import {
   type FontScale,
@@ -84,7 +86,12 @@ export function SettingsView() {
       case 'shortcuts':
         return <ShortcutsSection />;
       case 'compositor':
-        return <CompositorSection />;
+        return (
+          <div className="flex flex-col gap-6">
+            <CompositorSection />
+            <ActingSupervisorSection />
+          </div>
+        );
       default:
         return null;
     }

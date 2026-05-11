@@ -1286,6 +1286,74 @@ export default function App() {
     return () => window.removeEventListener('bflow:revisions-invalidated', handler);
   }, []);
 
+  // v1.25.0~ 액팅 피드백 알림 수신 + 씬 점프 리스너 (코덱스 2차 P1 #4 fix)
+  // 이전에는 ScenesView 안에 있었으나, 다른 뷰(Dashboard 등)에서도 알림을 받아야 하므로 App 최상위로 승격.
+  useEffect(() => {
+    if (!window.electronAPI?.onSupabaseBroadcast) return;
+
+    // 코덱스 5차 P1 #10 / 6차 P1 #12 fix: 점프 시 selectedEpisode/selectedPart 도 set + BG-only
+    //   필터면 'all' 로 전환. ScenesView 가 현재 선택된 ep/part/department 로 필터링하므로,
+    //   액팅 씬이 BG 필터에서는 안 보임.
+    const jumpToFeedbackScene = (sheetName: string, sceneId: string) => {
+      const eps = useDataStore.getState().episodes;
+      let foundEp: number | null = null;
+      let foundPart: string | null = null;
+      for (const ep of eps) {
+        const part = ep.parts.find((p) => p.sheetName === sheetName);
+        if (part) {
+          foundEp = ep.episodeNumber;
+          foundPart = part.partId;
+          break;
+        }
+      }
+      const app = useAppStore.getState();
+      app.setView('scenes');
+      if (foundEp !== null) app.setSelectedEpisode(foundEp);
+      if (foundPart !== null) app.setSelectedPart(foundPart);
+      // 액팅 알림이므로 BG-only 필터면 'all' 로 풀어 액팅 씬도 보이게 함.
+      if (app.selectedDepartment === 'bg') app.setSelectedDepartment('all');
+      app.setHighlightSceneId(sceneId);
+    };
+
+    const offBroadcast = window.electronAPI.onSupabaseBroadcast((event: unknown) => {
+      const e = event as { event?: string; payload?: Record<string, unknown> };
+      if (e?.event !== 'acting-feedback-request') return;
+      const p = e.payload as {
+        sceneUuid: string; sceneId: string; sheetName: string;
+        episodeNumber: number; senderId: string; senderName: string;
+        recipients: string[];
+      } | undefined;
+      const me = useAuthStore.getState().currentUser;
+      if (!p || !me?.id) return;
+      if (!Array.isArray(p.recipients) || !p.recipients.includes(me.id)) return;
+      if (p.senderId === me.id) return;
+
+      const epLabel = `EP${String(p.episodeNumber).padStart(2, '0')}`;
+      sonnerToast.info(`${p.senderName}님이 피드백을 요청했습니다`, {
+        description: `${epLabel} · ${p.sceneId}`,
+        action: {
+          label: '씬 보기',
+          onClick: () => jumpToFeedbackScene(p.sheetName, p.sceneId),
+        },
+        duration: 8000,
+      });
+      window.electronAPI.notifyFeedbackToast({
+        title: 'B flow — 피드백 요청',
+        body: `${p.senderName}님이 ${epLabel} ${p.sceneId} 검수를 요청했습니다.`,
+        sceneJump: { sheetName: p.sheetName, sceneId: p.sceneId, sceneUuid: p.sceneUuid },
+      }).catch(() => { /* 토스트 실패는 무시 */ });
+    });
+
+    const offJump = window.electronAPI.onFeedbackJumpToScene?.((payload) => {
+      jumpToFeedbackScene(payload.sheetName, payload.sceneId);
+    });
+
+    return () => {
+      offBroadcast?.();
+      offJump?.();
+    };
+  }, []);
+
   // Supabase Broadcast: 다른 사용자의 쓰기 직후 즉시 delta 수신 (Publication 설정 불필요)
   useEffect(() => {
     if (!window.electronAPI?.onSupabaseBroadcast) return;
@@ -1316,6 +1384,47 @@ export default function App() {
                   title: `${senderName}님이 ${scene.sceneId || sceneUuid} ${stageLabel} ${value ? '✓ 완료' : '✗ 해제'}`,
                   body: `${stageLabel} 단계가 ${value ? '완료' : '해제'} 처리되었습니다`,
                   metadata: { sceneId: sceneUuid, sceneName: scene.sceneId, fromStage: stage, toStage: value ? 'on' : 'off', changedBy: senderName },
+                }, notiSettings);
+              }
+            }
+          }
+          return;
+        }
+      }
+
+      // v1.25.0~ 액팅 단계 토글 broadcast — sceneState/workRound/feedbackRound 한 번에
+      // 코덱스 1차 P2 #3 fix: 다른 클라이언트가 즉시 반영해야 함 (Realtime 만 의존하면 폴링 지연).
+      if (data.event === 'scene-phase-update') {
+        const { sceneUuid, sceneState, workRound, feedbackRound, senderId } = data.payload as {
+          sceneUuid: string;
+          sceneState: 'wait' | 'work' | 'feedback' | 'done';
+          workRound: number;
+          feedbackRound: number;
+          senderId?: string;
+        };
+        if (sceneUuid && sceneState) {
+          useDataStore.getState().updateSceneByUuid(sceneUuid, {
+            sceneState,
+            workRound: workRound ?? 0,
+            feedbackRound: feedbackRound ?? 0,
+          });
+          // 자기 자신이 보낸 변경은 알림 스킵 (이미 로컬 토스트 표시됨)
+          const me = useAuthStore.getState().currentUser;
+          if (me && senderId && senderId !== me.id) {
+            const scene = useDataStore.getState().findSceneByUuid(sceneUuid);
+            if (scene && scene.assignee === me.name) {
+              const notiSettings = notiSettingsRef.current;
+              if (notiSettings.sceneChange !== false) {
+                const senderName = useAuthStore.getState().users.find((u) => u.id === senderId)?.name ?? '다른 사용자';
+                const stateLabel = sceneState === 'wait' ? '대기'
+                  : sceneState === 'work' ? `작업중 ${workRound}차`
+                  : sceneState === 'feedback' ? `피드백 대기 ${feedbackRound}차`
+                  : '완료';
+                dispatchNotification({
+                  type: 'scene_change',
+                  title: `${senderName}님이 ${scene.sceneId || sceneUuid} → ${stateLabel}`,
+                  body: `액팅 씬 단계가 ${stateLabel} 로 변경되었습니다`,
+                  metadata: { sceneId: sceneUuid, sceneName: scene.sceneId, toStage: sceneState, changedBy: senderName },
                 }, notiSettings);
               }
             }

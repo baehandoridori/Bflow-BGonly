@@ -1111,7 +1111,8 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest } from './broadcast';
+import type { FeedbackBroadcastPayload } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
   readAllEpisodes as sbReadAllEpisodes,
@@ -1126,6 +1127,7 @@ import {
   addScenes as sbAddScenes,
   deleteScene as sbDeleteScene,
   updateSceneStage as sbUpdateSceneStage,
+  updateScenePhase as sbUpdateScenePhase,
   bulkUpdateSceneStages as sbBulkUpdateSceneStages,
   bulkDeleteScenes as sbBulkDeleteScenes,
   bulkUpdateSceneFields as sbBulkUpdateSceneFields,
@@ -1375,6 +1377,23 @@ ipcMain.handle('supabase:update-scene-stage', wrapIpc(async (_e: unknown, sceneU
       detail: { value },
     });
   }
+}));
+// v1.25.0~ 액팅 단계 토글 (sceneState + workRound + feedbackRound 한 번에)
+ipcMain.handle('supabase:update-scene-phase', wrapIpc(async (
+  _e: unknown,
+  sceneUuid: string,
+  sceneState: 'wait' | 'work' | 'feedback' | 'done',
+  workRound: number,
+  feedbackRound: number,
+  updatedBy?: string,
+) => {
+  await sbUpdateScenePhase(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
+  await logSceneActivity({
+    sceneUuid,
+    actionType: `phase_${sceneState}` as ActionType,
+    actionGroup: 'progress',
+    detail: { sceneState, workRound, feedbackRound },
+  });
 }));
 ipcMain.handle('supabase:bulk-update-scene-stages', wrapIpc(async (_e: unknown, updates: BulkStageUpdate[], updatedBy: string) => {
   const results = await sbBulkUpdateSceneStages(updates, updatedBy, currentActivityUser?.name ?? null);
@@ -2137,6 +2156,38 @@ ipcMain.handle('notification:show-native', (_e: unknown, title: string, body: st
     noti.show();
   }
 });
+
+// v1.25.0~ 액팅 피드백 Windows 토스트 + 클릭 시 씬 점프
+//
+// renderer 가 broadcast 'acting-feedback-request' 수신 → 자기 ID 가 recipients 에 있으면 호출.
+// title/body 외에 sceneJump payload (sheetName, sceneId, sceneUuid) 를 받아 클릭 시 렌더러로 점프 신호 전달.
+ipcMain.handle('notify:feedback-toast', (_e: unknown, payload: {
+  title: string;
+  body: string;
+  sceneJump: { sheetName: string; sceneId: string; sceneUuid: string };
+}) => {
+  if (!Notification.isSupported()) return;
+  // 앱이 포커스 상태이고 ScenesView 가 활성일 가능성이 높으면 native toast 생략(인앱 sonner 만)
+  // 일단 항상 띄움 — 운영하면서 정책 조정
+  const noti = new Notification({ title: payload.title, body: payload.body });
+  noti.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('feedback:jump-to-scene', payload.sceneJump);
+    }
+  });
+  noti.show();
+});
+
+// v1.25.0~ 액팅 피드백 알림 디스패치 — 작업자가 "알림 보내기" 클릭 시 호출.
+// 다른 클라이언트에 broadcast 로 payload 전송. 받는 측에서 자기 ID 가 recipients 에 있으면 토스트.
+ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
+  _e: unknown,
+  payload: Omit<FeedbackBroadcastPayload, 'ts'>,
+) => {
+  broadcastActingFeedbackRequest(payload);
+}));
 
 // ─── IPC 핸들러: METADATA ───────────────────────────────────
 

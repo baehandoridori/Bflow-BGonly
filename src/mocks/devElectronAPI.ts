@@ -70,6 +70,18 @@ export function installDevElectronAPI(): void {
       console.log(`[DEV 알림] ${title}: ${body}`);
     },
 
+    // v1.25.0~ 액팅 단계 토글 + 피드백 알림 (mock — 로그만)
+    supabaseUpdateScenePhase: async (sceneUuid, sceneState, workRound, feedbackRound) => {
+      console.log('[DEV] supabaseUpdateScenePhase:', { sceneUuid, sceneState, workRound, feedbackRound });
+    },
+    supabaseDispatchFeedbackNotification: async (payload) => {
+      console.log('[DEV] supabaseDispatchFeedbackNotification:', payload);
+    },
+    notifyFeedbackToast: async (payload) => {
+      console.log('[DEV] notifyFeedbackToast:', payload);
+    },
+    onFeedbackJumpToScene: noop,
+
     imageSave: async () => '/dev/mock-image.png',
     imageDelete: async () => true,
     imageGetDir: async () => '/dev/images',
