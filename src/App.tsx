@@ -1291,9 +1291,9 @@ export default function App() {
   useEffect(() => {
     if (!window.electronAPI?.onSupabaseBroadcast) return;
 
-    // 코덱스 5차 P1 #10 fix: 점프 시 selectedEpisode/selectedPart 도 같이 set.
-    //   ScenesView 가 현재 선택된 ep/part 만 렌더링하므로, 다른 ep 보고 있던 사용자는
-    //   setHighlightSceneId 만으로는 그 씬을 못 봄.
+    // 코덱스 5차 P1 #10 / 6차 P1 #12 fix: 점프 시 selectedEpisode/selectedPart 도 set + BG-only
+    //   필터면 'all' 로 전환. ScenesView 가 현재 선택된 ep/part/department 로 필터링하므로,
+    //   액팅 씬이 BG 필터에서는 안 보임.
     const jumpToFeedbackScene = (sheetName: string, sceneId: string) => {
       const eps = useDataStore.getState().episodes;
       let foundEp: number | null = null;
@@ -1310,6 +1310,8 @@ export default function App() {
       app.setView('scenes');
       if (foundEp !== null) app.setSelectedEpisode(foundEp);
       if (foundPart !== null) app.setSelectedPart(foundPart);
+      // 액팅 알림이므로 BG-only 필터면 'all' 로 풀어 액팅 씬도 보이게 함.
+      if (app.selectedDepartment === 'bg') app.setSelectedDepartment('all');
       app.setHighlightSceneId(sceneId);
     };
 
