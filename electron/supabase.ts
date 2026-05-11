@@ -242,13 +242,14 @@ export async function readAllEpisodes(): Promise<SupabaseEpisodeData[]> {
     memo: string; storyboard_url: string; guide_url: string; assignee: string;
     layout: string; lo: boolean; done: boolean; review: boolean; png: boolean;
     created_at?: string | null; updated_at?: string | null;
+    scene_state?: string | null; work_round?: number | null; feedback_round?: number | null;
   }[] = [];
 
   if (partIds.length > 0) {
     // Supabase IN 쿼리는 최대 수백 개까지 괜찮음
     const { data: sceneRows, error: sceneErr } = await supabase
       .from('scenes')
-      .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change, created_at, updated_at')
+      .select('id, part_id, scene_number, sort_order, memo, storyboard_url, guide_url, assignee, layout, lo, done, review, png, length_change, created_at, updated_at, scene_state, work_round, feedback_round')
       .in('part_id', partIds)
       .order('sort_order');
     throwIfError(sceneErr);

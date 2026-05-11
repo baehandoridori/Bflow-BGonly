@@ -68,16 +68,25 @@ export function ScenePhaseToggle({
         const isActive = activeState === state;
         const showRound = isActive && (state === 'work' || state === 'feedback');
         const round = state === 'work' ? (scene.workRound ?? 1) : (scene.feedbackRound ?? 1);
+        // 코덱스 3차 P2 #7 fix: chip 을 <button> 으로 두면 안에 <RoundCounter> 의 +/- <button> 이
+        //   nested 되어 HTML 표준 위반. <div role="radio"> + keyboard handler 로 교체.
         return (
-          <button
+          <div
             key={state}
-            type="button"
             role="radio"
             aria-checked={isActive}
-            disabled={disabled}
+            aria-disabled={disabled || undefined}
+            tabIndex={disabled ? -1 : 0}
             onClick={() => handleChipClick(state)}
+            onKeyDown={(e) => {
+              if (disabled) return;
+              if (e.key === ' ' || e.key === 'Enter') {
+                e.preventDefault();
+                handleChipClick(state);
+              }
+            }}
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-full border font-semibold',
+              'inline-flex items-center gap-1.5 rounded-full border font-semibold select-none',
               'transition-colors transition-shadow',
               'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
               compact
@@ -86,7 +95,7 @@ export function ScenePhaseToggle({
               isActive
                 ? 'border-transparent text-bg-primary'
                 : 'border-bg-border/60 bg-bg-primary/30 text-text-secondary/80 hover:bg-bg-primary/50 hover:text-text-primary',
-              disabled && 'opacity-40 cursor-not-allowed',
+              disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
             )}
             style={
               isActive
@@ -106,7 +115,7 @@ export function ScenePhaseToggle({
                 compact={compact}
               />
             )}
-          </button>
+          </div>
         );
       })}
     </div>
