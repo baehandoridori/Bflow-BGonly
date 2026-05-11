@@ -172,16 +172,18 @@ export const useDataStore = create<DataState>((set, get) => ({
                 feedbackRound = 0;
               } else if (newState === 'work') {
                 if (prev === 'feedback') {
-                  workRound = prevFb + 1; // 자동 +1
+                  // 자동 +1 — 코덱스 2차 P2 fix: 99 상한 클램프
+                  workRound = Math.min(SCENE_PHASE_ROUND_MAX, prevFb + 1);
                 } else if (prev !== 'work') {
-                  workRound = Math.max(1, prevWork || 1);
+                  workRound = Math.max(SCENE_PHASE_ROUND_MIN, Math.min(SCENE_PHASE_ROUND_MAX, prevWork || 1));
                 }
                 // prev === 'work' 이면 그대로 유지
               } else if (newState === 'feedback') {
                 if (prev === 'work') {
-                  feedbackRound = prevWork; // 라운드 동기화
+                  // 라운드 동기화 — 코덱스 2차 P2 fix: 99 상한 클램프
+                  feedbackRound = Math.min(SCENE_PHASE_ROUND_MAX, prevWork);
                 } else if (prev !== 'feedback') {
-                  feedbackRound = Math.max(1, prevFb || 1);
+                  feedbackRound = Math.max(SCENE_PHASE_ROUND_MIN, Math.min(SCENE_PHASE_ROUND_MAX, prevFb || 1));
                 }
               }
               return { ...scene, sceneState: newState, workRound, feedbackRound };

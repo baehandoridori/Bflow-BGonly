@@ -1286,6 +1286,53 @@ export default function App() {
     return () => window.removeEventListener('bflow:revisions-invalidated', handler);
   }, []);
 
+  // v1.25.0~ 액팅 피드백 알림 수신 + 씬 점프 리스너 (코덱스 2차 P1 #4 fix)
+  // 이전에는 ScenesView 안에 있었으나, 다른 뷰(Dashboard 등)에서도 알림을 받아야 하므로 App 최상위로 승격.
+  useEffect(() => {
+    if (!window.electronAPI?.onSupabaseBroadcast) return;
+    const offBroadcast = window.electronAPI.onSupabaseBroadcast((event: unknown) => {
+      const e = event as { event?: string; payload?: Record<string, unknown> };
+      if (e?.event !== 'acting-feedback-request') return;
+      const p = e.payload as {
+        sceneUuid: string; sceneId: string; sheetName: string;
+        episodeNumber: number; senderId: string; senderName: string;
+        recipients: string[];
+      } | undefined;
+      const me = useAuthStore.getState().currentUser;
+      if (!p || !me?.id) return;
+      if (!Array.isArray(p.recipients) || !p.recipients.includes(me.id)) return;
+      if (p.senderId === me.id) return;
+
+      const epLabel = `EP${String(p.episodeNumber).padStart(2, '0')}`;
+      sonnerToast.info(`${p.senderName}님이 피드백을 요청했습니다`, {
+        description: `${epLabel} · ${p.sceneId}`,
+        action: {
+          label: '씬 보기',
+          onClick: () => {
+            useAppStore.getState().setView('scenes');
+            useAppStore.getState().setHighlightSceneId(p.sceneId);
+          },
+        },
+        duration: 8000,
+      });
+      window.electronAPI.notifyFeedbackToast({
+        title: 'B flow — 피드백 요청',
+        body: `${p.senderName}님이 ${epLabel} ${p.sceneId} 검수를 요청했습니다.`,
+        sceneJump: { sheetName: p.sheetName, sceneId: p.sceneId, sceneUuid: p.sceneUuid },
+      }).catch(() => { /* 토스트 실패는 무시 */ });
+    });
+
+    const offJump = window.electronAPI.onFeedbackJumpToScene?.((payload) => {
+      useAppStore.getState().setView('scenes');
+      useAppStore.getState().setHighlightSceneId(payload.sceneId);
+    });
+
+    return () => {
+      offBroadcast?.();
+      offJump?.();
+    };
+  }, []);
+
   // Supabase Broadcast: 다른 사용자의 쓰기 직후 즉시 delta 수신 (Publication 설정 불필요)
   useEffect(() => {
     if (!window.electronAPI?.onSupabaseBroadcast) return;

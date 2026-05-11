@@ -1535,17 +1535,18 @@ export function ScenesView() {
       const prevFb = scene.feedbackRound ?? 0;
       setScenePhaseOptimistic(sheetName, sceneId, newState);
       // 새 round 값을 store와 동일한 규칙으로 다시 계산해 Supabase 동기화
+      // 코덱스 2차 P2 fix: 99 상한 클램프 (store 전이 규칙과 일치)
       let workRound = prevWork;
       let feedbackRound = prevFb;
       if (newState === 'wait' || newState === 'done') {
         workRound = 0;
         feedbackRound = 0;
       } else if (newState === 'work') {
-        if (prevState === 'feedback') workRound = prevFb + 1;
-        else if (prevState !== 'work') workRound = Math.max(1, prevWork || 1);
+        if (prevState === 'feedback') workRound = Math.min(99, prevFb + 1);
+        else if (prevState !== 'work') workRound = Math.max(1, Math.min(99, prevWork || 1));
       } else if (newState === 'feedback') {
-        if (prevState === 'work') feedbackRound = prevWork;
-        else if (prevState !== 'feedback') feedbackRound = Math.max(1, prevFb || 1);
+        if (prevState === 'work') feedbackRound = Math.min(99, prevWork);
+        else if (prevState !== 'feedback') feedbackRound = Math.max(1, Math.min(99, prevFb || 1));
       }
       try {
         await updateScenePhaseInSupabase(sceneUuid, newState, workRound, feedbackRound, currentUser?.id);
@@ -1719,51 +1720,8 @@ export function ScenesView() {
     }
   }, [highlightSceneId, setHighlightSceneId]);
 
-  // v1.25.0~ 액팅 피드백 요청 알림 수신 + 씬 점프 신호 수신
-  useEffect(() => {
-    const offBroadcast = window.electronAPI.onSupabaseBroadcast((event: unknown) => {
-      const e = event as { event?: string; payload?: Record<string, unknown> };
-      if (e?.event !== 'acting-feedback-request') return;
-      const p = e.payload as {
-        sceneUuid: string; sceneId: string; sheetName: string;
-        episodeNumber: number; senderId: string; senderName: string;
-        recipients: string[];
-      } | undefined;
-      if (!p || !currentUser?.id) return;
-      if (!Array.isArray(p.recipients) || !p.recipients.includes(currentUser.id)) return;
-      if (p.senderId === currentUser.id) return; // 자기 자신 제외 (백업)
-
-      const epLabel = `EP${String(p.episodeNumber).padStart(2, '0')}`;
-      // 인앱 sonner 토스트 — 점프 액션 포함
-      sonnerToast.info(`${p.senderName}님이 피드백을 요청했습니다`, {
-        description: `${epLabel} · ${p.sceneId}`,
-        action: {
-          label: '씬 보기',
-          onClick: () => {
-            setView('scenes');
-            setHighlightSceneId(p.sceneId);
-          },
-        },
-        duration: 8000,
-      });
-      // Windows 네이티브 토스트 + 클릭 시 점프 (main 에서 처리)
-      window.electronAPI.notifyFeedbackToast({
-        title: 'B flow — 피드백 요청',
-        body: `${p.senderName}님이 ${epLabel} ${p.sceneId} 검수를 요청했습니다.`,
-        sceneJump: { sheetName: p.sheetName, sceneId: p.sceneId, sceneUuid: p.sceneUuid },
-      }).catch(() => { /* 토스트 실패는 무시 */ });
-    });
-
-    const offJump = window.electronAPI.onFeedbackJumpToScene((payload) => {
-      setView('scenes');
-      setHighlightSceneId(payload.sceneId);
-    });
-
-    return () => {
-      offBroadcast?.();
-      offJump?.();
-    };
-  }, [currentUser?.id, setView, setHighlightSceneId]);
+  // 코덱스 2차 P1 #4 fix: 액팅 피드백 알림 수신·점프 리스너는 App.tsx 로 이동됨.
+  // ScenesView 가 unmount 되면 다른 뷰(Dashboard 등) 에선 알림을 못 받기 때문.
 
   const deletePartOptimistic = useDataStore((s) => s.deletePartOptimistic);
   const deleteEpisodeOptimistic = useDataStore((s) => s.deleteEpisodeOptimistic);
