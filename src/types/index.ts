@@ -69,6 +69,15 @@ export const SCENE_PHASE_LABELS: Record<ScenePhaseState, string> = {
   done: '완료',
 };
 
+/** v1.25.3~ 칩 안에 표시하는 짧은 라벨 — '피드백 대기' 5자가 좁은 컨테이너에서 wrap 되는 문제 해결.
+ *  의미 보존 (피드백을 받기 대기 중 → 피드백). 풀 라벨은 알림 메시지/모달 헤더 등에서 유지. */
+export const SCENE_PHASE_LABELS_SHORT: Record<ScenePhaseState, string> = {
+  wait: '대기',
+  work: '작업중',
+  feedback: '피드백',
+  done: '완료',
+};
+
 export const SCENE_PHASE_COLORS: Record<ScenePhaseState, string> = {
   wait: '#6E7388',
   work: '#74B9FF',
