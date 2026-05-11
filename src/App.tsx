@@ -1290,6 +1290,29 @@ export default function App() {
   // 이전에는 ScenesView 안에 있었으나, 다른 뷰(Dashboard 등)에서도 알림을 받아야 하므로 App 최상위로 승격.
   useEffect(() => {
     if (!window.electronAPI?.onSupabaseBroadcast) return;
+
+    // 코덱스 5차 P1 #10 fix: 점프 시 selectedEpisode/selectedPart 도 같이 set.
+    //   ScenesView 가 현재 선택된 ep/part 만 렌더링하므로, 다른 ep 보고 있던 사용자는
+    //   setHighlightSceneId 만으로는 그 씬을 못 봄.
+    const jumpToFeedbackScene = (sheetName: string, sceneId: string) => {
+      const eps = useDataStore.getState().episodes;
+      let foundEp: number | null = null;
+      let foundPart: string | null = null;
+      for (const ep of eps) {
+        const part = ep.parts.find((p) => p.sheetName === sheetName);
+        if (part) {
+          foundEp = ep.episodeNumber;
+          foundPart = part.partId;
+          break;
+        }
+      }
+      const app = useAppStore.getState();
+      app.setView('scenes');
+      if (foundEp !== null) app.setSelectedEpisode(foundEp);
+      if (foundPart !== null) app.setSelectedPart(foundPart);
+      app.setHighlightSceneId(sceneId);
+    };
+
     const offBroadcast = window.electronAPI.onSupabaseBroadcast((event: unknown) => {
       const e = event as { event?: string; payload?: Record<string, unknown> };
       if (e?.event !== 'acting-feedback-request') return;
@@ -1308,10 +1331,7 @@ export default function App() {
         description: `${epLabel} · ${p.sceneId}`,
         action: {
           label: '씬 보기',
-          onClick: () => {
-            useAppStore.getState().setView('scenes');
-            useAppStore.getState().setHighlightSceneId(p.sceneId);
-          },
+          onClick: () => jumpToFeedbackScene(p.sheetName, p.sceneId),
         },
         duration: 8000,
       });
@@ -1323,8 +1343,7 @@ export default function App() {
     });
 
     const offJump = window.electronAPI.onFeedbackJumpToScene?.((payload) => {
-      useAppStore.getState().setView('scenes');
-      useAppStore.getState().setHighlightSceneId(payload.sceneId);
+      jumpToFeedbackScene(payload.sheetName, payload.sceneId);
     });
 
     return () => {

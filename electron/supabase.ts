@@ -602,7 +602,16 @@ export async function updateSceneStage(
 }
 
 /** v1.25.0~ 액팅 씬 단계 상태 + 차수 업데이트 (한 번의 트랜잭션으로 3컬럼 동기화).
- *  spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md (섹션 7-3) */
+ *  spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md (섹션 7-3)
+ *
+ *  코덱스 5차 P1 #11 fix: scene_state 변경 시 legacy lo/done/review/png 도 함께 dual-write.
+ *  calcStats, sheet 뷰 등 다른 surface 가 아직 legacy boolean 을 읽으므로 split state 방지.
+ *  마이그레이션 SQL 의 매핑과 round-trip 가능하도록 다음 규칙:
+ *    wait     → 모두 false (체크 없음)
+ *    work     → lo=true, done=true (2원화까지 체크)
+ *    feedback → lo=true, done=true, review=true (동화까지 체크)
+ *    done     → 모두 true (최종까지 체크)
+ *  BG 가 새 시스템 도입 시 dual-write 는 제거하고 새 컬럼 단일 진실이 됨. */
 export async function updateScenePhase(
   sceneUuid: string,
   sceneState: 'wait' | 'work' | 'feedback' | 'done',
@@ -610,16 +619,29 @@ export async function updateScenePhase(
   feedbackRound: number,
   updatedBy?: string,
 ): Promise<void> {
+  const legacyFlags = (() => {
+    switch (sceneState) {
+      case 'wait':     return { lo: false, done: false, review: false, png: false };
+      case 'work':     return { lo: true,  done: true,  review: false, png: false };
+      case 'feedback': return { lo: true,  done: true,  review: true,  png: false };
+      case 'done':     return { lo: true,  done: true,  review: true,  png: true  };
+    }
+  })();
   const update: Record<string, unknown> = {
     scene_state: sceneState,
     work_round: workRound,
     feedback_round: feedbackRound,
+    ...legacyFlags,
     updated_at: new Date().toISOString(),
   };
   if (updatedBy) update.updated_by = updatedBy;
   const { error } = await supabase.from('scenes').update(update).eq('id', sceneUuid);
   throwIfError(error);
   broadcastScenePhaseUpdate(sceneUuid, sceneState, workRound, feedbackRound, updatedBy);
+  // legacy stage 도 broadcast — 다른 view 가 즉시 반영하도록 4개 컬럼 각각
+  for (const [stage, value] of Object.entries(legacyFlags)) {
+    broadcastSceneUpdate(sceneUuid, stage, value, updatedBy);
+  }
 }
 
 /** 대량 씬 체크박스 토글 (부분 실패 허용) — RPC 경유 */

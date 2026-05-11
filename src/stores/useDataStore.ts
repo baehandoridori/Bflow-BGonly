@@ -88,6 +88,20 @@ function applyUpdate(get: () => DataState, episodes: Episode[]) {
   return { episodes, stats: calcDashboardStats(episodes) };
 }
 
+/**
+ * 코덱스 5차 P1 #11 fix: 액팅 단계 → legacy boolean 4개 매핑.
+ * electron/supabase.ts 의 updateScenePhase 의 dual-write 매핑과 동일.
+ * 마이그레이션 SQL 매핑과 round-trip 가능.
+ */
+function legacyStagesFor(state: ScenePhaseState): { lo: boolean; done: boolean; review: boolean; png: boolean } {
+  switch (state) {
+    case 'wait':     return { lo: false, done: false, review: false, png: false };
+    case 'work':     return { lo: true,  done: true,  review: false, png: false };
+    case 'feedback': return { lo: true,  done: true,  review: true,  png: false };
+    case 'done':     return { lo: true,  done: true,  review: true,  png: true  };
+  }
+}
+
 export const useDataStore = create<DataState>((set, get) => ({
   episodes: [],
   stats: calcDashboardStats([]),
@@ -186,7 +200,16 @@ export const useDataStore = create<DataState>((set, get) => ({
                   feedbackRound = Math.max(SCENE_PHASE_ROUND_MIN, Math.min(SCENE_PHASE_ROUND_MAX, prevFb || 1));
                 }
               }
-              return { ...scene, sceneState: newState, workRound, feedbackRound };
+              // 코덱스 5차 P1 #11 fix: legacy lo/done/review/png 동시 갱신 — calcStats 등이
+              //   아직 boolean 4개를 읽기 때문에 split state 방지. BG 합류 시 제거 예정.
+              const legacy = legacyStagesFor(newState);
+              return {
+                ...scene,
+                sceneState: newState,
+                workRound,
+                feedbackRound,
+                lo: legacy.lo, done: legacy.done, review: legacy.review, png: legacy.png,
+              };
             }),
           };
         }),

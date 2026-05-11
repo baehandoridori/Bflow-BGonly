@@ -1533,6 +1533,8 @@ export function ScenesView() {
       const prevState: ScenePhaseState = scene.sceneState ?? 'wait';
       const prevWork = scene.workRound ?? 0;
       const prevFb = scene.feedbackRound ?? 0;
+      // 코덱스 5차 P1 #11 fix: legacy boolean 도 캡처해 롤백 시 복원
+      const prevLegacy = { lo: scene.lo, done: scene.done, review: scene.review, png: scene.png };
       setScenePhaseOptimistic(sheetName, sceneId, newState);
       // 새 round 값을 store와 동일한 규칙으로 다시 계산해 Supabase 동기화
       // 코덱스 2차 P2 fix: 99 상한 클램프 (store 전이 규칙과 일치)
@@ -1553,11 +1555,12 @@ export function ScenesView() {
       } catch (err) {
         console.error('[ScenesView] 단계 변경 실패:', err);
         sonnerToast.error('단계 변경 저장에 실패했습니다.');
-        // 명시적 롤백 — sceneState 뿐 아니라 workRound/feedbackRound 까지 셋 모두 복원
+        // 명시적 롤백 — sceneState/round 셋 + legacy 4개 모두 복원
         updateSceneByUuid(sceneUuid, {
           sceneState: prevState,
           workRound: prevWork,
           feedbackRound: prevFb,
+          ...prevLegacy,
         });
       }
     },
@@ -1630,11 +1633,12 @@ export function ScenesView() {
       } catch (err) {
         console.error('[ScenesView] 피드백 대기 저장 실패:', err);
         sonnerToast.error('피드백 대기 저장에 실패했습니다.');
-        // 코덱스 1차 P1 #2 fix: 명시적 복원 (전이 규칙 재적용 차단)
+        // 코덱스 1차 P1 #2 / 5차 P1 #11 fix: 명시적 복원 (sceneState/round/legacy 모두)
         updateSceneByUuid(sceneUuid, {
           sceneState: fromState,
           workRound: fromWorkRound,
           feedbackRound: feedbackModal.fromFeedbackRound,
+          lo: scene.lo, done: scene.done, review: scene.review, png: scene.png,
         });
         setFeedbackModal(null);
         return;
@@ -1685,11 +1689,12 @@ export function ScenesView() {
     } catch (err) {
       console.error('[ScenesView] 피드백 대기(조용히) 저장 실패:', err);
       sonnerToast.error('피드백 대기 저장에 실패했습니다.');
-      // 코덱스 1차 P1 #2 fix: 명시적 복원
+      // 코덱스 1차 P1 #2 / 5차 P1 #11 fix: 명시적 복원 (legacy 포함)
       updateSceneByUuid(sceneUuid, {
         sceneState: fromState,
         workRound: fromWorkRound,
         feedbackRound: fromFeedbackRound,
+        lo: scene.lo, done: scene.done, review: scene.review, png: scene.png,
       });
     }
     setFeedbackModal(null);
