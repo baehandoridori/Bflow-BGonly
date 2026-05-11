@@ -103,7 +103,11 @@ function matchesSceneIdentifier(
 function findSceneNavigationByIdentifier(
   episodes: Episode[],
   identifier: string,
-  opts: { episodeNumber?: number | null; partId?: string | null } = {},
+  opts: {
+    episodeNumber?: number | null;
+    partId?: string | null;
+    department?: Activity['department'];
+  } = {},
 ): ActivitySceneNavigationTarget | null {
   const normalizedPartId = opts.partId?.trim().toLowerCase() ?? null;
   const matches: ActivitySceneNavigationTarget[] = [];
@@ -112,6 +116,7 @@ function findSceneNavigationByIdentifier(
     if (opts.episodeNumber != null && ep.episodeNumber !== opts.episodeNumber) continue;
     for (const part of ep.parts) {
       if (normalizedPartId && part.partId.trim().toLowerCase() !== normalizedPartId) continue;
+      if (opts.department && part.department !== opts.department) continue;
       for (const scene of part.scenes) {
         if (!matchesSceneIdentifier(scene, identifier)) continue;
         matches.push(buildNavigationTarget(ep.episodeNumber, part, scene));
@@ -124,7 +129,7 @@ function findSceneNavigationByIdentifier(
 
 /** activity.sceneId(UUID)를 ScenesView deep-link가 이해하는 sheetName + sceneId로 변환한다. */
 export function resolveActivitySceneNavigation(
-  activity: Pick<Activity, 'sceneId' | 'sceneLabel' | 'episodeNumber'>,
+  activity: Pick<Activity, 'sceneId' | 'sceneLabel' | 'episodeNumber' | 'department'>,
   episodes: Episode[],
 ): ActivitySceneNavigationTarget | null {
   if (activity.sceneId) {
@@ -142,6 +147,7 @@ export function resolveActivitySceneNavigation(
     const byLabel = findSceneNavigationByIdentifier(episodes, parsedLabel.sceneRef, {
       episodeNumber: activity.episodeNumber ?? parsedLabel.episodeNumber,
       partId: parsedLabel.partId,
+      department: activity.department,
     });
     if (byLabel) return byLabel;
   }
@@ -150,5 +156,6 @@ export function resolveActivitySceneNavigation(
   return findSceneNavigationByIdentifier(episodes, activity.sceneId, {
     episodeNumber: activity.episodeNumber ?? parsedLabel?.episodeNumber,
     partId: parsedLabel?.partId,
+    department: activity.department,
   });
 }
