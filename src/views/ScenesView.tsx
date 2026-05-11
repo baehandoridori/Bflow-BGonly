@@ -2571,6 +2571,31 @@ export function ScenesView() {
       updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.nextCompletedAt);
     }
 
+    // v1.25.0~ 액팅 씬이면 sceneState/round 도 reverse mapping 으로 자동 동기화 (시트뷰 호환)
+    // legacy boolean 4개의 누적 체크 상태로 새 단계 추정. 차수는 prev state 가 같으면 유지, 다르면 1차.
+    const isActingScene = sheetName.endsWith('_ACT');
+    let actingPhaseSync: { state: ScenePhaseState; workRound: number; feedbackRound: number } | null = null;
+    if (isActingScene && scene.id) {
+      const nlo = stage === 'lo' ? newValue : scene.lo;
+      const ndone = stage === 'done' ? newValue : scene.done;
+      const nreview = stage === 'review' ? newValue : scene.review;
+      const npng = stage === 'png' ? newValue : scene.png;
+      const newPhase: ScenePhaseState =
+        npng ? 'done'
+        : nreview ? 'feedback'
+        : ndone ? 'work'
+        : 'wait';
+      const prevPhase: ScenePhaseState = scene.sceneState ?? 'wait';
+      const work = newPhase === 'work'
+        ? (prevPhase === 'work' ? Math.max(1, scene.workRound ?? 1) : 1)
+        : 0;
+      const feedback = newPhase === 'feedback'
+        ? (prevPhase === 'feedback' ? Math.max(1, scene.feedbackRound ?? 1) : 1)
+        : 0;
+      actingPhaseSync = { state: newPhase, workRound: work, feedbackRound: feedback };
+      setScenePhaseOptimistic(sheetName, sceneId, newPhase);
+    }
+
     // API 호출을 큐에 넣어 순차 실행 (race condition 방지)
     toggleQueueRef.current = toggleQueueRef.current.then(async () => {
       try {
@@ -2582,12 +2607,30 @@ export function ScenesView() {
           field: stage,
           value: newValue,
         });
+        // 액팅 phase reverse dual-write — stage 저장 성공 후 새 컬럼도 동기화
+        if (actingPhaseSync && scene.id) {
+          try {
+            await updateScenePhaseInSupabase(
+              scene.id,
+              actingPhaseSync.state,
+              actingPhaseSync.workRound,
+              actingPhaseSync.feedbackRound,
+              currentUser?.id,
+            );
+          } catch (phaseErr) {
+            console.warn('[액팅 phase 동기화 실패 — legacy stage 는 저장됨]', phaseErr);
+          }
+        }
       } catch (err) {
         console.error('[토글 실패]', err);
         toggleSceneStage(sheetName, sceneId, stage);
         if (completionMeta) {
           updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.prevCompletedBy);
           updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.prevCompletedAt);
+        }
+        // 액팅 phase 도 롤백
+        if (actingPhaseSync) {
+          setScenePhaseOptimistic(sheetName, sceneId, scene.sceneState ?? 'wait');
         }
         return;
       }
@@ -4716,6 +4759,9 @@ export function ScenesView() {
                 setDetailMerged(mergedScenes[nextIdx]);
               }
             }}
+            onActPhaseStateClick={handleActPhaseStateClick}
+            onActFeedbackRequest={handleActFeedbackRequest}
+            onActRoundBump={handleActRoundBump}
           />
         );
       })()}

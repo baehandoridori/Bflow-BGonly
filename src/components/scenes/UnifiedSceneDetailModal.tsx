@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
-import type { MergedScene, Scene, Stage, Department } from '@/types';
+import type { MergedScene, Scene, Stage, Department, ScenePhaseState } from '@/types';
+import { ScenePhaseToggle } from './ScenePhaseToggle';
 import { sceneProgress } from '@/utils/calcStats';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
@@ -98,6 +99,10 @@ export interface UnifiedSceneDetailModalProps {
   focusRevisionId?: string;
   /** v1.24.0: 댓글 패널에서 강조할 댓글 id — 자동 스크롤 + comment-target-pulse. */
   focusCommentId?: string;
+  /** v1.25.0~: 액팅 단계 토글 핸들러 (전달되면 ACT DeptSection 에서 ScenePhaseToggle 사용) */
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
+  onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
@@ -122,6 +127,9 @@ export function UnifiedSceneDetailModal({
   initialTab,
   focusRevisionId,
   focusCommentId,
+  onActPhaseStateClick,
+  onActFeedbackRequest,
+  onActRoundBump,
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
@@ -720,6 +728,9 @@ export function UnifiedSceneDetailModal({
                             onFieldUpdate={onFieldUpdate}
                             onDelete={() => setDeleteConfirm('act')}
                             onAdd={() => handleAddDept('acting')}
+                            onActPhaseStateClick={onActPhaseStateClick}
+                            onActFeedbackRequest={onActFeedbackRequest}
+                            onActRoundBump={onActRoundBump}
                           />
                         </div>
 
@@ -964,6 +975,9 @@ function DeptSection({
   onFieldUpdate,
   onDelete,
   onAdd,
+  onActPhaseStateClick,
+  onActFeedbackRequest,
+  onActRoundBump,
 }: {
   dept: Department;
   scene: Scene | null;
@@ -974,6 +988,9 @@ function DeptSection({
   onFieldUpdate: (sheetName: string, sceneIndex: number, field: string, value: string) => void;
   onDelete: () => void;
   onAdd: () => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
+  onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
   const visualColor = deptVisualColor(dept);
@@ -1048,32 +1065,43 @@ function DeptSection({
 
       <div>
         <span className="block text-xs text-text-secondary mb-1.5">진행 단계</span>
-        {/* 진행 단계 칩 — 기존 그대로 (한솔 결정: 버튼 디자인 유지) */}
-        <div className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-1">
-          {STAGES.map((stage, i) => {
-            const done = scene[stage];
-            const isCurrent = done && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
-            return (
-              <button
-                key={stage}
-                onClick={() => onToggle(sheetName, sceneId, stage)}
-                className={cn(
-                  'flex-1 text-center py-2 text-xs font-medium rounded-md transition-all cursor-pointer',
-                  !done && 'text-text-secondary/60 hover:text-text-primary hover:bg-black/5 dark:hover:bg-white/5',
-                )}
-                style={
-                  done
-                    ? isCurrent
-                      ? { backgroundColor: cfg.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${cfg.color}40` }
-                      : { backgroundColor: `${cfg.color}20`, color: cfg.color }
-                    : undefined
-                }
-              >
-                {cfg.stageLabels[stage]}
-              </button>
-            );
-          })}
-        </div>
+        {/* v1.25.0~: 액팅 + 핸들러 모두 전달 시 새 ScenePhaseToggle, 아니면 기존 4-stage 토글 */}
+        {dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
+          <div className="rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1.5 flex justify-center">
+            <ScenePhaseToggle
+              scene={scene}
+              onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
+              onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
+              onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
+            />
+          </div>
+        ) : (
+          <div className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-1">
+            {STAGES.map((stage, i) => {
+              const done = scene[stage];
+              const isCurrent = done && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
+              return (
+                <button
+                  key={stage}
+                  onClick={() => onToggle(sheetName, sceneId, stage)}
+                  className={cn(
+                    'flex-1 text-center py-2 text-xs font-medium rounded-md transition-all cursor-pointer',
+                    !done && 'text-text-secondary/60 hover:text-text-primary hover:bg-black/5 dark:hover:bg-white/5',
+                  )}
+                  style={
+                    done
+                      ? isCurrent
+                        ? { backgroundColor: cfg.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${cfg.color}40` }
+                        : { backgroundColor: `${cfg.color}20`, color: cfg.color }
+                      : undefined
+                  }
+                >
+                  {cfg.stageLabels[stage]}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <InlineTextareaRow
