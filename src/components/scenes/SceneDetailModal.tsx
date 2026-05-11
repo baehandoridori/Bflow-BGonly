@@ -1080,7 +1080,7 @@ export function SceneDetailModal({
             <div className="px-4 py-3 border-b border-bg-border shrink-0">
               <h3 className="text-sm font-medium text-text-primary">댓글 및 활동</h3>
             </div>
-            <CommentPanelErrorBoundary panelId="single">
+            <CommentPanelErrorBoundary panelId="single" key={sceneKey}>
               <CommentPanel
                 sceneKey={sceneKey}
                 secondarySceneKey={

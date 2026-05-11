@@ -812,7 +812,7 @@ export function UnifiedSceneDetailModal({
                   )}
                 </h3>
               </div>
-              <CommentPanelErrorBoundary panelId="unified">
+              <CommentPanelErrorBoundary panelId="unified" key={primaryCommentKey}>
                 <CommentPanel
                   sceneKey={primaryCommentKey}
                   secondarySceneKey={secondaryCommentKey || undefined}
