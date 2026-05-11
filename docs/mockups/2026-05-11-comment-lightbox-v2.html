@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>B flow — 댓글 이미지 라이트박스 v2 (v1.24.1 fix)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg: #0F1117;
+    --card: #1A1D27;
+    --border: #2D3041;
+    --text: #E8E8EE;
+    --muted: #8B8DA3;
+    --accent: #6C5CE7;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  /* z-index 99999 — 사이드바/모달/모든 것 위에 */
+  .lightbox-portal { position: fixed; inset: 0; z-index: 99999; }
+  /* 씬 상세 모달 시뮬레이션 — z-index 50 */
+  .scene-modal { position: fixed; z-index: 50; }
+  /* 사이드바 시뮬레이션 — z-index 100 (모달보다 위) */
+  .sidebar-fake { position: fixed; left: 0; top: 0; bottom: 0; width: 200px; z-index: 100; background: #14161E; border-right: 1px solid #2D3041; }
+  /* 키보드 시각 */
+  kbd { font: inherit; padding: 2px 6px; border: 1px solid #3A3D4D; border-bottom-width: 2px; border-radius: 4px; background: rgba(255,255,255,0.04); font-size: 11px; }
+  /* 썸네일 strip 활성 */
+  .thumb-strip-item { transition: all 200ms ease; cursor: pointer; }
+  .thumb-strip-item.active { outline: 3px solid #6C5CE7; outline-offset: 2px; transform: scale(1.05); }
+  .thumb-strip-item:hover:not(.active) { outline: 2px solid rgba(108,92,231,0.4); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="sticky top-0 z-40 backdrop-blur-md bg-[var(--bg)]/80 border-b border-[var(--border)]">
+  <div class="max-w-[1400px] mx-auto px-6 py-3">
+    <h1 class="font-semibold">댓글 이미지 라이트박스 v2 — 한솔 보고 fix (v1.24.1)</h1>
+    <p class="text-[12px] text-[var(--muted)] mt-0.5">씬 상세 모달처럼 풀스크린 + body portal (사이드바 위) + 하단 썸네일 strip + 키보드 ←/→</p>
+  </div>
+</header>
+
+<main class="max-w-[1400px] mx-auto px-6 py-8 space-y-6">
+
+  <!-- 변경점 요약 -->
+  <section class="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
+    <h2 class="font-semibold text-[15px] mb-3">v1.24.0 (현재) → v1.24.1 변경</h2>
+    <div class="grid grid-cols-2 gap-4">
+      <div class="rounded-lg border border-[var(--border)] p-4">
+        <div class="text-[12px] text-[var(--muted)] mb-2 font-semibold">v1.24.0 (한솔 보고된 문제)</div>
+        <ul class="text-[12.5px] space-y-1.5 list-disc list-inside text-[var(--muted)]">
+          <li>라이트박스가 CommentPanel 안에 직접 렌더 → 부모 stacking context 갇힘</li>
+          <li class="text-orange-300">사이드바가 라이트박스 위에 보임 (z-index 9999 무력화)</li>
+          <li>이미지 N개 첨부했는데 라이트박스에서 1/1 만 표시 (데이터 인식 X)</li>
+          <li>하단 도트 인디케이터 — 어떤 이미지가 더 있는지 미리 알기 어려움</li>
+        </ul>
+      </div>
+      <div class="rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/[0.06] p-4">
+        <div class="text-[12px] text-[var(--accent)] mb-2 font-semibold">v1.24.1 fix</div>
+        <ul class="text-[12.5px] space-y-1.5 list-disc list-inside">
+          <li><code>createPortal(document.body)</code> — body 직속 렌더 → 사이드바/모달 어떤 stacking context 와도 무관</li>
+          <li>z-index 99999 (사이드바 100, 모달 50 보다 절대 위)</li>
+          <li><strong>하단 썸네일 strip</strong> — 모든 이미지가 가로로 주르륵 나열, 현재 인덱스 강조 + 클릭으로 직접 이동</li>
+          <li>key 변경에 댓글 묶음 단위로 이미지 합쳐 표시 (디버깅 후 결정)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 라이트박스 시뮬레이션 -->
+  <section class="rounded-xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between">
+      <span class="text-[12.5px] font-medium">라이트박스 v2 미리보기 (인터랙티브)</span>
+      <span class="text-[11px] text-[var(--muted)]">사이드바와 모달이 *아래에* 있어도 라이트박스가 항상 위</span>
+    </div>
+
+    <!-- 가짜 BFLOW 화면 영역 -->
+    <div id="lightbox-stage" class="relative" style="height: 680px; background: linear-gradient(180deg, #0a0c12, #14161E);" tabindex="0">
+      <!-- 사이드바 (z-100) -->
+      <aside class="sidebar-fake p-3 text-[12px] text-[var(--muted)]" style="position: absolute;">
+        <div class="font-semibold text-[var(--text)] mb-2">사이드바 (z-100)</div>
+        <div>이전엔 라이트박스 위에 보였음 ❌</div>
+        <div class="mt-1 text-orange-300">v1.24.1: 라이트박스가 portal 로 위로 ✓</div>
+      </aside>
+
+      <!-- 씬 상세 모달 (z-50) -->
+      <div class="scene-modal rounded-xl border border-[var(--border)] bg-[var(--card)]" style="position: absolute; left: 240px; top: 30px; right: 30px; bottom: 30px;">
+        <div class="px-5 py-3 border-b border-[var(--border)]">
+          <div class="font-semibold">EP01 A컷 #03 — 옥상에서 바라본 도시 (z-50 모달)</div>
+        </div>
+        <div class="p-5 text-[var(--muted)] text-[12.5px]">
+          모달 내용. 댓글 패널에서 이미지 클릭하면 라이트박스가 *모달과 사이드바 둘 다 위*에 떠야 함.
+        </div>
+      </div>
+
+      <!-- 라이트박스 (z-99999, body portal 시뮬레이션) -->
+      <div id="lightbox-v2" class="lightbox-portal" style="background: rgba(0,0,0,0.92); display: flex; flex-direction: column;">
+        <!-- 상단 헤더 -->
+        <div class="px-6 pt-4 pb-3 flex items-start justify-between gap-4 flex-shrink-0"
+             style="background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);">
+          <div class="flex-1 min-w-0 text-white">
+            <div class="flex items-center gap-2 text-[12px] text-white/70 flex-wrap">
+              <span class="px-2 py-0.5 rounded bg-white/10 font-medium">EP01 / A컷 / #03</span>
+              <span class="text-white/40">·</span>
+              <span class="font-semibold text-white">한솔</span>
+              <span class="text-white/40">·</span>
+              <span id="lb2-time" class="text-white/60">14:02</span>
+              <span class="text-white/40">·</span>
+              <span id="lb2-index" class="tabular-nums">1 / 5</span>
+            </div>
+            <p class="text-[13.5px] text-white/95 mt-2 line-clamp-2 max-w-3xl">옥상 씬 LO 5컷 한꺼번에 올렸어요. 시선 방향 + 캐릭터 동선 + 빌딩 라인 모두 확인 부탁드려요</p>
+          </div>
+          <button onclick="alert('실제로는 닫힙니다')" class="w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center cursor-pointer flex-shrink-0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <!-- 메인 이미지 + 좌우 화살표 -->
+        <div class="flex-1 relative flex items-center justify-center px-6 min-h-0">
+          <button id="lb2-prev" class="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-black/50 hover:bg-black/75 text-white flex items-center justify-center cursor-pointer">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div id="lb2-main" class="rounded-lg flex items-center justify-center text-white font-bold shadow-2xl"
+               style="width: 70%; height: 100%; max-height: 100%; background: linear-gradient(135deg,#74B9FF,#0984E3); font-size: 96px;">A</div>
+          <button id="lb2-next" class="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-black/50 hover:bg-black/75 text-white flex items-center justify-center cursor-pointer">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+
+        <!-- 하단 썸네일 strip — 핵심 변경 -->
+        <div class="flex-shrink-0 px-6 py-4" style="background: linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0.4));">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[11px] text-white/60 font-medium">이미지 5장</span>
+            <span class="text-[11px] text-white/60">
+              <kbd class="bg-white/10 border-white/20 text-white">←</kbd>
+              <kbd class="bg-white/10 border-white/20 text-white ml-1">→</kbd>
+              <span class="ml-2">키보드로 이동</span>
+              <span class="mx-2 text-white/30">·</span>
+              <kbd class="bg-white/10 border-white/20 text-white">ESC</kbd>
+              <span class="ml-1">닫기</span>
+            </span>
+          </div>
+          <div id="lb2-thumbs" class="flex gap-2 overflow-x-auto pb-1">
+            <!-- 썸네일들 JS 로 렌더 -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <div class="px-4 py-3 text-[11px] text-[var(--muted)] border-t border-[var(--border)] text-center">
+      위 영역에 마우스 두고 ← / → 화살표 또는 썸네일 클릭. 사이드바/모달이 라이트박스 *아래*에 있는지 확인.
+    </div>
+  </section>
+
+  <!-- 동작 규칙 -->
+  <section class="rounded-xl border border-[var(--border)] bg-[var(--card)] p-5">
+    <h3 class="font-semibold mb-3">v2 규칙</h3>
+    <ul class="text-[12.5px] space-y-1.5 list-disc list-inside text-[var(--muted)]">
+      <li><code>createPortal(document.body)</code> — CommentPanel/모달의 stacking context 무관</li>
+      <li>z-index 99999 — 사이드바(100), 모달(50), 어떤 컴포넌트보다 위</li>
+      <li>레이아웃: 헤더 (씬·작성자·시간·N/M·본문) / 메인 이미지 (70% 폭) / 하단 썸네일 strip</li>
+      <li>썸네일 strip — 모든 이미지 가로 나열, 현재 active 는 보라 outline + 1.05 scale, hover 는 옅은 outline</li>
+      <li>썸네일 클릭으로 직접 이동 + 키보드 ← → 순환 + ESC 닫기 (capture stage stopPropagation 으로 모달 prev/next 충돌 X)</li>
+      <li>이미지 1장이면 좌우 화살표 + 썸네일 strip 모두 숨김 (단일 이미지는 v1.24.0 그대로)</li>
+      <li><code>prefers-reduced-motion</code> 시 transition 제거</li>
+    </ul>
+  </section>
+
+  <!-- 1/1 문제 분석 -->
+  <section class="rounded-xl border border-orange-500/40 bg-orange-500/[0.06] p-5">
+    <h3 class="font-semibold mb-3 text-orange-300">"이미지 N개인데 1/1로 보임" 가설</h3>
+    <ol class="text-[12.5px] space-y-2 list-decimal list-inside text-[var(--muted)]">
+      <li><strong class="text-[var(--text)]">팀원 PC가 아직 v1.23.5</strong> — v1.23.5의 라이트박스는 단일 이미지만 지원 (배열 미지원). v1.24.0 받으면 자동 해결.</li>
+      <li><strong class="text-[var(--text)]">댓글 묶음 표시 착시</strong> — 같은 사용자가 *4번*에 걸쳐 1개씩 첨부 → Slack 식 묶음으로 한 댓글처럼 보이지만 실제론 4개 분리된 댓글, 각자 1개 이미지. 라이트박스는 1개 댓글 = 1개 이미지 정확히 표시.</li>
+      <li><strong class="text-[var(--text)]">한 번에 N개 첨부했는데 1로 저장</strong> — 데이터 자체 버그 (가능성 낮음). supabase 직접 query 로 검증 필요.</li>
+    </ol>
+    <p class="text-[12px] text-[var(--muted)] mt-3 pt-3 border-t border-[var(--border)]">
+      <strong class="text-[var(--text)]">확인 필요:</strong> 한솔 PC(v1.24.0)에서 새 댓글에 이미지 N개 한 번에 첨부 → grid 에 N개 보이는지 → 클릭 시 라이트박스가 N/N 으로 보이는지.
+    </p>
+  </section>
+
+</main>
+
+<script>
+  const IMAGES = [
+    { letter: 'A', bg: 'linear-gradient(135deg,#74B9FF,#0984E3)' },
+    { letter: 'B', bg: 'linear-gradient(135deg,#FDCB6E,#E17055)' },
+    { letter: 'C', bg: 'linear-gradient(135deg,#A29BFE,#6C5CE7)' },
+    { letter: 'D', bg: 'linear-gradient(135deg,#00B894,#055044)' },
+    { letter: 'E', bg: 'linear-gradient(135deg,#FF6B6B,#FF8E8E)' },
+  ];
+  let idx = 0;
+  const main = document.getElementById('lb2-main');
+  const indexEl = document.getElementById('lb2-index');
+  const thumbsEl = document.getElementById('lb2-thumbs');
+  const stage = document.getElementById('lightbox-stage');
+
+  function renderThumbs() {
+    thumbsEl.innerHTML = '';
+    IMAGES.forEach((img, i) => {
+      const t = document.createElement('div');
+      t.className = 'thumb-strip-item rounded flex items-center justify-center text-white font-bold flex-shrink-0';
+      t.style.cssText = 'width: 72px; height: 72px; background: ' + img.bg + '; font-size: 24px;';
+      t.textContent = img.letter;
+      if (i === idx) t.classList.add('active');
+      t.addEventListener('click', () => { idx = i; render(); });
+      thumbsEl.appendChild(t);
+    });
+  }
+  function render() {
+    const img = IMAGES[idx];
+    main.style.background = img.bg;
+    main.textContent = img.letter;
+    indexEl.textContent = (idx + 1) + ' / ' + IMAGES.length;
+    renderThumbs();
+  }
+  function step(dir) { idx = (idx + dir + IMAGES.length) % IMAGES.length; render(); }
+  document.getElementById('lb2-prev').addEventListener('click', () => step(-1));
+  document.getElementById('lb2-next').addEventListener('click', () => step(1));
+  stage.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+  });
+  stage.style.outline = 'none';
+  render();
+</script>
+</body>
+</html>

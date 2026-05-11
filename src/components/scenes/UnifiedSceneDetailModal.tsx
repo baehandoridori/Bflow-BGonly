@@ -22,6 +22,7 @@ import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
 import { CommentPanel, type CommentInlineEvent } from './CommentPanel';
+import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
 import { RevisionPanel } from './RevisionPanel';
 import { SceneFilesTab } from './SceneFilesTab';
 import { SceneHistoryTab } from './SceneHistoryTab';
@@ -489,7 +490,7 @@ export function UnifiedSceneDetailModal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 6 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="relative w-[min(720px,calc(100vw-26rem))] h-[min(720px,90vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden"
+            className="relative w-[min(720px,calc(100vw-26rem))] h-[min(900px,92vh)] flex flex-col bg-bg-card border border-bg-border overflow-hidden"
             style={{ borderRadius: 18, boxShadow: '0 40px 80px rgba(0,0,0,0.5)' }}
           >
             {/* §3-1 배경 글로우 두 개 — 시그니처 */}
@@ -800,7 +801,7 @@ export function UnifiedSceneDetailModal({
               initial={{ opacity: 0, x: 30 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.25, delay: 0.1 }}
-              className="w-80 bg-bg-card shadow-2xl border border-bg-border h-[min(720px,90vh)] flex flex-col shrink-0 overflow-hidden"
+              className="w-80 bg-bg-card shadow-2xl border border-bg-border h-[min(900px,92vh)] flex flex-col shrink-0 overflow-hidden"
               style={{ borderRadius: 18 }}
             >
               <div className="px-4 py-3 border-b border-bg-border shrink-0">
@@ -811,17 +812,19 @@ export function UnifiedSceneDetailModal({
                   )}
                 </h3>
               </div>
-              <CommentPanel
-                sceneKey={primaryCommentKey}
-                secondarySceneKey={secondaryCommentKey || undefined}
-                onCountChange={setCommentCount}
-                inlineEvents={inlineEvents}
-                focusCommentId={focusCommentId}
-                // v1.24.0: 댓글 이미지 라이트박스 상단 라벨용 — "EP01 / A컷 #03" 형태로 전달.
-                sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
-                  .filter(Boolean)
-                  .join(' / ')}
-              />
+              <CommentPanelErrorBoundary panelId="unified" key={primaryCommentKey}>
+                <CommentPanel
+                  sceneKey={primaryCommentKey}
+                  secondarySceneKey={secondaryCommentKey || undefined}
+                  onCountChange={setCommentCount}
+                  inlineEvents={inlineEvents}
+                  focusCommentId={focusCommentId}
+                  // v1.24.0: 댓글 이미지 라이트박스 상단 라벨용 — "EP01 / A컷 #03" 형태로 전달.
+                  sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
+                    .filter(Boolean)
+                    .join(' / ')}
+                />
+              </CommentPanelErrorBoundary>
             </motion.div>
           )}
         </motion.div>
