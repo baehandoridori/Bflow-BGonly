@@ -1036,9 +1036,9 @@ export function UnifiedSceneSheetView({
 
                   {/* v1.25.2~: ACT 단계 — 새 토글 통합 (colspan=4) 또는 기존 4 boolean 체크박스 */}
                   {onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
-                    <td colSpan={4} className="px-1 py-1.5 text-center">
+                    <td colSpan={4} className="px-1 py-1.5">
                       {actScene && actSheetName ? (
-                        <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
+                        <div onClick={(e) => e.stopPropagation()}>
                           <ScenePhaseToggle
                             scene={actScene}
                             compact

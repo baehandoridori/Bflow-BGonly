@@ -152,25 +152,20 @@ export function FeedbackRequestModal({
 
   const modal = (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"
       aria-labelledby="feedback-request-title"
     >
-      <div
-        className="w-full max-w-[520px] rounded-2xl border border-bg-border bg-bg-card shadow-2xl flex flex-col max-h-[90vh]"
-        style={{
-          background: 'linear-gradient(180deg, #1E2030 0%, #181A26 100%)',
-        }}
-      >
+      <div className="w-full max-w-[520px] rounded-2xl border border-bg-border bg-bg-card shadow-2xl flex flex-col max-h-[90vh]">
         {/* 헤더 */}
-        <div className="px-6 pt-5 pb-4 border-b border-bg-border/70 flex items-start justify-between">
+        <div className="px-6 pt-5 pb-4 border-b border-bg-border/60 flex items-start justify-between">
           <div>
             <h2 id="feedback-request-title" className="text-[14px] font-bold text-text-primary">
               피드백 대기로 보내기
             </h2>
-            <p className="text-[11px] text-text-secondary/70 mt-1">
+            <p className="text-[11px] text-text-secondary mt-1">
               선택된 검수자에게 알림이 발송됩니다.
             </p>
           </div>
@@ -178,21 +173,21 @@ export function FeedbackRequestModal({
             type="button"
             aria-label="닫기"
             onClick={onCancel}
-            className="text-text-secondary/70 hover:text-text-primary text-xl leading-none"
+            className="text-text-secondary hover:text-text-primary text-xl leading-none w-7 h-7 flex items-center justify-center rounded hover:bg-bg-primary/40"
           >
             ×
           </button>
         </div>
 
         {/* 씬 정보 */}
-        <div className="px-6 pt-4 pb-3 border-b border-bg-border/40">
-          <div className="text-[10.5px] uppercase tracking-wider font-semibold text-text-secondary/70 mb-1">
+        <div className="px-6 pt-4 pb-3 border-b border-bg-border/30 bg-bg-primary/20">
+          <div className="text-[10.5px] uppercase tracking-wider font-semibold text-text-secondary mb-1">
             {episodeLabel ? `${episodeLabel} · 액팅` : '액팅'}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[14px] font-bold text-text-primary">{scene.sceneId}</span>
             {scene.assignee && (
-              <span className="text-[11px] text-text-secondary/70">담당 · {scene.assignee}</span>
+              <span className="text-[11px] text-text-secondary">담당 · {scene.assignee}</span>
             )}
           </div>
           <div className="mt-2.5 flex items-center text-[11px]">
@@ -202,7 +197,7 @@ export function FeedbackRequestModal({
             >
               {fromLabel}
             </span>
-            <span className="mx-2 text-text-secondary/60">→</span>
+            <span className="mx-2 text-text-secondary">→</span>
             <span
               className="inline-flex items-center px-2 py-0.5 rounded-full font-bold"
               style={{ backgroundColor: '#FDCB6E', color: '#0F1117' }}
@@ -214,12 +209,12 @@ export function FeedbackRequestModal({
 
         {/* 수신자 — 액팅 수퍼바이저 */}
         <div className="px-6 pt-4 pb-1 overflow-y-auto flex-1">
-          <div className="text-[10.5px] uppercase tracking-wider font-bold text-text-secondary/70 mb-2">
+          <div className="text-[10.5px] uppercase tracking-wider font-bold text-text-secondary mb-2">
             알림 받을 사람 ({checkedCount}명 선택됨)
           </div>
 
           {supervisors.length === 0 ? (
-            <div className="text-[11.5px] text-text-secondary/60 px-2 py-3 text-center bg-bg-primary/30 rounded-lg">
+            <div className="text-[11.5px] text-text-secondary px-2 py-3 text-center bg-bg-primary/30 rounded-lg">
               등록된 액팅 검수자가 없습니다. 설정 &gt; 사용자 관리에서 추가하세요.
             </div>
           ) : (
@@ -244,7 +239,7 @@ export function FeedbackRequestModal({
           {(additional.length > 0 || searchOpen) && (
             <div className="my-3 relative">
               <div className="border-t border-dashed border-bg-border/70" />
-              <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-bg-card px-2 text-[10px] uppercase tracking-wider font-bold text-text-secondary/60">
+              <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-bg-card px-2 text-[10px] uppercase tracking-wider font-bold text-text-secondary">
                 추가 멘션
               </span>
             </div>
@@ -271,14 +266,14 @@ export function FeedbackRequestModal({
           {searchOpen ? (
             <div className="mt-2">
               <div className="relative">
-                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary/60" />
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary" />
                 <input
                   ref={searchInputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="이름으로 검색"
-                  className="w-full pl-7 pr-2 py-1.5 text-[12px] rounded-md bg-bg-primary/50 border border-bg-border focus:outline-none focus:border-accent text-text-primary"
+                  className="w-full pl-7 pr-2 py-1.5 text-[12px] rounded-md bg-bg-primary/50 border border-bg-border focus:outline-none focus:border-accent text-text-primary placeholder:text-text-secondary"
                 />
               </div>
               {searchResults.length > 0 && (
@@ -288,7 +283,7 @@ export function FeedbackRequestModal({
                       key={u.id}
                       type="button"
                       onClick={() => addUser(u)}
-                      className="w-full text-left px-2 py-1.5 text-[12px] hover:bg-accent/15 rounded transition-colors flex items-center gap-2"
+                      className="w-full text-left px-2 py-1.5 text-[12px] hover:bg-accent/15 rounded transition-colors flex items-center gap-2 text-text-primary"
                     >
                       <Avatar name={u.name} />
                       <span>{u.name}</span>
@@ -297,7 +292,7 @@ export function FeedbackRequestModal({
                 </div>
               )}
               {searchQuery.trim() && searchResults.length === 0 && (
-                <div className="mt-1 text-[11px] text-text-secondary/60 px-2 py-1.5">
+                <div className="mt-1 text-[11px] text-text-secondary px-2 py-1.5">
                   일치하는 사용자가 없습니다.
                 </div>
               )}
@@ -315,11 +310,11 @@ export function FeedbackRequestModal({
         </div>
 
         {/* 푸터 */}
-        <div className="px-6 py-3.5 mt-2 border-t border-bg-border/70 flex items-center justify-end gap-2">
+        <div className="px-6 py-3.5 mt-2 border-t border-bg-border/60 flex items-center justify-end gap-2 bg-bg-primary/20 rounded-b-2xl">
           <button
             type="button"
             onClick={onCancel}
-            className="px-3 py-2 text-[12px] font-bold rounded-md text-text-secondary/80 hover:text-text-primary hover:bg-bg-primary/40 transition-colors"
+            className="px-3 py-2 text-[12px] font-bold rounded-md text-text-secondary hover:text-text-primary hover:bg-bg-primary/40 transition-colors"
           >
             취소
           </button>
@@ -337,7 +332,7 @@ export function FeedbackRequestModal({
             className={cn(
               'px-3 py-2 text-[12px] font-bold rounded-md text-white transition-opacity',
               checkedCount === 0
-                ? 'bg-bg-border/40 text-text-secondary/60 cursor-not-allowed'
+                ? 'bg-bg-border/40 text-text-secondary cursor-not-allowed'
                 : 'bg-accent hover:opacity-90',
             )}
           >

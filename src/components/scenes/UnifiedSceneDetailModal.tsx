@@ -1067,14 +1067,12 @@ function DeptSection({
         <span className="block text-xs text-text-secondary mb-1.5">진행 단계</span>
         {/* v1.25.0~: 액팅 + 핸들러 모두 전달 시 새 ScenePhaseToggle, 아니면 기존 4-stage 토글 */}
         {dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
-          <div className="rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1.5 flex justify-center">
-            <ScenePhaseToggle
-              scene={scene}
-              onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
-              onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
-              onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
-            />
-          </div>
+          <ScenePhaseToggle
+            scene={scene}
+            onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
+            onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
+            onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
+          />
         ) : (
           <div className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-1">
             {STAGES.map((stage, i) => {

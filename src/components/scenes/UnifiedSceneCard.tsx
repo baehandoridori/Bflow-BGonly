@@ -504,12 +504,11 @@ function DeptSection({
           </button>
         </div>
       </div>
-      {/* v1.25.0~: 액팅 부서 + 핸들러 모두 전달된 경우 새 ScenePhaseToggle 사용 */}
+      {/* v1.25.0~: 액팅 부서 + 핸들러 모두 전달된 경우 새 ScenePhaseToggle 사용.
+          v1.25.3 (한솔 보고): ScenePhaseToggle 가 자체 컨테이너(flex w-full + bg/border)를
+          가지므로 wrapper 는 클릭 이벤트 전파만 막음. 기존 4-stage 토글과 동일한 모양. */}
       {dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
-        <div
-          className="rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1.5 flex justify-center"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div onClick={(e) => e.stopPropagation()}>
           <ScenePhaseToggle
             scene={scene}
             onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
