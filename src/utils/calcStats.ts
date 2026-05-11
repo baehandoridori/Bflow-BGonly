@@ -12,20 +12,41 @@ import type {
 } from '@/types';
 import { STAGES, STAGE_LABELS, DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 
-/** 씬 1개의 진행률 (0~100) */
+/**
+ * v1.25.2~ 액팅 씬의 sceneState 기반 진행률 단계 수.
+ *   wait=0 / work=2 / feedback=3 / done=4 (legacy boolean 매핑과 round-trip 동일)
+ *   sceneState 가 NULL 이면 null 반환 → legacy boolean fallback.
+ */
+function sceneStateProgressCount(scene: Scene): number | null {
+  if (!scene.sceneState) return null;
+  switch (scene.sceneState) {
+    case 'wait':     return 0;
+    case 'work':     return 2;
+    case 'feedback': return 3;
+    case 'done':     return 4;
+  }
+}
+
+/** 씬 1개의 진행률 (0~100).
+ *  v1.25.2~ 액팅 씬은 sceneState 우선, NULL 이면 legacy boolean fallback.
+ */
 export function sceneProgress(scene: Scene): number {
+  const stateCount = sceneStateProgressCount(scene);
+  if (stateCount !== null) return (stateCount / 4) * 100;
   const checks = [scene.lo, scene.done, scene.review, scene.png];
   const completed = checks.filter(Boolean).length;
   return (completed / 4) * 100;
 }
 
-/** 씬이 4단계 모두 완료인지 */
+/** 씬이 4단계 모두 완료인지 — sceneState 우선, 없으면 legacy. */
 export function isFullyDone(scene: Scene): boolean {
+  if (scene.sceneState) return scene.sceneState === 'done';
   return scene.lo && scene.done && scene.review && scene.png;
 }
 
-/** 씬이 아무것도 시작 안 한 상태인지 */
+/** 씬이 아무것도 시작 안 한 상태인지 — sceneState 우선, 없으면 legacy. */
 export function isNotStarted(scene: Scene): boolean {
+  if (scene.sceneState) return scene.sceneState === 'wait';
   return !scene.lo && !scene.done && !scene.review && !scene.png;
 }
 

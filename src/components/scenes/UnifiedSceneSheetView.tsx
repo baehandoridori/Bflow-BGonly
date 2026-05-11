@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { MessageCircle, Trash2 } from 'lucide-react';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
-import type { MergedScene, Stage, Scene } from '@/types';
+import type { MergedScene, Stage, Scene, ScenePhaseState } from '@/types';
+import { ScenePhaseToggle } from './ScenePhaseToggle';
 import type { SceneGroupMode } from '@/stores/useAppStore';
 import { sceneProgress, progressGradient } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
@@ -39,6 +40,10 @@ interface UnifiedSceneSheetViewProps {
   onOpenMerged?: (merged: MergedScene) => void;
   onFieldUpdate: (sheetName: string, sceneIndex: number, field: string, value: string) => void;
   onCtrlClick?: (sceneId: string) => void;
+  /** v1.25.2~ 액팅 단계 토글 핸들러 (전달 시 ACT 4셀 대신 ScenePhaseToggle 표시) */
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
+  onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
 }
 
 // ─── 셀 선택 타입 ───────────────────────────────────────────
@@ -310,6 +315,9 @@ export function UnifiedSceneSheetView({
   onOpenMerged,
   onFieldUpdate,
   onCtrlClick,
+  onActPhaseStateClick,
+  onActFeedbackRequest,
+  onActRoundBump,
 }: UnifiedSceneSheetViewProps) {
   const bgCfg = DEPARTMENT_CONFIGS.bg;
   const actCfg = DEPARTMENT_CONFIGS.acting;
@@ -756,15 +764,26 @@ export function UnifiedSceneSheetView({
               <th className="w-20 px-2 py-2 text-left text-xs font-medium" style={{ color: actCfg.color }}>
                 ACT담당
               </th>
-              {STAGES.map((s) => (
+              {/* v1.25.2~: 액팅 새 토글 핸들러가 전달되면 ACT 단계 4셀을 ScenePhaseToggle 1셀로 통합 */}
+              {onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
                 <th
-                  key={`act-${s}`}
-                  className="w-10 px-1 py-2 text-center text-[11px] font-medium"
-                  style={{ color: actCfg.stageColors[s] }}
+                  colSpan={4}
+                  className="px-1 py-2 text-center text-[11px] font-medium"
+                  style={{ color: actCfg.color }}
                 >
-                  {actCfg.stageLabels[s]}
+                  액팅 단계
                 </th>
-              ))}
+              ) : (
+                STAGES.map((s) => (
+                  <th
+                    key={`act-${s}`}
+                    className="w-10 px-1 py-2 text-center text-[11px] font-medium"
+                    style={{ color: actCfg.stageColors[s] }}
+                  >
+                    {actCfg.stageLabels[s]}
+                  </th>
+                ))
+              )}
               <th className="w-12 px-1 py-2 text-center text-xs font-medium text-text-secondary">BG%</th>
               <th className="w-12 px-1 py-2 text-center text-xs font-medium text-text-secondary">ACT%</th>
               <th className="w-12 px-1 py-2 text-center text-xs font-medium text-text-secondary">합계</th>
@@ -1015,26 +1034,44 @@ export function UnifiedSceneSheetView({
                     <td className="px-2 py-1.5 text-xs text-text-secondary/20">—</td>
                   )}
 
-                  {/* ACT 스테이지 체크박스 */}
-                  {STAGES.map((stage) => (
-                    <td key={`act-${stage}`} className="px-1 py-1.5 text-center">
+                  {/* v1.25.2~: ACT 단계 — 새 토글 통합 (colspan=4) 또는 기존 4 boolean 체크박스 */}
+                  {onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
+                    <td colSpan={4} className="px-1 py-1.5 text-center">
                       {actScene && actSheetName ? (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onToggle(actSheetName, actScene.sceneId, stage); }}
-                          className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto cursor-pointer"
-                          style={
-                            actScene[stage]
-                              ? { backgroundColor: actCfg.stageColors[stage], color: 'rgb(var(--color-bg-primary))' }
-                              : { border: '1px solid #2D3041' }
-                          }
-                        >
-                          {actScene[stage] ? '✓' : ''}
-                        </button>
+                        <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
+                          <ScenePhaseToggle
+                            scene={actScene}
+                            compact
+                            onStateClick={(next) => onActPhaseStateClick(actSheetName, actScene.sceneId, next)}
+                            onRequestFeedback={() => onActFeedbackRequest(actSheetName, actScene.sceneId)}
+                            onRoundBump={(kind, delta) => onActRoundBump(actSheetName, actScene.sceneId, kind, delta)}
+                          />
+                        </div>
                       ) : (
                         <span className="text-text-secondary/20 text-xs">—</span>
                       )}
                     </td>
-                  ))}
+                  ) : (
+                    STAGES.map((stage) => (
+                      <td key={`act-${stage}`} className="px-1 py-1.5 text-center">
+                        {actScene && actSheetName ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onToggle(actSheetName, actScene.sceneId, stage); }}
+                            className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto cursor-pointer"
+                            style={
+                              actScene[stage]
+                                ? { backgroundColor: actCfg.stageColors[stage], color: 'rgb(var(--color-bg-primary))' }
+                                : { border: '1px solid #2D3041' }
+                            }
+                          >
+                            {actScene[stage] ? '✓' : ''}
+                          </button>
+                        ) : (
+                          <span className="text-text-secondary/20 text-xs">—</span>
+                        )}
+                      </td>
+                    ))
+                  )}
 
                   {/* BG% */}
                   <SheetProgressCell pct={bgScene ? bgPct : 0} />
