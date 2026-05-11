@@ -4054,6 +4054,9 @@ export function ScenesView() {
                   if (bgPart) toggleSelectedScene(`bg:${id}`);
                   if (actPart) toggleSelectedScene(`act:${id}`);
                 }}
+                onActPhaseStateClick={handleActPhaseStateClick}
+                onActFeedbackRequest={handleActFeedbackRequest}
+                onActRoundBump={handleActRoundBump}
               />
             ) : mergedLayoutGroups ? (
               <div className="flex flex-col gap-6">
