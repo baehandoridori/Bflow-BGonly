@@ -53,6 +53,59 @@ const episodes = [
   },
 ] satisfies Episode[];
 
+const episodesWithBothDepartments = [
+  {
+    episodeNumber: 2,
+    title: 'EP.02',
+    parts: [
+      {
+        id: 'part-uuid-bg',
+        partId: 'B',
+        department: 'bg',
+        sheetName: 'EP02_B_BG',
+        scenes: [
+          {
+            id: 'scene-uuid-bg',
+            no: 18,
+            sceneId: 'b018',
+            memo: '',
+            storyboardUrl: '',
+            guideUrl: '',
+            assignee: '한솔',
+            layoutId: '',
+            lo: false,
+            done: true,
+            review: false,
+            png: false,
+          },
+        ],
+      },
+      {
+        id: 'part-uuid-act',
+        partId: 'B',
+        department: 'acting',
+        sheetName: 'EP02_B_ACT',
+        scenes: [
+          {
+            id: 'scene-uuid-act',
+            no: 18,
+            sceneId: 'b018_act',
+            memo: '',
+            storyboardUrl: '',
+            guideUrl: '',
+            assignee: '다른사람',
+            layoutId: '',
+            lo: false,
+            done: false,
+            review: false,
+            png: false,
+          },
+        ],
+      },
+    ],
+  },
+] satisfies Episode[];
+
 test('recent activity labels replace EP prefix with the custom Korean episode title (v1.23.0 가운데점)', () => {
   assert.equal(
     formatActivitySceneLabel(baseActivity.sceneLabel, baseActivity.episodeNumber, { 2: '쾅 뉴럴링크' }),
@@ -79,8 +132,95 @@ test('recent activity scene navigation resolves UUID activity targets to the sce
   });
 
   assert.equal(
-    resolveActivitySceneNavigation({ ...baseActivity, sceneId: 'missing-scene' }, episodes),
+    resolveActivitySceneNavigation(
+      { ...baseActivity, sceneId: 'missing-scene', sceneLabel: '알 수 없는 씬' },
+      episodes,
+    ),
     null,
+  );
+});
+
+test('recent activity scene navigation falls back to scene label when comment activity lost its scene UUID', () => {
+  assert.deepEqual(
+    resolveActivitySceneNavigation(
+      {
+        ...baseActivity,
+        actionType: 'comment_add',
+        sceneId: null,
+        sceneLabel: 'EP02 B #18',
+        detail: { commentId: 'comment-1', textPreview: '테스트 댓글' },
+      },
+      episodes,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_BG',
+      sceneId: 'b018',
+    },
+  );
+});
+
+test('recent activity scene navigation tolerates legacy comment activity scene numbers', () => {
+  assert.deepEqual(
+    resolveActivitySceneNavigation(
+      {
+        ...baseActivity,
+        actionType: 'comment_add',
+        sceneId: '18',
+        sceneLabel: 'EP02 B #18',
+        detail: { commentId: 'comment-2', textPreview: '레거시 댓글' },
+      },
+      episodes,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_BG',
+      sceneId: 'b018',
+    },
+  );
+});
+
+test('recent activity scene navigation uses activity department to disambiguate BG and ACT comment fallbacks', () => {
+  assert.deepEqual(
+    resolveActivitySceneNavigation(
+      {
+        ...baseActivity,
+        actionType: 'comment_add',
+        sceneId: null,
+        sceneLabel: 'EP02 B #18',
+        department: 'bg',
+        detail: { commentId: 'comment-bg' },
+      },
+      episodesWithBothDepartments,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_BG',
+      sceneId: 'b018',
+    },
+  );
+
+  assert.deepEqual(
+    resolveActivitySceneNavigation(
+      {
+        ...baseActivity,
+        actionType: 'comment_add',
+        sceneId: null,
+        sceneLabel: 'EP02 B #18',
+        department: 'acting',
+        detail: { commentId: 'comment-act' },
+      },
+      episodesWithBothDepartments,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_ACT',
+      sceneId: 'b018_act',
+    },
   );
 });
 

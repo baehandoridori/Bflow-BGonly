@@ -7,6 +7,12 @@ export interface ActivitySceneNavigationTarget {
   sceneId: string;
 }
 
+interface ParsedActivitySceneLabel {
+  episodeNumber: number | null;
+  partId: string | null;
+  sceneRef: string;
+}
+
 /**
  * v1.23.0: 가운데점(·) 분리 포맷.
  * 입력: "EP02 E #15"  →  출력: "그림자국 · E · #15"
@@ -44,23 +50,112 @@ export function formatActivityGroupLabel(
   return activity.sceneLabel ?? '';
 }
 
-/** activity.sceneId(UUID)를 ScenesView deep-link가 이해하는 sheetName + sceneId로 변환한다. */
-export function resolveActivitySceneNavigation(
-  activity: Pick<Activity, 'sceneId'>,
+function buildNavigationTarget(
+  episodeNumber: number,
+  part: Episode['parts'][number],
+  scene: Episode['parts'][number]['scenes'][number],
+): ActivitySceneNavigationTarget {
+  return {
+    episodeNumber,
+    partId: part.partId,
+    sheetName: part.sheetName,
+    sceneId: scene.sceneId,
+  };
+}
+
+function parseActivitySceneLabel(sceneLabel: string | null): ParsedActivitySceneLabel | null {
+  if (!sceneLabel) return null;
+  const label = sceneLabel.trim();
+  if (!label) return null;
+
+  const withEpisode = label.match(/^EP(\d+)\s+([A-Za-z0-9_-]+)\s+#([^\s]+)/i);
+  if (withEpisode) {
+    return {
+      episodeNumber: Number(withEpisode[1]),
+      partId: withEpisode[2],
+      sceneRef: withEpisode[3],
+    };
+  }
+
+  const withoutEpisode = label.match(/^([A-Za-z0-9_-]+)\s+#([^\s]+)/i);
+  if (withoutEpisode) {
+    return {
+      episodeNumber: null,
+      partId: withoutEpisode[1],
+      sceneRef: withoutEpisode[2],
+    };
+  }
+
+  return null;
+}
+
+function matchesSceneIdentifier(
+  scene: Episode['parts'][number]['scenes'][number],
+  identifier: string,
+): boolean {
+  const normalized = identifier.trim().replace(/^#/, '').toLowerCase();
+  if (!normalized) return false;
+
+  if (scene.sceneId.trim().toLowerCase() === normalized) return true;
+  return String(scene.no).trim().toLowerCase() === normalized;
+}
+
+function findSceneNavigationByIdentifier(
   episodes: Episode[],
+  identifier: string,
+  opts: {
+    episodeNumber?: number | null;
+    partId?: string | null;
+    department?: Activity['department'];
+  } = {},
 ): ActivitySceneNavigationTarget | null {
-  if (!activity.sceneId) return null;
+  const normalizedPartId = opts.partId?.trim().toLowerCase() ?? null;
+  const matches: ActivitySceneNavigationTarget[] = [];
+
   for (const ep of episodes) {
+    if (opts.episodeNumber != null && ep.episodeNumber !== opts.episodeNumber) continue;
     for (const part of ep.parts) {
-      const scene = part.scenes.find((candidate) => candidate.id === activity.sceneId);
-      if (!scene) continue;
-      return {
-        episodeNumber: ep.episodeNumber,
-        partId: part.partId,
-        sheetName: part.sheetName,
-        sceneId: scene.sceneId,
-      };
+      if (normalizedPartId && part.partId.trim().toLowerCase() !== normalizedPartId) continue;
+      if (opts.department && part.department !== opts.department) continue;
+      for (const scene of part.scenes) {
+        if (!matchesSceneIdentifier(scene, identifier)) continue;
+        matches.push(buildNavigationTarget(ep.episodeNumber, part, scene));
+      }
     }
   }
-  return null;
+
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/** activity.sceneId(UUID)를 ScenesView deep-link가 이해하는 sheetName + sceneId로 변환한다. */
+export function resolveActivitySceneNavigation(
+  activity: Pick<Activity, 'sceneId' | 'sceneLabel' | 'episodeNumber' | 'department'>,
+  episodes: Episode[],
+): ActivitySceneNavigationTarget | null {
+  if (activity.sceneId) {
+    for (const ep of episodes) {
+      for (const part of ep.parts) {
+        const scene = part.scenes.find((candidate) => candidate.id === activity.sceneId);
+        if (!scene) continue;
+        return buildNavigationTarget(ep.episodeNumber, part, scene);
+      }
+    }
+  }
+
+  const parsedLabel = parseActivitySceneLabel(activity.sceneLabel);
+  if (parsedLabel) {
+    const byLabel = findSceneNavigationByIdentifier(episodes, parsedLabel.sceneRef, {
+      episodeNumber: activity.episodeNumber ?? parsedLabel.episodeNumber,
+      partId: parsedLabel.partId,
+      department: activity.department,
+    });
+    if (byLabel) return byLabel;
+  }
+
+  if (!activity.sceneId) return null;
+  return findSceneNavigationByIdentifier(episodes, activity.sceneId, {
+    episodeNumber: activity.episodeNumber ?? parsedLabel?.episodeNumber,
+    partId: parsedLabel?.partId,
+    department: activity.department,
+  });
 }
