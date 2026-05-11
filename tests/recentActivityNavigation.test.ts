@@ -79,8 +79,53 @@ test('recent activity scene navigation resolves UUID activity targets to the sce
   });
 
   assert.equal(
-    resolveActivitySceneNavigation({ ...baseActivity, sceneId: 'missing-scene' }, episodes),
+    resolveActivitySceneNavigation(
+      { ...baseActivity, sceneId: 'missing-scene', sceneLabel: '알 수 없는 씬' },
+      episodes,
+    ),
     null,
+  );
+});
+
+test('recent activity scene navigation falls back to scene label when comment activity lost its scene UUID', () => {
+  assert.deepEqual(
+    resolveActivitySceneNavigation(
+      {
+        ...baseActivity,
+        actionType: 'comment_add',
+        sceneId: null,
+        sceneLabel: 'EP02 B #18',
+        detail: { commentId: 'comment-1', textPreview: '테스트 댓글' },
+      },
+      episodes,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_BG',
+      sceneId: 'b018',
+    },
+  );
+});
+
+test('recent activity scene navigation tolerates legacy comment activity scene numbers', () => {
+  assert.deepEqual(
+    resolveActivitySceneNavigation(
+      {
+        ...baseActivity,
+        actionType: 'comment_add',
+        sceneId: '18',
+        sceneLabel: 'EP02 B #18',
+        detail: { commentId: 'comment-2', textPreview: '레거시 댓글' },
+      },
+      episodes,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_BG',
+      sceneId: 'b018',
+    },
   );
 });
 
