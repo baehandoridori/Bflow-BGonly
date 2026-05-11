@@ -4108,6 +4108,9 @@ export function ScenesView() {
                         if (bgPart) toggleSelectedScene(`bg:${m.mergedKey}`);
                         if (actPart) toggleSelectedScene(`act:${m.mergedKey}`);
                       }}
+                      onActPhaseStateClick={handleActPhaseStateClick}
+                      onActFeedbackRequest={handleActFeedbackRequest}
+                      onActRoundBump={handleActRoundBump}
                     />
                   );
                 })}

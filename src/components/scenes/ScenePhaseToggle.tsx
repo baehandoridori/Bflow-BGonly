@@ -45,11 +45,13 @@ export function ScenePhaseToggle({
   const handleChipClick = useCallback(
     (target: ScenePhaseState) => {
       if (disabled) return;
+      // 코덱스 4차 P2 #9 fix: same-state no-op 체크를 feedback 분기보다 먼저.
+      //   이전엔 이미 활성인 feedback chip 을 다시 눌러도 모달이 또 열렸음.
+      if (target === activeState) return;
       if (target === 'feedback') {
         onRequestFeedback();
         return;
       }
-      if (target === activeState) return; // no-op
       onStateClick(target);
     },
     [activeState, disabled, onRequestFeedback, onStateClick],
