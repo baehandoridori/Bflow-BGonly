@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Q6 — '단계' 가 어떻게 들어가나요?</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg: #0F1117;
+    --card: #1A1D27;
+    --card-2: #20232E;
+    --border: #2D3041;
+    --border-2: #3A3D4D;
+    --text: #E8E8EE;
+    --muted: #8B8DA3;
+    --accent: #6C5CE7;
+    --st-wait: #6E7388;
+    --st-work: #74B9FF;
+    --st-feedback: #FDCB6E;
+    --st-done: #00B894;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+    letter-spacing: -0.01em;
+  }
+  .glass {
+    background: linear-gradient(180deg, rgba(26,29,39,0.95) 0%, rgba(20,22,30,0.95) 100%);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .glass-soft {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px;
+    font-size: 11px; font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid var(--border-2);
+    background: rgba(255,255,255,0.02);
+    color: var(--muted);
+    user-select: none;
+  }
+  .chip[data-active="true"][data-state="wait"]     { background: var(--st-wait); color: #fff; border-color: transparent; }
+  .chip[data-active="true"][data-state="work"]     { background: var(--st-work); color: #0F1117; border-color: transparent; font-weight: 700; }
+  .chip[data-active="true"][data-state="feedback"] { background: var(--st-feedback); color: #0F1117; border-color: transparent; font-weight: 700; }
+  .chip[data-active="true"][data-state="done"]     { background: var(--st-done); color: #0F1117; border-color: transparent; font-weight: 700; }
+
+  .scene-no { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+  .scene-id { font-weight: 700; font-size: 13px; }
+  .scene-assignee { font-size: 11.5px; color: var(--muted); }
+
+  .stage-row {
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 0;
+  }
+  .stage-lbl {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--text);
+    opacity: 0.8;
+  }
+  .stage-lbl-done { color: var(--st-done); }
+  .stage-lbl-active { color: var(--st-work); }
+
+  .header-tag {
+    display: inline-block; padding: 3px 10px;
+    border-radius: 999px; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .tally { font-size: 10.5px; color: var(--muted); margin-left: 6px; }
+
+  .marker {
+    display: inline-block;
+    width: 20px; height: 20px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-2);
+    text-align: center; line-height: 18px;
+    font-size: 10px; font-weight: 700;
+    color: var(--muted);
+  }
+  .marker[data-done="true"] { background: var(--st-done); color: #0F1117; border-color: transparent; }
+  .marker[data-active="true"] { background: var(--st-work); color: #0F1117; border-color: transparent; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="max-w-[1100px] mx-auto px-8 pt-10 pb-4">
+  <span class="header-tag" style="background: rgba(108,92,231,0.15); color: #B7AEFF;">
+    Q6 / 8  ·  '단계' 의 구조
+  </span>
+  <h1 class="text-2xl font-bold mt-3" style="color: var(--text);">
+    "1단계 / 2단계 / 3단계 / 4단계" — 어떤 모양으로 들어가나요?
+  </h1>
+  <p class="text-sm mt-2" style="color: var(--muted);">
+    한솔님이 "1단계/2단계/3단계/4단계로 나누어서 대체"라고 하셨는데, 그게 실제 화면에서 어떤 모양인지 두 갈래로 갈려요.
+    <br />아래 두 시안 모두 같은 씬(SC_001)을 다르게 표현한 모습입니다.
+  </p>
+</header>
+
+<main class="max-w-[1100px] mx-auto px-8 pb-20 space-y-8">
+
+  <!-- ─── 시안 A: 단계마다 별도 토글 (16 상태) ─── -->
+  <section class="glass p-6">
+    <div class="flex items-center gap-3 mb-1">
+      <span class="header-tag" style="background: var(--st-work); color: #0F1117;">시안 A</span>
+      <h2 class="text-lg font-bold">"단계마다 독립" — 각 단계가 자기만의 상태/차수를 가짐</h2>
+    </div>
+    <p class="text-sm" style="color: var(--muted);">
+      한 씬 안에 4단계가 각각 따로 진행됨. 1단계에서 작업중→피드백→완료, 끝나면 2단계 시작, 동일 반복.
+      한 씬에서 "1단계는 끝났고, 2단계 작업중 2차, 3단계는 아직 대기, 4단계도 대기" 같은 상황이 가능.
+      <br /><b>장점:</b> 실제 액팅 워크플로우(1원화→2원화→동화→최종)와 거의 1:1 일치 / <b>단점:</b> 한 씬이 차지하는 세로 공간이 크고 정보 밀도 높음.
+    </p>
+
+    <div class="mt-5 glass-soft p-4">
+      <div class="text-[11px] uppercase tracking-wider font-bold mb-3" style="color: var(--muted);">
+        미리보기 — SC_001 한 씬
+      </div>
+
+      <div class="flex items-center gap-4 mb-3 pb-3 border-b" style="border-color: var(--border);">
+        <span class="scene-no">001</span>
+        <span class="scene-id">SC_001</span>
+        <span class="scene-assignee">담당 · 김아무</span>
+      </div>
+
+      <div class="stage-row">
+        <span class="stage-lbl stage-lbl-done">1단계 ✓</span>
+        <div class="flex items-center gap-1.5">
+          <span class="chip" data-state="wait" data-active="false">대기</span>
+          <span class="chip" data-state="work" data-active="false">작업중</span>
+          <span class="chip" data-state="feedback" data-active="false">피드백 대기</span>
+          <span class="chip" data-state="done" data-active="true">완료</span>
+          <span class="tally">총 1차 만에 완료</span>
+        </div>
+      </div>
+
+      <div class="stage-row">
+        <span class="stage-lbl stage-lbl-active">2단계</span>
+        <div class="flex items-center gap-1.5">
+          <span class="chip" data-state="wait" data-active="false">대기</span>
+          <span class="chip" data-state="work" data-active="true">작업중 2차</span>
+          <span class="chip" data-state="feedback" data-active="false">피드백 대기</span>
+          <span class="chip" data-state="done" data-active="false">완료</span>
+          <span class="tally">현재 진행 중</span>
+        </div>
+      </div>
+
+      <div class="stage-row">
+        <span class="stage-lbl">3단계</span>
+        <div class="flex items-center gap-1.5">
+          <span class="chip" data-state="wait" data-active="true">대기</span>
+          <span class="chip" data-state="work" data-active="false">작업중</span>
+          <span class="chip" data-state="feedback" data-active="false">피드백 대기</span>
+          <span class="chip" data-state="done" data-active="false">완료</span>
+        </div>
+      </div>
+
+      <div class="stage-row">
+        <span class="stage-lbl">4단계</span>
+        <div class="flex items-center gap-1.5">
+          <span class="chip" data-state="wait" data-active="true">대기</span>
+          <span class="chip" data-state="work" data-active="false">작업중</span>
+          <span class="chip" data-state="feedback" data-active="false">피드백 대기</span>
+          <span class="chip" data-state="done" data-active="false">완료</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-xs mt-3" style="color: var(--muted);">
+      → 한 씬에 4 × (대기/작업중/피드백/완료) = <b>총 16개의 상태 슬롯</b>이 존재. DB 컬럼도 단계별로 따로 (예: <code>stage1_state</code>, <code>stage1_work_round</code>, <code>stage1_feedback_round</code>, …).
+    </p>
+  </section>
+
+  <!-- ─── 시안 B: 단계는 진행 마커, 토글은 1세트 ─── -->
+  <section class="glass p-6">
+    <div class="flex items-center gap-3 mb-1">
+      <span class="header-tag" style="background: var(--st-feedback); color: #0F1117;">시안 B</span>
+      <h2 class="text-lg font-bold">"단계는 진행 마커" — 토글은 한 묶음, 단계는 어디까지 끝났나 표시</h2>
+    </div>
+    <p class="text-sm" style="color: var(--muted);">
+      한 씬은 4개의 단계(1·2·3·4)를 순서대로 진행하지만, 토글(대기/작업중/피드백/완료 + 차수)은 <b>현재 작업 중인 단계 하나에만 적용</b>.
+      1단계가 완료되면 자동(또는 클릭)으로 2단계로 진입. "이 씬은 지금 2단계 작업중 2차" 같은 식.
+      <br /><b>장점:</b> UI 단순, 한 행에 콤팩트하게 / <b>단점:</b> 1단계 완료 후 2단계 진입 같은 단계 전환을 자동/수동 어떻게 할지 정해야 함.
+    </p>
+
+    <div class="mt-5 glass-soft p-4">
+      <div class="text-[11px] uppercase tracking-wider font-bold mb-3" style="color: var(--muted);">
+        미리보기 — SC_001 한 씬
+      </div>
+
+      <div class="flex items-center gap-4 mb-3 pb-3 border-b" style="border-color: var(--border);">
+        <span class="scene-no">001</span>
+        <span class="scene-id">SC_001</span>
+        <span class="scene-assignee">담당 · 김아무</span>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-1">
+          <span class="marker" data-done="true">1</span>
+          <span class="marker" data-active="true">2</span>
+          <span class="marker">3</span>
+          <span class="marker">4</span>
+        </div>
+        <span class="text-[11px]" style="color: var(--muted);">단계 진행</span>
+
+        <span class="mx-3 opacity-30">|</span>
+
+        <div class="flex items-center gap-1.5">
+          <span class="chip" data-state="wait" data-active="false">대기</span>
+          <span class="chip" data-state="work" data-active="true">작업중 2차</span>
+          <span class="chip" data-state="feedback" data-active="false">피드백 대기</span>
+          <span class="chip" data-state="done" data-active="false">완료</span>
+        </div>
+      </div>
+
+      <div class="mt-3 text-xs" style="color: var(--muted);">
+        해석: "1단계는 끝, 지금 <b style="color: var(--text);">2단계 작업중 2차</b> 진행 중". 2단계 완료를 누르면 마커 2번이 ✓ 되고 3단계가 활성화.
+      </div>
+    </div>
+
+    <p class="text-xs mt-3" style="color: var(--muted);">
+      → 한 씬에 <b>(현재 단계 1개) + (그 단계의 상태/차수 1세트)</b> 만 존재. DB 컬럼은 <code>current_stage</code>, <code>state</code>, <code>work_round</code>, <code>feedback_round</code> 정도로 단순.
+    </p>
+  </section>
+
+  <!-- ─── 핵심 차이점 정리 ─── -->
+  <section class="glass p-6" style="background: linear-gradient(135deg, rgba(108,92,231,0.06), rgba(108,92,231,0.02));">
+    <h3 class="text-base font-bold" style="color: #B7AEFF;">핵심 차이</h3>
+    <table class="mt-3 w-full text-sm" style="border-collapse: separate; border-spacing: 0;">
+      <thead>
+        <tr class="text-left text-[11px] uppercase" style="color: var(--muted);">
+          <th class="py-2 pr-3">관점</th>
+          <th class="py-2 px-3">시안 A · 단계별 독립</th>
+          <th class="py-2 px-3">시안 B · 진행 마커</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-t" style="border-color: var(--border);">
+          <td class="py-2 pr-3 text-xs" style="color: var(--muted);">한 씬 세로 공간</td>
+          <td class="py-2 px-3">4행 (단계마다 한 줄)</td>
+          <td class="py-2 px-3">1행</td>
+        </tr>
+        <tr class="border-t" style="border-color: var(--border);">
+          <td class="py-2 pr-3 text-xs" style="color: var(--muted);">병렬 작업 가능?</td>
+          <td class="py-2 px-3">가능 — 2단계 작업하면서 3단계 미리 시작 가능</td>
+          <td class="py-2 px-3">불가능 — 한 시점에 한 단계만</td>
+        </tr>
+        <tr class="border-t" style="border-color: var(--border);">
+          <td class="py-2 pr-3 text-xs" style="color: var(--muted);">차수 표기</td>
+          <td class="py-2 px-3">단계마다 별도 차수 (1단계 1차, 2단계 5차…)</td>
+          <td class="py-2 px-3">현재 단계 한 곳에만</td>
+        </tr>
+        <tr class="border-t" style="border-color: var(--border);">
+          <td class="py-2 pr-3 text-xs" style="color: var(--muted);">기존 1원화/2원화/동화/최종 매핑</td>
+          <td class="py-2 px-3">1원화 체크 = 1단계 완료, 2원화 체크 = 2단계 완료… 그대로 흡수</td>
+          <td class="py-2 px-3">체크 개수로 현재 단계만 추정, 차수는 1로</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="text-sm mt-4" style="color: var(--text); opacity: 0.92;">
+      <b>제안:</b> 실제 액팅 작업 흐름(1원화→2원화→동화→최종)에서 <b>각 단계마다 검수가 따로 들어간다</b>면 시안 A가 더 정확하고, <b>한 단계 끝나야 다음 단계 시작</b>이라면 시안 B 도 충분합니다.
+    </p>
+  </section>
+</main>
+
+</body>
+</html>

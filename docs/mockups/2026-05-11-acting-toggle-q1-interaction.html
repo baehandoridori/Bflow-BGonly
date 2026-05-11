@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>액팅 토글 — Q1. 인터랙션 모델 비교</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg: #0F1117;
+    --card: #1A1D27;
+    --card-2: #20232E;
+    --border: #2D3041;
+    --border-2: #3A3D4D;
+    --text: #E8E8EE;
+    --muted: #8B8DA3;
+    --accent: #6C5CE7;
+
+    --st-wait: #6E7388;       /* 대기 — 회색 */
+    --st-work: #74B9FF;       /* 작업중 — 파랑 */
+    --st-feedback: #FDCB6E;   /* 피드백 대기 — 노랑 */
+    --st-done: #00B894;       /* 완료 — 초록 */
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif;
+    letter-spacing: -0.01em;
+  }
+
+  .glass {
+    background: linear-gradient(180deg, rgba(26,29,39,0.95) 0%, rgba(20,22,30,0.95) 100%);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .glass-soft {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  /* 칩 공통 */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px;
+    font-size: 11.5px; font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid var(--border-2);
+    background: rgba(255,255,255,0.02);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+  }
+  .chip:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+  .chip[data-active="true"] {
+    color: #0F1117;
+    border-color: transparent;
+    font-weight: 700;
+  }
+  .chip[data-state="wait"][data-active="true"]     { background: var(--st-wait); color: #fff; }
+  .chip[data-state="work"][data-active="true"]     { background: var(--st-work); }
+  .chip[data-state="feedback"][data-active="true"] { background: var(--st-feedback); }
+  .chip[data-state="done"][data-active="true"]     { background: var(--st-done); }
+
+  /* 점 (스테퍼) */
+  .dot {
+    width: 16px; height: 16px; border-radius: 999px;
+    background: var(--border-2);
+    border: 2px solid var(--border-2);
+    position: relative;
+  }
+  .dot[data-active="true"] {
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.04);
+  }
+  .dot[data-state="wait"][data-active="true"]     { background: var(--st-wait); border-color: var(--st-wait); }
+  .dot[data-state="work"][data-active="true"]     { background: var(--st-work); border-color: var(--st-work); }
+  .dot[data-state="feedback"][data-active="true"] { background: var(--st-feedback); border-color: var(--st-feedback); }
+  .dot[data-state="done"][data-active="true"]     { background: var(--st-done); border-color: var(--st-done); }
+
+  .pill-counter {
+    display: inline-flex; align-items: center;
+    background: rgba(0,0,0,0.25);
+    border-radius: 999px;
+    padding: 1px;
+    margin-left: 4px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .pill-counter button {
+    width: 18px; height: 18px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; color: var(--text); opacity: 0.85;
+    background: transparent; border: none; cursor: pointer;
+  }
+  .pill-counter button:hover { background: rgba(255,255,255,0.10); }
+  .pill-counter .val {
+    min-width: 28px; text-align: center;
+    font-size: 11px; font-weight: 700;
+    color: #fff; padding: 0 4px;
+  }
+
+  /* 씬 행 외형 — 실제 ScenesView 와 유사하게 */
+  .scene-row {
+    display: grid;
+    grid-template-columns: 70px 110px 1fr auto;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.015);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .scene-row + .scene-row { margin-top: 6px; }
+  .scene-no {
+    font-variant-numeric: tabular-nums;
+    color: var(--muted); font-size: 12px;
+  }
+  .scene-id { font-weight: 700; font-size: 13px; }
+  .scene-assignee { font-size: 11.5px; color: var(--muted); }
+
+  .arrow-btn {
+    width: 26px; height: 26px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-2);
+    color: var(--text);
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .arrow-btn:hover { background: rgba(255,255,255,0.08); }
+  .arrow-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .label-tiny {
+    font-size: 10.5px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+
+  .stepper-track {
+    position: relative;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 6px;
+    min-width: 340px;
+  }
+  .stepper-track::before {
+    content: ""; position: absolute;
+    left: 14px; right: 14px; top: 50%; height: 2px;
+    background: var(--border-2); transform: translateY(-50%);
+    z-index: 0;
+  }
+  .stepper-step {
+    position: relative; z-index: 1;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    cursor: pointer;
+  }
+  .stepper-step .lbl {
+    font-size: 10.5px; color: var(--muted); white-space: nowrap;
+  }
+  .stepper-step[data-active="true"] .lbl { color: var(--text); font-weight: 700; }
+
+  .pros-cons {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    margin-top: 14px; font-size: 12px;
+  }
+  .pros, .cons {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+  }
+  .pros .ttl { color: #6EE7B7; font-weight: 700; }
+  .cons .ttl { color: #FCA5A5; font-weight: 700; }
+  .pros ul, .cons ul { margin-top: 6px; padding-left: 14px; }
+  .pros li, .cons li { margin-bottom: 3px; color: var(--text); opacity: 0.85; }
+
+  .header-tag {
+    display: inline-block; padding: 3px 10px;
+    border-radius: 999px; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="max-w-[1200px] mx-auto px-8 pt-10 pb-6">
+  <span class="header-tag" style="background: rgba(108,92,231,0.15); color: #B7AEFF;">
+    Q1 / 6  ·  토글 인터랙션 모델
+  </span>
+  <h1 class="text-2xl font-bold mt-3" style="color: var(--text);">
+    액팅 씬 토글을 화면에서 어떻게 만지면 좋을까요?
+  </h1>
+  <p class="text-sm mt-2" style="color: var(--muted);">
+    상태 4개(대기 / 작업중 / 피드백 대기 / 완료) + 차수(1차, 2차…)를 한 줄에 담는 방식.
+    세 가지 시안 중에 한솔님 머릿속 그림과 가장 가까운 걸 골라주세요.
+    <br />아래 칩/버튼은 실제로 눌러볼 수 있습니다.
+  </p>
+</header>
+
+<main class="max-w-[1200px] mx-auto px-8 pb-20 space-y-8">
+
+  <!-- ───── 옵션 A ───── -->
+  <section class="glass p-6">
+    <div class="flex items-center gap-3 mb-1">
+      <span class="header-tag" style="background: var(--st-work); color: #0F1117;">옵션 A</span>
+      <h2 class="text-lg font-bold">칩 4개 라디오 + 활성 칩 안에 차수 +/−</h2>
+    </div>
+    <p class="text-sm" style="color: var(--muted);">
+      네 가지 상태가 항상 보이고, 하나만 색이 들어옵니다. 작업중·피드백 대기에는 칩 안쪽에 작은 ▲▼ 가 붙어 차수를 조정.
+    </p>
+
+    <div class="mt-5 glass-soft p-4">
+      <div class="label-tiny mb-3">미리보기 — 씬 행</div>
+
+      <div class="scene-row" id="rowA1">
+        <span class="scene-no">001</span>
+        <span class="scene-id">SC_001</span>
+        <span class="scene-assignee">담당 · 김아무</span>
+        <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5" data-row="A1">
+            <span class="chip" data-state="wait"     data-active="false" onclick="setStateA('A1','wait')">대기</span>
+            <span class="chip" data-state="work"     data-active="true"  onclick="setStateA('A1','work')">
+              작업중
+              <span class="pill-counter" data-show-when="work">
+                <button onclick="event.stopPropagation();bumpA('A1','work',-1)">−</button>
+                <span class="val" id="A1-work-val">1차</span>
+                <button onclick="event.stopPropagation();bumpA('A1','work',+1)">+</button>
+              </span>
+            </span>
+            <span class="chip" data-state="feedback" data-active="false" onclick="setStateA('A1','feedback')">
+              피드백 대기
+              <span class="pill-counter" data-show-when="feedback" style="display:none;">
+                <button onclick="event.stopPropagation();bumpA('A1','feedback',-1)">−</button>
+                <span class="val" id="A1-feedback-val">1차</span>
+                <button onclick="event.stopPropagation();bumpA('A1','feedback',+1)">+</button>
+              </span>
+            </span>
+            <span class="chip" data-state="done"     data-active="false" onclick="setStateA('A1','done')">완료</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene-row" id="rowA2">
+        <span class="scene-no">002</span>
+        <span class="scene-id">SC_002</span>
+        <span class="scene-assignee">담당 · 이아무</span>
+        <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5" data-row="A2">
+            <span class="chip" data-state="wait"     data-active="false" onclick="setStateA('A2','wait')">대기</span>
+            <span class="chip" data-state="work"     data-active="false" onclick="setStateA('A2','work')">
+              작업중
+              <span class="pill-counter" data-show-when="work" style="display:none;">
+                <button onclick="event.stopPropagation();bumpA('A2','work',-1)">−</button>
+                <span class="val" id="A2-work-val">2차</span>
+                <button onclick="event.stopPropagation();bumpA('A2','work',+1)">+</button>
+              </span>
+            </span>
+            <span class="chip" data-state="feedback" data-active="true"  onclick="setStateA('A2','feedback')">
+              피드백 대기
+              <span class="pill-counter" data-show-when="feedback">
+                <button onclick="event.stopPropagation();bumpA('A2','feedback',-1)">−</button>
+                <span class="val" id="A2-feedback-val">2차</span>
+                <button onclick="event.stopPropagation();bumpA('A2','feedback',+1)">+</button>
+              </span>
+            </span>
+            <span class="chip" data-state="done"     data-active="false" onclick="setStateA('A2','done')">완료</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene-row" id="rowA3">
+        <span class="scene-no">003</span>
+        <span class="scene-id">SC_003</span>
+        <span class="scene-assignee">담당 · 박아무</span>
+        <div class="flex items-center gap-2">
+          <div class="flex items-center gap-1.5" data-row="A3">
+            <span class="chip" data-state="wait"     data-active="false" onclick="setStateA('A3','wait')">대기</span>
+            <span class="chip" data-state="work"     data-active="false" onclick="setStateA('A3','work')">
+              작업중
+              <span class="pill-counter" data-show-when="work" style="display:none;">
+                <button onclick="event.stopPropagation();bumpA('A3','work',-1)">−</button>
+                <span class="val" id="A3-work-val">1차</span>
+                <button onclick="event.stopPropagation();bumpA('A3','work',+1)">+</button>
+              </span>
+            </span>
+            <span class="chip" data-state="feedback" data-active="false" onclick="setStateA('A3','feedback')">
+              피드백 대기
+              <span class="pill-counter" data-show-when="feedback" style="display:none;">
+                <button onclick="event.stopPropagation();bumpA('A3','feedback',-1)">−</button>
+                <span class="val" id="A3-feedback-val">1차</span>
+                <button onclick="event.stopPropagation();bumpA('A3','feedback',+1)">+</button>
+              </span>
+            </span>
+            <span class="chip" data-state="done"     data-active="true"  onclick="setStateA('A3','done')">완료</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pros-cons">
+      <div class="pros">
+        <div class="ttl">좋은 점</div>
+        <ul>
+          <li>네 상태를 한눈에 — 클릭 한 번으로 어느 상태로든 점프</li>
+          <li>차수 ▲▼ 가 활성 칩 안에 들어가서 시선 흐트러짐 적음</li>
+          <li>현재 BG의 LO/완료/검수/PNG 와 모양이 비슷해 학습 부담 적음</li>
+        </ul>
+      </div>
+      <div class="cons">
+        <div class="ttl">아쉬운 점</div>
+        <ul>
+          <li>칩 4개 + 카운터까지 합쳐 가로 폭이 가장 넓음 (좁은 화면에선 줄바꿈 가능)</li>
+          <li>대기/완료 같은 정적 상태에는 들어가지 않는 ▲▼ 가 시각적으로 비대칭</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───── 옵션 B ───── -->
+  <section class="glass p-6">
+    <div class="flex items-center gap-3 mb-1">
+      <span class="header-tag" style="background: var(--st-feedback); color: #0F1117;">옵션 B</span>
+      <h2 class="text-lg font-bold">현재 상태 칩 1개 + 좌우 ◀▶ 단계 이동</h2>
+    </div>
+    <p class="text-sm" style="color: var(--muted);">
+      지금 어느 상태인지만 큼지막한 칩으로. 옆 ◀▶ 으로 앞/뒤 단계로 보냄.
+      "피드백 대기"로 갈 때 자동으로 +1차, 다시 작업중으로 갈 때도 자동 +1차. 차수 수동 조정은 칩을 우클릭하거나 길게 눌렀을 때 펼쳐지는 ▲▼.
+    </p>
+
+    <div class="mt-5 glass-soft p-4">
+      <div class="label-tiny mb-3">미리보기 — 씬 행</div>
+
+      <div class="scene-row" id="rowB1">
+        <span class="scene-no">001</span>
+        <span class="scene-id">SC_001</span>
+        <span class="scene-assignee">담당 · 김아무</span>
+        <div class="flex items-center gap-2">
+          <button class="arrow-btn" onclick="bumpB('B1',-1)">◀</button>
+          <span class="chip text-[12.5px]" style="min-width:130px; justify-content:center; padding: 8px 14px;"
+                id="B1-chip" data-state="work" data-active="true">
+            작업중 <span id="B1-sub" style="opacity:.85; font-weight:600;">1차</span>
+          </span>
+          <button class="arrow-btn" onclick="bumpB('B1',+1)">▶</button>
+        </div>
+      </div>
+
+      <div class="scene-row" id="rowB2">
+        <span class="scene-no">002</span>
+        <span class="scene-id">SC_002</span>
+        <span class="scene-assignee">담당 · 이아무</span>
+        <div class="flex items-center gap-2">
+          <button class="arrow-btn" onclick="bumpB('B2',-1)">◀</button>
+          <span class="chip text-[12.5px]" style="min-width:130px; justify-content:center; padding: 8px 14px;"
+                id="B2-chip" data-state="feedback" data-active="true">
+            피드백 대기 <span id="B2-sub" style="opacity:.85; font-weight:600;">2차</span>
+          </span>
+          <button class="arrow-btn" onclick="bumpB('B2',+1)">▶</button>
+        </div>
+      </div>
+
+      <div class="scene-row" id="rowB3">
+        <span class="scene-no">003</span>
+        <span class="scene-id">SC_003</span>
+        <span class="scene-assignee">담당 · 박아무</span>
+        <div class="flex items-center gap-2">
+          <button class="arrow-btn" onclick="bumpB('B3',-1)">◀</button>
+          <span class="chip text-[12.5px]" style="min-width:130px; justify-content:center; padding: 8px 14px;"
+                id="B3-chip" data-state="done" data-active="true">
+            완료 <span id="B3-sub" style="opacity:.85; font-weight:600;"></span>
+          </span>
+          <button class="arrow-btn" onclick="bumpB('B3',+1)" disabled>▶</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="pros-cons">
+      <div class="pros">
+        <div class="ttl">좋은 점</div>
+        <ul>
+          <li>한 줄에 들어가는 폭이 가장 좁음 — 씬 목록이 빽빽해도 깔끔</li>
+          <li>"한 단계 진행 / 되돌리기" 흐름이 자연스러움 (작업중 → 피드백 = ▶ 한 번)</li>
+          <li>피드백 ↔ 작업중 왕복마다 자동으로 +1차 → 손이 덜 감</li>
+        </ul>
+      </div>
+      <div class="cons">
+        <div class="ttl">아쉬운 점</div>
+        <ul>
+          <li>지금 상태 외엔 안 보여서 "지금 몇 단계지?" 한 번 더 인지 부담</li>
+          <li>중간 상태를 건너뛰려면 ▶ 여러 번 — 직접 점프가 어려움</li>
+          <li>차수 수동 조정이 숨겨져 있어 초보자에게는 보이지 않음</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───── 옵션 C ───── -->
+  <section class="glass p-6">
+    <div class="flex items-center gap-3 mb-1">
+      <span class="header-tag" style="background: var(--st-done); color: #0F1117;">옵션 C</span>
+      <h2 class="text-lg font-bold">가로 스테퍼 트랙 + 차수 배지</h2>
+    </div>
+    <p class="text-sm" style="color: var(--muted);">
+      네 단계를 가로 선으로 잇고 점으로 표시. 현재 위치만 색이 들어오고, 작업중·피드백 대기 점 위에 작은 "1차/2차" 배지.
+      점을 직접 클릭해서 어느 단계로든 이동. 점 옆 ▲▼ 으로 차수 조정.
+    </p>
+
+    <div class="mt-5 glass-soft p-4">
+      <div class="label-tiny mb-3">미리보기 — 씬 행</div>
+
+      <div class="scene-row" id="rowC1">
+        <span class="scene-no">001</span>
+        <span class="scene-id">SC_001</span>
+        <span class="scene-assignee">담당 · 김아무</span>
+        <div class="stepper-track">
+          <div class="stepper-step" data-state="wait"     data-active="false" onclick="setStateC('C1','wait')">
+            <span class="dot" data-state="wait"     data-active="false"></span>
+            <span class="lbl">대기</span>
+          </div>
+          <div class="stepper-step" data-state="work"     data-active="true"  onclick="setStateC('C1','work')">
+            <span class="dot" data-state="work"     data-active="true"></span>
+            <span class="lbl">작업중 <b id="C1-work-badge">1차</b></span>
+          </div>
+          <div class="stepper-step" data-state="feedback" data-active="false" onclick="setStateC('C1','feedback')">
+            <span class="dot" data-state="feedback" data-active="false"></span>
+            <span class="lbl">피드백 대기 <b id="C1-feedback-badge">0차</b></span>
+          </div>
+          <div class="stepper-step" data-state="done"     data-active="false" onclick="setStateC('C1','done')">
+            <span class="dot" data-state="done"     data-active="false"></span>
+            <span class="lbl">완료</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene-row" id="rowC2">
+        <span class="scene-no">002</span>
+        <span class="scene-id">SC_002</span>
+        <span class="scene-assignee">담당 · 이아무</span>
+        <div class="stepper-track">
+          <div class="stepper-step" data-state="wait"     data-active="false" onclick="setStateC('C2','wait')">
+            <span class="dot" data-state="wait"     data-active="false"></span>
+            <span class="lbl">대기</span>
+          </div>
+          <div class="stepper-step" data-state="work"     data-active="false" onclick="setStateC('C2','work')">
+            <span class="dot" data-state="work"     data-active="false"></span>
+            <span class="lbl">작업중 <b id="C2-work-badge">2차</b></span>
+          </div>
+          <div class="stepper-step" data-state="feedback" data-active="true"  onclick="setStateC('C2','feedback')">
+            <span class="dot" data-state="feedback" data-active="true"></span>
+            <span class="lbl">피드백 대기 <b id="C2-feedback-badge">2차</b></span>
+          </div>
+          <div class="stepper-step" data-state="done"     data-active="false" onclick="setStateC('C2','done')">
+            <span class="dot" data-state="done"     data-active="false"></span>
+            <span class="lbl">완료</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="scene-row" id="rowC3">
+        <span class="scene-no">003</span>
+        <span class="scene-id">SC_003</span>
+        <span class="scene-assignee">담당 · 박아무</span>
+        <div class="stepper-track">
+          <div class="stepper-step" data-state="wait"     data-active="false" onclick="setStateC('C3','wait')">
+            <span class="dot" data-state="wait"     data-active="false"></span>
+            <span class="lbl">대기</span>
+          </div>
+          <div class="stepper-step" data-state="work"     data-active="false" onclick="setStateC('C3','work')">
+            <span class="dot" data-state="work"     data-active="false"></span>
+            <span class="lbl">작업중 <b id="C3-work-badge">3차</b></span>
+          </div>
+          <div class="stepper-step" data-state="feedback" data-active="false" onclick="setStateC('C3','feedback')">
+            <span class="dot" data-state="feedback" data-active="false"></span>
+            <span class="lbl">피드백 대기 <b id="C3-feedback-badge">3차</b></span>
+          </div>
+          <div class="stepper-step" data-state="done"     data-active="true"  onclick="setStateC('C3','done')">
+            <span class="dot" data-state="done"     data-active="true"></span>
+            <span class="lbl">완료</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pros-cons">
+      <div class="pros">
+        <div class="ttl">좋은 점</div>
+        <ul>
+          <li>"이 씬이 작업 흐름의 어디쯤 와 있나" 가 시각적으로 가장 명확</li>
+          <li>작업중·피드백 대기 차수가 항상 보임 — 1차/2차/3차 누적이 한눈에</li>
+          <li>점을 클릭하면 그 단계로 직접 이동 (옵션 A와 같은 자유도)</li>
+        </ul>
+      </div>
+      <div class="cons">
+        <div class="ttl">아쉬운 점</div>
+        <ul>
+          <li>가로 폭이 옵션 A와 비슷하게 넓고, 점·라벨이 작아져 클릭이 살짝 까다로움</li>
+          <li>차수 ▲▼ 인터랙션을 어디에 둘지 디테일이 더 필요 (점 위 호버? 우클릭?)</li>
+          <li>시각적 요소가 가장 많아 정보 밀도가 높은 씬 행에선 부담될 수 있음</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="glass p-6" style="background: linear-gradient(135deg, rgba(108,92,231,0.06), rgba(108,92,231,0.02));">
+    <h3 class="text-base font-bold" style="color: #B7AEFF;">한솔님께 — 질문</h3>
+    <p class="text-sm mt-2" style="color: var(--text); opacity: 0.92;">
+      세 시안 중 어느 것이 가장 자연스러우신가요? 또는 "A 기본 + B/C 의 ○○ 요소만" 같은 조합도 환영입니다.
+    </p>
+    <p class="text-xs mt-3" style="color: var(--muted);">
+      참고로 B flow 의 씬 한 행은 보통 좁은 공간에 많은 정보가 들어가는데(번호·ID·담당·메모·이미지·각종 토글), 이 토글 영역이 어느 정도 폭을 차지해도 괜찮은지도 같이 떠올려 보시면 좋습니다.
+    </p>
+  </section>
+
+</main>
+
+<script>
+  // ───── 옵션 A 동작 ─────
+  const stateA = {
+    A1: { state: 'work',     work: 1, feedback: 1 },
+    A2: { state: 'feedback', work: 2, feedback: 2 },
+    A3: { state: 'done',     work: 1, feedback: 1 },
+  };
+  function setStateA(rowId, st) {
+    stateA[rowId].state = st;
+    const row = document.querySelector('[data-row="'+rowId+'"]');
+    row.querySelectorAll('.chip').forEach(chip => {
+      const s = chip.dataset.state;
+      chip.dataset.active = (s === st) ? 'true' : 'false';
+      const counter = chip.querySelector('.pill-counter');
+      if (counter) counter.style.display = (s === st && (s === 'work' || s === 'feedback')) ? '' : 'none';
+    });
+  }
+  function bumpA(rowId, kind, delta) {
+    const cur = stateA[rowId][kind] || 1;
+    const next = Math.max(1, Math.min(9, cur + delta));
+    stateA[rowId][kind] = next;
+    document.getElementById(rowId+'-'+kind+'-val').textContent = next + '차';
+  }
+
+  // ───── 옵션 B 동작 ─────
+  const orderB = ['wait','work','feedback','done'];
+  const labelB = { wait:'대기', work:'작업중', feedback:'피드백 대기', done:'완료' };
+  const stateB = {
+    B1: { state: 'work',     work: 1, feedback: 0 },
+    B2: { state: 'feedback', work: 2, feedback: 2 },
+    B3: { state: 'done',     work: 3, feedback: 3 },
+  };
+  function bumpB(rowId, delta) {
+    const cur = stateB[rowId];
+    const idx = orderB.indexOf(cur.state);
+    const next = Math.max(0, Math.min(orderB.length-1, idx + delta));
+    const nextState = orderB[next];
+    if (delta > 0 && (nextState === 'work' || nextState === 'feedback')) {
+      cur[nextState] = (cur[nextState] || 0) + 1;
+    }
+    cur.state = nextState;
+    const chip = document.getElementById(rowId+'-chip');
+    chip.dataset.state = nextState;
+    const sub = (nextState === 'work' || nextState === 'feedback') ? (cur[nextState] + '차') : '';
+    chip.innerHTML = labelB[nextState] + ' <span id="'+rowId+'-sub" style="opacity:.85; font-weight:600;">' + sub + '</span>';
+  }
+
+  // ───── 옵션 C 동작 ─────
+  const stateC = {
+    C1: { state: 'work',     work: 1, feedback: 0 },
+    C2: { state: 'feedback', work: 2, feedback: 2 },
+    C3: { state: 'done',     work: 3, feedback: 3 },
+  };
+  function setStateC(rowId, st) {
+    const cur = stateC[rowId];
+    // 진행 방향이면 자동 +1차
+    const order = ['wait','work','feedback','done'];
+    const prev = order.indexOf(cur.state);
+    const nxt = order.indexOf(st);
+    if (nxt > prev && (st === 'work' || st === 'feedback')) {
+      cur[st] = (cur[st] || 0) + 1;
+      document.getElementById(rowId+'-'+st+'-badge').textContent = cur[st] + '차';
+    }
+    cur.state = st;
+    const row = document.getElementById('row'+rowId);
+    row.querySelectorAll('.stepper-step').forEach(step => {
+      const s = step.dataset.state;
+      step.dataset.active = (s === st) ? 'true' : 'false';
+      step.querySelector('.dot').dataset.active = (s === st) ? 'true' : 'false';
+    });
+  }
+</script>
+
+</body>
+</html>
