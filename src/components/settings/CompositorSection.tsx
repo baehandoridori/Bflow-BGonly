@@ -92,12 +92,15 @@ export function CompositorSection() {
           );
           // dirty 유지 → 재시도 가능
         } else {
-          // missing 없음 + extra 있음 — 다른 사용자가 동시 변경했을 가능성
+          // 코덱스 3차 P2 fix: extra-only 도 두 가지 케이스
+          //   (a) 다른 PC 에서 동시 변경
+          //   (b) 사용자의 uncheck 가 실패 (expected=false, actual=true)
+          //   양쪽 모두 의도와 결과가 다르므로 dirty 유지 — 즉시 재시도 가능하게.
           toast.warning(
-            `다른 곳에서 추가로 반영됐어요: ${extraNames}. 필요 시 해제 후 다시 저장해주세요.`,
+            `의도와 결과가 다릅니다: ${extraNames} 가 체크된 상태로 남아있어요. 확인 후 다시 저장해주세요.`,
             { duration: 10000 },
           );
-          setDirty(false); // 내 변경은 적용됐으므로 dirty 해제
+          // dirty 유지 — uncheck 의도 보존
         }
       } else {
         setDirty(false);

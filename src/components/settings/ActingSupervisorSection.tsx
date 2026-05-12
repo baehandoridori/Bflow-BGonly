@@ -83,11 +83,12 @@ export function ActingSupervisorSection() {
             { duration: 10000 },
           );
         } else {
+          // 코덱스 3차 P2 fix: extra-only 도 uncheck 실패 또는 동시 변경 가능 — dirty 유지
           toast.warning(
-            `다른 곳에서 추가로 반영됐어요: ${extraNames}. 필요 시 해제 후 다시 저장해주세요.`,
+            `의도와 결과가 다릅니다: ${extraNames} 가 체크된 상태로 남아있어요. 확인 후 다시 저장해주세요.`,
             { duration: 10000 },
           );
-          setDirty(false);
+          // dirty 유지
         }
       } else {
         setDirty(false);
