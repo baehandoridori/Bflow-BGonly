@@ -1524,10 +1524,17 @@ export default function App() {
           },
         }, { ...notiSettingsRef.current, osNotification: false });
         // Windows 네이티브 토스트 + 클릭 시 점프 (피드백과 동일 sceneJump 경로 재사용)
+        // 코덱스 3차 P2 fix: notificationId/kind 도 함께 전달 — 클릭으로 점프했을 때 jump 핸들러가 read_at 처리.
         window.electronAPI.notifyFeedbackToast({
           title: 'B flow — 담당자 배정',
           body: `${ap.senderName}님이 ${epLabel} ${ap.sceneId} 담당자로 지정했습니다.`,
-          sceneJump: { sheetName: ap.sheetName, sceneId: ap.sceneId, sceneUuid: ap.sceneUuid },
+          sceneJump: {
+            sheetName: ap.sheetName,
+            sceneId: ap.sceneId,
+            sceneUuid: ap.sceneUuid,
+            notificationId: ap.notificationId,
+            kind: 'assignment',
+          },
         }).catch(() => { /* 토스트 실패 무시 */ });
         // broadcast 를 즉시 받았으므로 lastSeen 갱신 → 다음 로그인 catch-up 에서 중복 차단
         if (me?.id) setAssignmentLastSeenAt(me.id, new Date().toISOString());
@@ -1579,10 +1586,17 @@ export default function App() {
         },
       }, { ...notiSettingsRef.current, osNotification: false });
       // Windows 네이티브 토스트 + 클릭 시 점프 (별도 흐름 — main 에서 sceneJump 처리)
+      // 코덱스 3차 P2 fix: notificationId/kind 도 함께 전달 — feedback 토스트 클릭 후 read_at 처리.
       window.electronAPI.notifyFeedbackToast({
         title: 'B flow — 피드백 요청',
         body: `${p.senderName}님이 ${epLabel} ${p.sceneId} 검수를 요청했습니다.`,
-        sceneJump: { sheetName: p.sheetName, sceneId: p.sceneId, sceneUuid: p.sceneUuid },
+        sceneJump: {
+          sheetName: p.sheetName,
+          sceneId: p.sceneId,
+          sceneUuid: p.sceneUuid,
+          notificationId: myFeedbackNotificationId,
+          kind: 'feedback',
+        },
       }).catch(() => { /* 토스트 실패는 무시 */ });
       // v1.25.5: broadcast 를 즉시 받았으므로 lastSeen 갱신 — 다음 로그인 catch-up 에서 중복 차단
       if (me?.id) setFeedbackLastSeenAt(me.id, new Date().toISOString());
@@ -1590,6 +1604,19 @@ export default function App() {
 
     const offJump = window.electronAPI.onFeedbackJumpToScene?.((payload) => {
       jumpToFeedbackScene(payload.sheetName, payload.sceneId);
+      // 코덱스 3차 P2 fix: OS 토스트 → 점프 시에도 DB read_at 처리.
+      //   notificationId/kind 가 있으면 해당 도메인 markRead 호출 (fire-and-forget).
+      //   인앱 종 클릭 path 는 NotificationPanel 에서 처리하고, OS 토스트 path 는 여기서 처리.
+      if (payload.notificationId && payload.kind) {
+        const kind = payload.kind;
+        const id = payload.notificationId;
+        import('@/services/supabaseService')
+          .then((m) => {
+            if (kind === 'assignment') return m.markAssignmentNotificationRead(id);
+            return m.markFeedbackNotificationRead(id);
+          })
+          .catch((err) => console.warn('[toast-jump-markRead] 실패:', err));
+      }
     });
 
     return () => {

@@ -1485,8 +1485,23 @@ async function notifyAssigneeChange(
 ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, updates: BulkFieldUpdate[], updatedBy: string) => {
   // v1.25.8 코덱스 2차 P1 fix: bulk-edit 으로 담당자 변경 시에도 알림 분기.
   //   prev assignee 를 UPDATE 전에 일괄 조회 (이후 차집합 계산).
-  const senderId = currentActivityUser?.id;
-  const senderName = currentActivityUser?.name ?? '동료';
+  // v1.25.8 코덱스 3차 P2 fix: currentActivityUser 가 비어 있으면 (auth IPC 가 아직 set 안 됨)
+  //   renderer 에서 받은 updatedBy 를 fallback senderId 로 사용. updatedBy 가 빈 문자면 skip.
+  let senderId: string | undefined;
+  let senderName = '동료';
+  if (currentActivityUser?.id) {
+    senderId = currentActivityUser.id;
+    senderName = currentActivityUser.name;
+  } else if (updatedBy && updatedBy.trim()) {
+    senderId = updatedBy.trim();
+    try {
+      const { data } = await supabaseClient
+        .from('users').select('name').eq('id', senderId).maybeSingle();
+      senderName = (data as { name?: string } | null)?.name ?? '동료';
+    } catch (err) {
+      console.warn('[bulk-assignee-sender-name] 조회 실패 — default 사용:', err);
+    }
+  }
   const prevAssigneeByUuid = new Map<string, string>();
   if (senderId) {
     const sceneUuidsWithAssigneeChange = updates
@@ -2296,7 +2311,13 @@ ipcMain.handle('notification:show-native', (_e: unknown, title: string, body: st
 ipcMain.handle('notify:feedback-toast', (_e: unknown, payload: {
   title: string;
   body: string;
-  sceneJump: { sheetName: string; sceneId: string; sceneUuid: string };
+  // v1.25.8 코덱스 3차 P2 fix: sceneJump 에 notificationId/kind 옵션 추가 — OS 토스트 클릭 후
+  //   렌더러가 DB row 에 read_at 을 채우게 해서 catch-up 중복 출현 차단.
+  sceneJump: {
+    sheetName: string; sceneId: string; sceneUuid: string;
+    notificationId?: string;
+    kind?: 'feedback' | 'assignment';
+  };
 }) => {
   if (!Notification.isSupported()) return;
   // 앱이 포커스 상태이고 ScenesView 가 활성일 가능성이 높으면 native toast 생략(인앱 sonner 만)

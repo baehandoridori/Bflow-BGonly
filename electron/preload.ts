@@ -287,12 +287,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // v1.25.0~ 액팅 피드백 토스트 클릭 → 씬 점프 신호 수신
+  // v1.25.8 코덱스 3차 P2: notificationId/kind 도 함께 전달 — 클릭 후 read_at 처리.
   onFeedbackJumpToScene: (
-    callback: (payload: { sheetName: string; sceneId: string; sceneUuid: string }) => void,
+    callback: (payload: {
+      sheetName: string; sceneId: string; sceneUuid: string;
+      notificationId?: string;
+      kind?: 'feedback' | 'assignment';
+    }) => void,
   ) => {
     const handler = (
       _event: unknown,
-      data: { sheetName: string; sceneId: string; sceneUuid: string },
+      data: {
+        sheetName: string; sceneId: string; sceneUuid: string;
+        notificationId?: string;
+        kind?: 'feedback' | 'assignment';
+      },
     ) => callback(data);
     ipcRenderer.on('feedback:jump-to-scene', handler);
     return () => ipcRenderer.removeListener('feedback:jump-to-scene', handler);

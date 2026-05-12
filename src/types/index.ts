@@ -718,11 +718,21 @@ export interface ElectronAPI {
   notifyFeedbackToast: (payload: {
     title: string;
     body: string;
-    sceneJump: { sheetName: string; sceneId: string; sceneUuid: string };
+    /** v1.25.8 코덱스 3차 P2 fix: notificationId/kind 옵션 — OS 토스트 클릭 후
+     *  렌더러가 DB read_at 을 채워 catch-up 중복 출현 차단. */
+    sceneJump: {
+      sheetName: string; sceneId: string; sceneUuid: string;
+      notificationId?: string;
+      kind?: 'feedback' | 'assignment';
+    };
   }) => Promise<void>;
   /** v1.25.0~ 피드백 토스트 클릭 → 씬 점프 신호 수신 */
   onFeedbackJumpToScene: (
-    callback: (payload: { sheetName: string; sceneId: string; sceneUuid: string }) => void,
+    callback: (payload: {
+      sheetName: string; sceneId: string; sceneUuid: string;
+      notificationId?: string;
+      kind?: 'feedback' | 'assignment';
+    }) => void,
   ) => () => void;
   supabaseBulkUpdateSceneStages: (updates: BulkStageUpdate[], updatedBy: string) => Promise<BulkUpdateResult[]>;
   supabaseBulkDeleteScenes: (sceneUuids: string[], deletedBy: string) => Promise<BulkUpdateResult[]>;
