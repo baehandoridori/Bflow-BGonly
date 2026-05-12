@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Eye, Sparkles, Pencil, MessageSquare, RotateCw, Plus, Trash2, User, Grid3x3, Image as ImageIcon, ChevronRight } from 'lucide-react';
+import { Check, Eye, Sparkles, Pencil, MessageSquare, RotateCw, Plus, Trash2, User, Grid3x3, Image as ImageIcon, ChevronRight, Hourglass, Play, Bell } from 'lucide-react';
 import { useActivityStore } from '@/stores/useActivityStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
@@ -26,6 +26,15 @@ function ActionIcon({ type, size = 11 }: { type: ActionType; size?: number }) {
       return <Eye {...props} />;
     case 'stage_png':
       return <Sparkles {...props} />;
+    // v1.25.6: 액팅 단계 — 4 아이콘
+    case 'phase_wait':
+      return <Hourglass {...props} />;
+    case 'phase_work':
+      return <Play {...props} />;
+    case 'phase_feedback':
+      return <Bell {...props} />;
+    case 'phase_done':
+      return <Check {...props} />;
     case 'memo_update':
       return <Pencil {...props} />;
     case 'comment_add':
