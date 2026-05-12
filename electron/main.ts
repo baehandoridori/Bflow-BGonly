@@ -1131,7 +1131,7 @@ import {
   insertActingFeedbackNotifications as sbInsertFeedbackNotifications,
   fetchMissedActingFeedbackNotifications as sbFetchMissedFeedbackNotifications,
   markActingFeedbackNotificationRead as sbMarkFeedbackNotificationRead,
-  insertSceneAssignmentNotification as sbInsertAssignmentNotification,
+  insertSceneAssignmentNotifications as sbInsertAssignmentNotifications,
   fetchMissedSceneAssignmentNotifications as sbFetchMissedAssignmentNotifications,
   markSceneAssignmentNotificationRead as sbMarkAssignmentNotificationRead,
   bulkUpdateSceneStages as sbBulkUpdateSceneStages,
@@ -1444,6 +1444,23 @@ ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, 
   return results;
 }));
 ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneUuid: string, field: string, value: string, senderId?: string) => {
+  // v1.25.8 코덱스 1차 P2 fix: 담당자 변경이면 UPDATE 전에 prev 값을 캡처.
+  //  AssigneeMultiSelect 가 comma-separated 로 multi-value 저장하므로, 차집합으로 *추가된* 사람만 알림.
+  //  prev 캡처를 UPDATE 후에 하면 이미 새 값이 들어있어 차집합이 빈 배열이 됨.
+  let prevAssignee = '';
+  if (field === 'assignee' && senderId) {
+    try {
+      const { data: prevRow } = await supabaseClient
+        .from('scenes')
+        .select('assignee')
+        .eq('id', sceneUuid)
+        .maybeSingle();
+      prevAssignee = ((prevRow as { assignee?: string | null } | null)?.assignee ?? '').toString().trim();
+    } catch (err) {
+      console.warn('[assignee-prev-fetch] 실패 — prevAssignee 빈 값으로 진행:', err);
+    }
+  }
+
   await sbUpdateSceneField(sceneUuid, field, value, senderId);
   // 필드별 활동 기록
   let actionType: ActionType | null = null;
@@ -1459,10 +1476,10 @@ ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneU
       detail: actionType.startsWith('image_upload') ? {} : { to: value },
     });
   }
-  // v1.25.8: 담당자 변경 시 새 담당자에게 알림 (DB INSERT + broadcast).
-  //  IPC 호출자(렌더러)가 prevAssignee/senderName 을 함께 알려줘야 하지만,
-  //  단순화 위해 main 측에서 user_id → user_name 조회로 senderName 추론. prevAssignee 는
-  //  생략(spec 외 디테일). 자기 자신 자기에게 배정은 자동 skip.
+  // v1.25.8: 담당자 변경 시 *추가된* 담당자(들)에게 알림 (DB INSERT + broadcast).
+  //  코덱스 1차 P2 fix: AssigneeMultiSelect 가 comma-separated multi-value 를 쓰므로,
+  //   prev → new 차집합으로 새로 추가된 사람만 알림. 한 번에 여러 명 추가도 지원.
+  //  자기 자신 자기에게 배정은 INSERT 단계에서 skip.
   if (field === 'assignee' && value && value.trim() && senderId) {
     try {
       const { data: senderUser } = await supabaseClient
@@ -1471,15 +1488,15 @@ ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneU
         .eq('id', senderId)
         .maybeSingle();
       const senderName = (senderUser as { name?: string } | null)?.name ?? '동료';
-      const result = await sbInsertAssignmentNotification({
+      const inserted = await sbInsertAssignmentNotifications({
         sceneUuid,
-        prevAssignee: '',
+        prevAssignee,
         newAssignee: value.trim(),
         senderId,
         senderName,
       });
-      if (result) {
-        // 새 담당자 user_id 와 notification_id 알았으니 broadcast 발송
+      if (inserted.length > 0) {
+        // 씬 메타는 broadcast 모두에 공유 — 한 번만 조회.
         const { data: sceneRow } = await supabaseClient
           .from('scenes')
           .select('scene_number, parts(part_id, department, episodes(episode_number))')
@@ -1499,18 +1516,21 @@ ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneU
           const partId = firstPart?.part_id ?? 'A';
           const dept = firstPart?.department ?? 'bg';
           const deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
-          broadcastSceneAssignmentNotification({
-            notificationId: result.notificationId,
-            sceneUuid,
-            sceneId: s.scene_number,
-            sheetName: `EP${String(epNum).padStart(2, '0')}_${partId}${deptSuffix}`,
-            episodeNumber: epNum,
-            recipientId: result.recipientId,
-            senderId,
-            senderName,
-            prevAssignee: '',
-            newAssignee: value.trim(),
-          });
+          const sheetName = `EP${String(epNum).padStart(2, '0')}_${partId}${deptSuffix}`;
+          for (const r of inserted) {
+            broadcastSceneAssignmentNotification({
+              notificationId: r.notificationId,
+              sceneUuid,
+              sceneId: s.scene_number,
+              sheetName,
+              episodeNumber: epNum,
+              recipientId: r.recipientId,
+              senderId,
+              senderName,
+              prevAssignee,
+              newAssignee: value.trim(),
+            });
+          }
         }
       }
     } catch (err) {

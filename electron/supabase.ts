@@ -795,33 +795,59 @@ export interface MissedAssignmentNotification {
   createdAt: string;
 }
 
-/** 알림 row INSERT — newAssignee 이름으로 user 찾아 recipient_id 채움.
- *  반환: { recipientId, notificationId } 또는 null (대상 user 못 찾음 / 자기 자신).
- *  씬 메타(scene_id, sheet_name, episode_number) 도 조회해서 함께 저장. */
-export async function insertSceneAssignmentNotification(
+/** v1.25.8 코덱스 1차 P2 fix: assignee 는 콤마 구분 multi-value 일 수 있다 (AssigneeMultiSelect).
+ *  공백/빈 토큰 제거 + 중복 제거. */
+function parseAssigneeList(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const tok of raw.split(',')) {
+    const t = tok.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
+export interface AssignmentInsertResult {
+  recipientId: string;
+  recipientName: string;
+  notificationId: string;
+}
+
+/** 알림 row INSERT — v1.25.8 코덱스 1차 P2 fix: comma-separated multi-assignee 지원.
+ *  prev → new 차집합으로 *새로 추가된* 담당자만 알림 (기존 담당자는 제외).
+ *  반환: 추가된 (recipientId, recipientName, notificationId) 배열. 빈 배열이면 알림 없음.
+ *  씬 메타(scene_id, sheet_name, episode_number) 는 한 번만 조회해서 모든 row 에 재사용. */
+export async function insertSceneAssignmentNotifications(
   payload: SceneAssignmentPayload,
-): Promise<{ recipientId: string; notificationId: string } | null> {
-  if (!payload.newAssignee.trim()) return null;
+): Promise<AssignmentInsertResult[]> {
+  const newNames = parseAssigneeList(payload.newAssignee);
+  if (newNames.length === 0) return [];
+  const prevSet = new Set(parseAssigneeList(payload.prevAssignee));
+  const addedNames = newNames.filter((n) => !prevSet.has(n));
+  if (addedNames.length === 0) return [];
 
-  // 1) 새 담당자 user 찾기
-  const { data: userRow, error: userErr } = await supabase
+  // 1) 추가된 이름들로 user 일괄 조회 (in 쿼리)
+  const { data: userRows, error: userErr } = await supabase
     .from('users')
-    .select('id')
-    .eq('name', payload.newAssignee)
-    .maybeSingle();
+    .select('id, name')
+    .in('name', addedNames);
   if (userErr) throwIfError(userErr);
-  if (!userRow) return null;
-  const recipientId = (userRow as { id: string }).id;
-  if (recipientId === payload.senderId) return null;
+  const userMap = new Map<string, string>();
+  for (const u of ((userRows ?? []) as Array<{ id: string; name: string }>)) {
+    userMap.set(u.name, u.id);
+  }
 
-  // 2) 씬 메타 조회 (scene_number, parts.part_id, episodes.episode_number)
+  // 2) 씬 메타 조회 (한 번만)
   const { data: sceneRow, error: sceneErr } = await supabase
     .from('scenes')
     .select('scene_number, parts(part_id, department, episodes(episode_number))')
     .eq('id', payload.sceneUuid)
     .maybeSingle();
   if (sceneErr) throwIfError(sceneErr);
-  if (!sceneRow) return null;
+  if (!sceneRow) return [];
   // Supabase 의 관계 join 은 결과가 array 로 옴 (1:N 추론). FK 가 unique 임을 모르므로.
   //  → 첫 요소만 사용하는 단일 객체로 평탄화.
   type PartRel = { part_id?: string; department?: string; episodes?: { episode_number?: number } | { episode_number?: number }[] | null };
@@ -838,25 +864,32 @@ export async function insertSceneAssignmentNotification(
   const deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
   const sheetName = `EP${String(epNum).padStart(2, '0')}_${partId}${deptSuffix}`;
 
-  // 3) row INSERT
-  const { data: inserted, error: insErr } = await supabase
-    .from('scene_assignment_notifications')
-    .insert({
-      sender_id: payload.senderId,
-      sender_name: payload.senderName,
-      recipient_id: recipientId,
-      scene_uuid: payload.sceneUuid,
-      scene_id: s.scene_number,
-      sheet_name: sheetName,
-      episode_number: epNum,
-      prev_assignee: payload.prevAssignee || null,
-      new_assignee: payload.newAssignee,
-    })
-    .select('id')
-    .single();
-  if (insErr) throwIfError(insErr);
-  if (!inserted) return null;
-  return { recipientId, notificationId: (inserted as { id: string }).id };
+  // 3) 추가된 이름별로 row INSERT — 자기 자신 / user 못 찾음은 skip
+  const results: AssignmentInsertResult[] = [];
+  for (const name of addedNames) {
+    const recipientId = userMap.get(name);
+    if (!recipientId) continue; // 존재하지 않는 user → skip (오타/외부 이름)
+    if (recipientId === payload.senderId) continue; // 자기 자신 배정 → skip
+    const { data: inserted, error: insErr } = await supabase
+      .from('scene_assignment_notifications')
+      .insert({
+        sender_id: payload.senderId,
+        sender_name: payload.senderName,
+        recipient_id: recipientId,
+        scene_uuid: payload.sceneUuid,
+        scene_id: s.scene_number,
+        sheet_name: sheetName,
+        episode_number: epNum,
+        prev_assignee: payload.prevAssignee || null,
+        new_assignee: payload.newAssignee,
+      })
+      .select('id')
+      .single();
+    if (insErr) throwIfError(insErr);
+    if (!inserted) continue;
+    results.push({ recipientId, recipientName: name, notificationId: (inserted as { id: string }).id });
+  }
+  return results;
 }
 
 /** 로그인 catch-up — 마지막 본 시각 이후 미읽음 배정 알림 일괄 조회. */

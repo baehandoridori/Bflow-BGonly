@@ -165,7 +165,7 @@ export async function bulkUpdateSceneFields(
 }
 
 export async function updateSceneFieldInSupabase(sceneUuid: string, field: string, value: string): Promise<void> {
-  await window.electronAPI.supabaseUpdateSceneField(sceneUuid, field, value);
+  await window.electronAPI.supabaseUpdateSceneField(sceneUuid, field, value, getCurrentSenderId());
 }
 
 // ─── Users ──────────────────────────────────────
@@ -250,6 +250,7 @@ export async function writeMetadataToSupabase(type: string, key: string, value: 
 // ═══════════════════════════════════════════════════════
 
 import { useDataStore } from '../stores/useDataStore';
+import { useAuthStore } from '../stores/useAuthStore';
 
 const SCENE_COMPLETION_META_TYPE = 'scene-completion';
 
@@ -260,6 +261,13 @@ function resolveSceneUuid(sheetName: string, sceneIndex: number): string {
   const scene = part?.scenes[sceneIndex];
   if (!scene?.id) throw new Error(`씬 UUID를 찾을 수 없음: ${sheetName}[${sceneIndex}]`);
   return scene.id;
+}
+
+/** v1.25.8 코덱스 1차 P1 fix: 씬 필드 mutation 시 sender 자동 주입 — 담당자 알림 분기 활성화.
+ *  이전엔 senderId 가 누락된 채로 IPC 가 호출되어, electron 측 'assignee' notify 분기가
+ *  영구히 건너뛰어졌다 (= 알림 INSERT/broadcast 모두 안 됨). */
+function getCurrentSenderId(): string | undefined {
+  return useAuthStore.getState().currentUser?.id;
 }
 
 /** sheetName + sceneId (human) → scene UUID */
@@ -308,10 +316,11 @@ export async function deleteScene(sheetName: string, rowIndex: number): Promise<
   await window.electronAPI.supabaseDeleteScene(uuid);
 }
 
-/** 씬 필드 업데이트 (rowIndex → UUID) */
+/** 씬 필드 업데이트 (rowIndex → UUID).
+ *  v1.25.8 코덱스 1차 P1 fix: senderId 주입 — 담당자 변경 시 알림 분기 활성화. */
 export async function updateSceneField(sheetName: string, rowIndex: number, field: string, value: string): Promise<void> {
   const uuid = resolveSceneUuid(sheetName, rowIndex);
-  await window.electronAPI.supabaseUpdateSceneField(uuid, field, value);
+  await window.electronAPI.supabaseUpdateSceneField(uuid, field, value, getCurrentSenderId());
 }
 
 /** 씬 완료 메타 저장 (rowIndex → metadata upsert) */
@@ -439,7 +448,8 @@ export async function batchExecute(actions: BatchAction[]): Promise<{ ok: boolea
       }
       case 'updateSceneField': {
         const uuid = resolveSceneUuid(p.sheetName, Number(p.rowIndex));
-        await window.electronAPI.supabaseUpdateSceneField(uuid, p.field, p.value);
+        // v1.25.8 코덱스 1차 P1 fix: senderId 주입 — 담당자 변경 시 알림 분기 활성화.
+        await window.electronAPI.supabaseUpdateSceneField(uuid, p.field, p.value, getCurrentSenderId());
         break;
       }
       case 'archiveEpisode':
