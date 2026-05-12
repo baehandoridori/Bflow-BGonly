@@ -1,19 +1,15 @@
 /**
- * v1.25.0~ 액팅 씬 단계 토글 (대기/작업중/피드백 대기/완료 + 차수).
+ * v1.25.0~ 액팅 씬 단계 토글 (대기/작업중/피드백 대기/완료).
+ *
+ * v1.25.7 (한솔 결정 — 시안 B + 피드백 차수 숨김):
+ *  - 칩은 라벨만, 균등 분할(flex-1). 폭이 줄어들어도 글자 잘림 X.
+ *  - 활성이 '작업중' 일 때만 칩 위 우측에 작은 박스로 "작업중 N차 ▾▴" 표시.
+ *  - 피드백 대기/대기/완료 일 때는 차수 영역 자체가 사라짐 (한솔: "피드백 대기는 숫자 없이 OK").
+ *  - 데이터(work_round/feedback_round)는 보존되어 상태 전이 시 자동 +1 룰은 그대로.
  *
  * spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md (섹션 4)
- * mockup: docs/mockups/2026-05-11-acting-toggle-q1-interaction.html (옵션 A)
+ * mockup: docs/mockups/2026-05-12-phase-chip-layout-fix.html
  *
- * v1.25.3 (한솔 보고 fix): 한솔이 카드/상세 모달에서 "피드백 대기" 5자가 좁은 컨테이너에서
- *  글자가 세로로 wrap 되는 문제를 보고. 다음으로 보정:
- *   1) 칩 라벨을 SCENE_PHASE_LABELS_SHORT 로 단축 (피드백 대기 → 피드백)
- *   2) 컨테이너 `flex w-full` + 칩 `flex-1` 로 기존 액팅 4-stage 토글과 동일한 균등 분할
- *   3) 칩 라벨 + 차수 모두 whitespace-nowrap 으로 wrap 방지
- *   4) 활성 칩 차수 카운터는 "▼ N ▲" 만 (차자 생략) — 좁은 칩 안에서도 보이도록
- *
- * - 한 시점에 1개만 활성 (라디오)
- * - 활성 칩이 '작업중' 또는 '피드백 대기' 일 때만 칩 안쪽에 차수 카운터
- * - "피드백 대기" 칩 클릭은 onRequestFeedback 로 위임 (호출자가 확인 모달 표시)
  * - chip 은 <div role="radio"> — RoundCounter 의 +/- <button> 중첩 button 회피 (코덱스 3차 P2)
  */
 
@@ -29,7 +25,7 @@ export interface ScenePhaseToggleProps {
   onStateClick: (next: ScenePhaseState) => void;
   /** 피드백 대기 칩 클릭 시 호출 (확인 모달 트리거) */
   onRequestFeedback: () => void;
-  /** 차수 ▴▾ 클릭. kind = 'work' 또는 'feedback', delta = +1 또는 -1 */
+  /** 차수 ▴▾ 클릭. 작업중일 때만 노출되므로 kind 는 'work' 만 사용 */
   onRoundBump: (kind: 'work' | 'feedback', delta: 1 | -1) => void;
   /** 비활성/저장 중 표시용 */
   disabled?: boolean;
@@ -46,6 +42,9 @@ export function ScenePhaseToggle({
   compact = false,
 }: ScenePhaseToggleProps) {
   const activeState: ScenePhaseState = scene.sceneState ?? 'wait';
+  // v1.25.7: 작업중일 때만 차수 헤더 노출. 피드백/대기/완료는 차수 숨김.
+  const showWorkRound = activeState === 'work';
+  const workRound = scene.workRound ?? 1;
 
   const handleChipClick = useCallback(
     (target: ScenePhaseState) => {
@@ -62,63 +61,81 @@ export function ScenePhaseToggle({
   );
 
   return (
-    <div
-      className={cn(
-        'flex w-full rounded-lg bg-bg-primary/70 border border-bg-border/40',
-        compact ? 'p-0.5 gap-0.5' : 'p-1 gap-0.5',
-      )}
-      role="radiogroup"
-      aria-label="액팅 씬 단계"
-    >
-      {SCENE_PHASES.map((state) => {
-        const isActive = activeState === state;
-        const showRound = isActive && (state === 'work' || state === 'feedback');
-        const round = state === 'work' ? (scene.workRound ?? 1) : (scene.feedbackRound ?? 1);
-        return (
-          <div
-            key={state}
-            role="radio"
-            aria-checked={isActive}
-            aria-disabled={disabled || undefined}
-            tabIndex={disabled ? -1 : 0}
-            onClick={() => handleChipClick(state)}
-            onKeyDown={(e) => {
-              if (disabled) return;
-              if (e.key === ' ' || e.key === 'Enter') {
-                e.preventDefault();
-                handleChipClick(state);
-              }
-            }}
+    <div className="w-full flex flex-col gap-1.5">
+      {/* v1.25.7: 작업중 활성 시 차수 헤더. 우측 정렬 작은 박스. */}
+      {showWorkRound && (
+        <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+          <span
             className={cn(
-              'flex-1 min-w-0 inline-flex items-center justify-center gap-1 rounded-md font-medium select-none whitespace-nowrap',
-              'transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
-              compact ? 'px-1 py-1 text-[10px]' : 'px-1.5 py-2 text-[11px]',
-              !isActive && 'text-text-secondary/70 hover:text-text-primary hover:bg-bg-border/25 cursor-pointer',
-              disabled && 'opacity-40 cursor-not-allowed',
+              'inline-flex items-center gap-1 rounded-full font-bold tabular-nums',
+              compact ? 'px-1.5 py-0 text-[10px]' : 'px-2 py-0.5 text-[11px]',
             )}
-            style={
-              isActive
-                ? {
-                    backgroundColor: SCENE_PHASE_COLORS[state],
-                    color: state === 'wait' ? '#fff' : '#0F1117',
-                    fontWeight: 700,
-                    boxShadow: `0 2px 8px ${SCENE_PHASE_COLORS[state]}40`,
-                  }
-                : undefined
-            }
+            style={{
+              background: `${SCENE_PHASE_COLORS.work}26`,
+              color: SCENE_PHASE_COLORS.work,
+            }}
           >
-            <span className="truncate">{SCENE_PHASE_LABELS_SHORT[state]}</span>
-            {showRound && (
-              <RoundCounter
-                value={round}
-                onBump={(delta) => onRoundBump(state as 'work' | 'feedback', delta)}
-                disabled={disabled}
-                compact={compact}
-              />
-            )}
-          </div>
-        );
-      })}
+            작업중
+            <RoundCounter
+              value={workRound}
+              onBump={(delta) => onRoundBump('work', delta)}
+              disabled={disabled}
+              compact={compact}
+            />
+            차
+          </span>
+        </div>
+      )}
+
+      {/* 칩 4개 — 라벨만, 균등 분할 */}
+      <div
+        className={cn(
+          'flex w-full rounded-lg bg-bg-primary/70 border border-bg-border/40',
+          compact ? 'p-0.5 gap-0.5' : 'p-1 gap-0.5',
+        )}
+        role="radiogroup"
+        aria-label="액팅 씬 단계"
+      >
+        {SCENE_PHASES.map((state) => {
+          const isActive = activeState === state;
+          return (
+            <div
+              key={state}
+              role="radio"
+              aria-checked={isActive}
+              aria-disabled={disabled || undefined}
+              tabIndex={disabled ? -1 : 0}
+              onClick={() => handleChipClick(state)}
+              onKeyDown={(e) => {
+                if (disabled) return;
+                if (e.key === ' ' || e.key === 'Enter') {
+                  e.preventDefault();
+                  handleChipClick(state);
+                }
+              }}
+              className={cn(
+                'flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-medium select-none whitespace-nowrap',
+                'transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
+                compact ? 'px-1 py-1 text-[10px]' : 'px-1.5 py-2 text-[11px]',
+                !isActive && 'text-text-secondary/70 hover:text-text-primary hover:bg-bg-border/25 cursor-pointer',
+                disabled && 'opacity-40 cursor-not-allowed',
+              )}
+              style={
+                isActive
+                  ? {
+                      backgroundColor: SCENE_PHASE_COLORS[state],
+                      color: state === 'wait' ? '#fff' : '#0F1117',
+                      fontWeight: 700,
+                      boxShadow: `0 2px 8px ${SCENE_PHASE_COLORS[state]}40`,
+                    }
+                  : undefined
+              }
+            >
+              <span className="truncate">{SCENE_PHASE_LABELS_SHORT[state]}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -134,8 +151,8 @@ function RoundCounter({ value, onBump, disabled, compact }: RoundCounterProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full bg-black/15 flex-shrink-0',
-        compact ? 'gap-0' : 'gap-0',
+        'inline-flex items-center rounded-full bg-black/15',
+        compact ? '' : '',
       )}
       onClick={(e) => e.stopPropagation()}
     >
@@ -149,16 +166,16 @@ function RoundCounter({ value, onBump, disabled, compact }: RoundCounterProps) {
         }}
         className={cn(
           'inline-flex items-center justify-center rounded-full hover:bg-black/15',
-          compact ? 'w-3 h-3' : 'w-3.5 h-3.5',
+          compact ? 'w-3 h-3' : 'w-4 h-4',
           (disabled || value <= 1) && 'opacity-30 cursor-not-allowed',
         )}
       >
-        <ChevronDown size={compact ? 8 : 9} strokeWidth={2.5} />
+        <ChevronDown size={compact ? 8 : 10} strokeWidth={2.5} />
       </button>
       <span
         className={cn(
           'font-bold tabular-nums px-0.5',
-          compact ? 'text-[9px]' : 'text-[10px]',
+          compact ? 'text-[9px]' : 'text-[11px]',
         )}
       >
         {value}
@@ -173,11 +190,11 @@ function RoundCounter({ value, onBump, disabled, compact }: RoundCounterProps) {
         }}
         className={cn(
           'inline-flex items-center justify-center rounded-full hover:bg-black/15',
-          compact ? 'w-3 h-3' : 'w-3.5 h-3.5',
+          compact ? 'w-3 h-3' : 'w-4 h-4',
           (disabled || value >= 99) && 'opacity-30 cursor-not-allowed',
         )}
       >
-        <ChevronUp size={compact ? 8 : 9} strokeWidth={2.5} />
+        <ChevronUp size={compact ? 8 : 10} strokeWidth={2.5} />
       </button>
     </span>
   );
