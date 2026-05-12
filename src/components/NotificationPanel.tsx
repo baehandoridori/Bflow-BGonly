@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign } from 'lucide-react';
+import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
@@ -33,6 +33,8 @@ function typeConfig(type: NotificationType) {
     case 'revision': return { icon: MessageSquareWarning, color: 'rgb(var(--color-accent))', label: '리비전' };
     // v1.25.5: 액팅 피드백 — 검수 요청 (강한 톤, mention 시각 처리와 동일).
     case 'acting_feedback': return { icon: MessageSquareWarning, color: '#FDCB6E', label: '피드백' };
+    // v1.25.8: 씬 담당자 배정 — 본인이 새 담당자 (강한 톤, mention 동일 시각 처리).
+    case 'scene_assignment': return { icon: UserPlus, color: 'rgb(var(--color-accent))', label: '배정' };
   }
 }
 
@@ -46,11 +48,12 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
   //   다른 PC 사용자가 멘션 보낼 때 useDataStore 에 그 씬이 없어 metadata=undefined 가 되는
   //   케이스가 있는데, 그래도 본문 클릭 navigate 가 자체 fallback 으로 처리하므로 버튼 노출이 안전.
   const hasMetadataTarget = !!(n.metadata?.sceneId || n.metadata?.sceneName);
-  const isSceneRelated = n.type === 'comment' || n.type === 'mention' || n.type === 'scene_change' || n.type === 'revision' || n.type === 'acting_feedback';
+  const isSceneRelated = n.type === 'comment' || n.type === 'mention' || n.type === 'scene_change' || n.type === 'revision' || n.type === 'acting_feedback' || n.type === 'scene_assignment';
   const hasNavigateTarget = hasMetadataTarget || isSceneRelated;
   // v1.24.0: 멘션 알림 — 더 강한 시각 신호 (액센트 좌측 바 + @ 배지 + 카드 배경 진한 alpha).
   // v1.25.5: acting_feedback 도 멘션과 동일한 강한 톤 (검수 요청은 즉시 인지 필요).
-  const isMention = n.type === 'mention' || n.type === 'acting_feedback';
+  // v1.25.8: scene_assignment 도 동일 — 담당자 배정은 즉시 인지 필요.
+  const isMention = n.type === 'mention' || n.type === 'acting_feedback' || n.type === 'scene_assignment';
 
   const handleItemClick = () => {
     if (!n.isRead) markAsRead(n.id);
@@ -229,6 +232,14 @@ function NotificationDropdown() {
         .then(({ markFeedbackNotificationRead }) => markFeedbackNotificationRead(feedbackNotificationId))
         .catch((err) => console.warn('[NotificationPanel] markFeedbackNotificationRead 실패:', err));
     }
+    // v1.25.8: 씬 담당자 배정 알림 — 점프 시 DB read_at 처리 (catch-up 중복 알림 방지)
+    const isAssignmentNotif = n.type === 'scene_assignment';
+    const assignmentNotificationId = n.metadata?.assignmentNotificationId;
+    if (isAssignmentNotif && assignmentNotificationId) {
+      import('@/services/supabaseService')
+        .then(({ markAssignmentNotificationRead }) => markAssignmentNotificationRead(assignmentNotificationId))
+        .catch((err) => console.warn('[NotificationPanel] markAssignmentNotificationRead 실패:', err));
+    }
     const commentId = n.metadata?.commentId;
 
     if (sceneId || sceneName) {
@@ -310,7 +321,7 @@ function NotificationDropdown() {
         type: 'warning',
         message: '씬을 자동으로 찾지 못했어요. 씬 뷰에서 직접 확인해주세요.',
       });
-    } else if (n.type === 'comment' || n.type === 'mention' || n.type === 'scene_change' || n.type === 'revision' || n.type === 'acting_feedback') {
+    } else if (n.type === 'comment' || n.type === 'mention' || n.type === 'scene_change' || n.type === 'revision' || n.type === 'acting_feedback' || n.type === 'scene_assignment') {
       // v1.23.1 codex 1차 P2 + v1.24.0: metadata 가 비어있어도 씬 관련 알림이면 씬 뷰로 이동 + 안내.
       setView('scenes');
       useAppStore.getState().setToast?.({

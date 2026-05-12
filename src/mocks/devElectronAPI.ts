@@ -84,6 +84,13 @@ export function installDevElectronAPI(): void {
     supabaseMarkFeedbackNotificationRead: async (notificationId) => {
       console.log('[DEV] supabaseMarkFeedbackNotificationRead:', notificationId);
     },
+    supabaseFetchMissedAssignmentNotifications: async (userId, since, limit, before) => {
+      console.log('[DEV] supabaseFetchMissedAssignmentNotifications:', { userId, since, limit, before });
+      return [];
+    },
+    supabaseMarkAssignmentNotificationRead: async (notificationId) => {
+      console.log('[DEV] supabaseMarkAssignmentNotificationRead:', notificationId);
+    },
     notifyFeedbackToast: async (payload) => {
       console.log('[DEV] notifyFeedbackToast:', payload);
     },

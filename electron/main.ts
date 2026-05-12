@@ -1111,7 +1111,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification } from './broadcast';
 import type { FeedbackBroadcastPayload } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
@@ -1131,6 +1131,9 @@ import {
   insertActingFeedbackNotifications as sbInsertFeedbackNotifications,
   fetchMissedActingFeedbackNotifications as sbFetchMissedFeedbackNotifications,
   markActingFeedbackNotificationRead as sbMarkFeedbackNotificationRead,
+  insertSceneAssignmentNotifications as sbInsertAssignmentNotifications,
+  fetchMissedSceneAssignmentNotifications as sbFetchMissedAssignmentNotifications,
+  markSceneAssignmentNotificationRead as sbMarkAssignmentNotificationRead,
   bulkUpdateSceneStages as sbBulkUpdateSceneStages,
   bulkDeleteScenes as sbBulkDeleteScenes,
   bulkUpdateSceneFields as sbBulkUpdateSceneFields,
@@ -1427,7 +1430,98 @@ ipcMain.handle('supabase:bulk-delete-scenes', wrapIpc(async (_e: unknown, sceneU
   }
   return results;
 }));
+/** v1.25.8 코덱스 2차 P1 fix: 담당자 변경 알림 (INSERT + meta 조회 + broadcast) 헬퍼.
+ *  단일 필드 핸들러와 bulk 핸들러에서 동일 로직을 공유. 실패 시 throw 없이 로그만 — 본 mutation 흐름은 영향 없음. */
+async function notifyAssigneeChange(
+  sceneUuid: string,
+  prevAssignee: string,
+  newAssignee: string,
+  senderId: string,
+  senderName: string,
+): Promise<void> {
+  try {
+    const inserted = await sbInsertAssignmentNotifications({
+      sceneUuid, prevAssignee, newAssignee, senderId, senderName,
+    });
+    if (inserted.length === 0) return;
+    const { data: sceneRow } = await supabaseClient
+      .from('scenes')
+      .select('scene_number, parts(part_id, department, episodes(episode_number))')
+      .eq('id', sceneUuid)
+      .maybeSingle();
+    type PartRel = { part_id?: string; department?: string; episodes?: { episode_number?: number } | { episode_number?: number }[] | null };
+    const s = sceneRow as unknown as {
+      scene_number: string;
+      parts?: PartRel | PartRel[] | null;
+    } | null;
+    if (!s) return;
+    const firstPart: PartRel | null = Array.isArray(s.parts) ? (s.parts[0] ?? null) : (s.parts ?? null);
+    const epRel = firstPart?.episodes;
+    const firstEp: { episode_number?: number } | null = Array.isArray(epRel) ? (epRel[0] ?? null) : (epRel ?? null);
+    const epNum = firstEp?.episode_number ?? 0;
+    const partId = firstPart?.part_id ?? 'A';
+    const dept = firstPart?.department ?? 'bg';
+    const deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
+    const sheetName = `EP${String(epNum).padStart(2, '0')}_${partId}${deptSuffix}`;
+    for (const r of inserted) {
+      broadcastSceneAssignmentNotification({
+        notificationId: r.notificationId,
+        sceneUuid,
+        sceneId: s.scene_number,
+        sheetName,
+        episodeNumber: epNum,
+        recipientId: r.recipientId,
+        senderId,
+        senderName,
+        prevAssignee,
+        newAssignee,
+      });
+    }
+  } catch (err) {
+    console.error('[assignee-change-notify] 실패:', err);
+  }
+}
+
 ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, updates: BulkFieldUpdate[], updatedBy: string) => {
+  // v1.25.8 코덱스 2차 P1 fix: bulk-edit 으로 담당자 변경 시에도 알림 분기.
+  //   prev assignee 를 UPDATE 전에 일괄 조회 (이후 차집합 계산).
+  // v1.25.8 코덱스 3차 P2 fix: currentActivityUser 가 비어 있으면 (auth IPC 가 아직 set 안 됨)
+  //   renderer 에서 받은 updatedBy 를 fallback senderId 로 사용. updatedBy 가 빈 문자면 skip.
+  let senderId: string | undefined;
+  let senderName = '동료';
+  if (currentActivityUser?.id) {
+    senderId = currentActivityUser.id;
+    senderName = currentActivityUser.name;
+  } else if (updatedBy && updatedBy.trim()) {
+    senderId = updatedBy.trim();
+    try {
+      const { data } = await supabaseClient
+        .from('users').select('name').eq('id', senderId).maybeSingle();
+      senderName = (data as { name?: string } | null)?.name ?? '동료';
+    } catch (err) {
+      console.warn('[bulk-assignee-sender-name] 조회 실패 — default 사용:', err);
+    }
+  }
+  const prevAssigneeByUuid = new Map<string, string>();
+  if (senderId) {
+    const sceneUuidsWithAssigneeChange = updates
+      .filter((u) => typeof u.fields.assignee === 'string')
+      .map((u) => u.sceneUuid);
+    if (sceneUuidsWithAssigneeChange.length > 0) {
+      try {
+        const { data: prevRows } = await supabaseClient
+          .from('scenes')
+          .select('id, assignee')
+          .in('id', sceneUuidsWithAssigneeChange);
+        for (const r of ((prevRows ?? []) as Array<{ id: string; assignee?: string | null }>)) {
+          prevAssigneeByUuid.set(r.id, (r.assignee ?? '').toString().trim());
+        }
+      } catch (err) {
+        console.warn('[bulk-assignee-prev-fetch] 실패:', err);
+      }
+    }
+  }
+
   const results = await sbBulkUpdateSceneFields(updates, updatedBy, currentActivityUser?.name ?? null);
   for (const u of updates) {
     const r = results.find((x) => x.sceneUuid === u.sceneUuid);
@@ -1437,10 +1531,32 @@ ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, 
         broadcastSceneFieldUpdate(u.sceneUuid, key, value, updatedBy);
       }
     }
+    // 담당자 변경 시 알림 분기 (단일 핸들러와 동일 로직)
+    if (senderId && typeof u.fields.assignee === 'string' && u.fields.assignee.trim()) {
+      const prevAssignee = prevAssigneeByUuid.get(u.sceneUuid) ?? '';
+      await notifyAssigneeChange(u.sceneUuid, prevAssignee, u.fields.assignee.trim(), senderId, senderName);
+    }
   }
   return results;
 }));
 ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneUuid: string, field: string, value: string, senderId?: string) => {
+  // v1.25.8 코덱스 1차 P2 fix: 담당자 변경이면 UPDATE 전에 prev 값을 캡처.
+  //  AssigneeMultiSelect 가 comma-separated 로 multi-value 저장하므로, 차집합으로 *추가된* 사람만 알림.
+  //  prev 캡처를 UPDATE 후에 하면 이미 새 값이 들어있어 차집합이 빈 배열이 됨.
+  let prevAssignee = '';
+  if (field === 'assignee' && senderId) {
+    try {
+      const { data: prevRow } = await supabaseClient
+        .from('scenes')
+        .select('assignee')
+        .eq('id', sceneUuid)
+        .maybeSingle();
+      prevAssignee = ((prevRow as { assignee?: string | null } | null)?.assignee ?? '').toString().trim();
+    } catch (err) {
+      console.warn('[assignee-prev-fetch] 실패 — prevAssignee 빈 값으로 진행:', err);
+    }
+  }
+
   await sbUpdateSceneField(sceneUuid, field, value, senderId);
   // 필드별 활동 기록
   let actionType: ActionType | null = null;
@@ -1456,6 +1572,34 @@ ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneU
       detail: actionType.startsWith('image_upload') ? {} : { to: value },
     });
   }
+  // v1.25.8: 담당자 변경 시 *추가된* 담당자(들)에게 알림 (DB INSERT + broadcast).
+  //  코덱스 1차 P2 fix: AssigneeMultiSelect 가 comma-separated multi-value 를 쓰므로,
+  //   prev → new 차집합으로 새로 추가된 사람만 알림. 한 번에 여러 명 추가도 지원.
+  //  코덱스 2차 P1 fix: bulk handler 와 공통 헬퍼 notifyAssigneeChange 로 추출 — 중복 제거.
+  //  자기 자신 자기에게 배정은 INSERT 단계에서 skip.
+  if (field === 'assignee' && value && value.trim() && senderId) {
+    const { data: senderUser } = await supabaseClient
+      .from('users')
+      .select('name')
+      .eq('id', senderId)
+      .maybeSingle();
+    const senderName = (senderUser as { name?: string } | null)?.name ?? '동료';
+    await notifyAssigneeChange(sceneUuid, prevAssignee, value.trim(), senderId, senderName);
+  }
+}));
+
+// v1.25.8 로그인 catch-up — 미읽음 씬 배정 알림 일괄 조회
+ipcMain.handle('supabase:fetch-missed-assignment-notifications', wrapIpc(async (
+  _e: unknown, userId: string, since: string, limit?: number, before?: string,
+) => {
+  return await sbFetchMissedAssignmentNotifications(userId, since, limit ?? 100, before);
+}));
+
+// v1.25.8 알림 읽음 처리
+ipcMain.handle('supabase:mark-assignment-notification-read', wrapIpc(async (
+  _e: unknown, notificationId: string,
+) => {
+  await sbMarkAssignmentNotificationRead(notificationId);
 }));
 
 // ─── Users ───
@@ -2167,7 +2311,13 @@ ipcMain.handle('notification:show-native', (_e: unknown, title: string, body: st
 ipcMain.handle('notify:feedback-toast', (_e: unknown, payload: {
   title: string;
   body: string;
-  sceneJump: { sheetName: string; sceneId: string; sceneUuid: string };
+  // v1.25.8 코덱스 3차 P2 fix: sceneJump 에 notificationId/kind 옵션 추가 — OS 토스트 클릭 후
+  //   렌더러가 DB row 에 read_at 을 채우게 해서 catch-up 중복 출현 차단.
+  sceneJump: {
+    sheetName: string; sceneId: string; sceneUuid: string;
+    notificationId?: string;
+    kind?: 'feedback' | 'assignment';
+  };
 }) => {
   if (!Notification.isSupported()) return;
   // 앱이 포커스 상태이고 ScenesView 가 활성일 가능성이 높으면 native toast 생략(인앱 sonner 만)

@@ -32,7 +32,7 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { setFeedbackLastSeenAt } from '@/utils/lastSeenTracker';
+import { setFeedbackLastSeenAt, setAssignmentLastSeenAt } from '@/utils/lastSeenTracker';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
@@ -754,6 +754,7 @@ export default function App() {
         type MissedRow = Awaited<ReturnType<typeof fetchMissedFeedbackNotifications>>[number];
         const all: MissedRow[] = [];
         let before: string | undefined = undefined;
+        let cappedOut = false;
         while (true) {
           const batch = await fetchMissedFeedbackNotifications(me.id, lastSeen, PAGE_SIZE, before);
           if (!batch || batch.length === 0) break;
@@ -762,10 +763,11 @@ export default function App() {
           before = batch[batch.length - 1].createdAt; // 다음 페이지: 가장 오래된 fetched 보다 이전
           if (all.length >= SAFE_CAP) {
             console.warn('[feedback-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
+            cappedOut = true;
             break;
           }
         }
-        console.log('[feedback-catchup] 조회 결과', { count: all.length });
+        console.log('[feedback-catchup] 조회 결과', { count: all.length, cappedOut });
         if (all.length === 0) {
           setFeedbackLastSeenAt(me.id, new Date().toISOString());
           return;
@@ -791,12 +793,99 @@ export default function App() {
           description: '종 모양을 클릭해 확인해주세요.',
           duration: 6000,
         });
-        // P1 #2: 가장 최근 fetched 의 createdAt 으로 lastSeen 갱신 (now 아님).
-        //   페이지네이션으로 모든 unread 를 가져왔으므로, 그 이전 시점부터 다음 catch-up 시
-        //   더 newer 데이터만 fetch. SAFE_CAP 으로 잘렸어도 데이터 손실 없음 (다음 페이지 가능).
-        setFeedbackLastSeenAt(me.id, all[0].createdAt);
+        // 코덱스 2차 P2 fix: SAFE_CAP 도달 시 lastSeen 갱신 안 함 — cap 이하 older unread 가
+        //   `created_at > lastSeen` 필터에서 영구히 제외되는 손실 차단. 다음 로그인이 같은
+        //   lastSeen 으로 다시 시작하므로 이미 패널에 추가된 newer 알림이 재추가되지만,
+        //   조용한 데이터 손실보다는 시각적 중복이 안전 (dedup 은 후속 과제).
+        if (cappedOut) {
+          console.warn('[feedback-catchup] cap 도달 — lastSeen 보존 (다음 로그인에 backlog 재조회)');
+        } else {
+          setFeedbackLastSeenAt(me.id, all[0].createdAt);
+        }
       } catch (err) {
         console.warn('[feedback-catchup] 실패:', err);
+      }
+    })();
+  }, [currentUser, authReady]);
+
+  // v1.25.8 씬 담당자 배정 알림 catch-up — 한솔 보고: 미접속 시 배정 알림이 사라짐.
+  //   feedback catch-up 과 동일 패턴 (페이지네이션 + 별도 lastSeen + logout 시 ref clear).
+  const assignmentCatchupDoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) {
+      assignmentCatchupDoneRef.current = null;
+      return;
+    }
+    if (!authReady) return;
+    if (assignmentCatchupDoneRef.current === currentUser.id) return;
+
+    assignmentCatchupDoneRef.current = currentUser.id;
+    const me = currentUser;
+
+    (async () => {
+      const { getAssignmentLastSeenAt, ensureAssignmentLastSeenInitialized } =
+        await import('@/utils/lastSeenTracker');
+      const lastSeen = getAssignmentLastSeenAt(me.id);
+      if (!lastSeen) {
+        ensureAssignmentLastSeenInitialized(me.id);
+        console.log('[assignment-catchup] 첫 로그인 — last_seen 초기화만');
+        return;
+      }
+      try {
+        const { fetchMissedAssignmentNotifications } = await import('@/services/supabaseService');
+        const PAGE_SIZE = 100;
+        const SAFE_CAP = 1000;
+        type MissedRow = Awaited<ReturnType<typeof fetchMissedAssignmentNotifications>>[number];
+        const all: MissedRow[] = [];
+        let before: string | undefined = undefined;
+        let cappedOut = false;
+        while (true) {
+          const batch = await fetchMissedAssignmentNotifications(me.id, lastSeen, PAGE_SIZE, before);
+          if (!batch || batch.length === 0) break;
+          all.push(...batch);
+          if (batch.length < PAGE_SIZE) break;
+          before = batch[batch.length - 1].createdAt;
+          if (all.length >= SAFE_CAP) {
+            console.warn('[assignment-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
+            cappedOut = true;
+            break;
+          }
+        }
+        console.log('[assignment-catchup] 조회 결과', { count: all.length, cappedOut });
+        if (all.length === 0) {
+          setAssignmentLastSeenAt(me.id, new Date().toISOString());
+          return;
+        }
+        const store = useNotificationStore.getState();
+        for (const m of all) {
+          const epLabel = `EP${String(m.episodeNumber).padStart(2, '0')}`;
+          const prev = m.prevAssignee?.trim();
+          const transitionLabel = prev ? `${prev} → ${m.newAssignee}` : `미배정 → ${m.newAssignee}`;
+          store.addNotification({
+            type: 'scene_assignment',
+            title: `${m.senderName}님이 담당자로 지정했습니다`,
+            body: `${epLabel} · ${m.sceneId}`,
+            metadata: {
+              sceneId: m.sceneUuid,
+              sceneName: m.sceneId,
+              changedBy: m.senderName,
+              assignmentNotificationId: m.id,
+              assignmentTransition: transitionLabel,
+            },
+          });
+        }
+        sonnerToast(`놓친 배정 알림 ${all.length}건이 있어요`, {
+          description: '종 모양을 클릭해 확인해주세요.',
+          duration: 6000,
+        });
+        // 코덱스 2차 P2 fix: SAFE_CAP 도달 시 lastSeen 보존 — 같은 이유 (feedback 과 동일).
+        if (cappedOut) {
+          console.warn('[assignment-catchup] cap 도달 — lastSeen 보존 (다음 로그인에 backlog 재조회)');
+        } else {
+          setAssignmentLastSeenAt(me.id, all[0].createdAt);
+        }
+      } catch (err) {
+        console.warn('[assignment-catchup] 실패:', err);
       }
     })();
   }, [currentUser, authReady]);
@@ -1400,6 +1489,58 @@ export default function App() {
 
     const offBroadcast = window.electronAPI.onSupabaseBroadcast((event: unknown) => {
       const e = event as { event?: string; payload?: Record<string, unknown> };
+
+      // v1.25.8 씬 담당자 배정 알림 — 본인이 새 담당자로 지정될 때 dispatch.
+      //   acting-feedback 과 동일 시각 톤 (강한 펄스 + OS 토스트).
+      if (e?.event === 'scene-assignment-notification') {
+        const ap = e.payload as {
+          notificationId: string;
+          sceneUuid: string; sceneId: string; sheetName: string;
+          episodeNumber: number;
+          recipientId: string;
+          senderId: string; senderName: string;
+          prevAssignee: string; newAssignee: string;
+        } | undefined;
+        const me = useAuthStore.getState().currentUser;
+        if (!ap || !me?.id) return;
+        // 본인이 새 담당자인 경우만 토스트
+        if (ap.recipientId !== me.id) return;
+        // 본인이 본인을 지정하는 경우는 차단
+        if (ap.senderId === me.id) return;
+
+        const epLabel = `EP${String(ap.episodeNumber).padStart(2, '0')}`;
+        const prev = ap.prevAssignee?.trim();
+        const transitionLabel = prev ? `${prev} → ${ap.newAssignee}` : `미배정 → ${ap.newAssignee}`;
+        dispatchNotification({
+          type: 'scene_assignment',
+          title: `${ap.senderName}님이 담당자로 지정했습니다`,
+          body: `${epLabel} · ${ap.sceneId} (${transitionLabel})`,
+          metadata: {
+            sceneId: ap.sceneUuid,
+            sceneName: ap.sceneId,
+            changedBy: ap.senderName,
+            assignmentTransition: transitionLabel,
+            assignmentNotificationId: ap.notificationId,
+          },
+        }, { ...notiSettingsRef.current, osNotification: false });
+        // Windows 네이티브 토스트 + 클릭 시 점프 (피드백과 동일 sceneJump 경로 재사용)
+        // 코덱스 3차 P2 fix: notificationId/kind 도 함께 전달 — 클릭으로 점프했을 때 jump 핸들러가 read_at 처리.
+        window.electronAPI.notifyFeedbackToast({
+          title: 'B flow — 담당자 배정',
+          body: `${ap.senderName}님이 ${epLabel} ${ap.sceneId} 담당자로 지정했습니다.`,
+          sceneJump: {
+            sheetName: ap.sheetName,
+            sceneId: ap.sceneId,
+            sceneUuid: ap.sceneUuid,
+            notificationId: ap.notificationId,
+            kind: 'assignment',
+          },
+        }).catch(() => { /* 토스트 실패 무시 */ });
+        // broadcast 를 즉시 받았으므로 lastSeen 갱신 → 다음 로그인 catch-up 에서 중복 차단
+        if (me?.id) setAssignmentLastSeenAt(me.id, new Date().toISOString());
+        return;
+      }
+
       if (e?.event !== 'acting-feedback-request') return;
       const p = e.payload as {
         sceneUuid: string; sceneId: string; sheetName: string;
@@ -1445,10 +1586,17 @@ export default function App() {
         },
       }, { ...notiSettingsRef.current, osNotification: false });
       // Windows 네이티브 토스트 + 클릭 시 점프 (별도 흐름 — main 에서 sceneJump 처리)
+      // 코덱스 3차 P2 fix: notificationId/kind 도 함께 전달 — feedback 토스트 클릭 후 read_at 처리.
       window.electronAPI.notifyFeedbackToast({
         title: 'B flow — 피드백 요청',
         body: `${p.senderName}님이 ${epLabel} ${p.sceneId} 검수를 요청했습니다.`,
-        sceneJump: { sheetName: p.sheetName, sceneId: p.sceneId, sceneUuid: p.sceneUuid },
+        sceneJump: {
+          sheetName: p.sheetName,
+          sceneId: p.sceneId,
+          sceneUuid: p.sceneUuid,
+          notificationId: myFeedbackNotificationId,
+          kind: 'feedback',
+        },
       }).catch(() => { /* 토스트 실패는 무시 */ });
       // v1.25.5: broadcast 를 즉시 받았으므로 lastSeen 갱신 — 다음 로그인 catch-up 에서 중복 차단
       if (me?.id) setFeedbackLastSeenAt(me.id, new Date().toISOString());
@@ -1456,6 +1604,19 @@ export default function App() {
 
     const offJump = window.electronAPI.onFeedbackJumpToScene?.((payload) => {
       jumpToFeedbackScene(payload.sheetName, payload.sceneId);
+      // 코덱스 3차 P2 fix: OS 토스트 → 점프 시에도 DB read_at 처리.
+      //   notificationId/kind 가 있으면 해당 도메인 markRead 호출 (fire-and-forget).
+      //   인앱 종 클릭 path 는 NotificationPanel 에서 처리하고, OS 토스트 path 는 여기서 처리.
+      if (payload.notificationId && payload.kind) {
+        const kind = payload.kind;
+        const id = payload.notificationId;
+        import('@/services/supabaseService')
+          .then((m) => {
+            if (kind === 'assignment') return m.markAssignmentNotificationRead(id);
+            return m.markFeedbackNotificationRead(id);
+          })
+          .catch((err) => console.warn('[toast-jump-markRead] 실패:', err));
+      }
     });
 
     return () => {
