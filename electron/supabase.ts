@@ -680,12 +680,14 @@ export interface MissedFeedbackNotification {
   createdAt: string;
 }
 
-/** 알림 row INSERT — recipient 한 명당 한 row. broadcast 와 별개 영구 저장. */
+/** 알림 row INSERT — recipient 한 명당 한 row. broadcast 와 별개 영구 저장.
+ *  v1.25.5 코덱스 1차 P2 #3 fix: INSERT 결과의 (recipient_id, id) 매핑을 반환 →
+ *  broadcast payload 에 포함시켜 수신자가 자기 row ID 로 markRead 가능. */
 export async function insertActingFeedbackNotifications(
   payload: FeedbackNotificationPayload,
   recipientIds: string[],
-): Promise<void> {
-  if (recipientIds.length === 0) return;
+): Promise<Record<string, string>> {
+  if (recipientIds.length === 0) return {};
   const rows = recipientIds.map((rid) => ({
     sender_id: payload.senderId,
     sender_name: payload.senderName,
@@ -700,17 +702,28 @@ export async function insertActingFeedbackNotifications(
     feedback_round: payload.feedbackRound,
     message: payload.message ?? null,
   }));
-  const { error } = await supabase.from('acting_feedback_notifications').insert(rows);
+  const { data, error } = await supabase
+    .from('acting_feedback_notifications')
+    .insert(rows)
+    .select('id, recipient_id');
   throwIfError(error);
+  const map: Record<string, string> = {};
+  for (const r of (data ?? []) as Array<{ id: string; recipient_id: string }>) {
+    map[r.recipient_id] = r.id;
+  }
+  return map;
 }
 
-/** 로그인 catch-up — 마지막 본 시각 이후 미읽음 알림 일괄 조회. */
+/** 로그인 catch-up — 마지막 본 시각 이후 미읽음 알림 일괄 조회.
+ *  v1.25.5 코덱스 1차 P1 #2 fix: 페이지네이션용 before 파라미터 (created_at < before).
+ *  렌더러가 limit 만큼 받았으면 batch[N-1].createdAt 으로 다음 페이지 fetch. */
 export async function fetchMissedActingFeedbackNotifications(
   userId: string,
   since: string,
-  limit = 50,
+  limit = 100,
+  before?: string,
 ): Promise<MissedFeedbackNotification[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('acting_feedback_notifications')
     .select('*')
     .eq('recipient_id', userId)
@@ -718,6 +731,10 @@ export async function fetchMissedActingFeedbackNotifications(
     .is('read_at', null)
     .order('created_at', { ascending: false })
     .limit(limit);
+  if (before) {
+    query = query.lt('created_at', before);
+  }
+  const { data, error } = await query;
   throwIfError(error);
   return ((data ?? []) as Array<{
     id: string; sender_id: string; sender_name: string;

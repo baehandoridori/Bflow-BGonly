@@ -667,11 +667,13 @@ export interface ElectronAPI {
     recipients: string[];
     message?: string;
   }) => Promise<void>;
-  /** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 피드백 알림 일괄 조회 */
+  /** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 피드백 알림 일괄 조회.
+   *  before: 페이지네이션 — created_at < before 만 가져옴. */
   supabaseFetchMissedFeedbackNotifications: (
     userId: string,
     since: string,
     limit?: number,
+    before?: string,
   ) => Promise<Array<{
     id: string;
     senderId: string;

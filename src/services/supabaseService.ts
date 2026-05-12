@@ -100,13 +100,15 @@ export async function dispatchActingFeedbackNotification(payload: {
   await window.electronAPI.supabaseDispatchFeedbackNotification(payload);
 }
 
-/** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 피드백 알림 조회 */
+/** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 피드백 알림 조회.
+ *  before: 페이지네이션 (created_at < before). */
 export async function fetchMissedFeedbackNotifications(
   userId: string,
   since: string,
   limit?: number,
+  before?: string,
 ): ReturnType<typeof window.electronAPI.supabaseFetchMissedFeedbackNotifications> {
-  return window.electronAPI.supabaseFetchMissedFeedbackNotifications(userId, since, limit);
+  return window.electronAPI.supabaseFetchMissedFeedbackNotifications(userId, since, limit, before);
 }
 
 /** v1.25.5 알림 읽음 처리 */

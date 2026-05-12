@@ -2200,9 +2200,10 @@ ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
   // 1) DB 영구 저장 — broadcast 가 끊겨도 catch-up 으로 복원 가능
   //   sender 자기 자신은 recipients 에서 자동 제외 (UI 단에서 이미 제외하지만 백업 가드)
   const filteredRecipients = payload.recipients.filter((rid) => rid !== payload.senderId);
+  let notificationIdsByRecipient: Record<string, string> = {};
   if (filteredRecipients.length > 0) {
     try {
-      await sbInsertFeedbackNotifications({
+      notificationIdsByRecipient = await sbInsertFeedbackNotifications({
         senderId: payload.senderId,
         senderName: payload.senderName,
         sceneUuid: payload.sceneUuid,
@@ -2220,18 +2221,20 @@ ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
       // INSERT 실패해도 broadcast 는 시도 — 즉시 받는 사용자는 토스트라도 받음.
     }
   }
-  // 2) 즉시 broadcast — 켜져있는 클라이언트는 실시간 수신
-  broadcastActingFeedbackRequest(payload);
+  // 2) 즉시 broadcast — 켜져있는 클라이언트는 실시간 수신.
+  //    INSERT 결과의 (recipient_id → notification_id) 매핑 포함 → 수신자가 자기 row ID 로 markRead 가능.
+  broadcastActingFeedbackRequest({ ...payload, notificationIdsByRecipient });
 }));
 
-// v1.25.5 로그인 catch-up — last_seen_at 이후 미읽음 알림 일괄 조회
+// v1.25.5 로그인 catch-up — last_seen_at 이후 미읽음 알림 일괄 조회 (페이지네이션 before 지원)
 ipcMain.handle('supabase:fetch-missed-feedback-notifications', wrapIpc(async (
   _e: unknown,
   userId: string,
   since: string,
   limit?: number,
+  before?: string,
 ) => {
-  return await sbFetchMissedFeedbackNotifications(userId, since, limit ?? 50);
+  return await sbFetchMissedFeedbackNotifications(userId, since, limit ?? 100, before);
 }));
 
 // v1.25.5 알림 읽음 처리

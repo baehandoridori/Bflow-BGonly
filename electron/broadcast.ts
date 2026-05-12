@@ -164,6 +164,9 @@ export interface FeedbackBroadcastPayload {
   feedbackRound: number;
   recipients: string[];
   message?: string;
+  /** v1.25.5 코덱스 1차 P2 #3 fix: INSERT 결과의 (recipient_id → notification_id) 매핑.
+   *  수신자가 자기 ID 로 notificationId 찾아 markRead 가능. */
+  notificationIdsByRecipient?: Record<string, string>;
   ts: number;
 }
 export function broadcastActingFeedbackRequest(payload: Omit<FeedbackBroadcastPayload, 'ts'>): void {

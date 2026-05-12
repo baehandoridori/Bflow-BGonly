@@ -722,9 +722,15 @@ export default function App() {
   // v1.25.5 액팅 피드백 알림 catch-up — 댓글 멘션 catch-up 과 평행 구조, 별도 lastSeen 키.
   // 로그인 시 마지막 본 시각 이후 미읽음 피드백 알림을 DB 에서 일괄 조회 → 알림 패널 누적.
   // broadcast 가 끊긴 사이 발송된 알림도 영구 복원.
+  //
+  // 코덱스 1차 P1 #1 fix: currentUser null (logout) 시 ref clear — 다음 로그인 catch-up 재실행.
+  // 코덱스 1차 P1 #2 fix: 페이지네이션 — limit 초과 unread 가 다음 로그인에서 영구 손실되지 않도록.
   const feedbackCatchupDoneRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      feedbackCatchupDoneRef.current = null;  // P1 #1: logout 시 reset
+      return;
+    }
     if (!authReady) return;
     if (feedbackCatchupDoneRef.current === currentUser.id) return;
 
@@ -742,14 +748,30 @@ export default function App() {
       }
       try {
         const { fetchMissedFeedbackNotifications } = await import('@/services/supabaseService');
-        const missed = await fetchMissedFeedbackNotifications(me.id, lastSeen, 50);
-        console.log('[feedback-catchup] 조회 결과', { count: missed?.length ?? 0 });
-        if (!missed || missed.length === 0) {
+        // P1 #2: 페이지네이션 — 모든 미읽음 가져올 때까지 batch 반복
+        const PAGE_SIZE = 100;
+        const SAFE_CAP = 1000;
+        type MissedRow = Awaited<ReturnType<typeof fetchMissedFeedbackNotifications>>[number];
+        const all: MissedRow[] = [];
+        let before: string | undefined = undefined;
+        while (true) {
+          const batch = await fetchMissedFeedbackNotifications(me.id, lastSeen, PAGE_SIZE, before);
+          if (!batch || batch.length === 0) break;
+          all.push(...batch);
+          if (batch.length < PAGE_SIZE) break;
+          before = batch[batch.length - 1].createdAt; // 다음 페이지: 가장 오래된 fetched 보다 이전
+          if (all.length >= SAFE_CAP) {
+            console.warn('[feedback-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
+            break;
+          }
+        }
+        console.log('[feedback-catchup] 조회 결과', { count: all.length });
+        if (all.length === 0) {
           setFeedbackLastSeenAt(me.id, new Date().toISOString());
           return;
         }
         const store = useNotificationStore.getState();
-        for (const m of missed) {
+        for (const m of all) {
           const epLabel = `EP${String(m.episodeNumber).padStart(2, '0')}`;
           const transitionLabel = `${m.fromState ?? ''} → ${m.toState}`;
           store.addNotification({
@@ -765,11 +787,14 @@ export default function App() {
             },
           });
         }
-        sonnerToast(`놓친 피드백 알림 ${missed.length}건이 있어요`, {
+        sonnerToast(`놓친 피드백 알림 ${all.length}건이 있어요`, {
           description: '종 모양을 클릭해 확인해주세요.',
           duration: 6000,
         });
-        setFeedbackLastSeenAt(me.id, new Date().toISOString());
+        // P1 #2: 가장 최근 fetched 의 createdAt 으로 lastSeen 갱신 (now 아님).
+        //   페이지네이션으로 모든 unread 를 가져왔으므로, 그 이전 시점부터 다음 catch-up 시
+        //   더 newer 데이터만 fetch. SAFE_CAP 으로 잘렸어도 데이터 손실 없음 (다음 페이지 가능).
+        setFeedbackLastSeenAt(me.id, all[0].createdAt);
       } catch (err) {
         console.warn('[feedback-catchup] 실패:', err);
       }
@@ -1382,6 +1407,8 @@ export default function App() {
         fromState: string; toState: string;
         workRound: number; feedbackRound: number;
         recipients: string[];
+        // v1.25.5 코덱스 1차 P2 #3: INSERT 결과의 recipient_id → notification_id 매핑
+        notificationIdsByRecipient?: Record<string, string>;
       } | undefined;
       const me = useAuthStore.getState().currentUser;
       // v1.25.4 진단 로그 — 한솔 보고 "알림이 실제로 잘 오는지" 검증용.
@@ -1401,7 +1428,10 @@ export default function App() {
       // v1.25.5: dispatchNotification 으로 sonner + 알림 store(인앱 누적·persist) 통합.
       //  OS 네이티브 토스트는 osNotification=false 로 차단하고 notifyFeedbackToast 별도 호출
       //  (Windows 토스트 click handler 의 씬 점프 기능 유지).
+      //  코덱스 1차 P2 #3 fix: notificationIdsByRecipient 에서 자기 ID 의 row id 추출 →
+      //   metadata.feedbackNotificationId 로 markRead 가능.
       const transitionLabel = `${p.fromState || ''} → ${p.toState}`;
+      const myFeedbackNotificationId = p.notificationIdsByRecipient?.[me.id];
       dispatchNotification({
         type: 'acting_feedback',
         title: `${p.senderName}님이 피드백을 요청했습니다`,
@@ -1411,6 +1441,7 @@ export default function App() {
           sceneName: p.sceneId,
           changedBy: p.senderName,
           feedbackTransition: transitionLabel,
+          feedbackNotificationId: myFeedbackNotificationId,
         },
       }, { ...notiSettingsRef.current, osNotification: false });
       // Windows 네이티브 토스트 + 클릭 시 점프 (별도 흐름 — main 에서 sceneJump 처리)
