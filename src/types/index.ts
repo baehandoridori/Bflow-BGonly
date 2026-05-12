@@ -667,6 +667,28 @@ export interface ElectronAPI {
     recipients: string[];
     message?: string;
   }) => Promise<void>;
+  /** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 피드백 알림 일괄 조회 */
+  supabaseFetchMissedFeedbackNotifications: (
+    userId: string,
+    since: string,
+    limit?: number,
+  ) => Promise<Array<{
+    id: string;
+    senderId: string;
+    senderName: string;
+    sceneUuid: string | null;
+    sceneId: string;
+    sheetName: string;
+    episodeNumber: number;
+    fromState: string | null;
+    toState: string;
+    workRound: number;
+    feedbackRound: number;
+    message: string | null;
+    createdAt: string;
+  }>>;
+  /** v1.25.5 액팅 피드백 알림 읽음 처리 — read_at = now() */
+  supabaseMarkFeedbackNotificationRead: (notificationId: string) => Promise<void>;
   /** v1.25.0~ Windows 네이티브 토스트 + 클릭 시 씬으로 점프 */
   notifyFeedbackToast: (payload: {
     title: string;

@@ -100,6 +100,20 @@ export async function dispatchActingFeedbackNotification(payload: {
   await window.electronAPI.supabaseDispatchFeedbackNotification(payload);
 }
 
+/** v1.25.5 로그인 catch-up — 마지막 본 시각 이후 미읽음 액팅 피드백 알림 조회 */
+export async function fetchMissedFeedbackNotifications(
+  userId: string,
+  since: string,
+  limit?: number,
+): ReturnType<typeof window.electronAPI.supabaseFetchMissedFeedbackNotifications> {
+  return window.electronAPI.supabaseFetchMissedFeedbackNotifications(userId, since, limit);
+}
+
+/** v1.25.5 알림 읽음 처리 */
+export async function markFeedbackNotificationRead(notificationId: string): Promise<void> {
+  await window.electronAPI.supabaseMarkFeedbackNotificationRead(notificationId);
+}
+
 /**
  * 일괄 단계 토글 — RPC `bulk_update_scene_stages` 경유.
  * 각 항목별 per-row 결과(BulkUpdateResult)를 반환해 부분 실패 처리 가능.

@@ -32,6 +32,7 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
+import { setFeedbackLastSeenAt } from '@/utils/lastSeenTracker';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
@@ -718,6 +719,63 @@ export default function App() {
     })();
   }, [currentUser, authReady]);
 
+  // v1.25.5 액팅 피드백 알림 catch-up — 댓글 멘션 catch-up 과 평행 구조, 별도 lastSeen 키.
+  // 로그인 시 마지막 본 시각 이후 미읽음 피드백 알림을 DB 에서 일괄 조회 → 알림 패널 누적.
+  // broadcast 가 끊긴 사이 발송된 알림도 영구 복원.
+  const feedbackCatchupDoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) return;
+    if (!authReady) return;
+    if (feedbackCatchupDoneRef.current === currentUser.id) return;
+
+    feedbackCatchupDoneRef.current = currentUser.id;
+    const me = currentUser;
+
+    (async () => {
+      const { getFeedbackLastSeenAt, setFeedbackLastSeenAt, ensureFeedbackLastSeenInitialized } =
+        await import('@/utils/lastSeenTracker');
+      const lastSeen = getFeedbackLastSeenAt(me.id);
+      if (!lastSeen) {
+        ensureFeedbackLastSeenInitialized(me.id);
+        console.log('[feedback-catchup] 첫 로그인 — last_seen 초기화만');
+        return;
+      }
+      try {
+        const { fetchMissedFeedbackNotifications } = await import('@/services/supabaseService');
+        const missed = await fetchMissedFeedbackNotifications(me.id, lastSeen, 50);
+        console.log('[feedback-catchup] 조회 결과', { count: missed?.length ?? 0 });
+        if (!missed || missed.length === 0) {
+          setFeedbackLastSeenAt(me.id, new Date().toISOString());
+          return;
+        }
+        const store = useNotificationStore.getState();
+        for (const m of missed) {
+          const epLabel = `EP${String(m.episodeNumber).padStart(2, '0')}`;
+          const transitionLabel = `${m.fromState ?? ''} → ${m.toState}`;
+          store.addNotification({
+            type: 'acting_feedback',
+            title: `${m.senderName}님이 피드백을 요청했습니다`,
+            body: `${epLabel} · ${m.sceneId}`,
+            metadata: {
+              sceneId: m.sceneUuid ?? undefined,
+              sceneName: m.sceneId,
+              changedBy: m.senderName,
+              feedbackNotificationId: m.id,
+              feedbackTransition: transitionLabel,
+            },
+          });
+        }
+        sonnerToast(`놓친 피드백 알림 ${missed.length}건이 있어요`, {
+          description: '종 모양을 클릭해 확인해주세요.',
+          duration: 6000,
+        });
+        setFeedbackLastSeenAt(me.id, new Date().toISOString());
+      } catch (err) {
+        console.warn('[feedback-catchup] 실패:', err);
+      }
+    })();
+  }, [currentUser, authReady]);
+
   // v1.15.11 (한솔 보고): persistRestore 책임을 ScenesView 외부로 이동.
   // 이전엔 ScenesView 마운트 시 saved last episode 를 복원했는데, 외부에서 navigateToScene 으로
   // setSelectedEpisode 를 set한 직후 ScenesView 가 첫 마운트 되는 케이스에서 race condition 발생 →
@@ -1321,6 +1379,8 @@ export default function App() {
       const p = e.payload as {
         sceneUuid: string; sceneId: string; sheetName: string;
         episodeNumber: number; senderId: string; senderName: string;
+        fromState: string; toState: string;
+        workRound: number; feedbackRound: number;
         recipients: string[];
       } | undefined;
       const me = useAuthStore.getState().currentUser;
@@ -1338,19 +1398,29 @@ export default function App() {
       if (p.senderId === me.id) return;
 
       const epLabel = `EP${String(p.episodeNumber).padStart(2, '0')}`;
-      sonnerToast.info(`${p.senderName}님이 피드백을 요청했습니다`, {
-        description: `${epLabel} · ${p.sceneId}`,
-        action: {
-          label: '씬 보기',
-          onClick: () => jumpToFeedbackScene(p.sheetName, p.sceneId),
+      // v1.25.5: dispatchNotification 으로 sonner + 알림 store(인앱 누적·persist) 통합.
+      //  OS 네이티브 토스트는 osNotification=false 로 차단하고 notifyFeedbackToast 별도 호출
+      //  (Windows 토스트 click handler 의 씬 점프 기능 유지).
+      const transitionLabel = `${p.fromState || ''} → ${p.toState}`;
+      dispatchNotification({
+        type: 'acting_feedback',
+        title: `${p.senderName}님이 피드백을 요청했습니다`,
+        body: `${epLabel} · ${p.sceneId} (${transitionLabel})`,
+        metadata: {
+          sceneId: p.sceneUuid,
+          sceneName: p.sceneId,
+          changedBy: p.senderName,
+          feedbackTransition: transitionLabel,
         },
-        duration: 8000,
-      });
+      }, { ...notiSettingsRef.current, osNotification: false });
+      // Windows 네이티브 토스트 + 클릭 시 점프 (별도 흐름 — main 에서 sceneJump 처리)
       window.electronAPI.notifyFeedbackToast({
         title: 'B flow — 피드백 요청',
         body: `${p.senderName}님이 ${epLabel} ${p.sceneId} 검수를 요청했습니다.`,
         sceneJump: { sheetName: p.sheetName, sceneId: p.sceneId, sceneUuid: p.sceneUuid },
       }).catch(() => { /* 토스트 실패는 무시 */ });
+      // v1.25.5: broadcast 를 즉시 받았으므로 lastSeen 갱신 — 다음 로그인 catch-up 에서 중복 차단
+      if (me?.id) setFeedbackLastSeenAt(me.id, new Date().toISOString());
     });
 
     const offJump = window.electronAPI.onFeedbackJumpToScene?.((payload) => {

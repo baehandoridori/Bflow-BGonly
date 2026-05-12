@@ -1128,6 +1128,9 @@ import {
   deleteScene as sbDeleteScene,
   updateSceneStage as sbUpdateSceneStage,
   updateScenePhase as sbUpdateScenePhase,
+  insertActingFeedbackNotifications as sbInsertFeedbackNotifications,
+  fetchMissedActingFeedbackNotifications as sbFetchMissedFeedbackNotifications,
+  markActingFeedbackNotificationRead as sbMarkFeedbackNotificationRead,
   bulkUpdateSceneStages as sbBulkUpdateSceneStages,
   bulkDeleteScenes as sbBulkDeleteScenes,
   bulkUpdateSceneFields as sbBulkUpdateSceneFields,
@@ -2181,8 +2184,8 @@ ipcMain.handle('notify:feedback-toast', (_e: unknown, payload: {
 });
 
 // v1.25.0~ 액팅 피드백 알림 디스패치 — 작업자가 "알림 보내기" 클릭 시 호출.
-// 다른 클라이언트에 broadcast 로 payload 전송. 받는 측에서 자기 ID 가 recipients 에 있으면 토스트.
 // v1.25.4 진단 로그 추가 — 한솔 보고 "알림이 실제로 잘 오는지" 검증용.
+// v1.25.5 catch-up — DB INSERT 먼저 (영구 저장, 로그아웃 catch-up 가능) + broadcast (실시간).
 ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
   _e: unknown,
   payload: Omit<FeedbackBroadcastPayload, 'ts'>,
@@ -2194,7 +2197,49 @@ ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
     from: payload.fromState,
     to: payload.toState,
   });
+  // 1) DB 영구 저장 — broadcast 가 끊겨도 catch-up 으로 복원 가능
+  //   sender 자기 자신은 recipients 에서 자동 제외 (UI 단에서 이미 제외하지만 백업 가드)
+  const filteredRecipients = payload.recipients.filter((rid) => rid !== payload.senderId);
+  if (filteredRecipients.length > 0) {
+    try {
+      await sbInsertFeedbackNotifications({
+        senderId: payload.senderId,
+        senderName: payload.senderName,
+        sceneUuid: payload.sceneUuid,
+        sceneId: payload.sceneId,
+        sheetName: payload.sheetName,
+        episodeNumber: payload.episodeNumber,
+        fromState: payload.fromState,
+        toState: payload.toState,
+        workRound: payload.workRound,
+        feedbackRound: payload.feedbackRound,
+        message: payload.message,
+      }, filteredRecipients);
+    } catch (err) {
+      console.error('[Feedback Dispatch] DB INSERT 실패:', err);
+      // INSERT 실패해도 broadcast 는 시도 — 즉시 받는 사용자는 토스트라도 받음.
+    }
+  }
+  // 2) 즉시 broadcast — 켜져있는 클라이언트는 실시간 수신
   broadcastActingFeedbackRequest(payload);
+}));
+
+// v1.25.5 로그인 catch-up — last_seen_at 이후 미읽음 알림 일괄 조회
+ipcMain.handle('supabase:fetch-missed-feedback-notifications', wrapIpc(async (
+  _e: unknown,
+  userId: string,
+  since: string,
+  limit?: number,
+) => {
+  return await sbFetchMissedFeedbackNotifications(userId, since, limit ?? 50);
+}));
+
+// v1.25.5 알림 읽음 처리
+ipcMain.handle('supabase:mark-feedback-notification-read', wrapIpc(async (
+  _e: unknown,
+  notificationId: string,
+) => {
+  await sbMarkFeedbackNotificationRead(notificationId);
 }));
 
 // ─── IPC 핸들러: METADATA ───────────────────────────────────
