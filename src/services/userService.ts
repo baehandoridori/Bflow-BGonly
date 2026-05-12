@@ -239,6 +239,26 @@ export async function setIsCompositor(
 }
 
 /**
+ * v1.25.4 한솔 보고 fix (저장 안 됨): loadUsers 의 sheetsMode 게이트 우회.
+ * sheetsMode=false 거나 Supabase 일시 throw 일 때 silent 로컬 폴백되면
+ * 어드민 저장 verify 단계에서 fresh 가 stale 로컬 (is_compositor / is_acting_supervisor 누락)
+ * 으로 잡혀 항상 mismatch → toast.error("DB 반영이 확인되지 않았습니다") 만 떴음.
+ *
+ * 이 함수는 sheetsMode 무시하고 항상 Supabase 직결 IPC 만 사용. 실패 시 throw.
+ * 어드민 섹션의 verify 단계에서만 사용 (일반 로딩은 loadUsers 그대로).
+ */
+export async function fetchFreshUsersFromSupabase(): Promise<AppUser[]> {
+  const raw = await window.electronAPI.supabaseReadUsers();
+  const users = raw as AppUser[];
+  return users.map((u) => ({
+    ...u,
+    hireDate: u.hireDate || undefined,
+    birthday: u.birthday || undefined,
+    role: u.role || 'user',
+  }));
+}
+
+/**
  * v1.25.0~: 어드민 전용 — 액팅 검수자(애니메이팅 수퍼바이저) 지정/해제.
  * 컴포지터와 독립적인 별도 boolean. 한 사람이 둘 다 가능.
  * spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md (섹션 6)

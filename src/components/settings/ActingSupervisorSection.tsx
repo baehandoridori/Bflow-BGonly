@@ -16,7 +16,7 @@ import { Sparkles, Loader2, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { SettingsSection } from './SettingsSection';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { setIsActingSupervisor, loadUsers } from '@/services/userService';
+import { setIsActingSupervisor, fetchFreshUsersFromSupabase } from '@/services/userService';
 import { cn } from '@/utils/cn';
 
 export function ActingSupervisorSection() {
@@ -68,14 +68,18 @@ export function ActingSupervisorSection() {
       await Promise.all(
         dirtyUsers.map((u) => setIsActingSupervisor(u.id, supervisorIds.has(u.id))),
       );
-      const fresh = await loadUsers();
+      // v1.25.4 한솔 보고 fix: loadUsers 대신 fetchFreshUsersFromSupabase 로 verify.
+      //   sheetsMode 게이트 우회 — silent 로컬 폴백 시 항상 mismatch 떠 toast.error 만 떴던 문제 해결.
+      const fresh = await fetchFreshUsersFromSupabase();
       setUsers(fresh);
 
-      // verify — CompositorSection 와 동일 룰
       const actualIds = new Set(fresh.filter((u) => u.isActingSupervisor === true).map((u) => u.id));
       const mismatched = [...expectedIds].some((id) => !actualIds.has(id))
         || [...actualIds].some((id) => !expectedIds.has(id));
       if (mismatched) {
+        console.warn('[ActingSupervisorSection] verify mismatch', {
+          expected: [...expectedIds], actual: [...actualIds],
+        });
         toast.error(
           'DB 반영이 확인되지 않았습니다. is_acting_supervisor 컬럼/마이그레이션 또는 권한을 점검해주세요.',
           { duration: 8000 },

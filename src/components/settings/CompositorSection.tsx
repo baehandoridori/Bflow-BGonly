@@ -15,7 +15,7 @@ import { Layers, Loader2, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { SettingsSection } from './SettingsSection';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { setIsCompositor, loadUsers } from '@/services/userService';
+import { setIsCompositor, loadUsers, fetchFreshUsersFromSupabase } from '@/services/userService';
 import { cn } from '@/utils/cn';
 
 export function CompositorSection() {
@@ -75,16 +75,20 @@ export function CompositorSection() {
       await Promise.all(
         dirtyUsers.map((u) => setIsCompositor(u.id, compositorIds.has(u.id))),
       );
-      // store 새로고침 — App.tsx 의 useEffect 와 동일 패턴 (loadUsers → setUsers)
-      const fresh = await loadUsers();
+      // v1.25.4 한솔 보고 fix: verify 단계에 loadUsers 대신 fetchFreshUsersFromSupabase 사용.
+      //   loadUsers 는 sheetsMode=false 거나 supabase 일시 throw 시 silent 로 로컬 폴백.
+      //   로컬 users.dat 에 isCompositor 컬럼 없어 verify 항상 mismatch → 항상 toast.error.
+      //   fetchFreshUsersFromSupabase 는 supabase 직결, throw 면 catch 로 가서 명확한 에러 메시지.
+      const fresh = await fetchFreshUsersFromSupabase();
       setUsers(fresh);
 
-      // v1.24.0 한솔 보고 fix: 저장 후 verify — DB 가 실제로 반영했는지 fresh read 로 확인.
-      //   silent fail (마이그레이션 미적용·RLS 차단 등) 시 toast 성공만 뜨던 문제 차단 → 명확한 에러로.
       const actualIds = new Set(fresh.filter((u) => u.isCompositor === true).map((u) => u.id));
       const mismatched = [...expectedIds].some((id) => !actualIds.has(id))
         || [...actualIds].some((id) => !expectedIds.has(id));
       if (mismatched) {
+        console.warn('[CompositorSection] verify mismatch', {
+          expected: [...expectedIds], actual: [...actualIds],
+        });
         toast.error(
           'DB 반영이 확인되지 않았습니다. is_compositor 컬럼/마이그레이션 또는 권한을 점검해주세요.',
           { duration: 8000 },
