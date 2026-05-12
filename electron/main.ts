@@ -2182,10 +2182,18 @@ ipcMain.handle('notify:feedback-toast', (_e: unknown, payload: {
 
 // v1.25.0~ 액팅 피드백 알림 디스패치 — 작업자가 "알림 보내기" 클릭 시 호출.
 // 다른 클라이언트에 broadcast 로 payload 전송. 받는 측에서 자기 ID 가 recipients 에 있으면 토스트.
+// v1.25.4 진단 로그 추가 — 한솔 보고 "알림이 실제로 잘 오는지" 검증용.
 ipcMain.handle('supabase:dispatch-feedback-notification', wrapIpc(async (
   _e: unknown,
   payload: Omit<FeedbackBroadcastPayload, 'ts'>,
 ) => {
+  console.log('[Feedback Dispatch]', {
+    sceneId: payload.sceneId,
+    sender: payload.senderName,
+    recipients: payload.recipients.length,
+    from: payload.fromState,
+    to: payload.toState,
+  });
   broadcastActingFeedbackRequest(payload);
 }));
 

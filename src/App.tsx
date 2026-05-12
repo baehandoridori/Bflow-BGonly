@@ -1324,6 +1324,15 @@ export default function App() {
         recipients: string[];
       } | undefined;
       const me = useAuthStore.getState().currentUser;
+      // v1.25.4 진단 로그 — 한솔 보고 "알림이 실제로 잘 오는지" 검증용.
+      console.log('[Feedback Recv]', {
+        from: p?.senderName,
+        sceneId: p?.sceneId,
+        recipients: p?.recipients?.length,
+        meId: me?.id ? me.id.slice(0, 8) : null,
+        amIRecipient: !!(me?.id && p?.recipients?.includes(me.id)),
+        amISender: me?.id === p?.senderId,
+      });
       if (!p || !me?.id) return;
       if (!Array.isArray(p.recipients) || !p.recipients.includes(me.id)) return;
       if (p.senderId === me.id) return;

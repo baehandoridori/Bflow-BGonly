@@ -97,7 +97,11 @@ export function setupBroadcast(onReceive: BroadcastListener): () => void {
 
 /** 연결 상태 확인 후 안전하게 send (미연결 시 스킵) */
 function safeSend(event: string, payload: Record<string, unknown>): void {
-  if (!broadcastChannel || !broadcastConnected) return;
+  if (!broadcastChannel || !broadcastConnected) {
+    console.warn(`[Broadcast] '${event}' send 스킵 — 채널 미연결 (channel=${!!broadcastChannel}, connected=${broadcastConnected})`);
+    return;
+  }
+  console.log(`[Broadcast] send '${event}'`, Object.keys(payload));
   broadcastChannel.send({
     type: 'broadcast',
     event,
