@@ -768,6 +768,143 @@ export async function markActingFeedbackNotificationRead(notificationId: string)
   throwIfError(error);
 }
 
+// ═══════════════════════════════════════════════
+// v1.25.8 SCENE ASSIGNMENT NOTIFICATIONS (catch-up)
+// ═══════════════════════════════════════════════
+// 씬 담당자 배정 시 새 담당자에게 알림. broadcast 만 의존하던 동작에 DB 영구 저장 +
+// 로그인 catch-up 추가. acting_feedback_notifications 와 동일한 패턴.
+
+export interface SceneAssignmentPayload {
+  sceneUuid: string;
+  prevAssignee: string;
+  newAssignee: string;
+  senderId: string;
+  senderName: string;
+}
+
+export interface MissedAssignmentNotification {
+  id: string;
+  senderId: string;
+  senderName: string;
+  sceneUuid: string;
+  sceneId: string;
+  sheetName: string;
+  episodeNumber: number;
+  prevAssignee: string | null;
+  newAssignee: string;
+  createdAt: string;
+}
+
+/** 알림 row INSERT — newAssignee 이름으로 user 찾아 recipient_id 채움.
+ *  반환: { recipientId, notificationId } 또는 null (대상 user 못 찾음 / 자기 자신).
+ *  씬 메타(scene_id, sheet_name, episode_number) 도 조회해서 함께 저장. */
+export async function insertSceneAssignmentNotification(
+  payload: SceneAssignmentPayload,
+): Promise<{ recipientId: string; notificationId: string } | null> {
+  if (!payload.newAssignee.trim()) return null;
+
+  // 1) 새 담당자 user 찾기
+  const { data: userRow, error: userErr } = await supabase
+    .from('users')
+    .select('id')
+    .eq('name', payload.newAssignee)
+    .maybeSingle();
+  if (userErr) throwIfError(userErr);
+  if (!userRow) return null;
+  const recipientId = (userRow as { id: string }).id;
+  if (recipientId === payload.senderId) return null;
+
+  // 2) 씬 메타 조회 (scene_number, parts.part_id, episodes.episode_number)
+  const { data: sceneRow, error: sceneErr } = await supabase
+    .from('scenes')
+    .select('scene_number, parts(part_id, department, episodes(episode_number))')
+    .eq('id', payload.sceneUuid)
+    .maybeSingle();
+  if (sceneErr) throwIfError(sceneErr);
+  if (!sceneRow) return null;
+  // Supabase 의 관계 join 은 결과가 array 로 옴 (1:N 추론). FK 가 unique 임을 모르므로.
+  //  → 첫 요소만 사용하는 단일 객체로 평탄화.
+  type PartRel = { part_id?: string; department?: string; episodes?: { episode_number?: number } | { episode_number?: number }[] | null };
+  const s = sceneRow as unknown as {
+    scene_number: string;
+    parts?: PartRel | PartRel[] | null;
+  };
+  const firstPart: PartRel | null = Array.isArray(s.parts) ? (s.parts[0] ?? null) : (s.parts ?? null);
+  const epRel = firstPart?.episodes;
+  const firstEp: { episode_number?: number } | null = Array.isArray(epRel) ? (epRel[0] ?? null) : (epRel ?? null);
+  const epNum = firstEp?.episode_number ?? 0;
+  const partId = firstPart?.part_id ?? 'A';
+  const dept = firstPart?.department ?? 'bg';
+  const deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
+  const sheetName = `EP${String(epNum).padStart(2, '0')}_${partId}${deptSuffix}`;
+
+  // 3) row INSERT
+  const { data: inserted, error: insErr } = await supabase
+    .from('scene_assignment_notifications')
+    .insert({
+      sender_id: payload.senderId,
+      sender_name: payload.senderName,
+      recipient_id: recipientId,
+      scene_uuid: payload.sceneUuid,
+      scene_id: s.scene_number,
+      sheet_name: sheetName,
+      episode_number: epNum,
+      prev_assignee: payload.prevAssignee || null,
+      new_assignee: payload.newAssignee,
+    })
+    .select('id')
+    .single();
+  if (insErr) throwIfError(insErr);
+  if (!inserted) return null;
+  return { recipientId, notificationId: (inserted as { id: string }).id };
+}
+
+/** 로그인 catch-up — 마지막 본 시각 이후 미읽음 배정 알림 일괄 조회. */
+export async function fetchMissedSceneAssignmentNotifications(
+  userId: string,
+  since: string,
+  limit = 100,
+  before?: string,
+): Promise<MissedAssignmentNotification[]> {
+  let query = supabase
+    .from('scene_assignment_notifications')
+    .select('*')
+    .eq('recipient_id', userId)
+    .gt('created_at', since)
+    .is('read_at', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (before) query = query.lt('created_at', before);
+  const { data, error } = await query;
+  throwIfError(error);
+  return ((data ?? []) as Array<{
+    id: string; sender_id: string; sender_name: string;
+    scene_uuid: string; scene_id: string; sheet_name: string;
+    episode_number: number; prev_assignee: string | null; new_assignee: string;
+    created_at: string;
+  }>).map((r) => ({
+    id: r.id,
+    senderId: r.sender_id,
+    senderName: r.sender_name,
+    sceneUuid: r.scene_uuid,
+    sceneId: r.scene_id,
+    sheetName: r.sheet_name,
+    episodeNumber: r.episode_number,
+    prevAssignee: r.prev_assignee,
+    newAssignee: r.new_assignee,
+    createdAt: r.created_at,
+  }));
+}
+
+/** 알림 읽음 처리 */
+export async function markSceneAssignmentNotificationRead(notificationId: string): Promise<void> {
+  const { error } = await supabase
+    .from('scene_assignment_notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', notificationId);
+  throwIfError(error);
+}
+
 /** 대량 씬 체크박스 토글 (부분 실패 허용) — RPC 경유 */
 export async function bulkUpdateSceneStages(
   updates: BulkStageUpdate[],

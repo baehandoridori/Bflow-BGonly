@@ -1111,7 +1111,7 @@ ipcMain.handle('whiteboard:write-shared', async (_event, data: unknown) => {
 
 // ─── IPC 핸들러: Supabase ────────────────────────────────────
 
-import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest } from './broadcast';
+import { setupBroadcast, broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastDataChange, broadcastActingFeedbackRequest, broadcastSceneAssignmentNotification } from './broadcast';
 import type { FeedbackBroadcastPayload } from './broadcast';
 import {
   testConnection as supabaseTestConnection,
@@ -1131,6 +1131,9 @@ import {
   insertActingFeedbackNotifications as sbInsertFeedbackNotifications,
   fetchMissedActingFeedbackNotifications as sbFetchMissedFeedbackNotifications,
   markActingFeedbackNotificationRead as sbMarkFeedbackNotificationRead,
+  insertSceneAssignmentNotification as sbInsertAssignmentNotification,
+  fetchMissedSceneAssignmentNotifications as sbFetchMissedAssignmentNotifications,
+  markSceneAssignmentNotificationRead as sbMarkAssignmentNotificationRead,
   bulkUpdateSceneStages as sbBulkUpdateSceneStages,
   bulkDeleteScenes as sbBulkDeleteScenes,
   bulkUpdateSceneFields as sbBulkUpdateSceneFields,
@@ -1456,6 +1459,78 @@ ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneU
       detail: actionType.startsWith('image_upload') ? {} : { to: value },
     });
   }
+  // v1.25.8: 담당자 변경 시 새 담당자에게 알림 (DB INSERT + broadcast).
+  //  IPC 호출자(렌더러)가 prevAssignee/senderName 을 함께 알려줘야 하지만,
+  //  단순화 위해 main 측에서 user_id → user_name 조회로 senderName 추론. prevAssignee 는
+  //  생략(spec 외 디테일). 자기 자신 자기에게 배정은 자동 skip.
+  if (field === 'assignee' && value && value.trim() && senderId) {
+    try {
+      const { data: senderUser } = await supabaseClient
+        .from('users')
+        .select('name')
+        .eq('id', senderId)
+        .maybeSingle();
+      const senderName = (senderUser as { name?: string } | null)?.name ?? '동료';
+      const result = await sbInsertAssignmentNotification({
+        sceneUuid,
+        prevAssignee: '',
+        newAssignee: value.trim(),
+        senderId,
+        senderName,
+      });
+      if (result) {
+        // 새 담당자 user_id 와 notification_id 알았으니 broadcast 발송
+        const { data: sceneRow } = await supabaseClient
+          .from('scenes')
+          .select('scene_number, parts(part_id, department, episodes(episode_number))')
+          .eq('id', sceneUuid)
+          .maybeSingle();
+        // Supabase 관계 join 은 결과가 array | object — 첫 요소만 사용.
+        type PartRel = { part_id?: string; department?: string; episodes?: { episode_number?: number } | { episode_number?: number }[] | null };
+        const s = sceneRow as unknown as {
+          scene_number: string;
+          parts?: PartRel | PartRel[] | null;
+        } | null;
+        if (s) {
+          const firstPart: PartRel | null = Array.isArray(s.parts) ? (s.parts[0] ?? null) : (s.parts ?? null);
+          const epRel = firstPart?.episodes;
+          const firstEp: { episode_number?: number } | null = Array.isArray(epRel) ? (epRel[0] ?? null) : (epRel ?? null);
+          const epNum = firstEp?.episode_number ?? 0;
+          const partId = firstPart?.part_id ?? 'A';
+          const dept = firstPart?.department ?? 'bg';
+          const deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
+          broadcastSceneAssignmentNotification({
+            notificationId: result.notificationId,
+            sceneUuid,
+            sceneId: s.scene_number,
+            sheetName: `EP${String(epNum).padStart(2, '0')}_${partId}${deptSuffix}`,
+            episodeNumber: epNum,
+            recipientId: result.recipientId,
+            senderId,
+            senderName,
+            prevAssignee: '',
+            newAssignee: value.trim(),
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[assignee-change-notify] 실패:', err);
+    }
+  }
+}));
+
+// v1.25.8 로그인 catch-up — 미읽음 씬 배정 알림 일괄 조회
+ipcMain.handle('supabase:fetch-missed-assignment-notifications', wrapIpc(async (
+  _e: unknown, userId: string, since: string, limit?: number, before?: string,
+) => {
+  return await sbFetchMissedAssignmentNotifications(userId, since, limit ?? 100, before);
+}));
+
+// v1.25.8 알림 읽음 처리
+ipcMain.handle('supabase:mark-assignment-notification-read', wrapIpc(async (
+  _e: unknown, notificationId: string,
+) => {
+  await sbMarkAssignmentNotificationRead(notificationId);
 }));
 
 // ─── Users ───

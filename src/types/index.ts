@@ -693,6 +693,27 @@ export interface ElectronAPI {
   }>>;
   /** v1.25.5 액팅 피드백 알림 읽음 처리 — read_at = now() */
   supabaseMarkFeedbackNotificationRead: (notificationId: string) => Promise<void>;
+  /** v1.25.8 씬 담당자 배정 알림 catch-up — 한솔 보고: 미접속 시 배정 알림이 사라짐.
+   *  acting_feedback 과 동일 패턴. before: 페이지네이션 (created_at < before). */
+  supabaseFetchMissedAssignmentNotifications: (
+    userId: string,
+    since: string,
+    limit?: number,
+    before?: string,
+  ) => Promise<Array<{
+    id: string;
+    senderId: string;
+    senderName: string;
+    sceneUuid: string;
+    sceneId: string;
+    sheetName: string;
+    episodeNumber: number;
+    prevAssignee: string | null;
+    newAssignee: string;
+    createdAt: string;
+  }>>;
+  /** v1.25.8 씬 담당자 배정 알림 읽음 처리 — read_at = now() */
+  supabaseMarkAssignmentNotificationRead: (notificationId: string) => Promise<void>;
   /** v1.25.0~ Windows 네이티브 토스트 + 클릭 시 씬으로 점프 */
   notifyFeedbackToast: (payload: {
     title: string;

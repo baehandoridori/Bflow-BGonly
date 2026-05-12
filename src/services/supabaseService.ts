@@ -116,6 +116,23 @@ export async function markFeedbackNotificationRead(notificationId: string): Prom
   await window.electronAPI.supabaseMarkFeedbackNotificationRead(notificationId);
 }
 
+/** v1.25.8 씬 담당자 배정 알림 catch-up — 한솔 보고: 미접속 시 배정 알림이 사라짐.
+ *  acting_feedback 과 동일 패턴 (DB row INSERT + broadcast + 로그인 catch-up).
+ *  before: 페이지네이션 (created_at < before). */
+export async function fetchMissedAssignmentNotifications(
+  userId: string,
+  since: string,
+  limit?: number,
+  before?: string,
+): ReturnType<typeof window.electronAPI.supabaseFetchMissedAssignmentNotifications> {
+  return window.electronAPI.supabaseFetchMissedAssignmentNotifications(userId, since, limit, before);
+}
+
+/** v1.25.8 씬 담당자 배정 알림 읽음 처리 */
+export async function markAssignmentNotificationRead(notificationId: string): Promise<void> {
+  await window.electronAPI.supabaseMarkAssignmentNotificationRead(notificationId);
+}
+
 /**
  * 일괄 단계 토글 — RPC `bulk_update_scene_stages` 경유.
  * 각 항목별 per-row 결과(BulkUpdateResult)를 반환해 부분 실패 처리 가능.

@@ -32,7 +32,7 @@ import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { setFeedbackLastSeenAt } from '@/utils/lastSeenTracker';
+import { setFeedbackLastSeenAt, setAssignmentLastSeenAt } from '@/utils/lastSeenTracker';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
@@ -801,6 +801,81 @@ export default function App() {
     })();
   }, [currentUser, authReady]);
 
+  // v1.25.8 씬 담당자 배정 알림 catch-up — 한솔 보고: 미접속 시 배정 알림이 사라짐.
+  //   feedback catch-up 과 동일 패턴 (페이지네이션 + 별도 lastSeen + logout 시 ref clear).
+  const assignmentCatchupDoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) {
+      assignmentCatchupDoneRef.current = null;
+      return;
+    }
+    if (!authReady) return;
+    if (assignmentCatchupDoneRef.current === currentUser.id) return;
+
+    assignmentCatchupDoneRef.current = currentUser.id;
+    const me = currentUser;
+
+    (async () => {
+      const { getAssignmentLastSeenAt, ensureAssignmentLastSeenInitialized } =
+        await import('@/utils/lastSeenTracker');
+      const lastSeen = getAssignmentLastSeenAt(me.id);
+      if (!lastSeen) {
+        ensureAssignmentLastSeenInitialized(me.id);
+        console.log('[assignment-catchup] 첫 로그인 — last_seen 초기화만');
+        return;
+      }
+      try {
+        const { fetchMissedAssignmentNotifications } = await import('@/services/supabaseService');
+        const PAGE_SIZE = 100;
+        const SAFE_CAP = 1000;
+        type MissedRow = Awaited<ReturnType<typeof fetchMissedAssignmentNotifications>>[number];
+        const all: MissedRow[] = [];
+        let before: string | undefined = undefined;
+        while (true) {
+          const batch = await fetchMissedAssignmentNotifications(me.id, lastSeen, PAGE_SIZE, before);
+          if (!batch || batch.length === 0) break;
+          all.push(...batch);
+          if (batch.length < PAGE_SIZE) break;
+          before = batch[batch.length - 1].createdAt;
+          if (all.length >= SAFE_CAP) {
+            console.warn('[assignment-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
+            break;
+          }
+        }
+        console.log('[assignment-catchup] 조회 결과', { count: all.length });
+        if (all.length === 0) {
+          setAssignmentLastSeenAt(me.id, new Date().toISOString());
+          return;
+        }
+        const store = useNotificationStore.getState();
+        for (const m of all) {
+          const epLabel = `EP${String(m.episodeNumber).padStart(2, '0')}`;
+          const prev = m.prevAssignee?.trim();
+          const transitionLabel = prev ? `${prev} → ${m.newAssignee}` : `미배정 → ${m.newAssignee}`;
+          store.addNotification({
+            type: 'scene_assignment',
+            title: `${m.senderName}님이 담당자로 지정했습니다`,
+            body: `${epLabel} · ${m.sceneId}`,
+            metadata: {
+              sceneId: m.sceneUuid,
+              sceneName: m.sceneId,
+              changedBy: m.senderName,
+              assignmentNotificationId: m.id,
+              assignmentTransition: transitionLabel,
+            },
+          });
+        }
+        sonnerToast(`놓친 배정 알림 ${all.length}건이 있어요`, {
+          description: '종 모양을 클릭해 확인해주세요.',
+          duration: 6000,
+        });
+        setAssignmentLastSeenAt(me.id, all[0].createdAt);
+      } catch (err) {
+        console.warn('[assignment-catchup] 실패:', err);
+      }
+    })();
+  }, [currentUser, authReady]);
+
   // v1.15.11 (한솔 보고): persistRestore 책임을 ScenesView 외부로 이동.
   // 이전엔 ScenesView 마운트 시 saved last episode 를 복원했는데, 외부에서 navigateToScene 으로
   // setSelectedEpisode 를 set한 직후 ScenesView 가 첫 마운트 되는 케이스에서 race condition 발생 →
@@ -1400,6 +1475,51 @@ export default function App() {
 
     const offBroadcast = window.electronAPI.onSupabaseBroadcast((event: unknown) => {
       const e = event as { event?: string; payload?: Record<string, unknown> };
+
+      // v1.25.8 씬 담당자 배정 알림 — 본인이 새 담당자로 지정될 때 dispatch.
+      //   acting-feedback 과 동일 시각 톤 (강한 펄스 + OS 토스트).
+      if (e?.event === 'scene-assignment-notification') {
+        const ap = e.payload as {
+          notificationId: string;
+          sceneUuid: string; sceneId: string; sheetName: string;
+          episodeNumber: number;
+          recipientId: string;
+          senderId: string; senderName: string;
+          prevAssignee: string; newAssignee: string;
+        } | undefined;
+        const me = useAuthStore.getState().currentUser;
+        if (!ap || !me?.id) return;
+        // 본인이 새 담당자인 경우만 토스트
+        if (ap.recipientId !== me.id) return;
+        // 본인이 본인을 지정하는 경우는 차단
+        if (ap.senderId === me.id) return;
+
+        const epLabel = `EP${String(ap.episodeNumber).padStart(2, '0')}`;
+        const prev = ap.prevAssignee?.trim();
+        const transitionLabel = prev ? `${prev} → ${ap.newAssignee}` : `미배정 → ${ap.newAssignee}`;
+        dispatchNotification({
+          type: 'scene_assignment',
+          title: `${ap.senderName}님이 담당자로 지정했습니다`,
+          body: `${epLabel} · ${ap.sceneId} (${transitionLabel})`,
+          metadata: {
+            sceneId: ap.sceneUuid,
+            sceneName: ap.sceneId,
+            changedBy: ap.senderName,
+            assignmentTransition: transitionLabel,
+            assignmentNotificationId: ap.notificationId,
+          },
+        }, { ...notiSettingsRef.current, osNotification: false });
+        // Windows 네이티브 토스트 + 클릭 시 점프 (피드백과 동일 sceneJump 경로 재사용)
+        window.electronAPI.notifyFeedbackToast({
+          title: 'B flow — 담당자 배정',
+          body: `${ap.senderName}님이 ${epLabel} ${ap.sceneId} 담당자로 지정했습니다.`,
+          sceneJump: { sheetName: ap.sheetName, sceneId: ap.sceneId, sceneUuid: ap.sceneUuid },
+        }).catch(() => { /* 토스트 실패 무시 */ });
+        // broadcast 를 즉시 받았으므로 lastSeen 갱신 → 다음 로그인 catch-up 에서 중복 차단
+        if (me?.id) setAssignmentLastSeenAt(me.id, new Date().toISOString());
+        return;
+      }
+
       if (e?.event !== 'acting-feedback-request') return;
       const p = e.payload as {
         sceneUuid: string; sceneId: string; sheetName: string;

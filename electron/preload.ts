@@ -131,6 +131,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // v1.25.5 알림 읽음 처리
   supabaseMarkFeedbackNotificationRead: (notificationId: string) =>
     ipcRenderer.invoke('supabase:mark-feedback-notification-read', notificationId),
+  // v1.25.8 씬 담당자 배정 알림 catch-up — 한솔 보고: 미접속 시 알림이 사라짐.
+  //  acting_feedback 과 동일 패턴 (DB row INSERT + broadcast + 로그인 catch-up).
+  supabaseFetchMissedAssignmentNotifications: (userId: string, since: string, limit?: number, before?: string) =>
+    ipcRenderer.invoke('supabase:fetch-missed-assignment-notifications', userId, since, limit, before),
+  supabaseMarkAssignmentNotificationRead: (notificationId: string) =>
+    ipcRenderer.invoke('supabase:mark-assignment-notification-read', notificationId),
   // v1.25.0~ Windows 네이티브 토스트 + 클릭 시 씬으로 점프
   notifyFeedbackToast: (payload: unknown) =>
     ipcRenderer.invoke('notify:feedback-toast', payload),

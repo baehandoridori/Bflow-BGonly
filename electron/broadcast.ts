@@ -29,6 +29,9 @@ function createChannel(onReceive: BroadcastListener): RealtimeChannel {
     .on('broadcast', { event: 'acting-feedback-request' }, ({ payload }) => {
       onReceive('acting-feedback-request', payload as Record<string, unknown>);
     })
+    .on('broadcast', { event: 'scene-assignment-notification' }, ({ payload }) => {
+      onReceive('scene-assignment-notification', payload as Record<string, unknown>);
+    })
     .on('broadcast', { event: 'data-change' }, ({ payload }) => {
       onReceive('data-change', payload as Record<string, unknown>);
     })
@@ -171,6 +174,25 @@ export interface FeedbackBroadcastPayload {
 }
 export function broadcastActingFeedbackRequest(payload: Omit<FeedbackBroadcastPayload, 'ts'>): void {
   safeSend('acting-feedback-request', { ...payload, ts: Date.now() });
+}
+
+/** v1.25.8 씬 담당자 배정 알림 broadcast.
+ *  recipient_id 가 자기 user.id 와 같은 클라이언트만 토스트 표시. */
+export interface AssignmentBroadcastPayload {
+  notificationId: string;
+  sceneUuid: string;
+  sceneId: string;
+  sheetName: string;
+  episodeNumber: number;
+  recipientId: string;
+  senderId: string;
+  senderName: string;
+  prevAssignee: string;
+  newAssignee: string;
+  ts: number;
+}
+export function broadcastSceneAssignmentNotification(payload: Omit<AssignmentBroadcastPayload, 'ts'>): void {
+  safeSend('scene-assignment-notification', { ...payload, ts: Date.now() });
 }
 
 /** 캘린더(공개 GCal 이벤트 + 개인 비공개 이벤트) 변경 broadcast.

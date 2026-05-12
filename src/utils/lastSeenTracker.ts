@@ -58,3 +58,30 @@ export function ensureFeedbackLastSeenInitialized(userId: string): void {
     setFeedbackLastSeenAt(userId, new Date().toISOString());
   }
 }
+
+// ─── v1.25.8: 씬 담당자 배정 catch-up 전용 별도 키 ─────────
+//   댓글 멘션 / 액팅 피드백 catch-up 과 격리. 한 도메인의 lastSeen 갱신이
+//   다른 도메인 catch-up 에 영향을 주지 않도록 한다.
+
+const ASSIGNMENT_KEY_PREFIX = 'bflow_assignment_last_seen_';
+
+export function getAssignmentLastSeenAt(userId: string): string | null {
+  try {
+    const v = localStorage.getItem(ASSIGNMENT_KEY_PREFIX + userId);
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setAssignmentLastSeenAt(userId: string, isoString: string): void {
+  try {
+    localStorage.setItem(ASSIGNMENT_KEY_PREFIX + userId, isoString);
+  } catch { /* 무시 */ }
+}
+
+export function ensureAssignmentLastSeenInitialized(userId: string): void {
+  if (!getAssignmentLastSeenAt(userId)) {
+    setAssignmentLastSeenAt(userId, new Date().toISOString());
+  }
+}
