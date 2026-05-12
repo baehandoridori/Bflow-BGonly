@@ -1430,7 +1430,83 @@ ipcMain.handle('supabase:bulk-delete-scenes', wrapIpc(async (_e: unknown, sceneU
   }
   return results;
 }));
+/** v1.25.8 코덱스 2차 P1 fix: 담당자 변경 알림 (INSERT + meta 조회 + broadcast) 헬퍼.
+ *  단일 필드 핸들러와 bulk 핸들러에서 동일 로직을 공유. 실패 시 throw 없이 로그만 — 본 mutation 흐름은 영향 없음. */
+async function notifyAssigneeChange(
+  sceneUuid: string,
+  prevAssignee: string,
+  newAssignee: string,
+  senderId: string,
+  senderName: string,
+): Promise<void> {
+  try {
+    const inserted = await sbInsertAssignmentNotifications({
+      sceneUuid, prevAssignee, newAssignee, senderId, senderName,
+    });
+    if (inserted.length === 0) return;
+    const { data: sceneRow } = await supabaseClient
+      .from('scenes')
+      .select('scene_number, parts(part_id, department, episodes(episode_number))')
+      .eq('id', sceneUuid)
+      .maybeSingle();
+    type PartRel = { part_id?: string; department?: string; episodes?: { episode_number?: number } | { episode_number?: number }[] | null };
+    const s = sceneRow as unknown as {
+      scene_number: string;
+      parts?: PartRel | PartRel[] | null;
+    } | null;
+    if (!s) return;
+    const firstPart: PartRel | null = Array.isArray(s.parts) ? (s.parts[0] ?? null) : (s.parts ?? null);
+    const epRel = firstPart?.episodes;
+    const firstEp: { episode_number?: number } | null = Array.isArray(epRel) ? (epRel[0] ?? null) : (epRel ?? null);
+    const epNum = firstEp?.episode_number ?? 0;
+    const partId = firstPart?.part_id ?? 'A';
+    const dept = firstPart?.department ?? 'bg';
+    const deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
+    const sheetName = `EP${String(epNum).padStart(2, '0')}_${partId}${deptSuffix}`;
+    for (const r of inserted) {
+      broadcastSceneAssignmentNotification({
+        notificationId: r.notificationId,
+        sceneUuid,
+        sceneId: s.scene_number,
+        sheetName,
+        episodeNumber: epNum,
+        recipientId: r.recipientId,
+        senderId,
+        senderName,
+        prevAssignee,
+        newAssignee,
+      });
+    }
+  } catch (err) {
+    console.error('[assignee-change-notify] 실패:', err);
+  }
+}
+
 ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, updates: BulkFieldUpdate[], updatedBy: string) => {
+  // v1.25.8 코덱스 2차 P1 fix: bulk-edit 으로 담당자 변경 시에도 알림 분기.
+  //   prev assignee 를 UPDATE 전에 일괄 조회 (이후 차집합 계산).
+  const senderId = currentActivityUser?.id;
+  const senderName = currentActivityUser?.name ?? '동료';
+  const prevAssigneeByUuid = new Map<string, string>();
+  if (senderId) {
+    const sceneUuidsWithAssigneeChange = updates
+      .filter((u) => typeof u.fields.assignee === 'string')
+      .map((u) => u.sceneUuid);
+    if (sceneUuidsWithAssigneeChange.length > 0) {
+      try {
+        const { data: prevRows } = await supabaseClient
+          .from('scenes')
+          .select('id, assignee')
+          .in('id', sceneUuidsWithAssigneeChange);
+        for (const r of ((prevRows ?? []) as Array<{ id: string; assignee?: string | null }>)) {
+          prevAssigneeByUuid.set(r.id, (r.assignee ?? '').toString().trim());
+        }
+      } catch (err) {
+        console.warn('[bulk-assignee-prev-fetch] 실패:', err);
+      }
+    }
+  }
+
   const results = await sbBulkUpdateSceneFields(updates, updatedBy, currentActivityUser?.name ?? null);
   for (const u of updates) {
     const r = results.find((x) => x.sceneUuid === u.sceneUuid);
@@ -1439,6 +1515,11 @@ ipcMain.handle('supabase:bulk-update-scene-fields', wrapIpc(async (_e: unknown, 
       if (value !== undefined) {
         broadcastSceneFieldUpdate(u.sceneUuid, key, value, updatedBy);
       }
+    }
+    // 담당자 변경 시 알림 분기 (단일 핸들러와 동일 로직)
+    if (senderId && typeof u.fields.assignee === 'string' && u.fields.assignee.trim()) {
+      const prevAssignee = prevAssigneeByUuid.get(u.sceneUuid) ?? '';
+      await notifyAssigneeChange(u.sceneUuid, prevAssignee, u.fields.assignee.trim(), senderId, senderName);
     }
   }
   return results;
@@ -1479,63 +1560,16 @@ ipcMain.handle('supabase:update-scene-field', wrapIpc(async (_e: unknown, sceneU
   // v1.25.8: 담당자 변경 시 *추가된* 담당자(들)에게 알림 (DB INSERT + broadcast).
   //  코덱스 1차 P2 fix: AssigneeMultiSelect 가 comma-separated multi-value 를 쓰므로,
   //   prev → new 차집합으로 새로 추가된 사람만 알림. 한 번에 여러 명 추가도 지원.
+  //  코덱스 2차 P1 fix: bulk handler 와 공통 헬퍼 notifyAssigneeChange 로 추출 — 중복 제거.
   //  자기 자신 자기에게 배정은 INSERT 단계에서 skip.
   if (field === 'assignee' && value && value.trim() && senderId) {
-    try {
-      const { data: senderUser } = await supabaseClient
-        .from('users')
-        .select('name')
-        .eq('id', senderId)
-        .maybeSingle();
-      const senderName = (senderUser as { name?: string } | null)?.name ?? '동료';
-      const inserted = await sbInsertAssignmentNotifications({
-        sceneUuid,
-        prevAssignee,
-        newAssignee: value.trim(),
-        senderId,
-        senderName,
-      });
-      if (inserted.length > 0) {
-        // 씬 메타는 broadcast 모두에 공유 — 한 번만 조회.
-        const { data: sceneRow } = await supabaseClient
-          .from('scenes')
-          .select('scene_number, parts(part_id, department, episodes(episode_number))')
-          .eq('id', sceneUuid)
-          .maybeSingle();
-        // Supabase 관계 join 은 결과가 array | object — 첫 요소만 사용.
-        type PartRel = { part_id?: string; department?: string; episodes?: { episode_number?: number } | { episode_number?: number }[] | null };
-        const s = sceneRow as unknown as {
-          scene_number: string;
-          parts?: PartRel | PartRel[] | null;
-        } | null;
-        if (s) {
-          const firstPart: PartRel | null = Array.isArray(s.parts) ? (s.parts[0] ?? null) : (s.parts ?? null);
-          const epRel = firstPart?.episodes;
-          const firstEp: { episode_number?: number } | null = Array.isArray(epRel) ? (epRel[0] ?? null) : (epRel ?? null);
-          const epNum = firstEp?.episode_number ?? 0;
-          const partId = firstPart?.part_id ?? 'A';
-          const dept = firstPart?.department ?? 'bg';
-          const deptSuffix = dept === 'acting' ? '_ACT' : '_BG';
-          const sheetName = `EP${String(epNum).padStart(2, '0')}_${partId}${deptSuffix}`;
-          for (const r of inserted) {
-            broadcastSceneAssignmentNotification({
-              notificationId: r.notificationId,
-              sceneUuid,
-              sceneId: s.scene_number,
-              sheetName,
-              episodeNumber: epNum,
-              recipientId: r.recipientId,
-              senderId,
-              senderName,
-              prevAssignee,
-              newAssignee: value.trim(),
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[assignee-change-notify] 실패:', err);
-    }
+    const { data: senderUser } = await supabaseClient
+      .from('users')
+      .select('name')
+      .eq('id', senderId)
+      .maybeSingle();
+    const senderName = (senderUser as { name?: string } | null)?.name ?? '동료';
+    await notifyAssigneeChange(sceneUuid, prevAssignee, value.trim(), senderId, senderName);
   }
 }));
 

@@ -754,6 +754,7 @@ export default function App() {
         type MissedRow = Awaited<ReturnType<typeof fetchMissedFeedbackNotifications>>[number];
         const all: MissedRow[] = [];
         let before: string | undefined = undefined;
+        let cappedOut = false;
         while (true) {
           const batch = await fetchMissedFeedbackNotifications(me.id, lastSeen, PAGE_SIZE, before);
           if (!batch || batch.length === 0) break;
@@ -762,10 +763,11 @@ export default function App() {
           before = batch[batch.length - 1].createdAt; // 다음 페이지: 가장 오래된 fetched 보다 이전
           if (all.length >= SAFE_CAP) {
             console.warn('[feedback-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
+            cappedOut = true;
             break;
           }
         }
-        console.log('[feedback-catchup] 조회 결과', { count: all.length });
+        console.log('[feedback-catchup] 조회 결과', { count: all.length, cappedOut });
         if (all.length === 0) {
           setFeedbackLastSeenAt(me.id, new Date().toISOString());
           return;
@@ -791,10 +793,15 @@ export default function App() {
           description: '종 모양을 클릭해 확인해주세요.',
           duration: 6000,
         });
-        // P1 #2: 가장 최근 fetched 의 createdAt 으로 lastSeen 갱신 (now 아님).
-        //   페이지네이션으로 모든 unread 를 가져왔으므로, 그 이전 시점부터 다음 catch-up 시
-        //   더 newer 데이터만 fetch. SAFE_CAP 으로 잘렸어도 데이터 손실 없음 (다음 페이지 가능).
-        setFeedbackLastSeenAt(me.id, all[0].createdAt);
+        // 코덱스 2차 P2 fix: SAFE_CAP 도달 시 lastSeen 갱신 안 함 — cap 이하 older unread 가
+        //   `created_at > lastSeen` 필터에서 영구히 제외되는 손실 차단. 다음 로그인이 같은
+        //   lastSeen 으로 다시 시작하므로 이미 패널에 추가된 newer 알림이 재추가되지만,
+        //   조용한 데이터 손실보다는 시각적 중복이 안전 (dedup 은 후속 과제).
+        if (cappedOut) {
+          console.warn('[feedback-catchup] cap 도달 — lastSeen 보존 (다음 로그인에 backlog 재조회)');
+        } else {
+          setFeedbackLastSeenAt(me.id, all[0].createdAt);
+        }
       } catch (err) {
         console.warn('[feedback-catchup] 실패:', err);
       }
@@ -831,6 +838,7 @@ export default function App() {
         type MissedRow = Awaited<ReturnType<typeof fetchMissedAssignmentNotifications>>[number];
         const all: MissedRow[] = [];
         let before: string | undefined = undefined;
+        let cappedOut = false;
         while (true) {
           const batch = await fetchMissedAssignmentNotifications(me.id, lastSeen, PAGE_SIZE, before);
           if (!batch || batch.length === 0) break;
@@ -839,10 +847,11 @@ export default function App() {
           before = batch[batch.length - 1].createdAt;
           if (all.length >= SAFE_CAP) {
             console.warn('[assignment-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
+            cappedOut = true;
             break;
           }
         }
-        console.log('[assignment-catchup] 조회 결과', { count: all.length });
+        console.log('[assignment-catchup] 조회 결과', { count: all.length, cappedOut });
         if (all.length === 0) {
           setAssignmentLastSeenAt(me.id, new Date().toISOString());
           return;
@@ -869,7 +878,12 @@ export default function App() {
           description: '종 모양을 클릭해 확인해주세요.',
           duration: 6000,
         });
-        setAssignmentLastSeenAt(me.id, all[0].createdAt);
+        // 코덱스 2차 P2 fix: SAFE_CAP 도달 시 lastSeen 보존 — 같은 이유 (feedback 과 동일).
+        if (cappedOut) {
+          console.warn('[assignment-catchup] cap 도달 — lastSeen 보존 (다음 로그인에 backlog 재조회)');
+        } else {
+          setAssignmentLastSeenAt(me.id, all[0].createdAt);
+        }
       } catch (err) {
         console.warn('[assignment-catchup] 실패:', err);
       }
