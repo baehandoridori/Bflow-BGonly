@@ -644,6 +644,130 @@ export async function updateScenePhase(
   }
 }
 
+// ═══════════════════════════════════════════════
+// v1.25.5 ACTING FEEDBACK NOTIFICATIONS (catch-up)
+// ═══════════════════════════════════════════════
+// broadcast 만으로는 오프라인/로그아웃 시 영구 손실 → DB row 영구 저장.
+// 댓글 멘션 catch-up 흐름과 평행 구조 (fetchMissedMentions 와 같은 패턴).
+
+export interface FeedbackNotificationPayload {
+  senderId: string;
+  senderName: string;
+  sceneUuid: string;
+  sceneId: string;
+  sheetName: string;
+  episodeNumber: number;
+  fromState: string;
+  toState: string;
+  workRound: number;
+  feedbackRound: number;
+  message?: string;
+}
+
+export interface MissedFeedbackNotification {
+  id: string;
+  senderId: string;
+  senderName: string;
+  sceneUuid: string | null;
+  sceneId: string;
+  sheetName: string;
+  episodeNumber: number;
+  fromState: string | null;
+  toState: string;
+  workRound: number;
+  feedbackRound: number;
+  message: string | null;
+  createdAt: string;
+}
+
+/** 알림 row INSERT — recipient 한 명당 한 row. broadcast 와 별개 영구 저장.
+ *  v1.25.5 코덱스 1차 P2 #3 fix: INSERT 결과의 (recipient_id, id) 매핑을 반환 →
+ *  broadcast payload 에 포함시켜 수신자가 자기 row ID 로 markRead 가능. */
+export async function insertActingFeedbackNotifications(
+  payload: FeedbackNotificationPayload,
+  recipientIds: string[],
+): Promise<Record<string, string>> {
+  if (recipientIds.length === 0) return {};
+  const rows = recipientIds.map((rid) => ({
+    sender_id: payload.senderId,
+    sender_name: payload.senderName,
+    recipient_id: rid,
+    scene_uuid: payload.sceneUuid || null,
+    scene_id: payload.sceneId,
+    sheet_name: payload.sheetName,
+    episode_number: payload.episodeNumber,
+    from_state: payload.fromState || null,
+    to_state: payload.toState,
+    work_round: payload.workRound,
+    feedback_round: payload.feedbackRound,
+    message: payload.message ?? null,
+  }));
+  const { data, error } = await supabase
+    .from('acting_feedback_notifications')
+    .insert(rows)
+    .select('id, recipient_id');
+  throwIfError(error);
+  const map: Record<string, string> = {};
+  for (const r of (data ?? []) as Array<{ id: string; recipient_id: string }>) {
+    map[r.recipient_id] = r.id;
+  }
+  return map;
+}
+
+/** 로그인 catch-up — 마지막 본 시각 이후 미읽음 알림 일괄 조회.
+ *  v1.25.5 코덱스 1차 P1 #2 fix: 페이지네이션용 before 파라미터 (created_at < before).
+ *  렌더러가 limit 만큼 받았으면 batch[N-1].createdAt 으로 다음 페이지 fetch. */
+export async function fetchMissedActingFeedbackNotifications(
+  userId: string,
+  since: string,
+  limit = 100,
+  before?: string,
+): Promise<MissedFeedbackNotification[]> {
+  let query = supabase
+    .from('acting_feedback_notifications')
+    .select('*')
+    .eq('recipient_id', userId)
+    .gt('created_at', since)
+    .is('read_at', null)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (before) {
+    query = query.lt('created_at', before);
+  }
+  const { data, error } = await query;
+  throwIfError(error);
+  return ((data ?? []) as Array<{
+    id: string; sender_id: string; sender_name: string;
+    scene_uuid: string | null; scene_id: string; sheet_name: string;
+    episode_number: number; from_state: string | null; to_state: string;
+    work_round: number | null; feedback_round: number | null;
+    message: string | null; created_at: string;
+  }>).map((r) => ({
+    id: r.id,
+    senderId: r.sender_id,
+    senderName: r.sender_name,
+    sceneUuid: r.scene_uuid,
+    sceneId: r.scene_id,
+    sheetName: r.sheet_name,
+    episodeNumber: r.episode_number,
+    fromState: r.from_state,
+    toState: r.to_state,
+    workRound: r.work_round ?? 0,
+    feedbackRound: r.feedback_round ?? 0,
+    message: r.message,
+    createdAt: r.created_at,
+  }));
+}
+
+/** 알림 읽음 처리 — read_at = now() */
+export async function markActingFeedbackNotificationRead(notificationId: string): Promise<void> {
+  const { error } = await supabase
+    .from('acting_feedback_notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', notificationId);
+  throwIfError(error);
+}
+
 /** 대량 씬 체크박스 토글 (부분 실패 허용) — RPC 경유 */
 export async function bulkUpdateSceneStages(
   updates: BulkStageUpdate[],

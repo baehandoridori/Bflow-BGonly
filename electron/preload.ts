@@ -124,6 +124,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // v1.25.0~ 액팅 피드백 알림 디스패치
   supabaseDispatchFeedbackNotification: (payload: unknown) =>
     ipcRenderer.invoke('supabase:dispatch-feedback-notification', payload),
+  // v1.25.5 로그인 catch-up — last_seen_at 이후 미읽음 액팅 피드백 알림 일괄 조회.
+  //  before 옵션: 페이지네이션용 (created_at < before).
+  supabaseFetchMissedFeedbackNotifications: (userId: string, since: string, limit?: number, before?: string) =>
+    ipcRenderer.invoke('supabase:fetch-missed-feedback-notifications', userId, since, limit, before),
+  // v1.25.5 알림 읽음 처리
+  supabaseMarkFeedbackNotificationRead: (notificationId: string) =>
+    ipcRenderer.invoke('supabase:mark-feedback-notification-read', notificationId),
   // v1.25.0~ Windows 네이티브 토스트 + 클릭 시 씬으로 점프
   notifyFeedbackToast: (payload: unknown) =>
     ipcRenderer.invoke('notify:feedback-toast', payload),

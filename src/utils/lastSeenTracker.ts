@@ -31,3 +31,30 @@ export function ensureLastSeenInitialized(userId: string): void {
     setLastSeenAt(userId, new Date().toISOString());
   }
 }
+
+// ─── v1.25.5: 액팅 피드백 catch-up 전용 별도 키 ────────────
+//   댓글 멘션 last_seen 과 분리해, 두 catch-up effect 가 서로의 lastSeen 갱신에
+//   영향받지 않도록 격리.
+
+const FEEDBACK_KEY_PREFIX = 'bflow_feedback_last_seen_';
+
+export function getFeedbackLastSeenAt(userId: string): string | null {
+  try {
+    const v = localStorage.getItem(FEEDBACK_KEY_PREFIX + userId);
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setFeedbackLastSeenAt(userId: string, isoString: string): void {
+  try {
+    localStorage.setItem(FEEDBACK_KEY_PREFIX + userId, isoString);
+  } catch { /* 무시 */ }
+}
+
+export function ensureFeedbackLastSeenInitialized(userId: string): void {
+  if (!getFeedbackLastSeenAt(userId)) {
+    setFeedbackLastSeenAt(userId, new Date().toISOString());
+  }
+}

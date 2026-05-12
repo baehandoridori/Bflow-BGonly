@@ -2,13 +2,14 @@ import { create } from 'zustand';
 
 // ─── 알림 타입 정의 ─────────────────────────────────
 /**
- * 알림 타입 (v1.24.0)
+ * 알림 타입 (v1.24.0 / v1.25.5 acting_feedback 추가)
  * - 'comment': 자동 알림 (씬 작업자에게 발송, 차분한 톤)
  * - 'mention': 명시적 멘션 (@-멘션·답글 자동 멘션, 강한 톤 + 펄스)
  * - 'revision': 리비전 등록/진행/완료 알림
+ * - 'acting_feedback': v1.25.5 — 액팅 씬 피드백 대기 요청 (강한 톤, mention 과 동일 시각 처리)
  * - 'scene_change' / 'milestone' / 'system': 기존 동작 유지
  */
-export type NotificationType = 'scene_change' | 'comment' | 'mention' | 'milestone' | 'system' | 'revision';
+export type NotificationType = 'scene_change' | 'comment' | 'mention' | 'milestone' | 'system' | 'revision' | 'acting_feedback';
 
 export interface AppNotification {
   id: string;
@@ -34,6 +35,10 @@ export interface AppNotification {
     parentCommentId?: string;
     /** v1.24.0: 멘션 알림 발신자 식별용 (자동 멘션과 직접 멘션 구분) */
     mentionedBy?: string;
+    /** v1.25.5: 액팅 피드백 알림 DB row id — 씬 점프 시 read_at 처리용 */
+    feedbackNotificationId?: string;
+    /** v1.25.5: 액팅 피드백 알림 표시용 메타 (예: '작업중 2차 → 피드백 대기 2차') */
+    feedbackTransition?: string;
   };
   isRead: boolean;
   createdAt: string; // ISO 8601
@@ -49,10 +54,12 @@ function countUnread(notifications: AppNotification[]): number {
 
 /**
  * v1.24.0: 안 읽은 멘션 카운트 — 헤더 벨이 강한 펄스로 전환되는 트리거.
- * type==='mention' 만 멘션으로 간주 (자동 'comment' 알림은 차분한 톤).
+ * v1.25.5: acting_feedback 도 강한 톤 (검수 요청) — mention 과 동일 분기.
  */
 function countUnreadMentions(notifications: AppNotification[]): number {
-  return notifications.filter((x) => !x.isRead && x.type === 'mention').length;
+  return notifications.filter(
+    (x) => !x.isRead && (x.type === 'mention' || x.type === 'acting_feedback'),
+  ).length;
 }
 
 /** notifications 변경 시 unreadCount + unreadMentionCount 함께 set */
