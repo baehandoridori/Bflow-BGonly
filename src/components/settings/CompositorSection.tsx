@@ -83,15 +83,22 @@ export function CompositorSection() {
         const missingNames = diff.missing.map((u) => u.name).join(', ');
         const extraNames = diff.extra.map((u) => u.name).join(', ');
         console.warn('[CompositorSection] verify mismatch', { missing: missingNames, extra: extraNames });
-        const detail = [
-          missingNames && `저장 누락: ${missingNames}`,
-          extraNames && `예상 외 반영: ${extraNames}`,
-        ].filter(Boolean).join(' / ');
-        toast.error(
-          `저장은 됐지만 화면 동기화가 안 맞아요. ${detail || ''} — 잠시 후 새로고침해주세요.`.trim(),
-          { duration: 10000 },
-        );
-        // dirty 유지 → 재시도 가능
+        // 코덱스 2차 P2 #1 fix: missing 있을 땐 '저장 안 됨' 톤 + dirty 유지.
+        // extra 만 있을 땐 (이미 다른 PC 에서 추가 저장된 케이스) 경고 톤.
+        if (diff.missing.length > 0) {
+          toast.error(
+            `다음 사용자가 저장되지 않았어요: ${missingNames}${extraNames ? ` (예상 외 반영: ${extraNames})` : ''}. 잠시 후 다시 시도해주세요.`,
+            { duration: 10000 },
+          );
+          // dirty 유지 → 재시도 가능
+        } else {
+          // missing 없음 + extra 있음 — 다른 사용자가 동시 변경했을 가능성
+          toast.warning(
+            `다른 곳에서 추가로 반영됐어요: ${extraNames}. 필요 시 해제 후 다시 저장해주세요.`,
+            { duration: 10000 },
+          );
+          setDirty(false); // 내 변경은 적용됐으므로 dirty 해제
+        }
       } else {
         setDirty(false);
         toast.success(`${expectedSize}명을 컴포지터로 저장했습니다.`);
