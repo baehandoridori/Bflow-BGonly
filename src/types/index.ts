@@ -443,6 +443,8 @@ export type BulkUpdateResult = {
 export type ActionGroup = 'progress' | 'memo' | 'scene' | 'etc';
 export type ActionType =
   | 'stage_lo' | 'stage_done' | 'stage_review' | 'stage_png'
+  // v1.25.0~: 액팅 씬 단계 토글 — 작업 진행 그룹과 동일
+  | 'phase_wait' | 'phase_work' | 'phase_feedback' | 'phase_done'
   | 'memo_update' | 'comment_add'
   | 'revision_add' | 'revision_in_progress' | 'revision_resolve' | 'revision_delete'
   // v1.18.0: 리비전 맥락 댓글 — 일반 comment_add 와 분리해 활동 피드에서 별도 표시
