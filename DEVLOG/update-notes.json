@@ -1,5 +1,21 @@
 [
   {
+    "version": "1.25.6",
+    "title": "어드민 저장 verify — 1초 retry + 진단 메시지",
+    "items": [
+      {
+        "category": "bugfix",
+        "summary": "'DB 반영이 확인되지 않았습니다' 토스트가 가짜로 뜨던 케이스 해결",
+        "description": "저장은 실제로 DB 에 성공했는데 직후 fetch 가 PostgREST schema cache stale 등 일시적 사유로 stale 결과를 반환하면 verify 가 mismatch 로 잘못 잡았습니다. 이제 mismatch 가 잡히면 1초 뒤 자동으로 한 번 더 확인합니다."
+      },
+      {
+        "category": "stability",
+        "summary": "오류 메시지에 어떤 사용자가 어긋났는지 표시",
+        "description": "재시도해도 동기화가 안 맞으면 '저장 누락: 류성철 / 예상 외 반영: 윤성원' 식으로 사용자 이름이 포함된 토스트를 띄워, 다음 시도/문의 시 즉시 원인을 파악할 수 있게 합니다."
+      }
+    ]
+  },
+  {
     "version": "1.25.5",
     "title": "피드백 알림 catch-up — 로그아웃 중 받지 못한 알림도 복원",
     "items": [

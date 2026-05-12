@@ -259,6 +259,58 @@ export async function fetchFreshUsersFromSupabase(): Promise<AppUser[]> {
 }
 
 /**
+ * v1.25.6 한솔 보고 fix: 어드민 저장 verify 단계 강화.
+ *
+ * 보고: "DB 반영이 확인되지 않았습니다" toast 가 떴지만 실제 DB 는 update 성공 (윤성원
+ *   is_acting_supervisor=true 로 한솔님이 저장한 결과 확인). 즉 fresh fetch 시점에
+ *   PostgREST schema cache stale 또는 일시적 read-after-write lag 으로 stale 결과.
+ *
+ * 대응:
+ *  1) 1차 fetch → mismatch 면 1초 sleep 후 1차 retry
+ *  2) 그래도 mismatch 면 fresh 와 diff 정보 (extra/missing 사용자 이름) 반환
+ *     → toast/console 에 어떤 사용자가 어긋나는지 명확히 보여 진단 용이.
+ */
+export interface VerifyResult {
+  fresh: AppUser[];
+  mismatched: boolean;
+  diff: {
+    /** DB 에는 있지만 의도 set 에 없는 사용자 (의도치 않게 추가 저장됨) */
+    extra: AppUser[];
+    /** 의도 set 에는 있지만 DB 에 없는 사용자 (저장 실패) */
+    missing: AppUser[];
+  };
+}
+
+export async function verifyUserBoolPropAfterSave(
+  expectedIds: Set<string>,
+  propName: 'isCompositor' | 'isActingSupervisor',
+): Promise<VerifyResult> {
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+  const fetchAndCompare = async () => {
+    const fresh = await fetchFreshUsersFromSupabase();
+    const actualIds = new Set(
+      fresh.filter((u) => u[propName] === true).map((u) => u.id),
+    );
+    const mismatched = [...expectedIds].some((id) => !actualIds.has(id))
+      || [...actualIds].some((id) => !expectedIds.has(id));
+    return { fresh, actualIds, mismatched };
+  };
+
+  // 1차 — 즉시
+  let res = await fetchAndCompare();
+  // 2차 — PostgREST schema cache stale / read-after-write lag 대응
+  if (res.mismatched) {
+    await sleep(1000);
+    res = await fetchAndCompare();
+  }
+
+  const extra = res.fresh.filter((u) => res.actualIds.has(u.id) && !expectedIds.has(u.id));
+  const missing = res.fresh.filter((u) => expectedIds.has(u.id) && !res.actualIds.has(u.id));
+  return { fresh: res.fresh, mismatched: res.mismatched, diff: { extra, missing } };
+}
+
+/**
  * v1.25.0~: 어드민 전용 — 액팅 검수자(애니메이팅 수퍼바이저) 지정/해제.
  * 컴포지터와 독립적인 별도 boolean. 한 사람이 둘 다 가능.
  * spec: docs/superpowers/specs/2026-05-11-acting-phase-toggle-design.md (섹션 6)

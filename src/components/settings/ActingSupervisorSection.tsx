@@ -16,7 +16,7 @@ import { Sparkles, Loader2, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { SettingsSection } from './SettingsSection';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { setIsActingSupervisor, fetchFreshUsersFromSupabase } from '@/services/userService';
+import { setIsActingSupervisor, verifyUserBoolPropAfterSave } from '@/services/userService';
 import { cn } from '@/utils/cn';
 
 export function ActingSupervisorSection() {
@@ -68,21 +68,21 @@ export function ActingSupervisorSection() {
       await Promise.all(
         dirtyUsers.map((u) => setIsActingSupervisor(u.id, supervisorIds.has(u.id))),
       );
-      // v1.25.4 한솔 보고 fix: loadUsers 대신 fetchFreshUsersFromSupabase 로 verify.
-      //   sheetsMode 게이트 우회 — silent 로컬 폴백 시 항상 mismatch 떠 toast.error 만 떴던 문제 해결.
-      const fresh = await fetchFreshUsersFromSupabase();
+      // v1.25.4: supabase 직결 + v1.25.6: 1초 retry (PostgREST schema cache stale 대응)
+      const { fresh, mismatched, diff } = await verifyUserBoolPropAfterSave(expectedIds, 'isActingSupervisor');
       setUsers(fresh);
 
-      const actualIds = new Set(fresh.filter((u) => u.isActingSupervisor === true).map((u) => u.id));
-      const mismatched = [...expectedIds].some((id) => !actualIds.has(id))
-        || [...actualIds].some((id) => !expectedIds.has(id));
       if (mismatched) {
-        console.warn('[ActingSupervisorSection] verify mismatch', {
-          expected: [...expectedIds], actual: [...actualIds],
-        });
+        const missingNames = diff.missing.map((u) => u.name).join(', ');
+        const extraNames = diff.extra.map((u) => u.name).join(', ');
+        console.warn('[ActingSupervisorSection] verify mismatch', { missing: missingNames, extra: extraNames });
+        const detail = [
+          missingNames && `저장 누락: ${missingNames}`,
+          extraNames && `예상 외 반영: ${extraNames}`,
+        ].filter(Boolean).join(' / ');
         toast.error(
-          'DB 반영이 확인되지 않았습니다. is_acting_supervisor 컬럼/마이그레이션 또는 권한을 점검해주세요.',
-          { duration: 8000 },
+          `저장은 됐지만 화면 동기화가 안 맞아요. ${detail || ''} — 잠시 후 새로고침해주세요.`.trim(),
+          { duration: 10000 },
         );
       } else {
         setDirty(false);

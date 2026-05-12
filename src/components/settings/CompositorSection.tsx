@@ -15,7 +15,7 @@ import { Layers, Loader2, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { SettingsSection } from './SettingsSection';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { setIsCompositor, loadUsers, fetchFreshUsersFromSupabase } from '@/services/userService';
+import { setIsCompositor, loadUsers, verifyUserBoolPropAfterSave } from '@/services/userService';
 import { cn } from '@/utils/cn';
 
 export function CompositorSection() {
@@ -75,25 +75,23 @@ export function CompositorSection() {
       await Promise.all(
         dirtyUsers.map((u) => setIsCompositor(u.id, compositorIds.has(u.id))),
       );
-      // v1.25.4 한솔 보고 fix: verify 단계에 loadUsers 대신 fetchFreshUsersFromSupabase 사용.
-      //   loadUsers 는 sheetsMode=false 거나 supabase 일시 throw 시 silent 로 로컬 폴백.
-      //   로컬 users.dat 에 isCompositor 컬럼 없어 verify 항상 mismatch → 항상 toast.error.
-      //   fetchFreshUsersFromSupabase 는 supabase 직결, throw 면 catch 로 가서 명확한 에러 메시지.
-      const fresh = await fetchFreshUsersFromSupabase();
+      // v1.25.4: supabase 직결 + v1.25.6: 1초 retry (PostgREST schema cache stale 대응)
+      const { fresh, mismatched, diff } = await verifyUserBoolPropAfterSave(expectedIds, 'isCompositor');
       setUsers(fresh);
 
-      const actualIds = new Set(fresh.filter((u) => u.isCompositor === true).map((u) => u.id));
-      const mismatched = [...expectedIds].some((id) => !actualIds.has(id))
-        || [...actualIds].some((id) => !expectedIds.has(id));
       if (mismatched) {
-        console.warn('[CompositorSection] verify mismatch', {
-          expected: [...expectedIds], actual: [...actualIds],
-        });
+        const missingNames = diff.missing.map((u) => u.name).join(', ');
+        const extraNames = diff.extra.map((u) => u.name).join(', ');
+        console.warn('[CompositorSection] verify mismatch', { missing: missingNames, extra: extraNames });
+        const detail = [
+          missingNames && `저장 누락: ${missingNames}`,
+          extraNames && `예상 외 반영: ${extraNames}`,
+        ].filter(Boolean).join(' / ');
         toast.error(
-          'DB 반영이 확인되지 않았습니다. is_compositor 컬럼/마이그레이션 또는 권한을 점검해주세요.',
-          { duration: 8000 },
+          `저장은 됐지만 화면 동기화가 안 맞아요. ${detail || ''} — 잠시 후 새로고침해주세요.`.trim(),
+          { duration: 10000 },
         );
-        // dirty 유지 → 사용자 변경 보존, 재시도 가능
+        // dirty 유지 → 재시도 가능
       } else {
         setDirty(false);
         toast.success(`${expectedSize}명을 컴포지터로 저장했습니다.`);
