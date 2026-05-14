@@ -5,6 +5,11 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
+import {
+  getSceneShortcutVisibilityClass,
+  resolveNotificationSceneTarget,
+  shouldShowSceneShortcut,
+} from '@/utils/notificationSceneNavigation';
 import '@/styles/notification-bell.css';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
@@ -44,16 +49,14 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
   const removeNotification = useNotificationStore((s) => s.removeNotification);
   const cfg = typeConfig(n.type);
   const Icon = cfg.icon;
-  // v1.23.1 (#6): 멘션·댓글 알림은 metadata 가 비어 있어도 "씬 보기" 버튼 노출.
-  //   다른 PC 사용자가 멘션 보낼 때 useDataStore 에 그 씬이 없어 metadata=undefined 가 되는
-  //   케이스가 있는데, 그래도 본문 클릭 navigate 가 자체 fallback 으로 처리하므로 버튼 노출이 안전.
-  const hasMetadataTarget = !!(n.metadata?.sceneId || n.metadata?.sceneName);
-  const isSceneRelated = n.type === 'comment' || n.type === 'mention' || n.type === 'scene_change' || n.type === 'revision' || n.type === 'acting_feedback' || n.type === 'scene_assignment';
-  const hasNavigateTarget = hasMetadataTarget || isSceneRelated;
+  // 멘션·댓글 알림은 metadata 가 부족해도 "씬 보기" 버튼을 노출한다.
+  // hover 없는 환경에서도 바로가기 버튼이 사라지지 않도록 scene shortcut 은 기본 표시한다.
+  const hasNavigateTarget = shouldShowSceneShortcut(n.type, n.metadata);
   // v1.24.0: 멘션 알림 — 더 강한 시각 신호 (액센트 좌측 바 + @ 배지 + 카드 배경 진한 alpha).
   // v1.25.5: acting_feedback 도 멘션과 동일한 강한 톤 (검수 요청은 즉시 인지 필요).
   // v1.25.8: scene_assignment 도 동일 — 담당자 배정은 즉시 인지 필요.
   const isMention = n.type === 'mention' || n.type === 'acting_feedback' || n.type === 'scene_assignment';
+  const actionVisibilityClass = getSceneShortcutVisibilityClass(hasNavigateTarget);
 
   const handleItemClick = () => {
     if (!n.isRead) markAsRead(n.id);
@@ -116,10 +119,9 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
         <span className="text-[10px] text-text-secondary/50 mt-1 block">{timeAgo(n.createdAt)}</span>
       </div>
 
-      {/* 한솔 결정: 호버 시 우측에 [씬 보기 / 읽음 / 삭제] 액션 fade-in.
-          본문 클릭은 그대로 자동 (씬 이동 + 읽음). 액션 버튼은 stopPropagation 으로 분리.
-          flex sibling 으로 두어 평소에도 영역만 차지 (opacity 0) → 본문 truncate 가 액션 영역까지 침범하지 않음. */}
-      <div className="flex items-center gap-1 self-start mt-0.5 flex-shrink-0 opacity-0 group-hover/noti:opacity-100 transition-opacity">
+      {/* 씬 관련 알림은 no-hover 환경에서도 바로가기 버튼이 보여야 한다.
+          본문 클릭은 그대로 자동 (씬 이동 + 읽음). 액션 버튼은 stopPropagation 으로 분리. */}
+      <div className={cn('flex items-center gap-1 self-start mt-0.5 flex-shrink-0 transition-opacity', actionVisibilityClass)}>
         {hasNavigateTarget && (
           <button
             type="button"
@@ -215,15 +217,10 @@ function NotificationDropdown() {
   }, [setPanelOpen]);
 
   const handleNavigate = (n: AppNotification) => {
-    const sceneId = n.metadata?.sceneId;
-    const sceneName = n.metadata?.sceneName;
-    // v1.18.0: 리비전 알림 — 모달 자동 오픈 + revisions 탭 + focusRevisionId 강조.
-    // ScenesView 가 listen 하는 window CustomEvent 로 라우팅.
+    const target = resolveNotificationSceneTarget(n.metadata, useDataStore.getState().episodes);
     const isRevisionNotif = n.type === 'revision';
     const revisionId = n.metadata?.revisionId;
-    // v1.24.0: 댓글/멘션 알림 — 모달 자동 오픈 + 해당 댓글 자동 스크롤 + 펄스.
     const isCommentLikeNotif = n.type === 'comment' || n.type === 'mention';
-    // v1.25.5: 액팅 피드백 알림 — 점프 시 DB read_at 처리
     const isActingFeedbackNotif = n.type === 'acting_feedback';
     const feedbackNotificationId = n.metadata?.feedbackNotificationId;
     if (isActingFeedbackNotif && feedbackNotificationId) {
@@ -242,91 +239,45 @@ function NotificationDropdown() {
     }
     const commentId = n.metadata?.commentId;
 
-    if (sceneId || sceneName) {
-      // 코덱스 P1 fix (2026-05-05): sceneName 이 'EP01:A:a001' 형식 sceneKey 면
-      // EP/파트/sceneId 로 정확히 매칭 (raw sceneId 가 다른 EP 와 reuse 되어도 정확).
-      const sceneKeyParts = typeof sceneName === 'string' && sceneName.includes(':')
-        ? sceneName.split(':')
-        : null;
-      const sceneKeyEp = sceneKeyParts?.[0];   // 'EP01'
-      const sceneKeyPart = sceneKeyParts?.[1]; // 'A'
-      const sceneKeyId = sceneKeyParts?.[2];   // 'a001'
+    if (target) {
+      setSelectedEpisode(target.episodeNumber);
+      useAppStore.getState().setSelectedPart(target.partId);
+      setHighlightSceneId(target.sceneName);
+      setView('scenes');
+      setPanelOpen(false);
 
-      // 씬 UUID/이름으로 에피소드를 찾아서 이동
-      const episodes = useDataStore.getState().episodes;
-      for (const ep of episodes) {
-        for (const part of ep.parts) {
-          const found = part.scenes.find(s => {
-            // 1순위: UUID (가장 정확)
-            if (sceneId && s.id === sceneId) return true;
-            // 2순위: sceneKey 풀 매칭 ('EP01:A:a001' → ep.episodeNumber + part.partId + s.sceneId 모두 일치)
-            // 코덱스 P1 fix (6차, 2026-05-05): episode 토큰 정규화 — "EP01"→1, "EP1"→1 모두 같은 episodeNumber 매칭.
-            // 이전엔 String(ep.episodeNumber)='1' vs sceneKeyEp.replace(/\D/g,'')='01' → 문자열 mismatch.
-            if (sceneKeyParts) {
-              const sceneKeyEpNum = sceneKeyEp ? Number(sceneKeyEp.replace(/\D/g, '')) : NaN;
-              const epLabelMatch = (
-                (Number.isFinite(sceneKeyEpNum) && ep.episodeNumber === sceneKeyEpNum) ||
-                (sceneKeyEp != null && ep.title === sceneKeyEp)
-              );
-              const partLabelMatch = sceneKeyPart && part.partId === sceneKeyPart;
-              if (epLabelMatch && partLabelMatch && sceneKeyId && s.sceneId === sceneKeyId) return true;
-            }
-            // 3순위 (legacy): sceneName 이 단순 raw sceneId ('a001') 인 경우 — reuse 위험 있음
-            if (!sceneKeyParts && sceneName && s.sceneId === sceneName) return true;
-            return false;
-          });
-          if (found) {
-            // 한솔 보고 (v1.15.4): part 도 같이 이동해야 다른 파트의 씬으로 가도 펄스 이펙트가 보임
-            setSelectedEpisode(ep.episodeNumber);
-            useAppStore.getState().setSelectedPart(part.partId);
-            setHighlightSceneId(found.sceneId);
-            setView('scenes');
-            setPanelOpen(false);
-
-            // 리비전 알림이면 모달 자동 오픈 + 탭/포커스.
-            // 코덱스 P1 fix (2026-05-05): store-based request → ScenesView 마운트 race 제거.
-            // 이전 CustomEvent dispatch 는 setView 와 같은 tick 에 발화되어 ScenesView listener
-            // 등록 전에 손실될 수 있었음.
-            if (isRevisionNotif) {
-              useAppStore.getState().setPendingSceneModalRequest({
-                sceneUuid: found.id,
-                sceneName: found.sceneId,
-                episodeNumber: ep.episodeNumber,
-                partId: part.partId,
-                initialTab: 'revisions',
-                focusRevisionId: revisionId,
-              });
-            } else if (isCommentLikeNotif && commentId) {
-              // v1.24.0: 댓글/멘션 알림 — 모달 자동 오픈 + 해당 댓글 자동 스크롤 + 펄스.
-              // 코덱스 P1 fix (2026-05-10): forceDeptFilter:'all' 강제. counterpart assignee 알림을
-              //   반대 부서 필터에서 클릭할 때 단일 부서 매칭 실패하던 회귀 차단 (ActivityFeed 점프와 일관).
-              useAppStore.getState().setPendingSceneModalRequest({
-                sceneUuid: found.id,
-                sceneName: found.sceneId,
-                episodeNumber: ep.episodeNumber,
-                partId: part.partId,
-                initialTab: 'detail',
-                focusCommentId: commentId,
-                forceDeptFilter: 'all',
-              });
-            }
-            return;
-          }
-        }
+      if (isRevisionNotif) {
+        useAppStore.getState().setPendingSceneModalRequest({
+          sceneUuid: target.sceneUuid,
+          sceneName: target.sceneName,
+          episodeNumber: target.episodeNumber,
+          partId: target.partId,
+          initialTab: 'revisions',
+          focusRevisionId: revisionId,
+        });
+      } else if (isCommentLikeNotif && commentId) {
+        useAppStore.getState().setPendingSceneModalRequest({
+          sceneUuid: target.sceneUuid,
+          sceneName: target.sceneName,
+          episodeNumber: target.episodeNumber,
+          partId: target.partId,
+          initialTab: 'detail',
+          focusCommentId: commentId,
+          forceDeptFilter: 'all',
+        });
       }
-      // 매칭 실패 — 씬 뷰로만이라도 이동 + 안내 (한솔 결정: 알림 패널 씬 보기 무반응 fix)
-      console.warn('[NotificationPanel] 씬 매칭 실패', { sceneId, sceneName, episodeCount: episodes.length });
+      return;
+    }
+
+    if (shouldShowSceneShortcut(n.type, n.metadata)) {
+      console.warn('[NotificationPanel] 씬 매칭 실패', {
+        metadata: n.metadata,
+        episodeCount: useDataStore.getState().episodes.length,
+      });
       setView('scenes');
       useAppStore.getState().setToast?.({
         type: 'warning',
         message: '씬을 자동으로 찾지 못했어요. 씬 뷰에서 직접 확인해주세요.',
-      });
-    } else if (n.type === 'comment' || n.type === 'mention' || n.type === 'scene_change' || n.type === 'revision' || n.type === 'acting_feedback' || n.type === 'scene_assignment') {
-      // v1.23.1 codex 1차 P2 + v1.24.0: metadata 가 비어있어도 씬 관련 알림이면 씬 뷰로 이동 + 안내.
-      setView('scenes');
-      useAppStore.getState().setToast?.({
-        type: 'info',
-        message: '알림에 씬 정보가 부족해요. 씬 뷰에서 직접 찾아주세요.',
       });
     }
     setPanelOpen(false);
