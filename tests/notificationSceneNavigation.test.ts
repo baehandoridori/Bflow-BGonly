@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  departmentFromNotificationSheetName,
   getSceneShortcutVisibilityClass,
   resolveNotificationSceneTarget,
   shouldShowSceneShortcut,
@@ -45,6 +46,20 @@ const episodes = [
             id: 'scene-act-uuid',
             no: 18,
             sceneId: 'b018_act',
+            memo: '',
+            storyboardUrl: '',
+            guideUrl: '',
+            assignee: '다은',
+            layoutId: '',
+            lo: false,
+            done: false,
+            review: false,
+            png: false,
+          },
+          {
+            id: 'scene-act-duplicate-uuid',
+            no: 19,
+            sceneId: 'b018',
             memo: '',
             storyboardUrl: '',
             guideUrl: '',
@@ -99,8 +114,43 @@ test('mention notification resolves legacy EP:part:sceneName metadata without re
   );
 });
 
-test('comment and mention scene shortcuts stay visible even when metadata is incomplete', () => {
+test('feedback catch-up resolves by sheet name when scene UUID is missing and scene names are reused', () => {
+  assert.deepEqual(
+    resolveNotificationSceneTarget(
+      {
+        sheetName: 'EP02_B_BG',
+        sceneName: 'b018',
+      },
+      episodes,
+    ),
+    {
+      episodeNumber: 2,
+      partId: 'B',
+      sheetName: 'EP02_B_BG',
+      sceneUuid: 'scene-bg-uuid',
+      sceneName: 'b018',
+    },
+  );
+});
+
+test('comment and mention scene shortcuts render on hover even when metadata is incomplete', () => {
   assert.equal(shouldShowSceneShortcut('mention', undefined), true);
   assert.equal(shouldShowSceneShortcut('comment', {}), true);
-  assert.equal(getSceneShortcutVisibilityClass(true), 'opacity-100');
+  assert.equal(shouldShowSceneShortcut('acting_feedback', { sceneName: 'b018' }), true);
+  assert.equal(shouldShowSceneShortcut('scene_assignment', { sceneName: 'b018' }), true);
+  assert.equal(
+    getSceneShortcutVisibilityClass(),
+    'opacity-0 group-hover/noti:opacity-100 group-focus-within/noti:opacity-100',
+  );
+});
+
+test('notification sheet names infer department for current and legacy BG parts', () => {
+  assert.equal(departmentFromNotificationSheetName('EP02_B_ACT'), 'acting');
+  assert.equal(departmentFromNotificationSheetName('EP02_B_BG'), 'bg');
+  assert.equal(departmentFromNotificationSheetName('EP02_B'), 'bg');
+  assert.equal(departmentFromNotificationSheetName('ep02_b_act'), 'acting');
+  assert.equal(departmentFromNotificationSheetName('ep02_b_bg'), 'bg');
+  assert.equal(departmentFromNotificationSheetName('ep02_b'), 'bg');
+  assert.equal(departmentFromNotificationSheetName(''), null);
+  assert.equal(departmentFromNotificationSheetName('ARCHIVE'), null);
 });

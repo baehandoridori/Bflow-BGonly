@@ -1,4 +1,4 @@
-import type { Episode } from '../types';
+import type { Episode, ScenesDeptFilter } from '../types';
 
 export interface NotificationSceneMetadata {
   sceneId?: string;
@@ -163,10 +163,20 @@ export function shouldShowSceneShortcut(
   return SCENE_SHORTCUT_TYPES.has(type) || hasSceneTargetHint(metadata);
 }
 
-export function getSceneShortcutVisibilityClass(showShortcut: boolean): string {
-  return showShortcut
-    ? 'opacity-100'
-    : 'opacity-0 group-hover/noti:opacity-100 group-focus-within/noti:opacity-100';
+export function getSceneShortcutVisibilityClass(): string {
+  return 'opacity-0 group-hover/noti:opacity-100 group-focus-within/noti:opacity-100';
+}
+
+export function departmentFromNotificationSheetName(sheetName: string | undefined): ScenesDeptFilter | null {
+  const normalizedSheetName = asString(sheetName);
+  if (!normalizedSheetName) return null;
+  const upperSheetName = normalizedSheetName.toUpperCase();
+
+  if (upperSheetName.endsWith('_ACT')) return 'acting';
+  if (upperSheetName.endsWith('_BG')) return 'bg';
+  if (/^EP\d+_[A-Z0-9]+$/.test(upperSheetName)) return 'bg';
+
+  return null;
 }
 
 export function resolveNotificationSceneTarget(
