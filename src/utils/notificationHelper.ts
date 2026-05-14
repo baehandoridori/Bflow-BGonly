@@ -2,7 +2,12 @@ import { toast as sonnerToast } from 'sonner';
 import { useNotificationStore, type NotificationType } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
-import { hasSceneTargetHint, resolveNotificationSceneTarget } from '@/utils/notificationSceneNavigation';
+import {
+  buildNotificationSceneModalRequest,
+  departmentFromNotificationSheetName,
+  hasSceneTargetHint,
+  resolveNotificationSceneTarget,
+} from '@/utils/notificationSceneNavigation';
 
 // ─── 알림 디스패치 ───────────────────────────────────
 export interface NotifyPayload {
@@ -21,17 +26,25 @@ export interface NotificationSettings {
 
 /** 알림 metadata로 해당 에피소드/파트/씬을 찾아 씬 뷰로 이동.
  *  매칭 실패 시 fallback: 씬 뷰로만이라도 이동 + 안내 토스트 (한솔이 직접 찾을 수 있게). */
-function navigateToScene(metadata?: Record<string, unknown>) {
+function navigateToScene(type: NotificationType, metadata?: Record<string, unknown>) {
   if (!hasSceneTargetHint(metadata)) return;
   const episodes = useDataStore.getState().episodes;
   const target = resolveNotificationSceneTarget(metadata, episodes);
   if (target) {
+    const app = useAppStore.getState();
+    const modalRequest = buildNotificationSceneModalRequest(type, metadata, target);
+    const targetDept = departmentFromNotificationSheetName(target.sheetName);
     // 한솔 보고 (v1.15.4): part 도 같이 이동해야 다른 파트의 씬으로 가도 펄스 이펙트가 보임.
     // 기존엔 setSelectedEpisode 만 호출 → 현재 part 의 시트가 그대로라 highlight 매칭 실패.
-    useAppStore.getState().setSelectedEpisode(target.episodeNumber);
-    useAppStore.getState().setSelectedPart(target.partId);
-    useAppStore.getState().setHighlightSceneId(target.sceneName);
-    useAppStore.getState().setView('scenes');
+    app.setSelectedEpisode(target.episodeNumber);
+    app.setSelectedPart(target.partId);
+    if (!modalRequest && targetDept && app.selectedDepartment !== targetDept) {
+      app.setSelectedDepartment(targetDept);
+      app.setDashboardDeptFilter(targetDept);
+    }
+    app.setHighlightSceneId(target.sceneName);
+    if (modalRequest) app.setPendingSceneModalRequest(modalRequest);
+    app.setView('scenes');
     return;
   }
   // 매칭 실패 — 씬 뷰로만이라도 이동 + 디버그 로그 (한솔이 콘솔에서 원인 파악 가능)
@@ -64,7 +77,7 @@ export function dispatchNotification(payload: NotifyPayload, settings?: Notifica
     ...(canNavigate && {
       action: {
         label: '씬 보기',
-        onClick: () => navigateToScene(payload.metadata),
+        onClick: () => navigateToScene(payload.type, payload.metadata),
       },
     }),
   });
