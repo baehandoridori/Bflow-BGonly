@@ -5,8 +5,8 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
-import type { ScenesDeptFilter } from '@/types';
 import {
+  departmentFromNotificationSheetName,
   getSceneShortcutVisibilityClass,
   resolveNotificationSceneTarget,
   shouldShowSceneShortcut,
@@ -42,12 +42,6 @@ function typeConfig(type: NotificationType) {
     // v1.25.8: 씬 담당자 배정 — 본인이 새 담당자 (강한 톤, mention 동일 시각 처리).
     case 'scene_assignment': return { icon: UserPlus, color: 'rgb(var(--color-accent))', label: '배정' };
   }
-}
-
-function departmentFromSheetName(sheetName: string): ScenesDeptFilter | null {
-  if (sheetName.endsWith('_ACT')) return 'acting';
-  if (sheetName.endsWith('_BG')) return 'bg';
-  return null;
 }
 
 // ─── 알림 항목 ───────────────────────────────────────
@@ -246,7 +240,7 @@ function NotificationDropdown() {
     const commentId = n.metadata?.commentId;
 
     if (target) {
-      const targetDept = departmentFromSheetName(target.sheetName);
+      const targetDept = departmentFromNotificationSheetName(target.sheetName);
       setSelectedEpisode(target.episodeNumber);
       const app = useAppStore.getState();
       app.setSelectedPart(target.partId);

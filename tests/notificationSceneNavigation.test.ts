@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  departmentFromNotificationSheetName,
   getSceneShortcutVisibilityClass,
   resolveNotificationSceneTarget,
   shouldShowSceneShortcut,
@@ -141,4 +142,12 @@ test('comment and mention scene shortcuts render on hover even when metadata is 
     getSceneShortcutVisibilityClass(),
     'opacity-0 group-hover/noti:opacity-100 group-focus-within/noti:opacity-100',
   );
+});
+
+test('notification sheet names infer department for current and legacy BG parts', () => {
+  assert.equal(departmentFromNotificationSheetName('EP02_B_ACT'), 'acting');
+  assert.equal(departmentFromNotificationSheetName('EP02_B_BG'), 'bg');
+  assert.equal(departmentFromNotificationSheetName('EP02_B'), 'bg');
+  assert.equal(departmentFromNotificationSheetName(''), null);
+  assert.equal(departmentFromNotificationSheetName('ARCHIVE'), null);
 });
