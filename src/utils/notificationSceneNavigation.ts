@@ -163,10 +163,8 @@ export function shouldShowSceneShortcut(
   return SCENE_SHORTCUT_TYPES.has(type) || hasSceneTargetHint(metadata);
 }
 
-export function getSceneShortcutVisibilityClass(showShortcut: boolean): string {
-  return showShortcut
-    ? 'opacity-100'
-    : 'opacity-0 group-hover/noti:opacity-100 group-focus-within/noti:opacity-100';
+export function getSceneShortcutVisibilityClass(): string {
+  return 'opacity-0 group-hover/noti:opacity-100 group-focus-within/noti:opacity-100';
 }
 
 export function resolveNotificationSceneTarget(

@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
+import type { ScenesDeptFilter } from '@/types';
 import {
   getSceneShortcutVisibilityClass,
   resolveNotificationSceneTarget,
@@ -43,20 +44,26 @@ function typeConfig(type: NotificationType) {
   }
 }
 
+function departmentFromSheetName(sheetName: string): ScenesDeptFilter | null {
+  if (sheetName.endsWith('_ACT')) return 'acting';
+  if (sheetName.endsWith('_BG')) return 'bg';
+  return null;
+}
+
 // ─── 알림 항목 ───────────────────────────────────────
 function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (n: AppNotification) => void }) {
   const markAsRead = useNotificationStore((s) => s.markAsRead);
   const removeNotification = useNotificationStore((s) => s.removeNotification);
   const cfg = typeConfig(n.type);
   const Icon = cfg.icon;
-  // 멘션·댓글 알림은 metadata 가 부족해도 "씬 보기" 버튼을 노출한다.
-  // hover 없는 환경에서도 바로가기 버튼이 사라지지 않도록 scene shortcut 은 기본 표시한다.
+  // 멘션·댓글 알림은 metadata 가 부족해도 "씬 보기" 버튼을 만든다.
+  // 노출 방식은 기존 알림 액션과 동일하게 hover/focus 때만 보여준다.
   const hasNavigateTarget = shouldShowSceneShortcut(n.type, n.metadata);
   // v1.24.0: 멘션 알림 — 더 강한 시각 신호 (액센트 좌측 바 + @ 배지 + 카드 배경 진한 alpha).
   // v1.25.5: acting_feedback 도 멘션과 동일한 강한 톤 (검수 요청은 즉시 인지 필요).
   // v1.25.8: scene_assignment 도 동일 — 담당자 배정은 즉시 인지 필요.
   const isMention = n.type === 'mention' || n.type === 'acting_feedback' || n.type === 'scene_assignment';
-  const actionVisibilityClass = getSceneShortcutVisibilityClass(hasNavigateTarget);
+  const actionVisibilityClass = getSceneShortcutVisibilityClass();
 
   const handleItemClick = () => {
     if (!n.isRead) markAsRead(n.id);
@@ -119,8 +126,7 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
         <span className="text-[10px] text-text-secondary/50 mt-1 block">{timeAgo(n.createdAt)}</span>
       </div>
 
-      {/* 씬 관련 알림은 no-hover 환경에서도 바로가기 버튼이 보여야 한다.
-          본문 클릭은 그대로 자동 (씬 이동 + 읽음). 액션 버튼은 stopPropagation 으로 분리. */}
+      {/* 본문 클릭은 그대로 자동 (씬 이동 + 읽음). 액션 버튼은 stopPropagation 으로 분리. */}
       <div className={cn('flex items-center gap-1 self-start mt-0.5 flex-shrink-0 transition-opacity', actionVisibilityClass)}>
         {hasNavigateTarget && (
           <button
@@ -240,8 +246,14 @@ function NotificationDropdown() {
     const commentId = n.metadata?.commentId;
 
     if (target) {
+      const targetDept = departmentFromSheetName(target.sheetName);
       setSelectedEpisode(target.episodeNumber);
-      useAppStore.getState().setSelectedPart(target.partId);
+      const app = useAppStore.getState();
+      app.setSelectedPart(target.partId);
+      if (!isCommentLikeNotif && targetDept && app.selectedDepartment !== targetDept) {
+        app.setSelectedDepartment(targetDept);
+        app.setDashboardDeptFilter(targetDept);
+      }
       setHighlightSceneId(target.sceneName);
       setView('scenes');
       setPanelOpen(false);

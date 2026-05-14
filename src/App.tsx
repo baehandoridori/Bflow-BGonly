@@ -787,6 +787,7 @@ export default function App() {
             metadata: {
               sceneId: m.sceneUuid ?? undefined,
               sceneName: m.sceneId,
+              sheetName: m.sheetName,
               changedBy: m.senderName,
               feedbackNotificationId: m.id,
               feedbackTransition: transitionLabel,
@@ -872,6 +873,7 @@ export default function App() {
             metadata: {
               sceneId: m.sceneUuid,
               sceneName: m.sceneId,
+              sheetName: m.sheetName,
               changedBy: m.senderName,
               assignmentNotificationId: m.id,
               assignmentTransition: transitionLabel,
@@ -1526,6 +1528,7 @@ export default function App() {
           metadata: {
             sceneId: ap.sceneUuid,
             sceneName: ap.sceneId,
+            sheetName: ap.sheetName,
             changedBy: ap.senderName,
             assignmentTransition: transitionLabel,
             assignmentNotificationId: ap.notificationId,
@@ -1588,6 +1591,7 @@ export default function App() {
         metadata: {
           sceneId: p.sceneUuid,
           sceneName: p.sceneId,
+          sheetName: p.sheetName,
           changedBy: p.senderName,
           feedbackTransition: transitionLabel,
           feedbackNotificationId: myFeedbackNotificationId,
