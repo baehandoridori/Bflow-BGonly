@@ -5,8 +5,10 @@ export interface NotificationSceneMetadata {
   sceneName?: string;
   sheetName?: string;
   partId?: string;
+  commentId?: string;
   commentSceneId?: string;
   commentPartId?: string;
+  revisionId?: string;
 }
 
 export interface NotificationSceneTarget {
@@ -15,6 +17,17 @@ export interface NotificationSceneTarget {
   sheetName: string;
   sceneUuid?: string;
   sceneName: string;
+}
+
+export interface NotificationSceneModalRequest {
+  sceneUuid?: string;
+  sceneName: string;
+  episodeNumber: number;
+  partId: string;
+  initialTab: 'detail' | 'revisions';
+  focusRevisionId?: string;
+  focusCommentId?: string;
+  forceDeptFilter?: 'all' | 'bg' | 'acting';
 }
 
 type NotificationShortcutType =
@@ -175,6 +188,38 @@ export function departmentFromNotificationSheetName(sheetName: string | undefine
   if (upperSheetName.endsWith('_ACT')) return 'acting';
   if (upperSheetName.endsWith('_BG')) return 'bg';
   if (/^EP\d+_[A-Z0-9]+$/.test(upperSheetName)) return 'bg';
+
+  return null;
+}
+
+export function buildNotificationSceneModalRequest(
+  type: NotificationShortcutType | string,
+  metadata: NotificationSceneMetadata | Record<string, unknown> | undefined | null,
+  target: NotificationSceneTarget,
+): NotificationSceneModalRequest | null {
+  const base = {
+    sceneUuid: target.sceneUuid,
+    sceneName: target.sceneName,
+    episodeNumber: target.episodeNumber,
+    partId: target.partId,
+  };
+
+  if (type === 'comment' || type === 'mention') {
+    return {
+      ...base,
+      initialTab: 'detail',
+      focusCommentId: asString(metadata?.commentId),
+      forceDeptFilter: 'all',
+    };
+  }
+
+  if (type === 'revision') {
+    return {
+      ...base,
+      initialTab: 'revisions',
+      focusRevisionId: asString(metadata?.revisionId),
+    };
+  }
 
   return null;
 }

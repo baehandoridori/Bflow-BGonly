@@ -6,6 +6,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
 import {
+  buildNotificationSceneModalRequest,
   departmentFromNotificationSheetName,
   getSceneShortcutVisibilityClass,
   resolveNotificationSceneTarget,
@@ -218,8 +219,6 @@ function NotificationDropdown() {
 
   const handleNavigate = (n: AppNotification) => {
     const target = resolveNotificationSceneTarget(n.metadata, useDataStore.getState().episodes);
-    const isRevisionNotif = n.type === 'revision';
-    const revisionId = n.metadata?.revisionId;
     const isCommentLikeNotif = n.type === 'comment' || n.type === 'mention';
     const isActingFeedbackNotif = n.type === 'acting_feedback';
     const feedbackNotificationId = n.metadata?.feedbackNotificationId;
@@ -237,10 +236,9 @@ function NotificationDropdown() {
         .then(({ markAssignmentNotificationRead }) => markAssignmentNotificationRead(assignmentNotificationId))
         .catch((err) => console.warn('[NotificationPanel] markAssignmentNotificationRead 실패:', err));
     }
-    const commentId = n.metadata?.commentId;
-
     if (target) {
       const targetDept = departmentFromNotificationSheetName(target.sheetName);
+      const modalRequest = buildNotificationSceneModalRequest(n.type, n.metadata, target);
       setSelectedEpisode(target.episodeNumber);
       const app = useAppStore.getState();
       app.setSelectedPart(target.partId);
@@ -252,25 +250,8 @@ function NotificationDropdown() {
       setView('scenes');
       setPanelOpen(false);
 
-      if (isRevisionNotif) {
-        useAppStore.getState().setPendingSceneModalRequest({
-          sceneUuid: target.sceneUuid,
-          sceneName: target.sceneName,
-          episodeNumber: target.episodeNumber,
-          partId: target.partId,
-          initialTab: 'revisions',
-          focusRevisionId: revisionId,
-        });
-      } else if (isCommentLikeNotif && commentId) {
-        useAppStore.getState().setPendingSceneModalRequest({
-          sceneUuid: target.sceneUuid,
-          sceneName: target.sceneName,
-          episodeNumber: target.episodeNumber,
-          partId: target.partId,
-          initialTab: 'detail',
-          focusCommentId: commentId,
-          forceDeptFilter: 'all',
-        });
+      if (modalRequest) {
+        useAppStore.getState().setPendingSceneModalRequest(modalRequest);
       }
       return;
     }

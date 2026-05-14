@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildNotificationSceneModalRequest,
   departmentFromNotificationSheetName,
   getSceneShortcutVisibilityClass,
   resolveNotificationSceneTarget,
@@ -153,4 +154,51 @@ test('notification sheet names infer department for current and legacy BG parts'
   assert.equal(departmentFromNotificationSheetName('ep02_b'), 'bg');
   assert.equal(departmentFromNotificationSheetName(''), null);
   assert.equal(departmentFromNotificationSheetName('ARCHIVE'), null);
+});
+
+test('comment and mention scene shortcuts request the detail modal and focused comment', () => {
+  const target = resolveNotificationSceneTarget(
+    {
+      commentPartId: 'part-act-uuid',
+      commentSceneId: '18',
+      commentId: 'comment-1',
+    },
+    episodes,
+  );
+  assert.ok(target);
+  assert.deepEqual(
+    buildNotificationSceneModalRequest('mention', { commentId: 'comment-1' }, target),
+    {
+      sceneUuid: 'scene-act-uuid',
+      sceneName: 'b018_act',
+      episodeNumber: 2,
+      partId: 'B',
+      initialTab: 'detail',
+      focusCommentId: 'comment-1',
+      forceDeptFilter: 'all',
+    },
+  );
+});
+
+test('legacy comment shortcuts still open the detail modal when comment id is missing', () => {
+  const target = resolveNotificationSceneTarget(
+    {
+      commentPartId: 'part-act-uuid',
+      commentSceneId: '18',
+    },
+    episodes,
+  );
+  assert.ok(target);
+  assert.deepEqual(
+    buildNotificationSceneModalRequest('comment', {}, target),
+    {
+      sceneUuid: 'scene-act-uuid',
+      sceneName: 'b018_act',
+      episodeNumber: 2,
+      partId: 'B',
+      initialTab: 'detail',
+      focusCommentId: undefined,
+      forceDeptFilter: 'all',
+    },
+  );
 });
