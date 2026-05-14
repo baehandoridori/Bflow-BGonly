@@ -28,6 +28,10 @@ export interface AppNotification {
     toStage?: string;
     changedBy?: string;
     commentId?: string;
+    /** comments.scene_id — 댓글 저장용 scene.no(sort_order). scene_uuid 없는 알림의 정확한 fallback */
+    commentSceneId?: string;
+    /** comments.part_id — 댓글이 저장된 Supabase part UUID */
+    commentPartId?: string;
     /** v1.18.0: 리비전 알림 — 클릭 시 해당 리비전 패널로 이동 */
     revisionId?: string;
     /** v1.18.0: 리비전 알림 액션 종류 */

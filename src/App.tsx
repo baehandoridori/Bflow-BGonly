@@ -697,13 +697,17 @@ export default function App() {
             }
           }
           store.addNotification({
-            type: 'comment',
+            type: 'mention',
             title: `${c.userName || '누군가'}님이 나를 태그했습니다`,
             body: c.text ? (c.text.length > 50 ? c.text.slice(0, 50) + '...' : c.text) : undefined,
-            // scene 매칭 성공 시 UUID + 사용자 sceneId 둘 다. 못 찾아도 sceneUuid 라도 넣어 '씬 보기' 버튼은 노출
-            metadata: scene
-              ? { sceneId: scene.id, sceneName: scene.sceneId }
-              : (c.sceneUuid ? { sceneId: c.sceneUuid } : undefined),
+            // scene_uuid 없는 오래된 댓글도 part_uuid + sort_order 로 정확히 찾아갈 수 있게 storage hint 보존.
+            metadata: {
+              sceneId: scene?.id ?? c.sceneUuid ?? undefined,
+              sceneName: scene?.sceneId,
+              commentId: c.id,
+              commentSceneId: c.sceneId,
+              commentPartId: c.partId,
+            },
           });
         }
         // 요약 토스트 1번 (한솔이 인지)
@@ -1122,6 +1126,8 @@ export default function App() {
                     // newComment.scene_uuid 폴백 — 라우팅이 sceneId/sceneName 의존이라 누락 시 알림 클릭이 동작 안 함.
                     sceneId: sceneByUuid?.id ?? newComment.scene_uuid,
                     sceneName: sceneByUuid?.sceneId,
+                    commentSceneId: newComment.scene_id,
+                    commentPartId: newComment.part_id,
                     revisionId: newComment.revision_id,
                     revisionAction: 'comment',
                   } as Record<string, unknown>,
@@ -1214,6 +1220,8 @@ export default function App() {
                   sceneId: scene?.id ?? newComment.scene_uuid,
                   sceneName: scene?.sceneId,
                   commentId: newComment.id,
+                  commentSceneId: newComment.scene_id,
+                  commentPartId: newComment.part_id,
                 };
                 if (newComment.parent_comment_id) {
                   baseMetadata.parentCommentId = newComment.parent_comment_id;
@@ -1799,6 +1807,8 @@ export default function App() {
               sceneId: scene?.id,
               sceneName: scene?.sceneId,
               commentId: commentCid ?? undefined,
+              commentSceneId: commentSceneNumber,
+              commentPartId: commentPartId ?? undefined,
               ...(commentParent ? { parentCommentId: commentParent } : {}),
             };
             const bodyShort = commentText
