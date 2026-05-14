@@ -148,6 +148,9 @@ test('notification sheet names infer department for current and legacy BG parts'
   assert.equal(departmentFromNotificationSheetName('EP02_B_ACT'), 'acting');
   assert.equal(departmentFromNotificationSheetName('EP02_B_BG'), 'bg');
   assert.equal(departmentFromNotificationSheetName('EP02_B'), 'bg');
+  assert.equal(departmentFromNotificationSheetName('ep02_b_act'), 'acting');
+  assert.equal(departmentFromNotificationSheetName('ep02_b_bg'), 'bg');
+  assert.equal(departmentFromNotificationSheetName('ep02_b'), 'bg');
   assert.equal(departmentFromNotificationSheetName(''), null);
   assert.equal(departmentFromNotificationSheetName('ARCHIVE'), null);
 });

@@ -170,10 +170,11 @@ export function getSceneShortcutVisibilityClass(): string {
 export function departmentFromNotificationSheetName(sheetName: string | undefined): ScenesDeptFilter | null {
   const normalizedSheetName = asString(sheetName);
   if (!normalizedSheetName) return null;
+  const upperSheetName = normalizedSheetName.toUpperCase();
 
-  if (normalizedSheetName.endsWith('_ACT')) return 'acting';
-  if (normalizedSheetName.endsWith('_BG')) return 'bg';
-  if (/^EP\d+_[A-Z0-9]+$/i.test(normalizedSheetName)) return 'bg';
+  if (upperSheetName.endsWith('_ACT')) return 'acting';
+  if (upperSheetName.endsWith('_BG')) return 'bg';
+  if (/^EP\d+_[A-Z0-9]+$/.test(upperSheetName)) return 'bg';
 
   return null;
 }
