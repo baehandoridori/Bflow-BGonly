@@ -2,6 +2,9 @@ import { useBulkOperationsStore, type OpKind } from '@/stores/useBulkOperationsS
 import { useDataStore } from '@/stores/useDataStore';
 import type { BulkUpdateResult, MergedScene, Part, Scene } from '@/types';
 
+// v1.25.12 — 머지드 단위 카운트 헬퍼 재노출 (테스트 격리 위해 별도 파일).
+export { countSelectedScenes } from './bulkSelectionCount';
+
 const MERGED_KEY_PREFIX = { bg: 'bg:', act: 'act:' } as const;
 
 function findSceneInPart(part: Part | null | undefined, sceneId: string): Scene | undefined {

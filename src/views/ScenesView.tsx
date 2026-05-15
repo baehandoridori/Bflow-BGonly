@@ -661,6 +661,7 @@ import {
   runBulkOp,
   resolveSelectedUuids,
   resolveSelectedScenes,
+  countSelectedScenes,
 } from '@/utils/bulkOperations';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
@@ -2727,12 +2728,17 @@ export function ScenesView() {
   };
 
   // 일괄 삭제: ConfirmDialog → RPC 경유, runBulkOp가 낙관적 제거 처리 (Tasks 13-17)
+  // v1.25.12: 카운트는 사용자 보는 단위(머지드 카드)로 표기 — 내부 row 수 X.
   const handleBulkDelete = async () => {
     const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes, currentPart);
     if (uuids.length === 0) return;
 
+    const sceneCount = countSelectedScenes(selectedSceneIds, allMergedScenes, currentPart);
+    const isUnified = selectedDepartment === 'all';
+    const suffix = isUnified ? ' (BG·액팅 양쪽 적용)' : '';
+
     const ok = await ConfirmDialog.show({
-      message: `${uuids.length}개의 씬을 삭제하시겠습니까?`,
+      message: `씬 ${sceneCount}개를 삭제하시겠습니까?${suffix}`,
       confirmLabel: '삭제',
       tone: 'danger',
     });
