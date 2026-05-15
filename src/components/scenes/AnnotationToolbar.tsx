@@ -11,7 +11,8 @@ import { cn } from '@/utils/cn';
 export type DrawTool = 'pen' | 'line' | 'arrow' | 'rect' | 'circle' | 'text' | 'erase';
 
 export const COLORS = ['#EB5757', '#FDCB6E', '#00B894', '#74B9FF', '#A29BFE', '#FFFFFF', '#0F1117'] as const;
-export const STROKE_WIDTHS = [2, 4, 8] as const;
+export const STROKE_MIN = 1;
+export const STROKE_MAX = 24;
 
 interface AnnotationToolbarProps {
   tool: DrawTool;
@@ -112,27 +113,28 @@ export function AnnotationToolbar({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <span className="text-text-secondary/70 text-[11px] font-semibold">굵기</span>
-          {[
-            { w: 2, label: 'S' },
-            { w: 4, label: 'M' },
-            { w: 8, label: 'L' },
-          ].map(({ w, label }) => (
-            <button
-              key={w}
-              type="button"
-              onClick={() => onStrokeChange(w)}
-              className={cn(
-                'w-7 h-7 rounded-md border text-[11px] font-semibold',
-                strokeWidth === w
-                  ? 'bg-accent/20 text-accent-sub border-accent/50'
-                  : 'border-bg-border text-text-secondary',
-              )}
-            >
-              {label}
-            </button>
-          ))}
+          {/* 굵기 미리보기 점 */}
+          <span
+            aria-hidden
+            className="inline-block rounded-full"
+            style={{
+              width: Math.max(2, Math.min(strokeWidth, 18)),
+              height: Math.max(2, Math.min(strokeWidth, 18)),
+              background: color,
+              border: color === '#FFFFFF' ? '1px solid rgb(var(--color-bg-border))' : undefined,
+            }}
+          />
+          <input
+            type="range"
+            min={STROKE_MIN}
+            max={STROKE_MAX}
+            value={strokeWidth}
+            onChange={(e) => onStrokeChange(parseInt(e.target.value, 10))}
+            className="w-24 accent-accent-sub"
+          />
+          <span className="text-text-primary tabular-nums w-7 text-right text-[11px]">{strokeWidth}px</span>
         </div>
 
         <div className="flex items-center gap-1.5">

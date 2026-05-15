@@ -274,6 +274,28 @@ export function ImageModal({
     });
   }, [inferImageType]);
 
+  // v1.26.1: framer-motion 의 motion.div 가 native contextmenu 를 합성 이벤트로 전달 안 하는 케이스 대응.
+  //          document 레벨 capture phase 리스너로 imageAreaRef 안의 우클릭을 가로챈다.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const area = imageAreaRef.current;
+      if (!area) return;
+      const target = e.target as HTMLElement | null;
+      if (!target || !area.contains(target)) return;
+      // 툴바/메뉴/입력 등 정상 컨텍스트는 통과
+      if (target.closest('button, input, [role="menu"], [data-allow-context-menu]')) return;
+      e.preventDefault();
+      const rect = area.getBoundingClientRect();
+      setCtxMenu({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+        imageType: inferImageType(e.clientX),
+      });
+    };
+    document.addEventListener('contextmenu', handler, true);
+    return () => document.removeEventListener('contextmenu', handler, true);
+  }, [inferImageType]);
+
   const openMenuFromMoreBtn = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     const btnRect = (e.currentTarget as HTMLElement).getBoundingClientRect();

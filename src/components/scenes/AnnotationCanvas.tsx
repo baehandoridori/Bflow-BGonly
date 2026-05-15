@@ -276,6 +276,58 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       setTextValue('');
     }, [textInput, textValue, color, opacity, strokeWidth, getCtx, saveSnapshot]);
 
+    // 텍스트 입력 박스 드래그 이동 (확정 전 위치 조정)
+    const textDragRef = useRef<{ startScreenX: number; startScreenY: number; startMouseX: number; startMouseY: number } | null>(null);
+    const handleTextDragMouseMove = useCallback((e: MouseEvent) => {
+      if (!textDragRef.current) return;
+      const { startScreenX, startScreenY, startMouseX, startMouseY } = textDragRef.current;
+      const dx = e.clientX - startMouseX;
+      const dy = e.clientY - startMouseY;
+      setTextInput((prev) => prev ? {
+        ...prev,
+        screenX: startScreenX + dx,
+        screenY: startScreenY + dy,
+        canvasX: prev.canvasX + dx * (canvasRef.current ? canvasRef.current.width / canvasRef.current.getBoundingClientRect().width : 1) - (prev.canvasX - prev.canvasX), // 단순화 — 실제 canvasX 갱신은 별도
+      } : prev);
+    }, []);
+    const handleTextDragMouseUp = useCallback(() => {
+      textDragRef.current = null;
+      document.removeEventListener('mousemove', handleTextDragMouseMove);
+      document.removeEventListener('mouseup', handleTextDragMouseUp);
+    }, [handleTextDragMouseMove]);
+    const beginTextDrag = useCallback((e: React.MouseEvent) => {
+      if (!textInput) return;
+      e.preventDefault();
+      e.stopPropagation();
+      textDragRef.current = {
+        startScreenX: textInput.screenX,
+        startScreenY: textInput.screenY,
+        startMouseX: e.clientX,
+        startMouseY: e.clientY,
+      };
+      document.addEventListener('mousemove', handleTextDragMouseMove);
+      document.addEventListener('mouseup', handleTextDragMouseUp);
+    }, [textInput, handleTextDragMouseMove, handleTextDragMouseUp]);
+
+    // 텍스트 드래그 후 캔버스 좌표도 동기화
+    useEffect(() => {
+      if (!textInput) return;
+      const c = canvasRef.current;
+      const container = containerRef.current;
+      if (!c || !container) return;
+      const cRect = c.getBoundingClientRect();
+      const contRect = container.getBoundingClientRect();
+      // screenX/Y 는 container 기준 → canvas 화면 좌표 = screen - (cRect.left - contRect.left)
+      const xOnCanvas = textInput.screenX - (cRect.left - contRect.left);
+      const yOnCanvas = textInput.screenY - (cRect.top - contRect.top);
+      const newCanvasX = (xOnCanvas * c.width) / cRect.width;
+      const newCanvasY = (yOnCanvas * c.height) / cRect.height;
+      if (newCanvasX !== textInput.canvasX || newCanvasY !== textInput.canvasY) {
+        setTextInput((prev) => prev ? { ...prev, canvasX: newCanvasX, canvasY: newCanvasY } : prev);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [textInput?.screenX, textInput?.screenY]);
+
     return (
       <div ref={containerRef} className="relative w-full h-full flex items-center justify-center bg-[#0a0c12] overflow-hidden select-none">
         <img
@@ -303,27 +355,44 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
           onMouseLeave={() => { drawingRef.current = false; }}
         />
 
-        {/* v1.26.1: 텍스트 inline 입력 박스 — window.prompt 차단 환경 대응 */}
+        {/* v1.26.1: 텍스트 inline 입력 박스 — window.prompt 차단 환경 대응 + 드래그로 위치 이동 */}
         {textInput && (
-          <input
-            ref={textInputRef}
-            type="text"
-            value={textValue}
-            onChange={(e) => setTextValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); commitText(); }
-              else if (e.key === 'Escape') { e.preventDefault(); setTextInput(null); setTextValue(''); }
-            }}
-            onBlur={commitText}
-            placeholder="텍스트 입력 후 Enter"
-            className="absolute z-30 bg-bg-card border border-accent rounded px-2 py-1 text-sm outline-none shadow-lg"
-            style={{
-              left: textInput.screenX,
-              top: textInput.screenY,
-              color: color,
-              minWidth: 140,
-            }}
-          />
+          <div
+            className="absolute z-30 flex items-stretch shadow-lg"
+            style={{ left: textInput.screenX, top: textInput.screenY }}
+            data-allow-context-menu
+          >
+            {/* 드래그 핸들 */}
+            <div
+              onMouseDown={beginTextDrag}
+              className="bg-accent text-white px-1.5 rounded-l flex items-center cursor-move select-none"
+              title="드래그로 이동"
+              aria-label="텍스트 위치 이동"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+            </div>
+            <input
+              ref={textInputRef}
+              type="text"
+              value={textValue}
+              onChange={(e) => setTextValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitText(); }
+                else if (e.key === 'Escape') { e.preventDefault(); setTextInput(null); setTextValue(''); }
+              }}
+              onBlur={() => {
+                // 드래그 중에는 blur 로 확정 X — 핸들 mousedown 으로 인한 일시 blur 가드
+                if (textDragRef.current) {
+                  setTimeout(() => textInputRef.current?.focus(), 0);
+                  return;
+                }
+                commitText();
+              }}
+              placeholder="텍스트 입력 후 Enter"
+              className="bg-bg-card border border-accent border-l-0 rounded-r px-2 py-1 text-sm outline-none"
+              style={{ color, minWidth: 140 }}
+            />
+          </div>
         )}
 
         <AnnotationToolbar
