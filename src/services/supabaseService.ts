@@ -251,8 +251,22 @@ export async function writeMetadataToSupabase(type: string, key: string, value: 
 
 import { useDataStore } from '../stores/useDataStore';
 import { useAuthStore } from '../stores/useAuthStore';
+import { waitForSceneUuidWithStore } from '../utils/sceneUuidPolling';
 
 const SCENE_COMPLETION_META_TYPE = 'scene-completion';
+
+/**
+ * v1.25.12 — 옵티미스틱 추가된 씬의 UUID 가 채워질 때까지 폴링.
+ * 씬 추가 직후 이미지 업로드 같은 후속 작업에서 사용.
+ * 타임아웃이면 null 반환 — 호출자가 토스트로 안내.
+ */
+export async function waitForSceneUuid(
+  sheetName: string,
+  sceneId: string,
+  timeoutMs: number = 2000,
+): Promise<string | null> {
+  return waitForSceneUuidWithStore(() => useDataStore.getState(), sheetName, sceneId, timeoutMs);
+}
 
 /** sheetName + sceneIndex → scene UUID 조회 (스토어에서) */
 function resolveSceneUuid(sheetName: string, sceneIndex: number): string {
