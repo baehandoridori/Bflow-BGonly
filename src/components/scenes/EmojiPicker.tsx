@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export const QUICK_EMOJIS = ['✅', '👍', '❤️', '👀', '🎉', '🙏', '🔥'] as const;
 
@@ -51,11 +52,25 @@ export function EmojiPicker({ open, onPick, onClose, anchorEl }: EmojiPickerProp
 
   const list = showAll ? [...QUICK_EMOJIS, ...EXTRA_EMOJIS] : [...QUICK_EMOJIS];
 
-  return (
+  // v1.26.1: Portal + anchor 기준 위치 계산 — 댓글 패널 overflow 에 잘리지 않게.
+  const width = showAll ? 280 : 220;
+  const height = showAll ? 320 : 80;
+  let top = 0;
+  let left = 0;
+  if (anchorEl) {
+    const rect = anchorEl.getBoundingClientRect();
+    top = rect.top - height - 8;
+    if (top < 8) top = rect.bottom + 8;
+    left = rect.left;
+    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+    if (left < 8) left = 8;
+  }
+
+  return createPortal(
     <div
       ref={ref}
-      className="absolute z-50 bottom-full mb-2 left-0 bg-bg-card border border-bg-border rounded-xl p-2 shadow-2xl"
-      style={{ width: showAll ? 280 : 220 }}
+      className="fixed z-[10001] bg-bg-card border border-bg-border rounded-xl p-2 shadow-2xl"
+      style={{ width, top, left }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="grid grid-cols-7 gap-1">
@@ -83,6 +98,7 @@ export function EmojiPicker({ open, onPick, onClose, anchorEl }: EmojiPickerProp
           + 더 많은 이모지
         </button>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

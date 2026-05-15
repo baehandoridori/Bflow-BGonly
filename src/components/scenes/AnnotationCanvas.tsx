@@ -52,6 +52,19 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
     const historyIndexRef = useRef(-1);
     const hasDrawnRef = useRef(false);
 
+    // v1.26.1: window.prompt 가 Electron renderer 에서 차단되므로
+    //          텍스트 도구는 캔버스 위 inline input 으로 입력받는다.
+    //          screenPos: 입력 박스 표시 위치 (display pixel)
+    //          canvasPos: 그릴 때 사용할 캔버스 좌표
+    const [textInput, setTextInput] = useState<{
+      screenX: number;
+      screenY: number;
+      canvasX: number;
+      canvasY: number;
+    } | null>(null);
+    const [textValue, setTextValue] = useState('');
+    const textInputRef = useRef<HTMLInputElement>(null);
+
     // 이미지 자연 크기에 맞춰 캔버스 크기 설정
     useEffect(() => {
       const img = imgRef.current;
@@ -182,13 +195,17 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       ctx.globalCompositeOperation = tool === 'erase' ? 'destination-out' : 'source-over';
 
       if (tool === 'text') {
-        const text = window.prompt('텍스트를 입력하세요:');
-        if (text && text.trim()) {
-          const fontSize = strokeWidth * 4 * scale;
-          ctx.font = `${fontSize}px "Pretendard", sans-serif`;
-          ctx.fillText(text, p.x, p.y);
-          saveSnapshot();
-        }
+        // window.prompt 차단 환경 대응 — 캔버스 위 inline input
+        const containerRect = containerRef.current?.getBoundingClientRect();
+        if (!containerRect) return;
+        setTextInput({
+          screenX: e.clientX - containerRect.left,
+          screenY: e.clientY - containerRect.top,
+          canvasX: p.x,
+          canvasY: p.y,
+        });
+        setTextValue('');
+        setTimeout(() => textInputRef.current?.focus(), 0);
         return;
       }
 
@@ -236,8 +253,31 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       return () => document.removeEventListener('keydown', handler);
     }, [handleUndo]);
 
+    const commitText = useCallback(() => {
+      if (!textInput || !textValue.trim()) {
+        setTextInput(null);
+        setTextValue('');
+        return;
+      }
+      const ctx = getCtx();
+      const c = canvasRef.current;
+      if (!ctx || !c) return;
+      const displayW = c.getBoundingClientRect().width;
+      const scale = c.width / Math.max(1, displayW);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = opacity / 100;
+      ctx.globalCompositeOperation = 'source-over';
+      const fontSize = strokeWidth * 4 * scale;
+      ctx.font = `${fontSize}px "Pretendard", sans-serif`;
+      ctx.textBaseline = 'top';
+      ctx.fillText(textValue, textInput.canvasX, textInput.canvasY);
+      saveSnapshot();
+      setTextInput(null);
+      setTextValue('');
+    }, [textInput, textValue, color, opacity, strokeWidth, getCtx, saveSnapshot]);
+
     return (
-      <div ref={containerRef} className="relative w-full h-full flex items-center justify-center bg-[#0a0c12] overflow-hidden">
+      <div ref={containerRef} className="relative w-full h-full flex items-center justify-center bg-[#0a0c12] overflow-hidden select-none">
         <img
           ref={imgRef}
           src={imageUrl}
@@ -255,12 +295,36 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
             width: imgRef.current?.clientWidth ?? '100%',
             height: imgRef.current?.clientHeight ?? '100%',
             cursor: tool === 'text' ? 'text' : tool === 'erase' ? 'cell' : 'crosshair',
+            userSelect: 'none',
           }}
-          onMouseDown={handleMouseDown}
+          onMouseDown={(e) => { e.preventDefault(); handleMouseDown(e); }}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={() => { drawingRef.current = false; }}
         />
+
+        {/* v1.26.1: 텍스트 inline 입력 박스 — window.prompt 차단 환경 대응 */}
+        {textInput && (
+          <input
+            ref={textInputRef}
+            type="text"
+            value={textValue}
+            onChange={(e) => setTextValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitText(); }
+              else if (e.key === 'Escape') { e.preventDefault(); setTextInput(null); setTextValue(''); }
+            }}
+            onBlur={commitText}
+            placeholder="텍스트 입력 후 Enter"
+            className="absolute z-30 bg-bg-card border border-accent rounded px-2 py-1 text-sm outline-none shadow-lg"
+            style={{
+              left: textInput.screenX,
+              top: textInput.screenY,
+              color: color,
+              minWidth: 140,
+            }}
+          />
+        )}
 
         <AnnotationToolbar
           tool={tool}

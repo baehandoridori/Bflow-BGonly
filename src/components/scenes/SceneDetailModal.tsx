@@ -1153,6 +1153,7 @@ export function SceneDetailModal({
       {/* 이미지 전체 뷰 모달 — ACT 모달이면 BG 에서 가져온 읽기 전용 URL 사용 */}
       {showImageModal && (
         <ImageModal
+          key="detail-image-modal"
           storyboardUrl={department === 'bg' ? scene.storyboardUrl : (readOnlyStoryboardUrl ?? '')}
           guideUrl={department === 'bg' ? scene.guideUrl : (readOnlyGuideUrl ?? '')}
           sceneId={scene.sceneId}

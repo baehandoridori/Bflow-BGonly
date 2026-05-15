@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Columns2, Layers, ZoomIn, ZoomOut, Maximize, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { cn } from '@/utils/cn';
@@ -399,14 +400,35 @@ export function ImageModal({
   };
 
   /* ────────────────────── 렌더 ────────────────────── */
-  return (
+  // v1.26.1: createPortal 로 document.body 에 렌더 — 부모의 stacking context (사이드바 등) 회피
+  return createPortal(
     <AnimatePresence>
       <motion.div
+        key="image-modal-backdrop"
+        data-no-lasso
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-overlay/80 backdrop-blur-sm"
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/80 backdrop-blur-sm"
         onClick={handleBackdrop}
+        onMouseDown={(e) => e.stopPropagation()}
+        onContextMenu={(e) => {
+          // v1.26.1: framer-motion 내부 motion.div 가 contextmenu 를 가로채는 경우 대비
+          //          backdrop 단계에서 받아 imageAreaRef 좌표로 변환해 직접 처리.
+          const target = e.target as HTMLElement;
+          // 툴바/메뉴 등 정상 컨텍스트가 필요한 영역은 통과
+          if (target.closest('button, input, [role="menu"]')) return;
+          e.preventDefault();
+          const rect = imageAreaRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          // imageAreaRef 영역 안에서 발생한 우클릭만 처리
+          if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+          setCtxMenu({
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+            imageType: inferImageType(e.clientX),
+          });
+        }}
       >
         {/* ─── 상단 툴바 ─── */}
         <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-bg-card/90 border border-bg-border rounded-xl px-4 py-2 z-10">
@@ -894,7 +916,8 @@ export function ImageModal({
           );
         })()}
       </motion.div>
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }
 
