@@ -11,6 +11,9 @@ import { pickLatestVersion } from '@/utils/imageVersionUtils';
 import type { ImageVersion } from '@/types';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { AnnotationCanvas, type AnnotationCanvasHandle } from './AnnotationCanvas';
+import { composeAnnotation } from '@/utils/imageCompose';
+import { Check } from 'lucide-react';
 
 /**
  * 뷰 상태:
@@ -153,6 +156,79 @@ export function ImageModal({
     input.click();
   }, [sceneUuid, currentUserId, onUploadImage]);
 
+  // v1.26.0: 주석 모드 state
+  const [annotateMode, setAnnotateMode] = useState<{ imageType: 'storyboard' | 'guide' } | null>(null);
+  const annotationRef = useRef<AnnotationCanvasHandle>(null);
+
+  const enterAnnotate = useCallback((imageType: 'storyboard' | 'guide') => {
+    if (!sceneUuid) {
+      toast.error('주석 모드를 사용할 수 없습니다 (씬 정보 없음)');
+      return;
+    }
+    setAnnotateMode({ imageType });
+  }, [sceneUuid]);
+
+  const exitAnnotate = useCallback(() => {
+    const isEmpty = annotationRef.current?.isEmpty() ?? true;
+    if (!isEmpty) {
+      if (!confirm('주석을 모두 버리고 닫으시겠습니까?')) return;
+    }
+    annotationRef.current?.clear();
+    setAnnotateMode(null);
+  }, []);
+
+  const saveAnnotation = useCallback(async () => {
+    if (!annotateMode || !sceneUuid || !currentUserId) return;
+    const canvas = annotationRef.current?.getCanvas();
+    if (!canvas) {
+      toast.error('주석 캔버스를 찾을 수 없습니다');
+      return;
+    }
+    if (annotationRef.current?.isEmpty()) {
+      toast.error('아직 그린 내용이 없어요');
+      return;
+    }
+    const type = annotateMode.imageType;
+    const versions = type === 'guide' ? guideVersions : storyboardVersions;
+    const currentVerId = type === 'guide' ? currentGuideId : currentStoryboardId;
+    const currentVer = versions.find((v) => v.id === currentVerId);
+    if (!currentVer) {
+      toast.error('현재 버전 정보를 찾을 수 없습니다');
+      return;
+    }
+    try {
+      const blob = await composeAnnotation(currentVer.url, canvas);
+      const file = new File([blob], `annotation_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      if (!onUploadImage) {
+        toast.error('이미지 업로드 함수가 연결되지 않았습니다');
+        return;
+      }
+      const uploadedUrl = await onUploadImage(file, type);
+      const newVer = await createImageVersion({
+        sceneId: sceneUuid,
+        imageType: type,
+        kind: 'annotate',
+        url: uploadedUrl,
+        baseVersionNo: currentVer.versionNo,
+        createdBy: currentUserId,
+      });
+      const refreshed = await fetchImageVersions(sceneUuid, type);
+      if (type === 'guide') {
+        setGuideVersions(refreshed);
+        setCurrentGuideId(newVer.id);
+      } else {
+        setStoryboardVersions(refreshed);
+        setCurrentStoryboardId(newVer.id);
+      }
+      toast.success(`주석 v${newVer.versionNo} 저장됨`);
+      annotationRef.current?.clear();
+      setAnnotateMode(null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`주석 저장 실패: ${msg}`);
+    }
+  }, [annotateMode, sceneUuid, currentUserId, guideVersions, storyboardVersions, currentGuideId, currentStoryboardId, onUploadImage]);
+
   const handleVersionDelete = useCallback(async (imageType: 'storyboard' | 'guide', versionId: string) => {
     if (!sceneUuid) return;
     try {
@@ -225,7 +301,11 @@ export function ImageModal({
     if (action === 'download') void downloadImage(url, fileName);
     else if (action === 'copy') void copyImageToClipboard(url);
     else if (action === 'copy-url') void copyImageUrl(url);
-    else if (action === 'annotate') onAnnotate?.(type);
+    else if (action === 'annotate') {
+      // v1.26.0: 내부 주석 모드 진입. 외부 onAnnotate 가 주어지면 위임.
+      if (onAnnotate) onAnnotate(type);
+      else enterAnnotate(type);
+    }
   }, [
     ctxMenu, guideUrl, storyboardUrl, guideVersions, storyboardVersions,
     currentGuideId, currentStoryboardId, guideVersionNo, storyboardVersionNo,
@@ -762,7 +842,7 @@ export function ImageModal({
         </div>
 
         {/* v1.26.0: 하단 썸네일 스트립 — sceneUuid 활성화 시. 현재 view 의 imageType 기준 */}
-        {sceneUuid && (() => {
+        {sceneUuid && !annotateMode && (() => {
           const activeType: 'storyboard' | 'guide' = view === 'single-guide' ? 'guide' : 'storyboard';
           const versions = activeType === 'guide' ? guideVersions : storyboardVersions;
           const currentId = activeType === 'guide' ? currentGuideId : currentStoryboardId;
@@ -778,6 +858,38 @@ export function ImageModal({
                 }}
                 onAdd={() => handleVersionAdd(activeType)}
               />
+            </div>
+          );
+        })()}
+
+        {/* v1.26.0: 주석 모드 오버레이 */}
+        {annotateMode && (() => {
+          const type = annotateMode.imageType;
+          const versions = type === 'guide' ? guideVersions : storyboardVersions;
+          const currentId = type === 'guide' ? currentGuideId : currentStoryboardId;
+          const currentVer = versions.find((v) => v.id === currentId);
+          const targetUrl = currentVer?.url ?? (type === 'guide' ? guideUrl : storyboardUrl);
+          const baseVer = currentVer?.versionNo ?? 1;
+          if (!targetUrl) return null;
+          return (
+            <div className="absolute inset-0 z-40 bg-bg-primary">
+              <AnnotationCanvas ref={annotationRef} imageUrl={targetUrl} baseVersionNo={baseVer} />
+              <div className="absolute top-3 right-3 flex gap-2 z-50">
+                <button
+                  type="button"
+                  onClick={exitAnnotate}
+                  className="px-3 py-1.5 text-xs text-text-secondary border border-bg-border rounded-md hover:bg-bg-border/50"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={saveAnnotation}
+                  className="px-3 py-1.5 text-xs text-white bg-accent rounded-md hover:bg-accent/80 inline-flex items-center gap-1.5 font-semibold"
+                >
+                  <Check size={14} /> 주석 새 버전으로 저장
+                </button>
+              </div>
             </div>
           );
         })()}
