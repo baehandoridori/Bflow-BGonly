@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Columns2, Layers, ZoomIn, ZoomOut, Maximize, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Columns2, Layers, ZoomIn, ZoomOut, Maximize, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { ImageContextMenu, type ContextAction } from './ImageContextMenu';
+import { downloadImage, copyImageToClipboard, copyImageUrl, generateImageFileName } from '@/utils/imageActions';
 
 /**
  * 뷰 상태:
@@ -24,6 +26,11 @@ interface ImageModalProps {
   currentSceneIndex?: number;
   totalScenes?: number;
   onSceneNavigate?: (direction: 'prev' | 'next') => void;
+  // v1.26.0: 다운로드/복사/주석 진입에 필요한 메타
+  sheetName?: string;             // 파일명 생성용 (예: 'EP03_A_BG')
+  storyboardVersionNo?: number;   // 파일명에 v 번호 — 없으면 1 사용
+  guideVersionNo?: number;
+  onAnnotate?: (imageType: 'storyboard' | 'guide') => void; // 드로잉 진입
 }
 
 /* ────────────────────────────────────────────────────────────── */
@@ -38,6 +45,10 @@ export function ImageModal({
   currentSceneIndex = 0,
   totalScenes = 0,
   onSceneNavigate,
+  sheetName,
+  storyboardVersionNo = 1,
+  guideVersionNo = 1,
+  onAnnotate,
 }: ImageModalProps) {
   const hasBoth = !!storyboardUrl && !!guideUrl;
 
@@ -48,6 +59,58 @@ export function ImageModal({
   const [zoom, setZoom] = useState(1);
   const [direction, setDirection] = useState(0); // -1 left · 0 fade · 1 right
   const imageAreaRef = useRef<HTMLDivElement>(null);
+
+  // v1.26.0: 우클릭 메뉴 위치
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; imageType: 'storyboard' | 'guide' } | null>(null);
+
+  /** 현재 마우스 위치 기준 이미지 종류 추정 (side-by-side / overlay 분기). */
+  const inferImageType = useCallback((clientX: number): 'storyboard' | 'guide' => {
+    // 오버레이/단일 뷰는 현재 view 기준
+    if (view === 'single-guide') return 'guide';
+    if (view === 'single-storyboard') return 'storyboard';
+    if (view === 'overlay') return overlayOpacity > 0.5 ? 'guide' : 'storyboard';
+    // side-by-side: 가로 중점 기준 좌=스토리보드, 우=가이드
+    const rect = imageAreaRef.current?.getBoundingClientRect();
+    if (!rect) return 'storyboard';
+    return clientX < rect.left + rect.width / 2 ? 'storyboard' : 'guide';
+  }, [view, overlayOpacity]);
+
+  const handleImageContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const rect = imageAreaRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setCtxMenu({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      imageType: inferImageType(e.clientX),
+    });
+  }, [inferImageType]);
+
+  const openMenuFromMoreBtn = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const btnRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const stageRect = imageAreaRef.current?.getBoundingClientRect();
+    if (!stageRect) return;
+    setCtxMenu({
+      x: btnRect.right - stageRect.left - 220,
+      y: btnRect.bottom - stageRect.top + 6,
+      imageType: view === 'single-guide' ? 'guide' : 'storyboard',
+    });
+  }, [view]);
+
+  const handleContextAction = useCallback((action: ContextAction) => {
+    if (!ctxMenu) return;
+    const type = ctxMenu.imageType;
+    const url = type === 'guide' ? guideUrl : storyboardUrl;
+    const versionNo = type === 'guide' ? guideVersionNo : storyboardVersionNo;
+    if (!url) return;
+    const sheet = sheetName ?? 'unknown';
+    const fileName = generateImageFileName(sheet, sceneId, type, versionNo);
+    if (action === 'download') void downloadImage(url, fileName);
+    else if (action === 'copy') void copyImageToClipboard(url);
+    else if (action === 'copy-url') void copyImageUrl(url);
+    else if (action === 'annotate') onAnnotate?.(type);
+  }, [ctxMenu, guideUrl, storyboardUrl, guideVersionNo, storyboardVersionNo, sheetName, sceneId, onAnnotate]);
 
   /* ── 뷰 순서 (오버레이 제외) ── */
   const viewOrder: ViewState[] = ['single-storyboard', 'side-by-side', 'single-guide'];
@@ -230,6 +293,13 @@ export function ImageModal({
           </button>
 
           <div className="w-px h-5 bg-bg-border" />
+          <button
+            onClick={openMenuFromMoreBtn}
+            className="p-1 text-text-secondary hover:text-text-primary"
+            title="더보기 (우클릭 메뉴)"
+          >
+            <MoreHorizontal size={16} />
+          </button>
           <button onClick={onClose} className="p-1 text-text-secondary hover:text-red-400">
             <X size={16} />
           </button>
@@ -386,6 +456,7 @@ export function ImageModal({
         <div
           ref={imageAreaRef}
           className="relative w-full h-full flex items-center justify-center pt-20 pb-16 overflow-hidden"
+          onContextMenu={handleImageContextMenu}
         >
           {view === 'overlay' ? (
             /* 오버레이 모드 — 스와이프 없음 */
@@ -528,6 +599,19 @@ export function ImageModal({
                 )}
               </motion.div>
             </AnimatePresence>
+          )}
+
+          {/* v1.26.0: 우클릭 컨텍스트 메뉴 */}
+          {ctxMenu && (
+            <ImageContextMenu
+              open={true}
+              x={ctxMenu.x}
+              y={ctxMenu.y}
+              containerWidth={imageAreaRef.current?.clientWidth ?? 0}
+              containerHeight={imageAreaRef.current?.clientHeight ?? 0}
+              onAction={handleContextAction}
+              onClose={() => setCtxMenu(null)}
+            />
           )}
         </div>
       </motion.div>
