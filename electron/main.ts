@@ -1173,6 +1173,13 @@ import {
   getActivityInsights as sbGetActivityInsights,
   backfillActivities as sbBackfillActivities,
   getActivityStorageInfo as sbGetActivityStorageInfo,
+  // v1.26.0
+  addCommentReaction as sbAddCommentReaction,
+  removeCommentReaction as sbRemoveCommentReaction,
+  getCommentReactionsBulk as sbGetCommentReactionsBulk,
+  listImageVersions as sbListImageVersions,
+  addImageVersion as sbAddImageVersion,
+  deleteImageVersion as sbDeleteImageVersion,
 } from './supabase';
 import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -1681,6 +1688,35 @@ ipcMain.handle('supabase:edit-comment', wrapIpc(async (_e: unknown, commentId: s
 }));
 ipcMain.handle('supabase:delete-comment', wrapIpc(async (_e: unknown, commentId: string) => {
   await sbDeleteComment(commentId);
+}));
+
+// ─── v1.26.0: 댓글 이모지 리액션 ───
+ipcMain.handle('supabase:add-comment-reaction', wrapIpc(async (_e: unknown, commentId: string, emoji: string, userId: string, userName: string) => {
+  await sbAddCommentReaction(commentId, emoji, userId, userName);
+}));
+ipcMain.handle('supabase:remove-comment-reaction', wrapIpc(async (_e: unknown, commentId: string, emoji: string, userId: string) => {
+  await sbRemoveCommentReaction(commentId, emoji, userId);
+}));
+ipcMain.handle('supabase:get-comment-reactions-bulk', wrapIpc(async (_e: unknown, commentIds: string[]) => {
+  return sbGetCommentReactionsBulk(commentIds);
+}));
+
+// ─── v1.26.0: 이미지 버전 관리 ───
+ipcMain.handle('supabase:list-image-versions', wrapIpc(async (_e: unknown, sceneId: string, imageType: 'storyboard' | 'guide') => {
+  return sbListImageVersions(sceneId, imageType);
+}));
+ipcMain.handle('supabase:add-image-version', wrapIpc(async (_e: unknown, params: {
+  sceneId: string;
+  imageType: 'storyboard' | 'guide';
+  kind: 'replace' | 'annotate';
+  url: string;
+  baseVersionNo?: number;
+  createdBy: string;
+}) => {
+  return sbAddImageVersion(params);
+}));
+ipcMain.handle('supabase:delete-image-version', wrapIpc(async (_e: unknown, versionId: string) => {
+  await sbDeleteImageVersion(versionId);
 }));
 
 // ─── Supabase: 비공개 캘린더 이벤트 ───

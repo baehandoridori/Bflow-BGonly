@@ -433,3 +433,43 @@ export function extractMentions(text: string, userNames: string[]): string[] {
   }
   return mentions;
 }
+
+// ─── v1.26.0: 댓글 이모지 리액션 ───
+
+import type { CommentReaction } from '../types';
+
+export async function addReaction(
+  commentId: string,
+  emoji: string,
+  userId: string,
+  userName: string,
+): Promise<void> {
+  await window.electronAPI.supabaseAddCommentReaction(commentId, emoji, userId, userName);
+}
+
+export async function removeReaction(
+  commentId: string,
+  emoji: string,
+  userId: string,
+): Promise<void> {
+  await window.electronAPI.supabaseRemoveCommentReaction(commentId, emoji, userId);
+}
+
+/**
+ * 여러 댓글 id 에 대한 리액션 일괄 조회.
+ * 반환: Map<commentId, CommentReaction[]>
+ */
+export async function fetchReactionsBulk(commentIds: string[]): Promise<Map<string, CommentReaction[]>> {
+  if (commentIds.length === 0) return new Map();
+  try {
+    const raw = await window.electronAPI.supabaseGetCommentReactionsBulk(commentIds);
+    const map = new Map<string, CommentReaction[]>();
+    for (const [cid, list] of Object.entries(raw)) {
+      map.set(cid, list as CommentReaction[]);
+    }
+    return map;
+  } catch (err) {
+    console.error('[commentService] fetchReactionsBulk 실패', err);
+    return new Map();
+  }
+}

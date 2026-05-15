@@ -161,6 +161,31 @@ export function installDevElectronAPI(): void {
     supabaseAddComment: async () => {},
     supabaseEditComment: async () => {},
     supabaseDeleteComment: async () => {},
+    // v1.26.0 mocks
+    supabaseAddCommentReaction: async () => {},
+    supabaseRemoveCommentReaction: async () => {},
+    supabaseGetCommentReactionsBulk: async () => ({}),
+    supabaseListImageVersions: async () => [],
+    supabaseAddImageVersion: async (params: {
+      sceneId: string;
+      imageType: 'storyboard' | 'guide';
+      kind: 'replace' | 'annotate';
+      url: string;
+      baseVersionNo?: number;
+      createdBy: string;
+    }) => ({
+      id: 'mock-iv-' + Date.now(),
+      sceneId: params.sceneId,
+      imageType: params.imageType,
+      versionNo: 1,
+      url: params.url,
+      kind: params.kind,
+      baseVersionNo: params.baseVersionNo ?? null,
+      createdBy: params.createdBy,
+      createdByName: 'mock',
+      createdAt: new Date().toISOString(),
+    }),
+    supabaseDeleteImageVersion: async () => {},
     supabaseReadPrivateEvents: async () => [],
     supabaseAddPrivateEvent: async () => ({ id: 'mock-private' }),
     supabaseUpdatePrivateEvent: async () => {},

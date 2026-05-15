@@ -798,6 +798,28 @@ export interface ElectronAPI {
   supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string, images?: string[], revisionId?: string | null, parentCommentId?: string | null) => Promise<void>;
   supabaseEditComment: (commentId: string, text: string, mentions: string[], images?: string[]) => Promise<void>;
   supabaseDeleteComment: (commentId: string) => Promise<void>;
+  /** v1.26.0: 댓글 이모지 리액션 */
+  supabaseAddCommentReaction: (commentId: string, emoji: string, userId: string, userName: string) => Promise<void>;
+  supabaseRemoveCommentReaction: (commentId: string, emoji: string, userId: string) => Promise<void>;
+  supabaseGetCommentReactionsBulk: (commentIds: string[]) => Promise<Record<string, Array<{
+    id: string;
+    commentId: string;
+    userId: string;
+    userName: string;
+    emoji: string;
+    createdAt: string;
+  }>>>;
+  /** v1.26.0: 이미지 버전 관리 */
+  supabaseListImageVersions: (sceneId: string, imageType: 'storyboard' | 'guide') => Promise<ImageVersion[]>;
+  supabaseAddImageVersion: (params: {
+    sceneId: string;
+    imageType: 'storyboard' | 'guide';
+    kind: 'replace' | 'annotate';
+    url: string;
+    baseVersionNo?: number;
+    createdBy: string;
+  }) => Promise<ImageVersion>;
+  supabaseDeleteImageVersion: (versionId: string) => Promise<void>;
   /** 비공개 캘린더 이벤트 — Google Calendar 비연동, Supabase 전용 */
   supabaseReadPrivateEvents: (userId: string) => Promise<Array<{
     id: string;
