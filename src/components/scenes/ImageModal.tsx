@@ -4,6 +4,13 @@ import { X, Columns2, Layers, ZoomIn, ZoomOut, Maximize, ChevronLeft, ChevronRig
 import { cn } from '@/utils/cn';
 import { ImageContextMenu, type ContextAction } from './ImageContextMenu';
 import { downloadImage, copyImageToClipboard, copyImageUrl, generateImageFileName } from '@/utils/imageActions';
+import { ImageVersionStrip } from './ImageVersionStrip';
+import { ImageVersionDropdown } from './ImageVersionDropdown';
+import { fetchImageVersions, createImageVersion, removeImageVersion } from '@/services/imageVersionService';
+import { pickLatestVersion } from '@/utils/imageVersionUtils';
+import type { ImageVersion } from '@/types';
+import { toast } from 'sonner';
+import { useAuthStore } from '@/stores/useAuthStore';
 
 /**
  * 뷰 상태:
@@ -31,6 +38,12 @@ interface ImageModalProps {
   storyboardVersionNo?: number;   // 파일명에 v 번호 — 없으면 1 사용
   guideVersionNo?: number;
   onAnnotate?: (imageType: 'storyboard' | 'guide') => void; // 드로잉 진입
+  // v1.26.0: 이미지 버전 관리 활성화 (sceneUuid 있을 때만)
+  sceneUuid?: string | null;      // scenes.id UUID
+  currentUserId?: string | null;
+  isAdmin?: boolean;
+  /** 새 버전을 업로드할 함수 — Storage 업로드 + 반환 URL (기존 saveImage 로직 활용) */
+  onUploadImage?: (file: File, imageType: 'storyboard' | 'guide') => Promise<string>;
 }
 
 /* ────────────────────────────────────────────────────────────── */
@@ -49,7 +62,16 @@ export function ImageModal({
   storyboardVersionNo = 1,
   guideVersionNo = 1,
   onAnnotate,
+  sceneUuid,
+  currentUserId: currentUserIdProp,
+  isAdmin: isAdminProp,
+  onUploadImage,
 }: ImageModalProps) {
+  // v1.26.0: props 미전달 시 store 에서 자동 (호출자 단순화)
+  const storeUser = useAuthStore((s) => s.currentUser);
+  const storeAdminMode = useAuthStore((s) => s.isAdminMode);
+  const currentUserId = currentUserIdProp ?? storeUser?.id ?? null;
+  const isAdmin = isAdminProp ?? (storeUser?.role === 'admin' || storeAdminMode);
   const hasBoth = !!storyboardUrl && !!guideUrl;
 
   const [view, setView] = useState<ViewState>(
@@ -62,6 +84,95 @@ export function ImageModal({
 
   // v1.26.0: 우클릭 메뉴 위치
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; imageType: 'storyboard' | 'guide' } | null>(null);
+
+  // v1.26.0: 버전 관리 state — sceneUuid 가 있을 때만 활성화
+  const [storyboardVersions, setStoryboardVersions] = useState<ImageVersion[]>([]);
+  const [guideVersions, setGuideVersions] = useState<ImageVersion[]>([]);
+  const [currentStoryboardId, setCurrentStoryboardId] = useState<string | null>(null);
+  const [currentGuideId, setCurrentGuideId] = useState<string | null>(null);
+
+  // 버전 로드
+  useEffect(() => {
+    if (!sceneUuid) return;
+    let cancelled = false;
+    Promise.all([
+      fetchImageVersions(sceneUuid, 'storyboard'),
+      fetchImageVersions(sceneUuid, 'guide'),
+    ]).then(([sList, gList]) => {
+      if (cancelled) return;
+      setStoryboardVersions(sList);
+      setGuideVersions(gList);
+      // 초기 표시 = 최신
+      setCurrentStoryboardId(pickLatestVersion(sList)?.id ?? null);
+      setCurrentGuideId(pickLatestVersion(gList)?.id ?? null);
+    });
+    return () => { cancelled = true; };
+  }, [sceneUuid]);
+
+  // 현재 표시 URL — 버전 선택이 있으면 그 URL, 아니면 props 의 storyboardUrl/guideUrl
+  const displayStoryboardUrl =
+    storyboardVersions.find((v) => v.id === currentStoryboardId)?.url ?? storyboardUrl;
+  const displayGuideUrl =
+    guideVersions.find((v) => v.id === currentGuideId)?.url ?? guideUrl;
+
+  // 버전 추가 / 삭제 핸들러
+  const handleVersionAdd = useCallback(async (imageType: 'storyboard' | 'guide') => {
+    if (!sceneUuid || !currentUserId || !onUploadImage) {
+      toast.error('버전 추가가 가능하지 않습니다');
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      try {
+        const uploadedUrl = await onUploadImage(file, imageType);
+        const newVer = await createImageVersion({
+          sceneId: sceneUuid,
+          imageType,
+          kind: 'replace',
+          url: uploadedUrl,
+          createdBy: currentUserId,
+        });
+        const refreshed = await fetchImageVersions(sceneUuid, imageType);
+        if (imageType === 'guide') {
+          setGuideVersions(refreshed);
+          setCurrentGuideId(newVer.id);
+        } else {
+          setStoryboardVersions(refreshed);
+          setCurrentStoryboardId(newVer.id);
+        }
+        toast.success(`v${newVer.versionNo} 추가됨`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast.error(`업로드 실패: ${msg}`);
+      }
+    };
+    input.click();
+  }, [sceneUuid, currentUserId, onUploadImage]);
+
+  const handleVersionDelete = useCallback(async (imageType: 'storyboard' | 'guide', versionId: string) => {
+    if (!sceneUuid) return;
+    try {
+      await removeImageVersion(versionId);
+      const refreshed = await fetchImageVersions(sceneUuid, imageType);
+      if (imageType === 'guide') {
+        setGuideVersions(refreshed);
+        const latest = pickLatestVersion(refreshed);
+        setCurrentGuideId(latest?.id ?? null);
+      } else {
+        setStoryboardVersions(refreshed);
+        const latest = pickLatestVersion(refreshed);
+        setCurrentStoryboardId(latest?.id ?? null);
+      }
+      toast.success('버전 삭제됨');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(msg);
+    }
+  }, [sceneUuid]);
 
   /** 현재 마우스 위치 기준 이미지 종류 추정 (side-by-side / overlay 분기). */
   const inferImageType = useCallback((clientX: number): 'storyboard' | 'guide' => {
@@ -101,8 +212,13 @@ export function ImageModal({
   const handleContextAction = useCallback((action: ContextAction) => {
     if (!ctxMenu) return;
     const type = ctxMenu.imageType;
-    const url = type === 'guide' ? guideUrl : storyboardUrl;
-    const versionNo = type === 'guide' ? guideVersionNo : storyboardVersionNo;
+    // 현재 라이트박스에서 표시 중인 URL/버전 기준 (버전 시스템 활성화 시 그 값, 아니면 props)
+    const isGuide = type === 'guide';
+    const versions = isGuide ? guideVersions : storyboardVersions;
+    const currentVerId = isGuide ? currentGuideId : currentStoryboardId;
+    const currentVer = versions.find((v) => v.id === currentVerId);
+    const url = currentVer?.url ?? (isGuide ? guideUrl : storyboardUrl);
+    const versionNo = currentVer?.versionNo ?? (isGuide ? guideVersionNo : storyboardVersionNo);
     if (!url) return;
     const sheet = sheetName ?? 'unknown';
     const fileName = generateImageFileName(sheet, sceneId, type, versionNo);
@@ -110,7 +226,11 @@ export function ImageModal({
     else if (action === 'copy') void copyImageToClipboard(url);
     else if (action === 'copy-url') void copyImageUrl(url);
     else if (action === 'annotate') onAnnotate?.(type);
-  }, [ctxMenu, guideUrl, storyboardUrl, guideVersionNo, storyboardVersionNo, sheetName, sceneId, onAnnotate]);
+  }, [
+    ctxMenu, guideUrl, storyboardUrl, guideVersions, storyboardVersions,
+    currentGuideId, currentStoryboardId, guideVersionNo, storyboardVersionNo,
+    sheetName, sceneId, onAnnotate,
+  ]);
 
   /* ── 뷰 순서 (오버레이 제외) ── */
   const viewOrder: ViewState[] = ['single-storyboard', 'side-by-side', 'single-guide'];
@@ -463,7 +583,7 @@ export function ImageModal({
             <div className="relative">
               {storyboardUrl && (
                 <img
-                  src={storyboardUrl}
+                  src={displayStoryboardUrl}
                   alt="스토리보드"
                   className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                   style={{
@@ -477,7 +597,7 @@ export function ImageModal({
               )}
               {guideUrl && (
                 <img
-                  src={guideUrl}
+                  src={displayGuideUrl}
                   alt="가이드"
                   className="absolute inset-0 rounded-lg object-contain transition-transform duration-150 ease-out"
                   style={{
@@ -508,7 +628,7 @@ export function ImageModal({
                   <div className="flex flex-col items-center gap-3">
                     <span className="text-xs text-accent font-medium tracking-wide">스토리보드</span>
                     <img
-                      src={storyboardUrl}
+                      src={displayStoryboardUrl}
                       alt="스토리보드"
                       className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                       style={{
@@ -526,7 +646,7 @@ export function ImageModal({
                   <div className="flex flex-col items-center gap-3">
                     <span className="text-xs text-accent font-medium tracking-wide">가이드</span>
                     <img
-                      src={guideUrl}
+                      src={displayGuideUrl}
                       alt="가이드"
                       className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                       style={{
@@ -552,7 +672,7 @@ export function ImageModal({
                       {storyboardUrl ? (
                         <HoverCard3D direction="left">
                           <img
-                            src={storyboardUrl}
+                            src={displayStoryboardUrl}
                             alt="스토리보드"
                             className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                             style={{
@@ -579,7 +699,7 @@ export function ImageModal({
                       {guideUrl ? (
                         <HoverCard3D direction="right">
                           <img
-                            src={guideUrl}
+                            src={displayGuideUrl}
                             alt="가이드"
                             className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
                             style={{
@@ -601,6 +721,32 @@ export function ImageModal({
             </AnimatePresence>
           )}
 
+          {/* v1.26.0: 좌상단 버전 드롭다운 — sceneUuid 활성화 시 */}
+          {sceneUuid && (view === 'single-storyboard' || view === 'side-by-side') && storyboardVersions.length > 0 && (
+            <div className="absolute top-3 left-3 z-20">
+              <ImageVersionDropdown
+                versions={storyboardVersions}
+                currentVersionId={currentStoryboardId}
+                currentUserId={currentUserId}
+                isAdmin={isAdmin}
+                onSelect={setCurrentStoryboardId}
+                onDelete={(vid) => handleVersionDelete('storyboard', vid)}
+              />
+            </div>
+          )}
+          {sceneUuid && view === 'single-guide' && guideVersions.length > 0 && (
+            <div className="absolute top-3 left-3 z-20">
+              <ImageVersionDropdown
+                versions={guideVersions}
+                currentVersionId={currentGuideId}
+                currentUserId={currentUserId}
+                isAdmin={isAdmin}
+                onSelect={setCurrentGuideId}
+                onDelete={(vid) => handleVersionDelete('guide', vid)}
+              />
+            </div>
+          )}
+
           {/* v1.26.0: 우클릭 컨텍스트 메뉴 */}
           {ctxMenu && (
             <ImageContextMenu
@@ -614,6 +760,27 @@ export function ImageModal({
             />
           )}
         </div>
+
+        {/* v1.26.0: 하단 썸네일 스트립 — sceneUuid 활성화 시. 현재 view 의 imageType 기준 */}
+        {sceneUuid && (() => {
+          const activeType: 'storyboard' | 'guide' = view === 'single-guide' ? 'guide' : 'storyboard';
+          const versions = activeType === 'guide' ? guideVersions : storyboardVersions;
+          const currentId = activeType === 'guide' ? currentGuideId : currentStoryboardId;
+          if (versions.length === 0) return null;
+          return (
+            <div className="absolute bottom-0 left-0 right-0 z-10">
+              <ImageVersionStrip
+                versions={versions}
+                currentVersionId={currentId}
+                onSelect={(vid) => {
+                  if (activeType === 'guide') setCurrentGuideId(vid);
+                  else setCurrentStoryboardId(vid);
+                }}
+                onAdd={() => handleVersionAdd(activeType)}
+              />
+            </div>
+          );
+        })()}
       </motion.div>
     </AnimatePresence>
   );

@@ -848,6 +848,15 @@ export function UnifiedSceneDetailModal({
           guideUrl={bgScene.guideUrl ?? ''}
           sceneId={bgScene.sceneId || String(bgScene.no)}
           onClose={() => setShowImageModal(null)}
+          // v1.26.0: 버전 관리 + 우클릭 메뉴 메타
+          sheetName={bgSheetName ?? undefined}
+          sceneUuid={bgScene.id ?? null}
+          onUploadImage={async (file, imageType) => {
+            if (!bgSheetName) throw new Error('BG 시트 정보 없음');
+            const { resizeBlob: rb, saveImage: si } = await import('@/utils/imageUtils');
+            const base64 = await rb(file);
+            return si(base64, bgSheetName, bgScene.sceneId || String(bgScene.no), imageType);
+          }}
         />
       )}
 
