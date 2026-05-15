@@ -3051,26 +3051,33 @@ export function ScenesView() {
       }
 
       if (images?.storyboard || images?.guide) {
+        // v1.25.12: addScene 후 UUID 가 store 에 채워지기 전에 saveImage 가
+        // 끝나면서 발생하던 "씬 UUID를 찾을 수 없음" 오류 fix.
+        // sceneIndex 기반 resolveSceneUuid 대신 UUID 폴링 + 직접 IPC 사용.
         (async () => {
-          try {
-            const { saveImage } = await import('@/utils/imageUtils');
-            for (const sheet of sheets) {
-              const latestPart2 = useDataStore.getState().episodes
-                .flatMap((ep) => ep.parts)
-                .find((p) => p.sheetName === sheet);
-              const latestIndex = latestPart2?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
-              if (latestIndex < 0) continue;
+          const { saveImage } = await import('@/utils/imageUtils');
+          const { waitForSceneUuid } = await import('@/services/supabaseService');
+          for (const sheet of sheets) {
+            const uuid = await waitForSceneUuid(sheet, sceneId);
+            if (!uuid) {
+              sonnerToast.error(`이미지 업로드 동기화 실패: ${sceneId}. 새로고침 후 다시 시도해 주세요.`);
+              continue;
+            }
+            try {
               if (images.storyboard) {
                 const url = await saveImage(images.storyboard, sheet, sceneId, 'storyboard');
-                handleFieldUpdateForSheet(sheet, latestIndex, 'storyboardUrl', url);
+                await window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'storyboardUrl', url);
+                useDataStore.getState().updateSceneByUuid(uuid, { storyboardUrl: url });
               }
               if (images.guide) {
                 const url = await saveImage(images.guide, sheet, sceneId, 'guide');
-                handleFieldUpdateForSheet(sheet, latestIndex, 'guideUrl', url);
+                await window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'guideUrl', url);
+                useDataStore.getState().updateSceneByUuid(uuid, { guideUrl: url });
               }
+            } catch (err) {
+              console.error('[씬 추가 이미지 업로드 실패]', err);
+              sonnerToast.error(`이미지 업로드 실패: ${sceneId}`);
             }
-          } catch (err) {
-            console.error('[씬 추가 이미지 업로드 실패]', err);
           }
         })();
       }
@@ -3113,25 +3120,29 @@ export function ScenesView() {
     }
 
     if (images?.storyboard || images?.guide) {
+      // v1.25.12: UUID race fix (위 통합 모드와 동일 패턴).
       (async () => {
+        const { saveImage } = await import('@/utils/imageUtils');
+        const { waitForSceneUuid } = await import('@/services/supabaseService');
+        const uuid = await waitForSceneUuid(targetSheet, sceneId);
+        if (!uuid) {
+          sonnerToast.error(`이미지 업로드 동기화 실패: ${sceneId}. 새로고침 후 다시 시도해 주세요.`);
+          return;
+        }
         try {
-          const { saveImage } = await import('@/utils/imageUtils');
-          const latestPart2 = useDataStore.getState().episodes
-            .flatMap((ep) => ep.parts)
-            .find((p) => p.sheetName === targetSheet);
-          const latestIndex = latestPart2?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
-          if (latestIndex < 0) return;
-
           if (images.storyboard) {
             const url = await saveImage(images.storyboard, targetSheet, sceneId, 'storyboard');
-            handleFieldUpdateForSheet(targetSheet, latestIndex, 'storyboardUrl', url);
+            await window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'storyboardUrl', url);
+            useDataStore.getState().updateSceneByUuid(uuid, { storyboardUrl: url });
           }
           if (images.guide) {
             const url = await saveImage(images.guide, targetSheet, sceneId, 'guide');
-            handleFieldUpdateForSheet(targetSheet, latestIndex, 'guideUrl', url);
+            await window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'guideUrl', url);
+            useDataStore.getState().updateSceneByUuid(uuid, { guideUrl: url });
           }
         } catch (err) {
           console.error('[씬 추가 이미지 업로드 실패]', err);
+          sonnerToast.error(`이미지 업로드 실패: ${sceneId}`);
         }
       })();
     }
