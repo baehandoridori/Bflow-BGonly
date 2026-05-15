@@ -206,6 +206,44 @@ export interface AuthSession {
   loggedInAt: string;  // ISO 8601
 }
 
+// ─── 댓글 이모지 리액션 (v1.26.0+) ──────────
+
+export interface CommentReaction {
+  id: string;
+  commentId: string;
+  userId: string;
+  userName: string;
+  emoji: string;
+  createdAt: string;       // ISO 8601
+}
+
+/** 한 댓글의 같은 이모지를 누른 사용자들 — UI 렌더용 집계 형태 */
+export interface CommentReactionGroup {
+  emoji: string;
+  count: number;
+  userIds: string[];
+  userNames: string[];
+  mine: boolean;           // 본인이 누른 이모지인지
+}
+
+// ─── 이미지 버전 (v1.26.0+) ─────────────────
+
+export type ImageType = 'storyboard' | 'guide';
+export type ImageVersionKind = 'replace' | 'annotate';
+
+export interface ImageVersion {
+  id: string;
+  sceneId: string;
+  imageType: ImageType;
+  versionNo: number;
+  url: string;
+  kind: ImageVersionKind;
+  baseVersionNo: number | null;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;       // ISO 8601
+}
+
 // ─── 파트 & 에피소드 ─────────────────────────
 
 export interface Part {
