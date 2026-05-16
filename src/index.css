@@ -923,35 +923,53 @@ input[type="range"]::-webkit-slider-thumb {
   }
 }
 
-/* v1.27.0: 드래그 핸들 파티클 — drag 중일 때 핸들 주변에서 작은 입자가 사르르.
-   8개 파티클이 staggered delay 로 회전+외향 퍼지면서 fade. infinite loop. */
+/* v1.27.0: 드래그 핸들 파티클 — drag 중 핸들 주변에서 작은 입자가 사르르.
+   한솔 v1.27.0 5차 보고: 더 많이 + 더 밝게 + 라이트 모드 잘 보이게.
+   파티클 16개 + 0.07s staggered delay + 더 큰 외향 거리 + 강한 glow + drop-shadow 백업. */
 @keyframes bflow-handle-particle {
   0% {
     opacity: 0;
     transform: translate(0, 0) scale(0.4);
   }
-  20% {
-    opacity: 0.95;
-    transform: translate(var(--bflow-dx, 0px), var(--bflow-dy, 0px)) scale(1);
+  15% {
+    opacity: 1;
+    transform: translate(
+      calc(var(--bflow-dx, 0px) * 0.55),
+      calc(var(--bflow-dy, 0px) * 0.55)
+    ) scale(1.1);
+  }
+  60% {
+    opacity: 0.8;
+    transform: translate(
+      calc(var(--bflow-dx, 0px) * 1.4),
+      calc(var(--bflow-dy, 0px) * 1.4)
+    ) scale(1);
   }
   100% {
     opacity: 0;
     transform: translate(
-      calc(var(--bflow-dx, 0px) * 2.2),
-      calc(var(--bflow-dy, 0px) * 2.2)
+      calc(var(--bflow-dx, 0px) * 2.4),
+      calc(var(--bflow-dy, 0px) * 2.4)
     ) scale(0.5);
   }
 }
 .bflow-handle-particle {
   position: absolute;
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 9999px;
-  background: rgb(var(--color-accent));
-  box-shadow: 0 0 6px rgb(var(--color-accent) / 0.7);
+  /* 코어 — 흰빛 살짝 섞어 발광체 느낌 + 라이트 모드에서도 대비 확보. */
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgb(var(--color-accent)) 55%, rgb(var(--color-accent)) 100%);
+  /* 다중 box-shadow — 가까운 글로우 + 멀리 퍼지는 어슴푸레한 glow. */
+  box-shadow:
+    0 0 4px 1px rgb(var(--color-accent) / 0.95),
+    0 0 12px 4px rgb(var(--color-accent) / 0.55);
+  /* drop-shadow 까지 한 번 더 — 라이트 모드 흰 배경에서도 가장자리 발광 유지. */
+  filter: drop-shadow(0 0 6px rgb(var(--color-accent) / 0.7));
   pointer-events: none;
   opacity: 0;
-  animation: bflow-handle-particle 1.4s ease-out infinite;
+  animation: bflow-handle-particle 1.5s ease-out infinite;
+  z-index: 6;
 }
 @media (prefers-reduced-motion: reduce) {
   .bflow-handle-particle {

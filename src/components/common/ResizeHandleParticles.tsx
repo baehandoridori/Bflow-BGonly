@@ -12,7 +12,7 @@ import { memo, useMemo } from 'react';
 interface ResizeHandleParticlesProps {
   edge: 'n' | 's' | 'e' | 'w';
   active?: boolean;
-  /** 파티클 개수 — 핸들 길이에 따라 조정 (기본 8) */
+  /** 파티클 개수 — 핸들 길이에 따라 조정 (기본 16). 한솔 v1.27.0 5차 보고로 8 → 16 증량. */
   count?: number;
 }
 
@@ -29,19 +29,24 @@ interface ParticleConfig {
 function buildParticles(count: number, edge: 'n' | 's' | 'e' | 'w'): ParticleConfig[] {
   const out: ParticleConfig[] = [];
   // 변의 안쪽 영역에 균등 분포, dx/dy 는 edge 의 수직 방향으로 튀어나가게.
-  const perimeterRatio = (i: number) => 0.1 + ((i + 0.5) / count) * 0.8;
+  // 분포를 95% 까지 넓혀 변 가장자리까지 골고루 spawn.
+  const perimeterRatio = (i: number) => 0.025 + ((i + 0.5) / count) * 0.95;
+  // staggered delay 를 0.16 → 0.07 로 줄여 더 빠르게 연속 분출 (한솔 v1.27.0 5차: 더 많이).
+  const stagger = 0.07;
   for (let i = 0; i < count; i++) {
     const ratio = perimeterRatio(i);
-    // 변 방향에 살짝 흔들어줘서 단조롭지 않게.
-    const wobble = (i % 2 === 0 ? 1 : -1) * 4;
+    // 변 방향에 살짝 흔들어줘서 단조롭지 않게. 진폭 4 → 5.
+    const wobble = (i % 2 === 0 ? 1 : -1) * (4 + (i % 3));
+    // 외향 거리 8~14 → 10~22 로 더 넓게.
+    const reach = 10 + (i % 4) * 4;
     if (edge === 'w') {
-      out.push({ pos: ratio, dx: -8 - (i % 3) * 3, dy: wobble, delay: i * 0.16 });
+      out.push({ pos: ratio, dx: -reach, dy: wobble, delay: i * stagger });
     } else if (edge === 'e') {
-      out.push({ pos: ratio, dx: 8 + (i % 3) * 3, dy: wobble, delay: i * 0.16 });
+      out.push({ pos: ratio, dx: reach, dy: wobble, delay: i * stagger });
     } else if (edge === 'n') {
-      out.push({ pos: ratio, dx: wobble, dy: -8 - (i % 3) * 3, delay: i * 0.16 });
+      out.push({ pos: ratio, dx: wobble, dy: -reach, delay: i * stagger });
     } else {
-      out.push({ pos: ratio, dx: wobble, dy: 8 + (i % 3) * 3, delay: i * 0.16 });
+      out.push({ pos: ratio, dx: wobble, dy: reach, delay: i * stagger });
     }
   }
   return out;
@@ -50,7 +55,7 @@ function buildParticles(count: number, edge: 'n' | 's' | 'e' | 'w'): ParticleCon
 export const ResizeHandleParticles = memo(function ResizeHandleParticles({
   edge,
   active,
-  count = 8,
+  count = 16,
 }: ResizeHandleParticlesProps) {
   const particles = useMemo(() => buildParticles(count, edge), [count, edge]);
 

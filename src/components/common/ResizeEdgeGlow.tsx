@@ -52,27 +52,35 @@ export const ResizeEdgeGlow = memo(function ResizeEdgeGlow({
     e: { right: 0, top: insetStart, bottom: insetEnd, width: 2 },
   };
 
-  // 단계별 시각 파라미터 — 한솔 보고: idle 도 항상 살짝 보이게, hover 는 좀 더 세게, drag 는 가장 강.
+  // 단계별 시각 파라미터 — 한솔 v1.27.0 5차 보고: idle 은은한 빛이 너무 약함 + 라이트 모드 안 보임.
+  // idle 의 opacity / glow / scale 강화. thickness 도 2px → 3px 로 키워서 라이트 모드에서도 잘 보임.
   const params = {
-    idle: { opacity: 0.22, shadowAlpha: 0.12, glowSize: 6, scale: isHorizontal ? 0.85 : 0.85 },
-    hover: { opacity: 0.85, shadowAlpha: 0.55, glowSize: 14, scale: 1 },
-    drag: { opacity: 1, shadowAlpha: 0.85, glowSize: 22, scale: 1 },
+    idle: { opacity: 0.55, shadowAlpha: 0.35, glowSize: 14, thickness: 3, scale: 0.92 },
+    hover: { opacity: 0.95, shadowAlpha: 0.65, glowSize: 20, thickness: 3, scale: 1 },
+    drag: { opacity: 1, shadowAlpha: 0.95, glowSize: 28, thickness: 4, scale: 1 },
   }[level];
 
+  // 라이트 모드에서도 시인성 보장 위해 drop-shadow 추가 (배경 대비가 약한 경우의 백업 레이어).
   return (
     <div
       aria-hidden="true"
       style={{
         position: 'absolute',
         ...positionStyles[edge],
-        borderRadius: 1,
+        // 두께를 동적으로 — idle 도 3px 로 약간 두툼하게.
+        ...(isHorizontal
+          ? { height: params.thickness }
+          : { width: params.thickness }),
+        borderRadius: 2,
         pointerEvents: 'none',
         background: `linear-gradient(${isHorizontal ? '90deg' : '180deg'}, transparent, rgb(var(--color-accent)) 50%, transparent)`,
         opacity: params.opacity,
         boxShadow: `0 0 ${params.glowSize}px rgb(var(--color-accent) / ${params.shadowAlpha})`,
+        // 라이트 모드 보강 — accent 색 drop-shadow 로 한 번 더 외곽 발광.
+        filter: `drop-shadow(0 0 ${Math.round(params.glowSize / 2)}px rgb(var(--color-accent) / ${params.shadowAlpha * 0.7}))`,
         transform: isHorizontal ? `scaleX(${params.scale})` : `scaleY(${params.scale})`,
         transition:
-          'opacity 0.25s ease-out, transform 0.25s ease-out, box-shadow 0.25s ease-out',
+          'opacity 0.25s ease-out, transform 0.25s ease-out, box-shadow 0.25s ease-out, height 0.25s ease-out, width 0.25s ease-out',
         zIndex: 5,
       }}
     />
