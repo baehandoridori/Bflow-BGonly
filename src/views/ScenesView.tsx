@@ -1506,6 +1506,18 @@ export function ScenesView() {
   const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
   // 일괄 액션 바를 콘텐츠 영역 정중앙(=사이드바 뺀 자리) 으로 보정. 사이드바 펼침/접힘에 동기.
   const sidebarExpanded = useAppStore((s) => s.sidebarExpanded);
+  // viewport 너비 실시간 추적 — 사이드바 너비를 뺀 콘텐츠 영역의 정중앙 픽셀 계산용.
+  // framer-motion 의 animate.x:'-50%' 와 함께 left=px 로 줘야 motion 이 transform 을 올바르게 관리.
+  // (style.transform 인라인 지정은 motion 이 자기 transform 으로 덮어써 무시됨 → 한솔 보고 v1.27.0)
+  const [viewportW, setViewportW] = useState<number>(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 1280,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => setViewportW(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const currentUser = useAuthStore((s) => s.currentUser);
   const isBulkInFlight = useBulkOperationsStore((s) => s.activeOp?.status === 'in-flight');
   const isLight = colorMode === 'light';
@@ -1738,6 +1750,8 @@ export function ScenesView() {
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [batchAssigneeValue, setBatchAssigneeValue] = useState('');
+  // v1.27.0: 일괄 편집 담당자 처리 모드 — 'replace'=기존 덮어쓰기, 'append'=콤마 구분 이어붙이기 (중복 제거).
+  const [batchAssigneeMode, setBatchAssigneeMode] = useState<'replace' | 'append'>('replace');
   // treeOpen 초기값 — 영속화된 값이 있으면 그걸로, 없으면 true (디폴트 펼침)
   const [treeOpen, setTreeOpen] = useState(() => loadPersistedTreeOpen() ?? true);
 
@@ -2925,33 +2939,53 @@ export function ScenesView() {
   };
 
   // 일괄 편집: 선택된 씬들의 assignee/memo/layoutId를 RPC로 일괄 갱신 (Tasks 13-17)
+  // v1.27.0: assigneeMode 도입 — 'replace' 기존 덮어쓰기 / 'append' 기존에 이어붙이기 (중복 제거).
+  // append 모드는 씬마다 기존 값이 다르므로 fields 가 씬별로 다름 → 씬별 updates 생성.
   const handleBulkEditSubmit = async (
-    payload: { assignee?: string; memo?: string; layoutId?: string },
+    payload: { assignee?: string; assigneeMode?: 'replace' | 'append'; memo?: string; layoutId?: string },
     selectionSnapshot?: Set<string>,
   ) => {
-    const fields: BulkFieldUpdate['fields'] = {};
-    if (payload.assignee) fields.assignee = payload.assignee;
-    if (payload.memo) fields.memo = payload.memo;
-    if (payload.layoutId) fields.layoutId = payload.layoutId;
-    if (!fields.assignee && !fields.memo && !fields.layoutId) return;
+    if (!payload.assignee && !payload.memo && !payload.layoutId) return;
 
     const selection = selectionSnapshot ?? selectedSceneIds;
-    const uuids = resolveSelectedUuids(selection, allMergedScenes, currentPart);
-    if (uuids.length === 0) return;
+    const targetScenes = resolveSelectedScenes(selection, allMergedScenes, undefined, currentPart);
+    if (targetScenes.length === 0) return;
 
-    const updates: BulkFieldUpdate[] = uuids.map((uuid) => ({
-      sceneUuid: uuid,
-      fields,
-    }));
-
+    const mode = payload.assigneeMode ?? 'replace';
+    const updates: BulkFieldUpdate[] = [];
     const fieldsByUuid = new Map<string, Partial<Scene>>();
-    for (const uuid of uuids) {
-      fieldsByUuid.set(uuid, fields);
+
+    for (const s of targetScenes) {
+      if (!s.id) continue;
+      const fields: BulkFieldUpdate['fields'] = {};
+      if (payload.memo) fields.memo = payload.memo;
+      if (payload.layoutId) fields.layoutId = payload.layoutId;
+      if (payload.assignee) {
+        if (mode === 'replace') {
+          fields.assignee = payload.assignee;
+        } else {
+          // append: 기존 콤마 구분 담당자에 새 이름 이어붙임. 중복 제거.
+          const existing = (s.assignee ?? '').split(',').map((n) => n.trim()).filter(Boolean);
+          const adding = payload.assignee.split(',').map((n) => n.trim()).filter(Boolean);
+          const merged: string[] = [];
+          const seen = new Set<string>();
+          for (const n of [...existing, ...adding]) {
+            if (seen.has(n)) continue;
+            seen.add(n);
+            merged.push(n);
+          }
+          fields.assignee = merged.join(', ');
+        }
+      }
+      if (Object.keys(fields).length === 0) continue;
+      updates.push({ sceneUuid: s.id, fields });
+      fieldsByUuid.set(s.id, fields);
     }
+    if (updates.length === 0) return;
 
     await runBulkOp(
       'field-edit',
-      uuids,
+      updates.map((u) => u.sceneUuid),
       // retry 시 전달받은 uuids 부분집합만 재전송
       (uuidsToSend) => {
         const set = new Set(uuidsToSend);
@@ -4463,27 +4497,22 @@ export function ScenesView() {
 
       {/* 일괄 액션 바 (선택된 씬이 있을 때) */}
       <AnimatePresence>
-        {selectedSceneIds.size > 0 && (
+        {selectedSceneIds.size > 0 && (() => {
+          // 사이드바 너비를 뺀 콘텐츠 영역의 정중앙 픽셀 좌표.
+          // viewport 1996, 사이드바 64 → bulkBarLeftPx = 64 + (1996-64)/2 = 1030.
+          // framer-motion 의 x:'-50%' 가 transform: translateX(-50%) 로 변환되며 정중앙 정렬.
+          const sidebarW = sidebarExpanded ? 132 : 64;
+          const bulkBarLeftPx = sidebarW + (viewportW - sidebarW) / 2;
+          return (
           <motion.div
-            // viewport 50% + 사이드바 너비의 절반만큼 오른쪽으로 보정 → 콘텐츠 영역 정중앙.
-            // 사이드바 접힘 64px / 펼침 132px (Sidebar.tsx 와 동기). 호버 expand 는 무시.
-            // initial 에도 같은 left 를 명시 — 그렇지 않으면 첫 mount 시 left=auto 에서 보정값으로
-            // 가로 sliding 이 일어나 "가운데에서 오른쪽으로 스르륵" 보임 (한솔 보고, v1.27.0).
-            initial={{
-              opacity: 0,
-              y: 20,
-              left: `calc(50vw + ${(sidebarExpanded ? 132 : 64) / 2}px)`,
-            }}
-            animate={{
-              opacity: 1,
-              y: 0,
-              left: `calc(50vw + ${(sidebarExpanded ? 132 : 64) / 2}px)`,
-            }}
+            // motion.div 에서는 style.transform 을 인라인으로 주면 motion 이 자기 transform 으로
+            // 덮어써 무시되므로 (한솔 v1.27.0 보고), translateX 는 반드시 animate.x:'-50%' 로 위임.
+            initial={{ opacity: 0, y: 20, left: bulkBarLeftPx, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, left: bulkBarLeftPx, x: '-50%' }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
             className="fixed bottom-6 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl shadow-2xl shadow-black/40"
             style={{
-              transform: 'translateX(-50%)',
               background: 'rgb(var(--color-bg-card) / 0.95)',
               border: '1px solid rgb(var(--color-accent) / 0.3)',
               backdropFilter: 'blur(12px)',
@@ -4628,7 +4657,8 @@ export function ScenesView() {
               <X size={14} />
             </button>
           </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
 
       {/* 일괄 편집 모달 */}
@@ -4639,7 +4669,7 @@ export function ScenesView() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
-            onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }}
+            onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); setBatchAssigneeMode('replace'); }}
           >
               <motion.div
                 initial={{ opacity: 0, scale: 0.93, y: 12 }}
@@ -4651,7 +4681,7 @@ export function ScenesView() {
               >
               <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">
                 <h3 className="text-sm font-bold text-text-primary">일괄 편집 ({selectedSceneIds.size}개 씬)</h3>
-                <button onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
+                <button onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); setBatchAssigneeMode('replace'); }} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
                   <X size={16} />
                 </button>
               </div>
@@ -4678,6 +4708,7 @@ export function ScenesView() {
                   void handleBulkEditSubmit(
                     {
                       assignee: assignee || undefined,
+                      assigneeMode: batchAssigneeMode,
                       memo: memo || undefined,
                       layoutId: layoutId || undefined,
                     },
@@ -4693,6 +4724,37 @@ export function ScenesView() {
                     placeholder="담당자"
                     className="mt-1"
                   />
+                  {/* v1.27.0: 교체 vs 추가 토글. assignee 입력했을 때만 의미 있으므로 입력 시 표시. */}
+                  {batchAssigneeValue.trim() && (
+                    <div className="mt-2 flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setBatchAssigneeMode('replace')}
+                        className={cn(
+                          'flex-1 py-1.5 text-[11px] font-medium rounded-md border transition-colors cursor-pointer',
+                          batchAssigneeMode === 'replace'
+                            ? 'bg-accent/20 border-accent/40 text-accent-sub'
+                            : 'bg-bg-primary border-bg-border text-text-secondary hover:text-text-primary hover:border-bg-border/80',
+                        )}
+                        title="기존 담당자를 무시하고 새 담당자로 덮어쓰기"
+                      >
+                        교체
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBatchAssigneeMode('append')}
+                        className={cn(
+                          'flex-1 py-1.5 text-[11px] font-medium rounded-md border transition-colors cursor-pointer',
+                          batchAssigneeMode === 'append'
+                            ? 'bg-accent/20 border-accent/40 text-accent-sub'
+                            : 'bg-bg-primary border-bg-border text-text-secondary hover:text-text-primary hover:border-bg-border/80',
+                        )}
+                        title="기존 담당자 뒤에 새 담당자를 콤마로 이어붙이기 (중복은 자동 제거)"
+                      >
+                        추가
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모 (비어있으면 건너뜀)</label>

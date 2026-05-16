@@ -110,8 +110,12 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
         }}
         className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10"
       />
-      {/* 핸들 hover/drag 시 좌측 변에 accent 발광. 위젯 EdgeGlow 와 동일 톤. */}
-      <ResizeEdgeGlow edge="w" active={handleHover || dragging} strong={dragging} radius={16} />
+      {/* 핸들 idle/hover/drag 3 단계 발광. 평상시도 살짝 보여 핸들 위치 암시 (한솔 v1.27.0 보고). */}
+      <ResizeEdgeGlow
+        edge="w"
+        intensity={dragging ? 'drag' : handleHover ? 'hover' : 'idle'}
+        radius={16}
+      />
 
       <div className="px-4 py-3 border-b border-bg-border shrink-0 flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium text-text-primary">
