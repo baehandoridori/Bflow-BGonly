@@ -218,6 +218,11 @@ function NotificationDropdown() {
     commitSize: (size) => {
       setLiveSize(null);
       setDragAxis(null);
+      // v1.27.0 코덱스 4차 P3 fix: drag 종료 직후 마우스가 핸들에서 떨어져 있으면
+      // onMouseLeave 는 drag 중에 !dragAxis 가드로 hoverAxis 를 못 풀고, drag 끝난 뒤에는
+      // mouseLeave 이벤트가 이미 지났기 때문에 hoverAxis 가 stale 하게 남아 glow 가 hover
+      // intensity 로 굳음. drag 종료 시 명시적으로 hoverAxis 도 초기화.
+      setHoverAxis(null);
       void commit(size);
     },
   });
