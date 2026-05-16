@@ -86,6 +86,7 @@ export function AnnotationToolbar({
     <>
       {/* 상단 도구 툴바 */}
       <div
+        data-annotation-toolbar
         className="absolute top-3 left-1/2 -translate-x-1/2 bg-bg-card/95 backdrop-blur border border-bg-border/60 rounded-xl p-1.5 flex gap-1 items-center shadow-2xl z-20"
         onMouseDown={preventBlur}
       >
@@ -122,6 +123,7 @@ export function AnnotationToolbar({
 
       {/* 옵션바 */}
       <div
+        data-annotation-toolbar
         className="absolute top-16 left-1/2 -translate-x-1/2 bg-bg-card/95 backdrop-blur border border-bg-border/60 rounded-lg px-3.5 py-2.5 flex gap-3.5 items-center text-xs z-20"
         onMouseDown={preventBlur}
       >

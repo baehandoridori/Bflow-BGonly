@@ -104,22 +104,23 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       if (!img || !canvas || !container) return;
       const setSize = () => {
         if (img.naturalWidth === 0) return;
-        // 스테이지 비율 기반 캔버스 크기 — 이미지의 자연 픽셀 밀도를 유지하면서 stage 영역 전체를 덮음
+        // v1.26.3: 캔버스 영역을 더 크게 — 이미지 사방으로 충분한 여백 (zoom out 시 외부 그리기 영역).
+        //          stage 비율을 유지하면서 이미지가 캔버스 중앙 60%~70% 정도 차지.
         const cRect = container.getBoundingClientRect();
         const stageRatio = cRect.width / cRect.height;
         const imgW = img.naturalWidth;
         const imgH = img.naturalHeight;
         const imgRatio = imgW / imgH;
-        // 캔버스가 stage 비율을 가지면서 이미지가 100% contain
+        const EXPAND = 1.6; // 이미지 크기 대비 캔버스 배수 (사방 30% 여백)
+        // 캔버스가 stage 비율을 가지면서 이미지 + 여백 포함
         let canvasW: number;
         let canvasH: number;
         if (stageRatio > imgRatio) {
-          // stage 가 더 가로로 길면 → 캔버스 높이 = 이미지 높이, 너비 = 이미지 높이 × stageRatio
-          canvasH = imgH;
-          canvasW = Math.round(imgH * stageRatio);
+          canvasH = Math.round(imgH * EXPAND);
+          canvasW = Math.round(canvasH * stageRatio);
         } else {
-          canvasW = imgW;
-          canvasH = Math.round(imgW / stageRatio);
+          canvasW = Math.round(imgW * EXPAND);
+          canvasH = Math.round(canvasW / stageRatio);
         }
         canvas.width = canvasW;
         canvas.height = canvasH;
@@ -307,12 +308,16 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       ctx.globalCompositeOperation = tool === 'erase' ? 'destination-out' : 'source-over';
 
       if (tool === 'text') {
-        // window.prompt 차단 환경 대응 — 캔버스 위 inline input
+        // window.prompt 차단 환경 대응 — 캔버스 위 inline input.
+        // v1.26.3: wrapper 의 left/top 을 click 위치 - (drag handle + input padding) 로 저장.
+        //          이렇게 하면 wrapper 안 input 의 텍스트 시작 위치가 정확히 click 위치와 일치.
         const containerRect = containerRef.current?.getBoundingClientRect();
         if (!containerRect) return;
+        const WRAPPER_OFFSET_X = 30; // drag handle (22) + input padding-l (8)
+        const WRAPPER_OFFSET_Y = 5;  // border-t (1) + padding-t (4)
         setTextInput({
-          screenX: e.clientX - containerRect.left,
-          screenY: e.clientY - containerRect.top,
+          screenX: e.clientX - containerRect.left - WRAPPER_OFFSET_X,
+          screenY: e.clientY - containerRect.top - WRAPPER_OFFSET_Y,
           canvasX: p.x,
           canvasY: p.y,
         });
@@ -324,20 +329,12 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       drawingRef.current = true;
       startPosRef.current = p;
       if (tool === 'pen' || tool === 'erase') {
-        // v1.26.2: segment-by-segment 그리기 — outline 지원
+        // v1.26.3: 펜 path 누적 — segment-by-segment 그리기가 만든 "브러쉬 느낌" 제거.
+        //          mousedown 시 beginPath + moveTo. mousemove 시 lineTo + stroke (outline OFF) 또는
+        //          path 전체에 outline+main 두 번 stroke (outline ON).
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
         prevPointRef.current = p;
-        // 시작점에 한 번 점 찍기 (outline 모드면 outline 색으로 두꺼운 점, 그 위에 main)
-        const mainWidth = ctx.lineWidth;
-        const drawDot = (col: string, w: number) => {
-          ctx.beginPath();
-          ctx.fillStyle = col;
-          ctx.arc(p.x, p.y, w / 2, 0, Math.PI * 2);
-          ctx.fill();
-        };
-        if (tool === 'pen' && outlineEnabled) {
-          drawDot(outlineColor, mainWidth * 2.2);
-        }
-        drawDot(tool === 'erase' ? '#000' : color, mainWidth);
       } else {
         // 도형 미리보기용 스냅샷
         snapshotRef.current = ctx.getImageData(0, 0, c.width, c.height);
@@ -351,24 +348,19 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       if (!ctx || !c || !startPosRef.current) return;
       const p = getCanvasPos(e);
       if (tool === 'pen' || tool === 'erase') {
-        const prev = prevPointRef.current ?? startPosRef.current;
+        // v1.26.3: path 누적 + outline 모드면 outline 한 번 + main 한 번 (path 전체)
         const mainStroke = ctx.strokeStyle as string;
         const mainWidth = ctx.lineWidth;
-        // outline 먼저 (펜만 — 지우개는 outline 의미 없음)
+        ctx.lineTo(p.x, p.y);
         if (tool === 'pen' && outlineEnabled) {
+          // outline 두꺼움 (먼저)
           ctx.strokeStyle = outlineColor;
-          ctx.lineWidth = mainWidth * 2.2;
-          ctx.beginPath();
-          ctx.moveTo(prev.x, prev.y);
-          ctx.lineTo(p.x, p.y);
+          ctx.lineWidth = mainWidth + Math.max(2, mainWidth * 0.6);
           ctx.stroke();
+          // main 얇음 (위)
           ctx.strokeStyle = mainStroke;
           ctx.lineWidth = mainWidth;
         }
-        // main
-        ctx.beginPath();
-        ctx.moveTo(prev.x, prev.y);
-        ctx.lineTo(p.x, p.y);
         ctx.stroke();
         prevPointRef.current = p;
       } else if (snapshotRef.current) {
@@ -459,7 +451,10 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       document.addEventListener('mouseup', handleTextDragMouseUp);
     }, [textInput, handleTextDragMouseMove, handleTextDragMouseUp]);
 
-    // 텍스트 드래그 후 캔버스 좌표도 동기화
+    // 텍스트 드래그 후 캔버스 좌표 동기화.
+    // textInput.screenX/Y = wrapper 의 left/top (container 기준, 보정 적용).
+    // 실제 텍스트 시작 위치 = (screenX + 30, screenY + 5).
+    // 캔버스 그릴 좌표 = 텍스트 시작 위치를 캔버스 좌표계로 변환.
     useEffect(() => {
       if (!textInput) return;
       const c = canvasRef.current;
@@ -467,12 +462,15 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       if (!c || !container) return;
       const cRect = c.getBoundingClientRect();
       const contRect = container.getBoundingClientRect();
-      // screenX/Y 는 container 기준 → canvas 화면 좌표 = screen - (cRect.left - contRect.left)
-      const xOnCanvas = textInput.screenX - (cRect.left - contRect.left);
-      const yOnCanvas = textInput.screenY - (cRect.top - contRect.top);
+      const WRAPPER_OFFSET_X = 30;
+      const WRAPPER_OFFSET_Y = 5;
+      const textScreenX = textInput.screenX + WRAPPER_OFFSET_X;
+      const textScreenY = textInput.screenY + WRAPPER_OFFSET_Y;
+      const xOnCanvas = textScreenX - (cRect.left - contRect.left);
+      const yOnCanvas = textScreenY - (cRect.top - contRect.top);
       const newCanvasX = (xOnCanvas * c.width) / cRect.width;
       const newCanvasY = (yOnCanvas * c.height) / cRect.height;
-      if (newCanvasX !== textInput.canvasX || newCanvasY !== textInput.canvasY) {
+      if (Math.abs(newCanvasX - textInput.canvasX) > 0.5 || Math.abs(newCanvasY - textInput.canvasY) > 0.5) {
         setTextInput((prev) => prev ? { ...prev, canvasX: newCanvasX, canvasY: newCanvasY } : prev);
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -569,11 +567,16 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
           >1:1</button>
         </div>
 
-        {/* v1.26.1: 텍스트 inline 입력 박스 — window.prompt 차단 환경 대응 + 드래그로 위치 이동 */}
+        {/* v1.26.1: 텍스트 inline 입력 박스 — window.prompt 차단 환경 대응 + 드래그로 위치 이동.
+            v1.26.3: textInput.screenX/Y 자체가 wrapper 의 left/top (mousedown 시 보정해서 저장).
+                     이렇게 하면 wrapper 안 input 의 텍스트 시작 위치가 정확히 click 위치와 일치. */}
         {textInput && (
           <div
             className="absolute z-30 flex items-stretch shadow-lg"
-            style={{ left: textInput.screenX, top: textInput.screenY }}
+            style={{
+              left: textInput.screenX,
+              top: textInput.screenY,
+            }}
             data-allow-context-menu
           >
             {/* 드래그 핸들 */}
@@ -594,9 +597,16 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
                 if (e.key === 'Enter') { e.preventDefault(); commitText(); }
                 else if (e.key === 'Escape') { e.preventDefault(); setTextInput(null); setTextValue(''); }
               }}
-              onBlur={() => {
+              onBlur={(e) => {
                 // 드래그 중에는 blur 로 확정 X — 핸들 mousedown 으로 인한 일시 blur 가드
                 if (textDragRef.current) {
+                  setTimeout(() => textInputRef.current?.focus(), 0);
+                  return;
+                }
+                // v1.26.3: 새로 focus 되는 element 가 도구바/옵션바 안이면 무시 + 다시 focus.
+                //          (슬라이더 input[range] 조작 시 텍스트 박스가 닫히지 않게)
+                const rt = e.relatedTarget as HTMLElement | null;
+                if (rt && rt.closest('[data-annotation-toolbar]')) {
                   setTimeout(() => textInputRef.current?.focus(), 0);
                   return;
                 }

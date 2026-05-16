@@ -38,7 +38,9 @@ export function ImageContextMenu({
   useEffect(() => {
     if (!open) return;
     // v1.26.2: 자기 자신을 여는 우클릭(pointerdown + mousedown + contextmenu)이
-    //          mount 직후 close 트리거하지 않도록 100ms 인큐베이션 윈도우.
+    //          mount 직후 close 트리거하지 않도록 150ms 인큐베이션 윈도우.
+    // v1.26.3: framer-motion / React 합성 이벤트 stopPropagation 우회 위해
+    //          capture phase + mousedown/click 두 종류 모두 listen.
     const mountTime = Date.now();
     const handler = (e: MouseEvent) => {
       if (Date.now() - mountTime < 150) return;
@@ -51,11 +53,13 @@ export function ImageContextMenu({
       if (ref.current?.contains(e.target as Node)) return;
       onClose();
     };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('contextmenu', ctxHandler);
+    document.addEventListener('mousedown', handler, true);
+    document.addEventListener('click', handler, true);
+    document.addEventListener('contextmenu', ctxHandler, true);
     return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('contextmenu', ctxHandler);
+      document.removeEventListener('mousedown', handler, true);
+      document.removeEventListener('click', handler, true);
+      document.removeEventListener('contextmenu', ctxHandler, true);
     };
   }, [open, onClose]);
 

@@ -778,17 +778,16 @@ export function ImageModal({
               >
                 {/* ── 단일: 스토리보드 ── */}
                 {view === 'single-storyboard' && (
-                  <div className="flex flex-col items-center gap-3">
+                  <div
+                    className="flex flex-col items-center gap-3 transition-transform duration-150 ease-out"
+                    style={{ transform: `scale(${zoom})`, transformOrigin: 'center' }}
+                  >
                     <span className="text-xs text-accent font-medium tracking-wide">스토리보드</span>
                     <img
                       src={displayStoryboardUrl}
                       alt="스토리보드"
-                      className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
-                      style={{
-                        transform: `scale(${zoom})`,
-                        transformOrigin: 'center',
-                        maxHeight: '75vh',
-                      }}
+                      className="rounded-lg shadow-2xl object-contain"
+                      style={{ maxHeight: '75vh' }}
                       draggable={false}
                     />
                     {currentStoryboardDescription && (
@@ -799,17 +798,16 @@ export function ImageModal({
 
                 {/* ── 단일: 가이드 ── */}
                 {view === 'single-guide' && (
-                  <div className="flex flex-col items-center gap-3">
+                  <div
+                    className="flex flex-col items-center gap-3 transition-transform duration-150 ease-out"
+                    style={{ transform: `scale(${zoom})`, transformOrigin: 'center' }}
+                  >
                     <span className="text-xs text-accent font-medium tracking-wide">가이드</span>
                     <img
                       src={displayGuideUrl}
                       alt="가이드"
-                      className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
-                      style={{
-                        transform: `scale(${zoom})`,
-                        transformOrigin: 'center',
-                        maxHeight: '75vh',
-                      }}
+                      className="rounded-lg shadow-2xl object-contain"
+                      style={{ maxHeight: '75vh' }}
                       draggable={false}
                     />
                     {currentGuideDescription && (
@@ -823,8 +821,8 @@ export function ImageModal({
                   <>
                     {/* 스토리보드 (왼쪽) */}
                     <div
-                      className="flex flex-col items-center gap-2 cursor-pointer"
-                      style={{ perspective: 800 }}
+                      className="flex flex-col items-center gap-2 cursor-pointer transition-transform duration-150 ease-out"
+                      style={{ perspective: 800, transform: `scale(${zoom})`, transformOrigin: 'center' }}
                       onClick={() => handleImageClick('storyboard')}
                     >
                       <span className="text-xs text-text-secondary">스토리보드</span>
@@ -833,10 +831,8 @@ export function ImageModal({
                           <img
                             src={displayStoryboardUrl}
                             alt="스토리보드"
-                            className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
+                            className="rounded-lg shadow-2xl object-contain"
                             style={{
-                              transform: `scale(${zoom})`,
-                              transformOrigin: 'center',
                               maxHeight: '70vh',
                               maxWidth: '42vw',
                             }}
@@ -853,8 +849,8 @@ export function ImageModal({
 
                     {/* 가이드 (오른쪽) */}
                     <div
-                      className="flex flex-col items-center gap-2 cursor-pointer"
-                      style={{ perspective: 800 }}
+                      className="flex flex-col items-center gap-2 cursor-pointer transition-transform duration-150 ease-out"
+                      style={{ perspective: 800, transform: `scale(${zoom})`, transformOrigin: 'center' }}
                       onClick={() => handleImageClick('guide')}
                     >
                       <span className="text-xs text-text-secondary">가이드</span>
@@ -863,10 +859,8 @@ export function ImageModal({
                           <img
                             src={displayGuideUrl}
                             alt="가이드"
-                            className="rounded-lg shadow-2xl object-contain transition-transform duration-150 ease-out"
+                            className="rounded-lg shadow-2xl object-contain"
                             style={{
-                              transform: `scale(${zoom})`,
-                              transformOrigin: 'center',
                               maxHeight: '70vh',
                               maxWidth: '42vw',
                             }}
@@ -886,7 +880,10 @@ export function ImageModal({
             </AnimatePresence>
           )}
 
-          {/* v1.26.0: 좌상단 버전 드롭다운 — sceneUuid 활성화 시 */}
+          {/* v1.26.0/v1.26.3: 버전 드롭다운 — sceneUuid 활성화 시
+              · 단일 스토리보드: 좌상단 스토리보드
+              · 단일 가이드: 좌상단 가이드
+              · 나란히: 좌상단 스토리보드 + 우상단 가이드 */}
           {sceneUuid && (view === 'single-storyboard' || view === 'side-by-side') && storyboardVersions.length > 0 && (
             <div className="absolute top-3 left-3 z-20">
               <ImageVersionDropdown
@@ -901,6 +898,18 @@ export function ImageModal({
           )}
           {sceneUuid && view === 'single-guide' && guideVersions.length > 0 && (
             <div className="absolute top-3 left-3 z-20">
+              <ImageVersionDropdown
+                versions={guideVersions}
+                currentVersionId={currentGuideId}
+                currentUserId={currentUserId}
+                isAdmin={isAdmin}
+                onSelect={setCurrentGuideId}
+                onDelete={(vid) => handleVersionDelete('guide', vid)}
+              />
+            </div>
+          )}
+          {sceneUuid && view === 'side-by-side' && guideVersions.length > 0 && (
+            <div className="absolute top-3 right-3 z-20">
               <ImageVersionDropdown
                 versions={guideVersions}
                 currentVersionId={currentGuideId}
