@@ -1,9 +1,9 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { toast as sonnerToast } from 'sonner';
-import { useDataStore } from '@/stores/useDataStore';
+import { useDataStore, legacyStagesFor } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
-import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS } from '@/types';
+import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS, SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState } from '@/types';
 import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
 import { updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
@@ -662,6 +662,7 @@ import {
   resolveSelectedUuids,
   resolveSelectedScenes,
   countSelectedScenes,
+  type ActPhasePatch,
 } from '@/utils/bulkOperations';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
@@ -1494,6 +1495,7 @@ export function ScenesView() {
   // v1.25.0~ 액팅 단계 토글 액션
   const setScenePhaseOptimistic = useDataStore((s) => s.setScenePhaseOptimistic);
   const bumpScenePhaseRoundOptimistic = useDataStore((s) => s.bumpScenePhaseRoundOptimistic);
+  // v1.27.0 코덱스 1차 P1: bulk ACT phase set 의 legacy boolean dual-write 용.
   // 코덱스 1차 P1: sheet 안에서만 sceneId 매칭 (글로벌 검색 금지)
   const findSceneInSheet = useDataStore((s) => s.findSceneInSheet);
   const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
@@ -1505,6 +1507,20 @@ export function ScenesView() {
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
   const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
+  // 일괄 액션 바를 콘텐츠 영역 정중앙(=사이드바 뺀 자리) 으로 보정. 사이드바 펼침/접힘에 동기.
+  const sidebarExpanded = useAppStore((s) => s.sidebarExpanded);
+  // viewport 너비 실시간 추적 — 사이드바 너비를 뺀 콘텐츠 영역의 정중앙 픽셀 계산용.
+  // framer-motion 의 animate.x:'-50%' 와 함께 left=px 로 줘야 motion 이 transform 을 올바르게 관리.
+  // (style.transform 인라인 지정은 motion 이 자기 transform 으로 덮어써 무시됨 → 한솔 보고 v1.27.0)
+  const [viewportW, setViewportW] = useState<number>(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 1280,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => setViewportW(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const currentUser = useAuthStore((s) => s.currentUser);
   const isBulkInFlight = useBulkOperationsStore((s) => s.activeOp?.status === 'in-flight');
   const isLight = colorMode === 'light';
@@ -1737,6 +1753,11 @@ export function ScenesView() {
   const [celebratingId, setCelebratingId] = useState<string | null>(null);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [batchAssigneeValue, setBatchAssigneeValue] = useState('');
+  // v1.27.0: 일괄 편집 담당자 처리 모드 — 'replace'=기존 덮어쓰기, 'append'=콤마 구분 이어붙이기 (중복 제거).
+  const [batchAssigneeMode, setBatchAssigneeMode] = useState<'replace' | 'append'>('replace');
+  // v1.27.0: 일괄 편집 적용 대상 부서 — 'all'=BG+ACT 둘 다, 'bg'=BG만, 'acting'=ACT만.
+  // 기본값은 현재 카드뷰의 selectedDepartment 와 동기 (모달 열 때마다 갱신).
+  const [batchTargetDept, setBatchTargetDept] = useState<'all' | 'bg' | 'acting'>('all');
   // treeOpen 초기값 — 영속화된 값이 있으면 그걸로, 없으면 true (디폴트 펼침)
   const [treeOpen, setTreeOpen] = useState(() => loadPersistedTreeOpen() ?? true);
 
@@ -2727,6 +2748,107 @@ export function ScenesView() {
     );
   };
 
+  // v1.27.0: 통합 뷰 일괄 액션 바 — 액팅 씬을 한꺼번에 특정 phase 로 설정.
+  // 토글이 아닌 SET — 여러 씬이 다른 phase 일 수 있으므로 토글은 의미가 모호.
+  // 동작:
+  //   1. 선택된 씬 중 ACT 부서만 추출 (BG 는 무시).
+  //   2. 각 씬에 대해 handleActPhaseStateClick 와 동일한 round 계산 규칙 적용.
+  //      legacy boolean (lo/done/review/png) 도 함께 dual-write — calcStats 등 split state 방지.
+  //      코덱스 1차 P1 #2 fix.
+  //   3. 씬별 *이전* 값 (sceneState/workRound/feedbackRound + legacy 4 boolean) 캡처 — 실패 롤백용.
+  //      코덱스 1차 P1 #1 fix: executor 안 try/catch 에서 실패 씬은 prev 로 store 재패치.
+  //   4. runBulkOp 로 store + 토스트 통합. executor 는 updateScenePhaseInSupabase 를 N 회 호출.
+  //   5. 성공 항목마다 useDataStore 의 phasePatch 적용.
+  const handleBulkActPhaseSet = async (phase: ScenePhaseState) => {
+    const targetScenes = resolveSelectedScenes(selectedSceneIds, allMergedScenes, 'acting', currentPart);
+    if (targetScenes.length === 0) return;
+
+    // 씬별 새 phase patch + 이전 값 캡처. ActPhasePatch 는 bulkOperations.ts 정의.
+    const phasePatchByUuid = new Map<string, ActPhasePatch>();
+    const prevByUuid = new Map<string, ActPhasePatch>();
+    for (const s of targetScenes) {
+      if (!s.id) continue;
+      const prevState: ScenePhaseState = s.sceneState ?? 'wait';
+      const prevWork = s.workRound ?? 0;
+      const prevFb = s.feedbackRound ?? 0;
+      // 롤백용 — 코덱스 1차 P1 #1 fix.
+      prevByUuid.set(s.id, {
+        sceneState: prevState,
+        workRound: prevWork,
+        feedbackRound: prevFb,
+        lo: s.lo,
+        done: s.done,
+        review: s.review,
+        png: s.png,
+      });
+
+      let workRound = prevWork;
+      let feedbackRound = prevFb;
+      if (phase === 'wait' || phase === 'done') {
+        workRound = 0;
+        feedbackRound = 0;
+      } else if (phase === 'work') {
+        if (prevState === 'feedback') workRound = Math.min(99, prevFb + 1);
+        else if (prevState !== 'work') workRound = Math.max(1, Math.min(99, prevWork || 1));
+      } else if (phase === 'feedback') {
+        if (prevState === 'work') feedbackRound = Math.min(99, prevWork);
+        else if (prevState !== 'feedback') feedbackRound = Math.max(1, Math.min(99, prevFb || 1));
+      }
+      // 코덱스 1차 P1 #2 fix: legacy lo/done/review/png 도 dual-write.
+      // setScenePhaseOptimistic 의 legacyStagesFor 매핑과 동일.
+      const legacy = legacyStagesFor(phase);
+      phasePatchByUuid.set(s.id, {
+        sceneState: phase,
+        workRound,
+        feedbackRound,
+        lo: legacy.lo,
+        done: legacy.done,
+        review: legacy.review,
+        png: legacy.png,
+      });
+    }
+
+    const uuids = targetScenes.filter((s) => s.id).map((s) => s.id!);
+
+    // 낙관적 업데이트 — 각 씬에 즉시 새 phase + legacy 반영 (Supabase 응답 전).
+    for (const [uuid, patch] of phasePatchByUuid) {
+      updateSceneByUuid(uuid, patch);
+    }
+
+    await runBulkOp(
+      'act-phase-set',
+      uuids,
+      async (uuidsToSend) => {
+        // 단일 씬용 IPC 를 병렬 호출 후 BulkUpdateResult[] 로 합성.
+        // 실패 씬은 store 에서 즉시 prev 값으로 롤백 (코덱스 1차 P1 #1).
+        const results = await Promise.all(
+          uuidsToSend.map(async (uuid) => {
+            const patch = phasePatchByUuid.get(uuid);
+            if (!patch) return { sceneUuid: uuid, success: false, error: 'missing patch' };
+            try {
+              await updateScenePhaseInSupabase(
+                uuid,
+                patch.sceneState,
+                patch.workRound,
+                patch.feedbackRound,
+                currentUser?.id,
+              );
+              return { sceneUuid: uuid, success: true };
+            } catch (err) {
+              const message = err instanceof Error ? err.message : 'unknown error';
+              // 실패 시 즉시 prev 값으로 store 롤백 — stale state 영구화 방지.
+              const prev = prevByUuid.get(uuid);
+              if (prev) updateSceneByUuid(uuid, prev);
+              return { sceneUuid: uuid, success: false, error: message };
+            }
+          }),
+        );
+        return results;
+      },
+      { targetPhase: phase, phasePatchByUuid },
+    );
+  };
+
   // 일괄 삭제: ConfirmDialog → RPC 경유, runBulkOp가 낙관적 제거 처리 (Tasks 13-17)
   // v1.25.12: 카운트는 사용자 보는 단위(머지드 카드)로 표기 — 내부 row 수 X.
   const handleBulkDelete = async () => {
@@ -2858,33 +2980,75 @@ export function ScenesView() {
   };
 
   // 일괄 편집: 선택된 씬들의 assignee/memo/layoutId를 RPC로 일괄 갱신 (Tasks 13-17)
+  // v1.27.0: assigneeMode 도입 — 'replace' 기존 덮어쓰기 / 'append' 기존에 이어붙이기 (중복 제거).
+  // v1.27.0: targetDept 도입 — 'all'/'bg'/'acting'. resolveSelectedScenes 의 onlyDept 로 전달.
+  // append 모드는 씬마다 기존 값이 다르므로 fields 가 씬별로 다름 → 씬별 updates 생성.
   const handleBulkEditSubmit = async (
-    payload: { assignee?: string; memo?: string; layoutId?: string },
+    payload: {
+      assignee?: string;
+      assigneeMode?: 'replace' | 'append';
+      memo?: string;
+      layoutId?: string;
+      targetDept?: 'all' | 'bg' | 'acting';
+    },
     selectionSnapshot?: Set<string>,
   ) => {
-    const fields: BulkFieldUpdate['fields'] = {};
-    if (payload.assignee) fields.assignee = payload.assignee;
-    if (payload.memo) fields.memo = payload.memo;
-    if (payload.layoutId) fields.layoutId = payload.layoutId;
-    if (!fields.assignee && !fields.memo && !fields.layoutId) return;
+    if (!payload.assignee && !payload.memo && !payload.layoutId) return;
 
     const selection = selectionSnapshot ?? selectedSceneIds;
-    const uuids = resolveSelectedUuids(selection, allMergedScenes, currentPart);
-    if (uuids.length === 0) return;
-
-    const updates: BulkFieldUpdate[] = uuids.map((uuid) => ({
-      sceneUuid: uuid,
-      fields,
-    }));
-
-    const fieldsByUuid = new Map<string, Partial<Scene>>();
-    for (const uuid of uuids) {
-      fieldsByUuid.set(uuid, fields);
+    // v1.27.0 코덱스 3차 P1 fix: 단일 부서 뷰 (BG/ACT) 에서 selection 은 plain scene id 라
+    // resolveSelectedScenes 의 onlyDept 가 무시됨. 뷰 부서와 targetDept 가 불일치하면 의도와
+    // 반대 부서를 편집하는 데이터 무결성 사고 방지 — 명시적 early return + 사용자 안내.
+    if (
+      selectedDepartment !== 'all'
+      && payload.targetDept
+      && payload.targetDept !== 'all'
+      && payload.targetDept !== selectedDepartment
+    ) {
+      const viewLabel = selectedDepartment === 'bg' ? 'BG' : '액팅';
+      const targetLabel = payload.targetDept === 'bg' ? 'BG' : '액팅';
+      sonnerToast.warning(`현재 ${viewLabel} 뷰에서는 ${targetLabel}만으로 편집할 수 없습니다. 통합 뷰에서 시도해주세요.`);
+      return;
     }
+    const onlyDept = payload.targetDept && payload.targetDept !== 'all' ? payload.targetDept : undefined;
+    const targetScenes = resolveSelectedScenes(selection, allMergedScenes, onlyDept, currentPart);
+    if (targetScenes.length === 0) return;
+
+    const mode = payload.assigneeMode ?? 'replace';
+    const updates: BulkFieldUpdate[] = [];
+    const fieldsByUuid = new Map<string, Partial<Scene>>();
+
+    for (const s of targetScenes) {
+      if (!s.id) continue;
+      const fields: BulkFieldUpdate['fields'] = {};
+      if (payload.memo) fields.memo = payload.memo;
+      if (payload.layoutId) fields.layoutId = payload.layoutId;
+      if (payload.assignee) {
+        if (mode === 'replace') {
+          fields.assignee = payload.assignee;
+        } else {
+          // append: 기존 콤마 구분 담당자에 새 이름 이어붙임. 중복 제거.
+          const existing = (s.assignee ?? '').split(',').map((n) => n.trim()).filter(Boolean);
+          const adding = payload.assignee.split(',').map((n) => n.trim()).filter(Boolean);
+          const merged: string[] = [];
+          const seen = new Set<string>();
+          for (const n of [...existing, ...adding]) {
+            if (seen.has(n)) continue;
+            seen.add(n);
+            merged.push(n);
+          }
+          fields.assignee = merged.join(', ');
+        }
+      }
+      if (Object.keys(fields).length === 0) continue;
+      updates.push({ sceneUuid: s.id, fields });
+      fieldsByUuid.set(s.id, fields);
+    }
+    if (updates.length === 0) return;
 
     await runBulkOp(
       'field-edit',
-      uuids,
+      updates.map((u) => u.sceneUuid),
       // retry 시 전달받은 uuids 부분집합만 재전송
       (uuidsToSend) => {
         const set = new Set(uuidsToSend);
@@ -4427,16 +4591,25 @@ export function ScenesView() {
 
       {/* 일괄 액션 바 (선택된 씬이 있을 때) */}
       <AnimatePresence>
-        {selectedSceneIds.size > 0 && (
+        {selectedSceneIds.size > 0 && (() => {
+          // 사이드바 너비를 뺀 콘텐츠 영역의 정중앙 픽셀 좌표.
+          // viewport 1996, 사이드바 64 → bulkBarLeftPx = 64 + (1996-64)/2 = 1030.
+          // framer-motion 의 x:'-50%' 가 transform: translateX(-50%) 로 변환되며 정중앙 정렬.
+          const sidebarW = sidebarExpanded ? 132 : 64;
+          const bulkBarLeftPx = sidebarW + (viewportW - sidebarW) / 2;
+          return (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl shadow-2xl shadow-black/40"
+            // motion.div 에서는 style.transform 을 인라인으로 주면 motion 이 자기 transform 으로
+            // 덮어써 무시되므로 (한솔 v1.27.0 보고), translateX 는 반드시 animate.x:'-50%' 로 위임.
+            // 한솔 v1.27.0 보고: 존재감 부족 → 살짝 큰 스프링 entrance + bflow-bulk-bar-pulse glow.
+            initial={{ opacity: 0, y: 30, scale: 0.92, left: bulkBarLeftPx, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, scale: 1, left: bulkBarLeftPx, x: '-50%' }}
+            exit={{ opacity: 0, y: 20, scale: 0.96 }}
+            transition={{ duration: 0.45, ease: [0.22, 1.4, 0.36, 1] }}
+            className="bflow-bulk-bar-pulse fixed bottom-6 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl"
             style={{
               background: 'rgb(var(--color-bg-card) / 0.95)',
-              border: '1px solid rgb(var(--color-accent) / 0.3)',
+              border: '1.5px solid rgb(var(--color-accent) / 0.55)',
               backdropFilter: 'blur(12px)',
             }}
           >
@@ -4474,23 +4647,25 @@ export function ScenesView() {
                     </button>
                   ))}
                 </div>
-                {/* ACT 스테이지 */}
+                {/* ACT 단계 (v1.27.0) — SCENE_PHASES set 동작. 토글 아닌 직접 설정.
+                    BG 행과 달리 SCENE_PHASE_COLORS 사용 (phase ≠ stage 라 의도적 비대칭). */}
                 <div className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: DEPARTMENT_CONFIGS.acting.color }} />
                   <span className="text-[11px] text-text-secondary leading-none whitespace-nowrap">{DEPARTMENT_CONFIGS.acting.shortLabel}</span>
-                  {STAGES.map((stage) => (
+                  {SCENE_PHASES.map((phase) => (
                     <button
-                      key={`act-${stage}`}
-                      onClick={() => handleBulkStageToggle(stage, 'acting')}
+                      key={`act-${phase}`}
+                      onClick={() => handleBulkActPhaseSet(phase)}
                       disabled={isBulkInFlight}
+                      title={`선택된 액팅 씬을 모두 "${SCENE_PHASE_LABELS[phase]}" 로 설정`}
                       className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{
-                        backgroundColor: `${DEPARTMENT_CONFIGS.acting.stageColors[stage]}20`,
-                        color: DEPARTMENT_CONFIGS.acting.stageColors[stage],
-                        border: `1px solid ${DEPARTMENT_CONFIGS.acting.stageColors[stage]}40`,
+                        backgroundColor: `${SCENE_PHASE_COLORS[phase]}20`,
+                        color: SCENE_PHASE_COLORS[phase],
+                        border: `1px solid ${SCENE_PHASE_COLORS[phase]}40`,
                       }}
                     >
-                      {DEPARTMENT_CONFIGS.acting.stageLabels[stage]}
+                      {SCENE_PHASE_LABELS_SHORT[phase]}
                     </button>
                   ))}
                 </div>
@@ -4550,7 +4725,12 @@ export function ScenesView() {
 
             {/* 일괄 편집 */}
             <button
-              onClick={() => setBatchEditOpen(true)}
+              onClick={() => {
+                // v1.27.0: 모달 열 때마다 현재 카드뷰의 부서 필터를 기본값으로 동기화.
+                // 'all' 카드뷰 → 'all', 액팅 카드뷰 → 'acting', BG 카드뷰 → 'bg'.
+                setBatchTargetDept(selectedDepartment as 'all' | 'bg' | 'acting');
+                setBatchEditOpen(true);
+              }}
               disabled={isBulkInFlight}
               className="h-7 px-3 text-[11px] font-medium rounded-md bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -4577,7 +4757,8 @@ export function ScenesView() {
               <X size={14} />
             </button>
           </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
 
       {/* 일괄 편집 모달 */}
@@ -4588,7 +4769,7 @@ export function ScenesView() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-overlay/50 backdrop-blur-sm"
-            onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }}
+            onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); setBatchAssigneeMode('replace'); }}
           >
               <motion.div
                 initial={{ opacity: 0, scale: 0.93, y: 12 }}
@@ -4600,12 +4781,53 @@ export function ScenesView() {
               >
               <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">
                 <h3 className="text-sm font-bold text-text-primary">일괄 편집 ({selectedSceneIds.size}개 씬)</h3>
-                <button onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); }} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
+                <button onClick={() => { setBatchEditOpen(false); setBatchAssigneeValue(''); setBatchAssigneeMode('replace'); }} className="p-1 text-text-secondary hover:text-text-primary cursor-pointer">
                   <X size={16} />
                 </button>
               </div>
+
+              {/* v1.27.0: 적용 대상 부서 토글 — 통합 뷰에서 BG/ACT 동시 선택돼 있어도 한쪽만 편집 가능.
+                  코덱스 3차 P1 fix: 단일 부서 뷰 (BG/ACT) 에서는 반대 부서 토글을 disable —
+                  selection 이 plain id 라 어차피 효과 없고 오해만 부름. */}
+              <div className="px-5 pt-4">
+                <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider block mb-1.5">적용 대상</label>
+                <div className="flex gap-1.5">
+                  {(['all', 'bg', 'acting'] as const).map((dept) => {
+                    const isUnifiedView = selectedDepartment === 'all';
+                    // 단일 부서 뷰에서 반대 부서 옵션은 비활성. '둘 다' / 같은 부서는 항상 가능.
+                    const disabled = !isUnifiedView && dept !== 'all' && dept !== selectedDepartment;
+                    return (
+                      <button
+                        key={dept}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => !disabled && setBatchTargetDept(dept)}
+                        className={cn(
+                          'flex-1 py-1.5 text-[11px] font-medium rounded-md border transition-colors',
+                          batchTargetDept === dept
+                            ? 'bg-accent/20 border-accent/40 text-accent-sub'
+                            : 'bg-bg-primary border-bg-border text-text-secondary hover:text-text-primary hover:border-bg-border/80',
+                          disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+                        )}
+                        title={
+                          disabled
+                            ? `현재 ${selectedDepartment === 'bg' ? 'BG' : '액팅'} 뷰에서는 사용할 수 없는 옵션입니다`
+                            : dept === 'all'
+                              ? '선택된 씬의 BG·ACT 양쪽 모두 편집'
+                              : dept === 'bg'
+                                ? '선택된 씬의 BG 만 편집 (ACT 는 무시)'
+                                : '선택된 씬의 ACT 만 편집 (BG 는 무시)'
+                        }
+                      >
+                        {dept === 'all' ? '둘 다' : dept === 'bg' ? 'BG만' : 'ACT만'}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <form
-                className="p-5 flex flex-col gap-4"
+                className="p-5 pt-3 flex flex-col gap-4"
                 onSubmit={(e) => {
                   e.preventDefault();
                   const form = e.target as HTMLFormElement;
@@ -4627,8 +4849,10 @@ export function ScenesView() {
                   void handleBulkEditSubmit(
                     {
                       assignee: assignee || undefined,
+                      assigneeMode: batchAssigneeMode,
                       memo: memo || undefined,
                       layoutId: layoutId || undefined,
+                      targetDept: batchTargetDept,
                     },
                     selectionSnapshot,
                   );
@@ -4642,6 +4866,37 @@ export function ScenesView() {
                     placeholder="담당자"
                     className="mt-1"
                   />
+                  {/* v1.27.0: 교체 vs 추가 토글. assignee 입력했을 때만 의미 있으므로 입력 시 표시. */}
+                  {batchAssigneeValue.trim() && (
+                    <div className="mt-2 flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setBatchAssigneeMode('replace')}
+                        className={cn(
+                          'flex-1 py-1.5 text-[11px] font-medium rounded-md border transition-colors cursor-pointer',
+                          batchAssigneeMode === 'replace'
+                            ? 'bg-accent/20 border-accent/40 text-accent-sub'
+                            : 'bg-bg-primary border-bg-border text-text-secondary hover:text-text-primary hover:border-bg-border/80',
+                        )}
+                        title="기존 담당자를 무시하고 새 담당자로 덮어쓰기"
+                      >
+                        교체
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBatchAssigneeMode('append')}
+                        className={cn(
+                          'flex-1 py-1.5 text-[11px] font-medium rounded-md border transition-colors cursor-pointer',
+                          batchAssigneeMode === 'append'
+                            ? 'bg-accent/20 border-accent/40 text-accent-sub'
+                            : 'bg-bg-primary border-bg-border text-text-secondary hover:text-text-primary hover:border-bg-border/80',
+                        )}
+                        title="기존 담당자 뒤에 새 담당자를 콤마로 이어붙이기 (중복은 자동 제거)"
+                      >
+                        추가
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider">메모 (비어있으면 건너뜀)</label>

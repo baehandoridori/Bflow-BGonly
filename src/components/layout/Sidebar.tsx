@@ -286,8 +286,10 @@ export function Sidebar() {
           </button>
         ))}
 
-        {/* 하단: 토글 + 버전 (항상 같은 위치) */}
-        <div className="mt-auto flex flex-col items-center gap-1.5 w-16 shrink-0">
+        {/* 하단: 토글 + 버전 (항상 같은 위치)
+            v1.27.0: 새 버전 배지를 사이드바 우측 contour 밖으로 돌출시키기 위해
+            이 컨테이너만 overflow-visible 적용. aside 본체는 overflow-hidden 유지 (네비 라벨 보호). */}
+        <div className="mt-auto flex flex-col items-center gap-1.5 w-16 shrink-0 overflow-visible">
           <button
             onClick={handleToggle}
             className="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary/40 hover:text-text-primary hover:bg-bg-border/50 transition-all duration-200 cursor-pointer"
@@ -323,7 +325,11 @@ export function Sidebar() {
             >
               v{__APP_VERSION__}
               {hasRemoteUpdate && (
-                <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[#FDCB6E] shadow-[0_0_0_4px_rgba(253,203,110,0.13)]" />
+                <span
+                  aria-hidden="true"
+                  className="bflow-badge-pulse absolute h-3 w-3 rounded-full bg-[#FDCB6E]"
+                  style={{ right: '-8px', top: '-4px' }}
+                />
               )}
             </button>
           </span>

@@ -874,3 +874,105 @@ input[type="range"]::-webkit-slider-thumb {
 .bflow-peak-pulse {
   animation: bflow-peak-bar-pulse 1.6s ease-in-out infinite;
 }
+
+/* v1.27.0: 사이드바 새 버전 배지 — 노란색 펄스 + 사이드바 우측 contour 밖 돌출 */
+@keyframes bflow-badge-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(253, 203, 110, 0.6), 0 0 8px 2px rgba(253, 203, 110, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(253, 203, 110, 0), 0 0 12px 4px rgba(253, 203, 110, 0.5);
+  }
+}
+.bflow-badge-pulse {
+  animation: bflow-badge-pulse 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bflow-badge-pulse {
+    animation: none !important;
+    box-shadow: 0 0 8px 2px rgba(253, 203, 110, 0.4);
+  }
+}
+
+/* v1.27.0: 카드뷰 하단 일괄 액션 바 — 사용자들이 존재를 잘 모름 (한솔 보고).
+   액센트 색 외곽 글로우 + 잔잔한 pulse 로 시선을 끌되 정신없지 않게.
+   사이즈는 변하지 않고 box-shadow 만 호흡하듯 변동. */
+@keyframes bflow-bulk-bar-pulse {
+  0%, 100% {
+    box-shadow:
+      0 12px 28px rgba(0, 0, 0, 0.45),
+      0 0 0 0 rgb(var(--color-accent) / 0.45),
+      0 0 22px 4px rgb(var(--color-accent) / 0.22);
+  }
+  50% {
+    box-shadow:
+      0 12px 28px rgba(0, 0, 0, 0.45),
+      0 0 0 8px rgb(var(--color-accent) / 0),
+      0 0 36px 10px rgb(var(--color-accent) / 0.35);
+  }
+}
+.bflow-bulk-bar-pulse {
+  animation: bflow-bulk-bar-pulse 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bflow-bulk-bar-pulse {
+    animation: none !important;
+    box-shadow:
+      0 12px 28px rgba(0, 0, 0, 0.45),
+      0 0 24px 4px rgb(var(--color-accent) / 0.3);
+  }
+}
+
+/* v1.27.0: 드래그 핸들 파티클 — drag 중 핸들 주변에서 작은 입자가 사르르.
+   한솔 v1.27.0 5차 보고: 더 많이 + 더 밝게 + 라이트 모드 잘 보이게.
+   파티클 16개 + 0.07s staggered delay + 더 큰 외향 거리 + 강한 glow + drop-shadow 백업. */
+@keyframes bflow-handle-particle {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(
+      calc(var(--bflow-dx, 0px) * 0.55),
+      calc(var(--bflow-dy, 0px) * 0.55)
+    ) scale(1.1);
+  }
+  60% {
+    opacity: 0.8;
+    transform: translate(
+      calc(var(--bflow-dx, 0px) * 1.4),
+      calc(var(--bflow-dy, 0px) * 1.4)
+    ) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(
+      calc(var(--bflow-dx, 0px) * 2.4),
+      calc(var(--bflow-dy, 0px) * 2.4)
+    ) scale(0.5);
+  }
+}
+.bflow-handle-particle {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  /* 코어 — 흰빛 살짝 섞어 발광체 느낌 + 라이트 모드에서도 대비 확보. */
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgb(var(--color-accent)) 55%, rgb(var(--color-accent)) 100%);
+  /* 다중 box-shadow — 가까운 글로우 + 멀리 퍼지는 어슴푸레한 glow. */
+  box-shadow:
+    0 0 4px 1px rgb(var(--color-accent) / 0.95),
+    0 0 12px 4px rgb(var(--color-accent) / 0.55);
+  /* drop-shadow 까지 한 번 더 — 라이트 모드 흰 배경에서도 가장자리 발광 유지. */
+  filter: drop-shadow(0 0 6px rgb(var(--color-accent) / 0.7));
+  pointer-events: none;
+  opacity: 0;
+  animation: bflow-handle-particle 1.5s ease-out infinite;
+  z-index: 6;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bflow-handle-particle {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>카드 뷰 하단 바 정중앙 시안 비교</title>
+<style>
+  :root {
+    --bg-app:#0F1117;
+    --bg-card:#1A1D27;
+    --bg-border:#2D3041;
+    --text:#E8E8EE;
+    --text-sec:#8B8DA3;
+    --accent:#6C5CE7;
+    --accent-sub:#A29BFE;
+    --stage-lo:#74B9FF;
+    --stage-done:#A29BFE;
+    --stage-review:#FDCB6E;
+    --stage-png:#00B894;
+    --phase-wait:#6E7388;
+    --phase-work:#74B9FF;
+    --phase-feedback:#FDCB6E;
+    --phase-done:#00B894;
+    --sidebar-w-collapsed: 64px;
+    --sidebar-w-expanded: 132px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; height:100%; background:var(--bg-app); color:var(--text); font-family: 'Pretendard', system-ui, sans-serif; }
+  body { display:flex; flex-direction:column; min-height:100vh; }
+
+  /* ── 컨트롤 패널 ───────────────────────────────── */
+  .controls {
+    position: fixed; top: 12px; right: 12px; z-index: 100;
+    background: var(--bg-card); border: 1px solid var(--bg-border);
+    padding: 12px 14px; border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+    width: 280px;
+  }
+  .controls h4 { margin: 0 0 10px 0; font-size: 13px; color: var(--accent-sub); font-weight: 600; }
+  .controls .group { margin-bottom: 12px; }
+  .controls .group:last-child { margin-bottom: 0; }
+  .controls .group-title { font-size: 11px; color: var(--text-sec); margin-bottom: 6px; }
+  .controls label {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--text); padding: 6px 8px; border-radius: 6px;
+    cursor: pointer;
+  }
+  .controls label:hover { background: rgba(255,255,255,0.04); }
+  .controls input[type=radio] { accent-color: var(--accent); }
+  .controls button {
+    width: 100%; padding: 8px; background: rgba(108,92,231,0.18);
+    border: 1px solid rgba(108,92,231,0.35); color: var(--text);
+    border-radius: 6px; cursor: pointer; font-size: 12px;
+    transition: background 0.2s;
+  }
+  .controls button:hover { background: rgba(108,92,231,0.32); }
+
+  /* ── 앱 셸 ─────────────────────────────────────── */
+  .app-shell { display: flex; flex: 1; position: relative; min-height: 100vh; }
+
+  .sidebar {
+    width: var(--sidebar-w-collapsed);
+    background: var(--bg-card);
+    border-right: 1px solid var(--bg-border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px 0;
+    gap: 6px;
+    transition: width 350ms cubic-bezier(0.4,0,0.2,1);
+    flex-shrink: 0;
+    z-index: 40;
+  }
+  body[data-sidebar="expanded"] .sidebar { width: var(--sidebar-w-expanded); }
+  .sidebar-logo {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-sub));
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 700; font-size: 18px;
+    margin-bottom: 8px;
+  }
+  .sidebar-item {
+    width: 48px; height: 40px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-sec); font-size: 11px;
+    transition: background 0.2s;
+  }
+  .sidebar-item.active { background: rgba(108,92,231,0.2); color: var(--accent-sub); }
+  body[data-sidebar="expanded"] .sidebar-item { width: 116px; justify-content: flex-start; padding-left: 16px; }
+
+  /* ── 콘텐츠 영역 ───────────────────────────────── */
+  .content {
+    flex: 1; padding: 24px;
+    overflow-y: auto;
+    min-width: 0;
+    position: relative;
+  }
+  .content-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .content-header h1 { margin: 0; font-size: 18px; color: var(--text); font-weight: 700; }
+  .content-header .hint {
+    font-size: 11px; color: var(--text-sec);
+    background: var(--bg-card); padding: 6px 10px; border-radius: 6px;
+    border: 1px solid var(--bg-border);
+  }
+
+  /* ── 카드 그리드 ───────────────────────────────── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+  }
+  .scene-card {
+    background: var(--bg-card);
+    border: 1px solid var(--bg-border);
+    border-radius: 10px;
+    aspect-ratio: 4 / 3;
+    padding: 10px;
+    display: flex; flex-direction: column;
+    transition: border-color 0.15s;
+    cursor: pointer;
+  }
+  .scene-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1.5px var(--accent);
+  }
+  .scene-card .scene-id {
+    font-size: 11px; color: var(--accent-sub); font-weight: 600;
+  }
+  .scene-card .scene-thumb {
+    flex: 1; background: rgba(255,255,255,0.04); border-radius: 6px;
+    margin: 6px 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-sec); font-size: 10px;
+  }
+  .scene-card .scene-tags { display: flex; gap: 4px; }
+  .scene-card .scene-tags .tag {
+    width: 14px; height: 14px; border-radius: 3px;
+    background: rgba(255,255,255,0.08);
+  }
+  .scene-card .scene-tags .tag.done { background: var(--stage-done); }
+  .scene-card .scene-tags .tag.lo { background: var(--stage-lo); }
+
+  /* ── 하단 바 (옵션별 위치) ──────────────────────── */
+  .bulk-bar {
+    display: flex; align-items: center; gap: 12px;
+    background: rgba(26,29,39,0.96);
+    border: 1px solid rgba(108,92,231,0.32);
+    border-radius: 12px;
+    padding: 10px 18px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 18px 40px rgba(0,0,0,0.5);
+    z-index: 50;
+    white-space: nowrap;
+    color: var(--text);
+    font-size: 12px;
+  }
+  .bulk-bar .count-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding-right: 12px; border-right: 1px solid var(--bg-border);
+  }
+  .bulk-bar .count-pill .check {
+    width: 14px; height: 14px; border-radius: 3px;
+    background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 10px;
+  }
+  .bulk-bar .stage-btn {
+    height: 28px; padding: 0 10px; border-radius: 6px;
+    font-size: 11px; font-weight: 600;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: var(--text);
+  }
+  .bulk-bar .stage-btn.lo { color: var(--stage-lo); border-color: rgba(116,185,255,0.25); background: rgba(116,185,255,0.12); }
+  .bulk-bar .stage-btn.done { color: var(--stage-done); border-color: rgba(162,155,254,0.25); background: rgba(162,155,254,0.12); }
+  .bulk-bar .stage-btn.review { color: var(--stage-review); border-color: rgba(253,203,110,0.25); background: rgba(253,203,110,0.12); }
+  .bulk-bar .stage-btn.png { color: var(--stage-png); border-color: rgba(0,184,148,0.25); background: rgba(0,184,148,0.12); }
+
+  /* ── 옵션 A: 콘텐츠 영역 정중앙 (사이드바 보정, 추천) ── */
+  body[data-mode="A"] .bulk-bar {
+    position: fixed;
+    bottom: 24px;
+    left: calc(50vw + var(--sidebar-w-current, var(--sidebar-w-collapsed)) / 2);
+    transform: translateX(-50%);
+    transition: left 350ms cubic-bezier(0.4,0,0.2,1);
+  }
+  body[data-mode="A"][data-sidebar="expanded"] .bulk-bar { --sidebar-w-current: var(--sidebar-w-expanded); }
+  body[data-mode="A"][data-sidebar="collapsed"] .bulk-bar { --sidebar-w-current: var(--sidebar-w-collapsed); }
+
+  /* ── 옵션 B: viewport 정중앙 (현재 동작) ─────────── */
+  body[data-mode="B"] .bulk-bar {
+    position: fixed;
+    bottom: 24px;
+    left: 50vw;
+    transform: translateX(-50%);
+  }
+
+  /* ── 옵션 C: 콘텐츠 컨테이너 absolute ────────────── */
+  body[data-mode="C"] .bulk-bar {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  /* 가이드 라인 — 정중앙 인지용 */
+  .center-guide {
+    position: fixed; top: 0; bottom: 0;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, rgba(253,203,110,0.4), transparent);
+    z-index: 30;
+    pointer-events: none;
+  }
+  .center-guide.viewport { left: 50vw; }
+  .center-guide.content { left: calc(50vw + var(--sidebar-w-current-guide, var(--sidebar-w-collapsed)) / 2); transition: left 350ms cubic-bezier(0.4,0,0.2,1); }
+  body[data-sidebar="expanded"] .center-guide.content { --sidebar-w-current-guide: var(--sidebar-w-expanded); }
+  body[data-show-guide="off"] .center-guide { display: none; }
+
+  /* 옵션 설명 카드 */
+  .option-info {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--bg-card); border: 1px solid var(--bg-border);
+    padding: 10px 14px; border-radius: 10px;
+    font-size: 11px; color: var(--text-sec);
+    max-width: 280px;
+    z-index: 60;
+    line-height: 1.5;
+  }
+  .option-info b { color: var(--accent-sub); }
+</style>
+</head>
+<body data-mode="A" data-sidebar="collapsed" data-show-guide="on">
+
+<!-- 컨트롤 패널 -->
+<div class="controls">
+  <h4>🎛️ 시안 비교 컨트롤</h4>
+
+  <div class="group">
+    <div class="group-title">정중앙 정의</div>
+    <label><input type="radio" name="mode" value="A" checked /> A. 콘텐츠 영역 정중앙 (사이드바 보정, 추천)</label>
+    <label><input type="radio" name="mode" value="B" /> B. viewport 정중앙 (현재 상태)</label>
+    <label><input type="radio" name="mode" value="C" /> C. 콘텐츠 컨테이너 absolute</label>
+  </div>
+
+  <div class="group">
+    <div class="group-title">사이드바 상태</div>
+    <label><input type="radio" name="sidebar" value="collapsed" checked /> 접힘 (64px)</label>
+    <label><input type="radio" name="sidebar" value="expanded" /> 펼침 (132px)</label>
+  </div>
+
+  <div class="group">
+    <div class="group-title">가이드</div>
+    <label><input type="checkbox" id="guideToggle" checked /> 정중앙 노란 가이드 표시</label>
+  </div>
+
+  <div class="group">
+    <button id="toggleSel">선택 토글 (5개 ↔ 0개)</button>
+  </div>
+</div>
+
+<!-- 정중앙 가이드 -->
+<div class="center-guide viewport" title="viewport 정중앙"></div>
+<div class="center-guide content" title="콘텐츠 영역 정중앙"></div>
+
+<!-- 옵션 설명 -->
+<div class="option-info" id="info"></div>
+
+<!-- 앱 셸 -->
+<div class="app-shell">
+  <!-- 사이드바 -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">B</div>
+    <div class="sidebar-item">대시</div>
+    <div class="sidebar-item">에피</div>
+    <div class="sidebar-item active">씬</div>
+    <div class="sidebar-item">인원</div>
+    <div class="sidebar-item">팀원</div>
+    <div class="sidebar-item">타임</div>
+    <div class="sidebar-item">캘린</div>
+  </aside>
+
+  <!-- 콘텐츠 -->
+  <main class="content">
+    <div class="content-header">
+      <h1>씬 목록 — 카드 뷰</h1>
+      <div class="hint">사이드바·옵션을 토글해 하단 바가 어떻게 움직이는지 확인</div>
+    </div>
+
+    <div class="card-grid">
+      <!-- 16개 카드 (5개 선택됨) -->
+      <div class="scene-card selected"><div class="scene-id">EP01 S01</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag lo"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card selected"><div class="scene-id">EP01 S02</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag done"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card selected"><div class="scene-id">EP01 S03</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag done"></span><span class="tag done"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card"><div class="scene-id">EP01 S04</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card selected"><div class="scene-id">EP01 S05</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag lo"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card selected"><div class="scene-id">EP01 S06</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card"><div class="scene-id">EP01 S07</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card"><div class="scene-id">EP01 S08</div><div class="scene-thumb">[ACT]</div><div class="scene-tags"><span class="tag"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card"><div class="scene-id">EP01 S09</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card"><div class="scene-id">EP01 S10</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card"><div class="scene-id">EP01 S11</div><div class="scene-thumb">[ACT]</div><div class="scene-tags"><span class="tag"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+      <div class="scene-card"><div class="scene-id">EP01 S12</div><div class="scene-thumb">[BG]</div><div class="scene-tags"><span class="tag"></span><span class="tag"></span><span class="tag"></span><span class="tag"></span></div></div>
+    </div>
+
+    <!-- 하단 일괄 액션 바 -->
+    <div class="bulk-bar" id="bulkBar">
+      <div class="count-pill">
+        <span class="check">✓</span>
+        <span><b style="color:var(--text)">5</b>개 선택</span>
+      </div>
+      <button class="stage-btn lo">LO</button>
+      <button class="stage-btn done">완료</button>
+      <button class="stage-btn review">검수</button>
+      <button class="stage-btn png">PNG</button>
+    </div>
+  </main>
+</div>
+
+<script>
+  const body = document.body;
+  const info = document.getElementById('info');
+  const bar = document.getElementById('bulkBar');
+
+  const INFO = {
+    A: '<b>옵션 A — 콘텐츠 영역 정중앙</b><br>사이드바를 뺀 작업 영역 기준으로 정중앙. 노란 가이드(콘텐츠) 위에 바가 정확히 올라간다. 사이드바 펼침/접힘에 따라 바도 부드럽게 이동.',
+    B: '<b>옵션 B — viewport 정중앙 (현재)</b><br>화면 전체의 정가운데. 사이드바가 viewport 안에 있어서 시각적으로 작업 영역에선 오른쪽으로 치우쳐 보인다. 두 노란선의 차이가 그 보정량.',
+    C: '<b>옵션 C — 콘텐츠 absolute</b><br>fixed가 아니라 콘텐츠 컨테이너 내부에 absolute. 자연스럽게 콘텐츠 중앙. 다만 스크롤 시 콘텐츠와 함께 움직이지 않고 컨테이너의 마지막 위치에 고정 — 짧은 페이지에서는 OK.'
+  };
+
+  document.querySelectorAll('input[name="mode"]').forEach(r => {
+    r.addEventListener('change', e => {
+      body.dataset.mode = e.target.value;
+      info.innerHTML = INFO[e.target.value];
+    });
+  });
+  document.querySelectorAll('input[name="sidebar"]').forEach(r => {
+    r.addEventListener('change', e => { body.dataset.sidebar = e.target.value; });
+  });
+  document.getElementById('guideToggle').addEventListener('change', e => {
+    body.dataset.showGuide = e.target.checked ? 'on' : 'off';
+  });
+  document.getElementById('toggleSel').addEventListener('click', () => {
+    const selected = document.querySelectorAll('.scene-card.selected');
+    if (selected.length > 0) {
+      selected.forEach(c => c.classList.remove('selected'));
+      bar.style.display = 'none';
+    } else {
+      document.querySelectorAll('.scene-card').forEach((c, i) => {
+        if ([0,1,2,4,5].includes(i)) c.classList.add('selected');
+      });
+      bar.style.display = '';
+    }
+  });
+
+  info.innerHTML = INFO.A;
+</script>
+
+</body>
+</html>

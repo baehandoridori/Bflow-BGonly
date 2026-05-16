@@ -22,8 +22,8 @@ import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/Assig
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
-import { CommentPanel, type CommentInlineEvent } from './CommentPanel';
-import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
+import type { CommentInlineEvent } from './CommentPanel';
+import { CommentPanelResizable } from './CommentPanelResizable';
 import { RevisionPanel } from './RevisionPanel';
 import { SceneFilesTab } from './SceneFilesTab';
 import { SceneHistoryTab } from './SceneHistoryTab';
@@ -808,36 +808,21 @@ export function UnifiedSceneDetailModal({
 
           {/* ── 댓글 패널 (상시 표시) — 본체와 같은 높이 */}
           {primaryCommentKey && (
-            <motion.div
-              key="comment-panel"
-              initial={{ opacity: 0, x: 30 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.25, delay: 0.1 }}
-              className="w-80 bg-bg-card shadow-2xl border border-bg-border h-[min(900px,92vh)] flex flex-col shrink-0 overflow-hidden"
-              style={{ borderRadius: 18 }}
-            >
-              <div className="px-4 py-3 border-b border-bg-border shrink-0">
-                <h3 className="text-sm font-medium text-text-primary">
-                  댓글 및 활동
-                  {commentCount > 0 && (
-                    <span className="ml-2 text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
-                  )}
-                </h3>
-              </div>
-              <CommentPanelErrorBoundary panelId="unified" key={primaryCommentKey}>
-                <CommentPanel
-                  sceneKey={primaryCommentKey}
-                  secondarySceneKey={secondaryCommentKey || undefined}
-                  onCountChange={setCommentCount}
-                  inlineEvents={inlineEvents}
-                  focusCommentId={focusCommentId}
-                  // v1.24.0: 댓글 이미지 라이트박스 상단 라벨용 — "EP01 / A컷 #03" 형태로 전달.
-                  sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
-                    .filter(Boolean)
-                    .join(' / ')}
-                />
-              </CommentPanelErrorBoundary>
-            </motion.div>
+            <CommentPanelResizable
+              commentCount={commentCount}
+              sceneKey={primaryCommentKey}
+              secondarySceneKey={secondaryCommentKey || undefined}
+              onCountChange={setCommentCount}
+              inlineEvents={inlineEvents}
+              focusCommentId={focusCommentId}
+              sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
+                .filter(Boolean)
+                .join(' / ')}
+              heightClass="h-[min(900px,92vh)]"
+              headerRight={commentCount > 0 ? (
+                <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>
+              ) : null}
+            />
           )}
         </motion.div>
       </motion.div>

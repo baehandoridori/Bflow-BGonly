@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
+import { SCENE_PHASE_LABELS } from '@/types';
+import type { ScenePhaseState } from '@/types';
 
 /**
  * 일괄 작업 상태를 Sonner 토스트로 표시.
@@ -43,7 +45,7 @@ export function BulkOperationStatus() {
     if (!activeOp) return;
     const opId = activeOp.id;
     const toastId = `bulk-op-${opId}`;
-    const label = kindLabel(activeOp.kind, activeOp.targetStage);
+    const label = kindLabel(activeOp.kind, activeOp.targetStage, activeOp.targetPhase);
 
     const withOpGuard = (fn: () => void): (() => void) => () => {
       const current = useBulkOperationsStore.getState().activeOp;
@@ -136,7 +138,7 @@ export function BulkOperationStatus() {
       const fresh = useBulkOperationsStore.getState().activeOp;
       if (!fresh || fresh.id !== opId || fresh.status !== 'in-flight') return;
       slowHintShownRef.current.add(opId);
-      const label = kindLabel(fresh.kind, fresh.targetStage);
+      const label = kindLabel(fresh.kind, fresh.targetStage, fresh.targetPhase);
       toast.loading(renderInFlight(fresh, label), {
         id: `bulk-op-${opId}`,
         description: '네트워크가 느려요',
@@ -152,10 +154,12 @@ export function BulkOperationStatus() {
   return null;
 }
 
-function kindLabel(kind: string, stage?: string): string {
+function kindLabel(kind: string, stage?: string, phase?: ScenePhaseState): string {
   if (kind === 'delete') return '삭제';
   if (kind === 'stage-toggle') return (stage ?? '').toUpperCase();
   if (kind === 'field-edit') return '편집';
+  // v1.27.0: 액팅 phase 일괄 설정 — 라벨에 phase 한국어 표시 ('대기로 설정' 등)
+  if (kind === 'act-phase-set' && phase) return `${SCENE_PHASE_LABELS[phase]}으로 설정`;
   return '';
 }
 
