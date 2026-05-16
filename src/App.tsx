@@ -31,6 +31,7 @@ import { invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
+import { semverGt } from '@/utils/semver';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { setFeedbackLastSeenAt, setAssignmentLastSeenAt } from '@/utils/lastSeenTracker';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
@@ -406,6 +407,10 @@ export default function App() {
         if (savedPrefs?.notifications?.toastDuration) {
           setToastDuration(savedPrefs.notifications.toastDuration);
         }
+
+        // v1.27.0: lastSeenVersion 토스트는 *splash 닫힌 후* 별도 effect 에서 처리.
+        // 초기에 호출하면 Toaster 가 아직 mount 안 된 상태(splash 화면 동안) 라 안 보이는데
+        // lastSeenVersion 은 갱신되어 다음 실행에도 안 보임 — 한솔 v1.27.0 1차 보고.
 
         // 알림 히스토리 로드
         useNotificationStore.getState().loadFromDisk();
@@ -1988,6 +1993,35 @@ export default function App() {
 
   // ── 글로벌 단축키 (Phase 8-2) ──
   useGlobalShortcuts({ onReload: loadData });
+
+  // v1.27.0: 업데이트 완료 토스트 — splash 닫힌 뒤 (= Toaster mount 된 뒤) 한 번만 표시.
+  // splash 동안 호출하면 Toaster 가 아직 없어 안 보이지만 lastSeenVersion 은 갱신되어
+  // 다음 실행 시에도 영원히 안 뜨는 문제가 있었음 (한솔 v1.27.0 1차 보고).
+  const updateToastShownRef = useRef(false);
+  useEffect(() => {
+    if (showSplash || updateToastShownRef.current) return;
+    updateToastShownRef.current = true; // 같은 세션에서 두 번 안 뜨도록 즉시 마킹
+    let cancelled = false;
+    (async () => {
+      const prefs = (await loadPreferences()) ?? {};
+      if (cancelled) return;
+      const prev = prefs.lastSeenVersion;
+      if (prev && semverGt(__APP_VERSION__, prev)) {
+        sonnerToast.success(`v${__APP_VERSION__} 으로 업데이트되었어요`, {
+          duration: 8000,
+          action: {
+            label: '업데이트 내역 보기',
+            onClick: () => useAppStore.getState().setUpdateCenterOpen(true),
+          },
+        });
+      }
+      // 토스트 표시 여부와 무관하게 lastSeenVersion 갱신 — 다음 업데이트까지 1회 보장.
+      if (prev !== __APP_VERSION__) {
+        await savePreferences({ ...prefs, lastSeenVersion: __APP_VERSION__ });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showSplash]);
 
   // Ctrl+Alt+U: 관리자 모드 토글
   useEffect(() => {

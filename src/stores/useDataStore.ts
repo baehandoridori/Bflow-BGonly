@@ -92,8 +92,10 @@ function applyUpdate(get: () => DataState, episodes: Episode[]) {
  * 코덱스 5차 P1 #11 fix: 액팅 단계 → legacy boolean 4개 매핑.
  * electron/supabase.ts 의 updateScenePhase 의 dual-write 매핑과 동일.
  * 마이그레이션 SQL 매핑과 round-trip 가능.
+ *
+ * v1.27.0 코덱스 1차 P1 fix: bulk ACT phase set 에서도 동일 매핑 사용하도록 export.
  */
-function legacyStagesFor(state: ScenePhaseState): { lo: boolean; done: boolean; review: boolean; png: boolean } {
+export function legacyStagesFor(state: ScenePhaseState): { lo: boolean; done: boolean; review: boolean; png: boolean } {
   switch (state) {
     case 'wait':     return { lo: false, done: false, review: false, png: false };
     case 'work':     return { lo: true,  done: true,  review: false, png: false };

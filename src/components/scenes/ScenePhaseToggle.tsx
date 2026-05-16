@@ -45,6 +45,9 @@ export function ScenePhaseToggle({
   // v1.25.7: 작업중일 때만 차수 헤더 노출. 피드백/대기/완료는 차수 숨김.
   const showWorkRound = activeState === 'work';
   const workRound = scene.workRound ?? 1;
+  // v1.27.0: BG 카드와 동일한 "진행한 이전 단계 옅게 채움" 패턴. 현재 phase 의 앞 단계는
+  // 자기 색의 알파(0x20 ≈ 0.125) 로 살짝 채워 시각 진행도 표현.
+  const activeIndex = SCENE_PHASES.indexOf(activeState);
 
   const handleChipClick = useCallback(
     (target: ScenePhaseState) => {
@@ -96,8 +99,10 @@ export function ScenePhaseToggle({
         role="radiogroup"
         aria-label="액팅 씬 단계"
       >
-        {SCENE_PHASES.map((state) => {
+        {SCENE_PHASES.map((state, i) => {
           const isActive = activeState === state;
+          // v1.27.0: 현재 phase 보다 앞선 단계 = 이미 거쳐온 단계. BG 카드 트랙처럼 옅게 채움.
+          const isPrevious = !isActive && activeIndex > 0 && i < activeIndex;
           return (
             <div
               key={state}
@@ -117,7 +122,10 @@ export function ScenePhaseToggle({
                 'flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-medium select-none whitespace-nowrap',
                 'transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
                 compact ? 'px-1 py-1 text-[10px]' : 'px-1.5 py-2 text-[11px]',
-                !isActive && 'text-text-secondary/70 hover:text-text-primary hover:bg-bg-border/25 cursor-pointer',
+                // 비활성 + 진행 전 단계 → 기본 회색 톤 + hover.
+                !isActive && !isPrevious && 'text-text-secondary/70 hover:text-text-primary hover:bg-bg-border/25 cursor-pointer',
+                // 비활성 + 이미 거쳐온 단계 → 자기 색 옅게. hover 시 살짝 밝게.
+                !isActive && isPrevious && 'cursor-pointer hover:brightness-110',
                 disabled && 'opacity-40 cursor-not-allowed',
               )}
               style={
@@ -128,7 +136,13 @@ export function ScenePhaseToggle({
                       fontWeight: 700,
                       boxShadow: `0 2px 8px ${SCENE_PHASE_COLORS[state]}40`,
                     }
-                  : undefined
+                  : isPrevious
+                    ? {
+                        // BG 트랙의 isDone && !isCurrent 와 동일한 톤 (color + '20' = alpha ~0.125).
+                        backgroundColor: `${SCENE_PHASE_COLORS[state]}20`,
+                        color: SCENE_PHASE_COLORS[state],
+                      }
+                    : undefined
               }
             >
               <span className="truncate">{SCENE_PHASE_LABELS_SHORT[state]}</span>
