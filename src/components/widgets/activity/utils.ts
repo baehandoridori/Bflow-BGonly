@@ -4,6 +4,19 @@ import { ACTION_TYPE_LABEL } from './constants';
 import { GROUP_WINDOW_MS } from './constants';
 
 /**
+ * 멀티-씬 액션 — 한 번의 사용자 행위로 여러 씬에 동시에 영향이 가는 액션.
+ * 이 화이트리스트에 속하는 액션은 `sameGroup` 에서 sceneId 가 달라도 묶음.
+ * 단일-씬 액션(stage 토글, phase 토글, 댓글, 리비전 등)은 기존 정책대로 sceneId 일치 요구.
+ * 향후 새 멀티-씬 액션이 추가되면 여기에 함께 등록할 것.
+ */
+export const MULTI_SCENE_ACTIONS: ReadonlySet<ActionType> = new Set([
+  'assignee_change',
+  'layout_change',
+  'image_upload_storyboard',
+  'image_upload_guide',
+]);
+
+/**
  * 활동 동사(verb) 라벨 — stage 활동은 부서별 명칭 + 토글 ON/OFF 구분.
  * - BG: lo='LO', done='완료', review='검수', png='PNG'
  * - 액팅: lo='1원화', done='2원화', review='동화', png='최종'
@@ -49,8 +62,9 @@ export function groupActivities(items: Activity[]): FeedItem[] {
     if (a.userId !== b.userId) return false;
     if (a.actionType !== b.actionType) return false;
     if (a.episodeNumber !== b.episodeNumber) return false;
-    // scene_id 까지 일치해야 같은 그룹 — 같은 에피소드 다른 씬을 한 그룹으로 묶지 않음 (Codex P2)
-    if (a.sceneId !== b.sceneId) return false;
+    // 단일-씬 액션은 sceneId 일치 요구 (Codex P2). 멀티-씬 액션(담당자/레이아웃/이미지 일괄 업로드)
+    // 은 한 번의 사용자 행위로 여러 씬에 동시에 영향이 가므로 sceneId 무관 묶음.
+    if (!MULTI_SCENE_ACTIONS.has(a.actionType) && a.sceneId !== b.sceneId) return false;
     const da = new Date(a.createdAt).getTime();
     const db = new Date(b.createdAt).getTime();
     return Math.abs(da - db) <= GROUP_WINDOW_MS;
