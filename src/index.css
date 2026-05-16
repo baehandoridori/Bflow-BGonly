@@ -893,3 +893,68 @@ input[type="range"]::-webkit-slider-thumb {
     box-shadow: 0 0 8px 2px rgba(253, 203, 110, 0.4);
   }
 }
+
+/* v1.27.0: 카드뷰 하단 일괄 액션 바 — 사용자들이 존재를 잘 모름 (한솔 보고).
+   액센트 색 외곽 글로우 + 잔잔한 pulse 로 시선을 끌되 정신없지 않게.
+   사이즈는 변하지 않고 box-shadow 만 호흡하듯 변동. */
+@keyframes bflow-bulk-bar-pulse {
+  0%, 100% {
+    box-shadow:
+      0 12px 28px rgba(0, 0, 0, 0.45),
+      0 0 0 0 rgb(var(--color-accent) / 0.45),
+      0 0 22px 4px rgb(var(--color-accent) / 0.22);
+  }
+  50% {
+    box-shadow:
+      0 12px 28px rgba(0, 0, 0, 0.45),
+      0 0 0 8px rgb(var(--color-accent) / 0),
+      0 0 36px 10px rgb(var(--color-accent) / 0.35);
+  }
+}
+.bflow-bulk-bar-pulse {
+  animation: bflow-bulk-bar-pulse 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bflow-bulk-bar-pulse {
+    animation: none !important;
+    box-shadow:
+      0 12px 28px rgba(0, 0, 0, 0.45),
+      0 0 24px 4px rgb(var(--color-accent) / 0.3);
+  }
+}
+
+/* v1.27.0: 드래그 핸들 파티클 — drag 중일 때 핸들 주변에서 작은 입자가 사르르.
+   8개 파티클이 staggered delay 로 회전+외향 퍼지면서 fade. infinite loop. */
+@keyframes bflow-handle-particle {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  20% {
+    opacity: 0.95;
+    transform: translate(var(--bflow-dx, 0px), var(--bflow-dy, 0px)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(
+      calc(var(--bflow-dx, 0px) * 2.2),
+      calc(var(--bflow-dy, 0px) * 2.2)
+    ) scale(0.5);
+  }
+}
+.bflow-handle-particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: rgb(var(--color-accent));
+  box-shadow: 0 0 6px rgb(var(--color-accent) / 0.7);
+  pointer-events: none;
+  opacity: 0;
+  animation: bflow-handle-particle 1.4s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bflow-handle-particle {
+    animation: none !important;
+  }
+}

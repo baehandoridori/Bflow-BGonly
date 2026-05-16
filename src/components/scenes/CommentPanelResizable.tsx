@@ -4,6 +4,7 @@ import { CommentPanel } from './CommentPanel';
 import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
 import { useCommentPanelWidth, useCommentPanelResizer } from '@/hooks/useCommentPanelWidth';
 import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
+import { ResizeHandleParticles } from '@/components/common/ResizeHandleParticles';
 
 /**
  * v1.27.0: 상세 모달 옆 댓글 패널 — 3중 반응형.
@@ -116,6 +117,8 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
         intensity={dragging ? 'drag' : handleHover ? 'hover' : 'idle'}
         radius={16}
       />
+      {/* 드래그 중에만 좌측 변에서 파티클 사르르 (한솔 v1.27.0 보고). */}
+      <ResizeHandleParticles edge="w" active={dragging} />
 
       <div className="px-4 py-3 border-b border-bg-border shrink-0 flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium text-text-primary">

@@ -7,6 +7,7 @@ import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
 import { useNotificationPanelSize, useNotificationPanelResizer } from '@/hooks/useNotificationPanelSize';
 import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
+import { ResizeHandleParticles } from '@/components/common/ResizeHandleParticles';
 import {
   buildNotificationSceneModalRequest,
   departmentFromNotificationSheetName,
@@ -416,19 +417,33 @@ function NotificationDropdown() {
         className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize z-30"
       />
 
-      {/* EdgeGlow — hover 또는 drag 중인 변을 강조. 코너 hover/drag 면 양 변 모두. */}
+      {/* EdgeGlow — idle 에도 은은하게 보여 핸들 존재 암시 (한솔 v1.27.0 보고).
+          댓글 패널과 톤 통일. hover/drag 시 단계적으로 강해짐. */}
       <ResizeEdgeGlow
         edge="w"
-        active={hoverAxis === 'w' || hoverAxis === 'sw' || dragAxis === 'w' || dragAxis === 'sw'}
-        strong={dragAxis === 'w' || dragAxis === 'sw'}
+        intensity={
+          dragAxis === 'w' || dragAxis === 'sw'
+            ? 'drag'
+            : hoverAxis === 'w' || hoverAxis === 'sw'
+              ? 'hover'
+              : 'idle'
+        }
         radius={12}
       />
       <ResizeEdgeGlow
         edge="s"
-        active={hoverAxis === 's' || hoverAxis === 'sw' || dragAxis === 's' || dragAxis === 'sw'}
-        strong={dragAxis === 's' || dragAxis === 'sw'}
+        intensity={
+          dragAxis === 's' || dragAxis === 'sw'
+            ? 'drag'
+            : hoverAxis === 's' || hoverAxis === 'sw'
+              ? 'hover'
+              : 'idle'
+        }
         radius={12}
       />
+      {/* 드래그 중에만 좌측/하단 변에서 파티클 사르르. */}
+      <ResizeHandleParticles edge="w" active={dragAxis === 'w' || dragAxis === 'sw'} />
+      <ResizeHandleParticles edge="s" active={dragAxis === 's' || dragAxis === 'sw'} />
     </div>
   );
 }

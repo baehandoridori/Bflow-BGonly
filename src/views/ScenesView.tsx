@@ -1752,6 +1752,9 @@ export function ScenesView() {
   const [batchAssigneeValue, setBatchAssigneeValue] = useState('');
   // v1.27.0: 일괄 편집 담당자 처리 모드 — 'replace'=기존 덮어쓰기, 'append'=콤마 구분 이어붙이기 (중복 제거).
   const [batchAssigneeMode, setBatchAssigneeMode] = useState<'replace' | 'append'>('replace');
+  // v1.27.0: 일괄 편집 적용 대상 부서 — 'all'=BG+ACT 둘 다, 'bg'=BG만, 'acting'=ACT만.
+  // 기본값은 현재 카드뷰의 selectedDepartment 와 동기 (모달 열 때마다 갱신).
+  const [batchTargetDept, setBatchTargetDept] = useState<'all' | 'bg' | 'acting'>('all');
   // treeOpen 초기값 — 영속화된 값이 있으면 그걸로, 없으면 true (디폴트 펼침)
   const [treeOpen, setTreeOpen] = useState(() => loadPersistedTreeOpen() ?? true);
 
@@ -2940,15 +2943,23 @@ export function ScenesView() {
 
   // 일괄 편집: 선택된 씬들의 assignee/memo/layoutId를 RPC로 일괄 갱신 (Tasks 13-17)
   // v1.27.0: assigneeMode 도입 — 'replace' 기존 덮어쓰기 / 'append' 기존에 이어붙이기 (중복 제거).
+  // v1.27.0: targetDept 도입 — 'all'/'bg'/'acting'. resolveSelectedScenes 의 onlyDept 로 전달.
   // append 모드는 씬마다 기존 값이 다르므로 fields 가 씬별로 다름 → 씬별 updates 생성.
   const handleBulkEditSubmit = async (
-    payload: { assignee?: string; assigneeMode?: 'replace' | 'append'; memo?: string; layoutId?: string },
+    payload: {
+      assignee?: string;
+      assigneeMode?: 'replace' | 'append';
+      memo?: string;
+      layoutId?: string;
+      targetDept?: 'all' | 'bg' | 'acting';
+    },
     selectionSnapshot?: Set<string>,
   ) => {
     if (!payload.assignee && !payload.memo && !payload.layoutId) return;
 
     const selection = selectionSnapshot ?? selectedSceneIds;
-    const targetScenes = resolveSelectedScenes(selection, allMergedScenes, undefined, currentPart);
+    const onlyDept = payload.targetDept && payload.targetDept !== 'all' ? payload.targetDept : undefined;
+    const targetScenes = resolveSelectedScenes(selection, allMergedScenes, onlyDept, currentPart);
     if (targetScenes.length === 0) return;
 
     const mode = payload.assigneeMode ?? 'replace';
@@ -4507,14 +4518,15 @@ export function ScenesView() {
           <motion.div
             // motion.div 에서는 style.transform 을 인라인으로 주면 motion 이 자기 transform 으로
             // 덮어써 무시되므로 (한솔 v1.27.0 보고), translateX 는 반드시 animate.x:'-50%' 로 위임.
-            initial={{ opacity: 0, y: 20, left: bulkBarLeftPx, x: '-50%' }}
-            animate={{ opacity: 1, y: 0, left: bulkBarLeftPx, x: '-50%' }}
-            exit={{ opacity: 0, y: 20 }}
-            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
-            className="fixed bottom-6 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl shadow-2xl shadow-black/40"
+            // 한솔 v1.27.0 보고: 존재감 부족 → 살짝 큰 스프링 entrance + bflow-bulk-bar-pulse glow.
+            initial={{ opacity: 0, y: 30, scale: 0.92, left: bulkBarLeftPx, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, scale: 1, left: bulkBarLeftPx, x: '-50%' }}
+            exit={{ opacity: 0, y: 20, scale: 0.96 }}
+            transition={{ duration: 0.45, ease: [0.22, 1.4, 0.36, 1] }}
+            className="bflow-bulk-bar-pulse fixed bottom-6 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl"
             style={{
               background: 'rgb(var(--color-bg-card) / 0.95)',
-              border: '1px solid rgb(var(--color-accent) / 0.3)',
+              border: '1.5px solid rgb(var(--color-accent) / 0.55)',
               backdropFilter: 'blur(12px)',
             }}
           >
@@ -4630,7 +4642,12 @@ export function ScenesView() {
 
             {/* 일괄 편집 */}
             <button
-              onClick={() => setBatchEditOpen(true)}
+              onClick={() => {
+                // v1.27.0: 모달 열 때마다 현재 카드뷰의 부서 필터를 기본값으로 동기화.
+                // 'all' 카드뷰 → 'all', 액팅 카드뷰 → 'acting', BG 카드뷰 → 'bg'.
+                setBatchTargetDept(selectedDepartment as 'all' | 'bg' | 'acting');
+                setBatchEditOpen(true);
+              }}
               disabled={isBulkInFlight}
               className="h-7 px-3 text-[11px] font-medium rounded-md bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -4685,8 +4702,38 @@ export function ScenesView() {
                   <X size={16} />
                 </button>
               </div>
+
+              {/* v1.27.0: 적용 대상 부서 토글 — 통합 뷰에서 BG/ACT 동시 선택돼 있어도 한쪽만 편집 가능. */}
+              <div className="px-5 pt-4">
+                <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider block mb-1.5">적용 대상</label>
+                <div className="flex gap-1.5">
+                  {(['all', 'bg', 'acting'] as const).map((dept) => (
+                    <button
+                      key={dept}
+                      type="button"
+                      onClick={() => setBatchTargetDept(dept)}
+                      className={cn(
+                        'flex-1 py-1.5 text-[11px] font-medium rounded-md border transition-colors cursor-pointer',
+                        batchTargetDept === dept
+                          ? 'bg-accent/20 border-accent/40 text-accent-sub'
+                          : 'bg-bg-primary border-bg-border text-text-secondary hover:text-text-primary hover:border-bg-border/80',
+                      )}
+                      title={
+                        dept === 'all'
+                          ? '선택된 씬의 BG·ACT 양쪽 모두 편집'
+                          : dept === 'bg'
+                            ? '선택된 씬의 BG 만 편집 (ACT 는 무시)'
+                            : '선택된 씬의 ACT 만 편집 (BG 는 무시)'
+                      }
+                    >
+                      {dept === 'all' ? '둘 다' : dept === 'bg' ? 'BG만' : 'ACT만'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <form
-                className="p-5 flex flex-col gap-4"
+                className="p-5 pt-3 flex flex-col gap-4"
                 onSubmit={(e) => {
                   e.preventDefault();
                   const form = e.target as HTMLFormElement;
@@ -4711,6 +4758,7 @@ export function ScenesView() {
                       assigneeMode: batchAssigneeMode,
                       memo: memo || undefined,
                       layoutId: layoutId || undefined,
+                      targetDept: batchTargetDept,
                     },
                     selectionSnapshot,
                   );
