@@ -24,8 +24,7 @@ import { AssigneeMultiSelect } from '@/components/common/AssigneeMultiSelect';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
-import { CommentPanel } from './CommentPanel';
-import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
+import { CommentPanelResizable } from './CommentPanelResizable';
 import { RevisionPanel } from './RevisionPanel';
 import { getComments } from '@/services/commentService';
 import { useRevisionStore } from '@/stores/useRevisionStore';
@@ -1069,32 +1068,16 @@ export function SceneDetailModal({
             )}
           </AnimatePresence>
 
-          {/* ── 댓글 패널 — 항상 표시 ── */}
-          <motion.div
-            key="comment-panel"
-            initial={{ opacity: 0, x: 30 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.25, delay: 0.1 }}
-            className="w-80 bg-bg-card rounded-2xl shadow-2xl border border-bg-border max-h-[90vh] flex flex-col shrink-0"
-          >
-            <div className="px-4 py-3 border-b border-bg-border shrink-0">
-              <h3 className="text-sm font-medium text-text-primary">댓글 및 활동</h3>
-            </div>
-            <CommentPanelErrorBoundary panelId="single" key={sceneKey}>
-              <CommentPanel
-                sceneKey={sceneKey}
-                secondarySceneKey={
-                  counterpartSheetName && counterpartSceneNo != null
-                    ? `${counterpartSheetName}:${counterpartSceneNo}`
-                    : undefined
-                }
-                onCountChange={setCommentCount}
-                focusCommentId={focusCommentId}
-                // v1.24.0: 라이트박스 상단 라벨 — sheetName 에서 EP/파트 추출 + scene.sceneId.
-                sceneLabel={`${sheetName.replace(/_/g, ' ').replace(/^EP0?/, 'EP')}${scene.sceneId ? ` #${scene.sceneId}` : ''}`}
-              />
-            </CommentPanelErrorBoundary>
-          </motion.div>
+          {/* ── 댓글 패널 — 항상 표시. v1.27.0 3중 반응형 (clamp + 갯수 boost + 드래그) ── */}
+          <CommentPanelResizable
+            commentCount={commentCount}
+            sceneKey={sceneKey}
+            counterpartSheetName={counterpartSheetName}
+            counterpartSceneNo={counterpartSceneNo}
+            onCountChange={setCommentCount}
+            focusCommentId={focusCommentId}
+            sceneLabel={`${sheetName.replace(/_/g, ' ').replace(/^EP0?/, 'EP')}${scene.sceneId ? ` #${scene.sceneId}` : ''}`}
+          />
         </motion.div>
       </motion.div>
 
