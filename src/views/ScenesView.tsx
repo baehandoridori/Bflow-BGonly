@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { toast as sonnerToast } from 'sonner';
-import { useDataStore } from '@/stores/useDataStore';
+import { useDataStore, legacyStagesFor } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
 import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS, SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
@@ -661,6 +661,7 @@ import {
   runBulkOp,
   resolveSelectedUuids,
   resolveSelectedScenes,
+  type ActPhasePatch,
 } from '@/utils/bulkOperations';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
 import { cn } from '@/utils/cn';
@@ -1493,6 +1494,7 @@ export function ScenesView() {
   // v1.25.0~ 액팅 단계 토글 액션
   const setScenePhaseOptimistic = useDataStore((s) => s.setScenePhaseOptimistic);
   const bumpScenePhaseRoundOptimistic = useDataStore((s) => s.bumpScenePhaseRoundOptimistic);
+  // v1.27.0 코덱스 1차 P1: bulk ACT phase set 의 legacy boolean dual-write 용.
   // 코덱스 1차 P1: sheet 안에서만 sceneId 매칭 (글로벌 검색 금지)
   const findSceneInSheet = useDataStore((s) => s.findSceneInSheet);
   const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
@@ -2750,19 +2752,35 @@ export function ScenesView() {
   // 동작:
   //   1. 선택된 씬 중 ACT 부서만 추출 (BG 는 무시).
   //   2. 각 씬에 대해 handleActPhaseStateClick 와 동일한 round 계산 규칙 적용.
-  //   3. runBulkOp 로 store + 토스트 통합. executor 는 updateScenePhaseInSupabase 를 N 회 호출.
-  //   4. 성공 항목마다 useDataStore 의 sceneState/workRound/feedbackRound 패치.
+  //      legacy boolean (lo/done/review/png) 도 함께 dual-write — calcStats 등 split state 방지.
+  //      코덱스 1차 P1 #2 fix.
+  //   3. 씬별 *이전* 값 (sceneState/workRound/feedbackRound + legacy 4 boolean) 캡처 — 실패 롤백용.
+  //      코덱스 1차 P1 #1 fix: executor 안 try/catch 에서 실패 씬은 prev 로 store 재패치.
+  //   4. runBulkOp 로 store + 토스트 통합. executor 는 updateScenePhaseInSupabase 를 N 회 호출.
+  //   5. 성공 항목마다 useDataStore 의 phasePatch 적용.
   const handleBulkActPhaseSet = async (phase: ScenePhaseState) => {
     const targetScenes = resolveSelectedScenes(selectedSceneIds, allMergedScenes, 'acting', currentPart);
     if (targetScenes.length === 0) return;
 
-    // 씬별 새 phase patch 미리 계산 — handleActPhaseStateClick 의 round 규칙과 동일.
-    const phasePatchByUuid = new Map<string, { sceneState: ScenePhaseState; workRound: number; feedbackRound: number }>();
+    // 씬별 새 phase patch + 이전 값 캡처. ActPhasePatch 는 bulkOperations.ts 정의.
+    const phasePatchByUuid = new Map<string, ActPhasePatch>();
+    const prevByUuid = new Map<string, ActPhasePatch>();
     for (const s of targetScenes) {
       if (!s.id) continue;
       const prevState: ScenePhaseState = s.sceneState ?? 'wait';
       const prevWork = s.workRound ?? 0;
       const prevFb = s.feedbackRound ?? 0;
+      // 롤백용 — 코덱스 1차 P1 #1 fix.
+      prevByUuid.set(s.id, {
+        sceneState: prevState,
+        workRound: prevWork,
+        feedbackRound: prevFb,
+        lo: s.lo,
+        done: s.done,
+        review: s.review,
+        png: s.png,
+      });
+
       let workRound = prevWork;
       let feedbackRound = prevFb;
       if (phase === 'wait' || phase === 'done') {
@@ -2775,12 +2793,23 @@ export function ScenesView() {
         if (prevState === 'work') feedbackRound = Math.min(99, prevWork);
         else if (prevState !== 'feedback') feedbackRound = Math.max(1, Math.min(99, prevFb || 1));
       }
-      phasePatchByUuid.set(s.id, { sceneState: phase, workRound, feedbackRound });
+      // 코덱스 1차 P1 #2 fix: legacy lo/done/review/png 도 dual-write.
+      // setScenePhaseOptimistic 의 legacyStagesFor 매핑과 동일.
+      const legacy = legacyStagesFor(phase);
+      phasePatchByUuid.set(s.id, {
+        sceneState: phase,
+        workRound,
+        feedbackRound,
+        lo: legacy.lo,
+        done: legacy.done,
+        review: legacy.review,
+        png: legacy.png,
+      });
     }
 
     const uuids = targetScenes.filter((s) => s.id).map((s) => s.id!);
 
-    // 낙관적 업데이트 — 각 씬에 즉시 새 phase 반영 (Supabase 응답 전).
+    // 낙관적 업데이트 — 각 씬에 즉시 새 phase + legacy 반영 (Supabase 응답 전).
     for (const [uuid, patch] of phasePatchByUuid) {
       updateSceneByUuid(uuid, patch);
     }
@@ -2790,7 +2819,7 @@ export function ScenesView() {
       uuids,
       async (uuidsToSend) => {
         // 단일 씬용 IPC 를 병렬 호출 후 BulkUpdateResult[] 로 합성.
-        // RPC 한 방 대비 약간의 latency 손해지만 backend 변경 없이 즉시 적용 가능.
+        // 실패 씬은 store 에서 즉시 prev 값으로 롤백 (코덱스 1차 P1 #1).
         const results = await Promise.all(
           uuidsToSend.map(async (uuid) => {
             const patch = phasePatchByUuid.get(uuid);
@@ -2806,6 +2835,9 @@ export function ScenesView() {
               return { sceneUuid: uuid, success: true };
             } catch (err) {
               const message = err instanceof Error ? err.message : 'unknown error';
+              // 실패 시 즉시 prev 값으로 store 롤백 — stale state 영구화 방지.
+              const prev = prevByUuid.get(uuid);
+              if (prev) updateSceneByUuid(uuid, prev);
               return { sceneUuid: uuid, success: false, error: message };
             }
           }),

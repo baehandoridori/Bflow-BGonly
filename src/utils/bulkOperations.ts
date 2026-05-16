@@ -122,10 +122,24 @@ type RunBulkOpOptions = {
    */
   targetPhase?: ScenePhaseState;
   /**
-   * v1.27.0: act-phase-set 의 성공 시 씬별 phase patch (sceneState + workRound + feedbackRound).
+   * v1.27.0: act-phase-set 의 성공 시 씬별 phase patch.
+   * sceneState + workRound + feedbackRound + legacy boolean (lo/done/review/png) 모두 dual-write.
+   * 코덱스 1차 P1 #2 fix: legacy 4 boolean 도 포함해야 calcStats / 다른 surface 의 split state 방지.
+   * Pick<Scene,...> 대신 명시적 non-null 타입 — Scene.sceneState 는 optional 이라 IPC 호출부에서 컴파일 실패.
    */
-  phasePatchByUuid?: Map<string, Pick<Scene, 'sceneState' | 'workRound' | 'feedbackRound'>>;
+  phasePatchByUuid?: Map<string, ActPhasePatch>;
 };
+
+/** v1.27.0: bulk ACT phase set 의 씬별 패치 (롤백·낙관 업데이트·success side-effect 공용). */
+export interface ActPhasePatch {
+  sceneState: ScenePhaseState;
+  workRound: number;
+  feedbackRound: number;
+  lo: boolean;
+  done: boolean;
+  review: boolean;
+  png: boolean;
+}
 
 /**
  * 일괄 작업 공통 실행 래퍼.
