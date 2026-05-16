@@ -72,10 +72,23 @@ export function AnnotationToolbar({
     </button>
   );
 
+  // v1.26.2: 텍스트 입력 박스가 떠 있을 때 옵션바/도구바 클릭이 input blur 를 일으켜
+  //          박스가 사라지던 문제 방지 — root mousedown 에서 preventDefault.
+  //          (button click 자체는 동작; focus 이동만 차단)
+  const preventBlur = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    // 자체 input/textarea/range 는 focus 가능하게 (예외)
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+    e.preventDefault();
+  };
+
   return (
     <>
       {/* 상단 도구 툴바 */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-bg-card/95 backdrop-blur border border-bg-border/60 rounded-xl p-1.5 flex gap-1 items-center shadow-2xl z-20">
+      <div
+        className="absolute top-3 left-1/2 -translate-x-1/2 bg-bg-card/95 backdrop-blur border border-bg-border/60 rounded-xl p-1.5 flex gap-1 items-center shadow-2xl z-20"
+        onMouseDown={preventBlur}
+      >
         <ToolBtn name="pen" label="펜 (하이라이터)" Icon={Pencil} />
         <ToolBtn name="line" label="직선" Icon={Minus} />
         <ToolBtn name="arrow" label="화살표" Icon={ArrowRight} />
@@ -108,7 +121,10 @@ export function AnnotationToolbar({
       </div>
 
       {/* 옵션바 */}
-      <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-bg-card/95 backdrop-blur border border-bg-border/60 rounded-lg px-3.5 py-2.5 flex gap-3.5 items-center text-xs z-20">
+      <div
+        className="absolute top-16 left-1/2 -translate-x-1/2 bg-bg-card/95 backdrop-blur border border-bg-border/60 rounded-lg px-3.5 py-2.5 flex gap-3.5 items-center text-xs z-20"
+        onMouseDown={preventBlur}
+      >
         <div className="flex items-center gap-2">
           <span className="text-text-secondary/70 text-[11px] font-semibold">색상</span>
           <div className="flex gap-1.5">

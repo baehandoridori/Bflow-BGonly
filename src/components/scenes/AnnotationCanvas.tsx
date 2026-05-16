@@ -607,11 +607,15 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
               style={{
                 color,
                 opacity: opacity / 100,
-                minWidth: 140,
-                // v1.26.2: 굵기 슬라이더 값에 따라 실제 렌더 폰트 사이즈와 동일하게 미리보기.
-                //          fontSize = strokeWidth × 4 (캔버스/화면 비율은 캔버스 좌표계와 동일하므로 그대로).
+                // v1.26.2: 굵기 슬라이더 값에 따라 실제 렌더 폰트 사이즈/박스 폭/높이가 실시간 갱신.
+                //          캔버스에 그려질 텍스트 크기와 화면에서 보이는 미리보기 크기가 일치.
                 fontSize: `${strokeWidth * 4}px`,
+                minWidth: Math.max(140, strokeWidth * 4 * 5),
                 fontFamily: '"Pretendard", sans-serif',
+                // 윤곽선 미리보기 — outline ON 일 때 텍스트에 stroke 효과 (CSS text-shadow 4방향)
+                textShadow: outlineEnabled
+                  ? `-1px -1px 0 ${outlineColor}, 1px -1px 0 ${outlineColor}, -1px 1px 0 ${outlineColor}, 1px 1px 0 ${outlineColor}`
+                  : undefined,
               }}
             />
           </div>
