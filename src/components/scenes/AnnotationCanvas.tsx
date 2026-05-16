@@ -18,12 +18,14 @@ import {
 import { AnnotationToolbar, type DrawTool } from './AnnotationToolbar';
 
 export interface AnnotationCanvasHandle {
-  /** 합성용 캔버스 element (이미지 자연 크기와 동일) */
+  /** 합성용 캔버스 element (stage 비율로 확장된 자연 크기) */
   getCanvas(): HTMLCanvasElement | null;
   /** 캔버스 비우기 + 히스토리 초기화 */
   clear(): void;
   /** 빈 캔버스 여부 — 저장 가드 */
   isEmpty(): boolean;
+  /** v1.26.2: 캔버스 안의 이미지 위치/크기 (합성 시 사용) */
+  getImageRect(): { imgX: number; imgY: number; imgW: number; imgH: number } | null;
 }
 
 interface AnnotationCanvasProps {
@@ -47,9 +49,10 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
     const [color, setColor] = useState<string>('#EB5757');
     const [strokeWidth, setStrokeWidth] = useState<number>(4);
     const [opacity, setOpacity] = useState<number>(100);
-    // v1.26.2: 도형 채움/외곽선 토글 + 텍스트 윤곽선 토글
+    // v1.26.2: 도형 채움 토글 + 모든 도구 공통 외곽선 + 외곽선 색상 분리
     const [shapeFill, setShapeFill] = useState<boolean>(false);
-    const [textOutline, setTextOutline] = useState<boolean>(false);
+    const [outlineEnabled, setOutlineEnabled] = useState<boolean>(false);
+    const [outlineColor, setOutlineColor] = useState<string>('#0F1117');
     // v1.26.2: 캔버스 줌 (0.25 ~ 4)
     const [zoom, setZoom] = useState<number>(1);
     // v1.26.2: 내부 description (controlled 옵션 없으면 자체 state)
@@ -66,6 +69,8 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
     const historyRef = useRef<string[]>([]);
     const historyIndexRef = useRef(-1);
     const hasDrawnRef = useRef(false);
+    // v1.26.2: 펜/지우개 segment-by-segment 그리기를 위한 이전 좌표 추적 (outline 지원)
+    const prevPointRef = useRef<Point | null>(null);
 
     // v1.26.1: window.prompt 가 Electron renderer 에서 차단되므로
     //          텍스트 도구는 캔버스 위 inline input 으로 입력받는다.
@@ -182,7 +187,13 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       getCanvas: () => canvasRef.current,
       clear: handleClear,
       isEmpty: () => !hasDrawnRef.current,
-    }), [handleClear]);
+      getImageRect: () => canvasImageRect ? {
+        imgX: canvasImageRect.imgX,
+        imgY: canvasImageRect.imgY,
+        imgW: canvasImageRect.imgW,
+        imgH: canvasImageRect.imgH,
+      } : null,
+    }), [handleClear, canvasImageRect]);
 
     const getCanvasPos = useCallback((e: React.MouseEvent): Point => {
       const c = canvasRef.current;
@@ -194,41 +205,88 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       };
     }, []);
 
+    // v1.26.2: outline 모드 지원 — 같은 path 를 outline 색으로 더 두껍게 stroke 한 뒤
+    //          main 색으로 원래 두께로 stroke. fill 모드는 fill 후 추가 outline stroke.
+    //          drawShape 호출자가 strokeStyle/lineWidth/fillStyle 를 main 으로 설정한 상태로 들어옴.
     const drawShape = useCallback(
       (ctx: CanvasRenderingContext2D, t: DrawTool, start: Point, end: Point, baseW: number) => {
+        const mainStroke = ctx.strokeStyle as string;
+        const mainWidth = ctx.lineWidth;
+        const outlineLineWidth = mainWidth * 2.2;
+        const applyOutlineStroke = (drawPath: () => void) => {
+          if (!outlineEnabled) {
+            drawPath();
+            return;
+          }
+          // 1) outline 두껍게
+          ctx.strokeStyle = outlineColor;
+          ctx.lineWidth = outlineLineWidth;
+          drawPath();
+          // 2) main 원래 두께로
+          ctx.strokeStyle = mainStroke;
+          ctx.lineWidth = mainWidth;
+          drawPath();
+        };
+
         if (t === 'rect') {
-          if (shapeFill) ctx.fillRect(start.x, start.y, end.x - start.x, end.y - start.y);
-          else ctx.strokeRect(start.x, start.y, end.x - start.x, end.y - start.y);
+          if (shapeFill) {
+            ctx.fillRect(start.x, start.y, end.x - start.x, end.y - start.y);
+            if (outlineEnabled) {
+              ctx.strokeStyle = outlineColor;
+              ctx.lineWidth = mainWidth;
+              ctx.strokeRect(start.x, start.y, end.x - start.x, end.y - start.y);
+              ctx.strokeStyle = mainStroke;
+            }
+          } else {
+            applyOutlineStroke(() => ctx.strokeRect(start.x, start.y, end.x - start.x, end.y - start.y));
+          }
         } else if (t === 'circle') {
           const rx = Math.abs(end.x - start.x) / 2;
           const ry = Math.abs(end.y - start.y) / 2;
           const cx = (start.x + end.x) / 2;
           const cy = (start.y + end.y) / 2;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-          if (shapeFill) ctx.fill();
-          else ctx.stroke();
+          const drawEllipse = () => {
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+          };
+          if (shapeFill) {
+            drawEllipse();
+            ctx.fill();
+            if (outlineEnabled) {
+              ctx.strokeStyle = outlineColor;
+              ctx.lineWidth = mainWidth;
+              drawEllipse();
+              ctx.stroke();
+              ctx.strokeStyle = mainStroke;
+            }
+          } else {
+            applyOutlineStroke(() => { drawEllipse(); ctx.stroke(); });
+          }
         } else if (t === 'line') {
-          ctx.beginPath();
-          ctx.moveTo(start.x, start.y);
-          ctx.lineTo(end.x, end.y);
-          ctx.stroke();
+          applyOutlineStroke(() => {
+            ctx.beginPath();
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(end.x, end.y);
+            ctx.stroke();
+          });
         } else if (t === 'arrow') {
-          ctx.beginPath();
-          ctx.moveTo(start.x, start.y);
-          ctx.lineTo(end.x, end.y);
-          ctx.stroke();
           const angle = Math.atan2(end.y - start.y, end.x - start.x);
           const head = baseW * 3;
-          ctx.beginPath();
-          ctx.moveTo(end.x, end.y);
-          ctx.lineTo(end.x - head * Math.cos(angle - Math.PI / 6), end.y - head * Math.sin(angle - Math.PI / 6));
-          ctx.moveTo(end.x, end.y);
-          ctx.lineTo(end.x - head * Math.cos(angle + Math.PI / 6), end.y - head * Math.sin(angle + Math.PI / 6));
-          ctx.stroke();
+          applyOutlineStroke(() => {
+            ctx.beginPath();
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(end.x, end.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(end.x, end.y);
+            ctx.lineTo(end.x - head * Math.cos(angle - Math.PI / 6), end.y - head * Math.sin(angle - Math.PI / 6));
+            ctx.moveTo(end.x, end.y);
+            ctx.lineTo(end.x - head * Math.cos(angle + Math.PI / 6), end.y - head * Math.sin(angle + Math.PI / 6));
+            ctx.stroke();
+          });
         }
       },
-      [shapeFill],
+      [shapeFill, outlineEnabled, outlineColor],
     );
 
     const handleMouseDown = (e: React.MouseEvent) => {
@@ -266,8 +324,20 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       drawingRef.current = true;
       startPosRef.current = p;
       if (tool === 'pen' || tool === 'erase') {
-        ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
+        // v1.26.2: segment-by-segment 그리기 — outline 지원
+        prevPointRef.current = p;
+        // 시작점에 한 번 점 찍기 (outline 모드면 outline 색으로 두꺼운 점, 그 위에 main)
+        const mainWidth = ctx.lineWidth;
+        const drawDot = (col: string, w: number) => {
+          ctx.beginPath();
+          ctx.fillStyle = col;
+          ctx.arc(p.x, p.y, w / 2, 0, Math.PI * 2);
+          ctx.fill();
+        };
+        if (tool === 'pen' && outlineEnabled) {
+          drawDot(outlineColor, mainWidth * 2.2);
+        }
+        drawDot(tool === 'erase' ? '#000' : color, mainWidth);
       } else {
         // 도형 미리보기용 스냅샷
         snapshotRef.current = ctx.getImageData(0, 0, c.width, c.height);
@@ -281,8 +351,26 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       if (!ctx || !c || !startPosRef.current) return;
       const p = getCanvasPos(e);
       if (tool === 'pen' || tool === 'erase') {
+        const prev = prevPointRef.current ?? startPosRef.current;
+        const mainStroke = ctx.strokeStyle as string;
+        const mainWidth = ctx.lineWidth;
+        // outline 먼저 (펜만 — 지우개는 outline 의미 없음)
+        if (tool === 'pen' && outlineEnabled) {
+          ctx.strokeStyle = outlineColor;
+          ctx.lineWidth = mainWidth * 2.2;
+          ctx.beginPath();
+          ctx.moveTo(prev.x, prev.y);
+          ctx.lineTo(p.x, p.y);
+          ctx.stroke();
+          ctx.strokeStyle = mainStroke;
+          ctx.lineWidth = mainWidth;
+        }
+        // main
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(p.x, p.y);
         ctx.stroke();
+        prevPointRef.current = p;
       } else if (snapshotRef.current) {
         ctx.putImageData(snapshotRef.current, 0, 0);
         drawShape(ctx, tool, startPosRef.current, p, ctx.lineWidth);
@@ -323,10 +411,12 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       const fontSize = strokeWidth * 4 * scale;
       ctx.font = `${fontSize}px "Pretendard", sans-serif`;
       ctx.textBaseline = 'top';
-      if (textOutline) {
-        // 윤곽선 — strokeWidth 기반 lineWidth, 흰색은 검정으로 대비
-        ctx.lineWidth = Math.max(2, fontSize * 0.08);
-        ctx.strokeStyle = color === '#FFFFFF' ? '#0F1117' : '#FFFFFF';
+      if (outlineEnabled) {
+        // 윤곽선 — outlineColor 사용, 두께는 fontSize 비율
+        ctx.lineWidth = Math.max(2, fontSize * 0.1);
+        ctx.strokeStyle = outlineColor;
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
         ctx.strokeText(textValue, textInput.canvasX, textInput.canvasY);
       }
       ctx.fillStyle = color;
@@ -334,7 +424,7 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       saveSnapshot();
       setTextInput(null);
       setTextValue('');
-    }, [textInput, textValue, color, opacity, strokeWidth, textOutline, getCtx, saveSnapshot]);
+    }, [textInput, textValue, color, opacity, strokeWidth, outlineEnabled, outlineColor, getCtx, saveSnapshot]);
 
     // 텍스트 입력 박스 드래그 이동 (확정 전 위치 조정)
     const textDragRef = useRef<{ startScreenX: number; startScreenY: number; startMouseX: number; startMouseY: number } | null>(null);
@@ -388,18 +478,24 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [textInput?.screenX, textInput?.screenY]);
 
-    // 캔버스/이미지 display 크기 계산 — stage 비율 기준, zoom 적용
-    // (canvas 가 stage 비율을 가지므로 화면에서도 stage 100% × zoom 으로 표시)
+    // v1.26.2: 휠 줌 — React onWheel 은 passive listener 라 preventDefault 가 막힘.
+    //          native listener 를 { passive: false } 로 등록해 경고 제거 + 부모 스크롤 방지.
+    useEffect(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const handler = (e: WheelEvent) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        setZoom((z) => Math.min(4, Math.max(0.25, Math.round((z + delta) * 100) / 100)));
+      };
+      el.addEventListener('wheel', handler, { passive: false });
+      return () => el.removeEventListener('wheel', handler);
+    }, []);
+
     return (
       <div
         ref={containerRef}
         className="relative w-full h-full flex items-center justify-center bg-[#0a0c12] overflow-hidden select-none"
-        onWheel={(e) => {
-          if (!e.ctrlKey && !e.metaKey) return;
-          e.preventDefault();
-          const delta = e.deltaY > 0 ? -0.1 : 0.1;
-          setZoom((z) => Math.min(4, Math.max(0.25, Math.round((z + delta) * 100) / 100)));
-        }}
       >
         {/* 줌 wrapper — 캔버스 + 이미지를 함께 transform */}
         <div
@@ -450,20 +546,20 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
           />
         </div>
 
-        {/* 줌 컨트롤 (좌상단) */}
-        <div className="absolute top-3 right-3 z-20 flex items-center gap-1 bg-bg-card/95 backdrop-blur border border-bg-border/60 rounded-lg px-2 py-1 text-xs">
+        {/* 줌 컨트롤 — 좌상단 (저장 버튼은 우상단이므로 겹치지 않게) */}
+        <div className="absolute top-3 left-3 z-20 flex items-center gap-1 bg-bg-card/95 backdrop-blur border border-bg-border/60 rounded-lg px-2 py-1 text-xs">
           <button
             type="button"
             onClick={() => setZoom((z) => Math.max(0.25, Math.round((z - 0.1) * 100) / 100))}
             className="w-6 h-6 hover:bg-bg-border/50 rounded text-text-secondary hover:text-text-primary"
-            title="축소 (Ctrl + 휠)"
+            title="축소 (휠 아래)"
           >−</button>
           <span className="tabular-nums w-12 text-center text-text-primary">{Math.round(zoom * 100)}%</span>
           <button
             type="button"
             onClick={() => setZoom((z) => Math.min(4, Math.round((z + 0.1) * 100) / 100))}
             className="w-6 h-6 hover:bg-bg-border/50 rounded text-text-secondary hover:text-text-primary"
-            title="확대 (Ctrl + 휠)"
+            title="확대 (휠 위)"
           >+</button>
           <button
             type="button"
@@ -527,13 +623,15 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
           strokeWidth={strokeWidth}
           opacity={opacity}
           shapeFill={shapeFill}
-          textOutline={textOutline}
+          outlineEnabled={outlineEnabled}
+          outlineColor={outlineColor}
           onToolChange={setTool}
           onColorChange={setColor}
           onStrokeChange={setStrokeWidth}
           onOpacityChange={setOpacity}
           onShapeFillChange={setShapeFill}
-          onTextOutlineChange={setTextOutline}
+          onOutlineEnabledChange={setOutlineEnabled}
+          onOutlineColorChange={setOutlineColor}
           onUndo={handleUndo}
           onClear={handleClear}
         />

@@ -119,6 +119,12 @@ export function ImageModal({
   const displayGuideUrl =
     guideVersions.find((v) => v.id === currentGuideId)?.url ?? guideUrl;
 
+  // v1.26.2: 현재 표시 중인 버전의 description (있을 때 라이트박스에 floating 노출)
+  const currentStoryboardDescription =
+    storyboardVersions.find((v) => v.id === currentStoryboardId)?.description ?? null;
+  const currentGuideDescription =
+    guideVersions.find((v) => v.id === currentGuideId)?.description ?? null;
+
   // 버전 추가 / 삭제 핸들러
   const handleVersionAdd = useCallback(async (imageType: 'storyboard' | 'guide') => {
     if (!sceneUuid || !currentUserId || !onUploadImage) {
@@ -201,7 +207,8 @@ export function ImageModal({
       return;
     }
     try {
-      const blob = await composeAnnotation(currentVer.url, canvas);
+      const imageRect = annotationRef.current?.getImageRect() ?? null;
+      const blob = await composeAnnotation(currentVer.url, canvas, imageRect);
       const file = new File([blob], `annotation_${Date.now()}.jpg`, { type: 'image/jpeg' });
       if (!onUploadImage) {
         toast.error('이미지 업로드 함수가 연결되지 않았습니다');
@@ -784,6 +791,9 @@ export function ImageModal({
                       }}
                       draggable={false}
                     />
+                    {currentStoryboardDescription && (
+                      <AnnotationDescriptionCard text={currentStoryboardDescription} />
+                    )}
                   </div>
                 )}
 
@@ -802,6 +812,9 @@ export function ImageModal({
                       }}
                       draggable={false}
                     />
+                    {currentGuideDescription && (
+                      <AnnotationDescriptionCard text={currentGuideDescription} />
+                    )}
                   </div>
                 )}
 
@@ -833,6 +846,9 @@ export function ImageModal({
                       ) : (
                         <EmptySlot />
                       )}
+                      {currentStoryboardDescription && (
+                        <AnnotationDescriptionCard text={currentStoryboardDescription} />
+                      )}
                     </div>
 
                     {/* 가이드 (오른쪽) */}
@@ -859,6 +875,9 @@ export function ImageModal({
                         </HoverCard3D>
                       ) : (
                         <EmptySlot />
+                      )}
+                      {currentGuideDescription && (
+                        <AnnotationDescriptionCard text={currentGuideDescription} />
                       )}
                     </div>
                   </>
@@ -1007,5 +1026,23 @@ function EmptySlot() {
     <div className="w-64 h-48 rounded-lg bg-bg-card border border-bg-border flex items-center justify-center text-text-secondary text-sm">
       이미지 없음
     </div>
+  );
+}
+
+/**
+ * v1.26.2 — 주석 버전의 description 을 이미지 아래에 부드럽게 떠 있는 카드로.
+ * backdrop-blur + subtle border + 부드러운 그림자. 너무 강조하지 않게.
+ */
+function AnnotationDescriptionCard({ text }: { text: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 6 }}
+      transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+      className="max-w-[480px] mt-1 px-3 py-2 rounded-lg bg-bg-card/55 backdrop-blur-md border border-bg-border/40 text-[12px] leading-relaxed text-text-primary/90 shadow-[0_8px_24px_rgba(0,0,0,0.25)] whitespace-pre-line"
+    >
+      {text}
+    </motion.div>
   );
 }

@@ -37,11 +37,20 @@ export function ImageContextMenu({
 
   useEffect(() => {
     if (!open) return;
+    // v1.26.2: 자기 자신을 여는 우클릭(pointerdown + mousedown + contextmenu)이
+    //          mount 직후 close 트리거하지 않도록 100ms 인큐베이션 윈도우.
+    const mountTime = Date.now();
     const handler = (e: MouseEvent) => {
+      if (Date.now() - mountTime < 150) return;
+      if (e.button === 2) return; // 우클릭은 contextmenu 에서 별도 처리
       if (ref.current?.contains(e.target as Node)) return;
       onClose();
     };
-    const ctxHandler = () => onClose();
+    const ctxHandler = (e: MouseEvent) => {
+      if (Date.now() - mountTime < 150) return;
+      if (ref.current?.contains(e.target as Node)) return;
+      onClose();
+    };
     document.addEventListener('mousedown', handler);
     document.addEventListener('contextmenu', ctxHandler);
     return () => {

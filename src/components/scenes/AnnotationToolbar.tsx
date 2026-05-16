@@ -21,14 +21,17 @@ interface AnnotationToolbarProps {
   opacity: number;
   /** 도형(rect/circle) 채움 여부. true=채움, false=외곽선만. */
   shapeFill: boolean;
-  /** 텍스트 윤곽선(stroke) 토글 */
-  textOutline: boolean;
+  /** v1.26.2+: 모든 도구 공통 외곽선 토글 */
+  outlineEnabled: boolean;
+  /** 외곽선 색상 (메인 색과 분리) */
+  outlineColor: string;
   onToolChange: (t: DrawTool) => void;
   onColorChange: (c: string) => void;
   onStrokeChange: (w: number) => void;
   onOpacityChange: (o: number) => void;
   onShapeFillChange: (v: boolean) => void;
-  onTextOutlineChange: (v: boolean) => void;
+  onOutlineEnabledChange: (v: boolean) => void;
+  onOutlineColorChange: (c: string) => void;
   onUndo: () => void;
   onClear: () => void;
 }
@@ -39,18 +42,21 @@ export function AnnotationToolbar({
   strokeWidth,
   opacity,
   shapeFill,
-  textOutline,
+  outlineEnabled,
+  outlineColor,
   onToolChange,
   onColorChange,
   onStrokeChange,
   onOpacityChange,
   onShapeFillChange,
-  onTextOutlineChange,
+  onOutlineEnabledChange,
+  onOutlineColorChange,
   onUndo,
   onClear,
 }: AnnotationToolbarProps) {
   const isShape = tool === 'rect' || tool === 'circle';
-  const isText = tool === 'text';
+  // 지우개는 외곽선 적용 안 함
+  const canHaveOutline = tool !== 'erase';
   const ToolBtn = ({ name, label, Icon }: { name: DrawTool; label: string; Icon: typeof Pencil }) => (
     <button
       type="button"
@@ -162,7 +168,7 @@ export function AnnotationToolbar({
           <span className="text-text-primary tabular-nums w-9 text-right">{opacity}%</span>
         </div>
 
-        {/* 도형(사각형/원) 전용 옵션 — 채움 vs 외곽선 토글 */}
+        {/* 도형(사각형/원) 전용 옵션 — 채움 vs 외곽선만 */}
         {isShape && (
           <div className="flex items-center gap-1.5 pl-3 border-l border-bg-border">
             <span className="text-text-secondary/70 text-[11px] font-semibold">스타일</span>
@@ -195,23 +201,43 @@ export function AnnotationToolbar({
           </div>
         )}
 
-        {/* 텍스트 전용 — 윤곽선 토글 */}
-        {isText && (
+        {/* 모든 도구 공통 — 외곽선 토글 + 외곽선 색상 (외곽선 ON 일 때만 색상 노출) */}
+        {canHaveOutline && (
           <div className="flex items-center gap-1.5 pl-3 border-l border-bg-border">
-            <span className="text-text-secondary/70 text-[11px] font-semibold">윤곽선</span>
+            <span className="text-text-secondary/70 text-[11px] font-semibold">외곽선</span>
             <button
               type="button"
-              onClick={() => onTextOutlineChange(!textOutline)}
+              onClick={() => onOutlineEnabledChange(!outlineEnabled)}
               className={cn(
                 'h-7 px-2 rounded-md border text-[11px] font-semibold',
-                textOutline
+                outlineEnabled
                   ? 'bg-accent/20 text-accent-sub border-accent/50'
                   : 'border-bg-border text-text-secondary',
               )}
-              title="텍스트 윤곽선 켜기/끄기"
+              title="외곽선 켜기/끄기"
             >
-              {textOutline ? 'ON' : 'OFF'}
+              {outlineEnabled ? 'ON' : 'OFF'}
             </button>
+            {outlineEnabled && (
+              <div className="flex gap-1 ml-0.5">
+                {COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => onOutlineColorChange(c)}
+                    className={cn(
+                      'w-4 h-4 rounded-full transition-transform border-2',
+                      outlineColor === c
+                        ? 'border-white ring-1 ring-accent'
+                        : 'border-transparent hover:scale-110',
+                      c === '#FFFFFF' && 'border-bg-border',
+                    )}
+                    style={{ background: c }}
+                    aria-label={`외곽선 색상 ${c}`}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
