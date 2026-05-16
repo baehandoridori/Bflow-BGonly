@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
+import { useNotificationPanelSize, useNotificationPanelResizer } from '@/hooks/useNotificationPanelSize';
+import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
 import {
   buildNotificationSceneModalRequest,
   departmentFromNotificationSheetName,
@@ -203,9 +205,31 @@ function NotificationDropdown() {
   const { setView, setSelectedEpisode, setHighlightSceneId } = useAppStore();
   const ref = useRef<HTMLDivElement>(null);
 
-  // 외부 클릭 닫기
+  // v1.27.0: 패널 너비/높이 사용자 조절 + preferences 저장.
+  const { width, height, commit, isUserOverride } = useNotificationPanelSize();
+  // drag 중에는 disk 저장 없이 live 갱신.
+  const [liveSize, setLiveSize] = useState<{ width?: number; height?: number } | null>(null);
+  const [hoverAxis, setHoverAxis] = useState<'w' | 's' | 'sw' | null>(null);
+  const [dragAxis, setDragAxis] = useState<'w' | 's' | 'sw' | null>(null);
+
+  const { startDrag } = useNotificationPanelResizer({
+    liveSetSize: (size) => setLiveSize((prev) => ({ ...(prev ?? {}), ...size })),
+    commitSize: (size) => {
+      setLiveSize(null);
+      setDragAxis(null);
+      void commit(size);
+    },
+  });
+
+  const effectiveWidth = liveSize?.width ?? width;
+  const effectiveHeight = liveSize?.height ?? height;
+  // 헤더(약 46px) + 약간의 패딩 빼고 알림 목록 max-h. 외측 height 기준으로 계산.
+  const listMaxHeight = Math.max(120, effectiveHeight - 50);
+
+  // 외부 클릭 닫기 — 드래그 중에는 외부 mousedown 무시 (글로벌 핸들러가 이미 등록되어 있으므로).
   useEffect(() => {
     const handler = (e: MouseEvent) => {
+      if (dragAxis) return;
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setPanelOpen(false);
       }
@@ -215,7 +239,7 @@ function NotificationDropdown() {
       clearTimeout(timer);
       document.removeEventListener('mousedown', handler);
     };
-  }, [setPanelOpen]);
+  }, [setPanelOpen, dragAxis]);
 
   const handleNavigate = (n: AppNotification) => {
     const target = resolveNotificationSceneTarget(n.metadata, useDataStore.getState().episodes);
@@ -273,55 +297,138 @@ function NotificationDropdown() {
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full mt-2 w-[340px] max-h-[440px] z-[9999] rounded-xl overflow-hidden"
-      style={floatingGlassStyle}
+      className="absolute right-0 top-full mt-2 z-[9999] rounded-xl"
+      style={{
+        ...floatingGlassStyle,
+        width: effectiveWidth,
+        height: effectiveHeight,
+        // overflow-hidden 빼고 visible — 좌측/하단/코너 핸들 hover glow 가 contour 밖으로 살짝 나가도록.
+        overflow: 'visible',
+      }}
     >
-      {/* 상단 빛 반사 */}
-      <div
-        className="absolute top-0 left-0 right-0 h-px pointer-events-none"
-        style={{
-          background: glassTopHighlight,
-        }}
-      />
+      {/* 안쪽 컨텐츠 컨테이너 — 둥근 모서리 깨끗하게 clip. */}
+      <div className="absolute inset-0 rounded-xl overflow-hidden">
+        {/* 상단 빛 반사 */}
+        <div
+          className="absolute top-0 left-0 right-0 h-px pointer-events-none"
+          style={{
+            background: glassTopHighlight,
+          }}
+        />
 
-      {/* 헤더 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border/35">
-        <span className="text-[13px] font-semibold text-text-primary">알림</span>
-        <div className="flex items-center gap-2">
-          {unreadCount > 0 && (
-            <button
-              onClick={markAllAsRead}
-              className="text-[10px] text-accent hover:text-accent/80 flex items-center gap-1 cursor-pointer"
-            >
-              <Check size={11} />
-              모두 읽음
-            </button>
-          )}
-          {notifications.length > 0 && (
-            <button
-              onClick={clearAll}
-              className="text-[10px] text-text-secondary/55 hover:text-red-400 flex items-center gap-1 cursor-pointer"
-            >
-              <Trash2 size={11} />
-              전체 삭제
-            </button>
+        {/* 헤더 */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-bg-border/35">
+          <span className="text-[13px] font-semibold text-text-primary">
+            알림
+            {isUserOverride && (
+              <span
+                className="ml-2 text-[9px] text-text-secondary/45 font-normal"
+                title="사용자 조정 크기. 더블클릭 핸들로 기본 크기 복귀."
+              >
+                · 크기 고정
+              </span>
+            )}
+          </span>
+          <div className="flex items-center gap-2">
+            {unreadCount > 0 && (
+              <button
+                onClick={markAllAsRead}
+                className="text-[10px] text-accent hover:text-accent/80 flex items-center gap-1 cursor-pointer"
+              >
+                <Check size={11} />
+                모두 읽음
+              </button>
+            )}
+            {notifications.length > 0 && (
+              <button
+                onClick={clearAll}
+                className="text-[10px] text-text-secondary/55 hover:text-red-400 flex items-center gap-1 cursor-pointer"
+              >
+                <Trash2 size={11} />
+                전체 삭제
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 알림 목록 */}
+        <div
+          className="overflow-y-auto p-1.5 space-y-0.5"
+          style={{ maxHeight: listMaxHeight }}
+        >
+          {notifications.length === 0 ? (
+            <div className="py-10 text-center">
+              <Bell size={24} className="mx-auto text-text-secondary/25 mb-2" />
+              <p className="text-[12px] text-text-secondary/50">알림이 없습니다</p>
+            </div>
+          ) : (
+            notifications.map((n) => (
+              <NotificationItem key={n.id} n={n} onNavigate={handleNavigate} />
+            ))
           )}
         </div>
       </div>
 
-      {/* 알림 목록 */}
-      <div className="overflow-y-auto max-h-[380px] p-1.5 space-y-0.5">
-        {notifications.length === 0 ? (
-          <div className="py-10 text-center">
-            <Bell size={24} className="mx-auto text-text-secondary/25 mb-2" />
-            <p className="text-[12px] text-text-secondary/50">알림이 없습니다</p>
-          </div>
-        ) : (
-          notifications.map((n) => (
-            <NotificationItem key={n.id} n={n} onNavigate={handleNavigate} />
-          ))
-        )}
-      </div>
+      {/* v1.27.0: 리사이즈 핸들 3개 + EdgeGlow.
+          좌측: 너비 / 하단: 높이 / 좌하단 코너: 동시. 더블클릭 → 기본 크기 복귀. */}
+      {/* 좌측 (너비) */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="알림 패널 너비 조절"
+        title="드래그로 너비 조절 · 더블클릭으로 기본 크기 복귀"
+        onMouseEnter={() => !dragAxis && setHoverAxis('w')}
+        onMouseLeave={() => !dragAxis && setHoverAxis((p) => (p === 'w' ? null : p))}
+        onMouseDown={(e) => {
+          setDragAxis('w');
+          startDrag('w', e, effectiveWidth, effectiveHeight);
+        }}
+        onDoubleClick={() => void commit({ width: null, height: null })}
+        className="absolute left-0 top-2 bottom-2 w-2 cursor-w-resize z-20"
+      />
+      {/* 하단 (높이) */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="알림 패널 높이 조절"
+        title="드래그로 높이 조절 · 더블클릭으로 기본 크기 복귀"
+        onMouseEnter={() => !dragAxis && setHoverAxis('s')}
+        onMouseLeave={() => !dragAxis && setHoverAxis((p) => (p === 's' ? null : p))}
+        onMouseDown={(e) => {
+          setDragAxis('s');
+          startDrag('s', e, effectiveWidth, effectiveHeight);
+        }}
+        onDoubleClick={() => void commit({ width: null, height: null })}
+        className="absolute bottom-0 left-2 right-2 h-2 cursor-s-resize z-20"
+      />
+      {/* 좌하단 코너 */}
+      <div
+        role="separator"
+        aria-label="알림 패널 너비·높이 동시 조절"
+        title="드래그로 크기 조절 · 더블클릭으로 기본 크기 복귀"
+        onMouseEnter={() => !dragAxis && setHoverAxis('sw')}
+        onMouseLeave={() => !dragAxis && setHoverAxis((p) => (p === 'sw' ? null : p))}
+        onMouseDown={(e) => {
+          setDragAxis('sw');
+          startDrag('sw', e, effectiveWidth, effectiveHeight);
+        }}
+        onDoubleClick={() => void commit({ width: null, height: null })}
+        className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize z-30"
+      />
+
+      {/* EdgeGlow — hover 또는 drag 중인 변을 강조. 코너 hover/drag 면 양 변 모두. */}
+      <ResizeEdgeGlow
+        edge="w"
+        active={hoverAxis === 'w' || hoverAxis === 'sw' || dragAxis === 'w' || dragAxis === 'sw'}
+        strong={dragAxis === 'w' || dragAxis === 'sw'}
+        radius={12}
+      />
+      <ResizeEdgeGlow
+        edge="s"
+        active={hoverAxis === 's' || hoverAxis === 'sw' || dragAxis === 's' || dragAxis === 'sw'}
+        strong={dragAxis === 's' || dragAxis === 'sw'}
+        radius={12}
+      />
     </div>
   );
 }

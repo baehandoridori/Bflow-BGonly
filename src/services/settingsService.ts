@@ -168,6 +168,10 @@ export interface UserPreferences {
 
   // v1.27.0: 사용자가 드래그로 직접 조정한 댓글 패널 너비. null 이면 자동 모드.
   commentPanelWidthPx?: number;
+
+  // v1.27.0: 알림 패널 사용자 조정 크기. null 이면 기본값(w=340, h=440).
+  notificationPanelWidthPx?: number;
+  notificationPanelHeightPx?: number;
 }
 
 export async function loadPreferences(): Promise<UserPreferences | null> {

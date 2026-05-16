@@ -4465,12 +4465,18 @@ export function ScenesView() {
       <AnimatePresence>
         {selectedSceneIds.size > 0 && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            // viewport 50% + 사이드바 너비의 절반만큼 오른쪽으로 보정 → 콘텐츠 영역 정중앙.
+            // 사이드바 접힘 64px / 펼침 132px (Sidebar.tsx 와 동기). 호버 expand 는 무시.
+            // initial 에도 같은 left 를 명시 — 그렇지 않으면 첫 mount 시 left=auto 에서 보정값으로
+            // 가로 sliding 이 일어나 "가운데에서 오른쪽으로 스르륵" 보임 (한솔 보고, v1.27.0).
+            initial={{
+              opacity: 0,
+              y: 20,
+              left: `calc(50vw + ${(sidebarExpanded ? 132 : 64) / 2}px)`,
+            }}
             animate={{
               opacity: 1,
               y: 0,
-              // viewport 50% + 사이드바 너비의 절반만큼 오른쪽으로 보정 → 콘텐츠 영역 정중앙.
-              // 사이드바 접힘 64px / 펼침 132px (Sidebar.tsx 와 동기). 호버 expand 는 무시.
               left: `calc(50vw + ${(sidebarExpanded ? 132 : 64) / 2}px)`,
             }}
             exit={{ opacity: 0, y: 20 }}

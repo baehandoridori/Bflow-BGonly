@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { CommentPanel } from './CommentPanel';
 import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
 import { useCommentPanelWidth, useCommentPanelResizer } from '@/hooks/useCommentPanelWidth';
+import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
 
 /**
  * v1.27.0: 상세 모달 옆 댓글 패널 — 3중 반응형.
@@ -60,11 +61,14 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
   // 드래그 중에는 disk 저장 없이 화면만 즉시 갱신할 임시 너비.
   // mousemove → setLiveWidth(px) 만 호출, mouseup → commitWidth(px) 가 setWidth 호출 (disk 저장).
   const [liveWidth, setLiveWidth] = useState<number | null>(null);
+  const [handleHover, setHandleHover] = useState(false);
+  const [dragging, setDragging] = useState(false);
 
   const { onMouseDown } = useCommentPanelResizer({
     liveSetWidth: (px) => setLiveWidth(px),
     commitWidth: (px) => {
       setLiveWidth(null);
+      setDragging(false);
       void setWidth(px);
     },
   });
@@ -85,21 +89,29 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
       className={`bg-bg-card rounded-2xl shadow-2xl border border-bg-border ${heightClass} flex flex-col shrink-0 relative ${className}`}
       style={{ width: effectiveWidth }}
     >
-      {/* 좌측 드래그 핸들 — 4px 폭, hover 시 accent 가는 막대. 더블클릭 = 자동 모드 복귀. */}
+      {/* 좌측 드래그 핸들 — 8px hit zone (얇아 보이지만 잡기 쉽게).
+          hover/drag 시 ResizeEdgeGlow 가 accent gradient + glow 표시 (대시보드 위젯 톤 통일).
+          더블클릭 = 자동 모드 복귀. */}
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label="댓글 패널 너비 조절"
         title="드래그로 너비 조절 · 더블클릭으로 자동 모드 복귀"
         data-no-lasso
-        onMouseDown={(e) => onMouseDown(e, effectiveWidth)}
+        onMouseEnter={() => setHandleHover(true)}
+        onMouseLeave={() => setHandleHover(false)}
+        onMouseDown={(e) => {
+          setDragging(true);
+          onMouseDown(e, effectiveWidth);
+        }}
         onDoubleClick={() => {
           setLiveWidth(null);
           void setWidth(null);
         }}
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize transition-colors hover:bg-accent/40 z-10"
-        style={{ borderTopLeftRadius: '1rem', borderBottomLeftRadius: '1rem' }}
+        className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10"
       />
+      {/* 핸들 hover/drag 시 좌측 변에 accent 발광. 위젯 EdgeGlow 와 동일 톤. */}
+      <ResizeEdgeGlow edge="w" active={handleHover || dragging} strong={dragging} radius={16} />
 
       <div className="px-4 py-3 border-b border-bg-border shrink-0 flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium text-text-primary">
