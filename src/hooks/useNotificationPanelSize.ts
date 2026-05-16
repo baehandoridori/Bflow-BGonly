@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { loadPreferences, savePreferences } from '@/services/settingsService';
+import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
 
 const DEFAULT_WIDTH = 340;
 const DEFAULT_HEIGHT = 440;
@@ -46,22 +46,39 @@ export function useNotificationPanelSize(): UseNotificationPanelSizeResult {
 
   const commit = useCallback(
     async (size: { width?: number | null; height?: number | null }) => {
-      const nextW = size.width === undefined ? savedWidth : size.width;
-      const nextH = size.height === undefined ? savedHeight : size.height;
-      const clampW = nextW == null ? null : Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, nextW));
-      const clampH = nextH == null ? null : Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, nextH));
-      setSavedWidth(clampW);
-      setSavedHeight(clampH);
+      // v1.27.0 코덱스 2차 P2 fix: width-only / height-only 드래그 시 반대 축이
+      // 디스크에서 지워지는 race 방지. preferences async load 가 끝나기 전 (savedHeight===null)
+      // width-only commit 호출하면 nextH 가 null 로 평가돼 notificationPanelHeightPx 가 wipe 됨.
+      //
+      // 정책: 'undefined' = 건드리지 말것, 'null' = reset (delete), number = 저장.
+      // → 호출자가 명시한 축만 갱신.
+      const clampW =
+        size.width === undefined
+          ? undefined
+          : size.width === null
+            ? null
+            : Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, size.width));
+      const clampH =
+        size.height === undefined
+          ? undefined
+          : size.height === null
+            ? null
+            : Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, size.height));
 
+      // local state — undefined 면 그대로, null 이면 reset, number 면 update.
+      if (clampW !== undefined) setSavedWidth(clampW);
+      if (clampH !== undefined) setSavedHeight(clampH);
+
+      // disk — prefs 의 반대 축은 그대로 보존.
       const prefs = (await loadPreferences()) ?? {};
-      const merged = { ...prefs };
-      if (clampW == null) delete merged.notificationPanelWidthPx;
-      else merged.notificationPanelWidthPx = clampW;
-      if (clampH == null) delete merged.notificationPanelHeightPx;
-      else merged.notificationPanelHeightPx = clampH;
+      const merged: UserPreferences = { ...prefs };
+      if (clampW === null) delete merged.notificationPanelWidthPx;
+      else if (clampW !== undefined) merged.notificationPanelWidthPx = clampW;
+      if (clampH === null) delete merged.notificationPanelHeightPx;
+      else if (clampH !== undefined) merged.notificationPanelHeightPx = clampH;
       await savePreferences(merged);
     },
-    [savedWidth, savedHeight],
+    [],
   );
 
   return {
