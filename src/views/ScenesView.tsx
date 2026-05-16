@@ -2990,6 +2990,20 @@ export function ScenesView() {
     if (!payload.assignee && !payload.memo && !payload.layoutId) return;
 
     const selection = selectionSnapshot ?? selectedSceneIds;
+    // v1.27.0 코덱스 3차 P1 fix: 단일 부서 뷰 (BG/ACT) 에서 selection 은 plain scene id 라
+    // resolveSelectedScenes 의 onlyDept 가 무시됨. 뷰 부서와 targetDept 가 불일치하면 의도와
+    // 반대 부서를 편집하는 데이터 무결성 사고 방지 — 명시적 early return + 사용자 안내.
+    if (
+      selectedDepartment !== 'all'
+      && payload.targetDept
+      && payload.targetDept !== 'all'
+      && payload.targetDept !== selectedDepartment
+    ) {
+      const viewLabel = selectedDepartment === 'bg' ? 'BG' : '액팅';
+      const targetLabel = payload.targetDept === 'bg' ? 'BG' : '액팅';
+      sonnerToast.warning(`현재 ${viewLabel} 뷰에서는 ${targetLabel}만으로 편집할 수 없습니다. 통합 뷰에서 시도해주세요.`);
+      return;
+    }
     const onlyDept = payload.targetDept && payload.targetDept !== 'all' ? payload.targetDept : undefined;
     const targetScenes = resolveSelectedScenes(selection, allMergedScenes, onlyDept, currentPart);
     if (targetScenes.length === 0) return;
@@ -4735,32 +4749,43 @@ export function ScenesView() {
                 </button>
               </div>
 
-              {/* v1.27.0: 적용 대상 부서 토글 — 통합 뷰에서 BG/ACT 동시 선택돼 있어도 한쪽만 편집 가능. */}
+              {/* v1.27.0: 적용 대상 부서 토글 — 통합 뷰에서 BG/ACT 동시 선택돼 있어도 한쪽만 편집 가능.
+                  코덱스 3차 P1 fix: 단일 부서 뷰 (BG/ACT) 에서는 반대 부서 토글을 disable —
+                  selection 이 plain id 라 어차피 효과 없고 오해만 부름. */}
               <div className="px-5 pt-4">
                 <label className="text-[11px] font-semibold text-text-secondary/60 uppercase tracking-wider block mb-1.5">적용 대상</label>
                 <div className="flex gap-1.5">
-                  {(['all', 'bg', 'acting'] as const).map((dept) => (
-                    <button
-                      key={dept}
-                      type="button"
-                      onClick={() => setBatchTargetDept(dept)}
-                      className={cn(
-                        'flex-1 py-1.5 text-[11px] font-medium rounded-md border transition-colors cursor-pointer',
-                        batchTargetDept === dept
-                          ? 'bg-accent/20 border-accent/40 text-accent-sub'
-                          : 'bg-bg-primary border-bg-border text-text-secondary hover:text-text-primary hover:border-bg-border/80',
-                      )}
-                      title={
-                        dept === 'all'
-                          ? '선택된 씬의 BG·ACT 양쪽 모두 편집'
-                          : dept === 'bg'
-                            ? '선택된 씬의 BG 만 편집 (ACT 는 무시)'
-                            : '선택된 씬의 ACT 만 편집 (BG 는 무시)'
-                      }
-                    >
-                      {dept === 'all' ? '둘 다' : dept === 'bg' ? 'BG만' : 'ACT만'}
-                    </button>
-                  ))}
+                  {(['all', 'bg', 'acting'] as const).map((dept) => {
+                    const isUnifiedView = selectedDepartment === 'all';
+                    // 단일 부서 뷰에서 반대 부서 옵션은 비활성. '둘 다' / 같은 부서는 항상 가능.
+                    const disabled = !isUnifiedView && dept !== 'all' && dept !== selectedDepartment;
+                    return (
+                      <button
+                        key={dept}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => !disabled && setBatchTargetDept(dept)}
+                        className={cn(
+                          'flex-1 py-1.5 text-[11px] font-medium rounded-md border transition-colors',
+                          batchTargetDept === dept
+                            ? 'bg-accent/20 border-accent/40 text-accent-sub'
+                            : 'bg-bg-primary border-bg-border text-text-secondary hover:text-text-primary hover:border-bg-border/80',
+                          disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+                        )}
+                        title={
+                          disabled
+                            ? `현재 ${selectedDepartment === 'bg' ? 'BG' : '액팅'} 뷰에서는 사용할 수 없는 옵션입니다`
+                            : dept === 'all'
+                              ? '선택된 씬의 BG·ACT 양쪽 모두 편집'
+                              : dept === 'bg'
+                                ? '선택된 씬의 BG 만 편집 (ACT 는 무시)'
+                                : '선택된 씬의 ACT 만 편집 (BG 는 무시)'
+                        }
+                      >
+                        {dept === 'all' ? '둘 다' : dept === 'bg' ? 'BG만' : 'ACT만'}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
