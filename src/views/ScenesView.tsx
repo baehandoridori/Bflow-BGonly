@@ -3,7 +3,7 @@ import { toast as sonnerToast } from 'sonner';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import type { SortKey, StatusFilter, ViewMode } from '@/stores/useAppStore';
-import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS } from '@/types';
+import { STAGES, DEPARTMENTS, DEPARTMENT_CONFIGS, SCENE_PHASE_LABELS, SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
 import type { Scene, Stage, Department, ScenesDeptFilter, MergedScene, ScenePhaseState } from '@/types';
 import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
 import { updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
@@ -2728,6 +2728,77 @@ export function ScenesView() {
     );
   };
 
+  // v1.27.0: 통합 뷰 일괄 액션 바 — 액팅 씬을 한꺼번에 특정 phase 로 설정.
+  // 토글이 아닌 SET — 여러 씬이 다른 phase 일 수 있으므로 토글은 의미가 모호.
+  // 동작:
+  //   1. 선택된 씬 중 ACT 부서만 추출 (BG 는 무시).
+  //   2. 각 씬에 대해 handleActPhaseStateClick 와 동일한 round 계산 규칙 적용.
+  //   3. runBulkOp 로 store + 토스트 통합. executor 는 updateScenePhaseInSupabase 를 N 회 호출.
+  //   4. 성공 항목마다 useDataStore 의 sceneState/workRound/feedbackRound 패치.
+  const handleBulkActPhaseSet = async (phase: ScenePhaseState) => {
+    const targetScenes = resolveSelectedScenes(selectedSceneIds, allMergedScenes, 'acting', currentPart);
+    if (targetScenes.length === 0) return;
+
+    // 씬별 새 phase patch 미리 계산 — handleActPhaseStateClick 의 round 규칙과 동일.
+    const phasePatchByUuid = new Map<string, { sceneState: ScenePhaseState; workRound: number; feedbackRound: number }>();
+    for (const s of targetScenes) {
+      if (!s.id) continue;
+      const prevState: ScenePhaseState = s.sceneState ?? 'wait';
+      const prevWork = s.workRound ?? 0;
+      const prevFb = s.feedbackRound ?? 0;
+      let workRound = prevWork;
+      let feedbackRound = prevFb;
+      if (phase === 'wait' || phase === 'done') {
+        workRound = 0;
+        feedbackRound = 0;
+      } else if (phase === 'work') {
+        if (prevState === 'feedback') workRound = Math.min(99, prevFb + 1);
+        else if (prevState !== 'work') workRound = Math.max(1, Math.min(99, prevWork || 1));
+      } else if (phase === 'feedback') {
+        if (prevState === 'work') feedbackRound = Math.min(99, prevWork);
+        else if (prevState !== 'feedback') feedbackRound = Math.max(1, Math.min(99, prevFb || 1));
+      }
+      phasePatchByUuid.set(s.id, { sceneState: phase, workRound, feedbackRound });
+    }
+
+    const uuids = targetScenes.filter((s) => s.id).map((s) => s.id!);
+
+    // 낙관적 업데이트 — 각 씬에 즉시 새 phase 반영 (Supabase 응답 전).
+    for (const [uuid, patch] of phasePatchByUuid) {
+      updateSceneByUuid(uuid, patch);
+    }
+
+    await runBulkOp(
+      'act-phase-set',
+      uuids,
+      async (uuidsToSend) => {
+        // 단일 씬용 IPC 를 병렬 호출 후 BulkUpdateResult[] 로 합성.
+        // RPC 한 방 대비 약간의 latency 손해지만 backend 변경 없이 즉시 적용 가능.
+        const results = await Promise.all(
+          uuidsToSend.map(async (uuid) => {
+            const patch = phasePatchByUuid.get(uuid);
+            if (!patch) return { sceneUuid: uuid, success: false, error: 'missing patch' };
+            try {
+              await updateScenePhaseInSupabase(
+                uuid,
+                patch.sceneState,
+                patch.workRound,
+                patch.feedbackRound,
+                currentUser?.id,
+              );
+              return { sceneUuid: uuid, success: true };
+            } catch (err) {
+              const message = err instanceof Error ? err.message : 'unknown error';
+              return { sceneUuid: uuid, success: false, error: message };
+            }
+          }),
+        );
+        return results;
+      },
+      { targetPhase: phase, phasePatchByUuid },
+    );
+  };
+
   // 일괄 삭제: ConfirmDialog → RPC 경유, runBulkOp가 낙관적 제거 처리 (Tasks 13-17)
   const handleBulkDelete = async () => {
     const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes, currentPart);
@@ -4446,23 +4517,25 @@ export function ScenesView() {
                     </button>
                   ))}
                 </div>
-                {/* ACT 스테이지 */}
+                {/* ACT 단계 (v1.27.0) — SCENE_PHASES set 동작. 토글 아닌 직접 설정.
+                    BG 행과 달리 SCENE_PHASE_COLORS 사용 (phase ≠ stage 라 의도적 비대칭). */}
                 <div className="flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: DEPARTMENT_CONFIGS.acting.color }} />
                   <span className="text-[11px] text-text-secondary leading-none whitespace-nowrap">{DEPARTMENT_CONFIGS.acting.shortLabel}</span>
-                  {STAGES.map((stage) => (
+                  {SCENE_PHASES.map((phase) => (
                     <button
-                      key={`act-${stage}`}
-                      onClick={() => handleBulkStageToggle(stage, 'acting')}
+                      key={`act-${phase}`}
+                      onClick={() => handleBulkActPhaseSet(phase)}
                       disabled={isBulkInFlight}
+                      title={`선택된 액팅 씬을 모두 "${SCENE_PHASE_LABELS[phase]}" 로 설정`}
                       className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{
-                        backgroundColor: `${DEPARTMENT_CONFIGS.acting.stageColors[stage]}20`,
-                        color: DEPARTMENT_CONFIGS.acting.stageColors[stage],
-                        border: `1px solid ${DEPARTMENT_CONFIGS.acting.stageColors[stage]}40`,
+                        backgroundColor: `${SCENE_PHASE_COLORS[phase]}20`,
+                        color: SCENE_PHASE_COLORS[phase],
+                        border: `1px solid ${SCENE_PHASE_COLORS[phase]}40`,
                       }}
                     >
-                      {DEPARTMENT_CONFIGS.acting.stageLabels[stage]}
+                      {SCENE_PHASE_LABELS_SHORT[phase]}
                     </button>
                   ))}
                 </div>

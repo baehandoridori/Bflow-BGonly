@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import type { BulkUpdateResult } from '@/types';
+import type { BulkUpdateResult, ScenePhaseState } from '@/types';
 
 // ─── 일괄 작업 상태 타입 ──────────────────────────
 
-export type OpKind = 'delete' | 'stage-toggle' | 'field-edit';
+export type OpKind = 'delete' | 'stage-toggle' | 'field-edit' | 'act-phase-set';
 export type OpStatus = 'in-flight' | 'complete' | 'partial-fail' | 'network-error' | 'cancelled';
 export type BulkOpExecutor = (uuids: string[]) => Promise<BulkUpdateResult[]>;
 /** 개별 항목 성공 시 useDataStore 등에 반영할 부가 처리. runBulkOp이 kind별로 생성·주입. */
@@ -19,6 +19,8 @@ export type PendingOp = {
   startedAt: number;
   status: OpStatus;
   targetStage?: 'lo' | 'done' | 'review' | 'png';
+  /** v1.27.0: act-phase-set 일 때의 목표 phase. */
+  targetPhase?: ScenePhaseState;
   /**
    * "다시 시도" 버튼이 직접 호출하는 재전송 함수.
    * 최초 op 시작 시 저장되고, failed uuids만 재전송할 수 있어야 함.

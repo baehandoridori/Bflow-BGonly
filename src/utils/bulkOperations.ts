@@ -1,6 +1,6 @@
 import { useBulkOperationsStore, type OpKind } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
-import type { BulkUpdateResult, MergedScene, Part, Scene } from '@/types';
+import type { BulkUpdateResult, MergedScene, Part, Scene, ScenePhaseState } from '@/types';
 
 const MERGED_KEY_PREFIX = { bg: 'bg:', act: 'act:' } as const;
 
@@ -117,6 +117,14 @@ type RunBulkOpOptions = {
    * field-edit에서 적용할 필드. 성공 시 store에 반영한다.
    */
   fieldsByUuid?: Map<string, Partial<Scene>>;
+  /**
+   * v1.27.0: act-phase-set 의 목표 phase.
+   */
+  targetPhase?: ScenePhaseState;
+  /**
+   * v1.27.0: act-phase-set 의 성공 시 씬별 phase patch (sceneState + workRound + feedbackRound).
+   */
+  phasePatchByUuid?: Map<string, Pick<Scene, 'sceneState' | 'workRound' | 'feedbackRound'>>;
 };
 
 /**
@@ -162,6 +170,13 @@ export async function runBulkOp(
       if (fields) {
         useDataStore.getState().updateSceneByUuid(sceneUuid, fields);
       }
+      return;
+    }
+    if (kind === 'act-phase-set' && opts.phasePatchByUuid) {
+      const patch = opts.phasePatchByUuid.get(sceneUuid);
+      if (patch) {
+        useDataStore.getState().updateSceneByUuid(sceneUuid, patch);
+      }
     }
   };
 
@@ -177,6 +192,7 @@ export async function runBulkOp(
     totalCount: sceneUuids.length,
     pendingSceneUuids: new Set(sceneUuids),
     targetStage: opts.targetStage,
+    targetPhase: opts.targetPhase,
     retryExecutor: executor,
     retrySideEffect: (sceneUuid) => applySideEffect(sceneUuid),
   });
