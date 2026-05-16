@@ -160,6 +160,8 @@ export function ImageModal({
   // v1.26.0: 주석 모드 state
   const [annotateMode, setAnnotateMode] = useState<{ imageType: 'storyboard' | 'guide' } | null>(null);
   const annotationRef = useRef<AnnotationCanvasHandle>(null);
+  // v1.26.2: 주석 텍스트 메모 (캔버스 그림 + 텍스트 함께 저장)
+  const [annotationDescription, setAnnotationDescription] = useState('');
 
   const enterAnnotate = useCallback((imageType: 'storyboard' | 'guide') => {
     if (!sceneUuid) {
@@ -171,12 +173,13 @@ export function ImageModal({
 
   const exitAnnotate = useCallback(() => {
     const isEmpty = annotationRef.current?.isEmpty() ?? true;
-    if (!isEmpty) {
+    if (!isEmpty || annotationDescription.trim()) {
       if (!confirm('주석을 모두 버리고 닫으시겠습니까?')) return;
     }
     annotationRef.current?.clear();
     setAnnotateMode(null);
-  }, []);
+    setAnnotationDescription('');
+  }, [annotationDescription]);
 
   const saveAnnotation = useCallback(async () => {
     if (!annotateMode || !sceneUuid || !currentUserId) return;
@@ -212,6 +215,7 @@ export function ImageModal({
         url: uploadedUrl,
         baseVersionNo: currentVer.versionNo,
         createdBy: currentUserId,
+        description: annotationDescription.trim() || null,
       });
       const refreshed = await fetchImageVersions(sceneUuid, type);
       if (type === 'guide') {
@@ -224,11 +228,12 @@ export function ImageModal({
       toast.success(`주석 v${newVer.versionNo} 저장됨`);
       annotationRef.current?.clear();
       setAnnotateMode(null);
+      setAnnotationDescription('');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`주석 저장 실패: ${msg}`);
     }
-  }, [annotateMode, sceneUuid, currentUserId, guideVersions, storyboardVersions, currentGuideId, currentStoryboardId, onUploadImage]);
+  }, [annotateMode, sceneUuid, currentUserId, guideVersions, storyboardVersions, currentGuideId, currentStoryboardId, onUploadImage, annotationDescription]);
 
   const handleVersionDelete = useCallback(async (imageType: 'storyboard' | 'guide', versionId: string) => {
     if (!sceneUuid) return;
@@ -274,26 +279,43 @@ export function ImageModal({
     });
   }, [inferImageType]);
 
-  // v1.26.1: framer-motion 의 motion.div 가 native contextmenu 를 합성 이벤트로 전달 안 하는 케이스 대응.
-  //          document 레벨 capture phase 리스너로 imageAreaRef 안의 우클릭을 가로챈다.
+  // v1.26.1 → v1.26.2: framer-motion / Electron contextmenu 비활성 등 다양한 환경 대응.
+  //          ① imageAreaRef 의 native ref level capture listener + pointerdown(button===2) 백업
+  //          ② document 레벨도 함께 (안전망)
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      const area = imageAreaRef.current;
-      if (!area) return;
-      const target = e.target as HTMLElement | null;
-      if (!target || !area.contains(target)) return;
-      // 툴바/메뉴/입력 등 정상 컨텍스트는 통과
-      if (target.closest('button, input, [role="menu"], [data-allow-context-menu]')) return;
-      e.preventDefault();
+    const area = imageAreaRef.current;
+    if (!area) return;
+    const trigger = (clientX: number, clientY: number, target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      if (el && el.closest('button, input, [role="menu"], [data-allow-context-menu]')) return false;
       const rect = area.getBoundingClientRect();
+      // 영역 밖 이벤트면 무시
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return false;
       setCtxMenu({
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-        imageType: inferImageType(e.clientX),
+        x: clientX - rect.left,
+        y: clientY - rect.top,
+        imageType: inferImageType(clientX),
       });
+      return true;
     };
-    document.addEventListener('contextmenu', handler, true);
-    return () => document.removeEventListener('contextmenu', handler, true);
+    const onContext = (e: MouseEvent) => {
+      if (trigger(e.clientX, e.clientY, e.target)) e.preventDefault();
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      // button 2 = 마우스 오른쪽. contextmenu 가 막혀도 pointerdown 은 도달함.
+      if (e.button !== 2) return;
+      if (trigger(e.clientX, e.clientY, e.target)) e.preventDefault();
+    };
+    // ① ref level (capture)
+    area.addEventListener('contextmenu', onContext, true);
+    area.addEventListener('pointerdown', onPointerDown, true);
+    // ② document level (안전망)
+    document.addEventListener('contextmenu', onContext, true);
+    return () => {
+      area.removeEventListener('contextmenu', onContext, true);
+      area.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('contextmenu', onContext, true);
+    };
   }, [inferImageType]);
 
   const openMenuFromMoreBtn = useCallback((e: React.MouseEvent) => {
@@ -917,7 +939,13 @@ export function ImageModal({
           if (!targetUrl) return null;
           return (
             <div className="absolute inset-0 z-40 bg-bg-primary">
-              <AnnotationCanvas ref={annotationRef} imageUrl={targetUrl} baseVersionNo={baseVer} />
+              <AnnotationCanvas
+                ref={annotationRef}
+                imageUrl={targetUrl}
+                baseVersionNo={baseVer}
+                description={annotationDescription}
+                onDescriptionChange={setAnnotationDescription}
+              />
               <div className="absolute top-3 right-3 flex gap-2 z-50">
                 <button
                   type="button"

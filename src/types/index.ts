@@ -242,6 +242,8 @@ export interface ImageVersion {
   createdBy: string;
   createdByName: string;
   createdAt: string;       // ISO 8601
+  /** v1.26.2+: 주석 버전 등에 첨부된 텍스트 메모 (선택) */
+  description?: string | null;
 }
 
 // ─── 파트 & 에피소드 ─────────────────────────
@@ -818,6 +820,7 @@ export interface ElectronAPI {
     url: string;
     baseVersionNo?: number;
     createdBy: string;
+    description?: string | null;
   }) => Promise<ImageVersion>;
   supabaseDeleteImageVersion: (versionId: string) => Promise<void>;
   /** 비공개 캘린더 이벤트 — Google Calendar 비연동, Supabase 전용 */

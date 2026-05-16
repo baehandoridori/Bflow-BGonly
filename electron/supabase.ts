@@ -2451,6 +2451,7 @@ export interface ImageVersionRow {
   createdBy: string;
   createdByName: string;
   createdAt: string;
+  description?: string | null;
 }
 
 async function mapVersionRows(rows: Record<string, unknown>[]): Promise<ImageVersionRow[]> {
@@ -2471,6 +2472,7 @@ async function mapVersionRows(rows: Record<string, unknown>[]): Promise<ImageVer
     createdBy: r.created_by as string,
     createdByName: nameById.get(r.created_by as string) ?? '?',
     createdAt: r.created_at as string,
+    description: (r.description as string | null) ?? null,
   }));
 }
 
@@ -2480,7 +2482,7 @@ export async function listImageVersions(
 ): Promise<ImageVersionRow[]> {
   const { data, error } = await supabase
     .from('scene_image_versions')
-    .select('id, scene_id, image_type, version_no, url, kind, base_version_no, created_by, created_at')
+    .select('id, scene_id, image_type, version_no, url, kind, base_version_no, created_by, created_at, description')
     .eq('scene_id', sceneId)
     .eq('image_type', imageType)
     .order('version_no', { ascending: true });
@@ -2495,6 +2497,7 @@ export async function addImageVersion(params: {
   url: string;
   baseVersionNo?: number;
   createdBy: string;
+  description?: string | null;
 }): Promise<ImageVersionRow> {
   // 다음 version_no = max + 1 (UNIQUE 가 동시 INSERT 충돌 막아준다)
   const { data: existing, error: listErr } = await supabase
@@ -2517,6 +2520,7 @@ export async function addImageVersion(params: {
       kind: params.kind,
       base_version_no: params.baseVersionNo ?? null,
       created_by: params.createdBy,
+      description: params.description ?? null,
     })
     .select()
     .single();

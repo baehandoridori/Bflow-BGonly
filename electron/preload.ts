@@ -186,6 +186,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     url: string;
     baseVersionNo?: number;
     createdBy: string;
+    description?: string | null;
   }) => ipcRenderer.invoke('supabase:add-image-version', params),
   supabaseDeleteImageVersion: (versionId: string) =>
     ipcRenderer.invoke('supabase:delete-image-version', versionId),

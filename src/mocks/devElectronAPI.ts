@@ -173,6 +173,7 @@ export function installDevElectronAPI(): void {
       url: string;
       baseVersionNo?: number;
       createdBy: string;
+      description?: string | null;
     }) => ({
       id: 'mock-iv-' + Date.now(),
       sceneId: params.sceneId,
@@ -184,6 +185,7 @@ export function installDevElectronAPI(): void {
       createdBy: params.createdBy,
       createdByName: 'mock',
       createdAt: new Date().toISOString(),
+      description: params.description ?? null,
     }),
     supabaseDeleteImageVersion: async () => {},
     supabaseReadPrivateEvents: async () => [],

@@ -106,6 +106,11 @@ export function ImageVersionDropdown({
                   <div className="text-[11px] text-text-secondary/70 mt-0.5">
                     {v.createdByName} · {formatShortDate(v.createdAt)}
                   </div>
+                  {v.description && (
+                    <div className="text-[11px] text-text-secondary mt-0.5 line-clamp-2" title={v.description}>
+                      {v.description}
+                    </div>
+                  )}
                 </div>
                 {deletable && (
                   <button

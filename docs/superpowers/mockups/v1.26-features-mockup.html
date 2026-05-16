@@ -1,0 +1,2178 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="violet" data-mode="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>v1.26 신규 기능 — 디자인 목업 (이모지·우클릭·버전·드로잉)</title>
+<style>
+  /* ─── 토큰 (앱과 1:1 일치) ─── */
+  [data-theme="violet"][data-mode="dark"] {
+    --bg-primary: 15 17 23;
+    --bg-card: 26 29 39;
+    --bg-card-elev: 36 40 54;
+    --bg-border: 45 48 65;
+    --text-primary: 232 232 238;
+    --text-secondary: 139 141 163;
+    --text-muted: 100 102 122;
+    --accent: 108 92 231;
+    --accent-sub: 162 155 254;
+    --on-accent: 255 255 255;
+    --lo: 116 185 255;
+    --done: 162 155 254;
+    --review: 253 203 110;
+    --png: 0 184 148;
+    --danger: 235 87 87;
+    --warn: 245 158 11;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif; }
+  body {
+    background: rgb(var(--bg-primary));
+    color: rgb(var(--text-primary));
+    min-height: 100vh;
+    display: flex;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ─── 사이드바 ─── */
+  .sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    background: rgb(var(--bg-card));
+    border-right: 1px solid rgb(var(--bg-border) / .5);
+    padding: 24px 16px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  .sidebar-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgb(var(--text-muted));
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 0 12px 12px;
+  }
+  .sidebar-title:not(:first-child) { margin-top: 24px; }
+  .sidebar-brand {
+    padding: 0 12px 16px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgb(var(--bg-border) / .4);
+  }
+  .sidebar-brand h1 {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgb(var(--text-primary));
+  }
+  .sidebar-brand p {
+    font-size: 11px;
+    color: rgb(var(--text-secondary));
+    margin-top: 4px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    color: rgb(var(--text-secondary));
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 180ms, color 180ms;
+    user-select: none;
+  }
+  .nav-item:hover {
+    background: rgb(var(--bg-border) / .35);
+    color: rgb(var(--text-primary));
+  }
+  .nav-item.active {
+    background: rgb(var(--accent) / .15);
+    color: rgb(var(--accent-sub));
+    font-weight: 600;
+  }
+  .nav-item .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgb(var(--text-muted));
+    flex-shrink: 0;
+  }
+  .nav-item.active .dot { background: rgb(var(--accent-sub)); }
+
+  /* ─── 메인 ─── */
+  .main {
+    flex: 1;
+    padding: 32px 40px;
+    max-width: 1240px;
+    overflow-x: auto;
+  }
+  .page-header {
+    margin-bottom: 28px;
+  }
+  .page-tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgb(var(--accent-sub));
+    background: rgb(var(--accent) / .14);
+    padding: 4px 10px;
+    border-radius: 999px;
+    letter-spacing: 0.04em;
+  }
+  .page-header h2 {
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 12px;
+    margin-bottom: 8px;
+  }
+  .page-header p {
+    color: rgb(var(--text-secondary));
+    font-size: 14px;
+    max-width: 720px;
+  }
+
+  /* ─── 섹션 카드 ─── */
+  .card {
+    background: rgb(var(--bg-card));
+    border: 1px solid rgb(var(--bg-border) / .5);
+    border-radius: 14px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgb(var(--text-primary));
+  }
+  .card-subtitle {
+    font-size: 12px;
+    color: rgb(var(--text-secondary));
+    margin-top: 4px;
+  }
+  .card-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: rgb(var(--bg-border) / .5);
+    color: rgb(var(--text-secondary));
+  }
+  .card-badge.recommended {
+    background: rgb(var(--png) / .15);
+    color: rgb(var(--png));
+  }
+  .card-badge.option {
+    background: rgb(var(--lo) / .15);
+    color: rgb(var(--lo));
+  }
+
+  /* ─── 패널 (시안 비교) ─── */
+  .panel-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+  }
+
+  /* ─── 페이지 표시 / 숨김 ─── */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ═══════════════════════════════════════ */
+  /*  공통 — 가상 씬 상세 모달 / 라이트박스 외형  */
+  /* ═══════════════════════════════════════ */
+  .demo-frame {
+    background: rgb(var(--bg-primary));
+    border: 1px solid rgb(var(--bg-border) / .35);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .demo-frame-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgb(var(--bg-card-elev) / .5);
+    border-bottom: 1px solid rgb(var(--bg-border) / .35);
+    font-size: 12px;
+    color: rgb(var(--text-secondary));
+  }
+  .demo-frame-bar .dots { display: flex; gap: 5px; }
+  .demo-frame-bar .dot-x { width: 9px; height: 9px; border-radius: 50%; background: rgb(var(--bg-border)); }
+
+  /* ═══════════════════════════════════════ */
+  /*  PAGE 1 — 이모지 리액션                   */
+  /* ═══════════════════════════════════════ */
+  .comment-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 18px 22px;
+  }
+  .comment-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .comment-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, rgb(var(--accent)), rgb(var(--accent-sub)));
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .comment-avatar.user-2 { background: linear-gradient(135deg, #00B894, #55EFC4); }
+  .comment-avatar.user-3 { background: linear-gradient(135deg, #FDCB6E, #FFE3B3); color: #483606; }
+
+  .comment-body {
+    flex: 1;
+    min-width: 0;
+  }
+  .comment-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .comment-name { font-weight: 600; font-size: 13px; }
+  .comment-time { font-size: 11px; color: rgb(var(--text-muted)); }
+  .comment-text {
+    font-size: 13px;
+    color: rgb(var(--text-primary));
+    line-height: 1.55;
+    word-break: break-word;
+  }
+
+  /* 리액션 행 */
+  .reactions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    align-items: center;
+  }
+  .reaction-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px 3px 7px;
+    background: rgb(var(--bg-card-elev));
+    border: 1px solid rgb(var(--bg-border));
+    border-radius: 999px;
+    font-size: 12px;
+    color: rgb(var(--text-secondary));
+    cursor: pointer;
+    transition: all 150ms;
+    user-select: none;
+  }
+  .reaction-chip:hover {
+    border-color: rgb(var(--accent) / .5);
+    background: rgb(var(--accent) / .08);
+  }
+  .reaction-chip.active {
+    background: rgb(var(--accent) / .18);
+    border-color: rgb(var(--accent) / .7);
+    color: rgb(var(--accent-sub));
+    font-weight: 600;
+  }
+  .reaction-chip .emoji { font-size: 14px; line-height: 1; }
+  .reaction-chip .count { font-variant-numeric: tabular-nums; font-size: 11px; }
+
+  .reaction-add {
+    width: 26px;
+    height: 24px;
+    background: transparent;
+    border: 1px dashed rgb(var(--bg-border));
+    border-radius: 999px;
+    color: rgb(var(--text-muted));
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 150ms;
+    opacity: 0;
+    position: relative;
+  }
+  .comment-row:hover .reaction-add { opacity: 1; }
+  .reactions .reaction-add { opacity: 1; opacity: .5; }
+  .reaction-add:hover {
+    border-color: rgb(var(--accent) / .7);
+    color: rgb(var(--accent-sub));
+    background: rgb(var(--accent) / .08);
+  }
+  .reaction-add svg { width: 13px; height: 13px; }
+
+  /* 이모지 피커 */
+  .emoji-picker {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    background: rgb(var(--bg-card-elev));
+    border: 1px solid rgb(var(--bg-border));
+    border-radius: 12px;
+    padding: 8px;
+    display: none;
+    box-shadow: 0 10px 40px rgba(0,0,0,.5);
+    z-index: 30;
+    width: 220px;
+  }
+  .emoji-picker.open { display: block; }
+  .emoji-picker-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  .emoji-picker-row:last-child { margin-bottom: 0; }
+  .emoji-picker button {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .emoji-picker button:hover { background: rgb(var(--bg-border) / .6); }
+  .emoji-picker-more {
+    border-top: 1px solid rgb(var(--bg-border));
+    margin-top: 6px;
+    padding-top: 6px;
+    font-size: 11px;
+    color: rgb(var(--text-muted));
+    text-align: center;
+    cursor: pointer;
+  }
+  .emoji-picker-more:hover { color: rgb(var(--accent-sub)); }
+
+  /* 툴팁 */
+  .tip {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgb(var(--bg-primary));
+    border: 1px solid rgb(var(--bg-border));
+    padding: 5px 9px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: rgb(var(--text-primary));
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 150ms;
+    z-index: 40;
+  }
+  .reaction-chip:hover .tip { opacity: 1; }
+
+  /* 시스템 이벤트 */
+  .system-event {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 22px;
+    font-size: 11px;
+    color: rgb(var(--text-muted));
+  }
+  .system-event-line {
+    flex: 1;
+    height: 1px;
+    background: rgb(var(--bg-border) / .4);
+  }
+
+  /* ═══════════════════════════════════════ */
+  /*  PAGE 2 — 우클릭 메뉴                      */
+  /* ═══════════════════════════════════════ */
+  .lightbox-mock {
+    background: #0a0c12;
+    border-radius: 10px;
+    aspect-ratio: 16/9;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .lightbox-image {
+    width: 70%;
+    height: 70%;
+    background:
+      linear-gradient(135deg, #2d3041 0%, #1a1d27 100%),
+      radial-gradient(circle at 30% 40%, #6C5CE7 0%, transparent 30%);
+    background-blend-mode: overlay;
+    border-radius: 4px;
+    box-shadow: 0 8px 60px rgba(0,0,0,.6);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgb(var(--text-muted));
+    font-size: 12px;
+  }
+  .lightbox-image::before {
+    content: "스토리보드 이미지 영역";
+    color: rgb(var(--text-muted));
+    font-size: 12px;
+  }
+  .lightbox-tools {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgb(var(--bg-card-elev) / .92);
+    border: 1px solid rgb(var(--bg-border) / .6);
+    backdrop-filter: blur(8px);
+    border-radius: 10px;
+    padding: 6px;
+    display: flex;
+    gap: 4px;
+  }
+  .tool-btn {
+    background: transparent;
+    border: none;
+    color: rgb(var(--text-secondary));
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 150ms;
+  }
+  .tool-btn:hover {
+    background: rgb(var(--bg-border) / .5);
+    color: rgb(var(--text-primary));
+  }
+  .tool-btn.active {
+    background: rgb(var(--accent) / .2);
+    color: rgb(var(--accent-sub));
+  }
+  .tool-btn svg { width: 16px; height: 16px; }
+
+  /* 컨텍스트 메뉴 */
+  .context-menu {
+    position: absolute;
+    background: rgb(var(--bg-card-elev));
+    border: 1px solid rgb(var(--bg-border));
+    border-radius: 10px;
+    padding: 6px;
+    min-width: 200px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.6);
+    z-index: 50;
+    display: none;
+  }
+  .context-menu.open { display: block; animation: ctx-fade-in 150ms ease-out; }
+  @keyframes ctx-fade-in {
+    from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: rgb(var(--text-primary));
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .context-menu-item:hover {
+    background: rgb(var(--accent) / .14);
+    color: rgb(var(--accent-sub));
+  }
+  .context-menu-item svg {
+    width: 15px;
+    height: 15px;
+    color: rgb(var(--text-secondary));
+    flex-shrink: 0;
+  }
+  .context-menu-item:hover svg { color: rgb(var(--accent-sub)); }
+  .context-menu-divider {
+    height: 1px;
+    background: rgb(var(--bg-border) / .5);
+    margin: 4px 0;
+  }
+  .context-menu-shortcut {
+    margin-left: auto;
+    font-size: 11px;
+    color: rgb(var(--text-muted));
+    font-family: ui-monospace, monospace;
+  }
+  .toast-mini {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgb(var(--png) / .9);
+    color: white;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms;
+  }
+  .toast-mini.show { opacity: 1; }
+
+  /* ═══════════════════════════════════════ */
+  /*  PAGE 3 — 이미지 버전 관리 (3안 비교)        */
+  /* ═══════════════════════════════════════ */
+  .version-demo {
+    background: rgb(var(--bg-primary));
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgb(var(--bg-border) / .35);
+  }
+  .version-stage {
+    background: #0a0c12;
+    aspect-ratio: 4/3;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .version-stage-image {
+    width: 80%;
+    height: 80%;
+    border-radius: 4px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 32px;
+    transition: all 350ms;
+  }
+  /* v1, v2, v3 다른 그라데이션 */
+  .ver-v1 { background: linear-gradient(135deg, #2d3041, #4a5568); }
+  .ver-v2 { background: linear-gradient(135deg, #6C5CE7, #A29BFE); }
+  .ver-v3 { background: linear-gradient(135deg, #00B894, #55EFC4); }
+  .ver-v4 { background: linear-gradient(135deg, #FDCB6E, #FFE3B3); color: #483606; }
+
+  /* 시안 A — 썸네일 스트립 */
+  .v-strip {
+    background: rgb(var(--bg-card));
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-top: 1px solid rgb(var(--bg-border) / .4);
+    overflow-x: auto;
+  }
+  .v-thumb {
+    flex-shrink: 0;
+    width: 64px;
+    height: 48px;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 13px;
+    transition: all 180ms;
+  }
+  .v-thumb:hover { transform: translateY(-1px); }
+  .v-thumb.current {
+    border-color: rgb(var(--accent-sub));
+    box-shadow: 0 0 0 2px rgb(var(--accent) / .25);
+  }
+  .v-thumb-label {
+    position: absolute;
+    bottom: 2px;
+    right: 3px;
+    font-size: 9px;
+    background: rgba(0,0,0,.6);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-weight: 600;
+  }
+  .v-thumb-current-badge {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    background: rgb(var(--accent-sub));
+    color: #0F1117;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+  }
+  .v-thumb .annotated-corner {
+    position: absolute;
+    top: 0;
+    right: 0;
+    border-style: solid;
+    border-width: 0 12px 12px 0;
+    border-color: transparent rgb(var(--warn)) transparent transparent;
+  }
+  .v-add-thumb {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    border-radius: 6px;
+    border: 1px dashed rgb(var(--bg-border));
+    background: transparent;
+    color: rgb(var(--text-muted));
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    transition: all 180ms;
+  }
+  .v-add-thumb:hover {
+    border-color: rgb(var(--accent) / .7);
+    color: rgb(var(--accent-sub));
+  }
+  .v-strip-meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: rgb(var(--text-secondary));
+    flex-shrink: 0;
+    text-align: right;
+  }
+  .v-strip-meta strong { color: rgb(var(--text-primary)); display: block; }
+
+  /* 시안 B — 드롭다운 */
+  .v-dropdown-trigger {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    background: rgb(var(--bg-card-elev) / .92);
+    border: 1px solid rgb(var(--bg-border) / .6);
+    backdrop-filter: blur(6px);
+    border-radius: 8px;
+    padding: 6px 10px 6px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: rgb(var(--text-primary));
+    cursor: pointer;
+    user-select: none;
+  }
+  .v-dropdown-trigger:hover { border-color: rgb(var(--accent) / .5); }
+  .v-dropdown-trigger .v-tag {
+    background: rgb(var(--accent) / .25);
+    color: rgb(var(--accent-sub));
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .v-dropdown-trigger svg { width: 14px; height: 14px; color: rgb(var(--text-secondary)); }
+  .v-dropdown-list {
+    position: absolute;
+    top: 50px;
+    left: 12px;
+    background: rgb(var(--bg-card-elev));
+    border: 1px solid rgb(var(--bg-border));
+    border-radius: 8px;
+    padding: 4px;
+    width: 260px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6);
+    display: none;
+    z-index: 30;
+  }
+  .v-dropdown-list.open { display: block; }
+  .v-list-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .v-list-item:hover { background: rgb(var(--bg-border) / .5); }
+  .v-list-item.current { background: rgb(var(--accent) / .15); }
+  .v-list-thumb {
+    width: 40px;
+    height: 30px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .v-list-meta {
+    flex: 1;
+    min-width: 0;
+  }
+  .v-list-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgb(var(--text-primary));
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .v-list-name .badge-mini {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .v-list-name .badge-mini.replace { background: rgb(var(--lo) / .2); color: rgb(var(--lo)); }
+  .v-list-name .badge-mini.annot { background: rgb(var(--warn) / .2); color: rgb(var(--warn)); }
+  .v-list-name .badge-mini.current { background: rgb(var(--accent-sub)); color: #0F1117; }
+  .v-list-time {
+    font-size: 11px;
+    color: rgb(var(--text-muted));
+    margin-top: 1px;
+  }
+  .v-list-delete {
+    opacity: 0;
+    color: rgb(var(--danger));
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    transition: opacity 150ms;
+  }
+  .v-list-item:hover .v-list-delete { opacity: 0.8; }
+  .v-list-delete:hover { opacity: 1; }
+
+  /* 시안 C — 슬라이더 (좌우 화살표) */
+  .v-slider-nav {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgb(var(--bg-card-elev) / .92);
+    border: 1px solid rgb(var(--bg-border) / .6);
+    backdrop-filter: blur(8px);
+    border-radius: 999px;
+    padding: 6px 6px 6px 6px;
+  }
+  .v-slider-arrow {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
+    color: rgb(var(--text-primary));
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 150ms;
+  }
+  .v-slider-arrow:hover { background: rgb(var(--bg-border) / .6); }
+  .v-slider-arrow:disabled { opacity: 0.3; cursor: not-allowed; }
+  .v-slider-arrow svg { width: 16px; height: 16px; }
+  .v-slider-center {
+    font-size: 12px;
+    color: rgb(var(--text-primary));
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 120px;
+    justify-content: center;
+  }
+  .v-slider-center .v-tag {
+    background: rgb(var(--accent) / .25);
+    color: rgb(var(--accent-sub));
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .v-slider-pips {
+    display: flex;
+    gap: 4px;
+    padding-left: 6px;
+    border-left: 1px solid rgb(var(--bg-border));
+  }
+  .v-slider-pip {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgb(var(--text-muted) / .5);
+    cursor: pointer;
+    transition: all 150ms;
+  }
+  .v-slider-pip.active {
+    background: rgb(var(--accent-sub));
+    transform: scale(1.4);
+  }
+
+  /* 시안 외부 표시 */
+  .scenario-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgb(var(--bg-card-elev));
+    border: 1px solid rgb(var(--bg-border));
+    border-radius: 6px;
+    padding: 3px 7px;
+    font-size: 10px;
+    color: rgb(var(--text-secondary));
+    margin-bottom: 8px;
+    font-family: ui-monospace, monospace;
+  }
+  .scenario-tag.pro {
+    color: rgb(var(--png));
+    border-color: rgb(var(--png) / .4);
+  }
+  .scenario-tag.con {
+    color: rgb(var(--warn));
+    border-color: rgb(var(--warn) / .4);
+  }
+
+  /* ═══════════════════════════════════════ */
+  /*  PAGE 4 — 드로잉 툴                       */
+  /* ═══════════════════════════════════════ */
+  .drawing-stage {
+    background: #0a0c12;
+    aspect-ratio: 16/9;
+    position: relative;
+    overflow: hidden;
+    border-radius: 10px 10px 0 0;
+  }
+  .drawing-canvas-wrap {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .drawing-base-image {
+    width: 80%;
+    height: 80%;
+    background: linear-gradient(135deg, #2d3041, #1a1d27);
+    border-radius: 4px;
+    box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgb(var(--text-muted));
+    font-size: 13px;
+    position: relative;
+  }
+  .drawing-canvas {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+  }
+
+  /* 상단 툴바 */
+  .drawing-toolbar {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgb(var(--bg-card-elev) / .94);
+    border: 1px solid rgb(var(--bg-border) / .6);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    padding: 6px;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  }
+  .drawing-toolbar .divider {
+    width: 1px;
+    height: 24px;
+    background: rgb(var(--bg-border));
+    margin: 0 2px;
+  }
+  .drawing-toolbar .tool-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .drawing-toolbar .tool-btn svg { width: 18px; height: 18px; }
+
+  /* 색상 / 옵션 박스 */
+  .drawing-options {
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgb(var(--bg-card-elev) / .94);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgb(var(--bg-border) / .6);
+    border-radius: 10px;
+    padding: 10px 14px;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    font-size: 12px;
+    color: rgb(var(--text-secondary));
+  }
+  .opt-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .opt-label {
+    color: rgb(var(--text-muted));
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .color-swatches {
+    display: flex;
+    gap: 5px;
+  }
+  .color-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: transform 150ms;
+  }
+  .color-swatch:hover { transform: scale(1.15); }
+  .color-swatch.active {
+    border-color: white;
+    box-shadow: 0 0 0 2px rgb(var(--accent));
+  }
+  .stroke-options { display: flex; gap: 6px; align-items: center; }
+  .stroke-btn {
+    background: transparent;
+    border: 1px solid rgb(var(--bg-border));
+    color: rgb(var(--text-secondary));
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .stroke-btn.active {
+    background: rgb(var(--accent) / .2);
+    color: rgb(var(--accent-sub));
+    border-color: rgb(var(--accent) / .5);
+  }
+  .opacity-slider {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .opacity-slider input[type=range] {
+    width: 80px;
+    accent-color: rgb(var(--accent-sub));
+  }
+  .opacity-val {
+    font-variant-numeric: tabular-nums;
+    color: rgb(var(--text-primary));
+    width: 32px;
+    text-align: right;
+  }
+
+  /* 우상단 저장 액션 */
+  .drawing-save-bar {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .btn {
+    border: 1px solid rgb(var(--bg-border));
+    background: rgb(var(--bg-card-elev) / .9);
+    backdrop-filter: blur(6px);
+    color: rgb(var(--text-primary));
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 150ms;
+  }
+  .btn:hover { border-color: rgb(var(--accent) / .5); }
+  .btn-primary {
+    background: rgb(var(--accent));
+    color: white;
+    border-color: rgb(var(--accent));
+  }
+  .btn-primary:hover {
+    background: rgb(var(--accent-sub));
+    border-color: rgb(var(--accent-sub));
+  }
+  .btn-ghost {
+    background: transparent;
+    color: rgb(var(--text-secondary));
+  }
+
+  /* 좌하단 메타 */
+  .drawing-meta {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    font-size: 11px;
+    color: rgb(var(--text-muted));
+    background: rgb(var(--bg-primary) / .7);
+    backdrop-filter: blur(4px);
+    padding: 5px 10px;
+    border-radius: 6px;
+  }
+
+  /* 좌측 텍스트 */
+  .arrow-hint {
+    position: absolute;
+    color: rgb(var(--warn));
+    font-size: 11px;
+    font-weight: 600;
+    font-family: "Caveat", "Gowun Dodum", cursive;
+  }
+
+  /* ═══════════════════════════════════════ */
+  /*  PAGE 5 — 버그 수정 시각화                  */
+  /* ═══════════════════════════════════════ */
+  .bug-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    align-items: stretch;
+  }
+  .bug-side {
+    border: 1px solid rgb(var(--bg-border) / .5);
+    border-radius: 10px;
+    padding: 18px;
+    background: rgb(var(--bg-primary));
+  }
+  .bug-side.before {
+    border-color: rgb(var(--danger) / .35);
+  }
+  .bug-side.after {
+    border-color: rgb(var(--png) / .35);
+  }
+  .bug-side-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .bug-side.before .bug-side-label { color: rgb(var(--danger)); }
+  .bug-side.after .bug-side-label { color: rgb(var(--png)); }
+
+  /* 모의 토스트 */
+  .mock-toast {
+    background: rgb(var(--bg-card-elev));
+    border: 1px solid rgb(var(--bg-border));
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 8px;
+    max-width: 360px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.4);
+  }
+  .mock-toast.error { border-color: rgb(var(--danger) / .5); }
+  .mock-toast.success { border-color: rgb(var(--png) / .5); }
+  .mock-toast-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .mock-toast.error .mock-toast-icon { background: rgb(var(--danger) / .2); color: rgb(var(--danger)); }
+  .mock-toast.success .mock-toast-icon { background: rgb(var(--png) / .2); color: rgb(var(--png)); }
+  .mock-toast-body {
+    flex: 1;
+    font-size: 12px;
+    color: rgb(var(--text-primary));
+    line-height: 1.5;
+  }
+  .mock-confirm {
+    background: rgb(var(--bg-card-elev));
+    border: 1px solid rgb(var(--bg-border));
+    border-radius: 10px;
+    padding: 18px;
+    max-width: 360px;
+    margin-top: 8px;
+  }
+  .mock-confirm-title {
+    font-size: 14px;
+    color: rgb(var(--text-primary));
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .mock-confirm-sub {
+    font-size: 12px;
+    color: rgb(var(--text-secondary));
+  }
+  .mock-confirm-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 14px;
+  }
+  .mock-confirm-buttons .btn { padding: 6px 14px; }
+  .mock-confirm-buttons .btn-danger {
+    background: rgb(var(--danger));
+    color: white;
+    border-color: rgb(var(--danger));
+  }
+
+  /* ═══════════════════════════════════════ */
+  /*  공통 도움 텍스트                          */
+  /* ═══════════════════════════════════════ */
+  .help-block {
+    background: rgb(var(--accent) / .08);
+    border: 1px solid rgb(var(--accent) / .25);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-top: 16px;
+    font-size: 12px;
+    color: rgb(var(--text-secondary));
+    line-height: 1.6;
+  }
+  .help-block strong { color: rgb(var(--accent-sub)); }
+
+  .preview-relative { position: relative; }
+
+  /* shake animation */
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-3px); }
+    75% { transform: translateX(3px); }
+  }
+  .shake { animation: shake 200ms ease; }
+
+  /* pulse */
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(var(--accent) / .4); }
+    50% { box-shadow: 0 0 0 6px rgb(var(--accent) / 0); }
+  }
+  .pulse-glow { animation: pulse-glow 1.5s ease infinite; }
+</style>
+</head>
+<body>
+  <!-- 사이드바 -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <h1>B flow v1.26 시안</h1>
+      <p>인터랙티브 디자인 목업</p>
+    </div>
+    <div class="sidebar-title">신규 기능</div>
+    <div class="nav-item active" data-page="page-reactions"><span class="dot"></span> 댓글 이모지 리액션</div>
+    <div class="nav-item" data-page="page-context"><span class="dot"></span> 이미지 우클릭 메뉴</div>
+    <div class="nav-item" data-page="page-versions"><span class="dot"></span> 이미지 버전 관리 <span style="margin-left:auto; font-size:10px; opacity:.6;">3안</span></div>
+    <div class="nav-item" data-page="page-drawing"><span class="dot"></span> 드로잉 주석 툴</div>
+    <div class="sidebar-title">버그 수정</div>
+    <div class="nav-item" data-page="page-bugs"><span class="dot"></span> 씬 추가 / 벌크 카운트</div>
+  </aside>
+
+  <!-- 메인 -->
+  <main class="main">
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- PAGE 1: 댓글 이모지 리액션                  -->
+    <!-- ════════════════════════════════════════ -->
+    <section class="page active" id="page-reactions">
+      <div class="page-header">
+        <span class="page-tag">기능 #1</span>
+        <h2>댓글 이모지 리액션</h2>
+        <p>슬랙처럼 댓글에 이모지로 반응할 수 있습니다. 자주 쓰는 7개를 빠르게 노출하고, 동일 이모지는 카운트로 그룹화합니다. 호버 시 누가 눌렀는지 툴팁으로 노출됩니다.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">씬 상세 — 댓글 패널 (인터랙티브)</div>
+            <div class="card-subtitle">댓글 위에 마우스를 올리면 추가(+) 버튼이 나타납니다. 칩을 클릭하면 토글, 칩 호버 시 누가 눌렀는지 표시.</div>
+          </div>
+          <span class="card-badge recommended">확정안</span>
+        </div>
+
+        <div class="demo-frame">
+          <div class="demo-frame-bar"><div class="dots"><div class="dot-x"></div><div class="dot-x"></div><div class="dot-x"></div></div><div>씬 EP03 A컷 · #007 — 댓글</div></div>
+
+          <div class="comment-thread" id="comment-thread">
+
+            <!-- 시스템 이벤트 (이모지 없음) -->
+            <div class="system-event">
+              <div class="system-event-line"></div>
+              <span>박정인이 LO 단계를 완료했습니다 · 14:02</span>
+              <div class="system-event-line"></div>
+            </div>
+
+            <!-- 댓글 1 — 리액션 있음 -->
+            <div class="comment-row">
+              <div class="comment-avatar">한솔</div>
+              <div class="comment-body">
+                <div class="comment-meta">
+                  <span class="comment-name">한솔</span>
+                  <span class="comment-time">14:18</span>
+                </div>
+                <div class="comment-text">가이드 새로 올라간 거 확인하고, 디오라마 쪽 구성 살짝만 정돈해주세요. 마감 내일까지!</div>
+                <div class="reactions" data-comment="c1">
+                  <div class="reaction-chip active" data-emoji="✅" data-mine="true">
+                    <span class="emoji">✅</span><span class="count">3</span>
+                    <span class="tip">박정인, 김단비, 나 — 누른 사람: 3명</span>
+                  </div>
+                  <div class="reaction-chip" data-emoji="👀">
+                    <span class="emoji">👀</span><span class="count">2</span>
+                    <span class="tip">이다은, 송지혁</span>
+                  </div>
+                  <div class="reaction-chip" data-emoji="🙏">
+                    <span class="emoji">🙏</span><span class="count">1</span>
+                    <span class="tip">박정인</span>
+                  </div>
+                  <button class="reaction-add" data-comment="c1" title="이모지 추가">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><circle cx="9" cy="9.5" r="0.5" fill="currentColor"/><circle cx="15" cy="9.5" r="0.5" fill="currentColor"/><path d="M19 5v4M17 7h4" stroke-width="1.8"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 댓글 2 — 답글 형식 -->
+            <div class="comment-row" style="padding-left: 32px;">
+              <div class="comment-avatar user-2">박</div>
+              <div class="comment-body">
+                <div class="comment-meta">
+                  <span class="comment-name">박정인</span>
+                  <span class="comment-time">14:25</span>
+                </div>
+                <div class="comment-text">확인했습니다. 오늘 안에 마무리해서 다시 올릴게요.</div>
+                <div class="reactions" data-comment="c2">
+                  <div class="reaction-chip" data-emoji="❤️">
+                    <span class="emoji">❤️</span><span class="count">1</span>
+                    <span class="tip">한솔</span>
+                  </div>
+                  <button class="reaction-add" data-comment="c2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><circle cx="9" cy="9.5" r="0.5" fill="currentColor"/><circle cx="15" cy="9.5" r="0.5" fill="currentColor"/><path d="M19 5v4M17 7h4" stroke-width="1.8"/></svg></button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 댓글 3 — 리비전 댓글 -->
+            <div class="comment-row">
+              <div class="comment-avatar user-3">김</div>
+              <div class="comment-body">
+                <div class="comment-meta">
+                  <span class="comment-name">김단비</span>
+                  <span class="comment-time">15:42</span>
+                  <span style="font-size:10px; padding:2px 6px; background:rgb(var(--review)/.2); color:rgb(var(--review)); border-radius:4px; font-weight:600;">리비전 R3</span>
+                </div>
+                <div class="comment-text">디오라마 그림자 방향이 카메라 위치랑 안 맞아요. 화면 우상단에서 비치는 방향으로 수정 부탁드립니다.</div>
+                <div class="reactions" data-comment="c3">
+                  <button class="reaction-add" data-comment="c3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><circle cx="9" cy="9.5" r="0.5" fill="currentColor"/><circle cx="15" cy="9.5" r="0.5" fill="currentColor"/><path d="M19 5v4M17 7h4" stroke-width="1.8"/></svg></button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="help-block">
+          <strong>인터렉션 가이드</strong> · 칩 클릭 = 토글, "+" 버튼 클릭 = 빠른 이모지 7개 + "더보기" 피커, 칩 호버 = 누른 사람 노출. 리비전 댓글도 동일 적용. 시스템 이벤트는 적용 안 함(노이즈 방지).
+        </div>
+      </div>
+
+      <!-- 이모지 피커 (전역) -->
+      <div class="emoji-picker" id="emoji-picker">
+        <div class="emoji-picker-row">
+          <button data-emoji="✅">✅</button>
+          <button data-emoji="👍">👍</button>
+          <button data-emoji="❤️">❤️</button>
+          <button data-emoji="👀">👀</button>
+          <button data-emoji="🎉">🎉</button>
+          <button data-emoji="🙏">🙏</button>
+          <button data-emoji="🔥">🔥</button>
+        </div>
+        <div class="emoji-picker-more">+ 더 많은 이모지</div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- PAGE 2: 우클릭 메뉴                          -->
+    <!-- ════════════════════════════════════════ -->
+    <section class="page" id="page-context">
+      <div class="page-header">
+        <span class="page-tag">기능 #2</span>
+        <h2>이미지 우클릭 메뉴</h2>
+        <p>씬 상세 모달에서 이미지를 클릭해 라이트박스를 연 다음, 이미지 위에서 우클릭하면 다운로드/복사 메뉴가 나타납니다.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">라이트박스 — 이미지 우클릭 시 (인터랙티브)</div>
+            <div class="card-subtitle">아래 이미지 영역 위에서 <strong>마우스 우클릭</strong> 해보세요. 또는 우상단 ⋯ 버튼 클릭.</div>
+          </div>
+          <span class="card-badge recommended">확정안</span>
+        </div>
+
+        <div class="demo-frame">
+          <div class="demo-frame-bar"><div class="dots"><div class="dot-x"></div><div class="dot-x"></div><div class="dot-x"></div></div><div>씬 EP03 A컷 · #007 — 라이트박스</div></div>
+          <div class="lightbox-mock preview-relative" id="lightbox-mock">
+            <div class="lightbox-image" id="lightbox-image"></div>
+            <div class="lightbox-tools">
+              <button class="tool-btn" title="단일">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="5" width="16" height="14" rx="2"/></svg>
+              </button>
+              <button class="tool-btn active" title="나란히">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="8" height="14" rx="1.5"/><rect x="13" y="5" width="8" height="14" rx="1.5"/></svg>
+              </button>
+              <button class="tool-btn" title="오버레이">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="3" width="14" height="14" rx="1.5"/><rect x="3" y="7" width="14" height="14" rx="1.5" opacity=".5"/></svg>
+              </button>
+              <div style="width:1px; background:rgb(var(--bg-border)); margin:4px 2px;"></div>
+              <button class="tool-btn" id="lightbox-more" title="더 보기">
+                <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></svg>
+              </button>
+            </div>
+
+            <!-- 컨텍스트 메뉴 -->
+            <div class="context-menu" id="ctx-menu">
+              <div class="context-menu-item" data-action="download">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+                <span>다운로드</span>
+                <span class="context-menu-shortcut">Ctrl+S</span>
+              </div>
+              <div class="context-menu-item" data-action="copy">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
+                <span>이미지 복사</span>
+                <span class="context-menu-shortcut">Ctrl+C</span>
+              </div>
+              <div class="context-menu-item" data-action="copy-url">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 14l4-4M9 7H6a4 4 0 00-4 4 4 4 0 004 4h3m4-8h3a4 4 0 014 4 4 4 0 01-4 4h-3"/></svg>
+                <span>이미지 URL 복사</span>
+              </div>
+              <div class="context-menu-divider"></div>
+              <div class="context-menu-item" data-action="annotate">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                <span>주석 새 버전으로 그리기</span>
+              </div>
+            </div>
+
+            <div class="toast-mini" id="ctx-toast">복사 완료</div>
+          </div>
+        </div>
+
+        <div class="help-block">
+          <strong>인터렉션 가이드</strong> · 우클릭 또는 우상단 ⋯ 버튼으로 동일 메뉴. 파일명 자동 생성: <code style="color:rgb(var(--accent-sub));">EP03_A_BG_007_storyboard_v2.jpg</code>. 클립보드 복사는 PNG로, URL 복사는 Supabase CDN 링크. 마지막 항목 "주석 그리기"는 기능 #4 (드로잉 툴) 진입점.
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- PAGE 3: 이미지 버전 관리 — 3안 비교         -->
+    <!-- ════════════════════════════════════════ -->
+    <section class="page" id="page-versions">
+      <div class="page-header">
+        <span class="page-tag">기능 #3 · 3안 비교</span>
+        <h2>이미지 버전 관리</h2>
+        <p>"교체" 대신 새 버전을 추가합니다. 외부에선 항상 최신 버전 표시, 라이트박스에서 이전 버전 탐색 가능. <strong>3가지 UI 시안</strong>을 비교해보세요. 각 시안의 상호작용을 직접 눌러보면서 결정하시면 됩니다.</p>
+      </div>
+
+      <!-- 시안 A — 썸네일 스트립 -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">시안 A — 썸네일 스트립</div>
+            <div class="card-subtitle">이미지 아래에 가로 스트립. 한눈에 몇 개의 버전이 있는지 보임. 클릭 시 전환.</div>
+          </div>
+          <span class="card-badge option">시안 A</span>
+        </div>
+        <div class="scenario-tag pro">PRO · 버전 개수·종류가 한눈에 보임</div>
+        <div class="scenario-tag pro">PRO · 주석 버전(노란 코너)이 시각적으로 구분</div>
+        <div class="scenario-tag con">CON · 버전 많아지면 가로 스크롤 발생</div>
+
+        <div class="version-demo">
+          <div class="version-stage">
+            <div class="version-stage-image ver-v2" id="strip-stage">v2</div>
+          </div>
+          <div class="v-strip" id="strip-thumbs">
+            <div class="v-thumb ver-v1" data-v="v1">
+              <span>v1</span>
+              <div class="v-thumb-label">5/12</div>
+            </div>
+            <div class="v-thumb ver-v2 current" data-v="v2">
+              <span>v2</span>
+              <div class="v-thumb-current-badge">현재</div>
+              <div class="v-thumb-label">5/14</div>
+            </div>
+            <div class="v-thumb ver-v3" data-v="v3">
+              <span>v3</span>
+              <div class="annotated-corner"></div>
+              <div class="v-thumb-label">5/14</div>
+            </div>
+            <button class="v-add-thumb" title="버전 추가">+</button>
+            <div class="v-strip-meta">
+              <strong id="strip-meta-name">v2 · 한솔</strong>
+              <span id="strip-meta-time">5/14 14:32 · 교체</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 시안 B — 드롭다운 -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">시안 B — 드롭다운 (좌상단)</div>
+            <div class="card-subtitle">이미지 좌상단에 작은 "v2" 칩. 클릭 시 드롭다운으로 모든 버전 목록.</div>
+          </div>
+          <span class="card-badge option">시안 B</span>
+        </div>
+        <div class="scenario-tag pro">PRO · 공간 절약, 이미지에 시각 노이즈 최소</div>
+        <div class="scenario-tag pro">PRO · 메타 정보(작성자/시간) 풍부하게 노출</div>
+        <div class="scenario-tag con">CON · 몇 개 버전이 있는지 닫혀 있을 땐 안 보임</div>
+
+        <div class="version-demo">
+          <div class="version-stage preview-relative" id="drop-stage-wrap">
+            <div class="version-stage-image ver-v2" id="drop-stage">v2</div>
+            <div class="v-dropdown-trigger" id="drop-trigger">
+              <span class="v-tag" id="drop-current">v2</span>
+              <span>현재 · 한솔 · 5/14</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="v-dropdown-list" id="drop-list">
+              <div class="v-list-item current" data-v="v3">
+                <div class="v-list-thumb ver-v3">v3</div>
+                <div class="v-list-meta">
+                  <div class="v-list-name">v3 <span class="badge-mini annot">주석</span></div>
+                  <div class="v-list-time">한솔 · 5/14 16:08</div>
+                </div>
+                <button class="v-list-delete" title="삭제"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
+              </div>
+              <div class="v-list-item" data-v="v2">
+                <div class="v-list-thumb ver-v2">v2</div>
+                <div class="v-list-meta">
+                  <div class="v-list-name">v2 <span class="badge-mini current">표시</span> <span class="badge-mini replace">교체</span></div>
+                  <div class="v-list-time">한솔 · 5/14 14:32</div>
+                </div>
+                <button class="v-list-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
+              </div>
+              <div class="v-list-item" data-v="v1">
+                <div class="v-list-thumb ver-v1">v1</div>
+                <div class="v-list-meta">
+                  <div class="v-list-name">v1</div>
+                  <div class="v-list-time">박정인 · 5/12 10:15</div>
+                </div>
+                <button class="v-list-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 시안 C — 슬라이더 -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">시안 C — 좌우 슬라이더</div>
+            <div class="card-subtitle">하단에 좌우 화살표 + 진행 표시 핀. 키보드 ← → 로도 전환 가능.</div>
+          </div>
+          <span class="card-badge option">시안 C</span>
+        </div>
+        <div class="scenario-tag pro">PRO · 가장 가벼운 UI, 키보드 친화적</div>
+        <div class="scenario-tag pro">PRO · 한 번에 하나씩 전환되어 비교에 집중</div>
+        <div class="scenario-tag con">CON · 버전 종류·작성자 별도 정보 노출 약함</div>
+
+        <div class="version-demo">
+          <div class="version-stage preview-relative">
+            <div class="version-stage-image ver-v2" id="slider-stage">v2</div>
+            <div class="v-slider-nav">
+              <button class="v-slider-arrow" id="slider-prev">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <div class="v-slider-center">
+                <span class="v-tag" id="slider-tag">v2 / 3</span>
+                <span id="slider-meta">현재</span>
+                <div class="v-slider-pips">
+                  <span class="v-slider-pip" data-i="0"></span>
+                  <span class="v-slider-pip active" data-i="1"></span>
+                  <span class="v-slider-pip" data-i="2"></span>
+                </div>
+              </div>
+              <button class="v-slider-arrow" id="slider-next">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="help-block">
+        <strong>공통 사항</strong> · 외부(씬 카드, 시트뷰, 대시보드)에서는 항상 최신 버전이 보입니다. 라이트박스에서만 이전 버전을 탐색할 수 있고, 작성자 본인 + 관리자만 버전을 삭제할 수 있습니다. 메타데이터(작성자/시간/타입: 교체/주석)는 자동 부착됩니다.
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- PAGE 4: 드로잉 주석 툴                       -->
+    <!-- ════════════════════════════════════════ -->
+    <section class="page" id="page-drawing">
+      <div class="page-header">
+        <span class="page-tag">기능 #4</span>
+        <h2>드로잉 주석 툴</h2>
+        <p>라이트박스 상단 툴바에서 진입. 펜·도형·텍스트로 주석을 달고 "주석 새 버전으로 저장"하면 v3(주석)이 자동 추가됩니다. 모든 팀원에게 공유됩니다.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">라이트박스 주석 모드 (인터랙티브 — 그림 그리기 가능)</div>
+            <div class="card-subtitle">아래 캔버스에 직접 마우스로 그려보세요. 도구·색상·굵기·투명도 모두 작동합니다.</div>
+          </div>
+          <span class="card-badge recommended">확정안</span>
+        </div>
+
+        <div class="demo-frame">
+          <div class="demo-frame-bar"><div class="dots"><div class="dot-x"></div><div class="dot-x"></div><div class="dot-x"></div></div><div>씬 EP03 A컷 · #007 — 주석 모드</div></div>
+
+          <div class="drawing-stage" id="draw-stage">
+            <div class="drawing-canvas-wrap">
+              <div class="drawing-base-image">스토리보드 v2 — 이 위에 그려보세요</div>
+              <canvas class="drawing-canvas" id="draw-canvas"></canvas>
+            </div>
+
+            <!-- 도구 툴바 -->
+            <div class="drawing-toolbar">
+              <button class="tool-btn active" data-tool="pen" title="하이라이터 펜">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l-6 6v4h4l6-6"/><path d="M14 6l4 4-10 10-4-4z" fill="currentColor" fill-opacity=".15"/></svg>
+              </button>
+              <button class="tool-btn" data-tool="line" title="직선">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20L20 4"/></svg>
+              </button>
+              <button class="tool-btn" data-tool="arrow" title="화살표">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 19L19 5M19 5h-7M19 5v7"/></svg>
+              </button>
+              <button class="tool-btn" data-tool="rect" title="사각형">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>
+              </button>
+              <button class="tool-btn" data-tool="circle" title="원">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
+              </button>
+              <div class="divider"></div>
+              <button class="tool-btn" data-tool="text" title="텍스트">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V5h16v2M9 5v14M9 19h6"/></svg>
+              </button>
+              <button class="tool-btn" data-tool="erase" title="지우개">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 6 6-3 3H3v-3z"/><path d="M9 11l5-5a2 2 0 012.8 0l3.2 3.2a2 2 0 010 2.8l-5 5"/></svg>
+              </button>
+              <div class="divider"></div>
+              <button class="tool-btn" id="draw-undo" title="실행 취소 (Ctrl+Z)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M3 13a9 9 0 109-9"/></svg>
+              </button>
+              <button class="tool-btn" id="draw-clear" title="모두 지우기">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </button>
+            </div>
+
+            <!-- 옵션 (색상, 굵기, 투명도) -->
+            <div class="drawing-options">
+              <div class="opt-group">
+                <span class="opt-label">색상</span>
+                <div class="color-swatches" id="color-swatches">
+                  <div class="color-swatch active" style="background:#EB5757" data-c="#EB5757"></div>
+                  <div class="color-swatch" style="background:#FDCB6E" data-c="#FDCB6E"></div>
+                  <div class="color-swatch" style="background:#00B894" data-c="#00B894"></div>
+                  <div class="color-swatch" style="background:#74B9FF" data-c="#74B9FF"></div>
+                  <div class="color-swatch" style="background:#A29BFE" data-c="#A29BFE"></div>
+                  <div class="color-swatch" style="background:#FFFFFF" data-c="#FFFFFF"></div>
+                  <div class="color-swatch" style="background:#0F1117; border:1px solid #2D3041" data-c="#0F1117"></div>
+                </div>
+              </div>
+              <div class="opt-group">
+                <span class="opt-label">굵기</span>
+                <div class="stroke-options">
+                  <button class="stroke-btn" data-w="2">S</button>
+                  <button class="stroke-btn active" data-w="4">M</button>
+                  <button class="stroke-btn" data-w="8">L</button>
+                </div>
+              </div>
+              <div class="opt-group">
+                <span class="opt-label">투명도</span>
+                <div class="opacity-slider">
+                  <input type="range" id="opacity-range" min="20" max="100" value="100">
+                  <span class="opacity-val" id="opacity-val">100%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 우상단 저장 -->
+            <div class="drawing-save-bar">
+              <button class="btn btn-ghost" id="draw-cancel">취소</button>
+              <button class="btn btn-primary" id="draw-save">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M5 12l5 5L20 7"/></svg>
+                주석 새 버전으로 저장
+              </button>
+            </div>
+
+            <!-- 좌하단 메타 -->
+            <div class="drawing-meta">
+              <strong>대상</strong>: v2 위에 그리는 중 · <strong>저장 시</strong>: v3 (주석) 자동 생성
+            </div>
+          </div>
+        </div>
+
+        <div class="help-block">
+          <strong>도구</strong> · 펜(하이라이터, 반투명 기본), 직선, 화살표, 사각형, 원, 텍스트, 지우개. <strong>색상</strong> 7가지 + <strong>굵기</strong> 3단계 + <strong>투명도</strong> 슬라이더. <strong>실행취소</strong> Ctrl+Z. <strong>저장</strong> 시 캔버스를 원본 이미지 위에 합성해 새 버전으로 업로드 — 원본은 그대로 v2로 남고, 주석본은 v3로 추가됩니다.
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════ -->
+    <!-- PAGE 5: 버그 수정 시각화                     -->
+    <!-- ════════════════════════════════════════ -->
+    <section class="page" id="page-bugs">
+      <div class="page-header">
+        <span class="page-tag">버그 수정</span>
+        <h2>씬 추가 오류 / 벌크 카운트 표기</h2>
+        <p>두 가지 버그의 Before / After 비교입니다. (실제 코드 수정 결과를 텍스트 시각화로 보여주는 패널입니다)</p>
+      </div>
+
+      <!-- 버그 1 -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">버그 1 — 이미지 붙여넣고 씬 추가 시 "씬 UUID를 찾을 수 없음" 오류</div>
+            <div class="card-subtitle">원인: addScene → IPC 호출은 끝났지만, 새 씬의 진짜 UUID가 로컬에 채워지기 전에 이미지 업로드 콜백이 옵티미스틱 씬(UUID 없음)을 참조</div>
+          </div>
+        </div>
+
+        <div class="bug-row">
+          <div class="bug-side before">
+            <div class="bug-side-label">● 현재 (오류)</div>
+            <div class="mock-toast success">
+              <div class="mock-toast-icon">✓</div>
+              <div class="mock-toast-body">씬 a001 추가 완료 (BG+액팅)</div>
+            </div>
+            <div class="mock-toast error">
+              <div class="mock-toast-icon">!</div>
+              <div class="mock-toast-body">수정 실패: Error: 씬 UUID를 찾을 수 없음: EP03_E_BG[31]</div>
+            </div>
+            <div class="mock-toast error">
+              <div class="mock-toast-icon">!</div>
+              <div class="mock-toast-body">수정 실패: Error: 씬 UUID를 찾을 수 없음: EP03_E_ACT[31]</div>
+            </div>
+            <p style="font-size:11px; color:rgb(var(--text-secondary)); margin-top:12px;">→ 씬은 추가됐지만 이미지는 빈 상태</p>
+          </div>
+          <div class="bug-side after">
+            <div class="bug-side-label">● 수정 후</div>
+            <div class="mock-toast success">
+              <div class="mock-toast-icon">✓</div>
+              <div class="mock-toast-body">씬 a001 추가 완료 (BG+액팅)</div>
+            </div>
+            <p style="font-size:11px; color:rgb(var(--text-secondary)); margin-top:8px; line-height:1.6;">
+              → addScene 시점에 UUID를 즉시 받아서 옵티미스틱 씬에 주입.<br>
+              → 또는 이미지 업로드 시 sceneId 기반으로 UUID 재해석 (인덱스 → sceneId 키로 변경).<br>
+              → 추가 토스트 없이 깔끔하게 완료.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 버그 2 -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">버그 2 — 통합 뷰에서 씬 1개 선택 후 삭제 시 "2개 삭제" 표기</div>
+            <div class="card-subtitle">원인: bg:&lt;key&gt;와 act:&lt;key&gt;를 별개 UUID로 카운트. 사용자 시점에선 "한 씬"(머지드 카드 1장)임</div>
+          </div>
+        </div>
+
+        <div class="bug-row">
+          <div class="bug-side before">
+            <div class="bug-side-label">● 현재 (혼란)</div>
+            <div class="mock-confirm">
+              <div class="mock-confirm-title">2개의 씬을 삭제하시겠습니까?</div>
+              <div class="mock-confirm-sub">이 작업은 되돌릴 수 없습니다.</div>
+              <div class="mock-confirm-buttons">
+                <button class="btn btn-ghost">취소</button>
+                <button class="btn btn-danger">삭제</button>
+              </div>
+            </div>
+            <p style="font-size:11px; color:rgb(var(--text-secondary)); margin-top:12px;">→ 사용자: "1개만 선택했는데 왜 2개?"</p>
+          </div>
+          <div class="bug-side after">
+            <div class="bug-side-label">● 수정 후</div>
+            <div class="mock-confirm">
+              <div class="mock-confirm-title">씬 1개를 삭제하시겠습니까?</div>
+              <div class="mock-confirm-sub">BG·액팅 양쪽이 함께 삭제됩니다. 되돌릴 수 없습니다.</div>
+              <div class="mock-confirm-buttons">
+                <button class="btn btn-ghost">취소</button>
+                <button class="btn btn-danger">삭제</button>
+              </div>
+            </div>
+            <p style="font-size:11px; color:rgb(var(--text-secondary)); margin-top:12px; line-height:1.6;">
+              → "사용자가 보는 단위(머지드 1)"로 카운트.<br>
+              → 내부 동작(BG+액팅 2 row 삭제)은 부연 설명으로 명시.<br>
+              → BG 단독·액팅 단독 케이스도 정확히 1개로 표기.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+<script>
+  /* ─── 사이드바 탭 전환 ─── */
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      item.classList.add('active');
+      document.getElementById(item.dataset.page).classList.add('active');
+    });
+  });
+
+  /* ═══════════ PAGE 1 — 이모지 리액션 ═══════════ */
+  const picker = document.getElementById('emoji-picker');
+  let activeAddBtn = null;
+
+  document.querySelectorAll('.reaction-add').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (activeAddBtn === btn) {
+        picker.classList.remove('open');
+        activeAddBtn = null;
+        return;
+      }
+      activeAddBtn = btn;
+      const rect = btn.getBoundingClientRect();
+      const parentRect = btn.parentElement.parentElement.getBoundingClientRect();
+      picker.style.left = (rect.left - parentRect.left) + 'px';
+      picker.style.top = (rect.top - parentRect.top - 110) + 'px';
+      btn.parentElement.appendChild(picker);
+      picker.classList.add('open');
+    });
+  });
+  document.addEventListener('click', () => {
+    picker.classList.remove('open');
+    activeAddBtn = null;
+  });
+  picker.addEventListener('click', e => e.stopPropagation());
+
+  picker.querySelectorAll('button[data-emoji]').forEach(b => {
+    b.addEventListener('click', () => {
+      if (!activeAddBtn) return;
+      const emoji = b.dataset.emoji;
+      const reactions = activeAddBtn.parentElement;
+      let chip = reactions.querySelector(`.reaction-chip[data-emoji="${emoji}"]`);
+      if (chip) {
+        toggleChip(chip);
+      } else {
+        chip = createChip(emoji);
+        reactions.insertBefore(chip, activeAddBtn);
+      }
+      picker.classList.remove('open');
+      activeAddBtn = null;
+    });
+  });
+
+  function createChip(emoji) {
+    const chip = document.createElement('div');
+    chip.className = 'reaction-chip active';
+    chip.dataset.emoji = emoji;
+    chip.dataset.mine = 'true';
+    chip.innerHTML = `<span class="emoji">${emoji}</span><span class="count">1</span><span class="tip">나</span>`;
+    chip.addEventListener('click', e => { e.stopPropagation(); toggleChip(chip); });
+    chip.classList.add('shake');
+    setTimeout(() => chip.classList.remove('shake'), 200);
+    return chip;
+  }
+
+  function toggleChip(chip) {
+    const countEl = chip.querySelector('.count');
+    const tipEl = chip.querySelector('.tip');
+    let count = parseInt(countEl.textContent, 10);
+    if (chip.dataset.mine === 'true') {
+      count -= 1;
+      chip.dataset.mine = 'false';
+      chip.classList.remove('active');
+      if (count <= 0) { chip.remove(); return; }
+    } else {
+      count += 1;
+      chip.dataset.mine = 'true';
+      chip.classList.add('active');
+    }
+    countEl.textContent = count;
+    tipEl.textContent = (chip.dataset.mine === 'true') ? '...외 ' + (count-1) + '명 — 누른 사람: ' + count + '명' : '누른 사람: ' + count + '명';
+  }
+
+  document.querySelectorAll('.reaction-chip').forEach(chip => {
+    chip.addEventListener('click', e => { e.stopPropagation(); toggleChip(chip); });
+  });
+
+  document.querySelector('.emoji-picker-more').addEventListener('click', () => {
+    alert('전체 이모지 피커는 별도 라이브러리 (emoji-mart 등) 검토. 시안에선 알림으로 대체.');
+  });
+
+  /* ═══════════ PAGE 2 — 우클릭 메뉴 ═══════════ */
+  const ctxMenu = document.getElementById('ctx-menu');
+  const ctxToast = document.getElementById('ctx-toast');
+  const lightboxImage = document.getElementById('lightbox-image');
+  const lightboxMock = document.getElementById('lightbox-mock');
+
+  lightboxImage.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showCtxMenu(e.clientX, e.clientY);
+  });
+  document.getElementById('lightbox-more').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    showCtxMenu(rect.right - 200, rect.bottom + 6);
+  });
+
+  function showCtxMenu(x, y) {
+    const parentRect = lightboxMock.getBoundingClientRect();
+    ctxMenu.style.left = Math.min(x - parentRect.left, parentRect.width - 220) + 'px';
+    ctxMenu.style.top = Math.min(y - parentRect.top, parentRect.height - 200) + 'px';
+    ctxMenu.classList.add('open');
+  }
+
+  document.addEventListener('click', () => ctxMenu.classList.remove('open'));
+  ctxMenu.addEventListener('click', e => e.stopPropagation());
+
+  ctxMenu.querySelectorAll('.context-menu-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const action = item.dataset.action;
+      const label = item.querySelector('span').textContent;
+      let msg = label + ' 실행';
+      if (action === 'download') msg = '저장됨: EP03_A_BG_007_storyboard_v2.jpg';
+      if (action === 'copy') msg = '클립보드에 이미지 복사됨';
+      if (action === 'copy-url') msg = 'URL 복사됨: https://...supabase.co/.../EP03_A_BG_007_v2.jpg';
+      if (action === 'annotate') msg = '주석 모드로 진입합니다 (시안 4)';
+      ctxToast.textContent = msg;
+      ctxToast.classList.add('show');
+      setTimeout(() => ctxToast.classList.remove('show'), 2000);
+      ctxMenu.classList.remove('open');
+    });
+  });
+
+  /* ═══════════ PAGE 3 — 버전 관리 ═══════════ */
+  // 시안 A — 썸네일 스트립
+  const stripStage = document.getElementById('strip-stage');
+  const stripMetaName = document.getElementById('strip-meta-name');
+  const stripMetaTime = document.getElementById('strip-meta-time');
+  const stripVersions = {
+    v1: { name: 'v1 · 박정인', time: '5/12 10:15 · 최초' },
+    v2: { name: 'v2 · 한솔', time: '5/14 14:32 · 교체' },
+    v3: { name: 'v3 · 한솔', time: '5/14 16:08 · 주석' },
+  };
+  document.querySelectorAll('#strip-thumbs .v-thumb').forEach(thumb => {
+    thumb.addEventListener('click', () => {
+      const v = thumb.dataset.v;
+      document.querySelectorAll('#strip-thumbs .v-thumb').forEach(t => {
+        t.classList.remove('current');
+        t.querySelector('.v-thumb-current-badge')?.remove();
+      });
+      thumb.classList.add('current');
+      const badge = document.createElement('div');
+      badge.className = 'v-thumb-current-badge';
+      badge.textContent = '현재';
+      thumb.appendChild(badge);
+      stripStage.className = 'version-stage-image ver-' + v;
+      stripStage.textContent = v;
+      stripMetaName.textContent = stripVersions[v].name;
+      stripMetaTime.textContent = stripVersions[v].time;
+    });
+  });
+
+  // 시안 B — 드롭다운
+  const dropTrigger = document.getElementById('drop-trigger');
+  const dropList = document.getElementById('drop-list');
+  const dropStage = document.getElementById('drop-stage');
+  const dropCurrent = document.getElementById('drop-current');
+  dropTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dropList.classList.toggle('open');
+  });
+  document.addEventListener('click', () => dropList.classList.remove('open'));
+  dropList.addEventListener('click', e => e.stopPropagation());
+  dropList.querySelectorAll('.v-list-item').forEach(li => {
+    li.addEventListener('click', () => {
+      const v = li.dataset.v;
+      dropList.querySelectorAll('.v-list-item').forEach(x => x.classList.remove('current'));
+      li.classList.add('current');
+      dropStage.className = 'version-stage-image ver-' + v;
+      dropStage.textContent = v;
+      dropCurrent.textContent = v;
+      dropList.classList.remove('open');
+    });
+  });
+
+  // 시안 C — 슬라이더
+  const sliderVersions = ['v1', 'v2', 'v3'];
+  const sliderNames = ['v1 / 3', 'v2 / 3', 'v3 / 3'];
+  const sliderMetas = ['박정인 · 5/12', '한솔 · 5/14', '한솔 · 5/14 · 주석'];
+  let sliderIndex = 1;
+  const sliderStage = document.getElementById('slider-stage');
+  const sliderTag = document.getElementById('slider-tag');
+  const sliderMeta = document.getElementById('slider-meta');
+  const sliderPrev = document.getElementById('slider-prev');
+  const sliderNext = document.getElementById('slider-next');
+  const sliderPips = document.querySelectorAll('.v-slider-pip');
+
+  function renderSlider() {
+    const v = sliderVersions[sliderIndex];
+    sliderStage.className = 'version-stage-image ver-' + v;
+    sliderStage.textContent = v;
+    sliderTag.textContent = sliderNames[sliderIndex];
+    sliderMeta.textContent = sliderMetas[sliderIndex];
+    sliderPips.forEach((pip, i) => pip.classList.toggle('active', i === sliderIndex));
+    sliderPrev.disabled = sliderIndex === 0;
+    sliderNext.disabled = sliderIndex === sliderVersions.length - 1;
+  }
+  sliderPrev.addEventListener('click', () => { sliderIndex = Math.max(0, sliderIndex-1); renderSlider(); });
+  sliderNext.addEventListener('click', () => { sliderIndex = Math.min(sliderVersions.length-1, sliderIndex+1); renderSlider(); });
+  sliderPips.forEach(pip => pip.addEventListener('click', () => { sliderIndex = parseInt(pip.dataset.i, 10); renderSlider(); }));
+  renderSlider();
+
+  /* ═══════════ PAGE 4 — 드로잉 ═══════════ */
+  const canvas = document.getElementById('draw-canvas');
+  const ctx = canvas.getContext('2d');
+  let state = {
+    tool: 'pen',
+    color: '#EB5757',
+    width: 4,
+    opacity: 1.0,
+    drawing: false,
+    startX: 0, startY: 0,
+    history: [],
+    historyIndex: -1,
+  };
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0) return;
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    redraw();
+  }
+  window.addEventListener('resize', resizeCanvas);
+  setTimeout(resizeCanvas, 100);
+
+  function saveState() {
+    state.history = state.history.slice(0, state.historyIndex + 1);
+    state.history.push(canvas.toDataURL());
+    state.historyIndex++;
+  }
+  function redraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (state.historyIndex >= 0) {
+      const img = new Image();
+      img.onload = () => ctx.drawImage(img, 0, 0);
+      img.src = state.history[state.historyIndex];
+    }
+  }
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  canvas.addEventListener('mousedown', (e) => {
+    const p = getPos(e);
+    state.drawing = true;
+    state.startX = p.x; state.startY = p.y;
+    ctx.strokeStyle = state.color;
+    ctx.fillStyle = state.color;
+    ctx.lineWidth = state.width;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.globalAlpha = state.tool === 'pen' ? state.opacity * 0.5 : state.opacity;
+    if (state.tool === 'erase') ctx.globalCompositeOperation = 'destination-out';
+    else ctx.globalCompositeOperation = 'source-over';
+    if (state.tool === 'pen' || state.tool === 'erase') {
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    } else if (state.tool === 'text') {
+      const text = prompt('텍스트를 입력하세요:');
+      if (text) {
+        ctx.font = (state.width * 4) + 'px Pretendard, sans-serif';
+        ctx.fillText(text, p.x, p.y);
+        saveState();
+      }
+      state.drawing = false;
+    } else {
+      // shapes — snapshot current state
+      state.snapshot = canvas.toDataURL();
+    }
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (!state.drawing) return;
+    const p = getPos(e);
+    if (state.tool === 'pen' || state.tool === 'erase') {
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    } else {
+      // 도형 미리보기 — snapshot 다시 그리고 위에 임시 도형
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        drawShape(state.tool, state.startX, state.startY, p.x, p.y);
+      };
+      img.src = state.snapshot;
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (!state.drawing) return;
+    state.drawing = false;
+    if (state.tool === 'pen' || state.tool === 'erase') {
+      ctx.closePath();
+    } else if (state.tool !== 'text') {
+      const p = getPos(e);
+      // 이미 mousemove에서 그려졌지만 안정성을 위해 한 번 더
+    }
+    saveState();
+  });
+
+  canvas.addEventListener('mouseleave', () => { state.drawing = false; });
+
+  function drawShape(tool, x1, y1, x2, y2) {
+    if (tool === 'rect') {
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    } else if (tool === 'circle') {
+      const rx = Math.abs(x2 - x1) / 2;
+      const ry = Math.abs(y2 - y1) / 2;
+      const cx = (x1 + x2) / 2;
+      const cy = (y1 + y2) / 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (tool === 'line') {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      ctx.stroke();
+    } else if (tool === 'arrow') {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      ctx.stroke();
+      // 화살촉
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      const head = state.width * 3;
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - head * Math.cos(angle - Math.PI/6), y2 - head * Math.sin(angle - Math.PI/6));
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - head * Math.cos(angle + Math.PI/6), y2 - head * Math.sin(angle + Math.PI/6));
+      ctx.stroke();
+    }
+  }
+
+  // 도구 선택
+  document.querySelectorAll('[data-tool]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-tool]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.tool = btn.dataset.tool;
+      canvas.style.cursor = (state.tool === 'text') ? 'text' : (state.tool === 'erase') ? 'cell' : 'crosshair';
+    });
+  });
+
+  // 색상
+  document.querySelectorAll('#color-swatches .color-swatch').forEach(s => {
+    s.addEventListener('click', () => {
+      document.querySelectorAll('#color-swatches .color-swatch').forEach(x => x.classList.remove('active'));
+      s.classList.add('active');
+      state.color = s.dataset.c;
+    });
+  });
+
+  // 굵기
+  document.querySelectorAll('.stroke-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.stroke-btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      state.width = parseInt(b.dataset.w, 10);
+    });
+  });
+
+  // 투명도
+  const opacityRange = document.getElementById('opacity-range');
+  const opacityVal = document.getElementById('opacity-val');
+  opacityRange.addEventListener('input', () => {
+    state.opacity = parseInt(opacityRange.value, 10) / 100;
+    opacityVal.textContent = opacityRange.value + '%';
+  });
+
+  // Undo / Clear
+  document.getElementById('draw-undo').addEventListener('click', () => {
+    if (state.historyIndex > 0) { state.historyIndex--; redraw(); }
+    else if (state.historyIndex === 0) { state.historyIndex = -1; ctx.clearRect(0, 0, canvas.width, canvas.height); }
+  });
+  document.getElementById('draw-clear').addEventListener('click', () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    state.history = []; state.historyIndex = -1;
+  });
+
+  document.getElementById('draw-save').addEventListener('click', () => {
+    alert('저장됨 → v3 (주석) 새 버전으로 자동 추가\n팀원 모두에게 공유됩니다.');
+  });
+  document.getElementById('draw-cancel').addEventListener('click', () => {
+    if (confirm('주석을 모두 버리고 닫으시겠습니까?')) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      state.history = []; state.historyIndex = -1;
+    }
+  });
+
+  // Ctrl+Z
+  document.addEventListener('keydown', (e) => {
+    if (!document.getElementById('page-drawing').classList.contains('active')) return;
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+      e.preventDefault();
+      document.getElementById('draw-undo').click();
+    }
+  });
+
+  /* 페이지 전환 시 캔버스 리사이즈 */
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      if (item.dataset.page === 'page-drawing') setTimeout(resizeCanvas, 50);
+    });
+  });
+</script>
+</body>
+</html>

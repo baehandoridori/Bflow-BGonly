@@ -19,10 +19,16 @@ interface AnnotationToolbarProps {
   color: string;
   strokeWidth: number;
   opacity: number;
+  /** 도형(rect/circle) 채움 여부. true=채움, false=외곽선만. */
+  shapeFill: boolean;
+  /** 텍스트 윤곽선(stroke) 토글 */
+  textOutline: boolean;
   onToolChange: (t: DrawTool) => void;
   onColorChange: (c: string) => void;
   onStrokeChange: (w: number) => void;
   onOpacityChange: (o: number) => void;
+  onShapeFillChange: (v: boolean) => void;
+  onTextOutlineChange: (v: boolean) => void;
   onUndo: () => void;
   onClear: () => void;
 }
@@ -32,13 +38,19 @@ export function AnnotationToolbar({
   color,
   strokeWidth,
   opacity,
+  shapeFill,
+  textOutline,
   onToolChange,
   onColorChange,
   onStrokeChange,
   onOpacityChange,
+  onShapeFillChange,
+  onTextOutlineChange,
   onUndo,
   onClear,
 }: AnnotationToolbarProps) {
+  const isShape = tool === 'rect' || tool === 'circle';
+  const isText = tool === 'text';
   const ToolBtn = ({ name, label, Icon }: { name: DrawTool; label: string; Icon: typeof Pencil }) => (
     <button
       type="button"
@@ -149,6 +161,59 @@ export function AnnotationToolbar({
           />
           <span className="text-text-primary tabular-nums w-9 text-right">{opacity}%</span>
         </div>
+
+        {/* 도형(사각형/원) 전용 옵션 — 채움 vs 외곽선 토글 */}
+        {isShape && (
+          <div className="flex items-center gap-1.5 pl-3 border-l border-bg-border">
+            <span className="text-text-secondary/70 text-[11px] font-semibold">스타일</span>
+            <button
+              type="button"
+              onClick={() => onShapeFillChange(false)}
+              className={cn(
+                'h-7 px-2 rounded-md border text-[11px] font-semibold',
+                !shapeFill
+                  ? 'bg-accent/20 text-accent-sub border-accent/50'
+                  : 'border-bg-border text-text-secondary',
+              )}
+              title="외곽선만"
+            >
+              외곽선
+            </button>
+            <button
+              type="button"
+              onClick={() => onShapeFillChange(true)}
+              className={cn(
+                'h-7 px-2 rounded-md border text-[11px] font-semibold',
+                shapeFill
+                  ? 'bg-accent/20 text-accent-sub border-accent/50'
+                  : 'border-bg-border text-text-secondary',
+              )}
+              title="채움"
+            >
+              채움
+            </button>
+          </div>
+        )}
+
+        {/* 텍스트 전용 — 윤곽선 토글 */}
+        {isText && (
+          <div className="flex items-center gap-1.5 pl-3 border-l border-bg-border">
+            <span className="text-text-secondary/70 text-[11px] font-semibold">윤곽선</span>
+            <button
+              type="button"
+              onClick={() => onTextOutlineChange(!textOutline)}
+              className={cn(
+                'h-7 px-2 rounded-md border text-[11px] font-semibold',
+                textOutline
+                  ? 'bg-accent/20 text-accent-sub border-accent/50'
+                  : 'border-bg-border text-text-secondary',
+              )}
+              title="텍스트 윤곽선 켜기/끄기"
+            >
+              {textOutline ? 'ON' : 'OFF'}
+            </button>
+          </div>
+        )}
       </div>
     </>
   );

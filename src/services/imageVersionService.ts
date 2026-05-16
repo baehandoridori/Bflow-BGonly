@@ -26,6 +26,7 @@ export async function createImageVersion(params: {
   url: string;
   baseVersionNo?: number;
   createdBy: string;
+  description?: string | null;
 }): Promise<ImageVersion> {
   return window.electronAPI.supabaseAddImageVersion(params);
 }
