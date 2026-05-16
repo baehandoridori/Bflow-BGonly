@@ -1504,6 +1504,8 @@ export function ScenesView() {
   const { setSortKey, setSortDir, setStatusFilter, setSceneViewMode, setSceneGroupMode } = useAppStore();
   const { previousView, setView, highlightSceneId, setHighlightSceneId } = useAppStore();
   const { selectedSceneIds, toggleSelectedScene, setSelectedScenes, clearSelectedScenes } = useAppStore();
+  // 일괄 액션 바를 콘텐츠 영역 정중앙(=사이드바 뺀 자리) 으로 보정. 사이드바 펼침/접힘에 동기.
+  const sidebarExpanded = useAppStore((s) => s.sidebarExpanded);
   const currentUser = useAuthStore((s) => s.currentUser);
   const isBulkInFlight = useBulkOperationsStore((s) => s.activeOp?.status === 'in-flight');
   const isLight = colorMode === 'light';
@@ -4393,11 +4395,18 @@ export function ScenesView() {
         {selectedSceneIds.size > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+            animate={{
+              opacity: 1,
+              y: 0,
+              // viewport 50% + 사이드바 너비의 절반만큼 오른쪽으로 보정 → 콘텐츠 영역 정중앙.
+              // 사이드바 접힘 64px / 펼침 132px (Sidebar.tsx 와 동기). 호버 expand 는 무시.
+              left: `calc(50vw + ${(sidebarExpanded ? 132 : 64) / 2}px)`,
+            }}
             exit={{ opacity: 0, y: 20 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl shadow-2xl shadow-black/40"
+            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+            className="fixed bottom-6 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl shadow-2xl shadow-black/40"
             style={{
+              transform: 'translateX(-50%)',
               background: 'rgb(var(--color-bg-card) / 0.95)',
               border: '1px solid rgb(var(--color-accent) / 0.3)',
               backdropFilter: 'blur(12px)',
