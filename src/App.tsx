@@ -31,6 +31,7 @@ import { invalidateRevisionsCache } from '@/services/revisionService';
 import { extractSceneDelta } from '@/utils/realtimeDelta';
 import { loadVacationConfig, connectVacation } from '@/services/vacationService';
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
+import { semverGt } from '@/utils/semver';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { setFeedbackLastSeenAt, setAssignmentLastSeenAt } from '@/utils/lastSeenTracker';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
@@ -405,6 +406,22 @@ export default function App() {
         }
         if (savedPrefs?.notifications?.toastDuration) {
           setToastDuration(savedPrefs.notifications.toastDuration);
+        }
+
+        // v1.27.0: 업데이트 완료 토스트 — 이 PC 에서 마지막으로 본 버전과 현재 빌드가 다르면 1회 안내.
+        // 최초 설치(lastSeenVersion 미존재) 또는 다운그레이드는 토스트 생략.
+        if (savedPrefs?.lastSeenVersion && semverGt(__APP_VERSION__, savedPrefs.lastSeenVersion)) {
+          sonnerToast.success(`v${__APP_VERSION__} 으로 업데이트되었어요`, {
+            duration: 8000,
+            action: {
+              label: '업데이트 내역 보기',
+              onClick: () => useAppStore.getState().setUpdateCenterOpen(true),
+            },
+          });
+        }
+        // 토스트 표시 여부와 무관하게 즉시 lastSeenVersion 갱신 (다음 업데이트까지 1회 보장).
+        if (savedPrefs?.lastSeenVersion !== __APP_VERSION__) {
+          await savePreferences({ ...(savedPrefs ?? {}), lastSeenVersion: __APP_VERSION__ });
         }
 
         // 알림 히스토리 로드

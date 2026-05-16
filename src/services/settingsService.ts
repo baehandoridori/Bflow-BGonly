@@ -162,6 +162,12 @@ export interface UserPreferences {
 
   // 연동 탭: 접힌 IntegrationCard ID 목록
   settingsIntegrationCollapsed?: string[];
+
+  // v1.27.0: 업데이트 직후 첫 실행 토스트용 — 이 PC에서 마지막으로 본 앱 버전
+  lastSeenVersion?: string;
+
+  // v1.27.0: 사용자가 드래그로 직접 조정한 댓글 패널 너비. null 이면 자동 모드.
+  commentPanelWidthPx?: number;
 }
 
 export async function loadPreferences(): Promise<UserPreferences | null> {
