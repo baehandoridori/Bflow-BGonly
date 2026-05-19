@@ -206,6 +206,46 @@ export interface AuthSession {
   loggedInAt: string;  // ISO 8601
 }
 
+// ─── 댓글 이모지 리액션 (v1.26.0+) ──────────
+
+export interface CommentReaction {
+  id: string;
+  commentId: string;
+  userId: string;
+  userName: string;
+  emoji: string;
+  createdAt: string;       // ISO 8601
+}
+
+/** 한 댓글의 같은 이모지를 누른 사용자들 — UI 렌더용 집계 형태 */
+export interface CommentReactionGroup {
+  emoji: string;
+  count: number;
+  userIds: string[];
+  userNames: string[];
+  mine: boolean;           // 본인이 누른 이모지인지
+}
+
+// ─── 이미지 버전 (v1.26.0+) ─────────────────
+
+export type ImageType = 'storyboard' | 'guide';
+export type ImageVersionKind = 'replace' | 'annotate';
+
+export interface ImageVersion {
+  id: string;
+  sceneId: string;
+  imageType: ImageType;
+  versionNo: number;
+  url: string;
+  kind: ImageVersionKind;
+  baseVersionNo: number | null;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;       // ISO 8601
+  /** v1.26.2+: 주석 버전 등에 첨부된 텍스트 메모 (선택) */
+  description?: string | null;
+}
+
 // ─── 파트 & 에피소드 ─────────────────────────
 
 export interface Part {
@@ -760,6 +800,29 @@ export interface ElectronAPI {
   supabaseAddComment: (commentId: string, partUuid: string, sceneId: string, userId: string, userName: string, text: string, mentions: string[], createdAt: string, images?: string[], revisionId?: string | null, parentCommentId?: string | null) => Promise<void>;
   supabaseEditComment: (commentId: string, text: string, mentions: string[], images?: string[]) => Promise<void>;
   supabaseDeleteComment: (commentId: string) => Promise<void>;
+  /** v1.26.0: 댓글 이모지 리액션 */
+  supabaseAddCommentReaction: (commentId: string, emoji: string, userId: string, userName: string) => Promise<void>;
+  supabaseRemoveCommentReaction: (commentId: string, emoji: string, userId: string) => Promise<void>;
+  supabaseGetCommentReactionsBulk: (commentIds: string[]) => Promise<Record<string, Array<{
+    id: string;
+    commentId: string;
+    userId: string;
+    userName: string;
+    emoji: string;
+    createdAt: string;
+  }>>>;
+  /** v1.26.0: 이미지 버전 관리 */
+  supabaseListImageVersions: (sceneId: string, imageType: 'storyboard' | 'guide') => Promise<ImageVersion[]>;
+  supabaseAddImageVersion: (params: {
+    sceneId: string;
+    imageType: 'storyboard' | 'guide';
+    kind: 'replace' | 'annotate';
+    url: string;
+    baseVersionNo?: number;
+    createdBy: string;
+    description?: string | null;
+  }) => Promise<ImageVersion>;
+  supabaseDeleteImageVersion: (versionId: string) => Promise<void>;
   /** 비공개 캘린더 이벤트 — Google Calendar 비연동, Supabase 전용 */
   supabaseReadPrivateEvents: (userId: string) => Promise<Array<{
     id: string;

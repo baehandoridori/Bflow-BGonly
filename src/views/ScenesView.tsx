@@ -661,6 +661,7 @@ import {
   runBulkOp,
   resolveSelectedUuids,
   resolveSelectedScenes,
+  countSelectedScenes,
   type ActPhasePatch,
 } from '@/utils/bulkOperations';
 import { ContextMenu, useContextMenu } from '@/components/ui/ContextMenu';
@@ -2849,12 +2850,17 @@ export function ScenesView() {
   };
 
   // 일괄 삭제: ConfirmDialog → RPC 경유, runBulkOp가 낙관적 제거 처리 (Tasks 13-17)
+  // v1.25.12: 카운트는 사용자 보는 단위(머지드 카드)로 표기 — 내부 row 수 X.
   const handleBulkDelete = async () => {
     const uuids = resolveSelectedUuids(selectedSceneIds, allMergedScenes, currentPart);
     if (uuids.length === 0) return;
 
+    const sceneCount = countSelectedScenes(selectedSceneIds, allMergedScenes, currentPart);
+    const isUnified = selectedDepartment === 'all';
+    const suffix = isUnified ? ' (BG·액팅 양쪽 적용)' : '';
+
     const ok = await ConfirmDialog.show({
-      message: `${uuids.length}개의 씬을 삭제하시겠습니까?`,
+      message: `씬 ${sceneCount}개를 삭제하시겠습니까?${suffix}`,
       confirmLabel: '삭제',
       tone: 'danger',
     });
@@ -3215,26 +3221,43 @@ export function ScenesView() {
       }
 
       if (images?.storyboard || images?.guide) {
+        // v1.25.12: addScene 후 UUID 가 store 에 채워지기 전에 saveImage 가
+        // 끝나면서 발생하던 "씬 UUID를 찾을 수 없음" 오류 fix.
+        // sceneIndex 기반 resolveSceneUuid 대신 UUID 폴링 + 직접 IPC 사용.
+        // v1.26.0: 첫 이미지를 v1 로 자동 기록 (버전 시스템).
         (async () => {
-          try {
-            const { saveImage } = await import('@/utils/imageUtils');
-            for (const sheet of sheets) {
-              const latestPart2 = useDataStore.getState().episodes
-                .flatMap((ep) => ep.parts)
-                .find((p) => p.sheetName === sheet);
-              const latestIndex = latestPart2?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
-              if (latestIndex < 0) continue;
+          const { saveImage } = await import('@/utils/imageUtils');
+          const { waitForSceneUuid } = await import('@/services/supabaseService');
+          const { createImageVersion } = await import('@/services/imageVersionService');
+          for (const sheet of sheets) {
+            const uuid = await waitForSceneUuid(sheet, sceneId);
+            if (!uuid) {
+              sonnerToast.error(`이미지 업로드 동기화 실패: ${sceneId}. 새로고침 후 다시 시도해 주세요.`);
+              continue;
+            }
+            try {
               if (images.storyboard) {
                 const url = await saveImage(images.storyboard, sheet, sceneId, 'storyboard');
-                handleFieldUpdateForSheet(sheet, latestIndex, 'storyboardUrl', url);
+                await window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'storyboardUrl', url);
+                useDataStore.getState().updateSceneByUuid(uuid, { storyboardUrl: url });
+                if (currentUser?.id) {
+                  await createImageVersion({ sceneId: uuid, imageType: 'storyboard', kind: 'replace', url, createdBy: currentUser.id })
+                    .catch((e) => console.warn('[버전 v1 기록 실패]', e));
+                }
               }
               if (images.guide) {
                 const url = await saveImage(images.guide, sheet, sceneId, 'guide');
-                handleFieldUpdateForSheet(sheet, latestIndex, 'guideUrl', url);
+                await window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'guideUrl', url);
+                useDataStore.getState().updateSceneByUuid(uuid, { guideUrl: url });
+                if (currentUser?.id) {
+                  await createImageVersion({ sceneId: uuid, imageType: 'guide', kind: 'replace', url, createdBy: currentUser.id })
+                    .catch((e) => console.warn('[버전 v1 기록 실패]', e));
+                }
               }
+            } catch (err) {
+              console.error('[씬 추가 이미지 업로드 실패]', err);
+              sonnerToast.error(`이미지 업로드 실패: ${sceneId}`);
             }
-          } catch (err) {
-            console.error('[씬 추가 이미지 업로드 실패]', err);
           }
         })();
       }
@@ -3277,25 +3300,39 @@ export function ScenesView() {
     }
 
     if (images?.storyboard || images?.guide) {
+      // v1.25.12: UUID race fix (위 통합 모드와 동일 패턴).
+      // v1.26.0: 첫 이미지를 v1 로 자동 기록 (버전 시스템).
       (async () => {
+        const { saveImage } = await import('@/utils/imageUtils');
+        const { waitForSceneUuid } = await import('@/services/supabaseService');
+        const { createImageVersion } = await import('@/services/imageVersionService');
+        const uuid = await waitForSceneUuid(targetSheet, sceneId);
+        if (!uuid) {
+          sonnerToast.error(`이미지 업로드 동기화 실패: ${sceneId}. 새로고침 후 다시 시도해 주세요.`);
+          return;
+        }
         try {
-          const { saveImage } = await import('@/utils/imageUtils');
-          const latestPart2 = useDataStore.getState().episodes
-            .flatMap((ep) => ep.parts)
-            .find((p) => p.sheetName === targetSheet);
-          const latestIndex = latestPart2?.scenes.findIndex((s) => s.sceneId === sceneId) ?? -1;
-          if (latestIndex < 0) return;
-
           if (images.storyboard) {
             const url = await saveImage(images.storyboard, targetSheet, sceneId, 'storyboard');
-            handleFieldUpdateForSheet(targetSheet, latestIndex, 'storyboardUrl', url);
+            await window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'storyboardUrl', url);
+            useDataStore.getState().updateSceneByUuid(uuid, { storyboardUrl: url });
+            if (currentUser?.id) {
+              await createImageVersion({ sceneId: uuid, imageType: 'storyboard', kind: 'replace', url, createdBy: currentUser.id })
+                .catch((e) => console.warn('[버전 v1 기록 실패]', e));
+            }
           }
           if (images.guide) {
             const url = await saveImage(images.guide, targetSheet, sceneId, 'guide');
-            handleFieldUpdateForSheet(targetSheet, latestIndex, 'guideUrl', url);
+            await window.electronAPI?.supabaseUpdateSceneField?.(uuid, 'guideUrl', url);
+            useDataStore.getState().updateSceneByUuid(uuid, { guideUrl: url });
+            if (currentUser?.id) {
+              await createImageVersion({ sceneId: uuid, imageType: 'guide', kind: 'replace', url, createdBy: currentUser.id })
+                .catch((e) => console.warn('[버전 v1 기록 실패]', e));
+            }
           }
         } catch (err) {
           console.error('[씬 추가 이미지 업로드 실패]', err);
+          sonnerToast.error(`이미지 업로드 실패: ${sceneId}`);
         }
       })();
     }

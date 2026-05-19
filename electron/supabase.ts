@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
-import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastScenePhaseUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged } from './broadcast';
+import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastScenePhaseUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged, broadcastCommentReactionChanged } from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
 
 // ─── 일괄 작업 타입 ─────────────────────────────
@@ -2368,4 +2368,239 @@ export async function getActivityStorageInfo(): Promise<{ count: number; sizeMB:
   if (countErr) throw new Error(`activity count failed: ${countErr.message}`);
   const sizeMB = ((count ?? 0) * 400) / (1024 * 1024);
   return { count: count ?? 0, sizeMB };
+}
+
+// ═══════════════════════════════════════════════════════
+// v1.26.0 — 댓글 이모지 리액션
+// ═══════════════════════════════════════════════════════
+
+export interface CommentReactionRow {
+  id: string;
+  commentId: string;
+  userId: string;
+  userName: string;
+  emoji: string;
+  createdAt: string;
+}
+
+export async function addCommentReaction(
+  commentId: string,
+  emoji: string,
+  userId: string,
+  userName: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('comment_reactions')
+    .insert({ comment_id: commentId, user_id: userId, user_name: userName, emoji });
+  // UNIQUE 위반은 무시 (동일 리액션 중복 입력 방어)
+  if (error && !/duplicate key|unique/i.test(error.message)) {
+    throw new Error(`addCommentReaction failed: ${error.message}`);
+  }
+  // 코덱스 2차 P1: 다른 클라이언트에 broadcast — 자체 fetch 트리거.
+  broadcastCommentReactionChanged(commentId, 'add', emoji, userId);
+}
+
+export async function removeCommentReaction(
+  commentId: string,
+  emoji: string,
+  userId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('comment_reactions')
+    .delete()
+    .match({ comment_id: commentId, user_id: userId, emoji });
+  if (error) throw new Error(`removeCommentReaction failed: ${error.message}`);
+  broadcastCommentReactionChanged(commentId, 'remove', emoji, userId);
+}
+
+export async function getCommentReactionsBulk(
+  commentIds: string[],
+): Promise<Record<string, CommentReactionRow[]>> {
+  if (commentIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('comment_reactions')
+    .select('id, comment_id, user_id, user_name, emoji, created_at')
+    .in('comment_id', commentIds)
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`getCommentReactionsBulk failed: ${error.message}`);
+  const grouped: Record<string, CommentReactionRow[]> = {};
+  for (const row of data ?? []) {
+    const cid = row.comment_id as string;
+    if (!grouped[cid]) grouped[cid] = [];
+    grouped[cid].push({
+      id: row.id as string,
+      commentId: cid,
+      userId: row.user_id as string,
+      userName: row.user_name as string,
+      emoji: row.emoji as string,
+      createdAt: row.created_at as string,
+    });
+  }
+  return grouped;
+}
+
+// ═══════════════════════════════════════════════════════
+// v1.26.0 — 이미지 버전 관리
+// ═══════════════════════════════════════════════════════
+
+export interface ImageVersionRow {
+  id: string;
+  sceneId: string;
+  imageType: 'storyboard' | 'guide';
+  versionNo: number;
+  url: string;
+  kind: 'replace' | 'annotate';
+  baseVersionNo: number | null;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  description?: string | null;
+}
+
+async function mapVersionRows(rows: Record<string, unknown>[]): Promise<ImageVersionRow[]> {
+  if (rows.length === 0) return [];
+  // 작성자 이름 join — PostgREST embed 대신 별도 fetch (FK 임베드 명세가 자주 깨짐)
+  const userIds = Array.from(new Set(rows.map((r) => r.created_by as string)));
+  const { data: users } = await supabase.from('users').select('id, name').in('id', userIds);
+  const nameById = new Map<string, string>();
+  for (const u of users ?? []) nameById.set(u.id as string, u.name as string);
+  return rows.map((r) => ({
+    id: r.id as string,
+    sceneId: r.scene_id as string,
+    imageType: r.image_type as 'storyboard' | 'guide',
+    versionNo: r.version_no as number,
+    url: r.url as string,
+    kind: r.kind as 'replace' | 'annotate',
+    baseVersionNo: (r.base_version_no as number | null) ?? null,
+    createdBy: r.created_by as string,
+    createdByName: nameById.get(r.created_by as string) ?? '?',
+    createdAt: r.created_at as string,
+    description: (r.description as string | null) ?? null,
+  }));
+}
+
+export async function listImageVersions(
+  sceneId: string,
+  imageType: 'storyboard' | 'guide',
+): Promise<ImageVersionRow[]> {
+  const { data, error } = await supabase
+    .from('scene_image_versions')
+    .select('id, scene_id, image_type, version_no, url, kind, base_version_no, created_by, created_at, description')
+    .eq('scene_id', sceneId)
+    .eq('image_type', imageType)
+    .order('version_no', { ascending: true });
+  if (error) throw new Error(`listImageVersions failed: ${error.message}`);
+  return mapVersionRows((data ?? []) as Record<string, unknown>[]);
+}
+
+export async function addImageVersion(params: {
+  sceneId: string;
+  imageType: 'storyboard' | 'guide';
+  kind: 'replace' | 'annotate';
+  url: string;
+  baseVersionNo?: number;
+  createdBy: string;
+  description?: string | null;
+}): Promise<ImageVersionRow> {
+  // 다음 version_no = max + 1.
+  // 코덱스 1차 P1: max + 1 read 와 insert 사이에 다른 사용자가 같은 version_no 로 insert 하면
+  //   UNIQUE 제약 위반으로 한쪽 요청이 실패. 동시 업로드 (협업 케이스) 에서 간헐적 실패.
+  //   해결: UNIQUE 충돌 (Postgres 23505) 발생 시 max 를 다시 읽어 재시도. 최대 5회.
+  const MAX_RETRIES = 5;
+  let lastErrMsg = '';
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const { data: existing, error: listErr } = await supabase
+      .from('scene_image_versions')
+      .select('version_no')
+      .eq('scene_id', params.sceneId)
+      .eq('image_type', params.imageType)
+      .order('version_no', { ascending: false })
+      .limit(1);
+    if (listErr) throw new Error(`addImageVersion (next no lookup) failed: ${listErr.message}`);
+    const versionNo = existing && existing.length > 0 ? (existing[0].version_no as number) + 1 : 1;
+
+    const { data, error } = await supabase
+      .from('scene_image_versions')
+      .insert({
+        scene_id: params.sceneId,
+        image_type: params.imageType,
+        version_no: versionNo,
+        url: params.url,
+        kind: params.kind,
+        base_version_no: params.baseVersionNo ?? null,
+        created_by: params.createdBy,
+        description: params.description ?? null,
+      })
+      .select()
+      .single();
+    if (!error) {
+      return await finalizeAddImageVersion(params, data as Record<string, unknown>);
+    }
+    lastErrMsg = error.message;
+    // UNIQUE 위반 (Postgres SQLSTATE 23505 또는 메시지 키워드) → 재시도.
+    const isUniqueViolation =
+      (error as { code?: string }).code === '23505' ||
+      /duplicate key|unique constraint|already exists/i.test(error.message);
+    if (!isUniqueViolation) {
+      throw new Error(`addImageVersion (insert) failed: ${error.message}`);
+    }
+    // 짧은 지터 후 재시도 (동시 충돌 → 분산)
+    await new Promise((res) => setTimeout(res, 30 + Math.floor(Math.random() * 60)));
+  }
+  throw new Error(`addImageVersion (insert) failed after ${MAX_RETRIES} retries: ${lastErrMsg}`);
+}
+
+async function finalizeAddImageVersion(
+  params: {
+    sceneId: string;
+    imageType: 'storyboard' | 'guide';
+    url: string;
+  },
+  data: Record<string, unknown>,
+): Promise<ImageVersionRow> {
+
+  // scenes.{type}_url 갱신 — 외부 표시는 항상 최신 버전
+  const column = params.imageType === 'storyboard' ? 'storyboard_url' : 'guide_url';
+  const { error: updErr } = await supabase
+    .from('scenes')
+    .update({ [column]: params.url, updated_at: new Date().toISOString() })
+    .eq('id', params.sceneId);
+  if (updErr) console.warn('[addImageVersion] scenes 갱신 실패 (버전은 추가됨):', updErr.message);
+
+  const rows = await mapVersionRows([data as Record<string, unknown>]);
+  return rows[0];
+}
+
+export async function deleteImageVersion(versionId: string): Promise<void> {
+  // 마지막 1개 가드 (서버 측)
+  const { data: ver, error: e1 } = await supabase
+    .from('scene_image_versions')
+    .select('scene_id, image_type, version_no, url')
+    .eq('id', versionId)
+    .single();
+  if (e1 || !ver) throw new Error(`버전 조회 실패: ${e1?.message ?? 'not found'}`);
+
+  const { data: all } = await supabase
+    .from('scene_image_versions')
+    .select('id, version_no, url')
+    .eq('scene_id', ver.scene_id as string)
+    .eq('image_type', ver.image_type as string);
+  if (!all || all.length <= 1) throw new Error('마지막 버전은 삭제할 수 없습니다');
+
+  const { error: delErr } = await supabase
+    .from('scene_image_versions')
+    .delete()
+    .eq('id', versionId);
+  if (delErr) throw new Error(`deleteImageVersion failed: ${delErr.message}`);
+
+  // scenes.{type}_url 재계산 — 남은 것 중 최대 version_no
+  const remaining = all.filter((v) => v.id !== versionId);
+  const latest = remaining.reduce((m, v) =>
+    (v.version_no as number) > (m.version_no as number) ? v : m,
+  );
+  const column = ver.image_type === 'storyboard' ? 'storyboard_url' : 'guide_url';
+  await supabase
+    .from('scenes')
+    .update({ [column]: latest.url as string, updated_at: new Date().toISOString() })
+    .eq('id', ver.scene_id as string);
 }

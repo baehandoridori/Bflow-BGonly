@@ -11,8 +11,16 @@ import {
   updateComment,
   deleteComment,
   extractMentions,
+  addReaction,
+  removeReaction,
+  fetchReactionsBulk,
 } from '@/services/commentService';
 import type { SceneComment } from '@/services/commentService';
+import type { CommentReaction } from '@/types';
+import { groupReactionsByEmoji } from '@/utils/commentReactionUtils';
+import { ReactionChip } from './ReactionChip';
+import { EmojiPicker } from './EmojiPicker';
+import { SmilePlus } from 'lucide-react';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
 import { formatTimeShort } from '@/utils/formatTime';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
@@ -81,6 +89,76 @@ function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string }
   return { sheetName: sceneKey.substring(0, idx), sceneId: sceneKey.substring(idx + 1) };
 }
 
+// ─── v1.26.0: 댓글 리액션 영역 (보조 컴포넌트) ─────────────────
+interface ReactionsAreaProps {
+  commentId: string;
+  reactions: CommentReaction[];
+  currentUserId: string | null;
+  onToggle: (commentId: string, emoji: string) => void;
+  pickerOpen: boolean;
+  onPickerOpen: () => void;
+  onPickerClose: () => void;
+  compact?: boolean;  // 답글에서는 더 작게
+}
+
+function ReactionsArea({
+  commentId,
+  reactions,
+  currentUserId,
+  onToggle,
+  pickerOpen,
+  onPickerOpen,
+  onPickerClose,
+  compact = false,
+}: ReactionsAreaProps) {
+  const groups = groupReactionsByEmoji(reactions, currentUserId);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const hasReactions = groups.length > 0;
+  // 답글에선 칩 없을 때 + 버튼 평소 보이지 않다가 hover 시만. 부모도 동일하지만 살짝 더 노출 폭 큼.
+  return (
+    <div
+      className={cn(
+        'relative flex flex-wrap items-center gap-1',
+        compact ? 'mt-1' : 'mt-1.5',
+        !hasReactions && 'group/reactions-empty',
+      )}
+    >
+      {groups.map((g) => (
+        <ReactionChip
+          key={g.emoji}
+          group={g}
+          currentUserId={currentUserId}
+          onToggle={(emoji) => onToggle(commentId, emoji)}
+        />
+      ))}
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (pickerOpen) onPickerClose();
+          else onPickerOpen();
+        }}
+        className={cn(
+          'inline-flex items-center justify-center rounded-full border border-dashed border-bg-border text-text-secondary/60 hover:border-accent/60 hover:text-accent-sub hover:bg-accent/[0.06] transition-all',
+          compact ? 'w-5 h-5' : 'w-6 h-5',
+          hasReactions ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-70 hover:opacity-100',
+        )}
+        aria-label="이모지 추가"
+        title="이모지 추가"
+      >
+        <SmilePlus size={compact ? 11 : 12} />
+      </button>
+      <EmojiPicker
+        open={pickerOpen}
+        anchorEl={btnRef.current}
+        onPick={(emoji) => onToggle(commentId, emoji)}
+        onClose={onPickerClose}
+      />
+    </div>
+  );
+}
+
 // ─── 메인 컴포넌트 ──────────────────────────
 
 export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlineEvents, focusCommentId, sceneLabel }: CommentPanelProps) {
@@ -93,6 +171,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  // v1.26.0: 이모지 리액션 — commentId → reactions
+  const [reactionsByCommentId, setReactionsByCommentId] = useState<Map<string, CommentReaction[]>>(new Map());
+  const [pickerForCommentId, setPickerForCommentId] = useState<string | null>(null);
+  const pickerAnchorRef = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   // 입력 상태
   const [input, setInput] = useState('');
@@ -255,10 +337,84 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       });
       setComments(deduped);
       onCountChange?.(deduped.length);
+      // v1.26.0: 댓글 로드 후 리액션도 함께 fetch
+      const ids = deduped.map((c) => c.id);
+      fetchReactionsBulk(ids).then((map) => setReactionsByCommentId(map));
     });
   }, [sceneKey, secondarySceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadComments(); }, [loadComments]);
+
+  // v1.28.0 (코덱스 2차 P1): 다른 클라이언트의 리액션 변경 broadcast 수신 → 해당 댓글만 재fetch.
+  //   App.tsx 가 'bflow:comment-reaction-changed' window event 를 dispatch 한다.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ commentId?: string }>).detail;
+      const cid = detail?.commentId;
+      if (!cid) return;
+      // 현재 패널에 떠 있는 댓글에 해당할 때만 fetch (불필요한 호출 방지)
+      const isMine = comments.some((c) => c.id === cid);
+      if (!isMine) return;
+      fetchReactionsBulk([cid]).then((refreshed) => {
+        setReactionsByCommentId((m) => {
+          const nm = new Map(m);
+          nm.set(cid, refreshed.get(cid) ?? []);
+          return nm;
+        });
+      });
+    };
+    window.addEventListener('bflow:comment-reaction-changed', handler);
+    return () => window.removeEventListener('bflow:comment-reaction-changed', handler);
+  }, [comments]);
+
+  // v1.26.0: 이모지 리액션 토글 (옵티미스틱 → IPC → 실패 시 롤백)
+  const handleReactionToggle = useCallback(async (commentId: string, emoji: string) => {
+    if (!currentUser) return;
+    const prev = reactionsByCommentId.get(commentId) ?? [];
+    const mine = prev.find((r) => r.userId === currentUser.id && r.emoji === emoji);
+    let next: CommentReaction[];
+    if (mine) {
+      // 제거
+      next = prev.filter((r) => !(r.userId === currentUser.id && r.emoji === emoji));
+    } else {
+      // 추가
+      next = [...prev, {
+        id: `tmp-${Date.now()}`,
+        commentId,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        emoji,
+        createdAt: new Date().toISOString(),
+      }];
+    }
+    setReactionsByCommentId((m) => {
+      const nm = new Map(m);
+      nm.set(commentId, next);
+      return nm;
+    });
+    try {
+      if (mine) {
+        await removeReaction(commentId, emoji, currentUser.id);
+      } else {
+        await addReaction(commentId, emoji, currentUser.id, currentUser.name);
+      }
+      // 재fetch 로 진짜 id 동기화
+      const refreshed = await fetchReactionsBulk([commentId]);
+      setReactionsByCommentId((m) => {
+        const nm = new Map(m);
+        nm.set(commentId, refreshed.get(commentId) ?? []);
+        return nm;
+      });
+    } catch (err) {
+      // 롤백
+      console.error('[CommentPanel] 리액션 토글 실패', err);
+      setReactionsByCommentId((m) => {
+        const nm = new Map(m);
+        nm.set(commentId, prev);
+        return nm;
+      });
+    }
+  }, [currentUser, reactionsByCommentId]);
 
   // v1.24.2: openLightbox 가 closure 없이 *최신 visibleComments* 참조하도록 ref 동기화.
   useEffect(() => {
@@ -1091,6 +1247,21 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                   </div>
                 </div>
 
+                {/* v1.26.0: 이모지 리액션 — 부모 댓글 */}
+                <div className={cn('mt-1 flex', isOwn ? 'justify-end' : 'justify-start')}>
+                  <div className="max-w-[85%] w-fit">
+                    <ReactionsArea
+                      commentId={comment.id}
+                      reactions={reactionsByCommentId.get(comment.id) ?? []}
+                      currentUserId={currentUser?.id ?? null}
+                      onToggle={handleReactionToggle}
+                      pickerOpen={pickerForCommentId === comment.id}
+                      onPickerOpen={() => setPickerForCommentId(comment.id)}
+                      onPickerClose={() => setPickerForCommentId(null)}
+                    />
+                  </div>
+                </div>
+
                 {/* v1.24.0: 답글 스레드 — 부모 댓글 아래 인라인 들여쓰기 + 좌측 라인 + 토글 */}
                 {replies.length > 0 && (
                   <div className="mt-1.5 ml-3 pl-3 border-l-2 border-accent/30 space-y-2">
@@ -1202,6 +1373,17 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                               </div>
                             )}
                           </div>
+                          {/* v1.26.0: 답글 리액션 영역 (compact) */}
+                          <ReactionsArea
+                            commentId={reply.id}
+                            reactions={reactionsByCommentId.get(reply.id) ?? []}
+                            currentUserId={currentUser?.id ?? null}
+                            onToggle={handleReactionToggle}
+                            pickerOpen={pickerForCommentId === reply.id}
+                            onPickerOpen={() => setPickerForCommentId(reply.id)}
+                            onPickerClose={() => setPickerForCommentId(null)}
+                            compact
+                          />
                         </div>
                       );
                     })}

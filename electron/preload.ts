@@ -169,6 +169,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:edit-comment', commentId, text, mentions, images),
   supabaseDeleteComment: (commentId: string) =>
     ipcRenderer.invoke('supabase:delete-comment', commentId),
+  // v1.26.0: 댓글 이모지 리액션
+  supabaseAddCommentReaction: (commentId: string, emoji: string, userId: string, userName: string) =>
+    ipcRenderer.invoke('supabase:add-comment-reaction', commentId, emoji, userId, userName),
+  supabaseRemoveCommentReaction: (commentId: string, emoji: string, userId: string) =>
+    ipcRenderer.invoke('supabase:remove-comment-reaction', commentId, emoji, userId),
+  supabaseGetCommentReactionsBulk: (commentIds: string[]) =>
+    ipcRenderer.invoke('supabase:get-comment-reactions-bulk', commentIds),
+  // v1.26.0: 이미지 버전 관리
+  supabaseListImageVersions: (sceneId: string, imageType: 'storyboard' | 'guide') =>
+    ipcRenderer.invoke('supabase:list-image-versions', sceneId, imageType),
+  supabaseAddImageVersion: (params: {
+    sceneId: string;
+    imageType: 'storyboard' | 'guide';
+    kind: 'replace' | 'annotate';
+    url: string;
+    baseVersionNo?: number;
+    createdBy: string;
+    description?: string | null;
+  }) => ipcRenderer.invoke('supabase:add-image-version', params),
+  supabaseDeleteImageVersion: (versionId: string) =>
+    ipcRenderer.invoke('supabase:delete-image-version', versionId),
   // 비공개 캘린더 이벤트 (Supabase 전용, Google Calendar 비연동)
   supabaseReadPrivateEvents: (userId: string) =>
     ipcRenderer.invoke('supabase:read-private-events', userId),

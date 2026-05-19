@@ -1136,6 +1136,7 @@ export function SceneDetailModal({
       {/* 이미지 전체 뷰 모달 — ACT 모달이면 BG 에서 가져온 읽기 전용 URL 사용 */}
       {showImageModal && (
         <ImageModal
+          key="detail-image-modal"
           storyboardUrl={department === 'bg' ? scene.storyboardUrl : (readOnlyStoryboardUrl ?? '')}
           guideUrl={department === 'bg' ? scene.guideUrl : (readOnlyGuideUrl ?? '')}
           sceneId={scene.sceneId}
@@ -1146,6 +1147,14 @@ export function SceneDetailModal({
           currentSceneIndex={currentSceneIndex}
           totalScenes={totalScenes}
           onSceneNavigate={onNavigate}
+          // v1.26.0: 버전 관리 + 우클릭 메뉴 메타
+          sheetName={sheetName}
+          sceneUuid={scene.id ?? null}
+          onUploadImage={async (file, imageType) => {
+            const { resizeBlob: rb, saveImage: si } = await import('@/utils/imageUtils');
+            const base64 = await rb(file);
+            return si(base64, sheetName, scene.sceneId || String(scene.no), imageType);
+          }}
         />
       )}
     </AnimatePresence>

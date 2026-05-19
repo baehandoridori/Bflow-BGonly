@@ -470,6 +470,7 @@ export function UnifiedSceneDetailModal({
     <AnimatePresence>
       {/* data-no-lasso: 모달 내부 드래그가 뒤쪽 씬 그리드 라쏘를 트리거하지 않도록 */}
       <motion.div
+        key="unified-modal-backdrop"
         data-no-lasso
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -829,16 +830,27 @@ export function UnifiedSceneDetailModal({
       {/* 이미지 확대 */}
       {showImageModal && bgScene && (
         <ImageModal
+          key="unified-image-modal"
           storyboardUrl={bgScene.storyboardUrl ?? ''}
           guideUrl={bgScene.guideUrl ?? ''}
           sceneId={bgScene.sceneId || String(bgScene.no)}
           onClose={() => setShowImageModal(null)}
+          // v1.26.0: 버전 관리 + 우클릭 메뉴 메타
+          sheetName={bgSheetName ?? undefined}
+          sceneUuid={bgScene.id ?? null}
+          onUploadImage={async (file, imageType) => {
+            if (!bgSheetName) throw new Error('BG 시트 정보 없음');
+            const { resizeBlob: rb, saveImage: si } = await import('@/utils/imageUtils');
+            const base64 = await rb(file);
+            return si(base64, bgSheetName, bgScene.sceneId || String(bgScene.no), imageType);
+          }}
         />
       )}
 
       {/* 삭제 확인 */}
       {deleteConfirm && (
         <ConfirmDialog
+          key="unified-confirm-dialog"
           message={
             deleteConfirm === 'storyboard' ? '스토리보드 이미지를 삭제하시겠습니까?' :
             deleteConfirm === 'guide' ? '가이드 이미지를 삭제하시겠습니까?' :

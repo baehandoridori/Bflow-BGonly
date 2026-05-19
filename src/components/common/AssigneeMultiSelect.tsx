@@ -111,27 +111,27 @@ export function AssigneeMultiSelect({
   useEffect(() => { setHighlightIndex(0); }, [filtered.length]);
 
   // 칩 추가 (dedup)
+  // v1.26.1: setChips updater 내부에서 onChange 를 호출하면 React 가 그 호출을
+  //          렌더 단계로 인식해 "Cannot update a component while rendering" 경고.
+  //          updater 외부 동기 경로에서 onChange 를 호출하도록 정정.
   const addChip = useCallback((name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    setChips((prev) => {
-      if (prev.includes(trimmed)) return prev;
-      const next = [...prev, trimmed];
-      onChange(joinValue(next));
-      return next;
-    });
+    if (chips.includes(trimmed)) { setQuery(''); return; }
+    const next = [...chips, trimmed];
+    setChips(next);
+    onChange(joinValue(next));
     setQuery('');
-  }, [onChange]);
+  }, [chips, onChange]);
 
   // 칩 제거
   const removeChip = useCallback((name: string) => {
-    setChips((prev) => {
-      const next = prev.filter((c) => c !== name);
-      onChange(joinValue(next));
-      return next;
-    });
+    if (!chips.includes(name)) return;
+    const next = chips.filter((c) => c !== name);
+    setChips(next);
+    onChange(joinValue(next));
     inputRef.current?.focus();
-  }, [onChange]);
+  }, [chips, onChange]);
 
   // 빈 input 에서 backspace → 마지막 칩 제거
   const handleBackspace = useCallback(() => {
