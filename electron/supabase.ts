@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
-import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastScenePhaseUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged } from './broadcast';
+import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastScenePhaseUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged, broadcastCommentReactionChanged } from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
 
 // ─── 일괄 작업 타입 ─────────────────────────────
@@ -2396,6 +2396,8 @@ export async function addCommentReaction(
   if (error && !/duplicate key|unique/i.test(error.message)) {
     throw new Error(`addCommentReaction failed: ${error.message}`);
   }
+  // 코덱스 2차 P1: 다른 클라이언트에 broadcast — 자체 fetch 트리거.
+  broadcastCommentReactionChanged(commentId, 'add', emoji, userId);
 }
 
 export async function removeCommentReaction(
@@ -2408,6 +2410,7 @@ export async function removeCommentReaction(
     .delete()
     .match({ comment_id: commentId, user_id: userId, emoji });
   if (error) throw new Error(`removeCommentReaction failed: ${error.message}`);
+  broadcastCommentReactionChanged(commentId, 'remove', emoji, userId);
 }
 
 export async function getCommentReactionsBulk(

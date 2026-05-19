@@ -30,8 +30,16 @@ BEGIN
   END IF;
 END$$;
 
--- Realtime 활성화
-ALTER PUBLICATION supabase_realtime ADD TABLE comment_reactions;
+-- Realtime 활성화 (코덱스 2차 P2: 멱등성 — 이미 등록되어 있으면 skip)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'comment_reactions'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE comment_reactions;
+  END IF;
+END$$;
 
 COMMENT ON TABLE comment_reactions IS
   '댓글 이모지 리액션 (v1.26.0+). 한 댓글에 한 사용자가 같은 이모지를 1번만 누를 수 있다.';

@@ -68,7 +68,16 @@ BEGIN
 END$$;
 
 -- Realtime 활성화
-ALTER PUBLICATION supabase_realtime ADD TABLE scene_image_versions;
+-- Realtime 활성화 (코덱스 2차 P2: 멱등성 — 이미 등록되어 있으면 skip)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'scene_image_versions'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE scene_image_versions;
+  END IF;
+END$$;
 
 COMMENT ON TABLE scene_image_versions IS
   '씬 이미지 버전 히스토리 (v1.26.0+). scenes.{storyboard,guide}_url 은 항상 최신 버전 URL 을 유지하고, 모든 과거 버전은 이 테이블에 row 로 보존.';

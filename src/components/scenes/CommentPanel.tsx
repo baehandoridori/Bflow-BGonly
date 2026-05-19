@@ -345,6 +345,28 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
 
   useEffect(() => { loadComments(); }, [loadComments]);
 
+  // v1.28.0 (코덱스 2차 P1): 다른 클라이언트의 리액션 변경 broadcast 수신 → 해당 댓글만 재fetch.
+  //   App.tsx 가 'bflow:comment-reaction-changed' window event 를 dispatch 한다.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ commentId?: string }>).detail;
+      const cid = detail?.commentId;
+      if (!cid) return;
+      // 현재 패널에 떠 있는 댓글에 해당할 때만 fetch (불필요한 호출 방지)
+      const isMine = comments.some((c) => c.id === cid);
+      if (!isMine) return;
+      fetchReactionsBulk([cid]).then((refreshed) => {
+        setReactionsByCommentId((m) => {
+          const nm = new Map(m);
+          nm.set(cid, refreshed.get(cid) ?? []);
+          return nm;
+        });
+      });
+    };
+    window.addEventListener('bflow:comment-reaction-changed', handler);
+    return () => window.removeEventListener('bflow:comment-reaction-changed', handler);
+  }, [comments]);
+
   // v1.26.0: 이모지 리액션 토글 (옵티미스틱 → IPC → 실패 시 롤백)
   const handleReactionToggle = useCallback(async (commentId: string, emoji: string) => {
     if (!currentUser) return;

@@ -1866,6 +1866,17 @@ export default function App() {
         }, 300);
       }
 
+      // 코덱스 2차 P1: 다른 클라이언트의 댓글 리액션 변경 → 변경된 commentId 만 자체 fetch.
+      //   CommentPanel 이 window custom event 를 listen 해 reactionsByCommentId 갱신.
+      if (data.event === 'comment-reaction-changed') {
+        const { commentId, senderId } = data.payload as { commentId?: string; senderId?: string };
+        const me = useAuthStore.getState().currentUser;
+        // 본인 변경은 옵티미스틱으로 이미 반영됨 — 자기 broadcast 는 무시.
+        if (commentId && (!me || senderId !== me.id)) {
+          window.dispatchEvent(new CustomEvent('bflow:comment-reaction-changed', { detail: { commentId } }));
+        }
+      }
+
       if (data.event === 'calendar-changed') {
         // GCal webhook → incremental sync (인증된 경우에만)
         import('@/services/googleCalendarService').then(({ isAuthenticated }) => {

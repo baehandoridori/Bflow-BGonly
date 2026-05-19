@@ -38,6 +38,10 @@ function createChannel(onReceive: BroadcastListener): RealtimeChannel {
     .on('broadcast', { event: 'comment-added' }, ({ payload }) => {
       onReceive('comment-added', payload as Record<string, unknown>);
     })
+    .on('broadcast', { event: 'comment-reaction-changed' }, ({ payload }) => {
+      // 코덱스 2차 P1: 다른 클라이언트가 자체 fetch 트리거할 수 있도록.
+      onReceive('comment-reaction-changed', payload as Record<string, unknown>);
+    })
     .on('broadcast', { event: 'calendar-changed' }, ({ payload }) => {
       onReceive('calendar-changed', payload as Record<string, unknown>);
     });
@@ -199,6 +203,17 @@ export function broadcastSceneAssignmentNotification(payload: Omit<AssignmentBro
  *  수신 측(calendarService) 에서 sync/재렌더 트리거. 다른 기기 비공개 CRUD 도 실시간 반영된다. */
 export function broadcastCalendarChanged(action: string, senderId?: string): void {
   safeSend('calendar-changed', { action, senderId, ts: Date.now() });
+}
+
+/** v1.28.0 (코덱스 2차 P1): 댓글 이모지 리액션 변경 broadcast.
+ *  다른 클라이언트가 변경된 commentId 의 리액션을 다시 fetch 하도록 신호만 보낸다. */
+export function broadcastCommentReactionChanged(
+  commentId: string,
+  action: 'add' | 'remove',
+  emoji: string,
+  senderId?: string,
+): void {
+  safeSend('comment-reaction-changed', { commentId, action, emoji, senderId, ts: Date.now() });
 }
 
 /** 댓글 추가 broadcast 전송 */
