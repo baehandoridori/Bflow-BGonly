@@ -2499,32 +2499,62 @@ export async function addImageVersion(params: {
   createdBy: string;
   description?: string | null;
 }): Promise<ImageVersionRow> {
-  // 다음 version_no = max + 1 (UNIQUE 가 동시 INSERT 충돌 막아준다)
-  const { data: existing, error: listErr } = await supabase
-    .from('scene_image_versions')
-    .select('version_no')
-    .eq('scene_id', params.sceneId)
-    .eq('image_type', params.imageType)
-    .order('version_no', { ascending: false })
-    .limit(1);
-  if (listErr) throw new Error(`addImageVersion (next no lookup) failed: ${listErr.message}`);
-  const versionNo = existing && existing.length > 0 ? (existing[0].version_no as number) + 1 : 1;
+  // 다음 version_no = max + 1.
+  // 코덱스 1차 P1: max + 1 read 와 insert 사이에 다른 사용자가 같은 version_no 로 insert 하면
+  //   UNIQUE 제약 위반으로 한쪽 요청이 실패. 동시 업로드 (협업 케이스) 에서 간헐적 실패.
+  //   해결: UNIQUE 충돌 (Postgres 23505) 발생 시 max 를 다시 읽어 재시도. 최대 5회.
+  const MAX_RETRIES = 5;
+  let lastErrMsg = '';
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const { data: existing, error: listErr } = await supabase
+      .from('scene_image_versions')
+      .select('version_no')
+      .eq('scene_id', params.sceneId)
+      .eq('image_type', params.imageType)
+      .order('version_no', { ascending: false })
+      .limit(1);
+    if (listErr) throw new Error(`addImageVersion (next no lookup) failed: ${listErr.message}`);
+    const versionNo = existing && existing.length > 0 ? (existing[0].version_no as number) + 1 : 1;
 
-  const { data, error } = await supabase
-    .from('scene_image_versions')
-    .insert({
-      scene_id: params.sceneId,
-      image_type: params.imageType,
-      version_no: versionNo,
-      url: params.url,
-      kind: params.kind,
-      base_version_no: params.baseVersionNo ?? null,
-      created_by: params.createdBy,
-      description: params.description ?? null,
-    })
-    .select()
-    .single();
-  if (error) throw new Error(`addImageVersion (insert) failed: ${error.message}`);
+    const { data, error } = await supabase
+      .from('scene_image_versions')
+      .insert({
+        scene_id: params.sceneId,
+        image_type: params.imageType,
+        version_no: versionNo,
+        url: params.url,
+        kind: params.kind,
+        base_version_no: params.baseVersionNo ?? null,
+        created_by: params.createdBy,
+        description: params.description ?? null,
+      })
+      .select()
+      .single();
+    if (!error) {
+      return await finalizeAddImageVersion(params, data as Record<string, unknown>);
+    }
+    lastErrMsg = error.message;
+    // UNIQUE 위반 (Postgres SQLSTATE 23505 또는 메시지 키워드) → 재시도.
+    const isUniqueViolation =
+      (error as { code?: string }).code === '23505' ||
+      /duplicate key|unique constraint|already exists/i.test(error.message);
+    if (!isUniqueViolation) {
+      throw new Error(`addImageVersion (insert) failed: ${error.message}`);
+    }
+    // 짧은 지터 후 재시도 (동시 충돌 → 분산)
+    await new Promise((res) => setTimeout(res, 30 + Math.floor(Math.random() * 60)));
+  }
+  throw new Error(`addImageVersion (insert) failed after ${MAX_RETRIES} retries: ${lastErrMsg}`);
+}
+
+async function finalizeAddImageVersion(
+  params: {
+    sceneId: string;
+    imageType: 'storyboard' | 'guide';
+    url: string;
+  },
+  data: Record<string, unknown>,
+): Promise<ImageVersionRow> {
 
   // scenes.{type}_url 갱신 — 외부 표시는 항상 최신 버전
   const column = params.imageType === 'storyboard' ? 'storyboard_url' : 'guide_url';

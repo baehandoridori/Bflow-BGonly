@@ -369,11 +369,26 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       }
     };
 
-    const handleMouseUp = () => {
+    // v1.28.0 (코덱스 1차 P2): mouseup 이 캔버스 밖에서 일어나도 finalize.
+    //   사용자가 캔버스 안에서 누르고 밖에서 떼면 stroke 가 화면엔 남지만
+    //   saveSnapshot 이 호출되지 않아 undo/isEmpty 체크가 어긋났다.
+    //   document level pointerup 으로 일관되게 마무리.
+    const handleMouseUp = useCallback(() => {
       if (!drawingRef.current) return;
       drawingRef.current = false;
       saveSnapshot();
-    };
+    }, [saveSnapshot]);
+
+    useEffect(() => {
+      const onDocPointerUp = () => {
+        if (drawingRef.current) {
+          drawingRef.current = false;
+          saveSnapshot();
+        }
+      };
+      document.addEventListener('pointerup', onDocPointerUp);
+      return () => document.removeEventListener('pointerup', onDocPointerUp);
+    }, [saveSnapshot]);
 
     // Ctrl+Z
     useEffect(() => {
@@ -540,7 +555,14 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
             onMouseDown={(e) => { e.preventDefault(); handleMouseDown(e); }}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            onMouseLeave={() => { drawingRef.current = false; }}
+            // v1.28.0 (코덱스 1차 P2): mouseLeave 에서 drawing 을 그냥 끊지 말고
+            //   stroke 를 finalize 한다. document pointerup 안전망도 함께.
+            onMouseLeave={() => {
+              if (drawingRef.current) {
+                drawingRef.current = false;
+                saveSnapshot();
+              }
+            }}
           />
         </div>
 
