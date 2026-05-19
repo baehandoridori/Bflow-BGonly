@@ -834,37 +834,42 @@ function createWindow(): void {
     //   2) v1.22.5: 5s → 즉시 (한솔: "토스트가 좀 늦게 떠"). manifest 비교는 G드라이브
     //      manifest.json (수백 byte) read 한 번이라 매우 가벼움. fetch는 어차피 비동기
     //      백그라운드 진행이라 메인 창 사용성에 영향 X.
+    //   ★ v1.26.x dev 가드: dev 모드(app.isPackaged === false)에선 백그라운드 체크/
+    //      installer spawn 모두 건너뜀 — G드라이브 prod manifest 와 어긋날 때 dev 앱이
+    //      prod installer 로 교체되는 사고 방지.
     markStartSucceeded().catch(() => { /* noop */ });
     if (currentUpdateInfo && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('update:state', currentUpdateInfo);
     }
-    const handleUpdateReady = (info: UpdateInfo) => {
-      // installer 다운로드 + .ready 마커 작성 완료 → renderer에 토스트 띄우기 신호.
-      // 사용자가 "지금 업데이트" 클릭 시 update:apply-now → installer helper + relaunch.
-      notifyUpdateReady(info);
-    };
-    const handleUpdateState = (info: UpdateInfo) => {
-      publishUpdateInfo(info);
-    };
-    if (startupUpdateContinuation) {
-      const pendingStartupCheck = startupUpdateContinuation;
-      pendingStartupCheck
-        .then((info) => {
-          if (!info || isQuitting) return;
-          if (info.ready) notifyUpdateReady(info);
-          else publishUpdateInfo(info);
-        })
-        .catch((err) => console.warn('[autoUpdate] startup continuation 실패:', err))
-        .finally(() => {
-          if (startupUpdateContinuation === pendingStartupCheck) startupUpdateContinuation = null;
-          startRuntimeUpdateChecks(handleUpdateReady, handleUpdateState);
-        });
-    } else {
-      scheduleUpdateCheck(handleUpdateReady, handleUpdateState)
-        .catch((err) => console.warn('[autoUpdate] 체크 실패:', err))
-        .finally(() => {
-          startRuntimeUpdateChecks(handleUpdateReady, handleUpdateState);
-        });
+    if (app.isPackaged) {
+      const handleUpdateReady = (info: UpdateInfo) => {
+        // installer 다운로드 + .ready 마커 작성 완료 → renderer에 토스트 띄우기 신호.
+        // 사용자가 "지금 업데이트" 클릭 시 update:apply-now → installer helper + relaunch.
+        notifyUpdateReady(info);
+      };
+      const handleUpdateState = (info: UpdateInfo) => {
+        publishUpdateInfo(info);
+      };
+      if (startupUpdateContinuation) {
+        const pendingStartupCheck = startupUpdateContinuation;
+        pendingStartupCheck
+          .then((info) => {
+            if (!info || isQuitting) return;
+            if (info.ready) notifyUpdateReady(info);
+            else publishUpdateInfo(info);
+          })
+          .catch((err) => console.warn('[autoUpdate] startup continuation 실패:', err))
+          .finally(() => {
+            if (startupUpdateContinuation === pendingStartupCheck) startupUpdateContinuation = null;
+            startRuntimeUpdateChecks(handleUpdateReady, handleUpdateState);
+          });
+      } else {
+        scheduleUpdateCheck(handleUpdateReady, handleUpdateState)
+          .catch((err) => console.warn('[autoUpdate] 체크 실패:', err))
+          .finally(() => {
+            startRuntimeUpdateChecks(handleUpdateReady, handleUpdateState);
+          });
+      }
     }
   });
 
@@ -3543,10 +3548,17 @@ app.whenReady().then(async () => {
   // ★ v1.22.10 startup update gate:
   //   스플래시를 먼저 띄운 뒤 원격 최신 버전을 최대 10초까지만 준비한다.
   //   준비 완료 시 installer helper로 최신 버전을 다시 열고, 시간 초과/실패 시 현재 버전으로 진입.
+  // ★ v1.26.x dev 가드: dev 모드(app.isPackaged === false)에선 G드라이브 manifest 가
+  //   더 최신이면 installer 가 spawn되어 dev 앱이 prod 빌드로 교체되는 사고가 난다.
+  //   dev 에선 update gate 자체를 건너뛴다.
   createSplashWindow();
   console.time('splash-to-main'); // 스플래시 노출 시점부터 메인 did-finish-load까지 측정
-  const relaunchingForStartupUpdate = await runStartupUpdateGate();
-  if (relaunchingForStartupUpdate) return;
+  if (app.isPackaged) {
+    const relaunchingForStartupUpdate = await runStartupUpdateGate();
+    if (relaunchingForStartupUpdate) return;
+  } else {
+    console.log('[autoUpdate] dev 모드 감지 — startup update gate 건너뜀.');
+  }
 
   // 메인 창 bounds 미리 로드 — createWindow 전에 캐시 완료되어 있어야 첫 창부터 저장 크기로 뜸
   await preloadMainWindowBounds();
