@@ -154,7 +154,19 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
           <button
             type="button"
             title="읽음 처리"
-            onClick={(e) => { e.stopPropagation(); markAsRead(n.id); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              markAsRead(n.id);
+              // 코덱스 7차 P2: comment_reaction 은 inline 읽음 처리도 서버 read_at 동기화.
+              //   미동기화 시 이후 emoji 제거가 last_action_at 을 bump 하면 catch-up 에서
+              //   다시 unread 로 잡혀 알림이 재출현함.
+              if (n.type === 'comment_reaction' && typeof n.metadata?.reactionNotificationId === 'string') {
+                const rid = n.metadata.reactionNotificationId;
+                import('@/services/supabaseService')
+                  .then(({ markCommentReactionRead }) => markCommentReactionRead(rid))
+                  .catch((err) => console.warn('[NotificationPanel] inline markCommentReactionRead 실패:', err));
+              }
+            }}
             className="inline-flex items-center justify-center w-5 h-5 rounded text-[#00D9A0] bg-[#00D9A0]/10 border border-[#00D9A0]/30 hover:bg-[#00D9A0]/20"
           >
             <Check size={11} />
@@ -360,7 +372,21 @@ function NotificationDropdown() {
           <div className="flex items-center gap-2">
             {unreadCount > 0 && (
               <button
-                onClick={markAllAsRead}
+                onClick={() => {
+                  markAllAsRead();
+                  // 코덱스 7차 P2: comment_reaction 알림들도 서버 read_at 동기화.
+                  //   currentUser 의존성 없이 store 의 unread comment_reaction 행을 추려 각자 read 처리.
+                  const reactionIds = notifications
+                    .filter((n) => !n.isRead && n.type === 'comment_reaction' && typeof n.metadata?.reactionNotificationId === 'string')
+                    .map((n) => n.metadata!.reactionNotificationId as string);
+                  if (reactionIds.length > 0) {
+                    import('@/services/supabaseService')
+                      .then(({ markCommentReactionRead }) => Promise.all(
+                        reactionIds.map((id) => markCommentReactionRead(id).catch(() => { /* 개별 실패 무시 */ })),
+                      ))
+                      .catch((err) => console.warn('[NotificationPanel] markAll comment_reaction 동기화 실패:', err));
+                  }
+                }}
                 className="text-[10px] text-accent hover:text-accent/80 flex items-center gap-1 cursor-pointer"
               >
                 <Check size={11} />
