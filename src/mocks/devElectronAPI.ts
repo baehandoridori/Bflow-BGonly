@@ -91,6 +91,17 @@ export function installDevElectronAPI(): void {
     supabaseMarkAssignmentNotificationRead: async (notificationId) => {
       console.log('[DEV] supabaseMarkAssignmentNotificationRead:', notificationId);
     },
+    // v1.29.0 mocks
+    supabaseFetchCommentReactionNotifications: async (args) => {
+      console.log('[DEV] supabaseFetchCommentReactionNotifications:', args);
+      return { data: [] };
+    },
+    supabaseMarkCommentReactionRead: async (id) => {
+      console.log('[DEV] supabaseMarkCommentReactionRead:', id);
+    },
+    supabaseMarkAllCommentReactionsRead: async (recipientId) => {
+      console.log('[DEV] supabaseMarkAllCommentReactionsRead:', recipientId);
+    },
     notifyFeedbackToast: async (payload) => {
       console.log('[DEV] notifyFeedbackToast:', payload);
     },

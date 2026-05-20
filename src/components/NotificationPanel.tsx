@@ -16,6 +16,7 @@ import {
   shouldShowSceneShortcut,
 } from '@/utils/notificationSceneNavigation';
 import '@/styles/notification-bell.css';
+import { lastReactionEmoji } from '@/utils/commentReactionEmojiFormat';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
 function timeAgo(iso: string): string {
@@ -45,6 +46,9 @@ function typeConfig(type: NotificationType) {
     case 'acting_feedback': return { icon: MessageSquareWarning, color: '#FDCB6E', label: '피드백' };
     // v1.25.8: 씬 담당자 배정 — 본인이 새 담당자 (강한 톤, mention 동일 시각 처리).
     case 'scene_assignment': return { icon: UserPlus, color: 'rgb(var(--color-accent))', label: '배정' };
+    // v1.29.0: 댓글 이모지 반응 — 차분 톤(comment 동등). 아이콘은 NotificationItem 에서 metadata.reactionEmojis 의
+    //   마지막 원소(또는 fallback 💬) 로 덮어 그리므로 여기 icon 값은 placeholder.
+    case 'comment_reaction': return { icon: MessageSquare, color: '#8B8DA3', label: '반응' };
   }
 }
 
@@ -96,9 +100,18 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
         }}
       />
 
-      {/* 아이콘 */}
+      {/* 아이콘 — v1.29.0: comment_reaction 은 마지막 이모지 자체를 아이콘으로 표시(시각 hook). */}
       <div className="flex-shrink-0 mt-0.5">
-        <Icon size={14} style={{ color: n.isRead ? 'rgb(var(--color-text-secondary) / 0.55)' : cfg.color }} />
+        {n.type === 'comment_reaction' && n.metadata?.reactionEmojis?.length ? (
+          <span
+            className="text-[14px] leading-none"
+            style={{ opacity: n.isRead ? 0.55 : 1 }}
+          >
+            {lastReactionEmoji(n.metadata.reactionEmojis)}
+          </span>
+        ) : (
+          <Icon size={14} style={{ color: n.isRead ? 'rgb(var(--color-text-secondary) / 0.55)' : cfg.color }} />
+        )}
       </div>
 
       {/* 내용 — truncate 된 텍스트는 호버 시 GlobalTooltip 으로 전체 노출 */}
@@ -249,8 +262,17 @@ function NotificationDropdown() {
 
   const handleNavigate = (n: AppNotification) => {
     const target = resolveNotificationSceneTarget(n.metadata, useDataStore.getState().episodes);
-    const isCommentLikeNotif = n.type === 'comment' || n.type === 'mention';
+    // v1.29.0: comment_reaction 도 댓글 패널 자동 펼침 시맨틱은 comment / mention 과 동일.
+    const isCommentLikeNotif = n.type === 'comment' || n.type === 'mention' || n.type === 'comment_reaction';
     const isActingFeedbackNotif = n.type === 'acting_feedback';
+    // v1.29.0: 이모지 반응 알림 — 점프 시 read_at 갱신 (catch-up 재출현 방지).
+    const isReactionNotif = n.type === 'comment_reaction';
+    const reactionNotificationId = n.metadata?.reactionNotificationId;
+    if (isReactionNotif && typeof reactionNotificationId === 'string') {
+      import('@/services/supabaseService')
+        .then(({ markCommentReactionRead }) => markCommentReactionRead(reactionNotificationId))
+        .catch((err) => console.warn('[NotificationPanel] markCommentReactionRead 실패:', err));
+    }
     const feedbackNotificationId = n.metadata?.feedbackNotificationId;
     if (isActingFeedbackNotif && feedbackNotificationId) {
       // fire-and-forget — read_at 업데이트 실패는 점프 흐름에 영향 없음

@@ -10,7 +10,7 @@ import { create } from 'zustand';
  * - 'scene_assignment': v1.25.8 — 본인이 새 담당자로 배정된 씬 알림 (강한 톤, mention 과 동일 시각 처리)
  * - 'scene_change' / 'milestone' / 'system': 기존 동작 유지
  */
-export type NotificationType = 'scene_change' | 'comment' | 'mention' | 'milestone' | 'system' | 'revision' | 'acting_feedback' | 'scene_assignment';
+export type NotificationType = 'scene_change' | 'comment' | 'mention' | 'milestone' | 'system' | 'revision' | 'acting_feedback' | 'scene_assignment' | 'comment_reaction';
 
 export interface AppNotification {
   id: string;
@@ -48,6 +48,12 @@ export interface AppNotification {
     assignmentNotificationId?: string;
     /** v1.25.8: 씬 담당자 배정 알림 표시용 메타 (예: '미배정 → 한솔') */
     assignmentTransition?: string;
+    /** v1.29.0: 이모지 반응 알림 — comment_reaction_notifications row id (markRead 호출용) */
+    reactionNotificationId?: string;
+    /** v1.29.0: 이모지 반응 알림 — 누적된 이모지 배열 (UI 표시용, "❤️🔥👏" 묶기) */
+    reactionEmojis?: string[];
+    /** v1.29.0: 이모지 반응 알림 — 반응한 사람 id (자기 자신 필터링 fallback) */
+    reactionActorId?: string;
   };
   isRead: boolean;
   createdAt: string; // ISO 8601
@@ -101,6 +107,10 @@ interface NotificationState {
   setPanelOpen: (open: boolean) => void;
   togglePanel: () => void;
   loadFromDisk: () => Promise<void>;
+  // v1.29.0: 이모지 반응 알림 — 묶음 UPSERT / 행 삭제 / catch-up
+  upsertCommentReaction: (n: AppNotification) => void;
+  removeNotificationById: (id: string) => void;
+  appendCatchupCommentReactions: (rows: AppNotification[]) => void;
 }
 
 function generateId(): string {
@@ -171,5 +181,46 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     } catch {
       // 파일 없으면 무시
     }
+  },
+
+  // v1.29.0: 이모지 반응 알림 묶음 UPSERT.
+  //   같은 id 가 이미 있으면 emojis·메타 갱신 + 안 읽음 리셋 (이미 읽었어도).
+  //   없으면 최상단에 prepend.
+  upsertCommentReaction: (n) => {
+    const list = get().notifications;
+    const idx = list.findIndex((x) => x.id === n.id);
+    let next: AppNotification[];
+    if (idx >= 0) {
+      next = [...list];
+      next[idx] = { ...n };
+    } else {
+      next = [n, ...list].slice(0, MAX_NOTIFICATIONS);
+    }
+    setNotifications(set, next);
+    persistToDisk(next);
+  },
+
+  // v1.29.0: 알림 행 단일 제거. id 없으면 no-op. removeNotification 과 동일 시맨틱이지만
+  //   호출 의도 명시 + missing-ID 케이스 안전(race fallback).
+  removeNotificationById: (id) => {
+    const list = get().notifications;
+    if (!list.some((x) => x.id === id)) return;
+    const next = list.filter((x) => x.id !== id);
+    setNotifications(set, next);
+    persistToDisk(next);
+  },
+
+  // v1.29.0: catch-up 으로 받은 미읽음 묶음을 dedupe + prepend.
+  //   기존 store 에 이미 있는 id 는 새 데이터로 갱신, 없는 건 prepend.
+  appendCatchupCommentReactions: (rows) => {
+    if (!rows.length) return;
+    const list = get().notifications;
+    const incomingIds = new Set(rows.map((r) => r.id));
+    const merged: AppNotification[] = [
+      ...rows,
+      ...list.filter((x) => !incomingIds.has(x.id)),
+    ].slice(0, MAX_NOTIFICATIONS);
+    setNotifications(set, merged);
+    persistToDisk(merged);
   },
 }));

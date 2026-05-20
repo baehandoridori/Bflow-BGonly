@@ -1181,6 +1181,9 @@ import {
   // v1.26.0
   addCommentReaction as sbAddCommentReaction,
   removeCommentReaction as sbRemoveCommentReaction,
+  fetchCommentReactionNotifications as sbFetchCommentReactionNotifications,
+  markCommentReactionRead as sbMarkCommentReactionRead,
+  markAllCommentReactionsRead as sbMarkAllCommentReactionsRead,
   getCommentReactionsBulk as sbGetCommentReactionsBulk,
   listImageVersions as sbListImageVersions,
   addImageVersion as sbAddImageVersion,
@@ -2434,6 +2437,34 @@ ipcMain.handle('supabase:mark-feedback-notification-read', wrapIpc(async (
   notificationId: string,
 ) => {
   await sbMarkFeedbackNotificationRead(notificationId);
+}));
+
+// v1.29.0: 댓글 이모지 반응 알림 — catch-up / refetch.
+ipcMain.handle('supabase:fetch-comment-reaction-notifications', wrapIpc(async (
+  _e: unknown,
+  args: {
+    recipientId: string;
+    since?: string;
+    limit?: number;
+    offset?: number;
+    ids?: string[];
+  },
+) => {
+  return await sbFetchCommentReactionNotifications(args);
+}));
+
+ipcMain.handle('supabase:mark-comment-reaction-read', wrapIpc(async (
+  _e: unknown,
+  notificationId: string,
+) => {
+  await sbMarkCommentReactionRead(notificationId);
+}));
+
+ipcMain.handle('supabase:mark-all-comment-reactions-read', wrapIpc(async (
+  _e: unknown,
+  recipientId: string,
+) => {
+  await sbMarkAllCommentReactionsRead(recipientId);
 }));
 
 // ─── IPC 핸들러: METADATA ───────────────────────────────────

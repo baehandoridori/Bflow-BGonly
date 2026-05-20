@@ -137,6 +137,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:fetch-missed-assignment-notifications', userId, since, limit, before),
   supabaseMarkAssignmentNotificationRead: (notificationId: string) =>
     ipcRenderer.invoke('supabase:mark-assignment-notification-read', notificationId),
+  // v1.29.0 댓글 이모지 반응 알림 — catch-up / refetch / 읽음 처리.
+  supabaseFetchCommentReactionNotifications: (args: {
+    recipientId: string;
+    since?: string;
+    limit?: number;
+    offset?: number;
+    ids?: string[];
+  }) =>
+    ipcRenderer.invoke('supabase:fetch-comment-reaction-notifications', args),
+  supabaseMarkCommentReactionRead: (notificationId: string) =>
+    ipcRenderer.invoke('supabase:mark-comment-reaction-read', notificationId),
+  supabaseMarkAllCommentReactionsRead: (recipientId: string) =>
+    ipcRenderer.invoke('supabase:mark-all-comment-reactions-read', recipientId),
   // v1.25.0~ Windows 네이티브 토스트 + 클릭 시 씬으로 점프
   notifyFeedbackToast: (payload: unknown) =>
     ipcRenderer.invoke('notify:feedback-toast', payload),

@@ -1,6 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
-import { broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastScenePhaseUpdate, broadcastDataChange, broadcastCommentAdded, broadcastCalendarChanged, broadcastCommentReactionChanged } from './broadcast';
+import {
+  broadcastSceneUpdate, broadcastSceneFieldUpdate, broadcastScenePhaseUpdate, broadcastDataChange,
+  broadcastCommentAdded, broadcastCalendarChanged, broadcastCommentReactionChanged,
+  broadcastCommentReactionNotification, broadcastCommentReactionNotificationRemoved, broadcastActivityRemoved,
+} from './broadcast';
 import { deleteImage as storageDeleteImage } from './storage';
 
 // ─── 일괄 작업 타입 ─────────────────────────────
@@ -1409,6 +1413,35 @@ export async function deleteComment(commentId: string): Promise<void> {
     }
   }
 
+  // v1.29.0: 이모지 반응·반응 알림·반응 활동 로그 cleanup (best-effort 순차 — 단일 트랜잭션 미지원).
+  //   실패 한 단계가 다음을 막지 않음. orphan 데이터는 추후 cleanup job 으로 처리.
+  try {
+    await supabase.from('comment_reactions').delete().eq('comment_id', commentId);
+  } catch (e) {
+    console.warn('[deleteComment] comment_reactions cleanup 실패:', e);
+  }
+  try {
+    await supabase.from('comment_reaction_notifications').delete().eq('comment_id', commentId);
+    // 수신자들의 알림 패널은 댓글 점프 대상이 사라졌으므로 catch-up 라운드에서 자연 정합화.
+  } catch (e) {
+    console.warn('[deleteComment] comment_reaction_notifications cleanup 실패:', e);
+  }
+  try {
+    const { data: affectedActs } = await supabase
+      .from('activities')
+      .select('id')
+      .eq('action_type', 'comment_reaction')
+      .filter('detail->>commentId', 'eq', commentId);
+    if (affectedActs?.length) {
+      await supabase.from('activities').delete().in('id', affectedActs.map((r) => r.id));
+      for (const r of affectedActs) {
+        broadcastActivityRemoved({ activityId: r.id });
+      }
+    }
+  } catch (e) {
+    console.warn('[deleteComment] activities cleanup 실패:', e);
+  }
+
   broadcastDataChange('comments', 'DELETE');
 }
 
@@ -2383,21 +2416,281 @@ export interface CommentReactionRow {
   createdAt: string;
 }
 
+// v1.29.0: 이모지 반응 알림 행 표시용 직렬화 (Realtime payload + IPC 응답 공용).
+//   table column → camelCase + scenes 점프 정보까지 평탄화.
+interface CommentReactionNotificationRow {
+  id: string;
+  recipient_id: string;
+  comment_id: string;
+  actor_id: string;
+  actor_name: string;
+  scene_id: string | null;
+  episode_number: number | null;
+  part_id: string | null;
+  dept: string | null;
+  emojis: string[] | null;
+  reaction_count: number;
+  last_action_at: string;
+  created_at: string;
+  read_at: string | null;
+}
+
+/** v1.29.0: 댓글 이모지 반응 알림 — 렌더러 store 형식(`AppNotification`) 으로 직렬화.
+ *  metadata.reactionEmojis / commentId / sceneId 등은 NotificationPanel·점프 헬퍼가 직접 읽음. */
+function serializeReactionNotification(row: CommentReactionNotificationRow): {
+  id: string;
+  type: 'comment_reaction';
+  title: string;
+  body?: string;
+  metadata: Record<string, unknown>;
+  isRead: boolean;
+  createdAt: string;
+} {
+  const emojis = Array.isArray(row.emojis) ? (row.emojis as string[]) : [];
+  // 5개 초과면 첫 5 + "+N" 으로 truncate (UI 가독성).
+  const emojiText = emojis.length === 0
+    ? ''
+    : emojis.length <= 5
+      ? emojis.join('')
+      : emojis.slice(0, 5).join('') + `+${emojis.length - 5}`;
+  return {
+    id: row.id,
+    type: 'comment_reaction',
+    // title 에 emojis 결합 — 알림 패널 한 줄에 누가 어떤 이모지를 남겼는지 한눈에 보임.
+    title: emojiText
+      ? `${row.actor_name}가 회원님 댓글에 ${emojiText} 반응을 남겼어요`
+      : `${row.actor_name}가 회원님 댓글에 반응을 남겼어요`,
+    metadata: {
+      reactionNotificationId: row.id,
+      reactionEmojis: emojis,
+      reactionActorId: row.actor_id,
+      commentId: row.comment_id,
+      commentSceneId: row.scene_id ?? undefined,
+      commentPartId: row.part_id ?? undefined,
+    },
+    isRead: row.read_at !== null,
+    createdAt: row.last_action_at,  // 정렬 기준은 마지막 반응 시각
+  };
+}
+
+/** v1.29.0: 댓글 context 조회 (단일 `comments` 테이블, revision_id 컬럼으로 일반/리비전 구분).
+ *  scene episode·dept 는 별도 parts/episodes JOIN — 인접 함수(listEpisodes)의 조회 패턴 따름. */
+async function fetchCommentContext(commentId: string): Promise<{
+  authorId: string;
+  authorName: string;
+  sceneId?: string;
+  sceneUuid?: string;
+  partId?: string;
+  episodeNumber?: number;
+  dept?: string;
+  commentPreview?: string;
+} | null> {
+  const { data: comment, error } = await supabase
+    .from('comments')
+    .select('user_id, user_name, scene_id, scene_uuid, part_id, text, revision_id')
+    .eq('id', commentId)
+    .maybeSingle();
+  if (error || !comment) return null;
+
+  let episodeNumber: number | undefined;
+  let dept: string | undefined;
+  if (comment.part_id) {
+    const { data: part } = await supabase
+      .from('parts')
+      .select('episode_id, department')
+      .eq('id', comment.part_id)
+      .maybeSingle();
+    dept = part?.department;
+    if (part?.episode_id) {
+      const { data: ep } = await supabase
+        .from('episodes')
+        .select('episode_number')
+        .eq('id', part.episode_id)
+        .maybeSingle();
+      episodeNumber = ep?.episode_number;
+    }
+  }
+
+  return {
+    authorId: comment.user_id,
+    authorName: comment.user_name,
+    sceneId: comment.scene_id ?? undefined,
+    sceneUuid: comment.scene_uuid ?? undefined,
+    partId: comment.part_id ?? undefined,
+    episodeNumber,
+    dept,
+    commentPreview: (comment.text ?? '').slice(0, 30),
+  };
+}
+
 export async function addCommentReaction(
   commentId: string,
   emoji: string,
   userId: string,
   userName: string,
 ): Promise<void> {
-  const { error } = await supabase
+  // 1) 기존: comment_reactions INSERT
+  const inserted = await supabase
     .from('comment_reactions')
-    .insert({ comment_id: commentId, user_id: userId, user_name: userName, emoji });
-  // UNIQUE 위반은 무시 (동일 리액션 중복 입력 방어)
-  if (error && !/duplicate key|unique/i.test(error.message)) {
-    throw new Error(`addCommentReaction failed: ${error.message}`);
+    .insert({ comment_id: commentId, user_id: userId, user_name: userName, emoji })
+    .select()
+    .maybeSingle();
+  if (inserted.error && !/duplicate key|unique/i.test(inserted.error.message)) {
+    throw new Error(`addCommentReaction failed: ${inserted.error.message}`);
   }
-  // 코덱스 2차 P1: 다른 클라이언트에 broadcast — 자체 fetch 트리거.
+  // 코덱스 2차 P1: 다른 클라이언트에 broadcast — 이모지 칩 자체 fetch 트리거.
   broadcastCommentReactionChanged(commentId, 'add', emoji, userId);
+
+  // UNIQUE 충돌(중복 토글)이면 알림·활동 흐름 건너뜀.
+  if (!inserted.data) return;
+
+  // 2) v1.29.0: 댓글 context 조회 — 알림 행 + activities 저장에 필요한 scene 정보.
+  const ctx = await fetchCommentContext(commentId);
+  if (!ctx) {
+    console.warn('[addCommentReaction] 고아 reaction 감지 — comment 조회 실패:', commentId);
+    return;
+  }
+
+  // 3) 활동 로그 INSERT — 자기 자신이어도 다른 사용자가 보는 최근 작업 위젯에 표시되도록.
+  let activityRow: { id: string; created_at: string } | null = null;
+  try {
+    const { data, error: actErr } = await supabase
+      .from('activities')
+      .insert({
+        user_id: userId,
+        user_name: userName,
+        action_type: 'comment_reaction',
+        action_group: 'memo',
+        scene_id: ctx.sceneUuid ?? null,
+        scene_label: null,
+        episode_number: ctx.episodeNumber ?? null,
+        department: ctx.dept ?? null,
+        detail: {
+          commentId,
+          emoji,
+          commentAuthorId: ctx.authorId,
+          commentPreview: ctx.commentPreview,
+        },
+        created_at: new Date().toISOString(),
+      })
+      .select('id, created_at')
+      .maybeSingle();
+    if (actErr) {
+      console.warn('[addCommentReaction] activities INSERT 실패:', actErr.message);
+    } else if (data) {
+      activityRow = data;
+    }
+  } catch (e) {
+    console.warn('[addCommentReaction] activities INSERT 예외:', e);
+  }
+
+  // 4) 자기 자신 분기 — 알림은 생성하지 않음.
+  if (ctx.authorId === userId) return;
+
+  // 5) comment_reaction_notifications UPSERT (옵션 A: SELECT 후 INSERT/UPDATE).
+  try {
+    const existing = await supabase
+      .from('comment_reaction_notifications')
+      .select('id, emojis, reaction_count')
+      .eq('recipient_id', ctx.authorId)
+      .eq('comment_id', commentId)
+      .eq('actor_id', userId)
+      .maybeSingle();
+
+    let notifRow: CommentReactionNotificationRow | null = null;
+    const now = new Date().toISOString();
+
+    if (existing.data) {
+      const prevEmojis = (Array.isArray(existing.data.emojis) ? existing.data.emojis : []) as string[];
+      const { data, error } = await supabase
+        .from('comment_reaction_notifications')
+        .update({
+          emojis: [...prevEmojis, emoji],
+          reaction_count: (existing.data.reaction_count ?? 0) + 1,
+          last_action_at: now,
+          read_at: null,
+        })
+        .eq('id', existing.data.id)
+        .select()
+        .maybeSingle();
+      if (error) throw error;
+      notifRow = (data as CommentReactionNotificationRow | null);
+    } else {
+      let insertRes = await supabase
+        .from('comment_reaction_notifications')
+        .insert({
+          recipient_id: ctx.authorId,
+          comment_id: commentId,
+          actor_id: userId,
+          actor_name: userName,
+          scene_id: ctx.sceneId ?? null,
+          episode_number: ctx.episodeNumber ?? null,
+          part_id: ctx.partId ?? null,
+          dept: ctx.dept ?? null,
+          emojis: [emoji],
+          reaction_count: 1,
+          last_action_at: now,
+          created_at: now,
+          read_at: null,
+        })
+        .select()
+        .maybeSingle();
+
+      // 두 PC 동시 INSERT race → UNIQUE conflict. 한 번 retry: SELECT + UPDATE.
+      if (insertRes.error?.code === '23505') {
+        const retry = await supabase
+          .from('comment_reaction_notifications')
+          .select('id, emojis, reaction_count')
+          .eq('recipient_id', ctx.authorId)
+          .eq('comment_id', commentId)
+          .eq('actor_id', userId)
+          .single();
+        if (retry.data) {
+          const prevEmojis = (Array.isArray(retry.data.emojis) ? retry.data.emojis : []) as string[];
+          insertRes = await supabase
+            .from('comment_reaction_notifications')
+            .update({
+              emojis: [...prevEmojis, emoji],
+              reaction_count: (retry.data.reaction_count ?? 0) + 1,
+              last_action_at: now,
+              read_at: null,
+            })
+            .eq('id', retry.data.id)
+            .select()
+            .maybeSingle();
+        }
+      } else if (insertRes.error) {
+        throw insertRes.error;
+      }
+      notifRow = (insertRes.data as CommentReactionNotificationRow | null);
+    }
+
+    if (notifRow) {
+      const serialized = serializeReactionNotification(notifRow);
+      broadcastCommentReactionNotification({
+        notification: {
+          id: serialized.id,
+          recipientId: notifRow.recipient_id,
+          actorId: notifRow.actor_id,
+          actorName: notifRow.actor_name,
+          commentId: notifRow.comment_id,
+          emojis: (notifRow.emojis ?? []) as string[],
+          reactionCount: notifRow.reaction_count,
+          sceneId: notifRow.scene_id ?? undefined,
+          episodeNumber: notifRow.episode_number ?? undefined,
+          partId: notifRow.part_id ?? undefined,
+          dept: notifRow.dept ?? undefined,
+          lastActionAt: notifRow.last_action_at,
+          createdAt: notifRow.created_at,
+          readAt: notifRow.read_at,
+        },
+      });
+    }
+  } catch (e) {
+    console.warn('[addCommentReaction] notification UPSERT 실패:', e);
+  }
+
+  void activityRow;  // 사용은 안 하지만 await 결과 보존 (debug 트레이싱용)
 }
 
 export async function removeCommentReaction(
@@ -2405,12 +2698,157 @@ export async function removeCommentReaction(
   emoji: string,
   userId: string,
 ): Promise<void> {
-  const { error } = await supabase
+  // 1) 기존: comment_reactions DELETE — RETURNING 으로 실제 영향 받은 행 확인.
+  const deleted = await supabase
     .from('comment_reactions')
     .delete()
-    .match({ comment_id: commentId, user_id: userId, emoji });
-  if (error) throw new Error(`removeCommentReaction failed: ${error.message}`);
+    .match({ comment_id: commentId, user_id: userId, emoji })
+    .select()
+    .maybeSingle();
+  if (deleted.error) throw new Error(`removeCommentReaction failed: ${deleted.error.message}`);
   broadcastCommentReactionChanged(commentId, 'remove', emoji, userId);
+  if (!deleted.data) return;  // 행 없음 → 알림·활동 정리 건너뜀
+
+  // 2) 댓글 context 조회 (자기 자신 여부 확인 + scene 정보)
+  const ctx = await fetchCommentContext(commentId);
+
+  // 3) 활동 로그 — 가장 최근 매칭 1행 DELETE (자기 자신이어도 수행).
+  try {
+    const { data: target } = await supabase
+      .from('activities')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('action_type', 'comment_reaction')
+      .filter('detail->>commentId', 'eq', commentId)
+      .filter('detail->>emoji', 'eq', emoji)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (target?.id) {
+      const { data: del } = await supabase
+        .from('activities')
+        .delete()
+        .eq('id', target.id)
+        .select('id')
+        .maybeSingle();
+      if (del?.id) {
+        broadcastActivityRemoved({ activityId: del.id });
+      }
+    }
+  } catch (e) {
+    console.warn('[removeCommentReaction] activities DELETE 실패:', e);
+  }
+
+  // 4) 알림 행 업데이트/삭제 (자기 자신이면 알림 행 없음 → 건너뜀)
+  if (!ctx || ctx.authorId === userId) return;
+
+  try {
+    const cur = await supabase
+      .from('comment_reaction_notifications')
+      .select('id, emojis, reaction_count')
+      .eq('recipient_id', ctx.authorId)
+      .eq('comment_id', commentId)
+      .eq('actor_id', userId)
+      .maybeSingle();
+    if (!cur.data) return;
+
+    const prevEmojis = (Array.isArray(cur.data.emojis) ? cur.data.emojis : []) as string[];
+    const idx = prevEmojis.lastIndexOf(emoji);
+    const nextEmojis = idx >= 0
+      ? [...prevEmojis.slice(0, idx), ...prevEmojis.slice(idx + 1)]
+      : prevEmojis;
+    const nextCount = Math.max(0, (cur.data.reaction_count ?? 0) - 1);
+
+    if (nextCount === 0 || nextEmojis.length === 0) {
+      const { data: del } = await supabase
+        .from('comment_reaction_notifications')
+        .delete()
+        .eq('id', cur.data.id)
+        .select('id')
+        .maybeSingle();
+      if (del?.id) {
+        broadcastCommentReactionNotificationRemoved({
+          recipientId: ctx.authorId,
+          notificationId: cur.data.id,
+          deleted: true,
+          emoji,
+          commentId,
+          actorId: userId,
+        });
+      }
+    } else {
+      await supabase
+        .from('comment_reaction_notifications')
+        .update({
+          emojis: nextEmojis,
+          reaction_count: nextCount,
+          // read_at, last_action_at, created_at 의도적으로 미수정
+        })
+        .eq('id', cur.data.id);
+      broadcastCommentReactionNotificationRemoved({
+        recipientId: ctx.authorId,
+        notificationId: cur.data.id,
+        deleted: false,
+        emoji,
+        commentId,
+        actorId: userId,
+      });
+    }
+  } catch (e) {
+    console.warn('[removeCommentReaction] notification UPDATE/DELETE 실패:', e);
+  }
+}
+
+// v1.29.0: 댓글 이모지 반응 알림 — Catch-up / refetch 용 fetch.
+export interface FetchCommentReactionsArgs {
+  recipientId: string;
+  since?: string;       // last_action_at > since
+  limit?: number;
+  offset?: number;
+  ids?: string[];       // 단일/일부 refetch
+}
+export async function fetchCommentReactionNotifications(
+  args: FetchCommentReactionsArgs,
+): Promise<{ data: ReturnType<typeof serializeReactionNotification>[] }> {
+  const limit = Math.max(1, Math.min(args.limit ?? 100, 500));
+  let query = supabase
+    .from('comment_reaction_notifications')
+    .select('*')
+    .eq('recipient_id', args.recipientId)
+    .order('last_action_at', { ascending: false })
+    .limit(limit);
+
+  if (args.ids?.length) {
+    query = query.in('id', args.ids);
+  } else {
+    if (args.since) query = query.gt('last_action_at', args.since);
+    if (args.offset) query = query.range(args.offset, args.offset + limit - 1);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn('[fetchCommentReactionNotifications] failed:', error.message);
+    return { data: [] };
+  }
+  return { data: (data ?? []).map((row) => serializeReactionNotification(row as CommentReactionNotificationRow)) };
+}
+
+export async function markCommentReactionRead(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('comment_reaction_notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', id)
+    .is('read_at', null);
+  if (error) console.warn('[markCommentReactionRead] failed:', error.message);
+}
+
+export async function markAllCommentReactionsRead(recipientId: string): Promise<void> {
+  const { error } = await supabase
+    .from('comment_reaction_notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('recipient_id', recipientId)
+    .is('read_at', null);
+  if (error) console.warn('[markAllCommentReactionsRead] failed:', error.message);
 }
 
 export async function getCommentReactionsBulk(

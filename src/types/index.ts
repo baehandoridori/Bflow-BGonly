@@ -491,7 +491,9 @@ export type ActionType =
   | 'revision_comment'
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
-  | 'image_upload_storyboard' | 'image_upload_guide';
+  | 'image_upload_storyboard' | 'image_upload_guide'
+  // v1.29.0: 댓글 이모지 반응 — 메모/댓글 그룹에 포함, detail.commentId / detail.emoji 보관
+  | 'comment_reaction';
 
 export interface Activity {
   id: string;
@@ -754,6 +756,29 @@ export interface ElectronAPI {
   }>>;
   /** v1.25.8 씬 담당자 배정 알림 읽음 처리 — read_at = now() */
   supabaseMarkAssignmentNotificationRead: (notificationId: string) => Promise<void>;
+  /** v1.29.0 댓글 이모지 반응 알림 — catch-up / refetch.
+   *  - since: last_action_at > since (catch-up 페이지네이션)
+   *  - ids: 단일/일부 refetch (Realtime removed 이벤트 fallback)
+   *  - offset: 옵셔널 오프셋 페이지네이션 */
+  supabaseFetchCommentReactionNotifications: (args: {
+    recipientId: string;
+    since?: string;
+    limit?: number;
+    offset?: number;
+    ids?: string[];
+  }) => Promise<{ data: Array<{
+    id: string;
+    type: 'comment_reaction';
+    title: string;
+    body?: string;
+    metadata: Record<string, unknown>;
+    isRead: boolean;
+    createdAt: string;
+  }> }>;
+  /** v1.29.0 댓글 이모지 반응 알림 — 단일 read_at 채움 */
+  supabaseMarkCommentReactionRead: (notificationId: string) => Promise<void>;
+  /** v1.29.0 댓글 이모지 반응 알림 — recipient 의 모든 미읽음 read_at 채움 */
+  supabaseMarkAllCommentReactionsRead: (recipientId: string) => Promise<void>;
   /** v1.25.0~ Windows 네이티브 토스트 + 클릭 시 씬으로 점프 */
   notifyFeedbackToast: (payload: {
     title: string;

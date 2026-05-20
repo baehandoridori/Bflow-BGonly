@@ -133,6 +133,27 @@ export async function markAssignmentNotificationRead(notificationId: string): Pr
   await window.electronAPI.supabaseMarkAssignmentNotificationRead(notificationId);
 }
 
+/** v1.29.0 댓글 이모지 반응 알림 — catch-up / refetch. */
+export async function fetchCommentReactionNotifications(args: {
+  recipientId: string;
+  since?: string;
+  limit?: number;
+  offset?: number;
+  ids?: string[];
+}): ReturnType<typeof window.electronAPI.supabaseFetchCommentReactionNotifications> {
+  return window.electronAPI.supabaseFetchCommentReactionNotifications(args);
+}
+
+/** v1.29.0 댓글 이모지 반응 알림 — 단일 read_at 갱신. */
+export async function markCommentReactionRead(notificationId: string): Promise<void> {
+  await window.electronAPI.supabaseMarkCommentReactionRead(notificationId);
+}
+
+/** v1.29.0 댓글 이모지 반응 알림 — recipient 의 모든 미읽음 read_at 갱신. */
+export async function markAllCommentReactionsRead(recipientId: string): Promise<void> {
+  await window.electronAPI.supabaseMarkAllCommentReactionsRead(recipientId);
+}
+
 /**
  * 일괄 단계 토글 — RPC `bulk_update_scene_stages` 경유.
  * 각 항목별 per-row 결과(BulkUpdateResult)를 반환해 부분 실패 처리 가능.

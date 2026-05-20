@@ -34,6 +34,7 @@ import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } fr
 import { semverGt } from '@/utils/semver';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
 import { setFeedbackLastSeenAt, setAssignmentLastSeenAt } from '@/utils/lastSeenTracker';
+import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
@@ -44,7 +45,7 @@ import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { SvgIconDefs } from '@/components/SvgIconDefs';
-import { useNotificationStore } from '@/stores/useNotificationStore';
+import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 import {
@@ -897,6 +898,73 @@ export default function App() {
         }
       } catch (err) {
         console.warn('[assignment-catchup] 실패:', err);
+      }
+    })();
+  }, [currentUser, authReady]);
+
+  // v1.29.0: 댓글 이모지 반응 알림 catch-up — 미접속 사이 받은 반응 알림 일괄 조회.
+  //   acting_feedback / scene_assignment 와 동일 패턴 (별도 lastSeen + 페이지네이션 + logout 시 ref clear).
+  const reactionCatchupDoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) {
+      reactionCatchupDoneRef.current = null;
+      return;
+    }
+    if (!authReady) return;
+    if (reactionCatchupDoneRef.current === currentUser.id) return;
+
+    reactionCatchupDoneRef.current = currentUser.id;
+    const me = currentUser;
+
+    (async () => {
+      const {
+        getCommentReactionLastSeenAt,
+        setCommentReactionLastSeenAt,
+        ensureCommentReactionLastSeenInitialized,
+      } = await import('@/utils/lastSeenTracker');
+      const lastSeen = getCommentReactionLastSeenAt(me.id);
+      if (!lastSeen) {
+        ensureCommentReactionLastSeenInitialized(me.id);
+        console.log('[reaction-catchup] 첫 로그인 — last_seen 초기화만');
+        return;
+      }
+      try {
+        const { fetchCommentReactionNotifications } = await import('@/services/supabaseService');
+        const PAGE_SIZE = 100;
+        const SAFE_CAP = 1000;
+        const all: AppNotification[] = [];
+        let offset = 0;
+        let cappedOut = false;
+        while (true) {
+          const batch = await fetchCommentReactionNotifications({
+            recipientId: me.id,
+            since: lastSeen,
+            limit: PAGE_SIZE,
+            offset,
+          });
+          const rows = batch?.data ?? [];
+          if (rows.length === 0) break;
+          all.push(...rows as AppNotification[]);
+          if (rows.length < PAGE_SIZE) break;
+          offset += PAGE_SIZE;
+          if (all.length >= SAFE_CAP) {
+            console.warn('[reaction-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
+            cappedOut = true;
+            break;
+          }
+        }
+        console.log('[reaction-catchup] 조회 결과', { count: all.length, cappedOut });
+        if (all.length === 0) {
+          setCommentReactionLastSeenAt(me.id, new Date().toISOString());
+          return;
+        }
+        useNotificationStore.getState().appendCatchupCommentReactions(all);
+        // cap 도달 시 lastSeen 보존 (feedback/assignment 와 동일 — 데이터 손실 방지)
+        if (!cappedOut) {
+          setCommentReactionLastSeenAt(me.id, all[0].createdAt);
+        }
+      } catch (err) {
+        console.warn('[reaction-catchup] 실패:', err);
       }
     })();
   }, [currentUser, authReady]);
@@ -1874,6 +1942,81 @@ export default function App() {
         // 본인 변경은 옵티미스틱으로 이미 반영됨 — 자기 broadcast 는 무시.
         if (commentId && (!me || senderId !== me.id)) {
           window.dispatchEvent(new CustomEvent('bflow:comment-reaction-changed', { detail: { commentId } }));
+        }
+      }
+
+      // v1.29.0: 댓글 이모지 반응 알림 — 본인이 받은 경우만 store 반영.
+      if (data.event === 'comment-reaction-notification') {
+        const payload = data.payload as { notification?: {
+          id: string; recipientId: string; actorId: string; actorName: string;
+          commentId: string; emojis: string[]; reactionCount: number;
+          sceneId?: string; partId?: string; episodeNumber?: number; dept?: string;
+          lastActionAt: string; createdAt: string; readAt: string | null;
+        } };
+        const me = useAuthStore.getState().currentUser;
+        const n = payload?.notification;
+        if (n && me && n.recipientId === me.id && n.actorId !== me.id) {
+          useNotificationStore.getState().upsertCommentReaction({
+            id: n.id,
+            type: 'comment_reaction',
+            title: buildReactionNotificationTitle(n.actorName, n.emojis ?? []),
+            metadata: {
+              reactionNotificationId: n.id,
+              reactionEmojis: n.emojis,
+              reactionActorId: n.actorId,
+              commentId: n.commentId,
+              commentSceneId: n.sceneId,
+              commentPartId: n.partId,
+            },
+            isRead: n.readAt !== null,
+            createdAt: n.lastActionAt,
+          });
+        }
+      }
+
+      // v1.29.0: 댓글 이모지 반응 알림 축소/삭제.
+      if (data.event === 'comment-reaction-notification-removed') {
+        const payload = data.payload as {
+          recipientId?: string; notificationId?: string; deleted?: boolean;
+          emoji?: string; commentId?: string; actorId?: string;
+        };
+        const me = useAuthStore.getState().currentUser;
+        if (payload?.recipientId && me && payload.recipientId === me.id && payload.notificationId) {
+          if (payload.deleted) {
+            useNotificationStore.getState().removeNotificationById(payload.notificationId);
+          } else {
+            // 축소 — 단일 행 refetch 로 emojis 배열 정합화
+            void (async () => {
+              try {
+                const { fetchCommentReactionNotifications } = await import('@/services/supabaseService');
+                const res = await fetchCommentReactionNotifications({
+                  recipientId: me.id,
+                  ids: [payload.notificationId!],
+                  limit: 1,
+                });
+                const row = res?.data?.[0];
+                if (row) {
+                  useNotificationStore.getState().upsertCommentReaction({
+                    ...row,
+                    isRead: row.isRead,
+                  } as AppNotification);
+                } else {
+                  // race: 이미 사라진 행 → store 에서도 제거
+                  useNotificationStore.getState().removeNotificationById(payload.notificationId!);
+                }
+              } catch (err) {
+                console.warn('[reaction-removed] refetch 실패:', err);
+              }
+            })();
+          }
+        }
+      }
+
+      // v1.29.0: 활동 로그 단일 행 삭제 (이모지 반응 취소 시).
+      if (data.event === 'activity-removed') {
+        const payload = data.payload as { activityId?: string };
+        if (payload?.activityId) {
+          useActivityStore.getState().removeById(payload.activityId);
         }
       }
 

@@ -117,8 +117,13 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles,
     }
     const app = useAppStore.getState();
     // v1.24.0: 댓글 활동이면 commentId 추출 → 모달 진입 시 자동 스크롤 + 펄스.
+    // v1.29.0: 이모지 반응 활동도 같은 스크롤/펄스 시맨틱.
     let commentId: string | undefined;
-    if (activity.actionType === 'comment_add' || activity.actionType === 'revision_comment') {
+    if (
+      activity.actionType === 'comment_add' ||
+      activity.actionType === 'revision_comment' ||
+      activity.actionType === 'comment_reaction'
+    ) {
       const detailObj = activity.detail as Record<string, unknown> | null | undefined;
       const cid = detailObj?.commentId;
       if (typeof cid === 'string') commentId = cid;
@@ -179,6 +184,12 @@ function FeedItemRow({ activity, isSelf, isInsideGroup, episodes, episodeTitles,
           )}
           <Pictogram type={activity.actionType} />
           <span className="text-text-secondary">{verb}</span>
+          {/* v1.29.0: 이모지 반응 — detail.emoji 자체 표시 (시각 hook) */}
+          {activity.actionType === 'comment_reaction' && (activity.detail as { emoji?: string } | null)?.emoji && (
+            <span className="text-[14px] leading-none ml-0.5">
+              {(activity.detail as { emoji: string }).emoji}
+            </span>
+          )}
           {displayLabel && (
             <span
               className="px-1.5 py-[1px] rounded text-[11.5px] font-medium"

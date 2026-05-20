@@ -216,6 +216,64 @@ export function broadcastCommentReactionChanged(
   safeSend('comment-reaction-changed', { commentId, action, emoji, senderId, ts: Date.now() });
 }
 
+/** v1.29.0: 댓글 이모지 반응 알림 broadcast (UPSERT 결과 1행).
+ *  - 자기 자신이 자기 댓글에 반응 → emit 안 함 (송신 단계에서 skip)
+ *  - 수신측은 payload.notification.recipientId === currentUserId 일 때만 store 반영 */
+export interface CommentReactionNotificationPayload {
+  notification: {
+    id: string;
+    recipientId: string;
+    actorId: string;
+    actorName: string;
+    commentId: string;
+    emojis: string[];
+    reactionCount: number;
+    sceneId?: string;
+    episodeNumber?: number;
+    partId?: string;
+    dept?: string;
+    lastActionAt: string;
+    createdAt: string;
+    readAt: string | null;
+  };
+  ts: number;
+}
+export function broadcastCommentReactionNotification(
+  payload: Omit<CommentReactionNotificationPayload, 'ts'>,
+): void {
+  safeSend('comment-reaction-notification', { ...payload, ts: Date.now() });
+}
+
+/** v1.29.0: 댓글 이모지 반응 알림 축소/삭제 broadcast.
+ *  - deleted=true → 행 자체 삭제됨, 수신측은 removeNotificationById
+ *  - deleted=false → emojis 만 축소, 수신측은 refetch 또는 store 직접 갱신 */
+export interface CommentReactionNotificationRemovedPayload {
+  recipientId: string;
+  notificationId: string;
+  deleted: boolean;
+  emoji: string;
+  commentId: string;
+  actorId: string;
+  ts: number;
+}
+export function broadcastCommentReactionNotificationRemoved(
+  payload: Omit<CommentReactionNotificationRemovedPayload, 'ts'>,
+): void {
+  safeSend('comment-reaction-notification-removed', { ...payload, ts: Date.now() });
+}
+
+/** v1.29.0: 활동 로그 단일 행 삭제 broadcast (이모지 반응 취소 시).
+ *  수신측은 activityStore.removeById 호출 — missing-ID 면 no-op. */
+export interface ActivityRemovedPayload {
+  activityId: string;
+  ts: number;
+}
+export function broadcastActivityRemoved(
+  payload: Omit<ActivityRemovedPayload, 'ts'>,
+): void {
+  safeSend('activity-removed', { ...payload, ts: Date.now() });
+}
+
 /** 댓글 추가 broadcast 전송 */
 export function broadcastCommentAdded(
   sceneId: string,

@@ -36,7 +36,8 @@ type NotificationShortcutType =
   | 'revision'
   | 'scene_change'
   | 'acting_feedback'
-  | 'scene_assignment';
+  | 'scene_assignment'
+  | 'comment_reaction';
 
 const SCENE_SHORTCUT_TYPES = new Set<string>([
   'comment',
@@ -45,6 +46,7 @@ const SCENE_SHORTCUT_TYPES = new Set<string>([
   'scene_change',
   'acting_feedback',
   'scene_assignment',
+  'comment_reaction',
 ]);
 
 function asString(value: unknown): string | undefined {
@@ -204,7 +206,8 @@ export function buildNotificationSceneModalRequest(
     partId: target.partId,
   };
 
-  if (type === 'comment' || type === 'mention') {
+  if (type === 'comment' || type === 'mention' || type === 'comment_reaction') {
+    // v1.29.0: comment_reaction 도 동일한 점프 시맨틱 — 댓글 패널 자동 펼치고 해당 댓글로 스크롤.
     return {
       ...base,
       initialTab: 'detail',
