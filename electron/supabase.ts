@@ -2620,83 +2620,27 @@ export async function addCommentReaction(
   // 4) 자기 자신 분기 — 알림은 생성하지 않음.
   if (ctx.authorId === userId) return;
 
-  // 5) comment_reaction_notifications UPSERT (옵션 A: SELECT 후 INSERT/UPDATE).
+  // 5) comment_reaction_notifications UPSERT — 코덱스 4차 P1: RPC 로 원자화 (race-free).
+  //   기존 SELECT → INSERT/UPDATE 시퀀스는 같은 (recipient, comment, actor) 동시 호출 시
+  //   둘 다 같은 snapshot 을 읽고 서로의 write 를 덮어써 emoji 손실. PL/pgSQL 함수가
+  //   INSERT ... ON CONFLICT DO UPDATE 단일 expression 으로 처리.
   try {
-    const existing = await supabase
-      .from('comment_reaction_notifications')
-      .select('id, emojis, reaction_count')
-      .eq('recipient_id', ctx.authorId)
-      .eq('comment_id', commentId)
-      .eq('actor_id', userId)
-      .maybeSingle();
-
-    let notifRow: CommentReactionNotificationRow | null = null;
-    const now = new Date().toISOString();
-
-    if (existing.data) {
-      const prevEmojis = (Array.isArray(existing.data.emojis) ? existing.data.emojis : []) as string[];
-      const { data, error } = await supabase
-        .from('comment_reaction_notifications')
-        .update({
-          emojis: [...prevEmojis, emoji],
-          reaction_count: (existing.data.reaction_count ?? 0) + 1,
-          last_action_at: now,
-          read_at: null,
-        })
-        .eq('id', existing.data.id)
-        .select()
-        .maybeSingle();
-      if (error) throw error;
-      notifRow = (data as CommentReactionNotificationRow | null);
-    } else {
-      let insertRes = await supabase
-        .from('comment_reaction_notifications')
-        .insert({
-          recipient_id: ctx.authorId,
-          comment_id: commentId,
-          actor_id: userId,
-          actor_name: userName,
-          scene_id: ctx.sceneId ?? null,
-          episode_number: ctx.episodeNumber ?? null,
-          part_id: ctx.partId ?? null,
-          dept: ctx.dept ?? null,
-          emojis: [emoji],
-          reaction_count: 1,
-          last_action_at: now,
-          created_at: now,
-          read_at: null,
-        })
-        .select()
-        .maybeSingle();
-
-      // 두 PC 동시 INSERT race → UNIQUE conflict. 한 번 retry: SELECT + UPDATE.
-      if (insertRes.error?.code === '23505') {
-        const retry = await supabase
-          .from('comment_reaction_notifications')
-          .select('id, emojis, reaction_count')
-          .eq('recipient_id', ctx.authorId)
-          .eq('comment_id', commentId)
-          .eq('actor_id', userId)
-          .single();
-        if (retry.data) {
-          const prevEmojis = (Array.isArray(retry.data.emojis) ? retry.data.emojis : []) as string[];
-          insertRes = await supabase
-            .from('comment_reaction_notifications')
-            .update({
-              emojis: [...prevEmojis, emoji],
-              reaction_count: (retry.data.reaction_count ?? 0) + 1,
-              last_action_at: now,
-              read_at: null,
-            })
-            .eq('id', retry.data.id)
-            .select()
-            .maybeSingle();
-        }
-      } else if (insertRes.error) {
-        throw insertRes.error;
-      }
-      notifRow = (insertRes.data as CommentReactionNotificationRow | null);
-    }
+    const { data: notifData, error: rpcErr } = await supabase.rpc(
+      'upsert_comment_reaction_notification',
+      {
+        p_recipient: ctx.authorId,
+        p_comment: commentId,
+        p_actor: userId,
+        p_actor_name: userName,
+        p_scene: ctx.sceneId ?? null,
+        p_episode: ctx.episodeNumber ?? null,
+        p_part: ctx.partId ?? null,
+        p_dept: ctx.dept ?? null,
+        p_emoji: emoji,
+      },
+    );
+    if (rpcErr) throw rpcErr;
+    const notifRow = notifData as CommentReactionNotificationRow | null;
 
     if (notifRow) {
       const serialized = serializeReactionNotification(notifRow);
@@ -2773,62 +2717,37 @@ export async function removeCommentReaction(
   }
 
   // 4) 알림 행 업데이트/삭제 (자기 자신이면 알림 행 없음 → 건너뜀)
+  //   코덱스 4차 P1/P2: RPC 로 원자화 — 행 잠금 + emojis 배열에서 last-occurrence 제거 +
+  //   빈 배열이면 DELETE 한 트랜잭션에서 처리. RPC 결과(deleted, notification_id) 검증 후에만
+  //   broadcast 발화 → 실패 시 client store 와 DB 의 분기·재출현 방지.
   if (!ctx || ctx.authorId === userId) return;
 
   try {
-    const cur = await supabase
-      .from('comment_reaction_notifications')
-      .select('id, emojis, reaction_count')
-      .eq('recipient_id', ctx.authorId)
-      .eq('comment_id', commentId)
-      .eq('actor_id', userId)
-      .maybeSingle();
-    if (!cur.data) return;
-
-    const prevEmojis = (Array.isArray(cur.data.emojis) ? cur.data.emojis : []) as string[];
-    const idx = prevEmojis.lastIndexOf(emoji);
-    const nextEmojis = idx >= 0
-      ? [...prevEmojis.slice(0, idx), ...prevEmojis.slice(idx + 1)]
-      : prevEmojis;
-    const nextCount = Math.max(0, (cur.data.reaction_count ?? 0) - 1);
-
-    if (nextCount === 0 || nextEmojis.length === 0) {
-      const { data: del } = await supabase
-        .from('comment_reaction_notifications')
-        .delete()
-        .eq('id', cur.data.id)
-        .select('id')
-        .maybeSingle();
-      if (del?.id) {
-        broadcastCommentReactionNotificationRemoved({
-          recipientId: ctx.authorId,
-          notificationId: cur.data.id,
-          deleted: true,
-          emoji,
-          commentId,
-          actorId: userId,
-        });
-      }
-    } else {
-      await supabase
-        .from('comment_reaction_notifications')
-        .update({
-          emojis: nextEmojis,
-          reaction_count: nextCount,
-          // read_at, last_action_at, created_at 의도적으로 미수정
-        })
-        .eq('id', cur.data.id);
-      broadcastCommentReactionNotificationRemoved({
-        recipientId: ctx.authorId,
-        notificationId: cur.data.id,
-        deleted: false,
-        emoji,
-        commentId,
-        actorId: userId,
-      });
+    const { data: rpcRows, error: rpcErr } = await supabase.rpc(
+      'remove_emoji_from_reaction_notification',
+      {
+        p_recipient: ctx.authorId,
+        p_comment: commentId,
+        p_actor: userId,
+        p_emoji: emoji,
+      },
+    );
+    if (rpcErr) {
+      console.warn('[removeCommentReaction] RPC 실패:', rpcErr.message);
+      return;
     }
+    const row = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+    if (!row || !row.notification_id) return;  // 행 없음 → no-op
+    broadcastCommentReactionNotificationRemoved({
+      recipientId: ctx.authorId,
+      notificationId: row.notification_id as string,
+      deleted: row.deleted === true,
+      emoji,
+      commentId,
+      actorId: userId,
+    });
   } catch (e) {
-    console.warn('[removeCommentReaction] notification UPDATE/DELETE 실패:', e);
+    console.warn('[removeCommentReaction] notification RPC 예외:', e);
   }
 }
 
