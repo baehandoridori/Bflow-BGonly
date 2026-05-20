@@ -66,6 +66,11 @@ BEGIN
   END IF;
 END $$;
 
+-- DELETE 이벤트 때 'old' payload 가 모든 컬럼을 포함하도록 REPLICA IDENTITY FULL 지정.
+-- 기본값(REPLICA IDENTITY DEFAULT)은 PK 만 포함하므로 episode_number/scene_id 없이 들어와
+-- 렌더러의 rowToCompositingState 가 어느 씬의 row 인지 못 알아내는 문제 방지.
+ALTER TABLE compositing_states REPLICA IDENTITY FULL;
+
 -- ─── 4) scenes.duration_frames 컬럼 추가 (24fps 기준 프레임, 정수) ───
 -- 입력 UI 는 후속 spec (docs/superpowers/specs/2026-05-21-premiere-clip-length-import-design.md).
 -- 컴포지팅 대시보드 MVP 에는 비어있는 상태로 두고 AE 패널은 "씬 인덱스" fallback 사용.
