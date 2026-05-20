@@ -68,15 +68,15 @@ BEGIN
 END $$;
 ```
 
-**주의**: `comment_id`는 `scene_comments.id` 또는 `revision_comments.id` 둘 다 받을 수 있음(이모지 반응 자체가 두 종류 댓글 모두 지원). FK 제약 대신 application-level 참조만 유지(기존 `comment_reactions` 테이블도 FK 없는 텍스트 컬럼).
+**주의**: `comment_id`는 단일 `comments` 테이블의 `id` 를 가리킴(일반 씬 댓글·리비전 댓글 모두 같은 테이블에 저장되며 `revision_id` 컬럼으로 구분). FK 제약 대신 application-level 참조만 유지(기존 `comment_reactions` 테이블도 FK 없는 텍스트 컬럼).
 
 **Cleanup 경로** (댓글 삭제 시):
-- `deleteSceneComment(commentId)` / `deleteRevisionComment(commentId)` 흐름에서 다음 두 호출 추가:
-  - `DELETE FROM comment_reactions WHERE comment_id = :commentId` (기존)
+- 기존 `deleteComment(commentId)` (electron/supabase.ts:1372) 흐름에서 다음 호출 추가:
+  - `DELETE FROM comment_reactions WHERE comment_id = :commentId` (기존, 또는 추가)
   - `DELETE FROM comment_reaction_notifications WHERE comment_id = :commentId` (신규)
-  - `DELETE FROM activities WHERE action_type='comment_reaction' AND detail->>'commentId' = :commentId` (신규)
-- 위 cleanup 은 동일 트랜잭션 내에서 실행 → 댓글 삭제와 cascade 일관성 보장
-- broadcast: 각 영향 받은 사용자에게 `comment-reaction-notification-removed`(bulk) + `activity-removed`(bulk) 디스패치
+  - 영향 받은 activities 행 id 들 SELECT → DELETE → 각 id로 `broadcast('activity-removed')` 발화
+- 위 호출들은 supabase-js 의 별도 요청이므로 단일 트랜잭션 보장은 어려움. **best-effort 순차 실행**으로 진행하며, 실패 시 WARN log + 다음 단계 진행 (orphan 데이터 잔존 가능성은 차후 cleanup job 으로 처리).
+- broadcast: 각 영향 받은 사용자에게 `comment-reaction-notification-removed`(per-row) + `activity-removed`(per-row) 디스패치
 
 ### 활동 로그 (`activities`) 확장
 
@@ -168,8 +168,7 @@ export interface CommentReactionNotification {
   ↓
 supabase: comment_reactions INSERT
   ↓ (행이 실제로 추가된 경우만 다음 단계 — UNIQUE 충돌로 무시되면 분기 종료)
-supabase: scene_comments 또는 revision_comments 에서 author_id, scene 정보 조회
-  - 댓글 ID로 두 테이블 차례 조회(또는 UNION) — 어느 한쪽에 존재
+supabase: comments 테이블에서 author_id, scene 정보 조회 (revision_id 컬럼으로 일반/리비전 구분)
   - 미존재면(고아 reaction) early return + WARN log
   ↓
 [자기 자신 분기]
@@ -210,7 +209,7 @@ broadcast('activity-added', {activity})                    -- 기존 (최근 작
   ↓
 supabase: comment_reactions DELETE WHERE comment_id=:c AND user_id=:u AND emoji=:e RETURNING *
   ↓ (DELETE 된 행이 있을 때만 다음 단계 — 0행이면 분기 종료)
-supabase: scene_comments 또는 revision_comments 에서 author_id 조회
+supabase: comments 테이블에서 author_id 조회
   ↓ (author_id !== userId 일 때만 알림 행 처리. 자기 자신이면 알림 분기 건너뛰고 활동로그 DELETE 만)
 supabase: comment_reaction_notifications 업데이트 (recipient=author, comment=c, actor=u)
   -- PostgreSQL expression 으로 race-free 제거. WITH ORDINALITY 로 삽입 순서 보존.
