@@ -1465,22 +1465,20 @@ export async function deleteComment(commentId: string): Promise<void> {
     console.warn('[deleteComment] comment_reaction_notifications cleanup 실패:', e);
   }
   try {
+    // 코덱스 10차 P1: activities 가 아니라 activity_log 테이블에서 cleanup.
     const { data: affectedActs } = await supabase
-      .from('activities')
+      .from('activity_log')
       .select('id')
       .eq('action_type', 'comment_reaction')
       .filter('detail->>commentId', 'eq', commentId);
     if (affectedActs?.length) {
-      // 코덱스 5차 P2: DELETE 결과 검증 후에만 broadcast 발화. supabase-js mutation 은
-      //   error 를 throw 하지 않고 객체로 반환 — 실패해도 broadcast 가 가면 client store 의
-      //   feed item 만 사라지고 DB 에 row 가 남아 reload 전까지 desync.
       const { data: deletedActs, error: delErr } = await supabase
-        .from('activities')
+        .from('activity_log')
         .delete()
         .in('id', affectedActs.map((r) => r.id))
         .select('id');
       if (delErr) {
-        console.warn('[deleteComment] activities DELETE 에러:', delErr.message);
+        console.warn('[deleteComment] activity_log DELETE 에러:', delErr.message);
       } else if (deletedActs?.length) {
         for (const r of deletedActs) {
           broadcastActivityRemoved({ activityId: r.id });
@@ -1488,7 +1486,7 @@ export async function deleteComment(commentId: string): Promise<void> {
       }
     }
   } catch (e) {
-    console.warn('[deleteComment] activities cleanup 실패:', e);
+    console.warn('[deleteComment] activity_log cleanup 예외:', e);
   }
 
   broadcastDataChange('comments', 'DELETE');
@@ -2234,7 +2232,9 @@ export type ActionType =
   | 'revision_comment'
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
-  | 'image_upload_storyboard' | 'image_upload_guide';
+  | 'image_upload_storyboard' | 'image_upload_guide'
+  // v1.29.0: 댓글 이모지 반응
+  | 'comment_reaction';
 
 export interface ActivityRow {
   id: string;
@@ -2601,37 +2601,24 @@ export async function addCommentReaction(
   }
 
   // 3) 활동 로그 INSERT — 자기 자신이어도 다른 사용자가 보는 최근 작업 위젯에 표시되도록.
-  let activityRow: { id: string; created_at: string } | null = null;
-  try {
-    const { data, error: actErr } = await supabase
-      .from('activities')
-      .insert({
-        user_id: userId,
-        user_name: userName,
-        action_type: 'comment_reaction',
-        action_group: 'memo',
-        scene_id: ctx.sceneUuid ?? null,
-        scene_label: null,
-        episode_number: ctx.episodeNumber ?? null,
-        department: ctx.dept ?? null,
-        detail: {
-          commentId,
-          emoji,
-          commentAuthorId: ctx.authorId,
-          commentPreview: ctx.commentPreview,
-        },
-        created_at: new Date().toISOString(),
-      })
-      .select('id, created_at')
-      .maybeSingle();
-    if (actErr) {
-      console.warn('[addCommentReaction] activities INSERT 실패:', actErr.message);
-    } else if (data) {
-      activityRow = data;
-    }
-  } catch (e) {
-    console.warn('[addCommentReaction] activities INSERT 예외:', e);
-  }
+  //   코덱스 10차 P1: activities 가 아니라 activity_log 테이블 + record_activity RPC 사용.
+  //   잘못된 테이블에 INSERT 하면 RecentActivityWidget (activity_log 조회) 에 안 나옴 + 환경에 따라 fail.
+  await recordActivityLog({
+    userId,
+    userName,
+    actionType: 'comment_reaction',
+    actionGroup: 'memo',
+    sceneId: ctx.sceneUuid ?? null,
+    sceneLabel: null,
+    episodeNumber: ctx.episodeNumber ?? null,
+    department: (ctx.dept === 'bg' || ctx.dept === 'acting') ? ctx.dept : null,
+    detail: {
+      commentId,
+      emoji,
+      commentAuthorId: ctx.authorId,
+      commentPreview: ctx.commentPreview,
+    },
+  });
 
   // 4) 자기 자신 분기 — 알림은 생성하지 않음.
   if (ctx.authorId === userId) return;
@@ -2682,8 +2669,6 @@ export async function addCommentReaction(
   } catch (e) {
     console.warn('[addCommentReaction] notification UPSERT 실패:', e);
   }
-
-  void activityRow;  // 사용은 안 하지만 await 결과 보존 (debug 트레이싱용)
 }
 
 export async function removeCommentReaction(
@@ -2706,9 +2691,10 @@ export async function removeCommentReaction(
   const ctx = await fetchCommentContext(commentId);
 
   // 3) 활동 로그 — 가장 최근 매칭 1행 DELETE (자기 자신이어도 수행).
+  //   코덱스 10차 P1: activity_log 테이블 (activities 가 아님) 에서 삭제.
   try {
     const { data: target } = await supabase
-      .from('activities')
+      .from('activity_log')
       .select('id')
       .eq('user_id', userId)
       .eq('action_type', 'comment_reaction')
@@ -2718,18 +2704,20 @@ export async function removeCommentReaction(
       .limit(1)
       .maybeSingle();
     if (target?.id) {
-      const { data: del } = await supabase
-        .from('activities')
+      const { data: del, error: delErr } = await supabase
+        .from('activity_log')
         .delete()
         .eq('id', target.id)
         .select('id')
         .maybeSingle();
-      if (del?.id) {
+      if (delErr) {
+        console.warn('[removeCommentReaction] activity_log DELETE 에러:', delErr.message);
+      } else if (del?.id) {
         broadcastActivityRemoved({ activityId: del.id });
       }
     }
   } catch (e) {
-    console.warn('[removeCommentReaction] activities DELETE 실패:', e);
+    console.warn('[removeCommentReaction] activity_log DELETE 예외:', e);
   }
 
   // 4) 알림 행 업데이트/삭제 (자기 자신이면 알림 행 없음 → 건너뜀)
