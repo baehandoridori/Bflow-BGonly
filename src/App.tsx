@@ -971,9 +971,11 @@ export default function App() {
           return;
         }
         useNotificationStore.getState().appendCatchupCommentReactions(all, lastSeen, fetchStartedAt);
-        // cap 도달 시 lastSeen 보존 (feedback/assignment 와 동일 — 데이터 손실 방지)
+        // cap 도달 시 lastSeen 보존 (feedback/assignment 와 동일 — 데이터 손실 방지).
+        // 코덱스 15차 P2: composite cursor "<lastAt>|<id>" 로 같은 ts 행 누락 차단.
         if (!cappedOut) {
-          setCommentReactionLastSeenAt(me.id, all[0].createdAt);
+          const newest = all[0];
+          setCommentReactionLastSeenAt(me.id, `${newest.createdAt}|${newest.id}`);
         }
       } catch (err) {
         console.warn('[reaction-catchup] 실패:', err);
@@ -1986,13 +1988,15 @@ export default function App() {
             isRead: n.readAt !== null,
             createdAt: n.lastActionAt,
           });
-          // 코덱스 2차 P1: 실시간으로 받은 알림은 lastSeen 갱신 — feedback/assignment 와 동일 패턴.
-          //   안 갱신하면 catch-up 이 last_action_at > lastSeen 으로 같은 행을 다시 가져와
-          //   사용자가 이미 읽었거나 dismiss 한 알림을 다음 실행 때 재출현시킴.
-          // 코덱스 6차 P2: cursor 는 monotonic 으로 — out-of-order broadcast 가 이전 lastSeen 보다
-          //   작은 값으로 덮어쓰면 다음 catch-up 이 already-seen 알림을 재가져와 중복 노출. max() 보장.
+          // 코덱스 2차 P1: 실시간으로 받은 알림은 lastSeen 갱신.
+          // 코덱스 6차 P2: monotonic max() 로 out-of-order broadcast 의 cursor 후퇴 차단.
+          // 코덱스 15차 P2: lastSeen 을 composite "<lastActionAt>|<id>" 로 저장 → 같은 ts 행이
+          //   catch-up 의 gt() 필터에서 영구 제외되던 data loss 차단.
           const prevLastSeen = getCommentReactionLastSeenAt(me.id);
-          const nextLastSeen = !prevLastSeen || n.lastActionAt > prevLastSeen ? n.lastActionAt : prevLastSeen;
+          const prevAt = prevLastSeen?.split('|')[0] ?? '';
+          const nextLastSeen = n.lastActionAt > prevAt
+            ? `${n.lastActionAt}|${n.id}`
+            : (prevLastSeen ?? `${n.lastActionAt}|${n.id}`);
           setCommentReactionLastSeenAt(me.id, nextLastSeen);
         }
       }

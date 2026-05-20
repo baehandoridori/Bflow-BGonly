@@ -2785,7 +2785,18 @@ export async function fetchCommentReactionNotifications(
   if (args.ids?.length) {
     query = query.in('id', args.ids);
   } else {
-    if (args.since) query = query.gt('last_action_at', args.since);
+    if (args.since) {
+      // 코덱스 15차 P2: since 도 composite cursor "<lastAt>|<id>" 지원.
+      //   gt(last_action_at) 단일 필터는 같은 last_action_at 의 다른 row 를 영구 제외 →
+      //   data loss. before 와 동일하게 tuple 비교 (lastAction, id) > (T, I).
+      //   단순 ISO timestamp 만 들어오면 폴백 (구버전 lastSeen).
+      const [sAt, sId] = args.since.split('|');
+      if (sAt && sId) {
+        query = query.or(`last_action_at.gt.${sAt},and(last_action_at.eq.${sAt},id.gt.${sId})`);
+      } else if (sAt) {
+        query = query.gt('last_action_at', sAt);
+      }
+    }
     if (args.before) {
       // 코덱스 14차 P2: timestamp-only cursor 는 같은 last_action_at 의 행을 page 경계에서 누락 가능.
       //   "<last_action_at>|<id>" composite cursor 로 (lastAction < T) OR (lastAction = T AND id < I).
