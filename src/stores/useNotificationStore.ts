@@ -110,7 +110,9 @@ interface NotificationState {
   // v1.29.0: 이모지 반응 알림 — 묶음 UPSERT / 행 삭제 / catch-up
   upsertCommentReaction: (n: AppNotification) => void;
   removeNotificationById: (id: string) => void;
-  appendCatchupCommentReactions: (rows: AppNotification[]) => void;
+  /** v1.29.0: catch-up 결과 머지. sinceISO 가 제공되면 since 이후 store 내 comment_reaction
+   *  알림 중 fetched 결과에 없는 건 stale (offline 동안 삭제된 행) 로 간주해 함께 제거. */
+  appendCatchupCommentReactions: (rows: AppNotification[], sinceISO?: string) => void;
 }
 
 function generateId(): string {
@@ -206,8 +208,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   // v1.29.0: catch-up 으로 받은 미읽음 묶음을 dedupe + prepend.
   //   기존 store 에 이미 있는 id 는 새 데이터로 갱신, 없는 건 prepend.
-  appendCatchupCommentReactions: (rows) => {
-    if (!rows.length) return;
+  appendCatchupCommentReactions: (rows, sinceISO) => {
     // 코덱스 8차 P2: rows 자체에 같은 id 가 두 번 들어올 수 있음 (페이지네이션 경계에서
     //   같은 행이 두 페이지에 걸쳐 fetch 되는 race). Map 으로 last-wins dedupe 한 후 store 와 머지.
     const dedupedMap = new Map<string, AppNotification>();
@@ -216,10 +217,22 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
     const list = get().notifications;
     const incomingIds = new Set(deduped.map((r) => r.id));
-    const merged: AppNotification[] = [
-      ...deduped,
-      ...list.filter((x) => !incomingIds.has(x.id)),
-    ].slice(0, MAX_NOTIFICATIONS);
+    // 코덱스 11차 P2: stale alert purge.
+    //   offline 동안 다른 사용자가 마지막 이모지를 떼서 알림 행이 DELETE 됐다면
+    //   catch-up fetch 에 그 row 가 안 옴 → 기존 merge 룰(prepend + survivors)로 영원히 살아남음.
+    //   sinceISO 이후 createdAt 을 가진 comment_reaction 행 중 fetched 결과에 없는 건 stale 처리.
+    //   sinceISO 미제공 시 기존 동작 유지 (다른 호출처 호환).
+    const survivors = list.filter((x) => {
+      if (incomingIds.has(x.id)) return false; // 새 데이터로 덮어쓸 예정
+      if (!sinceISO) return true;
+      if (x.type !== 'comment_reaction') return true;
+      // x.createdAt 은 last_action_at 으로 채워짐. since 이후이면서 fetched 에 없으면 stale.
+      return x.createdAt <= sinceISO;
+    });
+
+    if (!deduped.length && survivors.length === list.length) return;  // 변경 없음
+
+    const merged: AppNotification[] = [...deduped, ...survivors].slice(0, MAX_NOTIFICATIONS);
     setNotifications(set, merged);
     persistToDisk(merged);
   },

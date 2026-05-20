@@ -958,10 +958,12 @@ export default function App() {
         }
         console.log('[reaction-catchup] 조회 결과', { count: all.length, cappedOut });
         if (all.length === 0) {
+          // 빈 fetch 라도 since 이후 stale 알림 정리 트리거 (코덱스 11차 P2).
+          useNotificationStore.getState().appendCatchupCommentReactions([], lastSeen);
           setCommentReactionLastSeenAt(me.id, new Date().toISOString());
           return;
         }
-        useNotificationStore.getState().appendCatchupCommentReactions(all);
+        useNotificationStore.getState().appendCatchupCommentReactions(all, lastSeen);
         // cap 도달 시 lastSeen 보존 (feedback/assignment 와 동일 — 데이터 손실 방지)
         if (!cappedOut) {
           setCommentReactionLastSeenAt(me.id, all[0].createdAt);
