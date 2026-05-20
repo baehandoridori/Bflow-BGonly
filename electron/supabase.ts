@@ -1430,18 +1430,30 @@ export async function deleteComment(commentId: string): Promise<void> {
       .select('id, recipient_id, actor_id')
       .eq('comment_id', commentId);
     if (affectedNotifs?.length) {
-      await supabase.from('comment_reaction_notifications')
+      // 코덱스 3차 P2: DELETE 결과를 RETURNING 으로 확인 후에만 broadcast 발화.
+      //   supabase-js mutation 은 error 를 throw 하지 않고 객체로 반환 — 실패 시에도 broadcast
+      //   를 보내면 client store 에선 제거되지만 DB row 가 남아 catch-up 에서 재출현하는 문제.
+      const targetIds = affectedNotifs.map((r) => r.id);
+      const { data: deletedRows, error: delErr } = await supabase
+        .from('comment_reaction_notifications')
         .delete()
-        .in('id', affectedNotifs.map((r) => r.id));
-      for (const row of affectedNotifs) {
-        broadcastCommentReactionNotificationRemoved({
-          recipientId: row.recipient_id,
-          notificationId: row.id,
-          deleted: true,
-          emoji: '',
-          commentId,
-          actorId: row.actor_id,
-        });
+        .in('id', targetIds)
+        .select('id');
+      if (delErr) {
+        console.warn('[deleteComment] comment_reaction_notifications DELETE 에러:', delErr.message);
+      } else if (deletedRows?.length) {
+        const deletedIdSet = new Set(deletedRows.map((r) => r.id));
+        for (const row of affectedNotifs) {
+          if (!deletedIdSet.has(row.id)) continue;
+          broadcastCommentReactionNotificationRemoved({
+            recipientId: row.recipient_id,
+            notificationId: row.id,
+            deleted: true,
+            emoji: '',
+            commentId,
+            actorId: row.actor_id,
+          });
+        }
       }
     }
   } catch (e) {

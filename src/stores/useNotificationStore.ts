@@ -184,18 +184,12 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   },
 
   // v1.29.0: 이모지 반응 알림 묶음 UPSERT.
-  //   같은 id 가 이미 있으면 emojis·메타 갱신 + 안 읽음 리셋 (이미 읽었어도).
-  //   없으면 최상단에 prepend.
+  //   같은 id 가 이미 있어도 새 이모지로 갱신된 행은 createdAt/read_at 이 사실상 갱신된 것이므로
+  //   "새 알림" 으로 취급해 **최상단으로 이동**시킨다. (코덱스 3차 P2: in-place 갱신 시 묻혀서
+  //   사용자가 놓치는 문제.) 없으면 그대로 prepend.
   upsertCommentReaction: (n) => {
     const list = get().notifications;
-    const idx = list.findIndex((x) => x.id === n.id);
-    let next: AppNotification[];
-    if (idx >= 0) {
-      next = [...list];
-      next[idx] = { ...n };
-    } else {
-      next = [n, ...list].slice(0, MAX_NOTIFICATIONS);
-    }
+    const next = [{ ...n }, ...list.filter((x) => x.id !== n.id)].slice(0, MAX_NOTIFICATIONS);
     setNotifications(set, next);
     persistToDisk(next);
   },
