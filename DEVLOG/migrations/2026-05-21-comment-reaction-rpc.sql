@@ -88,8 +88,11 @@ BEGIN
   ELSE
     UPDATE comment_reaction_notifications
        SET emojis         = v_new_emojis,
-           reaction_count = v_new_count
-           -- read_at, last_action_at, created_at 의도적으로 미수정
+           reaction_count = v_new_count,
+           last_action_at = now()
+           -- 코덱스 6차 P1: last_action_at 갱신 — catch-up 이 last_action_at > since 로 변경 행을
+           --   가져오게 해야 offline 사용자도 emoji 제거를 다음 실행 때 반영 가능.
+           -- read_at, created_at 은 의도적으로 미수정 (read 상태는 그대로 유지).
      WHERE id = v_id;
     notification_id       := v_id;
     deleted               := FALSE;

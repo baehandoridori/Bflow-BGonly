@@ -33,7 +33,7 @@ import { loadVacationConfig, connectVacation } from '@/services/vacationService'
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { semverGt } from '@/utils/semver';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
+import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
 import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
@@ -1974,7 +1974,11 @@ export default function App() {
           // 코덱스 2차 P1: 실시간으로 받은 알림은 lastSeen 갱신 — feedback/assignment 와 동일 패턴.
           //   안 갱신하면 catch-up 이 last_action_at > lastSeen 으로 같은 행을 다시 가져와
           //   사용자가 이미 읽었거나 dismiss 한 알림을 다음 실행 때 재출현시킴.
-          setCommentReactionLastSeenAt(me.id, n.lastActionAt);
+          // 코덱스 6차 P2: cursor 는 monotonic 으로 — out-of-order broadcast 가 이전 lastSeen 보다
+          //   작은 값으로 덮어쓰면 다음 catch-up 이 already-seen 알림을 재가져와 중복 노출. max() 보장.
+          const prevLastSeen = getCommentReactionLastSeenAt(me.id);
+          const nextLastSeen = !prevLastSeen || n.lastActionAt > prevLastSeen ? n.lastActionAt : prevLastSeen;
+          setCommentReactionLastSeenAt(me.id, nextLastSeen);
         }
       }
 
