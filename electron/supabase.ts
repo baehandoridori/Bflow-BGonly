@@ -2602,23 +2602,29 @@ export async function addCommentReaction(
 
   // 3) 활동 로그 INSERT — 자기 자신이어도 다른 사용자가 보는 최근 작업 위젯에 표시되도록.
   //   코덱스 10차 P1: activities 가 아니라 activity_log 테이블 + record_activity RPC 사용.
-  //   잘못된 테이블에 INSERT 하면 RecentActivityWidget (activity_log 조회) 에 안 나옴 + 환경에 따라 fail.
-  await recordActivityLog({
-    userId,
-    userName,
-    actionType: 'comment_reaction',
-    actionGroup: 'memo',
-    sceneId: ctx.sceneUuid ?? null,
-    sceneLabel: null,
-    episodeNumber: ctx.episodeNumber ?? null,
-    department: (ctx.dept === 'bg' || ctx.dept === 'acting') ? ctx.dept : null,
-    detail: {
-      commentId,
-      emoji,
-      commentAuthorId: ctx.authorId,
-      commentPreview: ctx.commentPreview,
-    },
-  });
+  //   코덱스 13차 P1: 활동 로그 실패가 후속 알림 흐름을 중단시키지 않도록 명시적 try/catch.
+  //     recordActivityLog 는 내부에서 throw 를 흡수하지만 방어적으로 한 번 더 wrap —
+  //     RPC 가 throw 하더라도 reaction 자체는 이미 INSERT·broadcast 됐으므로 알림 분기는 진행.
+  try {
+    await recordActivityLog({
+      userId,
+      userName,
+      actionType: 'comment_reaction',
+      actionGroup: 'memo',
+      sceneId: ctx.sceneUuid ?? null,
+      sceneLabel: null,
+      episodeNumber: ctx.episodeNumber ?? null,
+      department: (ctx.dept === 'bg' || ctx.dept === 'acting') ? ctx.dept : null,
+      detail: {
+        commentId,
+        emoji,
+        commentAuthorId: ctx.authorId,
+        commentPreview: ctx.commentPreview,
+      },
+    });
+  } catch (e) {
+    console.warn('[addCommentReaction] recordActivityLog 실패 — 알림 흐름은 계속 진행:', e);
+  }
 
   // 4) 자기 자신 분기 — 알림은 생성하지 않음.
   if (ctx.authorId === userId) return;
@@ -2785,8 +2791,10 @@ export async function fetchCommentReactionNotifications(
 
   const { data, error } = await query;
   if (error) {
-    console.warn('[fetchCommentReactionNotifications] failed:', error.message);
-    return { data: [] };
+    // 코덱스 13차 P1: 실패를 빈 결과로 swallow 하면 caller(catch-up) 가
+    //   "no new notifications" 로 오해해 lastSeen 을 now 로 갱신 → 영구 데이터 손실.
+    //   feedback/assignment fetch 와 동일하게 throw.
+    throw new Error(`fetchCommentReactionNotifications failed: ${error.message}`);
   }
   return { data: (data ?? []).map((row) => serializeReactionNotification(row as CommentReactionNotificationRow)) };
 }

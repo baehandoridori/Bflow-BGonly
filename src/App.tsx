@@ -960,6 +960,7 @@ export default function App() {
           }
         }
         console.log('[reaction-catchup] 조회 결과', { count: all.length, cappedOut });
+        // 코덱스 13차 P1: fetch 가 throw 하면 아래 catch 로 빠져 lastSeen 갱신 안 함 (재시도 시 같은 since 유지).
         if (all.length === 0) {
           // 빈 fetch 라도 since~fetchStartedAt 구간의 stale 알림 정리 트리거.
           useNotificationStore.getState().appendCatchupCommentReactions([], lastSeen, fetchStartedAt);
