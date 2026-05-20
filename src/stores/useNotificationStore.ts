@@ -110,9 +110,18 @@ interface NotificationState {
   // v1.29.0: 이모지 반응 알림 — 묶음 UPSERT / 행 삭제 / catch-up
   upsertCommentReaction: (n: AppNotification) => void;
   removeNotificationById: (id: string) => void;
-  /** v1.29.0: catch-up 결과 머지. sinceISO 가 제공되면 since 이후 store 내 comment_reaction
-   *  알림 중 fetched 결과에 없는 건 stale (offline 동안 삭제된 행) 로 간주해 함께 제거. */
-  appendCatchupCommentReactions: (rows: AppNotification[], sinceISO?: string) => void;
+  /** v1.29.0: catch-up 결과 머지.
+   *  - sinceISO: catch-up 시작 시점의 lastSeen. 이 이전 알림은 보존 (이미 정합).
+   *  - fetchStartedISO: fetch loop 진입 직전 시각. 이 이후 store 에 들어온 알림은
+   *    catch-up race 로 인한 realtime 신규 알림이므로 stale 로 보지 말고 보존
+   *    (코덱스 12차 P1). 두 시각 사이 (sinceISO < createdAt <= fetchStartedISO) 의
+   *    행 중 fetched 에 없는 건 stale 로 제거.
+   *  fetchStartedISO 미제공 시 purge 안전사이드로 비활성 (이전 동작 유지). */
+  appendCatchupCommentReactions: (
+    rows: AppNotification[],
+    sinceISO?: string,
+    fetchStartedISO?: string,
+  ) => void;
 }
 
 function generateId(): string {
@@ -208,7 +217,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
   // v1.29.0: catch-up 으로 받은 미읽음 묶음을 dedupe + prepend.
   //   기존 store 에 이미 있는 id 는 새 데이터로 갱신, 없는 건 prepend.
-  appendCatchupCommentReactions: (rows, sinceISO) => {
+  appendCatchupCommentReactions: (rows, sinceISO, fetchStartedISO) => {
     // 코덱스 8차 P2: rows 자체에 같은 id 가 두 번 들어올 수 있음 (페이지네이션 경계에서
     //   같은 행이 두 페이지에 걸쳐 fetch 되는 race). Map 으로 last-wins dedupe 한 후 store 와 머지.
     const dedupedMap = new Map<string, AppNotification>();
@@ -217,17 +226,19 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 
     const list = get().notifications;
     const incomingIds = new Set(deduped.map((r) => r.id));
-    // 코덱스 11차 P2: stale alert purge.
-    //   offline 동안 다른 사용자가 마지막 이모지를 떼서 알림 행이 DELETE 됐다면
-    //   catch-up fetch 에 그 row 가 안 옴 → 기존 merge 룰(prepend + survivors)로 영원히 살아남음.
-    //   sinceISO 이후 createdAt 을 가진 comment_reaction 행 중 fetched 결과에 없는 건 stale 처리.
-    //   sinceISO 미제공 시 기존 동작 유지 (다른 호출처 호환).
+    // 코덱스 11차 P2 + 12차 P1: stale alert purge.
+    //   purge 대상은 "pre-fetch snapshot 안에 있던 since 이후 행" 만.
+    //   - createdAt > fetchStartedISO 면 catch-up loop 중 realtime 으로 들어온 신규 알림 → 보존.
+    //   - createdAt <= sinceISO 면 since 이전이라 catch-up 대상 외 → 보존.
+    //   - 그 사이 (since < createdAt <= fetchStarted) 인데 fetched 결과에 없으면 → stale 처리.
+    //   sinceISO 미제공 시 purge 비활성 (기존 호출처 호환).
     const survivors = list.filter((x) => {
       if (incomingIds.has(x.id)) return false; // 새 데이터로 덮어쓸 예정
       if (!sinceISO) return true;
       if (x.type !== 'comment_reaction') return true;
-      // x.createdAt 은 last_action_at 으로 채워짐. since 이후이면서 fetched 에 없으면 stale.
-      return x.createdAt <= sinceISO;
+      if (x.createdAt <= sinceISO) return true;                    // since 이전 — 보존
+      if (fetchStartedISO && x.createdAt > fetchStartedISO) return true; // snapshot 이후 신규 — 보존
+      return false; // 그 사이 → stale
     });
 
     if (!deduped.length && survivors.length === list.length) return;  // 변경 없음

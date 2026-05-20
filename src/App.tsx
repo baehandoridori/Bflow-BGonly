@@ -935,6 +935,9 @@ export default function App() {
         const all: AppNotification[] = [];
         let before: string | undefined = undefined;
         let cappedOut = false;
+        // 코덱스 12차 P1: fetch 진입 직전 시각을 기록 → catch-up 진행 중 realtime 으로
+        //   들어온 신규 알림을 stale 로 오판하지 않게 purge 의 상한선으로 사용.
+        const fetchStartedAt = new Date().toISOString();
         // 코덱스 8차 P1: offset 페이지네이션 대신 cursor (before=last_action_at) seek.
         //   페이지 사이 row 추가/삭제로 인한 누락·중복 차단. feedback/assignment catch-up 과 동일.
         while (true) {
@@ -958,12 +961,12 @@ export default function App() {
         }
         console.log('[reaction-catchup] 조회 결과', { count: all.length, cappedOut });
         if (all.length === 0) {
-          // 빈 fetch 라도 since 이후 stale 알림 정리 트리거 (코덱스 11차 P2).
-          useNotificationStore.getState().appendCatchupCommentReactions([], lastSeen);
+          // 빈 fetch 라도 since~fetchStartedAt 구간의 stale 알림 정리 트리거.
+          useNotificationStore.getState().appendCatchupCommentReactions([], lastSeen, fetchStartedAt);
           setCommentReactionLastSeenAt(me.id, new Date().toISOString());
           return;
         }
-        useNotificationStore.getState().appendCatchupCommentReactions(all, lastSeen);
+        useNotificationStore.getState().appendCatchupCommentReactions(all, lastSeen, fetchStartedAt);
         // cap 도달 시 lastSeen 보존 (feedback/assignment 와 동일 — 데이터 손실 방지)
         if (!cappedOut) {
           setCommentReactionLastSeenAt(me.id, all[0].createdAt);
