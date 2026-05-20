@@ -1466,9 +1466,20 @@ export async function deleteComment(commentId: string): Promise<void> {
       .eq('action_type', 'comment_reaction')
       .filter('detail->>commentId', 'eq', commentId);
     if (affectedActs?.length) {
-      await supabase.from('activities').delete().in('id', affectedActs.map((r) => r.id));
-      for (const r of affectedActs) {
-        broadcastActivityRemoved({ activityId: r.id });
+      // 코덱스 5차 P2: DELETE 결과 검증 후에만 broadcast 발화. supabase-js mutation 은
+      //   error 를 throw 하지 않고 객체로 반환 — 실패해도 broadcast 가 가면 client store 의
+      //   feed item 만 사라지고 DB 에 row 가 남아 reload 전까지 desync.
+      const { data: deletedActs, error: delErr } = await supabase
+        .from('activities')
+        .delete()
+        .in('id', affectedActs.map((r) => r.id))
+        .select('id');
+      if (delErr) {
+        console.warn('[deleteComment] activities DELETE 에러:', delErr.message);
+      } else if (deletedActs?.length) {
+        for (const r of deletedActs) {
+          broadcastActivityRemoved({ activityId: r.id });
+        }
       }
     }
   } catch (e) {

@@ -2000,9 +2000,15 @@ export default function App() {
                 });
                 const row = res?.data?.[0];
                 if (row) {
+                  // 코덱스 5차 P1: refetch 결과의 isRead 가 로컬 읽음 상태를 덮어쓰지 않게 보존.
+                  //   "모두 읽음" 직후 다른 PC 가 이모지 제거 → refetch row.isRead=false 일 수 있고
+                  //   그대로 upsert 하면 사용자가 방금 읽은 알림이 다시 unread 로 뒤집힘. 로컬에서 한 번이라도
+                  //   읽음 처리됐으면(true) 유지, 아직 안 읽었으면 서버 값 사용.
+                  const cur = useNotificationStore.getState().notifications.find((x) => x.id === row.id);
+                  const preservedRead = cur?.isRead === true ? true : row.isRead;
                   useNotificationStore.getState().upsertCommentReaction({
                     ...row,
-                    isRead: row.isRead,
+                    isRead: preservedRead,
                   } as AppNotification);
                 } else {
                   // race: 이미 사라진 행 → store 에서도 제거
