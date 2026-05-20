@@ -2445,8 +2445,8 @@ ipcMain.handle('supabase:fetch-comment-reaction-notifications', wrapIpc(async (
   args: {
     recipientId: string;
     since?: string;
+    before?: string;
     limit?: number;
-    offset?: number;
     ids?: string[];
   },
 ) => {

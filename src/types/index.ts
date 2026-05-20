@@ -763,8 +763,8 @@ export interface ElectronAPI {
   supabaseFetchCommentReactionNotifications: (args: {
     recipientId: string;
     since?: string;
+    before?: string;
     limit?: number;
-    offset?: number;
     ids?: string[];
   }) => Promise<{ data: Array<{
     id: string;

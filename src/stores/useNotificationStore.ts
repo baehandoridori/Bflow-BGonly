@@ -208,10 +208,16 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   //   기존 store 에 이미 있는 id 는 새 데이터로 갱신, 없는 건 prepend.
   appendCatchupCommentReactions: (rows) => {
     if (!rows.length) return;
+    // 코덱스 8차 P2: rows 자체에 같은 id 가 두 번 들어올 수 있음 (페이지네이션 경계에서
+    //   같은 행이 두 페이지에 걸쳐 fetch 되는 race). Map 으로 last-wins dedupe 한 후 store 와 머지.
+    const dedupedMap = new Map<string, AppNotification>();
+    for (const r of rows) dedupedMap.set(r.id, r);
+    const deduped = Array.from(dedupedMap.values());
+
     const list = get().notifications;
-    const incomingIds = new Set(rows.map((r) => r.id));
+    const incomingIds = new Set(deduped.map((r) => r.id));
     const merged: AppNotification[] = [
-      ...rows,
+      ...deduped,
       ...list.filter((x) => !incomingIds.has(x.id)),
     ].slice(0, MAX_NOTIFICATIONS);
     setNotifications(set, merged);

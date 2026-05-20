@@ -141,8 +141,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   supabaseFetchCommentReactionNotifications: (args: {
     recipientId: string;
     since?: string;
+    before?: string;
     limit?: number;
-    offset?: number;
     ids?: string[];
   }) =>
     ipcRenderer.invoke('supabase:fetch-comment-reaction-notifications', args),

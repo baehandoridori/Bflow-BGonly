@@ -933,20 +933,23 @@ export default function App() {
         const PAGE_SIZE = 100;
         const SAFE_CAP = 1000;
         const all: AppNotification[] = [];
-        let offset = 0;
+        let before: string | undefined = undefined;
         let cappedOut = false;
+        // 코덱스 8차 P1: offset 페이지네이션 대신 cursor (before=last_action_at) seek.
+        //   페이지 사이 row 추가/삭제로 인한 누락·중복 차단. feedback/assignment catch-up 과 동일.
         while (true) {
           const batch = await fetchCommentReactionNotifications({
             recipientId: me.id,
             since: lastSeen,
+            before,
             limit: PAGE_SIZE,
-            offset,
           });
           const rows = batch?.data ?? [];
           if (rows.length === 0) break;
           all.push(...rows as AppNotification[]);
           if (rows.length < PAGE_SIZE) break;
-          offset += PAGE_SIZE;
+          // 결과는 last_action_at desc 정렬 → 다음 페이지 cursor 는 가장 오래된(=마지막) row 의 lastActionAt.
+          before = rows[rows.length - 1].createdAt;  // serializeReactionNotification 에서 createdAt = last_action_at
           if (all.length >= SAFE_CAP) {
             console.warn('[reaction-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
             cappedOut = true;

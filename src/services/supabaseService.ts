@@ -137,8 +137,8 @@ export async function markAssignmentNotificationRead(notificationId: string): Pr
 export async function fetchCommentReactionNotifications(args: {
   recipientId: string;
   since?: string;
+  before?: string;
   limit?: number;
-  offset?: number;
   ids?: string[];
 }): ReturnType<typeof window.electronAPI.supabaseFetchCommentReactionNotifications> {
   return window.electronAPI.supabaseFetchCommentReactionNotifications(args);

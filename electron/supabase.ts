@@ -2765,9 +2765,9 @@ export async function removeCommentReaction(
 // v1.29.0: 댓글 이모지 반응 알림 — Catch-up / refetch 용 fetch.
 export interface FetchCommentReactionsArgs {
   recipientId: string;
-  since?: string;       // last_action_at > since
+  since?: string;       // last_action_at > since (오래된 한계)
+  before?: string;      // last_action_at < before (cursor — 코덱스 8차 P1)
   limit?: number;
-  offset?: number;
   ids?: string[];       // 단일/일부 refetch
 }
 export async function fetchCommentReactionNotifications(
@@ -2784,8 +2784,10 @@ export async function fetchCommentReactionNotifications(
   if (args.ids?.length) {
     query = query.in('id', args.ids);
   } else {
+    // 코덱스 8차 P1: offset 페이지네이션은 페이지 사이 행 추가/삭제 시 누락/중복 발생.
+    //   feedback/assignment catch-up 과 동일하게 cursor (before) seek 방식으로 안정 페이징.
     if (args.since) query = query.gt('last_action_at', args.since);
-    if (args.offset) query = query.range(args.offset, args.offset + limit - 1);
+    if (args.before) query = query.lt('last_action_at', args.before);
   }
 
   const { data, error } = await query;
