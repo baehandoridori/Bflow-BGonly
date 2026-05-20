@@ -3029,3 +3029,106 @@ export async function deleteImageVersion(versionId: string): Promise<void> {
     .update({ [column]: latest.url as string, updated_at: new Date().toISOString() })
     .eq('id', ver.scene_id as string);
 }
+
+// ─── v1.30.0: 컴포지팅 단계 상태 ────────────────────────────────
+// spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
+// 한 row = (에피소드, sceneId) 단위. BG/ACT 시트 무관. 권한 분기는 앱 레벨.
+
+export type CompositingStatusValue =
+  'batch' | 'combine' | 'aggregated' | 'adjust' | 'error' | 'done';
+
+export type CompositingErrorKindValue =
+  'missing_file' | 'fix_blemish' | 'retake' | 'canceled_scene' | 'other';
+
+export interface CompositingStateRow {
+  id: string;
+  episode_number: number;
+  scene_id: string;
+  part_id: string;
+  status: CompositingStatusValue;
+  error_kind: CompositingErrorKindValue | null;
+  error_note: string | null;
+  progress_percent: number;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+/** 한 에피소드의 모든 컴포지팅 상태 row */
+export async function loadCompositingStates(
+  episodeNumber: number,
+): Promise<CompositingStateRow[]> {
+  const { data, error } = await supabase
+    .from('compositing_states')
+    .select('*')
+    .eq('episode_number', episodeNumber)
+    .order('scene_id', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as CompositingStateRow[];
+}
+
+/** UPSERT — (episode_number, scene_id) 유니크. INSERT or UPDATE 한 번에. */
+export async function setCompositingState(input: {
+  episodeNumber: number;
+  sceneId: string;
+  partId: string;
+  status: CompositingStatusValue;
+  errorKind?: CompositingErrorKindValue | null;
+  errorNote?: string | null;
+  progressPercent?: number;
+  updatedBy: string;
+}): Promise<CompositingStateRow> {
+  const payload: Partial<CompositingStateRow> = {
+    episode_number: input.episodeNumber,
+    scene_id: input.sceneId,
+    part_id: input.partId,
+    status: input.status,
+    error_kind: input.errorKind ?? null,
+    error_note: input.errorNote ?? null,
+    progress_percent: input.progressPercent ?? 0,
+    updated_by: input.updatedBy,
+    // updated_at 은 트리거가 자동 갱신
+  };
+  const { data, error } = await supabase
+    .from('compositing_states')
+    .upsert(payload as CompositingStateRow, {
+      onConflict: 'episode_number,scene_id',
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  // 활동 로그 (recordActivityLog) wire 는 PR 3 이후 별도 작업.
+  // 이번 PR 1 은 데이터 인프라만.
+  return data as CompositingStateRow;
+}
+
+/**
+ * Realtime 구독 setup — 메인 프로세스에서 한 번 호출.
+ * 변경 발생 시 모든 렌더러 창에 'compositing-states:realtime' 채널로 push.
+ *
+ * cleanup 함수 반환 (메인 프로세스 셧다운 시 호출).
+ */
+export function startCompositingStatesRealtime(
+  broadcast: (payload: {
+    eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+    row: CompositingStateRow | null;
+    old: CompositingStateRow | null;
+  }) => void,
+): () => void {
+  const channel = supabase
+    .channel('public:compositing_states')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'compositing_states' },
+      (payload) => {
+        broadcast({
+          eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
+          row: (payload.new ?? null) as CompositingStateRow | null,
+          old: (payload.old ?? null) as CompositingStateRow | null,
+        });
+      },
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

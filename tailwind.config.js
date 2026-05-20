@@ -33,6 +33,20 @@ module.exports = {
           mid: '#A599F5',
           low: '#E17055',
           none: '#F5BEB3',
+          // ── v1.30.0: 컴포지팅 6 단계 (값은 src/index.css 의 CSS 변수) ──
+          batch: 'var(--status-batch)',
+          combine: 'var(--status-combine)',
+          aggregated: 'var(--status-aggregated)',
+          adjust: 'var(--status-adjust)',
+          error: 'var(--status-error)',
+          done: 'var(--status-done)',
+        },
+        // ── v1.30.0: 컴포지팅 파트 색 ──
+        part: {
+          a: 'var(--part-a)',
+          b: 'var(--part-b)',
+          c: 'var(--part-c)',
+          d: 'var(--part-d)',
         },
       },
       keyframes: {

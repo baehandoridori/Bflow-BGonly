@@ -1188,6 +1188,10 @@ import {
   listImageVersions as sbListImageVersions,
   addImageVersion as sbAddImageVersion,
   deleteImageVersion as sbDeleteImageVersion,
+  // v1.30.0: 컴포지팅 단계 상태
+  loadCompositingStates as sbLoadCompositingStates,
+  setCompositingState as sbSetCompositingState,
+  startCompositingStatesRealtime as sbStartCompositingStatesRealtime,
 } from './supabase';
 import type { SupabaseUser, BulkStageUpdate, BulkFieldUpdate } from './supabase';
 import { setupRealtimeSubscription, teardownRealtime } from './realtime';
@@ -2258,6 +2262,17 @@ function startSupabaseRealtime() {
       if (!win.isDestroyed()) win.webContents.send('supabase:broadcast-event', broadcastEvent);
     }
   });
+
+  // 3) v1.30.0: 컴포지팅 단계 상태 Realtime 구독
+  // spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
+  sbStartCompositingStatesRealtime((payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('compositing-states:realtime', payload);
+    }
+    for (const win of widgetWindows.values()) {
+      if (!win.isDestroyed()) win.webContents.send('compositing-states:realtime', payload);
+    }
+  });
 }
 
 function broadcastSupabaseEvent(table: string, payload: unknown) {
@@ -2465,6 +2480,32 @@ ipcMain.handle('supabase:mark-all-comment-reactions-read', wrapIpc(async (
   recipientId: string,
 ) => {
   await sbMarkAllCommentReactionsRead(recipientId);
+}));
+
+// ─── v1.30.0: Compositing States ──────────────
+// spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
+
+ipcMain.handle('supabase:load-compositing-states', wrapIpc(async (
+  _e: unknown,
+  episodeNumber: number,
+) => {
+  return sbLoadCompositingStates(episodeNumber);
+}));
+
+ipcMain.handle('supabase:set-compositing-state', wrapIpc(async (
+  _e: unknown,
+  input: {
+    episodeNumber: number;
+    sceneId: string;
+    partId: string;
+    status: 'batch' | 'combine' | 'aggregated' | 'adjust' | 'error' | 'done';
+    errorKind?: 'missing_file' | 'fix_blemish' | 'retake' | 'canceled_scene' | 'other' | null;
+    errorNote?: string | null;
+    progressPercent?: number;
+    updatedBy: string;
+  },
+) => {
+  return sbSetCompositingState(input);
 }));
 
 // ─── IPC 핸들러: METADATA ───────────────────────────────────

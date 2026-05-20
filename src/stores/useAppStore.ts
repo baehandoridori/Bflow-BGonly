@@ -3,7 +3,10 @@ import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptF
 import type { ThemeColors } from '@/themes';
 import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
 
-export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'compositing' | 'settings';
+export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'compositing' | 'compositing-revisions' | 'settings';
+// v1.30.0~ : 'compositing' = 새 컴포지팅 현황 대시보드 (CompositingDashboardView)
+//            'compositing-revisions' = 기존 컴포지팅 리비전 피드백 보드 (CompositingView)
+// 사이드바 라우팅 분기는 PR 3 에서 App.tsx + Sidebar.tsx 수정.
 export type SortKey = 'no' | 'assignee' | 'progress' | 'incomplete';
 export type SortDir = 'asc' | 'desc';
 export type StatusFilter = 'all' | 'not-started' | 'in-progress' | 'done';

@@ -1,0 +1,232 @@
+/* ─── B flow 디자인 토큰 (CSS 변수) ─────────────────────────────
+   본 시안은 본 앱의 실제 토큰 시스템(themes.ts, index.css)을 그대로 모사.
+   라이트/다크 자동 대응, 6개 프리셋 액센트, 의미별 상태 컬러.
+   ────────────────────────────────────────────────────────────── */
+
+:root {
+  /* 다크 기본 (Violet Dream) */
+  --color-bg-primary: 15 17 23;
+  --color-bg-card: 26 29 39;
+  --color-bg-border: 45 48 65;
+  --color-text-primary: 232 232 238;
+  --color-text-secondary: 139 141 163;
+  --color-accent: 108 92 231;
+  --color-accent-sub: 162 155 254;
+
+  --color-overlay: 0 0 0;
+  --overlay-alpha: 0.55;
+  --color-on-accent: 255 255 255;
+  --color-glass-tint: 16 18 28;
+  --glass-tint-alpha: 0.28;
+  --color-glass-highlight: 255 255 255;
+  --glass-highlight-alpha: 0.08;
+  --color-shadow: 0 0 0;
+  --shadow-alpha: 0.35;
+
+  /* ── 컴포지팅 상태 (시멘틱) ── */
+  --status-batch: 110 115 136;       /* 배치 — 작업 대기, 중성 회색 */
+  --status-combine: 116 185 255;     /* 조합 중 — 파랑 (작업 활성) */
+  --status-aggregated: 162 155 254;  /* 취합완료 — 액센트 서브 (집계) */
+  --status-adjust: 253 203 110;      /* 보정 중 — 노랑 (재작업) */
+  --status-error: 225 112 85;        /* 오류 — 주황 (긴급 주의) */
+  --status-done: 0 184 148;          /* 완료 — 초록 */
+
+  /* ── 파트 컬러 (네이팡 스케치에 등장) ── */
+  --part-a: 225 112 85;   /* A — 시나몬 (#E17055) */
+  --part-b: 245 168 90;   /* B — 앰버 */
+  --part-c: 110 184 102;  /* C — 그린 */
+  --part-d: 80 145 230;   /* D — 블루 */
+
+  --easing-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --easing-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── 라이트 모드 오버라이드 ── */
+[data-color-mode="light"] {
+  --color-bg-primary: 239 243 250;
+  --color-bg-card: 255 255 255;
+  --color-bg-border: 188 195 211;
+  --color-text-primary: 24 29 40;
+  --color-text-secondary: 78 88 106;
+  --color-overlay: 0 0 0;
+  --overlay-alpha: 0.3;
+  --color-glass-tint: 255 255 255;
+  --glass-tint-alpha: 0.8;
+  --color-glass-highlight: 0 0 0;
+  --glass-highlight-alpha: 0.06;
+  --color-shadow: 0 0 0;
+  --shadow-alpha: 0.12;
+
+  /* 라이트 모드 상태 컬러 — 대비 강화 */
+  --status-batch: 130 138 158;
+  --status-combine: 38 120 215;
+  --status-aggregated: 122 105 220;
+  --status-adjust: 200 138 28;
+  --status-error: 200 70 50;
+  --status-done: 16 140 110;
+
+  --part-a: 200 80 55;
+  --part-b: 215 130 50;
+  --part-c: 70 140 70;
+  --part-d: 45 105 195;
+}
+
+/* ── 프리셋 액센트 ── */
+:root[data-accent="violet"] {
+  --color-accent: 108 92 231;
+  --color-accent-sub: 162 155 254;
+}
+:root[data-accent="cinema-red"] {
+  --color-accent: 225 29 72;
+  --color-accent-sub: 251 113 133;
+}
+:root[data-accent="midnight-blue"] {
+  --color-accent: 59 130 246;
+  --color-accent-sub: 96 165 250;
+}
+:root[data-accent="emerald"] {
+  --color-accent: 16 185 129;
+  --color-accent-sub: 52 211 153;
+}
+:root[data-accent="amber-gold"] {
+  --color-accent: 217 119 6;
+  --color-accent-sub: 251 191 36;
+}
+
+/* 글꼴 */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
+
+* {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+html, body {
+  margin: 0;
+  font-family: 'Pretendard Variable', Pretendard, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: 'tnum' 1;
+  background: #0a0b0f;
+  color: rgb(var(--color-text-primary));
+  font-variant-numeric: tabular-nums;
+}
+
+/* 디자인 캔버스 표면을 B flow 톤으로 */
+.dc-root, .dc-canvas, .dc-surface {
+  background: linear-gradient(180deg, #0a0b0f 0%, #0e0f15 100%) !important;
+  color: rgb(var(--color-text-primary));
+}
+
+/* ── 공통 유틸 ── */
+.bf-card-surface {
+  background: rgb(var(--color-bg-card));
+  border: 1px solid rgb(var(--color-bg-border));
+  color: rgb(var(--color-text-primary));
+}
+
+/* 진입 스태거 애니메이션 — 카드들이 촤라라라락 펼쳐짐 */
+@keyframes bf-card-cascade {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.92);
+    filter: blur(3px);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.bf-cascade-item {
+  opacity: 0;
+  animation: bf-card-cascade 560ms var(--easing-out) forwards;
+  animation-delay: calc(var(--idx, 0) * 28ms + 100ms);
+}
+
+/* 진입 라인 와이프 — 타임라인 바 채우기 */
+@keyframes bf-wipe-in {
+  0% { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+
+.bf-wipe-in {
+  transform-origin: left center;
+  animation: bf-wipe-in 800ms var(--easing-out) 150ms both;
+}
+
+/* 글로우 펄스 — 호버/선택 시 */
+@keyframes bf-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--bf-glow, var(--color-accent)) / 0.45), 0 0 22px 4px rgb(var(--bf-glow, var(--color-accent)) / 0.28); }
+  50% { box-shadow: 0 0 0 6px rgb(var(--bf-glow, var(--color-accent)) / 0), 0 0 32px 8px rgb(var(--bf-glow, var(--color-accent)) / 0.42); }
+}
+
+.bf-glow-pulse {
+  animation: bf-glow-pulse 1.8s ease-in-out infinite;
+}
+
+/* 파티클 (씬 카드 호버 시) */
+@keyframes bf-particle {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.4); }
+  20% { opacity: 1; }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx, 0), var(--dy, 0)) scale(0.6);
+  }
+}
+
+.bf-particle {
+  position: absolute;
+  width: 4px; height: 4px;
+  border-radius: 999px;
+  background: radial-gradient(circle, white, rgb(var(--color-accent)) 60%, transparent 100%);
+  box-shadow: 0 0 8px 2px rgb(var(--color-accent) / 0.6);
+  pointer-events: none;
+  opacity: 0;
+  animation: bf-particle 1.4s ease-out infinite;
+}
+
+/* 플레이헤드 깜박임 */
+@keyframes bf-playhead-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.4; }
+}
+
+/* 스크롤바 (테마 토큰) */
+.bf-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-bg-border) / 0.6) transparent;
+}
+.bf-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.bf-scroll::-webkit-scrollbar-track { background: transparent; }
+.bf-scroll::-webkit-scrollbar-thumb {
+  background: rgb(var(--color-bg-border) / 0.5);
+  border-radius: 999px;
+}
+.bf-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--color-accent) / 0.5);
+}
+
+/* 텍스트 셀렉트 방지 (B flow 본 앱 패턴) */
+.bf-dash, .bf-dash * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.bf-dash input,
+.bf-dash textarea,
+.bf-dash [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* 모션 감소 설정 존중 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

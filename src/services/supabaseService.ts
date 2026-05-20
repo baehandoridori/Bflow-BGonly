@@ -3,7 +3,11 @@
  * window.electronAPI → IPC → 메인 프로세스
  */
 
-import type { Episode, Stage, ScenePhaseState, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult, Activity, ActionGroup } from '../types';
+import type {
+  Episode, Stage, ScenePhaseState, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult,
+  Activity, ActionGroup,
+  CompositingState, CompositingStatus, CompositingErrorKind,
+} from '../types';
 
 // 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
 export type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult };
@@ -679,6 +683,62 @@ export async function getActivityStorageInfo(): Promise<{ count: number; sizeMB:
 
 export function subscribeToActivityRealtime(cb: (activity: Activity) => void): () => void {
   return window.electronAPI.onActivityRealtimeInsert((row: any) => cb(rowToActivity(row)));
+}
+
+// ─── v1.30.0: 컴포지팅 단계 상태 ────────────────
+// spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
+
+/** DB row(snake_case) → 도메인 객체(camelCase) */
+function rowToCompositingState(row: any): CompositingState {
+  return {
+    id: row.id,
+    episodeNumber: row.episode_number,
+    sceneId: row.scene_id,
+    partId: row.part_id,
+    status: row.status as CompositingStatus,
+    errorKind: row.error_kind as CompositingErrorKind | null,
+    errorNote: row.error_note ?? null,
+    progressPercent: row.progress_percent ?? 0,
+    updatedAt: row.updated_at,
+    updatedBy: row.updated_by ?? null,
+  };
+}
+
+/** 한 에피소드의 모든 컴포지팅 상태 row 로드. row 없는 씬은 caller 가 'batch' 디폴트로 처리. */
+export async function loadCompositingStates(episodeNumber: number): Promise<CompositingState[]> {
+  const rows = await window.electronAPI.supabaseLoadCompositingStates(episodeNumber);
+  return (rows ?? []).map(rowToCompositingState);
+}
+
+/** UPSERT — (episodeNumber, sceneId) 가 유니크. row 없으면 INSERT, 있으면 UPDATE. */
+export async function setCompositingState(input: {
+  episodeNumber: number;
+  sceneId: string;
+  partId: string;
+  status: CompositingStatus;
+  errorKind?: CompositingErrorKind | null;
+  errorNote?: string | null;
+  progressPercent?: number;
+  updatedBy: string;
+}): Promise<CompositingState> {
+  const row = await window.electronAPI.supabaseSetCompositingState(input);
+  return rowToCompositingState(row);
+}
+
+/**
+ * 실시간 구독 — 다른 사용자/창의 변경을 받음.
+ * 반환값은 cleanup 함수 (호출하면 구독 해제).
+ *
+ * @param onChange — eventType: 'INSERT' | 'UPDATE' | 'DELETE'
+ */
+export function subscribeCompositingStatesRealtime(
+  onChange: (state: CompositingState, eventType: 'INSERT' | 'UPDATE' | 'DELETE') => void
+): () => void {
+  return window.electronAPI.onCompositingStatesRealtime((payload: any) => {
+    const eventType = payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE';
+    const row = payload.row ?? payload.old;
+    if (row) onChange(rowToCompositingState(row), eventType);
+  });
 }
 
 export async function readAllMemos(userId: string) {

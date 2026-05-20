@@ -534,4 +534,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('vacation:pending-changed', listener);
     return () => ipcRenderer.removeListener('vacation:pending-changed', listener);
   },
+
+  // ─── v1.30.0: 컴포지팅 단계 상태 ───
+  // spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
+  supabaseLoadCompositingStates: (episodeNumber: number) =>
+    ipcRenderer.invoke('supabase:load-compositing-states', episodeNumber),
+  supabaseSetCompositingState: (input: {
+    episodeNumber: number;
+    sceneId: string;
+    partId: string;
+    status: 'batch' | 'combine' | 'aggregated' | 'adjust' | 'error' | 'done';
+    errorKind?: 'missing_file' | 'fix_blemish' | 'retake' | 'canceled_scene' | 'other' | null;
+    errorNote?: string | null;
+    progressPercent?: number;
+    updatedBy: string;
+  }) => ipcRenderer.invoke('supabase:set-compositing-state', input),
+  onCompositingStatesRealtime: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+    ipcRenderer.on('compositing-states:realtime', listener);
+    return () => ipcRenderer.removeListener('compositing-states:realtime', listener);
+  },
 });

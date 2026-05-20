@@ -89,6 +89,49 @@ export const SCENE_PHASE_COLORS: Record<ScenePhaseState, string> = {
 export const SCENE_PHASE_ROUND_MIN = 1;
 export const SCENE_PHASE_ROUND_MAX = 99;
 
+// ─── 컴포지팅 단계 상태 (v1.30.0~) ──────────
+// 씬 단위 1 row. BG/ACT 시트와 무관 — (episode_number, scene_id) 키로 식별.
+// spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
+
+/** 컴포지팅 6 단계 */
+export type CompositingStatus =
+  | 'batch'       // 배치 (회색) — 작업 대기
+  | 'combine'     // 취합중 (파랑) — 합치는 중
+  | 'aggregated'  // 취합 완료 (보라/액센트) — 모든 소스 모음
+  | 'adjust'      // 보정 중 (노랑) — 컬러/디테일 보정
+  | 'error'       // 오류 (주황) — 막힘
+  | 'done';       // 완료 (초록)
+
+export const COMPOSITING_STATUSES: CompositingStatus[] = [
+  'batch', 'combine', 'aggregated', 'adjust', 'error', 'done',
+];
+
+/** 오류 세부 사유 — 5 종 + 기타 (자유 입력) */
+export type CompositingErrorKind =
+  | 'missing_file'    // 파일 미싱
+  | 'fix_blemish'     // 옥에티 수정
+  | 'retake'          // 리테이크
+  | 'canceled_scene'  // 취소된 씬
+  | 'other';          // 기타 (errorNote 자유 입력)
+
+export const COMPOSITING_ERROR_KINDS: CompositingErrorKind[] = [
+  'missing_file', 'fix_blemish', 'retake', 'canceled_scene', 'other',
+];
+
+/** 한 씬의 컴포지팅 상태. compositing_states 테이블 1 row 와 매핑. */
+export interface CompositingState {
+  id: string;                               // UUID (Supabase)
+  episodeNumber: number;                    // 1, 2, 3, ...
+  sceneId: string;                          // 'a001', 'b012', ...
+  partId: string;                           // 'A' | 'B' | 'C' | 'D'
+  status: CompositingStatus;
+  errorKind: CompositingErrorKind | null;   // status='error' 일 때만 의미
+  errorNote: string | null;                 // errorKind='other' 자유 입력 (max ~100자)
+  progressPercent: number;                  // 0~100. 'combine'/'adjust' 에서 옵션 표시용 (MVP 는 단계만)
+  updatedAt: string;                        // ISO 8601
+  updatedBy: string | null;                 // app_users.id
+}
+
 // ─── 씬 ──────────────────────────────────────
 
 export interface Scene {
@@ -128,6 +171,14 @@ export interface Scene {
   workRound?: number;
   /** 피드백 대기 라운드 번호 (1~99). state !== 'feedback' 일 때 0 또는 마지막 값 유지 */
   feedbackRound?: number;
+  /**
+   * v1.30.0~: 씬 길이 (24fps 기준 프레임 단위, 정수).
+   * 컴포지팅 대시보드의 AE 타임라인 패널이 진짜 시간축으로 작동하려면 필요.
+   * MVP 에는 입력 UI 없음 — 데이터 비어있으면 AE 패널은 "씬 인덱스" fallback.
+   * 후속 spec: docs/superpowers/specs/2026-05-21-premiere-clip-length-import-design.md
+   * (프리미어 V1 트랙 파싱 → 자동 추출 + 수동 수정)
+   */
+  durationFrames?: number | null;
 }
 
 // ─── 통합 씬 (BG + ACT 머지) ─────────────────
@@ -1007,6 +1058,25 @@ export interface ElectronAPI {
   gcalUpdateEvent: (calendarId: string, eventId: string, input: unknown) => Promise<void>;
   gcalDeleteEvent: (calendarId: string, eventId: string) => Promise<void>;
   gcalEnsureWatch: (calendarId: string, userId: string) => Promise<void>;
+
+  // ─── v1.30.0: 컴포지팅 단계 상태 ────────────────
+  // spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
+  supabaseLoadCompositingStates: (episodeNumber: number) => Promise<any[]>;
+  supabaseSetCompositingState: (input: {
+    episodeNumber: number;
+    sceneId: string;
+    partId: string;
+    status: CompositingStatus;
+    errorKind?: CompositingErrorKind | null;
+    errorNote?: string | null;
+    progressPercent?: number;
+    updatedBy: string;
+  }) => Promise<any>;
+  onCompositingStatesRealtime: (cb: (payload: {
+    eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+    row: any | null;
+    old: any | null;
+  }) => void) => () => void;
 }
 
 declare global {
