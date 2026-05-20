@@ -12,7 +12,7 @@
 |---|---|
 | 알림 대상 | **댓글 작성자만**. 같은 댓글에 반응한 다른 사람들에게는 알림 X. |
 | 자기 반응 | 자기 댓글에 자기가 이모지 달면 → 알림·활동로그 모두 미생성 |
-| 알림 묶기 | `(받는 사람, 댓글, 보낸 사람)` UNIQUE → UPSERT 누적. 새 이모지 추가 시 `read_at=null` 리셋 |
+| 알림 묶기 | `(받는 사람, 댓글, 보낸 사람)` UNIQUE → UPSERT 누적. 새 이모지 **추가 시에만** `read_at=null` 리셋(이미 본 알림도 다시 안 읽음 상태로). 이모지 **제거 시에는** `read_at` 유지 |
 | 알림 시각 강도 | 기존 `comment` 톤(차분, 회색 아이콘) 재사용. mention/feedback 강조 톤 X |
 | 이모지 취소 동작 | "조용히 사라지기" — 알림 보관함의 emojis 배열에서 제거 + count 차감 + 0 이 되면 행 자체 DELETE. 활동 로그도 해당 행 DELETE |
 | 활동 로그 actionType | `'comment_reaction'` 신설 |
@@ -41,9 +41,10 @@ CREATE TABLE IF NOT EXISTS comment_reaction_notifications (
   part_id         TEXT,
   dept            TEXT,                                    -- 'bg' | 'act'
   -- 누적 데이터
-  emojis          JSONB       NOT NULL DEFAULT '[]'::jsonb,  -- ["❤️","🔥","👏"] 누적 배열
+  emojis          JSONB       NOT NULL DEFAULT '[]'::jsonb,  -- ["❤️","🔥","👏"] 누적 배열 (삽입 순서 보존)
   reaction_count  SMALLINT    NOT NULL DEFAULT 0,
-  last_emoji      TEXT,                                    -- 마지막 추가된 이모지 (UI 아이콘용)
+  -- NOTE: last_emoji 는 별도 컬럼으로 두지 않음 — `emojis[length-1]` 로 application 측에서 derive.
+  --       race-free + WITH ORDINALITY 의존성 제거. UI 아이콘은 derived getter 사용.
   last_action_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   read_at         TIMESTAMPTZ,                             -- null = 미읽음
@@ -67,7 +68,15 @@ BEGIN
 END $$;
 ```
 
-**주의**: `comment_id`는 `scene_comments.id` 또는 `revision_comments.id` 둘 다 받을 수 있음(이모지 반응 자체가 두 종류 댓글 모두 지원). FK 제약 대신 application-level 참조만 유지(기존 `comment_reactions` 테이블도 FK 없는 텍스트 컬럼). 댓글 삭제 시 cascade는 `removeCommentReaction` 흐름과 별개로 작성자 측에서 cleanup 호출.
+**주의**: `comment_id`는 `scene_comments.id` 또는 `revision_comments.id` 둘 다 받을 수 있음(이모지 반응 자체가 두 종류 댓글 모두 지원). FK 제약 대신 application-level 참조만 유지(기존 `comment_reactions` 테이블도 FK 없는 텍스트 컬럼).
+
+**Cleanup 경로** (댓글 삭제 시):
+- `deleteSceneComment(commentId)` / `deleteRevisionComment(commentId)` 흐름에서 다음 두 호출 추가:
+  - `DELETE FROM comment_reactions WHERE comment_id = :commentId` (기존)
+  - `DELETE FROM comment_reaction_notifications WHERE comment_id = :commentId` (신규)
+  - `DELETE FROM activities WHERE action_type='comment_reaction' AND detail->>'commentId' = :commentId` (신규)
+- 위 cleanup 은 동일 트랜잭션 내에서 실행 → 댓글 삭제와 cascade 일관성 보장
+- broadcast: 각 영향 받은 사용자에게 `comment-reaction-notification-removed`(bulk) + `activity-removed`(bulk) 디스패치
 
 ### 활동 로그 (`activities`) 확장
 
@@ -115,16 +124,16 @@ export interface CommentReactionNotification {
   recipientId: string;
   actorId: string;
   actorName: string;
-  commentId: string;
-  emojis: string[];        // 누적
+  // commentId 는 metadata 안에만 단일 보관 (점프 핸들러가 metadata 만 읽음)
+  emojis: string[];          // 누적 (삽입 순서 보존)
   reactionCount: number;
-  lastEmoji: string;
+  // lastEmoji 는 derived: `emojis.at(-1) ?? null`. 클라이언트 헬퍼로 계산, 별도 필드 X.
   metadata: {
     sceneId?: string;
     episodeNumber?: number;
     partId?: string;
     dept?: 'bg' | 'act';
-    commentId: string;     // navigateToScene 점프용
+    commentId: string;       // navigateToScene 점프 + cleanup join 용 (단일 진실 위치)
   };
   createdAt: string;
   lastActionAt: string;
@@ -142,7 +151,7 @@ export interface CommentReactionNotification {
 | B: A가 1분 안에 ❤️🔥👏 | 알림 1줄(누적 "❤️🔥👏" 표시). 최근 작업 3줄(같은 5분/같은 씬이라 "이모지 반응 · 3건" 묶음 헤더로 자동 접힘) |
 | C: A가 ❤️🔥 두 개 달았다가 ❤️ 떼면 | 알림 "🔥 1건"으로 축소(미읽음 리셋 안 함). 최근 작업의 ❤️ 줄 1개 삭제 → 묶음 헤더 "이모지 반응 · 1건"으로 자동 조정 |
 | C-end: A가 마지막 이모지까지 다 떼면 | 알림 행 자체 DELETE. 최근 작업 줄 모두 삭제 |
-| D: 본인 댓글에 본인이 이모지 | 알림·활동로그 모두 미생성 |
+| D: 본인 댓글에 본인이 이모지 | **알림 미생성**, **활동 로그는 기록**(다른 사용자가 보는 최근 작업 위젯엔 정상 표시) |
 | E: 오프라인 사이 받은 반응 | 다음 실행 시 catch-up이 자동으로 불러와서 알림 패널에 누적 |
 | F: 알림 클릭 | 씬 상세 모달 열기 + 우측 댓글 패널 자동 펼침 + 해당 댓글 위치로 스크롤 + 1.6초 강조(`targetPulse`) |
 
@@ -158,21 +167,37 @@ export interface CommentReactionNotification {
 [Main] addCommentReaction(commentId, emoji, userId, userName)
   ↓
 supabase: comment_reactions INSERT
-  ↓ (성공, UNIQUE 충돌 무시 카운트 0 → 무시 분기 X)
+  ↓ (행이 실제로 추가된 경우만 다음 단계 — UNIQUE 충돌로 무시되면 분기 종료)
 supabase: scene_comments 또는 revision_comments 에서 author_id, scene 정보 조회
-  ↓ (author_id !== userId)
-supabase: comment_reaction_notifications UPSERT
+  - 댓글 ID로 두 테이블 차례 조회(또는 UNION) — 어느 한쪽에 존재
+  - 미존재면(고아 reaction) early return + WARN log
+  ↓
+[자기 자신 분기]
+  - author_id === userId 면: 알림 행 생성 X, 활동 로그 INSERT 만 수행
+  - author_id !== userId 면: 아래 둘 다 수행
+  ↓
+supabase: comment_reaction_notifications UPSERT (author_id !== userId 일 때만)
+  INSERT INTO comment_reaction_notifications
+    (recipient_id, comment_id, actor_id, actor_name,
+     scene_id, episode_number, part_id, dept,
+     emojis, reaction_count, last_action_at, read_at, created_at)
+  VALUES
+    (:author, :commentId, :userId, :userName,
+     :sceneId, :episode, :partId, :dept,
+     jsonb_build_array(:emoji), 1, now(), NULL, now())
   ON CONFLICT (recipient_id, comment_id, actor_id) DO UPDATE
-  SET emojis = emojis || to_jsonb(:emoji),
-      reaction_count = reaction_count + 1,
-      last_emoji = :emoji,
+  SET emojis         = comment_reaction_notifications.emojis || jsonb_build_array(:emoji),
+      reaction_count = comment_reaction_notifications.reaction_count + 1,
       last_action_at = now(),
-      read_at = NULL
+      read_at        = NULL
+  RETURNING *
+  -- emojis 는 삽입 순서로 누적. last_emoji 컬럼 없음 → application 측에서 emojis.at(-1) 사용.
   ↓
 supabase: activities INSERT { actionType='comment_reaction', detail={commentId, emoji, commentAuthorId, commentPreview} }
+  -- 자기 자신이어도 이 INSERT 는 수행 (다른 사용자가 보는 최근 작업 위젯에 표시)
   ↓
 broadcast('comment-reaction-changed', {commentId})         -- 기존 (이모지 칩 갱신용)
-broadcast('comment-reaction-notification', {notification}) -- 신규 (알림 패널용)
+broadcast('comment-reaction-notification', {notification}) -- 신규, 자기 자신이면 emit X (수신측 필터링 외 송신 단계에서도 skip)
 broadcast('activity-added', {activity})                    -- 기존 (최근 작업 위젯용)
 ```
 
@@ -183,24 +208,56 @@ broadcast('activity-added', {activity})                    -- 기존 (최근 작
   ↓ IPC
 [Main] removeCommentReaction(commentId, emoji, userId)
   ↓
-supabase: comment_reactions DELETE WHERE comment_id=:c AND user_id=:u AND emoji=:e
-  ↓ (DELETE 된 행이 있을 때만)
+supabase: comment_reactions DELETE WHERE comment_id=:c AND user_id=:u AND emoji=:e RETURNING *
+  ↓ (DELETE 된 행이 있을 때만 다음 단계 — 0행이면 분기 종료)
 supabase: scene_comments 또는 revision_comments 에서 author_id 조회
-  ↓ (author_id !== userId)
-supabase: comment_reaction_notifications 조회 (recipient=author, comment=c, actor=u)
-  - emojis 배열에서 해당 이모지 1개 제거 (last occurrence)
-  - reaction_count -= 1
-  - count 가 0 이 되면 → DELETE 행 자체
-  - 아니면 → UPDATE (last_emoji 는 남은 배열의 마지막 원소로 갱신)
-  - read_at 은 건드리지 않음 (이미 본 알림이면 본 상태 유지)
-supabase: activities DELETE
-  WHERE user_id=:u AND action_type='comment_reaction'
-    AND detail->>'commentId'=:c AND detail->>'emoji'=:e
-  ORDER BY created_at DESC LIMIT 1  -- 가장 최근 1행만
+  ↓ (author_id !== userId 일 때만 알림 행 처리. 자기 자신이면 알림 분기 건너뛰고 활동로그 DELETE 만)
+supabase: comment_reaction_notifications 업데이트 (recipient=author, comment=c, actor=u)
+  -- PostgreSQL expression 으로 race-free 제거. WITH ORDINALITY 로 삽입 순서 보존.
+  -- UNIQUE(comment_id, user_id, emoji) 제약상 emojis 배열에 같은 이모지 중복 없음 → 1개만 매치.
+  WITH updated AS (
+    UPDATE comment_reaction_notifications
+    SET emojis = COALESCE(
+                   (SELECT jsonb_agg(e ORDER BY ord)
+                    FROM jsonb_array_elements_text(emojis) WITH ORDINALITY AS t(e, ord)
+                    WHERE e <> :emoji),
+                   '[]'::jsonb
+                 ),
+        reaction_count = GREATEST(reaction_count - 1, 0)
+        -- read_at, last_action_at, created_at 은 의도적으로 건드리지 않음
+    WHERE recipient_id=:author AND comment_id=:c AND actor_id=:u
+    RETURNING id, reaction_count
+  )
+  DELETE FROM comment_reaction_notifications
+  WHERE id IN (SELECT id FROM updated WHERE reaction_count = 0)
+  RETURNING id AS deleted_id;
+  -- 결과:
+  --   deleted_id 가 반환되면 → 행 자체 삭제 (broadcast: deleted=true)
+  --   updated 행 있고 deleted_id 없으면 → emojis 만 축소 (broadcast: deleted=false, notificationId=updated.id)
+  --   updated 행도 없으면(원래 행 없음) → broadcast emit X
+  -- last_emoji 는 사용 측에서 emojis[emojis.length-1] 로 derive (서버 별도 컬럼 X)
+supabase: activities DELETE — 가장 최근 1행만 (자기 자신이어도 수행)
+  WITH target AS (
+    SELECT id FROM activities
+    WHERE user_id=:u AND action_type='comment_reaction'
+      AND detail->>'commentId'=:c AND detail->>'emoji'=:e
+    ORDER BY created_at DESC LIMIT 1
+  )
+  DELETE FROM activities WHERE id IN (SELECT id FROM target)
+  RETURNING id
   ↓
 broadcast('comment-reaction-changed', {commentId})                         -- 기존
-broadcast('comment-reaction-notification-removed', {recipient, comment, actor, emoji, deletedRow?}) -- 신규
-broadcast('activity-removed', {activityId})                                -- 신규
+broadcast('comment-reaction-notification-removed', payload)                -- 신규, author_id !== userId 일 때만
+  -- payload 형태 (수신측이 분기할 수 있도록 모든 식별자 포함):
+  --   {
+  --     recipientId: string,    -- 수신측 본인 필터링용 (currentUserId 비교)
+  --     notificationId: string, -- 위 SQL 의 RETURNING id (UPDATE 케이스) 또는 deleted_id (DELETE 케이스)
+  --     deleted: boolean,       -- true 면 행 자체 삭제됨, false 면 emojis 만 축소됨
+  --     emoji: string,          -- 어떤 이모지가 제거됐는지 (UI 강조용)
+  --     commentId: string,      -- (옵션) 디버그/추적용
+  --     actorId: string         -- (옵션) 디버그/추적용
+  --   }
+broadcast('activity-removed', {activityId})                                -- 신규, RETURNING id 받은 경우만
 ```
 
 ### Catch-up (앱 시작)
@@ -223,13 +280,23 @@ broadcast.on('comment-reaction-notification', payload):
   showToastIfPanelClosed(payload);                          -- 패널 닫혀있으면 토스트
 
 broadcast.on('comment-reaction-notification-removed', payload):
-  if (payload.recipient !== currentUserId) return;
-  if (payload.deletedRow) notificationStore.removeById(payload.deletedRow.id);
-  else notificationStore.refetchOne(payload.notificationId);
+  if (payload.recipientId !== currentUserId) return;
+  if (payload.deleted) {
+    notificationStore.removeById(payload.notificationId);   -- store 에 없어도 no-op
+  } else {
+    notificationStore.refetchOne(payload.notificationId);   -- emojis 축소 반영
+      -- refetchOne 결과 404(이미 삭제) 면 removeById no-op 으로 fallback
+  }
 
 broadcast.on('activity-removed', payload):
-  activityStore.removeById(payload.activityId);             -- 신규 store action
+  activityStore.removeById(payload.activityId);             -- 신규 store action, missing ID 면 no-op
 ```
+
+### 읽음 처리 (`read_at` 갱신)
+
+- **알림 클릭 시**: 점프 직전 `markCommentReactionRead(notificationId)` 호출 → `UPDATE comment_reaction_notifications SET read_at = now() WHERE id = :id AND read_at IS NULL` → broadcast 없이 store만 갱신
+- **알림 패널 열림 + 화면에 1초 이상 보임**: 기존 `acting_feedback`·`scene_assignment`과 동일한 in-view 자동 read 패턴(기존 NotificationPanel에 `useInViewMarkRead` 훅 있음). 새 type 도 동일 훅 재사용
+- **"모두 읽음" 버튼**: `markAllCommentReactionsRead(userId)` IPC → `UPDATE ... WHERE recipient_id = :uid AND read_at IS NULL` → store 일괄 갱신
 
 ### 씬 점프
 
@@ -283,7 +350,7 @@ SceneDetailModal.tsx:
 
 ### `src/components/notifications/NotificationPanel.tsx`
 - `type='comment_reaction'` 분기 추가
-- 아이콘: `last_emoji` 자체를 작게 표시 (대체: 회색 💬 + 이모지 오버레이)
+- 아이콘: derived `lastEmoji` (= `emojis.at(-1) ?? '💬'`) 를 작게 표시 (대체: 회색 💬 + 이모지 오버레이)
 - 좌측 색깔 바: 없음 (차분 톤, `comment`와 동일)
 - 텍스트 포맷: `{actor_name}가 회원님 댓글에 {emojis 5개 + truncate} 반응을 남겼어요`
 - 시간 표시: `last_action_at` 상대 시간 ("3분 전")
@@ -374,7 +441,10 @@ SceneDetailModal.tsx:
    - 테이블 생성 + 인덱스 + Realtime publication
    - 멱등성 보장(`IF NOT EXISTS`, DO 블록)
 2. 코드 배포 (자동 업데이트)
-3. 기존 사용자: catch-up이 첫 실행에서 빈 결과 → 정상 (`lastSeenCommentReactionAt` 미설정 시 now()로 초기화)
+3. 기존 사용자 첫 실행: `lastSeenCommentReactionAt` 미설정 시 **앱 실행 시각(now)** 으로 초기화
+   - **의도**: 업데이트 전 이미 존재하던 반응 알림을 무더기로 retroactive 표시하지 않기 위함. 업데이트 이후의 새 반응부터 알림으로 인지.
+   - 사이드 이펙트 없음(이전 데이터 없음 — 본 마이그레이션이 첫 도입).
+4. 동시 삭제 멱등성: 두 PC 가 마지막 이모지를 동시에 떼서 양쪽 모두 DELETE 시도 → 두 번째 DELETE 는 0행 RETURNING, broadcast 도 emit X (조건: `if (deletedId) broadcast(...)`). 수신측은 첫 broadcast로 이미 store 제거 완료.
 
 ### 롤백
 - 코드 롤백 → 신규 broadcast 채널은 무시됨
