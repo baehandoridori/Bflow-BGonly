@@ -951,8 +951,11 @@ export default function App() {
           if (rows.length === 0) break;
           all.push(...rows as AppNotification[]);
           if (rows.length < PAGE_SIZE) break;
-          // 결과는 last_action_at desc 정렬 → 다음 페이지 cursor 는 가장 오래된(=마지막) row 의 lastActionAt.
-          before = rows[rows.length - 1].createdAt;  // serializeReactionNotification 에서 createdAt = last_action_at
+          // 코덱스 14차 P2: 단일 timestamp cursor 가 아니라 (last_action_at, id) composite 사용.
+          //   같은 last_action_at 행이 page 경계에 걸쳐 영구 누락되는 문제 차단.
+          //   serializeReactionNotification 에서 createdAt = last_action_at.
+          const lastRow = rows[rows.length - 1];
+          before = `${lastRow.createdAt}|${lastRow.id}`;
           if (all.length >= SAFE_CAP) {
             console.warn('[reaction-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
             cappedOut = true;
@@ -974,6 +977,9 @@ export default function App() {
         }
       } catch (err) {
         console.warn('[reaction-catchup] 실패:', err);
+        // 코덱스 14차 P2: 실패 시 done flag 클리어 → 같은 세션 안에서 다음 effect run 또는 currentUser
+        //   재마운트 시 재시도 가능. 그대로 두면 startup 네트워크 hiccup 한 번에 세션 내내 catch-up 영구 차단.
+        reactionCatchupDoneRef.current = null;
       }
     })();
   }, [currentUser, authReady]);

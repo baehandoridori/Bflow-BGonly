@@ -2765,7 +2765,8 @@ export async function removeCommentReaction(
 export interface FetchCommentReactionsArgs {
   recipientId: string;
   since?: string;       // last_action_at > since (오래된 한계)
-  before?: string;      // last_action_at < before (cursor — 코덱스 8차 P1)
+  /** cursor — 형식: "<last_action_at>|<id>". 같은 timestamp 행의 page 경계 누락 방지 (코덱스 14차 P2). */
+  before?: string;
   limit?: number;
   ids?: string[];       // 단일/일부 refetch
 }
@@ -2778,15 +2779,24 @@ export async function fetchCommentReactionNotifications(
     .select('*')
     .eq('recipient_id', args.recipientId)
     .order('last_action_at', { ascending: false })
+    .order('id', { ascending: false })  // tie-breaker: 같은 last_action_at 행도 결정적 정렬
     .limit(limit);
 
   if (args.ids?.length) {
     query = query.in('id', args.ids);
   } else {
-    // 코덱스 8차 P1: offset 페이지네이션은 페이지 사이 행 추가/삭제 시 누락/중복 발생.
-    //   feedback/assignment catch-up 과 동일하게 cursor (before) seek 방식으로 안정 페이징.
     if (args.since) query = query.gt('last_action_at', args.since);
-    if (args.before) query = query.lt('last_action_at', args.before);
+    if (args.before) {
+      // 코덱스 14차 P2: timestamp-only cursor 는 같은 last_action_at 의 행을 page 경계에서 누락 가능.
+      //   "<last_action_at>|<id>" composite cursor 로 (lastAction < T) OR (lastAction = T AND id < I).
+      const [bAt, bId] = args.before.split('|');
+      if (bAt && bId) {
+        query = query.or(`last_action_at.lt.${bAt},and(last_action_at.eq.${bAt},id.lt.${bId})`);
+      } else if (bAt) {
+        // 폴백 (구버전 호출처) — 단일 timestamp cursor
+        query = query.lt('last_action_at', bAt);
+      }
+    }
   }
 
   const { data, error } = await query;
