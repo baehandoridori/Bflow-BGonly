@@ -1416,9 +1416,14 @@ export async function deleteComment(commentId: string): Promise<void> {
   // v1.29.0: 이모지 반응·반응 알림·반응 활동 로그 cleanup (best-effort 순차 — 단일 트랜잭션 미지원).
   //   실패 한 단계가 다음을 막지 않음. orphan 데이터는 추후 cleanup job 으로 처리.
   try {
-    await supabase.from('comment_reactions').delete().eq('comment_id', commentId);
+    // 코덱스 9차 P2: supabase-js mutation 은 error 를 throw 하지 않고 객체로 반환 →
+    //   try/catch 만으로는 부분 실패를 잡지 못해 orphan reaction row 남을 수 있음.
+    const { error: rxnDelErr } = await supabase.from('comment_reactions').delete().eq('comment_id', commentId);
+    if (rxnDelErr) {
+      console.warn('[deleteComment] comment_reactions cleanup 에러:', rxnDelErr.message);
+    }
   } catch (e) {
-    console.warn('[deleteComment] comment_reactions cleanup 실패:', e);
+    console.warn('[deleteComment] comment_reactions cleanup 예외:', e);
   }
   try {
     // 코덱스 1차 P1: 영향 받은 알림 행 id 들을 먼저 SELECT → DELETE → 각 행마다
