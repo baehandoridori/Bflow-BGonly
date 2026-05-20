@@ -85,3 +85,30 @@ export function ensureAssignmentLastSeenInitialized(userId: string): void {
     setAssignmentLastSeenAt(userId, new Date().toISOString());
   }
 }
+
+// ─── v1.29.0: 댓글 이모지 반응 catch-up 전용 별도 키 ───────
+//   다른 알림 도메인과 격리. 새 알림이라 첫 도입 시 lastSeen=now() 로 초기화 →
+//   업데이트 이전의 누적 데이터는 표시하지 않음 (의도).
+
+const REACTION_KEY_PREFIX = 'bflow_comment_reaction_last_seen_';
+
+export function getCommentReactionLastSeenAt(userId: string): string | null {
+  try {
+    const v = localStorage.getItem(REACTION_KEY_PREFIX + userId);
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setCommentReactionLastSeenAt(userId: string, isoString: string): void {
+  try {
+    localStorage.setItem(REACTION_KEY_PREFIX + userId, isoString);
+  } catch { /* 무시 */ }
+}
+
+export function ensureCommentReactionLastSeenInitialized(userId: string): void {
+  if (!getCommentReactionLastSeenAt(userId)) {
+    setCommentReactionLastSeenAt(userId, new Date().toISOString());
+  }
+}

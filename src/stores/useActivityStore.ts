@@ -45,6 +45,8 @@ interface ActivityState {
   loadStats(): Promise<void>;
   backfillSince(): Promise<void>;
   receiveRealtime(activity: Activity): void;
+  // v1.29.0: 이모지 반응 취소 시 활동 로그 단일 행 삭제 (broadcast 'activity-removed' 처리)
+  removeById(activityId: string): void;
   setFilter(group: ActionGroup, on: boolean): void;
   setAllFilters(on: boolean): void;
   setGoldenMode(mode: GoldenMode): void;
@@ -342,6 +344,17 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
           ? incrementGrid(s.statsGrid, activity.createdAt, activity.actionGroup, s.timeUnit)
           : s.statsGrid,
       };
+    });
+  },
+
+  // v1.29.0: 이모지 반응 취소 시 활동 로그 단일 행 삭제.
+  //   missing-ID 면 no-op (race fallback). statsGrid 는 다음 loadStats 라운드에서
+  //   자연 정합화하도록 즉시 차감하지 않음 (incrementGrid 의 대칭 decrement 함수 신설 비용 대비
+  //   stats 가 30초 주기로 자동 갱신되는 점 고려).
+  removeById(activityId) {
+    set((s) => {
+      if (!s.activities.some((a) => a.id === activityId)) return s;
+      return { activities: s.activities.filter((a) => a.id !== activityId) };
     });
   },
 

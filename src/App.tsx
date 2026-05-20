@@ -33,7 +33,8 @@ import { loadVacationConfig, connectVacation } from '@/services/vacationService'
 import { loadLayout, loadPreferences, savePreferences, loadTheme, saveTheme } from '@/services/settingsService';
 import { semverGt } from '@/utils/semver';
 import { loadSession, loadUsers, setUsersSheetsMode, migrateUsersToSheets } from '@/services/userService';
-import { setFeedbackLastSeenAt, setAssignmentLastSeenAt } from '@/utils/lastSeenTracker';
+import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastSeenAt, setCommentReactionLastSeenAt } from '@/utils/lastSeenTracker';
+import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
 import { WelcomeToast } from '@/components/WelcomeToast';
@@ -44,7 +45,7 @@ import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
 import { SvgIconDefs } from '@/components/SvgIconDefs';
-import { useNotificationStore } from '@/stores/useNotificationStore';
+import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
 import {
@@ -897,6 +898,90 @@ export default function App() {
         }
       } catch (err) {
         console.warn('[assignment-catchup] 실패:', err);
+      }
+    })();
+  }, [currentUser, authReady]);
+
+  // v1.29.0: 댓글 이모지 반응 알림 catch-up — 미접속 사이 받은 반응 알림 일괄 조회.
+  //   acting_feedback / scene_assignment 와 동일 패턴 (별도 lastSeen + 페이지네이션 + logout 시 ref clear).
+  const reactionCatchupDoneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser) {
+      reactionCatchupDoneRef.current = null;
+      return;
+    }
+    if (!authReady) return;
+    if (reactionCatchupDoneRef.current === currentUser.id) return;
+
+    reactionCatchupDoneRef.current = currentUser.id;
+    const me = currentUser;
+
+    (async () => {
+      const {
+        getCommentReactionLastSeenAt,
+        setCommentReactionLastSeenAt,
+        ensureCommentReactionLastSeenInitialized,
+      } = await import('@/utils/lastSeenTracker');
+      const lastSeen = getCommentReactionLastSeenAt(me.id);
+      if (!lastSeen) {
+        ensureCommentReactionLastSeenInitialized(me.id);
+        console.log('[reaction-catchup] 첫 로그인 — last_seen 초기화만');
+        return;
+      }
+      try {
+        const { fetchCommentReactionNotifications } = await import('@/services/supabaseService');
+        const PAGE_SIZE = 100;
+        const SAFE_CAP = 1000;
+        const all: AppNotification[] = [];
+        let before: string | undefined = undefined;
+        let cappedOut = false;
+        // 코덱스 12차 P1: fetch 진입 직전 시각을 기록 → catch-up 진행 중 realtime 으로
+        //   들어온 신규 알림을 stale 로 오판하지 않게 purge 의 상한선으로 사용.
+        const fetchStartedAt = new Date().toISOString();
+        // 코덱스 8차 P1: offset 페이지네이션 대신 cursor (before=last_action_at) seek.
+        //   페이지 사이 row 추가/삭제로 인한 누락·중복 차단. feedback/assignment catch-up 과 동일.
+        while (true) {
+          const batch = await fetchCommentReactionNotifications({
+            recipientId: me.id,
+            since: lastSeen,
+            before,
+            limit: PAGE_SIZE,
+          });
+          const rows = batch?.data ?? [];
+          if (rows.length === 0) break;
+          all.push(...rows as AppNotification[]);
+          if (rows.length < PAGE_SIZE) break;
+          // 코덱스 14차 P2: 단일 timestamp cursor 가 아니라 (last_action_at, id) composite 사용.
+          //   같은 last_action_at 행이 page 경계에 걸쳐 영구 누락되는 문제 차단.
+          //   serializeReactionNotification 에서 createdAt = last_action_at.
+          const lastRow = rows[rows.length - 1];
+          before = `${lastRow.createdAt}|${lastRow.id}`;
+          if (all.length >= SAFE_CAP) {
+            console.warn('[reaction-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
+            cappedOut = true;
+            break;
+          }
+        }
+        console.log('[reaction-catchup] 조회 결과', { count: all.length, cappedOut });
+        // 코덱스 13차 P1: fetch 가 throw 하면 아래 catch 로 빠져 lastSeen 갱신 안 함 (재시도 시 같은 since 유지).
+        if (all.length === 0) {
+          // 빈 fetch 라도 since~fetchStartedAt 구간의 stale 알림 정리 트리거.
+          useNotificationStore.getState().appendCatchupCommentReactions([], lastSeen, fetchStartedAt);
+          setCommentReactionLastSeenAt(me.id, new Date().toISOString());
+          return;
+        }
+        useNotificationStore.getState().appendCatchupCommentReactions(all, lastSeen, fetchStartedAt);
+        // cap 도달 시 lastSeen 보존 (feedback/assignment 와 동일 — 데이터 손실 방지).
+        // 코덱스 15차 P2: composite cursor "<lastAt>|<id>" 로 같은 ts 행 누락 차단.
+        if (!cappedOut) {
+          const newest = all[0];
+          setCommentReactionLastSeenAt(me.id, `${newest.createdAt}|${newest.id}`);
+        }
+      } catch (err) {
+        console.warn('[reaction-catchup] 실패:', err);
+        // 코덱스 14차 P2: 실패 시 done flag 클리어 → 같은 세션 안에서 다음 effect run 또는 currentUser
+        //   재마운트 시 재시도 가능. 그대로 두면 startup 네트워크 hiccup 한 번에 세션 내내 catch-up 영구 차단.
+        reactionCatchupDoneRef.current = null;
       }
     })();
   }, [currentUser, authReady]);
@@ -1874,6 +1959,97 @@ export default function App() {
         // 본인 변경은 옵티미스틱으로 이미 반영됨 — 자기 broadcast 는 무시.
         if (commentId && (!me || senderId !== me.id)) {
           window.dispatchEvent(new CustomEvent('bflow:comment-reaction-changed', { detail: { commentId } }));
+        }
+      }
+
+      // v1.29.0: 댓글 이모지 반응 알림 — 본인이 받은 경우만 store 반영.
+      if (data.event === 'comment-reaction-notification') {
+        const payload = data.payload as { notification?: {
+          id: string; recipientId: string; actorId: string; actorName: string;
+          commentId: string; emojis: string[]; reactionCount: number;
+          sceneId?: string; partId?: string; episodeNumber?: number; dept?: string;
+          lastActionAt: string; createdAt: string; readAt: string | null;
+        } };
+        const me = useAuthStore.getState().currentUser;
+        const n = payload?.notification;
+        if (n && me && n.recipientId === me.id && n.actorId !== me.id) {
+          useNotificationStore.getState().upsertCommentReaction({
+            id: n.id,
+            type: 'comment_reaction',
+            title: buildReactionNotificationTitle(n.actorName, n.emojis ?? []),
+            metadata: {
+              reactionNotificationId: n.id,
+              reactionEmojis: n.emojis,
+              reactionActorId: n.actorId,
+              commentId: n.commentId,
+              commentSceneId: n.sceneId,
+              commentPartId: n.partId,
+            },
+            isRead: n.readAt !== null,
+            createdAt: n.lastActionAt,
+          });
+          // 코덱스 2차 P1: 실시간으로 받은 알림은 lastSeen 갱신.
+          // 코덱스 6차 P2: monotonic max() 로 out-of-order broadcast 의 cursor 후퇴 차단.
+          // 코덱스 15차 P2: lastSeen 을 composite "<lastActionAt>|<id>" 로 저장 → 같은 ts 행이
+          //   catch-up 의 gt() 필터에서 영구 제외되던 data loss 차단.
+          const prevLastSeen = getCommentReactionLastSeenAt(me.id);
+          const prevAt = prevLastSeen?.split('|')[0] ?? '';
+          const nextLastSeen = n.lastActionAt > prevAt
+            ? `${n.lastActionAt}|${n.id}`
+            : (prevLastSeen ?? `${n.lastActionAt}|${n.id}`);
+          setCommentReactionLastSeenAt(me.id, nextLastSeen);
+        }
+      }
+
+      // v1.29.0: 댓글 이모지 반응 알림 축소/삭제.
+      if (data.event === 'comment-reaction-notification-removed') {
+        const payload = data.payload as {
+          recipientId?: string; notificationId?: string; deleted?: boolean;
+          emoji?: string; commentId?: string; actorId?: string;
+        };
+        const me = useAuthStore.getState().currentUser;
+        if (payload?.recipientId && me && payload.recipientId === me.id && payload.notificationId) {
+          if (payload.deleted) {
+            useNotificationStore.getState().removeNotificationById(payload.notificationId);
+          } else {
+            // 축소 — 단일 행 refetch 로 emojis 배열 정합화
+            void (async () => {
+              try {
+                const { fetchCommentReactionNotifications } = await import('@/services/supabaseService');
+                const res = await fetchCommentReactionNotifications({
+                  recipientId: me.id,
+                  ids: [payload.notificationId!],
+                  limit: 1,
+                });
+                const row = res?.data?.[0];
+                if (row) {
+                  // 코덱스 5차 P1: refetch 결과의 isRead 가 로컬 읽음 상태를 덮어쓰지 않게 보존.
+                  //   "모두 읽음" 직후 다른 PC 가 이모지 제거 → refetch row.isRead=false 일 수 있고
+                  //   그대로 upsert 하면 사용자가 방금 읽은 알림이 다시 unread 로 뒤집힘. 로컬에서 한 번이라도
+                  //   읽음 처리됐으면(true) 유지, 아직 안 읽었으면 서버 값 사용.
+                  const cur = useNotificationStore.getState().notifications.find((x) => x.id === row.id);
+                  const preservedRead = cur?.isRead === true ? true : row.isRead;
+                  useNotificationStore.getState().upsertCommentReaction({
+                    ...row,
+                    isRead: preservedRead,
+                  } as AppNotification);
+                } else {
+                  // race: 이미 사라진 행 → store 에서도 제거
+                  useNotificationStore.getState().removeNotificationById(payload.notificationId!);
+                }
+              } catch (err) {
+                console.warn('[reaction-removed] refetch 실패:', err);
+              }
+            })();
+          }
+        }
+      }
+
+      // v1.29.0: 활동 로그 단일 행 삭제 (이모지 반응 취소 시).
+      if (data.event === 'activity-removed') {
+        const payload = data.payload as { activityId?: string };
+        if (payload?.activityId) {
+          useActivityStore.getState().removeById(payload.activityId);
         }
       }
 

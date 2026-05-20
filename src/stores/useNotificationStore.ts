@@ -10,7 +10,7 @@ import { create } from 'zustand';
  * - 'scene_assignment': v1.25.8 — 본인이 새 담당자로 배정된 씬 알림 (강한 톤, mention 과 동일 시각 처리)
  * - 'scene_change' / 'milestone' / 'system': 기존 동작 유지
  */
-export type NotificationType = 'scene_change' | 'comment' | 'mention' | 'milestone' | 'system' | 'revision' | 'acting_feedback' | 'scene_assignment';
+export type NotificationType = 'scene_change' | 'comment' | 'mention' | 'milestone' | 'system' | 'revision' | 'acting_feedback' | 'scene_assignment' | 'comment_reaction';
 
 export interface AppNotification {
   id: string;
@@ -48,6 +48,12 @@ export interface AppNotification {
     assignmentNotificationId?: string;
     /** v1.25.8: 씬 담당자 배정 알림 표시용 메타 (예: '미배정 → 한솔') */
     assignmentTransition?: string;
+    /** v1.29.0: 이모지 반응 알림 — comment_reaction_notifications row id (markRead 호출용) */
+    reactionNotificationId?: string;
+    /** v1.29.0: 이모지 반응 알림 — 누적된 이모지 배열 (UI 표시용, "❤️🔥👏" 묶기) */
+    reactionEmojis?: string[];
+    /** v1.29.0: 이모지 반응 알림 — 반응한 사람 id (자기 자신 필터링 fallback) */
+    reactionActorId?: string;
   };
   isRead: boolean;
   createdAt: string; // ISO 8601
@@ -101,6 +107,21 @@ interface NotificationState {
   setPanelOpen: (open: boolean) => void;
   togglePanel: () => void;
   loadFromDisk: () => Promise<void>;
+  // v1.29.0: 이모지 반응 알림 — 묶음 UPSERT / 행 삭제 / catch-up
+  upsertCommentReaction: (n: AppNotification) => void;
+  removeNotificationById: (id: string) => void;
+  /** v1.29.0: catch-up 결과 머지.
+   *  - sinceISO: catch-up 시작 시점의 lastSeen. 이 이전 알림은 보존 (이미 정합).
+   *  - fetchStartedISO: fetch loop 진입 직전 시각. 이 이후 store 에 들어온 알림은
+   *    catch-up race 로 인한 realtime 신규 알림이므로 stale 로 보지 말고 보존
+   *    (코덱스 12차 P1). 두 시각 사이 (sinceISO < createdAt <= fetchStartedISO) 의
+   *    행 중 fetched 에 없는 건 stale 로 제거.
+   *  fetchStartedISO 미제공 시 purge 안전사이드로 비활성 (이전 동작 유지). */
+  appendCatchupCommentReactions: (
+    rows: AppNotification[],
+    sinceISO?: string,
+    fetchStartedISO?: string,
+  ) => void;
 }
 
 function generateId(): string {
@@ -171,5 +192,59 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     } catch {
       // 파일 없으면 무시
     }
+  },
+
+  // v1.29.0: 이모지 반응 알림 묶음 UPSERT.
+  //   같은 id 가 이미 있어도 새 이모지로 갱신된 행은 createdAt/read_at 이 사실상 갱신된 것이므로
+  //   "새 알림" 으로 취급해 **최상단으로 이동**시킨다. (코덱스 3차 P2: in-place 갱신 시 묻혀서
+  //   사용자가 놓치는 문제.) 없으면 그대로 prepend.
+  upsertCommentReaction: (n) => {
+    const list = get().notifications;
+    const next = [{ ...n }, ...list.filter((x) => x.id !== n.id)].slice(0, MAX_NOTIFICATIONS);
+    setNotifications(set, next);
+    persistToDisk(next);
+  },
+
+  // v1.29.0: 알림 행 단일 제거. id 없으면 no-op. removeNotification 과 동일 시맨틱이지만
+  //   호출 의도 명시 + missing-ID 케이스 안전(race fallback).
+  removeNotificationById: (id) => {
+    const list = get().notifications;
+    if (!list.some((x) => x.id === id)) return;
+    const next = list.filter((x) => x.id !== id);
+    setNotifications(set, next);
+    persistToDisk(next);
+  },
+
+  // v1.29.0: catch-up 으로 받은 미읽음 묶음을 dedupe + prepend.
+  //   기존 store 에 이미 있는 id 는 새 데이터로 갱신, 없는 건 prepend.
+  appendCatchupCommentReactions: (rows, sinceISO, fetchStartedISO) => {
+    // 코덱스 8차 P2: rows 자체에 같은 id 가 두 번 들어올 수 있음 (페이지네이션 경계에서
+    //   같은 행이 두 페이지에 걸쳐 fetch 되는 race). Map 으로 last-wins dedupe 한 후 store 와 머지.
+    const dedupedMap = new Map<string, AppNotification>();
+    for (const r of rows) dedupedMap.set(r.id, r);
+    const deduped = Array.from(dedupedMap.values());
+
+    const list = get().notifications;
+    const incomingIds = new Set(deduped.map((r) => r.id));
+    // 코덱스 11차 P2 + 12차 P1: stale alert purge.
+    //   purge 대상은 "pre-fetch snapshot 안에 있던 since 이후 행" 만.
+    //   - createdAt > fetchStartedISO 면 catch-up loop 중 realtime 으로 들어온 신규 알림 → 보존.
+    //   - createdAt <= sinceISO 면 since 이전이라 catch-up 대상 외 → 보존.
+    //   - 그 사이 (since < createdAt <= fetchStarted) 인데 fetched 결과에 없으면 → stale 처리.
+    //   sinceISO 미제공 시 purge 비활성 (기존 호출처 호환).
+    const survivors = list.filter((x) => {
+      if (incomingIds.has(x.id)) return false; // 새 데이터로 덮어쓸 예정
+      if (!sinceISO) return true;
+      if (x.type !== 'comment_reaction') return true;
+      if (x.createdAt <= sinceISO) return true;                    // since 이전 — 보존
+      if (fetchStartedISO && x.createdAt > fetchStartedISO) return true; // snapshot 이후 신규 — 보존
+      return false; // 그 사이 → stale
+    });
+
+    if (!deduped.length && survivors.length === list.length) return;  // 변경 없음
+
+    const merged: AppNotification[] = [...deduped, ...survivors].slice(0, MAX_NOTIFICATIONS);
+    setNotifications(set, merged);
+    persistToDisk(merged);
   },
 }));
