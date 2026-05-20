@@ -1421,8 +1421,29 @@ export async function deleteComment(commentId: string): Promise<void> {
     console.warn('[deleteComment] comment_reactions cleanup 실패:', e);
   }
   try {
-    await supabase.from('comment_reaction_notifications').delete().eq('comment_id', commentId);
-    // 수신자들의 알림 패널은 댓글 점프 대상이 사라졌으므로 catch-up 라운드에서 자연 정합화.
+    // 코덱스 1차 P1: 영향 받은 알림 행 id 들을 먼저 SELECT → DELETE → 각 행마다
+    //   broadcastCommentReactionNotificationRemoved 발화. 미발화 시 수신자 클라이언트의 store/disk 에
+    //   stale 알림이 남고, catch-up 머지 로직(appendCatchupCommentReactions)은 prepend-only 라
+    //   사라진 행을 자동 정리하지 않음.
+    const { data: affectedNotifs } = await supabase
+      .from('comment_reaction_notifications')
+      .select('id, recipient_id, actor_id')
+      .eq('comment_id', commentId);
+    if (affectedNotifs?.length) {
+      await supabase.from('comment_reaction_notifications')
+        .delete()
+        .in('id', affectedNotifs.map((r) => r.id));
+      for (const row of affectedNotifs) {
+        broadcastCommentReactionNotificationRemoved({
+          recipientId: row.recipient_id,
+          notificationId: row.id,
+          deleted: true,
+          emoji: '',
+          commentId,
+          actorId: row.actor_id,
+        });
+      }
+    }
   } catch (e) {
     console.warn('[deleteComment] comment_reaction_notifications cleanup 실패:', e);
   }

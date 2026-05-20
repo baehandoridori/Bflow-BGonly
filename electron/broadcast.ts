@@ -42,6 +42,18 @@ function createChannel(onReceive: BroadcastListener): RealtimeChannel {
       // 코덱스 2차 P1: 다른 클라이언트가 자체 fetch 트리거할 수 있도록.
       onReceive('comment-reaction-changed', payload as Record<string, unknown>);
     })
+    // v1.29.0 (코덱스 1차 P1): 새 broadcast 이벤트 3종 subscribe 등록.
+    //   sender 측은 broadcastCommentReactionNotification/Removed/ActivityRemoved 로 emit 하지만
+    //   receiver 측이 .on() 등록 안 하면 payload 가 채널에서 drop → 실시간 반영 누락.
+    .on('broadcast', { event: 'comment-reaction-notification' }, ({ payload }) => {
+      onReceive('comment-reaction-notification', payload as Record<string, unknown>);
+    })
+    .on('broadcast', { event: 'comment-reaction-notification-removed' }, ({ payload }) => {
+      onReceive('comment-reaction-notification-removed', payload as Record<string, unknown>);
+    })
+    .on('broadcast', { event: 'activity-removed' }, ({ payload }) => {
+      onReceive('activity-removed', payload as Record<string, unknown>);
+    })
     .on('broadcast', { event: 'calendar-changed' }, ({ payload }) => {
       onReceive('calendar-changed', payload as Record<string, unknown>);
     });
