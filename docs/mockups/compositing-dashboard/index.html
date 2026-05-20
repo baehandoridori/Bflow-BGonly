@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>비플로우 — 컴포지팅 대시보드 시안</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  /* design-canvas는 다크 캔버스 위에 작동. 라이트 시안용 아트보드 안 배경은 토큰으로 */
+  html, body { margin: 0; height: 100%; }
+  /* 디자인 캔버스 상단 도구막대 톤 */
+  .dc-toolbar { backdrop-filter: blur(10px); }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- 데이터 + UI 키트 -->
+<script src="mock-data.js"></script>
+<script type="text/babel" src="shared.jsx"></script>
+<script type="text/babel" src="variant-a.jsx"></script>
+<script type="text/babel" src="variant-b.jsx"></script>
+<script type="text/babel" src="variant-c.jsx"></script>
+
+<!-- 디자인 캔버스 + 트윅 패널 -->
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect, useMemo } = React;
+const { DesignCanvas, DCSection, DCArtboard } = window;
+const { TweaksPanel, useTweaks, TweakSection, TweakRadio, TweakSelect, TweakToggle, TweakButton } = window;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "colorMode": "dark",
+  "accent": "violet",
+  "viewerIsCompositor": false,
+  "showCanvasChrome": true,
+  "dataSeed": 42
+}/*EDITMODE-END*/;
+
+function applyTheme(mode, accent) {
+  document.documentElement.setAttribute('data-color-mode', mode);
+  document.documentElement.setAttribute('data-accent', accent);
+}
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+  useEffect(() => {
+    applyTheme(t.colorMode, t.accent);
+  }, [t.colorMode, t.accent]);
+
+  const episode = useMemo(() => window.BF_DATA.buildEpisode(t.dataSeed), [t.dataSeed]);
+  const stats = useMemo(() => window.BF_DATA.computeStats(episode), [episode]);
+
+  const variantProps = {
+    episode,
+    stats,
+    viewerIsCompositor: !!t.viewerIsCompositor,
+  };
+
+  return (
+    <>
+      <DesignCanvas
+        title="비플로우 — 컴포지팅 현황 시안"
+        intro="실제 B flow 토큰/컴포넌트 패턴을 따른 컴포지팅 대시보드 시안 3종. 다크/라이트 모드 모두 대응. 우측 하단 'Tweaks' 토글로 테마/뷰어 권한 변경 가능."
+      >
+        <DCSection
+          id="dashboards"
+          title="컴포지팅 대시보드 — 인터랙션 시안"
+          subtitle="좌측 사이드바의 새 '컴포지팅' 섹션. 담당 컴포지터만 편집 가능, 그 외 팀원은 읽기 전용. 진입 시 씬 카드 촤라라라락 등장 (우측 상단 ↻로 재생). 헤더의 Timeline · Matrix · Cinema 토글로 같은 데이터를 세 가지 시각화로 전환."
+        >
+          <DCArtboard id="dashboard" label="컴포지팅 대시보드 (헤더 토글로 Timeline / Matrix / Cinema 전환)" width={1380} height={1480}>
+            <window.BF_VariantA {...variantProps} />
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks · 컴포지팅 대시보드">
+        <TweakSection title="테마">
+          <TweakRadio
+            label="컬러 모드"
+            value={t.colorMode}
+            options={[
+              { value: 'dark', label: '다크' },
+              { value: 'light', label: '라이트' },
+            ]}
+            onChange={(v) => setTweak('colorMode', v)}
+          />
+          <TweakSelect
+            label="액센트 프리셋 (B flow 6종 중 4종)"
+            value={t.accent}
+            options={[
+              { value: 'violet', label: '바이올렛 드림 (기본)' },
+              { value: 'cinema-red', label: '공산당 레드' },
+              { value: 'midnight-blue', label: '윤성원 블루' },
+              { value: 'emerald', label: '에메랄드' },
+              { value: 'amber-gold', label: '똥파리 골드' },
+            ]}
+            onChange={(v) => setTweak('accent', v)}
+          />
+        </TweakSection>
+        <TweakSection title="권한 시뮬레이션">
+          <TweakToggle
+            label="내가 담당 컴포지터"
+            value={!!t.viewerIsCompositor}
+            onChange={(v) => setTweak('viewerIsCompositor', v)}
+            hint="ON: 상태 변경 UI 노출 / OFF: 잠금 표시 (기본값)"
+          />
+        </TweakSection>
+        <TweakSection title="데이터">
+          <TweakButton onClick={() => setTweak('dataSeed', Math.floor(Math.random() * 9999))}>
+            🎲 씬 분포 새로 굴리기
+          </TweakButton>
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>

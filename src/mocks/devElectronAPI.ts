@@ -290,6 +290,24 @@ export function installDevElectronAPI(): void {
     activityBackfill: async () => [],
     activityStorageInfo: async () => ({ count: 0, sizeMB: 0 }),
     onActivityRealtimeInsert: noop,
+
+    // v1.30.0: 컴포지팅 단계 상태 (mock 은 빈 결과)
+    supabaseLoadCompositingStates: async () => [],
+    supabaseSetCompositingState: async (input) => ({
+      id: typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      episode_number: input.episodeNumber,
+      scene_id: input.sceneId,
+      part_id: input.partId,
+      status: input.status,
+      error_kind: input.errorKind ?? null,
+      error_note: input.errorNote ?? null,
+      progress_percent: input.progressPercent ?? 0,
+      updated_at: new Date().toISOString(),
+      updated_by: input.updatedBy,
+    }),
+    onCompositingStatesRealtime: noop,
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;
