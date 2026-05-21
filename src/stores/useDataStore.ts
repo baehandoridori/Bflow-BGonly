@@ -1,7 +1,24 @@
 import { create } from 'zustand';
-import type { Episode, Scene, DashboardStats, Department, Stage, ScenePhaseState } from '@/types';
+import type {
+  Episode,
+  Scene,
+  DashboardStats,
+  Department,
+  Stage,
+  ScenePhaseState,
+  CompositingState,
+} from '@/types';
 import { SCENE_PHASE_ROUND_MIN, SCENE_PHASE_ROUND_MAX } from '@/types';
 import { calcDashboardStats } from '@/utils/calcStats';
+import { loadCompositingStates as svcLoadCompositingStates } from '@/services/supabaseService';
+
+/**
+ * v1.30.0: 컴포지팅 단계 상태 Map 키 = `${episodeNumber}:${sceneId}`.
+ * 다른 모듈(낙관적 토글, Realtime 수신, 상세 모달)에서 동일 포맷으로 키를 만든다.
+ */
+export function compositingKey(episodeNumber: number, sceneId: string): string {
+  return `${episodeNumber}:${sceneId}`;
+}
 
 interface DataState {
   // 에피소드 데이터
@@ -82,6 +99,33 @@ interface DataState {
    * 코덱스 1차 리뷰 P1 fix: 같은 sceneId 가 다른 에피소드/파트에 있어도 정확히 그 시트의 씬만 반환.
    */
   findSceneInSheet: (sheetName: string, sceneId: string) => Scene | undefined;
+
+  // ─── v1.30.0: 컴포지팅 단계 상태 ──────────────────────────────
+  // spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
+  //
+  // 키: `${episodeNumber}:${sceneId}` (compositingKey 헬퍼 사용 권장).
+  // row 가 없는 씬은 caller 가 'batch' 디폴트로 그려준다 (DB INSERT 는 첫 변경 시).
+
+  compositingStates: Map<string, CompositingState>;
+
+  /**
+   * 여러 row 를 캐시에 UPSERT (merge). 기존 다른 EP 캐시는 그대로 유지.
+   * Realtime 초기 sync, 일괄 새로고침에서 사용.
+   */
+  setCompositingStates: (rows: CompositingState[]) => void;
+
+  /** 단일 row UPSERT — 낙관적 토글 / Realtime INSERT·UPDATE 양쪽에서 사용. */
+  setCompositingState: (key: string, row: CompositingState) => void;
+
+  /** 단일 row 제거 — Realtime DELETE 수신 시 사용. */
+  deleteCompositingState: (key: string) => void;
+
+  /**
+   * 한 EP 의 compositing_states 를 Supabase 에서 로드해 store 에 반영.
+   * 해당 EP 의 기존 row 는 모두 비우고 서버 결과로 교체 (서버 = source of truth).
+   * 다른 EP 캐시는 보존. 실패 시 throw — caller 가 토스트/롤백 처리.
+   */
+  loadCompositingForEpisode: (episodeNumber: number) => Promise<void>;
 }
 
 function applyUpdate(get: () => DataState, episodes: Episode[]) {
@@ -107,6 +151,7 @@ export function legacyStagesFor(state: ScenePhaseState): { lo: boolean; done: bo
 export const useDataStore = create<DataState>((set, get) => ({
   episodes: [],
   stats: calcDashboardStats([]),
+  compositingStates: new Map<string, CompositingState>(),
 
   setEpisodes: (episodes) => set(applyUpdate(get, episodes)),
 
@@ -433,5 +478,44 @@ export const useDataStore = create<DataState>((set, get) => ({
       }
     }
     return false;
+  },
+
+  // ─── v1.30.0: 컴포지팅 단계 상태 ──────────────────────────────
+
+  setCompositingStates: (rows) => {
+    if (rows.length === 0) return;
+    const next = new Map(get().compositingStates);
+    for (const row of rows) {
+      next.set(compositingKey(row.episodeNumber, row.sceneId), row);
+    }
+    set({ compositingStates: next });
+  },
+
+  setCompositingState: (key, row) => {
+    const next = new Map(get().compositingStates);
+    next.set(key, row);
+    set({ compositingStates: next });
+  },
+
+  deleteCompositingState: (key) => {
+    const cur = get().compositingStates;
+    if (!cur.has(key)) return;
+    const next = new Map(cur);
+    next.delete(key);
+    set({ compositingStates: next });
+  },
+
+  loadCompositingForEpisode: async (episodeNumber) => {
+    const rows = await svcLoadCompositingStates(episodeNumber);
+    // 해당 EP 의 기존 row 모두 비우고 서버 결과로 교체.
+    // 다른 EP 캐시는 그대로 보존 (EP 전환 시 빠른 복귀).
+    const next = new Map<string, CompositingState>();
+    for (const [key, row] of get().compositingStates) {
+      if (row.episodeNumber !== episodeNumber) next.set(key, row);
+    }
+    for (const row of rows) {
+      next.set(compositingKey(row.episodeNumber, row.sceneId), row);
+    }
+    set({ compositingStates: next });
   },
 }));
