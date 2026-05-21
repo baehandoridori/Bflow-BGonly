@@ -31,7 +31,7 @@ import { StatusLegend } from './compositing-dashboard/StatusLegend';
 import { TimelinePanel } from './compositing-dashboard/timeline/TimelinePanel';
 import { PartCardRow } from './compositing-dashboard/cards/PartCardRow';
 import { CompositingSceneModal } from './compositing-dashboard/modal/CompositingSceneModal';
-import { buildCardScenes, flattenCardScenes } from './compositing-dashboard/cardSceneHelpers';
+import { buildCardScenes } from './compositing-dashboard/cardSceneHelpers';
 
 export function CompositingDashboardView() {
   const episodes = useDataStore((s) => s.episodes);
@@ -112,8 +112,6 @@ export function CompositingDashboardView() {
     return buildCardScenes(ep);
   }, [episodes, episodeNumber]);
 
-  const allCardScenes = useMemo(() => flattenCardScenes(partGroups), [partGroups]);
-
   // 현재 EP 의 상태 row 만 슬라이스 — StatusLegend / Timeline / SceneCard 가 사용
   const epStates = useMemo(() => {
     const m = new Map<string, typeof compositingStates extends Map<string, infer V> ? V : never>();
@@ -147,11 +145,15 @@ export function CompositingDashboardView() {
         <div key={`cascade-${cascadeKey}`}>
           <TimelinePanel
             episodeNumber={episodeNumber}
-            scenes={allCardScenes.map((cs) => ({
-              // Timeline 패널은 단순화된 Scene-like — sceneId / durationFrames 만 사용
-              sceneId: cs.sceneId,
-              episodeNumber: cs.episodeNumber,
-              durationFrames: cs.durationFrames ?? null,
+            partGroups={partGroups.map((g) => ({
+              partId: g.partId,
+              scenes: g.scenes.map((cs) => ({
+                sceneId: cs.sceneId,
+                partId: cs.partId,
+                episodeNumber: cs.episodeNumber,
+                durationFrames: cs.durationFrames ?? null,
+                orderNo: cs.orderNo,
+              })),
             }))}
             epStates={epStates}
           />

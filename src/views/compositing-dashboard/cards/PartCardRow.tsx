@@ -34,10 +34,12 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
 
   const rowRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
-  const expanded = expandedParts.has(partId);
 
-  // 첫 마운트 시 펼침 — 사용자가 명시적으로 접지 않으면 항상 펼침 상태 (UX 단순화)
-  const effectiveExpanded = expanded || expandedParts.size === 0 || true;
+  // 코덱스 1차 P2 fix: 이전엔 `|| true` 가 남아있어 항상 펼침 상태 → collapse 토글 무력화.
+  // 디자인 결정 (한솔): 카드 그리드는 항상 펼침, 접힘은 다루지 않음 (Timeline 패널이 파트 단위 시각화를 대신 담당).
+  // PartHeader 의 chevron 은 시각적 ornament 로만 유지. 향후 폴리시에서 토글 활성 여부 재검토.
+  const effectiveExpanded = true;
+  void expandedParts; // store 필드는 향후 폴리시 대비 유지 — 명시적으로 미사용 표시.
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (rafRef.current !== null) return;
@@ -88,10 +90,12 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
           ref={rowRef}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
-          className="flex flex-wrap gap-3 py-4 px-1"
+          className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-visible px-1"
           style={{
-            // 상부 margin 추가 — dock-lift 시 카드가 잘리지 않도록
-            paddingTop: 24,
+            // 상부 margin — dock-lift / pinned 시 카드가 위 컨테이너에 잘리지 않도록.
+            paddingTop: 28,
+            paddingBottom: 12,
+            scrollbarGutter: 'stable',
           }}
         >
           {scenes.map((sc, idx) => {
