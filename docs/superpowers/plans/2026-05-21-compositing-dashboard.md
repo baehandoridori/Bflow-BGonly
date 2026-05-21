@@ -285,23 +285,23 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Modify: `src/App.tsx`
 - Modify: `src/stores/useAppStore.ts`
 
-- [ ] **Step 3.1.1: NAV_ITEMS 분리** — `compositing` 항목 라벨 그대로 + 새 icon 다른 거 (예: Clapperboard 유지) / 새 `compositing-revisions` 항목 추가 (라벨 "리비전", icon MessageSquareWarning).
-- [ ] **Step 3.1.2: App.tsx 라우팅** — `viewMode === 'compositing'` → `<CompositingDashboardView />` / `viewMode === 'compositing-revisions'` → `<CompositingView />`.
-- [ ] **Step 3.1.3: localStorage 마이그레이션** — 첫 진입 시 (`!localStorage['bflow:compositing-split-seen']`) 토스트 안내. 닫으면 플래그 set.
-- [ ] **Step 3.1.4: 사이드바 미해결 리비전 배지** — 기존 `compositing` 항목에 붙어있던 미해결 카운트 배지를 `compositing-revisions` 로 이동.
-- [ ] **Step 3.1.5: 사이드바 컴포지팅 배지** — `compositing_states` 의 `error` 카운트를 `compositing` 항목 배지로.
+- [x] **Step 3.1.1: NAV_ITEMS 분리** — `compositing` 항목 라벨 그대로 + 새 icon 다른 거 (예: Clapperboard 유지) / 새 `compositing-revisions` 항목 추가 (라벨 "리비전", icon MessageSquareWarning).
+- [x] **Step 3.1.2: App.tsx 라우팅** — `viewMode === 'compositing'` → `<CompositingDashboardView />` / `viewMode === 'compositing-revisions'` → `<CompositingView />`.
+- [x] **Step 3.1.3: localStorage 마이그레이션** — 첫 진입 시 (`!localStorage['bflow:compositing-split-seen']`) 토스트 안내. 닫으면 플래그 set.
+- [x] **Step 3.1.4: 사이드바 미해결 리비전 배지** — 기존 `compositing` 항목에 붙어있던 미해결 카운트 배지를 `compositing-revisions` 로 이동.
+- [x] **Step 3.1.5: 사이드바 컴포지팅 배지** — `compositing_states` 의 `error` 카운트를 `compositing` 항목 배지로.
 
 ### Task 3.2 — DashHeader
 
 **Files:**
 - Create: `src/views/compositing-dashboard/DashHeader.tsx`
 
-- [ ] **Step 3.2.1: 구조** — 좌(타이틀+진행률) + 가운데(EP 칩 토글) + 우(담당 컴포지터 칩 + 보는 사람 칩 + ↻).
-- [ ] **Step 3.2.2: EP 칩 토글** — useDataStore.episodes 에서 활성 EP 목록 가져와 칩 렌더. 현재 EP 강조. 클릭 = store.setEpisode + preferences 저장.
-- [ ] **Step 3.2.3: ◀ ▶ 화살표** — prev/next EP 이동.
-- [ ] **Step 3.2.4: 담당 컴포지터 칩** — useDataStore.users 에서 `isCompositor=true` 인 사용자 표시 (MVP: 전원 또는 첫 1명).
-- [ ] **Step 3.2.5: 보는 사람 칩** — Supabase Realtime presence 룸 구독 결과로 표시 (Task 3.7 에서 wire).
-- [ ] **Step 3.2.6: ↻ 버튼** — `key++` state 로 cascade 재생 트리거.
+- [x] **Step 3.2.1: 구조** — 좌(타이틀+진행률) + 가운데(EP 칩 토글) + 우(담당 컴포지터 칩 + 보는 사람 칩 + ↻).
+- [x] **Step 3.2.2: EP 칩 토글** — useDataStore.episodes 에서 활성 EP 목록 가져와 칩 렌더. 현재 EP 강조. 클릭 = store.setEpisode + preferences 저장.
+- [x] **Step 3.2.3: ◀ ▶ 화살표** — prev/next EP 이동.
+- [x] **Step 3.2.4: 담당 컴포지터 칩** — useDataStore.users 에서 `isCompositor=true` 인 사용자 표시 (MVP: 전원 또는 첫 1명).
+- [x] **Step 3.2.5: 보는 사람 칩** — Supabase Realtime presence 룸 구독 결과로 표시 (Task 3.7 에서 wire).
+- [x] **Step 3.2.6: ↻ 버튼** — `key++` state 로 cascade 재생 트리거.
 
 ### Task 3.3 — GuideStrip + StatusLegend
 
@@ -309,8 +309,8 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Create: `src/views/compositing-dashboard/GuideStrip.tsx`
 - Create: `src/views/compositing-dashboard/StatusLegend.tsx`
 
-- [ ] **Step 3.3.1: GuideStrip** — localStorage 플래그 체크. 텍스트 + 닫기 버튼. 닫으면 store.dismissGuideStrip.
-- [ ] **Step 3.3.2: StatusLegend** — 6 칩, 각 칩 카운트. 클릭 = store.setStatusFilter 토글. 호버 = hoveredStatus (linked highlight 용).
+- [x] **Step 3.3.1: GuideStrip** — localStorage 플래그 체크. 텍스트 + 닫기 버튼. 닫으면 store.dismissGuideStrip.
+- [x] **Step 3.3.2: StatusLegend** — 6 칩, 각 칩 카운트. 클릭 = store.setStatusFilter 토글. 호버 = hoveredStatus (linked highlight 용).
 
 ### Task 3.4 — Timeline 패널
 
@@ -322,12 +322,12 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Create: `src/views/compositing-dashboard/timeline/WorkingBar.tsx`
 - Create: `src/views/compositing-dashboard/timeline/CurrentPositionLine.tsx`
 
-- [ ] **Step 3.4.1: TimelinePanel 컨테이너** — wipe-in 800ms 애니메이션.
-- [ ] **Step 3.4.2: LayerPanel** — 좌측 컬럼. Scene 행마다 sceneId + 솔로(S)/뮤트(👁) 토글.
-- [ ] **Step 3.4.3: TimeRuler** — `useMemo(() => scenes.every(s => s.durationFrames != null), [scenes])` 로 mode 결정. true 면 분:초, false 면 씬 인덱스 ("Scene 1, Scene 5, ...").
-- [ ] **Step 3.4.4: CompletedBar** — status='done' 인 씬들의 가로축 범위. 초록 8px height.
-- [ ] **Step 3.4.5: WorkingBar** — status in ('combine','aggregated','adjust'). 파란 12px height + opacity 0.5.
-- [ ] **Step 3.4.6: CurrentPositionLine** — 마지막 단계 변경된 씬의 위치. 빨간 1px 세로선 + 삼각 핸들. 200ms transition.
+- [x] **Step 3.4.1: TimelinePanel 컨테이너** — wipe-in 800ms 애니메이션.
+- [x] **Step 3.4.2: LayerPanel** — 좌측 컬럼. Scene 행마다 sceneId + 솔로(S)/뮤트(👁) 토글.
+- [x] **Step 3.4.3: TimeRuler** — `useMemo(() => scenes.every(s => s.durationFrames != null), [scenes])` 로 mode 결정. true 면 분:초, false 면 씬 인덱스 ("Scene 1, Scene 5, ...").
+- [x] **Step 3.4.4: CompletedBar** — status='done' 인 씬들의 가로축 범위. 초록 8px height.
+- [x] **Step 3.4.5: WorkingBar** — status in ('combine','aggregated','adjust'). 파란 12px height + opacity 0.5.
+- [x] **Step 3.4.6: CurrentPositionLine** — 마지막 단계 변경된 씬의 위치. 빨간 1px 세로선 + 삼각 핸들. 200ms transition.
 
 ### Task 3.5 — 파트 카드 그리드
 
@@ -336,21 +336,21 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Create: `src/views/compositing-dashboard/cards/PartHeader.tsx`
 - Create: `src/views/compositing-dashboard/cards/SceneCard.tsx`
 
-- [ ] **Step 3.5.1: PartHeader** — PartBadge + 라벨 + 카운트 + 펼침 토글. 호버 시 store.setHoveredPart.
-- [ ] **Step 3.5.2: PartCardRow** — onMouseMove dock lift 효과 구현 (마우스 X 와 카드 X 거리 함수). throttle (requestAnimationFrame).
-- [ ] **Step 3.5.3: SceneCard** — 이미지 분할 (storyboardUrl / guideUrl), 단계 점 (StatusDot), BG/ACT 담당자, 진입 cascade (animation-delay), 1 클릭 pin / 2 클릭 모달, transientHighlight 구독 (색 펄스 + 보낸 사람 아바타 배지).
-- [ ] **Step 3.5.4: 상태 필터 dim 효과** — statusFilter 가 있으면 일치 안 하는 카드 opacity 0.35.
-- [ ] **Step 3.5.5: 솔로/뮤트 효과** — soloScene 이 있으면 그 씬 외 dim. mutedScenes 에 있으면 그 씬 숨김.
+- [x] **Step 3.5.1: PartHeader** — PartBadge + 라벨 + 카운트 + 펼침 토글. 호버 시 store.setHoveredPart.
+- [x] **Step 3.5.2: PartCardRow** — onMouseMove dock lift 효과 구현 (마우스 X 와 카드 X 거리 함수). throttle (requestAnimationFrame).
+- [x] **Step 3.5.3: SceneCard** — 이미지 분할 (storyboardUrl / guideUrl), 단계 점 (StatusDot), BG/ACT 담당자, 진입 cascade (animation-delay), 1 클릭 pin / 2 클릭 모달, transientHighlight 구독 (색 펄스 + 보낸 사람 아바타 배지).
+- [x] **Step 3.5.4: 상태 필터 dim 효과** — statusFilter 가 있으면 일치 안 하는 카드 opacity 0.35.
+- [x] **Step 3.5.5: 솔로/뮤트 효과** — soloScene 이 있으면 그 씬 외 dim. mutedScenes 에 있으면 그 씬 숨김.
 
 ### Task 3.6 — 상세 모달
 
 **Files:**
 - Create: `src/views/compositing-dashboard/modal/CompositingSceneModal.tsx`
 
-- [ ] **Step 3.6.1: 구조** — Spec 의 "9. 씬 상세 모달" 그대로. 헤더 / 이미지 두 장 / 단계 그리드 / 오류 사유 / 담당자 / 활동 기록.
-- [ ] **Step 3.6.2: 단계 그리드** — 6 칩, 현재 단계 채움, 클릭 = handleStatusChange. isCompositor=false 면 disabled (opacity 0.4 + tooltip "컴포지터만 변경할 수 있습니다").
-- [ ] **Step 3.6.3: 오류 사유** — status='error' 일 때만 노출. 5 칩 + 기타. errorKind='other' 면 자유 입력 필드 (max 100자, onBlur 저장).
-- [ ] **Step 3.6.4: 키보드 단축키** — 1~6 단계, Esc 닫기, ← → prev/next 씬.
+- [x] **Step 3.6.1: 구조** — Spec 의 "9. 씬 상세 모달" 그대로. 헤더 / 이미지 두 장 / 단계 그리드 / 오류 사유 / 담당자 / 활동 기록.
+- [x] **Step 3.6.2: 단계 그리드** — 6 칩, 현재 단계 채움, 클릭 = handleStatusChange. isCompositor=false 면 disabled (opacity 0.4 + tooltip "컴포지터만 변경할 수 있습니다").
+- [x] **Step 3.6.3: 오류 사유** — status='error' 일 때만 노출. 5 칩 + 기타. errorKind='other' 면 자유 입력 필드 (max 100자, onBlur 저장).
+- [x] **Step 3.6.4: 키보드 단축키** — 1~6 단계, Esc 닫기, ← → prev/next 씬.
 
 ### Task 3.7 — 데이터 동기화 (낙관적 + Realtime + Presence)
 
@@ -358,26 +358,26 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Create: `src/views/CompositingDashboardView.tsx` (메인 컨테이너)
 - Modify: `electron/broadcast.ts` (presence 확장)
 
-- [ ] **Step 3.7.1: CompositingDashboardView 마운트** — useEffect 로 EP 변경 시 `loadCompositingForEpisode(epNum)` + subscribe + presence join.
-- [ ] **Step 3.7.2: 낙관적 토글 함수** — Spec 의 "11.2 단계 토글" 코드 그대로. 실패 시 prev 로 롤백 + sonner 토스트.
-- [ ] **Step 3.7.3: Realtime onChange** — store UPSERT + 본인 아닐 때 transientHighlightStore.add.
-- [ ] **Step 3.7.4: Presence join/leave** — `compositing-presence:{epNum}` 채널. EP 전환 시 leave + join.
-- [ ] **Step 3.7.5: Broadcast 단계 변경** — channel.send broadcast event 'status-change'. 수신측은 transientHighlight 추가.
+- [x] **Step 3.7.1: CompositingDashboardView 마운트** — useEffect 로 EP 변경 시 `loadCompositingForEpisode(epNum)` + subscribe + presence join.
+- [x] **Step 3.7.2: 낙관적 토글 함수** — Spec 의 "11.2 단계 토글" 코드 그대로. 실패 시 prev 로 롤백 + sonner 토스트.
+- [x] **Step 3.7.3: Realtime onChange** — store UPSERT + 본인 아닐 때 transientHighlightStore.add.
+- [x] **Step 3.7.4: Presence join/leave** — `compositing-presence:{epNum}` 채널. EP 전환 시 leave + join.
+- [x] **Step 3.7.5: Broadcast 단계 변경** — channel.send broadcast event 'status-change'. 수신측은 transientHighlight 추가.
 
 ### Task 3.8 — preferences 저장
 
 **Files:**
 - Modify: `src/services/preferencesService.ts` (또는 settingsService)
 
-- [ ] **Step 3.8.1:** `lastCompositingEpisode: number` 필드 추가. setEpisode 시 디바운스 500ms 저장.
+- [x] **Step 3.8.1:** `lastCompositingEpisode: number` 필드 추가. setEpisode 시 디바운스 500ms 저장.
 
 ### Task 3.9 — 검증 & 커밋
 
-- [ ] **Step 3.9.1:** typecheck + build:vite
-- [ ] **Step 3.9.2:** 라이트/다크 모드 시각 점검 (이미지 첨부 또는 한솔 프리뷰)
+- [x] **Step 3.9.1:** typecheck + build:vite
+- [x] **Step 3.9.2:** 라이트/다크 모드 시각 점검 (이미지 첨부 또는 한솔 프리뷰)
 - [ ] **Step 3.9.3:** isCompositor=true / false 양쪽 권한 테스트
 - [ ] **Step 3.9.4:** 두 창 열고 단계 변경 → Realtime sync + 색 펄스 + 아바타 배지 확인
-- [ ] **Step 3.9.5:** Commit + PR + 코덱스 루프 + 한솔 머지 게이트
+- [x] **Step 3.9.5:** Commit + PR + 코덱스 루프 + 한솔 머지 게이트
 
 ---
 
