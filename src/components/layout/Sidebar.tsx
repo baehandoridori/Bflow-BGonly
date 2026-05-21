@@ -1,8 +1,9 @@
-import { useState, useRef, useCallback } from 'react';
-import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, Settings, PanelLeft } from 'lucide-react';
+import { useState, useRef, useCallback, useMemo } from 'react';
+import { LayoutDashboard, Film, List, Users, CircleUser, GanttChart, CalendarDays, Palmtree, Clapperboard, MessageSquareWarning, Settings, PanelLeft } from 'lucide-react';
 import { AnimatePresence } from 'framer-motion';
 import { useAppStore, type ViewMode } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { SplashScreen } from '@/components/splash/SplashScreen';
 import { getPreset, rgbToHex } from '@/themes';
@@ -18,7 +19,11 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   { id: 'calendar', label: '타임라인', icon: <GanttChart size={20} /> },
   { id: 'schedule', label: '캘린더', icon: <CalendarDays size={20} /> },
   { id: 'vacation', label: '휴가', icon: <Palmtree size={20} /> },
+  // v1.30.0~: 컴포지팅 메뉴가 둘로 분리됨.
+  //   - 'compositing' : 새 현황 대시보드 (CompositingDashboardView, 6 단계 진행도)
+  //   - 'compositing-revisions' : 기존 리비전 피드백 보드 (CompositingView)
   { id: 'compositing', label: '컴포지팅', icon: <Clapperboard size={20} /> },
+  { id: 'compositing-revisions', label: '리비전', icon: <MessageSquareWarning size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 
@@ -166,6 +171,16 @@ export function Sidebar() {
   const updateInfo = useAppStore((s) => s.updateInfo);
   const setUpdateCenterOpen = useAppStore((s) => s.setUpdateCenterOpen);
   const totalOpenRevisions = useRevisionStore((s) => s.totalOpenRevisionCount);
+  // v1.30.0: 컴포지팅 현황 대시보드의 '오류' 상태 카운트 — 사이드바 배지.
+  // load 된 EP 만 카운트되므로 (CompositingDashboardView 진입 시점에 load) MVP 로는 충분.
+  const compositingStates = useDataStore((s) => s.compositingStates);
+  const compositingErrorCount = useMemo(() => {
+    let n = 0;
+    for (const row of compositingStates.values()) {
+      if (row.status === 'error') n += 1;
+    }
+    return n;
+  }, [compositingStates]);
   const [showSplash, setShowSplash] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -266,9 +281,22 @@ export function Sidebar() {
             {/* 아이콘: 항상 w-12 내 중앙 → 펼침/접힘 무관 동일 위치 */}
             <span className="shrink-0 w-12 flex justify-center relative">
               {item.icon}
-              {item.id === 'compositing' && totalOpenRevisions > 0 && (
-                <span className="absolute -top-1 -right-0.5 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1" style={{ backgroundColor: '#FDCB6E', color: '#1A1D27' }}>
+              {item.id === 'compositing-revisions' && totalOpenRevisions > 0 && (
+                <span
+                  className="absolute -top-1 -right-0.5 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1"
+                  style={{ backgroundColor: '#FDCB6E', color: '#1A1D27' }}
+                  title={`미해결 리비전 ${totalOpenRevisions}개`}
+                >
                   {totalOpenRevisions}
+                </span>
+              )}
+              {item.id === 'compositing' && compositingErrorCount > 0 && (
+                <span
+                  className="absolute -top-1 -right-0.5 min-w-[16px] h-4 flex items-center justify-center text-[10px] font-bold rounded-full px-1"
+                  style={{ backgroundColor: 'var(--status-error)', color: '#fff' }}
+                  title={`오류 ${compositingErrorCount}개`}
+                >
+                  {compositingErrorCount}
                 </span>
               )}
             </span>
