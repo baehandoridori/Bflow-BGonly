@@ -1013,3 +1013,90 @@ input[type="range"]::-webkit-slider-thumb {
     animation: none !important;
   }
 }
+
+/* ─── v1.30.0: 컴포지팅 대시보드 모션 ─────────────────────
+   spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md (13)
+   PR 4 의 polish 단계에서 prefers-reduced-motion 등 한 번 더 다듬을 예정.
+*/
+
+@keyframes bf-cascade-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-cascade-translate, 14px)) scale(0.92);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.bf-cascade-item {
+  animation: bf-cascade-in var(--motion-cascade-duration, 560ms) cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  will-change: transform, opacity, filter;
+}
+
+@keyframes bf-wipe-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+
+.bf-wipe-in {
+  animation: bf-wipe-in var(--motion-wipe-duration, 800ms) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes bf-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--card-glow, rgba(108, 92, 231, 0.4)); }
+  50%      { box-shadow: 0 0 16px 4px var(--card-glow, rgba(108, 92, 231, 0.4)); }
+}
+
+.scene-card {
+  transform-origin: center bottom;
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 220ms ease,
+              border-color 220ms ease;
+}
+
+.scene-card.pinned {
+  animation: bf-glow-pulse var(--motion-glow-duration, 2000ms) ease-in-out infinite;
+  transform: translateY(-24px) scale(1.12) !important;
+  z-index: 5;
+}
+
+@keyframes bf-status-flash {
+  0%   { background-color: var(--current-status-color, transparent); }
+  50%  { background-color: var(--current-status-color-bright, transparent); }
+  100% { background-color: transparent; }
+}
+
+.scene-card.flashing {
+  animation: bf-status-flash 1200ms ease-out;
+}
+
+@keyframes bf-fade-out-25 {
+  0%   { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* SceneCard 의 highlight 아바타 배지 자동 fade-out (2.5초 후) */
+@keyframes fadeOut {
+  0%   { opacity: 1; transform: scale(1); }
+  80%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.85); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bf-cascade-item,
+  .bf-wipe-in,
+  .scene-card.pinned,
+  .scene-card.flashing {
+    animation-duration: 200ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  .scene-card.pinned {
+    transform: none !important;
+    box-shadow: 0 0 0 2px var(--card-glow, rgba(108, 92, 231, 0.4)) !important;
+  }
+}
