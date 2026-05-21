@@ -101,9 +101,19 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   }, [currentIndex, allScenes, setDetailScene]);
 
   // ── 키보드 단축키 ──
+  // 코덱스 2차 P2 fix: textarea/input/contenteditable 에 focus 가 있으면 단축키 처리 skip.
+  // 예: errorNote 자유 입력 중 '5' 를 타이핑 → 단계가 '오류' 로 바뀌고, 화살표 → 다음 씬으로 이동 (데이터 손실 위험).
+  // Esc 만은 입력 중에도 닫기 동작 유지 (자연스러운 dismiss UX).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isEditable = !!target && (
+        target.tagName === 'INPUT'
+        || target.tagName === 'TEXTAREA'
+        || target.isContentEditable
+      );
       if (e.key === 'Escape') { close(); return; }
+      if (isEditable) return;
       if (e.key === 'ArrowLeft') { moveTo(-1); return; }
       if (e.key === 'ArrowRight') { moveTo(1); return; }
       const n = parseInt(e.key, 10);
