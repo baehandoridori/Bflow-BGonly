@@ -268,7 +268,7 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
   - transientHighlightStore (단계 변경 시 색 펄스용)
   - StatusChip / StatusDot / PartBadge 공통 컴포넌트
   ```
-- [ ] **Step 2.5.3:** PR 생성 + 코덱스 루프 + 한솔 머지 게이트
+- [x] **Step 2.5.3:** PR 생성 + 코덱스 루프 + 한솔 머지 게이트
 
 ---
 
