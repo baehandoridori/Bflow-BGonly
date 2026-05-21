@@ -1,23 +1,27 @@
 /**
- * 한 파트 (A/B/C/D) 의 카드 가로 그리드 + 호버 dock-lift.
+ * 한 파트 (A/B/C/D) 의 카드 반응형 그리드 + 호버 dock-lift.
  *
- * 마우스가 행 위에서 움직이면 가장 가까운 카드가 위로 떠오름 (LP/Dock magnification).
- * rAF throttle.
+ * 동작:
+ * - PartHeader 클릭 = 접기/펼치기 토글 (`expandedParts` set).
+ * - 그리드는 `flex-wrap` 으로 가로폭에 따라 자동 줄바꿈 — 가로 스크롤 X.
+ * - 호버 dock-lift 는 마우스 (X, Y) 와 카드 중심 거리 (2D) 로 계산해 한 줄 안 인접 카드만 영향.
+ *   여러 줄로 wrap 됐을 때 위/아래 줄 카드가 같이 들썩이는 누수 방지.
  *
  * spec: 2026-05-21-compositing-dashboard-design.md (8.1~8.5, 13.2)
  */
 
 import { useCallback, useRef } from 'react';
-import { cn } from '@/utils/cn';
 import type { CompositingState } from '@/types';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import type { CardScene } from '../cardSceneHelpers';
 import { PartHeader } from './PartHeader';
 import { SceneCard } from './SceneCard';
 
-const DOCK_MAX_DIST = 160; // px
+const DOCK_MAX_DIST = 160; // px — 마우스 중심에서 이 거리 안 카드만 lift
 const DOCK_LIFT = -14; // px
 const DOCK_SCALE = 0.07; // scale = 1 + DOCK_SCALE * lift
+// 같은 행으로 인정하는 수직 허용치 — 카드 높이 절반 정도. 이 안에 있는 카드만 dock 영향.
+const SAME_ROW_Y_THRESHOLD = 110;
 
 interface PartCardRowProps {
   partId: string;
@@ -35,15 +39,21 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
 
-  // 코덱스 1차 P2 fix: 이전엔 `|| true` 가 남아있어 항상 펼침 상태 → collapse 토글 무력화.
-  // 디자인 결정 (한솔): 카드 그리드는 항상 펼침, 접힘은 다루지 않음 (Timeline 패널이 파트 단위 시각화를 대신 담당).
-  // PartHeader 의 chevron 은 시각적 ornament 로만 유지. 향후 폴리시에서 토글 활성 여부 재검토.
-  const effectiveExpanded = true;
-  void expandedParts; // store 필드는 향후 폴리시 대비 유지 — 명시적으로 미사용 표시.
+  // 사용자가 한 번이라도 토글한 파트는 set 에 들어있고, 그 안에 있으면 펼침.
+  // (set 초기화는 CompositingDashboardView 가 마운트 시 모든 partId 를 add — 기본 펼침.)
+  const expanded = expandedParts.has(partId);
+
+  // 완료(done) 씬 카운트 — PartHeader 의 진행률 바에 전달
+  let doneCount = 0;
+  for (const sc of scenes) {
+    const st = epStates.get(`${sc.episodeNumber}:${sc.sceneId}`);
+    if (st?.status === 'done') doneCount += 1;
+  }
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (rafRef.current !== null) return;
     const x = e.clientX;
+    const y = e.clientY;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       const row = rowRef.current;
@@ -52,8 +62,14 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
       cards.forEach((card) => {
         if (card.classList.contains('pinned')) return; // pinned 카드는 별도 transform
         const rect = card.getBoundingClientRect();
-        const center = rect.left + rect.width / 2;
-        const distance = Math.abs(x - center);
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        // 수직 거리가 임계치 이상이면 같은 행 아님 → lift 0
+        if (Math.abs(y - cy) > SAME_ROW_Y_THRESHOLD) {
+          card.style.transform = '';
+          return;
+        }
+        const distance = Math.abs(x - cx);
         const lift = Math.max(0, 1 - distance / DOCK_MAX_DIST);
         const dy = lift * DOCK_LIFT;
         const scale = 1 + lift * DOCK_SCALE;
@@ -81,21 +97,21 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
       <PartHeader
         partId={partId}
         sceneCount={scenes.length}
-        expanded={effectiveExpanded}
+        doneCount={doneCount}
+        expanded={expanded}
         onToggle={() => toggleExpand(partId)}
       />
 
-      {effectiveExpanded && (
+      {expanded && (
         <div
           ref={rowRef}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
-          className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-visible px-1"
+          className="flex flex-wrap gap-3 px-1"
           style={{
-            // 상부 margin — dock-lift / pinned 시 카드가 위 컨테이너에 잘리지 않도록.
+            // 상부 margin — dock-lift / pinned 시 카드가 위 컨테이너 / 위 줄에 잘리지 않도록.
             paddingTop: 28,
-            paddingBottom: 12,
-            scrollbarGutter: 'stable',
+            paddingBottom: 16,
           }}
         >
           {scenes.map((sc, idx) => {

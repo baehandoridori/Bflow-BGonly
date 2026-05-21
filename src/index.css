@@ -118,11 +118,14 @@
   --status-error:       #FF7675;   /* 오류 */
   --status-done:        #00B894;   /* 완료 */
 
-  /* 파트 색 (A·B·C·D) */
+  /* 파트 색 (A·B·C·D) — A~D 외 파트는 회색 fallback (E, F, ... 도 시각 깨지지 않게) */
   --part-a: #FF9F43;   /* 주황 */
   --part-b: #74B9FF;   /* 파랑 */
   --part-c: #A29BFE;   /* 보라 */
   --part-d: #00CEC9;   /* 청록 */
+  --part-e: #FD79A8;   /* 핑크 */
+  --part-f: #FAB1A0;   /* 살구 */
+  --part-g: #55EFC4;   /* 민트 */
 
   /* 컴포지팅 카드 톤 */
   --comp-card-glow: rgba(108, 92, 231, 0.4);   /* pinned glow */
@@ -161,6 +164,15 @@
   --status-adjust:      #E1B040;
   --status-error:       #E55656;
   --status-done:        #00A589;
+
+  /* 라이트 모드 파트 색 — 다크보다 살짝 진하게 */
+  --part-a: #E08229;
+  --part-b: #2E86DE;
+  --part-c: #6C5CE7;
+  --part-d: #00A589;
+  --part-e: #E84393;
+  --part-f: #E17055;
+  --part-g: #00B894;
 
   --comp-card-glow: rgba(108, 92, 231, 0.25);
 }
@@ -1056,12 +1068,20 @@ input[type="range"]::-webkit-slider-thumb {
   transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1),
               box-shadow 220ms ease,
               border-color 220ms ease;
+  position: relative;
+  z-index: 1;
 }
 
+/* 호버 dock-lift 중인 카드는 인접 카드보다 살짝 위로 */
+.scene-card:hover {
+  z-index: 2;
+}
+
+/* pinned 카드는 모든 인접 카드를 무조건 덮어쓰기. 정상 카드(z=1) / 호버(z=2) / pinned(z=20). */
 .scene-card.pinned {
   animation: bf-glow-pulse var(--motion-glow-duration, 2000ms) ease-in-out infinite;
   transform: translateY(-24px) scale(1.12) !important;
-  z-index: 5;
+  z-index: 20;
 }
 
 @keyframes bf-status-flash {

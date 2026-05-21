@@ -32,6 +32,7 @@ export function TimeRuler({ mode, totalFrames, totalScenes, fps }: TimeRulerProp
         letterSpacing: '0.04em',
       }}
     >
+      {/* Major tick + 라벨 */}
       {Array.from({ length: ticks + 1 }).map((_, i) => {
         const frac = i / ticks;
         let label = '';
@@ -45,15 +46,15 @@ export function TimeRuler({ mode, totalFrames, totalScenes, fps }: TimeRulerProp
         const isEdge = i === 0 || i === ticks;
         return (
           <div
-            key={i}
+            key={`maj-${i}`}
             className="absolute top-0 bottom-0"
             style={{ left: `${frac * 100}%` }}
           >
-            <div className="absolute left-0 bottom-0 w-px h-1.5 bg-text-secondary/60" />
+            <div className="absolute left-0 bottom-0 w-px h-2 bg-text-secondary/70" />
             <span
               className="absolute font-semibold tabular-nums"
               style={{
-                top: 5,
+                top: 4,
                 left: isEdge && i === ticks ? 'auto' : 4,
                 right: isEdge && i === ticks ? 4 : 'auto',
               }}
@@ -61,6 +62,18 @@ export function TimeRuler({ mode, totalFrames, totalScenes, fps }: TimeRulerProp
               {label}
             </span>
           </div>
+        );
+      })}
+      {/* Minor tick — major 사이를 4 등분, 매 4 칸 중 3 칸이 minor (major 와 겹치지 않게) */}
+      {Array.from({ length: ticks * 4 }).map((_, i) => {
+        if (i % 4 === 0) return null; // major 위치 skip
+        const frac = i / (ticks * 4);
+        return (
+          <div
+            key={`min-${i}`}
+            className="absolute bottom-0 w-px h-1 bg-text-secondary/30"
+            style={{ left: `${frac * 100}%` }}
+          />
         );
       })}
     </div>

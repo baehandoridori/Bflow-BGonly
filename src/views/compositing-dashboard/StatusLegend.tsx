@@ -53,9 +53,9 @@ export function StatusLegend({ epStates }: StatusLegendProps) {
               active ? 'shadow-[0_0_0_2px_currentColor_inset]' : 'hover:brightness-110',
             )}
             style={{
-              background: `rgb(var(${tokenVar}) / ${active ? '0.22' : '0.12'})`,
+              background: `color-mix(in srgb, var(${tokenVar}) ${active ? 22 : 12}%, transparent)`,
               color: `var(${tokenVar})`,
-              borderColor: `rgb(var(${tokenVar}) / ${active ? '0.6' : '0.28'})`,
+              borderColor: `color-mix(in srgb, var(${tokenVar}) ${active ? 60 : 28}%, transparent)`,
             }}
           >
             <span

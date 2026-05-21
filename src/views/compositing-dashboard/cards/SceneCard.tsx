@@ -10,9 +10,10 @@
  */
 
 import { useMemo } from 'react';
+import { Pin } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { CompositingState } from '@/types';
-import { COMPOSITING_STATUS_TOKEN, COMPOSITING_ERROR_LABEL } from '@/utils/compositingLabels';
+import { COMPOSITING_STATUS_LABEL, COMPOSITING_STATUS_TOKEN, COMPOSITING_ERROR_LABEL } from '@/utils/compositingLabels';
 import { StatusDot } from '@/components/compositing-dashboard/common/StatusDot';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { useTransientHighlightStore, selectHighlight } from '@/stores/transientHighlightStore';
@@ -41,6 +42,8 @@ export function SceneCard({ card, state, staggerIndex, dimmed }: SceneCardProps)
 
   const sceneKey = `${card.episodeNumber}:${card.sceneId}`;
   const isPinned = pinnedScene === sceneKey;
+  // 다른 카드가 핀되었으면 본인은 살짝 흐려진다 — 핀 카드로 시선 집중.
+  const otherPinned = pinnedScene !== null && pinnedScene !== sceneKey;
 
   // transientHighlight — 다른 사용자 변경 시 색 펄스 + 보낸 사람 아바타 배지
   const highlight = useTransientHighlightStore((s) => selectHighlight(s, sceneKey));
@@ -71,26 +74,43 @@ export function SceneCard({ card, state, staggerIndex, dimmed }: SceneCardProps)
         'border transition-all duration-200',
         isPinned ? 'pinned' : '',
         highlight ? 'flashing' : '',
-        dimmed && !isPinned ? 'opacity-35' : 'opacity-100',
+        isPinned ? 'opacity-100' : (dimmed ? 'opacity-35' : (otherPinned ? 'opacity-55' : 'opacity-100')),
       )}
       style={{
         background: 'rgb(var(--color-bg-card))',
-        borderColor: isPinned ? 'rgb(var(--color-accent) / 0.7)' : `rgb(var(${tokenVar}) / 0.4)`,
+        borderColor: isPinned ? 'rgb(var(--color-accent))' : `color-mix(in srgb, var(${tokenVar}) 40%, transparent)`,
+        borderWidth: isPinned ? 2 : 1,
+        outline: isPinned ? '3px solid rgb(var(--color-accent) / 0.25)' : 'none',
+        outlineOffset: isPinned ? 1 : 0,
         width: 180,
         height: 220,
         animationDelay: `${staggerIndex * 28}ms`,
         // bf-status-flash 용 변수
         ['--current-status-color' as any]: `var(${tokenVar})`,
-        ['--current-status-color-bright' as any]: `rgb(var(${tokenVar}) / 0.4)`,
+        ['--current-status-color-bright' as any]: `color-mix(in srgb, var(${tokenVar}) 40%, transparent)`,
         // glow pulse 컬러
         ['--card-glow' as any]: 'rgb(var(--color-accent) / 0.4)',
       }}
       title={`${card.sceneId} · ${status}`}
     >
-      {/* 상단 sceneId + StatusDot */}
-      <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-bg-border/30">
+      {/* 상단 sceneId + 상태 라벨 + StatusDot */}
+      <div className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 border-b border-bg-border/30">
         <span className="font-mono text-[11px] font-semibold text-text-primary">{card.sceneId}</span>
-        <StatusDot status={status} size={8} />
+        <div className="flex items-center gap-1.5">
+          {/* 핀 상태일 때만 단계 라벨을 풀로 표시 (정상 상태는 dot 만, 공간 절약) */}
+          {isPinned && (
+            <span
+              className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+              style={{
+                color: `var(${tokenVar})`,
+                background: `color-mix(in srgb, var(${tokenVar}) 18%, transparent)`,
+              }}
+            >
+              {COMPOSITING_STATUS_LABEL[status]}
+            </span>
+          )}
+          <StatusDot status={status} size={isPinned ? 10 : 8} />
+        </div>
       </div>
 
       {/* 중단 이미지 분할 */}
@@ -107,14 +127,29 @@ export function SceneCard({ card, state, staggerIndex, dimmed }: SceneCardProps)
         {!bgName && !actName && <span className="text-text-secondary/60">담당자 미지정</span>}
       </div>
 
+      {/* 핀 아이콘 — pinned 카드 좌상단 코너 */}
+      {isPinned && (
+        <span
+          className="absolute -top-2 -left-2 w-7 h-7 rounded-full flex items-center justify-center shadow-lg"
+          style={{
+            background: 'rgb(var(--color-accent))',
+            color: '#fff',
+            boxShadow: '0 0 0 2px rgb(var(--color-bg-card)), 0 0 12px rgb(var(--color-accent) / 0.6)',
+          }}
+          aria-hidden="true"
+        >
+          <Pin size={13} strokeWidth={2.5} fill="#fff" />
+        </span>
+      )}
+
       {/* status='error' 인 경우 오류 사유 라벨 우상단 truncate */}
       {status === 'error' && errorKind && (
         <span
           className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-bold pointer-events-none truncate max-w-[110px]"
           style={{
-            background: `rgb(var(${COMPOSITING_STATUS_TOKEN.error}) / 0.18)`,
+            background: `color-mix(in srgb, var(${COMPOSITING_STATUS_TOKEN.error}) 18%, transparent)`,
             color: `var(${COMPOSITING_STATUS_TOKEN.error})`,
-            border: `1px solid rgb(var(${COMPOSITING_STATUS_TOKEN.error}) / 0.5)`,
+            border: `1px solid color-mix(in srgb, var(${COMPOSITING_STATUS_TOKEN.error}) 50%, transparent)`,
           }}
         >
           {COMPOSITING_ERROR_LABEL[errorKind] ?? ''}

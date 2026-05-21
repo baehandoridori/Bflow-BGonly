@@ -51,6 +51,14 @@ interface CompositingDashboardStore {
   /** 첫 진입 안내 띠 표시 여부. localStorage 플래그로 영구 dismiss. */
   guideStripVisible: boolean;
 
+  /**
+   * 사용자가 드래그로 지정한 파트 순서 (EP 별).
+   * 키: episodeNumber, 값: partId 배열. 비어있으면 기본 (알파벳 순) 사용.
+   * Timeline 패널에서 파트 행을 드래그하면 이 배열이 업데이트되어
+   * Timeline / 카드 그리드 양쪽이 같은 순서로 재배치된다.
+   */
+  partsOrderByEpisode: Record<number, string[]>;
+
   // ─── Actions ───
   setEpisode: (n: number) => void;
   setViewMode: (mode: CompositingViewMode) => void;
@@ -64,6 +72,8 @@ interface CompositingDashboardStore {
   setPinnedPart: (p: string | null) => void;
   dismissGuideStrip: () => void;
   showGuideStrip: () => void;
+  /** EP 별 파트 순서 지정. partIds 가 빈 배열이면 기본 순서로 reset. */
+  setPartsOrder: (episodeNumber: number, partIds: string[]) => void;
 }
 
 function readGuideSeen(): boolean {
@@ -97,6 +107,7 @@ export const useCompositingDashboardStore = create<CompositingDashboardStore>((s
   hoveredPart: null,
   pinnedPart: null,
   guideStripVisible: !readGuideSeen(),
+  partsOrderByEpisode: {},
 
   setEpisode: (n) => set({ episodeNumber: n }),
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -138,4 +149,15 @@ export const useCompositingDashboardStore = create<CompositingDashboardStore>((s
     writeGuideSeen(false);
     set({ guideStripVisible: true });
   },
+
+  setPartsOrder: (episodeNumber, partIds) =>
+    set((state) => {
+      const next = { ...state.partsOrderByEpisode };
+      if (partIds.length === 0) {
+        delete next[episodeNumber];
+      } else {
+        next[episodeNumber] = partIds;
+      }
+      return { partsOrderByEpisode: next };
+    }),
 }));

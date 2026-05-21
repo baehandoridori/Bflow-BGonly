@@ -63,12 +63,13 @@ export function statusCssColor(status: CompositingStatus): string {
   return `var(${COMPOSITING_STATUS_TOKEN[status]})`;
 }
 
-/** 파트 (A·B·C·D) → 색 토큰 */
+/** 파트 (A~G) → 색 토큰. 그 외는 액센트 폴백. */
 export function partCssColor(partId: string): string {
   const key = partId.toLowerCase();
-  if (key === 'a' || key === 'b' || key === 'c' || key === 'd') {
+  if (key === 'a' || key === 'b' || key === 'c' || key === 'd'
+      || key === 'e' || key === 'f' || key === 'g') {
     return `var(--part-${key})`;
   }
-  // 알 수 없는 파트 (E, F, ...) — 액센트 폴백
+  // H 이상 — 액센트 폴백
   return 'var(--color-accent)';
 }

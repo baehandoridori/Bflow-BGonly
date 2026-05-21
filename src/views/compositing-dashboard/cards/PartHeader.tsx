@@ -12,14 +12,19 @@ import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardSt
 interface PartHeaderProps {
   partId: string;
   sceneCount: number;
+  /** 완료(done) 씬 수 — 진행률 표시용. */
+  doneCount: number;
   expanded: boolean;
   onToggle: () => void;
 }
 
-export function PartHeader({ partId, sceneCount, expanded, onToggle }: PartHeaderProps) {
+export function PartHeader({ partId, sceneCount, doneCount, expanded, onToggle }: PartHeaderProps) {
   const hoveredPart = useCompositingDashboardStore((s) => s.hoveredPart);
   const setHoveredPart = useCompositingDashboardStore((s) => s.setHoveredPart);
   const focused = hoveredPart === partId;
+
+  const pct = sceneCount > 0 ? Math.round((doneCount / sceneCount) * 100) : 0;
+  const lower = partId.toLowerCase();
 
   return (
     <button
@@ -44,6 +49,32 @@ export function PartHeader({ partId, sceneCount, expanded, onToggle }: PartHeade
         파트 {partId}
       </span>
       <span className="text-[11px] text-text-secondary font-medium">· {sceneCount}컷</span>
+
+      {/* 완료율 미니 progress + 퍼센트 */}
+      <div className="ml-auto flex items-center gap-2 min-w-[140px]">
+        <div
+          className="relative flex-1 h-1.5 rounded-full overflow-hidden"
+          style={{ background: `color-mix(in srgb, var(--part-${lower}) 14%, transparent)` }}
+        >
+          <div
+            className="absolute inset-y-0 left-0 transition-all duration-300"
+            style={{
+              width: `${pct}%`,
+              background: `linear-gradient(90deg, var(--part-${lower}), var(--status-done))`,
+              boxShadow: `0 0 4px color-mix(in srgb, var(--status-done) 55%, transparent)`,
+            }}
+          />
+        </div>
+        <span
+          className="text-[11px] font-bold tabular-nums shrink-0"
+          style={{ color: pct === 100 ? 'var(--status-done)' : `var(--part-${lower})` }}
+        >
+          {pct}%
+        </span>
+        <span className="text-[10px] text-text-secondary/80 tabular-nums shrink-0">
+          {doneCount}/{sceneCount}
+        </span>
+      </div>
     </button>
   );
 }

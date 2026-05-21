@@ -36,6 +36,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5560"],
       "port": 5560
+    },
+    {
+      "name": "compositing-mockup",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5561"],
+      "port": 5561
     }
   ]
 }

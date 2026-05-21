@@ -195,9 +195,9 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
                     active ? 'shadow-[0_0_10px_currentColor]' : '',
                   )}
                   style={{
-                    background: active ? `rgb(var(${tokenVar}))` : 'transparent',
+                    background: active ? `var(${tokenVar})` : 'transparent',
                     color: active ? '#fff' : `var(${tokenVar})`,
-                    borderColor: `rgb(var(${tokenVar}) / ${active ? '1' : '0.45'})`,
+                    borderColor: active ? `var(${tokenVar})` : `color-mix(in srgb, var(${tokenVar}) 45%, transparent)`,
                   }}
                 >
                   {COMPOSITING_STATUS_LABEL[st]}
