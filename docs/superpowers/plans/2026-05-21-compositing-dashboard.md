@@ -46,8 +46,8 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 **Files:**
 - Create: `docs/mockups/compositing-dashboard/` (폴더 전체)
 
-- [ ] **Step 1.1.1:** `C:\Users\user\Downloads\design_handoff_unzip\design_handoff_compositing_dashboard\` 의 모든 파일 (README.md, index.html, *.jsx, tokens.css, mock-data.js, CLAUDE_CODE_PROMPT.md) 을 워크트리의 `docs/mockups/compositing-dashboard/` 로 복사. 다음 세션에서 다시 참조 가능.
-- [ ] **Step 1.1.2:** 복사 검증 — `ls docs/mockups/compositing-dashboard/` 로 파일 11개 확인 (README + 10개 자산).
+- [x] **Step 1.1.1:** `C:\Users\user\Downloads\design_handoff_unzip\design_handoff_compositing_dashboard\` 의 모든 파일 (README.md, index.html, *.jsx, tokens.css, mock-data.js, CLAUDE_CODE_PROMPT.md) 을 워크트리의 `docs/mockups/compositing-dashboard/` 로 복사. 다음 세션에서 다시 참조 가능.
+- [x] **Step 1.1.2:** 복사 검증 — `ls docs/mockups/compositing-dashboard/` 로 파일 11개 확인 (README + 10개 자산).
 
 ### Task 1.2 — 디자인 토큰 추가
 
@@ -55,7 +55,7 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Modify: `src/index.css` (또는 `src/themes.ts` 둘 중 토큰 정의 위치)
 - Modify: `tailwind.config.js`
 
-- [ ] **Step 1.2.1: 컴포지팅 단계 색 토큰 추가** (`src/index.css` 의 `:root` 와 `[data-theme="dark"]` 양쪽):
+- [x] **Step 1.2.1: 컴포지팅 단계 색 토큰 추가** (`src/index.css` 의 `:root` 와 `[data-theme="dark"]` 양쪽):
   ```css
   --status-batch:       #4A5060;
   --status-combine:     #74B9FF;
@@ -66,7 +66,7 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
   ```
   라이트 모드는 동일하게 또는 saturation 약간 낮춤 (점검 후).
 
-- [ ] **Step 1.2.2: 파트 색 토큰 추가**:
+- [x] **Step 1.2.2: 파트 색 토큰 추가**:
   ```css
   --part-a: #FF9F43;
   --part-b: #74B9FF;
@@ -74,7 +74,7 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
   --part-d: #00CEC9;
   ```
 
-- [ ] **Step 1.2.3: 모션 토큰 추가**:
+- [x] **Step 1.2.3: 모션 토큰 추가**:
   ```css
   --motion-cascade-duration: 560ms;
   --motion-cascade-stagger:   28ms;
@@ -85,7 +85,7 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
   --motion-wipe-duration:     800ms;
   ```
 
-- [ ] **Step 1.2.4: Tailwind extend** — `tailwind.config.js` 의 `theme.extend.colors` 에 status/part 노출:
+- [x] **Step 1.2.4: Tailwind extend** — `tailwind.config.js` 의 `theme.extend.colors` 에 status/part 노출:
   ```js
   status: {
     batch: 'var(--status-batch)',
@@ -104,7 +104,7 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Modify: `src/types/index.ts`
 - Create: `src/utils/compositingLabels.ts`
 
-- [ ] **Step 1.3.1:** `src/types/index.ts` 에 추가:
+- [x] **Step 1.3.1:** `src/types/index.ts` 에 추가:
   ```typescript
   export type CompositingStatus =
     | 'batch' | 'combine' | 'aggregated' | 'adjust' | 'error' | 'done';
@@ -126,9 +126,9 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
   }
   ```
 
-- [ ] **Step 1.3.2:** `Scene` 인터페이스에 `durationFrames?: number | null;` 추가.
+- [x] **Step 1.3.2:** `Scene` 인터페이스에 `durationFrames?: number | null;` 추가.
 
-- [ ] **Step 1.3.3:** `ViewMode` 타입에 `compositing-revisions` 추가 (기존 `compositing` 은 유지):
+- [x] **Step 1.3.3:** `ViewMode` 타입에 `compositing-revisions` 추가 (기존 `compositing` 은 유지):
   ```typescript
   export type ViewMode =
     | ... 기존
@@ -137,7 +137,7 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
   ```
   단, ViewMode 가 useAppStore 에 있으면 거기서 수정.
 
-- [ ] **Step 1.3.4: 라벨 유틸 생성** (`src/utils/compositingLabels.ts`):
+- [x] **Step 1.3.4: 라벨 유틸 생성** (`src/utils/compositingLabels.ts`):
   ```typescript
   import type { CompositingStatus, CompositingErrorKind } from '../types';
 
@@ -167,11 +167,11 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 **Files:**
 - Create: `DEVLOG/migrations/2026-05-21-compositing-states.sql`
 
-- [ ] **Step 1.4.1: SQL 파일 작성** — spec 의 "4.2 Supabase 스키마" 섹션 SQL 그대로 복사 (compositing_states 테이블 + scenes.duration_frames 컬럼 + RLS 정책 + updated_at 트리거).
+- [x] **Step 1.4.1: SQL 파일 작성** — spec 의 "4.2 Supabase 스키마" 섹션 SQL 그대로 복사 (compositing_states 테이블 + scenes.duration_frames 컬럼 + RLS 정책 + updated_at 트리거).
 
-- [ ] **Step 1.4.2: Supabase 라이브 DB 적용** — `mcp__67cc__apply_migration` 사용. project_id 는 기존 마이그레이션 인접 파일에서 확인 (or `list_projects` 로). 적용 후 `list_tables` 로 `compositing_states` 존재 확인.
+- [x] **Step 1.4.2: Supabase 라이브 DB 적용** — `mcp__67cc__apply_migration` 사용. project_id 는 기존 마이그레이션 인접 파일에서 확인 (or `list_projects` 로). 적용 후 `list_tables` 로 `compositing_states` 존재 확인.
 
-- [ ] **Step 1.4.3: RLS 검증** — 임의 행 INSERT 시도 (`execute_sql`). isCompositor=true 인 user UUID 로 시도하면 성공, 다른 user UUID 로 시도하면 거부 확인.
+- [x] **Step 1.4.3: RLS 검증** — 임의 행 INSERT 시도 (`execute_sql`). isCompositor=true 인 user UUID 로 시도하면 성공, 다른 user UUID 로 시도하면 거부 확인.
 
 ### Task 1.5 — supabaseService + IPC 함수 추가
 
@@ -181,23 +181,23 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Modify: `electron/preload.ts`
 - Modify: `src/mocks/devElectronAPI.ts` (preview/mock 모드 호환)
 
-- [ ] **Step 1.5.1:** `src/services/supabaseService.ts` 에 `loadCompositingStates(episodeNumber)`, `setCompositingState(input)`, `subscribeCompositingStates(epNum, onChange): () => void` 함수 추가. 기존 `loadScenes` 패턴 차용.
+- [x] **Step 1.5.1:** `src/services/supabaseService.ts` 에 `loadCompositingStates(episodeNumber)`, `setCompositingState(input)`, `subscribeCompositingStates(epNum, onChange): () => void` 함수 추가. 기존 `loadScenes` 패턴 차용.
 
-- [ ] **Step 1.5.2:** `electron/supabase.ts` 에 IPC wrapper 추가:
+- [x] **Step 1.5.2:** `electron/supabase.ts` 에 IPC wrapper 추가:
   - `supabase:loadCompositingStates`
   - `supabase:setCompositingState`
   - `supabase:compositingStates:subscribe`
   - `supabase:compositingStates:unsubscribe`
 
-- [ ] **Step 1.5.3:** `electron/preload.ts` 에 `window.electronAPI.supabaseLoadCompositingStates`, `supabaseSetCompositingState`, `supabaseSubscribeCompositingStates` 노출.
+- [x] **Step 1.5.3:** `electron/preload.ts` 에 `window.electronAPI.supabaseLoadCompositingStates`, `supabaseSetCompositingState`, `supabaseSubscribeCompositingStates` 노출.
 
-- [ ] **Step 1.5.4:** `src/mocks/devElectronAPI.ts` 에 dev/preview 모드용 in-memory mock 함수 추가 (테스트 데이터 시드 포함).
+- [x] **Step 1.5.4:** `src/mocks/devElectronAPI.ts` 에 dev/preview 모드용 in-memory mock 함수 추가 (테스트 데이터 시드 포함).
 
 ### Task 1.6 — 검증 & 커밋
 
-- [ ] **Step 1.6.1:** `npm run typecheck` 통과
-- [ ] **Step 1.6.2:** `npm run build:vite` 통과
-- [ ] **Step 1.6.3:** Commit — 단일 commit 또는 task 별 분할:
+- [x] **Step 1.6.1:** `npm run typecheck` 통과
+- [x] **Step 1.6.2:** `npm run build:vite` 통과
+- [x] **Step 1.6.3:** Commit — 단일 commit 또는 task 별 분할:
   ```
   feat(compositing-dashboard): 토큰·타입·DB 스키마 기반 추가
 
@@ -210,9 +210,9 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 
   Spec: docs/superpowers/specs/2026-05-21-compositing-dashboard-design.md
   ```
-- [ ] **Step 1.6.4:** Push + PR 생성 (pr-creator 스킬 사용)
-- [ ] **Step 1.6.5:** 코덱스 리뷰 루프 (codex-review-loop 스킬)
-- [ ] **Step 1.6.6:** 한솔님 머지 게이트 — PR URL 한솔님께 보고, 머지 OK 명시 받으면 머지
+- [x] **Step 1.6.4:** Push + PR 생성 (pr-creator 스킬 사용)
+- [x] **Step 1.6.5:** 코덱스 리뷰 루프 (codex-review-loop 스킬)
+- [x] **Step 1.6.6:** 한솔님 머지 게이트 — PR URL 한솔님께 보고, 머지 OK 명시 받으면 머지
 
 ---
 
@@ -227,23 +227,23 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 **Files:**
 - Create: `src/stores/useCompositingDashboardStore.ts`
 
-- [ ] **Step 2.1.1:** Spec 의 "10. Store" 섹션 코드 그대로 적용. zustand create 사용. expandedParts/mutedScenes 는 Set, guideStripVisible 은 localStorage 초기화.
+- [x] **Step 2.1.1:** Spec 의 "10. Store" 섹션 코드 그대로 적용. zustand create 사용. expandedParts/mutedScenes 는 Set, guideStripVisible 은 localStorage 초기화.
 
 ### Task 2.2 — useDataStore 확장
 
 **Files:**
 - Modify: `src/stores/useDataStore.ts`
 
-- [ ] **Step 2.2.1:** `compositingStates: Map<string, CompositingState>` 필드 추가. Key = `${episodeNumber}:${sceneId}`.
-- [ ] **Step 2.2.2:** Setter 추가: `setCompositingStates(rows: CompositingState[])`, `setCompositingState(key, row)`, `deleteCompositingState(key)`.
-- [ ] **Step 2.2.3:** 진입 시 EP 별 로딩 헬퍼 `loadCompositingForEpisode(epNum)` 추가 (CompositingDashboardView 에서 호출).
+- [x] **Step 2.2.1:** `compositingStates: Map<string, CompositingState>` 필드 추가. Key = `${episodeNumber}:${sceneId}`.
+- [x] **Step 2.2.2:** Setter 추가: `setCompositingStates(rows: CompositingState[])`, `setCompositingState(key, row)`, `deleteCompositingState(key)`.
+- [x] **Step 2.2.3:** 진입 시 EP 별 로딩 헬퍼 `loadCompositingForEpisode(epNum)` 추가 (CompositingDashboardView 에서 호출).
 
 ### Task 2.3 — transientHighlightStore
 
 **Files:**
 - Create: `src/stores/transientHighlightStore.ts`
 
-- [ ] **Step 2.3.1:** 별도 Zustand store. `highlights: Map<string, { by: string; startedAt: number }>`. `add(key, by)` 메서드는 setTimeout 으로 2.5초 후 자동 delete. `get(key)` 셀렉터.
+- [x] **Step 2.3.1:** 별도 Zustand store. `highlights: Map<string, { by: string; startedAt: number }>`. `add(key, by)` 메서드는 setTimeout 으로 2.5초 후 자동 delete. `get(key)` 셀렉터.
 
 ### Task 2.4 — 공통 컴포넌트
 
@@ -252,14 +252,14 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Create: `src/components/compositing-dashboard/common/StatusDot.tsx`
 - Create: `src/components/compositing-dashboard/common/PartBadge.tsx`
 
-- [ ] **Step 2.4.1: StatusChip** — size: 'sm' | 'md' | 'lg' / variant: 'solid' | 'soft' / 카운트 표시 옵션. 핸드오프 `shared.jsx` 의 StatusChip 패턴 차용.
-- [ ] **Step 2.4.2: StatusDot** — size: 6/8/10/12px / withPulse 옵션 / status prop. 단순한 dot.
-- [ ] **Step 2.4.3: PartBadge** — size: 'sm' | 'md' | 'lg' / partId: 'A' | 'B' | 'C' | 'D'.
+- [x] **Step 2.4.1: StatusChip** — size: 'sm' | 'md' | 'lg' / variant: 'solid' | 'soft' / 카운트 표시 옵션. 핸드오프 `shared.jsx` 의 StatusChip 패턴 차용.
+- [x] **Step 2.4.2: StatusDot** — size: 6/8/10/12px / withPulse 옵션 / status prop. 단순한 dot.
+- [x] **Step 2.4.3: PartBadge** — size: 'sm' | 'md' | 'lg' / partId: 'A' | 'B' | 'C' | 'D'.
 
 ### Task 2.5 — 검증 & 커밋
 
-- [ ] **Step 2.5.1:** typecheck + build:vite
-- [ ] **Step 2.5.2:** Commit:
+- [x] **Step 2.5.1:** typecheck + build:vite
+- [x] **Step 2.5.2:** Commit:
   ```
   feat(compositing-dashboard): Store + 공통 컴포넌트
 
