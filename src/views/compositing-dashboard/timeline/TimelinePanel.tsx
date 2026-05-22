@@ -81,7 +81,11 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
     const to = next.indexOf(targetPartId);
     if (from < 0 || to < 0) return;
     next.splice(from, 1);
-    next.splice(to, 0, source);
+    // 코덱스 8차 P1: splice(from, 1) 으로 source 제거 후 인덱스가 시프트 → to 가 from 보다 컸으면 -1 조정.
+    //   예: [A,B,C,D] 에서 A 를 C 위치에 drop → from=0, to=2. splice 후 [B,C,D] 에서 C 는 index 1.
+    //   조정 없이 splice(2, 0, A) 하면 [B,C,A,D] 가 되어 의도(C 앞에 A) 와 어긋남.
+    const adjustedTo = from < to ? to - 1 : to;
+    next.splice(adjustedTo, 0, source);
     onReorder?.(next);
   };
   const handleDragEnd = () => {
