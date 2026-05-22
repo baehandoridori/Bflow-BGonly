@@ -63,6 +63,31 @@ export function statusCssColor(status: CompositingStatus): string {
   return `var(${COMPOSITING_STATUS_TOKEN[status]})`;
 }
 
+/**
+ * 한솔 정의 (2026-05-22): "완료된 부분" = done + aggregated.
+ *   취합 완료(aggregated) 는 완료 계열의 한 단계로 간주 — 진행률 / RAM 라인 표시에 모두 포함.
+ */
+export function isCompletedStatus(status: CompositingStatus | undefined | null): boolean {
+  return status === 'done' || status === 'aggregated';
+}
+
+/**
+ * 컴포지팅 대시보드에서 단계 변경 권한을 가진 사용자 판정.
+ *
+ * 한솔 정정 (2026-05-21): 배한솔은 언제나 컴포지터 + admin.
+ *   → user.isCompositor === true 외에도 다음 경우 true:
+ *      - user.role === 'admin' (관리자는 자동 권한)
+ *      - user.name === '배한솔' (오너 — 데이터 누락 시에도 항상 권한)
+ */
+import type { AppUser } from '@/types';
+export function isCompositorForCompositing(user: AppUser | null | undefined): boolean {
+  if (!user) return false;
+  if (user.isCompositor === true) return true;
+  if (user.role === 'admin') return true;
+  if (user.name === '배한솔') return true;
+  return false;
+}
+
 /** 파트 (A~G) → 색 토큰. 그 외는 액센트 폴백. */
 export function partCssColor(partId: string): string {
   const key = partId.toLowerCase();

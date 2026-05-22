@@ -28,6 +28,17 @@ export interface CardScene {
   /** BG 시트명 / ACT 시트명 (활동 기록, 모달 등에서 필요). */
   bgSheetName?: string;
   actSheetName?: string;
+  /** BG / ACT 파트의 Supabase UUID — 댓글 fetch (`readCommentsForPart`) 에 필요. */
+  bgPartUuid?: string;
+  actPartUuid?: string;
+  /**
+   * BG / ACT 시트의 scenes 배열 안 인덱스 (-1 if absent).
+   * 한솔 결정 (2026-05-22): "댓글이 가끔 안 불러와지는 문제" 근본 해결을 위해
+   * buildCardScenes 1 회 lookup 시점에 인덱스도 함께 저장. CompositingSceneModal 가
+   * 별도 lookup 으로 인덱스 재계산하면서 두 패턴이 어긋날 가능성을 원천 차단.
+   */
+  bgSceneIndex: number;
+  actSceneIndex: number;
 }
 
 export interface CardSceneGroup {
@@ -40,6 +51,18 @@ function normPartId(p: string): string {
   return (p || '').trim().slice(0, 1).toUpperCase();
 }
 
+/**
+ * sceneId 안의 마지막 숫자 부분을 추출. 정렬에 사용.
+ * 'a001' → 1, 'a025' → 25, 'b100' → 100.
+ * 사전식 정렬은 'a100' < 'a25' < 'a5' 가 되어버려 — 숫자 정렬로 fix (한솔 보고 2026-05-21).
+ */
+function sceneIdNumeric(id: string): number {
+  const m = (id || '').match(/(\d+)/g);
+  if (!m || m.length === 0) return Number.MAX_SAFE_INTEGER;
+  // 마지막 숫자 그룹을 우선 사용 (보통 sceneId 의 컷 번호)
+  return parseInt(m[m.length - 1], 10);
+}
+
 /** 한 EP 의 모든 씬을 (epNum, sceneId) 단위로 묶어 PartId 별 그룹 반환. */
 export function buildCardScenes(episode: Episode | undefined): CardSceneGroup[] {
   if (!episode) return [];
@@ -50,7 +73,7 @@ export function buildCardScenes(episode: Episode | undefined): CardSceneGroup[] 
   for (const part of episode.parts) {
     const partId = normPartId(part.partId);
     const isBg = part.department === 'bg';
-    for (const sc of part.scenes) {
+    part.scenes.forEach((sc, sceneIdx) => {
       const key = sc.sceneId;
       const existing = byScene.get(key);
       const next: CardScene = existing ?? {
@@ -59,10 +82,14 @@ export function buildCardScenes(episode: Episode | undefined): CardSceneGroup[] 
         episodeNumber: episode.episodeNumber,
         orderNo: sc.no,
         durationFrames: sc.durationFrames ?? null,
+        bgSceneIndex: -1,
+        actSceneIndex: -1,
       };
       if (isBg) {
         next.bg = sc;
         next.bgSheetName = part.sheetName;
+        next.bgPartUuid = part.id;
+        next.bgSceneIndex = sceneIdx;
         if (!next.storyboardUrl) next.storyboardUrl = sc.storyboardUrl;
         if (!next.guideUrl) next.guideUrl = sc.guideUrl;
         next.orderNo = sc.no; // BG 우선
@@ -70,13 +97,15 @@ export function buildCardScenes(episode: Episode | undefined): CardSceneGroup[] 
       } else {
         next.act = sc;
         next.actSheetName = part.sheetName;
+        next.actPartUuid = part.id;
+        next.actSceneIndex = sceneIdx;
         if (!next.storyboardUrl) next.storyboardUrl = sc.storyboardUrl;
         if (!next.guideUrl) next.guideUrl = sc.guideUrl;
         if (next.bg === undefined) next.orderNo = sc.no;
         if (next.durationFrames == null) next.durationFrames = sc.durationFrames ?? null;
       }
       byScene.set(key, next);
-    }
+    });
   }
 
   // partId 별로 그룹핑, 각 그룹 안에서 orderNo 정렬
@@ -85,8 +114,16 @@ export function buildCardScenes(episode: Episode | undefined): CardSceneGroup[] 
     if (!byPart.has(cs.partId)) byPart.set(cs.partId, []);
     byPart.get(cs.partId)!.push(cs);
   }
+  // sceneId 안 숫자 부분으로 정렬 (사전식 'a100 < a25 < a5' 문제 fix).
+  // orderNo (Scene.no) 는 BG/ACT 시트의 행 인덱스 — 둘이 다르면 어색해질 수 있어,
+  // sceneId 의 컷 번호를 1순위로 사용한다. tie 시 orderNo.
   for (const arr of byPart.values()) {
-    arr.sort((a, b) => a.orderNo - b.orderNo);
+    arr.sort((a, b) => {
+      const an = sceneIdNumeric(a.sceneId);
+      const bn = sceneIdNumeric(b.sceneId);
+      if (an !== bn) return an - bn;
+      return a.orderNo - b.orderNo;
+    });
   }
 
   return [...byPart.entries()]
@@ -94,11 +131,17 @@ export function buildCardScenes(episode: Episode | undefined): CardSceneGroup[] 
     .map(([partId, scenes]) => ({ partId, scenes }));
 }
 
-/** EP 전체 씬 평탄화 (Timeline 패널 룰러용). orderNo 정렬. */
+/** EP 전체 씬 평탄화 (Timeline 패널 룰러용). partId → sceneId 안 숫자 순. */
 export function flattenCardScenes(groups: CardSceneGroup[]): CardScene[] {
   const all: CardScene[] = [];
   for (const g of groups) for (const sc of g.scenes) all.push(sc);
-  all.sort((a, b) => a.orderNo - b.orderNo);
+  all.sort((a, b) => {
+    if (a.partId !== b.partId) return a.partId.localeCompare(b.partId);
+    const an = sceneIdNumeric(a.sceneId);
+    const bn = sceneIdNumeric(b.sceneId);
+    if (an !== bn) return an - bn;
+    return a.orderNo - b.orderNo;
+  });
   return all;
 }
 

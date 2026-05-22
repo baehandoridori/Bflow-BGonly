@@ -25,6 +25,7 @@ import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardSt
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useTransientHighlightStore } from '@/stores/transientHighlightStore';
 import { subscribeCompositingStatesRealtime, updateSceneFieldInSupabase } from '@/services/supabaseService';
+import { isCompositorForCompositing } from '@/utils/compositingLabels';
 import { loadPreferences, savePreferences } from '@/services/settingsService';
 import { DashHeader } from './compositing-dashboard/DashHeader';
 import { GuideStrip } from './compositing-dashboard/GuideStrip';
@@ -32,6 +33,7 @@ import { StatusLegend } from './compositing-dashboard/StatusLegend';
 import { TimelinePanel } from './compositing-dashboard/timeline/TimelinePanel';
 import { PartCardRow } from './compositing-dashboard/cards/PartCardRow';
 import { CompositingSceneModal } from './compositing-dashboard/modal/CompositingSceneModal';
+import { BulkActionBar } from './compositing-dashboard/BulkActionBar';
 import { buildCardScenes } from './compositing-dashboard/cardSceneHelpers';
 
 export function CompositingDashboardView() {
@@ -50,9 +52,14 @@ export function CompositingDashboardView() {
   const toggleExpand = useCompositingDashboardStore((s) => s.toggleExpand);
   const partsOrderByEpisode = useCompositingDashboardStore((s) => s.partsOrderByEpisode);
   const setPartsOrder = useCompositingDashboardStore((s) => s.setPartsOrder);
+  const selectedSceneKeys = useCompositingDashboardStore((s) => s.selectedSceneKeys);
+  const clearSelectedScenes = useCompositingDashboardStore((s) => s.clearSelectedScenes);
+  const setSelectedSceneKeys = useCompositingDashboardStore((s) => s.setSelectedSceneKeys);
+  const addSelectedSceneKeys = useCompositingDashboardStore((s) => s.addSelectedSceneKeys);
 
   const currentUser = useAuthStore((s) => s.currentUser);
-  const isCompositor = currentUser?.isCompositor === true;
+  // 한솔 정정 (2026-05-21): 배한솔은 언제나 컴포지터, admin role 도 자동 권한.
+  const isCompositor = isCompositorForCompositing(currentUser);
 
   const addHighlight = useTransientHighlightStore((s) => s.add);
   const clearAllHighlight = useTransientHighlightStore((s) => s.clearAll);
@@ -132,78 +139,10 @@ export function CompositingDashboardView() {
     setPartsOrder(episodeNumber, partIds);
   };
 
-  /**
-   * 파트 막대 우측 edge 드래그 종료 시 호출 — 그 파트 안 모든 씬의 durationFrames *= scale.
-   *
-   * 흐름:
-   *  1. 낙관적: useDataStore.episodes 의 그 파트 씬들 durationFrames 즉시 변경
-   *  2. Supabase: 각 씬마다 updateSceneFieldInSupabase 단건 호출 (Promise.all 병렬)
-   *  3. 실패 시: prev 값으로 롤백 + sonner.error
-   */
-  const handlePartResize = useCallback(async (partId: string, scale: number) => {
-    if (episodeNumber === null || !currentUser) return;
-    if (!isCompositor) {
-      sonnerToast.warning('컴포지터만 파트 길이를 조절할 수 있어요');
-      return;
-    }
-    const ep = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
-    if (!ep) return;
-
-    // 대상 씬 수집 — 같은 partId 의 모든 part (BG / ACT) × scenes
-    const targets: { sheetName: string; sceneId: string; sceneUuid?: string; prevFrames: number | null; nextFrames: number }[] = [];
-    const normPart = (p: string) => p.trim().slice(0, 1).toUpperCase();
-    for (const part of ep.parts) {
-      if (normPart(part.partId) !== normPart(partId)) continue;
-      for (const sc of part.scenes) {
-        const prev = sc.durationFrames ?? null;
-        const base = prev && prev > 0 ? prev : 24 * 4; // 데이터 없으면 4초 디폴트 base 로 scale 적용
-        const next = Math.max(1, Math.round(base * scale));
-        targets.push({
-          sheetName: part.sheetName,
-          sceneId: sc.sceneId,
-          sceneUuid: sc.id,
-          prevFrames: prev,
-          nextFrames: next,
-        });
-      }
-    }
-    if (targets.length === 0) return;
-
-    // 1. 낙관적 — episodes 안 씬 직접 변경
-    const setEpisodes = useDataStore.getState().setEpisodes;
-    const prevEpisodes = useDataStore.getState().episodes;
-    const nextEpisodes = prevEpisodes.map((e) => {
-      if (e.episodeNumber !== episodeNumber) return e;
-      return {
-        ...e,
-        parts: e.parts.map((part) => {
-          if (normPart(part.partId) !== normPart(partId)) return part;
-          return {
-            ...part,
-            scenes: part.scenes.map((sc) => {
-              const t = targets.find((x) => x.sceneId === sc.sceneId && x.sheetName === part.sheetName);
-              if (!t) return sc;
-              return { ...sc, durationFrames: t.nextFrames };
-            }),
-          };
-        }),
-      };
-    });
-    setEpisodes(nextEpisodes);
-
-    // 2. Supabase 단건 N 회 (병렬). sceneUuid 가 없는 mock 환경은 skip.
-    try {
-      await Promise.all(targets.map((t) => {
-        if (!t.sceneUuid) return Promise.resolve();
-        return updateSceneFieldInSupabase(t.sceneUuid, 'durationFrames', String(t.nextFrames));
-      }));
-    } catch (err) {
-      // 3. 실패 → 롤백
-      setEpisodes(prevEpisodes);
-      const msg = err instanceof Error ? err.message : String(err);
-      sonnerToast.error('파트 길이 저장 실패', { description: msg });
-    }
-  }, [episodeNumber, currentUser, isCompositor]);
+  // 한솔 정정 (2026-05-21): 파트 막대 가로 리사이즈로 씬 durationFrames 일괄 변경하던 로직 제거.
+  //   이유: "이 컴포지션의 타임라인에서 실제 영상 길이에 맞게 이렇게 저렇게 하는건 그냥 주석으로만 하고,
+  //   기본은 기본으로 배열하고, 스크롤 같은걸로 이렇게 길이 조정"
+  //   → TimelinePanel 안에서 시각 전용 (컷당 픽셀 배수) 으로 처리. 데이터 변경 X.
 
   // ── 모든 partId 를 기본 펼침 — EP 진입 시 1 회만 실행 ──
   // 이전 버그: deps 가 `[partGroups]` 였는데 useMemo 결과가 매 렌더 새 객체 → effect 매 렌더 실행 →
@@ -236,19 +175,96 @@ export function CompositingDashboardView() {
     return m;
   }, [compositingStates, episodeNumber]);
 
-  // ── Esc 로 pinnedScene / detailScene 해제 ──
+  // ── Esc 로 pinnedScene / detailScene / 일괄 선택 해제 ──
   useEffect(() => {
-    if (pinnedScene === null && detailScene === null) return;
+    if (pinnedScene === null && detailScene === null && selectedSceneKeys.size === 0) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        // 모달이 열려있으면 모달의 자체 Esc 핸들러가 detailScene 만 닫고, pinnedScene 은 유지.
-        // 모달 없을 때만 pinnedScene 해제.
-        if (detailScene === null) setPinnedScene(null);
+        // 우선순위: 모달 > 일괄 선택 > 핀
+        if (detailScene !== null) return; // 모달의 자체 Esc 핸들러가 처리
+        if (selectedSceneKeys.size > 0) {
+          clearSelectedScenes();
+          return;
+        }
+        setPinnedScene(null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [pinnedScene, detailScene, setPinnedScene]);
+  }, [pinnedScene, detailScene, selectedSceneKeys.size, setPinnedScene, clearSelectedScenes]);
+
+  // ── 드래그 박스 selection ──
+  // 빈 영역에서 mousedown → 드래그 → mouseup 사이에 박스 안에 들어온 [data-scene-key] element 를 selection 에 add.
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const dragBoxRef = useRef<HTMLDivElement>(null);
+  const dragStateRef = useRef<{ startX: number; startY: number; addMode: boolean } | null>(null);
+  const handleDragSelectStart = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    // 카드/모달/핸들 클릭은 건너뜀
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('.scene-card')) return;
+    if (target.closest('[role="dialog"]')) return;
+    if (target.closest('.part-row')) return;
+    if (target.closest('button')) return;
+    // Cmd/Ctrl 누르고 시작 시 = 기존 선택에 추가, 아니면 = 새로 시작
+    const addMode = e.metaKey || e.ctrlKey || e.shiftKey;
+    dragStateRef.current = { startX: e.clientX, startY: e.clientY, addMode };
+    if (!addMode) clearSelectedScenes();
+
+    const box = dragBoxRef.current;
+    if (!box) return;
+    box.style.display = 'block';
+    box.style.left = `${e.clientX}px`;
+    box.style.top = `${e.clientY}px`;
+    box.style.width = '0px';
+    box.style.height = '0px';
+
+    const onMove = (ev: MouseEvent) => {
+      const s = dragStateRef.current;
+      if (!s || !box) return;
+      const x = Math.min(s.startX, ev.clientX);
+      const y = Math.min(s.startY, ev.clientY);
+      const w = Math.abs(ev.clientX - s.startX);
+      const h = Math.abs(ev.clientY - s.startY);
+      box.style.left = `${x}px`;
+      box.style.top = `${y}px`;
+      box.style.width = `${w}px`;
+      box.style.height = `${h}px`;
+    };
+    const onUp = (ev: MouseEvent) => {
+      const s = dragStateRef.current;
+      dragStateRef.current = null;
+      if (box) box.style.display = 'none';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (!s) return;
+      const moved = Math.abs(ev.clientX - s.startX) + Math.abs(ev.clientY - s.startY);
+      if (moved < 4) return; // 단순 클릭 → selection 변경 없음
+      // 박스 안 카드들 수집
+      const rect = {
+        left: Math.min(s.startX, ev.clientX),
+        top: Math.min(s.startY, ev.clientY),
+        right: Math.max(s.startX, ev.clientX),
+        bottom: Math.max(s.startY, ev.clientY),
+      };
+      const cards = document.querySelectorAll<HTMLElement>('[data-scene-key]');
+      const newKeys: string[] = [];
+      cards.forEach((el) => {
+        const r = el.getBoundingClientRect();
+        const intersects = !(r.right < rect.left || r.left > rect.right || r.bottom < rect.top || r.top > rect.bottom);
+        if (intersects) {
+          const k = el.dataset.sceneKey;
+          if (k) newKeys.push(k);
+        }
+      });
+      if (newKeys.length === 0) return;
+      if (s.addMode) addSelectedSceneKeys(newKeys);
+      else setSelectedSceneKeys(new Set(newKeys));
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   // ── 배경 클릭 시 핀 해제 — 컨테이너 전체 onMouseDown 사용 ──
   // 카드 클릭은 SceneCard 의 onClick 이 먼저 처리하고 (button 의 onClick 은 mouseup 이후 firing), 그 안에서 setPinnedScene 호출.
@@ -266,8 +282,19 @@ export function CompositingDashboardView() {
   return (
     <div
       className="flex flex-col h-full bg-bg-primary text-text-primary overflow-hidden"
-      onMouseDown={handleBackgroundMouseDown}
+      onMouseDown={(e) => { handleBackgroundMouseDown(e); handleDragSelectStart(e); }}
     >
+      {/* 드래그 박스 selection 시각 */}
+      <div
+        ref={dragBoxRef}
+        className="fixed pointer-events-none z-50"
+        style={{
+          display: 'none',
+          border: '1.5px dashed rgb(var(--color-accent))',
+          background: 'rgb(var(--color-accent) / 0.12)',
+          borderRadius: 4,
+        }}
+      />
       <DashHeader
         episodeNumber={episodeNumber}
         onCascadeReplay={() => setCascadeKey((k) => k + 1)}
@@ -279,19 +306,25 @@ export function CompositingDashboardView() {
         <div key={`cascade-${cascadeKey}`}>
           <TimelinePanel
             episodeNumber={episodeNumber}
-            partGroups={partGroups.map((g) => ({
-              partId: g.partId,
-              scenes: g.scenes.map((cs) => ({
-                sceneId: cs.sceneId,
-                partId: cs.partId,
-                episodeNumber: cs.episodeNumber,
-                durationFrames: cs.durationFrames ?? null,
-                orderNo: cs.orderNo,
-              })),
-            }))}
+            partGroups={partGroups.map((g) => {
+              // 파트 메모 — episode.parts 안에서 BG 또는 ACT 파트의 메모 (실 데이터엔 보통 part-level memo 없으니 placeholder)
+              const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
+              const partForMemo = ep?.parts.find((p) => p.partId.trim().slice(0, 1).toUpperCase() === g.partId);
+              const memo = (partForMemo as { memo?: string } | undefined)?.memo ?? '';
+              return {
+                partId: g.partId,
+                memo,
+                scenes: g.scenes.map((cs) => ({
+                  sceneId: cs.sceneId,
+                  partId: cs.partId,
+                  episodeNumber: cs.episodeNumber,
+                  durationFrames: cs.durationFrames ?? null,
+                  orderNo: cs.orderNo,
+                })),
+              };
+            })}
             epStates={epStates}
             onReorder={handlePartsReorder}
-            onResizePart={handlePartResize}
             isCompositor={isCompositor}
           />
 
@@ -321,6 +354,9 @@ export function CompositingDashboardView() {
           isCompositor={isCompositor}
         />
       )}
+
+      {/* 일괄 작업 floating bar (선택 1개 이상일 때만 노출) */}
+      <BulkActionBar episodeNumber={episodeNumber} isCompositor={isCompositor} />
     </div>
   );
 }

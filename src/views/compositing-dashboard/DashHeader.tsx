@@ -12,11 +12,12 @@
  */
 
 import { useMemo } from 'react';
-import { ChevronLeft, ChevronRight, RotateCw, Eye, Lock, Unlock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RotateCw, Eye, Lock, Unlock, FileText } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
+import { isCompositorForCompositing, isCompletedStatus } from '@/utils/compositingLabels';
 
 interface DashHeaderProps {
   episodeNumber: number | null;
@@ -29,7 +30,7 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
   const setEpisode = useCompositingDashboardStore((s) => s.setEpisode);
   const users = useAuthStore((s) => s.users);
   const currentUser = useAuthStore((s) => s.currentUser);
-  const viewerIsCompositor = currentUser?.isCompositor === true;
+  const viewerIsCompositor = isCompositorForCompositing(currentUser);
 
   // 활성 EP 목록 — useDataStore.episodes 는 이미 active 만 들어있다.
   // (아카이브된 EP 는 별도 archivedEpisodes state 로 관리됨, ScenesView/EpisodeView 참조.)
@@ -38,7 +39,15 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
     [episodes],
   );
 
-  // 현재 EP 의 진행률 — done 비율
+  // v1.30.0+ (한솔 정정): EP 코드 대신 에피소드 제목 + 메모 표시.
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const episodeMemos = useDataStore((s) => s.episodeMemos);
+  const currentEp = episodes.find((e) => e.episodeNumber === episodeNumber);
+  const customTitle = episodeNumber !== null ? episodeTitles?.[episodeNumber] : undefined;
+  const episodeDisplayTitle = customTitle || currentEp?.title || (episodeNumber !== null ? `EP${String(episodeNumber).padStart(2, '0')}` : '');
+  const episodeMemo = episodeNumber !== null ? (episodeMemos?.[episodeNumber] ?? '') : '';
+
+  // 현재 EP 의 진행률 — 한솔 정의 (2026-05-22): "완료된 부분 = done + aggregated".
   const progressPercent = useMemo(() => {
     if (episodeNumber === null) return 0;
     let total = 0;
@@ -47,7 +56,7 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
     for (const [key, row] of compositingStates) {
       if (!key.startsWith(prefix)) continue;
       total += 1;
-      if (row.status === 'done') done += 1;
+      if (isCompletedStatus(row.status)) done += 1;
     }
     if (total === 0) return 0;
     return Math.round((done / total) * 100);
@@ -85,32 +94,41 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
           <Clapper />
         </div>
         <div className="flex flex-col min-w-0">
-          <div className="flex items-baseline gap-2.5">
-            <h1 className="m-0 text-base font-bold text-text-primary">컴포지팅 현황</h1>
-            <span className="text-xs text-text-secondary font-medium">{titleEp}</span>
+          <div className="flex items-baseline gap-2.5 min-w-0">
+            <h1 className="m-0 text-base font-bold text-text-primary shrink-0">컴포지팅 현황</h1>
+            <span className="text-sm font-semibold text-text-primary truncate min-w-0" title={episodeDisplayTitle}>
+              {episodeDisplayTitle || '—'}
+            </span>
             <span
-              className="text-[11px] font-bold px-1.5 py-0.5 rounded-md"
+              className="text-[11px] font-bold px-1.5 py-0.5 rounded-md shrink-0"
               style={{ background: 'rgb(var(--color-accent) / 0.16)', color: 'rgb(var(--color-accent))' }}
             >
               진행률 {progressPercent}%
             </span>
           </div>
-          <div className="flex items-center gap-2 mt-1 text-[11px] text-text-secondary">
+          <div className="flex items-center gap-2 mt-1 text-[11px] text-text-secondary min-w-0">
             <button
               type="button"
               onClick={handlePrev}
               disabled={activeEpisodes.length === 0 || activeEpisodes[0]?.episodeNumber === episodeNumber}
-              className="w-5 h-5 rounded flex items-center justify-center text-text-secondary disabled:opacity-30 hover:bg-bg-border/40 transition-colors"
+              className="w-5 h-5 rounded flex items-center justify-center text-text-secondary disabled:opacity-30 hover:bg-bg-border/40 transition-colors shrink-0"
               title="이전 에피소드"
             >
               <ChevronLeft size={14} />
             </button>
-            <span className="font-mono tabular-nums">{titleEp}</span>
+            {episodeMemo ? (
+              <span className="flex items-center gap-1 truncate min-w-0" title={episodeMemo}>
+                <FileText size={11} strokeWidth={2} className="shrink-0 text-text-secondary/70" />
+                <span className="truncate">{episodeMemo}</span>
+              </span>
+            ) : (
+              <span className="font-mono tabular-nums shrink-0 text-text-secondary/70">{titleEp}</span>
+            )}
             <button
               type="button"
               onClick={handleNext}
               disabled={activeEpisodes.length === 0 || activeEpisodes[activeEpisodes.length - 1]?.episodeNumber === episodeNumber}
-              className="w-5 h-5 rounded flex items-center justify-center text-text-secondary disabled:opacity-30 hover:bg-bg-border/40 transition-colors"
+              className="w-5 h-5 rounded flex items-center justify-center text-text-secondary disabled:opacity-30 hover:bg-bg-border/40 transition-colors shrink-0"
               title="다음 에피소드"
             >
               <ChevronRight size={14} />

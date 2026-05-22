@@ -1,32 +1,38 @@
 /**
  * 컴포지팅 씬 상세 모달.
  *
- * - 헤더 (sceneId · EP · 파트 · n번째 컷)
- * - 이미지 두 장 (가이드 / 실제) — 크게
- * - 단계 변경 그리드 (6 칩 — 컴포지터만 활성)
- * - status='error' 일 때 오류 사유 5+기타 칩
- * - 담당자 (BG / ACT)
- * - 활동 기록 (간단 — 최신 변경 정보 1줄)
- * - 키보드 단축키: 1~6 단계, Esc 닫기, ← → prev/next 씬
+ * 한솔 결정 (2026-05-21):
+ *   "기존 씬 뷰의 상세 모달을 그대로 가져와서, BG/ACT 단계만 살짝 바꾸고, 컴포지팅 단계를 추가하는 방식."
+ *   → 이 컴포넌트는 UnifiedSceneDetailModal 을 그대로 wrapping 한다.
+ *     - CardScene → MergedScene 변환 (BG/ACT 페어를 통합 씬 객체로)
+ *     - compositingSection prop 으로 부서 패널 위에 "컴포지팅 단계" 섹션 끼움
+ *     - onToggle / onFieldUpdate 는 ScenesView 와 동일 패턴 (낙관적 + Supabase) 으로 직접 처리
+ *     - onDeleteDept / onDeleteBoth / onAddDept 는 컴포지팅 환경에서 안 씀 (warning)
  *
- * spec: 2026-05-21-compositing-dashboard-design.md (9.x)
+ * 결과:
+ *   - 이미지 클릭/주석/댓글/리비전/히스토리/메모/담당자 편집 = UnifiedSceneDetailModal 의 모든 기능 그대로
+ *   - 추가: 컴포지팅 6 단계 칩 (모달 최상단, isCompositor 일 때만 활성)
+ *
+ * spec: 2026-05-21-compositing-dashboard-design.md (9.x — layout 은 UnifiedSceneDetailModal 따름)
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import { useCallback, useMemo } from 'react';
+import { Layers } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
-import type { CompositingErrorKind, CompositingState, CompositingStatus } from '@/types';
+import type { MergedScene, Scene, Stage, ScenePhaseState, CompositingStatus } from '@/types';
 import {
   COMPOSITING_STATUS_LABEL,
   COMPOSITING_STATUS_ORDER,
   COMPOSITING_STATUS_TOKEN,
-  COMPOSITING_ERROR_LABEL,
 } from '@/utils/compositingLabels';
-import { useDataStore, compositingKey } from '@/stores/useDataStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
-import { buildCardScenes, flattenCardScenes, primaryAssignee } from '../cardSceneHelpers';
-import { toggleCompositingStatus, updateCompositingError } from '../compositingActions';
+import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
+import { updateSceneFieldInSupabase, updateSceneStageInSupabase } from '@/services/supabaseService';
+import { buildCardScenes, flattenCardScenes } from '../cardSceneHelpers';
+import { toggleCompositingStatus } from '../compositingActions';
 
 interface CompositingSceneModalProps {
   sceneKey: string;       // `${episodeNumber}:${sceneId}`
@@ -34,98 +40,124 @@ interface CompositingSceneModalProps {
   isCompositor: boolean;
 }
 
-const ERROR_KINDS: CompositingErrorKind[] = ['missing_file', 'fix_blemish', 'retake', 'canceled_scene', 'other'];
-
 export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }: CompositingSceneModalProps) {
   const setDetailScene = useCompositingDashboardStore((s) => s.setDetailScene);
   const compositingStates = useDataStore((s) => s.compositingStates);
   const episodes = useDataStore((s) => s.episodes);
   const currentUser = useAuthStore((s) => s.currentUser);
-  const users = useAuthStore((s) => s.users);
-
-  const state = compositingStates.get(sceneKey);
-  const status: CompositingStatus = state?.status ?? 'batch';
-  const errorKind = state?.errorKind ?? null;
-  const errorNote = state?.errorNote ?? '';
-
-  const allScenes = useMemo(() => {
-    const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
-    return flattenCardScenes(buildCardScenes(ep));
-  }, [episodes, episodeNumber]);
 
   const sceneId = sceneKey.split(':').slice(1).join(':');
-  const card = allScenes.find((s) => s.sceneId === sceneId);
-  const currentIndex = allScenes.findIndex((s) => s.sceneId === sceneId);
+  const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
 
-  const updatedByName = useMemo(() => {
-    if (!state?.updatedBy) return null;
-    return users.find((u) => u.id === state.updatedBy)?.name ?? state.updatedBy;
-  }, [state, users]);
+  // 한솔 결정 (2026-05-22): 별도 lookup 제거 — buildCardScenes 가 이미 sheetName/partUuid/sceneIndex 다 저장.
+  // 두 lookup 패턴이 어긋나면서 댓글이 가끔 안 불러와지는 문제를 원천 차단.
+  const cardCtx = useMemo(() => {
+    if (!ep) return null;
+    const cards = buildCardScenes(ep);
+    const all = flattenCardScenes(cards);
+    const card = all.find((s) => s.sceneId === sceneId);
+    if (!card) return null;
+    return {
+      card,
+      all,
+      bgSheetName: card.bgSheetName ?? null,
+      actSheetName: card.actSheetName ?? null,
+      bgSceneIndex: card.bgSceneIndex,
+      actSceneIndex: card.actSceneIndex,
+    };
+  }, [ep, sceneId]);
 
-  const [localNote, setLocalNote] = useState(errorNote);
-  useEffect(() => { setLocalNote(errorNote); }, [errorNote, sceneKey]);
-
-  // ── 단계 변경 ──
-  const handleStatus = useCallback((next: CompositingStatus) => {
-    if (!isCompositor || !currentUser || !card) return;
-    if (next === status) return;
-    toggleCompositingStatus({
-      episodeNumber,
-      sceneId: card.sceneId,
-      partId: card.partId,
-      next,
-      currentUserId: currentUser.id,
-    });
-  }, [isCompositor, currentUser, card, status, episodeNumber]);
-
-  const handleErrorKind = useCallback((kind: CompositingErrorKind) => {
-    if (!isCompositor || !currentUser || !card) return;
-    updateCompositingError({
-      episodeNumber,
-      sceneId: card.sceneId,
-      partId: card.partId,
-      currentUserId: currentUser.id,
-      errorKind: kind,
-      errorNote: kind === 'other' ? localNote : null,
-    });
-  }, [isCompositor, currentUser, card, episodeNumber, localNote]);
+  // prev/next 같은 부분에서 sceneIndex 변경 시 호출.
+  const navigate = useCallback((dir: 'prev' | 'next') => {
+    if (!cardCtx) return;
+    const i = cardCtx.all.findIndex((s) => s.sceneId === cardCtx.card.sceneId);
+    if (i < 0) return;
+    const next = dir === 'prev' ? i - 1 : i + 1;
+    if (next < 0 || next >= cardCtx.all.length) return;
+    setDetailScene(`${episodeNumber}:${cardCtx.all[next].sceneId}`);
+  }, [cardCtx, episodeNumber, setDetailScene]);
 
   const close = useCallback(() => setDetailScene(null), [setDetailScene]);
 
-  const moveTo = useCallback((dir: -1 | 1) => {
-    if (currentIndex < 0) return;
-    const nextIdx = currentIndex + dir;
-    if (nextIdx < 0 || nextIdx >= allScenes.length) return;
-    const nextCard = allScenes[nextIdx];
-    setDetailScene(compositingKey(nextCard.episodeNumber, nextCard.sceneId));
-  }, [currentIndex, allScenes, setDetailScene]);
+  // ── BG/ACT 단계 토글 — 정상 시트 데이터 변경 (낙관적 + Supabase) ──
+  const handleToggle = useCallback((sheetName: string, sceneIdArg: string, stage: Stage) => {
+    if (!currentUser) return;
+    const store = useDataStore.getState();
+    store.toggleSceneStage(sheetName, sceneIdArg, stage as 'lo' | 'done' | 'review' | 'png');
+    // 새 값 계산 (낙관적 토글 후)
+    const ep2 = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
+    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
+    if (!sc?.id) return;
+    const newValue = Boolean(sc[stage as keyof Scene]);
+    updateSceneStageInSupabase(sc.id, stage, newValue).catch((err) => {
+      sonnerToast.error(`단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }, [currentUser, episodeNumber]);
 
-  // ── 키보드 단축키 ──
-  // 코덱스 2차 P2 fix: textarea/input/contenteditable 에 focus 가 있으면 단축키 처리 skip.
-  // 예: errorNote 자유 입력 중 '5' 를 타이핑 → 단계가 '오류' 로 바뀌고, 화살표 → 다음 씬으로 이동 (데이터 손실 위험).
-  // Esc 만은 입력 중에도 닫기 동작 유지 (자연스러운 dismiss UX).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isEditable = !!target && (
-        target.tagName === 'INPUT'
-        || target.tagName === 'TEXTAREA'
-        || target.isContentEditable
-      );
-      if (e.key === 'Escape') { close(); return; }
-      if (isEditable) return;
-      if (e.key === 'ArrowLeft') { moveTo(-1); return; }
-      if (e.key === 'ArrowRight') { moveTo(1); return; }
-      const n = parseInt(e.key, 10);
-      if (n >= 1 && n <= 6) {
-        handleStatus(COMPOSITING_STATUS_ORDER[n - 1]);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [close, moveTo, handleStatus]);
+  // ── 필드 업데이트 — 메모 / 담당자 / 이미지 URL 등 ──
+  const handleFieldUpdate = useCallback((sheetName: string, sceneIndex: number, field: string, value: string) => {
+    if (!currentUser) return;
+    const store = useDataStore.getState();
+    // 낙관적 — 시트 안 그 sceneIndex 의 field 변경
+    const ep2 = store.episodes.find((e) => e.episodeNumber === episodeNumber);
+    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    const sc = part?.scenes[sceneIndex];
+    if (!sc) return;
+    store.setSceneFieldBySceneId(sheetName, sc.sceneId, field, value);
+    if (sc.id) {
+      updateSceneFieldInSupabase(sc.id, field, value).catch((err) => {
+        sonnerToast.error(`필드 저장 실패: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+  }, [currentUser, episodeNumber]);
 
-  if (!card) {
+  // ── 액팅 단계 (대기/작업중/피드백/완료) — ScenesView 와 동일 패턴 ──
+  const handleActPhaseStateClick = useCallback((sheetName: string, sceneIdArg: string, newState: ScenePhaseState) => {
+    if (!currentUser) return;
+    const store = useDataStore.getState();
+    store.setScenePhaseOptimistic(sheetName, sceneIdArg, newState);
+    const ep2 = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
+    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
+    if (sc?.id) {
+      window.electronAPI?.supabaseUpdateScenePhase?.(sc.id, newState, sc.workRound ?? 0, sc.feedbackRound ?? 0).catch((err: unknown) => {
+        sonnerToast.error(`액팅 단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+  }, [currentUser, episodeNumber]);
+
+  const handleActRoundBump = useCallback((sheetName: string, sceneIdArg: string, kind: 'work' | 'feedback', delta: 1 | -1) => {
+    if (!currentUser) return;
+    const store = useDataStore.getState();
+    store.bumpScenePhaseRoundOptimistic(sheetName, sceneIdArg, kind, delta);
+    const ep2 = useDataStore.getState().episodes.find((e) => e.episodeNumber === episodeNumber);
+    const part = ep2?.parts.find((p) => p.sheetName === sheetName);
+    const sc = part?.scenes.find((s) => s.sceneId === sceneIdArg);
+    if (sc?.id) {
+      window.electronAPI?.supabaseUpdateScenePhase?.(sc.id, sc.sceneState ?? 'wait', sc.workRound ?? 0, sc.feedbackRound ?? 0).catch((err: unknown) => {
+        sonnerToast.error(`차수 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+  }, [currentUser, episodeNumber]);
+
+  // ── 액팅 피드백 요청 — 컴포지팅 환경에서는 단순 안내 (정식 흐름은 씬 뷰에서) ──
+  const handleActFeedbackRequest = useCallback(() => {
+    sonnerToast.info('피드백 요청은 씬 목록 화면에서 진행해주세요.');
+  }, []);
+
+  // ── 삭제/부서 추가 — 컴포지팅 환경에서 안 씀 ──
+  const handleDeleteDept = useCallback(() => {
+    sonnerToast.info('씬 삭제는 씬 목록에서 진행해주세요.');
+  }, []);
+  const handleDeleteBoth = useCallback(() => {
+    sonnerToast.info('씬 삭제는 씬 목록에서 진행해주세요.');
+  }, []);
+  const handleAddDept = useCallback(() => {
+    sonnerToast.info('부서 추가는 씬 목록에서 진행해주세요.');
+  }, []);
+
+  if (!cardCtx) {
     return (
       <div
         className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60"
@@ -139,179 +171,138 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     );
   }
 
-  const bgName = primaryAssignee(card.bg?.assignee);
-  const actName = primaryAssignee(card.act?.assignee);
+  const { card, all, bgSheetName, actSheetName, bgSceneIndex, actSceneIndex } = cardCtx;
+  const currentIdx = all.findIndex((s) => s.sceneId === card.sceneId);
+
+  const merged: MergedScene = {
+    sceneId: card.sceneId,
+    mergedKey: `${card.partId}:${card.sceneId}`,
+    bgScene: card.bg ?? null,
+    actScene: card.act ?? null,
+    bgSceneIndex,
+    actSceneIndex,
+  };
+
+  const state = compositingStates.get(sceneKey);
+  const status: CompositingStatus = state?.status ?? 'batch';
+
+  const handleChangeStatus = (next: CompositingStatus) => {
+    if (!isCompositor || !currentUser) return;
+    if (next === status) return;
+    toggleCompositingStatus({
+      episodeNumber,
+      sceneId: card.sceneId,
+      partId: card.partId,
+      next,
+      currentUserId: currentUser.id,
+    });
+  };
+
+  // 헤더 라벨 (한솔 정정): EP 코드 → 에피소드 제목 + 메모
+  const episodeTitle = ep?.title || `EP${String(episodeNumber).padStart(2, '0')}`;
+  const episodeMemoMap = useDataStore.getState().episodeMemos;
+  const episodeMemo = episodeMemoMap?.[episodeNumber] || '';
+
+  const compositingSection = (
+    <CompositingStageSection
+      status={status}
+      isCompositor={isCompositor}
+      onChange={handleChangeStatus}
+    />
+  );
+
+  return (
+    <UnifiedSceneDetailModal
+      merged={merged}
+      bgSheetName={bgSheetName}
+      actSheetName={actSheetName}
+      onClose={close}
+      onToggle={handleToggle}
+      onFieldUpdate={handleFieldUpdate}
+      onDeleteDept={handleDeleteDept}
+      onDeleteBoth={handleDeleteBoth}
+      onAddDept={handleAddDept}
+      onNavigate={navigate}
+      hasPrev={currentIdx > 0}
+      hasNext={currentIdx >= 0 && currentIdx < all.length - 1}
+      currentMergedIndex={currentIdx >= 0 ? currentIdx : 0}
+      totalMerged={all.length}
+      partLabel={`${card.partId}파트`}
+      episodeLabel={episodeMemo ? `${episodeTitle} · ${episodeMemo}` : episodeTitle}
+      compositingSection={compositingSection}
+      onActPhaseStateClick={handleActPhaseStateClick}
+      onActFeedbackRequest={handleActFeedbackRequest}
+      onActRoundBump={handleActRoundBump}
+    />
+  );
+}
+
+// ─── 컴포지팅 단계 섹션 — UnifiedSceneDetailModal 의 부서 패널 위에 끼워짐 ───
+interface CompositingStageSectionProps {
+  status: CompositingStatus;
+  isCompositor: boolean;
+  onChange: (next: CompositingStatus) => void;
+}
+
+function CompositingStageSection({ status, isCompositor, onChange }: CompositingStageSectionProps) {
+  const tokenVar = COMPOSITING_STATUS_TOKEN[status];
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
-      onClick={close}
+      className="rounded-xl p-3.5 border-2"
+      style={{
+        borderColor: `color-mix(in srgb, var(${tokenVar}) 45%, transparent)`,
+        background: `linear-gradient(180deg, color-mix(in srgb, var(${tokenVar}) 10%, transparent), transparent)`,
+      }}
     >
-      <div
-        className="bg-bg-card text-text-primary rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto border border-bg-border"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 헤더 */}
-        <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-bg-border">
-          <div className="flex items-baseline gap-2.5 min-w-0">
-            <span className="font-mono text-sm font-bold">{card.sceneId}</span>
-            <span className="text-xs text-text-secondary">
-              EP{String(card.episodeNumber).padStart(2, '0')} · 파트 {card.partId}
-              {currentIndex >= 0 && ` · ${currentIndex + 1}번째 컷`}
-            </span>
-          </div>
-          <button onClick={close} className="w-8 h-8 rounded-md hover:bg-bg-border/50 flex items-center justify-center" title="닫기 (Esc)">
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* 이미지 두 장 */}
-        <div className="grid grid-cols-2 gap-3 p-4 bg-bg-primary/30">
-          <ImagePane label="가이드" url={card.storyboardUrl} />
-          <ImagePane label="실제" url={card.guideUrl} />
-        </div>
-
-        {/* 단계 그리드 */}
-        <div className="px-5 py-4 border-t border-bg-border">
-          <div className="text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-2">단계</div>
-          <div
-            className={cn(
-              'flex flex-wrap gap-2',
-              !isCompositor && 'opacity-40 cursor-not-allowed',
-            )}
-            title={!isCompositor ? '컴포지터만 단계를 변경할 수 있습니다' : undefined}
-          >
-            {COMPOSITING_STATUS_ORDER.map((st) => {
-              const active = status === st;
-              const tokenVar = COMPOSITING_STATUS_TOKEN[st];
-              return (
-                <button
-                  key={st}
-                  type="button"
-                  disabled={!isCompositor}
-                  onClick={() => handleStatus(st)}
-                  className={cn(
-                    'px-3 py-1.5 text-[12px] font-semibold rounded-full transition-all duration-150 border tabular-nums',
-                    active ? 'shadow-[0_0_10px_currentColor]' : '',
-                  )}
-                  style={{
-                    background: active ? `var(${tokenVar})` : 'transparent',
-                    color: active ? '#fff' : `var(${tokenVar})`,
-                    borderColor: active ? `var(${tokenVar})` : `color-mix(in srgb, var(${tokenVar}) 45%, transparent)`,
-                  }}
-                >
-                  {COMPOSITING_STATUS_LABEL[st]}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 오류 사유 — status='error' 일 때만 */}
-        {status === 'error' && (
-          <div className="px-5 py-4 border-t border-bg-border">
-            <div className="text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-2">오류 사유</div>
-            <div className={cn('flex flex-wrap gap-2', !isCompositor && 'opacity-40 cursor-not-allowed')}>
-              {ERROR_KINDS.map((kind) => {
-                const active = errorKind === kind;
-                return (
-                  <button
-                    key={kind}
-                    type="button"
-                    disabled={!isCompositor}
-                    onClick={() => handleErrorKind(kind)}
-                    className={cn(
-                      'px-3 py-1.5 text-[11px] font-semibold rounded-full transition-all duration-150 border',
-                      active
-                        ? 'bg-status-error/22 border-status-error/70 text-status-error'
-                        : 'bg-transparent border-bg-border text-text-secondary hover:text-text-primary',
-                    )}
-                  >
-                    {COMPOSITING_ERROR_LABEL[kind]}
-                  </button>
-                );
-              })}
-            </div>
-            {errorKind === 'other' && (
-              <textarea
-                value={localNote}
-                onChange={(e) => setLocalNote(e.target.value.slice(0, 100))}
-                onBlur={() => {
-                  if (!currentUser || !isCompositor) return;
-                  updateCompositingError({
-                    episodeNumber,
-                    sceneId: card.sceneId,
-                    partId: card.partId,
-                    currentUserId: currentUser.id,
-                    errorKind: 'other',
-                    errorNote: localNote,
-                  });
-                }}
-                disabled={!isCompositor}
-                maxLength={100}
-                placeholder="기타 사유 (최대 100자)"
-                className="mt-3 w-full px-3 py-2 text-[12px] rounded-md bg-bg-primary/40 border border-bg-border focus:outline-none focus:border-accent/60 resize-none disabled:opacity-40"
-                rows={2}
-              />
-            )}
-          </div>
-        )}
-
-        {/* 담당자 */}
-        <div className="px-5 py-4 border-t border-bg-border">
-          <div className="text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-2">담당자</div>
-          <div className="flex items-center gap-5 text-[12px]">
-            <div className="flex items-center gap-2">
-              <span className="text-text-secondary font-semibold w-7">BG</span>
-              <span className="text-text-primary">{bgName || <span className="text-text-secondary/60">미지정</span>}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-text-secondary font-semibold w-7">ACT</span>
-              <span className="text-text-primary">{actName || <span className="text-text-secondary/60">미지정</span>}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 활동 기록 (MVP — 마지막 변경 1줄만) */}
-        <div className="px-5 py-4 border-t border-bg-border">
-          <div className="text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-2">활동 기록</div>
-          {state ? (
-            <div className="text-[12px] text-text-secondary">
-              <span className="font-semibold text-text-primary">{updatedByName ?? '알 수 없음'}</span>
-              가 <span className="font-semibold text-text-primary">{COMPOSITING_STATUS_LABEL[status]}</span> 로 변경
-              {' · '}
-              <span className="font-mono tabular-nums text-text-secondary/80">
-                {state.updatedAt ? new Date(state.updatedAt).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : ''}
-              </span>
-            </div>
-          ) : (
-            <div className="text-[12px] text-text-secondary/70">아직 변경 기록이 없습니다.</div>
-          )}
-        </div>
-
-        {/* 푸터 단축키 안내 */}
-        <div className="px-5 py-2 border-t border-bg-border bg-bg-primary/30 text-[10px] text-text-secondary/70 flex items-center justify-between">
-          <span>단축키: 1~6 단계 변경 · ← → 이전/다음 씬 · Esc 닫기</span>
-          <span className="font-mono tabular-nums">{currentIndex + 1}/{allScenes.length}</span>
-        </div>
+      <div className="flex items-center gap-2 mb-2.5">
+        <span
+          className="flex items-center gap-1.5 text-[11px] font-extrabold tracking-wider"
+          style={{ color: `var(${tokenVar})` }}
+        >
+          <Layers size={12} strokeWidth={2.4} />
+          컴포지팅 단계
+        </span>
+        <span className="text-[10px] text-text-secondary">
+          {isCompositor ? '이 화면에서 변경 가능' : '컴포지터만 변경 가능'}
+        </span>
+        <span
+          className="ml-auto text-[10px] font-extrabold px-2 py-0.5 rounded-full text-white"
+          style={{
+            background: `var(${tokenVar})`,
+            boxShadow: `0 0 8px var(${tokenVar})`,
+          }}
+        >
+          ● {COMPOSITING_STATUS_LABEL[status]}
+        </span>
+      </div>
+      <div className={cn('flex flex-wrap gap-1.5', !isCompositor && 'opacity-50 cursor-not-allowed')}>
+        {COMPOSITING_STATUS_ORDER.map((st) => {
+          const active = status === st;
+          const tv = COMPOSITING_STATUS_TOKEN[st];
+          return (
+            <button
+              key={st}
+              disabled={!isCompositor}
+              onClick={() => onChange(st)}
+              className={cn(
+                'px-3.5 py-1.5 text-xs font-bold rounded-full transition-all duration-150',
+              )}
+              style={{
+                background: active ? `var(${tv})` : 'transparent',
+                color: active ? '#fff' : `var(${tv})`,
+                border: `1.5px solid ${active ? `var(${tv})` : `color-mix(in srgb, var(${tv}) 45%, transparent)`}`,
+                boxShadow: active ? `0 0 10px var(${tv})` : 'none',
+              }}
+              title={!isCompositor ? '컴포지터만 단계를 변경할 수 있습니다' : undefined}
+            >
+              {COMPOSITING_STATUS_LABEL[st]}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function ImagePane({ label, url }: { label: string; url?: string }) {
-  return (
-    <div className="relative aspect-video bg-bg-primary rounded-md overflow-hidden border border-bg-border/60">
-      <span className="absolute top-2 left-2 z-10 text-[10px] font-bold px-1.5 py-0.5 rounded bg-bg-card/85 text-text-secondary">
-        {label}
-      </span>
-      {url
-        ? <img src={url} alt={label} className="w-full h-full object-contain" />
-        : (
-          <div className="w-full h-full flex items-center justify-center text-text-secondary/60 text-[11px]">
-            이미지 없음
-          </div>
-        )}
-    </div>
-  );
-}
+export default CompositingSceneModal;

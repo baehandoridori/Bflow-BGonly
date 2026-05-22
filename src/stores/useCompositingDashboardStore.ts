@@ -59,6 +59,15 @@ interface CompositingDashboardStore {
    */
   partsOrderByEpisode: Record<number, string[]>;
 
+  /**
+   * 일괄 선택된 씬 키 (Cmd/Ctrl 클릭, Shift 클릭, 드래그 박스로 추가).
+   * Key = compositingKey(episodeNumber, sceneId).
+   * Floating action bar 가 이 set 의 크기로 노출 여부 결정.
+   */
+  selectedSceneKeys: Set<string>;
+  /** 마지막 단일 클릭으로 선택한 sceneKey — Shift+클릭 range 선택의 anchor. */
+  lastSelectedSceneKey: string | null;
+
   // ─── Actions ───
   setEpisode: (n: number) => void;
   setViewMode: (mode: CompositingViewMode) => void;
@@ -74,6 +83,17 @@ interface CompositingDashboardStore {
   showGuideStrip: () => void;
   /** EP 별 파트 순서 지정. partIds 가 빈 배열이면 기본 순서로 reset. */
   setPartsOrder: (episodeNumber: number, partIds: string[]) => void;
+
+  /** 일괄 선택 — 토글 (Cmd/Ctrl + 클릭). lastSelectedSceneKey 도 업데이트. */
+  toggleSelectedScene: (sceneKey: string) => void;
+  /** 일괄 선택 — 한 키만 선택 (단일 클릭, 기존 선택 모두 해제). */
+  selectOnlyScene: (sceneKey: string) => void;
+  /** 일괄 선택 — 여러 키 한 번에 set (드래그 박스 결과). */
+  setSelectedSceneKeys: (keys: Set<string>) => void;
+  /** 일괄 선택 — 추가 (드래그 박스 + Cmd 누름 시 기존 + 새 set). */
+  addSelectedSceneKeys: (keys: string[]) => void;
+  /** 일괄 선택 전체 해제. */
+  clearSelectedScenes: () => void;
 }
 
 function readGuideSeen(): boolean {
@@ -108,6 +128,8 @@ export const useCompositingDashboardStore = create<CompositingDashboardStore>((s
   pinnedPart: null,
   guideStripVisible: !readGuideSeen(),
   partsOrderByEpisode: {},
+  selectedSceneKeys: new Set<string>(),
+  lastSelectedSceneKey: null,
 
   setEpisode: (n) => set({ episodeNumber: n }),
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -160,4 +182,27 @@ export const useCompositingDashboardStore = create<CompositingDashboardStore>((s
       }
       return { partsOrderByEpisode: next };
     }),
+
+  toggleSelectedScene: (sceneKey) =>
+    set((state) => {
+      const next = new Set(state.selectedSceneKeys);
+      if (next.has(sceneKey)) next.delete(sceneKey);
+      else next.add(sceneKey);
+      return { selectedSceneKeys: next, lastSelectedSceneKey: sceneKey };
+    }),
+
+  selectOnlyScene: (sceneKey) =>
+    set({ selectedSceneKeys: new Set([sceneKey]), lastSelectedSceneKey: sceneKey }),
+
+  setSelectedSceneKeys: (keys) =>
+    set({ selectedSceneKeys: new Set(keys) }),
+
+  addSelectedSceneKeys: (keys) =>
+    set((state) => {
+      const next = new Set(state.selectedSceneKeys);
+      for (const k of keys) next.add(k);
+      return { selectedSceneKeys: next };
+    }),
+
+  clearSelectedScenes: () => set({ selectedSceneKeys: new Set(), lastSelectedSceneKey: null }),
 }));

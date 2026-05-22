@@ -1065,11 +1065,17 @@ input[type="range"]::-webkit-slider-thumb {
 
 .scene-card {
   transform-origin: center bottom;
-  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1),
-              box-shadow 220ms ease,
-              border-color 220ms ease;
+  /* 한솔 보고 (2026-05-21):
+     - 카드 가장자리 호버 시 떨림 — transition 더 부드럽게 (cubic-bezier ease-out + 320ms).
+     - 핀 해제 시 사라짐 → animation 없이 box-shadow / transform 만 transition. */
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 220ms ease,
+    outline-color 220ms ease;
   position: relative;
   z-index: 1;
+  will-change: transform;
 }
 
 /* 호버 dock-lift 중인 카드는 인접 카드보다 살짝 위로 */
@@ -1077,11 +1083,14 @@ input[type="range"]::-webkit-slider-thumb {
   z-index: 2;
 }
 
-/* pinned 카드는 모든 인접 카드를 무조건 덮어쓰기. 정상 카드(z=1) / 호버(z=2) / pinned(z=20). */
+/* pinned 카드 — animation: bf-glow-pulse 제거 (해제 시 갑자기 멈춰 깜빡임 발생).
+   대신 transition 으로 box-shadow + transform 부드럽게. */
 .scene-card.pinned {
-  animation: bf-glow-pulse var(--motion-glow-duration, 2000ms) ease-in-out infinite;
   transform: translateY(-24px) scale(1.12) !important;
   z-index: 20;
+  box-shadow:
+    0 16px 32px rgb(0 0 0 / 0.45),
+    0 0 24px var(--card-glow, rgb(108 92 231 / 0.5));
 }
 
 @keyframes bf-status-flash {

@@ -1,0 +1,1371 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>컴포지팅 대시보드 — 인터랙티브 mock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  html, body { margin: 0; min-height: 100%; background: #0F1117; color: #E8E8EE;
+    font-family: 'Pretendard Variable', 'Noto Sans KR', system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  button { font-family: inherit; }
+  :root {
+    --status-batch: #4A5060;
+    --status-combine: #74B9FF;
+    --status-aggregated: #A29BFE;
+    --status-adjust: #FDCB6E;
+    --status-error: #FF7675;
+    --status-done: #00B894;
+    --part-a: #FF9F43;
+    --part-b: #74B9FF;
+    --part-c: #A29BFE;
+    --part-d: #00CEC9;
+    --part-e: #FD79A8;
+    --bg-primary: #0F1117;
+    --bg-card: #1A1D27;
+    --bg-border: #2D3041;
+    --text-primary: #E8E8EE;
+    --text-secondary: #8B8DA3;
+    --accent: #6C5CE7;
+  }
+  @keyframes wipe-in {
+    from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); }
+  }
+  .wipe-in { animation: wipe-in 800ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+  @keyframes cascade-in {
+    from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); }
+  }
+  .cascade-in { animation: cascade-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+  ::selection { background: rgba(108, 92, 231, 0.45); }
+  /* 호버시만 보이는 리사이즈 핸들 */
+  .part-row:hover .resize-handle { opacity: 1; }
+  .resize-handle { opacity: 0; transition: opacity 150ms ease; }
+  .resize-handle.dragging { opacity: 1; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useMemo, useRef, useEffect, useCallback } = React;
+
+// ─── 데이터 ───
+const STATUSES = [
+  { id: 'batch',      label: '배치',     color: 'var(--status-batch)' },
+  { id: 'combine',    label: '취합중',   color: 'var(--status-combine)' },
+  { id: 'aggregated', label: '취합 완료', color: 'var(--status-aggregated)' },
+  { id: 'adjust',     label: '보정 중',  color: 'var(--status-adjust)' },
+  { id: 'error',      label: '오류',     color: 'var(--status-error)' },
+  { id: 'done',       label: '완료',     color: 'var(--status-done)' },
+];
+const PART_COLOR = { A: 'var(--part-a)', B: 'var(--part-b)', C: 'var(--part-c)', D: 'var(--part-d)', E: 'var(--part-e)' };
+
+function makeScene(no, partId, status, assignees = ['동우', '민지'], lengthChange = null, memo = '') {
+  return {
+    id: `${partId.toLowerCase()}${String(no).padStart(3, '0')}`,
+    no,
+    partId,
+    status,
+    bgAssignee: assignees[0],
+    actAssignee: assignees[1],
+    lengthChange,           // 'LS' | 'SD' | null (LD/SD 같은 길이 변경 라벨)
+    memo,
+    comments: [],
+    revisions: [],
+  };
+}
+
+const INITIAL_PARTS = [
+  {
+    id: 'A',
+    duration: 330,
+    memo: '오프닝 시퀀스 — 음악과 동기 필요',
+    scenes: [
+      makeScene(1,'A','done',['동우','민지'],null,'타이틀 크레딧'),
+      makeScene(2,'A','done',['동우','민지']),
+      makeScene(3,'A','done',['선영','이혜민']),
+      makeScene(4,'A','done',['선영','이혜민']),
+      makeScene(5,'A','done',['동우','민지'],'LD','길이 조정 — 음악과 sync'),
+      makeScene(6,'A','done',['동우','민지']),
+      makeScene(7,'A','aggregated',['동우','민지']),
+      makeScene(8,'A','aggregated',['선영','이혜민']),
+      makeScene(9,'A','aggregated',['선영','이혜민'],null,'배경 보정 한번 더 확인'),
+      makeScene(10,'A','combine',['동우','민지']),
+      makeScene(11,'A','combine',['동우','민지']),
+      makeScene(12,'A','adjust',['동우','민지'],'SD','컷 줄임'),
+      makeScene(13,'A','error',['선영','이혜민']),
+      makeScene(14,'A','batch',['선영','이혜민']),
+    ],
+  },
+  {
+    id: 'B',
+    duration: 510,
+    memo: '대화 씬 — 액팅 리듬 우선',
+    scenes: [
+      makeScene(1,'B','done',['정인','김어진']),
+      makeScene(2,'B','done',['정인','김어진']),
+      makeScene(3,'B','done',['혜원','류이레']),
+      makeScene(4,'B','done',['혜원','류이레']),
+      makeScene(5,'B','done',['정인','김어진']),
+      makeScene(6,'B','done',['정인','김어진']),
+      makeScene(7,'B','done',['혜원','류이레']),
+      makeScene(8,'B','done',['혜원','류이레']),
+      makeScene(9,'B','aggregated',['정인','김어진']),
+      makeScene(10,'B','aggregated',['정인','김어진']),
+      makeScene(11,'B','aggregated',['혜원','류이레']),
+      makeScene(12,'B','aggregated',['혜원','류이레']),
+      makeScene(13,'B','aggregated',['정인','김어진'],null,'액팅 컷타이밍 재검토'),
+      makeScene(14,'B','combine',['정인','김어진']),
+      makeScene(15,'B','combine',['정인','김어진']),
+      makeScene(16,'B','combine',['혜원','류이레']),
+      makeScene(17,'B','combine',['혜원','류이레']),
+      makeScene(18,'B','combine',['정인','김어진']),
+      makeScene(19,'B','adjust',['정인','김어진'],'LD'),
+      makeScene(20,'B','adjust',['혜원','류이레']),
+      makeScene(21,'B','adjust',['혜원','류이레']),
+      makeScene(22,'B','adjust',['정인','김어진']),
+      makeScene(23,'B','adjust',['정인','김어진']),
+      makeScene(24,'B','error',['혜원','류이레'],null,'BG 파일 누락'),
+      makeScene(25,'B','batch',['혜원','류이레']),
+      makeScene(26,'B','batch',['정인','김어진']),
+      makeScene(27,'B','batch',['정인','김어진']),
+    ],
+  },
+  {
+    id: 'C',
+    duration: 380,
+    memo: '',
+    scenes: [
+      makeScene(1,'C','done',['동우','민지']),
+      makeScene(2,'C','done',['동우','민지']),
+      makeScene(3,'C','aggregated',['선영','이혜민']),
+      makeScene(4,'C','aggregated',['선영','이혜민']),
+      makeScene(5,'C','aggregated',['선영','이혜민']),
+      makeScene(6,'C','combine',['선영','이혜민']),
+      makeScene(7,'C','combine',['선영','이혜민']),
+      makeScene(8,'C','combine',['선영','이혜민']),
+      makeScene(9,'C','combine',['선영','이혜민']),
+      makeScene(10,'C','combine',['선영','이혜민']),
+      makeScene(11,'C','combine',['선영','이혜민']),
+      makeScene(12,'C','combine',['선영','이혜민']),
+      makeScene(13,'C','adjust',['선영','이혜민'],'SD'),
+      makeScene(14,'C','adjust',['선영','이혜민']),
+      makeScene(15,'C','adjust',['선영','이혜민']),
+      makeScene(16,'C','adjust',['선영','이혜민']),
+      makeScene(17,'C','error',['선영','이혜민']),
+      makeScene(18,'C','error',['선영','이혜민']),
+      makeScene(19,'C','batch',['선영','이혜민']),
+      makeScene(20,'C','batch',['선영','이혜민']),
+      makeScene(21,'C','batch',['선영','이혜민']),
+      makeScene(22,'C','batch',['선영','이혜민']),
+      makeScene(23,'C','batch',['선영','이혜민']),
+    ],
+  },
+  {
+    id: 'D',
+    duration: 240,
+    memo: '엔딩 시퀀스 — 한 번 더 톤 점검 필요',
+    scenes: [
+      makeScene(1,'D','done',['혜원','류이레']),
+      makeScene(2,'D','aggregated',['혜원','류이레']),
+      makeScene(3,'D','combine',['혜원','류이레']),
+      makeScene(4,'D','combine',['혜원','류이레']),
+      makeScene(5,'D','adjust',['혜원','류이레'],null,'마지막 컷 톤 다시 잡기'),
+      makeScene(6,'D','batch',['혜원','류이레']),
+      makeScene(7,'D','batch',['혜원','류이레']),
+      makeScene(8,'D','batch',['혜원','류이레']),
+      makeScene(9,'D','batch',['혜원','류이레']),
+      makeScene(10,'D','batch',['혜원','류이레']),
+      makeScene(11,'D','batch',['혜원','류이레']),
+      makeScene(12,'D','batch',['혜원','류이레']),
+    ],
+  },
+];
+
+// ─── 헬퍼 ───
+function fmtTime(sec) {
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+function countByStatus(scenes) {
+  const c = {};
+  for (const s of STATUSES) c[s.id] = 0;
+  for (const sc of scenes) c[sc.status] = (c[sc.status] ?? 0) + 1;
+  return c;
+}
+function buildLayout(parts) {
+  let cum = 0;
+  const out = parts.map((p) => {
+    const start = cum;
+    const end = cum + p.duration;
+    const sliceSec = p.scenes.length > 0 ? p.duration / p.scenes.length : 0;
+    const sceneRanges = p.scenes.map((sc, i) => ({
+      sceneId: sc.id,
+      status: sc.status,
+      start: start + i * sliceSec,
+      end: start + (i + 1) * sliceSec,
+    }));
+    cum = end;
+    return { ...p, start, end, sceneRanges, counts: countByStatus(p.scenes) };
+  });
+  return { parts: out, totalSec: cum };
+}
+
+// ─── 공통 UI ───
+function PartBadge({ id, size = 22 }) {
+  const color = PART_COLOR[id] ?? 'var(--accent)';
+  return (
+    <span style={{
+      width: size, height: size, borderRadius: 5,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      background: `color-mix(in srgb, ${color} 18%, transparent)`,
+      color, fontWeight: 800, fontSize: size * 0.55,
+    }}>{id}</span>
+  );
+}
+
+function ResizeHandleDots({ color, isDragging }) {
+  return (
+    <div className={`resize-handle ${isDragging ? 'dragging' : ''}`}
+      style={{
+        position: 'absolute', right: -6, top: '50%', transform: 'translateY(-50%)',
+        width: 14, height: 42,
+        background: isDragging ? color : 'rgb(15 17 23 / 0.85)',
+        border: `1.5px solid ${color}`,
+        borderRadius: 6,
+        cursor: 'ew-resize',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 5,
+        boxShadow: isDragging
+          ? `0 0 14px ${color}, 0 4px 12px rgb(0 0 0 / 0.5)`
+          : `0 2px 6px rgb(0 0 0 / 0.45)`,
+        transition: 'background 130ms ease, box-shadow 130ms ease',
+      }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, pointerEvents: 'none' }}>
+        <span style={{ width: 3, height: 3, borderRadius: 999, background: isDragging ? '#fff' : color }} />
+        <span style={{ width: 3, height: 3, borderRadius: 999, background: isDragging ? '#fff' : color }} />
+        <span style={{ width: 3, height: 3, borderRadius: 999, background: isDragging ? '#fff' : color }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── 리사이즈 훅 ───
+function usePartResize(secPerPx, onResize) {
+  const startRef = useRef(null);
+  const [draggingPart, setDraggingPart] = useState(null);
+  const onDown = useCallback((partId) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startRef.current = { partId, x: e.clientX, lastDelta: 0 };
+    setDraggingPart(partId);
+    const onMove = (ev) => {
+      if (!startRef.current) return;
+      const deltaPx = ev.clientX - startRef.current.x;
+      const deltaSec = Math.round(deltaPx * secPerPx);
+      const inc = deltaSec - startRef.current.lastDelta;
+      if (inc !== 0) {
+        onResize(startRef.current.partId, inc);
+        startRef.current.lastDelta = deltaSec;
+      }
+    };
+    const onUp = () => {
+      startRef.current = null;
+      setDraggingPart(null);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [secPerPx, onResize]);
+  return { onDown, draggingPart };
+}
+
+// ─── 룰러 + RAM + WORK 영역 (모든 시안 공통) ───
+function TopMetaBars({ layout, height = 56 }) {
+  const { parts, totalSec } = layout;
+  const RULER_H = 22;
+  const RAM_H = 14;
+  const WORK_H = 14;
+  const ticks = 8;
+  return (
+    <div style={{ position: 'relative', height }}>
+      <div style={{ position: 'relative', height: RULER_H, fontSize: 10, color: 'var(--text-secondary)' }}>
+        {Array.from({ length: ticks + 1 }).map((_, i) => {
+          const frac = i / ticks;
+          const sec = Math.round(totalSec * frac);
+          return (
+            <div key={i} style={{ position: 'absolute', left: `${frac * 100}%`, top: 0 }}>
+              <div style={{ width: 1, height: 5, background: 'rgb(139 141 163 / 0.6)' }} />
+              <span style={{
+                fontFamily: 'monospace', fontWeight: 600,
+                marginLeft: i === ticks ? -28 : 3,
+              }}>{fmtTime(sec)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ position: 'relative', height: RAM_H, marginTop: 2,
+          background: 'rgb(15 17 23 / 0.9)', borderRadius: 4, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', inset: 0,
+          background: 'repeating-linear-gradient(90deg, color-mix(in srgb, var(--status-done) 14%, transparent) 0 4px, transparent 4px 8px)' }} />
+        {parts.flatMap((p) => p.sceneRanges.map((r, i) => r.status === 'done' && (
+          <div key={`ram-${p.id}-${i}`} style={{
+            position: 'absolute',
+            left: `${(r.start / totalSec) * 100}%`,
+            width: `${((r.end - r.start) / totalSec) * 100}%`,
+            top: 1, bottom: 1,
+            background: 'var(--status-done)',
+            boxShadow: '0 0 4px color-mix(in srgb, var(--status-done) 55%, transparent)',
+          }} />
+        )))}
+        <span style={{
+          position: 'absolute', left: 4, top: '50%', transform: 'translateY(-50%)',
+          fontSize: 8, fontWeight: 800, color: 'var(--status-done)',
+          background: 'rgb(15 17 23 / 0.92)', padding: '0 4px', letterSpacing: '0.12em',
+        }}>RAM</span>
+      </div>
+      <div style={{ position: 'relative', height: WORK_H, marginTop: 2,
+          background: 'rgb(15 17 23 / 0.65)', borderRadius: 4, overflow: 'hidden' }}>
+        {parts.flatMap((p) => p.sceneRanges.map((r, i) => {
+          if (r.status === 'batch' || r.status === 'done') return null;
+          const s = STATUSES.find((x) => x.id === r.status);
+          return (
+            <div key={`work-${p.id}-${i}`} style={{
+              position: 'absolute',
+              left: `${(r.start / totalSec) * 100}%`,
+              width: `${((r.end - r.start) / totalSec) * 100}%`,
+              top: 1, bottom: 1,
+              background: `linear-gradient(180deg, color-mix(in srgb, ${s.color} 95%, transparent), color-mix(in srgb, ${s.color} 70%, transparent))`,
+              boxShadow: `0 0 3px color-mix(in srgb, ${s.color} 45%, transparent)`,
+            }} />
+          );
+        }))}
+        <span style={{
+          position: 'absolute', left: 4, top: '50%', transform: 'translateY(-50%)',
+          fontSize: 8, fontWeight: 800, color: 'var(--status-combine)',
+          background: 'rgb(15 17 23 / 0.92)', padding: '0 4px', letterSpacing: '0.12em',
+        }}>WORK AREA</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── 시안 D: 합친 시안 (AE 메타포 + 큰 박스 + 호버 핸들 + 메모) ───
+function VariantHybrid({ layout, onResizePart, trackWidthPx, onSelectPart, selectedPartId }) {
+  const ROW_H = 92;
+  const { parts, totalSec } = layout;
+  const secPerPx = totalSec / Math.max(1, trackWidthPx);
+  const { onDown, draggingPart } = usePartResize(secPerPx, onResizePart);
+
+  return (
+    <div style={{
+      borderRadius: 12, overflow: 'visible',
+      border: '1px solid rgb(45 48 65 / 0.45)',
+      background: 'rgb(26 29 39 / 0.45)', padding: '16px 18px 20px',
+    }} className="wipe-in">
+      <TopMetaBars layout={layout} height={54} />
+
+      {/* 파트 박스들 — 가로 stacked, 시간축 비례 */}
+      <div style={{
+        position: 'relative', display: 'flex', gap: 0, marginTop: 14, height: ROW_H,
+      }}>
+        {parts.map((p) => {
+          const color = PART_COLOR[p.id] ?? 'var(--accent)';
+          const donePct = p.counts.done / Math.max(1, p.scenes.length) * 100;
+          const widthPct = (p.duration / totalSec) * 100;
+          const isDragging = draggingPart === p.id;
+          const isSelected = selectedPartId === p.id;
+          return (
+            <div key={p.id}
+              className="part-row cascade-in"
+              onClick={() => onSelectPart?.(p.id)}
+              style={{
+                position: 'relative', flexShrink: 0,
+                width: `${widthPct}%`,
+                background: `linear-gradient(180deg, color-mix(in srgb, ${color} 16%, transparent), color-mix(in srgb, ${color} 4%, transparent))`,
+                borderLeft: `4px solid ${color}`,
+                borderRight: '1px solid rgb(45 48 65 / 0.5)',
+                borderTop: isSelected ? `1px solid ${color}` : '1px solid rgb(45 48 65 / 0.4)',
+                borderBottom: isSelected ? `1px solid ${color}` : '1px solid rgb(45 48 65 / 0.4)',
+                padding: '8px 12px',
+                cursor: 'pointer',
+                boxShadow: isSelected ? `0 0 0 1px ${color} inset, 0 4px 14px color-mix(in srgb, ${color} 35%, transparent)` : 'none',
+                transition: 'box-shadow 180ms ease',
+              }}>
+              {/* 헤더 라인 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <PartBadge id={p.id} size={20} />
+                <span style={{ fontSize: 13, fontWeight: 800, color }}>{p.id}파트</span>
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                  {p.scenes.length}컷 · {fmtTime(p.duration)}
+                </span>
+              </div>
+
+              {/* status mini stacked */}
+              <div style={{ display: 'flex', height: 14, marginTop: 8, borderRadius: 3, overflow: 'hidden' }}>
+                {STATUSES.map((s) => {
+                  const c = p.counts[s.id];
+                  if (c === 0) return null;
+                  const w = (c / p.scenes.length) * 100;
+                  return (
+                    <div key={s.id} title={`${s.label} ${c}컷`} style={{
+                      width: `${w}%`,
+                      background: `linear-gradient(180deg, color-mix(in srgb, ${s.color} 95%, transparent), color-mix(in srgb, ${s.color} 70%, transparent))`,
+                      borderRight: '1px solid rgb(15 17 23 / 0.4)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {w > 7 && (
+                        <span style={{ fontSize: 9, fontWeight: 800, color: '#fff', textShadow: '0 1px 2px rgb(0 0 0 / 0.5)' }}>{c}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 진행률 라인 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                <div style={{ flex: 1, height: 2.5, background: 'rgb(45 48 65 / 0.55)', borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${donePct}%`, height: '100%',
+                    background: `linear-gradient(90deg, ${color}, var(--status-done))`,
+                    boxShadow: '0 0 4px color-mix(in srgb, var(--status-done) 55%, transparent)',
+                  }} />
+                </div>
+                <span style={{
+                  fontSize: 10, fontFamily: 'monospace', fontWeight: 700,
+                  color: donePct >= 100 ? 'var(--status-done)' : color,
+                }}>{Math.round(donePct)}%</span>
+              </div>
+
+              {/* 파트 메모 — 있을 때만 표시 */}
+              {p.memo && (
+                <div title={p.memo} style={{
+                  marginTop: 6, fontSize: 10, color: 'var(--text-secondary)',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  <span style={{ opacity: 0.7 }}>📝</span>
+                  {p.memo}
+                </div>
+              )}
+
+              {/* 호버 시만 보이는 점 세개 핸들 (우측 edge) */}
+              <div onMouseDown={onDown(p.id)} title="좌우로 드래그 — 파트 길이 조절">
+                <ResizeHandleDots color={color} isDragging={isDragging} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── 시안 A: AE 메타포 (LayerPanel + 행) ───
+function VariantA({ layout, onResizePart, trackWidthPx }) {
+  const LAYER_W = 168;
+  const ROW_H = 56;
+  const { parts, totalSec } = layout;
+  const secPerPx = totalSec / Math.max(1, trackWidthPx);
+  const { onDown, draggingPart } = usePartResize(secPerPx, onResizePart);
+
+  return (
+    <div style={{
+      borderRadius: 8, overflow: 'visible', border: '1px solid rgb(45 48 65 / 0.45)',
+      background: 'rgb(26 29 39 / 0.55)', padding: 0,
+    }} className="wipe-in">
+      <div style={{ display: 'flex' }}>
+        <div style={{ width: LAYER_W, flexShrink: 0, borderRight: '1px solid rgb(45 48 65 / 0.55)', background: 'rgb(26 29 39 / 0.7)' }}>
+          <div style={{
+            height: 54, display: 'flex', alignItems: 'flex-end',
+            padding: '0 12px 4px', borderBottom: '1px solid rgb(45 48 65 / 0.55)',
+            background: 'rgb(15 17 23 / 0.8)',
+            fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.12em',
+          }}>COMP NAME</div>
+          {parts.map((p) => {
+            const color = PART_COLOR[p.id] ?? 'var(--accent)';
+            const donePct = p.counts.done / Math.max(1, p.scenes.length) * 100;
+            return (
+              <div key={p.id} style={{
+                position: 'relative', height: ROW_H, padding: '8px 12px 8px 18px',
+                borderBottom: '1px solid rgb(45 48 65 / 0.4)',
+              }}>
+                <span style={{ position: 'absolute', left: 0, top: 6, bottom: 6, width: 4, background: color, borderRadius: '0 2px 2px 0' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <PartBadge id={p.id} size={18} />
+                  <span style={{ fontSize: 13, fontWeight: 800, color }}>{p.id}파트</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{p.scenes.length}컷</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                  <div style={{ flex: 1, height: 3, background: 'rgb(45 48 65 / 0.45)', borderRadius: 999, overflow: 'hidden' }}>
+                    <div style={{ width: `${donePct}%`, height: '100%', background: `linear-gradient(90deg, ${color}, var(--status-done))` }} />
+                  </div>
+                  <span style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 700, color: donePct >= 100 ? 'var(--status-done)' : color }}>{Math.round(donePct)}%</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+          <TopMetaBars layout={layout} height={54} />
+          {parts.map((p, idx) => {
+            const color = PART_COLOR[p.id] ?? 'var(--accent)';
+            const donePct = p.counts.done / Math.max(1, p.scenes.length) * 100;
+            const isDragging = draggingPart === p.id;
+            return (
+              <div key={p.id} className="part-row" style={{
+                position: 'relative', height: ROW_H,
+                borderBottom: '1px solid rgb(45 48 65 / 0.3)',
+                background: idx % 2 === 0 ? 'transparent' : 'rgb(15 17 23 / 0.25)',
+              }}>
+                <div style={{
+                  position: 'absolute', left: `${(p.start / totalSec) * 100}%`,
+                  width: `${(p.duration / totalSec) * 100}%`, top: 6, bottom: 6,
+                  background: 'rgb(15 17 23 / 0.55)',
+                  border: `1.5px solid color-mix(in srgb, ${color} 55%, transparent)`,
+                  borderRadius: 5, overflow: 'visible',
+                }}>
+                  <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, background: color, borderRadius: '5px 0 0 5px' }} />
+                  <div style={{ position: 'absolute', left: 4, right: 4, top: 4, bottom: 16, display: 'flex', borderRadius: 2, overflow: 'hidden' }}>
+                    {STATUSES.map((s) => {
+                      const c = p.counts[s.id]; if (c === 0) return null;
+                      const w = (c / p.scenes.length) * 100;
+                      return (
+                        <div key={s.id} title={`${s.label} ${c}컷`} style={{
+                          width: `${w}%`,
+                          background: `linear-gradient(180deg, color-mix(in srgb, ${s.color} 95%, transparent), color-mix(in srgb, ${s.color} 70%, transparent))`,
+                          borderRight: '1px solid rgb(15 17 23 / 0.5)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>{w > 5 && <span style={{ fontSize: 9, fontWeight: 800, color: '#fff', textShadow: '0 1px 2px rgb(0 0 0 / 0.6)' }}>{c}</span>}</div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ position: 'absolute', bottom: 1, left: 6, right: 6, display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                    <span style={{ fontWeight: 700, color }}>{p.id}파트 · {p.scenes.length}컷</span>
+                    <span>{fmtTime(p.duration)} · 완료 {Math.round(donePct)}%</span>
+                  </div>
+                  <div onMouseDown={onDown(p.id)} title="좌우로 드래그">
+                    <ResizeHandleDots color={color} isDragging={isDragging} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 시안 B: 큰 박스 (정적 핸들) ───
+function VariantB({ layout, onResizePart, trackWidthPx }) {
+  const ROW_H = 76;
+  const { parts, totalSec } = layout;
+  const secPerPx = totalSec / Math.max(1, trackWidthPx);
+  const { onDown, draggingPart } = usePartResize(secPerPx, onResizePart);
+
+  return (
+    <div style={{
+      borderRadius: 12, overflow: 'visible', border: '1px solid rgb(45 48 65 / 0.45)',
+      background: 'rgb(26 29 39 / 0.4)', padding: 14,
+    }} className="wipe-in">
+      <TopMetaBars layout={layout} height={54} />
+      <div style={{ position: 'relative', display: 'flex', gap: 0, marginTop: 12 }}>
+        {parts.map((p) => {
+          const color = PART_COLOR[p.id] ?? 'var(--accent)';
+          const donePct = p.counts.done / Math.max(1, p.scenes.length) * 100;
+          const widthPct = (p.duration / totalSec) * 100;
+          const isDragging = draggingPart === p.id;
+          return (
+            <div key={p.id} className="part-row" style={{
+              position: 'relative', flexShrink: 0, width: `${widthPct}%`, height: ROW_H,
+              borderLeft: `4px solid ${color}`,
+              background: `linear-gradient(180deg, color-mix(in srgb, ${color} 14%, transparent), color-mix(in srgb, ${color} 4%, transparent))`,
+              padding: '8px 10px', borderRight: '1px solid rgb(45 48 65 / 0.5)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <PartBadge id={p.id} size={20} />
+                <span style={{ fontSize: 13, fontWeight: 800, color }}>{p.id}파트</span>
+                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{p.scenes.length}컷 · {fmtTime(p.duration)}</span>
+              </div>
+              <div style={{ display: 'flex', height: 12, marginTop: 8, borderRadius: 3, overflow: 'hidden' }}>
+                {STATUSES.map((s) => {
+                  const c = p.counts[s.id]; if (c === 0) return null;
+                  const w = (c / p.scenes.length) * 100;
+                  return <div key={s.id} style={{ width: `${w}%`, background: s.color, opacity: 0.85 }} />;
+                })}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-secondary)' }}>완료 {Math.round(donePct)}%</span>
+                <div style={{ flex: 1, height: 2, background: 'rgb(45 48 65 / 0.5)', borderRadius: 999 }}>
+                  <div style={{ width: `${donePct}%`, height: '100%', background: 'var(--status-done)', borderRadius: 999 }} />
+                </div>
+              </div>
+              <div onMouseDown={onDown(p.id)} title="좌우로 드래그">
+                <ResizeHandleDots color={color} isDragging={isDragging} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── 씬 카드 그리드 (선택 파트의 씬들) ───
+const STATUS_BORDER = {
+  batch: 'rgb(74 80 96 / 0.55)',
+  combine: 'rgb(116 185 255 / 0.7)',
+  aggregated: 'rgb(162 155 254 / 0.7)',
+  adjust: 'rgb(253 203 110 / 0.75)',
+  error: 'rgb(255 118 117 / 0.8)',
+  done: 'rgb(0 184 148 / 0.75)',
+};
+
+function SceneCard({ scene, onClick, isSelected }) {
+  const statusObj = STATUSES.find((s) => s.id === scene.status);
+  const ls = scene.lengthChange; // 'LD' | 'SD' | null
+  return (
+    <button
+      onClick={() => onClick?.(scene.id)}
+      className="cascade-in"
+      style={{
+        all: 'unset',
+        position: 'relative',
+        width: 180, height: 220,
+        borderRadius: 8,
+        background: 'var(--bg-card)',
+        border: `1.5px solid ${isSelected ? 'var(--accent)' : STATUS_BORDER[scene.status]}`,
+        outline: isSelected ? '3px solid color-mix(in srgb, var(--accent) 25%, transparent)' : 'none',
+        outlineOffset: 1,
+        cursor: 'pointer',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+        transition: 'transform 180ms ease, box-shadow 180ms ease',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 8px 18px rgb(0 0 0 / 0.4)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}
+    >
+      {/* 상단 — sceneId + status + LS/SD */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '6px 10px', borderBottom: '1px solid rgb(45 48 65 / 0.4)',
+      }}>
+        <span style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{scene.id}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {ls && (
+            <span style={{
+              fontSize: 8, fontWeight: 800,
+              padding: '1px 4px', borderRadius: 3,
+              background: ls === 'LD' ? 'color-mix(in srgb, var(--status-done) 25%, transparent)' : 'color-mix(in srgb, var(--status-error) 25%, transparent)',
+              color: ls === 'LD' ? 'var(--status-done)' : 'var(--status-error)',
+              border: `1px solid ${ls === 'LD' ? 'var(--status-done)' : 'var(--status-error)'}`,
+              letterSpacing: '0.04em',
+            }}>{ls}</span>
+          )}
+          <span style={{ width: 8, height: 8, borderRadius: 999, background: statusObj?.color, flexShrink: 0 }} />
+        </div>
+      </div>
+      {/* 이미지 분할 — placeholder */}
+      <div style={{ flex: 1, display: 'flex', background: 'rgb(15 17 23 / 0.5)' }}>
+        <div style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 9, color: 'var(--text-secondary)', borderRight: '1px solid rgb(45 48 65 / 0.4)',
+          background: `linear-gradient(135deg, color-mix(in srgb, ${PART_COLOR[scene.partId]} 14%, transparent), transparent)`,
+        }}>가이드</div>
+        <div style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 9, color: 'var(--text-secondary)',
+          background: `linear-gradient(135deg, color-mix(in srgb, ${PART_COLOR[scene.partId]} 8%, transparent), transparent)`,
+        }}>실제</div>
+      </div>
+      {/* 담당자 */}
+      <div style={{ padding: '4px 10px 2px', fontSize: 9, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {scene.bgAssignee && <div><span style={{ color: 'var(--text-secondary)', fontWeight: 700, marginRight: 4 }}>BG</span>{scene.bgAssignee}</div>}
+        {scene.actAssignee && <div><span style={{ color: 'var(--text-secondary)', fontWeight: 700, marginRight: 4 }}>ACT</span>{scene.actAssignee}</div>}
+      </div>
+      {/* 메모 — 있으면 / 없으면 비움 */}
+      <div style={{
+        padding: '4px 10px 6px',
+        fontSize: 9, color: scene.memo ? 'var(--text-secondary)' : 'rgb(139 141 163 / 0.4)',
+        minHeight: 22, lineHeight: 1.3,
+        overflow: 'hidden', textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        borderTop: '1px solid rgb(45 48 65 / 0.3)',
+      }} title={scene.memo || ''}>
+        {scene.memo ? `📝 ${scene.memo}` : ''}
+      </div>
+      {/* 댓글 + 리비전 카운트 */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        padding: '4px 10px 6px',
+        fontSize: 9, color: 'var(--text-secondary)',
+        borderTop: '1px solid rgb(45 48 65 / 0.3)',
+      }}>
+        <span>💬 {scene.comments.length}</span>
+        <span>🔄 {scene.revisions.length}</span>
+      </div>
+    </button>
+  );
+}
+
+// ─── 씬 상세 모달 — 기존 UnifiedSceneDetailModal 패턴 (좌측 본체 + 본체 내 탭 + 우측 댓글 패널) 차용
+//     컴포지팅 버전: BG/ACT 단계 변경 비활성 (read-only), 컴포지팅 6 단계만 변경 가능 ───
+function SceneDetailModal({ scene, onClose, onAddComment, onAddRevision, onEditMemo, onChangeStatus }) {
+  const [commentDraft, setCommentDraft] = useState('');
+  const [revisionDraft, setRevisionDraft] = useState('');
+  const [memoDraft, setMemoDraft] = useState(scene?.memo ?? '');
+  const [activeTab, setActiveTab] = useState('detail'); // 'detail' | 'revisions' | 'history'
+  useEffect(() => { setMemoDraft(scene?.memo ?? ''); setActiveTab('detail'); }, [scene?.id]);
+  useEffect(() => {
+    if (!scene) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') { onClose?.(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [scene, onClose]);
+
+  if (!scene) return null;
+  const statusObj = STATUSES.find((s) => s.id === scene.status);
+  const partColor = PART_COLOR[scene.partId] ?? 'var(--accent)';
+
+  const BG_STAGES = ['LO', '완료', '검수', 'PNG'];
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 80,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgb(0 0 0 / 0.65)',
+        backdropFilter: 'blur(4px)',
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 1280, height: '88vh',
+          background: 'var(--bg-card)',
+          border: '1px solid var(--bg-border)',
+          borderRadius: 18,
+          boxShadow: '0 24px 64px rgb(0 0 0 / 0.65), 0 0 80px rgb(108 92 231 / 0.15), 0 0 80px rgb(255 159 67 / 0.10)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}>
+        {/* ─── 헤더 ─── */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '14px 20px',
+          borderBottom: '1px solid var(--bg-border)',
+          background: 'rgb(26 29 39 / 0.6)',
+          backdropFilter: 'blur(8px)',
+        }}>
+          <PartBadge id={scene.partId} size={22} />
+          <span style={{ fontFamily: 'monospace', fontSize: 17, fontWeight: 800 }}>{scene.id}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+            EP05 · {scene.partId}파트 · {scene.no}번째 컷
+          </span>
+          <span style={{
+            fontSize: 10, fontWeight: 800,
+            padding: '3px 10px', borderRadius: 999,
+            color: '#fff', background: statusObj?.color,
+            marginLeft: 6,
+            boxShadow: `0 0 10px ${statusObj?.color}`,
+          }}>● {statusObj?.label}</span>
+          {scene.lengthChange && (
+            <span style={{
+              fontSize: 10, fontWeight: 800,
+              padding: '3px 8px', borderRadius: 4,
+              background: scene.lengthChange === 'LD' ? 'color-mix(in srgb, var(--status-done) 25%, transparent)' : 'color-mix(in srgb, var(--status-error) 25%, transparent)',
+              color: scene.lengthChange === 'LD' ? 'var(--status-done)' : 'var(--status-error)',
+              border: `1px solid ${scene.lengthChange === 'LD' ? 'var(--status-done)' : 'var(--status-error)'}`,
+            }}>{scene.lengthChange}</span>
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button title="이전 씬" style={{
+              all: 'unset', cursor: 'pointer', width: 30, height: 30, borderRadius: 6,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgb(45 48 65 / 0.4)', fontSize: 13,
+            }}>‹</button>
+            <button title="다음 씬" style={{
+              all: 'unset', cursor: 'pointer', width: 30, height: 30, borderRadius: 6,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgb(45 48 65 / 0.4)', fontSize: 13,
+            }}>›</button>
+            <button onClick={onClose} style={{
+              all: 'unset', cursor: 'pointer',
+              width: 30, height: 30, borderRadius: 6,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgb(45 48 65 / 0.4)', fontSize: 13,
+              marginLeft: 4,
+            }}>✕</button>
+          </div>
+        </div>
+
+        {/* ─── 본체: 좌측(메인) + 우측(댓글 패널) ─── */}
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          {/* ── 좌측 메인 ── */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            {/* 탭 헤더 */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '8px 16px 0', borderBottom: '1px solid var(--bg-border)',
+              background: 'rgb(15 17 23 / 0.4)',
+            }}>
+              {[
+                { id: 'detail', label: '상세' },
+                { id: 'revisions', label: `리비전${scene.revisions.length > 0 ? ` · ${scene.revisions.length}` : ''}` },
+                { id: 'history', label: '히스토리' },
+              ].map((t) => {
+                const active = activeTab === t.id;
+                return (
+                  <button key={t.id}
+                    onClick={() => setActiveTab(t.id)}
+                    style={{
+                      all: 'unset', cursor: 'pointer',
+                      padding: '8px 14px',
+                      fontSize: 12, fontWeight: 700,
+                      color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+                      transition: 'all 150ms ease',
+                      boxShadow: active ? '0 4px 12px color-mix(in srgb, var(--accent) 35%, transparent)' : 'none',
+                    }}>{t.label}</button>
+                );
+              })}
+            </div>
+
+            {/* 탭 내용 */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+              {activeTab === 'detail' && (
+                <DetailTabContent
+                  scene={scene}
+                  statusObj={statusObj}
+                  partColor={partColor}
+                  memoDraft={memoDraft}
+                  setMemoDraft={setMemoDraft}
+                  onEditMemo={onEditMemo}
+                  onChangeStatus={onChangeStatus}
+                  BG_STAGES={BG_STAGES}
+                />
+              )}
+              {activeTab === 'revisions' && (
+                <RevisionsTabContent
+                  scene={scene}
+                  revisionDraft={revisionDraft}
+                  setRevisionDraft={setRevisionDraft}
+                  onAddRevision={onAddRevision}
+                />
+              )}
+              {activeTab === 'history' && (
+                <HistoryTabContent scene={scene} statusObj={statusObj} />
+              )}
+            </div>
+          </div>
+
+          {/* ── 우측 댓글 패널 ── */}
+          <div style={{
+            width: 340, flexShrink: 0,
+            borderLeft: '1px solid var(--bg-border)',
+            background: 'rgb(15 17 23 / 0.35)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{
+              padding: '12px 16px', borderBottom: '1px solid var(--bg-border)',
+              fontSize: 11, fontWeight: 800, letterSpacing: '0.1em',
+              color: 'var(--text-secondary)',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span>💬 댓글</span>
+              {scene.comments.length > 0 && (
+                <span style={{
+                  fontSize: 10, padding: '1px 6px', borderRadius: 999,
+                  background: 'var(--accent)', color: '#fff',
+                }}>{scene.comments.length}</span>
+              )}
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {scene.comments.length === 0 && (
+                <div style={{ fontSize: 11, color: 'rgb(139 141 163 / 0.7)', textAlign: 'center', marginTop: 20 }}>
+                  아직 댓글이 없습니다.<br />아래에 첫 댓글을 남겨보세요.
+                </div>
+              )}
+              {scene.comments.map((c, i) => (
+                <div key={i} style={{
+                  padding: '10px 12px',
+                  background: 'rgb(26 29 39 / 0.7)',
+                  border: '1px solid var(--bg-border)',
+                  borderLeft: '3px solid var(--accent)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                    <strong style={{ color: 'var(--text-primary)' }}>{c.author}</strong>
+                    <span>{c.at}</span>
+                  </div>
+                  {c.text}
+                </div>
+              ))}
+            </div>
+            <div style={{
+              padding: 12, borderTop: '1px solid var(--bg-border)',
+              background: 'rgb(15 17 23 / 0.5)',
+            }}>
+              <textarea
+                value={commentDraft}
+                onChange={(e) => setCommentDraft(e.target.value)}
+                placeholder="댓글 입력... (Cmd/Ctrl+Enter 로 등록)"
+                rows={2}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && commentDraft.trim()) {
+                    onAddComment?.(scene.id, commentDraft.trim());
+                    setCommentDraft('');
+                  }
+                }}
+                style={{
+                  width: '100%', padding: '8px 10px',
+                  background: 'rgb(26 29 39 / 0.7)', border: '1px solid var(--bg-border)',
+                  borderRadius: 6, color: 'var(--text-primary)', fontSize: 12,
+                  fontFamily: 'inherit', resize: 'none', outline: 'none',
+                }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                <button onClick={() => {
+                  if (!commentDraft.trim()) return;
+                  onAddComment?.(scene.id, commentDraft.trim());
+                  setCommentDraft('');
+                }} style={{
+                  padding: '5px 14px', background: 'var(--accent)', border: 'none',
+                  borderRadius: 6, color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                }}>등록</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 푸터 */}
+        <div style={{
+          padding: '8px 20px', borderTop: '1px solid var(--bg-border)',
+          fontSize: 10, color: 'rgb(139 141 163 / 0.7)',
+          background: 'rgb(15 17 23 / 0.3)',
+          display: 'flex', justifyContent: 'space-between',
+        }}>
+          <span>Esc 닫기 · ‹/› 이전/다음 · Cmd+Enter 댓글 등록</span>
+          <span style={{ color: 'var(--text-secondary)' }}>
+            {scene.id} · {scene.partId}파트
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 상세 탭 — 부서 패널 (BG / ACT 단계 read-only) + 컴포지팅 단계 + 메모 ───
+function DetailTabContent({ scene, statusObj, partColor, memoDraft, setMemoDraft, onEditMemo, onChangeStatus, BG_STAGES }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* 이미지 두 장 */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        {['가이드', '실제'].map((label) => (
+          <div key={label} style={{
+            position: 'relative', aspectRatio: '16 / 9',
+            borderRadius: 8, overflow: 'hidden',
+            border: '1px solid var(--bg-border)',
+            background: `linear-gradient(135deg, color-mix(in srgb, ${partColor} 14%, transparent), rgb(15 17 23 / 0.4))`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 12, color: 'var(--text-secondary)',
+          }}>
+            <span style={{
+              position: 'absolute', top: 8, left: 8, zIndex: 2,
+              fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
+              background: 'rgb(26 29 39 / 0.85)', color: 'var(--text-secondary)',
+            }}>{label}</span>
+            {label} 이미지 (mock)
+          </div>
+        ))}
+      </div>
+
+      {/* 컴포지팅 단계 (편집 가능 — 한솔 정정: 컴포지팅 버전 모달의 핵심) */}
+      <div style={{
+        padding: 14, borderRadius: 10,
+        border: `2px solid color-mix(in srgb, ${statusObj?.color} 45%, transparent)`,
+        background: `linear-gradient(180deg, color-mix(in srgb, ${statusObj?.color} 10%, transparent), transparent)`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', color: statusObj?.color }}>
+            ⚙ 컴포지팅 단계
+          </span>
+          <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+            이 화면에서 변경 가능
+          </span>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {STATUSES.map((s) => {
+            const active = scene.status === s.id;
+            return (
+              <button key={s.id}
+                onClick={() => onChangeStatus?.(scene.id, s.id)}
+                style={{
+                  all: 'unset', cursor: 'pointer',
+                  padding: '7px 14px', borderRadius: 999,
+                  fontSize: 12, fontWeight: 700,
+                  background: active ? s.color : 'transparent',
+                  color: active ? '#fff' : s.color,
+                  border: `1.5px solid ${active ? s.color : `color-mix(in srgb, ${s.color} 45%, transparent)`}`,
+                  boxShadow: active ? `0 0 10px ${s.color}` : 'none',
+                  transition: 'all 150ms ease',
+                }}>{s.label}</button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* BG / ACT 부서 패널 — 단계 read-only (한솔 정정) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        {[
+          { dept: 'BG', color: '#A29BFE', assignee: scene.bgAssignee },
+          { dept: 'ACT', color: '#FAB1A0', assignee: scene.actAssignee },
+        ].map((d) => (
+          <div key={d.dept} style={{
+            padding: 12, borderRadius: 10,
+            border: '1px solid var(--bg-border)',
+            background: 'rgb(15 17 23 / 0.45)',
+            borderTop: `2px solid ${d.color}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: d.color }}>{d.dept}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{d.assignee || '미지정'}</span>
+              <span style={{
+                marginLeft: 'auto', fontSize: 9, padding: '2px 6px', borderRadius: 3,
+                background: 'rgb(45 48 65 / 0.5)', color: 'var(--text-secondary)',
+              }}>여기서는 잠금</span>
+            </div>
+            {/* 진행 단계 칩 (read-only, opacity 0.45) */}
+            <div style={{ display: 'flex', gap: 4, opacity: 0.45, pointerEvents: 'none' }}>
+              {BG_STAGES.map((stage, i) => (
+                <span key={stage} style={{
+                  flex: 1, textAlign: 'center', padding: '4px 0',
+                  fontSize: 10, fontWeight: 700,
+                  background: i < 2 ? d.color : 'rgb(45 48 65 / 0.5)',
+                  color: i < 2 ? '#fff' : 'var(--text-secondary)',
+                  borderRadius: 4,
+                }}>{stage}</span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 메모 */}
+      <div style={{
+        padding: 12, borderRadius: 10,
+        border: '1px solid var(--bg-border)',
+        background: 'rgb(15 17 23 / 0.4)',
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.1em', marginBottom: 8 }}>📝 메모</div>
+        <textarea
+          value={memoDraft}
+          onChange={(e) => setMemoDraft(e.target.value)}
+          onBlur={() => onEditMemo?.(scene.id, memoDraft)}
+          placeholder="씬 메모..."
+          rows={2}
+          style={{
+            width: '100%', padding: '10px 12px',
+            background: 'rgb(26 29 39 / 0.7)', border: '1px solid var(--bg-border)',
+            borderRadius: 6, color: 'var(--text-primary)', fontSize: 13,
+            fontFamily: 'inherit', resize: 'vertical', outline: 'none',
+          }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── 리비전 탭 ───
+function RevisionsTabContent({ scene, revisionDraft, setRevisionDraft, onAddRevision }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {scene.revisions.length === 0 && (
+          <div style={{ fontSize: 12, color: 'rgb(139 141 163 / 0.7)', textAlign: 'center', padding: 24 }}>
+            등록된 리비전이 없습니다.
+          </div>
+        )}
+        {scene.revisions.map((r, i) => (
+          <div key={i} style={{
+            padding: 14,
+            background: 'rgb(15 17 23 / 0.55)',
+            border: '1px solid var(--bg-border)',
+            borderLeft: '3px solid var(--status-adjust)',
+            borderRadius: 8,
+            fontSize: 13, lineHeight: 1.5,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-secondary)', marginBottom: 6 }}>
+              <span><strong style={{ color: 'var(--text-primary)' }}>Rev.{i + 1}</strong> · {r.at}</span>
+              <span style={{ color: r.status === 'open' ? 'var(--status-error)' : 'var(--status-done)', fontWeight: 700 }}>
+                {r.status === 'open' ? '● 진행 중' : '✓ 해결'}
+              </span>
+            </div>
+            {r.description}
+          </div>
+        ))}
+      </div>
+      <div style={{
+        padding: 12, borderRadius: 8,
+        background: 'rgb(15 17 23 / 0.5)',
+        border: '1px solid var(--bg-border)',
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.1em', marginBottom: 8 }}>새 리비전 요청</div>
+        <textarea
+          value={revisionDraft}
+          onChange={(e) => setRevisionDraft(e.target.value)}
+          placeholder="리비전 요청 사유..."
+          rows={2}
+          style={{
+            width: '100%', padding: '10px 12px',
+            background: 'rgb(26 29 39 / 0.7)', border: '1px solid var(--bg-border)',
+            borderRadius: 6, color: 'var(--text-primary)', fontSize: 13,
+            fontFamily: 'inherit', resize: 'vertical', outline: 'none',
+          }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+          <button onClick={() => {
+            if (!revisionDraft.trim()) return;
+            onAddRevision?.(scene.id, revisionDraft.trim());
+            setRevisionDraft('');
+          }} style={{
+            padding: '6px 16px',
+            background: 'var(--status-adjust)', border: 'none',
+            borderRadius: 6, color: '#1A1D27', fontSize: 12, fontWeight: 800, cursor: 'pointer',
+          }}>리비전 등록</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 히스토리 탭 ───
+function HistoryTabContent({ scene, statusObj }) {
+  // mock 활동 기록
+  const history = [
+    { at: '14:35', author: '원동우', desc: `"보정 중" → "${statusObj?.label}" 로 변경`, color: statusObj?.color },
+    { at: '13:12', author: '원동우', desc: '"취합 완료" → "보정 중" 으로 변경', color: 'var(--status-adjust)' },
+    { at: '11:48', author: '이혜민', desc: '메모 수정', color: 'var(--accent)' },
+    { at: '09:20', author: '원동우', desc: '"취합중" → "취합 완료" 로 변경', color: 'var(--status-aggregated)' },
+    { at: '어제 18:02', author: '원동우', desc: '"배치" → "취합중" 으로 변경', color: 'var(--status-combine)' },
+  ];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.1em', marginBottom: 4 }}>
+        이 씬의 활동 기록
+      </div>
+      {history.map((h, i) => (
+        <div key={i} style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10,
+          padding: '10px 12px',
+          background: 'rgb(15 17 23 / 0.45)',
+          border: '1px solid var(--bg-border)',
+          borderRadius: 6,
+          fontSize: 12,
+        }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: 999,
+            background: h.color, marginTop: 5, flexShrink: 0,
+            boxShadow: `0 0 6px ${h.color}`,
+          }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 2 }}>
+              <strong style={{ color: 'var(--text-primary)' }}>{h.author}</strong> · {h.at}
+            </div>
+            {h.desc}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── 메인 앱 ───
+function App() {
+  const [variant, setVariant] = useState('Hybrid');
+  const [parts, setParts] = useState(INITIAL_PARTS);
+  const [trackWidthPx, setTrackWidthPx] = useState(1000);
+  const [selectedPartId, setSelectedPartId] = useState('A');
+  const [selectedSceneId, setSelectedSceneId] = useState(null);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const measure = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      setTrackWidthPx(el.clientWidth - (variant === 'A' ? 168 : 0));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [variant]);
+
+  const handleResizePart = useCallback((partId, deltaSec) => {
+    setParts((prev) => prev.map((p) => {
+      if (p.id !== partId) return p;
+      return { ...p, duration: Math.max(30, p.duration + deltaSec) };
+    }));
+  }, []);
+  const reset = () => setParts(INITIAL_PARTS);
+  const layout = useMemo(() => buildLayout(parts), [parts]);
+
+  const selectedPart = parts.find((p) => p.id === selectedPartId);
+  const selectedScene = useMemo(() => {
+    if (!selectedSceneId) return null;
+    for (const p of parts) {
+      const sc = p.scenes.find((s) => s.id === selectedSceneId);
+      if (sc) return sc;
+    }
+    return null;
+  }, [parts, selectedSceneId]);
+
+  const updateScene = (sceneId, mutator) => {
+    setParts((prev) => prev.map((p) => ({
+      ...p,
+      scenes: p.scenes.map((sc) => sc.id === sceneId ? mutator(sc) : sc),
+    })));
+  };
+  const addComment = (sceneId, text) => updateScene(sceneId, (sc) => ({
+    ...sc, comments: [...sc.comments, { author: '한솔', at: '방금 전', text }],
+  }));
+  const addRevision = (sceneId, description) => updateScene(sceneId, (sc) => ({
+    ...sc, revisions: [...sc.revisions, { description, at: '방금 전', status: 'open' }],
+  }));
+  const editMemo = (sceneId, memo) => updateScene(sceneId, (sc) => ({ ...sc, memo }));
+  const changeStatus = (sceneId, status) => updateScene(sceneId, (sc) => ({ ...sc, status }));
+
+  return (
+    <div style={{ minHeight: '100vh', padding: '24px 32px', maxWidth: 1600, margin: '0 auto' }}>
+      <header style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 auto', minWidth: 280 }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>컴포지팅 대시보드 — 인터랙티브 mock</h1>
+          <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            파트 박스 호버 → 우측에 <strong>점 세개 핸들</strong> 보임. 잡고 좌우 드래그 = 파트 길이 변경 (RAM/WORK AREA 자동 동기).
+            파트 클릭 = 하단 카드 그리드 그 파트로. 카드 클릭 = 우측 사이드 패널 (메모 / 댓글 / 리비전).
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {[
+            { id: 'Hybrid', name: '합친 시안 (AE + 큰 박스)' },
+            { id: 'A', name: '시안 A — AE 메타포' },
+            { id: 'B', name: '시안 B — 큰 박스' },
+          ].map((v) => (
+            <button key={v.id} onClick={() => setVariant(v.id)} style={{
+              padding: '8px 14px', borderRadius: 8, border: '1px solid',
+              cursor: 'pointer', fontSize: 12, fontWeight: 700,
+              borderColor: variant === v.id ? 'var(--accent)' : 'rgb(45 48 65)',
+              background: variant === v.id ? 'color-mix(in srgb, var(--accent) 22%, transparent)' : 'transparent',
+              color: variant === v.id ? '#fff' : 'var(--text-secondary)',
+              transition: 'all 150ms ease',
+            }}>{v.name}</button>
+          ))}
+          <button onClick={reset} style={{
+            marginLeft: 4, padding: '8px 12px', borderRadius: 8,
+            border: '1px solid rgb(45 48 65)', background: 'transparent',
+            color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+          }}>↺ 초기화</button>
+        </div>
+      </header>
+
+      <div ref={containerRef}>
+        {variant === 'Hybrid' && <VariantHybrid layout={layout} onResizePart={handleResizePart} trackWidthPx={trackWidthPx} onSelectPart={setSelectedPartId} selectedPartId={selectedPartId} />}
+        {variant === 'A' && <VariantA layout={layout} onResizePart={handleResizePart} trackWidthPx={trackWidthPx} />}
+        {variant === 'B' && <VariantB layout={layout} onResizePart={handleResizePart} trackWidthPx={trackWidthPx} />}
+      </div>
+
+      {/* 씬 카드 그리드 — 선택된 파트 */}
+      <div style={{ marginTop: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>씬 카드 — 파트 선택</h2>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {parts.map((p) => {
+              const color = PART_COLOR[p.id];
+              const active = selectedPartId === p.id;
+              return (
+                <button key={p.id} onClick={() => setSelectedPartId(p.id)} style={{
+                  padding: '5px 12px', borderRadius: 6,
+                  border: `1.5px solid ${active ? color : 'rgb(45 48 65)'}`,
+                  background: active ? `color-mix(in srgb, ${color} 22%, transparent)` : 'transparent',
+                  color: active ? color : 'var(--text-secondary)',
+                  fontSize: 12, fontWeight: 800, cursor: 'pointer',
+                  transition: 'all 150ms ease',
+                }}>{p.id}파트</button>
+              );
+            })}
+          </div>
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-secondary)' }}>
+            {selectedPart ? `${selectedPart.scenes.length}컷` : ''}
+          </span>
+        </div>
+        {selectedPart && (
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: 12,
+            padding: 12, background: 'rgb(15 17 23 / 0.5)',
+            borderRadius: 8, border: '1px solid rgb(45 48 65 / 0.4)',
+          }}>
+            {selectedPart.scenes.map((sc, i) => (
+              <div key={sc.id} style={{ animationDelay: `${i * 24}ms` }}>
+                <SceneCard scene={sc} isSelected={selectedSceneId === sc.id} onClick={setSelectedSceneId} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 데이터 요약 */}
+      <div style={{ marginTop: 28, padding: 14, background: 'rgb(26 29 39 / 0.45)', border: '1px solid rgb(45 48 65 / 0.4)', borderRadius: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.12em', marginBottom: 8 }}>
+          현재 데이터 (드래그하면 실시간 갱신)
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, fontFamily: 'monospace' }}>
+          {layout.parts.map((p) => (
+            <div key={p.id} style={{
+              padding: '6px 10px',
+              background: 'rgb(15 17 23 / 0.55)',
+              border: `1px solid color-mix(in srgb, ${PART_COLOR[p.id]} 40%, transparent)`,
+              borderRadius: 6, color: 'var(--text-secondary)',
+            }}>
+              <strong style={{ color: PART_COLOR[p.id] }}>{p.id}</strong> · {fmtTime(p.duration)} · {fmtTime(p.start)}–{fmtTime(p.end)}
+            </div>
+          ))}
+          <div style={{
+            padding: '6px 10px',
+            background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+            borderRadius: 6, color: 'var(--text-primary)',
+          }}>
+            <strong style={{ color: 'var(--accent)' }}>합계</strong> · {fmtTime(layout.totalSec)} · {layout.parts.reduce((n, p) => n + p.scenes.length, 0)}컷
+          </div>
+        </div>
+      </div>
+
+      <SceneDetailModal
+        scene={selectedScene}
+        onClose={() => setSelectedSceneId(null)}
+        onAddComment={addComment}
+        onAddRevision={addRevision}
+        onEditMemo={editMemo}
+        onChangeStatus={changeStatus}
+      />
+
+      <footer style={{ marginTop: 32, padding: '16px 0', fontSize: 11, color: 'var(--text-secondary)', textAlign: 'center', borderTop: '1px solid rgb(45 48 65 / 0.4)' }}>
+        결정사항 — (1) 어느 시안 채택, (2) 카드 좌상단 핀 vs 클릭 동작 분리, (3) 리비전이 별도 패널인지 카드 직접 표시인지.
+      </footer>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

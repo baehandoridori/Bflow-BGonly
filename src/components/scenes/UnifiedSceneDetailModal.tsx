@@ -103,6 +103,12 @@ export interface UnifiedSceneDetailModalProps {
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  /**
+   * v1.30.0+: 컴포지팅 대시보드에서 모달을 열 때 부서 패널 위에 끼울 컴포지팅 단계 섹션.
+   * 일반 ScenesView 호출은 이 prop 을 생략하면 normal 모드 (영향 0).
+   * 컴포지팅 컨텍스트가 모달 챕터를 모두 정의하므로, host(CompositingSceneModal) 가 직접 ReactNode 를 만들어 전달.
+   */
+  compositingSection?: React.ReactNode;
 }
 
 type TabKey = 'detail' | 'revisions' | 'files' | 'history';
@@ -130,6 +136,7 @@ export function UnifiedSceneDetailModal({
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
+  compositingSection,
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const headScene = bgScene ?? actScene;
@@ -704,6 +711,11 @@ export function UnifiedSceneDetailModal({
                               onDropBlob={(b) => uploadImage(b, 'guide')}
                             />
                           </div>
+                        )}
+
+                        {/* v1.30.0+: 컴포지팅 대시보드에서 모달 호출 시 부서 패널 위에 컴포지팅 단계 섹션 노출. */}
+                        {compositingSection && (
+                          <div className="px-5 pt-2 pb-1">{compositingSection}</div>
                         )}
 
                         {/* 좌 BG | 우 ACT — 듀얼 패널 (v1.23.0 동작 복원). 부서 전환은 헤더 토글로. */}

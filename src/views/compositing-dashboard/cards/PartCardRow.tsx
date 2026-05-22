@@ -12,16 +12,21 @@
 
 import { useCallback, useRef } from 'react';
 import type { CompositingState } from '@/types';
+import { isCompletedStatus } from '@/utils/compositingLabels';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import type { CardScene } from '../cardSceneHelpers';
 import { PartHeader } from './PartHeader';
 import { SceneCard } from './SceneCard';
 
-const DOCK_MAX_DIST = 160; // px — 마우스 중심에서 이 거리 안 카드만 lift
-const DOCK_LIFT = -14; // px
-const DOCK_SCALE = 0.07; // scale = 1 + DOCK_SCALE * lift
-// 같은 행으로 인정하는 수직 허용치 — 카드 높이 절반 정도. 이 안에 있는 카드만 dock 영향.
+const DOCK_MAX_DIST = 200; // px — 마우스 중심에서 이 거리 안 카드만 lift (한솔 보고: 변화 폭 더 넓게 → 떨림 줄임)
+const DOCK_LIFT = -10; // px (이전 -14 → -10 으로 lift 폭 줄임, 떨림 안정)
+const DOCK_SCALE = 0.05; // scale = 1 + DOCK_SCALE * lift
+// 같은 행으로 인정하는 수직 허용치
 const SAME_ROW_Y_THRESHOLD = 110;
+// smoothstep — 거리 → lift 곡선을 부드럽게 (가장자리 효과 약화 → 떨림 fix)
+function smoothstep(t: number): number {
+  return t * t * (3 - 2 * t);
+}
 
 interface PartCardRowProps {
   partId: string;
@@ -43,11 +48,11 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
   // (set 초기화는 CompositingDashboardView 가 마운트 시 모든 partId 를 add — 기본 펼침.)
   const expanded = expandedParts.has(partId);
 
-  // 완료(done) 씬 카운트 — PartHeader 의 진행률 바에 전달
+  // 완료 씬 카운트 — 한솔 정의 (2026-05-22): "완료 = done + aggregated".
   let doneCount = 0;
   for (const sc of scenes) {
     const st = epStates.get(`${sc.episodeNumber}:${sc.sceneId}`);
-    if (st?.status === 'done') doneCount += 1;
+    if (isCompletedStatus(st?.status)) doneCount += 1;
   }
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -70,7 +75,9 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
           return;
         }
         const distance = Math.abs(x - cx);
-        const lift = Math.max(0, 1 - distance / DOCK_MAX_DIST);
+        // smoothstep 으로 거리→lift 변환 — 가장자리 떨림 fix (한솔 보고 2026-05-21).
+        const raw = Math.max(0, 1 - distance / DOCK_MAX_DIST);
+        const lift = smoothstep(raw);
         const dy = lift * DOCK_LIFT;
         const scale = 1 + lift * DOCK_SCALE;
         card.style.transform = `translateY(${dy}px) scale(${scale.toFixed(3)})`;
@@ -127,12 +134,18 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
             const dimmed = !matchesFilter || !isSoloed;
 
             return (
-              <div key={sc.sceneId} className="shrink-0" style={{ width: 180 }}>
+              <div
+                key={sc.sceneId}
+                className="shrink-0"
+                style={{ width: 180 }}
+                data-scene-key={`${sc.episodeNumber}:${sc.sceneId}`}
+              >
                 <SceneCard
                   card={sc}
                   state={state}
                   staggerIndex={idx}
                   dimmed={dimmed}
+                  partSceneIds={scenes.map((s) => s.sceneId)}
                 />
               </div>
             );
