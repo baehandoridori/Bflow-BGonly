@@ -15,9 +15,15 @@ import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardSt
 
 interface StatusLegendProps {
   epStates: Map<string, CompositingState>;
+  /**
+   * EP 전체 씬 수 (BG/ACT dedup). 코덱스 3차 P2 (2026-05-22):
+   *   카운트 계산 시 row 없는 씬을 batch 로 포함해야 카드/타임라인과 일관.
+   *   부모(CompositingDashboardView)가 partGroups 로 산출해서 전달.
+   */
+  totalSceneCount: number;
 }
 
-export function StatusLegend({ epStates }: StatusLegendProps) {
+export function StatusLegend({ epStates, totalSceneCount }: StatusLegendProps) {
   const statusFilter = useCompositingDashboardStore((s) => s.statusFilter);
   const setStatusFilter = useCompositingDashboardStore((s) => s.setStatusFilter);
 
@@ -25,11 +31,16 @@ export function StatusLegend({ epStates }: StatusLegendProps) {
     const c: Record<CompositingStatus, number> = {
       batch: 0, combine: 0, aggregated: 0, adjust: 0, error: 0, done: 0,
     };
+    let withRow = 0;
     for (const row of epStates.values()) {
       c[row.status] = (c[row.status] ?? 0) + 1;
+      withRow += 1;
     }
+    // row 가 없는 나머지 씬은 batch 로 카운트 (카드/타임라인 동작과 일치)
+    const missing = Math.max(0, totalSceneCount - withRow);
+    c.batch += missing;
     return c;
-  }, [epStates]);
+  }, [epStates, totalSceneCount]);
 
   return (
     <div

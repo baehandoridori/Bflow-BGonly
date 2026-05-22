@@ -301,7 +301,7 @@ export function CompositingDashboardView() {
         onCascadeReplay={() => setCascadeKey((k) => k + 1)}
       />
       <GuideStrip />
-      <StatusLegend epStates={epStates} />
+      <StatusLegend epStates={epStates} totalSceneCount={partGroups.reduce((n, g) => n + g.scenes.length, 0)} />
 
       <div className="flex-1 overflow-y-auto px-6 pb-12 pt-2">
         <div key={`cascade-${cascadeKey}`}>

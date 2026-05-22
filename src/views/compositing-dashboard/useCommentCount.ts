@@ -16,10 +16,17 @@ interface PartCache {
   status: 'pending' | 'done' | 'error';
   /** scene_id (= scene.no 문자열) → count */
   counts: Map<string, number>;
+  /** 마지막 fetch 완료 시각 (ms). stale 판정 + 자동 재시도용. */
+  fetchedAt: number;
 }
 
 const cache = new Map<string, PartCache>();
 const listeners = new Map<string, Set<() => void>>();
+
+/** 'done' 캐시의 stale 시간 — 이 시간 지나면 다음 mount 시 자동 재fetch (수동 invalidate 안 거쳐도 갱신). */
+const DONE_STALE_MS = 60_000;
+/** 'error' 캐시의 retry 간격 — transient error 일 가능성에 한 번 더 시도. */
+const ERROR_RETRY_MS = 5_000;
 
 function notify(partUuid: string) {
   const set = listeners.get(partUuid);
@@ -29,9 +36,25 @@ function notify(partUuid: string) {
   }
 }
 
+function shouldRefetch(entry: PartCache | undefined, now: number): boolean {
+  if (!entry) return true;
+  if (entry.status === 'pending') return false;
+  if (entry.status === 'error' && (now - entry.fetchedAt) >= ERROR_RETRY_MS) return true;
+  if (entry.status === 'done' && (now - entry.fetchedAt) >= DONE_STALE_MS) return true;
+  return false;
+}
+
 async function fetchPartComments(partUuid: string): Promise<void> {
-  if (cache.has(partUuid)) return;
-  cache.set(partUuid, { status: 'pending', counts: new Map() });
+  const now = Date.now();
+  // 코덱스 3차 P2 (2026-05-22): 'error' 후 5s 재시도, 'done' 후 60s stale 갱신 허용.
+  const existing = cache.get(partUuid);
+  if (!shouldRefetch(existing, now)) return;
+  // pending 표시 — 다만 기존 counts 는 유지해서 화면 깜빡임 방지
+  cache.set(partUuid, {
+    status: 'pending',
+    counts: existing?.counts ?? new Map(),
+    fetchedAt: existing?.fetchedAt ?? 0,
+  });
   try {
     const rows = await readCommentsFromSupabase(partUuid) as Array<Record<string, unknown>>;
     const counts = new Map<string, number>();
@@ -42,12 +65,22 @@ async function fetchPartComments(partUuid: string): Promise<void> {
       if (!key) continue;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    cache.set(partUuid, { status: 'done', counts });
+    cache.set(partUuid, { status: 'done', counts, fetchedAt: Date.now() });
   } catch {
-    cache.set(partUuid, { status: 'error', counts: new Map() });
+    cache.set(partUuid, {
+      status: 'error',
+      counts: existing?.counts ?? new Map(),
+      fetchedAt: Date.now(),
+    });
   } finally {
     notify(partUuid);
   }
+}
+
+/** 특정 partUuid 캐시만 무효화 (댓글 추가/삭제 broadcast 받았을 때 호출). */
+export function invalidateCommentCountForPart(partUuid: string): void {
+  cache.delete(partUuid);
+  notify(partUuid);
 }
 
 /** 캐시 무효화 — EP 전환 / 댓글 추가 시 호출 가능. */
@@ -77,7 +110,8 @@ export function useCommentCount(
     if (uuids.length === 0) return;
     const registered: { uuid: string; fn: () => void }[] = [];
     uuids.forEach((uuid) => {
-      if (!cache.has(uuid)) void fetchPartComments(uuid);
+      // fetchPartComments 가 내부에서 shouldRefetch 판정 — stale/error 면 자동 재fetch.
+      void fetchPartComments(uuid);
       let set = listeners.get(uuid);
       if (!set) { set = new Set(); listeners.set(uuid, set); }
       const fn = () => setTick((n) => n + 1);
