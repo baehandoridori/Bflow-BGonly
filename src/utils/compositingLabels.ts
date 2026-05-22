@@ -95,6 +95,8 @@ export function partCssColor(partId: string): string {
       || key === 'e' || key === 'f' || key === 'g') {
     return `var(--part-${key})`;
   }
-  // H 이상 — 액센트 폴백
-  return 'var(--color-accent)';
+  // H 이상 — 액센트 폴백.
+  // 코덱스 9차 P2: --color-accent 는 RGB triplet ("108 92 231") 이라 var() 만 쓰면 invalid CSS color.
+  //   color/border/color-mix() 슬롯에 직접 쓸 수 있도록 rgb() wrapping 한 완성된 color 값을 반환.
+  return 'rgb(var(--color-accent))';
 }
