@@ -11,7 +11,7 @@
  * mock: docs/mockups/compositing-dashboard/interactive.html (VariantHybrid)
  */
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Reorder, useDragControls } from 'framer-motion';
 import { GripVertical, FileText } from 'lucide-react';
 import { cn } from '@/utils/cn';
@@ -58,7 +58,12 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
   //   - 다른 파트는 가만 → "내가 잡고 끄는 부분만 변형" 직관 충족.
   //   - 컨테이너에 fit (가로 스크롤 X).
   //   - rAF throttle 로 렉 fix.
+  // 코덱스 2차 P2 (2026-05-22): EP 변경 시 overrideFractions reset — 이전 EP 에서 조정한 비율이
+  //   다음 EP partId 가 같으면 stale 상태로 유지되던 문제.
   const [overrideFractions, setOverrideFractions] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    setOverrideFractions(null);
+  }, [episodeNumber]);
 
   // 기본 fraction — 컷 수 비례. override 있으면 그것 우선.
   const baseFractions = useMemo(() => {

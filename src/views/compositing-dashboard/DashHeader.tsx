@@ -48,19 +48,26 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
   const episodeMemo = episodeNumber !== null ? (episodeMemos?.[episodeNumber] ?? '') : '';
 
   // 현재 EP 의 진행률 — 한솔 정의 (2026-05-22): "완료된 부분 = done + aggregated".
+  // 코덱스 2차 P2 (2026-05-22): 분모를 compositingStates rows 가 아닌 EP 의 전체 씬 수로.
+  //   row 가 없는 씬 (batch 디폴트) 도 분모에 포함. 1 개만 done 인데 100% 로 부풀던 문제 fix.
   const progressPercent = useMemo(() => {
     if (episodeNumber === null) return 0;
-    let total = 0;
-    let done = 0;
-    const prefix = `${episodeNumber}:`;
-    for (const [key, row] of compositingStates) {
-      if (!key.startsWith(prefix)) continue;
-      total += 1;
-      if (isCompletedStatus(row.status)) done += 1;
+    const ep = episodes.find((e) => e.episodeNumber === episodeNumber);
+    if (!ep) return 0;
+    // EP 의 모든 씬 수집 — sceneId 단위 dedup (BG/ACT 두 sheet 의 같은 sceneId 는 한 컷).
+    const sceneIds = new Set<string>();
+    for (const part of ep.parts) {
+      for (const sc of part.scenes) sceneIds.add(sc.sceneId);
     }
+    const total = sceneIds.size;
     if (total === 0) return 0;
+    let done = 0;
+    for (const sceneId of sceneIds) {
+      const row = compositingStates.get(`${episodeNumber}:${sceneId}`);
+      if (isCompletedStatus(row?.status)) done += 1;
+    }
     return Math.round((done / total) * 100);
-  }, [compositingStates, episodeNumber]);
+  }, [compositingStates, episodeNumber, episodes]);
 
   // 담당 컴포지터 — 본인이 컴포지터면 본인, 아니면 첫 번째 컴포지터.
   // 추후 EP 별 명시 가능 (spec 17.2 참조).

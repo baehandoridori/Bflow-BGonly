@@ -85,10 +85,25 @@ export async function toggleCompositingStatus({
       useDataStore.getState().setCompositingState(key, row);
     }
   } catch (err) {
-    // 4. 실패 → 본인이 최신 일 때만 롤백 + 토스트. 옛 mutation 의 실패는 옛 상태 보존 의미 없음.
+    // 4. 실패 → 본인이 최신 mutation 일 때만 롤백 + 토스트.
+    //    코덱스 2차 P1 (2026-05-22): 그 사이 다른 사용자가 Realtime 으로 같은 씬을 newer 값으로 업데이트했다면
+    //    prev 로 rollback 은 newer 를 stale 로 덮어씀. current.updatedAt > prev.updatedAt 이면 skip.
     if (isLatest(key, seq)) {
-      if (prev) useDataStore.getState().setCompositingState(key, prev);
-      else useDataStore.getState().deleteCompositingState(key);
+      const current = useDataStore.getState().compositingStates.get(key);
+      const remoteNewer = !!(current && (
+        // current 가 optimistic 아닌 진짜 서버 row (id != 'pending') 이고,
+        // current.updatedAt 가 prev.updatedAt 보다 더 새로움 → Realtime 으로 들어온 newer state.
+        current.id !== 'pending'
+        && current.id !== optimistic.id
+        && (!prev || current.updatedAt > prev.updatedAt)
+      ));
+      if (remoteNewer) {
+        // Realtime newer state 가 도착했으니 rollback skip. 그것 그대로 유지.
+      } else if (prev) {
+        useDataStore.getState().setCompositingState(key, prev);
+      } else {
+        useDataStore.getState().deleteCompositingState(key);
+      }
       const msg = err instanceof Error ? err.message : String(err);
       sonnerToast.error('단계 변경에 실패했어요', { description: msg });
     }
@@ -137,7 +152,16 @@ export async function updateCompositingError({
     }
   } catch (err) {
     if (isLatest(key, seq)) {
-      useDataStore.getState().setCompositingState(key, prev);
+      // 코덱스 2차 P1 fix — Realtime newer state 가 도착했으면 rollback skip.
+      const current = useDataStore.getState().compositingStates.get(key);
+      const remoteNewer = !!(current
+        && current.id !== 'pending'
+        && current.id !== optimistic.id
+        && current.updatedAt > prev.updatedAt
+      );
+      if (!remoteNewer) {
+        useDataStore.getState().setCompositingState(key, prev);
+      }
       const msg = err instanceof Error ? err.message : String(err);
       sonnerToast.error('오류 사유 변경 실패', { description: msg });
     }
