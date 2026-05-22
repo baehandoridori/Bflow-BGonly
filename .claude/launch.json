@@ -8,6 +8,12 @@
       "port": 5173
     },
     {
+      "name": "dist-static",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "http-server", "dist", "-p", "5182", "--silent"],
+      "port": 5182
+    },
+    {
       "name": "mockup",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "5555"],

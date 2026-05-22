@@ -312,16 +312,29 @@ export function applySpacing(lineHeight: number, letterSpacing: number): void {
   root.style.setProperty('--text-letter-spacing', `${letterSpacing}em`);
 }
 
-/** 사용자 폰트의 @font-face를 동적으로 <head>에 주입. 같은 id가 이미 있으면 skip. */
+/**
+ * 사용자 폰트의 @font-face를 동적으로 <head>에 주입.
+ * - 같은 id의 style이 이미 있어도 cssText가 다르면 자동 replace (override 룰 추가 후
+ *   기존 style 이 새 룰로 갱신되도록).
+ * - ascent/descent/line-gap override: 디자인 한글 폰트는 폰트 자체 metric의 ascent
+ *   가 비정상적으로 커서 line-box 위로 글리프가 빠져 상단 자소(ㅍ, ㅈ, ㅌ 등)가
+ *   잘려 보이는 현상이 보고됨. Pretendard 류 표준 근사치(90%/22%/0%)로 강제 → 어떤
+ *   폰트든 line-box 안에 안정적으로 들어옴.
+ */
 function injectCustomFontFace(font: CustomFont): void {
-  if (document.querySelector(`style[data-font-id="${font.id}"]`)) return;
   const formatHint: Record<CustomFont['format'], string> = {
     otf: 'opentype', ttf: 'truetype', woff: 'woff', woff2: 'woff2',
   };
   const url = `bflow-font://${encodeURIComponent(font.filename)}`;
+  const cssText = `@font-face { font-family: '${escapeFontFamilyName(font.name)}'; src: url('${url}') format('${formatHint[font.format]}'); font-display: swap; ascent-override: 90%; descent-override: 22%; line-gap-override: 0%; }`;
+  const existing = document.querySelector(`style[data-font-id="${font.id}"]`);
+  if (existing) {
+    if (existing.textContent !== cssText) existing.textContent = cssText;
+    return;
+  }
   const style = document.createElement('style');
   style.setAttribute('data-font-id', font.id);
-  style.textContent = `@font-face { font-family: '${escapeFontFamilyName(font.name)}'; src: url('${url}') format('${formatHint[font.format]}'); font-display: swap; }`;
+  style.textContent = cssText;
   document.head.appendChild(style);
 }
 
