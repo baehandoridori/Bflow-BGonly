@@ -74,6 +74,16 @@
   .text-\[11px\], .text-\[10px\], .text-\[9px\] {
     color: rgb(var(--color-text-micro, var(--color-text-primary)));
   }
+
+  /* input/textarea placeholder 가 사용자 글꼴·자간을 따라가도록 강제 inherit.
+     Tailwind preflight 는 input 자체에만 font-family: inherit 을 적용하고
+     ::placeholder 의 typography 는 Chromium UA 기본값에 의존 → 사용자가 추가한
+     커스텀 글꼴이 입력 placeholder 에는 반영 안 되는 현상이 보고됨. */
+  ::placeholder,
+  ::-webkit-input-placeholder {
+    font-family: inherit;
+    letter-spacing: inherit;
+  }
 }
 
 /* ─── Liveblocks SDK 자동 삽입 배지 숨기기 ─── */
