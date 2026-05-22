@@ -118,7 +118,25 @@ export function useCommentCount(
       set.add(fn);
       registered.push({ uuid, fn });
     });
+
+    // 코덱스 11차 P2 (2026-05-22): 마운트 중 stale refresh.
+    //   - 이전엔 mount 시 1회 fetch 만 — 같은 카드가 계속 떠있는 동안 댓글 추가/삭제 가 반영 안 됨.
+    //   - DONE_STALE_MS(60s) 주기 setInterval + visibilitychange 로 stale 재확인.
+    //   - fetchPartComments 가 shouldRefetch 로 dedupe — 실제 네트워크 호출은 stale 일 때만.
+    //   - visibility hidden 이면 폴링 skip (background tab 절약).
+    const refresh = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      uuids.forEach((uuid) => { void fetchPartComments(uuid); });
+    };
+    const intervalId = window.setInterval(refresh, DONE_STALE_MS);
+    const onVisibility = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') refresh();
+    };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
+
     return () => {
+      window.clearInterval(intervalId);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
       for (const { uuid, fn } of registered) {
         listeners.get(uuid)?.delete(fn);
       }

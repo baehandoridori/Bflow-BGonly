@@ -114,6 +114,9 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   }, [cardCtx, isCompositor, currentUser, episodeNumber]);
 
   // ── BG/ACT 단계 토글 — 정상 시트 데이터 변경 (낙관적 + Supabase) ──
+  // 코덱스 11차 P1 (2026-05-22): Supabase 실패 시 낙관적 토글을 복원해야 함.
+  //   - toggleSceneStage 는 토글이므로 다시 호출하면 이전 값으로 복귀.
+  //   - 실패 토스트만 띄우고 store 상태는 잘못된 값으로 남아 사용자가 계속 작업하는 문제 fix.
   const handleToggle = useCallback((sheetName: string, sceneIdArg: string, stage: Stage) => {
     if (!currentUser) return;
     const store = useDataStore.getState();
@@ -125,6 +128,8 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
     if (!sc?.id) return;
     const newValue = Boolean(sc[stage as keyof Scene]);
     updateSceneStageInSupabase(sc.id, stage, newValue).catch((err) => {
+      // 롤백 — 토글 다시 호출하면 이전 값으로 복귀.
+      useDataStore.getState().toggleSceneStage(sheetName, sceneIdArg, stage as 'lo' | 'done' | 'review' | 'png');
       sonnerToast.error(`단계 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
     });
   }, [currentUser, episodeNumber]);
