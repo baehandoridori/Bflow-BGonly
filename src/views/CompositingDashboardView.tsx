@@ -56,6 +56,7 @@ export function CompositingDashboardView() {
   const clearSelectedScenes = useCompositingDashboardStore((s) => s.clearSelectedScenes);
   const setSelectedSceneKeys = useCompositingDashboardStore((s) => s.setSelectedSceneKeys);
   const addSelectedSceneKeys = useCompositingDashboardStore((s) => s.addSelectedSceneKeys);
+  const resetExpandedParts = useCompositingDashboardStore((s) => s.resetExpandedParts);
 
   const currentUser = useAuthStore((s) => s.currentUser);
   // 한솔 정정 (2026-05-21): 배한솔은 언제나 컴포지터, admin role 도 자동 권한.
@@ -144,25 +145,25 @@ export function CompositingDashboardView() {
   //   기본은 기본으로 배열하고, 스크롤 같은걸로 이렇게 길이 조정"
   //   → TimelinePanel 안에서 시각 전용 (컷당 픽셀 배수) 으로 처리. 데이터 변경 X.
 
-  // ── 모든 partId 를 기본 펼침 — EP 진입 시 1 회만 실행 ──
-  // 이전 버그: deps 가 `[partGroups]` 였는데 useMemo 결과가 매 렌더 새 객체 → effect 매 렌더 실행 →
-  // 사용자가 접은 partId 가 다시 add 되어 "잠시 후 자동 펼쳐짐" 현상.
-  // 해결: 처음 본 partId set 을 ref 로 추적, 신규 partId 만 한 번씩 add.
+  // ── EP 변경 시 — expandedParts 를 새 EP partId 로 초기화 + 일괄 선택 클리어
+  // 코덱스 P2 fix (2026-05-22):
+  //   - 이전엔 deps 가 partGroups partIds join 만이라 EP 가 같은 partId set 을 공유하면 (예: 둘 다 A,B,C,D)
+  //     effect 재실행 안 됨 → 한 EP 에서 접은 partId 가 다음 EP 까지 따라감.
+  //   - 일괄 선택도 글로벌 set 이라 EP 전환 후에도 카운트 남아 floating bar 가 어색하게 떠있음.
+  //   - 해결: episodeNumber 도 deps 에 포함 + resetExpandedParts 로 강제 reset.
   const seenPartIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const seen = seenPartIdsRef.current;
-    for (const g of partGroups) {
-      if (seen.has(g.partId)) continue;
-      seen.add(g.partId);
-      // 이 partId 가 expandedParts 에 아직 없으면 (= store 가 초기 상태) 자동 펼침.
-      if (!expandedParts.has(g.partId)) toggleExpand(g.partId);
-    }
+    if (episodeNumber === null) return;
+    // EP 변경 시 expandedParts 강제 reset — 새 EP 의 모든 partId 를 펼침 set 으로.
+    const partIds = partGroups.map((g) => g.partId);
+    resetExpandedParts(partIds);
+    // ref 도 reset — 새 EP 컨텍스트로 신규 partId 추적 재시작.
+    seenPartIdsRef.current = new Set(partIds);
+    // 일괄 선택도 EP 전환 시 클리어 — 다른 EP 카드 stale 표시 방지.
+    clearSelectedScenes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [partGroups.map((g) => g.partId).join(',')]);
-  // EP 전환 시 ref reset — 새 EP 의 partId 는 다시 기본 펼침.
-  useEffect(() => {
-    seenPartIdsRef.current = new Set();
-  }, [episodeNumber]);
+  }, [episodeNumber, partGroups.map((g) => g.partId).join(',')]);
+  void expandedParts; void toggleExpand; // store 필드/액션 유지 — 사용자가 토글로 접는 동작은 그대로 동작.
 
   // 현재 EP 의 상태 row 만 슬라이스 — StatusLegend / Timeline / SceneCard 가 사용
   const epStates = useMemo(() => {

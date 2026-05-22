@@ -84,6 +84,9 @@ interface CompositingDashboardStore {
   /** EP 별 파트 순서 지정. partIds 가 빈 배열이면 기본 순서로 reset. */
   setPartsOrder: (episodeNumber: number, partIds: string[]) => void;
 
+  /** expandedParts 를 주어진 partId 들로 강제 set — EP 전환 시 새 EP partId 로 초기화. */
+  resetExpandedParts: (partIds: string[]) => void;
+
   /** 일괄 선택 — 토글 (Cmd/Ctrl + 클릭). lastSelectedSceneKey 도 업데이트. */
   toggleSelectedScene: (sceneKey: string) => void;
   /** 일괄 선택 — 한 키만 선택 (단일 클릭, 기존 선택 모두 해제). */
@@ -182,6 +185,9 @@ export const useCompositingDashboardStore = create<CompositingDashboardStore>((s
       }
       return { partsOrderByEpisode: next };
     }),
+
+  resetExpandedParts: (partIds) =>
+    set({ expandedParts: new Set(partIds) }),
 
   toggleSelectedScene: (sceneKey) =>
     set((state) => {
