@@ -8,6 +8,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { PartBadge } from '@/components/compositing-dashboard/common/PartBadge';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
+import { partCssColor } from '@/utils/compositingLabels';
 
 interface PartHeaderProps {
   partId: string;
@@ -24,7 +25,9 @@ export function PartHeader({ partId, sceneCount, doneCount, expanded, onToggle }
   const focused = hoveredPart === partId;
 
   const pct = sceneCount > 0 ? Math.round((doneCount / sceneCount) * 100) : 0;
-  const lower = partId.toLowerCase();
+  // 코덱스 10차 P3: var(--part-${lower}) 직접 구성 → partCssColor() 헬퍼 사용.
+  //   A~G 외 partId (H 이상) 에서 빈 CSS var 로 떨어져 progress/% 스타일링이 사라지던 문제 fix.
+  const partColor = partCssColor(partId);
 
   return (
     <button
@@ -54,20 +57,20 @@ export function PartHeader({ partId, sceneCount, doneCount, expanded, onToggle }
       <div className="ml-auto flex items-center gap-2 min-w-[140px]">
         <div
           className="relative flex-1 h-1.5 rounded-full overflow-hidden"
-          style={{ background: `color-mix(in srgb, var(--part-${lower}) 14%, transparent)` }}
+          style={{ background: `color-mix(in srgb, ${partColor} 14%, transparent)` }}
         >
           <div
             className="absolute inset-y-0 left-0 transition-all duration-300"
             style={{
               width: `${pct}%`,
-              background: `linear-gradient(90deg, var(--part-${lower}), var(--status-done))`,
+              background: `linear-gradient(90deg, ${partColor}, var(--status-done))`,
               boxShadow: `0 0 4px color-mix(in srgb, var(--status-done) 55%, transparent)`,
             }}
           />
         </div>
         <span
           className="text-[11px] font-bold tabular-nums shrink-0"
-          style={{ color: pct === 100 ? 'var(--status-done)' : `var(--part-${lower})` }}
+          style={{ color: pct === 100 ? 'var(--status-done)' : partColor }}
         >
           {pct}%
         </span>
