@@ -150,7 +150,12 @@ export function CompositingDashboardView() {
   //   - 이전엔 deps 가 partGroups partIds join 만이라 EP 가 같은 partId set 을 공유하면 (예: 둘 다 A,B,C,D)
   //     effect 재실행 안 됨 → 한 EP 에서 접은 partId 가 다음 EP 까지 따라감.
   //   - 일괄 선택도 글로벌 set 이라 EP 전환 후에도 카운트 남아 floating bar 가 어색하게 떠있음.
-  //   - 해결: episodeNumber 도 deps 에 포함 + resetExpandedParts 로 강제 reset.
+  // 코덱스 5차 P2 fix (2026-05-22):
+  //   - partGroups.map(...).join(',') deps 추가했더니 파트 재정렬(같은 set 다른 순서) 에도 effect 가 fire.
+  //   - 결과: 드래그로 파트 재배치 시 접힌 파트가 다시 펼쳐지고 일괄 선택이 사라지는 버그.
+  //   - 해결: deps 를 [episodeNumber] 만으로 축소. episodeNumber 가 바뀌면 partGroups 도 같은 render 에서
+  //     이미 새 값 (useMemo deps 에 episodeNumber 들어있음) → effect 안 closure 가 최신 partIds 읽음.
+  //     순수한 EP 전환에만 reset 발생.
   const seenPartIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (episodeNumber === null) return;
@@ -162,7 +167,7 @@ export function CompositingDashboardView() {
     // 일괄 선택도 EP 전환 시 클리어 — 다른 EP 카드 stale 표시 방지.
     clearSelectedScenes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [episodeNumber, partGroups.map((g) => g.partId).join(',')]);
+  }, [episodeNumber]);
   void expandedParts; void toggleExpand; // store 필드/액션 유지 — 사용자가 토글로 접는 동작은 그대로 동작.
 
   // 현재 EP 의 상태 row 만 슬라이스 — StatusLegend / Timeline / SceneCard 가 사용
