@@ -46,6 +46,7 @@ export function CompositingDashboardView() {
   const episodeNumber = useCompositingDashboardStore((s) => s.episodeNumber);
   const setEpisode = useCompositingDashboardStore((s) => s.setEpisode);
   const detailScene = useCompositingDashboardStore((s) => s.detailScene);
+  const setDetailScene = useCompositingDashboardStore((s) => s.setDetailScene);
   const pinnedScene = useCompositingDashboardStore((s) => s.pinnedScene);
   const setPinnedScene = useCompositingDashboardStore((s) => s.setPinnedScene);
   const expandedParts = useCompositingDashboardStore((s) => s.expandedParts);
@@ -156,6 +157,10 @@ export function CompositingDashboardView() {
   //   - 해결: deps 를 [episodeNumber] 만으로 축소. episodeNumber 가 바뀌면 partGroups 도 같은 render 에서
   //     이미 새 값 (useMemo deps 에 episodeNumber 들어있음) → effect 안 closure 가 최신 partIds 읽음.
   //     순수한 EP 전환에만 reset 발생.
+  // 코덱스 6차 P2 fix (2026-05-22):
+  //   - pinnedScene/detailScene 이 EP 전환 후에도 stale 상태로 남아 다른 EP 카드가 otherPinned 로 처리됨
+  //     → 모든 카드가 opacity-55 로 dim 되어 EP 가 부분 비활성 상태처럼 보이는 버그.
+  //   - 해결: EP 전환 시 pinnedScene/detailScene 도 null 로 클리어.
   const seenPartIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (episodeNumber === null) return;
@@ -166,6 +171,10 @@ export function CompositingDashboardView() {
     seenPartIdsRef.current = new Set(partIds);
     // 일괄 선택도 EP 전환 시 클리어 — 다른 EP 카드 stale 표시 방지.
     clearSelectedScenes();
+    // 핀/모달도 EP 전환 시 클리어 — 다른 EP 의 sceneKey 가 남아있으면 새 EP 카드가
+    //   otherPinned 로 처리되어 dim 되거나, 닫히지 않은 모달이 다른 씬을 보여줌.
+    setPinnedScene(null);
+    setDetailScene(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeNumber]);
   void expandedParts; void toggleExpand; // store 필드/액션 유지 — 사용자가 토글로 접는 동작은 그대로 동작.

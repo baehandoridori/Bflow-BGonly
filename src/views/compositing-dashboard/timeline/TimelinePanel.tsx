@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { GripVertical, FileText } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { CompositingState, CompositingStatus } from '@/types';
-import { COMPOSITING_STATUS_LABEL, COMPOSITING_STATUS_ORDER, COMPOSITING_STATUS_TOKEN, isCompletedStatus } from '@/utils/compositingLabels';
+import { COMPOSITING_STATUS_LABEL, COMPOSITING_STATUS_ORDER, COMPOSITING_STATUS_TOKEN, isCompletedStatus, partCssColor } from '@/utils/compositingLabels';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { PartBadge } from '@/components/compositing-dashboard/common/PartBadge';
 
@@ -337,8 +337,8 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
         {partGroups.map((g, i) => {
           const info = partInfo.get(g.partId);
           const frac = partFractions.get(g.partId) ?? 0;
-          const lower = g.partId.toLowerCase();
-          const color = `var(--part-${lower})`;
+          // 코덱스 6차 P3: partCssColor 헬퍼 사용 — A~G 외 partId (H 이상) 에서 빈 CSS var 로 떨어지지 않게 액센트 폴백.
+          const color = partCssColor(g.partId);
           const focused = hoveredPart === g.partId;
           const isLast = i >= partGroups.length - 1;
           // 한솔 정정 (2026-05-21): 파트 박스 안 status 표시도 씬 번호 위치 기반.
