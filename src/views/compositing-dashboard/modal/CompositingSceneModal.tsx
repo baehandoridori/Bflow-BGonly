@@ -16,7 +16,7 @@
  * spec: 2026-05-21-compositing-dashboard-design.md (9.x — layout 은 UnifiedSceneDetailModal 따름)
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Layers } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
 import { cn } from '@/utils/cn';
@@ -78,6 +78,40 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   }, [cardCtx, episodeNumber, setDetailScene]);
 
   const close = useCallback(() => setDetailScene(null), [setDetailScene]);
+
+  // ── 코덱스 4차 P2 (2026-05-22): 1~6 키보드 핫키로 컴포지팅 단계 변경 ──
+  //   - UnifiedSceneDetailModal 로 wrapping 한 뒤 키보드 매핑이 사라져 마우스로만 변경 가능했음.
+  //   - 1=배치, 2=취합중, 3=취합완료, 4=보정중, 5=오류, 6=완료 (COMPOSITING_STATUS_ORDER 순).
+  //   - INPUT/TEXTAREA/contenteditable 안에 포커스가 있으면 skip (메모/에러노트 편집 보호).
+  //   - meta/ctrl/alt 조합도 skip (브라우저/OS 단축키 충돌 방지).
+  useEffect(() => {
+    if (!cardCtx) return;
+    const card = cardCtx.card;
+    const onKey = (e: KeyboardEvent) => {
+      if (!isCompositor || !currentUser) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (t?.isContentEditable) return;
+      const idx = parseInt(e.key, 10);
+      if (Number.isNaN(idx) || idx < 1 || idx > COMPOSITING_STATUS_ORDER.length) return;
+      const next = COMPOSITING_STATUS_ORDER[idx - 1];
+      // 현재 status 와 같으면 noop. store 에서 최신값 직접 읽음 (useEffect closure stale 방지).
+      const cur = useDataStore.getState().compositingStates.get(`${episodeNumber}:${card.sceneId}`)?.status ?? 'batch';
+      if (next === cur) return;
+      e.preventDefault();
+      toggleCompositingStatus({
+        episodeNumber,
+        sceneId: card.sceneId,
+        partId: card.partId,
+        next,
+        currentUserId: currentUser.id,
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cardCtx, isCompositor, currentUser, episodeNumber]);
 
   // ── BG/ACT 단계 토글 — 정상 시트 데이터 변경 (낙관적 + Supabase) ──
   const handleToggle = useCallback((sheetName: string, sceneIdArg: string, stage: Stage) => {

@@ -12,7 +12,6 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Reorder, useDragControls } from 'framer-motion';
 import { GripVertical, FileText } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { CompositingState, CompositingStatus } from '@/types';
@@ -50,7 +49,45 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
   const hoveredPart = useCompositingDashboardStore((s) => s.hoveredPart);
   const setHoveredPart = useCompositingDashboardStore((s) => s.setHoveredPart);
   const partIds = useMemo(() => partGroups.map((g) => g.partId), [partGroups]);
-  const handleReorder = (next: string[]) => { onReorder?.(next); };
+
+  // 코덱스 4차 P1 (2026-05-22): framer-motion Reorder 제거.
+  //   - 이 컴포넌트는 부모(CompositingDashboardView) 의 `overflow-y-auto` 컨테이너 안에서 렌더링됨.
+  //   - framer-motion docs: Reorder 는 스크롤 컨테이너 내부에서 측정값이 흔들려 동작이 불안정 (unsupported).
+  //   - 해결: native HTML5 drag-drop 으로 교체 (스크롤 컨테이너 안에서 안정적, edge auto-scroll 도 브라우저 기본).
+  //   - 인터페이스(onReorder?(partIds)) 는 그대로 유지 — CompositingDashboardView 변경 X.
+  const [draggingPartId, setDraggingPartId] = useState<string | null>(null);
+  const [dragOverPartId, setDragOverPartId] = useState<string | null>(null);
+
+  const handleDragStart = (partId: string) => (e: React.DragEvent) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', partId);
+    setDraggingPartId(partId);
+  };
+  const handleDragOver = (partId: string) => (e: React.DragEvent) => {
+    if (draggingPartId && draggingPartId !== partId) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dragOverPartId !== partId) setDragOverPartId(partId);
+    }
+  };
+  const handleDrop = (targetPartId: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const source = draggingPartId;
+    setDraggingPartId(null);
+    setDragOverPartId(null);
+    if (!source || source === targetPartId) return;
+    const next = [...partIds];
+    const from = next.indexOf(source);
+    const to = next.indexOf(targetPartId);
+    if (from < 0 || to < 0) return;
+    next.splice(from, 1);
+    next.splice(to, 0, source);
+    onReorder?.(next);
+  };
+  const handleDragEnd = () => {
+    setDraggingPartId(null);
+    setDragOverPartId(null);
+  };
 
   // 한솔 정정 (2026-05-21): split-pane 패턴.
   //   - 각 파트는 절대 fraction 보관 (0~1, 총합 = 1).
@@ -292,11 +329,9 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
       </div>
 
       {/* 파트 박스 — % 기반 width, 컨테이너 안에 fit. split-pane: 핸들 = 파트 N과 N+1 사이 경계 */}
-      <Reorder.Group
+      {/* 코덱스 4차 P1: Reorder.Group 제거, native HTML5 drag-drop 으로 대체 (scroll 컨테이너 안전). */}
+      <div
         ref={trackContainerRef}
-        axis="x"
-        values={partIds}
-        onReorder={handleReorder}
         className="list-none m-0 p-0 flex w-full"
       >
         {partGroups.map((g, i) => {
@@ -326,15 +361,21 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
               isCompositor={isCompositor}
               isLast={isLast}
               onResizeDown={onResizeDown(g.partId, i)}
+              isDragging={draggingPartId === g.partId}
+              isDropTarget={dragOverPartId === g.partId && draggingPartId !== g.partId}
+              onDragStart={handleDragStart(g.partId)}
+              onDragOver={handleDragOver(g.partId)}
+              onDrop={handleDrop(g.partId)}
+              onDragEnd={handleDragEnd}
             />
           );
         })}
-      </Reorder.Group>
+      </div>
     </div>
   );
 }
 
-// ─── 파트 박스 — Reorder.Item (% 기반 width) ───
+// ─── 파트 박스 — % 기반 width, native HTML5 drag-drop ───
 interface PartBoxProps {
   partId: string;
   widthPct: number;
@@ -352,21 +393,26 @@ interface PartBoxProps {
   /** 마지막 파트 — 우측 인접 파트가 없어 split-pane 핸들 노출 X */
   isLast: boolean;
   onResizeDown: (e: React.MouseEvent) => void;
+  /** 코덱스 4차 P1: native HTML5 drag-drop 으로 교체. */
+  isDragging: boolean;
+  isDropTarget: boolean;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+  onDragEnd: (e: React.DragEvent) => void;
 }
 
 function PartBox({
   partId, widthPct, height, color, info, memo, totalScenes, sceneStatuses,
   focused, onHoverEnter, onHoverLeave, isCompositor, isLast, onResizeDown,
+  isDragging, isDropTarget, onDragStart, onDragOver, onDrop, onDragEnd,
 }: PartBoxProps) {
-  const dragControls = useDragControls();
-
   return (
-    <Reorder.Item
-      value={partId}
-      dragListener={false}
-      dragControls={dragControls}
+    <div
       onMouseEnter={onHoverEnter}
       onMouseLeave={onHoverLeave}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
       className="part-row relative cascade-in"
       data-part-id={partId}
       style={{
@@ -374,11 +420,15 @@ function PartBox({
         minWidth: 60,
         height,
         background: `linear-gradient(180deg, color-mix(in srgb, ${color} 16%, transparent), color-mix(in srgb, ${color} 4%, transparent))`,
-        borderLeft: `4px solid ${color}`,
+        borderLeft: isDropTarget ? `4px dashed ${color}` : `4px solid ${color}`,
         borderRight: '1px solid rgb(var(--color-bg-border) / 0.5)',
         borderTop: focused ? `1px solid ${color}` : '1px solid rgb(var(--color-bg-border) / 0.4)',
         borderBottom: '1px solid rgb(var(--color-bg-border) / 0.4)',
-        boxShadow: focused ? `0 4px 14px color-mix(in srgb, ${color} 28%, transparent)` : 'none',
+        boxShadow: isDropTarget
+          ? `0 0 0 2px color-mix(in srgb, ${color} 55%, transparent) inset, 0 4px 14px color-mix(in srgb, ${color} 35%, transparent)`
+          : (focused ? `0 4px 14px color-mix(in srgb, ${color} 28%, transparent)` : 'none'),
+        opacity: isDragging ? 0.45 : 1,
+        transition: 'opacity 120ms ease, box-shadow 120ms ease',
         listStyle: 'none',
         flexShrink: 1,
         flexGrow: 0,
@@ -386,11 +436,14 @@ function PartBox({
     >
       <div style={{ padding: '6px 12px' }}>
         <div className="flex items-center gap-2">
-          {/* drag 핸들 (Reorder) */}
-          <button
-            type="button"
-            onPointerDown={(e) => { e.preventDefault(); dragControls.start(e); }}
-            className="shrink-0 flex items-center justify-center rounded cursor-grab active:cursor-grabbing"
+          {/* drag 핸들 — native HTML5 draggable. div 로 사용 (button 은 일부 브라우저에서 drag source 동작 불안정). */}
+          <div
+            role="button"
+            tabIndex={-1}
+            draggable
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            className="shrink-0 flex items-center justify-center rounded cursor-grab active:cursor-grabbing select-none"
             style={{
               width: 16, height: 20,
               background: focused ? `color-mix(in srgb, ${color} 28%, transparent)` : 'transparent',
@@ -399,7 +452,7 @@ function PartBox({
             title="좌우로 드래그하여 파트 순서 변경"
           >
             <GripVertical size={12} strokeWidth={2.5} />
-          </button>
+          </div>
           <PartBadge partId={partId as 'A' | 'B' | 'C' | 'D'} size="sm" />
           <span className="text-[13px] font-extrabold" style={{ color }}>{partId}파트</span>
           <span className="ml-auto text-[10px] text-text-secondary font-mono tabular-nums shrink-0">
@@ -463,6 +516,6 @@ function PartBox({
           </div>
         </div>
       )}
-    </Reorder.Item>
+    </div>
   );
 }
