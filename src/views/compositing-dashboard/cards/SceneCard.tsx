@@ -164,11 +164,13 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
         </div>
       </div>
 
-      {/* 중단 이미지 분할 */}
+      {/* 중단 이미지 분할 — 코덱스 7차 P2: 라벨 ↔ URL 매핑 정리.
+          전체 코드베이스 convention(ScenesView/UnifiedSceneSheetView/SceneDetailModal) 에 맞춰
+          "스토리보드"=storyboardUrl, "가이드"=guideUrl 로 통일. 헤더 주석 의도(좌 storyboardUrl, 우 guideUrl)도 일치. */}
       <div className="flex-1 flex border-b border-bg-border/30 bg-bg-primary/40">
-        <ImageSlot label="가이드" url={card.storyboardUrl} />
+        <ImageSlot label="스토리보드" url={card.storyboardUrl} />
         <div className="w-px bg-bg-border/40" />
-        <ImageSlot label="실제" url={card.guideUrl} />
+        <ImageSlot label="가이드" url={card.guideUrl} />
       </div>
 
       {/* 하단 담당자 + 댓글/리비전 아이콘 */}
