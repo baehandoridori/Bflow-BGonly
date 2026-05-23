@@ -336,3 +336,69 @@ await deleteScene(sheetName, sceneIndex);        // 2) 내부에서 resolveScene
 - `src/utils/mergedSceneHelpers.ts` — unmatched 병합과 통합 표시 ID 생성에 공용 규칙 사용
 - `src/utils/revisionSceneKey.ts` — 리비전 키도 동일 규칙 재사용
 - `src/views/ScenesView.tsx` — ACT 이미지 fallback, 반대 부서 씬 찾기 lookup 도 동일 규칙 사용
+
+---
+
+## 2026-05-23: 컴포지팅 대시보드 v1.30.0 시리즈 (PR 1~4)
+
+### CSS 토큰 형태가 두 종류 섞여 있으면 함수 사용법이 갈린다
+
+`--color-accent: 108 92 231` (RGB triplet) 과 `--part-a: #FF9F43` (full hex) 가 한 파일에 공존한다.
+- triplet 은 `rgb(var(--color-accent) / 0.5)` 식 wrap 필요. 그냥 `var(--color-accent)` 은 invalid color.
+- hex 는 `var(--part-a)` 그대로 color/border/color-mix() 슬롯에 사용 가능.
+- 헬퍼(`partCssColor()`)를 두고 fallback 도 같은 형태(완성된 color 값)로 반환하게 통일. 코덱스가 이 함정을 3 라운드에 걸쳐 잡아냄.
+
+### framer-motion `Reorder` 는 스크롤 컨테이너 안에서 측정값이 흔들린다
+
+부모가 `overflow-y-auto` 면 Motion docs 가 unsupported 케이스로 명시. 스크롤 위치 변동 시 drag 좌표 drift.
+- 대안: HTML5 native drag-drop (`draggable` + `onDragStart/Over/Drop`). edge auto-scroll 도 브라우저 기본.
+- `splice(from, 1)` 후 `to` 인덱스 시프트 주의 — `from < to` 면 `to - 1` 로 조정.
+
+### 모듈 스코프 캐시 + 리스너 패턴 — 여러 카드가 같은 partUuid 데이터를 공유
+
+씬 카드 50개가 같은 partUuid 의 댓글 카운트를 보여줘야 할 때, 카드마다 fetch 하면 N 번 호출. 대신:
+- 모듈 스코프 `Map<partUuid, Cache>` + `Map<partUuid, Set<listener>>`
+- `fetchPartComments(partUuid)` 가 `shouldRefetch()` 로 dedupe (stale/error/done 상태 + 마지막 fetch 시각)
+- 각 카드 hook 은 `useEffect` 안에서 listener 등록 + cleanup
+- mutation 시 `invalidateCommentCountForPart()` 호출로 즉시 갱신, 또는 60s 주기 stale refresh + visibilitychange.
+
+### 단일 lookup 출처 — 두 경로가 어긋나면 댓글이 가끔 안 불러와진다
+
+`buildCardScenes(ep)` 가 한 번에 sheetName/partUuid/sceneIndex 를 다 계산해 `CardScene` 에 박는다.
+상세 모달은 그 `CardScene` 의 필드만 읽고, 다시 `ep.parts` 를 들여다보지 않음 — 두 lookup 결과가 어긋날 여지 자체를 차단.
+
+### useEffect deps 가 over-fire 하는 함정
+
+- "EP 가 바뀔 때만 reset" 의도였지만 deps 에 `partGroups.map(...).join(',')` 추가하니 reorder 시에도 발화.
+- partGroups 의 useMemo deps 가 episodeNumber 를 이미 포함하면, effect deps 는 `[episodeNumber]` 만으로 충분.
+  closure 가 새 render 의 최신 partGroups 를 자동으로 본다.
+
+### 낙관적 업데이트 + Realtime + Rollback 의 race
+
+같은 씬에 두 사용자가 거의 동시에 다른 단계로 바꾸면:
+1. 로컬 낙관적 업데이트 → Supabase 저장 시도
+2. 그 사이 다른 사용자의 Realtime broadcast 가 도착 (더 최신 updatedAt)
+3. 내 저장이 실패해서 rollback 시 — `prev` 로 덮으면 더 최신 Realtime 값을 잃음
+**Fix**: rollback 전에 `current.updatedAt > prev.updatedAt` 비교. 더 최신이면 rollback skip.
+
+또한 빠른 연속 클릭 시 응답이 out-of-order 도착 → 오래된 응답이 최신 값을 덮음:
+**Fix**: 씬별 monotonic `sceneSeq` 카운터로 stale 응답 차단.
+
+### update-notes 비개발자 톤 룰의 가치
+
+`PostgREST`, `IPC`, `Tailwind` 같은 용어는 비개발자 매니저가 읽으면 무의미. "X 상황 → Y → Z" 시나리오로 풀어 쓰면
+슬랙 그대로 공유 가능. 한솔 본인이 팀에 안내할 때 그대로 쓸 수 있어야 한다.
+파일경로/컴포넌트명/IPC 채널명 노출 금지. PR 본문의 '📋 업데이트 요약' 섹션에도 같은 룰 적용.
+
+### 코덱스 리뷰 루프의 실용성
+
+PR #116 에서 12 라운드 (P1×3, P2×6, P3×2) 끝에 silent-done. Monitor 폴링으로 라운드 사이 idle 토큰 소모 거의 없음.
+- 같은 P3 (`partCssColor` 폴백) 가 3 라운드에 걸쳐 다른 파일에서 다시 나옴 — 헬퍼 도입 후엔 호출처를 모두 한 번에 일관시킬 것.
+- silent-done 신호: 새 코멘트 0 + 트리거 코멘트의 👀 반응 사라짐. 30분 응답 없으면 머지 게이트로 전환 OK.
+
+### 적용 위치
+- `src/utils/compositingLabels.ts` — `partCssColor()` 헬퍼 + `isCompositorForCompositing()` + `isCompletedStatus()`
+- `src/views/compositing-dashboard/cardSceneHelpers.ts` — buildCardScenes 단일 lookup
+- `src/views/compositing-dashboard/useCommentCount.ts` — 모듈 스코프 캐시 + listener 패턴 + stale refresh
+- `src/views/compositing-dashboard/compositingActions.ts` — sequence guard + rollback skip
+- `src/views/compositing-dashboard/timeline/TimelinePanel.tsx` — HTML5 native drag-drop

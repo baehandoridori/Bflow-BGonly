@@ -133,14 +133,15 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
         outlineOffset: (isPinned || isMultiSelected) ? 1 : 0,
         width: 180,
         height: 220,
-        animationDelay: `${staggerIndex * 28}ms`,
+        // PR 4 polish: stagger 를 CSS 토큰에서 읽도록 변경 (한 곳에서만 조정).
+        animationDelay: `calc(var(--motion-cascade-stagger, 20ms) * ${staggerIndex})`,
         // 핀 해제 시에도 transition 끝까지 z-index 유지 (260ms) — flicker 방지
         zIndex: isPinned ? 20 : (unpinning ? 15 : (otherPinned ? 1 : 1)),
         // bf-status-flash 용 변수
         ['--current-status-color' as any]: `var(${tokenVar})`,
         ['--current-status-color-bright' as any]: `color-mix(in srgb, var(${tokenVar}) 40%, transparent)`,
-        // glow pulse 컬러
-        ['--card-glow' as any]: 'rgb(var(--color-accent) / 0.4)',
+        // glow pulse 컬러 (PR 4 polish: 토큰 사용 — alpha 0.3 다듬어진 값)
+        ['--card-glow' as any]: 'var(--comp-card-glow)',
       }}
       title={`${card.sceneId} · ${status}`}
     >
