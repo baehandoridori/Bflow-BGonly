@@ -392,24 +392,24 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 **Files:**
 - Modify: `src/index.css` (또는 별도 `src/styles/compositing-dashboard.css`)
 
-- [ ] **Step 4.1.1:** `bf-cascade-in`, `bf-glow-pulse`, `bf-wipe-in`, `bf-status-flash` keyframes 를 `@layer components` 또는 적절한 layer 에 정리. Spec 의 "13. 모션" 섹션 코드 그대로.
-- [ ] **Step 4.1.2:** `prefers-reduced-motion` 미디어 쿼리로 모든 모션 200ms fade-in 으로 override.
+- [x] **Step 4.1.1:** `bf-cascade-in`, `bf-glow-pulse`, `bf-wipe-in`, `bf-status-flash` keyframes 를 `@layer components` 또는 적절한 layer 에 정리. Spec 의 "13. 모션" 섹션 코드 그대로. (한솔 가이드 적용: blur 3→2px, stagger 28→20ms, glow alpha 0.4→0.3, SceneCard 토큰 사용)
+- [x] **Step 4.1.2:** `prefers-reduced-motion` 미디어 쿼리로 모든 모션 200ms fade-in 으로 override. (transition: none + animation-delay: 0 + filter: none 강화)
 
 ### Task 4.2 — 라이트 모드 점검
 
 **Files:**
 - Modify: `src/index.css` 의 `:root` (라이트 모드) status/part 토큰
 
-- [ ] **Step 4.2.1:** 라이트 모드에서 status 색이 너무 saturated 인지 확인. 필요 시 -10~20% lightness.
-- [ ] **Step 4.2.2:** 카드 배경/보더, 안내 띠 톤, glow pulse 색 — 라이트 모드 대비 확인.
-- [ ] **Step 4.2.3:** 한솔 프리뷰 받아 어색한 부분 조정.
+- [x] **Step 4.2.1:** 라이트 모드에서 status 색이 너무 saturated 인지 확인. 필요 시 -10~20% lightness. (batch #8A92A6→#6B7280, adjust #E1B040→#C99224, error #E55656→#D74A4A)
+- [x] **Step 4.2.2:** 카드 배경/보더, 안내 띠 톤, glow pulse 색 — 라이트 모드 대비 확인. (glow alpha 0.25→0.32 라이트에서 인식 가능하게)
+- [ ] **Step 4.2.3:** 한솔 프리뷰 받아 어색한 부분 조정. (PR 머지 후 한솔 G드라이브 빌드로 확인 시 폴리시)
 
 ### Task 4.3 — Update Notes
 
 **Files:**
 - Modify: `DEVLOG/update-notes.json`
 
-- [ ] **Step 4.3.1:** v1.30.0 항목 추가. 한솔의 update-notes 비개발자 톤 룰 준수 (`feedback_update_notes_tone.md` + CLAUDE.md):
+- [x] **Step 4.3.1:** v1.30.0 항목 추가. 한솔의 update-notes 비개발자 톤 룰 준수 (`feedback_update_notes_tone.md` + CLAUDE.md): 8개 항목 (feature 5건 + ux 3건)
   - 식별자/파일경로/기술용어 금지
   - 시나리오 형식 "X 상황 → Y → Z"
   - 슬랙 공유 가능한 톤
@@ -430,7 +430,7 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 **Files:**
 - Create: `DEVLOG/compositing-dashboard-e2e.md`
 
-- [ ] **Step 4.4.1:** 수동 테스트 시나리오 체크리스트. Spec 의 "3. 핵심 사용자 흐름" 5 시나리오 + 실제 테스트 절차.
+- [x] **Step 4.4.1:** 수동 테스트 시나리오 체크리스트. Spec 의 "3. 핵심 사용자 흐름" 5 시나리오 + 실제 테스트 절차. (10 시나리오 + 회귀 + 빌드/배포)
 
 ### Task 4.5 — Version bump + lessons
 
@@ -438,15 +438,15 @@ PR 4 — 마무리 (keyframes + update-notes + 점검)    ← /session-4-start
 - Modify: `package.json` (version → "1.30.0")
 - Modify: `tasks/lessons.md`
 
-- [ ] **Step 4.5.1:** version bump.
-- [ ] **Step 4.5.2:** lessons 항목 추가 — 이번 작업에서 학습한 패턴 / 실수 / 결정 근거.
+- [x] **Step 4.5.1:** version bump. (1.29.1 → 1.30.0)
+- [x] **Step 4.5.2:** lessons 항목 추가 — 이번 작업에서 학습한 패턴 / 실수 / 결정 근거. (CSS 토큰 형태 / Reorder vs HTML5 drag / 모듈 캐시 + listener / 단일 lookup / useEffect deps over-fire / Realtime + rollback race / update-notes 톤 / 코덱스 루프)
 
 ### Task 4.6 — 검증 & 커밋
 
-- [ ] **Step 4.6.1:** `npm run typecheck` ✓
-- [ ] **Step 4.6.2:** `npm run build:vite` ✓
-- [ ] **Step 4.6.3:** `npm run build` ✓ (정식 빌드, installer)
-- [ ] **Step 4.6.4:** Commit + PR + 코덱스 루프
+- [x] **Step 4.6.1:** `npm run typecheck` ✓
+- [x] **Step 4.6.2:** `npm run build:vite` ✓
+- [x] **Step 4.6.3:** `npm run build` ✓ (정식 빌드, installer + manifest v1.30.0 — 656.3MB / 7073 files)
+- [ ] **Step 4.6.4:** Commit + PR + 코덱스 루프 (진행 중)
 - [ ] **Step 4.6.5:** 한솔님 머지 게이트
 - [ ] **Step 4.6.6:** (한솔님 명시 시에만) G드라이브 배포 + 슬랙 공지
 

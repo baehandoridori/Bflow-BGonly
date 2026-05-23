@@ -138,11 +138,13 @@
   --part-g: #55EFC4;   /* 민트 */
 
   /* 컴포지팅 카드 톤 */
-  --comp-card-glow: rgba(108, 92, 231, 0.4);   /* pinned glow */
+  /* PR 4 polish: glow alpha 0.4 → 0.3 (덜 saturated, 한솔 가이드 "촌스럽지 않게"). */
+  --comp-card-glow: rgba(108, 92, 231, 0.3);   /* pinned glow */
 
   /* 모션 토큰 (컴포지팅 대시보드) */
   --motion-cascade-duration:  560ms;
-  --motion-cascade-stagger:    28ms;
+  /* PR 4 polish: stagger 28 → 20ms (한솔 가이드 "stagger 너무 길지 않게"). 50카드 * 20ms ≈ 1초. */
+  --motion-cascade-stagger:    20ms;
   --motion-cascade-translate:  14px;
   --motion-dock-lift:         -14px;
   --motion-dock-scale:         1.07;
@@ -167,12 +169,17 @@
   --color-length-up: 5 150 105;      /* #059669 emerald-600 */
   --color-length-down: 220 38 38;     /* #DC2626 red-600 */
 
-  /* v1.30.0: 라이트 모드 컴포지팅 토큰 (PR 4 점검 단계에서 미세 조정 예정) */
-  --status-batch:       #8A92A6;   /* 라이트 배경에서 보이는 회색 */
+  /* v1.30.0: 라이트 모드 컴포지팅 토큰
+     PR 4 polish (2026-05-23):
+       - status-batch 회색이 너무 가라앉아서 좀 더 진하게 (8A92A6 → 6B7280, tailwind gray-500 톤).
+       - status-error 빨강이 흰 카드 위에서 saturated 하게 보여 살짝 부드럽게 (E55656 → D74A4A).
+       - status-adjust 노랑이 흰 카드 위에서 살짝 흐릿 → 좀 더 진하게 (E1B040 → C99224).
+       - glow alpha 0.25 → 0.32 — 흰 카드 위에서 인식 가능하게 (다크 0.3 보다 살짝 올림). */
+  --status-batch:       #6B7280;   /* gray-500 톤 */
   --status-combine:     #2E86DE;   /* 채도↑ */
   --status-aggregated:  #6C5CE7;   /* 다크보다 살짝 진하게 */
-  --status-adjust:      #E1B040;
-  --status-error:       #E55656;
+  --status-adjust:      #C99224;
+  --status-error:       #D74A4A;
   --status-done:        #00A589;
 
   /* 라이트 모드 파트 색 — 다크보다 살짝 진하게 */
@@ -184,7 +191,7 @@
   --part-f: #E17055;
   --part-g: #00B894;
 
-  --comp-card-glow: rgba(108, 92, 231, 0.25);
+  --comp-card-glow: rgba(108, 92, 231, 0.32);
 }
 
 /* 앱 전체 텍스트 선택 방지 (드래그 시 파란색 하이라이트 제거) */
@@ -1045,7 +1052,8 @@ input[type="range"]::-webkit-slider-thumb {
   from {
     opacity: 0;
     transform: translateY(var(--motion-cascade-translate, 14px)) scale(0.92);
-    filter: blur(3px);
+    /* PR 4 polish: blur 3px → 2px (한솔 가이드 "blur 너무 짙지 않게"). */
+    filter: blur(2px);
   }
   to {
     opacity: 1;
@@ -1137,5 +1145,15 @@ input[type="range"]::-webkit-slider-thumb {
   .scene-card.pinned {
     transform: none !important;
     box-shadow: 0 0 0 2px var(--card-glow, rgba(108, 92, 231, 0.4)) !important;
+  }
+  /* PR 4 polish: hover dock-lift / status transition 도 reduced-motion 에서 즉시 적용
+     (transform/box-shadow 300ms 도 흔들림 유발 가능). */
+  .scene-card {
+    transition: none !important;
+  }
+  .bf-cascade-item {
+    /* cascade stagger 자체도 reduced-motion 에서는 0 — 한 번에 fade-in */
+    animation-delay: 0 !important;
+    filter: none !important;
   }
 }
