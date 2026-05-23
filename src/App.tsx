@@ -14,7 +14,8 @@ const TeamView = lazy(() => import('@/views/TeamView').then(m => ({ default: m.T
 const CalendarView = lazy(() => import('@/views/CalendarView').then(m => ({ default: m.CalendarView })));
 const ScheduleView = lazy(() => import('@/views/ScheduleView').then(m => ({ default: m.ScheduleView })));
 const VacationView = lazy(() => import('@/views/VacationView').then(m => ({ default: m.VacationView })));
-const CompositingView = lazy(() => import('@/views/CompositingView')); // default export
+const CompositingView = lazy(() => import('@/views/CompositingView')); // default export — 기존 리비전 피드백 보드 (v1.30.0~ 'compositing-revisions' 로 이관)
+const CompositingDashboardView = lazy(() => import('@/views/CompositingDashboardView')); // v1.30.0+ 새 현황 대시보드
 const SettingsView = lazy(() => import('@/views/SettingsView').then(m => ({ default: m.SettingsView })));
 import { SpotlightSearch } from '@/components/spotlight/SpotlightSearch';
 import { LoginScreen } from '@/components/auth/LoginScreen';
@@ -601,6 +602,28 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [currentUser, authReady]);
+
+  // v1.30.0: 컴포지팅 메뉴가 둘로 나뉘었음을 사용자에게 1회 안내.
+  // 기존 사용자 입장에서 '컴포지팅' 위치에 다른 화면이 떠 의아할 수 있으므로
+  // 로그인 직후 한 번만 토스트 + localStorage 플래그.
+  useEffect(() => {
+    if (!authReady || !currentUser) return;
+    try {
+      const KEY = 'bflow:compositing-split-seen';
+      if (localStorage.getItem(KEY) === '1') return;
+      // 1초 지연으로 다른 환영 토스트와 겹치지 않게.
+      const t = window.setTimeout(() => {
+        sonnerToast.info('컴포지팅 메뉴가 둘로 나뉘었어요', {
+          description: '"컴포지팅" 은 새 진행 현황 대시보드, "리비전" 은 기존 피드백 보드입니다.',
+          duration: 7000,
+        });
+        try { localStorage.setItem(KEY, '1'); } catch { /* noop */ }
+      }, 1000);
+      return () => window.clearTimeout(t);
+    } catch {
+      // localStorage 사용 불가 환경(시크릿 모드 등) — silent skip
+    }
+  }, [authReady, currentUser]);
 
   // 세션 변경 브로드캐스트: currentUser 변화를 모든 위젯 창에 전파
   // (로그인/세션 복원/로그아웃/비밀번호 변경 등 모든 setCurrentUser 경로 공통)
@@ -2262,6 +2285,8 @@ export default function App() {
         case 'vacation':
           return <VacationView />;
         case 'compositing':
+          return <CompositingDashboardView />;
+        case 'compositing-revisions':
           return <CompositingView />;
         case 'settings':
           return <SettingsView />;

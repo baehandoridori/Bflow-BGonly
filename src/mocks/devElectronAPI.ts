@@ -4,6 +4,7 @@
  */
 
 import type { ElectronAPI, AppUser } from '@/types';
+import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
 
 const MOCK_USERS: AppUser[] = [
   { id: '1', name: '배한솔', slackId: 'U05DFV9UAN5', password: '1234', isInitialPassword: false, createdAt: '2025-01-01T00:00:00Z', role: 'admin' },
@@ -145,7 +146,9 @@ export function installDevElectronAPI(): void {
 
     // ─── Supabase mock ───
     supabaseTestConnection: async () => ({ ok: true }),
-    supabaseReadAll: async () => [],
+    // v1.30.0: 컴포지팅 대시보드 시각 검증용 — MOCK_EPISODES 시드.
+    // 운영(.exe)에는 영향 없음 (devElectronAPI 자체가 install skip).
+    supabaseReadAll: async () => MOCK_EPISODES as unknown as Record<string, unknown>[],
     supabaseAddEpisode: async () => {},
     supabaseSoftDeleteEpisode: async () => {},
     supabaseArchiveEpisode: async () => {},
@@ -291,22 +294,38 @@ export function installDevElectronAPI(): void {
     activityStorageInfo: async () => ({ count: 0, sizeMB: 0 }),
     onActivityRealtimeInsert: noop,
 
-    // v1.30.0: 컴포지팅 단계 상태 (mock 은 빈 결과)
-    supabaseLoadCompositingStates: async () => [],
-    supabaseSetCompositingState: async (input) => ({
-      id: typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      episode_number: input.episodeNumber,
-      scene_id: input.sceneId,
-      part_id: input.partId,
-      status: input.status,
-      error_kind: input.errorKind ?? null,
-      error_note: input.errorNote ?? null,
-      progress_percent: input.progressPercent ?? 0,
-      updated_at: new Date().toISOString(),
-      updated_by: input.updatedBy,
-    }),
+    // v1.30.0: 컴포지팅 단계 상태 — preview 모드에서 시각 검증용으로 in-memory 시드 + 변경 추적.
+    supabaseLoadCompositingStates: async (episodeNumber: number) => {
+      const compStore: MockCompositingRow[] = (localStore.__compositingStates as MockCompositingRow[] | undefined)
+        ?? (localStore.__compositingStates = [...MOCK_COMPOSITING_STATES]) as MockCompositingRow[];
+      return compStore.filter((r) => r.episode_number === episodeNumber);
+    },
+    supabaseSetCompositingState: async (input) => {
+      const compStore: MockCompositingRow[] = (localStore.__compositingStates as MockCompositingRow[] | undefined)
+        ?? (localStore.__compositingStates = [...MOCK_COMPOSITING_STATES]) as MockCompositingRow[];
+      const idx = compStore.findIndex(
+        (r) => r.episode_number === input.episodeNumber && r.scene_id === input.sceneId,
+      );
+      const row: MockCompositingRow = {
+        id: idx >= 0
+          ? compStore[idx].id
+          : (typeof crypto !== 'undefined' && crypto.randomUUID
+              ? crypto.randomUUID()
+              : `mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+        episode_number: input.episodeNumber,
+        scene_id: input.sceneId,
+        part_id: input.partId,
+        status: input.status,
+        error_kind: input.errorKind ?? null,
+        error_note: input.errorNote ?? null,
+        progress_percent: input.progressPercent ?? 0,
+        updated_at: new Date().toISOString(),
+        updated_by: input.updatedBy,
+      };
+      if (idx >= 0) compStore[idx] = row;
+      else compStore.push(row);
+      return row;
+    },
     onCompositingStatesRealtime: noop,
   };
 

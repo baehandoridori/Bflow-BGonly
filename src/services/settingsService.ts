@@ -149,6 +149,9 @@ export interface UserPreferences {
   // 사이드바
   sidebarExpanded?: boolean;
 
+  // v1.30.0: 컴포지팅 현황 대시보드 — 마지막으로 본 EP (재진입 시 자동 복원)
+  lastCompositingEpisode?: number;
+
   // 씬 뷰 UI 상태
   sceneUi?: {
     controlsCollapsedByContext?: Record<string, boolean>;

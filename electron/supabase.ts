@@ -1105,6 +1105,8 @@ export async function updateSceneField(
     guideUrl: 'guide_url',
     layoutId: 'layout',
     lengthChange: 'length_change',
+    // v1.30.0+: 컴포지팅 대시보드의 파트 막대 리사이즈가 씬 길이를 비례 조정할 때 사용.
+    durationFrames: 'duration_frames',
   };
   const dbField = fieldMap[field] || field;
   // length_change: 빈 문자열은 NULL 로 저장 (CHECK constraint: NULL | 'LD' | 'SD' 만 허용)
