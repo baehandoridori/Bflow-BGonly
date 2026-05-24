@@ -237,7 +237,8 @@ export function ImageModal({
     try {
       const imageRect = annotationRef.current?.getImageRect() ?? null;
       const blob = await composeAnnotation(baseVer.url, canvas, imageRect);
-      const file = new File([blob], `annotation_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      // v1.30.2 (한솔 보고 2026-05-24): composeAnnotation 결과가 PNG (투명 배경 유지) 로 바뀌어 file 확장자/MIME 도 png 로.
+      const file = new File([blob], `annotation_${Date.now()}.png`, { type: 'image/png' });
       if (!onUploadImage) {
         toast.error('이미지 업로드 함수가 연결되지 않았습니다');
         return;

@@ -3,6 +3,9 @@
  *
  * - 기존 GAS/Drive 경로를 Storage 버킷 'scene-images'로 대체
  * - nativeImage로 안전망 resize (렌더러에서 이미 변환된 경우 double-resize 방지)
+ * - v1.30.2 (코덱스 P1, 한솔 보고 2026-05-24):
+ *   주석 결과(PNG, alpha 채널) 가 toJPEG 으로 재인코딩되면서 투명 픽셀이 검정 matte 되던 문제.
+ *   base64 의 mime 을 그대로 보존 — PNG 이면 PNG 로, JPEG 이면 JPEG 로 업로드.
  */
 
 import { nativeImage } from 'electron';
@@ -20,11 +23,11 @@ function parseSheetName(sheetName: string): { ep: string; partId: string; dept: 
   return { ep: m[1], partId: m[2], dept: m[3] };
 }
 
-function buildPath(sheetName: string, sceneId: string, imageType: string): string {
+function buildPath(sheetName: string, sceneId: string, imageType: string, ext: 'jpg' | 'png'): string {
   const { ep, partId, dept } = parseSheetName(sheetName);
   // 8자리 hex random suffix로 같은 ms 내 충돌 방지
   const uniq = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  return `${ep}/${partId}/${dept}/${sceneId}/${imageType}_${uniq}.jpg`;
+  return `${ep}/${partId}/${dept}/${sceneId}/${imageType}_${uniq}.${ext}`;
 }
 
 /** public URL → storage 경로 추출 */
@@ -33,14 +36,25 @@ export function extractPathFromPublicUrl(url: string): string | null {
   return m ? m[1] : null;
 }
 
-/** base64 → 필요 시 resize된 JPEG Buffer */
-function toBuffer(base64Data: string): Buffer {
-  const match = base64Data.match(/^data:(image\/\w+);base64,(.+)$/);
+interface ProcessedImage {
+  buffer: Buffer;
+  mime: 'image/jpeg' | 'image/png';
+  ext: 'jpg' | 'png';
+}
+
+/** base64 → 필요 시 resize. PNG 는 PNG 로, JPEG 은 JPEG 로 보존 (alpha 채널 유지). */
+function toBuffer(base64Data: string): ProcessedImage {
+  const match = base64Data.match(/^data:(image\/(?:jpeg|png));base64,(.+)$/);
   if (!match) throw new Error('Invalid base64 image data');
+  const inputMime = match[1] as 'image/jpeg' | 'image/png';
+  const isPng = inputMime === 'image/png';
+  const ext: 'jpg' | 'png' = isPng ? 'png' : 'jpg';
   const buffer = Buffer.from(match[2], 'base64');
 
   // 안전망: 이미 작으면 그대로 사용 (renderer에서 이미 처리된 경우)
-  if (buffer.length <= SAFE_SIZE_BYTES) return buffer;
+  if (buffer.length <= SAFE_SIZE_BYTES) {
+    return { buffer, mime: inputMime, ext };
+  }
 
   // 크면 nativeImage로 크기 확인 후 필요할 때만 resize
   const image = nativeImage.createFromBuffer(buffer);
@@ -54,10 +68,14 @@ function toBuffer(base64Data: string): Buffer {
       width: Math.round(width * ratio),
       height: Math.round(height * ratio),
     });
-    return resized.toJPEG(JPEG_QUALITY);
+    return isPng
+      ? { buffer: resized.toPNG(), mime: 'image/png', ext: 'png' }
+      : { buffer: resized.toJPEG(JPEG_QUALITY), mime: 'image/jpeg', ext: 'jpg' };
   }
-  // 크기는 작은데 파일만 큰 경우 (PNG 등) — JPEG 인코딩만
-  return image.toJPEG(JPEG_QUALITY);
+  // 크기는 작은데 파일만 큰 경우 — PNG 는 PNG 로, JPEG 은 JPEG 로 재인코딩.
+  return isPng
+    ? { buffer: image.toPNG(), mime: 'image/png', ext: 'png' }
+    : { buffer: image.toJPEG(JPEG_QUALITY), mime: 'image/jpeg', ext: 'jpg' };
 }
 
 export async function uploadImage(
@@ -67,11 +85,11 @@ export async function uploadImage(
   base64Data: string,
 ): Promise<{ ok: boolean; url?: string; error?: string }> {
   try {
-    const buffer = toBuffer(base64Data);
-    const path = buildPath(sheetName, sceneId, imageType);
+    const processed = toBuffer(base64Data);
+    const path = buildPath(sheetName, sceneId, imageType, processed.ext);
     const { error } = await supabase.storage
       .from(BUCKET)
-      .upload(path, buffer, { contentType: 'image/jpeg', upsert: false });
+      .upload(path, processed.buffer, { contentType: processed.mime, upsert: false });
     if (error) throw error;
     const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
     return { ok: true, url: data.publicUrl };

@@ -94,14 +94,16 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
         return;
       }
     }
-    // 일반 클릭 — 선택 중이면 선택 해제 + 핀 동작. 아니면 핀/모달.
-    if (hasAnySelection) {
-      clearSelectedScenes();
-    }
+    // v1.30.2 (한솔 보고 2026-05-24): 일반 클릭에도 단일 선택(BulkActionBar 띄움) 추가.
+    //   기존: 일반 클릭 = 핀/모달. 일괄 메뉴는 Ctrl/Shift/drag-box 로만.
+    //   새: 일반 클릭 = 그 카드만 단일 선택 → 하단 BulkActionBar 자동 노출.
+    //   pin/modal 동작은 그대로 유지.
     if (isPinned) {
       setDetailScene(sceneKey);
     } else {
       setPinnedScene(sceneKey);
+      // 기존 다른 카드들 선택 해제하고 이 카드만 단일 선택 → BulkActionBar 가 단일 카드용으로 뜸.
+      selectOnlyScene(sceneKey);
     }
   };
 

@@ -215,6 +215,10 @@ export function CompositingDashboardView() {
   const dragStateRef = useRef<{ startX: number; startY: number; addMode: boolean } | null>(null);
   const handleDragSelectStart = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
+    // v1.30.2 (한솔 보고 2026-05-24): 모달 열려있을 때 뒤 카드 drag-select 작동하던 버그.
+    //   상세 모달은 overlay z-index 위지만 그 너머 mousedown 이 부모로 전파되어 drag-select 시작.
+    //   detailScene 활성화 시 즉시 skip.
+    if (detailScene !== null) return;
     // 카드/모달/핸들 클릭은 건너뜀
     const target = e.target as HTMLElement | null;
     if (!target) return;

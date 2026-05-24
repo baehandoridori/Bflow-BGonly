@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  Pin,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
@@ -390,13 +391,32 @@ export function UnifiedSceneDetailModal({
   // v1.30.1 (한솔 보고 2026-05-23): 클립보드 붙여넣기 UI/UX 강화.
   //   - 호버 중인 슬롯이 있으면 그 슬롯을 target. 없으면 빈 슬롯 자동 우선 (기존 동작).
   //   - 성공 시 토스트로 어느 칸에 들어갔는지 명시.
+  // v1.30.2 (한솔 보고 2026-05-24): hover 만으론 race/stale 로 paste 가 못 들어가는 경우가 있어
+  //   "빈 슬롯 1번 클릭 = 핀(paste target 고정) / 한 번 더 클릭 = 파일 탐색기" UX 추가.
+  //   paste target 우선순위: pinned > hovered > 자동(빈 슬롯 우선).
   const [hoveredImageSlot, setHoveredImageSlot] = useState<'storyboard' | 'guide' | null>(null);
+  const [pinnedImageSlot, setPinnedImageSlot] = useState<'storyboard' | 'guide' | null>(null);
   // 코덱스 4차 P2 (2026-05-24): imageLoading 으로 슬롯이 spinner div 로 교체되면서
   //   onMouseLeave 가 fire 안 할 수 있음. 그 시점에 hoveredImageSlot 가 stale 로 남아
   //   다음 paste 가 잘못된 슬롯으로 가는 race 차단. loading 진입 시 즉시 클리어.
   useEffect(() => {
-    if (imageLoading) setHoveredImageSlot(null);
+    if (imageLoading) {
+      setHoveredImageSlot(null);
+      setPinnedImageSlot(null);
+    }
   }, [imageLoading]);
+  // ESC 로 핀 해제 — 모달 닫기 단축키 (Esc) 와 별도. 핀 있으면 핀만 해제, 없으면 모달 닫기로 흘러감.
+  useEffect(() => {
+    if (!pinnedImageSlot) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setPinnedImageSlot(null);
+      }
+    };
+    document.addEventListener('keydown', onKey, true); // capture phase 로 먼저 받음
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [pinnedImageSlot]);
   // Ctrl+V 이미지 붙여넣기 (BG 만)
   useEffect(() => {
     if (!bgScene || !bgSheetName) return;
@@ -412,14 +432,15 @@ export function UnifiedSceneDetailModal({
           const blob = item.getAsFile();
           if (!blob) continue;
           // target 우선순위:
-          //   1) 호버 중인 슬롯 (사용자가 명시적으로 그 슬롯 위에서 paste)
-          //   2) 빈 슬롯 (storyboard 비어있으면 storyboard, 아니면 guide)
+          //   1) 핀된 슬롯 (사용자가 명시적으로 클릭으로 고정 — 가장 안정)
+          //   2) 호버 중인 슬롯
+          //   3) 빈 슬롯 (storyboard 비어있으면 storyboard, 아니면 guide)
           const imageType: 'storyboard' | 'guide' =
-            hoveredImageSlot ?? (!bgScene.storyboardUrl ? 'storyboard' : 'guide');
-          // 코덱스 2차 P2 (2026-05-24): paste 시작 시 hoveredImageSlot 클리어.
-          //   loading 분기로 DOM 교체 시 mouseleave 가 fire 안 할 수 있어 stale 남아
-          //   다음 paste 가 잘못된 슬롯으로 가는 문제 방지.
+            pinnedImageSlot ?? hoveredImageSlot ?? (!bgScene.storyboardUrl ? 'storyboard' : 'guide');
+          // 코덱스 2차 P2 (2026-05-24): paste 시작 시 hoveredImageSlot 클리어 (stale 방지).
+          // v1.30.2: pinnedImageSlot 도 paste 후 자동 해제 (한 번 paste 후 다음은 명시적 재핀).
           setHoveredImageSlot(null);
+          setPinnedImageSlot(null);
           // 코덱스 2차 P2: uploadImage 가 boolean 반환 — 성공 시에만 success 토스트.
           //   실패 시 uploadImage 자체가 error 토스트 띄움. 이중 토스트 방지.
           const ok = await uploadImage(blob, imageType);
@@ -434,7 +455,7 @@ export function UnifiedSceneDetailModal({
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bgScene?.storyboardUrl, bgScene?.guideUrl, bgSheetName, showImageModal, hoveredImageSlot]);
+  }, [bgScene?.storyboardUrl, bgScene?.guideUrl, bgSheetName, showImageModal, hoveredImageSlot, pinnedImageSlot]);
 
   // 코덱스 P2 (2026-05-24): 호출자가 성공/실패 분기로 토스트 띄울 수 있도록 boolean 반환.
   //   기존엔 catch 가 swallow 해서 paste 가 실패해도 onPaste 가 success 토스트를 띄움.
@@ -445,7 +466,10 @@ export function UnifiedSceneDetailModal({
     }
     try {
       setImageLoading(imageType);
-      const base64 = await resizeBlob(blob);
+      // v1.30.2 (코덱스 P1, 한솔 보고 2026-05-24): 주석 결과(PNG, 투명 배경) 가 JPEG 으로 재인코딩되며
+      //   투명 픽셀이 검정 matte 되던 버그 fix — 입력 mime 이 PNG 면 PNG 로 유지.
+      const isPng = blob.type === 'image/png';
+      const base64 = await resizeBlob(blob, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
       setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
       const { saveImage: si } = await import('@/utils/imageUtils');
       const url = await si(
@@ -728,6 +752,8 @@ export function UnifiedSceneDetailModal({
                               onView={() => setShowImageModal('storyboard')}
                               onDropBlob={(b) => uploadImage(b, 'storyboard')}
                               onHoverChange={(h) => setHoveredImageSlot(h ? 'storyboard' : (s) => s === 'storyboard' ? null : s)}
+                              pinned={pinnedImageSlot === 'storyboard'}
+                              onPinToggle={() => setPinnedImageSlot((p) => p === 'storyboard' ? null : 'storyboard')}
                             />
                             <UnifiedImageSlot
                               label="가이드"
@@ -739,6 +765,8 @@ export function UnifiedSceneDetailModal({
                               onView={() => setShowImageModal('guide')}
                               onDropBlob={(b) => uploadImage(b, 'guide')}
                               onHoverChange={(h) => setHoveredImageSlot(h ? 'guide' : (s) => s === 'guide' ? null : s)}
+                              pinned={pinnedImageSlot === 'guide'}
+                              onPinToggle={() => setPinnedImageSlot((p) => p === 'guide' ? null : 'guide')}
                             />
                           </div>
                         )}
@@ -1272,6 +1300,8 @@ function UnifiedImageSlot({
   onView,
   onDropBlob,
   onHoverChange,
+  pinned = false,
+  onPinToggle,
 }: {
   label: string;
   url: string;
@@ -1283,6 +1313,10 @@ function UnifiedImageSlot({
   onDropBlob: (blob: Blob) => void;
   /** v1.30.1: 호버 시 paste target 명확화. true = enter, false = leave. */
   onHoverChange?: (hover: boolean) => void;
+  /** v1.30.2 (한솔 보고): 빈 슬롯 핀 상태 (paste target 고정). */
+  pinned?: boolean;
+  /** 빈 슬롯에서 1차 클릭 시 호출 (핀 토글). 핀 상태에서 다시 클릭하면 파일 탐색기 (onPick). */
+  onPinToggle?: () => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [hover, setHover] = useState(false);
@@ -1295,6 +1329,16 @@ function UnifiedImageSlot({
   const handleLeave = () => {
     setHover(false);
     onHoverChange?.(false);
+  };
+  // v1.30.2 빈 슬롯 클릭 동작:
+  //   - !pinned: 핀 (paste target 고정). 다음 Ctrl+V 가 이 슬롯으로 들어감.
+  //   - pinned: 파일 탐색기 (onPick). 핀 상태에서 한 번 더 누르면 기존 동작.
+  const handleEmptyClick = () => {
+    if (pinned) {
+      onPick();
+    } else {
+      onPinToggle?.();
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -1364,7 +1408,7 @@ function UnifiedImageSlot({
         </div>
       ) : canEdit ? (
         <button
-          onClick={onPick}
+          onClick={handleEmptyClick}
           onMouseEnter={handleEnter}
           onMouseLeave={handleLeave}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -1375,22 +1419,39 @@ function UnifiedImageSlot({
           }}
           onDrop={handleDrop}
           className={cn(
-            'flex flex-col items-center justify-center gap-0.5 h-32 rounded-lg border-2 border-dashed transition-all cursor-pointer',
-            dragOver
-              ? 'border-accent bg-accent/15 ring-4 ring-accent/25'
-              : hover
-                ? 'border-accent/55 bg-accent/8 shadow-[0_0_18px_rgba(108,92,231,0.22)]'
-                : 'border-bg-border hover:border-accent/40 hover:bg-accent/5',
+            'flex flex-col items-center justify-center gap-0.5 h-32 rounded-lg border-2 transition-all cursor-pointer',
+            // v1.30.2 (한솔 보고 2026-05-24): 핀 상태 시각 강조. 핀이 가장 진한 outline + 안내 변경.
+            pinned
+              ? 'border-accent bg-accent/12 shadow-[0_0_24px_rgba(108,92,231,0.35)]'
+              : 'border-dashed',
+            !pinned && (
+              dragOver
+                ? 'border-accent bg-accent/15 ring-4 ring-accent/25'
+                : hover
+                  ? 'border-accent/55 bg-accent/8 shadow-[0_0_18px_rgba(108,92,231,0.22)]'
+                  : 'border-bg-border hover:border-accent/40 hover:bg-accent/5'
+            ),
           )}
         >
-          <ImagePlus size={22} className={cn('mb-0.5', dragOver ? 'text-accent animate-bounce' : hover ? 'text-accent' : 'text-text-secondary/45')} />
-          {/* v1.30.1 (한솔 보고 2026-05-23): 빈 슬롯 호버 시 paste 가능 안내 텍스트 명시. */}
-          <span className={cn('text-xs', dragOver ? 'text-accent font-semibold' : hover ? 'text-accent font-semibold' : 'text-text-secondary/60')}>
-            {dragOver ? '여기에 놓기' : '클릭 또는 드래그 앤 드롭'}
-          </span>
-          <span className={cn('text-[10px] tracking-wide', hover || dragOver ? 'text-accent/85' : 'text-text-secondary/45')}>
-            붙여넣기 (Ctrl+V) 도 가능해요
-          </span>
+          {pinned ? (
+            <>
+              <Pin size={20} className="mb-0.5 text-accent fill-accent" />
+              <span className="text-xs text-accent font-semibold">Ctrl+V 로 붙여넣기</span>
+              <span className="text-[10px] text-accent/75">한 번 더 클릭 → 파일 탐색기 · Esc → 핀 해제</span>
+            </>
+          ) : (
+            <>
+              <ImagePlus size={22} className={cn('mb-0.5', dragOver ? 'text-accent animate-bounce' : hover ? 'text-accent' : 'text-text-secondary/45')} />
+              {/* v1.30.1 (한솔 보고 2026-05-23): 빈 슬롯 호버 시 paste 가능 안내 텍스트 명시.
+                  v1.30.2 (한솔 보고 2026-05-24): 호버만으론 paste race — 클릭 핀 UX 추가. */}
+              <span className={cn('text-xs', dragOver ? 'text-accent font-semibold' : hover ? 'text-accent font-semibold' : 'text-text-secondary/60')}>
+                {dragOver ? '여기에 놓기' : hover ? '클릭 → 붙여넣기 핀' : '클릭 → 핀 / 드래그 앤 드롭'}
+              </span>
+              <span className={cn('text-[10px] tracking-wide', hover || dragOver ? 'text-accent/85' : 'text-text-secondary/45')}>
+                핀 후 Ctrl+V · 한 번 더 클릭 → 파일 탐색기
+              </span>
+            </>
+          )}
         </button>
       ) : (
         <div className="flex items-center justify-center h-32 rounded-lg border-2 border-dashed border-bg-border/50 bg-bg-primary/20 text-text-secondary/40 text-xs">

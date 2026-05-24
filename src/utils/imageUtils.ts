@@ -6,16 +6,19 @@
 
 import * as storageService from '@/services/storageService';
 
-/** File/Blob → 리사이즈 JPEG base64 data URL */
+/** File/Blob → 리사이즈 base64 data URL (기본 JPEG, 옵션으로 PNG — alpha 채널 유지 시).
+ *  v1.30.2 (코덱스 P1): 주석 결과(투명 PNG) 가 JPEG 재인코딩되면서 검정 matte 되던 문제 fix —
+ *  outputMime 인자로 PNG 유지 가능. */
 export function resizeBlob(
   file: File | Blob,
   maxSize = 800,
   quality = 0.8,
+  outputMime: 'image/jpeg' | 'image/png' = 'image/jpeg',
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
-      resizeDataUrl(reader.result as string, maxSize, quality)
+      resizeDataUrl(reader.result as string, maxSize, quality, outputMime)
         .then(resolve)
         .catch(reject);
     };
@@ -24,11 +27,12 @@ export function resizeBlob(
   });
 }
 
-/** data URL → 리사이즈 JPEG base64 data URL (Blob 변환 불필요) */
+/** data URL → 리사이즈 base64 data URL (기본 JPEG, 옵션 PNG). */
 export function resizeDataUrl(
   dataUrl: string,
   maxSize = 800,
   quality = 0.8,
+  outputMime: 'image/jpeg' | 'image/png' = 'image/jpeg',
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -43,7 +47,7 @@ export function resizeDataUrl(
       canvas.width = width;
       canvas.height = height;
       canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', quality));
+      resolve(canvas.toDataURL(outputMime, quality));
     };
     img.onerror = reject;
     img.src = dataUrl;

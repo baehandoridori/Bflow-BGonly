@@ -168,8 +168,15 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
       historyIndexRef.current--;
       const img = new Image();
       img.onload = () => {
+        // v1.30.2 (한솔 보고 2026-05-24): 이전 선이 연해지던 버그.
+        //   원인: pen tool 등으로 globalAlpha < 1 가 남아있는 상태에서 drawImage 가 그 alpha 를 곱함.
+        //   해결: undo 시점에는 항상 globalAlpha=1 + source-over 로 명시. save/restore 로 격리.
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
         ctx.clearRect(0, 0, c.width, c.height);
         ctx.drawImage(img, 0, 0);
+        ctx.restore();
       };
       img.src = historyRef.current[historyIndexRef.current];
     }, [getCtx]);
