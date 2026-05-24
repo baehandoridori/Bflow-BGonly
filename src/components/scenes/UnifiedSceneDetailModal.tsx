@@ -410,9 +410,17 @@ export function UnifiedSceneDetailModal({
           //   2) 빈 슬롯 (storyboard 비어있으면 storyboard, 아니면 guide)
           const imageType: 'storyboard' | 'guide' =
             hoveredImageSlot ?? (!bgScene.storyboardUrl ? 'storyboard' : 'guide');
-          await uploadImage(blob, imageType);
-          const slotLabel = imageType === 'storyboard' ? '스토리보드' : '가이드';
-          sonnerToast.success(`${slotLabel} 칸에 붙여넣어졌어요`);
+          // 코덱스 2차 P2 (2026-05-24): paste 시작 시 hoveredImageSlot 클리어.
+          //   loading 분기로 DOM 교체 시 mouseleave 가 fire 안 할 수 있어 stale 남아
+          //   다음 paste 가 잘못된 슬롯으로 가는 문제 방지.
+          setHoveredImageSlot(null);
+          // 코덱스 2차 P2: uploadImage 가 boolean 반환 — 성공 시에만 success 토스트.
+          //   실패 시 uploadImage 자체가 error 토스트 띄움. 이중 토스트 방지.
+          const ok = await uploadImage(blob, imageType);
+          if (ok) {
+            const slotLabel = imageType === 'storyboard' ? '스토리보드' : '가이드';
+            sonnerToast.success(`${slotLabel} 칸에 붙여넣어졌어요`);
+          }
           return;
         }
       }
@@ -422,10 +430,12 @@ export function UnifiedSceneDetailModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bgScene?.storyboardUrl, bgScene?.guideUrl, bgSheetName, showImageModal, hoveredImageSlot]);
 
-  const uploadImage = useCallback(async (blob: Blob, imageType: 'storyboard' | 'guide') => {
+  // 코덱스 P2 (2026-05-24): 호출자가 성공/실패 분기로 토스트 띄울 수 있도록 boolean 반환.
+  //   기존엔 catch 가 swallow 해서 paste 가 실패해도 onPaste 가 success 토스트를 띄움.
+  const uploadImage = useCallback(async (blob: Blob, imageType: 'storyboard' | 'guide'): Promise<boolean> => {
     if (!bgScene || !bgSheetName) {
       sonnerToast.error('BG 씬이 없어 이미지를 저장할 수 없습니다.');
-      return;
+      return false;
     }
     try {
       setImageLoading(imageType);
@@ -441,10 +451,12 @@ export function UnifiedSceneDetailModal({
       const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
       onFieldUpdate(bgSheetName, bgSceneIndex, field, url);
       setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+      return true;
     } catch (err) {
       console.error('[UnifiedSceneDetailModal] 이미지 업로드 실패', err);
       setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
       sonnerToast.error(`이미지 저장 실패: ${err instanceof Error ? err.message : err}`);
+      return false;
     } finally {
       setImageLoading(null);
     }
