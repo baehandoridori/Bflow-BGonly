@@ -466,7 +466,10 @@ export function UnifiedSceneDetailModal({
     }
     try {
       setImageLoading(imageType);
-      const base64 = await resizeBlob(blob);
+      // v1.30.2 (코덱스 P1, 한솔 보고 2026-05-24): 주석 결과(PNG, 투명 배경) 가 JPEG 으로 재인코딩되며
+      //   투명 픽셀이 검정 matte 되던 버그 fix — 입력 mime 이 PNG 면 PNG 로 유지.
+      const isPng = blob.type === 'image/png';
+      const base64 = await resizeBlob(blob, 800, isPng ? 0.92 : 0.8, isPng ? 'image/png' : 'image/jpeg');
       setPreviewUrls((prev) => ({ ...prev, [imageType]: base64 }));
       const { saveImage: si } = await import('@/utils/imageUtils');
       const url = await si(
