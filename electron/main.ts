@@ -249,7 +249,9 @@ function createSplashWindow(): void {
     height: 360,
     frame: false,
     transparent: true,
-    alwaysOnTop: true,
+    // v1.30.1 (한솔 보고 2026-05-23): AOT 해제 — 다른 앱 위에 항상 떠 있어서
+    //   사용자가 거슬려했음. 그 외 안전장치(closable false, frame false 등)는 유지.
+    alwaysOnTop: false,
     resizable: false,
     skipTaskbar: true,
     closable: false, // 사용자가 닫지 못하게 (좀비 방지)
