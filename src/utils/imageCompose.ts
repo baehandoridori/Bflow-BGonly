@@ -17,6 +17,95 @@ export interface ImageRectInCanvas {
   imgH: number;
 }
 
+export interface CanvasSize {
+  width: number;
+  height: number;
+}
+
+export interface RectBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function clampRect(bounds: RectBounds, canvas: CanvasSize): RectBounds | null {
+  const x = Math.max(0, Math.floor(bounds.x));
+  const y = Math.max(0, Math.floor(bounds.y));
+  const right = Math.min(canvas.width, Math.ceil(bounds.x + bounds.width));
+  const bottom = Math.min(canvas.height, Math.ceil(bounds.y + bounds.height));
+  if (right <= x || bottom <= y) return null;
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+function unionRect(a: RectBounds, b: RectBounds): RectBounds {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const right = Math.max(a.x + a.width, b.x + b.width);
+  const bottom = Math.max(a.y + a.height, b.y + b.height);
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+export function calculateAnnotationExportBounds(
+  canvas: CanvasSize,
+  imageRect: ImageRectInCanvas,
+  annotationBounds: RectBounds | null,
+): RectBounds {
+  const imageBounds = clampRect(
+    {
+      x: imageRect.imgX,
+      y: imageRect.imgY,
+      width: imageRect.imgW,
+      height: imageRect.imgH,
+    },
+    canvas,
+  ) ?? { x: 0, y: 0, width: canvas.width, height: canvas.height };
+
+  const clampedAnnotation = annotationBounds ? clampRect(annotationBounds, canvas) : null;
+  return clampedAnnotation ? unionRect(imageBounds, clampedAnnotation) : imageBounds;
+}
+
+function findAnnotationPixelBounds(annotationCanvas: HTMLCanvasElement): RectBounds | null {
+  const ctx = annotationCanvas.getContext('2d');
+  if (!ctx) return null;
+
+  let data: Uint8ClampedArray;
+  try {
+    data = ctx.getImageData(0, 0, annotationCanvas.width, annotationCanvas.height).data;
+  } catch {
+    return {
+      x: 0,
+      y: 0,
+      width: annotationCanvas.width,
+      height: annotationCanvas.height,
+    };
+  }
+
+  let minX = annotationCanvas.width;
+  let minY = annotationCanvas.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < annotationCanvas.height; y++) {
+    for (let x = 0; x < annotationCanvas.width; x++) {
+      const alpha = data[(y * annotationCanvas.width + x) * 4 + 3];
+      if (alpha === 0) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return null;
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
+}
+
 export async function composeAnnotation(
   originalImageUrl: string,
   annotationCanvas: HTMLCanvasElement,
@@ -31,11 +120,16 @@ export async function composeAnnotation(
     img.onerror = () => rej(new Error('원본 이미지 로드 실패'));
   });
 
-  // 결과 캔버스: imageRect 가 있으면 그 크기 (= 이미지 크기), 없으면 annotationCanvas 크기 (호환).
-  //   이미지를 (0,0,W,H) 에 그리고, 주석 캔버스는 imageRect 영역만 crop 해서 같은 (0,0,W,H) 에 얹음.
-  //   결과: 이미지 + 이미지 위 주석만 포함. 이미지 밖에 그린 주석은 잘림.
-  const W = imageRect ? imageRect.imgW : annotationCanvas.width;
-  const H = imageRect ? imageRect.imgH : annotationCanvas.height;
+  const exportBounds = imageRect
+    ? calculateAnnotationExportBounds(
+      { width: annotationCanvas.width, height: annotationCanvas.height },
+      imageRect,
+      findAnnotationPixelBounds(annotationCanvas),
+    )
+    : { x: 0, y: 0, width: annotationCanvas.width, height: annotationCanvas.height };
+
+  const W = exportBounds.width;
+  const H = exportBounds.height;
   const composite = document.createElement('canvas');
   composite.width = W;
   composite.height = H;
@@ -44,19 +138,27 @@ export async function composeAnnotation(
 
   // 1) 배경 — 투명 유지 (PNG 결과). 이전엔 흰색으로 채웠지만 한솔 요청.
 
-  // 2) 이미지를 결과 캔버스 전체에 그림 (1:1)
-  ctx.drawImage(img, 0, 0, W, H);
-
-  // 3) 주석 캔버스에서 이미지 영역만 잘라서 결과에 합성
+  // 2) 원본 이미지는 exportBounds 안의 상대 위치에 배치.
+  //    이미지 바깥에 그린 주석은 결과 캔버스를 확장하고, 남는 영역은 PNG 투명도로 유지한다.
   if (imageRect) {
     ctx.drawImage(
-      annotationCanvas,
-      imageRect.imgX, imageRect.imgY, imageRect.imgW, imageRect.imgH,  // source crop
-      0, 0, W, H,                                                       // destination
+      img,
+      0, 0, img.naturalWidth || img.width, img.naturalHeight || img.height,
+      imageRect.imgX - exportBounds.x,
+      imageRect.imgY - exportBounds.y,
+      imageRect.imgW,
+      imageRect.imgH,
     );
   } else {
-    ctx.drawImage(annotationCanvas, 0, 0);
+    ctx.drawImage(img, 0, 0, W, H);
   }
+
+  // 3) 실제 exportBounds 만큼의 주석을 합성. 이미지 밖 주석도 잘리지 않는다.
+  ctx.drawImage(
+    annotationCanvas,
+    exportBounds.x, exportBounds.y, exportBounds.width, exportBounds.height,
+    0, 0, W, H,
+  );
 
   return new Promise<Blob>((res, rej) =>
     composite.toBlob(

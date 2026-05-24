@@ -16,6 +16,7 @@ import {
   useCallback,
 } from 'react';
 import { AnnotationToolbar, type DrawTool } from './AnnotationToolbar';
+import { getEditableElementFromTarget } from '@/utils/editableFocus';
 
 export interface AnnotationCanvasHandle {
   /** 합성용 캔버스 element (stage 비율로 확장된 자연 크기) */
@@ -400,6 +401,7 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
     // Ctrl+Z
     useEffect(() => {
       const handler = (e: KeyboardEvent) => {
+        if (getEditableElementFromTarget(e.target)) return;
         if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
           handleUndo();
@@ -679,20 +681,22 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
           onClear={handleClear}
         />
 
-        {/* 좌하단 — 메타 + 주석 텍스트 메모 입력 */}
-        <div className="absolute bottom-3 left-3 right-3 z-20 flex items-end gap-3 pointer-events-none">
-          <div className="text-[11px] text-text-secondary bg-bg-primary/70 backdrop-blur px-2.5 py-1 rounded shrink-0">
-            <strong className="text-text-primary">대상</strong>: v{baseVersionNo} 위 · <strong className="text-text-primary">저장 시</strong>: v{baseVersionNo + 1} (주석)
+        {/* 중앙 하단 — 메타 + 주석 텍스트 메모 입력 */}
+        <div className="absolute bottom-5 left-1/2 z-30 w-[min(720px,calc(100%-32px))] -translate-x-1/2 pointer-events-none">
+          <div className="rounded-lg border border-bg-border/70 bg-bg-primary/85 backdrop-blur-md px-3 py-2.5 shadow-2xl pointer-events-auto">
+            <div className="mb-2 text-[11px] text-text-secondary">
+              <strong className="text-text-primary">대상</strong>: v{baseVersionNo} 위 · <strong className="text-text-primary">저장 시</strong>: v{baseVersionNo + 1} (주석)
+            </div>
+            {/* v1.26.2: 주석 텍스트 메모 — 캔버스 그림 + 함께 저장 */}
+            <textarea
+              value={descValue}
+              onChange={(e) => setDescValue(e.target.value)}
+              placeholder="이 주석에 대한 설명을 입력하세요 (선택)"
+              className="block w-full min-h-[56px] bg-bg-card/80 border border-bg-border/70 rounded px-2.5 py-2 text-xs text-text-primary outline-none focus:border-accent/70 resize-none"
+              rows={2}
+              data-allow-context-menu
+            />
           </div>
-          {/* v1.26.2: 주석 텍스트 메모 — 캔버스 그림 + 함께 저장 */}
-          <textarea
-            value={descValue}
-            onChange={(e) => setDescValue(e.target.value)}
-            placeholder="이 주석에 대한 설명을 입력하세요 (선택)"
-            className="pointer-events-auto flex-1 max-w-xl bg-bg-primary/75 backdrop-blur border border-bg-border/70 rounded px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent/70 resize-none"
-            rows={2}
-            data-allow-context-menu
-          />
         </div>
       </div>
     );

@@ -42,6 +42,7 @@ import { WelcomeToast } from '@/components/WelcomeToast';
 import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
+import { installEditableFocusRecovery } from '@/utils/editableFocus';
 import { DEFAULT_GAS_IMAGE_URL, DEFAULT_VACATION_URL } from '@/config';
 import { Toaster, toast as sonnerToast } from 'sonner';
 import { ConfirmDialogHost } from '@/components/common/ConfirmDialog';
@@ -2203,6 +2204,8 @@ export default function App() {
 
   // ── 글로벌 단축키 (Phase 8-2) ──
   useGlobalShortcuts({ onReload: loadData });
+
+  useEffect(() => installEditableFocusRecovery(), []);
 
   // v1.27.0: 업데이트 완료 토스트 — splash 닫힌 뒤 (= Toaster mount 된 뒤) 한 번만 표시.
   // splash 동안 호출하면 Toaster 가 아직 없어 안 보이지만 lastSeenVersion 은 갱신되어

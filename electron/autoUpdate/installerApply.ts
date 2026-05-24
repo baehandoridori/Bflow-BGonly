@@ -235,16 +235,24 @@ function Show-ProgressWindowUntilExit($proc) {
 "@
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $window = [Windows.Markup.XamlReader]::Load($reader)
+    $window.Topmost = $false
     $timer = New-Object Windows.Threading.DispatcherTimer
     $timer.Interval = [TimeSpan]::FromMilliseconds(500)
+    $frame = New-Object Windows.Threading.DispatcherFrame
     $timer.Add_Tick({
       if ($proc.HasExited) {
         $timer.Stop()
         $window.Close()
+        $frame.Continue = $false
       }
     })
+    $window.Add_Closed({
+      $timer.Stop()
+      $frame.Continue = $false
+    })
     $timer.Start()
-    $window.ShowDialog() | Out-Null
+    $window.Show() | Out-Null
+    [Windows.Threading.Dispatcher]::PushFrame($frame)
   } catch {
     Write-UpdateLog "progress window unavailable: $($_.Exception.Message)"
     try { $proc.WaitForExit() | Out-Null } catch {}
