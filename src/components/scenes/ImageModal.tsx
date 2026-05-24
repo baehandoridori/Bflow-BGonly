@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { AnnotationCanvas, type AnnotationCanvasHandle } from './AnnotationCanvas';
 import { composeAnnotation } from '@/utils/imageCompose';
 import { Check } from 'lucide-react';
+import { getEditableElementFromTarget } from '@/utils/editableFocus';
 
 /**
  * 뷰 상태:
@@ -422,6 +423,7 @@ export function ImageModal({
   /* ── 키보드 핸들러 (ESC는 SceneDetailModal에서 처리) ── */
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
+      if (getEditableElementFromTarget(e.target)) return;
       if (e.key === 'ArrowLeft')  { e.preventDefault(); navigate(-1); }
       if (e.key === 'ArrowRight') { e.preventDefault(); navigate(1); }
     };
