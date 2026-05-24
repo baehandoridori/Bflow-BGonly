@@ -391,6 +391,12 @@ export function UnifiedSceneDetailModal({
   //   - 호버 중인 슬롯이 있으면 그 슬롯을 target. 없으면 빈 슬롯 자동 우선 (기존 동작).
   //   - 성공 시 토스트로 어느 칸에 들어갔는지 명시.
   const [hoveredImageSlot, setHoveredImageSlot] = useState<'storyboard' | 'guide' | null>(null);
+  // 코덱스 4차 P2 (2026-05-24): imageLoading 으로 슬롯이 spinner div 로 교체되면서
+  //   onMouseLeave 가 fire 안 할 수 있음. 그 시점에 hoveredImageSlot 가 stale 로 남아
+  //   다음 paste 가 잘못된 슬롯으로 가는 race 차단. loading 진입 시 즉시 클리어.
+  useEffect(() => {
+    if (imageLoading) setHoveredImageSlot(null);
+  }, [imageLoading]);
   // Ctrl+V 이미지 붙여넣기 (BG 만)
   useEffect(() => {
     if (!bgScene || !bgSheetName) return;
