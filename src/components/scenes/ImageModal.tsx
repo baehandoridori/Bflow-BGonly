@@ -268,7 +268,10 @@ export function ImageModal({
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`주석 저장 실패: ${msg}`);
     }
-  }, [annotateMode, sceneUuid, currentUserId, guideVersions, storyboardVersions, currentGuideId, currentStoryboardId, onUploadImage, annotationDescription]);
+    // 코덱스 3차 P2 (2026-05-24): legacy 폴백이 guideUrl/storyboardUrl props 를 읽으므로
+    //   deps 에도 포함. 모달 열려있는 동안 씬 데이터가 라이브 업데이트되면 자동 v1 시드가
+    //   stale URL 로 생성될 위험 차단.
+  }, [annotateMode, sceneUuid, currentUserId, guideVersions, storyboardVersions, currentGuideId, currentStoryboardId, guideUrl, storyboardUrl, onUploadImage, annotationDescription]);
 
   const handleVersionDelete = useCallback(async (imageType: 'storyboard' | 'guide', versionId: string) => {
     if (!sceneUuid) return;
