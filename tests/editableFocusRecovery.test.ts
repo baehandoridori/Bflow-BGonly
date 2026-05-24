@@ -12,4 +12,7 @@ test('global editable focus recovery is installed by the app shell', async () =>
   assert.match(helper, /focus\(\{ preventScroll: true \}\)/);
   assert.match(helper, /HTMLTextAreaElement/);
   assert.match(helper, /isContentEditable/);
+  assert.match(helper, /RECOVERY_WINDOW_MS/);
+  assert.match(helper, /pendingEditable/);
+  assert.doesNotMatch(helper, /lastEditable/);
 });

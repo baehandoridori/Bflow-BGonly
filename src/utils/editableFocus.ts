@@ -33,25 +33,45 @@ function focusEditable(editable: HTMLElement): void {
 }
 
 export function installEditableFocusRecovery(): () => void {
-  const onPointerDown = (event: PointerEvent) => {
-    if (event.button !== 0) return;
-    const editable = getEditableElementFromTarget(event.target);
-    if (!editable) return;
+  const RECOVERY_WINDOW_MS = 1500;
+  let pendingEditable: HTMLElement | null = null;
+  let pendingUntil = 0;
+
+  const clearPendingEditable = () => {
+    pendingEditable = null;
+    pendingUntil = 0;
+  };
+
+  const queueEditableFocus = (editable: HTMLElement) => {
+    pendingEditable = editable;
+    pendingUntil = Date.now() + RECOVERY_WINDOW_MS;
     focusEditable(editable);
   };
 
-  const onFocusIn = (event: FocusEvent) => {
+  const onPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return;
     const editable = getEditableElementFromTarget(event.target);
-    if (editable) lastEditable = editable;
+    if (!editable) {
+      clearPendingEditable();
+      return;
+    }
+    queueEditableFocus(editable);
+  };
+
+  const onFocusIn = () => {
+    clearPendingEditable();
   };
 
   const onWindowFocus = () => {
-    if (!lastEditable?.isConnected) return;
+    if (!pendingEditable?.isConnected) return;
+    if (Date.now() > pendingUntil) {
+      clearPendingEditable();
+      return;
+    }
     if (document.activeElement && document.activeElement !== document.body) return;
-    focusEditable(lastEditable);
+    focusEditable(pendingEditable);
   };
 
-  let lastEditable: HTMLElement | null = null;
   document.addEventListener('pointerdown', onPointerDown, true);
   document.addEventListener('focusin', onFocusIn, true);
   window.addEventListener('focus', onWindowFocus);
