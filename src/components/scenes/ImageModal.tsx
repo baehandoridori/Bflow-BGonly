@@ -201,14 +201,42 @@ export function ImageModal({
     const type = annotateMode.imageType;
     const versions = type === 'guide' ? guideVersions : storyboardVersions;
     const currentVerId = type === 'guide' ? currentGuideId : currentStoryboardId;
-    const currentVer = versions.find((v) => v.id === currentVerId);
-    if (!currentVer) {
-      toast.error('현재 버전 정보를 찾을 수 없습니다');
-      return;
+    // v1.30.1 (한솔 보고 2026-05-23): versions 가 비어있는 경우 (legacy 이미지가 image_versions
+    //   row 없이 url 만 있는 경우) "현재 버전 정보를 찾을 수 없습니다" 에러로 막혔던 문제.
+    //   props 의 storyboardUrl/guideUrl 폴백으로 자동 v1 시드 후 그것을 base 로 사용.
+    let baseVer = versions.find((v) => v.id === currentVerId) ?? null;
+    if (!baseVer) {
+      const fallbackUrl = type === 'guide' ? guideUrl : storyboardUrl;
+      if (!fallbackUrl) {
+        toast.error('주석할 이미지가 없습니다');
+        return;
+      }
+      try {
+        baseVer = await createImageVersion({
+          sceneId: sceneUuid,
+          imageType: type,
+          kind: 'replace',
+          url: fallbackUrl,
+          createdBy: currentUserId,
+          description: '기존 이미지를 첫 버전으로 자동 등록',
+        });
+        const refreshed = await fetchImageVersions(sceneUuid, type);
+        if (type === 'guide') {
+          setGuideVersions(refreshed);
+          setCurrentGuideId(baseVer.id);
+        } else {
+          setStoryboardVersions(refreshed);
+          setCurrentStoryboardId(baseVer.id);
+        }
+      } catch (err) {
+        console.error('[ImageModal] legacy 이미지 v1 seed 실패:', err);
+        toast.error('기존 이미지를 버전으로 등록하는 데 실패했습니다');
+        return;
+      }
     }
     try {
       const imageRect = annotationRef.current?.getImageRect() ?? null;
-      const blob = await composeAnnotation(currentVer.url, canvas, imageRect);
+      const blob = await composeAnnotation(baseVer.url, canvas, imageRect);
       const file = new File([blob], `annotation_${Date.now()}.jpg`, { type: 'image/jpeg' });
       if (!onUploadImage) {
         toast.error('이미지 업로드 함수가 연결되지 않았습니다');
@@ -220,7 +248,7 @@ export function ImageModal({
         imageType: type,
         kind: 'annotate',
         url: uploadedUrl,
-        baseVersionNo: currentVer.versionNo,
+        baseVersionNo: baseVer.versionNo,
         createdBy: currentUserId,
         description: annotationDescription.trim() || null,
       });
@@ -240,7 +268,10 @@ export function ImageModal({
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`주석 저장 실패: ${msg}`);
     }
-  }, [annotateMode, sceneUuid, currentUserId, guideVersions, storyboardVersions, currentGuideId, currentStoryboardId, onUploadImage, annotationDescription]);
+    // 코덱스 3차 P2 (2026-05-24): legacy 폴백이 guideUrl/storyboardUrl props 를 읽으므로
+    //   deps 에도 포함. 모달 열려있는 동안 씬 데이터가 라이브 업데이트되면 자동 v1 시드가
+    //   stale URL 로 생성될 위험 차단.
+  }, [annotateMode, sceneUuid, currentUserId, guideVersions, storyboardVersions, currentGuideId, currentStoryboardId, guideUrl, storyboardUrl, onUploadImage, annotationDescription]);
 
   const handleVersionDelete = useCallback(async (imageType: 'storyboard' | 'guide', versionId: string) => {
     if (!sceneUuid) return;
