@@ -216,7 +216,7 @@ function Show-ProgressWindowUntilExit($proc) {
         WindowStartupLocation="CenterScreen"
         Background="#1A1D27"
         Foreground="#E8E8EE"
-        Topmost="True">
+        Topmost="False">
   <Border Padding="24" Background="#1A1D27" BorderBrush="#2D3041" BorderThickness="1">
     <Grid>
       <Grid.RowDefinitions>
