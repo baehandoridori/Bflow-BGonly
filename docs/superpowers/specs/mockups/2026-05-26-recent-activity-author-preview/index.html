@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>B flow 최근 작업 및 메모 작성자 시안</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1117;
+      --panel: #171a23;
+      --panel-2: #1d2130;
+      --border: #2d3041;
+      --text: #e8e8ee;
+      --muted: #8b8da3;
+      --soft: #b8bad0;
+      --accent: #6c5ce7;
+      --violet: #a29bfe;
+      --blue: #74b9ff;
+      --gold: #fdcb6e;
+      --green: #00b894;
+      --orange: #ff9f6e;
+      --pink: #ff8fa3;
+      --teal: #4dd0e1;
+      --shadow: 0 20px 70px rgba(0, 0, 0, 0.34);
+      font-family: Inter, Pretendard, "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 18% -8%, rgba(116, 185, 255, 0.13), transparent 34rem),
+        radial-gradient(circle at 94% 12%, rgba(0, 184, 148, 0.10), transparent 34rem),
+        var(--bg);
+      color: var(--text);
+      letter-spacing: 0;
+    }
+
+    button, input, textarea {
+      font: inherit;
+    }
+
+    .page {
+      width: min(1440px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 32px 0 46px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 9px;
+      border: 1px solid rgba(116, 185, 255, 0.25);
+      border-radius: 6px;
+      color: var(--blue);
+      background: rgba(116, 185, 255, 0.08);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 12px 0 8px;
+      font-size: 30px;
+      line-height: 1.22;
+      font-weight: 760;
+    }
+
+    .lead {
+      max-width: 860px;
+      margin: 0;
+      color: var(--soft);
+      font-size: 15px;
+      line-height: 1.62;
+    }
+
+    .status-card {
+      width: min(360px, 100%);
+      padding: 14px 15px;
+      border: 1px solid rgba(253, 203, 110, 0.24);
+      border-radius: 8px;
+      background: rgba(253, 203, 110, 0.07);
+      color: #ffe0a0;
+      font-size: 13px;
+      line-height: 1.55;
+      box-shadow: var(--shadow);
+    }
+
+    .status-card strong {
+      display: block;
+      color: #fff1c4;
+      margin-bottom: 3px;
+    }
+
+    .decision-bar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 22px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 8px;
+      background: rgba(15, 17, 23, 0.86);
+      backdrop-filter: blur(14px);
+    }
+
+    .decision-bar .left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(0, 184, 148, 0.12);
+      flex: none;
+    }
+
+    .decision-text {
+      min-width: 0;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .option {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 8px;
+      background: rgba(26, 29, 39, 0.86);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color 0.16s, transform 0.16s, background 0.16s;
+    }
+
+    .option:hover,
+    .option:focus-visible {
+      outline: none;
+      border-color: rgba(116, 185, 255, 0.44);
+      background: rgba(29, 33, 48, 0.96);
+      transform: translateY(-1px);
+    }
+
+    .option.selected {
+      border-color: rgba(0, 184, 148, 0.72);
+      box-shadow: 0 0 0 1px rgba(0, 184, 148, 0.24), var(--shadow);
+    }
+
+    .option-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 15px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .option-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .letter {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--blue));
+      flex: none;
+    }
+
+    .option h2 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.3;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 23px;
+      padding: 0 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .tag.reco {
+      color: #dffff7;
+      border-color: rgba(0, 184, 148, 0.30);
+      background: rgba(0, 184, 148, 0.12);
+    }
+
+    .option-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 14px;
+      height: 100%;
+    }
+
+    .summary {
+      margin: 0;
+      min-height: 60px;
+      color: var(--soft);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .mini-app {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 10px;
+      min-height: 360px;
+    }
+
+    .mock-panel {
+      min-width: 0;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 8px;
+      background: rgba(15, 17, 23, 0.72);
+      overflow: hidden;
+    }
+
+    .mock-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 38px;
+      padding: 9px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .mock-header .small {
+      color: var(--muted);
+      font-size: 10.5px;
+      font-weight: 650;
+    }
+
+    .heatmap {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 3px;
+      padding: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .cell {
+      aspect-ratio: 1 / 0.72;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .cell.a { background: rgba(116, 185, 255, 0.36); }
+    .cell.b { background: rgba(255, 143, 163, 0.44); }
+    .cell.c { background: rgba(0, 184, 148, 0.34); }
+    .cell.d { background: rgba(253, 203, 110, 0.42); }
+
+    .feed {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .feed-row {
+      display: grid;
+      grid-template-columns: 26px 18px 1fr;
+      gap: 8px;
+      align-items: start;
+      padding: 9px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+    }
+
+    .feed-row:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .avatar {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #5964e0, #5dd89c);
+    }
+
+    .picto {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      margin-top: 3px;
+      border-radius: 5px;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.09);
+    }
+
+    .picto svg {
+      width: 12px;
+      height: 12px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .picto.memo { color: var(--pink); background: rgba(255, 143, 163, 0.16); }
+    .picto.image { color: var(--teal); background: rgba(77, 208, 225, 0.15); }
+    .picto.done { color: var(--green); background: rgba(0, 184, 148, 0.14); }
+
+    .feed-title {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 5px;
+      color: var(--soft);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .feed-title strong {
+      color: var(--text);
+      font-weight: 780;
+    }
+
+    .scene-chip {
+      display: inline-flex;
+      align-items: center;
+      max-width: 152px;
+      height: 18px;
+      padding: 0 6px;
+      border-radius: 4px;
+      color: #d9d5ff;
+      background: rgba(108, 92, 231, 0.16);
+      font-size: 11px;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .feed-meta {
+      margin-top: 3px;
+      color: rgba(139, 141, 163, 0.82);
+      font-size: 10.5px;
+      line-height: 1.35;
+    }
+
+    .modal-preview {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+    }
+
+    .modal-title {
+      padding: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .modal-title strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .modal-title span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .scene-tabs {
+      display: flex;
+      gap: 5px;
+      padding: 8px 10px 0;
+    }
+
+    .tab {
+      padding: 4px 8px;
+      border-radius: 5px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 10.5px;
+      font-weight: 700;
+    }
+
+    .tab.active {
+      color: #fff;
+      background: rgba(108, 92, 231, 0.55);
+    }
+
+    .dept-card {
+      margin: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.035);
+      overflow: hidden;
+    }
+
+    .dept-card .line {
+      height: 2px;
+      background: linear-gradient(90deg, var(--blue), transparent);
+    }
+
+    .field {
+      padding: 10px;
+    }
+
+    .field-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .author-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      max-width: 170px;
+      color: #c9f7ec;
+      font-size: 10.5px;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .author-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      flex: none;
+    }
+
+    .memo-box {
+      min-height: 82px;
+      padding: 9px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.025);
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .memo-footer {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+
+    .segments {
+      display: flex;
+      gap: 5px;
+      padding: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      overflow: hidden;
+    }
+
+    .seg {
+      flex: 1;
+      min-width: 0;
+      text-align: center;
+      padding: 5px 6px;
+      border-radius: 5px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.05);
+      font-size: 10.5px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .seg.active {
+      color: var(--text);
+      background: rgba(116, 185, 255, 0.18);
+      box-shadow: inset 0 0 0 1px rgba(116, 185, 255, 0.18);
+    }
+
+    .image-strip {
+      display: flex;
+      gap: 6px;
+      padding: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .thumb {
+      width: 58px;
+      aspect-ratio: 4 / 3;
+      border-radius: 6px;
+      background:
+        linear-gradient(135deg, rgba(116, 185, 255, 0.22), rgba(253, 203, 110, 0.16)),
+        rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      position: relative;
+      overflow: hidden;
+      flex: none;
+    }
+
+    .thumb::after {
+      content: "";
+      position: absolute;
+      width: 34px;
+      height: 18px;
+      border: 2px solid rgba(77, 208, 225, 0.8);
+      border-left: none;
+      border-bottom: none;
+      transform: rotate(-12deg);
+      right: 8px;
+      top: 18px;
+      border-radius: 9px;
+    }
+
+    .thumb-info {
+      min-width: 0;
+      color: var(--soft);
+      font-size: 11.5px;
+      line-height: 1.45;
+    }
+
+    .compact-feed .feed-row {
+      grid-template-columns: 18px 1fr;
+    }
+
+    .compact-feed .avatar {
+      display: none;
+    }
+
+    .notes {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .note-card {
+      padding: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 8px;
+      background: rgba(23, 26, 35, 0.74);
+    }
+
+    .note-card h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+
+    .note-card p,
+    .note-card li {
+      color: var(--soft);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .note-card ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .choice-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: auto;
+      padding-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .select-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--green);
+      font-weight: 760;
+      opacity: 0;
+    }
+
+    .option.selected .select-indicator {
+      opacity: 1;
+    }
+
+    @media (max-width: 1180px) {
+      .grid,
+      .notes {
+        grid-template-columns: 1fr;
+      }
+      .option { min-height: auto; }
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        width: min(100% - 24px, 720px);
+        padding-top: 20px;
+      }
+      .topbar {
+        flex-direction: column;
+      }
+      .status-card {
+        width: 100%;
+      }
+      .decision-bar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .hint {
+        white-space: normal;
+      }
+      .mini-app {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <span class="eyebrow">
+          <span class="dot"></span>
+          B flow UI decision preview
+        </span>
+        <h1>최근 작업 위젯 + 씬 메모 작성자 표시 시안</h1>
+        <p class="lead">
+          현재 코드 기준으로 “최근 작업 위젯”과 “씬 상세 모달”은 B flow 기능입니다.
+          아래 시안은 B flow에 적용할 화면 기준이며, 주석 이미지 업데이트와 메모 수정자를 사용자가 바로 알아볼 수 있게 만드는 방향을 비교합니다.
+        </p>
+      </div>
+      <aside class="status-card">
+        <strong>범위 확인</strong>
+        배프레임은 현재 “최근 연 파일” 구조가 중심이고, B flow에는 이미 activity_log 기반 “최근 작업” 위젯이 있습니다.
+        그래서 이번 시안은 B flow에 바로 구현 가능한 안을 먼저 잡습니다.
+      </aside>
+    </header>
+
+    <section class="decision-bar" aria-live="polite">
+      <div class="left">
+        <span class="dot"></span>
+        <span class="decision-text" id="decisionText">A안을 기본 추천으로 선택해두었습니다. 다른 안을 누르면 선택이 바뀝니다.</span>
+      </div>
+      <span class="hint">클릭해서 선택한 뒤 채팅에 A/B/C 또는 조합을 말해주세요.</span>
+    </section>
+
+    <section class="grid" aria-label="디자인 시안 선택">
+      <article class="option selected" data-choice="A" tabindex="0">
+        <div class="option-head">
+          <div class="option-title">
+            <span class="letter">A</span>
+            <h2>통합 타임라인형</h2>
+          </div>
+          <span class="tag reco">추천</span>
+        </div>
+        <div class="option-body">
+          <p class="summary">
+            최근 작업 흐름 안에 “주석 이미지 업데이트”를 그대로 넣습니다.
+            메모 작성자는 메모 라벨 오른쪽에 작게 붙여서, 내용을 읽기 전에 누가 마지막으로 손댔는지 보입니다.
+          </p>
+          <div class="mini-app">
+            <div class="mock-panel">
+              <div class="mock-header">
+                <span>최근 작업</span>
+                <span class="small">이번 주</span>
+              </div>
+              <div class="heatmap">
+                <span class="cell a"></span><span class="cell"></span><span class="cell b"></span><span class="cell c"></span>
+                <span class="cell"></span><span class="cell d"></span><span class="cell a"></span><span class="cell"></span>
+                <span class="cell c"></span><span class="cell b"></span><span class="cell"></span><span class="cell"></span>
+                <span class="cell d"></span><span class="cell a"></span><span class="cell c"></span><span class="cell"></span>
+              </div>
+              <div class="feed">
+                <div class="feed-row">
+                  <span class="avatar">한</span>
+                  <span class="picto image">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 13l3-3 5 6"/><circle cx="8" cy="9" r="1.5"/></svg>
+                  </span>
+                  <div>
+                    <div class="feed-title"><strong>한솔</strong><span>주석 이미지 업데이트</span><span class="scene-chip">EP03 A #012</span></div>
+                    <div class="feed-meta">v5 (주석) · 스토리보드 · 3분 전</div>
+                  </div>
+                </div>
+                <div class="feed-row">
+                  <span class="avatar">도</span>
+                  <span class="picto memo">
+                    <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
+                  </span>
+                  <div>
+                    <div class="feed-title"><strong>도윤</strong><span>메모 변경</span><span class="scene-chip">EP03 A #012</span></div>
+                    <div class="feed-meta">ACT 메모 · 12분 전</div>
+                  </div>
+                </div>
+                <div class="feed-row">
+                  <span class="avatar">민</span>
+                  <span class="picto done">
+                    <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+                  </span>
+                  <div>
+                    <div class="feed-title"><strong>민지</strong><span>PNG 완료</span><span class="scene-chip">EP02 B #044</span></div>
+                    <div class="feed-meta">작업 진행 · 24분 전</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mock-panel modal-preview">
+              <div class="modal-title">
+                <strong>EP03 A #012</strong>
+                <span>씬 상세 모달</span>
+              </div>
+              <div class="scene-tabs">
+                <span class="tab active">상세</span>
+                <span class="tab">댓글</span>
+                <span class="tab">히스토리</span>
+              </div>
+              <div class="dept-card">
+                <div class="line"></div>
+                <div class="field">
+                  <div class="field-label">
+                    <span>BG 메모</span>
+                    <span class="author-meta"><span class="author-dot"></span>한솔 · 3분 전</span>
+                  </div>
+                  <div class="memo-box">왼쪽 구름 라인 더 부드럽게. v5 주석 참고해서 다음 수정 때 반영.</div>
+                </div>
+              </div>
+              <div class="dept-card">
+                <div class="line" style="background:linear-gradient(90deg,var(--orange),transparent)"></div>
+                <div class="field">
+                  <div class="field-label">
+                    <span>ACT 메모</span>
+                    <span class="author-meta"><span class="author-dot" style="background:var(--orange)"></span>도윤 · 12분 전</span>
+                  </div>
+                  <div class="memo-box">손 위치는 OK. 컷 끝 4프레임만 타이밍 재확인 필요.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="choice-footer">
+            <span>가장 직관적. 기존 위젯 성격 유지.</span>
+            <span class="select-indicator">선택됨</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="option" data-choice="B" tabindex="0">
+        <div class="option-head">
+          <div class="option-title">
+            <span class="letter">B</span>
+            <h2>작업 종류 분리형</h2>
+          </div>
+          <span class="tag">정리형</span>
+        </div>
+        <div class="option-body">
+          <p class="summary">
+            최근 작업 위젯에 상단 필터를 더 강조해서 “전체, 진행, 메모, 이미지”로 나눕니다.
+            주석만 보고 싶을 때 좋지만, 사용자가 필터를 눌러야 해서 놓칠 가능성이 있습니다.
+          </p>
+          <div class="mini-app">
+            <div class="mock-panel">
+              <div class="mock-header">
+                <span>최근 작업</span>
+                <span class="small">이미지 보기</span>
+              </div>
+              <div class="segments">
+                <span class="seg">전체</span>
+                <span class="seg">진행</span>
+                <span class="seg">메모</span>
+                <span class="seg active">이미지</span>
+              </div>
+              <div class="image-strip">
+                <span class="thumb"></span>
+                <div class="thumb-info">
+                  <strong style="color:var(--text)">EP03 A #012</strong><br>
+                  한솔 · 스토리보드 v5 주석<br>
+                  방금 전
+                </div>
+              </div>
+              <div class="feed compact-feed">
+                <div class="feed-row">
+                  <span class="picto image"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 13l3-3 5 6"/></svg></span>
+                  <div>
+                    <div class="feed-title"><strong>한솔</strong><span>주석 이미지 업데이트</span></div>
+                    <div class="feed-meta">EP03 A #012 · v5 (주석)</div>
+                  </div>
+                </div>
+                <div class="feed-row">
+                  <span class="picto image"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 13l3-3 5 6"/></svg></span>
+                  <div>
+                    <div class="feed-title"><strong>서연</strong><span>가이드 이미지 교체</span></div>
+                    <div class="feed-meta">EP02 C #071 · v2 (교체)</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mock-panel modal-preview">
+              <div class="modal-title">
+                <strong>EP03 A #012</strong>
+                <span>씬 상세 모달</span>
+              </div>
+              <div class="dept-card">
+                <div class="line"></div>
+                <div class="field">
+                  <div class="field-label"><span>BG 메모</span></div>
+                  <div class="memo-box">
+                    왼쪽 구름 라인 더 부드럽게. v5 주석 참고.
+                    <div class="memo-footer">마지막 수정: 한솔 · 3분 전</div>
+                  </div>
+                </div>
+              </div>
+              <div class="dept-card">
+                <div class="line" style="background:linear-gradient(90deg,var(--orange),transparent)"></div>
+                <div class="field">
+                  <div class="field-label"><span>ACT 메모</span></div>
+                  <div class="memo-box">
+                    손 위치 OK. 컷 끝 타이밍 재확인.
+                    <div class="memo-footer">마지막 수정: 도윤 · 12분 전</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="choice-footer">
+            <span>분류는 깔끔하지만 한 번 더 눌러야 함.</span>
+            <span class="select-indicator">선택됨</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="option" data-choice="C" tabindex="0">
+        <div class="option-head">
+          <div class="option-title">
+            <span class="letter">C</span>
+            <h2>최소 변경형</h2>
+          </div>
+          <span class="tag">저위험</span>
+        </div>
+        <div class="option-body">
+          <p class="summary">
+            현재 화면을 거의 유지하고, 활동 종류와 메모 작성자 텍스트만 추가합니다.
+            빠르게 만들 수 있지만, 주석 이미지 변경이 기존 “이미지 업로드”와 충분히 구분되지 않을 수 있습니다.
+          </p>
+          <div class="mini-app">
+            <div class="mock-panel">
+              <div class="mock-header">
+                <span>최근 작업</span>
+                <span class="small">기존 밀도 유지</span>
+              </div>
+              <div class="heatmap">
+                <span class="cell a"></span><span class="cell"></span><span class="cell"></span><span class="cell c"></span>
+                <span class="cell d"></span><span class="cell"></span><span class="cell b"></span><span class="cell"></span>
+                <span class="cell"></span><span class="cell c"></span><span class="cell"></span><span class="cell d"></span>
+                <span class="cell a"></span><span class="cell"></span><span class="cell"></span><span class="cell b"></span>
+              </div>
+              <div class="feed">
+                <div class="feed-row">
+                  <span class="avatar">한</span>
+                  <span class="picto image"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 13l3-3 5 6"/></svg></span>
+                  <div>
+                    <div class="feed-title"><strong>한솔</strong><span>이미지 업데이트</span><span class="scene-chip">EP03 A #012</span></div>
+                    <div class="feed-meta">주석 버전 · 3분 전</div>
+                  </div>
+                </div>
+                <div class="feed-row">
+                  <span class="avatar">도</span>
+                  <span class="picto memo"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></span>
+                  <div>
+                    <div class="feed-title"><strong>도윤</strong><span>메모 변경</span><span class="scene-chip">EP03 A #012</span></div>
+                    <div class="feed-meta">12분 전</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mock-panel modal-preview">
+              <div class="modal-title">
+                <strong>EP03 A #012</strong>
+                <span>씬 상세 모달</span>
+              </div>
+              <div class="dept-card">
+                <div class="line"></div>
+                <div class="field">
+                  <div class="field-label">
+                    <span>메모</span>
+                    <span class="author-meta">한솔</span>
+                  </div>
+                  <div class="memo-box">왼쪽 구름 라인 더 부드럽게. v5 주석 참고.</div>
+                </div>
+              </div>
+              <div class="dept-card">
+                <div class="line" style="background:linear-gradient(90deg,var(--orange),transparent)"></div>
+                <div class="field">
+                  <div class="field-label">
+                    <span>메모</span>
+                    <span class="author-meta">도윤</span>
+                  </div>
+                  <div class="memo-box">손 위치 OK. 컷 끝 타이밍 재확인.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="choice-footer">
+            <span>빠르지만 새 기능의 존재감이 약함.</span>
+            <span class="select-indicator">선택됨</span>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="notes">
+      <div class="note-card">
+        <h3>제가 보는 추천 결론</h3>
+        <p>
+          A안이 가장 낫습니다. 이미 있는 최근 작업 위젯의 흐름을 유지하면서도,
+          주석 이미지 변경과 메모 작성자를 사용자가 따로 찾아보지 않아도 됩니다.
+        </p>
+      </div>
+      <div class="note-card">
+        <h3>구현 핵심</h3>
+        <ul>
+          <li>주석 저장 시 activity_log에 “주석 이미지 업데이트” 활동을 새로 남깁니다.</li>
+          <li>씬 상세 모달 메모 작성자는 별도 컬럼 추가보다 최신 memo_update 활동에서 먼저 가져오는 쪽이 낮은 위험입니다.</li>
+          <li>옛날 메모처럼 작성자 기록이 없는 경우에는 작성자 줄을 숨기거나 “기존 메모”로 처리합니다.</li>
+        </ul>
+      </div>
+      <div class="note-card">
+        <h3>결정할 것</h3>
+        <ul>
+          <li>A안 그대로 갈지, B안처럼 이미지 필터를 더 강하게 둘지 선택하면 됩니다.</li>
+          <li>메모 작성자 위치는 “라벨 오른쪽”이 가장 눈에 잘 띄고 공간도 적게 씁니다.</li>
+          <li>배프레임에도 같은 위젯을 새로 만들지 여부는 별도 작업으로 분리하는 편이 안전합니다.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const labels = {
+      A: "A안 선택: 통합 타임라인형. 최근 작업에 주석 이미지 업데이트를 바로 섞고, 메모 라벨 오른쪽에 작성자를 표시합니다.",
+      B: "B안 선택: 작업 종류 분리형. 이미지/메모 필터가 더 뚜렷하지만 클릭 단계가 늘어납니다.",
+      C: "C안 선택: 최소 변경형. 구현 위험은 낮지만 주석 이미지 변경의 존재감은 약합니다."
+    };
+
+    const options = Array.from(document.querySelectorAll(".option"));
+    const decisionText = document.getElementById("decisionText");
+
+    function selectOption(choice) {
+      options.forEach((el) => {
+        el.classList.toggle("selected", el.dataset.choice === choice);
+      });
+      decisionText.textContent = labels[choice];
+      try {
+        localStorage.setItem("bflow-recent-activity-author-preview-choice", choice);
+      } catch (_) {}
+    }
+
+    options.forEach((el) => {
+      el.addEventListener("click", () => selectOption(el.dataset.choice));
+      el.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectOption(el.dataset.choice);
+        }
+      });
+    });
+
+    try {
+      const saved = localStorage.getItem("bflow-recent-activity-author-preview-choice");
+      if (saved && labels[saved]) selectOption(saved);
+    } catch (_) {}
+  </script>
+</body>
+</html>

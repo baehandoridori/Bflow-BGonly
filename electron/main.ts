@@ -1726,8 +1726,30 @@ ipcMain.handle('supabase:add-image-version', wrapIpc(async (_e: unknown, params:
   url: string;
   baseVersionNo?: number;
   createdBy: string;
+  description?: string | null;
 }) => {
-  return sbAddImageVersion(params);
+  const version = await sbAddImageVersion(params);
+
+  if (params.kind === 'annotate') {
+    const actionType: ActionType = params.imageType === 'storyboard'
+      ? 'image_annotate_storyboard'
+      : 'image_annotate_guide';
+    const description = params.description?.trim();
+    await logSceneActivity({
+      sceneUuid: params.sceneId,
+      actionType,
+      actionGroup: 'memo',
+      detail: {
+        imageType: params.imageType,
+        kind: params.kind,
+        versionNo: version.versionNo,
+        baseVersionNo: version.baseVersionNo,
+        ...(description ? { descriptionPreview: description.slice(0, 60) } : {}),
+      },
+    });
+  }
+
+  return version;
 }));
 ipcMain.handle('supabase:delete-image-version', wrapIpc(async (_e: unknown, versionId: string) => {
   await sbDeleteImageVersion(versionId);

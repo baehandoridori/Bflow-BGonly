@@ -543,6 +543,7 @@ export type ActionType =
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
   | 'image_upload_storyboard' | 'image_upload_guide'
+  | 'image_annotate_storyboard' | 'image_annotate_guide'
   // v1.29.0: 댓글 이모지 반응 — 메모/댓글 그룹에 포함, detail.commentId / detail.emoji 보관
   | 'comment_reaction';
 

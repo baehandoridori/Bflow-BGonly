@@ -52,6 +52,8 @@ function ActionIcon({ type, size = 11 }: { type: ActionType; size?: number }) {
       return <Grid3x3 {...props} />;
     case 'image_upload_storyboard':
     case 'image_upload_guide':
+    case 'image_annotate_storyboard':
+    case 'image_annotate_guide':
       return <ImageIcon {...props} />;
   }
 }
