@@ -2235,6 +2235,7 @@ export type ActionType =
   | 'scene_add' | 'scene_delete'
   | 'assignee_change' | 'layout_change'
   | 'image_upload_storyboard' | 'image_upload_guide'
+  | 'image_annotate_storyboard' | 'image_annotate_guide'
   // v1.29.0: 댓글 이모지 반응
   | 'comment_reaction';
 

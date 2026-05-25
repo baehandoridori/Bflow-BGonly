@@ -120,6 +120,10 @@ export function describeActivity(activity: Activity): ActivityVisual {
       return { Icon: ImagePlus, text: '스토리보드 업로드', tone: TONE.meta };
     case 'image_upload_guide':
       return { Icon: ImagePlus, text: '가이드 업로드', tone: TONE.meta };
+    case 'image_annotate_storyboard':
+      return { Icon: ImagePlus, text: '스토리보드 주석 업데이트', tone: TONE.comment };
+    case 'image_annotate_guide':
+      return { Icon: ImagePlus, text: '가이드 주석 업데이트', tone: TONE.comment };
     default:
       return { Icon: Pencil, text: actionType, tone: TONE.meta };
   }

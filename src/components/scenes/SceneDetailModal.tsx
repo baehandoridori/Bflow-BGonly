@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { toast as sonnerToast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -27,10 +27,13 @@ import { ImageModal } from './ImageModal';
 import { CommentPanelResizable } from './CommentPanelResizable';
 import { RevisionPanel } from './RevisionPanel';
 import { getComments } from '@/services/commentService';
+import { useSceneActivities } from '@/hooks/useSceneActivities';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
+import { formatStamp, formatTime } from '@/utils/formatTime';
+import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
 
 // ─── 타입 ──────────────────────────────────────────
 
@@ -71,9 +74,10 @@ interface PropertyRowProps {
   value: string;
   placeholder?: string;
   onSave: (value: string) => void;
+  memoAuthorMeta?: MemoAuthorMeta | null;
 }
 
-function PropertyRow({ label, value, placeholder, onSave }: PropertyRowProps) {
+function PropertyRow({ label, value, placeholder, onSave, memoAuthorMeta }: PropertyRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -93,8 +97,17 @@ function PropertyRow({ label, value, placeholder, onSave }: PropertyRowProps) {
 
   return (
     <div className="flex items-center gap-3 py-2.5 px-4 group hover:bg-bg-primary/40 rounded-lg transition-colors">
-      <span className="text-xs text-text-secondary w-20 shrink-0 font-medium">
+      <span className={cn('text-xs text-text-secondary shrink-0 font-medium', memoAuthorMeta ? 'w-24' : 'w-20')}>
         {label}
+        {value && memoAuthorMeta && (
+          <span
+            className="mt-1 flex items-center gap-1 max-w-full text-[10px] font-medium text-emerald-300/85 truncate"
+            title={`마지막 수정: ${memoAuthorMeta.userName} · ${formatStamp(memoAuthorMeta.createdAt, { withYearAlways: true })}`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-300/80 shrink-0" />
+            <span className="truncate">{memoAuthorMeta.userName} · {formatTime(memoAuthorMeta.createdAt)}</span>
+          </span>
+        )}
       </span>
       <div className="flex-1 min-w-0">
         {editing ? (
@@ -423,6 +436,11 @@ export function SceneDetailModal({
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
+  const sceneActivities = useSceneActivities([scene.id], 50);
+  const memoAuthorMeta = useMemo(
+    () => findLatestMemoActivity(sceneActivities, scene.id),
+    [sceneActivities, scene.id],
+  );
   // 코덱스 P2 fix (5차, 2026-05-05): 알림 라우팅 시 initialTab='revisions' 면 리비전 패널 자동 펼침.
   const [showRevisions, setShowRevisions] = useState(initialTab === 'revisions');
   // 코덱스 P2 fix (6차, 2026-05-05): 모달 인스턴스가 재사용되어 initialTab prop 이 나중에 바뀌면
@@ -897,6 +915,7 @@ export function SceneDetailModal({
                       value={scene.memo}
                       placeholder="메모 입력"
                       onSave={(v) => onFieldUpdate(sceneIndex, 'memo', v)}
+                      memoAuthorMeta={memoAuthorMeta}
                     />
                   </div>
                 </section>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast as sonnerToast } from 'sonner';
 import { motion, AnimatePresence, useAnimationControls } from 'framer-motion';
-import { formatStamp } from '@/utils/formatTime';
+import { formatStamp, formatTime } from '@/utils/formatTime';
 import {
   X,
   Pencil,
@@ -35,6 +35,7 @@ import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
+import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -338,6 +339,7 @@ export function UnifiedSceneDetailModal({
     const BIG_EVENT_TYPES = new Set([
       'memo_update',
       'image_upload_storyboard', 'image_upload_guide',
+      'image_annotate_storyboard', 'image_annotate_guide',
       'scene_add',
       'revision_add', 'revision_in_progress', 'revision_resolve', 'revision_delete',
     ]);
@@ -368,6 +370,14 @@ export function UnifiedSceneDetailModal({
     }
     return events;
   }, [sceneActivities, bgScene, actScene]);
+  const bgMemoAuthorMeta = useMemo(
+    () => findLatestMemoActivity(sceneActivities, bgScene?.id),
+    [sceneActivities, bgScene?.id],
+  );
+  const actMemoAuthorMeta = useMemo(
+    () => findLatestMemoActivity(sceneActivities, actScene?.id),
+    [sceneActivities, actScene?.id],
+  );
 
   // ESC 닫기 + 좌우 화살표
   useEffect(() => {
@@ -788,6 +798,7 @@ export function UnifiedSceneDetailModal({
                             onFieldUpdate={onFieldUpdate}
                             onDelete={() => setDeleteConfirm('bg')}
                             onAdd={() => handleAddDept('bg')}
+                            memoAuthorMeta={bgMemoAuthorMeta}
                           />
                           <DeptSection
                             dept="acting"
@@ -799,6 +810,7 @@ export function UnifiedSceneDetailModal({
                             onFieldUpdate={onFieldUpdate}
                             onDelete={() => setDeleteConfirm('act')}
                             onAdd={() => handleAddDept('acting')}
+                            memoAuthorMeta={actMemoAuthorMeta}
                             onActPhaseStateClick={onActPhaseStateClick}
                             onActFeedbackRequest={onActFeedbackRequest}
                             onActRoundBump={onActRoundBump}
@@ -1042,6 +1054,7 @@ function DeptSection({
   onFieldUpdate,
   onDelete,
   onAdd,
+  memoAuthorMeta,
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
@@ -1055,6 +1068,7 @@ function DeptSection({
   onFieldUpdate: (sheetName: string, sceneIndex: number, field: string, value: string) => void;
   onDelete: () => void;
   onAdd: () => void;
+  memoAuthorMeta?: MemoAuthorMeta | null;
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
@@ -1173,6 +1187,7 @@ function DeptSection({
         label="메모"
         value={scene.memo || ''}
         onSave={(v) => onFieldUpdate(sheetName, sceneIndex, 'memo', v)}
+        memoAuthorMeta={memoAuthorMeta}
       />
     </div>
   );
@@ -1229,8 +1244,8 @@ function InlineAssigneeRow({ label, value, onSave }: {
 
 /* ── 인라인 메모 ── */
 
-function InlineTextareaRow({ label, value, onSave }: {
-  label: string; value: string; onSave: (v: string) => void;
+function InlineTextareaRow({ label, value, onSave, memoAuthorMeta }: {
+  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -1248,6 +1263,15 @@ function InlineTextareaRow({ label, value, onSave }: {
     <div>
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-xs text-text-secondary">{label}</span>
+        {value && memoAuthorMeta && !editing && (
+          <span
+            className="inline-flex items-center gap-1.5 max-w-[13rem] text-[10.5px] font-medium text-emerald-300/85 truncate"
+            title={`마지막 수정: ${memoAuthorMeta.userName} · ${formatStamp(memoAuthorMeta.createdAt, { withYearAlways: true })}`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-300/80 shrink-0" />
+            <span className="truncate">{memoAuthorMeta.userName} · {formatTime(memoAuthorMeta.createdAt)}</span>
+          </span>
+        )}
         {editing && (
           <button
             onClick={commit}

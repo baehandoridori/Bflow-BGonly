@@ -25,6 +25,8 @@ export const ACTION_TYPE_TO_GROUP: Record<ActionType, ActionGroup> = {
   layout_change: 'etc',
   image_upload_storyboard: 'etc',
   image_upload_guide: 'etc',
+  image_annotate_storyboard: 'memo',
+  image_annotate_guide: 'memo',
   // v1.29.0: 댓글 이모지 반응 — 메모/댓글 카테고리
   comment_reaction: 'memo',
 };
@@ -54,6 +56,8 @@ export const ACTION_TYPE_LABEL: Record<ActionType, string> = {
   layout_change: '레이아웃 변경',
   image_upload_storyboard: '스토리보드 업로드',
   image_upload_guide: '가이드 업로드',
+  image_annotate_storyboard: '스토리보드 주석 업데이트',
+  image_annotate_guide: '가이드 주석 업데이트',
   // v1.29.0: 댓글 이모지 반응
   comment_reaction: '이모지 반응',
 };
@@ -83,6 +87,8 @@ export const ACTION_TYPE_COLOR: Record<ActionType, string> = {
   layout_change: '#95A5A6',
   image_upload_storyboard: '#95A5A6',
   image_upload_guide: '#95A5A6',
+  image_annotate_storyboard: '#4DD0E1',
+  image_annotate_guide: '#4DD0E1',
   // v1.29.0: 댓글 이모지 반응 — 메모/댓글 톤(comment_add #FFA94D, memo_update #FF8FA3) 사이의 부드러운 보라/핑크
   comment_reaction: '#C8A2D8',
 };
