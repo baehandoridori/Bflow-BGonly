@@ -6,7 +6,7 @@ import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Stage, Scene, ScenePhaseState } from '@/types';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
 import type { SceneGroupMode } from '@/stores/useAppStore';
-import { sceneProgress, progressGradient } from '@/utils/calcStats';
+import { isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 import { getMergedCommentBadgeCounts } from '@/utils/mergedSceneHelpers';
 import { HighlightText } from '@/components/common/HighlightText';
@@ -18,6 +18,12 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
+import {
+  ResizableHeaderCell,
+  useResizableSheetColumns,
+  type SheetColumnDefinition,
+} from './SheetColumnResize';
+import { useAppStore } from '@/stores/useAppStore';
 
 // ─── Props ───────────────────────────────────────────────────
 
@@ -54,6 +60,43 @@ interface CellId { row: number; col: number }
 const EDITABLE_FIELDS = ['bgMemo', 'actMemo', 'bgAssignee', 'actAssignee'] as const;
 
 function cellKey(row: number, col: number) { return `${row}:${col}`; }
+
+type UnifiedSheetColumnKey =
+  | 'scene'
+  | 'bgMemo'
+  | 'actMemo'
+  | 'storyboard'
+  | 'guide'
+  | 'bgAssignee'
+  | 'bgLo'
+  | 'bgDone'
+  | 'bgReview'
+  | 'bgPng'
+  | 'actAssignee'
+  | 'actWait'
+  | 'actWork'
+  | 'actFeedback'
+  | 'actDone'
+  | 'actions';
+
+const UNIFIED_SHEET_COLUMNS: Array<SheetColumnDefinition<UnifiedSheetColumnKey>> = [
+  { key: 'scene', defaultWidth: 104, minWidth: 78, maxWidth: 180 },
+  { key: 'bgMemo', defaultWidth: 220, minWidth: 72, maxWidth: 520 },
+  { key: 'actMemo', defaultWidth: 220, minWidth: 72, maxWidth: 520 },
+  { key: 'storyboard', defaultWidth: 64, minWidth: 48, maxWidth: 140 },
+  { key: 'guide', defaultWidth: 64, minWidth: 48, maxWidth: 140 },
+  { key: 'bgAssignee', defaultWidth: 112, minWidth: 72, maxWidth: 220 },
+  { key: 'bgLo', defaultWidth: 48, minWidth: 36, maxWidth: 96 },
+  { key: 'bgDone', defaultWidth: 52, minWidth: 36, maxWidth: 104 },
+  { key: 'bgReview', defaultWidth: 52, minWidth: 36, maxWidth: 104 },
+  { key: 'bgPng', defaultWidth: 52, minWidth: 36, maxWidth: 104 },
+  { key: 'actAssignee', defaultWidth: 112, minWidth: 72, maxWidth: 220 },
+  { key: 'actWait', defaultWidth: 52, minWidth: 36, maxWidth: 104 },
+  { key: 'actWork', defaultWidth: 56, minWidth: 36, maxWidth: 112 },
+  { key: 'actFeedback', defaultWidth: 64, minWidth: 44, maxWidth: 128 },
+  { key: 'actDone', defaultWidth: 56, minWidth: 36, maxWidth: 112 },
+  { key: 'actions', defaultWidth: 40, minWidth: 32, maxWidth: 72 },
+];
 
 // ─── 인라인 편집 셀 ─────────────────────────────────────────
 
@@ -171,7 +214,6 @@ function SheetEditableCell({
     );
   }
 
-  // v1.16.0: 메모 컬럼 분리 (bgMemo/actMemo) — 한 컬럼당 max-width 한계 + 컨텐츠 기반 동적
   const isMemo = field === 'bgMemo' || field === 'actMemo';
   return (
     <td
@@ -179,7 +221,7 @@ function SheetEditableCell({
       title={isMemo && value ? value : undefined}
       className={cn(
         'px-2 py-1.5 text-xs text-text-secondary cursor-cell truncate transition-colors',
-        isMemo && 'max-w-[20rem] min-w-[3.5rem]',
+        isMemo && 'min-w-0',
         isSelected
           ? 'ring-2 ring-accent ring-inset bg-accent/5'
           : 'hover:bg-accent/5',
@@ -274,29 +316,6 @@ function SheetThumbnailCell({ url, label }: { url?: string; label: string }) {
   );
 }
 
-// ─── 진행률 셀 ───────────────────────────────────────────────
-
-function SheetProgressCell({ pct }: { pct: number }) {
-  return (
-    <td className="px-1 py-1.5 text-center">
-      <div className="flex flex-col items-center gap-0.5">
-        <span className={cn(
-          'text-[10px] font-mono font-bold leading-none',
-          pct >= 100 ? 'text-green-400' : pct >= 50 ? 'text-yellow-400' : 'text-text-secondary',
-        )}>
-          {Math.round(pct)}%
-        </span>
-        <div className="w-full h-1 bg-bg-primary rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${pct}%`, background: progressGradient(pct) }}
-          />
-        </div>
-      </div>
-    </td>
-  );
-}
-
 // ─── 메인 컴포넌트 ──────────────────────────────────────────
 
 export function UnifiedSceneSheetView({
@@ -321,6 +340,13 @@ export function UnifiedSceneSheetView({
 }: UnifiedSceneSheetViewProps) {
   const bgCfg = DEPARTMENT_CONFIGS.bg;
   const actCfg = DEPARTMENT_CONFIGS.acting;
+  const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
+  const stagePointerHandledRef = useRef(false);
+  const {
+    widthOf,
+    totalWidth,
+    startResize,
+  } = useResizableSheetColumns('bflow_unified_scene_sheet_columns_v1', UNIFIED_SHEET_COLUMNS);
 
   // 레이아웃 그루핑
   const layoutGroups = useMemo(() => {
@@ -712,7 +738,15 @@ export function UnifiedSceneSheetView({
         onMouseUp={() => setIsDragging(false)}
         style={{ userSelect: isDragging ? 'none' : undefined }}
       >
-        <table className="w-full text-sm border-collapse">
+        <table
+          className="w-full text-sm border-collapse"
+          style={{ tableLayout: 'fixed', minWidth: totalWidth }}
+        >
+          <colgroup>
+            {UNIFIED_SHEET_COLUMNS.map((column) => (
+              <col key={column.key} style={{ width: widthOf(column.key) }} />
+            ))}
+          </colgroup>
           {/* ── 헤더 ── */}
           <thead className="sticky top-0 z-10">
             {/* 부서 구분 서브헤더 (상단) — v1.16.0: 메모 컬럼 분리에 맞춰 colSpan 조정 (2→3)
@@ -720,50 +754,54 @@ export function UnifiedSceneSheetView({
                 여기만 19칸이 되어 sticky 2단 헤더 정렬이 깨졌음. 한솔 결정 1-B 에 따라 컬럼 수는
                 일반 모드와 동일하므로 별도 분기 불필요. */}
             <tr className="bg-bg-card border-b border-bg-border/50">
-              <th colSpan={3} />
-              <th className="px-2 py-1" />
-              <th colSpan={2} />
-              <th colSpan={4} className="py-1 text-center">
+              <th colSpan={5} />
+              <th colSpan={5} className="py-1 text-center">
                 <span className="inline-flex items-center gap-1 text-[10px] text-text-secondary/60">
                   <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: bgCfg.color }} />
                   {bgCfg.shortLabel}
                 </span>
               </th>
-              <th colSpan={4} className="py-1 text-center">
+              <th colSpan={5} className="py-1 text-center">
                 <span className="inline-flex items-center gap-1 text-[10px] text-text-secondary/60">
                   <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: actCfg.color }} />
                   {actCfg.shortLabel}
                 </span>
               </th>
-              <th colSpan={3} />
               <th />
             </tr>
             <tr className="bg-bg-card border-b border-bg-border">
               {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 별도 컬럼 대신 행 위에 그룹 헤더 행을 삽입.
                   sceneGroupMode === 'layout' 컬럼 분기 제거 — 컬럼 수가 일반 모드와 동일하게 유지된다.
                   v1.16.0: 메모 컬럼을 BG/ACT 두 개로 분리 (한솔 결정 B2). */}
-              <th className="w-24 px-2 py-2 text-left text-xs font-medium text-text-secondary">씬번호</th>
-              <th className="px-2 py-2 text-left text-xs font-medium max-w-[20rem] min-w-[3.5rem]" style={{ color: bgCfg.color }}>BG 메모</th>
-              <th className="px-2 py-2 text-left text-xs font-medium max-w-[20rem] min-w-[3.5rem]" style={{ color: actCfg.color }}>ACT 메모</th>
-              <th className="w-14 px-1 py-2 text-center text-xs font-medium text-text-secondary">SB</th>
-              <th className="w-14 px-1 py-2 text-center text-xs font-medium text-text-secondary">가이드</th>
+              <ResizableHeaderCell columnKey="scene" width={widthOf('scene')} onResizeStart={startResize}>씬번호</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="bgMemo" width={widthOf('bgMemo')} onResizeStart={startResize} style={{ color: bgCfg.color }}>BG 메모</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="actMemo" width={widthOf('actMemo')} onResizeStart={startResize} style={{ color: actCfg.color }}>ACT 메모</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="storyboard" width={widthOf('storyboard')} onResizeStart={startResize} align="center">SB</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="guide" width={widthOf('guide')} onResizeStart={startResize} align="center">가이드</ResizableHeaderCell>
               {/* BG 담당 + 스테이지 */}
-              <th className="w-20 px-2 py-2 text-left text-xs font-medium" style={{ color: bgCfg.color }}>
+              <ResizableHeaderCell columnKey="bgAssignee" width={widthOf('bgAssignee')} onResizeStart={startResize} style={{ color: bgCfg.color }}>
                 BG담당
-              </th>
-              {STAGES.map((s) => (
-                <th
-                  key={`bg-${s}`}
-                  className="w-10 px-1 py-2 text-center text-[11px] font-medium"
-                  style={{ color: bgCfg.stageColors[s] }}
-                >
-                  {bgCfg.stageLabels[s]}
-                </th>
-              ))}
+              </ResizableHeaderCell>
+              {STAGES.map((s) => {
+                const key = `bg${s[0].toUpperCase()}${s.slice(1)}` as UnifiedSheetColumnKey;
+                return (
+                  <ResizableHeaderCell
+                    key={`bg-${s}`}
+                    columnKey={key}
+                    width={widthOf(key)}
+                    onResizeStart={startResize}
+                    align="center"
+                    className="px-1 text-[11px]"
+                    style={{ color: bgCfg.stageColors[s] }}
+                  >
+                    {bgCfg.stageLabels[s]}
+                  </ResizableHeaderCell>
+                );
+              })}
               {/* ACT 담당 + 스테이지 */}
-              <th className="w-20 px-2 py-2 text-left text-xs font-medium" style={{ color: actCfg.color }}>
+              <ResizableHeaderCell columnKey="actAssignee" width={widthOf('actAssignee')} onResizeStart={startResize} style={{ color: actCfg.color }}>
                 ACT담당
-              </th>
+              </ResizableHeaderCell>
               {/* v1.25.2~: 액팅 새 토글 핸들러가 전달되면 ACT 단계 4셀을 ScenePhaseToggle 1셀로 통합 */}
               {onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
                 <th
@@ -774,20 +812,30 @@ export function UnifiedSceneSheetView({
                   액팅 단계
                 </th>
               ) : (
-                STAGES.map((s) => (
-                  <th
-                    key={`act-${s}`}
-                    className="w-10 px-1 py-2 text-center text-[11px] font-medium"
-                    style={{ color: actCfg.stageColors[s] }}
-                  >
-                    {actCfg.stageLabels[s]}
-                  </th>
-                ))
+                STAGES.map((s) => {
+                  const key = s === 'lo'
+                    ? 'actWait'
+                    : s === 'done'
+                      ? 'actWork'
+                      : s === 'review'
+                        ? 'actFeedback'
+                        : 'actDone';
+                  return (
+                    <ResizableHeaderCell
+                      key={`act-${s}`}
+                      columnKey={key}
+                      width={widthOf(key)}
+                      onResizeStart={startResize}
+                      align="center"
+                      className="px-1 text-[11px]"
+                      style={{ color: actCfg.stageColors[s] }}
+                    >
+                      {actCfg.stageLabels[s]}
+                    </ResizableHeaderCell>
+                  );
+                })
               )}
-              <th className="w-12 px-1 py-2 text-center text-xs font-medium text-text-secondary">BG%</th>
-              <th className="w-12 px-1 py-2 text-center text-xs font-medium text-text-secondary">ACT%</th>
-              <th className="w-12 px-1 py-2 text-center text-xs font-medium text-text-secondary">합계</th>
-              <th className="w-8 px-1 py-2" />
+              <ResizableHeaderCell columnKey="actions" width={widthOf('actions')} onResizeStart={startResize} align="center" className="px-1" />
             </tr>
           </thead>
 
@@ -797,11 +845,6 @@ export function UnifiedSceneSheetView({
               const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = m;
               const primary = bgScene ?? actScene;
               if (!primary) return null;
-
-              const bgPct = bgScene ? sceneProgress(bgScene) : 0;
-              const actPct = actScene ? sceneProgress(actScene) : 0;
-              const presentCount = (bgScene ? 1 : 0) + (actScene ? 1 : 0);
-              const combinedPct = presentCount > 0 ? Math.round((bgPct + actPct) / presentCount) : 0;
 
               const meta = layoutMeta.get(m);
               const isRowSelected = selectedSceneIds.has(`bg:${mergedKey}`) || selectedSceneIds.has(`act:${mergedKey}`);
@@ -828,6 +871,7 @@ export function UnifiedSceneSheetView({
 
               // v1.18.0: 미해결 리비전 카운트 (행 좌측 막대 + 씬번호 셀 배지)
               const openRevCount = revisionCountByMergedKey.get(mergedKey) ?? 0;
+              const isMergedComplete = !!bgScene && !!actScene && isFullyDone(bgScene) && isFullyDone(actScene);
 
               return (
                 <Fragment key={mergedKey}>
@@ -859,6 +903,7 @@ export function UnifiedSceneSheetView({
                       isLayoutMode && isLastInGroup && 'scene-row-group-last',
                       lengthChange === 'LD' && 'sheet-row-length-up',
                       lengthChange === 'SD' && 'sheet-row-length-down',
+                      completionTintEnabled && isMergedComplete && 'scene-completion-tint-row',
                       // v1.18.0: 미해결 리비전 행 — 액센트 좌측 강조 (셀 배지와 함께 시각적 anchor)
                       openRevCount > 0 && 'sheet-row-revision-open',
                     )}
@@ -998,7 +1043,26 @@ export function UnifiedSceneSheetView({
                     <td key={`bg-${stage}`} className="px-1 py-1.5 text-center">
                       {bgScene && bgSheetName ? (
                         <button
-                          onClick={(e) => { e.stopPropagation(); onToggle(bgSheetName, bgScene.sceneId, stage); }}
+                          type="button"
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            stagePointerHandledRef.current = true;
+                            onToggle(bgSheetName, bgScene.sceneId, stage);
+                            window.setTimeout(() => {
+                              stagePointerHandledRef.current = false;
+                            }, 600);
+                          }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (stagePointerHandledRef.current) {
+                              stagePointerHandledRef.current = false;
+                              return;
+                            }
+                            onToggle(bgSheetName, bgScene.sceneId, stage);
+                          }}
                           className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto cursor-pointer"
                           style={
                             bgScene[stage]
@@ -1056,7 +1120,26 @@ export function UnifiedSceneSheetView({
                       <td key={`act-${stage}`} className="px-1 py-1.5 text-center">
                         {actScene && actSheetName ? (
                           <button
-                            onClick={(e) => { e.stopPropagation(); onToggle(actSheetName, actScene.sceneId, stage); }}
+                            type="button"
+                            onPointerDown={(e) => {
+                              if (e.button !== 0) return;
+                              e.preventDefault();
+                              e.stopPropagation();
+                              stagePointerHandledRef.current = true;
+                              onToggle(actSheetName, actScene.sceneId, stage);
+                              window.setTimeout(() => {
+                                stagePointerHandledRef.current = false;
+                              }, 600);
+                            }}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (stagePointerHandledRef.current) {
+                                stagePointerHandledRef.current = false;
+                                return;
+                              }
+                              onToggle(actSheetName, actScene.sceneId, stage);
+                            }}
                             className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto cursor-pointer"
                             style={
                               actScene[stage]
@@ -1072,15 +1155,6 @@ export function UnifiedSceneSheetView({
                       </td>
                     ))
                   )}
-
-                  {/* BG% */}
-                  <SheetProgressCell pct={bgScene ? bgPct : 0} />
-
-                  {/* ACT% */}
-                  <SheetProgressCell pct={actScene ? actPct : 0} />
-
-                  {/* 합계% */}
-                  <SheetProgressCell pct={combinedPct} />
 
                   {/* 삭제 */}
                   <td className="px-1 py-1.5">

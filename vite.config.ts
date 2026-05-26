@@ -5,36 +5,42 @@ import renderer from 'vite-plugin-electron-renderer';
 import path from 'path';
 import pkg from './package.json';
 
+const rendererOnly = process.env.BFLOW_RENDERER_ONLY === '1';
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   plugins: [
     react(),
-    electron([
-      {
-        entry: 'electron/main.ts',
-        vite: {
-          build: {
-            outDir: 'dist-electron',
-            rollupOptions: {
-              external: ['ws', 'bufferutil', 'utf-8-validate', 'googleapis', 'google-auth-library'],
+    ...(!rendererOnly
+      ? [
+          electron([
+            {
+              entry: 'electron/main.ts',
+              vite: {
+                build: {
+                  outDir: 'dist-electron',
+                  rollupOptions: {
+                    external: ['ws', 'bufferutil', 'utf-8-validate', 'googleapis', 'google-auth-library'],
+                  },
+                },
+              },
             },
-          },
-        },
-      },
-      {
-        entry: 'electron/preload.ts',
-        onstart(args) {
-          args.reload();
-        },
-        vite: {
-          build: {
-            outDir: 'dist-electron',
-          },
-        },
-      },
-    ]),
+            {
+              entry: 'electron/preload.ts',
+              onstart(args) {
+                args.reload();
+              },
+              vite: {
+                build: {
+                  outDir: 'dist-electron',
+                },
+              },
+            },
+          ]),
+        ]
+      : []),
     renderer(),
   ],
   resolve: {

@@ -411,6 +411,8 @@ export default function App() {
           setToastDuration(savedPrefs.notifications.toastDuration);
         }
 
+        useAppStore.getState().setCompletionTintEnabled(savedPrefs?.sceneUi?.completionTintEnabled ?? true);
+
         // v1.27.0: lastSeenVersion 토스트는 *splash 닫힌 후* 별도 effect 에서 처리.
         // 초기에 호출하면 Toaster 가 아직 mount 안 된 상태(splash 화면 동안) 라 안 보이는데
         // lastSeenVersion 은 갱신되어 다음 실행에도 안 보임 — 한솔 v1.27.0 1차 보고.
@@ -2103,7 +2105,11 @@ export default function App() {
   useEffect(() => {
     const cleanup = window.electronAPI?.onPreferencesChanged?.(() => {
       loadPreferences()
-        .then((prefs) => { if (prefs) applyPreferencesToDOM(prefs); })
+        .then((prefs) => {
+          if (!prefs) return;
+          applyPreferencesToDOM(prefs);
+          useAppStore.getState().setCompletionTintEnabled(prefs.sceneUi?.completionTintEnabled ?? true);
+        })
         .catch((err) => console.warn('[설정] 브로드캐스트 재적용 실패', err));
     });
     return () => { cleanup?.(); };

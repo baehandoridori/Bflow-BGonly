@@ -4,6 +4,7 @@ import { cn } from '@/utils/cn';
 import type { Episode, Department, ScenesDeptFilter } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
 import { getCombinedPartMemo, type PartContextMenuTarget } from '@/utils/partMemoHelpers';
+import { normalizePartIdKey, partIdMatches } from '@/utils/partId';
 
 export interface ArchivedEpisodeInfo {
   episodeNumber: number;
@@ -151,6 +152,7 @@ export function EpisodeTreeNav({
 
   // 'all' 모드에서 partId별 그룹핑된 항목 타입
   type GroupedPartItem = {
+    partKey: string;
     partId: string;
     scenes: { lo: boolean; done: boolean; review: boolean; png: boolean }[];
     sceneCount: number;
@@ -175,15 +177,21 @@ export function EpisodeTreeNav({
     for (const ep of episodes) {
       const grouped = new Map<string, GroupedPartItem>();
       for (const part of ep.parts) {
-        const existing = grouped.get(part.partId);
+        const partKey = normalizePartIdKey(part.partId);
+        if (!partKey) continue;
+        const existing = grouped.get(partKey);
         if (existing) {
           existing.scenes.push(...part.scenes);
           existing.sceneCount += part.scenes.length;
+          if (part.department === 'bg') {
+            existing.partId = part.partId;
+          }
           if (!existing.sheetNames.includes(part.sheetName)) {
             existing.sheetNames.push(part.sheetName);
           }
         } else {
-          grouped.set(part.partId, {
+          grouped.set(partKey, {
+            partKey,
             partId: part.partId,
             scenes: [...part.scenes],
             sceneCount: part.scenes.length,
@@ -321,13 +329,13 @@ export function EpisodeTreeNav({
                       /* 'all' 모드: partId 기준 그룹핑 (BG+ACT 합산) */
                       (epGroupedPartsMap.get(ep.episodeNumber) ?? []).map((group) => {
                         const defaultPartId = (epGroupedPartsMap.get(ep.episodeNumber) ?? [])[0]?.partId;
-                        const isPartActive = isEpSelected && (selectedPart ?? defaultPartId) === group.partId;
+                        const isPartActive = isEpSelected && partIdMatches(selectedPart ?? defaultPartId, group.partId);
                         const partProgress = calcPartProgress(group.scenes);
                         const memo = getCombinedPartMemo(partMemos, group.sheetNames);
 
                         return (
                           <div
-                            key={group.partId}
+                            key={group.partKey}
                             className={cn(
                               'group/part flex items-center gap-1.5 px-2 py-1 mx-1 rounded-md cursor-pointer transition-colors',
                               isPartActive
@@ -377,7 +385,7 @@ export function EpisodeTreeNav({
                       /* BG/ACT 개별 모드: 기존 방식 */
                       deptParts.map((part) => {
                         const defaultKey = deptParts[0]?.partId;
-                        const isPartActive = isEpSelected && (selectedPart ?? defaultKey) === part.partId;
+                        const isPartActive = isEpSelected && partIdMatches(selectedPart ?? defaultKey, part.partId);
                         const partProgress = calcPartProgress(part.scenes);
                         const memo = partMemos[part.sheetName];
 

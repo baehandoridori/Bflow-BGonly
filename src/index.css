@@ -226,6 +226,142 @@ body.theme-ready *::after {
     box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* ─── 씬 카드 → 상세 모달 continuity transition ─── */
+.bflow-continuity-source-dim {
+  opacity: 0.38 !important;
+  filter: saturate(0.82) blur(0.2px);
+  transition: opacity 0.18s ease, filter 0.18s ease;
+}
+
+.bflow-continuity-live-root {
+  transform-origin: top left;
+  will-change: transform, opacity, filter;
+  overflow: hidden;
+}
+
+/* ─── 씬 뷰 상단 진행률 바 ─── */
+.scene-top-progress-track {
+  position: relative;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgb(var(--color-bg-primary) / 0.96), rgb(var(--color-bg-primary) / 0.72));
+  box-shadow:
+    inset 0 1px 2px rgb(0 0 0 / 0.32),
+    inset 0 0 0 1px rgb(255 255 255 / 0.045);
+}
+
+.scene-top-progress-fill {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.26),
+    0 0 18px rgb(var(--color-accent) / 0.22);
+}
+
+.scene-top-progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.28), transparent);
+  opacity: 0.38;
+  transform: translateX(-80%);
+  animation: scene-progress-sheen 2.8s ease-in-out infinite;
+}
+
+@keyframes scene-progress-sheen {
+  0%, 28% { transform: translateX(-90%); }
+  72%, 100% { transform: translateX(110%); }
+}
+
+/* ─── 씬 완료 색상 표시 ─── */
+.scene-completion-tint-card {
+  border-color: rgb(52 211 153 / 0.54) !important;
+  background:
+    linear-gradient(135deg, rgb(16 185 129 / 0.20), rgb(var(--color-bg-card) / 0.96) 44%, rgb(34 197 94 / 0.10)),
+    rgb(var(--color-bg-card));
+  box-shadow:
+    0 0 0 1px rgb(16 185 129 / 0.16),
+    0 14px 36px rgb(16 185 129 / 0.10),
+    0 8px 22px rgb(0 0 0 / 0.16);
+}
+
+.scene-completion-tint-row {
+  background:
+    linear-gradient(90deg, rgb(16 185 129 / 0.18), rgb(var(--color-bg-card) / 0.30) 42%, rgb(16 185 129 / 0.08)) !important;
+  box-shadow: inset 3px 0 0 rgb(52 211 153 / 0.72);
+}
+
+.scene-completion-dept-done {
+  color: rgb(110 231 183);
+  background: rgb(16 185 129 / 0.14);
+  border: 1px solid rgb(52 211 153 / 0.22);
+}
+
+:root[data-color-mode="light"] .scene-completion-tint-card {
+  border-color: rgb(5 150 105 / 0.34) !important;
+  background:
+    linear-gradient(135deg, rgb(209 250 229 / 0.88), rgb(255 255 255 / 0.96) 48%, rgb(220 252 231 / 0.72)),
+    rgb(var(--color-bg-card));
+  box-shadow:
+    0 0 0 1px rgb(5 150 105 / 0.12),
+    0 14px 32px rgb(5 150 105 / 0.10);
+}
+
+:root[data-color-mode="light"] .scene-completion-tint-row {
+  background:
+    linear-gradient(90deg, rgb(209 250 229 / 0.84), rgb(255 255 255 / 0.76) 46%, rgb(220 252 231 / 0.64)) !important;
+  box-shadow: inset 3px 0 0 rgb(5 150 105 / 0.54);
+}
+
+:root[data-color-mode="light"] .scene-completion-dept-done {
+  color: rgb(4 120 87);
+  background: rgb(209 250 229 / 0.82);
+  border-color: rgb(5 150 105 / 0.18);
+}
+
+/* ─── 시트 뷰 컬럼 리사이즈 ─── */
+.sheet-resizable-th {
+  position: relative;
+  overflow: visible;
+  user-select: none;
+}
+
+.sheet-column-resizer {
+  position: absolute;
+  top: 6px;
+  right: -3px;
+  bottom: 6px;
+  z-index: 2;
+  width: 7px;
+  cursor: col-resize;
+  border-radius: 999px;
+}
+
+.sheet-column-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: rgb(var(--color-bg-border) / 0.72);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sheet-column-resizer:hover::after,
+.is-sheet-column-resizing .sheet-column-resizer::after {
+  background: rgb(var(--color-accent) / 0.96);
+  box-shadow: 0 0 8px rgb(var(--color-accent) / 0.42);
+}
+
+.is-sheet-column-resizing {
+  cursor: col-resize;
+}
+
 /* ─── 스크롤바 (테마 반응형, 다크 UI 통일) ─── */
 /* Firefox scrollbar-color (html+body에 적용, 자식은 inherit) */
 html, body {

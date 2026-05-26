@@ -9,6 +9,7 @@ import { FeedbackRequestModal } from '@/components/scenes/FeedbackRequestModal';
 import { updateScenePhaseInSupabase, dispatchActingFeedbackNotification } from '@/services/supabaseService';
 import { sceneProgress, isFullyDone, isNotStarted, progressGradient } from '@/utils/calcStats';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
+import { findPartById, getCanonicalPartIds, partIdMatches } from '@/utils/partId';
 import {
   buildUnifiedSceneId,
   getMergedCommentBadgeCounts,
@@ -16,7 +17,7 @@ import {
 } from '@/utils/mergedSceneHelpers';
 import { getAllViewCompletionState, getSingleViewCompletionState } from '@/utils/visibleCompletion';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { HighlightText } from '@/components/common/HighlightText';
 import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
@@ -318,8 +319,9 @@ function formatCompletedMeta(iso: string | undefined, completedBy: string | unde
 }
 
 /* ── 파트 완료 오버레이 ── */
-function PartCompleteOverlay({ completedMeta }: {
+function PartCompleteOverlay({ completedMeta, onUndoLastAction }: {
   completedMeta?: ReturnType<typeof formatCompletedMeta>;
+  onUndoLastAction?: () => void;
 }) {
   const colorMode = useAppStore((s) => s.colorMode);
   const isLight = colorMode === 'light';
@@ -581,6 +583,24 @@ function PartCompleteOverlay({ completedMeta }: {
                 고생 많으셨습니다! 다음 작업 이어서 하시기 전에, 잠깐 쉬셔요~ 띵호와
               </p>
             </div>
+            {onUndoLastAction && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onUndoLastAction();
+                }}
+                className={cn(
+                  'pointer-events-auto inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-all',
+                  isLight
+                    ? 'border border-emerald-200 bg-white/80 text-emerald-800 hover:bg-white'
+                    : 'border border-emerald-300/20 bg-white/8 text-emerald-100 hover:bg-white/12',
+                )}
+              >
+                <RotateCcw size={14} />
+                마지막 체크 취소
+              </button>
+            )}
           </div>
         </motion.div>
       </div>
@@ -701,10 +721,13 @@ interface SceneCardProps {
 
 function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, revisionCount = 0, selectionId, fallbackStoryboardUrl, fallbackGuideUrl, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
+  const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const pct = sceneProgress(scene);
+  const isComplete = isFullyDone(scene);
   const storyboardUrl = scene.storyboardUrl || fallbackStoryboardUrl || '';
   const guideUrl = scene.guideUrl || fallbackGuideUrl || '';
   const hasImages = !!(storyboardUrl || guideUrl);
+  const stagePointerHandledRef = useRef(false);
 
   const borderColor = pct >= 100 ? '#6C5CE7' : pct >= 50 ? '#A599F5' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
 
@@ -730,6 +753,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         'hover:shadow-[0_3px_8px_rgba(0,0,0,0.12),0_10px_24px_rgba(0,0,0,0.18)]',
         'scene-card-interactive',
         'hover:-translate-y-0.5 hover:border-accent/70',
+        completionTintEnabled && isComplete && 'scene-completion-tint-card',
         isHighlighted && 'scene-highlight',
         isSelected && 'scene-card-selected',
       )}
@@ -862,8 +886,27 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 
             return (
               <button
+                type="button"
                 key={stage}
-                onClick={(e) => { e.stopPropagation(); onToggle(scene.sceneId, stage); }}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  stagePointerHandledRef.current = true;
+                  onToggle(scene.sceneId, stage);
+                  window.setTimeout(() => {
+                    stagePointerHandledRef.current = false;
+                  }, 600);
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (stagePointerHandledRef.current) {
+                    stagePointerHandledRef.current = false;
+                    return;
+                  }
+                  onToggle(scene.sceneId, stage);
+                }}
                 className={cn(
                   'flex-1 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
                   !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
@@ -892,6 +935,24 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 const ALPHABET_PREFIXES = 'abcdefghijklmnopqrstuvwx'.split('');
 
 type PrefixMode = 'alphabet' | 'sc' | 'custom';
+
+type CompletionUndoAction =
+  | {
+      kind: 'stage';
+      sheetName: string;
+      sceneId: string;
+      stage: Stage;
+    }
+  | {
+      kind: 'phase';
+      sheetName: string;
+      sceneId: string;
+      previousState: ScenePhaseState;
+      previousWorkRound: number;
+      previousFeedbackRound: number;
+      previousCompletedBy: string;
+      previousCompletedAt: string;
+    };
 
 function suggestNextNumber(prefix: string, existingIds: string[]): string {
   const lp = prefix.toLowerCase();
@@ -1544,15 +1605,61 @@ export function ScenesView() {
   //   명시적 복원. setScenePhaseOptimistic 만 부르면 전이 규칙이 다시 적용되어 차수가 잘못 복구됨.
   const handleActPhaseStateClick = useCallback(
     async (sheetName: string, sceneId: string, newState: ScenePhaseState) => {
-      const scene = findSceneInSheet(sheetName, sceneId);
-      if (!scene?.id) return;
+      const latestPart = useDataStore.getState().episodes
+        .flatMap((ep) => ep.parts)
+        .find((part) => part.sheetName === sheetName);
+      const sceneIndex = latestPart?.scenes.findIndex((candidate) => candidate.sceneId === sceneId) ?? -1;
+      const scene = sceneIndex >= 0 ? latestPart?.scenes[sceneIndex] : undefined;
+      if (!scene?.id || sceneIndex < 0) return;
       const sceneUuid = scene.id;
       const prevState: ScenePhaseState = scene.sceneState ?? 'wait';
       const prevWork = scene.workRound ?? 0;
       const prevFb = scene.feedbackRound ?? 0;
       // 코덱스 5차 P1 #11 fix: legacy boolean 도 캡처해 롤백 시 복원
       const prevLegacy = { lo: scene.lo, done: scene.done, review: scene.review, png: scene.png };
+      const prevCompletedBy = scene.completedBy ?? '';
+      const prevCompletedAt = scene.completedAt ?? '';
+      const wasFullyDone = Boolean(scene.lo && scene.done && scene.review && scene.png);
+      const willBeFullyDone = newState === 'done';
+      const completionMeta = (() => {
+        if (willBeFullyDone && !wasFullyDone) {
+          return {
+            nextCompletedBy: currentUser?.name ?? '알 수 없음',
+            nextCompletedAt: new Date().toISOString(),
+            prevCompletedBy,
+            prevCompletedAt,
+          };
+        }
+        if (wasFullyDone && !willBeFullyDone && (prevCompletedBy || prevCompletedAt)) {
+          return {
+            nextCompletedBy: '',
+            nextCompletedAt: '',
+            prevCompletedBy,
+            prevCompletedAt,
+          };
+        }
+        return null;
+      })();
+
       setScenePhaseOptimistic(sheetName, sceneId, newState);
+      if (completionMeta) {
+        if (completionMeta.nextCompletedBy && completionMeta.nextCompletedAt) {
+          setCelebratingId(sceneId);
+          setLastCompletionUndoAction({
+            kind: 'phase',
+            sheetName,
+            sceneId,
+            previousState: prevState,
+            previousWorkRound: prevWork,
+            previousFeedbackRound: prevFb,
+            previousCompletedBy: prevCompletedBy,
+            previousCompletedAt: prevCompletedAt,
+          });
+        }
+        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.nextCompletedBy);
+        updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.nextCompletedAt);
+      }
+
       // 새 round 값을 store와 동일한 규칙으로 다시 계산해 Supabase 동기화
       // 코덱스 2차 P2 fix: 99 상한 클램프 (store 전이 규칙과 일치)
       let workRound = prevWork;
@@ -1578,10 +1685,30 @@ export function ScenesView() {
           workRound: prevWork,
           feedbackRound: prevFb,
           ...prevLegacy,
+          completedBy: prevCompletedBy,
+          completedAt: prevCompletedAt,
         });
+        return;
+      }
+
+      if (completionMeta) {
+        try {
+          await updateSceneCompletionMeta(
+            sheetName,
+            sceneIndex,
+            completionMeta.nextCompletedBy && completionMeta.nextCompletedAt
+              ? {
+                  completedBy: completionMeta.nextCompletedBy,
+                  completedAt: completionMeta.nextCompletedAt,
+                }
+              : null,
+          );
+        } catch (metaErr) {
+          console.error('[완료 메타 저장 실패]', metaErr);
+        }
       }
     },
-    [findSceneInSheet, setScenePhaseOptimistic, updateSceneByUuid, currentUser?.id],
+    [setScenePhaseOptimistic, updateSceneByUuid, updateSceneFieldOptimistic, currentUser?.id, currentUser?.name],
   );
 
   const handleActFeedbackRequest = useCallback(
@@ -1955,25 +2082,25 @@ export function ScenesView() {
 
   // 'all' 모드: partId 기준 unique partIds
   const uniquePartIds = useMemo(() => {
-    return [...new Set(parts.map((p) => p.partId))];
+    return getCanonicalPartIds(parts);
   }, [parts]);
 
   // 'all' 모드에서 현재 partId 도출
   const currentPartId = selectedDepartment === 'all'
-    ? (uniquePartIds.includes(selectedPart ?? '') ? selectedPart : (uniquePartIds[0] ?? null))
+    ? (uniquePartIds.find((partId) => partIdMatches(partId, selectedPart)) ?? (uniquePartIds[0] ?? null))
     : null;
 
   // 'all' 모드: bgPart + actPart 분리
   const bgPart = selectedDepartment === 'all'
-    ? allParts.find((p) => p.partId === currentPartId && p.department === 'bg') ?? null
+    ? findPartById(allParts, currentPartId, 'bg') ?? null
     : null;
   const actPart = selectedDepartment === 'all'
-    ? allParts.find((p) => p.partId === currentPartId && p.department === 'acting') ?? null
+    ? findPartById(allParts, currentPartId, 'acting') ?? null
     : null;
 
   // 개별 모드: 기존 currentPart
   const currentPart = selectedDepartment !== 'all' && parts.length > 0
-    ? (parts.find((p) => p.partId === selectedPart) ?? parts[0])
+    ? (findPartById(parts, selectedPart) ?? parts[0])
     : (bgPart ?? actPart ?? undefined);  // 'all' 모드 fallback (기존 로직 호환)
   const mergedScenePartId = currentPartId ?? bgPart?.partId ?? actPart?.partId ?? '';
   const {
@@ -2045,6 +2172,11 @@ export function ScenesView() {
 
   // 상세 모달 컨텍스트: sheetName + sceneIndex 추적
   const [detailContext, setDetailContext] = useState<{ sheetName: string; sceneIndex: number } | null>(null);
+  const [continuitySourceElement, setContinuitySourceElement] = useState<HTMLElement | null>(null);
+  const [lastCompletionUndoAction, setLastCompletionUndoAction] = useState<CompletionUndoAction | null>(null);
+  const clearContinuitySource = useCallback(() => {
+    setContinuitySourceElement(null);
+  }, []);
 
   // 딥링크 처리: bflow://scene/sheetName/sceneId → 해당 씬 모달 자동 오픈
   // sceneId는 씬번호(예: a003) 또는 씬 인덱스(예: 12) 모두 지원
@@ -2378,7 +2510,7 @@ export function ScenesView() {
       setSelectedEpisode(detail.episodeNumber);
       return; // 다음 render 까지 대기
     }
-    if (detail.partId && selectedPart !== detail.partId) {
+    if (detail.partId && !partIdMatches(selectedPart, detail.partId)) {
       setSelectedPart(detail.partId);
       return; // 다음 render 까지 대기
     }
@@ -2422,9 +2554,7 @@ export function ScenesView() {
   // ACT 단독 뷰에서는 대응하는 BG 이미지를 폴백으로 사용한다.
   const actToBgImageMap = useMemo(() => {
     if (selectedDepartment !== 'acting') return null;
-    const bgSibling = allParts.find(
-      (p) => p.partId === (currentPart?.partId ?? '') && p.department === 'bg',
-    );
+    const bgSibling = findPartById(allParts, currentPart?.partId, 'bg');
     if (!bgSibling) return null;
     const map = new Map<string, { storyboard?: string; guide?: string }>();
     for (const bgScene of bgSibling.scenes) {
@@ -2507,6 +2637,14 @@ export function ScenesView() {
     ),
     [visibleCompletionState.completedMeta],
   );
+  const canUndoLastCompletionAction = useMemo(() => {
+    if (!lastCompletionUndoAction) return false;
+    if (selectedDepartment === 'all') {
+      return lastCompletionUndoAction.sheetName === bgPart?.sheetName
+        || lastCompletionUndoAction.sheetName === actPart?.sheetName;
+    }
+    return lastCompletionUndoAction.sheetName === currentPart?.sheetName;
+  }, [actPart?.sheetName, bgPart?.sheetName, currentPart?.sheetName, lastCompletionUndoAction, selectedDepartment]);
   const sceneControlsSummary = useMemo(() => {
     const items = [
       { label: '작업자', value: selectedAssignee ?? '전체' },
@@ -2544,7 +2682,12 @@ export function ScenesView() {
   const toggleQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // 공통 토글 로직 (sheetName 파라미터)
-  const handleToggleForSheet = (sheetName: string, sceneId: string, stage: Stage) => {
+  const handleToggleForSheet = (
+    sheetName: string,
+    sceneId: string,
+    stage: Stage,
+    options?: { skipCompletionUndoCapture?: boolean },
+  ) => {
     if (!currentEp) return;
 
     // 현재 스토어에서 최신 씬 상태 직접 조회 (stale closure 방지)
@@ -2588,6 +2731,9 @@ export function ScenesView() {
     if (completionMeta) {
       if (completionMeta.nextCompletedBy && completionMeta.nextCompletedAt) {
         setCelebratingId(sceneId);
+        if (!options?.skipCompletionUndoCapture) {
+          setLastCompletionUndoAction({ kind: 'stage', sheetName, sceneId, stage });
+        }
       }
       updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.nextCompletedBy);
       updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.nextCompletedAt);
@@ -2682,6 +2828,67 @@ export function ScenesView() {
     if (!currentPart) return;
     handleToggleForSheet(currentPart.sheetName, sceneId, stage);
   };
+
+  const handleUndoLastCompletionAction = useCallback(() => {
+    const action = lastCompletionUndoAction;
+    if (!action) return;
+    const latestPart = useDataStore.getState().episodes
+      .flatMap((ep) => ep.parts)
+      .find((part) => part.sheetName === action.sheetName);
+    const latestSceneIndex = latestPart?.scenes.findIndex((scene) => scene.sceneId === action.sceneId) ?? -1;
+    const latestScene = latestSceneIndex >= 0 ? latestPart?.scenes[latestSceneIndex] : undefined;
+
+    if (action.kind === 'stage') {
+      if (!latestScene?.[action.stage]) {
+        setLastCompletionUndoAction(null);
+        return;
+      }
+      setLastCompletionUndoAction(null);
+      handleToggleForSheet(action.sheetName, action.sceneId, action.stage, { skipCompletionUndoCapture: true });
+      return;
+    }
+
+    if (!latestScene?.id || latestSceneIndex < 0) {
+      setLastCompletionUndoAction(null);
+      return;
+    }
+
+    setLastCompletionUndoAction(null);
+    const legacy = legacyStagesFor(action.previousState);
+    updateSceneByUuid(latestScene.id, {
+      sceneState: action.previousState,
+      workRound: action.previousWorkRound,
+      feedbackRound: action.previousFeedbackRound,
+      ...legacy,
+      completedBy: action.previousCompletedBy,
+      completedAt: action.previousCompletedAt,
+    });
+
+    void (async () => {
+      try {
+        await updateScenePhaseInSupabase(
+          latestScene.id!,
+          action.previousState,
+          action.previousWorkRound,
+          action.previousFeedbackRound,
+          currentUser?.id,
+        );
+        await updateSceneCompletionMeta(
+          action.sheetName,
+          latestSceneIndex,
+          action.previousCompletedBy && action.previousCompletedAt
+            ? {
+                completedBy: action.previousCompletedBy,
+                completedAt: action.previousCompletedAt,
+              }
+            : null,
+        );
+      } catch (err) {
+        console.error('[완료 취소 실패]', err);
+        sonnerToast.error('마지막 완료 취소 저장에 실패했습니다. 새로고침 후 다시 확인해주세요.');
+      }
+    })();
+  }, [currentUser?.id, lastCompletionUndoAction, updateSceneByUuid]);
 
   // 일괄 stage 토글: 선택된 씬들을 RPC 한 번에 처리 (Tasks 13-17)
   const handleBulkStageToggle = async (stage: Stage, onlyDept?: 'bg' | 'acting') => {
@@ -3919,7 +4126,9 @@ export function ScenesView() {
                       sublabel: getPartMemoText([p.sheetName]) || undefined,
                     }));
                   })()}
-                  value={selectedPart ?? (uniquePartIds[0] ?? (parts[0]?.partId ?? null))}
+                  value={selectedDepartment === 'all'
+                    ? (currentPartId ?? uniquePartIds[0] ?? null)
+                    : (currentPart?.partId ?? parts[0]?.partId ?? null)}
                   onChange={(v) => setSelectedPart(v)}
                   label="파트 선택"
                   onItemContextMenu={(v, e) => {
@@ -4124,9 +4333,9 @@ export function ScenesView() {
             {activeScenes.length}씬 표시 중
           </span>
           <div className="flex min-w-[220px] flex-1 items-center gap-4">
-            <div className="flex-1 h-2.5 bg-bg-primary rounded-full overflow-hidden">
+            <div className="scene-top-progress-track flex-1">
               <div
-                className="h-full rounded-full transition-all duration-700 ease-out"
+                className="scene-top-progress-fill transition-all duration-700 ease-out"
                 style={{ width: `${overallPct}%`, background: progressGradient(overallPct) }}
               />
             </div>
@@ -4230,7 +4439,12 @@ export function ScenesView() {
           )}
         >
           <AnimatePresence>
-            {isVisibleComplete && <PartCompleteOverlay completedMeta={visibleCompletedMeta} />}
+            {isVisibleComplete && (
+              <PartCompleteOverlay
+                completedMeta={visibleCompletedMeta}
+                onUndoLastAction={canUndoLastCompletionAction ? handleUndoLastCompletionAction : undefined}
+              />
+            )}
           </AnimatePresence>
           <div className="relative z-10 flex h-full min-h-0 flex-col">
             {mergedScenes.length === 0 ? (
@@ -4298,7 +4512,10 @@ export function ScenesView() {
                             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                             onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                             onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                            onOpenMerged={(merged) => setDetailMerged(merged)}
+                            onOpenMerged={(merged, sourceElement) => {
+                              setContinuitySourceElement(sourceElement ?? null);
+                              setDetailMerged(merged);
+                            }}
                             onCelebrationEnd={clearCelebration}
                             onSelect={() => {
                               const ids = new Set<string>();
@@ -4348,7 +4565,10 @@ export function ScenesView() {
                       onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                       onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                       onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
-                      onOpenMerged={(merged) => setDetailMerged(merged)}
+                      onOpenMerged={(merged, sourceElement) => {
+                        setContinuitySourceElement(sourceElement ?? null);
+                        setDetailMerged(merged);
+                      }}
                       onCelebrationEnd={clearCelebration}
                       onSelect={() => {
                         const ids = new Set<string>();
@@ -4382,7 +4602,12 @@ export function ScenesView() {
       >
         {/* 파트 완료 보케 오버레이 */}
         <AnimatePresence>
-          {isVisibleComplete && <PartCompleteOverlay completedMeta={visibleCompletedMeta} />}
+          {isVisibleComplete && (
+            <PartCompleteOverlay
+              completedMeta={visibleCompletedMeta}
+              onUndoLastAction={canUndoLastCompletionAction ? handleUndoLastCompletionAction : undefined}
+            />
+          )}
         </AnimatePresence>
         <div className="relative z-10 flex h-full min-h-0 flex-col">
           {scenes.length === 0 ? (
@@ -4936,9 +5161,7 @@ export function ScenesView() {
           const currentDetailPart = allParts.find((p) => p.sheetName === detailSheetName);
           if (!currentDetailPart) return null;
           const otherDept: Department = currentDetailPart.department === 'bg' ? 'acting' : 'bg';
-          const otherPart = allParts.find(
-            (p) => p.partId === currentDetailPart.partId && p.department === otherDept,
-          );
+          const otherPart = findPartById(allParts, currentDetailPart.partId, otherDept);
           if (!otherPart) return null;
           // 정규화된 sceneId 키로 매칭 (예: ac001 ↔ a001)
           const targetKey = normalizeSceneIdKey(detailScene.sceneId, currentDetailPart.partId);
@@ -5000,7 +5223,7 @@ export function ScenesView() {
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}
             focusCommentId={modalRouting?.focusCommentId}
-            onClose={() => { setDetailMerged(null); setModalRouting(null); }}
+            onClose={() => { setDetailMerged(null); setModalRouting(null); clearContinuitySource(); }}
             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
             onFieldUpdate={(sheet, idx, field, value) => handleFieldUpdateForSheet(sheet, idx, field, value)}
             onDeleteDept={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
@@ -5057,6 +5280,8 @@ export function ScenesView() {
             onActPhaseStateClick={handleActPhaseStateClick}
             onActFeedbackRequest={handleActFeedbackRequest}
             onActRoundBump={handleActRoundBump}
+            continuitySourceElement={continuitySourceElement}
+            onContinuityEnd={clearContinuitySource}
           />
         );
       })()}

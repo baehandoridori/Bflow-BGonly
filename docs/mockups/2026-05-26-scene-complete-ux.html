@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>B flow Scene Complete UX Mockup</title>
+  <style>
+    :root {
+      --bg: #0F1117;
+      --panel: #151824;
+      --card: #1A1D27;
+      --border: #2D3041;
+      --text: #E8E8EE;
+      --muted: #8B8DA3;
+      --accent: #6C5CE7;
+      --lo: #74B9FF;
+      --done: #00B894;
+      --review: #FDCB6E;
+      --png: #A29BFE;
+      --feedback: #FF7675;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Pretendard, Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    .page {
+      width: min(1440px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+    .top {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0 0 7px;
+      font-size: 22px;
+      line-height: 1.2;
+      font-weight: 750;
+    }
+    .sub {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 30px;
+      padding: 0 11px;
+      border: 1px solid rgba(108, 92, 231, .28);
+      border-radius: 8px;
+      color: #CFCBFF;
+      background: rgba(108, 92, 231, .12);
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .section {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(26, 29, 39, .72);
+      overflow: hidden;
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 50px;
+      padding: 13px 16px;
+      border-bottom: 1px solid rgba(45, 48, 65, .75);
+      background: rgba(21, 24, 36, .9);
+    }
+    h2 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .mock-body { padding: 16px; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .tabs, .segmented {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid rgba(45, 48, 65, .9);
+      border-radius: 8px;
+      background: rgba(15, 17, 23, .72);
+    }
+    .tab, .seg {
+      height: 28px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+      transition: background .18s ease, color .18s ease;
+    }
+    .tab.active, .seg.active {
+      color: #fff;
+      background: rgba(108, 92, 231, .23);
+    }
+    .complete-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      border: 1px solid rgba(0, 184, 148, .36);
+      border-radius: 8px;
+      background: linear-gradient(90deg, rgba(0, 184, 148, .14), rgba(0, 184, 148, .045));
+    }
+    .complete-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .complete-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--done);
+      box-shadow: 0 0 18px rgba(0, 184, 148, .65);
+      flex: 0 0 auto;
+    }
+    .complete-copy {
+      min-width: 0;
+    }
+    .complete-copy strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+    .complete-copy span {
+      display: block;
+      color: #B3B7C8;
+      font-size: 12px;
+      line-height: 1.35;
+      margin-top: 2px;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+    .btn {
+      height: 32px;
+      padding: 0 11px;
+      border-radius: 7px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.05);
+      color: #E8E8EE;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform .18s ease, background .18s ease, border-color .18s ease, color .18s ease;
+    }
+    .btn:hover {
+      transform: translateY(-1px);
+      background: rgba(255,255,255,.08);
+    }
+    .btn.primary {
+      border-color: rgba(0, 184, 148, .46);
+      background: rgba(0, 184, 148, .16);
+      color: #BFF6E8;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .scene-card {
+      min-height: 168px;
+      padding: 13px;
+      border: 1px solid rgba(45, 48, 65, .95);
+      border-radius: 8px;
+      background: var(--card);
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease, opacity .18s ease;
+    }
+    .scene-card:hover {
+      transform: translateY(-2px);
+    }
+    .scene-card.selected {
+      outline: 2px solid rgba(108, 92, 231, .75);
+      outline-offset: 2px;
+    }
+    .scene-card.done-subtle {
+      border-color: rgba(0, 184, 148, .48);
+      box-shadow: inset 4px 0 0 rgba(0, 184, 148, .9);
+    }
+    .scene-card.done-tint {
+      border-color: rgba(0, 184, 148, .55);
+      background: linear-gradient(135deg, rgba(0, 184, 148, .19), rgba(26, 29, 39, .92) 46%);
+    }
+    .scene-card.done-off {
+      opacity: .72;
+    }
+    .card-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .scene-no {
+      font-family: "Fira Code", Consolas, monospace;
+      font-size: 15px;
+      font-weight: 800;
+      color: #fff;
+    }
+    .status-badge {
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: rgba(0, 184, 148, .16);
+      color: #98F1DA;
+      border: 1px solid rgba(0, 184, 148, .28);
+      font-size: 11px;
+      font-weight: 750;
+      display: inline-flex;
+      align-items: center;
+    }
+    .memo {
+      min-height: 36px;
+      color: #FDCB6E;
+      font-size: 12px;
+      line-height: 1.45;
+      margin-bottom: 13px;
+    }
+    .stage-line {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .stage {
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #07110F;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .lo { background: var(--lo); }
+    .done { background: var(--done); }
+    .review { background: var(--review); }
+    .png { background: var(--png); }
+    .setting-panel {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .setting-box {
+      border: 1px solid rgba(45, 48, 65, .9);
+      border-radius: 8px;
+      padding: 12px;
+      background: rgba(15, 17, 23, .42);
+    }
+    .setting-title {
+      margin-bottom: 9px;
+      color: #E8E8EE;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .check-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 30px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .switch {
+      width: 36px;
+      height: 20px;
+      border-radius: 999px;
+      background: rgba(0, 184, 148, .28);
+      border: 1px solid rgba(0, 184, 148, .36);
+      position: relative;
+      cursor: pointer;
+      transition: background .18s ease, border-color .18s ease;
+    }
+    .switch::after {
+      content: "";
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      background: #E8FFF8;
+      position: absolute;
+      right: 3px;
+      top: 2px;
+      transition: transform .18s ease, background .18s ease;
+    }
+    .switch.off {
+      background: rgba(139, 141, 163, .16);
+      border-color: rgba(139, 141, 163, .28);
+    }
+    .switch.off::after {
+      transform: translateX(-16px);
+      background: #A8AABC;
+    }
+    .table-wrap {
+      border: 1px solid rgba(45, 48, 65, .9);
+      border-radius: 8px;
+      overflow: auto;
+      background: rgba(15, 17, 23, .46);
+    }
+    table {
+      width: 100%;
+      min-width: 940px;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      height: 36px;
+      padding: 0 9px;
+      background: #171A25;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      font-weight: 700;
+    }
+    td {
+      height: 42px;
+      padding: 0 9px;
+      border-bottom: 1px solid rgba(45, 48, 65, .55);
+      color: #D9DBE6;
+      white-space: nowrap;
+    }
+    .row-working { background: rgba(116, 185, 255, .06); box-shadow: inset 4px 0 0 rgba(116, 185, 255, .75); }
+    .row-feedback { background: rgba(255, 118, 117, .06); box-shadow: inset 4px 0 0 rgba(255, 118, 117, .75); }
+    .row-complete { background: rgba(0, 184, 148, .075); box-shadow: inset 4px 0 0 rgba(0, 184, 148, .88); }
+    .table-wrap[data-color-mode="cell"] tbody tr {
+      background: transparent;
+      box-shadow: none;
+    }
+    .table-wrap[data-color-mode="off"] tbody tr {
+      background: transparent;
+      box-shadow: none;
+    }
+    .table-wrap[data-color-mode="off"] .state {
+      color: var(--muted);
+      background: rgba(139, 141, 163, .1);
+      border-color: rgba(139, 141, 163, .18);
+    }
+    .state {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 760;
+    }
+    .state.work { color: #BEE1FF; background: rgba(116, 185, 255, .15); border: 1px solid rgba(116, 185, 255, .25); }
+    .state.feed { color: #FFD0D0; background: rgba(255, 118, 117, .13); border: 1px solid rgba(255, 118, 117, .24); }
+    .state.ok { color: #BDF4E7; background: rgba(0, 184, 148, .14); border: 1px solid rgba(0, 184, 148, .25); }
+    .memo-wide { width: 36%; max-width: 520px; overflow: hidden; text-overflow: ellipsis; color: #FDCB6E; }
+    .memo-normal { width: 280px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; color: #FDCB6E; }
+    .memo-compact { width: 210px; max-width: 210px; overflow: hidden; text-overflow: ellipsis; color: #FDCB6E; }
+    .tiny-checks {
+      display: grid;
+      grid-template-columns: repeat(4, 20px);
+      gap: 5px;
+      justify-content: end;
+    }
+    .tiny {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #07110F;
+      font-size: 10px;
+      font-weight: 900;
+    }
+    .option-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .option {
+      border: 1px solid rgba(45, 48, 65, .95);
+      border-radius: 8px;
+      padding: 12px;
+      background: rgba(15, 17, 23, .52);
+      cursor: pointer;
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+    }
+    .option:hover { transform: translateY(-1px); }
+    .option.recommended {
+      border-color: rgba(108, 92, 231, .6);
+      background: rgba(108, 92, 231, .09);
+    }
+    .option.selected {
+      border-color: rgba(108, 92, 231, .9);
+      background: rgba(108, 92, 231, .16);
+      box-shadow: 0 0 0 1px rgba(108, 92, 231, .2);
+    }
+    .option strong {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .option p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    @media (max-width: 900px) {
+      .page { width: min(100vw - 24px, 760px); padding-top: 18px; }
+      .top, .toolbar, .complete-banner { align-items: stretch; flex-direction: column; }
+      .cards, .setting-panel, .option-row { grid-template-columns: 1fr; }
+      .actions { width: 100%; }
+      .btn { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="top">
+      <div>
+        <h1>씬 뷰 완료 UX 목업</h1>
+        <p class="sub">실제 구현 전 확인용입니다. 앱의 기존 어두운 톤과 단계 색상은 유지하고, 완료 상태를 더 잘 보이게 하는 방향만 비교합니다.</p>
+      </div>
+      <div class="pill">논의용 목업 · production 코드 아님</div>
+    </div>
+
+    <div class="grid">
+      <section class="section">
+        <div class="section-head">
+          <h2>1. 전체 완료 표시 + 마지막 동작 취소</h2>
+          <div class="note">완료가 뜬 직후, 사용자가 방금 누른 체크만 되돌리는 안입니다.</div>
+        </div>
+        <div class="mock-body">
+          <div class="toolbar">
+            <div class="tabs">
+              <button class="tab active">카드</button>
+              <button class="tab">시트</button>
+            </div>
+            <div class="segmented">
+              <button class="seg active">전체</button>
+              <button class="seg">BG</button>
+              <button class="seg">ACT</button>
+            </div>
+          </div>
+
+          <div class="complete-banner">
+            <div class="complete-title">
+              <span class="complete-dot"></span>
+              <div class="complete-copy">
+                <strong>현재 화면의 모든 씬이 완료되었습니다</strong>
+                <span>방금 누른 마지막 체크: EP03 A 014 · PNG 완료</span>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn primary">마지막 체크 취소</button>
+              <button class="btn">닫기</button>
+            </div>
+          </div>
+
+          <div class="option-row">
+            <div class="option recommended">
+              <strong>추천: 마지막 체크 1개만 되돌리기</strong>
+              <p>실수 복구가 빠르고, 다른 사람의 변경이나 예전 작업까지 되돌릴 위험이 낮습니다.</p>
+            </div>
+            <div class="option">
+              <strong>넓은 취소: 마지막 일괄 작업 되돌리기</strong>
+              <p>여러 씬을 한 번에 완료한 경우 유용하지만, 실패/부분 저장 처리까지 설계해야 합니다.</p>
+            </div>
+            <div class="option">
+              <strong>단순 안내: 창만 닫기</strong>
+              <p>안전하지만 사용자가 다시 뒤로 가서 체크를 찾아 꺼야 해서 문제 해결력이 낮습니다.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>2. 카드 뷰 완료 색상 옵션</h2>
+          <div class="note">사용자 설정으로 켜고 끌 수 있게 두는 전제입니다.</div>
+        </div>
+        <div class="mock-body">
+          <div class="cards">
+            <article class="scene-card done-subtle">
+              <div class="card-row">
+                <div class="scene-no">A014</div>
+                <span class="status-badge">완료</span>
+              </div>
+              <div class="memo">액션 컷 확인 완료. PNG까지 정리됨.</div>
+              <div class="stage-line">
+                <span class="stage lo">LO</span>
+                <span class="stage done">완료</span>
+                <span class="stage review">검수</span>
+                <span class="stage png">PNG</span>
+              </div>
+              <div class="note" style="margin-top:12px">A안: 왼쪽 완료 막대 + 살짝 밝은 테두리</div>
+            </article>
+
+            <article class="scene-card done-tint">
+              <div class="card-row">
+                <div class="scene-no">A015</div>
+                <span class="status-badge">완료</span>
+              </div>
+              <div class="memo">검수 후 수정 없음. 최종 파일 업로드 완료.</div>
+              <div class="stage-line">
+                <span class="stage lo">LO</span>
+                <span class="stage done">완료</span>
+                <span class="stage review">검수</span>
+                <span class="stage png">PNG</span>
+              </div>
+              <div class="note" style="margin-top:12px">B안: 카드 배경 자체를 초록 계열로 틴트</div>
+            </article>
+
+            <article class="scene-card done-off">
+              <div class="card-row">
+                <div class="scene-no">A016</div>
+                <span class="status-badge">완료</span>
+              </div>
+              <div class="memo">표시는 기존과 거의 동일. 완료 뱃지만 유지.</div>
+              <div class="stage-line">
+                <span class="stage lo">LO</span>
+                <span class="stage done">완료</span>
+                <span class="stage review">검수</span>
+                <span class="stage png">PNG</span>
+              </div>
+              <div class="note" style="margin-top:12px">C안: 설정을 꺼둔 사용자용 기본 표시</div>
+            </article>
+          </div>
+
+          <div class="setting-panel">
+            <div class="setting-box">
+              <div class="setting-title">씬 뷰 표시 설정</div>
+              <div class="check-row"><span>완료 카드 색상</span><span class="switch"></span></div>
+              <div class="check-row"><span>시트 상태 색상</span><span class="switch"></span></div>
+              <div class="check-row"><span>설정은 이 PC에 저장</span><span style="color:#B3B7C8">preferences</span></div>
+            </div>
+            <div class="option recommended">
+              <strong>추천: A안을 기본값으로 켜기</strong>
+              <p>완료 상태가 바로 보이면서도 기존 카드 디자인을 크게 흔들지 않습니다. B안은 눈에 잘 띄지만 화면 전체가 초록빛으로 많아질 수 있습니다.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>3. 시트 뷰 상태 색상 + 메모 폭</h2>
+          <div class="note">컬럼 전체 드래그 재배치보다 먼저, 한눈에 보기 어려운 지점을 줄이는 작은 변경안입니다.</div>
+        </div>
+        <div class="mock-body">
+          <div class="toolbar">
+            <div class="segmented">
+              <button class="seg">메모 넓게</button>
+              <button class="seg active">메모 보통</button>
+              <button class="seg">메모 좁게</button>
+            </div>
+            <div class="segmented">
+              <button class="seg active">행 색상</button>
+              <button class="seg">셀 색상만</button>
+              <button class="seg">끔</button>
+            </div>
+          </div>
+
+          <div class="table-wrap" data-color-mode="row">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:88px">씬번호</th>
+                  <th style="width:120px">상태</th>
+                  <th class="memo-compact">메모</th>
+                  <th style="width:92px">스토리보드</th>
+                  <th style="width:92px">가이드</th>
+                  <th style="width:120px">담당자</th>
+                  <th style="text-align:right">진행 단계</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="row-working">
+                  <td style="font-family:Consolas,monospace;font-weight:800">A012</td>
+                  <td><span class="state work">작업중</span></td>
+                  <td class="memo-compact">캐릭터 뒤 배경 라인 정리 필요, 그림자 톤 확인</td>
+                  <td>있음</td>
+                  <td>있음</td>
+                  <td>김OO</td>
+                  <td><div class="tiny-checks"><span class="tiny lo">L</span><span class="tiny done">D</span><span class="tiny" style="border:1px solid var(--border);color:var(--muted)">R</span><span class="tiny" style="border:1px solid var(--border);color:var(--muted)">P</span></div></td>
+                </tr>
+                <tr class="row-feedback">
+                  <td style="font-family:Consolas,monospace;font-weight:800">A013</td>
+                  <td><span class="state feed">피드백</span></td>
+                  <td class="memo-compact">검수 코멘트 반영 중. 창문 밝기만 재확인</td>
+                  <td>있음</td>
+                  <td>-</td>
+                  <td>박OO</td>
+                  <td><div class="tiny-checks"><span class="tiny lo">L</span><span class="tiny done">D</span><span class="tiny review">R</span><span class="tiny" style="border:1px solid var(--border);color:var(--muted)">P</span></div></td>
+                </tr>
+                <tr class="row-complete">
+                  <td style="font-family:Consolas,monospace;font-weight:800">A014</td>
+                  <td><span class="state ok">완료</span></td>
+                  <td class="memo-compact">최종 확인 끝. PNG 업로드 완료</td>
+                  <td>있음</td>
+                  <td>있음</td>
+                  <td>이OO</td>
+                  <td><div class="tiny-checks"><span class="tiny lo">L</span><span class="tiny done">D</span><span class="tiny review">R</span><span class="tiny png">P</span></div></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="option-row">
+            <div class="option recommended">
+              <strong>추천: 씬번호 옆에 상태 컬럼 추가</strong>
+              <p>왼쪽에서 씬번호와 상태를 같이 볼 수 있어, 오른쪽 끝 체크박스를 계속 확인하지 않아도 됩니다.</p>
+            </div>
+            <div class="option">
+              <strong>메모 폭 3단계</strong>
+              <p>넓게, 보통, 좁게 중 선택합니다. 드래그 리사이즈보다 단순하고 저장/복구가 안정적입니다.</p>
+            </div>
+            <div class="option">
+              <strong>컬럼 위치 자유 변경</strong>
+              <p>가장 강력하지만 저장 구조, 키보드 편집, 선택 범위 로직까지 함께 손봐야 해서 별도 작업으로 분리하는 편이 안전합니다.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script>
+    const setActiveButton = (button) => {
+      const group = button.closest('.tabs, .segmented');
+      if (!group) return;
+      group.querySelectorAll('button').forEach((item) => item.classList.remove('active'));
+      button.classList.add('active');
+    };
+
+    const setSelectedInGroup = (item) => {
+      const group = item.parentElement;
+      if (!group) return;
+      group.querySelectorAll('.option, .scene-card').forEach((sibling) => sibling.classList.remove('selected'));
+      item.classList.add('selected');
+    };
+
+    const setMemoWidth = (label) => {
+      const nextClass = label.includes('넓게')
+        ? 'memo-wide'
+        : label.includes('좁게')
+          ? 'memo-compact'
+          : 'memo-normal';
+      document.querySelectorAll('th, td').forEach((cell) => {
+        if (!['memo-wide', 'memo-normal', 'memo-compact'].some((name) => cell.classList.contains(name))) return;
+        cell.classList.remove('memo-wide', 'memo-normal', 'memo-compact');
+        cell.classList.add(nextClass);
+      });
+    };
+
+    const setRowColorMode = (label) => {
+      const tableWrap = document.querySelector('.table-wrap');
+      if (!tableWrap) return;
+      tableWrap.dataset.colorMode = label.includes('셀')
+        ? 'cell'
+        : label.includes('끔')
+          ? 'off'
+          : 'row';
+    };
+
+    const simulateUndoLastCheck = (button) => {
+      const banner = button.closest('.complete-banner');
+      const title = banner?.querySelector('.complete-copy strong');
+      const detail = banner?.querySelector('.complete-copy span');
+      const row = document.querySelector('.row-complete');
+      const state = row?.querySelector('.state');
+      const png = row?.querySelector('.tiny.png');
+
+      button.textContent = '취소 완료';
+      button.disabled = true;
+      button.style.opacity = '.72';
+      if (title) title.textContent = '마지막 체크를 취소했습니다';
+      if (detail) detail.textContent = 'EP03 A 014 · PNG 완료를 해제한 상태입니다';
+      if (row) {
+        row.classList.remove('row-complete');
+        row.classList.add('row-feedback');
+      }
+      if (state) {
+        state.className = 'state feed';
+        state.textContent = '피드백';
+      }
+      if (png) {
+        png.className = 'tiny';
+        png.style.border = '1px solid var(--border)';
+        png.style.color = 'var(--muted)';
+        png.style.background = 'transparent';
+      }
+    };
+
+    document.querySelectorAll('.tab, .seg').forEach((button) => {
+      button.addEventListener('click', () => {
+        setActiveButton(button);
+        const label = button.textContent || '';
+        if (label.includes('메모')) setMemoWidth(label);
+        if (label.includes('행 색상') || label.includes('셀 색상') || label.includes('끔')) setRowColorMode(label);
+      });
+    });
+
+    document.querySelectorAll('.option').forEach((item) => {
+      item.addEventListener('click', () => setSelectedInGroup(item));
+    });
+
+    document.querySelectorAll('.scene-card').forEach((card) => {
+      card.addEventListener('click', () => setSelectedInGroup(card));
+    });
+
+    document.querySelectorAll('.check-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        const sw = row.querySelector('.switch');
+        if (sw) sw.classList.toggle('off');
+      });
+    });
+
+    document.querySelectorAll('.btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const label = button.textContent || '';
+        if (label.includes('마지막 체크')) {
+          simulateUndoLastCheck(button);
+          return;
+        }
+        if (label.includes('닫기')) {
+          button.closest('.complete-banner')?.remove();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

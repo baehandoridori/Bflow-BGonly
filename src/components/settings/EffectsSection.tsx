@@ -2,7 +2,7 @@ import { useCallback, useRef, useEffect, useState } from 'react';
 import { Sparkles, RotateCcw, ChevronDown } from 'lucide-react';
 import { SettingsSection } from './SettingsSection';
 import { useAppStore } from '@/stores/useAppStore';
-import { loadPreferences, savePreferences } from '@/services/settingsService';
+import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
 import { cn } from '@/utils/cn';
 
 const DEFAULTS = {
@@ -301,11 +301,20 @@ async function persistPlexus(plexus: typeof DEFAULTS) {
   window.electronAPI?.preferencesBroadcastChange?.({ plexus });
 }
 
+async function persistSceneUi(patch: NonNullable<UserPreferences['sceneUi']>) {
+  const existing = await loadPreferences() ?? {};
+  const sceneUi = { ...(existing.sceneUi ?? {}), ...patch };
+  await savePreferences({ ...existing, sceneUi });
+  window.electronAPI?.preferencesBroadcastChange?.({ sceneUi });
+}
+
 /* ── 메인 섹션 ── */
 
 export function EffectsSection() {
   const plexusSettings = useAppStore((s) => s.plexusSettings);
   const setPlexusSettings = useAppStore((s) => s.setPlexusSettings);
+  const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
+  const setCompletionTintEnabled = useAppStore((s) => s.setCompletionTintEnabled);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const update = useCallback((partial: Partial<typeof DEFAULTS>) => {
@@ -317,6 +326,11 @@ export function EffectsSection() {
     setPlexusSettings(DEFAULTS);
     persistPlexus(DEFAULTS);
   }, [setPlexusSettings]);
+
+  const updateCompletionTint = useCallback((enabled: boolean) => {
+    setCompletionTintEnabled(enabled);
+    persistSceneUi({ completionTintEnabled: enabled });
+  }, [setCompletionTintEnabled]);
 
   return (
     <SettingsSection
@@ -334,6 +348,27 @@ export function EffectsSection() {
     >
       {/* 전체 화면 그라데이션 배경 (모든 뷰 공통) */}
       <div className="mb-5 pb-4 border-b border-bg-border/30">
+        <div className="flex items-center justify-between gap-4 mb-4 pb-4 border-b border-bg-border/30">
+          <div>
+            <p className="text-sm font-medium text-text-primary">씬 완료 색상 표시</p>
+            <p className="text-[11px] text-text-secondary/60 mt-0.5">
+              완료된 씬 카드는 색을 더 강하게 틴트하고, 시트 뷰 행도 완료 색상으로 표시합니다.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {completionTintEnabled !== true && (
+              <button
+                onClick={() => updateCompletionTint(true)}
+                className="text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
+                title="기본값 (ON)"
+              >
+                <RotateCcw size={11} />
+              </button>
+            )}
+            <Toggle checked={completionTintEnabled} onChange={updateCompletionTint} />
+          </div>
+        </div>
+
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-text-primary">전체 화면 그라데이션 배경</p>

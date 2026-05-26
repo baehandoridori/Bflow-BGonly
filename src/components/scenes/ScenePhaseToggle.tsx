@@ -14,7 +14,7 @@
  */
 
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { useCallback } from 'react';
+import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Scene, ScenePhaseState } from '@/types';
 import { SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
 import { cn } from '@/utils/cn';
@@ -48,6 +48,7 @@ export function ScenePhaseToggle({
   // v1.27.0: BG 카드와 동일한 "진행한 이전 단계 옅게 채움" 패턴. 현재 phase 의 앞 단계는
   // 자기 색의 알파(0x20 ≈ 0.125) 로 살짝 채워 시각 진행도 표현.
   const activeIndex = SCENE_PHASES.indexOf(activeState);
+  const pointerHandledRef = useRef(false);
 
   const handleChipClick = useCallback(
     (target: ScenePhaseState) => {
@@ -61,6 +62,20 @@ export function ScenePhaseToggle({
       onStateClick(target);
     },
     [activeState, disabled, onRequestFeedback, onStateClick],
+  );
+
+  const handleChipPointerDown = useCallback(
+    (event: ReactPointerEvent, target: ScenePhaseState) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      pointerHandledRef.current = true;
+      handleChipClick(target);
+      window.setTimeout(() => {
+        pointerHandledRef.current = false;
+      }, 600);
+    },
+    [handleChipClick],
   );
 
   return (
@@ -106,11 +121,21 @@ export function ScenePhaseToggle({
           return (
             <div
               key={state}
+              data-continuity-stage-segment
               role="radio"
               aria-checked={isActive}
               aria-disabled={disabled || undefined}
               tabIndex={disabled ? -1 : 0}
-              onClick={() => handleChipClick(state)}
+              onPointerDown={(e) => handleChipPointerDown(e, state)}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (pointerHandledRef.current) {
+                  pointerHandledRef.current = false;
+                  return;
+                }
+                handleChipClick(state);
+              }}
               onKeyDown={(e) => {
                 if (disabled) return;
                 if (e.key === ' ' || e.key === 'Enter') {
