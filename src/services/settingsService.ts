@@ -155,6 +155,7 @@ export interface UserPreferences {
   // 씬 뷰 UI 상태
   sceneUi?: {
     controlsCollapsedByContext?: Record<string, boolean>;
+    completionTintEnabled?: boolean;
   };
 
   // 화이트보드 배경색

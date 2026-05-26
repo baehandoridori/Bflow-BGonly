@@ -1,0 +1,2850 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>B flow Full View Completion Actual Mockup</title>
+  <style>
+    :root {
+      --bg-primary: #0F1117;
+      --bg-card: #1A1D27;
+      --bg-panel: #151824;
+      --bg-border: #2D3041;
+      --text-primary: #E8E8EE;
+      --text-secondary: #8B8DA3;
+      --accent: #6C5CE7;
+      --accent-sub: #A29BFE;
+      --bg-color: #6C5CE7;
+      --act-color: #E17055;
+      --bg-lo: #C4BCFA;
+      --bg-done: #A599F5;
+      --bg-review: #8677EF;
+      --bg-png: #6C5CE7;
+      --act-lo: #F5BEB3;
+      --act-done: #EDA293;
+      --act-review: #E58A76;
+      --act-png: #E17055;
+      --phase-wait: #6E7388;
+      --phase-work: #74B9FF;
+      --phase-feedback: #FDCB6E;
+      --phase-done: #00B894;
+      --complete: #00B894;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 18% 8%, rgba(108, 92, 231, .18), transparent 34%),
+        var(--bg-primary);
+      color: var(--text-primary);
+      font-family: Pretendard, Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, input { font-family: inherit; }
+    button { cursor: pointer; }
+
+    .mock-shell {
+      width: min(1500px, calc(100vw - 28px));
+      min-height: calc(100vh - 28px);
+      margin: 14px auto;
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .tree {
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      background: rgba(26, 29, 39, .78);
+      padding: 12px;
+      min-height: 680px;
+    }
+
+    .tree-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .tree-title {
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .tree-btn {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--bg-border);
+      border-radius: 8px;
+      background: rgba(15, 17, 23, .65);
+      color: var(--text-secondary);
+    }
+
+    .ep {
+      border-radius: 9px;
+      padding: 10px;
+      background: rgba(15, 17, 23, .42);
+      border: 1px solid rgba(45, 48, 65, .7);
+      margin-bottom: 8px;
+    }
+
+    .ep.active {
+      border-color: rgba(108, 92, 231, .55);
+      background: rgba(108, 92, 231, .12);
+    }
+
+    .ep-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .part-list {
+      margin-top: 10px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .part {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 28px;
+      padding: 0 8px;
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    .part.active {
+      color: white;
+      background: rgba(108, 92, 231, .22);
+    }
+
+    .content {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .note-bar {
+      border: 1px solid rgba(108, 92, 231, .35);
+      border-radius: 10px;
+      background: rgba(108, 92, 231, .1);
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: #D7D3FF;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .option-tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      border-radius: 8px;
+      background: rgba(15, 17, 23, .75);
+      border: 1px solid rgba(45, 48, 65, .8);
+      flex: 0 0 auto;
+    }
+
+    .option-tabs button,
+    .icon-tabs button {
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 720;
+      height: 29px;
+      padding: 0 10px;
+      transition: color .18s ease, background .18s ease;
+    }
+
+    .option-tabs button.active,
+    .icon-tabs button.active {
+      color: white;
+      background: rgba(108, 92, 231, .24);
+    }
+
+    .filter {
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      background: rgba(26, 29, 39, .9);
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .filter-line {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .dept-tabs {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--bg-border);
+      border-radius: 9px;
+      background: var(--bg-primary);
+    }
+
+    .dept-tabs button {
+      border: 0;
+      border-radius: 7px;
+      height: 34px;
+      padding: 0 16px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 720;
+    }
+
+    .dept-tabs button.active {
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 2px 8px rgba(108, 92, 231, .34);
+    }
+
+    .select-like, .small-btn, .search {
+      height: 34px;
+      border-radius: 9px;
+      border: 1px solid var(--bg-border);
+      background: rgba(15, 17, 23, .56);
+      color: var(--text-secondary);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .small-btn.accent {
+      color: var(--accent-sub);
+      background: rgba(108, 92, 231, .16);
+      border-color: rgba(108, 92, 231, .24);
+    }
+
+    .filter-subline {
+      background: rgba(15, 17, 23, .33);
+      border-radius: 9px;
+      padding: 8px 10px;
+    }
+
+    .status-filter {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .status-filter button {
+      height: 30px;
+      border: 0;
+      border-radius: 8px;
+      padding: 0 10px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 720;
+    }
+
+    .status-filter button.active {
+      color: var(--accent-sub);
+      background: rgba(108, 92, 231, .18);
+    }
+
+    .icon-tabs {
+      display: inline-flex;
+      border: 1px solid var(--bg-border);
+      border-radius: 9px;
+      overflow: hidden;
+    }
+
+    .icon-tabs button {
+      border-radius: 0;
+      width: 37px;
+      padding: 0;
+    }
+
+    .search {
+      width: 156px;
+      color: var(--text-primary);
+      outline: none;
+    }
+
+    .spacer { flex: 1 1 auto; }
+    .divider { width: 1px; height: 24px; background: var(--bg-border); }
+
+    .progress-strip {
+      border: 1px solid rgba(45, 48, 65, .86);
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at 14% 10%, rgba(108, 92, 231, .12), transparent 34%),
+        radial-gradient(circle at 88% 24%, rgba(0, 184, 148, .09), transparent 28%),
+        rgba(26, 29, 39, .78);
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 10px 28px rgba(0,0,0,.12);
+    }
+
+    .progress-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .progress-title {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .progress-title strong {
+      color: var(--text-primary);
+      font-size: 17px;
+      margin-left: 6px;
+    }
+
+    .complete-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      padding: 0 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(0, 184, 148, .28);
+      background: rgba(0, 184, 148, .1);
+      color: #BDF4E7;
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .complete-meta button {
+      border: 1px solid rgba(0, 184, 148, .36);
+      border-radius: 999px;
+      background: rgba(0, 184, 148, .16);
+      color: #D7FFF3;
+      height: 24px;
+      padding: 0 8px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .bar {
+      height: 12px;
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.045), transparent),
+        rgba(15, 17, 23, .86);
+      border: 1px solid rgba(45, 48, 65, .86);
+      box-shadow: inset 0 1px 3px rgba(0,0,0,.55), 0 1px 0 rgba(255,255,255,.03);
+    }
+
+    .bar::before {
+      content: "";
+      position: absolute;
+      inset: 2px;
+      border-radius: 999px;
+      background:
+        repeating-linear-gradient(
+          90deg,
+          rgba(255,255,255,.055) 0 1px,
+          transparent 1px 9.5%
+        );
+      opacity: .38;
+      pointer-events: none;
+    }
+
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 78%;
+      position: relative;
+      border-radius: 999px;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.34), transparent 48%),
+        linear-gradient(90deg,
+          #C4BCFA 0%,
+          #8F80F4 26%,
+          #E17055 56%,
+          #FDCB6E 73%,
+          #00B894 100%
+        );
+      box-shadow:
+        0 0 18px rgba(108, 92, 231, .24),
+        0 0 26px rgba(0, 184, 148, .12);
+    }
+
+    .bar > span::before {
+      content: "";
+      position: absolute;
+      inset: 1px 0 auto;
+      height: 42%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
+      opacity: .55;
+    }
+
+    .bar > span::after {
+      content: "";
+      position: absolute;
+      right: -5px;
+      top: 50%;
+      width: 10px;
+      height: 10px;
+      transform: translateY(-50%);
+      border-radius: 999px;
+      background: #D7FFF3;
+      box-shadow: 0 0 0 3px rgba(0, 184, 148, .18), 0 0 18px rgba(0, 184, 148, .68);
+    }
+
+    .view {
+      min-height: 468px;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(270px, 1fr));
+      gap: 14px;
+    }
+
+    .scene-card {
+      background: var(--bg-card);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      min-height: 238px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,.08), 0 8px 20px rgba(0,0,0,.12);
+      transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease, background .18s ease;
+      overflow: visible;
+    }
+
+    .scene-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(108, 92, 231, .7);
+      box-shadow: 0 3px 8px rgba(0,0,0,.14), 0 10px 24px rgba(0,0,0,.18);
+    }
+
+    body[data-option="a"] .scene-card.is-all-complete,
+    body[data-option="b"] .scene-card.is-all-complete,
+    body[data-option="c"] .scene-card.is-all-complete {
+      border-color: rgba(0, 184, 148, .76);
+      background:
+        radial-gradient(circle at 14% 0%, rgba(0, 184, 148, .34), transparent 36%),
+        linear-gradient(135deg, rgba(0, 184, 148, .2), rgba(26, 29, 39, .96) 58%);
+      box-shadow:
+        inset 0 0 0 1px rgba(0, 184, 148, .15),
+        0 10px 30px rgba(0, 184, 148, .1),
+        0 12px 24px rgba(0,0,0,.18);
+    }
+
+    body[data-option="a"] .scene-card.is-all-complete::before,
+    body[data-option="b"] .scene-card.is-all-complete::before,
+    body[data-option="c"] .scene-card.is-all-complete::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 6px;
+      border-radius: 12px 0 0 12px;
+      background: var(--complete);
+      box-shadow: 0 0 18px rgba(0, 184, 148, .72);
+    }
+
+    body[data-option="b"] .scene-card.is-partial-complete {
+      border-color: rgba(0, 184, 148, .38);
+      background: linear-gradient(135deg, rgba(0, 184, 148, .12), rgba(26, 29, 39, .96) 42%);
+    }
+
+    .card-head {
+      padding: 14px 16px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .scene-id-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .scene-index {
+      color: rgba(139, 141, 163, .55);
+      font-family: Consolas, "Fira Code", monospace;
+      font-size: 14px;
+    }
+
+    .scene-id {
+      font-family: Consolas, "Fira Code", monospace;
+      font-size: 15px;
+      font-weight: 850;
+      color: white;
+    }
+
+    .layout-chip {
+      color: rgba(139, 141, 163, .68);
+      font-size: 11px;
+      font-style: italic;
+      white-space: nowrap;
+    }
+
+    .badges {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+    }
+
+    .badge {
+      height: 22px;
+      border-radius: 999px;
+      border: 1px solid rgba(45, 48, 65, .8);
+      display: inline-flex;
+      align-items: center;
+      padding: 0 8px;
+      font-size: 10px;
+      font-weight: 820;
+      color: var(--text-secondary);
+      background: rgba(15, 17, 23, .62);
+    }
+
+    .badge.comment {
+      color: var(--accent-sub);
+      background: rgba(108, 92, 231, .15);
+      border-color: rgba(108, 92, 231, .2);
+    }
+
+    .badge.complete {
+      color: #BDF4E7;
+      background: rgba(0, 184, 148, .17);
+      border-color: rgba(0, 184, 148, .3);
+    }
+
+    .pct {
+      height: 26px;
+      min-width: 52px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(45, 48, 65, .7);
+      border-radius: 999px;
+      background: rgba(15, 17, 23, .72);
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 780;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .thumbs {
+      margin: 0 16px 6px;
+      display: flex;
+      gap: 1px;
+      border-radius: 9px;
+      overflow: hidden;
+      background: var(--bg-border);
+    }
+
+    .thumb {
+      flex: 1;
+      height: 56px;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.12), transparent 34%),
+        linear-gradient(135deg, rgba(108,92,231,.28), rgba(15,17,23,.9));
+      display: grid;
+      place-items: center;
+      color: rgba(232, 232, 238, .55);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .memo-lines {
+      margin: 0 16px 4px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .memo-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      overflow: hidden;
+      color: rgba(253, 203, 110, .72);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .mini-dept {
+      height: 16px;
+      min-width: 26px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 5px;
+      font-size: 9px;
+      font-weight: 900;
+      flex: 0 0 auto;
+    }
+
+    .mini-dept.bg { color: #C4BCFA; background: rgba(108, 92, 231, .16); }
+    .mini-dept.act { color: #F5BEB3; background: rgba(225, 112, 85, .16); }
+
+    .dept-sections {
+      padding: 8px 16px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: auto;
+    }
+
+    .dept-section {
+      border-radius: 10px;
+      transition: background .18s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+
+    body[data-option="a"] .dept-section.is-complete,
+    body[data-option="b"] .dept-section.is-complete {
+      background: rgba(0, 184, 148, .105);
+      box-shadow: inset 0 0 0 1px rgba(0, 184, 148, .22);
+      padding: 7px;
+      margin: -7px;
+    }
+
+    body[data-option="b"] .dept-section.is-complete {
+      background: rgba(0, 184, 148, .18);
+      box-shadow: inset 0 0 0 1px rgba(0, 184, 148, .34), 0 0 18px rgba(0, 184, 148, .09);
+    }
+
+    body[data-option="c"] .dept-section.is-complete .dept-name::after {
+      content: "완료";
+      margin-left: 6px;
+      color: #9AF0D8;
+      background: rgba(0, 184, 148, .16);
+      border: 1px solid rgba(0, 184, 148, .28);
+      border-radius: 999px;
+      padding: 1px 6px;
+      font-size: 9px;
+      font-weight: 900;
+    }
+
+    .dept-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .dept-name {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+    }
+
+    .assignee {
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    .stage-track {
+      display: flex;
+      gap: 2px;
+      padding: 4px;
+      border: 1px solid rgba(45, 48, 65, .45);
+      border-radius: 9px;
+      background: rgba(15, 17, 23, .72);
+    }
+
+    .stage {
+      flex: 1;
+      min-width: 0;
+      height: 30px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      color: rgba(139, 141, 163, .74);
+      font-size: 11px;
+      font-weight: 760;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .stage.done-current {
+      color: white;
+      font-weight: 850;
+      box-shadow: 0 2px 8px rgba(108, 92, 231, .25);
+    }
+
+    .stage.done-prev {
+      font-weight: 760;
+    }
+
+    .phase-round {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 5px;
+    }
+
+    .round-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      height: 22px;
+      border-radius: 999px;
+      padding: 0 8px;
+      background: rgba(116, 185, 255, .15);
+      color: var(--phase-work);
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .card-footer {
+      height: 24px;
+      position: relative;
+    }
+
+    .sheet-view {
+      display: none;
+      border: 1px solid var(--bg-border);
+      border-radius: 10px;
+      overflow: auto;
+      background: rgba(26, 29, 39, .54);
+    }
+
+    table {
+      width: 100%;
+      min-width: 1240px;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 12px;
+    }
+
+    thead {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    th, td {
+      border-bottom: 1px solid rgba(45, 48, 65, .42);
+      padding: 0 8px;
+      height: 39px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    th {
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 760;
+      text-align: left;
+      position: relative;
+    }
+
+    th.center, td.center { text-align: center; }
+    th.right, td.right { text-align: right; }
+
+    .group-head th {
+      height: 25px;
+      color: rgba(139, 141, 163, .62);
+      font-size: 10px;
+      font-weight: 700;
+      text-align: center;
+      border-bottom-color: rgba(45, 48, 65, .32);
+    }
+
+    .resize-handle {
+      position: absolute;
+      top: 6px;
+      bottom: 6px;
+      right: -2px;
+      width: 5px;
+      border-radius: 999px;
+      background: transparent;
+      cursor: col-resize;
+      z-index: 3;
+    }
+
+    .resizable:hover .resize-handle,
+    .resize-handle.active {
+      background: rgba(162, 155, 254, .7);
+    }
+
+    tbody tr:nth-child(odd) { background: rgba(26, 29, 39, .2); }
+    tbody tr:nth-child(even) { background: rgba(15, 17, 23, .1); }
+    tbody tr:hover { background: rgba(108, 92, 231, .06); }
+
+    body[data-option="a"] tr.is-all-complete,
+    body[data-option="b"] tr.is-all-complete,
+    body[data-option="c"] tr.is-all-complete {
+      background: rgba(0, 184, 148, .13);
+      box-shadow: inset 5px 0 0 var(--complete);
+    }
+
+    body[data-option="b"] tr.is-partial-complete {
+      background: linear-gradient(90deg, rgba(0, 184, 148, .12), rgba(15, 17, 23, .08) 34%);
+      box-shadow: inset 5px 0 0 rgba(0, 184, 148, .58);
+    }
+
+    .scene-num-glow-wrap {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 7px;
+      color: var(--accent-sub);
+      border: 1px solid rgba(162, 155, 254, .5);
+      box-shadow: 0 0 10px rgba(108, 92, 231, .18);
+      font-family: Consolas, "Fira Code", monospace;
+      font-weight: 850;
+    }
+
+    .comment-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      height: 18px;
+      margin-left: 6px;
+      border-radius: 999px;
+      color: var(--accent-sub);
+      background: rgba(108, 92, 231, .18);
+      font-size: 10px;
+      font-weight: 850;
+    }
+
+    .editable {
+      color: rgba(253, 203, 110, .75);
+    }
+
+    .thumb-cell {
+      display: inline-grid;
+      place-items: center;
+      width: 28px;
+      height: 22px;
+      border-radius: 6px;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.14), transparent 50%),
+        rgba(108, 92, 231, .18);
+      color: rgba(232, 232, 238, .58);
+      font-size: 9px;
+      font-weight: 850;
+    }
+
+    .assignee-chip {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: rgba(15, 17, 23, .62);
+      border: 1px solid rgba(45, 48, 65, .75);
+      color: var(--text-primary);
+      font-size: 11px;
+      font-weight: 720;
+    }
+
+    .check-cell {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid var(--bg-border);
+      color: var(--bg-primary);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .phase-cell {
+      display: flex;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid rgba(45, 48, 65, .48);
+      border-radius: 8px;
+      background: rgba(15, 17, 23, .7);
+    }
+
+    .phase-chip {
+      flex: 1;
+      height: 24px;
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+      color: rgba(139, 141, 163, .74);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .phase-chip.active {
+      color: var(--bg-primary);
+      background: var(--phase-work);
+      box-shadow: 0 2px 8px rgba(116, 185, 255, .25);
+    }
+
+    .phase-chip.done {
+      color: var(--bg-primary);
+      background: var(--complete);
+      box-shadow: 0 2px 8px rgba(0, 184, 148, .25);
+    }
+
+    .sheet-pct {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      min-width: 36px;
+      height: 22px;
+      border-radius: 999px;
+      color: var(--text-primary);
+      background: rgba(15, 17, 23, .64);
+      border: 1px solid rgba(45, 48, 65, .75);
+      font-size: 11px;
+      font-weight: 820;
+      font-variant-numeric: tabular-nums;
+    }
+
+    body[data-view="sheet"] .card-grid { display: none; }
+    body[data-view="sheet"] .sheet-view { display: block; }
+
+    .help {
+      color: var(--text-secondary);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .sheet-view tbody tr {
+      cursor: pointer;
+    }
+
+    .is-transition-source {
+      opacity: .46 !important;
+      transition: opacity .18s ease, filter .18s ease;
+      filter: saturate(.85);
+    }
+
+    .continuity-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .continuity-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(8, 10, 16, .58);
+      backdrop-filter: blur(7px);
+      opacity: 0;
+      transition: opacity .28s ease;
+    }
+
+    .continuity-overlay.visible .continuity-backdrop {
+      opacity: 1;
+    }
+
+    .continuity-modal {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      display: flex;
+      align-items: stretch;
+      gap: 12px;
+      max-width: calc(100vw - 32px);
+      max-height: calc(100vh - 32px);
+      transform: translate(-50%, -50%) scale(.982) translateY(8px);
+      opacity: 0;
+      transition: opacity .24s ease, transform .34s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: none;
+      will-change: opacity, transform;
+    }
+
+    .continuity-modal.visible {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1) translateY(0);
+      pointer-events: auto;
+    }
+
+    .continuity-modal.preparing {
+      visibility: hidden;
+      opacity: 0;
+    }
+
+    .continuity-modal.loading .modal-inner {
+      opacity: 0;
+      transform: translateY(4px) scale(.996);
+    }
+
+    .continuity-modal.hydrated .modal-inner,
+    .continuity-modal:not(.loading) .modal-inner {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    .continuity-modal.motion-active [data-motion-target] {
+      opacity: 0;
+    }
+
+    .continuity-modal.hydrated [data-motion-target] {
+      opacity: 1;
+      transition: opacity .22s ease;
+    }
+
+    .continuity-main-shell {
+      position: relative;
+      width: min(720px, calc(100vw - 26rem));
+      min-width: 620px;
+      height: min(900px, 92vh);
+      border: 1px solid rgba(45, 48, 65, .96);
+      border-radius: 18px;
+      background:
+        radial-gradient(circle at 14% 0%, rgba(108, 92, 231, .18), transparent 34%),
+        radial-gradient(circle at 88% 105%, rgba(162, 155, 254, .13), transparent 34%),
+        #171A25;
+      box-shadow: 0 40px 80px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.04);
+      overflow: hidden;
+    }
+
+    .modal-glow-a,
+    .modal-glow-b {
+      position: absolute;
+      border-radius: 999px;
+      pointer-events: none;
+      filter: blur(44px);
+      opacity: .9;
+    }
+
+    .modal-glow-a {
+      left: -110px;
+      top: -120px;
+      width: 410px;
+      height: 410px;
+      background: radial-gradient(circle, rgba(108, 92, 231, .19), transparent 60%);
+    }
+
+    .modal-glow-b {
+      right: -120px;
+      bottom: -170px;
+      width: 520px;
+      height: 520px;
+      background: radial-gradient(circle, rgba(162, 155, 254, .14), transparent 60%);
+    }
+
+    .modal-inner {
+      position: relative;
+      z-index: 1;
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      transition: opacity .24s ease, transform .32s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .modal-skeleton {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      background:
+        radial-gradient(circle at 14% 0%, rgba(108, 92, 231, .13), transparent 34%),
+        radial-gradient(circle at 88% 105%, rgba(162, 155, 254, .10), transparent 34%),
+        #171A25;
+      opacity: 0;
+      transform: translateY(5px) scale(.996);
+      transition: opacity .22s ease, transform .32s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: none;
+    }
+
+    .continuity-modal.loading.visible .modal-skeleton {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    .continuity-modal.hydrated .modal-skeleton {
+      opacity: 0;
+      transform: translateY(-2px) scale(.997);
+    }
+
+    .skeleton-head,
+    .skeleton-tabs,
+    .skeleton-body,
+    .skeleton-dots {
+      flex: 0 0 auto;
+    }
+
+    .skeleton-head {
+      min-height: 57px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 20px;
+      border-bottom: 1px solid rgba(45, 48, 65, .48);
+      background: rgba(255, 255, 255, .012);
+    }
+
+    .skeleton-tabs {
+      height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 20px;
+      border-bottom: 1px solid rgba(45, 48, 65, .36);
+    }
+
+    .skeleton-body {
+      flex: 1 1 auto;
+      padding: 16px 20px 10px;
+      display: grid;
+      gap: 12px;
+      overflow: hidden;
+    }
+
+    .skeleton-image-grid,
+    .skeleton-dept-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .skel {
+      position: relative;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(45, 48, 65, .3);
+    }
+
+    .skel::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      transform: translateX(-120%);
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.105), transparent);
+      animation: skeleton-sweep 1.15s ease-in-out infinite;
+    }
+
+    .skel.id { width: 190px; height: 22px; border-radius: 7px; }
+    .skel.meta { width: 96px; height: 20px; }
+    .skel.button { width: 72px; height: 25px; border-radius: 7px; }
+    .skel.tab { width: 54px; height: 16px; border-radius: 5px; }
+    .skel.image { height: 150px; border-radius: 12px; }
+    .skel.card { height: 235px; border-radius: 12px; }
+    .skel.dot { width: 6px; height: 6px; }
+    .skel.dot.active { width: 20px; }
+
+    .skeleton-dots {
+      height: 38px;
+      border-top: 1px solid rgba(45, 48, 65, .3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    @keyframes skeleton-sweep {
+      0% { transform: translateX(-120%); }
+      54%, 100% { transform: translateX(120%); }
+    }
+
+    .modal-head {
+      min-height: 57px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      border-bottom: 1px solid rgba(45, 48, 65, .52);
+      background: rgba(255, 255, 255, .015);
+      backdrop-filter: blur(20px);
+    }
+
+    .modal-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .modal-scene-no,
+    .modal-scene-id {
+      font-family: Consolas, "Fira Code", monospace;
+      white-space: nowrap;
+    }
+
+    .modal-scene-no {
+      color: rgba(139, 141, 163, .58);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .modal-scene-id {
+      font-size: 18px;
+      font-weight: 900;
+      color: #fff;
+    }
+
+    .modal-layout,
+    .modal-sub {
+      color: var(--text-secondary);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .modal-layout {
+      color: rgba(139, 141, 163, .58);
+    }
+
+    .modal-total {
+      display: inline-flex;
+      align-items: center;
+      height: 23px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      color: var(--text-primary);
+      font-size: 11px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .modal-actions {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex: 0 0 auto;
+    }
+
+    .modal-nav-btn,
+    .modal-close {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .modal-nav-btn:hover,
+    .modal-close:hover {
+      color: white;
+      background: rgba(45, 48, 65, .5);
+    }
+
+    .modal-nav-count {
+      min-width: 56px;
+      text-align: center;
+      color: rgba(139, 141, 163, .72);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .modal-delete {
+      height: 27px;
+      border-radius: 7px;
+      border: 1px solid rgba(255, 99, 99, .3);
+      background: rgba(255, 99, 99, .1);
+      color: #ff8f8f;
+      padding: 0 9px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .modal-dept-toggle {
+      display: inline-flex;
+      gap: 2px;
+      padding: 2px;
+      border-radius: 7px;
+      background: rgba(45, 48, 65, .4);
+    }
+
+    .modal-dept-toggle span {
+      height: 24px;
+      border-radius: 5px;
+      padding: 0 8px;
+      display: inline-flex;
+      align-items: center;
+      color: var(--text-secondary);
+      font-size: 10.5px;
+      font-weight: 800;
+    }
+
+    .modal-dept-toggle span.active {
+      color: var(--accent-sub);
+      background: rgba(108, 92, 231, .22);
+      box-shadow: inset 0 0 0 1px rgba(108, 92, 231, .32);
+    }
+
+    .modal-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 0 20px;
+      border-bottom: 1px solid rgba(45, 48, 65, .42);
+      flex: 0 0 auto;
+    }
+
+    .modal-tabs span {
+      height: 39px;
+      display: inline-flex;
+      align-items: center;
+      border-bottom: 2px solid transparent;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 780;
+      padding: 0 8px;
+    }
+
+    .modal-tabs span.active {
+      color: var(--accent-sub);
+      border-bottom-color: var(--accent);
+    }
+
+    .modal-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      padding: 16px 20px 10px;
+    }
+
+    .modal-image-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .modal-image-slot {
+      min-height: 150px;
+      border-radius: 12px;
+      border: 1px solid rgba(45, 48, 65, .78);
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.10), transparent 40%),
+        linear-gradient(135deg, rgba(108, 92, 231, .22), rgba(15,17,23,.92));
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: rgba(232,232,238,.42);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .03em;
+    }
+
+    .modal-image-slot::before {
+      content: attr(data-label);
+      position: absolute;
+      left: 10px;
+      top: 9px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0 8px;
+      background: rgba(15, 17, 23, .66);
+      border: 1px solid rgba(45, 48, 65, .7);
+      color: var(--text-secondary);
+      font-size: 10px;
+      letter-spacing: 0;
+    }
+
+    .modal-depts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .modal-dept-card {
+      border: 1px solid rgba(45, 48, 65, .76);
+      border-radius: 12px;
+      background: rgba(15, 17, 23, .34);
+      padding: 13px;
+      display: grid;
+      gap: 11px;
+      min-width: 0;
+    }
+
+    .modal-dept-card.complete {
+      border-color: rgba(0, 184, 148, .36);
+      background:
+        linear-gradient(180deg, rgba(0, 184, 148, .11), rgba(15, 17, 23, .34));
+      box-shadow: inset 0 0 0 1px rgba(0, 184, 148, .08);
+    }
+
+    .modal-section-label {
+      color: rgba(139, 141, 163, .7);
+      font-size: 11px;
+      font-weight: 850;
+      margin-bottom: -4px;
+    }
+
+    .modal-property-list {
+      display: grid;
+      gap: 0;
+      border: 1px solid rgba(45, 48, 65, .54);
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(15, 17, 23, .24);
+    }
+
+    .modal-property-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 35px;
+      padding: 7px 10px;
+      border-bottom: 1px solid rgba(45, 48, 65, .38);
+      font-size: 12px;
+    }
+
+    .modal-property-row:last-child {
+      border-bottom: 0;
+    }
+
+    .modal-property-row b {
+      width: 58px;
+      color: var(--text-secondary);
+      font-size: 11px;
+      flex: 0 0 auto;
+    }
+
+    .modal-property-row span {
+      color: rgba(232, 232, 238, .86);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .modal-property-row .memo-text {
+      color: rgba(253, 203, 110, .78);
+      white-space: normal;
+      line-height: 1.35;
+    }
+
+    .modal-meta-row {
+      margin-top: 11px;
+      padding: 10px 2px 0;
+      color: rgba(139, 141, 163, .54);
+      font-size: 11px;
+      display: flex;
+      gap: 14px;
+    }
+
+    .modal-dots {
+      height: 38px;
+      border-top: 1px solid rgba(45, 48, 65, .34);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      flex: 0 0 auto;
+    }
+
+    .modal-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(139, 141, 163, .3);
+    }
+
+    .modal-dot.active {
+      width: 20px;
+      background: var(--accent);
+      box-shadow: 0 0 6px rgba(108, 92, 231, .68);
+    }
+
+    .continuity-comments {
+      width: clamp(320px, 26vw, 420px);
+      height: min(900px, 92vh);
+      border: 1px solid rgba(45, 48, 65, .96);
+      border-radius: 18px;
+      background: #171A25;
+      box-shadow: 0 40px 80px rgba(0,0,0,.42);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: translateX(18px);
+      opacity: 0;
+      transition: opacity .26s ease .08s, transform .34s cubic-bezier(0.16, 1, 0.3, 1) .08s;
+    }
+
+    .continuity-modal.visible .continuity-comments {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .continuity-modal.loading .continuity-comments {
+      opacity: 0;
+      transform: translateX(14px);
+    }
+
+    .comment-head {
+      height: 48px;
+      border-bottom: 1px solid rgba(45, 48, 65, .86);
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-weight: 760;
+    }
+
+    .comment-count {
+      color: rgba(139, 141, 163, .68);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .comment-list {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    .comment-item {
+      border: 1px solid rgba(45, 48, 65, .62);
+      border-radius: 11px;
+      background: rgba(15, 17, 23, .36);
+      padding: 11px;
+      display: grid;
+      gap: 7px;
+    }
+
+    .comment-author {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .comment-author span:last-child {
+      color: rgba(139, 141, 163, .58);
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .comment-text {
+      color: rgba(232, 232, 238, .72);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .continuity-snapshot {
+      position: fixed;
+      z-index: 90;
+      overflow: hidden;
+      pointer-events: none;
+      background: var(--bg-card);
+      border: 1px solid rgba(45, 48, 65, .95);
+      box-shadow: 0 24px 80px rgba(0,0,0,.42);
+      transform-origin: top left;
+      will-change: transform, border-radius, opacity;
+      background:
+        radial-gradient(circle at 14% 0%, rgba(108, 92, 231, .18), transparent 34%),
+        #171A25;
+    }
+
+    .continuity-snapshot.fading-out {
+      transition: opacity .24s ease;
+      opacity: 0;
+    }
+
+    .continuity-snapshot .scene-card {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      margin: 0;
+      box-shadow: none;
+      transform: none !important;
+    }
+
+    .continuity-snapshot.to-modal {
+      border-color: rgba(45, 48, 65, .96);
+      box-shadow: 0 40px 80px rgba(0,0,0,.5);
+      background:
+        radial-gradient(circle at 14% 0%, rgba(108, 92, 231, .18), transparent 34%),
+        radial-gradient(circle at 88% 105%, rgba(162, 155, 254, .13), transparent 34%),
+        #171A25;
+    }
+
+    .continuity-snapshot.to-modal > * {
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .continuity-snapshot.to-modal > * {
+      opacity: .18;
+      transform: scale(.985);
+    }
+
+    .continuity-ghost {
+      position: fixed;
+      z-index: 96;
+      overflow: hidden;
+      pointer-events: none;
+      transform-origin: top left;
+      will-change: transform, opacity, border-radius;
+      box-shadow: 0 16px 42px rgba(0,0,0,.26);
+    }
+
+    .continuity-ghost.fading-out {
+      transition: opacity .22s ease;
+      opacity: 0;
+    }
+
+    .continuity-ghost > * {
+      width: 100% !important;
+      height: 100% !important;
+      margin: 0 !important;
+      box-sizing: border-box;
+    }
+
+    .motion-ghost-content {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+
+    .motion-ghost-content::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      transform: translateX(-120%);
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.10), transparent);
+      animation: skeleton-sweep 1.1s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .motion-pill,
+    .motion-line,
+    .motion-stage-seg {
+      display: block;
+      position: relative;
+      border-radius: 999px;
+      background: rgba(255,255,255,.11);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+    }
+
+    .motion-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      background:
+        linear-gradient(135deg, rgba(108, 92, 231, .13), rgba(15,17,23,.86));
+    }
+
+    .motion-title .idx { width: 42px; height: 12px; opacity: .52; }
+    .motion-title .id { width: 118px; height: 18px; background: rgba(255,255,255,.19); }
+    .motion-title .layout { width: 54px; height: 12px; opacity: .46; }
+    .motion-title .pct { width: 42px; height: 18px; margin-left: auto; opacity: .58; }
+
+    .motion-image {
+      border-radius: inherit;
+      background:
+        radial-gradient(circle at 22% 18%, rgba(162,155,254,.28), transparent 35%),
+        linear-gradient(135deg, rgba(108,92,231,.24), rgba(15,17,23,.94));
+    }
+
+    .motion-image::before {
+      content: "";
+      position: absolute;
+      left: 11px;
+      top: 10px;
+      width: 58px;
+      height: 15px;
+      border-radius: 999px;
+      background: rgba(15,17,23,.56);
+      border: 1px solid rgba(255,255,255,.05);
+    }
+
+    .motion-image .center-mark {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 92px;
+      height: 15px;
+      transform: translate(-50%, -50%);
+      border-radius: 999px;
+      background: rgba(255,255,255,.12);
+    }
+
+    .motion-stage {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 3px;
+      padding: 5px;
+      background: rgba(15, 17, 23, .86);
+      border: 1px solid rgba(45, 48, 65, .55);
+    }
+
+    .motion-stage-seg {
+      height: 100%;
+      min-height: 14px;
+      border-radius: 7px;
+      opacity: .82;
+    }
+
+    .motion-stage-seg.active {
+      opacity: 1;
+      box-shadow: 0 0 18px rgba(108,92,231,.22), inset 0 1px 0 rgba(255,255,255,.16);
+    }
+
+    .motion-memo {
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 9px;
+      background: rgba(23,26,37,.92);
+    }
+
+    .motion-memo .dept-chip {
+      height: 16px;
+      border-radius: 5px;
+      background: rgba(108,92,231,.20);
+    }
+
+    .motion-memo.act .dept-chip {
+      background: rgba(225,112,85,.22);
+    }
+
+    .motion-memo .text-lines {
+      display: grid;
+      gap: 4px;
+    }
+
+    .motion-memo .motion-line {
+      height: 8px;
+      background: rgba(253,203,110,.24);
+    }
+
+    .motion-memo .motion-line.short {
+      width: 68%;
+      opacity: .7;
+    }
+
+    .continuity-skeleton-only {
+      border-radius: inherit;
+      background:
+        radial-gradient(circle at 14% 0%, rgba(108, 92, 231, .18), transparent 36%),
+        linear-gradient(135deg, rgba(26,29,39,.96), rgba(15,17,23,.94));
+      padding: 14px 16px;
+      display: grid;
+      grid-template-rows: auto 56px auto 1fr auto;
+      gap: 12px;
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+    }
+
+    .continuity-skeleton-head,
+    .continuity-skeleton-thumbs,
+    .continuity-skeleton-memos,
+    .continuity-skeleton-depts {
+      display: grid;
+      gap: 8px;
+    }
+
+    .continuity-skeleton-head {
+      grid-template-columns: 1fr 64px;
+      align-items: center;
+    }
+
+    .continuity-skeleton-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .continuity-skeleton-thumbs {
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
+      border-radius: 9px;
+      overflow: hidden;
+    }
+
+    .continuity-skeleton-memos {
+      gap: 5px;
+    }
+
+    .continuity-skeleton-depts {
+      align-self: end;
+      gap: 10px;
+    }
+
+    .continuity-skeleton-stage {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 2px;
+      padding: 4px;
+      border-radius: 9px;
+      background: rgba(15,17,23,.7);
+      border: 1px solid rgba(45,48,65,.5);
+      height: 40px;
+    }
+
+    .continuity-skeleton-stage .motion-stage-seg {
+      min-height: 0;
+    }
+
+    .continuity-ghost.ghost-title {
+      border-radius: 10px;
+      background: rgba(23, 26, 37, .88);
+      border: 1px solid rgba(108, 92, 231, .18);
+      box-shadow: 0 12px 34px rgba(0,0,0,.2);
+    }
+
+    .continuity-ghost.ghost-image {
+      border-radius: 10px;
+      border: 1px solid rgba(45, 48, 65, .92);
+      background: rgba(26, 29, 39, .9);
+    }
+
+    .continuity-ghost.ghost-stage {
+      border-radius: 10px;
+      background: rgba(15, 17, 23, .74);
+    }
+
+    .continuity-ghost.ghost-memo {
+      border-radius: 9px;
+      border: 1px solid rgba(253, 203, 110, .13);
+      background: rgba(23, 26, 37, .86);
+      box-shadow: 0 12px 32px rgba(0,0,0,.18);
+    }
+
+    .sheet-row-snapshot {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: 96px 1fr 1fr 90px 180px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      background: rgba(26, 29, 39, .94);
+      color: var(--text-primary);
+      font-size: 12px;
+    }
+
+    .sheet-row-snapshot .snap-id {
+      font-family: Consolas, "Fira Code", monospace;
+      font-weight: 900;
+      color: var(--accent-sub);
+    }
+
+    .sheet-row-snapshot .snap-memo {
+      color: rgba(253, 203, 110, .72);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 1120px) {
+      .continuity-comments {
+        display: none;
+      }
+      .continuity-main-shell {
+        width: min(720px, calc(100vw - 32px));
+        min-width: min(620px, calc(100vw - 32px));
+      }
+      .modal-depts {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 1180px) {
+      .mock-shell {
+        grid-template-columns: 1fr;
+      }
+      .tree { display: none; }
+      .card-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body data-view="card" data-option="c">
+  <div class="mock-shell">
+    <aside class="tree">
+      <div class="tree-head">
+        <div class="tree-title">에피소드</div>
+        <button class="tree-btn">+</button>
+      </div>
+      <div class="ep active">
+        <div class="ep-row"><span>EP03 두근두근 실험실</span><span>78%</span></div>
+        <div class="part-list">
+          <div class="part active"><span>A파트</span><span>전체</span></div>
+          <div class="part"><span>B파트</span><span>63%</span></div>
+          <div class="part"><span>C파트</span><span>41%</span></div>
+        </div>
+      </div>
+      <div class="ep">
+        <div class="ep-row"><span>EP04 준비중</span><span>21%</span></div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <div class="note-bar">
+        <span>실제 Bflow 전체 씬 뷰 구조에 맞춘 완료 색상 시안입니다. 카드뷰/시트뷰를 바꿔 보면서 A/B/C를 비교하세요.</span>
+        <div class="option-tabs" aria-label="완료 색상 시안">
+          <button data-option="a">A안</button>
+          <button data-option="b">B안</button>
+          <button class="active" data-option="c">C안</button>
+        </div>
+      </div>
+
+      <section class="filter">
+        <div class="filter-line">
+          <div class="dept-tabs">
+            <button class="active">전체</button>
+            <button>BG</button>
+            <button>ACT</button>
+          </div>
+          <div class="divider"></div>
+          <div class="select-like">EP03 두근두근 실험실</div>
+          <button class="small-btn accent">+ 에피소드</button>
+          <div class="select-like">A파트</div>
+          <button class="small-btn">+</button>
+          <div class="spacer"></div>
+          <button class="small-btn">옵션 접기</button>
+        </div>
+
+        <div class="filter-line filter-subline">
+          <div class="select-like">작업자: 전체</div>
+          <div class="divider"></div>
+          <div class="status-filter">
+            <button class="active">전체</button>
+            <button>시작 전</button>
+            <button>진행중</button>
+            <button>완료</button>
+          </div>
+          <div class="spacer"></div>
+          <div class="select-like">번호순</div>
+          <button class="small-btn">↑</button>
+          <div class="icon-tabs" aria-label="그룹 모드">
+            <button class="active" title="씬번호별">≡</button>
+            <button title="레이아웃별">▣</button>
+          </div>
+          <div class="icon-tabs" aria-label="보기 모드">
+            <button class="active" data-view="card" title="카드 뷰">▦</button>
+            <button data-view="sheet" title="시트 뷰">▥</button>
+          </div>
+          <input class="search" value="" placeholder="검색..." />
+        </div>
+      </section>
+
+      <section class="progress-strip">
+        <div class="progress-head">
+          <div class="progress-title">현재 화면 진행률 <strong>78%</strong></div>
+          <div class="complete-meta">
+            <span>마지막 완료 · 이다은님 · 방금</span>
+            <button>마지막 체크 취소</button>
+          </div>
+        </div>
+        <div class="bar"><span></span></div>
+        <div class="help" id="option-desc">C안: 부분 완료는 배지 중심으로만 표시합니다. 화면은 조용하지만 한쪽 완료가 덜 눈에 띕니다.</div>
+      </section>
+
+      <section class="view">
+        <div class="card-grid">
+          <article class="scene-card is-partial-complete">
+            <div class="card-head">
+              <div class="scene-id-wrap">
+                <span class="scene-index">#14</span>
+                <span class="scene-id">A014</span>
+                <span class="layout-chip">L#03</span>
+              </div>
+              <div class="badges"><span class="badge comment">3</span><span class="pct">75%</span></div>
+            </div>
+            <div class="thumbs"><div class="thumb">SB</div><div class="thumb">GUIDE</div></div>
+            <div class="memo-lines">
+              <div class="memo-line"><span class="mini-dept bg">BG</span><span>최종 배경 업로드 완료. 컨펌 대기 없음.</span></div>
+              <div class="memo-line"><span class="mini-dept act">ACT</span><span>작업중 2차. 팔 동작 타이밍 재확인.</span></div>
+            </div>
+            <div class="dept-sections">
+              <div class="dept-section is-complete">
+                <div class="dept-top">
+                  <div class="dept-name" style="color:var(--bg-color)"><span class="dot" style="background:var(--bg-color)"></span>BG</div>
+                  <span class="assignee">김OO</span>
+                </div>
+                <div class="stage-track">
+                  <div class="stage done-prev" style="background:rgba(196,188,250,.16);color:var(--bg-lo)">LO</div>
+                  <div class="stage done-prev" style="background:rgba(165,153,245,.16);color:var(--bg-done)">완료</div>
+                  <div class="stage done-prev" style="background:rgba(134,119,239,.16);color:var(--bg-review)">검수</div>
+                  <div class="stage done-current" style="background:var(--bg-png)">PNG</div>
+                </div>
+              </div>
+              <div class="dept-section">
+                <div class="dept-top">
+                  <div class="dept-name" style="color:var(--act-color)"><span class="dot" style="background:var(--act-color)"></span>ACT</div>
+                  <span class="assignee">박OO</span>
+                </div>
+                <div class="phase-round"><span class="round-pill">작업중 2차</span></div>
+                <div class="stage-track">
+                  <div class="stage done-prev" style="background:rgba(110,115,136,.18);color:var(--phase-wait)">대기</div>
+                  <div class="stage done-current" style="background:var(--phase-work);color:var(--bg-primary)">작업중</div>
+                  <div class="stage">피드백</div>
+                  <div class="stage">완료</div>
+                </div>
+              </div>
+            </div>
+            <div class="card-footer"></div>
+          </article>
+
+          <article class="scene-card is-partial-complete">
+            <div class="card-head">
+              <div class="scene-id-wrap">
+                <span class="scene-index">#15</span>
+                <span class="scene-id">A015</span>
+              </div>
+              <div class="badges"><span class="badge complete">ACT 완료</span><span class="pct">62%</span></div>
+            </div>
+            <div class="thumbs"><div class="thumb">SB</div><div class="thumb">GUIDE</div></div>
+            <div class="memo-lines">
+              <div class="memo-line"><span class="mini-dept bg">BG</span><span>검수 전. 창문 밝기만 한 번 더 확인.</span></div>
+              <div class="memo-line"><span class="mini-dept act">ACT</span><span>액팅 최종 완료. 피드백 없음.</span></div>
+            </div>
+            <div class="dept-sections">
+              <div class="dept-section">
+                <div class="dept-top">
+                  <div class="dept-name" style="color:var(--bg-color)"><span class="dot" style="background:var(--bg-color)"></span>BG</div>
+                  <span class="assignee">최OO</span>
+                </div>
+                <div class="stage-track">
+                  <div class="stage done-prev" style="background:rgba(196,188,250,.16);color:var(--bg-lo)">LO</div>
+                  <div class="stage done-current" style="background:var(--bg-done)">완료</div>
+                  <div class="stage">검수</div>
+                  <div class="stage">PNG</div>
+                </div>
+              </div>
+              <div class="dept-section is-complete">
+                <div class="dept-top">
+                  <div class="dept-name" style="color:var(--act-color)"><span class="dot" style="background:var(--act-color)"></span>ACT</div>
+                  <span class="assignee">이OO</span>
+                </div>
+                <div class="stage-track">
+                  <div class="stage done-prev" style="background:rgba(110,115,136,.18);color:var(--phase-wait)">대기</div>
+                  <div class="stage done-prev" style="background:rgba(116,185,255,.16);color:var(--phase-work)">작업중</div>
+                  <div class="stage done-prev" style="background:rgba(253,203,110,.16);color:var(--phase-feedback)">피드백</div>
+                  <div class="stage done-current" style="background:var(--complete);color:var(--bg-primary)">완료</div>
+                </div>
+              </div>
+            </div>
+            <div class="card-footer"></div>
+          </article>
+
+          <article class="scene-card is-all-complete">
+            <div class="card-head">
+              <div class="scene-id-wrap">
+                <span class="scene-index">#16</span>
+                <span class="scene-id">A016</span>
+                <span class="layout-chip">L#04</span>
+              </div>
+              <div class="badges"><span class="badge complete">전체 완료</span><span class="pct">100%</span></div>
+            </div>
+            <div class="thumbs"><div class="thumb">SB</div><div class="thumb">GUIDE</div></div>
+            <div class="memo-lines">
+              <div class="memo-line"><span class="mini-dept bg">BG</span><span>BG 최종 완료. 파일 정리 끝.</span></div>
+              <div class="memo-line"><span class="mini-dept act">ACT</span><span>ACT 최종 완료. 추가 피드백 없음.</span></div>
+            </div>
+            <div class="dept-sections">
+              <div class="dept-section is-complete">
+                <div class="dept-top">
+                  <div class="dept-name" style="color:var(--bg-color)"><span class="dot" style="background:var(--bg-color)"></span>BG</div>
+                  <span class="assignee">한OO</span>
+                </div>
+                <div class="stage-track">
+                  <div class="stage done-prev" style="background:rgba(196,188,250,.16);color:var(--bg-lo)">LO</div>
+                  <div class="stage done-prev" style="background:rgba(165,153,245,.16);color:var(--bg-done)">완료</div>
+                  <div class="stage done-prev" style="background:rgba(134,119,239,.16);color:var(--bg-review)">검수</div>
+                  <div class="stage done-current" style="background:var(--bg-png)">PNG</div>
+                </div>
+              </div>
+              <div class="dept-section is-complete">
+                <div class="dept-top">
+                  <div class="dept-name" style="color:var(--act-color)"><span class="dot" style="background:var(--act-color)"></span>ACT</div>
+                  <span class="assignee">정OO</span>
+                </div>
+                <div class="stage-track">
+                  <div class="stage done-prev" style="background:rgba(110,115,136,.18);color:var(--phase-wait)">대기</div>
+                  <div class="stage done-prev" style="background:rgba(116,185,255,.16);color:var(--phase-work)">작업중</div>
+                  <div class="stage done-prev" style="background:rgba(253,203,110,.16);color:var(--phase-feedback)">피드백</div>
+                  <div class="stage done-current" style="background:var(--complete);color:var(--bg-primary)">완료</div>
+                </div>
+              </div>
+            </div>
+            <div class="card-footer"></div>
+          </article>
+        </div>
+
+        <div class="sheet-view">
+          <table id="sheet-table">
+            <colgroup>
+              <col style="width:96px" />
+              <col style="width:210px" />
+              <col style="width:210px" />
+              <col style="width:56px" />
+              <col style="width:56px" />
+              <col style="width:90px" />
+              <col style="width:40px" />
+              <col style="width:40px" />
+              <col style="width:40px" />
+              <col style="width:40px" />
+              <col style="width:90px" />
+              <col style="width:190px" />
+              <col style="width:34px" />
+            </colgroup>
+            <thead>
+              <tr class="group-head">
+                <th colspan="3"></th>
+                <th></th>
+                <th></th>
+                <th colspan="5"><span style="color:var(--bg-color)">●</span> BG</th>
+                <th colspan="2"><span style="color:var(--act-color)">●</span> ACT</th>
+                <th></th>
+              </tr>
+              <tr>
+                <th class="resizable">씬번호<span class="resize-handle"></span></th>
+                <th class="resizable" style="color:var(--bg-color)">BG 메모<span class="resize-handle"></span></th>
+                <th class="resizable" style="color:var(--act-color)">ACT 메모<span class="resize-handle"></span></th>
+                <th class="center resizable">SB<span class="resize-handle"></span></th>
+                <th class="center resizable">가이드<span class="resize-handle"></span></th>
+                <th class="resizable" style="color:var(--bg-color)">BG담당<span class="resize-handle"></span></th>
+                <th class="center" style="color:var(--bg-lo)">LO</th>
+                <th class="center" style="color:var(--bg-done)">완료</th>
+                <th class="center" style="color:var(--bg-review)">검수</th>
+                <th class="center" style="color:var(--bg-png)">PNG</th>
+                <th class="resizable" style="color:var(--act-color)">ACT담당<span class="resize-handle"></span></th>
+                <th class="center resizable" style="color:var(--act-color)">액팅 단계<span class="resize-handle"></span></th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="is-partial-complete">
+                <td><span class="scene-num-glow-wrap">A014</span><span class="comment-chip">3</span></td>
+                <td class="editable">최종 배경 업로드 완료. 컨펌 대기 없음.</td>
+                <td class="editable">작업중 2차. 팔 동작 타이밍 재확인.</td>
+                <td class="center"><span class="thumb-cell">SB</span></td>
+                <td class="center"><span class="thumb-cell">G</span></td>
+                <td><span class="assignee-chip">김OO</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-lo)">✓</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-done)">✓</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-review)">✓</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-png)">✓</span></td>
+                <td><span class="assignee-chip">박OO</span></td>
+                <td><div class="phase-cell"><span class="phase-chip">대기</span><span class="phase-chip active">작업중</span><span class="phase-chip">피드백</span><span class="phase-chip">완료</span></div></td>
+                <td></td>
+              </tr>
+              <tr class="is-partial-complete">
+                <td><span class="scene-num-glow-wrap">A015</span></td>
+                <td class="editable">검수 전. 창문 밝기만 한 번 더 확인.</td>
+                <td class="editable">액팅 최종 완료. 피드백 없음.</td>
+                <td class="center"><span class="thumb-cell">SB</span></td>
+                <td class="center"><span class="thumb-cell">G</span></td>
+                <td><span class="assignee-chip">최OO</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-lo)">✓</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-done)">✓</span></td>
+                <td class="center"><span class="check-cell"></span></td>
+                <td class="center"><span class="check-cell"></span></td>
+                <td><span class="assignee-chip">이OO</span></td>
+                <td><div class="phase-cell"><span class="phase-chip">대기</span><span class="phase-chip">작업중</span><span class="phase-chip">피드백</span><span class="phase-chip done">완료</span></div></td>
+                <td></td>
+              </tr>
+              <tr class="is-all-complete">
+                <td><span class="scene-num-glow-wrap">A016</span><span class="comment-chip">1</span></td>
+                <td class="editable">BG 최종 완료. 파일 정리 끝.</td>
+                <td class="editable">ACT 최종 완료. 추가 피드백 없음.</td>
+                <td class="center"><span class="thumb-cell">SB</span></td>
+                <td class="center"><span class="thumb-cell">G</span></td>
+                <td><span class="assignee-chip">한OO</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-lo)">✓</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-done)">✓</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-review)">✓</span></td>
+                <td class="center"><span class="check-cell" style="background:var(--bg-png)">✓</span></td>
+                <td><span class="assignee-chip">정OO</span></td>
+                <td><div class="phase-cell"><span class="phase-chip">대기</span><span class="phase-chip">작업중</span><span class="phase-chip">피드백</span><span class="phase-chip done">완료</span></div></td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const descriptions = {
+      a: 'A안: 한쪽만 완료되면 해당 부서 섹션만 완료 표시, BG+ACT 둘 다 완료될 때만 카드/행 전체가 강하게 변합니다.',
+      b: 'B안: 부분 완료 카드/행에도 초록 기운을 조금 더 줍니다. 완료가 눈에 잘 띄지만, 전체 완료와 헷갈릴 여지가 있습니다.',
+      c: 'C안: 부분 완료는 배지 중심으로만 표시합니다. 화면은 조용하지만 한쪽 완료가 덜 눈에 띕니다.'
+    };
+
+    document.querySelectorAll('.option-tabs [data-option]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const option = button.dataset.option;
+        if (!option) return;
+        document.body.dataset.option = option;
+        document.querySelectorAll('.option-tabs [data-option]').forEach((item) => item.classList.toggle('active', item === button));
+        document.getElementById('option-desc').textContent = descriptions[option];
+      });
+    });
+
+    document.querySelectorAll('.icon-tabs [data-view]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const view = button.dataset.view;
+        if (!view) return;
+        document.body.dataset.view = view;
+        document.querySelectorAll('.icon-tabs [data-view]').forEach((item) => item.classList.toggle('active', item === button));
+      });
+    });
+
+    let resizeState = null;
+    const table = document.getElementById('sheet-table');
+    const cols = table.querySelectorAll('col');
+
+    document.querySelectorAll('.resize-handle').forEach((handle) => {
+      handle.addEventListener('mousedown', (event) => {
+        const th = handle.closest('th');
+        const headerCells = Array.from(th.parentElement.children);
+        const colIndex = headerCells.indexOf(th);
+        const currentWidth = cols[colIndex].getBoundingClientRect().width;
+        resizeState = { handle, colIndex, startX: event.clientX, startWidth: currentWidth };
+        handle.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        event.preventDefault();
+      });
+    });
+
+    window.addEventListener('mousemove', (event) => {
+      if (!resizeState) return;
+      const nextWidth = Math.max(42, resizeState.startWidth + event.clientX - resizeState.startX);
+      cols[resizeState.colIndex].style.width = `${Math.round(nextWidth)}px`;
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!resizeState) return;
+      resizeState.handle.classList.remove('active');
+      resizeState = null;
+      document.body.style.cursor = '';
+    });
+
+    let activeTransition = null;
+
+    const getSceneData = (source) => {
+      const isCard = source.classList.contains('scene-card');
+      const sceneId = isCard
+        ? source.querySelector('.scene-id')?.textContent?.trim()
+        : source.querySelector('.scene-num-glow-wrap')?.textContent?.trim();
+      const isComplete = source.classList.contains('is-all-complete');
+      const isPartial = source.classList.contains('is-partial-complete');
+      const bgMemo = isCard
+        ? source.querySelector('.memo-line .mini-dept.bg')?.parentElement?.textContent?.replace('BG', '').trim()
+        : source.children[1]?.textContent?.trim();
+      const actMemo = isCard
+        ? source.querySelector('.memo-line .mini-dept.act')?.parentElement?.textContent?.replace('ACT', '').trim()
+        : source.children[2]?.textContent?.trim();
+
+      return {
+        sceneId: sceneId || 'A014',
+        status: isComplete ? '전체 완료' : isPartial ? '부분 완료' : '진행중',
+        bgMemo: bgMemo || 'BG 메모 없음',
+        actMemo: actMemo || 'ACT 메모 없음',
+        isComplete,
+        isPartial,
+      };
+    };
+
+    const buildSnapshot = (source) => {
+      const snapshot = document.createElement('div');
+      snapshot.className = 'continuity-snapshot';
+      if (source.classList.contains('scene-card')) {
+        snapshot.innerHTML = `
+          <div class="continuity-skeleton-only">
+            <div class="continuity-skeleton-head">
+              <div class="continuity-skeleton-title">
+                <span class="motion-pill idx"></span>
+                <span class="motion-pill id"></span>
+                <span class="motion-pill layout"></span>
+              </div>
+              <span class="motion-pill pct"></span>
+            </div>
+            <div class="continuity-skeleton-thumbs">
+              <div class="motion-image"><span class="center-mark"></span></div>
+              <div class="motion-image"><span class="center-mark"></span></div>
+            </div>
+            <div class="continuity-skeleton-memos">
+              <div class="motion-memo bg"><span class="dept-chip"></span><span class="text-lines"><span class="motion-line"></span><span class="motion-line short"></span></span></div>
+              <div class="motion-memo act"><span class="dept-chip"></span><span class="text-lines"><span class="motion-line"></span><span class="motion-line short"></span></span></div>
+            </div>
+            <div class="continuity-skeleton-depts">
+              <div class="continuity-skeleton-stage">
+                <span class="motion-stage-seg" style="background:rgba(196,188,250,.30)"></span>
+                <span class="motion-stage-seg" style="background:rgba(165,153,245,.30)"></span>
+                <span class="motion-stage-seg" style="background:rgba(134,119,239,.30)"></span>
+                <span class="motion-stage-seg active" style="background:rgba(108,92,231,.78)"></span>
+              </div>
+              <div class="continuity-skeleton-stage">
+                <span class="motion-stage-seg" style="background:rgba(110,115,136,.28)"></span>
+                <span class="motion-stage-seg active" style="background:rgba(116,185,255,.54)"></span>
+                <span class="motion-stage-seg" style="background:rgba(253,203,110,.34)"></span>
+                <span class="motion-stage-seg" style="background:rgba(0,184,148,.55)"></span>
+              </div>
+            </div>
+          </div>
+        `;
+      } else {
+        const data = getSceneData(source);
+        snapshot.innerHTML = `
+          <div class="sheet-row-snapshot">
+            <span class="snap-id">${data.sceneId}</span>
+            <span class="snap-memo">${data.bgMemo}</span>
+            <span class="snap-memo">${data.actMemo}</span>
+            <span>${data.status}</span>
+            <span>${data.isComplete ? 'BG + ACT 완료' : '상세 확인'}</span>
+          </div>
+        `;
+      }
+      return snapshot;
+    };
+
+    const buildModal = (source) => {
+      const data = getSceneData(source);
+      const sceneNo = data.sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || '14';
+      const totalPct = data.isComplete ? '100%' : data.isPartial ? '74%' : '42%';
+      const bgDone = data.isComplete || data.bgMemo.includes('완료');
+      const actDone = data.isComplete || data.actMemo.includes('완료');
+      const overlay = document.createElement('div');
+      overlay.className = 'continuity-overlay';
+      overlay.innerHTML = `
+        <div class="continuity-backdrop"></div>
+        <section class="continuity-modal" role="dialog" aria-modal="true" aria-label="${data.sceneId} 상세">
+          <div class="continuity-main-shell">
+            <div class="modal-glow-a"></div>
+            <div class="modal-glow-b"></div>
+            <div class="modal-skeleton" aria-hidden="true">
+              <div class="skeleton-head">
+                <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                  <span class="skel id"></span>
+                  <span class="skel meta"></span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span class="skel button"></span>
+                  <span class="skel button"></span>
+                  <span class="skel button"></span>
+                </div>
+              </div>
+              <div class="skeleton-tabs">
+                <span class="skel tab"></span>
+                <span class="skel tab"></span>
+                <span class="skel tab"></span>
+                <span class="skel tab"></span>
+              </div>
+              <div class="skeleton-body">
+                <div class="skeleton-image-grid">
+                  <span class="skel image"></span>
+                  <span class="skel image"></span>
+                </div>
+                <div class="skeleton-dept-grid">
+                  <span class="skel card"></span>
+                  <span class="skel card"></span>
+                </div>
+              </div>
+              <div class="skeleton-dots">
+                <span class="skel dot"></span>
+                <span class="skel dot"></span>
+                <span class="skel dot active"></span>
+                <span class="skel dot"></span>
+                <span class="skel dot"></span>
+              </div>
+            </div>
+            <div class="modal-inner">
+              <div class="modal-head">
+                <div class="modal-title-wrap" data-motion-target="title">
+                  <span class="modal-scene-no">#${sceneNo}</span>
+                  <span class="modal-scene-id">${data.sceneId}</span>
+                  <span class="modal-layout">L#03</span>
+                  <span class="modal-sub">EP03 / A파트</span>
+                  <span class="modal-total">${totalPct}</span>
+                </div>
+                <div class="modal-actions">
+                  <button class="modal-nav-btn" aria-label="이전 씬">‹</button>
+                  <span class="modal-nav-count">14 / 42</span>
+                  <button class="modal-nav-btn" aria-label="다음 씬">›</button>
+                  <button class="modal-delete">씬 삭제</button>
+                  <div class="modal-dept-toggle" aria-label="부서 전환">
+                    <span class="active">통합</span>
+                    <span>BG</span>
+                    <span>액팅</span>
+                  </div>
+                  <button class="modal-close" aria-label="닫기">×</button>
+                </div>
+              </div>
+              <div class="modal-tabs">
+                <span class="active">상세</span>
+                <span>리비전</span>
+                <span>파일</span>
+                <span>히스토리</span>
+              </div>
+              <div class="modal-body">
+                <div class="modal-image-grid">
+                  <div class="modal-image-slot" data-label="스토리보드" data-motion-target="storyboard">STORYBOARD</div>
+                  <div class="modal-image-slot" data-label="가이드" data-motion-target="guide">GUIDE</div>
+                </div>
+                <div class="modal-depts">
+                  <div class="modal-dept-card ${bgDone ? 'complete' : ''}" data-dept="bg">
+                    <div class="dept-top">
+                      <div class="dept-name" style="color:var(--bg-color)"><span class="dot" style="background:var(--bg-color)"></span>BG</div>
+                      <span class="assignee">${bgDone ? '완료' : '담당자'}</span>
+                    </div>
+                    <div class="modal-section-label">진행 단계</div>
+                    <div class="stage-track" data-motion-target="bg-stage">
+                      <div class="stage done-prev" style="background:rgba(196,188,250,.16);color:var(--bg-lo)">LO</div>
+                      <div class="stage done-prev" style="background:rgba(165,153,245,.16);color:var(--bg-done)">완료</div>
+                      <div class="stage done-prev" style="background:rgba(134,119,239,.16);color:var(--bg-review)">검수</div>
+                      <div class="stage done-current" style="background:var(--bg-png)">PNG</div>
+                    </div>
+                    <div class="modal-section-label">속성</div>
+                    <div class="modal-property-list">
+                      <div class="modal-property-row"><b>담당자</b><span>한OO</span></div>
+                      <div class="modal-property-row"><b>레이아웃</b><span>L#03</span></div>
+                      <div class="modal-property-row"><b>메모</b><span class="memo-text" data-motion-target="bg-memo">${data.bgMemo}</span></div>
+                    </div>
+                  </div>
+                  <div class="modal-dept-card ${actDone ? 'complete' : ''}" data-dept="act">
+                    <div class="dept-top">
+                      <div class="dept-name" style="color:var(--act-color)"><span class="dot" style="background:var(--act-color)"></span>ACT</div>
+                      <span class="assignee">${actDone ? '완료' : '작업중'}</span>
+                    </div>
+                    <div class="modal-section-label">액팅 단계</div>
+                    <div class="stage-track" data-motion-target="act-stage">
+                      <div class="stage done-prev" style="background:rgba(110,115,136,.18);color:var(--phase-wait)">대기</div>
+                      <div class="stage done-prev" style="background:rgba(116,185,255,.16);color:var(--phase-work)">작업중</div>
+                      <div class="stage done-prev" style="background:rgba(253,203,110,.16);color:var(--phase-feedback)">피드백</div>
+                      <div class="stage done-current" style="background:var(--complete);color:var(--bg-primary)">완료</div>
+                    </div>
+                    <div class="modal-section-label">속성</div>
+                    <div class="modal-property-list">
+                      <div class="modal-property-row"><b>담당자</b><span>정OO</span></div>
+                      <div class="modal-property-row"><b>회차</b><span>2차 작업</span></div>
+                      <div class="modal-property-row"><b>메모</b><span class="memo-text" data-motion-target="act-memo">${data.actMemo}</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="modal-meta-row">
+                  <span>등록 2026-05-22 10:24</span>
+                  <span>수정 2026-05-26 15:08</span>
+                  <span>${data.status}</span>
+                </div>
+              </div>
+              <div class="modal-dots">
+                <span class="modal-dot"></span>
+                <span class="modal-dot"></span>
+                <span class="modal-dot active"></span>
+                <span class="modal-dot"></span>
+                <span class="modal-dot"></span>
+              </div>
+            </div>
+          </div>
+          <aside class="continuity-comments">
+            <div class="comment-head">
+              <span>댓글 및 활동</span>
+              <span class="comment-count">(3)</span>
+            </div>
+            <div class="comment-list">
+              <div class="comment-item">
+                <div class="comment-author"><span>이OO</span><span>오늘 14:20</span></div>
+                <div class="comment-text">가이드 기준으로 손 위치만 한 번 더 확인 부탁드립니다.</div>
+              </div>
+              <div class="comment-item">
+                <div class="comment-author"><span>한OO</span><span>어제</span></div>
+                <div class="comment-text">BG PNG까지 완료. 액팅 확인 후 최종 완료 처리 예정.</div>
+              </div>
+              <div class="comment-item">
+                <div class="comment-author"><span>시스템</span><span>방금</span></div>
+                <div class="comment-text">마지막 체크: ACT 완료</div>
+              </div>
+            </div>
+          </aside>
+        </section>
+      `;
+      return overlay;
+    };
+
+    const animateSnapshot = async (snapshot, fromRect, toRect, direction = 'open') => {
+      snapshot.style.left = `${fromRect.left}px`;
+      snapshot.style.top = `${fromRect.top}px`;
+      snapshot.style.width = `${fromRect.width}px`;
+      snapshot.style.height = `${fromRect.height}px`;
+      snapshot.style.borderRadius = direction === 'open' ? '12px' : '18px';
+      snapshot.style.transform = 'translate3d(0, 0, 0) scale(1, 1)';
+      document.body.appendChild(snapshot);
+
+      const dx = toRect.left - fromRect.left;
+      const dy = toRect.top - fromRect.top;
+      const sx = toRect.width / Math.max(fromRect.width, 1);
+      const sy = toRect.height / Math.max(fromRect.height, 1);
+      const targetTransform = `translate3d(${dx}px, ${dy}px, 0) scale(${sx}, ${sy})`;
+      const animation = snapshot.animate(
+        [
+          {
+            transform: 'translate3d(0, 0, 0) scale(1, 1)',
+            borderRadius: direction === 'open' ? '12px' : '18px',
+            opacity: 1,
+          },
+          {
+            transform: targetTransform,
+            borderRadius: direction === 'open' ? '18px' : '12px',
+            opacity: 1,
+          },
+        ],
+        { duration: direction === 'open' ? 520 : 360, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', fill: 'forwards' },
+      );
+
+      await animation.finished;
+      snapshot.style.transform = targetTransform;
+      snapshot.style.borderRadius = direction === 'open' ? '18px' : '12px';
+      return snapshot;
+    };
+
+    const sharedMotionSpecs = [
+      {
+        key: 'title',
+        ghostClass: 'ghost-title',
+        delay: 0,
+        source: (source) => source.querySelector('.scene-id-wrap') || source.querySelector('.scene-num-glow-wrap'),
+        target: (modal) => modal.querySelector('[data-motion-target="title"]'),
+      },
+      {
+        key: 'storyboard',
+        ghostClass: 'ghost-image',
+        delay: 35,
+        source: (source) => source.querySelector('.thumbs .thumb:nth-child(1)'),
+        target: (modal) => modal.querySelector('[data-motion-target="storyboard"]'),
+      },
+      {
+        key: 'guide',
+        ghostClass: 'ghost-image',
+        delay: 55,
+        source: (source) => source.querySelector('.thumbs .thumb:nth-child(2)'),
+        target: (modal) => modal.querySelector('[data-motion-target="guide"]'),
+      },
+      {
+        key: 'bg-stage',
+        ghostClass: 'ghost-stage',
+        delay: 90,
+        source: (source) => source.querySelector('.dept-sections .dept-section:nth-child(1) .stage-track'),
+        target: (modal) => modal.querySelector('[data-motion-target="bg-stage"]'),
+      },
+      {
+        key: 'act-stage',
+        ghostClass: 'ghost-stage',
+        delay: 115,
+        source: (source) => source.querySelector('.dept-sections .dept-section:nth-child(2) .stage-track'),
+        target: (modal) => modal.querySelector('[data-motion-target="act-stage"]'),
+      },
+      {
+        key: 'bg-memo',
+        ghostClass: 'ghost-memo',
+        delay: 145,
+        source: (source) => source.querySelector('.memo-lines .memo-line:nth-child(1)'),
+        target: (modal) => modal.querySelector('[data-motion-target="bg-memo"]'),
+      },
+      {
+        key: 'act-memo',
+        ghostClass: 'ghost-memo',
+        delay: 165,
+        source: (source) => source.querySelector('.memo-lines .memo-line:nth-child(2)'),
+        target: (modal) => modal.querySelector('[data-motion-target="act-memo"]'),
+      },
+    ];
+
+    const getSharedMotionPairs = (source, modal, reverse = false) => {
+      if (!source.classList.contains('scene-card')) return [];
+      return sharedMotionSpecs
+        .map((spec) => {
+          const sourceEl = spec.source(source);
+          const targetEl = spec.target(modal);
+          if (!sourceEl || !targetEl) return null;
+          return {
+            key: spec.key,
+            ghostClass: spec.ghostClass,
+            delay: reverse ? Math.max(0, 170 - spec.delay) : spec.delay,
+            fromEl: reverse ? targetEl : sourceEl,
+            toEl: reverse ? sourceEl : targetEl,
+            sourceEl,
+          };
+        })
+        .filter(Boolean);
+    };
+
+    const buildMotionGhostContent = ({ key, fromEl, sourceEl }) => {
+      const root = document.createElement('div');
+      root.className = `motion-ghost-content motion-${key}`;
+
+      if (key === 'title') {
+        root.innerHTML = `
+          <span class="motion-pill idx"></span>
+          <span class="motion-pill id"></span>
+          <span class="motion-pill layout"></span>
+          <span class="motion-pill pct"></span>
+        `;
+        return root;
+      }
+
+      if (key === 'storyboard' || key === 'guide') {
+        root.classList.add('motion-image');
+        root.innerHTML = '<span class="center-mark"></span>';
+        return root;
+      }
+
+      if (key === 'bg-stage' || key === 'act-stage') {
+        root.classList.add('motion-stage');
+        const stages = Array.from((sourceEl || fromEl).querySelectorAll('.stage')).slice(0, 4);
+        const fallbackColors = key === 'bg-stage'
+          ? ['rgba(196,188,250,.30)', 'rgba(165,153,245,.30)', 'rgba(134,119,239,.30)', 'rgba(108,92,231,.78)']
+          : ['rgba(110,115,136,.28)', 'rgba(116,185,255,.54)', 'rgba(253,203,110,.34)', 'rgba(0,184,148,.55)'];
+        root.innerHTML = fallbackColors.map((color, index) => {
+          const stage = stages[index];
+          const inlineColor = stage?.style?.background || color;
+          const isActive = stage?.classList?.contains('done-current') || index === fallbackColors.length - 1;
+          return `<span class="motion-stage-seg ${isActive ? 'active' : ''}" style="background:${inlineColor}"></span>`;
+        }).join('');
+        return root;
+      }
+
+      if (key === 'bg-memo' || key === 'act-memo') {
+        root.classList.add('motion-memo', key === 'act-memo' ? 'act' : 'bg');
+        root.innerHTML = `
+          <span class="dept-chip"></span>
+          <span class="text-lines">
+            <span class="motion-line"></span>
+            <span class="motion-line short"></span>
+          </span>
+        `;
+        return root;
+      }
+
+      root.innerHTML = '<span class="motion-line"></span>';
+      return root;
+    };
+
+    const animateSharedPair = ({ key, fromEl, toEl, ghostClass, delay, sourceEl }, direction = 'open') => {
+      const fromRect = fromEl.getBoundingClientRect();
+      const toRect = toEl.getBoundingClientRect();
+      const ghost = document.createElement('div');
+      ghost.className = `continuity-ghost ${ghostClass}`;
+      ghost.appendChild(buildMotionGhostContent({ key, fromEl, sourceEl }));
+      ghost.style.left = `${fromRect.left}px`;
+      ghost.style.top = `${fromRect.top}px`;
+      ghost.style.width = `${fromRect.width}px`;
+      ghost.style.height = `${fromRect.height}px`;
+      ghost.style.borderRadius = getComputedStyle(fromEl).borderRadius || '10px';
+      document.body.appendChild(ghost);
+
+      const dx = toRect.left - fromRect.left;
+      const dy = toRect.top - fromRect.top;
+      const sx = toRect.width / Math.max(fromRect.width, 1);
+      const sy = toRect.height / Math.max(fromRect.height, 1);
+      const targetTransform = `translate3d(${dx}px, ${dy}px, 0) scale(${sx}, ${sy})`;
+      const targetRadius = getComputedStyle(toEl).borderRadius || '10px';
+      const duration = direction === 'open' ? 620 : 410;
+      const animation = ghost.animate(
+        [
+          {
+            transform: 'translate3d(0, 0, 0) scale(1, 1)',
+            opacity: direction === 'open' ? .94 : .88,
+            borderRadius: getComputedStyle(fromEl).borderRadius || '10px',
+            offset: 0,
+          },
+          {
+            transform: targetTransform,
+            opacity: 1,
+            borderRadius: targetRadius,
+            offset: .82,
+          },
+          {
+            transform: targetTransform,
+            opacity: direction === 'open' ? .98 : .72,
+            borderRadius: targetRadius,
+            offset: 1,
+          },
+        ],
+        {
+          duration,
+          delay,
+          easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          fill: 'forwards',
+        },
+      );
+
+      return animation.finished.then(() => {
+        ghost.style.transform = targetTransform;
+        return ghost;
+      });
+    };
+
+    const openContinuityModal = async (source) => {
+      if (resizeState || activeTransition) return;
+      activeTransition = { source };
+
+      const sourceRect = source.getBoundingClientRect();
+      const overlay = buildModal(source);
+      document.body.appendChild(overlay);
+      const modal = overlay.querySelector('.continuity-modal');
+      modal.classList.add('preparing', 'loading');
+      const mainShell = overlay.querySelector('.continuity-main-shell');
+      const close = overlay.querySelector('.modal-close');
+      const backdrop = overlay.querySelector('.continuity-backdrop');
+      const targetRect = mainShell.getBoundingClientRect();
+      const snapshot = buildSnapshot(source);
+      source.classList.add('is-transition-source');
+      const useSharedElements = source.classList.contains('scene-card');
+
+      requestAnimationFrame(() => overlay.classList.add('visible'));
+      let skeletonRevealed = false;
+      const revealSkeleton = () => {
+        if (skeletonRevealed) return;
+        skeletonRevealed = true;
+        modal.classList.remove('preparing');
+        modal.getBoundingClientRect();
+        modal.classList.add('visible');
+      };
+      const revealTimer = window.setTimeout(revealSkeleton, 115);
+
+      if (useSharedElements) {
+        modal.classList.add('motion-active');
+        window.setTimeout(revealSkeleton, 80);
+        const pairs = getSharedMotionPairs(source, modal, false);
+        const ghosts = await Promise.all(pairs.map((pair) => animateSharedPair(pair, 'open')));
+        window.clearTimeout(revealTimer);
+        revealSkeleton();
+        modal.classList.add('hydrated');
+        modal.classList.remove('loading');
+        window.setTimeout(() => {
+          modal.classList.remove('motion-active');
+          ghosts.forEach((ghost) => {
+            ghost.classList.add('fading-out');
+            window.setTimeout(() => ghost.remove(), 230);
+          });
+        }, 80);
+      } else {
+        const animatedSnapshot = await animateSnapshot(snapshot, sourceRect, targetRect, 'open');
+        window.clearTimeout(revealTimer);
+        revealSkeleton();
+        animatedSnapshot.classList.add('to-modal');
+        window.setTimeout(() => {
+          modal.classList.add('hydrated');
+          modal.classList.remove('loading');
+          animatedSnapshot.classList.add('fading-out');
+          window.setTimeout(() => animatedSnapshot.remove(), 260);
+        }, 70);
+      }
+
+      let closing = false;
+      const closeModal = async () => {
+        if (closing) return;
+        closing = true;
+
+        if (useSharedElements) {
+          modal.classList.add('motion-active');
+          const pairs = getSharedMotionPairs(source, modal, true);
+          const closingGhosts = pairs.map((pair) => animateSharedPair(pair, 'close'));
+          window.setTimeout(() => {
+            modal.classList.remove('hydrated');
+            modal.classList.remove('visible');
+            overlay.classList.remove('visible');
+          }, 35);
+          const ghosts = await Promise.all(closingGhosts);
+          ghosts.forEach((ghost) => ghost.remove());
+          overlay.remove();
+        } else {
+          const currentSourceRect = source.getBoundingClientRect();
+          const modalRect = mainShell.getBoundingClientRect();
+          const closingSnapshot = buildSnapshot(source);
+          closingSnapshot.classList.add('to-modal');
+          modal.classList.remove('hydrated');
+          modal.classList.remove('visible');
+          overlay.classList.remove('visible');
+          const animatedClosingSnapshot = await animateSnapshot(closingSnapshot, modalRect, currentSourceRect, 'close');
+          animatedClosingSnapshot.remove();
+          overlay.remove();
+        }
+
+        source.classList.remove('is-transition-source');
+        activeTransition = null;
+      };
+
+      close.addEventListener('click', closeModal);
+      backdrop.addEventListener('click', closeModal);
+      window.addEventListener('keydown', function onEsc(event) {
+        if (event.key !== 'Escape') return;
+        window.removeEventListener('keydown', onEsc);
+        closeModal();
+      });
+    };
+
+    document.querySelectorAll('.scene-card').forEach((card) => {
+      card.addEventListener('click', (event) => {
+        if (event.target.closest('button')) return;
+        openContinuityModal(card);
+      });
+    });
+
+    document.querySelectorAll('.sheet-view tbody tr').forEach((row) => {
+      row.addEventListener('click', (event) => {
+        if (event.target.closest('button, .resize-handle')) return;
+        openContinuityModal(row);
+      });
+    });
+  </script>
+</body>
+</html>

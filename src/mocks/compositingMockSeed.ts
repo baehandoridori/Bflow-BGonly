@@ -24,8 +24,9 @@ import type { CompositingStatus, Episode, Scene } from '@/types';
 const FPS = 24;
 
 /** 모든 씬에 동일하게 24fps 기준 길이. 시드 정도라 일관성 + 단순화. */
-function makeScene(no: number, sceneId: string, assignee: string, durationSec: number): Scene {
+function makeScene(no: number, sceneId: string, assignee: string, durationSec: number, uuidSeed: string): Scene {
   return {
+    id: `mock-scene-${uuidSeed}`,
     no,
     sceneId,
     memo: '',
@@ -48,8 +49,8 @@ function makePartPair(
   actAssignee: string,
   sceneIds: string[],
 ): Array<Episode['parts'][number]> {
-  const bgScenes = sceneIds.map((sid, i) => makeScene(i + 1, sid, bgAssignee, 4 + (i % 4)));
-  const actScenes = sceneIds.map((sid, i) => makeScene(i + 1, sid, actAssignee, 4 + (i % 4)));
+  const bgScenes = sceneIds.map((sid, i) => makeScene(i + 1, sid, bgAssignee, 4 + (i % 4), `EP05-${partId}-BG-${sid}`));
+  const actScenes = sceneIds.map((sid, i) => makeScene(i + 1, sid, actAssignee, 4 + (i % 4), `EP05-${partId}-ACT-${sid}`));
   const lower = partId.toLowerCase();
   return [
     { partId, department: 'bg', sheetName: `EP05_${partId}_BG`, scenes: bgScenes },

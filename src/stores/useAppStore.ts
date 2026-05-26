@@ -153,6 +153,10 @@ interface AppState {
   };
   setPlexusSettings: (settings: Partial<AppState['plexusSettings']>) => void;
 
+  // 씬 뷰 완료 색상 표시
+  completionTintEnabled: boolean;
+  setCompletionTintEnabled: (enabled: boolean) => void;
+
   // 휴가 관리 연결 상태
   vacationConnected: boolean;
   vacationConfig: VacationConfig | null;
@@ -287,6 +291,9 @@ export const useAppStore = create<AppState>((set) => ({
   setPlexusSettings: (partial) => set((s) => ({
     plexusSettings: { ...s.plexusSettings, ...partial },
   })),
+
+  completionTintEnabled: true,
+  setCompletionTintEnabled: (enabled) => set({ completionTintEnabled: enabled }),
 
   vacationConnected: false,
   vacationConfig: null,

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { MessageCircle, MessageSquareWarning, Check, Trash2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { sceneProgress } from '@/utils/calcStats';
+import { isFullyDone, sceneProgress } from '@/utils/calcStats';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Stage, Department, ScenePhaseState } from '@/types';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
@@ -13,6 +13,7 @@ import { Confetti } from '@/components/ui/Confetti';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
+import { useAppStore } from '@/stores/useAppStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
@@ -44,7 +45,7 @@ interface UnifiedSceneCardProps {
   onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
   onDelete: (sheetName: string, sceneIndex: number) => void;
   onOpenDetail: (sheetName: string, sceneIndex: number) => void;
-  onOpenMerged?: (merged: MergedScene) => void;
+  onOpenMerged?: (merged: MergedScene, sourceElement?: HTMLElement | null) => void;
   onCelebrationEnd: () => void;
   onSelect: () => void;
   onCtrlSelect?: () => void;
@@ -80,6 +81,7 @@ export function UnifiedSceneCard({
 }: UnifiedSceneCardProps) {
   const { sceneId, mergedKey, bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
   const primaryScene = bgScene ?? actScene;
+  const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
 
   const cardRootRef = useRef<HTMLDivElement>(null);
   const prevHighlightedRef = useRef(false);
@@ -165,6 +167,7 @@ export function UnifiedSceneCard({
   const actPct = actScene ? sceneProgress(actScene) : 0;
   const presentCount = (bgScene ? 1 : 0) + (actScene ? 1 : 0);
   const combinedPct = presentCount > 0 ? Math.round((bgPct + actPct) / presentCount) : 0;
+  const isMergedComplete = !!bgScene && !!actScene && isFullyDone(bgScene) && isFullyDone(actScene);
 
   const hasImages = !!(bgScene?.storyboardUrl || bgScene?.guideUrl);
   const layoutId = bgScene?.layoutId || actScene?.layoutId;
@@ -183,7 +186,7 @@ export function UnifiedSceneCard({
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (onOpenMerged) {
-      onOpenMerged(merged);
+      onOpenMerged(merged, e.currentTarget as HTMLElement);
       return;
     }
     if (bgScene && bgSheetName) {
@@ -234,12 +237,14 @@ export function UnifiedSceneCard({
   return (
     <motion.div
       data-scene-id={mergedKey}
+      data-continuity-card
       className={cn(
         'bg-bg-card border border-bg-border rounded-xl flex flex-col group relative cursor-pointer',
         'shadow-[0_2px_6px_rgba(0,0,0,0.08),0_8px_20px_rgba(0,0,0,0.12)]',
         'hover:shadow-[0_3px_8px_rgba(0,0,0,0.12),0_10px_24px_rgba(0,0,0,0.18)]',
         'scene-card-interactive',
         'hover:-translate-y-0.5 hover:border-accent/70',
+        completionTintEnabled && isMergedComplete && 'scene-completion-tint-card',
         // v1.18.0: 미해결 리비전 있는 카드 → 보더에 액센트 강조 (mockup revision-visibility.html 시안 1)
         openRevCount > 0 && 'border-accent/60',
         isHighlighted && 'scene-highlight',
@@ -277,7 +282,7 @@ export function UnifiedSceneCard({
 
         {/* ── 헤더: 씬 ID + 전체 진행률 배지 ── */}
         <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0" data-continuity-source="title">
             <span className="text-sm font-mono text-text-secondary/50">
               #{sceneId ? (sceneId.match(/\d+$/)?.[0]?.replace(/^0+/, '') || primaryScene.no) : primaryScene.no}
             </span>
@@ -341,10 +346,10 @@ export function UnifiedSceneCard({
         {hasImages && (
           <div className="mx-4 mt-0.5 mb-1 flex gap-px rounded-lg overflow-hidden bg-bg-border">
         {bgScene?.storyboardUrl && (
-          <img src={bgScene.storyboardUrl} alt="SB" className="flex-1 h-20 object-contain bg-bg-card/70 min-w-0" draggable={false} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          <img data-continuity-source="storyboard" src={bgScene.storyboardUrl} alt="SB" className="flex-1 h-20 object-contain bg-bg-card/70 min-w-0" draggable={false} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
         )}
         {bgScene?.guideUrl && (
-          <img src={bgScene.guideUrl} alt="Guide" className="flex-1 h-20 object-contain bg-bg-card/70 min-w-0" draggable={false} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          <img data-continuity-source="guide" src={bgScene.guideUrl} alt="Guide" className="flex-1 h-20 object-contain bg-bg-card/70 min-w-0" draggable={false} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
         )}
           </div>
         )}
@@ -353,7 +358,7 @@ export function UnifiedSceneCard({
         {(bgScene?.memo || actScene?.memo) && (
           <div className="mx-4 mt-1 flex flex-col gap-0.5" data-no-lasso>
             {bgScene?.memo && (
-              <div className="flex items-center gap-1.5 overflow-hidden">
+              <div className="flex items-center gap-1.5 overflow-hidden" data-continuity-source="bg-memo">
                 <span className="text-[9px] font-bold tracking-wide px-1 py-px rounded text-blue-300 bg-blue-300/15 flex-shrink-0">BG</span>
                 <p className="text-[11px] text-amber-400/70 leading-relaxed truncate min-w-0">
                   <PathLinkifiedText
@@ -364,7 +369,7 @@ export function UnifiedSceneCard({
               </div>
             )}
             {actScene?.memo && (
-              <div className="flex items-center gap-1.5 overflow-hidden">
+              <div className="flex items-center gap-1.5 overflow-hidden" data-continuity-source="act-memo">
                 <span className="text-[9px] font-bold tracking-wide px-1 py-px rounded text-pink-300 bg-pink-300/15 flex-shrink-0">ACT</span>
                 <p className="text-[11px] text-amber-400/70 leading-relaxed truncate min-w-0">
                   <PathLinkifiedText
@@ -456,6 +461,9 @@ function DeptSection({
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
 }) {
   const cfg = DEPARTMENT_CONFIGS[dept];
+  const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
+  const isDeptDone = !!scene && isFullyDone(scene);
+  const stagePointerHandledRef = useRef(false);
 
   // stage-toggle 작업에서 이 씬의 targetStage 셀에만 pending/failed 스타일 적용
   const stageCellPendingClass = (stage: Stage): string => {
@@ -473,9 +481,16 @@ function DeptSection({
           <span className="text-xs font-semibold text-text-secondary">{cfg.shortLabel}</span>
           <span className="text-[11px] text-text-secondary/50 italic">(미등록)</span>
         </div>
-        <div className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5">
+        <div
+          className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5"
+          data-continuity-source={dept === 'bg' ? 'bg-stage' : 'act-stage'}
+        >
           {STAGES.map((stage) => (
-            <div key={stage} className="flex-1 min-w-0 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md whitespace-nowrap overflow-hidden text-ellipsis">
+            <div
+              key={stage}
+              data-continuity-stage-segment
+              className="flex-1 min-w-0 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md whitespace-nowrap overflow-hidden text-ellipsis"
+            >
               {cfg.stageLabels[stage]}
             </div>
           ))}
@@ -490,6 +505,11 @@ function DeptSection({
         <div className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cfg.color }} />
           <span className="text-xs font-semibold" style={{ color: cfg.color }}>{cfg.shortLabel}</span>
+          {completionTintEnabled && isDeptDone && (
+            <span className="scene-completion-dept-done rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none">
+              완료
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-text-secondary">
@@ -508,7 +528,10 @@ function DeptSection({
           v1.25.3 (한솔 보고): ScenePhaseToggle 가 자체 컨테이너(flex w-full + bg/border)를
           가지므로 wrapper 는 클릭 이벤트 전파만 막음. 기존 4-stage 토글과 동일한 모양. */}
       {dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
-        <div onClick={(e) => e.stopPropagation()}>
+        <div
+          onClick={(e) => e.stopPropagation()}
+          data-continuity-source="act-stage"
+        >
           <ScenePhaseToggle
             scene={scene}
             onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
@@ -517,15 +540,38 @@ function DeptSection({
           />
         </div>
       ) : (
-        <div className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5">
+        <div
+          className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5"
+          data-continuity-source={dept === 'bg' ? 'bg-stage' : 'act-stage'}
+        >
           {STAGES.map((stage, i) => {
             const isDone = scene[stage];
             const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
 
             return (
               <button
+                type="button"
                 key={stage}
-                onClick={(e) => { e.stopPropagation(); onToggle(sheetName, sceneId, stage); }}
+                data-continuity-stage-segment
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  stagePointerHandledRef.current = true;
+                  onToggle(sheetName, sceneId, stage);
+                  window.setTimeout(() => {
+                    stagePointerHandledRef.current = false;
+                  }, 600);
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (stagePointerHandledRef.current) {
+                    stagePointerHandledRef.current = false;
+                    return;
+                  }
+                  onToggle(sheetName, sceneId, stage);
+                }}
                 className={cn(
                   'flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer whitespace-nowrap overflow-hidden text-ellipsis',
                   !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',

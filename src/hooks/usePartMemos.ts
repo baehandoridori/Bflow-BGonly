@@ -10,6 +10,7 @@ import {
   rollbackFailedPartMemoSheets,
   type PartContextMenuTarget,
 } from '@/utils/partMemoHelpers';
+import { partIdMatches } from '@/utils/partId';
 
 interface UsePartMemosArgs {
   episodes: Episode[];
@@ -69,7 +70,7 @@ export function usePartMemos({
 
   const buildMenuTarget = useCallback((partId: string): PartContextMenuTarget | null => {
     const visibleParts = (selectedDepartment === 'all' ? allParts : parts)
-      .filter((part) => part.partId === partId)
+      .filter((part) => partIdMatches(part.partId, partId))
       .map((part) => ({
         partId: part.partId,
         sheetName: part.sheetName,

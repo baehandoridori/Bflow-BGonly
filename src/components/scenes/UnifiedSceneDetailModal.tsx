@@ -36,6 +36,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
 import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
+import { SceneContinuityTransition } from './SceneContinuityTransition';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -105,6 +106,10 @@ export interface UnifiedSceneDetailModalProps {
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
+  /** 카드 뷰에서 열릴 때 카드 내부 요소를 실제 모달 위치로 연결하는 시작 DOM. */
+  continuitySourceElement?: HTMLElement | null;
+  /** continuity transition 종료 후 source DOM 참조를 비울 때 사용. */
+  onContinuityEnd?: () => void;
   /**
    * v1.30.0+: 컴포지팅 대시보드에서 모달을 열 때 부서 패널 위에 끼울 컴포지팅 단계 섹션.
    * 일반 ScenesView 호출은 이 prop 을 생략하면 normal 모드 (영향 0).
@@ -138,6 +143,8 @@ export function UnifiedSceneDetailModal({
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
+  continuitySourceElement,
+  onContinuityEnd,
   compositingSection,
 }: UnifiedSceneDetailModalProps) {
   const { bgScene, actScene, bgSceneIndex, actSceneIndex } = merged;
@@ -184,6 +191,7 @@ export function UnifiedSceneDetailModal({
   }, [selectedDepartment, setSelectedDepartment, setDashboardDeptFilter, setPendingSceneModalRequest, onClose, bgScene, actScene, merged.sceneId]);
   // 모달 backdrop 드래그 닫힘 방지 — mousedown 시작 위치를 추적해 backdrop 자체에서 시작한 경우만 onClose 트리거
   const backdropMouseDownRef = useRef(false);
+  const modalMainRef = useRef<HTMLDivElement>(null);
 
   // 댓글 키: BG와 ACT 양쪽 조회 가능하게.
   // primary 는 "실제로 이 merged 에 존재하는 부서" 와 일치해야 한다 —
@@ -564,7 +572,8 @@ export function UnifiedSceneDetailModal({
         >
           {/* ── 본체 ── */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 12 }}
+            ref={modalMainRef}
+            initial={continuitySourceElement ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 6 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
@@ -623,6 +632,7 @@ export function UnifiedSceneDetailModal({
                     exit="exit"
                     transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                     className="flex items-center gap-2 min-w-0"
+                    data-continuity-target="title"
                   >
                     <span className="text-sm font-mono text-text-secondary/50">#{sceneNoDisplay}</span>
                     <span className="text-lg font-mono font-bold text-text-primary truncate">
@@ -752,32 +762,38 @@ export function UnifiedSceneDetailModal({
                         {/* 이미지 (BG 기준) */}
                         {primaryScene && (
                           <div className="grid grid-cols-2 gap-3 px-5 pt-4 pb-2">
-                            <UnifiedImageSlot
-                              label="스토리보드"
-                              url={previewUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
-                              loading={imageLoading === 'storyboard'}
-                              canEdit={!!bgScene && !!bgSheetName}
-                              onPick={() => pickFile('storyboard')}
-                              onRemove={() => setDeleteConfirm('storyboard')}
-                              onView={() => setShowImageModal('storyboard')}
-                              onDropBlob={(b) => uploadImage(b, 'storyboard')}
-                              onHoverChange={(h) => setHoveredImageSlot(h ? 'storyboard' : (s) => s === 'storyboard' ? null : s)}
-                              pinned={pinnedImageSlot === 'storyboard'}
-                              onPinToggle={() => setPinnedImageSlot((p) => p === 'storyboard' ? null : 'storyboard')}
-                            />
-                            <UnifiedImageSlot
-                              label="가이드"
-                              url={previewUrls.guide ?? bgScene?.guideUrl ?? ''}
-                              loading={imageLoading === 'guide'}
-                              canEdit={!!bgScene && !!bgSheetName}
-                              onPick={() => pickFile('guide')}
-                              onRemove={() => setDeleteConfirm('guide')}
-                              onView={() => setShowImageModal('guide')}
-                              onDropBlob={(b) => uploadImage(b, 'guide')}
-                              onHoverChange={(h) => setHoveredImageSlot(h ? 'guide' : (s) => s === 'guide' ? null : s)}
-                              pinned={pinnedImageSlot === 'guide'}
-                              onPinToggle={() => setPinnedImageSlot((p) => p === 'guide' ? null : 'guide')}
-                            />
+                            <div data-continuity-target="storyboard">
+                              <UnifiedImageSlot
+                                label="스토리보드"
+                                continuityTarget="storyboard"
+                                url={previewUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
+                                loading={imageLoading === 'storyboard'}
+                                canEdit={!!bgScene && !!bgSheetName}
+                                onPick={() => pickFile('storyboard')}
+                                onRemove={() => setDeleteConfirm('storyboard')}
+                                onView={() => setShowImageModal('storyboard')}
+                                onDropBlob={(b) => uploadImage(b, 'storyboard')}
+                                onHoverChange={(h) => setHoveredImageSlot(h ? 'storyboard' : (s) => s === 'storyboard' ? null : s)}
+                                pinned={pinnedImageSlot === 'storyboard'}
+                                onPinToggle={() => setPinnedImageSlot((p) => p === 'storyboard' ? null : 'storyboard')}
+                              />
+                            </div>
+                            <div data-continuity-target="guide">
+                              <UnifiedImageSlot
+                                label="가이드"
+                                continuityTarget="guide"
+                                url={previewUrls.guide ?? bgScene?.guideUrl ?? ''}
+                                loading={imageLoading === 'guide'}
+                                canEdit={!!bgScene && !!bgSheetName}
+                                onPick={() => pickFile('guide')}
+                                onRemove={() => setDeleteConfirm('guide')}
+                                onView={() => setShowImageModal('guide')}
+                                onDropBlob={(b) => uploadImage(b, 'guide')}
+                                onHoverChange={(h) => setHoveredImageSlot(h ? 'guide' : (s) => s === 'guide' ? null : s)}
+                                pinned={pinnedImageSlot === 'guide'}
+                                onPinToggle={() => setPinnedImageSlot((p) => p === 'guide' ? null : 'guide')}
+                              />
+                            </div>
                           </div>
                         )}
 
@@ -908,6 +924,14 @@ export function UnifiedSceneDetailModal({
           )}
         </motion.div>
       </motion.div>
+
+      {continuitySourceElement && (
+        <SceneContinuityTransition
+          sourceElement={continuitySourceElement}
+          targetRootRef={modalMainRef}
+          onComplete={onContinuityEnd}
+        />
+      )}
 
       {/* 이미지 확대 */}
       {showImageModal && bgScene && (
@@ -1148,20 +1172,26 @@ function DeptSection({
         <span className="block text-xs text-text-secondary mb-1.5">진행 단계</span>
         {/* v1.25.0~: 액팅 + 핸들러 모두 전달 시 새 ScenePhaseToggle, 아니면 기존 4-stage 토글 */}
         {dept === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
-          <ScenePhaseToggle
-            scene={scene}
-            onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
-            onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
-            onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
-          />
+          <div data-continuity-target="act-stage">
+            <ScenePhaseToggle
+              scene={scene}
+              onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
+              onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
+              onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
+            />
+          </div>
         ) : (
-          <div className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-1">
+          <div
+            className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-1"
+            data-continuity-target={dept === 'bg' ? 'bg-stage' : 'act-stage'}
+          >
             {STAGES.map((stage, i) => {
               const done = scene[stage];
               const isCurrent = done && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
               return (
                 <button
                   key={stage}
+                  data-continuity-stage-segment
                   onClick={() => onToggle(sheetName, sceneId, stage)}
                   className={cn(
                     'flex-1 text-center py-2 text-xs font-medium rounded-md transition-all cursor-pointer',
@@ -1188,6 +1218,7 @@ function DeptSection({
         value={scene.memo || ''}
         onSave={(v) => onFieldUpdate(sheetName, sceneIndex, 'memo', v)}
         memoAuthorMeta={memoAuthorMeta}
+        continuityTarget={dept === 'bg' ? 'bg-memo' : 'act-memo'}
       />
     </div>
   );
@@ -1244,8 +1275,8 @@ function InlineAssigneeRow({ label, value, onSave }: {
 
 /* ── 인라인 메모 ── */
 
-function InlineTextareaRow({ label, value, onSave, memoAuthorMeta }: {
-  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null;
+function InlineTextareaRow({ label, value, onSave, memoAuthorMeta, continuityTarget }: {
+  label: string; value: string; onSave: (v: string) => void; memoAuthorMeta?: MemoAuthorMeta | null; continuityTarget?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -1260,7 +1291,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta }: {
   };
 
   return (
-    <div>
+    <div data-continuity-target={continuityTarget}>
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-xs text-text-secondary">{label}</span>
         {value && memoAuthorMeta && !editing && (
@@ -1316,6 +1347,7 @@ function InlineTextareaRow({ label, value, onSave, memoAuthorMeta }: {
 
 function UnifiedImageSlot({
   label,
+  continuityTarget,
   url,
   loading,
   canEdit,
@@ -1328,6 +1360,7 @@ function UnifiedImageSlot({
   onPinToggle,
 }: {
   label: string;
+  continuityTarget?: 'storyboard' | 'guide';
   url: string;
   loading: boolean;
   canEdit: boolean;
@@ -1376,7 +1409,10 @@ function UnifiedImageSlot({
     <div className="flex flex-col gap-1">
       <span className="text-[11px] text-text-secondary uppercase tracking-wider font-medium">{label}</span>
       {loading ? (
-        <div className="flex items-center justify-center h-32 bg-bg-primary rounded-lg border border-bg-border">
+        <div
+          data-continuity-target-box={continuityTarget}
+          className="flex items-center justify-center h-32 bg-bg-primary rounded-lg border border-bg-border"
+        >
           <div className="flex items-center gap-2 text-xs text-text-secondary/60">
             <div className="w-3 h-3 border-2 border-accent/40 border-t-accent rounded-full animate-spin" />
             저장 중...
@@ -1385,6 +1421,7 @@ function UnifiedImageSlot({
       ) : url ? (
         <div className="relative group">
           <div
+            data-continuity-target-box={continuityTarget}
             onMouseEnter={handleEnter}
             onMouseLeave={handleLeave}
             onDragOver={canEdit ? (e) => { e.preventDefault(); setDragOver(true); } : undefined}
@@ -1395,7 +1432,7 @@ function UnifiedImageSlot({
             } : undefined}
             onDrop={canEdit ? handleDrop : undefined}
             className={cn(
-              'relative rounded-lg overflow-hidden border-2 transition-all',
+              'relative h-40 rounded-lg overflow-hidden border-2 bg-bg-primary transition-all',
               dragOver ? 'border-accent ring-4 ring-accent/25'
                 : hover && canEdit ? 'border-accent/40 shadow-[0_0_18px_rgba(108,92,231,0.22)]'
                 : 'border-transparent',
@@ -1404,7 +1441,7 @@ function UnifiedImageSlot({
             <img
               src={url}
               alt={label}
-              className={cn('w-full max-h-40 object-contain bg-bg-primary rounded-lg transition-all', dragOver && 'brightness-50')}
+              className={cn('w-full h-full object-contain rounded-lg transition-all', dragOver && 'brightness-50')}
               draggable={false}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
             />
@@ -1432,6 +1469,7 @@ function UnifiedImageSlot({
         </div>
       ) : canEdit ? (
         <button
+          data-continuity-target-box={continuityTarget}
           onClick={handleEmptyClick}
           onMouseEnter={handleEnter}
           onMouseLeave={handleLeave}
@@ -1478,7 +1516,10 @@ function UnifiedImageSlot({
           )}
         </button>
       ) : (
-        <div className="flex items-center justify-center h-32 rounded-lg border-2 border-dashed border-bg-border/50 bg-bg-primary/20 text-text-secondary/40 text-xs">
+        <div
+          data-continuity-target-box={continuityTarget}
+          className="flex items-center justify-center h-32 rounded-lg border-2 border-dashed border-bg-border/50 bg-bg-primary/20 text-text-secondary/40 text-xs"
+        >
           BG 씬이 필요합니다
         </div>
       )}
