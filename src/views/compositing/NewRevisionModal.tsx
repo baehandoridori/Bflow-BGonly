@@ -27,6 +27,12 @@ import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 import { resizeBlob } from '@/utils/imageUtils';
 import { RevisionRecipientPicker } from '@/components/scenes/RevisionRecipientPicker';
 import type { Episode, Part, Scene } from '@/types';
+import {
+  buildRevisionPartOptions,
+  buildRevisionPartScenesUnion,
+  formatRevisionPartId,
+  getSourcePartForRevisionScene,
+} from './newRevisionOptions';
 
 interface Props {
   open: boolean;
@@ -79,17 +85,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
   // v1.19.6: 같은 EP 의 parts 를 partId 단위로 group — BG sheet 우선, 없으면 ACT.
   // (sceneKey 자체가 부서 무관이라 어느 sheet 를 선택하든 결과는 같은 씬으로 합산됨)
   const partLabels = useMemo(() => {
-    if (!selectedEpisode) return [] as { partId: string; part: Part }[];
-    const map = new Map<string, Part>();
-    for (const part of selectedEpisode.parts) {
-      const existing = map.get(part.partId);
-      if (!existing || part.department === 'bg') {
-        map.set(part.partId, part);
-      }
-    }
-    return Array.from(map.entries())
-      .map(([partId, part]) => ({ partId, part }))
-      .sort((a, b) => a.partId.localeCompare(b.partId));
+    return buildRevisionPartOptions(selectedEpisode);
   }, [selectedEpisode]);
 
   const selectedPart: Part | null = useMemo(() => {
@@ -97,30 +93,13 @@ export default function NewRevisionModal({ open, onClose }: Props) {
     return selectedEpisode.parts.find((p) => p.sheetName === selectedSheetName) ?? null;
   }, [selectedEpisode, selectedSheetName]);
 
+  const selectedPartLabel = selectedPart ? formatRevisionPartId(selectedPart.partId) : '';
+
   // 코덱스 P1 fix (7차, 2026-05-05): 같은 partId 의 BG + ACT sheet scenes 를 union(dedup by sceneId).
   // 이전엔 BG sheet 만 채택해 ACT-only 씬은 검색에 안 잡혀 등록 불가능. 한솔 정책상 사용자에겐
   // 부서 비노출이지만 데이터 lookup 은 양쪽 sheet 합쳐야 정확하게 모든 씬을 보여줌.
   const partScenesUnion = useMemo<{ scenes: Scene[]; sourceMap: Map<string, Part> }>(() => {
-    if (!selectedEpisode || !selectedPart) {
-      return { scenes: [], sourceMap: new Map() };
-    }
-    const allPartsSamePartId = selectedEpisode.parts.filter((p) => p.partId === selectedPart.partId);
-    const seen = new Set<string>();
-    const scenes: Scene[] = [];
-    const sourceMap = new Map<string, Part>();
-    // BG 우선 — 같은 sceneId 가 BG/ACT 둘 다에 있으면 BG 채택
-    const sortedParts = allPartsSamePartId.slice().sort((a, b) =>
-      (a.department === 'bg' ? 0 : 1) - (b.department === 'bg' ? 0 : 1),
-    );
-    for (const p of sortedParts) {
-      for (const s of p.scenes) {
-        if (seen.has(s.sceneId)) continue;
-        seen.add(s.sceneId);
-        scenes.push(s);
-        sourceMap.set(s.sceneId, p);
-      }
-    }
-    return { scenes, sourceMap };
+    return buildRevisionPartScenesUnion(selectedEpisode, selectedPart);
   }, [selectedEpisode, selectedPart]);
 
   const filteredScenes = useMemo(() => {
@@ -280,7 +259,11 @@ export default function NewRevisionModal({ open, onClose }: Props) {
       // 코덱스 P1 fix (7차, 2026-05-05): selectedScene 의 실제 source Part 사용.
       // 같은 partId 의 BG/ACT 양쪽 scenes 를 union 했기 때문에, ACT-only 씬일 때
       // selectedPart(BG primary) 가 아니라 그 씬이 실제 속한 ACT sheet 사용해야 정확.
-      const sourcePart = partScenesUnion.sourceMap.get(selectedScene.sceneId) ?? selectedPart;
+      const sourcePart = getSourcePartForRevisionScene(
+        partScenesUnion.sourceMap,
+        selectedScene.sceneId,
+        selectedPart,
+      );
       const sceneKey = buildSceneKey(sourcePart.sheetName, selectedScene.sceneId, {
         siblingSceneIds: sourcePart.scenes.map((s) => s.sceneId),
       });
@@ -306,7 +289,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
   // ── 렌더 ────
   // v1.19.6: 부서(BG/ACT) 표기 제거 — 통합 sceneKey 라 의미 없음.
   const summary = selectedEpisode && selectedPart && selectedScene
-    ? `${getEpisodeDisplayName(selectedEpisode)} / ${selectedPart.partId} / #${selectedScene.no}`
+    ? `${getEpisodeDisplayName(selectedEpisode)} / ${selectedPartLabel} / #${selectedScene.no}`
     : '';
 
   return (
@@ -426,7 +409,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
                 2. 파트
               </label>
               {selectedPart && (
-                <span className="text-[11px] text-accent-sub">{selectedPart.partId} ✓</span>
+                <span className="text-[11px] text-accent-sub">{selectedPartLabel} ✓</span>
               )}
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -480,14 +463,19 @@ export default function NewRevisionModal({ open, onClose }: Props) {
                     className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-bold text-text-primary"
                     style={{ backgroundColor: 'rgb(var(--color-accent) / 0.2)' }}
                   >
-                    {selectedPart.partId} {selectedScene.no}
+                    {selectedPartLabel} {selectedScene.no}
                   </span>
                   <span className="text-[12px] text-text-primary truncate">
                     {selectedScene.memo || '메모 없음'}
                   </span>
                   {(() => {
-                    const sceneKey = buildSceneKey(selectedPart.sheetName, selectedScene.sceneId, {
-                      siblingSceneIds: selectedPart.scenes.map((s) => s.sceneId),
+                    const sourcePart = getSourcePartForRevisionScene(
+                      partScenesUnion.sourceMap,
+                      selectedScene.sceneId,
+                      selectedPart,
+                    );
+                    const sceneKey = buildSceneKey(sourcePart.sheetName, selectedScene.sceneId, {
+                      siblingSceneIds: sourcePart.scenes.map((s) => s.sceneId),
                     });
                     const open = getOpenCount(sceneKey);
                     if (open <= 0) return null;
@@ -528,8 +516,13 @@ export default function NewRevisionModal({ open, onClose }: Props) {
                       <div className="px-3 py-2 text-[11px] text-text-secondary/50">검색 결과 없음</div>
                     ) : (
                       filteredScenes.map((scene) => {
-                        const sceneKey = buildSceneKey(selectedPart.sheetName, scene.sceneId, {
-                          siblingSceneIds: selectedPart.scenes.map((s) => s.sceneId),
+                        const sourcePart = getSourcePartForRevisionScene(
+                          partScenesUnion.sourceMap,
+                          scene.sceneId,
+                          selectedPart,
+                        );
+                        const sceneKey = buildSceneKey(sourcePart.sheetName, scene.sceneId, {
+                          siblingSceneIds: sourcePart.scenes.map((s) => s.sceneId),
                         });
                         const openCount = getOpenCount(sceneKey);
                         return (
@@ -539,7 +532,7 @@ export default function NewRevisionModal({ open, onClose }: Props) {
                             className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-left hover:bg-bg-primary/60 transition-colors cursor-pointer"
                           >
                             <span className="text-[11px] font-mono font-bold text-text-primary w-12 shrink-0">
-                              {selectedPart.partId} {scene.no}
+                              {selectedPartLabel} {scene.no}
                             </span>
                             <span
                               className={`text-[11px] truncate flex-1 ${

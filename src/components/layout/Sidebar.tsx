@@ -23,7 +23,7 @@ const NAV_ITEMS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
   //   - 'compositing' : 새 현황 대시보드 (CompositingDashboardView, 6 단계 진행도)
   //   - 'compositing-revisions' : 기존 리비전 피드백 보드 (CompositingView)
   { id: 'compositing', label: '컴포지팅', icon: <Clapperboard size={20} /> },
-  { id: 'compositing-revisions', label: '리비전', icon: <MessageSquareWarning size={20} /> },
+  { id: 'compositing-revisions', label: '피드백', icon: <MessageSquareWarning size={20} /> },
   { id: 'settings', label: '설정', icon: <Settings size={20} /> },
 ];
 

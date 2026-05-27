@@ -27,6 +27,7 @@ export function RevisionItem({
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const isResolved = revision.status === 'resolved';
+  const statusCfg = STATUS_CONFIG[revision.status];
   const { description: descText, paths } = parsePathsFromText(revision.description);
   const allUsers = useAuthStore((s) => s.users);
   // v1.19.4: notifyUserIds → 사용자 이름 배열 (AvatarStack 용)
@@ -127,39 +128,43 @@ export function RevisionItem({
         )}
 
         {/* 메타 라인 — v1.19.4: 알림 대상 / v1.19.6: 댓글 카운트 마커 */}
-        {(notifyNames.length > 0 || commentCount > 0) && (
-          <div
-            className={`flex items-center gap-3 mt-1 ${isResolved ? 'opacity-50' : ''}`}
+        <div
+          className={`flex items-center gap-3 mt-1 flex-wrap ${isResolved ? 'opacity-50' : ''}`}
+        >
+          <span
+            className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 shrink-0"
+            style={{ color: STATUS_CONFIG[revision.status].color, backgroundColor: STATUS_CONFIG[revision.status].bg }}
           >
-            {notifyNames.length > 0 && (
-              <div
-                className="flex items-center gap-1.5"
-                title={`알림 대상: ${notifyNames.join(', ')}`}
-              >
-                <Bell size={10} className="text-text-secondary/60 shrink-0" />
-                <AvatarStack names={notifyNames} max={4} size={16} />
-              </div>
-            )}
-            {commentCount > 0 && (
-              <span
-                className="flex items-center gap-1 text-[11px] text-text-secondary/70"
-                title={`댓글 ${commentCount}개`}
-              >
-                <MessageSquare size={10} className="shrink-0" />
-                {commentCount}
-              </span>
-            )}
-          </div>
-        )}
+            {statusCfg.label}
+          </span>
+          {commentCount > 0 && (
+            <span
+              className="flex items-center gap-1 text-[11px] text-text-secondary/70"
+              title={`댓글 ${commentCount}개`}
+            >
+              <MessageSquare size={10} className="shrink-0" />
+              댓글 {commentCount}
+            </span>
+          )}
+          {notifyNames.length > 0 && (
+            <div
+              className="flex items-center gap-1.5"
+              title={`알림 대상: ${notifyNames.join(', ')}`}
+            >
+              <Bell size={10} className="text-text-secondary/60 shrink-0" />
+              <AvatarStack names={notifyNames} max={4} size={16} />
+            </div>
+          )}
+        </div>
 
-        {/* 해결 메모 */}
+        {/* 완료 메모 */}
         {isResolved && revision.resolvedNote && (
           <p className="text-xs text-text-secondary/50 mt-0.5">
             → {revision.resolvedNote}
           </p>
         )}
 
-        {/* 해결 메모 입력 */}
+        {/* 완료 메모 입력 */}
         <AnimatePresence>
           {showResolveNote && (
             <motion.div
@@ -175,7 +180,7 @@ export function RevisionItem({
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleResolve(); }
                   if (e.key === 'Escape') { setShowResolveNote(false); setResolveNote(''); }
                 }}
-                placeholder="해결 메모 (선택, Enter로 전송)"
+                placeholder="완료 메모 (선택, Enter로 전송)"
                 className="w-full px-3 py-1.5 text-xs bg-bg-primary rounded-lg border border-bg-border text-text-primary placeholder:text-text-secondary/50 resize-none focus:outline-none focus:ring-1 focus:ring-accent/50"
                 rows={2}
                 autoFocus
@@ -193,7 +198,7 @@ export function RevisionItem({
                   className="text-[11px] px-2.5 py-1 rounded-md text-white cursor-pointer"
                   style={{ backgroundColor: STATUS_CONFIG.resolved.color }}
                 >
-                  해결
+                  완료
                 </button>
               </div>
             </motion.div>

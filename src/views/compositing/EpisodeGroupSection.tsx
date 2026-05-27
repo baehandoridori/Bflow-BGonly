@@ -202,6 +202,13 @@ function SceneNested({
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </span>
         <span className="text-[12px] font-mono font-bold text-text-primary">{info.partId ?? info.part} {info.sceneNo || sceneLabel}</span>
+        <SceneJumpButton
+          sceneKey={info.sceneKey}
+          variant="chip"
+          episodeNumber={info.episodeNumber}
+          partId={info.partId}
+          sceneUuid={info.sceneUuid}
+        />
         {info.sceneName && (
           <span className="text-[11px] text-text-secondary/70 truncate flex-1">{info.sceneName}</span>
         )}
@@ -211,13 +218,6 @@ function SceneNested({
             {openCount}
           </span>
         )}
-        <SceneJumpButton
-          sceneKey={info.sceneKey}
-          variant="icon"
-          episodeNumber={info.episodeNumber}
-          partId={info.partId}
-          sceneUuid={info.sceneUuid}
-        />
       </div>
 
       <AnimatePresence initial={false}>

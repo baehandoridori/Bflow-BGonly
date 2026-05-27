@@ -13,8 +13,9 @@ import {
   filterRevisionsBySearch,
   sortRevisions,
 } from './compositing/utils';
+import { buildFeedbackHubStats, buildFeedbackHubTree } from './compositing/feedbackHubUtils';
 import type { SceneInfo, SceneGroup, SortMode } from './compositing/utils';
-import { SceneRow, EpisodeFilter } from './compositing/SceneGroupSection';
+import { FeedbackTreeSection, EpisodeFilter } from './compositing/SceneGroupSection';
 import { DetailPanel } from './compositing/RevisionDetailPanel';
 import { EpisodeGroupSection } from './compositing/EpisodeGroupSection';
 import { ProgressKanbanSection } from './compositing/ProgressKanbanSection';
@@ -29,12 +30,14 @@ export default function CompositingView() {
   const { currentUser } = useAuthStore();
   const dataConnected = useAppStore((s) => s.dataConnected);
   const episodes = useDataStore((s) => s.episodes);
+  const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const { revisions, loadRevisions, updateStatus, isLoading } = useRevisionStore();
 
   const [selectedEp, setSelectedEp] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | RevisionStatus>('all');
   const [myTasksOnly, setMyTasksOnly] = useState(false);
   const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set());
+  const [autoExpandedOnce, setAutoExpandedOnce] = useState(false);
   const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
@@ -249,13 +252,77 @@ export default function CompositingView() {
     return groups;
   }, [episodes, searchedSorted, selectedEp, statusFilter, myTasksOnly, currentUser, sceneInfoMap]);
 
+  const visibleRevisions = useMemo(
+    () => sceneGroups.flatMap((group) => group.revisions),
+    [sceneGroups],
+  );
+
+  const feedbackTree = useMemo(
+    () => buildFeedbackHubTree({ sceneGroups, episodes, getEpisodeDisplayName }),
+    [sceneGroups, episodes, getEpisodeDisplayName],
+  );
+
   // 통계
   const stats = useMemo(() => {
     const totalScenes = sceneGroups.length;
-    const totalRevisions = sceneGroups.reduce((acc, g) => acc + g.revisions.length, 0);
-    const totalOpen = revisions.filter(r => r.status !== 'resolved').length;
-    return { totalScenes, totalRevisions, totalOpen };
-  }, [sceneGroups, revisions]);
+    const totalRevisions = visibleRevisions.length;
+    return {
+      totalScenes,
+      totalRevisions,
+      ...buildFeedbackHubStats({
+        revisions: visibleRevisions,
+        commentCountByRev,
+        currentUserName: currentUser?.name,
+      }),
+    };
+  }, [sceneGroups.length, visibleRevisions, commentCountByRev, currentUser?.name]);
+
+  const summaryCards = useMemo(() => ([
+    {
+      label: '전체 미해결',
+      value: stats.totalOpen,
+      hint: '대기+진행',
+      tone: 'border-[#FDCB6E]/35 bg-[#FDCB6E]/[0.06]',
+    },
+    {
+      label: '댓글 있음',
+      value: stats.withComments,
+      hint: '연결된 대화',
+      tone: 'border-accent/35 bg-accent/[0.07]',
+    },
+    {
+      label: '내 관련',
+      value: stats.myRelated,
+      hint: '담당/요청',
+      tone: 'border-bg-border/60 bg-bg-card/55',
+    },
+    {
+      label: '오래 멈춤',
+      value: stats.stalled,
+      hint: '2일 이상',
+      tone: 'border-[#74B9FF]/30 bg-[#74B9FF]/[0.05]',
+    },
+    {
+      label: '오늘 완료',
+      value: stats.resolvedToday,
+      hint: '해결 반영',
+      tone: 'border-bg-border/60 bg-bg-card/55',
+    },
+  ]), [stats]);
+
+  useEffect(() => {
+    if (autoExpandedOnce || sceneGroups.length === 0) return;
+    const openGroups = sceneGroups.filter((group) => group.openCount > 0);
+    const groupsToOpen = openGroups.length > 0 ? openGroups : sceneGroups.slice(0, 8);
+    setExpandedScenes(new Set(groupsToOpen.map((group) => group.sceneKey)));
+    setAutoExpandedOnce(true);
+  }, [autoExpandedOnce, sceneGroups]);
+
+  useEffect(() => {
+    if (!selectedRevisionId) return;
+    if (visibleRevisions.some((revision) => revision.id === selectedRevisionId)) return;
+    setSelectedRevisionId(null);
+  }, [selectedRevisionId, visibleRevisions]);
 
   // v1.19.6: 표시되는 sheetName 집합으로 댓글 fetch → revisionId 기준 카운트 맵 빌드.
   // sceneGroups 의 info.sheetName 에서 unique 만 모아 loadPartComments 호출 (캐시되어 재호출은 가벼움).
@@ -326,7 +393,9 @@ export default function CompositingView() {
     if (expandedScenes.size > 0) {
       setExpandedScenes(new Set());
     } else {
-      setExpandedScenes(new Set(sceneGroups.filter(g => g.openCount > 0).map(g => g.sceneKey)));
+      const openGroups = sceneGroups.filter(g => g.openCount > 0);
+      const groupsToOpen = openGroups.length > 0 ? openGroups : sceneGroups;
+      setExpandedScenes(new Set(groupsToOpen.map(g => g.sceneKey)));
     }
   }, [expandedScenes.size, sceneGroups]);
 
@@ -344,43 +413,28 @@ export default function CompositingView() {
   };
 
   return (
-    <div className="h-full flex">
-      {/* 좌측: 씬 타임라인 */}
+    <div className="h-full flex bg-bg-primary/40">
+      {/* 좌측: 피드백 허브 */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* 헤더 */}
-        <div className="shrink-0 px-6 pt-6 pb-4 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <h1 className="text-lg font-semibold text-text-primary">씬 타임라인</h1>
-              <span className="text-xs text-text-secondary">
-                {stats.totalScenes}개 씬 &middot; {stats.totalRevisions}개 피드백
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* 그룹화 토글 */}
-              <div className="inline-flex bg-bg-primary rounded-lg p-1 gap-0.5 border border-bg-border/40">
-                {([
-                  { key: 'scene' as const, label: '씬별' },
-                  { key: 'episode' as const, label: '에피소드별' },
-                  { key: 'progress' as const, label: '진행률별' },
-                ]).map(({ key, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => setGroupMode(key)}
-                    className={`px-3 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
-                      groupMode === key
-                        ? 'bg-accent text-white'
-                        : 'text-text-secondary hover:text-text-primary'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+        <div className="shrink-0 px-6 pt-6 pb-4 space-y-3 border-b border-bg-border/25">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <h1 className="text-xl font-semibold text-text-primary">피드백 허브</h1>
+                <span className="text-xs text-text-secondary">
+                  {stats.totalScenes}개 씬 &middot; {stats.totalRevisions}개 피드백
+                </span>
               </div>
+              <p className="mt-1 text-xs text-text-secondary leading-relaxed">
+                씬별 피드백과 상태 흐름을 한 화면에서 정리합니다.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
               {groupMode === 'scene' && (
                 <button
                   onClick={toggleAll}
-                  className="px-3 py-1.5 text-[11px] text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors cursor-pointer"
+                  className="min-h-[34px] px-3 text-[11px] text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors cursor-pointer"
                 >
                   {expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
                 </button>
@@ -388,12 +442,27 @@ export default function CompositingView() {
               {/* v1.19.5: 헤더에서 직접 새 리비전 등록 */}
               <button
                 onClick={() => setNewRevModalOpen(true)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer"
+                className="min-h-[34px] inline-flex items-center gap-1 px-3 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer"
               >
                 <Plus size={12} strokeWidth={2.5} />
-                새 리비전
+                새 피드백
               </button>
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
+            {summaryCards.map((card) => (
+              <div
+                key={card.label}
+                className={`min-h-[58px] rounded-lg border px-3 py-2 ${card.tone}`}
+              >
+                <span className="block text-[10.5px] font-bold text-text-secondary">{card.label}</span>
+                <div className="mt-1 flex items-end gap-1.5">
+                  <strong className="text-xl leading-none text-text-primary">{card.value}</strong>
+                  <span className="text-[10px] text-text-secondary/70">{card.hint}</span>
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* 검색 + 정렬 (Row 1) */}
@@ -404,16 +473,15 @@ export default function CompositingView() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="본문·씬·등록자 검색..."
-                className="w-full pl-8 pr-3 py-1.5 bg-bg-primary/80 border border-bg-border/60 rounded-md text-[13px] text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/60"
+                placeholder="본문·씬·등록자·담당자 검색..."
+                className="w-full min-h-[34px] pl-8 pr-3 bg-bg-primary/80 border border-bg-border/60 rounded-md text-[13px] text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/60"
               />
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <span className="text-[11px] text-text-secondary uppercase tracking-wider">정렬</span>
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as SortMode)}
-                className="bg-bg-primary/80 border border-bg-border/60 rounded-md px-2 py-1.5 text-[12px] text-text-primary focus:outline-none focus:border-accent/60 cursor-pointer"
+                className="min-h-[34px] bg-bg-primary/80 border border-bg-border/60 rounded-md px-2 text-[12px] text-text-primary focus:outline-none focus:border-accent/60 cursor-pointer"
               >
                 <option value="recent">최신순</option>
                 <option value="oldest">오래된순</option>
@@ -421,20 +489,39 @@ export default function CompositingView() {
                 <option value="comments">댓글 많은순</option>
               </select>
             </div>
+            <div className="inline-flex min-h-[34px] bg-bg-primary rounded-lg p-1 gap-0.5 border border-bg-border/40 shrink-0">
+              {([
+                { key: 'scene' as const, label: '씬 트리' },
+                { key: 'episode' as const, label: '에피소드별' },
+                { key: 'progress' as const, label: '상태 보드' },
+              ]).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setGroupMode(key)}
+                  className={`px-3 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
+                    groupMode === key
+                      ? 'bg-accent text-white'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* 에피소드 필터 */}
           <EpisodeFilter episodes={episodes} selected={selectedEp} onSelect={setSelectedEp} />
 
           {/* 필터 바 */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             {/* 상태 필터 */}
             <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary/50">
               {([
                 { key: 'all' as const, label: '전체' },
                 { key: 'open' as const, label: '대기' },
                 { key: 'in_progress' as const, label: '진행중' },
-                { key: 'resolved' as const, label: '해결' },
+                { key: 'resolved' as const, label: '완료' },
               ]).map(({ key, label }) => (
                 <button
                   key={key}
@@ -460,7 +547,7 @@ export default function CompositingView() {
               }`}
             >
               <ListFilter size={12} />
-              내 할 일
+              내 관련
             </button>
 
             {stats.totalOpen > 0 && (
@@ -474,7 +561,7 @@ export default function CompositingView() {
           </div>
         </div>
 
-        {/* 씬 타임라인 목록 */}
+        {/* 피드백 목록 */}
         <div className="flex-1 overflow-y-auto">
           {isLoading && revisions.length === 0 ? (
             <div className="flex items-center justify-center py-16 text-text-secondary/50 text-sm">
@@ -487,20 +574,15 @@ export default function CompositingView() {
               <p className="text-xs mt-1">씬 상세에서 수정 요청을 등록해보세요</p>
             </div>
           ) : groupMode === 'scene' ? (
-            <div className="divide-y divide-bg-border/20">
-              {sceneGroups.map((group) => (
-                <SceneRow
-                  key={group.sceneKey}
-                  group={group}
-                  expanded={expandedScenes.has(group.sceneKey)}
-                  selectedRevisionId={selectedRevisionId}
-                  commentCountByRev={commentCountByRev}
-                  onToggle={() => toggleScene(group.sceneKey)}
-                  onSelectRevision={handleSelectRevision}
-                  onStatusChange={handleStatusChange}
-                />
-              ))}
-            </div>
+            <FeedbackTreeSection
+              episodeTrees={feedbackTree}
+              expandedScenes={expandedScenes}
+              selectedRevisionId={selectedRevisionId}
+              commentCountByRev={commentCountByRev}
+              onToggleScene={toggleScene}
+              onSelectRevision={handleSelectRevision}
+              onStatusChange={handleStatusChange}
+            />
           ) : groupMode === 'episode' ? (
             <EpisodeGroupSection
               sceneGroups={sceneGroups}
@@ -516,7 +598,7 @@ export default function CompositingView() {
             // searchedSorted 는 검색/정렬만 반영하고 selectedEp/statusFilter/myTasksOnly 무시 →
             // 사용자가 EP/상태/내할일 토글 후 진행률별 보기로 전환하면 무관한 리비전이 보임.
             <ProgressKanbanSection
-              revisions={sceneGroups.flatMap((g) => g.revisions)}
+              revisions={visibleRevisions}
               sceneInfoMap={sceneInfoMap}
               selectedRevisionId={selectedRevisionId}
               commentCountByRev={commentCountByRev}

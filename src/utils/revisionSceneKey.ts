@@ -6,6 +6,10 @@ export type RevisionSceneKeyOptions = {
 
 const DIGITS_ONLY_RE = /^\d+$/;
 
+function normalizeRevisionPartId(part: string): string {
+  return part.trim().toUpperCase();
+}
+
 function normalizeSceneIdForRevision(sceneId: string, part: string): string {
   return normalizeSceneIdKey(sceneId, part);
 }
@@ -28,14 +32,15 @@ function parseDistinctRevisionSceneId(sceneId: string): string {
 
 export function buildLegacySharedRevisionSceneKey(sceneKey: string): string | null {
   const [episode = '', part = '', sceneId = ''] = sceneKey.split(':');
+  const normalizedPart = normalizeRevisionPartId(part);
   const normalizedSceneId = sceneId.trim().toLowerCase();
   if (!normalizedSceneId.startsWith('raw-')) return null;
 
   const rawSceneId = parseDistinctRevisionSceneId(normalizedSceneId);
-  const legacySceneId = normalizeSceneIdForRevision(rawSceneId, part);
+  const legacySceneId = normalizeSceneIdForRevision(rawSceneId, normalizedPart);
   if (!legacySceneId || legacySceneId === normalizedSceneId) return null;
 
-  return `${episode}:${part}:${legacySceneId}`;
+  return `${episode}:${normalizedPart}:${legacySceneId}`;
 }
 
 function buildHistoricalRawAliasRevisionSceneKey(
@@ -43,13 +48,14 @@ function buildHistoricalRawAliasRevisionSceneKey(
   normalizedSceneKey: string,
 ): string | null {
   const [episode = '', part = '', sceneId = ''] = sceneKey.split(':');
+  const normalizedPart = normalizeRevisionPartId(part);
   const rawSceneId = sceneId.trim();
   const normalizedSceneId = rawSceneId.toLowerCase();
   if (!rawSceneId || DIGITS_ONLY_RE.test(normalizedSceneId) || normalizedSceneId.startsWith('raw-')) {
     return null;
   }
 
-  const rawAliasKey = `${episode}:${part}:${buildDistinctRevisionSceneId(rawSceneId)}`;
+  const rawAliasKey = `${episode}:${normalizedPart}:${buildDistinctRevisionSceneId(rawSceneId)}`;
   if (rawAliasKey === normalizedSceneKey) return null;
 
   const legacySharedKey = buildLegacySharedRevisionSceneKey(rawAliasKey);
@@ -80,14 +86,15 @@ export function normalizeRevisionSceneKey(
   options: RevisionSceneKeyOptions = {},
 ): string {
   const [episode = '', part = '', rawSceneId = ''] = sceneKey.split(':');
+  const normalizedPart = normalizeRevisionPartId(part);
   const trimmedSceneId = rawSceneId.trim();
   if (DIGITS_ONLY_RE.test(trimmedSceneId)) {
-    return `${episode}:${part}:${normalizeSceneIdForRevision(trimmedSceneId, part)}`;
+    return `${episode}:${normalizedPart}:${normalizeSceneIdForRevision(trimmedSceneId, normalizedPart)}`;
   }
 
-  const revisionSceneId = buildRevisionSceneIdForScene(rawSceneId, part, options);
-  const normalizedSceneId = normalizeSceneIdForRevision(revisionSceneId, part);
-  return `${episode}:${part}:${normalizedSceneId}`;
+  const revisionSceneId = buildRevisionSceneIdForScene(rawSceneId, normalizedPart, options);
+  const normalizedSceneId = normalizeSceneIdForRevision(revisionSceneId, normalizedPart);
+  return `${episode}:${normalizedPart}:${normalizedSceneId}`;
 }
 
 export function buildRevisionSceneKeyLookupKeys(
@@ -116,7 +123,7 @@ export function buildUnifiedRevisionSceneKey(
 ): string {
   const parts = sheetName.split('_');
   const episode = parts[0] || sheetName;
-  const part = parts[1] || '';
+  const part = normalizeRevisionPartId(parts[1] || '');
   const revisionSceneId = buildRevisionSceneIdForScene(sceneId, part, options);
   const normalizedSceneId = normalizeSceneIdForRevision(revisionSceneId, part);
   return `${episode}:${part}:${normalizedSceneId}`;

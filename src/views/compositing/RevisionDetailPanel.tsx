@@ -60,16 +60,21 @@ export function DetailPanel({
   return (
     <motion.div
       initial={{ width: 0, opacity: 0 }}
-      animate={{ width: 340, opacity: 1 }}
+      animate={{ width: 380, opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
       transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
       className="shrink-0 border-l border-bg-border overflow-hidden h-full"
     >
-      <div className="w-[340px] h-full overflow-y-auto">
+      <div className="w-[380px] h-full overflow-y-auto bg-bg-primary/25">
         <div className="p-5">
           {/* 헤더 */}
           <div className="flex items-center justify-between mb-5">
-            <h3 className="text-sm font-semibold text-text-primary">상세내용</h3>
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">선택 피드백</h3>
+              <p className="mt-0.5 text-[11px] text-text-secondary">
+                {sceneInfo?.sceneId || sceneId}
+              </p>
+            </div>
             <button
               onClick={onClose}
               className="p-1 text-text-secondary hover:text-text-primary rounded-lg hover:bg-bg-border/50 transition-colors cursor-pointer"
@@ -197,12 +202,12 @@ export function DetailPanel({
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-2">
                   <Check size={14} style={{ color: STATUS_CONFIG.resolved.color }} />
-                  <span className="text-xs font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>해결됨</span>
+                  <span className="text-xs font-medium" style={{ color: STATUS_CONFIG.resolved.color }}>완료됨</span>
                 </div>
                 <button
                   onClick={() => onStatusChange('open')}
                   className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-text-secondary hover:text-accent rounded-md hover:bg-accent/10 transition-all cursor-pointer"
-                  title="되돌리기"
+                  title="대기로 되돌리기"
                 >
                   <Undo2 size={11} />
                   되돌리기
@@ -235,7 +240,7 @@ export function DetailPanel({
                     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleResolve(); }
                     if (e.key === 'Escape') { setShowResolveNote(false); setResolveNote(''); }
                   }}
-                  placeholder="해결 메모 (선택, Enter로 전송)"
+                  placeholder="완료 메모 (선택, Enter로 전송)"
                   className="w-full px-3 py-2 text-sm bg-bg-primary rounded-xl border border-bg-border text-text-primary placeholder:text-text-secondary/50 resize-none focus:outline-none focus:ring-1 focus:ring-accent/50"
                   rows={2}
                   autoFocus
@@ -252,7 +257,7 @@ export function DetailPanel({
                     className="px-4 py-1.5 text-xs font-medium rounded-lg text-white cursor-pointer"
                     style={{ backgroundColor: STATUS_CONFIG.resolved.color }}
                   >
-                    해결
+                    완료
                   </button>
                 </div>
               </motion.div>
@@ -277,7 +282,7 @@ export function DetailPanel({
               style={{ backgroundColor: STATUS_CONFIG.resolved.color }}
             >
               <Check size={16} />
-              해결 완료로 변경
+              완료로 변경
             </button>
           )}
 
