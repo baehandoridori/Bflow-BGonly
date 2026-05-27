@@ -75,8 +75,18 @@ test('feedback hub stats use real revision workflow states without assignment-on
       requesterName: '민지',
     }),
     revision({
-      id: 'resolved-today',
+      id: 'reopened-fresh',
       revisionNo: 3,
+      status: 'open',
+      assignee: '서연',
+      requesterName: '민지',
+      createdAt: '2026-05-20T00:00:00.000Z',
+      updatedAt: '2026-05-27T08:50:00.000Z',
+      resolvedAt: '2026-05-22T00:00:00.000Z',
+    }),
+    revision({
+      id: 'resolved-today',
+      revisionNo: 4,
       status: 'resolved',
       assignee: '민지',
       requesterName: '서연',
@@ -94,7 +104,7 @@ test('feedback hub stats use real revision workflow states without assignment-on
     now: new Date('2026-05-27T09:00:00.000Z'),
   });
 
-  assert.equal(stats.totalOpen, 2);
+  assert.equal(stats.totalOpen, 3);
   assert.equal(stats.withComments, 2);
   assert.equal(stats.myRelated, 2);
   assert.equal(stats.stalled, 1);

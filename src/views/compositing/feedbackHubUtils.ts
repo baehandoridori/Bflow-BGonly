@@ -27,7 +27,11 @@ function isSameLocalDate(a: Date, b: Date): boolean {
   );
 }
 
-function revisionTime(revision: CompRevision): Date {
+function revisionActivityTime(revision: CompRevision): Date {
+  return new Date(revision.updatedAt ?? revision.createdAt);
+}
+
+function revisionResolvedTime(revision: CompRevision): Date {
   return new Date(revision.resolvedAt ?? revision.updatedAt ?? revision.createdAt);
 }
 
@@ -53,9 +57,9 @@ export function buildFeedbackHubStats({
           revision.assignee === currentUserName || revision.requesterName === currentUserName,
         ).length
       : 0,
-    stalled: openRevisions.filter((revision) => revisionTime(revision).getTime() <= stalledSince).length,
+    stalled: openRevisions.filter((revision) => revisionActivityTime(revision).getTime() <= stalledSince).length,
     resolvedToday: revisions.filter((revision) =>
-      revision.status === 'resolved' && isSameLocalDate(revisionTime(revision), now),
+      revision.status === 'resolved' && isSameLocalDate(revisionResolvedTime(revision), now),
     ).length,
     workflowLabels: ['대기', '진행중', '완료'],
   };

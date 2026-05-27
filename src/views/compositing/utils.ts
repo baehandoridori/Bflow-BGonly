@@ -77,7 +77,7 @@ export interface SceneGroup {
 export type SortMode = 'recent' | 'oldest' | 'sceneNo' | 'comments';
 
 /**
- * 본문/등록자/씬 이름에서 검색어 일치하는 리비전만 필터.
+ * 본문/등록자/담당자/씬 이름에서 검색어 일치하는 리비전만 필터.
  * 빈 쿼리면 전체 반환.
  */
 export function filterRevisionsBySearch(
@@ -90,9 +90,11 @@ export function filterRevisionsBySearch(
   return revisions.filter((r) => {
     if (r.description?.toLowerCase().includes(q)) return true;
     if (r.requesterName?.toLowerCase().includes(q)) return true;
+    if (r.assignee?.toLowerCase().includes(q)) return true;
     const info = sceneInfoMap.get(r.sceneKey);
     if (info?.sceneName?.toLowerCase().includes(q)) return true;
     if (info?.sceneId?.toLowerCase().includes(q)) return true;
+    if (info?.assignee?.toLowerCase().includes(q)) return true;
     return false;
   });
 }
