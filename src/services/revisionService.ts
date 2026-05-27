@@ -18,6 +18,7 @@ import {
   type RevisionSceneKeyOptions,
 } from '../utils/revisionSceneKey';
 import { normalizeSceneIdKey } from '../utils/sceneIdKey';
+import { normalizePartIdKey } from '../utils/partId';
 
 const REVISIONS_FILE = 'revisions.json';
 const DIGITS_ONLY_RE = /^\d+$/;
@@ -71,10 +72,11 @@ function syncRevisionContextSignature(): void {
 function getPartsForRevisionContext(episode: string, part: string) {
   const episodes = useDataStore.getState().episodes;
   const parts: Part[] = [];
+  const partKey = normalizePartIdKey(part);
   for (const candidateEpisode of episodes) {
     for (const candidatePart of candidateEpisode.parts) {
       const { episode: candidateEpisodeId, part: candidatePartId } = parseSheetContext(candidatePart.sheetName);
-      if (candidateEpisodeId !== episode || candidatePartId !== part) continue;
+      if (candidateEpisodeId !== episode || normalizePartIdKey(candidatePartId) !== partKey) continue;
       parts.push(candidatePart);
     }
   }

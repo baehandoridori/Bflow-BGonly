@@ -10,7 +10,7 @@ import { parseSceneKey } from './utils';
 
 interface Props {
   sceneKey: string;
-  variant?: 'icon' | 'link';
+  variant?: 'icon' | 'link' | 'chip';
   episodeNumber?: number;
   partId?: string;
   sceneUuid?: string;
@@ -49,7 +49,20 @@ export function SceneJumpButton({
         className="text-[10px] text-accent-sub hover:underline flex items-center gap-1 cursor-pointer"
       >
         <ExternalLink className="w-2.5 h-2.5" />
-        씬 모달 열기
+        씬 상세
+      </button>
+    );
+  }
+
+  if (variant === 'chip') {
+    return (
+      <button
+        onClick={handleJump}
+        title="씬 상세 모달 열기"
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-accent/35 bg-accent/10 text-[11px] font-bold text-accent-sub hover:bg-accent/18 transition-colors cursor-pointer"
+      >
+        <ExternalLink className="w-3 h-3" />
+        씬 상세
       </button>
     );
   }

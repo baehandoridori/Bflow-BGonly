@@ -10,12 +10,14 @@ import { RevisionItem } from './RevisionItem';
 import { AddRevisionForm } from './AddRevisionForm';
 import { SceneJumpButton } from './SceneJumpButton';
 import type { SceneGroup } from './utils';
+import type { FeedbackHubEpisodeTree } from './feedbackHubUtils';
 
 export function SceneRow({
   group,
   expanded,
   selectedRevisionId,
   commentCountByRev,
+  pathMode = 'full',
   onToggle,
   onSelectRevision,
   onStatusChange,
@@ -25,6 +27,7 @@ export function SceneRow({
   selectedRevisionId: string | null;
   /** v1.19.6: revisionId → 댓글 개수. 0 이면 마커 표시 안 함. */
   commentCountByRev?: Map<string, number>;
+  pathMode?: 'full' | 'sceneOnly';
   onToggle: () => void;
   onSelectRevision: (rev: CompRevision) => void;
   onStatusChange: (revId: string, sceneKey: string, status: RevisionStatus, note?: string) => void;
@@ -41,6 +44,8 @@ export function SceneRow({
 
   // 씬 ID 표시 (a001, SC001 등 원본 그대로)
   const sceneLabel = info.sceneId || `S${String(info.sceneNo).padStart(2, '0')}`;
+  const sceneTitle = info.sceneName?.trim();
+  const showSceneTitle = !!sceneTitle && sceneTitle !== info.sceneId;
 
   return (
     <div className="border-b border-bg-border/40 last:border-b-0">
@@ -64,17 +69,21 @@ export function SceneRow({
           )}
         </span>
 
-        {/* v1.19.6: EP / 파트 / 씬 ID 메타 라벨 — 한 행에서 위치 파악 가능하게 */}
+        {/* v1.19.6: EP / 파트 / 씬 ID 메타 라벨 — 트리 보기에서는 EP/파트 반복 제거 */}
         <div className="flex items-center gap-1.5 shrink-0 text-[11px]">
-          <span
-            className="text-text-secondary/70 truncate max-w-[140px]"
-            title={epLabel}
-          >
-            {epLabel}
-          </span>
-          <span className="text-text-secondary/40">/</span>
-          <span className="text-text-secondary font-medium">{info.part}</span>
-          <span className="text-text-secondary/40">/</span>
+          {pathMode === 'full' && (
+            <>
+              <span
+                className="text-text-secondary/70 truncate max-w-[140px]"
+                title={epLabel}
+              >
+                {epLabel}
+              </span>
+              <span className="text-text-secondary/40">/</span>
+              <span className="text-text-secondary font-medium">{info.part}</span>
+              <span className="text-text-secondary/40">/</span>
+            </>
+          )}
           <span
             className={`font-bold px-2 py-0.5 rounded border ${
               expanded
@@ -86,10 +95,20 @@ export function SceneRow({
           </span>
         </div>
 
+        <SceneJumpButton
+          sceneKey={info.sceneKey}
+          variant="chip"
+          episodeNumber={info.episodeNumber}
+          partId={info.partId}
+          sceneUuid={info.sceneUuid}
+        />
+
         {/* 씬 이름 */}
-        <span className="font-medium text-sm text-text-primary truncate">
-          {info.sceneName || info.sceneId}
-        </span>
+        {showSceneTitle && (
+          <span className="font-medium text-sm text-text-primary truncate">
+            {sceneTitle}
+          </span>
+        )}
 
         {/* 오른쪽: 아바타 + 미해결 뱃지 + 씬 점프 */}
         <div className="ml-auto flex items-center gap-3 shrink-0">
@@ -105,12 +124,6 @@ export function SceneRow({
               {openCount} 미해결
             </span>
           )}
-          <SceneJumpButton
-            sceneKey={info.sceneKey}
-            episodeNumber={info.episodeNumber}
-            partId={info.partId}
-            sceneUuid={info.sceneUuid}
-          />
         </div>
       </div>
 
@@ -187,6 +200,92 @@ export function SceneRow({
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── 피드백 허브 트리 (에피소드 → 파트 → 씬) ─────────────────────
+
+export function FeedbackTreeSection({
+  episodeTrees,
+  expandedScenes,
+  selectedRevisionId,
+  commentCountByRev,
+  onToggleScene,
+  onSelectRevision,
+  onStatusChange,
+}: {
+  episodeTrees: FeedbackHubEpisodeTree[];
+  expandedScenes: Set<string>;
+  selectedRevisionId: string | null;
+  commentCountByRev?: Map<string, number>;
+  onToggleScene: (sceneKey: string) => void;
+  onSelectRevision: (rev: CompRevision) => void;
+  onStatusChange: (revId: string, sceneKey: string, status: RevisionStatus, note?: string) => void;
+}) {
+  return (
+    <div className="px-5 py-4 space-y-4">
+      {episodeTrees.map((episodeTree) => (
+        <section
+          key={episodeTree.episodeNumber}
+          className="overflow-hidden rounded-xl border border-bg-border/55 bg-bg-card/55"
+        >
+          <header className="px-4 py-3 flex items-center gap-3 border-b border-bg-border/35 bg-bg-primary/20">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-text-primary">{episodeTree.episodeLabel}</span>
+                <span className="text-[10px] text-text-secondary/60">
+                  {episodeTree.sceneCount}씬 · {episodeTree.totalRevisions}개 피드백
+                </span>
+              </div>
+            </div>
+            {episodeTree.totalOpen > 0 && (
+              <span
+                className="inline-flex items-center gap-1 text-[11px] font-bold rounded-full px-2 py-0.5 shrink-0"
+                style={{ color: '#FDCB6E', backgroundColor: 'rgba(253, 203, 110, 0.12)' }}
+              >
+                <AlertTriangle size={10} />
+                {episodeTree.totalOpen} 미해결
+              </span>
+            )}
+          </header>
+
+          <div className="divide-y divide-bg-border/30">
+            {episodeTree.parts.map((partTree) => (
+              <section key={partTree.partId}>
+                <div className="px-4 py-2.5 flex items-center gap-2 bg-bg-primary/10">
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent-sub shrink-0" />
+                  <span className="text-[12px] font-bold text-text-primary">{partTree.partId} 파트</span>
+                  <span className="text-[10px] text-text-secondary/60">
+                    {partTree.scenes.length}씬 · {partTree.totalRevisions}개
+                  </span>
+                  {partTree.totalOpen > 0 && (
+                    <span className="ml-auto text-[10px] font-bold text-accent-sub">
+                      {partTree.totalOpen} 미해결
+                    </span>
+                  )}
+                </div>
+
+                <div className="ml-5 border-l border-bg-border/40">
+                  {partTree.scenes.map((group) => (
+                    <SceneRow
+                      key={group.sceneKey}
+                      group={group}
+                      expanded={expandedScenes.has(group.sceneKey)}
+                      selectedRevisionId={selectedRevisionId}
+                      commentCountByRev={commentCountByRev}
+                      pathMode="sceneOnly"
+                      onToggle={() => onToggleScene(group.sceneKey)}
+                      onSelectRevision={onSelectRevision}
+                      onStatusChange={onStatusChange}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
