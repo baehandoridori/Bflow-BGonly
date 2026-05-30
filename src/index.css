@@ -323,9 +323,9 @@ body.theme-ready *::after {
   border-color: rgb(5 150 105 / 0.18);
 }
 
-/* ─── 좁은 컨테이너 라벨 축약 ─── */
+/* ─── 좁은 화면 라벨 축약 ─── */
 .compact-label-container {
-  container-type: inline-size;
+  max-width: 100%;
 }
 
 [data-compact-icon-label] {
@@ -341,7 +341,7 @@ body.theme-ready *::after {
   transition: max-width 160ms ease, opacity 120ms ease, margin-inline-start 160ms ease;
 }
 
-@container (max-width: 72px) {
+@media (max-width: 1040px) {
   .compact-label-container [data-compact-label-text] {
     max-width: 0;
     opacity: 0;

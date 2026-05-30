@@ -16,15 +16,15 @@ test('CompactIconLabel exposes accessible icon and label hooks', () => {
   assert.match(source, /aria-hidden="true"/);
 });
 
-test('compact labels use container queries without writing-mode', () => {
+test('compact labels collapse at narrow viewport without self-sizing container traps', () => {
   const css = read('src/index.css');
   const component = read('src/components/common/CompactIconLabel.tsx');
 
-  assert.match(css, /\.compact-label-container[\s\S]*container-type:\s*inline-size/);
+  assert.doesNotMatch(css, /\.compact-label-container\s*\{[^}]*container-type/);
   assert.doesNotMatch(css, /\[data-compact-icon-label\]\s*\{[^}]*container-type/);
   assert.doesNotMatch(component, /container-type/);
-  assert.match(css, /@container\s*\(max-width:\s*72px\)/);
-  assert.match(css, /@container\s*\(max-width:\s*72px\)\s*\{[\s\S]*\.compact-label-container\s+\[data-compact-label-text\][\s\S]*max-width:\s*0/);
+  assert.match(css, /@media\s*\(max-width:\s*1040px\)/);
+  assert.match(css, /@media\s*\(max-width:\s*1040px\)\s*\{[\s\S]*\.compact-label-container\s+\[data-compact-label-text\][\s\S]*max-width:\s*0/);
   assert.match(css, /data-sheet-header-short-label/);
   assert.match(css, /data-sheet-header-full-label/);
   assert.doesNotMatch(css, /writing-mode/);
