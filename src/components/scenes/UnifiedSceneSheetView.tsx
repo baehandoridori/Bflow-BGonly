@@ -5,6 +5,7 @@ import { MessageCircle, Trash2 } from 'lucide-react';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Stage, Scene, ScenePhaseState } from '@/types';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import type { SceneGroupMode } from '@/stores/useAppStore';
 import { isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
@@ -34,6 +35,7 @@ interface UnifiedSceneSheetViewProps {
   commentCounts: Record<string, number>;
   /** Codex P2 6차(2026-04-23): ambiguous skip 케이스에서 정확한 union 크기 계산을 위한 id 맵. */
   commentIdsByKey?: Record<string, string[]>;
+  commentUnreadByKey?: Record<string, boolean>;
   searchQuery?: string;
   selectedSceneIds: Set<string>;
   sceneGroupMode: SceneGroupMode;
@@ -97,6 +99,20 @@ const UNIFIED_SHEET_COLUMNS: Array<SheetColumnDefinition<UnifiedSheetColumnKey>>
   { key: 'actDone', defaultWidth: 56, minWidth: 36, maxWidth: 112 },
   { key: 'actions', defaultWidth: 40, minWidth: 32, maxWidth: 72 },
 ];
+
+const BG_STAGE_SHORT_LABELS: Record<Stage, string> = {
+  lo: 'LO',
+  done: '완',
+  review: '검',
+  png: 'PNG',
+};
+
+const ACT_STAGE_SHORT_LABELS: Record<Stage, string> = {
+  lo: '대',
+  done: '작',
+  review: '피',
+  png: '완',
+};
 
 // ─── 인라인 편집 셀 ─────────────────────────────────────────
 
@@ -324,6 +340,7 @@ export function UnifiedSceneSheetView({
   actSheetName,
   commentCounts,
   commentIdsByKey,
+  commentUnreadByKey,
   searchQuery,
   selectedSceneIds,
   sceneGroupMode,
@@ -773,13 +790,13 @@ export function UnifiedSceneSheetView({
               {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 별도 컬럼 대신 행 위에 그룹 헤더 행을 삽입.
                   sceneGroupMode === 'layout' 컬럼 분기 제거 — 컬럼 수가 일반 모드와 동일하게 유지된다.
                   v1.16.0: 메모 컬럼을 BG/ACT 두 개로 분리 (한솔 결정 B2). */}
-              <ResizableHeaderCell columnKey="scene" width={widthOf('scene')} onResizeStart={startResize}>씬번호</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="bgMemo" width={widthOf('bgMemo')} onResizeStart={startResize} style={{ color: bgCfg.color }}>BG 메모</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="actMemo" width={widthOf('actMemo')} onResizeStart={startResize} style={{ color: actCfg.color }}>ACT 메모</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="storyboard" width={widthOf('storyboard')} onResizeStart={startResize} align="center">SB</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="guide" width={widthOf('guide')} onResizeStart={startResize} align="center">가이드</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="scene" width={widthOf('scene')} onResizeStart={startResize} shortLabel="씬">씬번호</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="bgMemo" width={widthOf('bgMemo')} onResizeStart={startResize} style={{ color: bgCfg.color }} shortLabel="BG">BG 메모</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="actMemo" width={widthOf('actMemo')} onResizeStart={startResize} style={{ color: actCfg.color }} shortLabel="ACT">ACT 메모</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="storyboard" width={widthOf('storyboard')} onResizeStart={startResize} align="center" shortLabel="SB">스토리보드</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="guide" width={widthOf('guide')} onResizeStart={startResize} align="center" shortLabel="Guide">가이드</ResizableHeaderCell>
               {/* BG 담당 + 스테이지 */}
-              <ResizableHeaderCell columnKey="bgAssignee" width={widthOf('bgAssignee')} onResizeStart={startResize} style={{ color: bgCfg.color }}>
+              <ResizableHeaderCell columnKey="bgAssignee" width={widthOf('bgAssignee')} onResizeStart={startResize} style={{ color: bgCfg.color }} shortLabel="BG담">
                 BG담당
               </ResizableHeaderCell>
               {STAGES.map((s) => {
@@ -793,13 +810,14 @@ export function UnifiedSceneSheetView({
                     align="center"
                     className="px-1 text-[11px]"
                     style={{ color: bgCfg.stageColors[s] }}
+                    shortLabel={BG_STAGE_SHORT_LABELS[s]}
                   >
                     {bgCfg.stageLabels[s]}
                   </ResizableHeaderCell>
                 );
               })}
               {/* ACT 담당 + 스테이지 */}
-              <ResizableHeaderCell columnKey="actAssignee" width={widthOf('actAssignee')} onResizeStart={startResize} style={{ color: actCfg.color }}>
+              <ResizableHeaderCell columnKey="actAssignee" width={widthOf('actAssignee')} onResizeStart={startResize} style={{ color: actCfg.color }} shortLabel="ACT담">
                 ACT담당
               </ResizableHeaderCell>
               {/* v1.25.2~: 액팅 새 토글 핸들러가 전달되면 ACT 단계 4셀을 ScenePhaseToggle 1셀로 통합 */}
@@ -829,6 +847,7 @@ export function UnifiedSceneSheetView({
                       align="center"
                       className="px-1 text-[11px]"
                       style={{ color: actCfg.stageColors[s] }}
+                      shortLabel={ACT_STAGE_SHORT_LABELS[s]}
                     >
                       {actCfg.stageLabels[s]}
                     </ResizableHeaderCell>
@@ -864,6 +883,12 @@ export function UnifiedSceneSheetView({
                 actSheetName,
                 commentCounts,
                 commentIdsByKey,
+              );
+              const bgCommentKey = bgScene && bgSheetName ? `${bgSheetName}:${bgScene.no}` : null;
+              const actCommentKey = actScene && actSheetName ? `${actSheetName}:${actScene.no}` : null;
+              const hasUnreadComments = Boolean(
+                (bgCommentKey && commentUnreadByKey?.[bgCommentKey]) ||
+                (actCommentKey && commentUnreadByKey?.[actCommentKey]),
               );
 
               // v1.16.0: 길이 변경 라벨 (BG/ACT 양쪽 동기화 정책 — BG 우선)
@@ -966,9 +991,20 @@ export function UnifiedSceneSheetView({
                         </span>
                       )}
                       {commentBadgeCounts.total > 0 && (
-                        <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full">
-                          <MessageCircle size={9} fill="currentColor" />
-                          <span className="text-[10px] font-bold">{commentBadgeCounts.total}</span>
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-0.5 rounded-full border px-1 py-px transition-colors',
+                            hasUnreadComments
+                              ? 'border-accent/25 bg-accent/20 text-accent'
+                              : 'border-bg-border/40 bg-text-secondary/10 text-text-secondary/55',
+                          )}
+                          title={`${hasUnreadComments ? '새 댓글' : '확인한 댓글'} ${commentBadgeCounts.total}개`}
+                        >
+                          <CompactIconLabel
+                            icon={<MessageCircle size={9} fill="currentColor" />}
+                            label={`${commentBadgeCounts.total}개`}
+                            textClassName="text-[10px] font-bold"
+                          />
                         </span>
                       )}
                     </span>

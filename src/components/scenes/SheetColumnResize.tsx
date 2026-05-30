@@ -98,6 +98,7 @@ export function useResizableSheetColumns<K extends string>(
 export function ResizableHeaderCell<K extends string>({
   columnKey,
   width,
+  shortLabel,
   className,
   style,
   align = 'left',
@@ -106,12 +107,15 @@ export function ResizableHeaderCell<K extends string>({
 }: {
   columnKey: K;
   width: number;
+  shortLabel?: string;
   className?: string;
   style?: CSSProperties;
   align?: 'left' | 'center';
   onResizeStart: (key: K, event: ReactPointerEvent) => void;
   children?: ReactNode;
 }) {
+  const fullLabel = typeof children === 'string' ? children : undefined;
+
   return (
     <th
       className={cn(
@@ -120,8 +124,12 @@ export function ResizableHeaderCell<K extends string>({
         className,
       )}
       style={{ ...style, width, minWidth: width, maxWidth: width }}
+      title={fullLabel}
     >
-      <span className="block truncate pr-2">{children}</span>
+      <span className="sheet-header-label-wrap truncate">
+        <span data-sheet-header-full-label>{children}</span>
+        {shortLabel && <span data-sheet-header-short-label>{shortLabel}</span>}
+      </span>
       <span
         role="separator"
         aria-orientation="vertical"

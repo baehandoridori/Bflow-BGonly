@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Filter, ListFilter, Plus, Search } from 'lucide-react';
+import { BarChart3, CheckCircle2, Circle, Clock, Filter, Layers, List, ListFilter, PlayCircle, Plus, Search } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useNotificationStore } from '@/stores/useNotificationStore';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
 import { loadPartComments } from '@/services/commentService';
 import type { CompRevision, RevisionStatus } from '@/types';
@@ -20,18 +21,30 @@ import { DetailPanel } from './compositing/RevisionDetailPanel';
 import { EpisodeGroupSection } from './compositing/EpisodeGroupSection';
 import { ProgressKanbanSection } from './compositing/ProgressKanbanSection';
 import NewRevisionModal from './compositing/NewRevisionModal';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 
 // v1.19.0: 그룹화 모드
 type GroupMode = 'scene' | 'episode' | 'progress';
 
+interface CompositingViewProps {
+  previewMode?: boolean;
+  previewCommentCountByRev?: Map<string, number>;
+  previewCommentSeenByRev?: Map<string, boolean>;
+}
+
 // ─── 메인 뷰 ─────────────────────────────────
 
-export default function CompositingView() {
+export default function CompositingView({
+  previewMode = false,
+  previewCommentCountByRev,
+  previewCommentSeenByRev,
+}: CompositingViewProps = {}) {
   const { currentUser } = useAuthStore();
   const dataConnected = useAppStore((s) => s.dataConnected);
   const episodes = useDataStore((s) => s.episodes);
   const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const { revisions, loadRevisions, updateStatus, isLoading } = useRevisionStore();
+  const notifications = useNotificationStore((s) => s.notifications);
 
   const [selectedEp, setSelectedEp] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | RevisionStatus>('all');
@@ -56,9 +69,42 @@ export default function CompositingView() {
   );
 
   useEffect(() => {
+    if (previewMode) return;
     setRevisionsSheetsMode(dataConnected);
     loadRevisions();
-  }, [dataConnected, loadRevisions]);
+  }, [dataConnected, loadRevisions, previewMode]);
+
+  const effectiveCommentCountByRev = previewMode && previewCommentCountByRev
+    ? previewCommentCountByRev
+    : commentCountByRev;
+  const notificationCommentSeenByRev = useMemo(() => {
+    const states = new Map<string, { hasRead: boolean; hasUnread: boolean }>();
+
+    for (const notification of notifications) {
+      const revisionId = notification.metadata?.revisionId;
+      const isRevisionComment =
+        !!revisionId
+        && (
+          notification.type === 'comment'
+          || notification.type === 'mention'
+          || (notification.type === 'revision' && notification.metadata?.revisionAction === 'comment')
+        );
+
+      if (!revisionId || !isRevisionComment) continue;
+
+      const state = states.get(revisionId) ?? { hasRead: false, hasUnread: false };
+      if (notification.isRead) state.hasRead = true;
+      else state.hasUnread = true;
+      states.set(revisionId, state);
+    }
+
+    const seenByRev = new Map<string, boolean>();
+    for (const [revisionId, state] of states) {
+      seenByRev.set(revisionId, state.hasRead && !state.hasUnread);
+    }
+    return seenByRev;
+  }, [notifications]);
+  const effectiveCommentSeenByRev = previewMode ? previewCommentSeenByRev : notificationCommentSeenByRev;
 
   // 씬 정보 맵 빌드 (에피소드 데이터 + 리비전 sceneKey 매칭)
   //
@@ -105,8 +151,8 @@ export default function CompositingView() {
   // 이전엔 인자 누락으로 sortRevisions 가 모든 리비전을 0 으로 취급해 정렬 무효였음.
   const searchedSorted = useMemo(() => {
     const filtered = filterRevisionsBySearch(revisions, searchQuery, sceneInfoMap);
-    return sortRevisions(filtered, sortMode, commentCountByRev);
-  }, [revisions, searchQuery, sortMode, sceneInfoMap, commentCountByRev]);
+    return sortRevisions(filtered, sortMode, effectiveCommentCountByRev);
+  }, [revisions, searchQuery, sortMode, sceneInfoMap, effectiveCommentCountByRev]);
 
   // 선택된 리비전의 씬 정보
   const selectedRevisionSceneInfo = useMemo(
@@ -271,44 +317,11 @@ export default function CompositingView() {
       totalRevisions,
       ...buildFeedbackHubStats({
         revisions: visibleRevisions,
-        commentCountByRev,
+        commentCountByRev: effectiveCommentCountByRev,
         currentUserName: currentUser?.name,
       }),
     };
-  }, [sceneGroups.length, visibleRevisions, commentCountByRev, currentUser?.name]);
-
-  const summaryCards = useMemo(() => ([
-    {
-      label: '전체 미해결',
-      value: stats.totalOpen,
-      hint: '대기+진행',
-      tone: 'border-[#FDCB6E]/35 bg-[#FDCB6E]/[0.06]',
-    },
-    {
-      label: '댓글 있음',
-      value: stats.withComments,
-      hint: '연결된 대화',
-      tone: 'border-accent/35 bg-accent/[0.07]',
-    },
-    {
-      label: '내 관련',
-      value: stats.myRelated,
-      hint: '담당/요청',
-      tone: 'border-bg-border/60 bg-bg-card/55',
-    },
-    {
-      label: '오래 멈춤',
-      value: stats.stalled,
-      hint: '2일 이상',
-      tone: 'border-[#74B9FF]/30 bg-[#74B9FF]/[0.05]',
-    },
-    {
-      label: '오늘 완료',
-      value: stats.resolvedToday,
-      hint: '해결 반영',
-      tone: 'border-bg-border/60 bg-bg-card/55',
-    },
-  ]), [stats]);
+  }, [sceneGroups.length, visibleRevisions, effectiveCommentCountByRev, currentUser?.name]);
 
   useEffect(() => {
     if (autoExpandedOnce || sceneGroups.length === 0) return;
@@ -338,6 +351,10 @@ export default function CompositingView() {
     [sceneGroups],
   );
   useEffect(() => {
+    if (previewMode) {
+      setCommentCountByRev(previewCommentCountByRev ?? new Map());
+      return;
+    }
     if (!sheetNamesKey) return;
     const sheetNames = sheetNamesKey.split(',');
 
@@ -368,7 +385,7 @@ export default function CompositingView() {
     })();
 
     return () => { cancelled = true; };
-  }, [sheetNamesKey, commentRefreshTick]);
+  }, [sheetNamesKey, commentRefreshTick, previewMode, previewCommentCountByRev]);
 
   // 댓글 변경 이벤트 — 다른 창에서 댓글 추가/수정/삭제 시 카운트 재빌드.
   // commentService 가 invalidate 이벤트와 함께 캐시도 비우므로 다음 fetch 는 최신 데이터를 가져옴.
@@ -436,7 +453,10 @@ export default function CompositingView() {
                   onClick={toggleAll}
                   className="min-h-[34px] px-3 text-[11px] text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors cursor-pointer"
                 >
-                  {expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
+                  <CompactIconLabel
+                    icon={<ListFilter size={12} strokeWidth={2.4} />}
+                    label={expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
+                  />
                 </button>
               )}
               {/* v1.19.5: 헤더에서 직접 새 리비전 등록 */}
@@ -444,25 +464,9 @@ export default function CompositingView() {
                 onClick={() => setNewRevModalOpen(true)}
                 className="min-h-[34px] inline-flex items-center gap-1 px-3 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer"
               >
-                <Plus size={12} strokeWidth={2.5} />
-                새 피드백
+                <CompactIconLabel icon={<Plus size={12} strokeWidth={2.5} />} label="새 피드백" />
               </button>
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
-            {summaryCards.map((card) => (
-              <div
-                key={card.label}
-                className={`min-h-[58px] rounded-lg border px-3 py-2 ${card.tone}`}
-              >
-                <span className="block text-[10.5px] font-bold text-text-secondary">{card.label}</span>
-                <div className="mt-1 flex items-end gap-1.5">
-                  <strong className="text-xl leading-none text-text-primary">{card.value}</strong>
-                  <span className="text-[10px] text-text-secondary/70">{card.hint}</span>
-                </div>
-              </div>
-            ))}
           </div>
 
           {/* 검색 + 정렬 (Row 1) */}
@@ -491,10 +495,10 @@ export default function CompositingView() {
             </div>
             <div className="inline-flex min-h-[34px] bg-bg-primary rounded-lg p-1 gap-0.5 border border-bg-border/40 shrink-0">
               {([
-                { key: 'scene' as const, label: '씬 트리' },
-                { key: 'episode' as const, label: '에피소드별' },
-                { key: 'progress' as const, label: '상태 보드' },
-              ]).map(({ key, label }) => (
+                { key: 'scene' as const, label: '씬 트리', icon: <List size={12} strokeWidth={2.4} /> },
+                { key: 'episode' as const, label: '에피소드별', icon: <Layers size={12} strokeWidth={2.4} /> },
+                { key: 'progress' as const, label: '상태 보드', icon: <BarChart3 size={12} strokeWidth={2.4} /> },
+              ]).map(({ key, label, icon }) => (
                 <button
                   key={key}
                   onClick={() => setGroupMode(key)}
@@ -504,7 +508,7 @@ export default function CompositingView() {
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  {label}
+                  <CompactIconLabel icon={icon} label={label} />
                 </button>
               ))}
             </div>
@@ -518,11 +522,11 @@ export default function CompositingView() {
             {/* 상태 필터 */}
             <div className="flex items-center gap-1 p-0.5 rounded-lg bg-bg-primary/50">
               {([
-                { key: 'all' as const, label: '전체' },
-                { key: 'open' as const, label: '대기' },
-                { key: 'in_progress' as const, label: '진행중' },
-                { key: 'resolved' as const, label: '완료' },
-              ]).map(({ key, label }) => (
+                { key: 'all' as const, label: '전체', icon: <Circle size={11} strokeWidth={2.4} /> },
+                { key: 'open' as const, label: '대기', icon: <Clock size={11} strokeWidth={2.4} /> },
+                { key: 'in_progress' as const, label: '진행중', icon: <PlayCircle size={11} strokeWidth={2.4} /> },
+                { key: 'resolved' as const, label: '완료', icon: <CheckCircle2 size={11} strokeWidth={2.4} /> },
+              ]).map(({ key, label, icon }) => (
                 <button
                   key={key}
                   onClick={() => setStatusFilter(key)}
@@ -532,7 +536,7 @@ export default function CompositingView() {
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  {label}
+                  <CompactIconLabel icon={icon} label={label} />
                 </button>
               ))}
             </div>
@@ -546,8 +550,7 @@ export default function CompositingView() {
                   : 'border-bg-border text-text-secondary hover:text-text-primary'
               }`}
             >
-              <ListFilter size={12} />
-              내 관련
+              <CompactIconLabel icon={<ListFilter size={12} />} label={`내 관련 ${stats.myRelated}`} />
             </button>
 
             {stats.totalOpen > 0 && (
@@ -578,7 +581,8 @@ export default function CompositingView() {
               episodeTrees={feedbackTree}
               expandedScenes={expandedScenes}
               selectedRevisionId={selectedRevisionId}
-              commentCountByRev={commentCountByRev}
+              commentCountByRev={effectiveCommentCountByRev}
+              commentSeenByRev={effectiveCommentSeenByRev}
               onToggleScene={toggleScene}
               onSelectRevision={handleSelectRevision}
               onStatusChange={handleStatusChange}
@@ -589,7 +593,8 @@ export default function CompositingView() {
               episodes={episodes}
               expandedScenes={expandedScenes}
               selectedRevisionId={selectedRevisionId}
-              commentCountByRev={commentCountByRev}
+              commentCountByRev={effectiveCommentCountByRev}
+              commentSeenByRev={effectiveCommentSeenByRev}
               onSelectRevision={handleSelectRevision}
               onToggleScene={toggleScene}
             />
@@ -601,7 +606,8 @@ export default function CompositingView() {
               revisions={visibleRevisions}
               sceneInfoMap={sceneInfoMap}
               selectedRevisionId={selectedRevisionId}
-              commentCountByRev={commentCountByRev}
+              commentCountByRev={effectiveCommentCountByRev}
+              commentSeenByRev={effectiveCommentSeenByRev}
               onSelectRevision={handleSelectRevision}
             />
           )}

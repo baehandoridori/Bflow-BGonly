@@ -17,9 +17,10 @@ import {
 } from '@/utils/mergedSceneHelpers';
 import { getAllViewCompletionState, getSingleViewCompletionState } from '@/utils/visibleCompletion';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw, Clock, PlayCircle, CheckCircle2, Circle, MessageSquareWarning, Plus } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { HighlightText } from '@/components/common/HighlightText';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
@@ -35,6 +36,20 @@ import type { PartContextMenuTarget } from '@/utils/partMemoHelpers';
 import { usePartMemos } from '@/hooks/usePartMemos';
 import { useUnifiedScenes } from '@/hooks/useUnifiedScenes';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
+
+function stageIcon(stage: Stage, size = 12) {
+  if (stage === 'lo') return <Clock size={size} strokeWidth={2.4} />;
+  if (stage === 'done') return <PlayCircle size={size} strokeWidth={2.4} />;
+  if (stage === 'review') return <CheckSquare size={size} strokeWidth={2.4} />;
+  return <CheckCircle2 size={size} strokeWidth={2.4} />;
+}
+
+function phaseIcon(phase: ScenePhaseState, size = 12) {
+  if (phase === 'wait') return <Clock size={size} strokeWidth={2.4} />;
+  if (phase === 'work') return <PlayCircle size={size} strokeWidth={2.4} />;
+  if (phase === 'feedback') return <MessageSquareWarning size={size} strokeWidth={2.4} />;
+  return <CheckCircle2 size={size} strokeWidth={2.4} />;
+}
 
 /* ── 라쏘 드래그 선택 훅 ── */
 interface LassoRect { x: number; y: number; w: number; h: number }
@@ -797,14 +812,20 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         <div className="flex items-center gap-1.5 shrink-0">
           {commentCount > 0 && (
             <span className="flex items-center gap-0.5 bg-accent/15 text-accent px-1.5 py-0.5 rounded-full" title={`의견 ${commentCount}개`}>
-              <MessageCircle size={10} fill="currentColor" />
-              <span className="text-[10px] font-bold leading-none">{commentCount}</span>
+              <CompactIconLabel
+                icon={<MessageCircle size={10} fill="currentColor" />}
+                label={`${commentCount}개`}
+                textClassName="text-[10px] font-bold leading-none"
+              />
             </span>
           )}
           {revisionCount > 0 && (
             <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(108, 92, 231, 0.15)', color: '#A599F5' }} title={`리비전 ${revisionCount}건`}>
-              <Film size={10} />
-              <span className="text-[10px] font-bold leading-none">{revisionCount}</span>
+              <CompactIconLabel
+                icon={<Film size={10} />}
+                label={`${revisionCount}건`}
+                textClassName="text-[10px] font-bold leading-none"
+              />
             </span>
           )}
           {/* v1.20.x: 분리(BG/ACT 단독) 카드 뷰에도 씬 길이 변경 라벨 표시 — UnifiedSceneCard와 동일 패턴 */}
@@ -919,7 +940,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
                     : undefined
                 }
               >
-                {deptConfig.stageLabels[stage]}
+                <CompactIconLabel icon={stageIcon(stage, 12)} label={deptConfig.stageLabels[stage]} className="w-full" />
               </button>
             );
           })}
@@ -4221,7 +4242,18 @@ export function ScenesView() {
                         : 'text-text-secondary hover:text-text-primary'
                     )}
                   >
-                    {STATUS_FILTER_LABELS[f]}
+                    <CompactIconLabel
+                      icon={
+                        f === 'done'
+                          ? <CheckCircle2 size={13} strokeWidth={2.4} />
+                          : f === 'not-started'
+                            ? <Clock size={13} strokeWidth={2.4} />
+                            : f === 'in-progress'
+                              ? <PlayCircle size={13} strokeWidth={2.4} />
+                              : <Circle size={13} strokeWidth={2.4} />
+                      }
+                      label={STATUS_FILTER_LABELS[f]}
+                    />
                   </button>
                 ))}
 
@@ -4347,7 +4379,7 @@ export function ScenesView() {
               onClick={() => { setAddTargetSheet(currentPart.sheetName); setShowAddScene(true); }}
               className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 shadow-sm shadow-accent/20 transition-colors"
             >
-              + 씬 추가
+              <CompactIconLabel icon={<Plus size={14} strokeWidth={2.5} />} label="씬 추가" />
             </button>
           )}
           {/* 씬 추가 버튼 (전체 모드: BG+ACT 동시 추가) */}
@@ -4356,7 +4388,7 @@ export function ScenesView() {
               onClick={() => { setAddTargetSheet('__both__'); setShowAddScene(true); }}
               className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 shadow-sm shadow-accent/20 transition-colors cursor-pointer"
             >
-              + 씬 추가
+              <CompactIconLabel icon={<Plus size={14} strokeWidth={2.5} />} label="씬 추가" />
             </button>
           )}
         </div>
@@ -4831,7 +4863,7 @@ export function ScenesView() {
             animate={{ opacity: 1, y: 0, scale: 1, left: bulkBarLeftPx, x: '-50%' }}
             exit={{ opacity: 0, y: 20, scale: 0.96 }}
             transition={{ duration: 0.45, ease: [0.22, 1.4, 0.36, 1] }}
-            className="bflow-bulk-bar-pulse fixed bottom-6 z-50 flex items-center gap-3 px-5 py-2.5 rounded-xl"
+            className="bflow-bulk-bar-pulse fixed bottom-6 z-50 flex max-w-[calc(100vw-2rem)] flex-wrap items-center justify-center gap-3 overflow-x-auto px-5 py-2.5 rounded-xl"
             style={{
               background: 'rgb(var(--color-bg-card) / 0.95)',
               border: '1.5px solid rgb(var(--color-accent) / 0.55)',
@@ -4868,7 +4900,7 @@ export function ScenesView() {
                         border: `1px solid ${DEPARTMENT_CONFIGS.bg.stageColors[stage]}40`,
                       }}
                     >
-                      {DEPARTMENT_CONFIGS.bg.stageLabels[stage]}
+                      <CompactIconLabel icon={stageIcon(stage, 12)} label={DEPARTMENT_CONFIGS.bg.stageLabels[stage]} className="w-full" />
                     </button>
                   ))}
                 </div>
@@ -4890,7 +4922,7 @@ export function ScenesView() {
                         border: `1px solid ${SCENE_PHASE_COLORS[phase]}40`,
                       }}
                     >
-                      {SCENE_PHASE_LABELS_SHORT[phase]}
+                      <CompactIconLabel icon={phaseIcon(phase, 12)} label={SCENE_PHASE_LABELS_SHORT[phase]} className="w-full" />
                     </button>
                   ))}
                 </div>
@@ -4908,7 +4940,7 @@ export function ScenesView() {
                     border: `1px solid ${deptConfig.stageColors[stage]}40`,
                   }}
                 >
-                  {deptConfig.stageLabels[stage]}
+                  <CompactIconLabel icon={stageIcon(stage, 12)} label={deptConfig.stageLabels[stage]} className="w-full" />
                 </button>
               ))
             )}
@@ -4924,8 +4956,7 @@ export function ScenesView() {
                 title="LD · Long Duration (길이 늘어남)"
                 className="h-7 px-2 text-[11px] font-medium rounded-md bg-length-up/10 text-length-up border border-length-up/30 hover:bg-length-up/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
               >
-                <LengthIcon kind="LD" size="sm" />
-                <span>LD</span>
+                <CompactIconLabel icon={<LengthIcon kind="LD" size="sm" />} label="LD" />
               </button>
               <button
                 onClick={() => handleBulkLengthChange('SD')}
@@ -4933,8 +4964,7 @@ export function ScenesView() {
                 title="SD · Short Duration (길이 줄어듦)"
                 className="h-7 px-2 text-[11px] font-medium rounded-md bg-length-down/10 text-length-down border border-length-down/30 hover:bg-length-down/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
               >
-                <LengthIcon kind="SD" size="sm" />
-                <span>SD</span>
+                <CompactIconLabel icon={<LengthIcon kind="SD" size="sm" />} label="SD" />
               </button>
               <button
                 onClick={() => handleBulkLengthChange(null)}
@@ -4942,7 +4972,7 @@ export function ScenesView() {
                 title="길이 변경 표시 해제"
                 className="h-7 px-2 text-[11px] font-medium rounded-md bg-bg-border/30 text-text-secondary border border-bg-border hover:bg-bg-border/50 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                해제
+                <CompactIconLabel icon={<X size={12} strokeWidth={2.4} />} label="해제" />
               </button>
             </div>
 
@@ -4959,8 +4989,7 @@ export function ScenesView() {
               disabled={isBulkInFlight}
               className="h-7 px-3 text-[11px] font-medium rounded-md bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Pencil size={12} className="inline mr-1 align-middle" />
-              편집
+              <CompactIconLabel icon={<Pencil size={12} strokeWidth={2.4} />} label="편집" />
             </button>
 
             {/* 일괄 삭제 */}
@@ -4969,8 +4998,7 @@ export function ScenesView() {
               disabled={isBulkInFlight}
               className="h-7 px-3 text-[11px] font-medium rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Trash2 size={12} className="inline mr-1 align-middle" />
-              삭제
+              <CompactIconLabel icon={<Trash2 size={12} strokeWidth={2.4} />} label="삭제" />
             </button>
 
             {/* 선택 해제 */}

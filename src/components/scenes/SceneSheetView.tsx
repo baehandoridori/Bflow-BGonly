@@ -3,12 +3,13 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { MessageCircle, Trash2 } from 'lucide-react';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
-import type { Scene, Stage, Department } from '@/types';
+import type { Scene, Stage, Department, ScenePhaseState } from '@/types';
 import type { SceneGroupMode } from '@/stores/useAppStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 import { HighlightText } from '@/components/common/HighlightText';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import {
@@ -16,6 +17,7 @@ import {
   useResizableSheetColumns,
   type SheetColumnDefinition,
 } from './SheetColumnResize';
+import { ScenePhaseToggle } from './ScenePhaseToggle';
 
 // ─── Props ───────────────────────────────────────────────────
 
@@ -24,6 +26,7 @@ interface SceneSheetViewProps {
   allScenes: Scene[];
   department: Department;
   commentCounts: Record<string, number>;
+  commentUnreadByKey?: Record<string, boolean>;
   sheetName: string;
   searchQuery?: string;
   selectedSceneIds?: Set<string>;
@@ -31,6 +34,9 @@ interface SceneSheetViewProps {
   /** 한솔 결정 (8번): 토스트 클릭 후 진입 시 강조할 sceneId */
   highlightSceneId?: string | null;
   onToggle: (sceneId: string, stage: Stage) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
+  onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: (sceneIndex: number) => void;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
@@ -68,6 +74,13 @@ const SINGLE_SHEET_COLUMNS: Array<SheetColumnDefinition<SingleSheetColumnKey>> =
   { key: 'png', defaultWidth: 58, minWidth: 36, maxWidth: 112 },
   { key: 'actions', defaultWidth: 40, minWidth: 32, maxWidth: 72 },
 ];
+
+const STAGE_SHORT_LABELS: Record<Stage, string> = {
+  lo: 'LO',
+  done: '완',
+  review: '검',
+  png: 'PNG',
+};
 
 // ─── 인라인 편집 셀 (controlled) ─────────────────────────────
 
@@ -291,12 +304,16 @@ export function SceneSheetView({
   allScenes,
   department,
   commentCounts,
+  commentUnreadByKey,
   sheetName,
   searchQuery,
   selectedSceneIds,
   sceneGroupMode,
   highlightSceneId,
   onToggle,
+  onActPhaseStateClick,
+  onActFeedbackRequest,
+  onActRoundBump,
   onDelete,
   onOpenDetail,
   onFieldUpdate,
@@ -305,6 +322,7 @@ export function SceneSheetView({
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const stagePointerHandledRef = useRef(false);
+  const useActingPhaseControls = department === 'acting' && !!onActPhaseStateClick && !!onActFeedbackRequest && !!onActRoundBump;
   const {
     widthOf,
     totalWidth,
@@ -600,24 +618,35 @@ export function SceneSheetView({
             <tr className="bg-bg-card border-b border-bg-border">
               {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 별도 컬럼 대신 행 위에 그룹 헤더 행을 삽입.
                   컬럼 수가 일반 모드와 동일하게 유지된다. */}
-              <ResizableHeaderCell columnKey="scene" width={widthOf('scene')} onResizeStart={startResize}>씬번호</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="memo" width={widthOf('memo')} onResizeStart={startResize}>메모</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="storyboard" width={widthOf('storyboard')} onResizeStart={startResize} align="center">스토리보드</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="guide" width={widthOf('guide')} onResizeStart={startResize} align="center">가이드</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="assignee" width={widthOf('assignee')} onResizeStart={startResize}>담당자</ResizableHeaderCell>
-              {STAGES.map((s) => (
-                <ResizableHeaderCell
-                  key={s}
-                  columnKey={s}
-                  width={widthOf(s)}
-                  onResizeStart={startResize}
-                  align="center"
-                  className="px-1 text-[11px]"
-                  style={{ color: deptConfig.stageColors[s] }}
+              <ResizableHeaderCell columnKey="scene" width={widthOf('scene')} onResizeStart={startResize} shortLabel="씬">씬번호</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="memo" width={widthOf('memo')} onResizeStart={startResize} shortLabel="메모">메모</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="storyboard" width={widthOf('storyboard')} onResizeStart={startResize} align="center" shortLabel="SB">스토리보드</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="guide" width={widthOf('guide')} onResizeStart={startResize} align="center" shortLabel="Guide">가이드</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="assignee" width={widthOf('assignee')} onResizeStart={startResize} shortLabel="담">담당자</ResizableHeaderCell>
+              {useActingPhaseControls ? (
+                <th
+                  colSpan={4}
+                  className="px-1 py-2 text-center text-[11px] font-medium"
+                  style={{ color: deptConfig.color }}
                 >
-                  {deptConfig.stageLabels[s]}
-                </ResizableHeaderCell>
-              ))}
+                  액팅 단계
+                </th>
+              ) : (
+                STAGES.map((s) => (
+                  <ResizableHeaderCell
+                    key={s}
+                    columnKey={s}
+                    width={widthOf(s)}
+                    onResizeStart={startResize}
+                    align="center"
+                    className="px-1 text-[11px]"
+                    style={{ color: deptConfig.stageColors[s] }}
+                    shortLabel={STAGE_SHORT_LABELS[s]}
+                  >
+                    {deptConfig.stageLabels[s]}
+                  </ResizableHeaderCell>
+                ))
+              )}
               <ResizableHeaderCell columnKey="actions" width={widthOf('actions')} onResizeStart={startResize} align="center" className="px-1" />
             </tr>
           </thead>
@@ -689,11 +718,24 @@ export function SceneSheetView({
                         </span>
                       )}
                       {(() => {
-                        const cc = commentCounts[`${sheetName}:${scene.no}`];
+                        const commentKey = `${sheetName}:${scene.no}`;
+                        const cc = commentCounts[commentKey];
+                        const isUnread = commentUnreadByKey?.[commentKey] ?? false;
                         return cc > 0 ? (
-                          <span className="inline-flex items-center gap-0.5 bg-accent/20 text-accent px-1 py-px rounded-full">
-                            <MessageCircle size={9} fill="currentColor" />
-                            <span className="text-[10px] font-bold">{cc}</span>
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-0.5 rounded-full border px-1 py-px transition-colors',
+                              isUnread
+                                ? 'border-accent/25 bg-accent/20 text-accent'
+                                : 'border-bg-border/40 bg-text-secondary/10 text-text-secondary/55',
+                            )}
+                            title={`${isUnread ? '새 댓글' : '확인한 댓글'} ${cc}개`}
+                          >
+                            <CompactIconLabel
+                              icon={<MessageCircle size={9} fill="currentColor" />}
+                              label={`${cc}개`}
+                              textClassName="text-[10px] font-bold"
+                            />
                           </span>
                         ) : null;
                       })()}
@@ -739,41 +781,55 @@ export function SceneSheetView({
                     onStopEditing={handleStopEditing}
                   />
 
-                  {/* 진행상황 체크박스 (LO/완료/검수/PNG) */}
-                  {STAGES.map((stage) => (
-                    <td key={stage} className="px-1 py-1.5 text-center">
-                      <button
-                        type="button"
-                        onPointerDown={(e) => {
-                          if (e.button !== 0) return;
-                          e.preventDefault();
-                          e.stopPropagation();
-                          stagePointerHandledRef.current = true;
-                          onToggle(scene.sceneId, stage);
-                          window.setTimeout(() => {
-                            stagePointerHandledRef.current = false;
-                          }, 600);
-                        }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (stagePointerHandledRef.current) {
-                            stagePointerHandledRef.current = false;
-                            return;
-                          }
-                          onToggle(scene.sceneId, stage);
-                        }}
-                        className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto"
-                        style={
-                          scene[stage]
-                            ? { backgroundColor: deptConfig.stageColors[stage], color: 'rgb(var(--color-bg-primary))' }
-                            : { border: '1px solid #2D3041' }
-                        }
-                      >
-                        {scene[stage] ? '✓' : ''}
-                      </button>
+                  {/* 진행상황: ACT 단독은 새 액팅 단계, 그 외는 기존 BG 스테이지 체크박스 */}
+                  {useActingPhaseControls ? (
+                    <td colSpan={4} className="px-1 py-1.5">
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <ScenePhaseToggle
+                          scene={scene}
+                          compact
+                          onStateClick={(next) => onActPhaseStateClick(sheetName, scene.sceneId, next)}
+                          onRequestFeedback={() => onActFeedbackRequest(sheetName, scene.sceneId)}
+                          onRoundBump={(kind, delta) => onActRoundBump(sheetName, scene.sceneId, kind, delta)}
+                        />
+                      </div>
                     </td>
-                  ))}
+                  ) : (
+                    STAGES.map((stage) => (
+                      <td key={stage} className="px-1 py-1.5 text-center">
+                        <button
+                          type="button"
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            stagePointerHandledRef.current = true;
+                            onToggle(scene.sceneId, stage);
+                            window.setTimeout(() => {
+                              stagePointerHandledRef.current = false;
+                            }, 600);
+                          }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (stagePointerHandledRef.current) {
+                              stagePointerHandledRef.current = false;
+                              return;
+                            }
+                            onToggle(scene.sceneId, stage);
+                          }}
+                          className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto"
+                          style={
+                            scene[stage]
+                              ? { backgroundColor: deptConfig.stageColors[stage], color: 'rgb(var(--color-bg-primary))' }
+                              : { border: '1px solid #2D3041' }
+                          }
+                        >
+                          {scene[stage] ? '✓' : ''}
+                        </button>
+                      </td>
+                    ))
+                  )}
 
                   {/* 삭제 */}
                   <td className="px-1 py-1.5">

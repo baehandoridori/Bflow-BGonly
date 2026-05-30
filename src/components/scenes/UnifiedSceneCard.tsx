@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { MessageCircle, MessageSquareWarning, Check, Trash2 } from 'lucide-react';
+import { Check, CheckCircle2, Clock, MessageCircle, MessageSquareWarning, PlayCircle, Trash2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { isFullyDone, sceneProgress } from '@/utils/calcStats';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Stage, Department, ScenePhaseState } from '@/types';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
 import { HighlightText } from '@/components/common/HighlightText';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { Confetti } from '@/components/ui/Confetti';
 import { useBulkOperationsStore, type PendingOp } from '@/stores/useBulkOperationsStore';
@@ -17,6 +18,13 @@ import { useAppStore } from '@/stores/useAppStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
+
+function stageIcon(stage: Stage, size = 12) {
+  if (stage === 'lo') return <Clock size={size} strokeWidth={2.4} />;
+  if (stage === 'done') return <PlayCircle size={size} strokeWidth={2.4} />;
+  if (stage === 'review') return <MessageSquareWarning size={size} strokeWidth={2.4} />;
+  return <CheckCircle2 size={size} strokeWidth={2.4} />;
+}
 
 // 씬 UUID에 대한 현재 일괄 작업 상태(pending / failed)를 조회
 function getPendingState(
@@ -42,6 +50,7 @@ interface UnifiedSceneCardProps {
   actCommentCount: number;
   /** Codex P2 6차(2026-04-23): 양쪽 sheet 댓글 id 유니온 크기. 제공되면 Math.max fallback 대신 사용. */
   totalCommentCount?: number;
+  hasUnreadComments?: boolean;
   onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
   onDelete: (sheetName: string, sceneIndex: number) => void;
   onOpenDetail: (sheetName: string, sceneIndex: number) => void;
@@ -67,6 +76,7 @@ export function UnifiedSceneCard({
   bgCommentCount,
   actCommentCount,
   totalCommentCount,
+  hasUnreadComments = false,
   onToggle,
   onDelete,
   onOpenDetail,
@@ -322,9 +332,20 @@ export function UnifiedSceneCard({
               const displayCount = totalCommentCount ?? Math.max(bgCommentCount, actCommentCount);
               if (displayCount <= 0) return null;
               return (
-                <span className="flex items-center gap-0.5 bg-accent/15 text-accent px-1.5 py-0.5 rounded-full" title={`의견 ${displayCount}개`}>
-                  <MessageCircle size={10} fill="currentColor" />
-                  <span className="text-[10px] font-bold">{displayCount}</span>
+                <span
+                  className={cn(
+                    'flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 transition-colors',
+                    hasUnreadComments
+                      ? 'border-accent/25 bg-accent/15 text-accent shadow-[0_0_10px_rgba(108,92,231,0.16)]'
+                      : 'border-bg-border/45 bg-text-secondary/10 text-text-secondary/60',
+                  )}
+                  title={`${hasUnreadComments ? '새 댓글' : '확인한 댓글'} ${displayCount}개`}
+                >
+                  <CompactIconLabel
+                    icon={<MessageCircle size={10} fill="currentColor" />}
+                    label={`${displayCount}개`}
+                    textClassName="text-[10px] font-bold"
+                  />
                 </span>
               );
             })()}
@@ -489,9 +510,9 @@ function DeptSection({
             <div
               key={stage}
               data-continuity-stage-segment
-              className="flex-1 min-w-0 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md whitespace-nowrap overflow-hidden text-ellipsis"
+              className="flex-1 min-w-0 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md"
             >
-              {cfg.stageLabels[stage]}
+              <CompactIconLabel icon={stageIcon(stage, 12)} label={cfg.stageLabels[stage]} className="w-full" />
             </div>
           ))}
         </div>
@@ -573,7 +594,7 @@ function DeptSection({
                   onToggle(sheetName, sceneId, stage);
                 }}
                 className={cn(
-                  'flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer whitespace-nowrap overflow-hidden text-ellipsis',
+                  'flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
                   !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
                   stageCellPendingClass(stage),
                 )}
@@ -586,7 +607,7 @@ function DeptSection({
                 }
                 title={cfg.stageLabels[stage]}
               >
-                {cfg.stageLabels[stage]}
+                <CompactIconLabel icon={stageIcon(stage, 12)} label={cfg.stageLabels[stage]} className="w-full" />
               </button>
             );
           })}

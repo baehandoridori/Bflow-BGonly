@@ -15,6 +15,7 @@ import { formatDateTime } from '@/utils/formatTime';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { elevatedGlassStyle } from '@/utils/glassStyles';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { Avatar } from './sharedComponents';
 import { parsePathsFromText, parseSceneKey } from './utils';
 import type { SceneInfo } from './utils';
@@ -92,10 +93,16 @@ export function DetailPanel({
               className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5"
               style={{ color: STATUS_CONFIG[revision.status].color, backgroundColor: STATUS_CONFIG[revision.status].bg }}
             >
-              {revision.status === 'open' && <Circle size={10} fill="currentColor" />}
-              {revision.status === 'in_progress' && <Clock size={10} />}
-              {revision.status === 'resolved' && <Check size={10} />}
-              {STATUS_CONFIG[revision.status].label}
+              <CompactIconLabel
+                icon={
+                  revision.status === 'open'
+                    ? <Circle size={10} fill="currentColor" />
+                    : revision.status === 'in_progress'
+                      ? <Clock size={10} />
+                      : <Check size={10} />
+                }
+                label={STATUS_CONFIG[revision.status].label}
+              />
             </span>
             <SceneJumpButton
               sceneKey={revision.sceneKey}
@@ -209,8 +216,7 @@ export function DetailPanel({
                   className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-text-secondary hover:text-accent rounded-md hover:bg-accent/10 transition-all cursor-pointer"
                   title="대기로 되돌리기"
                 >
-                  <Undo2 size={11} />
-                  되돌리기
+                  <CompactIconLabel icon={<Undo2 size={11} />} label="되돌리기" />
                 </button>
               </div>
               {revision.resolvedBy && (
@@ -271,8 +277,7 @@ export function DetailPanel({
               className="w-full flex items-center justify-center gap-2 py-2.5 text-xs font-medium rounded-xl border transition-all cursor-pointer"
               style={{ borderColor: STATUS_CONFIG.in_progress.color + '40', color: STATUS_CONFIG.in_progress.color }}
             >
-              <Clock size={14} />
-              진행 시작
+              <CompactIconLabel icon={<Clock size={14} />} label="진행 시작" />
             </button>
           )}
           {revision.status !== 'resolved' && !showResolveNote && (
@@ -281,8 +286,7 @@ export function DetailPanel({
               className={`w-full flex items-center justify-center gap-2 py-3 text-sm font-medium rounded-xl text-white transition-all cursor-pointer hover:opacity-90${revision.status === 'open' ? ' mt-2' : ''}`}
               style={{ backgroundColor: STATUS_CONFIG.resolved.color }}
             >
-              <Check size={16} />
-              완료로 변경
+              <CompactIconLabel icon={<Check size={16} />} label="완료로 변경" />
             </button>
           )}
 
