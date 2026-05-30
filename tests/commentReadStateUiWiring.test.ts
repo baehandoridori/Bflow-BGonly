@@ -16,3 +16,14 @@ test('CommentPanelResizable passes canonical sceneThreadKey to CommentPanel', ()
   assert.match(resizable, /sceneThreadKey\?: string/);
   assert.match(resizable, /sceneThreadKey=\{sceneThreadKey/);
 });
+
+test('CommentPanel does not mark canonical read state while merely loading comments', () => {
+  assert.doesNotMatch(commentPanel, /markCommentKeysSeen/);
+});
+
+test('CommentPanel can place the unread divider before a nested unread reply', () => {
+  assert.match(commentPanel, /orderedVisibleComments/);
+  assert.match(commentPanel, /replyShowUnreadDivider/);
+  assert.match(commentPanel, /reply\.id === firstUnreadCommentId/);
+  assert.match(commentPanel, /next\.delete\(target\.parentCommentId!\)/);
+});

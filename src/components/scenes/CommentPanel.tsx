@@ -27,10 +27,8 @@ import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import {
   COMMENT_READ_STATE_EVENT,
   getCommentReadStateForUser,
-  getLatestCommentCreatedAt,
   getLatestOtherUserCommentCreatedAt,
   isCommentKeyUnread,
-  markCommentKeysSeen,
   markSceneThreadReadForUser,
 } from '@/services/commentReadStateService';
 import * as storageService from '@/services/storageService';
@@ -354,20 +352,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       });
       setComments(deduped);
       onCountChange?.(deduped.length);
-      if (currentUser?.id) {
-        const latestBySceneKey: Record<string, string | null> = {};
-        for (const key of [sceneKey, secondarySceneKey].filter(Boolean) as string[]) {
-          latestBySceneKey[key] = getLatestCommentCreatedAt(
-            deduped.filter((comment) => (comment._sourceKey ?? sceneKey) === key),
-          );
-        }
-        void markCommentKeysSeen(currentUser.id, latestBySceneKey);
-      }
       // v1.26.0: 댓글 로드 후 리액션도 함께 fetch
       const ids = deduped.map((c) => c.id);
       fetchReactionsBulk(ids).then((map) => setReactionsByCommentId(map));
     });
-  }, [sceneKey, secondarySceneKey, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sceneKey, secondarySceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadComments(); }, [loadComments]);
 
@@ -1022,11 +1011,18 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     [topLevelComments, orphanReplies],
   );
 
+  const orderedVisibleComments = useMemo(
+    () => [...visibleComments].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    ),
+    [visibleComments],
+  );
+
   const firstUnreadCommentId = useMemo(() => {
     if (!currentUser?.id || !hasUnreadComments) return null;
     const readMs = lastReadAt ? Date.parse(lastReadAt) : Number.NEGATIVE_INFINITY;
 
-    for (const comment of mainFlowComments) {
+    for (const comment of orderedVisibleComments) {
       if (comment.userId === currentUser.id) continue;
       const createdMs = Date.parse(comment.createdAt);
       if (!Number.isFinite(createdMs)) continue;
@@ -1034,7 +1030,20 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     }
 
     return null;
-  }, [currentUser?.id, hasUnreadComments, lastReadAt, mainFlowComments]);
+  }, [currentUser?.id, hasUnreadComments, lastReadAt, orderedVisibleComments]);
+
+  useEffect(() => {
+    if (!firstUnreadCommentId) return;
+    const target = comments.find((comment) => comment.id === firstUnreadCommentId);
+    if (target?.parentCommentId) {
+      setCollapsedThreads((prev) => {
+        if (!prev.has(target.parentCommentId!)) return prev;
+        const next = new Set(prev);
+        next.delete(target.parentCommentId!);
+        return next;
+      });
+    }
+  }, [firstUnreadCommentId, comments]);
 
   // 새 댓글 시 스크롤. 읽지 않은 댓글이 있으면 구분선으로 먼저 이동한다.
   useEffect(() => {
@@ -1455,12 +1464,29 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                       const replyHasImages = (reply.images?.length ?? 0) > 0;
                       const replyMentionsMe = !!currentUser && (reply.mentions ?? []).includes(currentUser.name);
                       const replyIsFocused = focusedCommentId === reply.id;
+                      const replyShowUnreadDivider =
+                        firstUnreadCommentId != null
+                        && reply.id === firstUnreadCommentId;
                       // 답글 묶음 — 답글 내부에서도 같은 사용자 연속이면 메타 숨김.
                       const replyIsGrouped = ri > 0 && replies[ri - 1].userId === reply.userId;
                       return (
+                        <Fragment key={reply.id}>
+                        {replyShowUnreadDivider && (
+                          <div
+                            ref={unreadDividerRef}
+                            className="flex items-center gap-2 py-1"
+                            aria-label="새 댓글 시작"
+                          >
+                            <span className="h-px flex-1 bg-accent/30" />
+                            <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                              새 댓글
+                            </span>
+                            <span className="h-px flex-1 bg-accent/30" />
+                          </div>
+                        )}
                         <div
-                          key={reply.id}
                           ref={(el) => { commentRefs.current.set(reply.id, el); }}
+                          onClick={markUnreadCommentsRead}
                           className={cn(
                             'group/reply relative',
                             replyMentionsMe && 'pl-1.5',
@@ -1561,6 +1587,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                             compact
                           />
                         </div>
+                        </Fragment>
                       );
                     })}
                   </div>
