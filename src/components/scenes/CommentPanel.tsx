@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, ChevronDown, ChevronRight, Reply, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
@@ -22,8 +22,17 @@ import { ReactionChip } from './ReactionChip';
 import { EmojiPicker } from './EmojiPicker';
 import { SmilePlus } from 'lucide-react';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
-import { formatTimeShort } from '@/utils/formatTime';
+import { formatCommentTime } from '@/utils/formatTime';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import {
+  COMMENT_READ_STATE_EVENT,
+  getCommentReadStateForUser,
+  getLatestCommentCreatedAt,
+  getLatestOtherUserCommentCreatedAt,
+  isCommentKeyUnread,
+  markCommentKeysSeen,
+  markSceneThreadReadForUser,
+} from '@/services/commentReadStateService';
 import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { RevisionCommentBadge } from './RevisionCommentBadge';
@@ -36,6 +45,8 @@ export interface CommentInlineEvent {
   id: string;
   at: string;       // ISO 8601
   text: string;     // 한 줄 텍스트 (예: "이다은이 BG 모든 단계를 완료했습니다")
+  tone?: 'default' | 'revision_add' | 'revision_in_progress' | 'revision_resolve';
+  label?: string;
 }
 
 interface CommentPanelProps {
@@ -43,6 +54,8 @@ interface CommentPanelProps {
   sceneKey: string;
   /** 통합 뷰 전용 — 이 키의 댓글도 함께 보여주되, 저장은 primary(sceneKey)에만 한다 */
   secondarySceneKey?: string;
+  /** 사용자별 읽음 상태 저장에 쓰는 canonical 씬 대화 키 */
+  sceneThreadKey?: string;
   onCountChange?: (count: number) => void;
   /** 댓글 사이에 시간순으로 끼어들어가는 시스템 이벤트 (씬 생성/완료/리비전 등) */
   inlineEvents?: CommentInlineEvent[];
@@ -161,11 +174,12 @@ function ReactionsArea({
 
 // ─── 메인 컴포넌트 ──────────────────────────
 
-export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlineEvents, focusCommentId, sceneLabel }: CommentPanelProps) {
+export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
 
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
+  const effectiveSceneThreadKey = sceneThreadKey ?? sceneKey;
 
   // 댓글 상태
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
@@ -208,6 +222,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   // v1.24.0: 외부 점프 시 강조할 댓글 id. focusCommentId prop 변경 또는 jump 이벤트로 set.
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(focusCommentId ?? null);
   const commentRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const [lastReadAt, setLastReadAt] = useState<string | null>(null);
+  const readMarkedRef = useRef<string | null>(null);
+  const unreadDividerRef = useRef<HTMLDivElement | null>(null);
 
   // v1.18.0: "re만" 필터 — 리비전 맥락 댓글(revisionId 있음)만 표시.
   // 한솔 결정 (spec 2026-05-03): 댓글 패널에서 "리비전 댓글만" 빠르게 가려보고 싶을 때 토글.
@@ -337,11 +354,20 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       });
       setComments(deduped);
       onCountChange?.(deduped.length);
+      if (currentUser?.id) {
+        const latestBySceneKey: Record<string, string | null> = {};
+        for (const key of [sceneKey, secondarySceneKey].filter(Boolean) as string[]) {
+          latestBySceneKey[key] = getLatestCommentCreatedAt(
+            deduped.filter((comment) => (comment._sourceKey ?? sceneKey) === key),
+          );
+        }
+        void markCommentKeysSeen(currentUser.id, latestBySceneKey);
+      }
       // v1.26.0: 댓글 로드 후 리액션도 함께 fetch
       const ids = deduped.map((c) => c.id);
       fetchReactionsBulk(ids).then((map) => setReactionsByCommentId(map));
     });
-  }, [sceneKey, secondarySceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sceneKey, secondarySceneKey, currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { loadComments(); }, [loadComments]);
 
@@ -421,6 +447,53 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     commentsRef.current = comments;
   }, [comments]);
 
+  const latestOtherUserCommentAt = useMemo(
+    () => getLatestOtherUserCommentCreatedAt(comments, currentUser?.id ?? ''),
+    [comments, currentUser?.id],
+  );
+
+  const hasUnreadComments = isCommentKeyUnread(latestOtherUserCommentAt, lastReadAt);
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setLastReadAt(null);
+      return;
+    }
+
+    let cancelled = false;
+    const load = () => {
+      void getCommentReadStateForUser(currentUser.id).then((state) => {
+        if (!cancelled) setLastReadAt(state[effectiveSceneThreadKey] ?? null);
+      });
+    };
+
+    load();
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      if (detail?.userId && detail.userId !== currentUser.id) return;
+      load();
+    };
+
+    window.addEventListener(COMMENT_READ_STATE_EVENT, handler);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(COMMENT_READ_STATE_EVENT, handler);
+    };
+  }, [currentUser?.id, effectiveSceneThreadKey]);
+
+  const markUnreadCommentsRead = useCallback(() => {
+    if (!currentUser?.id || !effectiveSceneThreadKey || !latestOtherUserCommentAt) return;
+    if (readMarkedRef.current === latestOtherUserCommentAt) return;
+
+    readMarkedRef.current = latestOtherUserCommentAt;
+    setLastReadAt(latestOtherUserCommentAt);
+    void markSceneThreadReadForUser({
+      userId: currentUser.id,
+      sceneThreadKey: effectiveSceneThreadKey,
+      readAt: latestOtherUserCommentAt,
+    });
+  }, [currentUser?.id, effectiveSceneThreadKey, latestOtherUserCommentAt]);
+
   // 다른 PC 변경 시 자동 리로드 (300ms 디바운스)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -434,12 +507,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       if (timer) clearTimeout(timer);
     };
   }, [loadComments]);
-
-  // 새 댓글 시 스크롤
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    // Codex R3 P2 (2026-05-03): inlineEvents 도 watch — system 활동만 도착해도 스크롤 따라가게.
-  }, [comments.length, inlineEvents?.length]);
 
   // v1.24.0: focusCommentId prop 변경 시 → 자동 스크롤 + 일시 펄스. 답글이면 부모 자동 펼침.
   // P0 #2 fix: cleanup 누수 + comments 의존성으로 인한 펄스 무한 재시작 회귀 방지.
@@ -754,6 +821,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     try {
       // v1.24.0: 답글이면 targetSceneKey (부모 sourceKey) 로 저장 → 부모/답글이 같은 sheet 에 모임.
       await addComment(targetSceneKey, comment);
+      if (prevReplyTarget) {
+        markUnreadCommentsRead();
+      }
 
       // 성공 — 이전 미리보기 blob URL revoke (메모리 정리)
       prevAttached.forEach(a => {
@@ -952,6 +1022,52 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     [topLevelComments, orphanReplies],
   );
 
+  const firstUnreadCommentId = useMemo(() => {
+    if (!currentUser?.id || !hasUnreadComments) return null;
+    const readMs = lastReadAt ? Date.parse(lastReadAt) : Number.NEGATIVE_INFINITY;
+
+    for (const comment of mainFlowComments) {
+      if (comment.userId === currentUser.id) continue;
+      const createdMs = Date.parse(comment.createdAt);
+      if (!Number.isFinite(createdMs)) continue;
+      if (createdMs > readMs) return comment.id;
+    }
+
+    return null;
+  }, [currentUser?.id, hasUnreadComments, lastReadAt, mainFlowComments]);
+
+  // 새 댓글 시 스크롤. 읽지 않은 댓글이 있으면 구분선으로 먼저 이동한다.
+  useEffect(() => {
+    if (firstUnreadCommentId) return;
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    // Codex R3 P2 (2026-05-03): inlineEvents 도 watch — system 활동만 도착해도 스크롤 따라가게.
+  }, [comments.length, inlineEvents?.length, firstUnreadCommentId]);
+
+  useEffect(() => {
+    if (!firstUnreadCommentId) return;
+    const timer = setTimeout(() => {
+      unreadDividerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [firstUnreadCommentId]);
+
+  useEffect(() => {
+    if (!firstUnreadCommentId || !latestOtherUserCommentAt) return;
+    const anchor = unreadDividerRef.current;
+    const root = scrollRef.current;
+    if (!anchor || !root) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        markUnreadCommentsRead();
+        observer.disconnect();
+      }
+    }, { root, threshold: 0.6 });
+
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [firstUnreadCommentId, latestOtherUserCommentAt, markUnreadCommentsRead]);
+
   const handleMentionClick = (userName: string) => {
     setHighlightUserName(userName);
     setView('team');
@@ -1054,6 +1170,23 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
               if (node.kind === 'event') {
                 // v1.24.0: 시스템 활동이 끼어들면 묶음 끊김 (확정 규칙).
                 prevUserId = null;
+                const isRevisionEvent = node.event.tone?.startsWith('revision_') ?? false;
+                const eventToneClass =
+                  node.event.tone === 'revision_resolve'
+                    ? 'border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-100/85'
+                    : node.event.tone === 'revision_in_progress'
+                      ? 'border-sky-300/20 bg-sky-300/[0.07] text-sky-100/85'
+                      : node.event.tone === 'revision_add'
+                        ? 'border-accent/25 bg-accent/[0.08] text-accent-sub'
+                        : 'text-text-secondary/55';
+                const eventDotClass =
+                  node.event.tone === 'revision_resolve'
+                    ? 'bg-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.45)]'
+                    : node.event.tone === 'revision_in_progress'
+                      ? 'bg-sky-300 shadow-[0_0_8px_rgba(125,211,252,0.45)]'
+                      : node.event.tone === 'revision_add'
+                        ? 'bg-accent-sub shadow-[0_0_8px_rgba(108,92,231,0.5)]'
+                        : 'bg-text-secondary/40';
                 return (
                   <motion.div
                     key={`evt:${node.event.id}`}
@@ -1062,11 +1195,36 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                    className="flex items-center gap-2 text-[10.5px] text-text-secondary/55 py-0.5"
+                    className={cn(
+                      'flex items-center gap-2 text-[10.5px] py-0.5',
+                      isRevisionEvent
+                        ? 'rounded-lg border px-2.5 py-2 shadow-[0_10px_26px_rgba(0,0,0,0.18)]'
+                        : '',
+                      eventToneClass,
+                    )}
                   >
-                    <span className="inline-block w-1 h-1 rounded-full bg-text-secondary/40" aria-hidden />
-                    <span className="flex-1 truncate">{node.event.text}</span>
-                    <span className="tabular-nums shrink-0">{formatTimeShort(node.event.at)}</span>
+                    {isRevisionEvent ? (
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 text-[10px] text-text-secondary/55 tabular-nums">
+                          {formatCommentTime(node.event.at)}
+                        </div>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={cn('inline-block w-1.5 h-1.5 rounded-full shrink-0', eventDotClass)} aria-hidden />
+                          {node.event.label && (
+                            <span className="shrink-0 rounded-md border border-current/15 bg-white/[0.04] px-1.5 py-0.5 text-[9.5px] font-bold">
+                              {node.event.label}
+                            </span>
+                          )}
+                          <span className="min-w-0 flex-1 truncate">{node.event.text}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <span className={cn('inline-block w-1.5 h-1.5 rounded-full shrink-0', eventDotClass)} aria-hidden />
+                        <span className="flex-1 truncate">{node.event.text}</span>
+                        <span className="tabular-nums shrink-0">{formatCommentTime(node.event.at)}</span>
+                      </>
+                    )}
                   </motion.div>
                 );
               }
@@ -1083,10 +1241,28 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
               const replies = repliesByParent.get(comment.id) ?? [];
               const threadCollapsed = collapsedThreads.has(comment.id);
               const isOrphanReply = !!comment.parentCommentId;
+              const showUnreadDivider =
+                firstUnreadCommentId != null
+                && comment.id === firstUnreadCommentId;
               return (
+              <Fragment key={comment.id}>
+                {showUnreadDivider && (
+                  <div
+                    ref={unreadDividerRef}
+                    className="flex items-center gap-2 py-1"
+                    aria-label="새 댓글 시작"
+                  >
+                    <span className="h-px flex-1 bg-accent/30" />
+                    <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                      새 댓글
+                    </span>
+                    <span className="h-px flex-1 bg-accent/30" />
+                  </div>
+                )}
               <motion.div
                 key={comment.id}
                 ref={(el) => { commentRefs.current.set(comment.id, el); }}
+                onClick={markUnreadCommentsRead}
                 layout="position"
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1106,7 +1282,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                   {isOwn ? (
                     <>
                       <span className="text-[11px] text-text-secondary/50">
-                        {formatTimeShort(comment.createdAt)}
+                        {formatCommentTime(comment.createdAt)}
                       </span>
                       <span className="text-xs font-semibold text-text-primary">
                         {comment.userName}
@@ -1118,7 +1294,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                         {comment.userName}
                       </span>
                       <span className="text-[11px] text-text-secondary/50">
-                        {formatTimeShort(comment.createdAt)}
+                        {formatCommentTime(comment.createdAt)}
                       </span>
                     </>
                   )}
@@ -1296,7 +1472,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                           {!replyIsGrouped && (
                             <div className="flex items-center gap-1.5 mb-0.5">
                               <span className="text-[11px] font-semibold text-text-primary">{reply.userName}</span>
-                              <span className="text-[10px] text-text-secondary/50">{formatTimeShort(reply.createdAt)}</span>
+                              <span className="text-[10px] text-text-secondary/50">{formatCommentTime(reply.createdAt)}</span>
                               {reply.editedAt && (
                                 <span className="text-[10px] text-text-secondary/30 italic">수정됨</span>
                               )}
@@ -1390,6 +1566,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                   </div>
                 )}
               </motion.div>
+              </Fragment>
             );
             });
           })()}
@@ -1693,7 +1870,7 @@ function CommentLightboxPortal({
         <div className="flex-shrink-0 px-6 pt-3 pb-2 max-w-3xl mx-auto w-full">
           <div className="flex items-baseline gap-2 text-[12.5px] mb-1">
             <span className="font-semibold text-white">{current.userName}</span>
-            <span className="text-white/50 text-[11px]">{formatTimeShort(current.createdAt)}</span>
+            <span className="text-white/50 text-[11px]">{formatCommentTime(current.createdAt)}</span>
           </div>
           {current.commentText && (
             <p className="text-[13.5px] text-white/95 leading-relaxed whitespace-pre-wrap break-words max-h-24 overflow-y-auto comment-lightbox-thumb-strip">

@@ -21,6 +21,7 @@ import { ResizeHandleParticles } from '@/components/common/ResizeHandleParticles
 interface CommentPanelResizableProps {
   commentCount: number;
   sceneKey: string;
+  sceneThreadKey?: string;
   counterpartSheetName?: string | null;
   counterpartSceneNo?: number | null;
   onCountChange?: (count: number) => void;
@@ -44,6 +45,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
   const {
     commentCount,
     sceneKey,
+    sceneThreadKey,
     counterpartSheetName,
     counterpartSceneNo,
     onCountChange,
@@ -134,6 +136,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
       <CommentPanelErrorBoundary panelId="single" key={sceneKey}>
         <CommentPanel
           sceneKey={sceneKey}
+          sceneThreadKey={sceneThreadKey}
           secondarySceneKey={secondaryKey}
           onCountChange={onCountChange}
           focusCommentId={focusCommentId ?? null}
