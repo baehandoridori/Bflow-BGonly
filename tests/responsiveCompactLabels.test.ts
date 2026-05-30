@@ -18,10 +18,13 @@ test('CompactIconLabel exposes accessible icon and label hooks', () => {
 
 test('compact labels use container queries without writing-mode', () => {
   const css = read('src/index.css');
+  const component = read('src/components/common/CompactIconLabel.tsx');
 
-  assert.match(css, /data-compact-icon-label[\s\S]*container-type:\s*inline-size/);
+  assert.match(css, /\.compact-label-container[\s\S]*container-type:\s*inline-size/);
+  assert.doesNotMatch(css, /\[data-compact-icon-label\]\s*\{[^}]*container-type/);
+  assert.doesNotMatch(component, /container-type/);
   assert.match(css, /@container\s*\(max-width:\s*72px\)/);
-  assert.match(css, /data-compact-label-text[\s\S]*max-width:\s*0/);
+  assert.match(css, /@container\s*\(max-width:\s*72px\)\s*\{[\s\S]*\.compact-label-container\s+\[data-compact-label-text\][\s\S]*max-width:\s*0/);
   assert.match(css, /data-sheet-header-short-label/);
   assert.match(css, /data-sheet-header-full-label/);
   assert.doesNotMatch(css, /writing-mode/);
@@ -91,6 +94,9 @@ test('bulk and card stage controls avoid forced ellipsis overflow', () => {
   const unifiedCard = read('src/components/scenes/UnifiedSceneCard.tsx');
 
   assert.match(scenesView, /bflow-bulk-bar-pulse[\s\S]*max-w-\[calc\(100vw-2rem\)\][\s\S]*flex-wrap/);
+  assert.match(scenesView, /compact-label-container[\s\S]*inline-flex[\s\S]*min-w-0[\s\S]*shrink/);
+  assert.match(scenesView, /compact-label-container[\s\S]*flex[\s\S]*min-w-0[\s\S]*shrink/);
+  assert.doesNotMatch(scenesView, /bflow-bulk-bar-pulse[\s\S]{0,3000}whitespace-nowrap disabled:opacity-50/);
   assert.match(scenesView, /<CompactIconLabel icon=\{stageIcon\(stage, 12\)\}/);
   assert.match(scenesView, /<CompactIconLabel icon=\{phaseIcon\(phase, 12\)\}/);
   assert.doesNotMatch(unifiedCard, /text-ellipsis/);

@@ -174,7 +174,7 @@ export function SceneRow({
         <div className="ml-auto flex items-center gap-3 shrink-0">
           {uniqueRequesters.length > 0 && (
             <span
-              className={`inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 border ${
+              className={`compact-label-container inline-flex min-w-0 shrink items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 border ${
                 isSceneResolved
                   ? 'border-bg-border/25 bg-bg-primary/25 text-text-secondary/40'
                   : 'border-bg-border/40 bg-bg-primary/45 text-text-secondary/70'
@@ -191,14 +191,14 @@ export function SceneRow({
           />
           {openCount > 0 && (
             <span
-              className="flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5"
+              className="compact-label-container flex min-w-0 shrink items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5"
               style={{ color: '#FDCB6E', backgroundColor: 'rgba(253, 203, 110, 0.12)' }}
             >
               <CompactIconLabel icon={<AlertTriangle size={10} />} label={`${openCount} 미해결`} />
             </span>
           )}
           {isSceneResolved && (
-            <span className="text-[10px] font-bold rounded-full px-2 py-0.5 text-text-secondary/45 bg-bg-primary/35 border border-bg-border/25">
+            <span className="compact-label-container inline-flex min-w-0 shrink text-[10px] font-bold rounded-full px-2 py-0.5 text-text-secondary/45 bg-bg-primary/35 border border-bg-border/25">
               <CompactIconLabel icon={<CheckCircle2 size={10} />} label="완료" />
             </span>
           )}
@@ -269,7 +269,7 @@ export function SceneRow({
                   >
                     <button
                       onClick={(e) => { e.stopPropagation(); setShowAddForm(true); }}
-                      className="flex items-center gap-1 px-3 py-1.5 text-[11px] text-text-secondary/60 hover:text-accent transition-colors cursor-pointer rounded-lg hover:bg-accent/5"
+                      className="compact-label-container flex min-w-0 shrink items-center gap-1 px-3 py-1.5 text-[11px] text-text-secondary/60 hover:text-accent transition-colors cursor-pointer rounded-lg hover:bg-accent/5"
                     >
                       <CompactIconLabel
                         icon={<Plus size={12} />}
@@ -340,7 +340,7 @@ export function FeedbackTreeSection({
               </div>
               {episodeTree.totalOpen > 0 && (
                 <span
-                  className="inline-flex items-center gap-1 text-[11px] font-bold rounded-full px-2 py-0.5 shrink-0"
+                  className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 text-[11px] font-bold rounded-full px-2 py-0.5"
                   style={{ color: '#FDCB6E', backgroundColor: 'rgba(253, 203, 110, 0.12)' }}
                 >
                   <CompactIconLabel icon={<AlertTriangle size={10} />} label={`${episodeTree.totalOpen} 미해결`} />
@@ -383,11 +383,11 @@ export function FeedbackTreeSection({
                       className={isPartResolved ? 'opacity-60' : ''}
                     />
                     {isPartResolved ? (
-                      <span className="ml-auto text-[10px] font-bold rounded-full px-2 py-0.5 text-text-secondary/45 bg-bg-primary/35 border border-bg-border/25">
+                      <span className="compact-label-container ml-auto inline-flex min-w-0 shrink text-[10px] font-bold rounded-full px-2 py-0.5 text-text-secondary/45 bg-bg-primary/35 border border-bg-border/25">
                         <CompactIconLabel icon={<CheckCircle2 size={10} />} label="완료" />
                       </span>
                     ) : partTree.totalOpen > 0 ? (
-                      <span className="ml-auto text-[10px] font-bold text-accent-sub">
+                      <span className="compact-label-container ml-auto inline-flex min-w-0 shrink text-[10px] font-bold text-accent-sub">
                         <CompactIconLabel icon={<AlertTriangle size={10} />} label={`${partTree.totalOpen} 미해결`} />
                       </span>
                     ) : null}
@@ -438,7 +438,7 @@ export function EpisodeFilter({
     <div className="flex items-center gap-1.5 flex-wrap">
       <button
         onClick={() => onSelect(null)}
-        className={`px-3 py-1.5 text-xs rounded-lg border transition-all cursor-pointer ${
+        className={`compact-label-container inline-flex min-w-0 shrink items-center justify-center px-3 py-1.5 text-xs rounded-lg border transition-all cursor-pointer ${
           selected === null
             ? 'border-accent bg-accent/10 text-accent'
             : 'border-bg-border text-text-secondary hover:text-text-primary'

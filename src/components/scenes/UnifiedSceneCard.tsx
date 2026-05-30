@@ -334,7 +334,7 @@ export function UnifiedSceneCard({
               return (
                 <span
                   className={cn(
-                    'flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 transition-colors',
+                    'compact-label-container flex min-w-0 shrink items-center gap-0.5 rounded-full border px-1.5 py-0.5 transition-colors',
                     hasUnreadComments
                       ? 'border-accent/25 bg-accent/15 text-accent shadow-[0_0_10px_rgba(108,92,231,0.16)]'
                       : 'border-bg-border/45 bg-text-secondary/10 text-text-secondary/60',
@@ -510,7 +510,7 @@ function DeptSection({
             <div
               key={stage}
               data-continuity-stage-segment
-              className="flex-1 min-w-0 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md"
+              className="compact-label-container flex-1 min-w-0 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md"
             >
               <CompactIconLabel icon={stageIcon(stage, 12)} label={cfg.stageLabels[stage]} className="w-full" />
             </div>
@@ -594,7 +594,7 @@ function DeptSection({
                   onToggle(sheetName, sceneId, stage);
                 }}
                 className={cn(
-                  'flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
+                  'compact-label-container flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
                   !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
                   stageCellPendingClass(stage),
                 )}

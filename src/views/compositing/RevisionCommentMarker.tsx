@@ -49,7 +49,7 @@ export function RevisionCommentMarker({
       data-comment-marker={seen ? 'seen' : 'unseen'}
       title={label}
       aria-label={label}
-      className={`inline-flex items-center rounded-full border font-bold leading-none transition-colors ${
+      className={`compact-label-container inline-flex min-w-0 shrink items-center rounded-full border font-bold leading-none transition-colors ${
         seen
           ? 'border-bg-border/35 bg-bg-primary/35 text-text-secondary/55'
           : 'border-accent/30 bg-accent/10 text-accent-sub'

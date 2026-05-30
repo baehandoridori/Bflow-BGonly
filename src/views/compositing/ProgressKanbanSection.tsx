@@ -99,7 +99,7 @@ function KanbanColumn({
   return (
     <div className="bg-bg-primary/35 rounded-xl p-3 space-y-2 min-h-[200px]">
       <div className="flex items-center justify-between mb-2 px-1">
-        <h3 className="text-[12px] font-bold text-text-primary flex items-center gap-1.5">
+        <h3 className="compact-label-container text-[12px] font-bold text-text-primary flex min-w-0 items-center gap-1.5">
           <span className="w-2 h-2 rounded-full" style={{ backgroundColor: statusCfg.color }} />
           <CompactIconLabel icon={<Circle size={11} strokeWidth={2.4} />} label={title} />
         </h3>
@@ -193,7 +193,7 @@ function KanbanCard({
             <span className="text-[10px] px-1 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold truncate max-w-[160px]">
               {sceneLabel}
             </span>
-            <span className={`text-[10px] font-bold ${isResolved ? 'text-text-secondary/60' : 'text-accent-sub'}`}>
+            <span className={`compact-label-container inline-flex min-w-0 shrink text-[10px] font-bold ${isResolved ? 'text-text-secondary/60' : 'text-accent-sub'}`}>
               <CompactIconLabel icon={<MessageSquareText size={10} strokeWidth={2.4} />} label={revisionNoToLabel(rev.revisionNo)} />
             </span>
             <RevisionCommentMarker

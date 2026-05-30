@@ -152,7 +152,7 @@ export function ScenePhaseToggle({
                 }
               }}
               className={cn(
-                'flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-medium select-none whitespace-nowrap',
+                'compact-label-container flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-medium select-none',
                 'transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
                 compact ? 'px-1 py-1 text-[10px]' : 'px-1.5 py-2 text-[11px]',
                 // 비활성 + 진행 전 단계 → 기본 회색 톤 + hover.

@@ -451,7 +451,7 @@ export default function CompositingView({
               {groupMode === 'scene' && (
                 <button
                   onClick={toggleAll}
-                  className="min-h-[34px] px-3 text-[11px] text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors cursor-pointer"
+                  className="compact-label-container inline-flex min-h-[34px] min-w-0 shrink items-center justify-center px-3 text-[11px] text-text-secondary hover:text-text-primary border border-bg-border rounded-lg transition-colors cursor-pointer"
                 >
                   <CompactIconLabel
                     icon={<ListFilter size={12} strokeWidth={2.4} />}
@@ -462,7 +462,7 @@ export default function CompositingView({
               {/* v1.19.5: 헤더에서 직접 새 리비전 등록 */}
               <button
                 onClick={() => setNewRevModalOpen(true)}
-                className="min-h-[34px] inline-flex items-center gap-1 px-3 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer"
+                className="compact-label-container min-h-[34px] inline-flex min-w-0 shrink items-center gap-1 px-3 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer"
               >
                 <CompactIconLabel icon={<Plus size={12} strokeWidth={2.5} />} label="새 피드백" />
               </button>
@@ -502,7 +502,7 @@ export default function CompositingView({
                 <button
                   key={key}
                   onClick={() => setGroupMode(key)}
-                  className={`px-3 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
+                  className={`compact-label-container inline-flex min-w-0 shrink items-center justify-center px-3 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
                     groupMode === key
                       ? 'bg-accent text-white'
                       : 'text-text-secondary hover:text-text-primary'
@@ -530,7 +530,7 @@ export default function CompositingView({
                 <button
                   key={key}
                   onClick={() => setStatusFilter(key)}
-                  className={`px-2.5 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
+                  className={`compact-label-container inline-flex min-w-0 shrink items-center justify-center px-2.5 py-1 text-[11px] rounded-md font-medium transition-all cursor-pointer ${
                     statusFilter === key
                       ? 'bg-accent/20 text-accent shadow-sm'
                       : 'text-text-secondary hover:text-text-primary'
@@ -544,7 +544,7 @@ export default function CompositingView({
             {/* 내 할 일 */}
             <button
               onClick={() => setMyTasksOnly(!myTasksOnly)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg border transition-all cursor-pointer ${
+              className={`compact-label-container flex min-w-0 shrink items-center gap-1.5 px-3 py-1.5 text-[11px] rounded-lg border transition-all cursor-pointer ${
                 myTasksOnly
                   ? 'border-accent bg-accent/10 text-accent'
                   : 'border-bg-border text-text-secondary hover:text-text-primary'

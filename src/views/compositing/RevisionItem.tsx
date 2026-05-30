@@ -163,7 +163,7 @@ export function RevisionItem({
           className={`flex items-center gap-3 mt-1 flex-wrap ${isResolved ? 'opacity-50' : ''}`}
         >
           <span
-            className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 shrink-0"
+            className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5"
             style={{ color: STATUS_CONFIG[revision.status].color, backgroundColor: STATUS_CONFIG[revision.status].bg }}
           >
             <CompactIconLabel icon={<Bell size={10} strokeWidth={2.2} />} label={statusCfg.label} />
@@ -171,7 +171,7 @@ export function RevisionItem({
           {isInProgress && (
             <button
               onClick={(e) => { e.stopPropagation(); onStatusChange('open'); }}
-              className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 text-text-secondary/70 bg-bg-primary/45 border border-bg-border/35 hover:text-accent-sub hover:border-accent/35 hover:bg-accent/10 transition-colors cursor-pointer"
+              className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 text-text-secondary/70 bg-bg-primary/45 border border-bg-border/35 hover:text-accent-sub hover:border-accent/35 hover:bg-accent/10 transition-colors cursor-pointer"
               title="대기 상태로 되돌리기"
               aria-label="대기 상태로 되돌리기"
             >
@@ -181,7 +181,7 @@ export function RevisionItem({
           <RevisionCommentMarker count={commentCount} seen={commentSeen} />
           {revision.assignee && (
             <span
-              className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 text-text-secondary/70 bg-bg-primary/40 border border-bg-border/35"
+              className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 text-text-secondary/70 bg-bg-primary/40 border border-bg-border/35"
               title={`담당: ${revision.assignee}`}
             >
               <CompactIconLabel icon={<UserRound size={10} />} label="담당" />
@@ -189,7 +189,7 @@ export function RevisionItem({
           )}
           {notifyNames.length > 0 && (
             <div
-              className="inline-flex items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 text-text-secondary/65 bg-bg-primary/35 border border-bg-border/30"
+              className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5 text-text-secondary/65 bg-bg-primary/35 border border-bg-border/30"
               title={`알림 대상: ${notifyNames.join(', ')}`}
             >
               <CompactIconLabel icon={<Bell size={10} className="shrink-0" />} label={`알림 ${notifyNames.length}`} />
@@ -254,7 +254,7 @@ export function RevisionItem({
       ) : (
         <button
           onClick={(e) => { e.stopPropagation(); handleStatusSelect('open'); }}
-          className="relative z-[1] shrink-0 opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 px-2 py-1 text-[11px] text-text-secondary hover:text-accent rounded-md hover:bg-accent/10 transition-all cursor-pointer"
+          className="compact-label-container relative z-[1] shrink-0 opacity-0 group-hover:opacity-100 inline-flex min-w-0 items-center gap-1 px-2 py-1 text-[11px] text-text-secondary hover:text-accent rounded-md hover:bg-accent/10 transition-all cursor-pointer"
           title="되돌리기"
         >
           <CompactIconLabel icon={<Undo2 size={11} />} label="되돌리기" />

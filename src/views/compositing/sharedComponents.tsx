@@ -122,7 +122,7 @@ export function StatusDropdown({
     <div ref={ref} className="relative">
       <button
         onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
-        className="flex items-center gap-1 text-[10px] text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+        className="compact-label-container flex min-w-0 shrink items-center gap-1 text-[10px] text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
       >
         <CompactIconLabel
           icon={<ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />}
@@ -145,7 +145,7 @@ export function StatusDropdown({
                 <button
                   key={s}
                   onClick={(e) => { e.stopPropagation(); onSelect(s); setOpen(false); }}
-                  className="flex items-center gap-2 px-3 py-1.5 text-[11px] w-full hover:bg-bg-border/20 transition-colors cursor-pointer whitespace-nowrap"
+                  className="compact-label-container flex min-w-0 items-center gap-2 px-3 py-1.5 text-[11px] w-full hover:bg-bg-border/20 transition-colors cursor-pointer"
                   style={{ color: cfg.color }}
                 >
                   <CompactIconLabel

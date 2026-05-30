@@ -324,8 +324,11 @@ body.theme-ready *::after {
 }
 
 /* ─── 좁은 컨테이너 라벨 축약 ─── */
-[data-compact-icon-label] {
+.compact-label-container {
   container-type: inline-size;
+}
+
+[data-compact-icon-label] {
   display: inline-flex;
   max-width: 100%;
 }
@@ -339,7 +342,7 @@ body.theme-ready *::after {
 }
 
 @container (max-width: 72px) {
-  [data-compact-label-text] {
+  .compact-label-container [data-compact-label-text] {
     max-width: 0;
     opacity: 0;
     margin-inline-start: -0.375rem;

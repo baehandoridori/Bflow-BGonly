@@ -133,11 +133,11 @@ export function EpisodeGroupSection({
                 <span className="text-[16px] font-mono font-bold text-text-primary">{epLabel}</span>
               </div>
               {eg.totalOpen > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white flex items-center gap-1 shrink-0">
+                <span className="compact-label-container text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white flex min-w-0 shrink items-center gap-1">
                   <CompactIconLabel icon={<AlertTriangle size={10} />} label={`${eg.totalOpen} 미해결`} />
                 </span>
               )}
-              <span className="text-[10px] text-text-secondary/70 shrink-0">
+              <span className="compact-label-container inline-flex min-w-0 shrink text-[10px] text-text-secondary/70">
                 <CompactIconLabel icon={<Layers size={10} strokeWidth={2.4} />} label={`${eg.scenes.length}씬 · ${eg.totalRevisions}개`} />
               </span>
               <RevisionCommentMarker
@@ -232,7 +232,7 @@ function SceneNested({
         )}
         {!info.sceneName && <span className="flex-1" />}
         {openCount > 0 && (
-          <span className="text-[10px] px-1 py-0.5 rounded bg-accent text-white font-bold shrink-0">
+          <span className="compact-label-container text-[10px] px-1 py-0.5 rounded bg-accent text-white font-bold inline-flex min-w-0 shrink">
             <CompactIconLabel icon={<AlertTriangle size={9} />} label={`${openCount}`} />
           </span>
         )}
@@ -301,7 +301,7 @@ function MiniRevisionRow({
         {revisionNoToLabel(rev.revisionNo)}
       </span>
       <span
-        className="text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0"
+        className="compact-label-container text-[10px] px-1.5 py-0.5 rounded font-bold inline-flex min-w-0 shrink"
         style={{ color: statusCfg.color, backgroundColor: statusCfg.bg }}
       >
         <CompactIconLabel icon={<Circle size={10} strokeWidth={2.4} />} label={statusCfg.label} />

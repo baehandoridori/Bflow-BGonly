@@ -724,7 +724,7 @@ export function SceneSheetView({
                         return cc > 0 ? (
                           <span
                             className={cn(
-                              'inline-flex items-center gap-0.5 rounded-full border px-1 py-px transition-colors',
+                              'compact-label-container inline-flex min-w-0 shrink items-center gap-0.5 rounded-full border px-1 py-px transition-colors',
                               isUnread
                                 ? 'border-accent/25 bg-accent/20 text-accent'
                                 : 'border-bg-border/40 bg-text-secondary/10 text-text-secondary/55',

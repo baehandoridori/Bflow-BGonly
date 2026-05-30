@@ -929,7 +929,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
                   onToggle(scene.sceneId, stage);
                 }}
                 className={cn(
-                  'flex-1 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
+                  'compact-label-container flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
                   !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
                 )}
                 style={
@@ -4233,7 +4233,7 @@ export function ScenesView() {
                     key={f}
                     onClick={() => setStatusFilter(f)}
                     className={cn(
-                      'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                      'compact-label-container inline-flex min-w-0 shrink items-center justify-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                       statusFilter === f
                         ? f === 'done' ? 'bg-green-500/20 text-green-400'
                           : f === 'not-started' ? 'bg-red-500/20 text-red-400'
@@ -4377,7 +4377,7 @@ export function ScenesView() {
           {selectedDepartment !== 'all' && currentPart && (
             <button
               onClick={() => { setAddTargetSheet(currentPart.sheetName); setShowAddScene(true); }}
-              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 shadow-sm shadow-accent/20 transition-colors"
+              className="compact-label-container inline-flex min-w-0 shrink items-center justify-center px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 shadow-sm shadow-accent/20 transition-colors"
             >
               <CompactIconLabel icon={<Plus size={14} strokeWidth={2.5} />} label="씬 추가" />
             </button>
@@ -4386,7 +4386,7 @@ export function ScenesView() {
           {selectedDepartment === 'all' && (bgPart || actPart) && (
             <button
               onClick={() => { setAddTargetSheet('__both__'); setShowAddScene(true); }}
-              className="px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 shadow-sm shadow-accent/20 transition-colors cursor-pointer"
+              className="compact-label-container inline-flex min-w-0 shrink items-center justify-center px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 shadow-sm shadow-accent/20 transition-colors cursor-pointer"
             >
               <CompactIconLabel icon={<Plus size={14} strokeWidth={2.5} />} label="씬 추가" />
             </button>
@@ -4893,7 +4893,7 @@ export function ScenesView() {
                       key={`bg-${stage}`}
                       onClick={() => handleBulkStageToggle(stage, 'bg')}
                       disabled={isBulkInFlight}
-                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="compact-label-container inline-flex h-7 min-w-0 shrink items-center justify-center px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{
                         backgroundColor: `${DEPARTMENT_CONFIGS.bg.stageColors[stage]}20`,
                         color: DEPARTMENT_CONFIGS.bg.stageColors[stage],
@@ -4915,7 +4915,7 @@ export function ScenesView() {
                       onClick={() => handleBulkActPhaseSet(phase)}
                       disabled={isBulkInFlight}
                       title={`선택된 액팅 씬을 모두 "${SCENE_PHASE_LABELS[phase]}" 로 설정`}
-                      className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="compact-label-container inline-flex h-7 min-w-0 shrink items-center justify-center px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{
                         backgroundColor: `${SCENE_PHASE_COLORS[phase]}20`,
                         color: SCENE_PHASE_COLORS[phase],
@@ -4933,7 +4933,7 @@ export function ScenesView() {
                   key={stage}
                   onClick={() => handleBulkStageToggle(stage)}
                   disabled={isBulkInFlight}
-                  className="h-7 px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="compact-label-container inline-flex h-7 min-w-0 shrink items-center justify-center px-2.5 text-[11px] font-medium rounded-md transition-colors cursor-pointer leading-none disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
                     backgroundColor: `${deptConfig.stageColors[stage]}20`,
                     color: deptConfig.stageColors[stage],
@@ -4954,7 +4954,7 @@ export function ScenesView() {
                 onClick={() => handleBulkLengthChange('LD')}
                 disabled={isBulkInFlight}
                 title="LD · Long Duration (길이 늘어남)"
-                className="h-7 px-2 text-[11px] font-medium rounded-md bg-length-up/10 text-length-up border border-length-up/30 hover:bg-length-up/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                className="compact-label-container flex h-7 min-w-0 shrink items-center gap-1 rounded-md border border-length-up/30 bg-length-up/10 px-2 text-[11px] font-medium leading-none text-length-up transition-colors hover:bg-length-up/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <CompactIconLabel icon={<LengthIcon kind="LD" size="sm" />} label="LD" />
               </button>
@@ -4962,7 +4962,7 @@ export function ScenesView() {
                 onClick={() => handleBulkLengthChange('SD')}
                 disabled={isBulkInFlight}
                 title="SD · Short Duration (길이 줄어듦)"
-                className="h-7 px-2 text-[11px] font-medium rounded-md bg-length-down/10 text-length-down border border-length-down/30 hover:bg-length-down/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                className="compact-label-container flex h-7 min-w-0 shrink items-center gap-1 rounded-md border border-length-down/30 bg-length-down/10 px-2 text-[11px] font-medium leading-none text-length-down transition-colors hover:bg-length-down/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <CompactIconLabel icon={<LengthIcon kind="SD" size="sm" />} label="SD" />
               </button>
@@ -4970,7 +4970,7 @@ export function ScenesView() {
                 onClick={() => handleBulkLengthChange(null)}
                 disabled={isBulkInFlight}
                 title="길이 변경 표시 해제"
-                className="h-7 px-2 text-[11px] font-medium rounded-md bg-bg-border/30 text-text-secondary border border-bg-border hover:bg-bg-border/50 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                className="compact-label-container inline-flex h-7 min-w-0 shrink items-center justify-center rounded-md border border-bg-border bg-bg-border/30 px-2 text-[11px] font-medium leading-none text-text-secondary transition-colors hover:bg-bg-border/50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <CompactIconLabel icon={<X size={12} strokeWidth={2.4} />} label="해제" />
               </button>
@@ -4987,7 +4987,7 @@ export function ScenesView() {
                 setBatchEditOpen(true);
               }}
               disabled={isBulkInFlight}
-              className="h-7 px-3 text-[11px] font-medium rounded-md bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+              className="compact-label-container inline-flex h-7 min-w-0 shrink items-center justify-center rounded-md border border-accent/20 bg-accent/10 px-3 text-[11px] font-medium leading-none text-accent transition-colors hover:bg-accent/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CompactIconLabel icon={<Pencil size={12} strokeWidth={2.4} />} label="편집" />
             </button>
@@ -4996,7 +4996,7 @@ export function ScenesView() {
             <button
               onClick={handleBulkDelete}
               disabled={isBulkInFlight}
-              className="h-7 px-3 text-[11px] font-medium rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors cursor-pointer leading-none whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+              className="compact-label-container inline-flex h-7 min-w-0 shrink items-center justify-center rounded-md border border-red-500/20 bg-red-500/10 px-3 text-[11px] font-medium leading-none text-red-400 transition-colors hover:bg-red-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CompactIconLabel icon={<Trash2 size={12} strokeWidth={2.4} />} label="삭제" />
             </button>
