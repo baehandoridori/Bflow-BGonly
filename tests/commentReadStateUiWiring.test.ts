@@ -4,6 +4,14 @@ import { readFileSync } from 'node:fs';
 
 const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf8');
 const resizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
+const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
+const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
+
+function getCommentPanelResizableUsage(source: string): string {
+  const usage = source.match(/<CommentPanelResizable\b[\s\S]*?\/>/);
+  assert.ok(usage);
+  return usage[0];
+}
 
 test('CommentPanel renders unread divider and observes visibility before marking read', () => {
   assert.match(commentPanel, /새 댓글/);
@@ -15,6 +23,20 @@ test('CommentPanel renders unread divider and observes visibility before marking
 test('CommentPanelResizable passes canonical sceneThreadKey to CommentPanel', () => {
   assert.match(resizable, /sceneThreadKey\?: string/);
   assert.match(resizable, /sceneThreadKey=\{sceneThreadKey/);
+});
+
+test('SceneDetailModal passes revision scene key as comment read-state thread key', () => {
+  const usage = getCommentPanelResizableUsage(sceneDetailModal);
+
+  assert.match(usage, /sceneKey=\{sceneKey\}/);
+  assert.match(usage, /sceneThreadKey=\{revisionSceneKey\}/);
+});
+
+test('UnifiedSceneDetailModal passes revision scene key as comment read-state thread key', () => {
+  const usage = getCommentPanelResizableUsage(unifiedSceneDetailModal);
+
+  assert.match(usage, /sceneKey=\{primaryCommentKey\}/);
+  assert.match(usage, /sceneThreadKey=\{revisionSceneKey\}/);
 });
 
 test('CommentPanel does not mark canonical read state while merely loading comments', () => {

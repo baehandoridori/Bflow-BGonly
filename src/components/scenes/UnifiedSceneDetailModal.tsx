@@ -909,6 +909,7 @@ export function UnifiedSceneDetailModal({
             <CommentPanelResizable
               commentCount={commentCount}
               sceneKey={primaryCommentKey}
+              sceneThreadKey={revisionSceneKey}
               secondarySceneKey={secondaryCommentKey || undefined}
               onCountChange={setCommentCount}
               inlineEvents={inlineEvents}

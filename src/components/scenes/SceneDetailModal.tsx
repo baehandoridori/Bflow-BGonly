@@ -1091,6 +1091,7 @@ export function SceneDetailModal({
           <CommentPanelResizable
             commentCount={commentCount}
             sceneKey={sceneKey}
+            sceneThreadKey={revisionSceneKey}
             counterpartSheetName={counterpartSheetName}
             counterpartSceneNo={counterpartSceneNo}
             onCountChange={setCommentCount}
