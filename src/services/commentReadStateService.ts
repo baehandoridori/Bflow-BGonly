@@ -2,6 +2,7 @@ export const COMMENT_READ_STATE_EVENT = 'bflow:comment-read-state-changed';
 
 const FIRST_RETRY_DELAY_MS = 10_000;
 const REPEATED_RETRY_DELAY_MS = 30_000;
+const MAX_AUTO_RETRY_ATTEMPTS = 2;
 
 type CommentTimestampLike = {
   createdAt?: string | null;
@@ -19,9 +20,27 @@ type MarkSceneThreadReadInput = {
   readAt: string;
 };
 
+type CommentReadStateRowLike = {
+  userId?: string;
+  sceneThreadKey: string;
+  lastReadAt: string;
+  updatedAt?: string;
+};
+
+export type CommentReadStatePersistence = {
+  read: (userId: string) => Promise<CommentReadStateRowLike[]>;
+  upsert: (userId: string, sceneThreadKey: string, lastReadAt: string) => Promise<void>;
+};
+
 type PendingWrite = MarkSceneThreadReadInput & {
+  autoRetryAttempts: number;
   failureCount: number;
   timer: ReturnType<typeof setTimeout> | null;
+  version: number;
+};
+
+type PendingWriteSnapshot = MarkSceneThreadReadInput & {
+  version: number;
 };
 
 type SupabaseServiceModule = typeof import('./supabaseService.ts');
@@ -29,8 +48,24 @@ type SupabaseServiceModule = typeof import('./supabaseService.ts');
 const cacheByUser = new Map<string, CommentReadState>();
 const pendingWrites = new Map<string, PendingWrite>();
 
-async function getSupabaseService(): Promise<SupabaseServiceModule> {
-  return import('./supabaseService.ts');
+let persistenceOverride: CommentReadStatePersistence | null = null;
+let pendingVersionSequence = 0;
+
+async function getDefaultPersistence(): Promise<CommentReadStatePersistence> {
+  if (typeof window === 'undefined') {
+    throw new Error('Comment read state persistence is unavailable outside the renderer process.');
+  }
+
+  const module: SupabaseServiceModule = await import('./supabaseService.ts');
+  return {
+    read: module.readCommentReadStatesFromSupabase,
+    upsert: module.upsertCommentReadStateInSupabase,
+  };
+}
+
+async function getPersistence(): Promise<CommentReadStatePersistence> {
+  if (persistenceOverride) return persistenceOverride;
+  return getDefaultPersistence();
 }
 
 function getPendingKey(userId: string, sceneThreadKey: string): string {
@@ -51,6 +86,10 @@ function isNewerThanExisting(nextAt: string, existingAt?: string | null): boolea
   if (!Number.isFinite(nextMs)) return false;
   if (!Number.isFinite(existingMs)) return true;
   return nextMs > existingMs;
+}
+
+function isAfter(at: string, baseline: string): boolean {
+  return Date.parse(at) > Date.parse(baseline);
 }
 
 function getMutableUserCache(userId: string): CommentReadState {
@@ -76,52 +115,107 @@ function clearPendingTimer(pending: PendingWrite): void {
 function scheduleRetry(pending: PendingWrite): void {
   clearPendingTimer(pending);
 
-  const delay = pending.failureCount <= 1 ? FIRST_RETRY_DELAY_MS : REPEATED_RETRY_DELAY_MS;
+  if (pending.autoRetryAttempts >= MAX_AUTO_RETRY_ATTEMPTS) return;
+
+  pending.autoRetryAttempts += 1;
+  const delay = pending.autoRetryAttempts === 1 ? FIRST_RETRY_DELAY_MS : REPEATED_RETRY_DELAY_MS;
   pending.timer = setTimeout(() => {
     pending.timer = null;
-    void flushPendingWrite(pending);
+    void flushPendingWrite(pending, { scheduleOnFailure: true });
   }, delay);
 
-  pending.timer.unref?.();
+  const timerWithUnref = pending.timer as ReturnType<typeof setTimeout> & { unref?: () => void };
+  timerWithUnref.unref?.();
 }
 
-function queuePendingWrite(input: MarkSceneThreadReadInput, failureCount = 1): void {
+function snapshotPendingWrite(pending: PendingWrite): PendingWriteSnapshot {
+  return {
+    userId: pending.userId,
+    sceneThreadKey: pending.sceneThreadKey,
+    readAt: pending.readAt,
+    version: pending.version,
+  };
+}
+
+function completePendingWriteAfterSuccessfulSave(attempted: MarkSceneThreadReadInput): void {
+  const key = getPendingKey(attempted.userId, attempted.sceneThreadKey);
+  const current = pendingWrites.get(key);
+  if (!current) return;
+
+  if (isAfter(current.readAt, attempted.readAt)) {
+    if (!current.timer) {
+      scheduleRetry(current);
+    }
+    return;
+  }
+
+  clearPendingTimer(current);
+  pendingWrites.delete(key);
+}
+
+function queuePendingWrite(input: MarkSceneThreadReadInput): void {
   const key = getPendingKey(input.userId, input.sceneThreadKey);
   const existing = pendingWrites.get(key);
 
   if (existing) {
-    if (isNewerThanExisting(input.readAt, existing.readAt)) {
-      existing.readAt = input.readAt;
+    if (!isNewerThanExisting(input.readAt, existing.readAt)) {
+      scheduleRetry(existing);
+      return;
     }
-    existing.failureCount = Math.max(existing.failureCount, failureCount);
+
+    existing.readAt = input.readAt;
+    existing.autoRetryAttempts = 0;
+    existing.failureCount = 0;
+    existing.version = ++pendingVersionSequence;
     scheduleRetry(existing);
     return;
   }
 
-  const pending: PendingWrite = { ...input, failureCount, timer: null };
+  const pending: PendingWrite = {
+    ...input,
+    autoRetryAttempts: 0,
+    failureCount: 0,
+    timer: null,
+    version: ++pendingVersionSequence,
+  };
   pendingWrites.set(key, pending);
   scheduleRetry(pending);
 }
 
-async function saveReadStateToSupabase(input: MarkSceneThreadReadInput): Promise<void> {
-  const { upsertCommentReadStateInSupabase } = await getSupabaseService();
-  await upsertCommentReadStateInSupabase(input.userId, input.sceneThreadKey, input.readAt);
+async function saveReadState(input: MarkSceneThreadReadInput): Promise<void> {
+  const persistence = await getPersistence();
+  await persistence.upsert(input.userId, input.sceneThreadKey, input.readAt);
 }
 
-async function flushPendingWrite(pending: PendingWrite): Promise<void> {
+async function flushPendingWrite(
+  pending: PendingWrite,
+  options: { scheduleOnFailure: boolean },
+): Promise<void> {
+  const attempted = snapshotPendingWrite(pending);
+  const key = getPendingKey(attempted.userId, attempted.sceneThreadKey);
+
   try {
-    await saveReadStateToSupabase(pending);
-    pendingWrites.delete(getPendingKey(pending.userId, pending.sceneThreadKey));
+    await saveReadState(attempted);
+    completePendingWriteAfterSuccessfulSave(attempted);
   } catch (err) {
-    console.warn('[댓글 읽음] Supabase 저장 재시도 예약:', err);
-    pending.failureCount += 1;
-    scheduleRetry(pending);
+    console.warn('[댓글 읽음] Supabase 저장 실패:', err);
+
+    const current = pendingWrites.get(key);
+    if (!current) return;
+
+    if (!isAfter(current.readAt, attempted.readAt)) {
+      current.failureCount += 1;
+    }
+
+    if (options.scheduleOnFailure) {
+      scheduleRetry(current);
+    }
   }
 }
 
 async function flushPendingWritesForUser(userId: string): Promise<void> {
   const writes = [...pendingWrites.values()].filter((pending) => pending.userId === userId);
-  await Promise.all(writes.map((pending) => flushPendingWrite(pending)));
+  await Promise.all(writes.map((pending) => flushPendingWrite(pending, { scheduleOnFailure: false })));
 }
 
 function applyReadStateToCache(userId: string, sceneThreadKey: string, readAt: string): boolean {
@@ -207,8 +301,8 @@ export async function getCommentReadStateForUser(userId: string): Promise<Record
   }
 
   try {
-    const { readCommentReadStatesFromSupabase } = await getSupabaseService();
-    const rows = await readCommentReadStatesFromSupabase(userId);
+    const persistence = await getPersistence();
+    const rows = await persistence.read(userId);
     for (const row of rows) {
       applyReadStateToCache(userId, row.sceneThreadKey, row.lastReadAt);
     }
@@ -239,8 +333,8 @@ export async function markSceneThreadReadForUser(input: MarkSceneThreadReadInput
   dispatchReadStateChanged(normalizedInput.userId);
 
   try {
-    await saveReadStateToSupabase(normalizedInput);
-    pendingWrites.delete(getPendingKey(normalizedInput.userId, normalizedInput.sceneThreadKey));
+    await saveReadState(normalizedInput);
+    completePendingWriteAfterSuccessfulSave(normalizedInput);
   } catch (err) {
     console.warn('[댓글 읽음] Supabase 저장 실패, 재시도 예약:', err);
     queuePendingWrite(normalizedInput);
@@ -260,8 +354,40 @@ export async function markCommentKeysSeen(
   );
 }
 
+export function __setCommentReadStatePersistenceForTests(
+  persistence: CommentReadStatePersistence | null,
+): void {
+  persistenceOverride = persistence;
+}
+
+export async function __flushPendingCommentReadStateForTests(userId: string): Promise<void> {
+  await flushPendingWritesForUser(userId);
+}
+
+export function __getPendingCommentReadStateForTests(
+  userId: string,
+  sceneThreadKey: string,
+): { autoRetryAttempts: number; failureCount: number; hasTimer: boolean; readAt: string; version: number } | null {
+  const pending = pendingWrites.get(getPendingKey(userId, sceneThreadKey));
+  if (!pending) return null;
+
+  return {
+    autoRetryAttempts: pending.autoRetryAttempts,
+    failureCount: pending.failureCount,
+    hasTimer: !!pending.timer,
+    readAt: pending.readAt,
+    version: pending.version,
+  };
+}
+
+export function __hasCommentReadStatePersistenceOverrideForTests(): boolean {
+  return !!persistenceOverride;
+}
+
 export function __resetCommentReadStateServiceForTests(): void {
   cacheByUser.clear();
+  persistenceOverride = null;
+  pendingVersionSequence = 0;
 
   for (const pending of pendingWrites.values()) {
     clearPendingTimer(pending);
