@@ -72,6 +72,17 @@ test('sheet percentage columns are removed and main columns are resizable', asyn
   assert.match(resize, /onPointerDown/);
 });
 
+test('sheet resize uses an exact table width so one column does not redistribute others', async () => {
+  const singleSheet = await readRepoFile('src', 'components', 'scenes', 'SceneSheetView.tsx');
+  const unifiedSheet = await readRepoFile('src', 'components', 'scenes', 'UnifiedSceneSheetView.tsx');
+
+  for (const source of [singleSheet, unifiedSheet]) {
+    assert.match(source, /style=\{\{\s*tableLayout:\s*'fixed',\s*width:\s*totalWidth\s*\}\}/);
+    assert.doesNotMatch(source, /className="w-full text-sm border-collapse"/);
+    assert.doesNotMatch(source, /minWidth:\s*totalWidth/);
+  }
+});
+
 test('scene top progress bar uses the polished progress track styles', async () => {
   const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
   const css = await readRepoFile('src', 'index.css');

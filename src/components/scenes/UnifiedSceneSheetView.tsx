@@ -756,8 +756,8 @@ export function UnifiedSceneSheetView({
         style={{ userSelect: isDragging ? 'none' : undefined }}
       >
         <table
-          className="w-full text-sm border-collapse"
-          style={{ tableLayout: 'fixed', minWidth: totalWidth }}
+          className="text-sm border-collapse"
+          style={{ tableLayout: 'fixed', width: totalWidth }}
         >
           <colgroup>
             {UNIFIED_SHEET_COLUMNS.map((column) => (
