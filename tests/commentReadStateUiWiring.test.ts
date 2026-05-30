@@ -27,3 +27,10 @@ test('CommentPanel can place the unread divider before a nested unread reply', (
   assert.match(commentPanel, /reply\.id === firstUnreadCommentId/);
   assert.match(commentPanel, /next\.delete\(target\.parentCommentId!\)/);
 });
+
+test('CommentPanel reruns scroll and observer setup after the unread divider mounts', () => {
+  assert.match(commentPanel, /setUnreadDividerNode/);
+  assert.match(commentPanel, /unreadDividerElement/);
+  assert.match(commentPanel, /\[firstUnreadCommentId,\s*unreadDividerElement\]/);
+  assert.match(commentPanel, /\[firstUnreadCommentId,\s*latestOtherUserCommentAt,\s*markUnreadCommentsRead,\s*unreadDividerElement\]/);
+});

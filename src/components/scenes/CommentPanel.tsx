@@ -223,6 +223,11 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   const [lastReadAt, setLastReadAt] = useState<string | null>(null);
   const readMarkedRef = useRef<string | null>(null);
   const unreadDividerRef = useRef<HTMLDivElement | null>(null);
+  const [unreadDividerElement, setUnreadDividerElement] = useState<HTMLDivElement | null>(null);
+  const setUnreadDividerNode = useCallback((node: HTMLDivElement | null) => {
+    unreadDividerRef.current = node;
+    setUnreadDividerElement(node);
+  }, []);
 
   // v1.18.0: "re만" 필터 — 리비전 맥락 댓글(revisionId 있음)만 표시.
   // 한솔 결정 (spec 2026-05-03): 댓글 패널에서 "리비전 댓글만" 빠르게 가려보고 싶을 때 토글.
@@ -1053,18 +1058,18 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   }, [comments.length, inlineEvents?.length, firstUnreadCommentId]);
 
   useEffect(() => {
-    if (!firstUnreadCommentId) return;
+    if (!firstUnreadCommentId || !unreadDividerElement) return;
     const timer = setTimeout(() => {
-      unreadDividerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      unreadDividerElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 150);
     return () => clearTimeout(timer);
-  }, [firstUnreadCommentId]);
+  }, [firstUnreadCommentId, unreadDividerElement]);
 
   useEffect(() => {
-    if (!firstUnreadCommentId || !latestOtherUserCommentAt) return;
-    const anchor = unreadDividerRef.current;
+    if (!firstUnreadCommentId || !latestOtherUserCommentAt || !unreadDividerElement) return;
+    const anchor = unreadDividerElement;
     const root = scrollRef.current;
-    if (!anchor || !root) return;
+    if (!root) return;
 
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
@@ -1075,7 +1080,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
 
     observer.observe(anchor);
     return () => observer.disconnect();
-  }, [firstUnreadCommentId, latestOtherUserCommentAt, markUnreadCommentsRead]);
+  }, [firstUnreadCommentId, latestOtherUserCommentAt, markUnreadCommentsRead, unreadDividerElement]);
 
   const handleMentionClick = (userName: string) => {
     setHighlightUserName(userName);
@@ -1257,7 +1262,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
               <Fragment key={comment.id}>
                 {showUnreadDivider && (
                   <div
-                    ref={unreadDividerRef}
+                    ref={setUnreadDividerNode}
                     className="flex items-center gap-2 py-1"
                     aria-label="새 댓글 시작"
                   >
@@ -1473,7 +1478,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                         <Fragment key={reply.id}>
                         {replyShowUnreadDivider && (
                           <div
-                            ref={unreadDividerRef}
+                            ref={setUnreadDividerNode}
                             className="flex items-center gap-2 py-1"
                             aria-label="새 댓글 시작"
                           >
