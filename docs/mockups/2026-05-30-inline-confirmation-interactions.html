@@ -1,0 +1,1115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bflow Inline Confirmation Mockup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080a11;
+      --panel: #111420;
+      --panel-2: #161a28;
+      --line: #2b3042;
+      --line-soft: rgba(124, 134, 166, 0.18);
+      --text: #eef0fb;
+      --muted: #8b91a8;
+      --weak: #5f667d;
+      --accent: #7567f6;
+      --accent-2: #8b7cff;
+      --cyan: #35d2c4;
+      --green: #35c873;
+      --green-soft: rgba(53, 200, 115, 0.16);
+      --amber: #f1bd52;
+      --amber-soft: rgba(241, 189, 82, 0.14);
+      --red: #ff6b7a;
+      --red-soft: rgba(255, 107, 122, 0.14);
+      --blue: #5ca8ff;
+      --blue-soft: rgba(92, 168, 255, 0.14);
+      --shadow: 0 18px 70px rgba(0, 0, 0, 0.36);
+      font-family: Inter, "Pretendard Variable", Pretendard, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 16% 8%, rgba(117, 103, 246, 0.16), transparent 26rem),
+        radial-gradient(circle at 86% 12%, rgba(53, 210, 196, 0.10), transparent 24rem),
+        linear-gradient(180deg, #111421 0%, var(--bg) 46%, #06070c 100%);
+      color: var(--text);
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      border: 0;
+    }
+
+    .app {
+      display: grid;
+      min-height: 100vh;
+      grid-template-columns: 56px minmax(0, 1fr);
+    }
+
+    .rail {
+      border-right: 1px solid var(--line-soft);
+      background: rgba(20, 23, 36, 0.72);
+      backdrop-filter: blur(20px);
+      padding: 14px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .brand {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+      border: 1px solid rgba(139, 124, 255, 0.44);
+      background: linear-gradient(145deg, rgba(117, 103, 246, 0.7), rgba(24, 28, 45, 0.92));
+      color: white;
+      font-weight: 800;
+      box-shadow: 0 10px 30px rgba(117, 103, 246, 0.24);
+    }
+
+    .rail-button {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: var(--muted);
+      background: transparent;
+      transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+
+    .rail-button:hover,
+    .rail-button.active {
+      color: white;
+      background: rgba(117, 103, 246, 0.2);
+    }
+
+    .main {
+      min-width: 0;
+      padding: 28px 34px 44px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 22px;
+    }
+
+    .title-block h1 {
+      margin: 0;
+      font-size: 25px;
+      letter-spacing: 0;
+      line-height: 1.1;
+    }
+
+    .title-block p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 328px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--line-soft);
+      background: rgba(14, 17, 27, 0.78);
+      box-shadow: var(--shadow);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .metric {
+      position: relative;
+      overflow: hidden;
+      min-height: 86px;
+      border-radius: 10px;
+      border: 1px solid var(--line-soft);
+      background: linear-gradient(180deg, rgba(23, 27, 43, 0.92), rgba(13, 15, 24, 0.92));
+      padding: 13px 14px;
+    }
+
+    .metric::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: var(--metric, var(--accent));
+      box-shadow: 0 0 18px var(--metric, var(--accent));
+    }
+
+    .metric span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 25px;
+      line-height: 1;
+    }
+
+    .metric small {
+      display: block;
+      margin-top: 6px;
+      color: var(--weak);
+      font-size: 11px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(17, 20, 32, 0.76);
+    }
+
+    .toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .inline-field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: min(100%, 380px);
+      height: 40px;
+      padding: 0 8px 0 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      background: rgba(7, 9, 16, 0.82);
+      transition: border 160ms ease, background 160ms ease;
+    }
+
+    .inline-field:focus-within {
+      border-color: rgba(117, 103, 246, 0.62);
+      background: rgba(12, 14, 23, 0.96);
+    }
+
+    .inline-field input {
+      min-width: 0;
+      width: 245px;
+      max-width: 42vw;
+      color: var(--text);
+      background: transparent;
+      border: 0;
+      outline: 0;
+      font-size: 12px;
+    }
+
+    .inline-action {
+      --action-bg: rgba(21, 25, 39, 0.94);
+      --action-border: rgba(139, 145, 168, 0.18);
+      --action-color: var(--text);
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-width: 40px;
+      min-height: 36px;
+      padding: 0 13px;
+      border-radius: 10px;
+      border: 1px solid var(--action-border);
+      background: var(--action-bg);
+      color: var(--action-color);
+      font-size: 12px;
+      font-weight: 750;
+      line-height: 1;
+      white-space: nowrap;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+      transition:
+        transform 170ms cubic-bezier(.2,.8,.2,1),
+        background 170ms ease,
+        color 170ms ease,
+        border-color 170ms ease,
+        box-shadow 170ms ease,
+        min-width 190ms cubic-bezier(.2,.8,.2,1);
+    }
+
+    .inline-action:hover {
+      transform: translateY(-1px);
+      border-color: rgba(139, 124, 255, 0.42);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+    }
+
+    .inline-action:focus-visible {
+      outline: 2px solid rgba(139, 124, 255, 0.8);
+      outline-offset: 2px;
+    }
+
+    .inline-action.primary {
+      --action-bg: linear-gradient(135deg, #6657ef, #8a78ff);
+      --action-border: rgba(154, 140, 255, 0.45);
+      --action-color: white;
+    }
+
+    .inline-action.green,
+    .inline-action.is-confirmed {
+      --action-bg: linear-gradient(135deg, #20ba63, #43d77d);
+      --action-border: rgba(84, 229, 141, 0.44);
+      --action-color: white;
+      box-shadow: 0 16px 38px rgba(39, 198, 105, 0.22);
+    }
+
+    .inline-action.red {
+      --action-bg: rgba(255, 107, 122, 0.12);
+      --action-border: rgba(255, 107, 122, 0.28);
+      --action-color: #ff9aa4;
+    }
+
+    .inline-action.amber {
+      --action-bg: rgba(241, 189, 82, 0.13);
+      --action-border: rgba(241, 189, 82, 0.32);
+      --action-color: #ffd97d;
+    }
+
+    .icon {
+      width: 15px;
+      height: 15px;
+      flex: 0 0 auto;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2.3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .icon-fill {
+      fill: currentColor;
+      stroke: none;
+    }
+
+    .content {
+      padding: 14px;
+    }
+
+    .scene-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      padding: 14px;
+      border: 1px solid var(--line-soft);
+      background: linear-gradient(135deg, rgba(117, 103, 246, 0.12), rgba(53, 210, 196, 0.05));
+      border-radius: 12px;
+      margin-bottom: 12px;
+    }
+
+    .scene-title {
+      min-width: 0;
+    }
+
+    .scene-title b {
+      display: block;
+      font-size: 15px;
+      line-height: 1.25;
+    }
+
+    .scene-title span {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .status-row {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      padding: 0 9px;
+      border-radius: 999px;
+      border: 1px solid var(--line-soft);
+      background: rgba(255, 255, 255, 0.035);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .pill.green {
+      color: #7ee3a5;
+      border-color: rgba(53, 200, 115, 0.28);
+      background: var(--green-soft);
+    }
+
+    .pill.amber {
+      color: #f7cf73;
+      border-color: rgba(241, 189, 82, 0.28);
+      background: var(--amber-soft);
+    }
+
+    .list {
+      display: grid;
+      gap: 9px;
+    }
+
+    .feedback-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid var(--line-soft);
+      background:
+        linear-gradient(90deg, rgba(241, 189, 82, 0.10), transparent 52%),
+        rgba(13, 16, 25, 0.9);
+      border-radius: 11px;
+      padding: 12px;
+      transform-origin: top;
+      transition: opacity 220ms ease, transform 220ms ease, max-height 260ms ease, margin 260ms ease, padding 260ms ease, border-color 180ms ease;
+    }
+
+    .feedback-card.is-new {
+      animation: insertCard 520ms cubic-bezier(.2,.8,.2,1);
+      border-color: rgba(53, 200, 115, 0.45);
+      box-shadow: 0 0 0 1px rgba(53, 200, 115, 0.14), 0 18px 54px rgba(53, 200, 115, 0.08);
+    }
+
+    .feedback-card.is-removing {
+      opacity: 0;
+      transform: translateY(-6px) scale(0.985);
+      max-height: 0;
+      margin: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      overflow: hidden;
+      border-color: transparent;
+    }
+
+    .feedback-copy {
+      min-width: 0;
+    }
+
+    .feedback-meta {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .feedback-copy p {
+      margin: 0;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .feedback-actions {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .confirm-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 36px;
+      padding: 4px 5px 4px 11px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 107, 122, 0.28);
+      background: rgba(255, 107, 122, 0.12);
+      color: #ffc0c6;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+      animation: confirmIn 180ms ease;
+    }
+
+    .mini-button {
+      min-height: 28px;
+      padding: 0 9px;
+      border-radius: 8px;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 11px;
+      font-weight: 800;
+      transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+    }
+
+    .mini-button:hover {
+      transform: translateY(-1px);
+      background: rgba(255, 255, 255, 0.11);
+    }
+
+    .mini-button.danger {
+      color: white;
+      background: rgba(255, 107, 122, 0.72);
+      border-color: rgba(255, 107, 122, 0.5);
+    }
+
+    .side {
+      display: grid;
+      gap: 12px;
+    }
+
+    .side-card {
+      border: 1px solid var(--line-soft);
+      background: rgba(14, 17, 27, 0.84);
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    .side-card h2 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .memo-box {
+      display: grid;
+      gap: 9px;
+    }
+
+    .memo-box textarea {
+      min-height: 86px;
+      resize: vertical;
+      border-radius: 10px;
+      border: 1px solid var(--line-soft);
+      background: rgba(7, 9, 16, 0.82);
+      color: var(--text);
+      outline: 0;
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .memo-box textarea:focus {
+      border-color: rgba(117, 103, 246, 0.6);
+    }
+
+    .select-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+
+    .select-row select {
+      min-width: 0;
+      border-radius: 10px;
+      border: 1px solid var(--line-soft);
+      background: rgba(7, 9, 16, 0.82);
+      color: var(--text);
+      padding: 0 10px;
+      height: 38px;
+      outline: 0;
+    }
+
+    .activity-stream {
+      display: grid;
+      gap: 8px;
+    }
+
+    .activity {
+      border-radius: 10px;
+      border: 1px solid var(--line-soft);
+      background: rgba(255, 255, 255, 0.035);
+      padding: 10px;
+    }
+
+    .activity small {
+      display: block;
+      color: var(--weak);
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+
+    .activity p {
+      margin: 0;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .toast-line {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      transform: translateX(-50%) translateY(20px);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      max-width: min(92vw, 520px);
+      padding: 0 13px;
+      border-radius: 12px;
+      border: 1px solid rgba(53, 200, 115, 0.28);
+      background: rgba(15, 20, 28, 0.92);
+      box-shadow: 0 20px 70px rgba(0,0,0,0.42);
+      color: var(--text);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease, transform 180ms ease;
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .toast-line.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      pointer-events: auto;
+    }
+
+    .toast-line button {
+      min-height: 26px;
+      padding: 0 8px;
+      border-radius: 7px;
+      background: var(--green-soft);
+      border: 1px solid rgba(53, 200, 115, 0.28);
+      color: #8ce8ae;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    @keyframes insertCard {
+      0% { opacity: 0; transform: translateY(-10px) scale(0.985); }
+      64% { opacity: 1; transform: translateY(2px) scale(1); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes confirmIn {
+      from { opacity: 0; transform: translateX(8px) scale(0.98); }
+      to { opacity: 1; transform: translateX(0) scale(1); }
+    }
+
+    .spark {
+      position: absolute;
+      inset: -2px;
+      pointer-events: none;
+      border-radius: inherit;
+      opacity: 0;
+      background: radial-gradient(circle at center, rgba(255,255,255,0.28), transparent 48%);
+      transform: scale(0.72);
+    }
+
+    .is-confirmed .spark {
+      animation: spark 360ms ease;
+    }
+
+    @keyframes spark {
+      0% { opacity: 0.75; transform: scale(0.72); }
+      100% { opacity: 0; transform: scale(1.25); }
+    }
+
+    @media (max-width: 1060px) {
+      .layout { grid-template-columns: 1fr; }
+      .side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 720px) {
+      .app { grid-template-columns: 1fr; }
+      .rail { display: none; }
+      .main { padding: 20px 14px 34px; }
+      .topbar { flex-direction: column; }
+      .top-actions { justify-content: flex-start; }
+      .summary { grid-template-columns: 1fr; }
+      .scene-head { align-items: flex-start; flex-direction: column; }
+      .status-row { justify-content: flex-start; }
+      .feedback-card { grid-template-columns: 1fr; }
+      .feedback-actions { justify-content: flex-start; }
+      .side { grid-template-columns: 1fr; }
+      .inline-field { width: 100%; }
+      .inline-field input { width: 100%; max-width: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="rail" aria-label="Bflow">
+      <div class="brand">B</div>
+      <button class="rail-button" aria-label="대시보드">
+        <svg class="icon"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
+      </button>
+      <button class="rail-button active" aria-label="피드백 허브">
+        <svg class="icon"><path d="M5 6h14v10H8l-3 3z"/></svg>
+      </button>
+      <button class="rail-button" aria-label="설정">
+        <svg class="icon"><path d="M12 3v3M12 18v3M4.6 5.6l2.1 2.1M17.3 17.3l2.1 2.1M3 12h3M18 12h3M4.6 18.4l2.1-2.1M17.3 6.7l2.1-2.1"/><circle cx="12" cy="12" r="3.2"/></svg>
+      </button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="title-block">
+          <h1>피드백 허브</h1>
+          <p>인라인 확인 인터랙션 시안 · 복사, 등록, 저장, 배정, 삭제 흐름</p>
+        </div>
+        <div class="top-actions">
+          <button class="inline-action" data-action="copy-scene" data-copy-text="EP.05 / A / a001">
+            <span class="spark"></span>
+            <svg class="icon"><rect x="8" y="8" width="10" height="10" rx="2"/><path d="M6 14H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"/></svg>
+            <span>씬 링크 복사</span>
+          </button>
+          <button class="inline-action primary" data-action="new-feedback-focus">
+            <svg class="icon"><path d="M12 5v14M5 12h14"/></svg>
+            <span>새 피드백</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="summary" aria-label="요약">
+        <article class="metric" style="--metric: var(--amber)">
+          <span><svg class="icon"><path d="M12 8v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>대기</span>
+          <strong>7</strong>
+          <small>아직 처리 전</small>
+        </article>
+        <article class="metric" style="--metric: var(--blue)">
+          <span><svg class="icon"><path d="M5 12h14M12 5l7 7-7 7"/></svg>진행중</span>
+          <strong>4</strong>
+          <small>작업 반영 중</small>
+        </article>
+        <article class="metric" style="--metric: var(--green)">
+          <span><svg class="icon"><path d="m5 12 4 4L19 6"/></svg>완료</span>
+          <strong>25</strong>
+          <small>해결 반영</small>
+        </article>
+        <article class="metric" style="--metric: var(--cyan)">
+          <span><svg class="icon"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>내 관련</span>
+          <strong>5</strong>
+          <small>확인 필요</small>
+        </article>
+      </section>
+
+      <div class="layout">
+        <section class="panel">
+          <div class="toolbar">
+            <form class="inline-field" id="feedbackForm">
+              <svg class="icon"><path d="M5 6h14v10H8l-3 3z"/></svg>
+              <input id="feedbackInput" value="창가 하이라이트를 조금 낮춰 주세요." aria-label="피드백 내용" />
+              <button class="inline-action primary" type="submit" id="addFeedbackButton">
+                <span class="spark"></span>
+                <svg class="icon"><path d="M12 5v14M5 12h14"/></svg>
+                <span>등록</span>
+              </button>
+            </form>
+            <div class="toolbar-group">
+              <button class="inline-action" data-action="copy-selection" data-copy-text="a001 rel2 shadow note">
+                <span class="spark"></span>
+                <svg class="icon"><rect x="8" y="8" width="10" height="10" rx="2"/><path d="M6 14H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"/></svg>
+                <span>선택 복사</span>
+              </button>
+              <button class="inline-action amber" data-action="request-review">
+                <span class="spark"></span>
+                <svg class="icon"><path d="M3 12h18"/><path d="m14 5 7 7-7 7"/></svg>
+                <span>검토 요청</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="content">
+            <div class="scene-head">
+              <div class="scene-title">
+                <b>EP.05 / A / a001 · 학교 앞 골목 낮</b>
+                <span>피드백 등록과 상태 변경을 같은 자리에서 확인하는 흐름</span>
+              </div>
+              <div class="status-row">
+                <span class="pill amber">대기 2</span>
+                <span class="pill green">완료 1</span>
+                <span class="pill">댓글 3</span>
+              </div>
+            </div>
+
+            <div class="list" id="feedbackList">
+              <article class="feedback-card" data-card>
+                <div class="feedback-copy">
+                  <div class="feedback-meta">
+                    <span class="pill amber">대기</span>
+                    <span>rel 2</span>
+                    <span>2시간 전</span>
+                  </div>
+                  <p>골목 입구 그림자 경계가 너무 딱 끊겨 보여서, 캐릭터 동선 주변만 부드럽게 풀어주세요.</p>
+                </div>
+                <div class="feedback-actions">
+                  <button class="inline-action" data-action="copy-feedback" data-copy-text="골목 입구 그림자 경계 수정 요청">
+                    <span class="spark"></span>
+                    <svg class="icon"><rect x="8" y="8" width="10" height="10" rx="2"/><path d="M6 14H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"/></svg>
+                    <span>복사</span>
+                  </button>
+                  <button class="inline-action" data-action="progress">
+                    <span class="spark"></span>
+                    <svg class="icon"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    <span>진행</span>
+                  </button>
+                  <button class="inline-action red" data-action="delete">
+                    <svg class="icon"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/></svg>
+                    <span>삭제</span>
+                  </button>
+                </div>
+              </article>
+
+              <article class="feedback-card" data-card>
+                <div class="feedback-copy">
+                  <div class="feedback-meta">
+                    <span class="pill">진행중</span>
+                    <span>rel 3</span>
+                    <span>어제</span>
+                  </div>
+                  <p>교실 창가 오후 톤이 인물 뒤쪽에서 튀어 보입니다. 채도만 한 단계 낮춰주세요.</p>
+                </div>
+                <div class="feedback-actions">
+                  <button class="inline-action" data-action="complete">
+                    <span class="spark"></span>
+                    <svg class="icon"><path d="m5 12 4 4L19 6"/></svg>
+                    <span>완료</span>
+                  </button>
+                  <button class="inline-action" data-action="comment">
+                    <span class="spark"></span>
+                    <svg class="icon"><path d="M5 6h14v10H8l-3 3z"/></svg>
+                    <span>댓글</span>
+                  </button>
+                  <button class="inline-action red" data-action="delete">
+                    <svg class="icon"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/></svg>
+                    <span>삭제</span>
+                  </button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <aside class="side">
+          <section class="side-card">
+            <h2>메모 저장</h2>
+            <div class="memo-box">
+              <textarea id="memoInput">a001 배경 톤은 유지. 그림자 경계만 부드럽게.</textarea>
+              <button class="inline-action primary" data-action="save-memo">
+                <span class="spark"></span>
+                <svg class="icon"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+                <span>메모 저장</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="side-card">
+            <h2>담당자 배정</h2>
+            <div class="select-row">
+              <select id="assigneeSelect" aria-label="담당자">
+                <option>배한솔</option>
+                <option>서연</option>
+                <option>민지</option>
+                <option>준호</option>
+              </select>
+              <button class="inline-action" data-action="assign">
+                <span class="spark"></span>
+                <svg class="icon"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <span>배정</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="side-card">
+            <h2>댓글 및 활동</h2>
+            <div class="activity-stream" id="activityStream">
+              <div class="activity">
+                <small>오늘 14:32</small>
+                <p>배한솔이 rel 2 피드백을 등록했습니다.</p>
+              </div>
+              <div class="activity">
+                <small>오늘 14:35</small>
+                <p>서연에게 담당자 알림을 보냈습니다.</p>
+              </div>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast-line" id="toastLine" role="status" aria-live="polite">
+    <svg class="icon"><path d="m5 12 4 4L19 6"/></svg>
+    <span id="toastText">처리됨</span>
+    <button id="undoButton" type="button">되돌리기</button>
+  </div>
+
+  <script>
+    const icons = {
+      check: '<svg class="icon"><path d="m5 12 4 4L19 6"/></svg>',
+      copy: '<svg class="icon"><rect x="8" y="8" width="10" height="10" rx="2"/><path d="M6 14H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v1"/></svg>',
+      plus: '<svg class="icon"><path d="M12 5v14M5 12h14"/></svg>',
+      bell: '<svg class="icon"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+      save: '<svg class="icon"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>',
+      message: '<svg class="icon"><path d="M5 6h14v10H8l-3 3z"/></svg>',
+      progress: '<svg class="icon"><path d="M5 12h14M12 5l7 7-7 7"/></svg>',
+      trash: '<svg class="icon"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/></svg>'
+    };
+
+    const list = document.getElementById('feedbackList');
+    const toast = document.getElementById('toastLine');
+    const toastText = document.getElementById('toastText');
+    const undoButton = document.getElementById('undoButton');
+    const activityStream = document.getElementById('activityStream');
+    let toastTimer;
+    let lastDeleted = null;
+
+    function buttonHtml(icon, label) {
+      return '<span class="spark"></span>' + icon + '<span>' + label + '</span>';
+    }
+
+    function confirmButton(button, label, icon = icons.check, className = 'is-confirmed', duration = 1350) {
+      if (button.dataset.busy === 'true') return;
+      button.dataset.busy = 'true';
+      const original = button.innerHTML;
+      const originalClasses = button.className;
+      button.className = originalClasses + ' ' + className;
+      button.innerHTML = buttonHtml(icon, label);
+      window.setTimeout(() => {
+        button.className = originalClasses;
+        button.innerHTML = original;
+        button.dataset.busy = 'false';
+      }, duration);
+    }
+
+    function addActivity(text) {
+      const item = document.createElement('div');
+      item.className = 'activity';
+      item.innerHTML = '<small>방금 전</small><p>' + text + '</p>';
+      activityStream.prepend(item);
+    }
+
+    function showToast(text, undoVisible = false) {
+      window.clearTimeout(toastTimer);
+      toastText.textContent = text;
+      undoButton.style.display = undoVisible ? 'inline-flex' : 'none';
+      toast.classList.add('show');
+      toastTimer = window.setTimeout(() => toast.classList.remove('show'), 3000);
+    }
+
+    function writeClipboard(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+    }
+
+    function makeFeedbackCard(text) {
+      const article = document.createElement('article');
+      article.className = 'feedback-card is-new';
+      article.dataset.card = '';
+      article.innerHTML = `
+        <div class="feedback-copy">
+          <div class="feedback-meta">
+            <span class="pill amber">대기</span>
+            <span>rel 4</span>
+            <span>방금 전</span>
+          </div>
+          <p>${text.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>
+        </div>
+        <div class="feedback-actions">
+          <button class="inline-action" data-action="copy-feedback" data-copy-text="${text.replace(/"/g, '&quot;')}">
+            <span class="spark"></span>${icons.copy}<span>복사</span>
+          </button>
+          <button class="inline-action" data-action="progress">
+            <span class="spark"></span>${icons.progress}<span>진행</span>
+          </button>
+          <button class="inline-action red" data-action="delete">
+            ${icons.trash}<span>삭제</span>
+          </button>
+        </div>
+      `;
+      window.setTimeout(() => article.classList.remove('is-new'), 900);
+      return article;
+    }
+
+    document.getElementById('feedbackForm').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const input = document.getElementById('feedbackInput');
+      const button = document.getElementById('addFeedbackButton');
+      const text = input.value.trim() || '새 피드백 내용을 입력해 주세요.';
+      confirmButton(button, '등록됨', icons.check, 'is-confirmed', 1100);
+      const card = makeFeedbackCard(text);
+      list.prepend(card);
+      addActivity('배한솔이 새 피드백을 등록했습니다.');
+      input.value = '';
+    });
+
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      const action = button.dataset.action;
+      if (!action) return;
+
+      if (action.includes('copy')) {
+        writeClipboard(button.dataset.copyText || 'Bflow copied text');
+        confirmButton(button, '복사됨', icons.check);
+        addActivity('항목을 클립보드에 복사했습니다.');
+        return;
+      }
+
+      if (action === 'new-feedback-focus') {
+        document.getElementById('feedbackInput').focus();
+        confirmButton(button, '입력 준비', icons.check, 'is-confirmed', 900);
+        return;
+      }
+
+      if (action === 'request-review') {
+        confirmButton(button, '요청됨', icons.check, 'is-confirmed', 1200);
+        addActivity('검토 요청 알림을 보냈습니다.');
+        return;
+      }
+
+      if (action === 'progress') {
+        confirmButton(button, '진행중', icons.progress, 'is-confirmed');
+        const card = button.closest('[data-card]');
+        const pill = card.querySelector('.feedback-meta .pill');
+        pill.textContent = '진행중';
+        pill.className = 'pill';
+        addActivity('피드백 상태가 진행중으로 바뀌었습니다.');
+        return;
+      }
+
+      if (action === 'complete') {
+        confirmButton(button, '완료됨', icons.check, 'is-confirmed');
+        const card = button.closest('[data-card]');
+        const pill = card.querySelector('.feedback-meta .pill');
+        pill.textContent = '완료';
+        pill.className = 'pill green';
+        addActivity('피드백을 완료 처리했습니다.');
+        return;
+      }
+
+      if (action === 'comment') {
+        confirmButton(button, '열림', icons.message, 'is-confirmed', 950);
+        addActivity('댓글 창을 열었습니다.');
+        return;
+      }
+
+      if (action === 'save-memo') {
+        confirmButton(button, '저장됨', icons.check, 'is-confirmed');
+        addActivity('씬 메모가 저장되었습니다.');
+        return;
+      }
+
+      if (action === 'assign') {
+        const assignee = document.getElementById('assigneeSelect').value;
+        confirmButton(button, '알림 전송됨', icons.bell, 'is-confirmed', 1500);
+        addActivity(assignee + '에게 담당자 알림을 보냈습니다.');
+        return;
+      }
+
+      if (action === 'delete') {
+        const actions = button.parentElement;
+        if (actions.querySelector('[data-confirm-delete]')) return;
+        const original = actions.innerHTML;
+        actions.dataset.original = original;
+        actions.innerHTML = `
+          <span class="confirm-inline" data-confirm-delete>
+            <span>정말 삭제?</span>
+            <button class="mini-button" data-action="cancel-delete" type="button">취소</button>
+            <button class="mini-button danger" data-action="confirm-delete" type="button">삭제</button>
+          </span>
+        `;
+        return;
+      }
+
+      if (action === 'cancel-delete') {
+        const actions = button.closest('.feedback-actions');
+        actions.innerHTML = actions.dataset.original;
+        return;
+      }
+
+      if (action === 'confirm-delete') {
+        const card = button.closest('[data-card]');
+        lastDeleted = {
+          node: card,
+          next: card.nextElementSibling,
+          parent: card.parentElement
+        };
+        card.classList.add('is-removing');
+        window.setTimeout(() => card.remove(), 260);
+        showToast('피드백을 삭제했습니다.', true);
+        addActivity('피드백을 삭제했습니다.');
+      }
+    });
+
+    undoButton.addEventListener('click', () => {
+      if (!lastDeleted) return;
+      const { node, next, parent } = lastDeleted;
+      node.classList.remove('is-removing');
+      if (next && next.parentElement === parent) {
+        parent.insertBefore(node, next);
+      } else {
+        parent.appendChild(node);
+      }
+      node.classList.add('is-new');
+      window.setTimeout(() => node.classList.remove('is-new'), 900);
+      lastDeleted = null;
+      showToast('삭제를 되돌렸습니다.', false);
+      addActivity('삭제한 피드백을 되돌렸습니다.');
+    });
+  </script>
+</body>
+</html>
