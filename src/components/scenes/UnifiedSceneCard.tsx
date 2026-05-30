@@ -336,7 +336,7 @@ export function UnifiedSceneCard({
                   className={cn(
                     'compact-label-container flex min-w-0 shrink items-center gap-0.5 rounded-full border px-1.5 py-0.5 transition-colors',
                     hasUnreadComments
-                      ? 'border-accent/25 bg-accent/15 text-accent shadow-[0_0_10px_rgba(108,92,231,0.16)]'
+                      ? 'comment-unread-badge border-accent/25 bg-accent/15 text-accent shadow-[0_0_10px_rgba(108,92,231,0.16)]'
                       : 'border-bg-border/45 bg-text-secondary/10 text-text-secondary/60',
                   )}
                   title={`${hasUnreadComments ? '새 댓글' : '확인한 댓글'} ${displayCount}개`}

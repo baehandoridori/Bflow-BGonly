@@ -355,10 +355,28 @@ export function UnifiedSceneDetailModal({
       .filter((a) => BIG_EVENT_TYPES.has(a.actionType))
       .map<CommentInlineEvent>((a) => {
         const v = describeActivity(a);
+        const revisionTone =
+          a.actionType === 'revision_add'
+            ? 'revision_add'
+            : a.actionType === 'revision_in_progress'
+              ? 'revision_in_progress'
+              : a.actionType === 'revision_resolve'
+                ? 'revision_resolve'
+                : undefined;
+        const revisionLabel =
+          a.actionType === 'revision_add'
+            ? '등록'
+            : a.actionType === 'revision_in_progress'
+              ? '진행'
+              : a.actionType === 'revision_resolve'
+                ? '완료'
+                : undefined;
         return {
           id: a.id,
           at: a.createdAt,
           text: `${a.userName} ${deptPrefix(a.department)}${v.text}`,
+          tone: revisionTone,
+          label: revisionLabel,
         };
       });
     // 단계 전부 완료 derive — Scene.completedAt + completedBy

@@ -101,3 +101,22 @@ test('bulk and card stage controls avoid forced ellipsis overflow', () => {
   assert.match(scenesView, /<CompactIconLabel icon=\{phaseIcon\(phase, 12\)\}/);
   assert.doesNotMatch(unifiedCard, /text-ellipsis/);
 });
+
+test('compositing and shared dropdown controls use compact or bounded labels', () => {
+  const glassDropdown = read('src/components/common/GlassDropdown.tsx');
+  const scenesView = read('src/views/ScenesView.tsx');
+  const compositingView = read('src/views/CompositingView.tsx');
+  const sceneGroupSection = read('src/views/compositing/SceneGroupSection.tsx');
+  const dashboardBulkBar = read('src/views/compositing-dashboard/BulkActionBar.tsx');
+
+  assert.match(glassDropdown, /CompactIconLabel/);
+  assert.match(glassDropdown, /compact-label-container/);
+  assert.match(scenesView, /label="작업자 선택"[\s\S]*icon=\{<UserRound/);
+  assert.match(compositingView, /GlassDropdown<SortMode>/);
+  assert.doesNotMatch(compositingView, /<select[\s\S]*댓글 많은순[\s\S]*<\/select>/);
+  assert.match(sceneGroupSection, /data-episode-filter-label/);
+  assert.match(sceneGroupSection, /data-episode-filter-short-label/);
+  assert.match(dashboardBulkBar, /max-w-\[calc\(100vw-2rem\)\]/);
+  assert.match(dashboardBulkBar, /overflow-x-auto/);
+  assert.match(dashboardBulkBar, /CompactIconLabel/);
+});

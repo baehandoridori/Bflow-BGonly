@@ -17,7 +17,7 @@ import {
 } from '@/utils/mergedSceneHelpers';
 import { getAllViewCompletionState, getSingleViewCompletionState } from '@/utils/visibleCompletion';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw, Clock, PlayCircle, CheckCircle2, Circle, MessageSquareWarning, Plus } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw, Clock, PlayCircle, CheckCircle2, Circle, MessageSquareWarning, Plus, UserRound } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { HighlightText } from '@/components/common/HighlightText';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
@@ -25,12 +25,21 @@ import { EpisodeTreeNav } from '@/components/scenes/EpisodeTreeNav';
 import { SceneSheetView } from '@/components/scenes/SceneSheetView';
 import { UnifiedSceneCard } from '@/components/scenes/UnifiedSceneCard';
 import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView';
+import { ScenePhaseToggle } from '@/components/scenes/ScenePhaseToggle';
 import { LengthIcon } from '@/components/scenes/LengthIcon';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
 import { BulkOperationStatus } from '@/components/scenes/BulkOperationStatus';
 import { useAuthStore } from '@/stores/useAuthStore';
-import { setCommentsSheetsMode, loadPartComments, invalidatePartCache } from '@/services/commentService';
+import { setCommentsSheetsMode, getCommentStoreForPart, invalidatePartCache } from '@/services/commentService';
+import {
+  COMMENT_READ_STATE_EVENT,
+  getCommentReadStateForUser,
+  getLatestCommentCreatedAt,
+  getLatestOtherUserCommentCreatedAt,
+  isCommentKeyUnread,
+} from '@/services/commentReadStateService';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
+import { buildSceneThreadKeyFromCommentKey } from '@/utils/commentThreadKey';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import type { PartContextMenuTarget } from '@/utils/partMemoHelpers';
 import { usePartMemos } from '@/hooks/usePartMemos';
@@ -722,11 +731,16 @@ interface SceneCardProps {
   isSelected?: boolean;
   searchQuery?: string;
   commentCount?: number;
+  hasUnreadComments?: boolean;
   revisionCount?: number;
   selectionId?: string;  // 'all' 모드에서 부서 접두사 포함된 고유 ID (라쏘/선택용)
+  sheetName?: string;
   fallbackStoryboardUrl?: string | null;
   fallbackGuideUrl?: string | null;
   onToggle: (sceneId: string, stage: Stage) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
+  onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
   onDelete: (sceneIndex: number) => void;
   onOpenDetail: () => void;
   onCelebrationEnd: () => void;
@@ -734,7 +748,7 @@ interface SceneCardProps {
   onShiftClick?: () => void;
 }
 
-function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, revisionCount = 0, selectionId, fallbackStoryboardUrl, fallbackGuideUrl, onToggle, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
+function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, isSelected, searchQuery, commentCount = 0, hasUnreadComments = false, revisionCount = 0, selectionId, sheetName, fallbackStoryboardUrl, fallbackGuideUrl, onToggle, onActPhaseStateClick, onActFeedbackRequest, onActRoundBump, onDelete, onOpenDetail, onCelebrationEnd, onCtrlClick, onShiftClick }: SceneCardProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const pct = sceneProgress(scene);
@@ -743,6 +757,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const guideUrl = scene.guideUrl || fallbackGuideUrl || '';
   const hasImages = !!(storyboardUrl || guideUrl);
   const stagePointerHandledRef = useRef(false);
+  const useActingPhaseControls = department === 'acting' && !!sheetName && !!onActPhaseStateClick && !!onActFeedbackRequest && !!onActRoundBump;
 
   const borderColor = pct >= 100 ? '#6C5CE7' : pct >= 50 ? '#A599F5' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
 
@@ -811,7 +826,15 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {commentCount > 0 && (
-            <span className="flex items-center gap-0.5 bg-accent/15 text-accent px-1.5 py-0.5 rounded-full" title={`의견 ${commentCount}개`}>
+            <span
+              className={cn(
+                'compact-label-container flex min-w-0 shrink items-center gap-0.5 rounded-full border px-1.5 py-0.5 transition-colors',
+                hasUnreadComments
+                  ? 'comment-unread-badge border-accent/25 bg-accent/15 text-accent shadow-[0_0_10px_rgba(108,92,231,0.16)]'
+                  : 'border-bg-border/45 bg-text-secondary/10 text-text-secondary/60',
+              )}
+              title={`${hasUnreadComments ? '새 댓글' : '확인한 댓글'} ${commentCount}개`}
+            >
               <CompactIconLabel
                 icon={<MessageCircle size={10} fill="currentColor" />}
                 label={`${commentCount}개`}
@@ -820,7 +843,7 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             </span>
           )}
           {revisionCount > 0 && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(108, 92, 231, 0.15)', color: '#A599F5' }} title={`리비전 ${revisionCount}건`}>
+            <span className="compact-label-container flex min-w-0 shrink items-center gap-0.5 px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(108, 92, 231, 0.15)', color: '#A599F5' }} title={`리비전 ${revisionCount}건`}>
               <CompactIconLabel
                 icon={<Film size={10} />}
                 label={`${revisionCount}건`}
@@ -900,51 +923,62 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
 
       {/* ── 하단: 프로세스 트랙 ── */}
       <div className="px-4 pt-1 pb-3.5 mt-auto relative overflow-visible">
-        <div className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5">
-          {STAGES.map((stage, i) => {
-            const isDone = scene[stage];
-            const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
+        {useActingPhaseControls ? (
+          <div onClick={(e) => e.stopPropagation()}>
+            <ScenePhaseToggle
+              scene={scene}
+              onStateClick={(next) => onActPhaseStateClick(sheetName, scene.sceneId, next)}
+              onRequestFeedback={() => onActFeedbackRequest(sheetName, scene.sceneId)}
+              onRoundBump={(kind, delta) => onActRoundBump(sheetName, scene.sceneId, kind, delta)}
+            />
+          </div>
+        ) : (
+          <div className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5">
+            {STAGES.map((stage, i) => {
+              const isDone = scene[stage];
+              const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
 
-            return (
-              <button
-                type="button"
-                key={stage}
-                onPointerDown={(e) => {
-                  if (e.button !== 0) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  stagePointerHandledRef.current = true;
-                  onToggle(scene.sceneId, stage);
-                  window.setTimeout(() => {
-                    stagePointerHandledRef.current = false;
-                  }, 600);
-                }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (stagePointerHandledRef.current) {
-                    stagePointerHandledRef.current = false;
-                    return;
+              return (
+                <button
+                  type="button"
+                  key={stage}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    stagePointerHandledRef.current = true;
+                    onToggle(scene.sceneId, stage);
+                    window.setTimeout(() => {
+                      stagePointerHandledRef.current = false;
+                    }, 600);
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (stagePointerHandledRef.current) {
+                      stagePointerHandledRef.current = false;
+                      return;
+                    }
+                    onToggle(scene.sceneId, stage);
+                  }}
+                  className={cn(
+                    'compact-label-container flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
+                    !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
+                  )}
+                  style={
+                    isDone
+                      ? isCurrent
+                        ? { backgroundColor: deptConfig.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${deptConfig.color}40` }
+                        : { backgroundColor: `${deptConfig.color}20`, color: deptConfig.color }
+                      : undefined
                   }
-                  onToggle(scene.sceneId, stage);
-                }}
-                className={cn(
-                  'compact-label-container flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
-                  !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
-                )}
-                style={
-                  isDone
-                    ? isCurrent
-                      ? { backgroundColor: deptConfig.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${deptConfig.color}40` }
-                      : { backgroundColor: `${deptConfig.color}20`, color: deptConfig.color }
-                    : undefined
-                }
-              >
-                <CompactIconLabel icon={stageIcon(stage, 12)} label={deptConfig.stageLabels[stage]} className="w-full" />
-              </button>
-            );
-          })}
-        </div>
+                >
+                  <CompactIconLabel icon={stageIcon(stage, 12)} label={deptConfig.stageLabels[stage]} className="w-full" />
+                </button>
+              );
+            })}
+          </div>
+        )}
         <Confetti active={celebrating} onComplete={onCelebrationEnd} />
       </div>
     </motion.div>
@@ -1582,6 +1616,7 @@ export function ScenesView() {
   const findSceneInSheet = useDataStore((s) => s.findSceneInSheet);
   const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
   const { selectedEpisode, selectedPart, selectedAssignee, searchQuery, selectedDepartment } = useAppStore();
+  const dataConnected = useAppStore((s) => s.dataConnected);
   const colorMode = useAppStore((s) => s.colorMode);
   const revisionCountByScene = useRevisionStore((s) => s.revisionCountByScene);
   const { sortKey, sortDir, statusFilter, sceneViewMode, sceneGroupMode } = useAppStore();
@@ -1983,13 +2018,13 @@ export function ScenesView() {
   // 리비전 초기 로드
   const loadRevisions = useRevisionStore((s) => s.loadRevisions);
 
-  // 댓글 + 리비전 모드 설정 (항상 시트 모드)
+  // 댓글 + 리비전 모드 설정. 프리뷰/오프라인은 로컬 더미 저장소, 연결 상태는 Supabase/Sheets 경로를 사용.
   useEffect(() => {
-    setCommentsSheetsMode(true);
-    setRevisionsSheetsMode(true);
+    setCommentsSheetsMode(dataConnected);
+    setRevisionsSheetsMode(dataConnected);
     loadRevisions();
     return () => { invalidatePartCache(); };
-  }, []);
+  }, [dataConnected, loadRevisions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2008,6 +2043,9 @@ export function ScenesView() {
   // Codex P2 6차(2026-04-23): ambiguous skip 으로 BG/ACT 댓글 집합이 달라질 수 있어
   // `getMergedCommentBadgeCounts` 가 union 크기를 산출할 수 있도록 id list 도 함께 유지.
   const [commentIdsByKey, setCommentIdsByKey] = useState<Record<string, string[]>>({});
+  const [commentLatestAtByKey, setCommentLatestAtByKey] = useState<Record<string, string>>({});
+  const [commentThreadKeyByCommentKey, setCommentThreadKeyByCommentKey] = useState<Record<string, string>>({});
+  const [commentReadAtByKey, setCommentReadAtByKey] = useState<Record<string, string>>({});
   // 댓글 카운트 로딩은 currentPart 정의 후 아래에서 수행 (useEffect)
 
   // Shift+Click 범위 선택을 위한 마지막 클릭 인덱스
@@ -2123,6 +2161,23 @@ export function ScenesView() {
   const currentPart = selectedDepartment !== 'all' && parts.length > 0
     ? (findPartById(parts, selectedPart) ?? parts[0])
     : (bgPart ?? actPart ?? undefined);  // 'all' 모드 fallback (기존 로직 호환)
+  const commentUnreadByKey = useMemo(() => {
+    const unread: Record<string, boolean> = {};
+    for (const [key, count] of Object.entries(commentCounts)) {
+      if (count <= 0) continue;
+      const threadKey = commentThreadKeyByCommentKey[key] ?? key;
+      unread[key] = isCommentKeyUnread(commentLatestAtByKey[key], commentReadAtByKey[threadKey]);
+    }
+    return unread;
+  }, [commentCounts, commentLatestAtByKey, commentReadAtByKey, commentThreadKeyByCommentKey]);
+  const hasMergedUnreadComments = useCallback((merged: MergedScene) => {
+    const bgKey = merged.bgScene && bgPart?.sheetName ? `${bgPart.sheetName}:${merged.bgScene.no}` : null;
+    const actKey = merged.actScene && actPart?.sheetName ? `${actPart.sheetName}:${merged.actScene.no}` : null;
+    return Boolean(
+      (bgKey && commentUnreadByKey[bgKey]) ||
+      (actKey && commentUnreadByKey[actKey]),
+    );
+  }, [actPart?.sheetName, bgPart?.sheetName, commentUnreadByKey]);
   const mergedScenePartId = currentPartId ?? bgPart?.partId ?? actPart?.partId ?? '';
   const {
     partMemos,
@@ -2242,7 +2297,8 @@ export function ScenesView() {
       : currentPart ? [currentPart.sheetName] : [];
 
     sheetsToLoad.forEach((sheetName) => {
-      loadPartComments(sheetName).then((store) => {
+      getCommentStoreForPart(sheetName).then((store) => {
+        const currentEpisodes = useDataStore.getState().episodes;
         setCommentCounts((prev) => {
           const next = { ...prev };
           const prefix = `${sheetName}:`;
@@ -2265,9 +2321,57 @@ export function ScenesView() {
           }
           return next;
         });
+        setCommentThreadKeyByCommentKey((prev) => {
+          const next = { ...prev };
+          const prefix = `${sheetName}:`;
+          Object.keys(next).forEach((key) => {
+            if (key.startsWith(prefix)) delete next[key];
+          });
+          for (const key of Object.keys(store)) {
+            next[key] = buildSceneThreadKeyFromCommentKey(currentEpisodes, key);
+          }
+          return next;
+        });
+        setCommentLatestAtByKey((prev) => {
+          const next = { ...prev };
+          const prefix = `${sheetName}:`;
+          Object.keys(next).forEach((key) => {
+            if (key.startsWith(prefix)) delete next[key];
+          });
+          for (const [key, list] of Object.entries(store)) {
+            const latestAt = getLatestOtherUserCommentCreatedAt(list, currentUser?.id ?? '') ?? getLatestCommentCreatedAt(list);
+            if (latestAt) next[key] = latestAt;
+          }
+          return next;
+        });
       }).catch(() => {});
     });
-  }, [selectedDepartment, bgPart?.sheetName, actPart?.sheetName, currentPart?.sheetName]);
+  }, [selectedDepartment, bgPart?.sheetName, actPart?.sheetName, currentPart?.sheetName, currentUser?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadReadState = () => {
+      if (!currentUser?.id) {
+        setCommentReadAtByKey({});
+        return;
+      }
+      void getCommentReadStateForUser(currentUser.id).then((state) => {
+        if (!cancelled) setCommentReadAtByKey(state);
+      });
+    };
+
+    loadReadState();
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      if (detail?.userId && detail.userId !== currentUser?.id) return;
+      loadReadState();
+    };
+    window.addEventListener(COMMENT_READ_STATE_EVENT, handler);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(COMMENT_READ_STATE_EVENT, handler);
+    };
+  }, [currentUser?.id]);
 
   useEffect(() => {
     reloadCommentCounts();
@@ -3629,6 +3733,8 @@ export function ScenesView() {
     // Codex P2 8차(2026-04-23): 실패 롤백 시 뱃지 state 도 복원할 수 있도록 이전 값 보관.
     const prevCommentCount = commentCounts[badgeKey];
     const prevCommentIds = commentIdsByKey[badgeKey];
+    const prevCommentLatestAt = commentLatestAtByKey[badgeKey];
+    const prevCommentThreadKey = commentThreadKeyByCommentKey[badgeKey];
 
     deleteSceneOptimistic(sheetName, sceneIndex);
 
@@ -3642,6 +3748,16 @@ export function ScenesView() {
       return next;
     });
     setCommentIdsByKey((prev) => {
+      const next = { ...prev };
+      delete next[badgeKey];
+      return next;
+    });
+    setCommentLatestAtByKey((prev) => {
+      const next = { ...prev };
+      delete next[badgeKey];
+      return next;
+    });
+    setCommentThreadKeyByCommentKey((prev) => {
       const next = { ...prev };
       delete next[badgeKey];
       return next;
@@ -3660,6 +3776,12 @@ export function ScenesView() {
       }
       if (prevCommentIds !== undefined) {
         setCommentIdsByKey((prev) => ({ ...prev, [badgeKey]: prevCommentIds }));
+      }
+      if (prevCommentLatestAt !== undefined) {
+        setCommentLatestAtByKey((prev) => ({ ...prev, [badgeKey]: prevCommentLatestAt }));
+      }
+      if (prevCommentThreadKey !== undefined) {
+        setCommentThreadKeyByCommentKey((prev) => ({ ...prev, [badgeKey]: prevCommentThreadKey }));
       }
       handleSheetError(err, '씬 삭제');
       syncInBackground();
@@ -4223,6 +4345,7 @@ export function ScenesView() {
                   allOption={{ value: '__all__', label: '전체' }}
                   label="작업자 선택"
                   triggerLabel={selectedAssignee ?? '작업자: 전체'}
+                  icon={<UserRound size={14} className="text-text-secondary" />}
                   minWidth={130}
                 />
 
@@ -4239,7 +4362,7 @@ export function ScenesView() {
                           : f === 'not-started' ? 'bg-red-500/20 text-red-400'
                           : f === 'in-progress' ? 'bg-yellow-500/20 text-yellow-400'
                           : 'bg-accent/20 text-accent'
-                        : 'text-text-secondary hover:text-text-primary'
+                      : 'text-text-secondary hover:text-text-primary'
                     )}
                   >
                     <CompactIconLabel
@@ -4488,6 +4611,7 @@ export function ScenesView() {
                 actSheetName={actPart?.sheetName ?? null}
                 commentCounts={commentCounts}
                 commentIdsByKey={commentIdsByKey}
+                commentUnreadByKey={commentUnreadByKey}
                 searchQuery={searchQuery}
                 selectedSceneIds={selectedSceneIds}
                 sceneGroupMode={sceneGroupMode}
@@ -4541,6 +4665,7 @@ export function ScenesView() {
                             bgCommentCount={commentBadgeCounts.bg}
                             actCommentCount={commentBadgeCounts.act}
                             totalCommentCount={commentBadgeCounts.total}
+                            hasUnreadComments={hasMergedUnreadComments(m)}
                             onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                             onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                             onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
@@ -4594,6 +4719,7 @@ export function ScenesView() {
                       bgCommentCount={commentBadgeCounts.bg}
                       actCommentCount={commentBadgeCounts.act}
                       totalCommentCount={commentBadgeCounts.total}
+                      hasUnreadComments={hasMergedUnreadComments(m)}
                       onToggle={(sheet, id, stage) => handleToggleForSheet(sheet, id, stage)}
                       onDelete={(sheet, idx) => handleDeleteSceneForSheet(sheet, idx)}
                       onOpenDetail={(sheet, idx) => { setDetailContext({ sheetName: sheet, sceneIndex: idx }); setDetailSceneIndex(idx); }}
@@ -4661,12 +4787,16 @@ export function ScenesView() {
                   allScenes={currentPart?.scenes ?? []}
                   department={effectiveDept}
                   commentCounts={commentCounts}
+                  commentUnreadByKey={commentUnreadByKey}
                   sheetName={currentPart?.sheetName ?? ''}
                   searchQuery={searchQuery}
                   selectedSceneIds={selectedSceneIds}
                   sceneGroupMode="layout"
                   highlightSceneId={highlightSceneId}
                   onToggle={handleToggle}
+                  onActPhaseStateClick={handleActPhaseStateClick}
+                  onActFeedbackRequest={handleActFeedbackRequest}
+                  onActRoundBump={handleActRoundBump}
                   onDelete={handleDeleteScene}
                   onOpenDetail={(idx) => setDetailSceneIndex(idx)}
                   onFieldUpdate={handleFieldUpdate}
@@ -4720,10 +4850,15 @@ export function ScenesView() {
                               isSelected={selectedSceneIds.has(scene.sceneId)}
                               searchQuery={searchQuery}
                               commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
+                              hasUnreadComments={commentUnreadByKey[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? false}
                               revisionCount={revisionCountByScene[buildSceneKey(currentPart?.sheetName ?? '', scene.sceneId)] ?? 0}
+                              sheetName={currentPart?.sheetName ?? ''}
                               fallbackStoryboardUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId, currentPart?.partId))?.storyboard ?? null}
                               fallbackGuideUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId, currentPart?.partId))?.guide ?? null}
                               onToggle={handleToggle}
+                              onActPhaseStateClick={handleActPhaseStateClick}
+                              onActFeedbackRequest={handleActFeedbackRequest}
+                              onActRoundBump={handleActRoundBump}
                               onDelete={handleDeleteScene}
                               onOpenDetail={() => setDetailSceneIndex(sIdx)}
                               onCelebrationEnd={clearCelebration}
@@ -4762,12 +4897,16 @@ export function ScenesView() {
                 allScenes={currentPart?.scenes ?? []}
                 department={effectiveDept}
                 commentCounts={commentCounts}
+                commentUnreadByKey={commentUnreadByKey}
                 sheetName={currentPart?.sheetName ?? ''}
                 searchQuery={searchQuery}
                 selectedSceneIds={selectedSceneIds}
                 sceneGroupMode="flat"
                 highlightSceneId={highlightSceneId}
                 onToggle={handleToggle}
+                onActPhaseStateClick={handleActPhaseStateClick}
+                onActFeedbackRequest={handleActFeedbackRequest}
+                onActRoundBump={handleActRoundBump}
                 onDelete={handleDeleteScene}
                 onOpenDetail={(idx) => setDetailSceneIndex(idx)}
                 onFieldUpdate={handleFieldUpdate}
@@ -4790,10 +4929,15 @@ export function ScenesView() {
                     isSelected={selectedSceneIds.has(scene.sceneId)}
                     searchQuery={searchQuery}
                     commentCount={commentCounts[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? 0}
+                    hasUnreadComments={commentUnreadByKey[`${currentPart?.sheetName ?? ''}:${scene.no}`] ?? false}
                     revisionCount={revisionCountByScene[buildSceneKey(currentPart?.sheetName ?? '', scene.sceneId)] ?? 0}
+                    sheetName={currentPart?.sheetName ?? ''}
                     fallbackStoryboardUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId, currentPart?.partId))?.storyboard ?? null}
                     fallbackGuideUrl={actToBgImageMap?.get(normalizeSceneIdKey(scene.sceneId, currentPart?.partId))?.guide ?? null}
                     onToggle={handleToggle}
+                    onActPhaseStateClick={handleActPhaseStateClick}
+                    onActFeedbackRequest={handleActFeedbackRequest}
+                    onActRoundBump={handleActRoundBump}
                     onDelete={handleDeleteScene}
                     onOpenDetail={() => setDetailSceneIndex(sIdx)}
                     onCelebrationEnd={clearCelebration}

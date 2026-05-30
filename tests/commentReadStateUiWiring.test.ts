@@ -6,6 +6,10 @@ const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf
 const resizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
 const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
+const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
+const compositingView = readFileSync('src/views/CompositingView.tsx', 'utf8');
+const feedbackHubPreviewApp = readFileSync('src/views/FeedbackHubPreviewApp.tsx', 'utf8');
+const indexCss = readFileSync('src/index.css', 'utf8');
 
 function getCommentPanelResizableUsage(source: string): string {
   const usage = source.match(/<CommentPanelResizable\b[\s\S]*?\/>/);
@@ -37,6 +41,31 @@ test('UnifiedSceneDetailModal passes revision scene key as comment read-state th
 
   assert.match(usage, /sceneKey=\{primaryCommentKey\}/);
   assert.match(usage, /sceneThreadKey=\{revisionSceneKey\}/);
+});
+
+test('ScenesView maps legacy comment keys to canonical thread keys for read badges', () => {
+  assert.match(scenesView, /buildSceneThreadKeyFromCommentKey/);
+  assert.match(scenesView, /setCommentThreadKeyByCommentKey/);
+  assert.match(scenesView, /commentThreadKeyByCommentKey\[key\] \?\? key/);
+  assert.match(scenesView, /getLatestOtherUserCommentCreatedAt\(list,\s*currentUser\?\.id \?\? ''\)/);
+  assert.doesNotMatch(scenesView, /isCommentKeyUnread\(commentLatestAtByKey\[key\], commentReadAtByKey\[key\]\)/);
+});
+
+test('Scene view unread comment badges use quiet pulse styling', () => {
+  assert.match(indexCss, /@keyframes comment-unread-badge-pulse/);
+  assert.match(indexCss, /\.comment-unread-badge/);
+  assert.match(scenesView, /comment-unread-badge/);
+  assert.match(sceneDetailModal + unifiedSceneDetailModal + commentPanel, /sceneThreadKey/);
+});
+
+test('Feedback hub uses shared comment read state instead of notification-only read markers', () => {
+  assert.match(compositingView, /getCommentReadStateForUser/);
+  assert.match(compositingView, /buildSceneThreadKeyFromRevisionKey/);
+  assert.match(compositingView, /commentReadAtByThreadKey/);
+  assert.match(compositingView, /COMMENT_READ_STATE_EVENT/);
+  assert.match(compositingView, /isCommentKeyUnread/);
+  assert.match(feedbackHubPreviewApp, /primeCommentReadStateForUser/);
+  assert.match(feedbackHubPreviewApp, /COMMENT_READ_STATE_EVENT/);
 });
 
 test('CommentPanel does not mark canonical read state while merely loading comments', () => {

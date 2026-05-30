@@ -34,6 +34,28 @@ export function formatTimeShort(iso: string): string {
   return `${ampm} ${h12}:${m}`;
 }
 
+/** 댓글/활동용 시간 포맷: 오늘이면 시간만, 지난 날짜면 날짜+시간 */
+export function formatCommentTime(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+
+  if (sameDay) return formatTimeShort(iso);
+
+  const date = d.toLocaleDateString('ko-KR', {
+    ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}),
+    month: 'short',
+    day: 'numeric',
+  });
+  return `${date} ${formatTimeShort(iso)}`;
+}
+
 /**
  * 24h 절대 타임스탬프 (한솔 요청: 년/월.일/시간/분 순).
  * - 같은 날: "14:32"

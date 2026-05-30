@@ -347,11 +347,42 @@ body.theme-ready *::after {
     opacity: 0;
     margin-inline-start: -0.375rem;
   }
+
+  [data-episode-filter-label] {
+    display: none;
+  }
+
+  [data-episode-filter-short-label] {
+    display: inline;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   [data-compact-label-text] {
     transition: none;
+  }
+}
+
+@keyframes comment-unread-badge-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 rgb(var(--color-accent) / 0.22),
+      0 0 10px rgb(var(--color-accent) / 0.16);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px rgb(var(--color-accent) / 0),
+      0 0 16px rgb(var(--color-accent) / 0.28);
+  }
+}
+
+.comment-unread-badge {
+  animation: comment-unread-badge-pulse 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comment-unread-badge {
+    animation: none !important;
   }
 }
 

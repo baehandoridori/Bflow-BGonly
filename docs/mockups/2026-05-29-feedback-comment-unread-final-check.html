@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feedback Comment Read State Final Check</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #171a24;
+      --panel-2: #1d2130;
+      --line: rgba(141, 145, 170, 0.22);
+      --line-soft: rgba(141, 145, 170, 0.13);
+      --text: #e8e8ee;
+      --muted: #8b8da3;
+      --muted-2: #656a80;
+      --accent: #8f7cff;
+      --accent-2: #6c5ce7;
+      --yellow: #fdcb6e;
+      --green: #00b894;
+      color-scheme: dark;
+      font-family: Inter, "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 16% -12%, rgba(108, 92, 231, 0.22), transparent 31%),
+        linear-gradient(180deg, #121521 0%, #090b10 100%);
+      letter-spacing: 0;
+    }
+
+    button {
+      font: inherit;
+      color: inherit;
+    }
+
+    main {
+      width: min(1240px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 32px 0 42px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      line-height: 1.22;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .button {
+      border: 1px solid rgba(143, 124, 255, 0.35);
+      background: rgba(108, 92, 231, 0.16);
+      border-radius: 9px;
+      padding: 8px 11px;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+    }
+
+    .button:hover {
+      background: rgba(108, 92, 231, 0.26);
+      border-color: rgba(143, 124, 255, 0.56);
+      transform: translateY(-1px);
+    }
+
+    .button.secondary {
+      border-color: var(--line);
+      background: rgba(23, 26, 36, 0.74);
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 390px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(29, 33, 48, 0.96), rgba(18, 21, 31, 0.96));
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.32);
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .mark {
+      width: 25px;
+      height: 25px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--accent-2);
+      color: white;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .body {
+      padding: 16px;
+    }
+
+    .view-switch {
+      display: inline-flex;
+      gap: 3px;
+      border: 1px solid var(--line);
+      background: rgba(9, 11, 16, 0.32);
+      border-radius: 10px;
+      padding: 3px;
+      margin-bottom: 14px;
+    }
+
+    .view-switch button {
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      padding: 6px 9px;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .view-switch button.active {
+      background: rgba(108, 92, 231, 0.92);
+      color: white;
+      box-shadow: 0 8px 22px rgba(108, 92, 231, 0.28);
+    }
+
+    .scene-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .scene-card {
+      border: 1px solid rgba(141, 145, 170, 0.18);
+      background: rgba(9, 11, 16, 0.44);
+      border-radius: 13px;
+      overflow: hidden;
+      transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
+    }
+
+    .scene-card:hover {
+      border-color: rgba(143, 124, 255, 0.52);
+      transform: translateY(-1px);
+    }
+
+    .scene-main {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 12px;
+      border-bottom: 1px solid rgba(141, 145, 170, 0.12);
+    }
+
+    .scene-id {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(143, 124, 255, 0.32);
+      background: rgba(108, 92, 231, 0.13);
+      color: #c9c1ff;
+      border-radius: 7px;
+      padding: 3px 7px;
+      font-size: 11px;
+      font-weight: 900;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    .scene-title {
+      flex: 1;
+      min-width: 0;
+      font-size: 13px;
+      font-weight: 800;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .meta-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 12px 12px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 22px;
+      border-radius: 999px;
+      border: 1px solid rgba(141, 145, 170, 0.24);
+      background: rgba(15, 17, 23, 0.46);
+      color: var(--muted);
+      padding: 0 7px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .comment-badge {
+      border-color: rgba(143, 124, 255, 0.34);
+      background: rgba(108, 92, 231, 0.13);
+      color: #bdb4ff;
+      box-shadow: 0 0 14px rgba(108, 92, 231, 0.18);
+    }
+
+    .comment-badge.read {
+      border-color: rgba(141, 145, 170, 0.24);
+      background: rgba(141, 145, 170, 0.08);
+      color: rgba(180, 184, 202, 0.62);
+      box-shadow: none;
+    }
+
+    .comment-badge.unread {
+      animation: unreadPulse 2.55s ease-in-out infinite;
+    }
+
+    .comment-badge svg {
+      width: 12px;
+      height: 12px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.2;
+    }
+
+    @keyframes unreadPulse {
+      0%, 100% {
+        box-shadow: 0 0 9px rgba(108, 92, 231, 0.13), 0 0 0 0 rgba(108, 92, 231, 0.16);
+        border-color: rgba(143, 124, 255, 0.34);
+      }
+      50% {
+        box-shadow: 0 0 18px rgba(108, 92, 231, 0.3), 0 0 0 3px rgba(108, 92, 231, 0.07);
+        border-color: rgba(191, 181, 255, 0.6);
+      }
+    }
+
+    .open-detail {
+      margin-left: auto;
+      border: 1px solid rgba(143, 124, 255, 0.28);
+      background: rgba(108, 92, 231, 0.11);
+      color: #c9c1ff;
+      border-radius: 8px;
+      padding: 5px 8px;
+      font-size: 11px;
+      font-weight: 850;
+      cursor: pointer;
+    }
+
+    .sheet {
+      display: none;
+      border: 1px solid rgba(141, 145, 170, 0.18);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .sheet-row {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr) 118px 104px 110px;
+      align-items: center;
+      gap: 8px;
+      min-height: 48px;
+      padding: 0 12px;
+      border-bottom: 1px solid rgba(141, 145, 170, 0.12);
+      background: rgba(9, 11, 16, 0.35);
+      font-size: 12px;
+    }
+
+    .sheet-row.head {
+      min-height: 38px;
+      background: rgba(29, 33, 48, 0.86);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .sheet-row:last-child {
+      border-bottom: 0;
+    }
+
+    .hub-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .hub-item {
+      border: 1px solid rgba(141, 145, 170, 0.17);
+      background: rgba(9, 11, 16, 0.42);
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .hub-top {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .hub-text {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .hub-title {
+      font-size: 13px;
+      font-weight: 850;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .hub-desc {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(3, 5, 10, 0.64);
+      backdrop-filter: blur(7px);
+      padding: 28px;
+      z-index: 30;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal {
+      width: min(860px, 100%);
+      height: min(720px, calc(100vh - 56px));
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+      border: 1px solid rgba(143, 124, 255, 0.28);
+      background: linear-gradient(180deg, rgba(28, 32, 47, 0.98), rgba(14, 17, 26, 0.98));
+      border-radius: 18px;
+      box-shadow: 0 32px 90px rgba(0, 0, 0, 0.58);
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 16px 18px;
+      border-bottom: 1px solid rgba(141, 145, 170, 0.18);
+    }
+
+    .modal-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .modal-title strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .modal-title span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .close {
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(9, 11, 16, 0.46);
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .modal-body {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      min-height: 0;
+    }
+
+    .preview-pane {
+      padding: 18px;
+      border-right: 1px solid rgba(141, 145, 170, 0.14);
+    }
+
+    .image-box {
+      height: 248px;
+      border: 1px solid rgba(141, 145, 170, 0.16);
+      border-radius: 14px;
+      background:
+        linear-gradient(135deg, rgba(116, 185, 255, 0.12), transparent 46%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .info-stack {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .info {
+      border: 1px solid rgba(141, 145, 170, 0.15);
+      background: rgba(9, 11, 16, 0.36);
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .info label {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 850;
+      margin-bottom: 5px;
+    }
+
+    .info strong {
+      font-size: 12px;
+    }
+
+    .comments-pane {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      background: rgba(9, 11, 16, 0.21);
+    }
+
+    .tab-head {
+      padding: 13px 14px;
+      border-bottom: 1px solid rgba(141, 145, 170, 0.14);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .comment-list {
+      overflow: auto;
+      padding: 14px;
+      scroll-behavior: smooth;
+    }
+
+    .message {
+      position: relative;
+      border: 1px solid rgba(141, 145, 170, 0.16);
+      background: rgba(17, 20, 30, 0.68);
+      border-radius: 12px;
+      padding: 10px 11px;
+      margin-bottom: 10px;
+      transition: border-color 220ms ease, background 220ms ease, box-shadow 220ms ease;
+    }
+
+    .message.new {
+      border-color: rgba(143, 124, 255, 0.38);
+      background: rgba(108, 92, 231, 0.13);
+      box-shadow: inset 3px 0 0 rgba(143, 124, 255, 0.9);
+    }
+
+    .message-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .message p {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .new-divider {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 14px 0 12px;
+      color: #c9c1ff;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .new-divider::before,
+    .new-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(143, 124, 255, 0.7), transparent);
+    }
+
+    .composer {
+      display: flex;
+      gap: 8px;
+      padding: 12px 14px;
+      border-top: 1px solid rgba(141, 145, 170, 0.14);
+    }
+
+    .composer input {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: rgba(9, 11, 16, 0.46);
+      border-radius: 10px;
+      padding: 8px 10px;
+      color: var(--text);
+      outline: none;
+      font-size: 12px;
+    }
+
+    .composer button {
+      border: 0;
+      background: var(--accent-2);
+      color: white;
+      border-radius: 10px;
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 28px;
+      transform: translateX(-50%) translateY(18px);
+      opacity: 0;
+      pointer-events: none;
+      border: 1px solid rgba(143, 124, 255, 0.28);
+      background: rgba(17, 20, 30, 0.96);
+      border-radius: 999px;
+      padding: 9px 13px;
+      color: var(--muted);
+      font-size: 12px;
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+      transition: opacity 180ms ease, transform 180ms ease;
+      z-index: 40;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+      .modal-body { grid-template-columns: 1fr; }
+      .preview-pane { display: none; }
+      .scene-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>댓글 읽음 상태 최종 확인</h1>
+        <p class="subtitle">확정된 규칙: 사용자+씬 기준 마지막 확인 시간 저장, 전체 댓글 수 유지, 안읽음은 배지만 조용히 펄스, 상세 모달은 첫 새 댓글로 이동.</p>
+      </div>
+      <div class="toolbar">
+        <button class="button secondary" id="resetBtn">안읽음으로 되돌리기</button>
+        <button class="button" id="newCommentBtn">새 댓글 추가</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <span class="mark">S</span>
+            <div>
+              <h2>씬 뷰: 카드 / 시트</h2>
+              <div class="mini">숫자는 전체 댓글 수, 보라색 펄스는 새 댓글 존재</div>
+            </div>
+          </div>
+          <span class="mini" id="readStateText">새 댓글 2개</span>
+        </div>
+        <div class="body">
+          <div class="view-switch">
+            <button class="active" data-view="card">카드 뷰</button>
+            <button data-view="sheet">시트 뷰</button>
+          </div>
+
+          <div class="scene-grid" id="cardView">
+            <article class="scene-card">
+              <div class="scene-main">
+                <span class="scene-id">a001</span>
+                <span class="scene-title">학교 앞 골목 낮 배경</span>
+                <span class="pill">진행중</span>
+              </div>
+              <div class="meta-row">
+                <span class="pill">담당 배한</span>
+                <span class="pill comment-badge unread" data-comment-badge title="새 댓글 포함, 전체 댓글 7개">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.3 8.7 8.7 0 0 1-3.6-.9L3 20l1.3-4.6A8.2 8.2 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z"/></svg>
+                  <span data-comment-count>7</span>
+                </span>
+                <button class="open-detail" data-open-detail>씬 상세</button>
+              </div>
+            </article>
+
+            <article class="scene-card">
+              <div class="scene-main">
+                <span class="scene-id">a002</span>
+                <span class="scene-title">교실 창가 오후 톤</span>
+                <span class="pill" style="color: var(--green); border-color: rgba(0,184,148,.28); background: rgba(0,184,148,.09);">완료</span>
+              </div>
+              <div class="meta-row">
+                <span class="pill">담당 서연</span>
+                <span class="pill comment-badge read" title="확인한 댓글, 전체 댓글 3개">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.3 8.7 8.7 0 0 1-3.6-.9L3 20l1.3-4.6A8.2 8.2 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z"/></svg>
+                  <span>3</span>
+                </span>
+                <button class="open-detail">씬 상세</button>
+              </div>
+            </article>
+          </div>
+
+          <div class="sheet" id="sheetView">
+            <div class="sheet-row head">
+              <span>씬</span><span>내용</span><span>상태</span><span>댓글</span><span></span>
+            </div>
+            <div class="sheet-row">
+              <span class="scene-id">a001</span>
+              <span>학교 앞 골목 낮 배경</span>
+              <span class="pill">진행중</span>
+              <span class="pill comment-badge unread" data-comment-badge>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.3 8.7 8.7 0 0 1-3.6-.9L3 20l1.3-4.6A8.2 8.2 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z"/></svg>
+                <span data-comment-count>7</span>
+              </span>
+              <button class="open-detail" data-open-detail>씬 상세</button>
+            </div>
+            <div class="sheet-row">
+              <span class="scene-id">a002</span>
+              <span>교실 창가 오후 톤</span>
+              <span class="pill" style="color: var(--green); border-color: rgba(0,184,148,.28); background: rgba(0,184,148,.09);">완료</span>
+              <span class="pill comment-badge read">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.3 8.7 8.7 0 0 1-3.6-.9L3 20l1.3-4.6A8.2 8.2 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z"/></svg>
+                <span>3</span>
+              </span>
+              <button class="open-detail">씬 상세</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <span class="mark">H</span>
+            <div>
+              <h2>피드백 허브</h2>
+              <div class="mini">같은 씬이면 같은 읽음 상태를 공유</div>
+            </div>
+          </div>
+        </div>
+        <div class="body">
+          <div class="hub-list">
+            <article class="hub-item">
+              <div class="hub-top">
+                <span class="scene-id">a001</span>
+                <div class="hub-text">
+                  <div class="hub-title">re2 그림자 경계 보정 요청</div>
+                  <div class="hub-desc">리비전 댓글과 일반 댓글을 씬 단위로 함께 읽음 처리합니다.</div>
+                </div>
+                <span class="pill comment-badge unread" data-comment-badge>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.3 8.7 8.7 0 0 1-3.6-.9L3 20l1.3-4.6A8.2 8.2 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z"/></svg>
+                  <span data-comment-count>7</span>
+                </span>
+              </div>
+            </article>
+            <article class="hub-item">
+              <div class="hub-top">
+                <span class="scene-id">a002</span>
+                <div class="hub-text">
+                  <div class="hub-title">re1 오후 톤 완료 확인</div>
+                  <div class="hub-desc">이미 확인한 댓글은 회색 배지로 유지됩니다.</div>
+                </div>
+                <span class="pill comment-badge read">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.3 8.7 8.7 0 0 1-3.6-.9L3 20l1.3-4.6A8.2 8.2 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z"/></svg>
+                  <span>3</span>
+                </span>
+              </div>
+            </article>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <div class="modal-backdrop" id="modal">
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <div class="modal-title">
+          <span class="scene-id">a001</span>
+          <div>
+            <strong id="modalTitle">씬 상세</strong>
+            <span>댓글 및 활동 탭: 첫 새 댓글 위치로 자동 이동</span>
+          </div>
+        </div>
+        <button class="close" id="closeBtn" aria-label="닫기">x</button>
+      </div>
+      <div class="modal-body">
+        <div class="preview-pane">
+          <div class="image-box">씬 프리뷰 영역</div>
+          <div class="info-stack">
+            <div class="info"><label>상태</label><strong>진행중</strong></div>
+            <div class="info"><label>담당</label><strong>배한</strong></div>
+            <div class="info"><label>댓글</label><strong data-comment-count>7</strong></div>
+          </div>
+        </div>
+        <div class="comments-pane">
+          <div class="tab-head">댓글 및 활동</div>
+          <div class="comment-list" id="commentList">
+            <article class="message">
+              <div class="message-meta"><span>서연</span><span>어제 18:10</span></div>
+              <p>초기 확인했습니다. 입구 쪽 그림자만 조금 더 정리하면 될 것 같아요.</p>
+            </article>
+            <article class="message">
+              <div class="message-meta"><span>배한</span><span>오늘 09:18</span></div>
+              <p>re2로 반영했습니다. 캐릭터 발밑만 다시 확인 부탁드립니다.</p>
+            </article>
+            <div class="new-divider" id="newDivider">새 댓글</div>
+            <article class="message new" data-new-comment>
+              <div class="message-meta"><span>한솔</span><span>오늘 11:42</span></div>
+              <p>골목 입구 그림자 경계가 아직 딱 끊겨 보여요. 캐릭터 동선 주변만 부드럽게 풀어주세요.</p>
+            </article>
+            <article class="message new" data-new-comment>
+              <div class="message-meta"><span>서연</span><span>오늘 11:46</span></div>
+              <p>리비전 확인했습니다. 처리 시작하면 상태만 진행중으로 바꿔주세요.</p>
+            </article>
+          </div>
+          <div class="composer">
+            <input placeholder="답글 입력..." id="replyInput">
+            <button id="replyBtn">등록</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast">새 댓글이 화면에 보여 읽음 처리되었습니다.</div>
+
+  <script>
+    const badges = Array.from(document.querySelectorAll('[data-comment-badge]'));
+    const countNodes = Array.from(document.querySelectorAll('[data-comment-count]'));
+    const readStateText = document.getElementById('readStateText');
+    const modal = document.getElementById('modal');
+    const commentList = document.getElementById('commentList');
+    const newDivider = document.getElementById('newDivider');
+    const toast = document.getElementById('toast');
+    const cardView = document.getElementById('cardView');
+    const sheetView = document.getElementById('sheetView');
+
+    let isUnread = true;
+    let totalComments = 7;
+    let toastTimer = null;
+
+    function showToast(text) {
+      toast.textContent = text;
+      toast.classList.add('show');
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1900);
+    }
+
+    function renderState() {
+      badges.forEach((badge) => {
+        badge.classList.toggle('unread', isUnread);
+        badge.classList.toggle('read', !isUnread);
+        badge.title = isUnread
+          ? `새 댓글 포함, 전체 댓글 ${totalComments}개`
+          : `확인한 댓글, 전체 댓글 ${totalComments}개`;
+      });
+      countNodes.forEach((node) => {
+        node.textContent = String(totalComments);
+      });
+      readStateText.textContent = isUnread ? '새 댓글 2개' : '읽음';
+    }
+
+    function markRead() {
+      if (!isUnread) return;
+      isUnread = false;
+      document.querySelectorAll('[data-new-comment]').forEach((el) => {
+        el.classList.remove('new');
+      });
+      renderState();
+      showToast('새 댓글이 화면에 보여 읽음 처리되었습니다.');
+    }
+
+    function openModal() {
+      modal.classList.add('open');
+      window.setTimeout(() => {
+        newDivider.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 80);
+      window.setTimeout(markRead, 760);
+    }
+
+    function closeModal() {
+      modal.classList.remove('open');
+    }
+
+    document.querySelectorAll('[data-open-detail], .hub-item').forEach((el) => {
+      el.addEventListener('click', openModal);
+    });
+
+    document.getElementById('closeBtn').addEventListener('click', closeModal);
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) closeModal();
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      isUnread = true;
+      document.querySelectorAll('[data-new-comment]').forEach((el) => {
+        el.classList.add('new');
+      });
+      renderState();
+      showToast('a001 씬을 다시 안읽음 상태로 돌렸습니다.');
+    });
+
+    document.getElementById('newCommentBtn').addEventListener('click', () => {
+      totalComments += 1;
+      isUnread = true;
+      const article = document.createElement('article');
+      article.className = 'message new';
+      article.setAttribute('data-new-comment', '');
+      article.innerHTML = '<div class="message-meta"><span>민지</span><span>방금</span></div><p>새로 추가된 댓글입니다. 전체 댓글 수는 늘어나지만 배지는 전체 수만 표시합니다.</p>';
+      commentList.appendChild(article);
+      renderState();
+      showToast('새 댓글이 추가되어 배지만 다시 펄스됩니다.');
+    });
+
+    document.getElementById('replyBtn').addEventListener('click', () => {
+      const input = document.getElementById('replyInput');
+      if (!input.value.trim()) return;
+      totalComments += 1;
+      const article = document.createElement('article');
+      article.className = 'message';
+      article.innerHTML = '<div class="message-meta"><span>나</span><span>방금</span></div><p>' + input.value.replace(/[<>&]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[ch])) + '</p>';
+      commentList.appendChild(article);
+      input.value = '';
+      markRead();
+      renderState();
+    });
+
+    document.querySelectorAll('.view-switch button').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.view-switch button').forEach((btn) => btn.classList.remove('active'));
+        button.classList.add('active');
+        const view = button.dataset.view;
+        cardView.style.display = view === 'card' ? 'grid' : 'none';
+        sheetView.style.display = view === 'sheet' ? 'block' : 'none';
+      });
+    });
+
+    renderState();
+  </script>
+</body>
+</html>

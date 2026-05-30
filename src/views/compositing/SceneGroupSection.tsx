@@ -446,19 +446,25 @@ export function EpisodeFilter({
       >
         <CompactIconLabel icon={<Circle size={12} strokeWidth={2.4} />} label="전체" />
       </button>
-      {episodes.map((ep) => (
-        <button
-          key={ep.episodeNumber}
-          onClick={() => onSelect(ep.episodeNumber)}
-          className={`px-3 py-1.5 text-xs rounded-lg border transition-all cursor-pointer ${
-            selected === ep.episodeNumber
-              ? 'border-accent bg-accent/10 text-accent'
-              : 'border-bg-border text-text-secondary hover:text-text-primary'
-          }`}
-        >
-          {getDisplayName(ep)}
-        </button>
-      ))}
+      {episodes.map((ep) => {
+        const displayName = getDisplayName(ep);
+        const shortName = `EP.${String(ep.episodeNumber).padStart(2, '0')}`;
+        return (
+          <button
+            key={ep.episodeNumber}
+            onClick={() => onSelect(ep.episodeNumber)}
+            title={displayName}
+            className={`compact-label-container inline-flex min-w-0 max-w-[10rem] shrink items-center justify-center px-3 py-1.5 text-xs rounded-lg border transition-all cursor-pointer ${
+              selected === ep.episodeNumber
+                ? 'border-accent bg-accent/10 text-accent'
+                : 'border-bg-border text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            <span data-episode-filter-label className="min-w-0 truncate">{displayName}</span>
+            <span data-episode-filter-short-label className="hidden whitespace-nowrap">{shortName}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

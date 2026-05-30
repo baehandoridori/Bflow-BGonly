@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { BarChart3, CheckCircle2, Circle, Clock, Filter, Layers, List, ListFilter, PlayCircle, Plus, Search } from 'lucide-react';
+import { ArrowUpDown, BarChart3, CheckCircle2, Circle, Clock, Filter, Layers, List, ListFilter, PlayCircle, Plus, Search } from 'lucide-react';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -8,6 +8,13 @@ import { useAppStore } from '@/stores/useAppStore';
 import { useNotificationStore } from '@/stores/useNotificationStore';
 import { setRevisionsSheetsMode, buildSceneKey } from '@/services/revisionService';
 import { loadPartComments } from '@/services/commentService';
+import {
+  COMMENT_READ_STATE_EVENT,
+  getCommentReadStateForUser,
+  getLatestOtherUserCommentCreatedAt,
+  isCommentKeyUnread,
+} from '@/services/commentReadStateService';
+import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import type { CompRevision, RevisionStatus } from '@/types';
 import {
   parseSceneKey,
@@ -22,6 +29,7 @@ import { EpisodeGroupSection } from './compositing/EpisodeGroupSection';
 import { ProgressKanbanSection } from './compositing/ProgressKanbanSection';
 import NewRevisionModal from './compositing/NewRevisionModal';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
+import { GlassDropdown } from '@/components/common/GlassDropdown';
 
 // v1.19.0: 그룹화 모드
 type GroupMode = 'scene' | 'episode' | 'progress';
@@ -59,6 +67,8 @@ export default function CompositingView({
   const [newRevModalOpen, setNewRevModalOpen] = useState(false);
   // v1.19.6: 리비전별 댓글 카운트 맵 (revisionId → count). 표시되는 sheetName 들의 댓글을 한 번 fetch 해 빌드.
   const [commentCountByRev, setCommentCountByRev] = useState<Map<string, number>>(() => new Map());
+  const [commentLatestByRev, setCommentLatestByRev] = useState<Map<string, string>>(() => new Map());
+  const [commentReadAtByThreadKey, setCommentReadAtByThreadKey] = useState<Record<string, string>>({});
   // 댓글 변경(다른 창에서 추가/수정/삭제) 시 카운트 재빌드 트리거용 카운터
   const [commentRefreshTick, setCommentRefreshTick] = useState(0);
 
@@ -73,6 +83,34 @@ export default function CompositingView({
     setRevisionsSheetsMode(dataConnected);
     loadRevisions();
   }, [dataConnected, loadRevisions, previewMode]);
+
+  useEffect(() => {
+    if (previewMode) return;
+
+    let cancelled = false;
+    const loadReadState = () => {
+      if (!currentUser?.id) {
+        setCommentReadAtByThreadKey({});
+        return;
+      }
+
+      void getCommentReadStateForUser(currentUser.id).then((state) => {
+        if (!cancelled) setCommentReadAtByThreadKey(state);
+      });
+    };
+
+    loadReadState();
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      if (detail?.userId && detail.userId !== currentUser?.id) return;
+      loadReadState();
+    };
+    window.addEventListener(COMMENT_READ_STATE_EVENT, handler);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(COMMENT_READ_STATE_EVENT, handler);
+    };
+  }, [currentUser?.id, previewMode]);
 
   const effectiveCommentCountByRev = previewMode && previewCommentCountByRev
     ? previewCommentCountByRev
@@ -104,7 +142,22 @@ export default function CompositingView({
     }
     return seenByRev;
   }, [notifications]);
-  const effectiveCommentSeenByRev = previewMode ? previewCommentSeenByRev : notificationCommentSeenByRev;
+  const readStateCommentSeenByRev = useMemo(() => {
+    const seenByRev = new Map(notificationCommentSeenByRev);
+
+    for (const revision of revisions) {
+      const count = effectiveCommentCountByRev.get(revision.id) ?? 0;
+      const latestAt = commentLatestByRev.get(revision.id);
+      if (count <= 0 || !latestAt) continue;
+
+      const threadKey = buildSceneThreadKeyFromRevisionKey(revision.sceneKey);
+      const readAt = commentReadAtByThreadKey[threadKey];
+      seenByRev.set(revision.id, !!readAt && !isCommentKeyUnread(latestAt, readAt));
+    }
+
+    return seenByRev;
+  }, [commentLatestByRev, commentReadAtByThreadKey, effectiveCommentCountByRev, notificationCommentSeenByRev, revisions]);
+  const effectiveCommentSeenByRev = previewMode ? previewCommentSeenByRev : readStateCommentSeenByRev;
 
   // 씬 정보 맵 빌드 (에피소드 데이터 + 리비전 sceneKey 매칭)
   //
@@ -353,6 +406,7 @@ export default function CompositingView({
   useEffect(() => {
     if (previewMode) {
       setCommentCountByRev(previewCommentCountByRev ?? new Map());
+      setCommentLatestByRev(new Map());
       return;
     }
     if (!sheetNamesKey) return;
@@ -368,6 +422,7 @@ export default function CompositingView({
         // revisionId → count (BG/ACT 통합 조회로 중복 들어올 수 있어 commentId 로 dedup)
         const seenCommentIds = new Set<string>();
         const counts = new Map<string, number>();
+        const commentsByRev = new Map<string, Parameters<typeof getLatestOtherUserCommentCreatedAt>[0]>();
         for (const store of stores) {
           for (const list of Object.values(store)) {
             for (const c of list) {
@@ -375,17 +430,25 @@ export default function CompositingView({
               if (seenCommentIds.has(c.id)) continue;
               seenCommentIds.add(c.id);
               counts.set(c.revisionId, (counts.get(c.revisionId) || 0) + 1);
+              const revisionComments = commentsByRev.get(c.revisionId) ?? [];
+              commentsByRev.set(c.revisionId, [...revisionComments, c]);
             }
           }
         }
+        const latestByRev = new Map<string, string>();
+        for (const [revisionId, comments] of commentsByRev) {
+          const latestAt = getLatestOtherUserCommentCreatedAt(comments, currentUser?.id ?? '');
+          if (latestAt) latestByRev.set(revisionId, latestAt);
+        }
         setCommentCountByRev(counts);
+        setCommentLatestByRev(latestByRev);
       } catch (err) {
         if (!cancelled) console.warn('[CompositingView] 댓글 카운트 빌드 실패:', err);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [sheetNamesKey, commentRefreshTick, previewMode, previewCommentCountByRev]);
+  }, [sheetNamesKey, commentRefreshTick, previewMode, previewCommentCountByRev, currentUser?.id]);
 
   // 댓글 변경 이벤트 — 다른 창에서 댓글 추가/수정/삭제 시 카운트 재빌드.
   // commentService 가 invalidate 이벤트와 함께 캐시도 비우므로 다음 fetch 는 최신 데이터를 가져옴.
@@ -482,16 +545,19 @@ export default function CompositingView({
               />
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              <select
+              <GlassDropdown<SortMode>
+                options={[
+                  { value: 'recent', label: '최신순' },
+                  { value: 'oldest', label: '오래된순' },
+                  { value: 'sceneNo', label: '씬 번호순' },
+                  { value: 'comments', label: '댓글 많은순' },
+                ]}
                 value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-                className="min-h-[34px] bg-bg-primary/80 border border-bg-border/60 rounded-md px-2 text-[12px] text-text-primary focus:outline-none focus:border-accent/60 cursor-pointer"
-              >
-                <option value="recent">최신순</option>
-                <option value="oldest">오래된순</option>
-                <option value="sceneNo">씬 번호순</option>
-                <option value="comments">댓글 많은순</option>
-              </select>
+                onChange={setSortMode}
+                label="정렬"
+                icon={<ArrowUpDown size={13} className="text-text-secondary" />}
+                minWidth={132}
+              />
             </div>
             <div className="inline-flex min-h-[34px] bg-bg-primary rounded-lg p-1 gap-0.5 border border-bg-border/40 shrink-0">
               {([

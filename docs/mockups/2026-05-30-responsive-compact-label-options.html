@@ -1,0 +1,1127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bflow Responsive Label Polish Options</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #151924;
+      --surface-2: #1c2230;
+      --surface-3: #10131c;
+      --line: rgba(141, 145, 170, 0.22);
+      --line-soft: rgba(141, 145, 170, 0.12);
+      --text: #e8e8ee;
+      --muted: #8b8da3;
+      --muted-2: #64697f;
+      --accent: #8f7cff;
+      --accent-2: #6c5ce7;
+      --blue: #74b9ff;
+      --green: #00b894;
+      --yellow: #fdcb6e;
+      --red: #ff7675;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
+      color-scheme: dark;
+      font-family: Inter, "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 14% -8%, rgba(108, 92, 231, 0.22), transparent 30%),
+        linear-gradient(180deg, #141826 0%, #080a10 100%);
+      letter-spacing: 0;
+    }
+
+    button {
+      font: inherit;
+      color: inherit;
+    }
+
+    svg {
+      display: block;
+    }
+
+    main {
+      width: min(1380px, calc(100vw - 44px));
+      margin: 0 auto;
+      padding: 30px 0 44px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0 0 7px;
+      font-size: 26px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.62;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .segmented {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(11, 13, 20, 0.62);
+    }
+
+    .segmented button,
+    .option-tab {
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      min-height: 32px;
+      padding: 0 10px;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 150ms ease, color 150ms ease, box-shadow 150ms ease;
+    }
+
+    .segmented button.active,
+    .option-tab.active {
+      color: #fff;
+      background: linear-gradient(180deg, rgba(143, 124, 255, 1), rgba(108, 92, 231, 0.92));
+      box-shadow: 0 9px 24px rgba(108, 92, 231, 0.26);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(25, 29, 42, 0.95), rgba(12, 15, 22, 0.95));
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .panel-head h2 {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .panel-head p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .options {
+      padding: 12px;
+      display: grid;
+      gap: 9px;
+    }
+
+    .option {
+      width: 100%;
+      text-align: left;
+      border: 1px solid rgba(141, 145, 170, 0.18);
+      background: rgba(15, 17, 25, 0.68);
+      border-radius: 12px;
+      padding: 12px;
+      cursor: pointer;
+      transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+    }
+
+    .option:hover {
+      transform: translateY(-1px);
+      border-color: rgba(143, 124, 255, 0.38);
+      background: rgba(27, 31, 45, 0.86);
+    }
+
+    .option.active {
+      border-color: rgba(143, 124, 255, 0.72);
+      background:
+        linear-gradient(90deg, rgba(108, 92, 231, 0.18), rgba(108, 92, 231, 0.04)),
+        rgba(20, 23, 34, 0.96);
+      box-shadow: inset 3px 0 0 rgba(143, 124, 255, 0.95);
+    }
+
+    .option-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .tag {
+      flex: 0 0 auto;
+      border: 1px solid rgba(143, 124, 255, 0.28);
+      border-radius: 999px;
+      padding: 2px 7px;
+      color: #c9c1ff;
+      background: rgba(108, 92, 231, 0.12);
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .option-desc {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.55;
+    }
+
+    .rules {
+      padding: 12px 16px 16px;
+      display: grid;
+      gap: 8px;
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .rule {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr);
+      gap: 9px;
+      align-items: start;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .rule svg {
+      margin-top: 1px;
+      color: var(--accent);
+    }
+
+    .stage {
+      padding: 14px;
+    }
+
+    .preview-shell {
+      width: var(--preview-width, 100%);
+      max-width: 100%;
+      min-width: 360px;
+      margin: 0 auto;
+      border: 1px solid rgba(141, 145, 170, 0.2);
+      border-radius: 18px;
+      background: #0b0d13;
+      overflow: hidden;
+      box-shadow: 0 18px 52px rgba(0, 0, 0, 0.34);
+      transition: width 240ms ease;
+    }
+
+    .preview-shell[data-width="wide"] {
+      --preview-width: 100%;
+    }
+
+    .preview-shell[data-width="medium"] {
+      --preview-width: 820px;
+    }
+
+    .preview-shell[data-width="narrow"] {
+      --preview-width: 600px;
+    }
+
+    .preview-shell[data-width="micro"] {
+      --preview-width: 430px;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr);
+      min-height: 680px;
+    }
+
+    .nav {
+      border-right: 1px solid rgba(141, 145, 170, 0.16);
+      background: linear-gradient(180deg, #20243a, #161927 55%, #11141f);
+      padding: 12px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .logo {
+      width: 29px;
+      height: 29px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: white;
+      background: linear-gradient(135deg, rgba(143, 124, 255, 0.95), rgba(76, 68, 160, 0.78));
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      font-size: 12px;
+      font-weight: 900;
+      box-shadow: 0 10px 24px rgba(108, 92, 231, 0.34);
+    }
+
+    .nav-icon {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: var(--muted);
+    }
+
+    .nav-icon.active {
+      color: #fff;
+      background: rgba(108, 92, 231, 0.36);
+      border: 1px solid rgba(143, 124, 255, 0.26);
+    }
+
+    .content {
+      min-width: 0;
+      padding: 18px;
+    }
+
+    .app-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .app-title {
+      min-width: 0;
+    }
+
+    .app-title h3 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      line-height: 1.18;
+    }
+
+    .app-title p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .command-row,
+    .filter-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 9px;
+      margin-bottom: 10px;
+    }
+
+    .filter-row {
+      justify-content: flex-start;
+      flex-wrap: nowrap;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .search {
+      flex: 1;
+      min-width: 150px;
+      height: 36px;
+      border: 1px solid rgba(141, 145, 170, 0.17);
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px;
+      color: var(--muted-2);
+      background: rgba(9, 11, 16, 0.42);
+      font-size: 12px;
+    }
+
+    .action-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .btn,
+    .chip,
+    .phase,
+    .head-cell {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-width: 0;
+      border: 1px solid rgba(141, 145, 170, 0.18);
+      border-radius: 9px;
+      min-height: 32px;
+      padding: 0 9px;
+      background: rgba(15, 17, 25, 0.7);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+      line-height: 1;
+      overflow: hidden;
+    }
+
+    .btn.primary {
+      color: #fff;
+      border-color: rgba(143, 124, 255, 0.38);
+      background: linear-gradient(180deg, rgba(143, 124, 255, 0.92), rgba(108, 92, 231, 0.84));
+      box-shadow: 0 9px 24px rgba(108, 92, 231, 0.26);
+    }
+
+    .btn.active,
+    .chip.active,
+    .phase.active {
+      color: #fff;
+      border-color: rgba(143, 124, 255, 0.42);
+      background: rgba(108, 92, 231, 0.82);
+    }
+
+    .btn .label,
+    .chip .label,
+    .phase .label,
+    .head-cell .label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: clip;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: currentColor;
+      box-shadow: 0 0 12px currentColor;
+    }
+
+    .more {
+      display: none;
+    }
+
+    .workbench {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .tree {
+      border: 1px solid rgba(141, 145, 170, 0.16);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(21, 25, 36, 0.95), rgba(12, 14, 22, 0.95));
+      overflow: hidden;
+    }
+
+    .tree-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(141, 145, 170, 0.12);
+    }
+
+    .tree-head strong {
+      font-size: 13px;
+    }
+
+    .part {
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(141, 145, 170, 0.08);
+    }
+
+    .part-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 900;
+      margin-bottom: 9px;
+    }
+
+    .scene-card {
+      border: 1px solid rgba(141, 145, 170, 0.14);
+      border-radius: 11px;
+      background: rgba(9, 11, 16, 0.34);
+      padding: 10px;
+      display: grid;
+      gap: 9px;
+      margin-bottom: 8px;
+    }
+
+    .scene-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .scene-id {
+      flex: 0 0 auto;
+      border: 1px solid rgba(143, 124, 255, 0.32);
+      color: #c9c1ff;
+      background: rgba(108, 92, 231, 0.12);
+      border-radius: 7px;
+      padding: 4px 7px;
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .scene-name {
+      min-width: 0;
+      flex: 1;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .scene-tools {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      flex-wrap: nowrap;
+      overflow: hidden;
+    }
+
+    .status-card {
+      border: 1px solid rgba(141, 145, 170, 0.16);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(21, 25, 36, 0.95), rgba(12, 14, 22, 0.95));
+      padding: 14px;
+    }
+
+    .status-card h4 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+
+    .status-card p {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .mini-feed {
+      display: grid;
+      gap: 7px;
+    }
+
+    .feed-item {
+      border: 1px solid rgba(141, 145, 170, 0.13);
+      border-radius: 9px;
+      background: rgba(9, 11, 16, 0.36);
+      padding: 9px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .sheet {
+      margin-top: 12px;
+      border: 1px solid rgba(141, 145, 170, 0.16);
+      border-radius: 14px;
+      background: rgba(10, 12, 18, 0.62);
+      overflow: hidden;
+    }
+
+    .sheet-row {
+      display: grid;
+      grid-template-columns: 70px 1.4fr 92px 96px 88px 84px;
+      min-width: 0;
+    }
+
+    .sheet-row + .sheet-row {
+      border-top: 1px solid rgba(141, 145, 170, 0.08);
+    }
+
+    .cell {
+      min-width: 0;
+      padding: 8px 9px;
+      border-right: 1px solid rgba(141, 145, 170, 0.08);
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cell:last-child {
+      border-right: 0;
+    }
+
+    .cell.head {
+      color: var(--text);
+      background: rgba(28, 34, 48, 0.78);
+      font-weight: 900;
+    }
+
+    .bulk {
+      margin-top: 12px;
+      border: 1px solid rgba(141, 145, 170, 0.16);
+      border-radius: 12px;
+      background: rgba(21, 25, 36, 0.82);
+      padding: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .bulk-left,
+    .bulk-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .bad-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      overflow: hidden;
+      padding: 10px 14px;
+      border-top: 1px solid rgba(141, 145, 170, 0.08);
+      background: rgba(255, 118, 117, 0.045);
+    }
+
+    .bad-chip {
+      min-width: 26px;
+      max-width: 38px;
+      min-height: 30px;
+      padding: 0 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 118, 117, 0.28);
+      color: rgba(255, 184, 184, 0.92);
+      background: rgba(255, 118, 117, 0.08);
+      font-size: 10px;
+      font-weight: 900;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bad-chip.vertical {
+      width: 22px;
+      white-space: normal;
+      word-break: keep-all;
+      line-height: 1.05;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .legend-item {
+      border: 1px solid rgba(141, 145, 170, 0.15);
+      background: rgba(9, 11, 16, 0.34);
+      border-radius: 11px;
+      padding: 10px;
+      min-width: 0;
+    }
+
+    .legend-item strong {
+      display: block;
+      font-size: 11px;
+      margin-bottom: 5px;
+    }
+
+    .legend-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 10.5px;
+      line-height: 1.45;
+    }
+
+    .tooltip-demo {
+      position: absolute;
+      inset: auto 10px calc(100% + 8px) auto;
+      padding: 6px 8px;
+      border-radius: 8px;
+      border: 1px solid rgba(141, 145, 170, 0.25);
+      background: rgba(7, 9, 14, 0.95);
+      color: var(--text);
+      font-size: 10px;
+      white-space: nowrap;
+      opacity: 0;
+      transform: translateY(2px);
+      pointer-events: none;
+      transition: opacity 120ms ease, transform 120ms ease;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+    }
+
+    .btn:hover .tooltip-demo,
+    .chip:hover .tooltip-demo,
+    .phase:hover .tooltip-demo {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .preview-shell[data-width="narrow"] .workbench,
+    .preview-shell[data-width="micro"] .workbench {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .preview-shell[data-width="narrow"] .status-card,
+    .preview-shell[data-width="micro"] .status-card {
+      display: none;
+    }
+
+    .preview-shell[data-width="micro"] .app {
+      grid-template-columns: 40px minmax(0, 1fr);
+    }
+
+    .preview-shell[data-width="micro"] .content {
+      padding: 14px 12px;
+    }
+
+    .preview-shell[data-width="narrow"] .app-header,
+    .preview-shell[data-width="micro"] .app-header,
+    .preview-shell[data-width="micro"] .command-row {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .preview-shell[data-width="narrow"] .filter-row,
+    .preview-shell[data-width="micro"] .filter-row {
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .preview-shell[data-width="micro"] .sheet-row {
+      grid-template-columns: 54px 1.3fr 58px 56px 52px 52px;
+    }
+
+    .preview-shell[data-width="narrow"] .scene-tools .chip,
+    .preview-shell[data-width="narrow"] .phase,
+    .preview-shell[data-width="narrow"] .btn.secondary,
+    .preview-shell[data-width="micro"] .scene-tools .chip,
+    .preview-shell[data-width="micro"] .phase,
+    .preview-shell[data-width="micro"] .btn.secondary {
+      max-width: 36px;
+      padding-inline: 8px;
+    }
+
+    .preview-shell[data-width="narrow"] .btn .label,
+    .preview-shell[data-width="narrow"] .chip .label,
+    .preview-shell[data-width="narrow"] .phase .label,
+    .preview-shell[data-width="micro"] .btn .label,
+    .preview-shell[data-width="micro"] .chip .label,
+    .preview-shell[data-width="micro"] .phase .label {
+      display: none;
+    }
+
+    .preview-shell[data-width="narrow"] .head-cell .full,
+    .preview-shell[data-width="micro"] .head-cell .full {
+      display: none;
+    }
+
+    .preview-shell[data-width="wide"] .head-cell .short,
+    .preview-shell[data-width="medium"] .head-cell .short {
+      display: none;
+    }
+
+    .preview-shell[data-option="b"][data-width="narrow"] .btn.primary,
+    .preview-shell[data-option="b"][data-width="narrow"] .chip.important,
+    .preview-shell[data-option="b"][data-width="micro"] .btn.primary,
+    .preview-shell[data-option="b"][data-width="micro"] .chip.important {
+      max-width: none;
+    }
+
+    .preview-shell[data-option="b"][data-width="narrow"] .btn.primary .label,
+    .preview-shell[data-option="b"][data-width="narrow"] .chip.important .label {
+      display: inline;
+    }
+
+    .preview-shell[data-option="b"][data-width="micro"] .chip.important .label {
+      display: none;
+    }
+
+    .preview-shell[data-option="c"][data-width="narrow"] .secondary-pack,
+    .preview-shell[data-option="c"][data-width="micro"] .secondary-pack {
+      display: none;
+    }
+
+    .preview-shell[data-option="c"][data-width="narrow"] .more,
+    .preview-shell[data-option="c"][data-width="micro"] .more {
+      display: inline-flex;
+    }
+
+    .preview-shell[data-option="c"][data-width="narrow"] .scene-tools,
+    .preview-shell[data-option="c"][data-width="micro"] .scene-tools {
+      justify-content: flex-start;
+    }
+
+    .preview-shell[data-width="micro"] .bulk {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .preview-shell[data-width="micro"] .bulk-left,
+    .preview-shell[data-width="micro"] .bulk-right {
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    @media (max-width: 980px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <div>
+        <h1>전역 반응형 라벨 폴리싱 시안</h1>
+        <p class="subtitle">
+          좁은 창에서 버튼 라벨이 말줄임 또는 세로 배치로 무너지는 문제를 전역 규칙으로 정리하는 시안입니다.
+          실제 데이터 텍스트는 보존하고, 조작 버튼과 상태 칩만 단계적으로 아이콘화합니다.
+        </p>
+      </div>
+      <div class="toolbar">
+        <div class="segmented" aria-label="프리뷰 폭">
+          <button class="active" data-width="wide">넓게</button>
+          <button data-width="medium">중간</button>
+          <button data-width="narrow">좁게</button>
+          <button data-width="micro">매우 좁게</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <aside class="panel">
+        <div class="panel-head">
+          <h2>방향 선택</h2>
+          <p>각 방향을 누르고, 오른쪽에서 폭을 바꿔 보세요.</p>
+        </div>
+        <div class="options">
+          <button class="option active" data-option="a">
+            <div class="option-title">
+              <span>A. 아이콘 우선 접힘</span>
+              <span class="tag">추천</span>
+            </div>
+            <p class="option-desc">
+              모든 조작 버튼은 넓을 때 텍스트를 보이고, 좁아지면 같은 위치에서 아이콘만 남깁니다.
+              가장 일관되고 구현 범위가 작습니다.
+            </p>
+          </button>
+          <button class="option" data-option="b">
+            <div class="option-title">
+              <span>B. 중요도 기반 접힘</span>
+              <span class="tag">균형</span>
+            </div>
+            <p class="option-desc">
+              핵심 버튼은 텍스트를 더 오래 유지하고, 보조 버튼만 먼저 아이콘화합니다.
+              정보성은 좋지만 기준 정의가 더 필요합니다.
+            </p>
+          </button>
+          <button class="option" data-option="c">
+            <div class="option-title">
+              <span>C. 보조 조작 묶기</span>
+              <span class="tag">강함</span>
+            </div>
+            <p class="option-desc">
+              좁은 화면에서는 보조 기능을 더보기 버튼으로 묶습니다.
+              가장 깔끔하지만 클릭 한 번이 추가되고 구현 범위가 큽니다.
+            </p>
+          </button>
+        </div>
+        <div class="rules">
+          <div class="rule">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span>조작 버튼: 좁아지면 아이콘만 남기고 tooltip/aria-label로 의미를 보존합니다.</span>
+          </div>
+          <div class="rule">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span>실제 데이터: 씬명, 담당자, 메모, 댓글 본문은 임의 아이콘화하지 않습니다.</span>
+          </div>
+          <div class="rule">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h16v14H4zM8 5v14M16 5v14" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+            <span>시트 헤더: 아이콘보다 짧은 코드 라벨을 씁니다. 예: Storyboard는 SB, Acting은 ACT.</span>
+          </div>
+          <div class="rule">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+            <span>너무 좁은 조작 묶음은 C안처럼 더보기로 흡수할 수 있습니다.</span>
+          </div>
+        </div>
+      </aside>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>프리뷰</h2>
+          <p>피드백 허브, 씬 카드, 액팅 단계, 시트 헤더, 선택 일괄 툴바를 한 화면에 압축했습니다.</p>
+        </div>
+        <div class="stage">
+          <div id="previewShell" class="preview-shell" data-option="a" data-width="wide">
+            <div class="app">
+              <nav class="nav" aria-label="앱 메뉴">
+                <div class="logo">B</div>
+                <div class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" stroke="currentColor" stroke-width="2"/></svg></div>
+                <div class="nav-icon active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></div>
+                <div class="nav-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.38 1.1V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.38H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .38-1.1V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.39.31.77.5 1.1.6H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.4z" stroke="currentColor" stroke-width="1.7"/></svg></div>
+              </nav>
+
+              <div class="content">
+                <header class="app-header">
+                  <div class="app-title">
+                    <h3>피드백 허브</h3>
+                    <p>28개 씬 · 담당/상태/댓글 흐름을 한 화면에서 정리합니다.</p>
+                  </div>
+                  <div class="action-group">
+                    <button class="btn secondary" aria-label="모두 펼치기" title="모두 펼치기">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M4 8h16M4 16h16M8 4l4 4-4 4M16 12l-4 4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      <span class="label">모두 펼치기</span>
+                      <span class="tooltip-demo">모두 펼치기</span>
+                    </button>
+                    <button class="btn primary" aria-label="새 피드백" title="새 피드백">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+                      <span class="label">새 피드백</span>
+                      <span class="tooltip-demo">새 피드백</span>
+                    </button>
+                  </div>
+                </header>
+
+                <div class="command-row">
+                  <div class="search">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    본문, 씬, 등록자, 담당자 검색
+                  </div>
+                  <div class="action-group secondary-pack">
+                    <button class="btn secondary" aria-label="최신순" title="최신순"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M8 7h12M4 7h.01M8 12h10M4 12h.01M8 17h8M4 17h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="label">최신순</span><span class="tooltip-demo">최신순</span></button>
+                    <button class="btn secondary active" aria-label="씬 트리" title="씬 트리"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M6 4v16M6 8h6a3 3 0 0 1 3 3v1M6 16h8a3 3 0 0 0 3-3v-1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="label">씬 트리</span><span class="tooltip-demo">씬 트리</span></button>
+                    <button class="btn secondary" aria-label="에피소드별" title="에피소드별"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M4 5h7v14H4zM13 5h7v14h-7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span class="label">에피소드별</span><span class="tooltip-demo">에피소드별</span></button>
+                    <button class="btn secondary" aria-label="상태 보드" title="상태 보드"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M4 5h5v14H4zM10 5h5v14h-5zM16 5h4v14h-4z" stroke="currentColor" stroke-width="2"/></svg><span class="label">상태 보드</span><span class="tooltip-demo">상태 보드</span></button>
+                  </div>
+                  <button class="btn secondary more" aria-label="더보기" title="정렬과 보기 전환"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><span class="tooltip-demo">정렬과 보기 전환</span></button>
+                </div>
+
+                <div class="filter-row">
+                  <button class="chip active important" aria-label="전체" title="전체"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h12M4 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="label">전체</span><span class="tooltip-demo">전체</span></button>
+                  <button class="chip important" aria-label="대기" title="대기"><span class="dot" style="color: var(--yellow)"></span><span class="label">대기</span><span class="tooltip-demo">대기</span></button>
+                  <button class="chip important" aria-label="진행중" title="진행중"><span class="dot" style="color: var(--blue)"></span><span class="label">진행중</span><span class="tooltip-demo">진행중</span></button>
+                  <button class="chip important" aria-label="완료" title="완료"><span class="dot" style="color: var(--green)"></span><span class="label">완료</span><span class="tooltip-demo">완료</span></button>
+                  <button class="chip secondary-pack" aria-label="내 관련" title="내 관련"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" stroke="currentColor" stroke-width="2"/></svg><span class="label">내 관련</span><span class="tooltip-demo">내 관련</span></button>
+                  <button class="chip more" aria-label="필터 더보기" title="필터 더보기"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><span class="tooltip-demo">필터 더보기</span></button>
+                </div>
+
+                <div class="workbench">
+                  <section class="tree">
+                    <div class="tree-head">
+                      <strong>EP.05</strong>
+                      <span class="tag">7 미해결</span>
+                    </div>
+
+                    <div class="part">
+                      <div class="part-title">
+                        <span>A 파트</span>
+                        <span style="color: var(--muted); font-size: 11px;">2씬 · 3개</span>
+                      </div>
+                      <article class="scene-card">
+                        <div class="scene-top">
+                          <span class="scene-id">a001</span>
+                          <span class="scene-name">학교 앞 골목 낮 배경</span>
+                          <button class="btn secondary" aria-label="씬 상세" title="씬 상세"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M14 3h7v7M21 3l-9 9M10 5H5v14h14v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="label">씬 상세</span><span class="tooltip-demo">씬 상세</span></button>
+                        </div>
+                        <div class="scene-tools">
+                          <span class="phase active important" title="대기"><span class="dot" style="color: var(--yellow)"></span><span class="label">대기</span><span class="tooltip-demo">대기</span></span>
+                          <span class="chip important" title="댓글 3개"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" stroke="currentColor" stroke-width="2"/></svg><span class="label">댓글 3</span><span class="tooltip-demo">댓글 3개</span></span>
+                          <span class="chip secondary-pack" title="담당 배한"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" stroke="currentColor" stroke-width="2"/></svg><span class="label">담당 배한</span><span class="tooltip-demo">담당 배한</span></span>
+                          <button class="chip more" aria-label="씬 조작 더보기" title="씬 조작 더보기"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><span class="tooltip-demo">씬 조작 더보기</span></button>
+                        </div>
+                      </article>
+                      <article class="scene-card">
+                        <div class="scene-top">
+                          <span class="scene-id">a002</span>
+                          <span class="scene-name">교실 창가 오후 톤</span>
+                          <button class="btn secondary" aria-label="씬 상세" title="씬 상세"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M14 3h7v7M21 3l-9 9M10 5H5v14h14v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="label">씬 상세</span><span class="tooltip-demo">씬 상세</span></button>
+                        </div>
+                        <div class="scene-tools">
+                          <span class="phase important" title="진행중"><span class="dot" style="color: var(--blue)"></span><span class="label">진행중</span><span class="tooltip-demo">진행중</span></span>
+                          <span class="chip important" title="댓글 확인됨"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" stroke="currentColor" stroke-width="2"/></svg><span class="label">댓글 1</span><span class="tooltip-demo">댓글 1개</span></span>
+                          <span class="chip secondary-pack" title="담당 서연"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" stroke="currentColor" stroke-width="2"/></svg><span class="label">담당 서연</span><span class="tooltip-demo">담당 서연</span></span>
+                          <button class="chip more" aria-label="씬 조작 더보기" title="씬 조작 더보기"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><span class="tooltip-demo">씬 조작 더보기</span></button>
+                        </div>
+                      </article>
+                    </div>
+
+                    <div class="part">
+                      <div class="part-title">
+                        <span>B 파트</span>
+                        <span style="color: var(--muted); font-size: 11px;">1씬 · 1개</span>
+                      </div>
+                      <article class="scene-card">
+                        <div class="scene-top">
+                          <span class="scene-id">b001</span>
+                          <span class="scene-name">복도 전환 컷</span>
+                          <button class="btn secondary" aria-label="씬 상세" title="씬 상세"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M14 3h7v7M21 3l-9 9M10 5H5v14h14v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="label">씬 상세</span><span class="tooltip-demo">씬 상세</span></button>
+                        </div>
+                        <div class="scene-tools">
+                          <span class="phase important" title="완료"><span class="dot" style="color: var(--green)"></span><span class="label">완료</span><span class="tooltip-demo">완료</span></span>
+                          <span class="chip important" title="댓글 0개"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" stroke="currentColor" stroke-width="2"/></svg><span class="label">댓글 0</span><span class="tooltip-demo">댓글 0개</span></span>
+                          <span class="chip secondary-pack" title="담당 민지"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" stroke="currentColor" stroke-width="2"/></svg><span class="label">담당 민지</span><span class="tooltip-demo">담당 민지</span></span>
+                          <button class="chip more" aria-label="씬 조작 더보기" title="씬 조작 더보기"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><span class="tooltip-demo">씬 조작 더보기</span></button>
+                        </div>
+                      </article>
+                    </div>
+
+                    <div class="bad-row" aria-label="현재 문제 예시">
+                      <span style="color: var(--muted); font-size: 11px; font-weight: 800;">현재 문제</span>
+                      <span class="bad-chip">작...</span>
+                      <span class="bad-chip vertical">피드백</span>
+                      <span class="bad-chip">씬...</span>
+                      <span style="color: var(--muted-2); font-size: 10.5px;">이런 형태를 전역 규칙으로 없앱니다.</span>
+                    </div>
+                  </section>
+
+                  <aside class="status-card">
+                    <h4>선택한 항목</h4>
+                    <p>오른쪽 패널은 넓을 때만 유지하고, 좁아지면 메인 흐름을 우선합니다.</p>
+                    <div class="mini-feed">
+                      <div class="feed-item">a001 · 그림자 경계 보정 요청</div>
+                      <div class="feed-item">댓글 3개 · 새 댓글 1개</div>
+                      <div class="feed-item">씬 상세 열기 버튼은 아이콘과 tooltip로 유지</div>
+                    </div>
+                  </aside>
+                </div>
+
+                <section class="sheet" aria-label="시트 헤더 축소 예시">
+                  <div class="sheet-row">
+                    <div class="cell head">씬</div>
+                    <div class="cell head">메모</div>
+                    <div class="cell head head-cell"><span class="full">스토리보드</span><span class="short">SB</span></div>
+                    <div class="cell head head-cell"><span class="full">가이드</span><span class="short">Guide</span></div>
+                    <div class="cell head head-cell"><span class="full">배경</span><span class="short">BG</span></div>
+                    <div class="cell head head-cell"><span class="full">액팅</span><span class="short">ACT</span></div>
+                  </div>
+                  <div class="sheet-row">
+                    <div class="cell">a001</div>
+                    <div class="cell">골목 입구 그림자 경계</div>
+                    <div class="cell">완료</div>
+                    <div class="cell">대기</div>
+                    <div class="cell">검수</div>
+                    <div class="cell">진행중</div>
+                  </div>
+                </section>
+
+                <section class="bulk" aria-label="선택 일괄 편집 축소 예시">
+                  <div class="bulk-left">
+                    <span style="font-size: 12px; font-weight: 900;">선택 3</span>
+                    <span style="color: var(--muted); font-size: 11px;">일괄 변경</span>
+                  </div>
+                  <div class="bulk-right">
+                    <button class="phase important" aria-label="작업" title="작업"><span class="dot" style="color: var(--blue)"></span><span class="label">작업</span><span class="tooltip-demo">작업</span></button>
+                    <button class="phase important" aria-label="피드백" title="피드백"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" stroke="currentColor" stroke-width="2"/></svg><span class="label">피드백</span><span class="tooltip-demo">피드백</span></button>
+                    <button class="phase important" aria-label="완료" title="완료"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="label">완료</span><span class="tooltip-demo">완료</span></button>
+                    <button class="btn secondary secondary-pack" aria-label="선택 해제" title="선택 해제"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span class="label">선택 해제</span><span class="tooltip-demo">선택 해제</span></button>
+                    <button class="btn secondary more" aria-label="일괄 조작 더보기" title="일괄 조작 더보기"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M6 12h.01M12 12h.01M18 12h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg><span class="tooltip-demo">일괄 조작 더보기</span></button>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <div class="legend">
+            <div class="legend-item">
+              <strong>적용 1: 피드백 허브</strong>
+              <span>상단 정렬, 보기 전환, 새 피드백, 씬 상세 버튼을 아이콘 우선 구조로 통일합니다.</span>
+            </div>
+            <div class="legend-item">
+              <strong>적용 2: 씬 카드/시트</strong>
+              <span>댓글 배지, 상세 열기, 단계 토글은 아이콘화하되 씬명과 담당자 텍스트는 보존합니다.</span>
+            </div>
+            <div class="legend-item">
+              <strong>적용 3: 시트 헤더</strong>
+              <span>헤더는 tooltip이 있는 짧은 코드로 바꿔 세로 글자 문제를 줄입니다.</span>
+            </div>
+            <div class="legend-item">
+              <strong>적용 4: 벌크 툴바</strong>
+              <span>선택 일괄 조작은 폭에 따라 아이콘 또는 더보기로 정리합니다.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const shell = document.getElementById('previewShell');
+    const optionButtons = [...document.querySelectorAll('[data-option]')];
+    const widthButtons = [...document.querySelectorAll('[data-width]')];
+
+    optionButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const option = button.dataset.option;
+        shell.dataset.option = option;
+        optionButtons.forEach((candidate) => candidate.classList.toggle('active', candidate === button));
+      });
+    });
+
+    widthButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const width = button.dataset.width;
+        shell.dataset.width = width;
+        widthButtons.forEach((candidate) => candidate.classList.toggle('active', candidate === button));
+      });
+    });
+  </script>
+</body>
+</html>

@@ -67,11 +67,18 @@ async function bootstrap() {
   const popupParams = popupMatch?.[2]
     ? Object.fromEntries(new URLSearchParams(popupMatch[2]))
     : {};
+  const feedbackHubPreview = import.meta.env.DEV
+    && new URLSearchParams(window.location.search).get('preview') === 'feedback-hub';
+  const PreviewApp = feedbackHubPreview
+    ? (await import('./views/FeedbackHubPreviewApp')).FeedbackHubPreviewApp
+    : null;
 
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       {popupMatch ? (
         <WidgetPopup widgetId={decodeURIComponent(popupMatch[1])} extraParams={popupParams} />
+      ) : PreviewApp ? (
+        <PreviewApp />
       ) : (
         <App />
       )}
