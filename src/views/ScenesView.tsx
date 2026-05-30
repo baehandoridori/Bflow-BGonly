@@ -16,6 +16,11 @@ import {
   matchesMergedSceneIdentity,
 } from '@/utils/mergedSceneHelpers';
 import { getAllViewCompletionState, getSingleViewCompletionState } from '@/utils/visibleCompletion';
+import {
+  buildSequentialStagePatch,
+  getChangedSequentialStages,
+  isSequentialStageComplete,
+} from '@/utils/sceneStageProgression';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUpDown, LayoutGrid, Grid3x3, Layers, List, ChevronUp, ChevronDown, ClipboardPaste, ImagePlus, ArrowLeft, CheckSquare, Trash2, X, MessageCircle, Pencil, MoreVertical, StickyNote, Archive, Film, RotateCcw, Clock, PlayCircle, CheckCircle2, Circle, MessageSquareWarning, Plus, UserRound } from 'lucide-react';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
@@ -698,7 +703,7 @@ import {
   bulkUpdateSceneFields,
 } from '@/services/supabaseService';
 import type { BatchAction } from '@/services/supabaseService';
-import type { BulkStageUpdate, BulkFieldUpdate } from '@/types';
+import type { BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult } from '@/types';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useBulkOperationsStore } from '@/stores/useBulkOperationsStore';
 import {
@@ -1601,7 +1606,7 @@ function AddEpisodeModal({
 
 export function ScenesView() {
   const episodes = useDataStore((s) => s.episodes);
-  const toggleSceneStage = useDataStore((s) => s.toggleSceneStage);
+  const setSceneStageValue = useDataStore((s) => s.setSceneStageValue);
   const addEpisodeOptimistic = useDataStore((s) => s.addEpisodeOptimistic);
   const addPartOptimistic = useDataStore((s) => s.addPartOptimistic);
   const addSceneOptimistic = useDataStore((s) => s.addSceneOptimistic);
@@ -2824,15 +2829,20 @@ export function ScenesView() {
     const scene = latestPart.scenes.find((s) => s.sceneId === sceneId);
     if (!scene) return;
 
-    const newValue = !scene[stage];
+    const stagePatch = buildSequentialStagePatch(scene, stage);
+    const changedStages = getChangedSequentialStages(scene, stagePatch);
+    if (changedStages.length === 0) return;
+
     const sceneIndex = latestPart.scenes.findIndex((s) => s.sceneId === sceneId);
     if (sceneIndex < 0) return;
+
     const completionMeta = (() => {
       const prevCompletedBy = scene.completedBy ?? '';
       const prevCompletedAt = scene.completedAt ?? '';
-      if (newValue) {
-        const afterToggle = { ...scene, [stage]: true };
-        if (!afterToggle.lo || !afterToggle.done || !afterToggle.review || !afterToggle.png) return null;
+      const wasAllDone = isSequentialStageComplete(scene);
+      const willBeAllDone = isSequentialStageComplete(stagePatch);
+
+      if (!wasAllDone && willBeAllDone) {
         return {
           nextCompletedBy: currentUser?.name ?? '알 수 없음',
           nextCompletedAt: new Date().toISOString(),
@@ -2840,17 +2850,22 @@ export function ScenesView() {
           prevCompletedAt,
         };
       }
-      if (!prevCompletedBy && !prevCompletedAt) return null;
-      return {
-        nextCompletedBy: '',
-        nextCompletedAt: '',
-        prevCompletedBy,
-        prevCompletedAt,
-      };
+      if (wasAllDone && !willBeAllDone) {
+        if (!prevCompletedBy && !prevCompletedAt) return null;
+        return {
+          nextCompletedBy: '',
+          nextCompletedAt: '',
+          prevCompletedBy,
+          prevCompletedAt,
+        };
+      }
+      return null;
     })();
 
     // 낙관적 업데이트 — 즉시 UI 반영
-    toggleSceneStage(sheetName, sceneId, stage);
+    changedStages.forEach((changedStage) => {
+      setSceneStageValue(sheetName, sceneId, changedStage, stagePatch[changedStage]);
+    });
 
     // 완료 축하 애니메이션 + 완료 기록: 방금 토글로 4단계 모두 완료 시
     if (completionMeta) {
@@ -2869,14 +2884,10 @@ export function ScenesView() {
     const isActingScene = sheetName.endsWith('_ACT');
     let actingPhaseSync: { state: ScenePhaseState; workRound: number; feedbackRound: number } | null = null;
     if (isActingScene && scene.id) {
-      const nlo = stage === 'lo' ? newValue : scene.lo;
-      const ndone = stage === 'done' ? newValue : scene.done;
-      const nreview = stage === 'review' ? newValue : scene.review;
-      const npng = stage === 'png' ? newValue : scene.png;
       const newPhase: ScenePhaseState =
-        npng ? 'done'
-        : nreview ? 'feedback'
-        : ndone ? 'work'
+        stagePatch.png ? 'done'
+        : stagePatch.review ? 'feedback'
+        : stagePatch.done ? 'work'
         : 'wait';
       const prevPhase: ScenePhaseState = scene.sceneState ?? 'wait';
       const work = newPhase === 'work'
@@ -2892,14 +2903,16 @@ export function ScenesView() {
     // API 호출을 큐에 넣어 순차 실행 (race condition 방지)
     toggleQueueRef.current = toggleQueueRef.current.then(async () => {
       try {
-        await updateCell(sheetName, sceneIndex, stage, newValue, currentUser?.id);
-        window.electronAPI?.dataNotifyChange?.({
-          type: 'toggle',
-          sheetName,
-          sceneId,
-          field: stage,
-          value: newValue,
-        });
+        for (const changedStage of changedStages) {
+          await updateCell(sheetName, sceneIndex, changedStage, stagePatch[changedStage], currentUser?.id);
+          window.electronAPI?.dataNotifyChange?.({
+            type: 'toggle',
+            sheetName,
+            sceneId,
+            field: changedStage,
+            value: stagePatch[changedStage],
+          });
+        }
         // 액팅 phase reverse dual-write — stage 저장 성공 후 새 컬럼도 동기화
         if (actingPhaseSync && scene.id) {
           try {
@@ -2916,7 +2929,9 @@ export function ScenesView() {
         }
       } catch (err) {
         console.error('[토글 실패]', err);
-        toggleSceneStage(sheetName, sceneId, stage);
+        changedStages.forEach((changedStage) => {
+          setSceneStageValue(sheetName, sceneId, changedStage, Boolean(scene[changedStage]));
+        });
         if (completionMeta) {
           updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedBy', completionMeta.prevCompletedBy);
           updateSceneFieldOptimistic(sheetName, sceneIndex, 'completedAt', completionMeta.prevCompletedAt);
@@ -3023,14 +3038,19 @@ export function ScenesView() {
     const nowIso = new Date().toISOString();
     const actorName = currentUser?.name ?? '알 수 없음';
 
-    const updates: BulkStageUpdate[] = targetScenes.map((s) => {
-      const currentValue = Boolean(s[stage]);
-      const newValue = !currentValue;
-      const wasAllDone = Boolean(s.lo && s.done && s.review && s.png);
-      const afterToggle = { lo: s.lo, done: s.done, review: s.review, png: s.png, [stage]: newValue };
-      const willBeAllDone = Boolean(
-        afterToggle.lo && afterToggle.done && afterToggle.review && afterToggle.png,
-      );
+    const updates: BulkStageUpdate[] = [];
+    const completedMetaByUuid = new Map<string, { completedBy: string; completedAt: string }>();
+    const stagePatchByUuid = new Map<string, Partial<Record<Stage, boolean>>>();
+
+    for (const s of targetScenes) {
+      if (!s.id) continue;
+
+      const stagePatch = buildSequentialStagePatch(s, stage);
+      const changedStages = getChangedSequentialStages(s, stagePatch);
+      if (changedStages.length === 0) continue;
+
+      const wasAllDone = isSequentialStageComplete(s);
+      const willBeAllDone = isSequentialStageComplete(stagePatch);
 
       // 완료 메타 시맨틱 (BulkStageUpdate 주석 참조):
       // - 4단계 전체 미완료 → 완료: actor/now UPSERT
@@ -3046,20 +3066,27 @@ export function ScenesView() {
         completedAt = null;
       }
 
-      return {
-        sceneUuid: s.id!, // resolveSelectedScenes가 id 있는 것만 반환
-        stage,
-        value: newValue,
-        completedBy,
-        completedAt,
-      };
-    });
+      const sceneStagePatch: Partial<Record<Stage, boolean>> = {};
+      changedStages.forEach((changedStage, index) => {
+        sceneStagePatch[changedStage] = stagePatch[changedStage];
+        const update: BulkStageUpdate = {
+          sceneUuid: s.id!, // resolveSelectedScenes가 id 있는 것만 반환
+          stage: changedStage,
+          value: stagePatch[changedStage],
+        };
+        if (index === 0) {
+          if (completedBy !== undefined) update.completedBy = completedBy;
+          if (completedAt !== undefined) update.completedAt = completedAt;
+        }
+        updates.push(update);
+      });
+      stagePatchByUuid.set(s.id, sceneStagePatch);
+    }
+
+    if (updates.length === 0) return;
 
     // 로컬 store 반영용 맵 — null(해제)은 빈 문자열로, string(설정)은 값 그대로
-    const completedMetaByUuid = new Map<string, { completedBy: string; completedAt: string }>();
-    const stageValueByUuid = new Map<string, boolean>();
     for (const u of updates) {
-      stageValueByUuid.set(u.sceneUuid, u.value);
       if (u.completedBy === null && u.completedAt === null) {
         completedMetaByUuid.set(u.sceneUuid, { completedBy: '', completedAt: '' });
       } else if (u.completedBy && u.completedAt) {
@@ -3067,16 +3094,33 @@ export function ScenesView() {
       }
     }
 
+    const targetUuids = Array.from(new Set(updates.map((u) => u.sceneUuid)));
+    const coalesceBulkStageResults = (
+      requestedUuids: string[],
+      results: BulkUpdateResult[],
+    ): BulkUpdateResult[] => {
+      const byUuid = new Map<string, BulkUpdateResult>(
+        requestedUuids.map((sceneUuid) => [sceneUuid, { sceneUuid, success: true }]),
+      );
+      for (const result of results) {
+        if (!result.success) {
+          byUuid.set(result.sceneUuid, result);
+        }
+      }
+      return requestedUuids.map((sceneUuid) => byUuid.get(sceneUuid) ?? { sceneUuid, success: true });
+    };
+
     await runBulkOp(
       'stage-toggle',
-      updates.map((u) => u.sceneUuid),
+      targetUuids,
       // retry 시 전달받은 uuids 부분집합만 재전송 (이미 성공한 씬의 값 덮어쓰기 방지)
-      (uuidsToSend) => {
+      async (uuidsToSend) => {
         const set = new Set(uuidsToSend);
         const subset = updates.filter((u) => set.has(u.sceneUuid));
-        return bulkUpdateSceneStages(subset, currentUser?.id ?? '');
+        const results = await bulkUpdateSceneStages(subset, currentUser?.id ?? '');
+        return coalesceBulkStageResults(uuidsToSend, results);
       },
-      { targetStage: stage, completedMetaByUuid, stageValueByUuid },
+      { targetStage: stage, completedMetaByUuid, stagePatchByUuid },
     );
   };
 
