@@ -171,6 +171,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('supabase:delete-user', userId),
   supabaseReadComments: (partUuid: string) =>
     ipcRenderer.invoke('supabase:read-comments', partUuid),
+  supabaseReadCommentReadStates: (userId: string) =>
+    ipcRenderer.invoke('supabase:read-comment-read-states', userId),
+  supabaseUpsertCommentReadState: (userId: string, sceneThreadKey: string, lastReadAt: string) =>
+    ipcRenderer.invoke('supabase:upsert-comment-read-state', userId, sceneThreadKey, lastReadAt),
   // 한솔 결정 (v1.15.5): 로그인 catch-up
   supabaseFetchMissedMentions: (userId: string, userName: string, since: string, limit?: number) =>
     ipcRenderer.invoke('supabase:fetch-missed-mentions', userId, userName, since, limit),

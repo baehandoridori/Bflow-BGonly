@@ -277,6 +277,13 @@ export interface CommentReactionGroup {
   mine: boolean;           // 본인이 누른 이모지인지
 }
 
+export interface CommentReadStateRow {
+  userId: string;
+  sceneThreadKey: string;
+  lastReadAt: string;
+  updatedAt: string;
+}
+
 // ─── 이미지 버전 (v1.26.0+) ─────────────────
 
 export type ImageType = 'storyboard' | 'guide';
@@ -860,6 +867,8 @@ export interface ElectronAPI {
   supabaseUpdateUser: (userId: string, updates: Record<string, string | boolean | null>) => Promise<void>;
   supabaseDeleteUser: (userId: string) => Promise<void>;
   supabaseReadComments: (partUuid: string) => Promise<unknown[]>;
+  supabaseReadCommentReadStates?: (userId: string) => Promise<CommentReadStateRow[]>;
+  supabaseUpsertCommentReadState?: (userId: string, sceneThreadKey: string, lastReadAt: string) => Promise<void>;
   /** 한솔 결정 (v1.15.5): 로그인 catch-up — last seen 이후 받은 멘션 댓글 일괄 조회 */
   supabaseFetchMissedMentions: (userId: string, userName: string, since: string, limit?: number) => Promise<Array<{
     id: string;

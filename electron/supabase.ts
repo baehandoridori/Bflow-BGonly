@@ -149,6 +149,13 @@ export interface SupabaseComment {
   parentCommentId?: string | null;
 }
 
+export interface CommentReadStateRow {
+  userId: string;
+  sceneThreadKey: string;
+  lastReadAt: string;
+  updatedAt: string;
+}
+
 export interface SupabaseRevision {
   id: string;
   partId: string;
@@ -1295,6 +1302,51 @@ export async function readCommentsForPart(partUuid: string): Promise<SupabaseCom
     // v1.24.0: 1단계 대댓글 부모 참조. NULL 이면 일반 댓글.
     parentCommentId: c.parent_comment_id ?? null,
   }));
+}
+
+export async function readCommentReadStates(userId: string): Promise<CommentReadStateRow[]> {
+  const safeUserId = userId.trim();
+  if (!safeUserId) return [];
+
+  const { data, error } = await supabase
+    .from('comment_read_states')
+    .select('user_id, scene_thread_key, last_read_at, updated_at')
+    .eq('user_id', safeUserId)
+    .order('updated_at', { ascending: false });
+
+  throwIfError(error);
+
+  return (data ?? []).map((row: any) => ({
+    userId: String(row.user_id ?? ''),
+    sceneThreadKey: String(row.scene_thread_key ?? ''),
+    lastReadAt: String(row.last_read_at ?? ''),
+    updatedAt: String(row.updated_at ?? ''),
+  })).filter((row) => row.userId && row.sceneThreadKey && row.lastReadAt);
+}
+
+export async function upsertCommentReadState(
+  userId: string,
+  sceneThreadKey: string,
+  lastReadAt: string,
+): Promise<void> {
+  const safeUserId = userId.trim();
+  const safeSceneThreadKey = sceneThreadKey.trim();
+  const readMs = Date.parse(lastReadAt);
+
+  if (!safeUserId || !safeSceneThreadKey || !Number.isFinite(readMs)) {
+    throw new Error('invalid comment read state input');
+  }
+
+  const { error } = await supabase
+    .from('comment_read_states')
+    .upsert({
+      user_id: safeUserId,
+      scene_thread_key: safeSceneThreadKey,
+      last_read_at: new Date(readMs).toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,scene_thread_key' });
+
+  throwIfError(error);
 }
 
 /** 댓글 추가 */
