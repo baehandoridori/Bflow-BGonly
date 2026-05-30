@@ -1337,14 +1337,11 @@ export async function upsertCommentReadState(
     throw new Error('invalid comment read state input');
   }
 
-  const { error } = await supabase
-    .from('comment_read_states')
-    .upsert({
-      user_id: safeUserId,
-      scene_thread_key: safeSceneThreadKey,
-      last_read_at: new Date(readMs).toISOString(),
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,scene_thread_key' });
+  const { error } = await supabase.rpc('upsert_comment_read_state', {
+    p_user_id: safeUserId,
+    p_scene_thread_key: safeSceneThreadKey,
+    p_last_read_at: new Date(readMs).toISOString(),
+  });
 
   throwIfError(error);
 }

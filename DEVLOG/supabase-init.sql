@@ -199,6 +199,38 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+CREATE OR REPLACE FUNCTION upsert_comment_read_state(
+  p_user_id TEXT,
+  p_scene_thread_key TEXT,
+  p_last_read_at TIMESTAMPTZ
+) RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO comment_read_states (
+    user_id,
+    scene_thread_key,
+    last_read_at,
+    updated_at
+  )
+  VALUES (
+    p_user_id,
+    p_scene_thread_key,
+    p_last_read_at,
+    now()
+  )
+  ON CONFLICT (user_id, scene_thread_key) DO UPDATE
+  SET
+    last_read_at = GREATEST(comment_read_states.last_read_at, EXCLUDED.last_read_at),
+    updated_at = CASE
+      WHEN EXCLUDED.last_read_at > comment_read_states.last_read_at THEN now()
+      ELSE comment_read_states.updated_at
+    END;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION upsert_comment_read_state(TEXT, TEXT, TIMESTAMPTZ) TO anon, authenticated;
+
 ALTER TABLE comp_revisions ENABLE ROW LEVEL SECURITY;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'comp_revisions' AND policyname = 'allow_all') THEN

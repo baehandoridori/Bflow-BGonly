@@ -21,4 +21,11 @@ for (const [label, sql] of [
     assert.match(sql, /ALTER TABLE comment_read_states ENABLE ROW LEVEL SECURITY/i);
     assert.match(sql, /CREATE POLICY "allow_all" ON comment_read_states FOR ALL USING \(true\) WITH CHECK \(true\)/i);
   });
+
+  test(`${label} upserts comment_read_states monotonically`, () => {
+    assert.match(sql, /CREATE OR REPLACE FUNCTION upsert_comment_read_state/i);
+    assert.match(sql, /GREATEST\s*\(\s*comment_read_states\.last_read_at\s*,\s*EXCLUDED\.last_read_at\s*\)/i);
+    assert.match(sql, /WHEN\s+EXCLUDED\.last_read_at\s*>\s*comment_read_states\.last_read_at\s+THEN\s+now\(\)/i);
+    assert.match(sql, /GRANT EXECUTE ON FUNCTION upsert_comment_read_state\s*\(\s*TEXT\s*,\s*TEXT\s*,\s*TIMESTAMPTZ\s*\)\s+TO anon,\s*authenticated/i);
+  });
 }
