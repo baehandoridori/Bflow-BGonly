@@ -34,6 +34,7 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { buildSceneKey } from '@/services/revisionService';
+import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
 import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
 import { SceneContinuityTransition } from './SceneContinuityTransition';
@@ -226,6 +227,7 @@ export function UnifiedSceneDetailModal({
   const revisionSceneKey = revisionSheetName && revisionSceneId
     ? buildSceneKey(revisionSheetName, revisionSceneId, { siblingSceneIds: revisionSiblingSceneIds })
     : '';
+  const sceneThreadKey = revisionSceneKey ? buildSceneThreadKeyFromRevisionKey(revisionSceneKey) : '';
   const openRevCount = useRevisionStore((s) => revisionSceneKey ? s.getOpenCount(revisionSceneKey) : 0);
 
   // UI state — v1.18.0: initialTab 으로 외부에서 시작 탭 지정 가능 (알림 클릭 시 'revisions' 등)
@@ -927,7 +929,7 @@ export function UnifiedSceneDetailModal({
             <CommentPanelResizable
               commentCount={commentCount}
               sceneKey={primaryCommentKey}
-              sceneThreadKey={revisionSceneKey}
+              sceneThreadKey={sceneThreadKey}
               secondarySceneKey={secondaryCommentKey || undefined}
               onCountChange={setCommentCount}
               inlineEvents={inlineEvents}
