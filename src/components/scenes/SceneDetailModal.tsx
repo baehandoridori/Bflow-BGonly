@@ -32,6 +32,7 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { buildSceneKey } from '@/services/revisionService';
+import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { formatStamp, formatTime } from '@/utils/formatTime';
 import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
 
@@ -512,6 +513,7 @@ export function SceneDetailModal({
   const pct = sceneProgress(scene);
   const sceneKey = `${sheetName}:${scene.no}`;
   const revisionSceneKey = buildSceneKey(sheetName, scene.sceneId);
+  const sceneThreadKey = buildSceneThreadKeyFromRevisionKey(revisionSceneKey);
   const openRevCount = useRevisionStore((s) => s.getOpenCount(revisionSceneKey));
 
   // 댓글 수 로드
@@ -1091,7 +1093,7 @@ export function SceneDetailModal({
           <CommentPanelResizable
             commentCount={commentCount}
             sceneKey={sceneKey}
-            sceneThreadKey={revisionSceneKey}
+            sceneThreadKey={sceneThreadKey}
             counterpartSheetName={counterpartSheetName}
             counterpartSceneNo={counterpartSceneNo}
             onCountChange={setCommentCount}

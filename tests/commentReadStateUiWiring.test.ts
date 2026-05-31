@@ -29,18 +29,22 @@ test('CommentPanelResizable passes canonical sceneThreadKey to CommentPanel', ()
   assert.match(resizable, /sceneThreadKey=\{sceneThreadKey/);
 });
 
-test('SceneDetailModal passes revision scene key as comment read-state thread key', () => {
+test('SceneDetailModal passes canonical thread key as comment read-state thread key', () => {
   const usage = getCommentPanelResizableUsage(sceneDetailModal);
 
+  assert.match(sceneDetailModal, /buildSceneThreadKeyFromRevisionKey/);
+  assert.match(sceneDetailModal, /const sceneThreadKey = buildSceneThreadKeyFromRevisionKey\(revisionSceneKey\)/);
   assert.match(usage, /sceneKey=\{sceneKey\}/);
-  assert.match(usage, /sceneThreadKey=\{revisionSceneKey\}/);
+  assert.match(usage, /sceneThreadKey=\{sceneThreadKey\}/);
 });
 
-test('UnifiedSceneDetailModal passes revision scene key as comment read-state thread key', () => {
+test('UnifiedSceneDetailModal passes canonical thread key as comment read-state thread key', () => {
   const usage = getCommentPanelResizableUsage(unifiedSceneDetailModal);
 
+  assert.match(unifiedSceneDetailModal, /buildSceneThreadKeyFromRevisionKey/);
+  assert.match(unifiedSceneDetailModal, /const sceneThreadKey = revisionSceneKey \? buildSceneThreadKeyFromRevisionKey\(revisionSceneKey\) : ''/);
   assert.match(usage, /sceneKey=\{primaryCommentKey\}/);
-  assert.match(usage, /sceneThreadKey=\{revisionSceneKey\}/);
+  assert.match(usage, /sceneThreadKey=\{sceneThreadKey\}/);
 });
 
 test('Scene detail comment panels expose /re quick revision context', () => {
@@ -58,7 +62,7 @@ test('ScenesView maps legacy comment keys to canonical thread keys for read badg
   assert.match(scenesView, /buildSceneThreadKeyFromCommentKey/);
   assert.match(scenesView, /setCommentThreadKeyByCommentKey/);
   assert.match(scenesView, /commentThreadKeyByCommentKey\[key\] \?\? key/);
-  assert.match(scenesView, /getLatestOtherUserCommentCreatedAt\(list,\s*currentUser\?\.id \?\? ''\)/);
+  assert.match(scenesView, /currentUser\?\.id\s*\?\s*getLatestOtherUserCommentCreatedAt\(list,\s*currentUser\.id\)\s*:\s*getLatestCommentCreatedAt\(list\)/);
   assert.doesNotMatch(scenesView, /isCommentKeyUnread\(commentLatestAtByKey\[key\], commentReadAtByKey\[key\]\)/);
 });
 

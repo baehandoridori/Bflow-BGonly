@@ -2344,7 +2344,9 @@ export function ScenesView() {
             if (key.startsWith(prefix)) delete next[key];
           });
           for (const [key, list] of Object.entries(store)) {
-            const latestAt = getLatestOtherUserCommentCreatedAt(list, currentUser?.id ?? '') ?? getLatestCommentCreatedAt(list);
+            const latestAt = currentUser?.id
+              ? getLatestOtherUserCommentCreatedAt(list, currentUser.id)
+              : getLatestCommentCreatedAt(list);
             if (latestAt) next[key] = latestAt;
           }
           return next;
