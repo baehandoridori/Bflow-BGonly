@@ -30,6 +30,7 @@ import { saveLayout } from '@/services/settingsService';
 import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
 import { getPreset } from '@/themes';
+import { StarNestBackground } from '@/components/effects/StarNestBackground';
 
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -201,6 +202,21 @@ function DashboardPlexus() {
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" style={{ opacity: 0.85 }} />;
 }
 
+function DashboardBackgroundArt() {
+  const plexusSettings = useAppStore((s) => s.plexusSettings);
+  const backgroundArt = plexusSettings.dashboardBackgroundArt ?? plexusSettings.backgroundArt;
+  if (backgroundArt === 'starnest') {
+    return (
+      <StarNestBackground
+        enabled={plexusSettings.dashboardEnabled}
+        className="z-0"
+        settings={plexusSettings.starNest}
+      />
+    );
+  }
+  return <DashboardPlexus />;
+}
+
 /* ── 위젯 메타데이터 ── */
 type WidgetCategory = 'progress' | 'tool' | 'etc';
 const CATEGORY_LABELS: Record<WidgetCategory, string> = { progress: '진행률', tool: '도구', etc: '기타' };
@@ -279,42 +295,44 @@ function getWidgetComponent(id: string, isEpMode: boolean): React.ReactNode | un
 /* 중복 배치 허용 위젯 (캘린더/메모는 고유 ID 생성) */
 const MULTI_INSTANCE_WIDGETS = new Set(['calendar', 'memo']);
 
-/* ── 부서별 레이아웃 (24칸 그리드, rowHeight=16px) ── */
+/* ── 기본 레이아웃 뷰 (24칸 그리드, rowHeight=16px)
+   저장된 개인 레이아웃이 없을 때만 사용한다. 이미 사용자가 옮기거나 삭제한 레이아웃 파일은 유지. ── */
 const DEPT_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
-  { i: 'stage-bars', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 2 },
-  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
-  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
-  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
-  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
-  { i: 'memo', x: 0, y: 45, w: 12, h: 15, minW: 2, minH: 2 },
-  // v1.24.0: 최근 작업 위젯 — 신규 사용자 기본 레이아웃에 포함 (하단 전체 폭).
-  { i: 'recent-activity', x: 0, y: 60, w: 24, h: 20, minW: 4, minH: 4 },
+  { i: 'stage-bars', x: 0, y: 0, w: 7, h: 11, minW: 2, minH: 2 },
+  { i: 'calendar', x: 7, y: 0, w: 5, h: 14, minW: 2, minH: 2 },
+  { i: 'overall-progress', x: 12, y: 0, w: 5, h: 14, minW: 2, minH: 2 },
+  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 28, minW: 2, minH: 2 },
+  { i: 'episode-summary', x: 0, y: 11, w: 7, h: 15, minW: 2, minH: 2 },
+  { i: 'vacation-today', x: 7, y: 14, w: 7, h: 12, minW: 2, minH: 2 },
+  { i: 'recent-activity', x: 0, y: 26, w: 9, h: 31, minW: 4, minH: 4 },
 ];
 
-/* ── 통합 레이아웃 (24칸 그리드, rowHeight=16px) ── */
+/* ── 통합 기본 레이아웃 뷰 (24칸 그리드, rowHeight=16px) ── */
 const ALL_LAYOUT: Layout[] = [
-  { i: 'overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
-  { i: 'dept-comparison', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 2 },
-  { i: 'assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
-  { i: 'episode-summary', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
-  { i: 'my-tasks', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
-  { i: 'calendar', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
-  { i: 'memo', x: 0, y: 45, w: 12, h: 15, minW: 2, minH: 2 },
-  // v1.24.0: 최근 작업 위젯 — 신규 사용자 기본 레이아웃에 포함 (하단 전체 폭).
-  { i: 'recent-activity', x: 0, y: 60, w: 24, h: 20, minW: 4, minH: 4 },
+  { i: 'overall-progress', x: 0, y: 0, w: 5, h: 14, minW: 2, minH: 2 },
+  { i: 'episode-summary', x: 5, y: 0, w: 5, h: 14, minW: 2, minH: 2 },
+  { i: 'calendar', x: 10, y: 0, w: 5, h: 18, minW: 2, minH: 2 },
+  { i: 'dept-comparison', x: 15, y: 0, w: 4, h: 16, minW: 2, minH: 2 },
+  { i: 'assignee-cards', x: 19, y: 0, w: 5, h: 16, minW: 2, minH: 2 },
+  { i: 'memo', x: 0, y: 14, w: 5, h: 20, minW: 2, minH: 2 },
+  { i: 'whiteboard', x: 5, y: 14, w: 5, h: 17, minW: 2, minH: 2 },
+  { i: 'my-tasks', x: 10, y: 18, w: 5, h: 27, minW: 2, minH: 2 },
+  { i: 'vacation-today', x: 5, y: 31, w: 5, h: 14, minW: 2, minH: 2 },
+  { i: 'recent-activity', x: 15, y: 16, w: 9, h: 41, minW: 4, minH: 4 },
 ];
 
-/* ── 에피소드 대시보드 기본 레이아웃 (24칸 그리드) ── */
+/* ── 에피소드 대시보드 기본 레이아웃 뷰 (24칸 그리드) ── */
 const EP_LAYOUT: Layout[] = [
-  { i: 'ep-overall-progress', x: 0, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
-  { i: 'ep-dept-comparison', x: 6, y: 0, w: 12, h: 20, minW: 2, minH: 2 },
-  { i: 'ep-assignee-cards', x: 18, y: 0, w: 6, h: 20, minW: 2, minH: 2 },
-  { i: 'ep-part-progress', x: 0, y: 20, w: 12, h: 25, minW: 2, minH: 2 },
-  { i: 'ep-stage-bars', x: 12, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
-  { i: 'my-tasks', x: 18, y: 20, w: 6, h: 25, minW: 2, minH: 2 },
-  // v1.24.0: 최근 작업 — 에피소드 컨텍스트에서도 동일하게 노출.
-  { i: 'recent-activity', x: 0, y: 45, w: 24, h: 20, minW: 4, minH: 4 },
+  { i: 'ep-overall-progress', x: 0, y: 0, w: 4, h: 11, minW: 2, minH: 2 },
+  { i: 'ep-stage-bars', x: 4, y: 0, w: 6, h: 11, minW: 2, minH: 2 },
+  { i: 'ep-assignee-cards', x: 10, y: 0, w: 4, h: 21, minW: 2, minH: 2 },
+  { i: 'ep-dept-comparison', x: 14, y: 0, w: 5, h: 13, minW: 2, minH: 2 },
+  { i: 'ep-part-progress', x: 0, y: 11, w: 5, h: 22, minW: 2, minH: 2 },
+  { i: 'ep-part-bg-A', x: 5, y: 11, w: 5, h: 15, minW: 2, minH: 2 },
+  { i: 'memo', x: 10, y: 21, w: 4, h: 15, minW: 2, minH: 2 },
+  { i: 'my-tasks', x: 5, y: 26, w: 5, h: 29, minW: 2, minH: 2 },
+  { i: 'ep-full-bg-progress', x: 0, y: 33, w: 5, h: 15, minW: 2, minH: 2 },
+  { i: 'ep-full-act-progress', x: 0, y: 48, w: 5, h: 15, minW: 2, minH: 2 },
 ];
 
 /* ── 파트 전용 위젯 타입 (2단계 선택) ── */
@@ -839,7 +857,7 @@ export function Dashboard() {
   return (
     <div className="relative flex flex-col gap-4 h-full overflow-y-auto overflow-x-hidden z-0">
       {/* 경량 플렉서스 배경 (fixed로 뷰포트 전체 커버) — 그라데이션은 App.tsx의 전역 GradientBackdrop이 담당 */}
-      <DashboardPlexus />
+      <DashboardBackgroundArt />
 
       {/* 부서 탭 + 편집 버튼 */}
       <div className="flex items-center justify-between">
@@ -1054,7 +1072,7 @@ export function Dashboard() {
           )}
         </div>
 
-        {/* 위젯 추가 + 레이아웃 초기화 */}
+        {/* 위젯 추가 + 기본 레이아웃 뷰 초기화 */}
         <div className="relative flex items-center gap-2">
           <div className="relative">
             <button
@@ -1090,10 +1108,10 @@ export function Dashboard() {
               'transition-colors duration-150',
               'border border-text-secondary/10',
             )}
-            title="기본 레이아웃으로 초기화"
+            title="기본 레이아웃 뷰로 초기화"
           >
             <RotateCcw size={13} />
-            초기화
+            기본 레이아웃 뷰
           </button>
         </div>
       </div>

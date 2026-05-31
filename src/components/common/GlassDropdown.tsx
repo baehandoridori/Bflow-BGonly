@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 
 export interface GlassDropdownOption<T extends string | number = string> {
   value: T;
@@ -150,19 +151,24 @@ export function GlassDropdown<T extends string | number = string>({
         ref={triggerRef}
         onClick={toggle}
         className={cn(
-          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium',
+          'compact-label-container flex min-w-0 max-w-full items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium',
           'transition-colors duration-150',
           'bg-bg-primary border border-bg-border',
           'text-text-primary hover:border-accent/40',
           open && 'border-accent/50',
         )}
+        title={selectedLabel}
+        aria-label={label ? `${label}: ${selectedLabel}` : selectedLabel}
       >
-        {icon}
-        <span className="truncate">{selectedLabel}</span>
+        {icon ? (
+          <CompactIconLabel icon={icon} label={selectedLabel} />
+        ) : (
+          <span className="min-w-0 truncate">{selectedLabel}</span>
+        )}
         <ChevronDown
           size={14}
           className={cn(
-            'text-text-secondary transition-transform duration-200',
+            'shrink-0 text-text-secondary transition-transform duration-200',
             open && 'rotate-180',
           )}
         />

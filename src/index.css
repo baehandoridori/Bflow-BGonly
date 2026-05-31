@@ -323,11 +323,99 @@ body.theme-ready *::after {
   border-color: rgb(5 150 105 / 0.18);
 }
 
+/* ─── 좁은 화면 라벨 축약 ─── */
+.compact-label-container {
+  max-width: 100%;
+}
+
+[data-compact-icon-label] {
+  display: inline-flex;
+  max-width: 100%;
+}
+
+[data-compact-label-text] {
+  display: inline-block;
+  max-width: 12rem;
+  overflow: hidden;
+  opacity: 1;
+  transition: max-width 160ms ease, opacity 120ms ease, margin-inline-start 160ms ease;
+}
+
+@media (max-width: 1040px) {
+  .compact-label-container [data-compact-label-text] {
+    max-width: 0;
+    opacity: 0;
+    margin-inline-start: -0.375rem;
+  }
+
+  [data-episode-filter-label] {
+    display: none;
+  }
+
+  [data-episode-filter-short-label] {
+    display: inline;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-compact-label-text] {
+    transition: none;
+  }
+}
+
+@keyframes comment-unread-badge-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 rgb(var(--color-accent) / 0.22),
+      0 0 10px rgb(var(--color-accent) / 0.16);
+  }
+  50% {
+    box-shadow:
+      0 0 0 4px rgb(var(--color-accent) / 0),
+      0 0 16px rgb(var(--color-accent) / 0.28);
+  }
+}
+
+.comment-unread-badge {
+  animation: comment-unread-badge-pulse 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comment-unread-badge {
+    animation: none !important;
+  }
+}
+
 /* ─── 시트 뷰 컬럼 리사이즈 ─── */
 .sheet-resizable-th {
   position: relative;
   overflow: visible;
   user-select: none;
+  container-type: inline-size;
+}
+
+.sheet-header-label-wrap {
+  display: block;
+  min-width: 0;
+  padding-right: 0.5rem;
+}
+
+[data-sheet-header-full-label] {
+  display: block;
+}
+
+[data-sheet-header-short-label] {
+  display: none;
+}
+
+@container (max-width: 72px) {
+  [data-sheet-header-full-label] {
+    display: none;
+  }
+
+  [data-sheet-header-short-label] {
+    display: block;
+  }
 }
 
 .sheet-column-resizer {
@@ -1240,11 +1328,13 @@ input[type="range"]::-webkit-slider-thumb {
 /* pinned 카드 — animation: bf-glow-pulse 제거 (해제 시 갑자기 멈춰 깜빡임 발생).
    대신 transition 으로 box-shadow + transform 부드럽게. */
 .scene-card.pinned {
-  transform: translateY(-24px) scale(1.12) !important;
+  transform: translateY(-18px) scale(1.045);
   z-index: 20;
   box-shadow:
-    0 16px 32px rgb(0 0 0 / 0.45),
-    0 0 24px var(--card-glow, rgb(108 92 231 / 0.5));
+    0 16px 34px rgb(0 0 0 / 0.42),
+    0 0 0 1px rgb(var(--color-accent) / 0.18),
+    0 0 24px var(--card-glow, rgb(108 92 231 / 0.5)),
+    0 0 42px rgb(var(--color-accent) / 0.18);
 }
 
 @keyframes bf-status-flash {

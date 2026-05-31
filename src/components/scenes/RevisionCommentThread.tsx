@@ -23,7 +23,7 @@ import {
   type SceneComment,
 } from '@/services/commentService';
 import { revisionNoToLabel } from '@/constants/revision';
-import { formatTimeShort } from '@/utils/formatTime';
+import { formatCommentTime } from '@/utils/formatTime';
 
 interface Props {
   revisionId: string;
@@ -226,7 +226,7 @@ function CommentBubble({ comment, isMe }: { comment: SceneComment; isMe: boolean
           </span>
         </div>
         <span className="text-[10px] text-text-secondary/50">
-          {formatTimeShort(comment.createdAt)}
+          {formatCommentTime(comment.createdAt)}
         </span>
       </div>
       <div className="text-[12px] text-text-primary whitespace-pre-wrap leading-relaxed">

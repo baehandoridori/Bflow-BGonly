@@ -4,8 +4,25 @@ import { SettingsSection } from './SettingsSection';
 import { useAppStore } from '@/stores/useAppStore';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
 import { cn } from '@/utils/cn';
+import { StarNestBackground } from '@/components/effects/StarNestBackground';
+import {
+  DEFAULT_BACKGROUND_ART,
+  DEFAULT_STAR_NEST_SETTINGS,
+  STAR_NEST_TONE_PRESETS,
+  applyStarNestTonePreset,
+  getThemeSyncedStarNestSettings,
+  normalizeBackgroundArt,
+  normalizeStarNestSettings,
+  type BackgroundArt,
+  type StarNestSettings,
+  type StarNestDirectionMode,
+  type StarNestTonePreset,
+} from '@/utils/starNestSettings';
 
 const DEFAULTS = {
+  backgroundArt: DEFAULT_BACKGROUND_ART,
+  loginBackgroundArt: DEFAULT_BACKGROUND_ART,
+  dashboardBackgroundArt: DEFAULT_BACKGROUND_ART,
   loginEnabled: true,
   loginGradientEnabled: true,
   loginParticleCount: 666,
@@ -18,6 +35,9 @@ const DEFAULTS = {
   mouseForce: 0.06,
   glowIntensity: 1.0,
   connectionDist: 160,
+  starNest: DEFAULT_STAR_NEST_SETTINGS,
+  loginStarNest: DEFAULT_STAR_NEST_SETTINGS,
+  dashboardStarNest: DEFAULT_STAR_NEST_SETTINGS,
 };
 
 /* ── 미니 플렉서스 프리뷰 (마우스 반응 + 부드러운 파티클 증감) ── */
@@ -241,6 +261,114 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
   );
 }
 
+function MiniStarNestPreview({ enabled, settings }: { enabled: boolean; settings: StarNestSettings }) {
+  return (
+    <div
+      className="relative rounded-lg overflow-hidden border border-bg-border/30 my-2.5"
+      style={{ width: '100%', aspectRatio: `${PREVIEW_W}/${PREVIEW_H}`, background: 'rgb(var(--color-bg-primary) / 0.6)' }}
+    >
+      {enabled ? (
+        <StarNestBackground enabled fixed={false} settings={settings} />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center bg-bg-border/20">
+          <span className="text-xs text-text-secondary/40 font-medium">OFF</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DirectionPad({
+  x,
+  y,
+  onChange,
+}: {
+  x: number;
+  y: number;
+  onChange: (next: { directionX: number; directionY: number }) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  const updateFromPointer = useCallback((clientX: number, clientY: number) => {
+    const el = ref.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const nx = Math.max(-1, Math.min(1, ((clientX - rect.left) / rect.width) * 2 - 1));
+    const ny = Math.max(-1, Math.min(1, -(((clientY - rect.top) / rect.height) * 2 - 1)));
+    onChange({
+      directionX: Number(nx.toFixed(2)),
+      directionY: Number(ny.toFixed(2)),
+    });
+  }, [onChange]);
+
+  return (
+    <div className="flex items-start gap-3">
+      <span className="text-xs text-text-secondary/60 w-20 shrink-0 pt-2">이동 방향</span>
+      <div className="flex-1">
+        <div
+          ref={ref}
+          role="slider"
+          aria-label="StarNest 수동 이동 방향"
+          aria-valuetext={`X ${x.toFixed(2)}, Y ${y.toFixed(2)}`}
+          tabIndex={0}
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            updateFromPointer(e.clientX, e.clientY);
+          }}
+          onPointerMove={(e) => {
+            if (e.buttons !== 1) return;
+            updateFromPointer(e.clientX, e.clientY);
+          }}
+          onKeyDown={(e) => {
+            const step = e.shiftKey ? 0.1 : 0.04;
+            if (e.key === 'ArrowLeft') onChange({ directionX: Math.max(-1, x - step), directionY: y });
+            else if (e.key === 'ArrowRight') onChange({ directionX: Math.min(1, x + step), directionY: y });
+            else if (e.key === 'ArrowUp') onChange({ directionX: x, directionY: Math.min(1, y + step) });
+            else if (e.key === 'ArrowDown') onChange({ directionX: x, directionY: Math.max(-1, y - step) });
+            else if (e.key === 'Home') onChange({ directionX: 0, directionY: 0 });
+            else return;
+            e.preventDefault();
+          }}
+          className="relative h-36 rounded-xl border border-bg-border/50 bg-bg-primary/70 overflow-hidden cursor-crosshair focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
+        >
+          <div
+            className="absolute inset-0 opacity-70"
+            style={{
+              background:
+                'radial-gradient(circle at center, rgb(var(--color-accent) / 0.18), transparent 28%), linear-gradient(90deg, transparent 49.5%, rgb(var(--color-bg-border) / 0.7) 49.5% 50.5%, transparent 50.5%), linear-gradient(0deg, transparent 49.5%, rgb(var(--color-bg-border) / 0.7) 49.5% 50.5%, transparent 50.5%)',
+            }}
+          />
+          <div
+            className="absolute rounded-full border border-accent/45"
+            style={{
+              width: 42,
+              height: 42,
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              boxShadow: '0 0 16px rgb(var(--color-accent) / 0.15) inset',
+            }}
+          />
+          <div
+            className="absolute w-4 h-4 rounded-full bg-accent shadow-lg transition-[left,top] duration-150"
+            style={{
+              left: `${((x + 1) / 2) * 100}%`,
+              top: `${((1 - y) / 2) * 100}%`,
+              transform: 'translate(-50%, -50%)',
+              boxShadow: '0 0 0 5px rgb(var(--color-accent) / 0.16), 0 0 22px rgb(var(--color-accent) / 0.55)',
+            }}
+          />
+        </div>
+        <div className="mt-1.5 flex items-center justify-between text-[10px] text-text-secondary/55">
+          <span>가운데는 정지에 가깝게</span>
+          <span className="font-mono">X {x.toFixed(2)} · Y {y.toFixed(2)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── UI 컴포넌트 ── */
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -263,11 +391,25 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-function Slider({ label, value, min, max, step, defaultVal, onChange }: {
+function formatSliderValue(value: number, step: number, precision?: number): string {
+  if (typeof precision === 'number') {
+    const text = value
+      .toFixed(precision)
+      .replace(/0+$/, '')
+      .replace(/\.$/, '');
+    return text.length > 0 ? text : '0';
+  }
+  return step < 1 ? value.toFixed(2) : String(value);
+}
+
+function Slider({ label, value, min, max, step, defaultVal, precision, onChange }: {
   label: string; value: number; min: number; max: number; step: number; defaultVal: number;
+  precision?: number;
   onChange: (v: number) => void;
 }) {
   const isModified = Math.abs(value - defaultVal) > step * 0.1;
+  const valueText = formatSliderValue(value, step, precision);
+  const defaultText = formatSliderValue(defaultVal, step, precision);
   return (
     <div className="flex items-center gap-3">
       <span className="text-xs text-text-secondary/60 w-20 shrink-0">{label}</span>
@@ -279,17 +421,47 @@ function Slider({ label, value, min, max, step, defaultVal, onChange }: {
         className="flex-1 h-1.5 bg-bg-border rounded-full appearance-none cursor-pointer accent-accent"
       />
       <span className={cn('text-xs font-mono w-12 text-right', isModified ? 'text-accent' : 'text-text-secondary/60')}>
-        {step < 1 ? value.toFixed(2) : value}
+        {valueText}
       </span>
       {isModified && (
         <button
           onClick={() => onChange(defaultVal)}
           className="shrink-0 text-text-secondary/40 hover:text-accent transition-colors cursor-pointer"
-          title={`기본값 (${step < 1 ? defaultVal.toFixed(2) : defaultVal})`}
+          title={`기본값 (${defaultText})`}
         >
           <RotateCcw size={11} />
         </button>
       )}
+    </div>
+  );
+}
+
+function SegmentedButton<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="inline-flex shrink-0 gap-1 p-1 rounded-lg bg-bg-primary border border-bg-border/40">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          className={cn(
+            'px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer',
+            value === option.value
+              ? 'bg-accent text-white shadow-sm'
+              : 'text-text-secondary hover:text-text-primary hover:bg-bg-border/40',
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -316,11 +488,61 @@ export function EffectsSection() {
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const setCompletionTintEnabled = useAppStore((s) => s.setCompletionTintEnabled);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const loginBackgroundArt = plexusSettings.loginBackgroundArt ?? plexusSettings.backgroundArt ?? DEFAULT_BACKGROUND_ART;
+  const dashboardBackgroundArt = plexusSettings.dashboardBackgroundArt ?? plexusSettings.backgroundArt ?? DEFAULT_BACKGROUND_ART;
+  const usesStarNest = loginBackgroundArt === 'starnest' || dashboardBackgroundArt === 'starnest';
+  const usesPlexus = loginBackgroundArt !== 'starnest' || dashboardBackgroundArt !== 'starnest';
+  const starNest = normalizeStarNestSettings(plexusSettings.starNest);
 
   const update = useCallback((partial: Partial<typeof DEFAULTS>) => {
-    setPlexusSettings(partial);
-    persistPlexus({ ...plexusSettings, ...partial });
+    const legacy = normalizeStarNestSettings(partial.starNest ?? plexusSettings.starNest);
+    const next = {
+      ...plexusSettings,
+      ...partial,
+      backgroundArt: partial.backgroundArt ?? plexusSettings.backgroundArt,
+      loginBackgroundArt: normalizeBackgroundArt(partial.loginBackgroundArt ?? plexusSettings.loginBackgroundArt ?? plexusSettings.backgroundArt),
+      dashboardBackgroundArt: normalizeBackgroundArt(partial.dashboardBackgroundArt ?? plexusSettings.dashboardBackgroundArt ?? plexusSettings.backgroundArt),
+      starNest: legacy,
+      loginStarNest: normalizeStarNestSettings(partial.loginStarNest ?? plexusSettings.loginStarNest ?? legacy),
+      dashboardStarNest: normalizeStarNestSettings(partial.dashboardStarNest ?? plexusSettings.dashboardStarNest ?? legacy),
+    };
+    setPlexusSettings(next);
+    persistPlexus(next);
   }, [plexusSettings, setPlexusSettings]);
+
+  const updateStarNest = useCallback((partial: Partial<StarNestSettings>) => {
+    const nextSettings = normalizeStarNestSettings({
+      ...plexusSettings.starNest,
+      ...partial,
+    });
+    update({
+      starNest: nextSettings,
+      loginStarNest: nextSettings,
+      dashboardStarNest: nextSettings,
+    });
+  }, [plexusSettings.starNest, update]);
+
+  const applyTonePreset = useCallback((preset: StarNestTonePreset) => {
+    const next = applyStarNestTonePreset(preset, starNest);
+    updateStarNest(next);
+  }, [starNest, updateStarNest]);
+
+  const syncStarNestWithTheme = useCallback(() => {
+    updateStarNest(getThemeSyncedStarNestSettings(getAccentRgb(), getAccentSubRgb(), starNest));
+  }, [starNest, updateStarNest]);
+
+  const updateSurfaceBackgroundArt = useCallback((surface: 'login' | 'dashboard', backgroundArt: BackgroundArt) => {
+    const nextLoginBackgroundArt = surface === 'login' ? backgroundArt : loginBackgroundArt;
+    const nextDashboardBackgroundArt = surface === 'dashboard' ? backgroundArt : dashboardBackgroundArt;
+    update({
+      loginBackgroundArt: nextLoginBackgroundArt,
+      dashboardBackgroundArt: nextDashboardBackgroundArt,
+      // 옛 버전/옛 코드가 하나의 값만 읽을 때는 실제 메인 화면인 대시보드 기준으로 맞춘다.
+      backgroundArt: nextLoginBackgroundArt === nextDashboardBackgroundArt
+        ? nextLoginBackgroundArt
+        : nextDashboardBackgroundArt,
+    });
+  }, [dashboardBackgroundArt, loginBackgroundArt, update]);
 
   const handleReset = useCallback(() => {
     setPlexusSettings(DEFAULTS);
@@ -392,6 +614,45 @@ export function EffectsSection() {
             />
           </div>
         </div>
+
+        <div className="mt-4 pt-4 border-t border-bg-border/30">
+          <div className="mb-3">
+            <p className="text-sm font-medium text-text-primary">화면별 배경 아트</p>
+            <p className="text-[11px] text-text-secondary/60 mt-0.5">
+              로그인 화면과 대시보드 화면에서 플렉서스와 StarNest를 각각 선택합니다.
+            </p>
+          </div>
+          <div className="grid gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-bg-border/35 bg-bg-primary/45 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-text-primary">로그인 화면</p>
+                <p className="text-[10px] text-text-secondary/55 mt-0.5">앱에 들어오기 전 첫 화면</p>
+              </div>
+              <SegmentedButton<BackgroundArt>
+                value={loginBackgroundArt}
+                options={[
+                  { value: 'plexus', label: '플렉서스' },
+                  { value: 'starnest', label: 'StarNest' },
+                ]}
+                onChange={(backgroundArt) => updateSurfaceBackgroundArt('login', backgroundArt)}
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-bg-border/35 bg-bg-primary/45 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-text-primary">대시보드 화면</p>
+                <p className="text-[10px] text-text-secondary/55 mt-0.5">로그인 뒤 기본 작업 화면</p>
+              </div>
+              <SegmentedButton<BackgroundArt>
+                value={dashboardBackgroundArt}
+                options={[
+                  { value: 'plexus', label: '플렉서스' },
+                  { value: 'starnest', label: 'StarNest' },
+                ]}
+                onChange={(backgroundArt) => updateSurfaceBackgroundArt('dashboard', backgroundArt)}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 로그인 플렉서스 */}
@@ -399,7 +660,7 @@ export function EffectsSection() {
         <div className="flex items-center justify-between gap-4 mb-1">
           <div>
             <p className="text-sm font-medium text-text-primary">로그인 배경 애니메이션</p>
-            <p className="text-[11px] text-text-secondary/60 mt-0.5">로그인 화면의 플렉서스 파티클 효과</p>
+            <p className="text-[11px] text-text-secondary/60 mt-0.5">로그인 화면에 표시되는 배경 효과</p>
           </div>
           <div className="flex items-center gap-2">
             {plexusSettings.loginEnabled !== DEFAULTS.loginEnabled && (
@@ -415,18 +676,22 @@ export function EffectsSection() {
           </div>
         </div>
 
-        <MiniPlexusPreview
-          particleCount={plexusSettings.loginParticleCount}
-          enabled={plexusSettings.loginEnabled}
-          speed={plexusSettings.speed}
-          mouseRadius={plexusSettings.mouseRadius}
-          mouseForce={plexusSettings.mouseForce}
-          glowIntensity={plexusSettings.glowIntensity}
-          connectionDist={plexusSettings.connectionDist}
-          dense
-        />
+        {loginBackgroundArt === 'starnest' ? (
+          <MiniStarNestPreview enabled={plexusSettings.loginEnabled} settings={starNest} />
+        ) : (
+          <MiniPlexusPreview
+            particleCount={plexusSettings.loginParticleCount}
+            enabled={plexusSettings.loginEnabled}
+            speed={plexusSettings.speed}
+            mouseRadius={plexusSettings.mouseRadius}
+            mouseForce={plexusSettings.mouseForce}
+            glowIntensity={plexusSettings.glowIntensity}
+            connectionDist={plexusSettings.connectionDist}
+            dense
+          />
+        )}
 
-        {plexusSettings.loginEnabled && (
+        {plexusSettings.loginEnabled && loginBackgroundArt !== 'starnest' && (
           <Slider
             label="파티클 수" value={plexusSettings.loginParticleCount}
             min={100} max={1500} step={50} defaultVal={DEFAULTS.loginParticleCount}
@@ -440,7 +705,7 @@ export function EffectsSection() {
         <div className="flex items-center justify-between gap-4 mb-1">
           <div>
             <p className="text-sm font-medium text-text-primary">대시보드 배경 애니메이션</p>
-            <p className="text-[11px] text-text-secondary/60 mt-0.5">대시보드의 은은한 파티클 효과</p>
+            <p className="text-[11px] text-text-secondary/60 mt-0.5">대시보드 화면에 표시되는 배경 효과</p>
           </div>
           <div className="flex items-center gap-2">
             {plexusSettings.dashboardEnabled !== DEFAULTS.dashboardEnabled && (
@@ -456,17 +721,21 @@ export function EffectsSection() {
           </div>
         </div>
 
-        <MiniPlexusPreview
-          particleCount={plexusSettings.dashboardParticleCount}
-          enabled={plexusSettings.dashboardEnabled}
-          speed={plexusSettings.speed}
-          mouseRadius={plexusSettings.mouseRadius}
-          mouseForce={plexusSettings.mouseForce}
-          glowIntensity={plexusSettings.glowIntensity}
-          connectionDist={plexusSettings.connectionDist}
-        />
+        {dashboardBackgroundArt === 'starnest' ? (
+          <MiniStarNestPreview enabled={plexusSettings.dashboardEnabled} settings={starNest} />
+        ) : (
+          <MiniPlexusPreview
+            particleCount={plexusSettings.dashboardParticleCount}
+            enabled={plexusSettings.dashboardEnabled}
+            speed={plexusSettings.speed}
+            mouseRadius={plexusSettings.mouseRadius}
+            mouseForce={plexusSettings.mouseForce}
+            glowIntensity={plexusSettings.glowIntensity}
+            connectionDist={plexusSettings.connectionDist}
+          />
+        )}
 
-        {plexusSettings.dashboardEnabled && (
+        {plexusSettings.dashboardEnabled && dashboardBackgroundArt !== 'starnest' && (
           <Slider
             label="파티클 수" value={plexusSettings.dashboardParticleCount}
             min={30} max={300} step={10} defaultVal={DEFAULTS.dashboardParticleCount}
@@ -474,6 +743,124 @@ export function EffectsSection() {
           />
         )}
       </div>
+
+      {usesStarNest && (
+        <div className="border-t border-bg-border/30 mt-5 pt-5">
+          <div className="mb-3">
+            <div>
+              <p className="text-sm font-medium text-text-primary">StarNest 세부 설정</p>
+              <p className="text-[11px] text-text-secondary/60 mt-0.5">
+                StarNest를 선택한 화면에 공통으로 적용합니다. 마우스는 좌표가 아니라 방향과 강도만 만듭니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            {(Object.keys(STAR_NEST_TONE_PRESETS) as StarNestTonePreset[]).map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => applyTonePreset(preset)}
+                className="px-2.5 py-1.5 rounded-lg border border-bg-border/45 bg-bg-primary/70 text-xs font-semibold text-text-secondary hover:text-text-primary hover:border-accent/50 transition-colors"
+              >
+                {STAR_NEST_TONE_PRESETS[preset].label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={syncStarNestWithTheme}
+              className="px-2.5 py-1.5 rounded-lg border border-accent/25 bg-accent/10 text-xs font-semibold text-accent hover:bg-accent/18 transition-colors"
+            >
+              현재 테마와 동기화
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div>
+              <p className="text-xs font-semibold text-text-primary">흐름 방식</p>
+              <p className="text-[10px] text-text-secondary/55 mt-0.5">
+                수동 모드에서는 아래 가상 화면에서 방향을 잡습니다.
+              </p>
+            </div>
+            <SegmentedButton<StarNestDirectionMode>
+              value={starNest.directionMode}
+              options={[
+                { value: 'mouse', label: '마우스' },
+                { value: 'fixed', label: '현재' },
+                { value: 'manual', label: '수동' },
+              ]}
+              onChange={(directionMode) => updateStarNest({ directionMode })}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2.5 pl-1">
+            {starNest.directionMode === 'manual' && (
+              <DirectionPad
+                x={starNest.directionX}
+                y={starNest.directionY}
+                onChange={updateStarNest}
+              />
+            )}
+            <Slider
+              label="최대 속도" value={starNest.maxSpeed}
+              min={0} max={0.002} step={0.0001} defaultVal={DEFAULT_STAR_NEST_SETTINGS.maxSpeed}
+              precision={4}
+              onChange={(v) => updateStarNest({ maxSpeed: v })}
+            />
+            <Slider
+              label="밝기" value={starNest.brightness}
+              min={0.0002} max={0.006} step={0.0001} defaultVal={DEFAULT_STAR_NEST_SETTINGS.brightness}
+              precision={4}
+              onChange={(v) => updateStarNest({ brightness: v })}
+            />
+            <Slider
+              label="채도" value={starNest.saturation}
+              min={0} max={1} step={0.01} defaultVal={DEFAULT_STAR_NEST_SETTINGS.saturation}
+              onChange={(v) => updateStarNest({ saturation: v })}
+            />
+            <Slider
+              label="색상" value={starNest.colorShift}
+              min={-1} max={1} step={0.01} defaultVal={DEFAULT_STAR_NEST_SETTINGS.colorShift}
+              onChange={(v) => updateStarNest({ colorShift: v })}
+            />
+            <Slider
+              label="반짝임" value={starNest.sparkle}
+              min={0} max={1} step={0.01} defaultVal={DEFAULT_STAR_NEST_SETTINGS.sparkle}
+              onChange={(v) => updateStarNest({ sparkle: v })}
+            />
+            <Slider
+              label="반짝임 속도" value={starNest.sparkleSpeed}
+              min={0.1} max={3} step={0.1} defaultVal={DEFAULT_STAR_NEST_SETTINGS.sparkleSpeed}
+              onChange={(v) => updateStarNest({ sparkleSpeed: v })}
+            />
+            <Slider
+              label="깊이" value={starNest.zoom}
+              min={0.55} max={0.95} step={0.01} defaultVal={DEFAULT_STAR_NEST_SETTINGS.zoom}
+              onChange={(v) => updateStarNest({ zoom: v })}
+            />
+            <Slider
+              label="빈 공간" value={starNest.darkmatter}
+              min={0.2} max={0.62} step={0.01} defaultVal={DEFAULT_STAR_NEST_SETTINGS.darkmatter}
+              onChange={(v) => updateStarNest({ darkmatter: v })}
+            />
+            <Slider
+              label="거리감" value={starNest.distfade}
+              min={0.58} max={0.82} step={0.01} defaultVal={DEFAULT_STAR_NEST_SETTINGS.distfade}
+              onChange={(v) => updateStarNest({ distfade: v })}
+            />
+            <Slider
+              label="디테일" value={starNest.iterations}
+              min={10} max={22} step={1} defaultVal={DEFAULT_STAR_NEST_SETTINGS.iterations}
+              onChange={(v) => updateStarNest({ iterations: v })}
+            />
+            <Slider
+              label="품질" value={starNest.quality}
+              min={8} max={20} step={1} defaultVal={DEFAULT_STAR_NEST_SETTINGS.quality}
+              onChange={(v) => updateStarNest({ quality: v })}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 세부 설정 (접이식) */}
       <div className="border-t border-bg-border/30 mt-5 pt-4">
@@ -490,37 +877,45 @@ export function EffectsSection() {
 
         {showAdvanced && (
           <div className="flex flex-col gap-2.5 pl-1">
-            <Slider
-              label="움직임 속도" value={plexusSettings.speed}
-              min={0.3} max={2.5} step={0.1} defaultVal={DEFAULTS.speed}
-              onChange={(v) => update({ speed: v })}
-            />
-            <Slider
-              label="마우스 범위" value={plexusSettings.mouseRadius}
-              min={80} max={500} step={10} defaultVal={DEFAULTS.mouseRadius}
-              onChange={(v) => update({ mouseRadius: v })}
-            />
-            <Slider
-              label="마우스 힘" value={plexusSettings.mouseForce}
-              min={0.01} max={0.20} step={0.01} defaultVal={DEFAULTS.mouseForce}
-              onChange={(v) => update({ mouseForce: v })}
-            />
-            <Slider
-              label="글로우 강도" value={plexusSettings.glowIntensity}
-              min={0} max={2.5} step={0.1} defaultVal={DEFAULTS.glowIntensity}
-              onChange={(v) => update({ glowIntensity: v })}
-            />
-            <Slider
-              label="연결 거리" value={plexusSettings.connectionDist}
-              min={60} max={300} step={10} defaultVal={DEFAULTS.connectionDist}
-              onChange={(v) => update({ connectionDist: v })}
-            />
+            {!usesPlexus ? (
+              <p className="text-[11px] text-text-secondary/60">
+                StarNest 조절값은 위 전용 패널에서 바로 수정합니다.
+              </p>
+            ) : (
+              <>
+                <Slider
+                  label="움직임 속도" value={plexusSettings.speed}
+                  min={0.3} max={2.5} step={0.1} defaultVal={DEFAULTS.speed}
+                  onChange={(v) => update({ speed: v })}
+                />
+                <Slider
+                  label="마우스 범위" value={plexusSettings.mouseRadius}
+                  min={80} max={500} step={10} defaultVal={DEFAULTS.mouseRadius}
+                  onChange={(v) => update({ mouseRadius: v })}
+                />
+                <Slider
+                  label="마우스 힘" value={plexusSettings.mouseForce}
+                  min={0.01} max={0.20} step={0.01} defaultVal={DEFAULTS.mouseForce}
+                  onChange={(v) => update({ mouseForce: v })}
+                />
+                <Slider
+                  label="글로우 강도" value={plexusSettings.glowIntensity}
+                  min={0} max={2.5} step={0.1} defaultVal={DEFAULTS.glowIntensity}
+                  onChange={(v) => update({ glowIntensity: v })}
+                />
+                <Slider
+                  label="연결 거리" value={plexusSettings.connectionDist}
+                  min={60} max={300} step={10} defaultVal={DEFAULTS.connectionDist}
+                  onChange={(v) => update({ connectionDist: v })}
+                />
+              </>
+            )}
           </div>
         )}
       </div>
 
       <p className="text-[10px] text-text-secondary/40 mt-4">
-        * 파티클 수가 많으면 성능에 영향을 줄 수 있습니다. 프리뷰 위에서 마우스를 움직여 보세요.
+        * 배경 효과가 무겁게 느껴지면 품질/디테일 또는 파티클 수를 낮춰주세요. 프리뷰 위에서 마우스를 움직여 보세요.
       </p>
     </SettingsSection>
   );

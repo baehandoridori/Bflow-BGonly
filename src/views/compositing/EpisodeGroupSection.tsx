@@ -5,13 +5,15 @@
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, ChevronDown, AlertTriangle, MessageSquare } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Circle, Layers } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
 import type { CompRevision, RevisionStatus, Episode } from '@/types';
 import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { formatTimeShort } from '@/utils/formatTime';
 import type { SceneGroup } from './utils';
 import { SceneJumpButton } from './SceneJumpButton';
+import { RevisionCommentMarker, summarizeRevisionComments } from './RevisionCommentMarker';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 
 // ─── EP 그룹 타입 ──────────
 
@@ -65,6 +67,7 @@ export function EpisodeGroupSection({
   expandedScenes,
   selectedRevisionId,
   commentCountByRev,
+  commentSeenByRev,
   onSelectRevision,
   onToggleScene,
 }: {
@@ -74,6 +77,8 @@ export function EpisodeGroupSection({
   selectedRevisionId: string | null;
   /** v1.19.7: revisionId → 댓글 개수. 0 이면 마커 표시 안 함. 씬별 모드와 일관 유지. */
   commentCountByRev?: Map<string, number>;
+  /** revisionId → 현재 사용자가 댓글을 확인했는지 여부. */
+  commentSeenByRev?: Map<string, boolean>;
   onSelectRevision: (rev: CompRevision) => void;
   onToggleScene: (sceneKey: string) => void;
 }) {
@@ -106,6 +111,11 @@ export function EpisodeGroupSection({
         const expanded = expandedEps.has(eg.episodeNumber);
         const epDisplay = episodes.find((e) => e.episodeNumber === eg.episodeNumber);
         const epLabel = epDisplay ? getDisplayName(epDisplay) : eg.episodeName;
+        const commentSummary = summarizeRevisionComments(
+          eg.scenes.flatMap((sceneGroup) => sceneGroup.revisions),
+          commentCountByRev,
+          commentSeenByRev,
+        );
         return (
           <article
             key={eg.episodeNumber}
@@ -123,14 +133,18 @@ export function EpisodeGroupSection({
                 <span className="text-[16px] font-mono font-bold text-text-primary">{epLabel}</span>
               </div>
               {eg.totalOpen > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white flex items-center gap-1 shrink-0">
-                  <AlertTriangle size={10} />
-                  {eg.totalOpen} 미해결
+                <span className="compact-label-container text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-accent text-white flex min-w-0 shrink items-center gap-1">
+                  <CompactIconLabel icon={<AlertTriangle size={10} />} label={`${eg.totalOpen} 미해결`} />
                 </span>
               )}
-              <span className="text-[10px] text-text-secondary/70 shrink-0">
-                {eg.scenes.length}씬 · {eg.totalRevisions}개
+              <span className="compact-label-container inline-flex min-w-0 shrink text-[10px] text-text-secondary/70">
+                <CompactIconLabel icon={<Layers size={10} strokeWidth={2.4} />} label={`${eg.scenes.length}씬 · ${eg.totalRevisions}개`} />
               </span>
+              <RevisionCommentMarker
+                count={commentSummary.count}
+                seen={commentSummary.seen}
+                size="compact"
+              />
             </header>
 
             <AnimatePresence>
@@ -150,6 +164,7 @@ export function EpisodeGroupSection({
                         expanded={expandedScenes.has(sg.sceneKey)}
                         selectedRevisionId={selectedRevisionId}
                         commentCountByRev={commentCountByRev}
+                        commentSeenByRev={commentSeenByRev}
                         onSelectRevision={onSelectRevision}
                         onToggleScene={() => onToggleScene(sg.sceneKey)}
                       />
@@ -172,6 +187,7 @@ function SceneNested({
   expanded,
   selectedRevisionId,
   commentCountByRev,
+  commentSeenByRev,
   onSelectRevision,
   onToggleScene,
 }: {
@@ -179,11 +195,13 @@ function SceneNested({
   expanded: boolean;
   selectedRevisionId: string | null;
   commentCountByRev?: Map<string, number>;
+  commentSeenByRev?: Map<string, boolean>;
   onSelectRevision: (rev: CompRevision) => void;
   onToggleScene: () => void;
 }) {
   const { info, revisions, openCount } = sceneGroup;
   const sceneLabel = info.sceneId || `S${String(info.sceneNo).padStart(2, '0')}`;
+  const commentSummary = summarizeRevisionComments(revisions, commentCountByRev, commentSeenByRev);
 
   // 미해결 먼저 → 최신순
   const sortedRevs = [...revisions].sort((a, b) => {
@@ -214,10 +232,16 @@ function SceneNested({
         )}
         {!info.sceneName && <span className="flex-1" />}
         {openCount > 0 && (
-          <span className="text-[10px] px-1 py-0.5 rounded bg-accent text-white font-bold shrink-0">
-            {openCount}
+          <span className="compact-label-container text-[10px] px-1 py-0.5 rounded bg-accent text-white font-bold inline-flex min-w-0 shrink">
+            <CompactIconLabel icon={<AlertTriangle size={9} />} label={`${openCount}`} />
           </span>
         )}
+        <RevisionCommentMarker
+          count={commentSummary.count}
+          seen={commentSummary.seen}
+          size="compact"
+          className={openCount === 0 ? 'opacity-70' : ''}
+        />
       </div>
 
       <AnimatePresence initial={false}>
@@ -236,6 +260,7 @@ function SceneNested({
                   rev={rev}
                   isSelected={rev.id === selectedRevisionId}
                   commentCount={commentCountByRev?.get(rev.id) ?? 0}
+                  commentSeen={commentSeenByRev?.get(rev.id) ?? false}
                   onSelect={() => onSelectRevision(rev)}
                 />
               ))}
@@ -253,12 +278,14 @@ function MiniRevisionRow({
   rev,
   isSelected,
   commentCount = 0,
+  commentSeen = false,
   onSelect,
 }: {
   rev: CompRevision;
   isSelected: boolean;
   /** v1.19.7: 댓글 개수 마커 — 씬별 모드와 일관 유지. */
   commentCount?: number;
+  commentSeen?: boolean;
   onSelect: () => void;
 }) {
   const isResolved = rev.status === 'resolved';
@@ -274,23 +301,20 @@ function MiniRevisionRow({
         {revisionNoToLabel(rev.revisionNo)}
       </span>
       <span
-        className="text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0"
+        className="compact-label-container text-[10px] px-1.5 py-0.5 rounded font-bold inline-flex min-w-0 shrink"
         style={{ color: statusCfg.color, backgroundColor: statusCfg.bg }}
       >
-        {statusCfg.label}
+        <CompactIconLabel icon={<Circle size={10} strokeWidth={2.4} />} label={statusCfg.label} />
       </span>
       <span className={`truncate flex-1 min-w-0 ${isResolved ? 'line-through text-text-secondary/60' : 'text-text-primary'}`}>
         {rev.description}
       </span>
-      {commentCount > 0 && (
-        <span
-          className={`flex items-center gap-0.5 text-[10px] shrink-0 ${isResolved ? 'text-text-secondary/50' : 'text-text-secondary/70'}`}
-          title={`댓글 ${commentCount}개`}
-        >
-          <MessageSquare size={10} className="shrink-0" />
-          {commentCount}
-        </span>
-      )}
+      <RevisionCommentMarker
+        count={commentCount}
+        seen={commentSeen}
+        size="compact"
+        className={isResolved ? 'opacity-70' : ''}
+      />
       <span className="text-[10px] text-text-secondary/70 shrink-0">{formatTimeShort(rev.createdAt)}</span>
     </button>
   );

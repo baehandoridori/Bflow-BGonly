@@ -6,11 +6,12 @@
 
 import { ExternalLink } from 'lucide-react';
 import { useAppStore } from '@/stores/useAppStore';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { parseSceneKey } from './utils';
 
 interface Props {
   sceneKey: string;
-  variant?: 'icon' | 'link' | 'chip';
+  variant?: 'icon' | 'link' | 'chip' | 'action';
   episodeNumber?: number;
   partId?: string;
   sceneUuid?: string;
@@ -46,10 +47,9 @@ export function SceneJumpButton({
     return (
       <button
         onClick={handleJump}
-        className="text-[10px] text-accent-sub hover:underline flex items-center gap-1 cursor-pointer"
+        className="compact-label-container text-[10px] text-accent-sub hover:underline flex min-w-0 shrink items-center gap-1 cursor-pointer"
       >
-        <ExternalLink className="w-2.5 h-2.5" />
-        씬 상세
+        <CompactIconLabel icon={<ExternalLink className="w-2.5 h-2.5" />} label="씬 상세" />
       </button>
     );
   }
@@ -59,10 +59,21 @@ export function SceneJumpButton({
       <button
         onClick={handleJump}
         title="씬 상세 모달 열기"
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-accent/35 bg-accent/10 text-[11px] font-bold text-accent-sub hover:bg-accent/18 transition-colors cursor-pointer"
+        className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 px-2.5 py-1 rounded-md border border-accent/30 bg-accent/10 text-[11px] font-bold text-accent-sub hover:bg-accent/18 transition-colors cursor-pointer"
       >
-        <ExternalLink className="w-3 h-3" />
-        씬 상세
+        <CompactIconLabel icon={<ExternalLink className="w-3 h-3" />} label="씬 상세" />
+      </button>
+    );
+  }
+
+  if (variant === 'action') {
+    return (
+      <button
+        onClick={handleJump}
+        title="씬 상세 모달 열기"
+        className="compact-label-container inline-flex min-h-[28px] min-w-0 shrink items-center gap-1.5 rounded-md border border-accent/30 bg-accent/[0.08] px-2.5 text-[11px] font-bold text-accent-sub hover:border-accent/45 hover:bg-accent/[0.14] transition-colors cursor-pointer"
+      >
+        <CompactIconLabel icon={<ExternalLink className="w-3 h-3" />} label="상세 열기" />
       </button>
     );
   }

@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feedback Comment Unread Flow</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #171a24;
+      --panel-2: #1e2231;
+      --line: rgba(141, 145, 170, 0.22);
+      --text: #e8e8ee;
+      --muted: #8b8da3;
+      --muted-2: #62677d;
+      --accent: #8f7cff;
+      --accent-deep: #6c5ce7;
+      --yellow: #fdcb6e;
+      --green: #00b894;
+      color-scheme: dark;
+      font-family: Inter, "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 18% 0%, rgba(108, 92, 231, 0.19), transparent 29%),
+        linear-gradient(180deg, #121521 0%, #090b10 100%);
+      letter-spacing: 0;
+    }
+
+    main {
+      width: min(1220px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 34px 0 44px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .rule {
+      border: 1px solid var(--line);
+      background: rgba(23, 26, 36, 0.78);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(29, 33, 48, 0.96), rgba(18, 21, 31, 0.96));
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 22px 60px rgba(0, 0, 0, 0.32);
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(141, 145, 170, 0.16);
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .badge {
+      width: 25px;
+      height: 25px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: white;
+      background: var(--accent-deep);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .body {
+      padding: 16px;
+    }
+
+    .scene {
+      border: 1px solid rgba(141, 145, 170, 0.18);
+      background: rgba(9, 11, 16, 0.48);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+
+    .scene-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 11px 12px;
+      border-bottom: 1px solid rgba(141, 145, 170, 0.12);
+    }
+
+    .scene-id {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(143, 124, 255, 0.32);
+      background: rgba(108, 92, 231, 0.13);
+      color: #c9c1ff;
+      border-radius: 7px;
+      padding: 3px 7px;
+      font-size: 11px;
+      font-weight: 800;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    .scene-title {
+      flex: 1;
+      min-width: 0;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 21px;
+      border-radius: 999px;
+      border: 1px solid rgba(141, 145, 170, 0.24);
+      padding: 0 7px;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--muted);
+      background: rgba(15, 17, 23, 0.46);
+    }
+
+    .comment {
+      position: relative;
+      border-color: rgba(143, 124, 255, 0.34);
+      background: rgba(108, 92, 231, 0.13);
+      color: #bdb4ff;
+      box-shadow: 0 0 14px rgba(108, 92, 231, 0.18);
+    }
+
+    .comment.unread {
+      animation: unreadPulse 2.6s ease-in-out infinite;
+    }
+
+    .comment.read {
+      border-color: rgba(141, 145, 170, 0.25);
+      background: rgba(141, 145, 170, 0.08);
+      color: rgba(180, 184, 202, 0.64);
+      box-shadow: none;
+      animation: none;
+    }
+
+    .comment svg {
+      width: 12px;
+      height: 12px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.2;
+    }
+
+    @keyframes unreadPulse {
+      0%, 100% {
+        box-shadow: 0 0 9px rgba(108, 92, 231, 0.12), 0 0 0 0 rgba(108, 92, 231, 0.18);
+        border-color: rgba(143, 124, 255, 0.34);
+      }
+      50% {
+        box-shadow: 0 0 18px rgba(108, 92, 231, 0.28), 0 0 0 3px rgba(108, 92, 231, 0.07);
+        border-color: rgba(191, 181, 255, 0.58);
+      }
+    }
+
+    .revision {
+      margin: 12px;
+      border: 1px solid rgba(141, 145, 170, 0.14);
+      border-radius: 11px;
+      padding: 11px;
+      background: linear-gradient(90deg, rgba(253, 203, 110, 0.09), rgba(253, 203, 110, 0.02) 55%, transparent);
+    }
+
+    .revision.resolved {
+      background: linear-gradient(90deg, rgba(0, 184, 148, 0.06), rgba(0, 184, 148, 0.018) 55%, transparent);
+      opacity: 0.72;
+    }
+
+    .revision-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .rev-label {
+      color: #d8cdff;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .rev-text {
+      margin: 0;
+      color: rgba(232, 232, 238, 0.84);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .modal {
+      border: 1px solid rgba(143, 124, 255, 0.24);
+      border-radius: 13px;
+      background: rgba(9, 11, 16, 0.58);
+      overflow: hidden;
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(141, 145, 170, 0.13);
+      background: rgba(108, 92, 231, 0.08);
+    }
+
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tab {
+      border: 1px solid rgba(141, 145, 170, 0.2);
+      border-radius: 8px;
+      padding: 5px 9px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(15, 17, 23, 0.48);
+    }
+
+    .tab.active {
+      color: white;
+      border-color: rgba(143, 124, 255, 0.5);
+      background: rgba(108, 92, 231, 0.42);
+    }
+
+    .activity-list {
+      padding: 12px 14px;
+      display: grid;
+      gap: 9px;
+    }
+
+    .comment-row {
+      border: 1px solid rgba(141, 145, 170, 0.13);
+      border-radius: 10px;
+      padding: 9px 10px;
+      background: rgba(23, 26, 36, 0.62);
+    }
+
+    .comment-row.unread {
+      border-color: rgba(143, 124, 255, 0.28);
+      background: rgba(108, 92, 231, 0.08);
+      animation: rowPulse 2.8s ease-in-out infinite;
+    }
+
+    @keyframes rowPulse {
+      0%, 100% { box-shadow: inset 0 0 0 1px rgba(108, 92, 231, 0.02); }
+      50% { box-shadow: inset 0 0 0 1px rgba(143, 124, 255, 0.18), 0 0 18px rgba(108, 92, 231, 0.08); }
+    }
+
+    .time {
+      margin-bottom: 3px;
+      color: var(--muted-2);
+      font-size: 10px;
+    }
+
+    .text {
+      margin: 0;
+      color: rgba(232, 232, 238, 0.86);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .read-rule {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+      padding: 13px;
+      border: 1px solid rgba(116, 185, 255, 0.24);
+      border-radius: 12px;
+      background: rgba(116, 185, 255, 0.07);
+      color: #c6dcff;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .step {
+      border: 1px solid rgba(141, 145, 170, 0.16);
+      background: rgba(23, 26, 36, 0.68);
+      border-radius: 12px;
+      padding: 12px;
+      min-height: 112px;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Slack식 댓글 읽음 흐름</h1>
+        <p class="subtitle">새 댓글은 보라색으로 조용히 펄스, 확인 후에는 회색 배지로 낮춰 보입니다.</p>
+      </div>
+      <div class="rule">확정: 씬 상세 모달을 열면 기본 읽음 처리</div>
+    </header>
+
+    <section class="grid">
+      <article class="panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <span class="badge">1</span>
+            <h2>피드백 허브 카드</h2>
+          </div>
+          <span class="mini">새 댓글은 조용한 펄스</span>
+        </div>
+        <div class="body">
+          <div class="scene">
+            <div class="scene-row">
+              <span class="scene-id">a001</span>
+              <span class="scene-title">학교 앞 골목 낮 배경</span>
+              <span class="pill comment unread" title="새 댓글 3개">
+                <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6a8 8 0 1 1 18-5Z"/></svg>
+                <span>3</span>
+              </span>
+              <span class="pill">2 미해결</span>
+            </div>
+            <div class="revision">
+              <div class="revision-top">
+                <span class="rev-label">re1 · 대기</span>
+                <span class="pill comment unread" title="새 댓글 3개">
+                  <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6a8 8 0 1 1 18-5Z"/></svg>
+                  <span>3</span>
+                </span>
+              </div>
+              <p class="rev-text">댓글이 새로 달리면 카드와 리비전 배지가 모두 조용히 살아납니다.</p>
+            </div>
+          </div>
+
+          <div class="scene">
+            <div class="scene-row">
+              <span class="scene-id">a002</span>
+              <span class="scene-title">교실 창가 오후 톤</span>
+              <span class="pill comment read" title="확인한 댓글 1개">
+                <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6a8 8 0 1 1 18-5Z"/></svg>
+                <span>1</span>
+              </span>
+              <span class="pill">완료</span>
+            </div>
+            <div class="revision resolved">
+              <div class="revision-top">
+                <span class="rev-label">re1 · 완료</span>
+                <span class="pill comment read" title="확인한 댓글 1개">
+                  <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6a8 8 0 1 1 18-5Z"/></svg>
+                  <span>1</span>
+                </span>
+              </div>
+              <p class="rev-text">확인한 댓글은 회색 배지와 숫자만 남기고 시선을 빼앗지 않습니다.</p>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <span class="badge">2</span>
+            <h2>씬 상세 모달 댓글 및 활동</h2>
+          </div>
+          <span class="mini">상호작용 후 회색으로 전환</span>
+        </div>
+        <div class="body">
+          <div class="modal">
+            <div class="modal-head">
+              <strong>a001 씬 상세</strong>
+              <div class="tabs">
+                <span class="tab">기본 정보</span>
+                <span class="tab active">댓글 및 활동</span>
+              </div>
+            </div>
+            <div class="activity-list">
+              <div class="comment-row unread">
+                <div class="time">오전 10:32</div>
+                <p class="text">새 댓글입니다. 모달을 열거나 이 댓글을 클릭하거나 답글을 달면 읽음으로 내려갑니다.</p>
+              </div>
+              <div class="comment-row">
+                <div class="time">어제 오후 5:48</div>
+                <p class="text">이미 확인한 댓글은 일반 활동처럼 조용하게 남습니다.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="read-rule">
+            <div>읽음 처리 후보: 씬 상세 모달 열기, 댓글 클릭, 대댓글 작성, 상태 변경 후 댓글 영역 확인.</div>
+            <div>미읽음 복귀 조건: 내가 마지막으로 확인한 시각 이후 새 댓글이 추가되면 다시 보라색 펄스.</div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="steps">
+      <div class="step">
+        <strong>1. 새 댓글 발생</strong>
+        <p>관련 씬/리비전 카드의 댓글 배지가 보라색으로 바뀌고 아주 천천히 펄스합니다.</p>
+      </div>
+      <div class="step">
+        <strong>2. 사용자가 발견</strong>
+        <p>피드백 허브, 씬 카드, 시트 뷰에서 모두 같은 색상 규칙으로 보입니다.</p>
+      </div>
+      <div class="step">
+        <strong>3. 상세 모달 진입</strong>
+        <p>씬 상세 모달을 여는 순간 읽음으로 처리하는 것이 현재 선택입니다.</p>
+      </div>
+      <div class="step">
+        <strong>4. 새 댓글 추가</strong>
+        <p>확인 후에도 새 댓글이 추가되면 해당 배지가 다시 보라색으로 돌아옵니다.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

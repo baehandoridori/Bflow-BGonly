@@ -13,6 +13,7 @@
 import { useCallback } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import type { CompositingStatus } from '@/types';
 import {
   COMPOSITING_STATUS_LABEL,
@@ -56,7 +57,7 @@ export function BulkActionBar({ episodeNumber, isCompositor }: BulkActionBarProp
 
   return (
     <div
-      className="fixed left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-3 py-2 rounded-xl shadow-2xl border"
+      className="fixed left-1/2 -translate-x-1/2 z-40 flex max-w-[calc(100vw-2rem)] flex-wrap items-center gap-2 overflow-x-auto px-3 py-2 rounded-xl shadow-2xl border"
       style={{
         bottom: 28,
         background: 'rgb(var(--color-bg-card) / 0.97)',
@@ -89,7 +90,7 @@ export function BulkActionBar({ episodeNumber, isCompositor }: BulkActionBarProp
       {/* 컴포지팅 단계 일괄 변경 */}
       <div
         className={cn(
-          'flex items-center gap-1.5',
+          'flex min-w-0 flex-wrap items-center gap-1.5',
           !isCompositor && 'opacity-50 cursor-not-allowed',
         )}
         title={!isCompositor ? '컴포지터만 단계 일괄 변경 가능' : undefined}
@@ -105,7 +106,7 @@ export function BulkActionBar({ episodeNumber, isCompositor }: BulkActionBarProp
               type="button"
               disabled={!isCompositor}
               onClick={() => handleBulkStatus(st)}
-              className="px-2.5 py-1 text-[11px] font-bold rounded-full border transition-all duration-150"
+              className="compact-label-container inline-flex min-w-0 shrink items-center px-2.5 py-1 text-[11px] font-bold rounded-full border transition-all duration-150"
               style={{
                 background: 'transparent',
                 color: `var(${tv})`,
@@ -122,7 +123,16 @@ export function BulkActionBar({ episodeNumber, isCompositor }: BulkActionBarProp
                 e.currentTarget.style.color = `var(${tv})`;
               }}
             >
-              {COMPOSITING_STATUS_LABEL[st]}
+              <CompactIconLabel
+                icon={
+                  <span
+                    aria-hidden="true"
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: `var(${tv})` }}
+                  />
+                }
+                label={COMPOSITING_STATUS_LABEL[st]}
+              />
             </button>
           );
         })}

@@ -10,7 +10,7 @@
  * spec: 2026-05-21-compositing-dashboard-design.md (8.1~8.5, 13.2)
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CompositingState } from '@/types';
 import { isCompletedStatus } from '@/utils/compositingLabels';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
@@ -43,10 +43,47 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
 
   const rowRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
+  const [contentHeight, setContentHeight] = useState(0);
 
   // 사용자가 한 번이라도 토글한 파트는 set 에 들어있고, 그 안에 있으면 펼침.
   // (set 초기화는 CompositingDashboardView 가 마운트 시 모든 partId 를 add — 기본 펼침.)
   const expanded = expandedParts.has(partId);
+  const [rendered, setRendered] = useState(expanded);
+
+  useEffect(() => {
+    if (expanded) {
+      setRendered(true);
+      return;
+    }
+    const t = window.setTimeout(() => setRendered(false), 280);
+    return () => window.clearTimeout(t);
+  }, [expanded]);
+
+  useLayoutEffect(() => {
+    if (!rendered) {
+      setContentHeight(0);
+      return;
+    }
+
+    const row = rowRef.current;
+    if (!row) return;
+
+    const updateHeight = () => {
+      setContentHeight(row.scrollHeight);
+    };
+
+    updateHeight();
+
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateHeight) : null;
+    resizeObserver?.observe(row);
+    window.addEventListener('resize', updateHeight);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, [rendered, scenes.length, mutedScenes]);
 
   // 완료 씬 카운트 — 한솔 정의 (2026-05-22): "완료 = done + aggregated".
   let doneCount = 0;
@@ -109,47 +146,58 @@ export function PartCardRow({ partId, scenes, epStates }: PartCardRowProps) {
         onToggle={() => toggleExpand(partId)}
       />
 
-      {expanded && (
+      {rendered && (
         <div
-          ref={rowRef}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-          className="flex flex-wrap gap-3 px-1"
+          aria-hidden={!expanded}
           style={{
-            // 상부 margin — dock-lift / pinned 시 카드가 위 컨테이너 / 위 줄에 잘리지 않도록.
-            paddingTop: 28,
-            paddingBottom: 16,
+            overflow: expanded ? 'visible' : 'hidden',
+            maxHeight: expanded ? Math.max(320, contentHeight) : 0,
+            opacity: expanded ? 1 : 0,
+            transform: expanded ? 'translateY(0)' : 'translateY(-8px)',
+            transition: 'max-height 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease, transform 220ms ease',
           }}
         >
-          {scenes.map((sc, idx) => {
-            const stateKey = `${sc.episodeNumber}:${sc.sceneId}`;
-            const state = epStates.get(stateKey);
-            const status = state?.status ?? 'batch';
+          <div
+            ref={rowRef}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            className="flex flex-wrap gap-3 px-1"
+            style={{
+              // 상부 margin — dock-lift / pinned 시 카드가 위 컨테이너 / 위 줄에 잘리지 않도록.
+              paddingTop: 34,
+              paddingBottom: 16,
+            }}
+          >
+            {scenes.map((sc, idx) => {
+              const stateKey = `${sc.episodeNumber}:${sc.sceneId}`;
+              const state = epStates.get(stateKey);
+              const status = state?.status ?? 'batch';
 
-            // 필터/솔로/뮤트 처리
-            const matchesFilter = statusFilter === null || status === statusFilter;
-            const isSoloed = soloScene === null || soloScene === sc.sceneId;
-            const isMuted = mutedScenes.has(sc.sceneId);
-            if (isMuted) return null;
-            const dimmed = !matchesFilter || !isSoloed;
+              // 필터/솔로/뮤트 처리
+              const matchesFilter = statusFilter === null || status === statusFilter;
+              const isSoloed = soloScene === null || soloScene === sc.sceneId;
+              const isMuted = mutedScenes.has(sc.sceneId);
+              if (isMuted) return null;
+              const dimmed = !matchesFilter || !isSoloed;
 
-            return (
-              <div
-                key={sc.sceneId}
-                className="shrink-0"
-                style={{ width: 180 }}
-                data-scene-key={`${sc.episodeNumber}:${sc.sceneId}`}
-              >
-                <SceneCard
-                  card={sc}
-                  state={state}
-                  staggerIndex={idx}
-                  dimmed={dimmed}
-                  partSceneIds={scenes.map((s) => s.sceneId)}
-                />
-              </div>
-            );
-          })}
+              return (
+                <div
+                  key={sc.sceneId}
+                  className="shrink-0"
+                  style={{ width: 180 }}
+                  data-scene-key={`${sc.episodeNumber}:${sc.sceneId}`}
+                >
+                  <SceneCard
+                    card={sc}
+                    state={state}
+                    staggerIndex={idx}
+                    dimmed={dimmed}
+                    partSceneIds={scenes.map((s) => s.sceneId)}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

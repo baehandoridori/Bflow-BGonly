@@ -40,7 +40,13 @@ export interface SceneComment {
   storageKey?: string;
 }
 
-type CommentsStore = Record<string, SceneComment[]>;
+export type CommentsStore = Record<string, SceneComment[]>;
+
+export function hydrateLocalCommentsForPreview(store: CommentsStore): void {
+  localCache = store;
+  void window.electronAPI?.writeSettings?.(COMMENTS_FILE, store);
+  window.dispatchEvent(new CustomEvent('bflow:comments-invalidated'));
+}
 
 // ─── 모드 관리 ──────────────────────────────────
 
@@ -71,6 +77,13 @@ async function loadLocalAll(): Promise<CommentsStore> {
 async function saveLocal(all: CommentsStore): Promise<void> {
   localCache = all;
   await window.electronAPI.writeSettings(COMMENTS_FILE, all);
+}
+
+function dispatchLocalCommentInvalidated(sceneKey: string, commentAction?: 'add' | 'edit' | 'delete'): void {
+  const { sheetName, sceneId } = parseSceneKey(sceneKey);
+  window.dispatchEvent(new CustomEvent('bflow:comments-invalidated', {
+    detail: { sheetName, sceneId, commentAction },
+  }));
 }
 
 // ─── 시트 캐시 (파트별 지연 로딩) ───────────────
@@ -265,6 +278,18 @@ export async function getComments(sceneKey: string): Promise<SceneComment[]> {
   return [...(all[sceneKey] ?? [])];
 }
 
+export async function getCommentStoreForPart(sheetName: string): Promise<CommentsStore> {
+  if (sheetsMode) return loadPartComments(sheetName);
+
+  const all = await loadLocalAll();
+  const prefix = `${sheetName}:`;
+  const partStore: CommentsStore = {};
+  for (const [key, list] of Object.entries(all)) {
+    if (key.startsWith(prefix)) partStore[key] = [...list];
+  }
+  return partStore;
+}
+
 export async function addComment(sceneKey: string, comment: SceneComment): Promise<void> {
   if (sheetsMode) {
     const { sheetName, sceneId } = parseSceneKey(sceneKey);
@@ -309,6 +334,7 @@ export async function addComment(sceneKey: string, comment: SceneComment): Promi
   if (!all[sceneKey]) all[sceneKey] = [];
   all[sceneKey].push(comment);
   await saveLocal(all);
+  dispatchLocalCommentInvalidated(sceneKey, 'add');
 }
 
 export async function updateComment(
@@ -342,6 +368,7 @@ export async function updateComment(
   const idx = list.findIndex(c => c.id === commentId);
   if (idx >= 0) list[idx] = { ...list[idx], text, mentions, ...imagesPatch, editedAt };
   await saveLocal(all);
+  dispatchLocalCommentInvalidated(sceneKey, 'edit');
 }
 
 export async function deleteComment(sceneKey: string, commentId: string): Promise<void> {
@@ -382,6 +409,7 @@ export async function deleteComment(sceneKey: string, commentId: string): Promis
     .map(c => (c.parentCommentId === commentId ? { ...c, parentCommentId: null } : c));
   if (all[sceneKey].length === 0) delete all[sceneKey];
   await saveLocal(all);
+  dispatchLocalCommentInvalidated(sceneKey, 'delete');
 }
 
 /**

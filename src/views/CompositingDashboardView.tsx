@@ -291,6 +291,7 @@ export function CompositingDashboardView() {
   // 헤더 / 안내 띠 / 상태 칩 / Timeline 등 카드 외 모든 영역을 자연스럽게 cover.
   const handleBackgroundMouseDown = (e: React.MouseEvent) => {
     if (pinnedScene === null) return;
+    if (detailScene !== null) return;
     const target = e.target as HTMLElement | null;
     if (!target) return;
     // 카드 안 (또는 모달 안) 인지 검사

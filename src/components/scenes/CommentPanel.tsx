@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, ChevronDown, ChevronRight, Reply, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
+import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, ChevronDown, ChevronRight, Reply, MessageSquareWarning, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useRevisionStore } from '@/stores/useRevisionStore';
 import {
   getComments,
   addComment,
@@ -16,17 +17,31 @@ import {
   fetchReactionsBulk,
 } from '@/services/commentService';
 import type { SceneComment } from '@/services/commentService';
-import type { CommentReaction } from '@/types';
+import type { AppUser, CommentReaction } from '@/types';
 import { groupReactionsByEmoji } from '@/utils/commentReactionUtils';
 import { ReactionChip } from './ReactionChip';
 import { EmojiPicker } from './EmojiPicker';
 import { SmilePlus } from 'lucide-react';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
-import { formatTimeShort } from '@/utils/formatTime';
+import { formatCommentTime } from '@/utils/formatTime';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import {
+  COMMENT_READ_STATE_EVENT,
+  getCommentReadStateForUser,
+  getLatestOtherUserCommentCreatedAt,
+  isCommentKeyUnread,
+  markSceneThreadReadForUser,
+} from '@/services/commentReadStateService';
 import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { RevisionCommentBadge } from './RevisionCommentBadge';
+import { RevisionRecipientPicker } from './RevisionRecipientPicker';
+import {
+  getDefaultRevisionSlashRecipientIds,
+  parseRevisionSlashCommand,
+  type RevisionSlashContext,
+} from '@/utils/revisionSlashCommand';
+import { toast as sonnerToast } from 'sonner';
 import '@/styles/comment-panel.css';
 
 // ─── 타입 ───────────────────────────────────
@@ -36,6 +51,8 @@ export interface CommentInlineEvent {
   id: string;
   at: string;       // ISO 8601
   text: string;     // 한 줄 텍스트 (예: "이다은이 BG 모든 단계를 완료했습니다")
+  tone?: 'default' | 'revision_add' | 'revision_in_progress' | 'revision_resolve';
+  label?: string;
 }
 
 interface CommentPanelProps {
@@ -43,6 +60,8 @@ interface CommentPanelProps {
   sceneKey: string;
   /** 통합 뷰 전용 — 이 키의 댓글도 함께 보여주되, 저장은 primary(sceneKey)에만 한다 */
   secondarySceneKey?: string;
+  /** 사용자별 읽음 상태 저장에 쓰는 canonical 씬 대화 키 */
+  sceneThreadKey?: string;
   onCountChange?: (count: number) => void;
   /** 댓글 사이에 시간순으로 끼어들어가는 시스템 이벤트 (씬 생성/완료/리비전 등) */
   inlineEvents?: CommentInlineEvent[];
@@ -50,6 +69,19 @@ interface CommentPanelProps {
   focusCommentId?: string | null;
   /** v1.24.0: 댓글 이미지 라이트박스 상단에 표시할 씬 라벨 (예: "EP01 A컷 #03"). */
   sceneLabel?: string;
+  /** 댓글 입력창의 /re 빠른 리비전 등록 문맥. 없으면 /re 는 일반 댓글로 취급된다. */
+  quickRevision?: CommentPanelQuickRevisionContext;
+}
+
+export interface CommentPanelQuickRevisionContext {
+  /** buildSceneKey() 로 만든 리비전 canonical sceneKey */
+  sceneKey: string;
+  /** 현재 화면 문맥. 전체 모드는 BG/ACT 담당자를 모두 기본 체크한다. */
+  context: RevisionSlashContext;
+  /** 리비전에 기록할 부서. 전체 모드에서는 생략 가능. */
+  department?: 'bg' | 'acting';
+  bgAssignee?: string | null;
+  actingAssignee?: string | null;
 }
 
 /**
@@ -161,11 +193,13 @@ function ReactionsArea({
 
 // ─── 메인 컴포넌트 ──────────────────────────
 
-export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlineEvents, focusCommentId, sceneLabel }: CommentPanelProps) {
+export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel, quickRevision }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
+  const { createRevision } = useRevisionStore();
 
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
+  const effectiveSceneThreadKey = sceneThreadKey ?? sceneKey;
 
   // 댓글 상태
   const [comments, setComments] = useState<SceneCommentWithSource[]>([]);
@@ -182,6 +216,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [quickRevisionPickerOpen, setQuickRevisionPickerOpen] = useState(false);
+  const [quickRevisionNotifyIds, setQuickRevisionNotifyIds] = useState<string[]>([]);
 
   // 멘션 자동완성
   const [showMentions, setShowMentions] = useState(false);
@@ -208,6 +244,14 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   // v1.24.0: 외부 점프 시 강조할 댓글 id. focusCommentId prop 변경 또는 jump 이벤트로 set.
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(focusCommentId ?? null);
   const commentRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const [lastReadAt, setLastReadAt] = useState<string | null>(null);
+  const readMarkedRef = useRef<string | null>(null);
+  const unreadDividerRef = useRef<HTMLDivElement | null>(null);
+  const [unreadDividerElement, setUnreadDividerElement] = useState<HTMLDivElement | null>(null);
+  const setUnreadDividerNode = useCallback((node: HTMLDivElement | null) => {
+    unreadDividerRef.current = node;
+    setUnreadDividerElement(node);
+  }, []);
 
   // v1.18.0: "re만" 필터 — 리비전 맥락 댓글(revisionId 있음)만 표시.
   // 한솔 결정 (spec 2026-05-03): 댓글 패널에서 "리비전 댓글만" 빠르게 가려보고 싶을 때 토글.
@@ -313,6 +357,45 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     ta.style.height = prev;
     setTaHeight(Math.max(40, Math.min(sh, taMaxPx)));
   }, [input, taMaxPx]);
+
+  const quickRevisionCommand = useMemo(() => parseRevisionSlashCommand(input), [input]);
+  const quickRevisionActive = !!quickRevision && quickRevisionCommand.isRevisionCommand;
+  const quickRevisionDescription = quickRevisionCommand.description;
+  const quickRevisionDefaultRecipientIds = useMemo(() => {
+    if (!quickRevision || !currentUser) return [];
+    return getDefaultRevisionSlashRecipientIds({
+      context: quickRevision.context,
+      bgAssignee: quickRevision.bgAssignee,
+      actingAssignee: quickRevision.actingAssignee,
+      allUsers: users,
+      excludeUserId: currentUser.id,
+    });
+  }, [
+    quickRevision?.context,
+    quickRevision?.bgAssignee,
+    quickRevision?.actingAssignee,
+    currentUser?.id,
+    users,
+    quickRevision,
+  ]);
+  const quickRevisionDefaultRecipientKey = quickRevisionDefaultRecipientIds.join('|');
+
+  useEffect(() => {
+    if (!quickRevisionActive) {
+      setQuickRevisionPickerOpen(false);
+      return;
+    }
+    setQuickRevisionNotifyIds(quickRevisionDefaultRecipientIds);
+    setReplyTarget(null);
+  }, [quickRevisionActive, quickRevisionDefaultRecipientKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const quickRevisionSelectedUsers = useMemo(
+    () => quickRevisionNotifyIds
+      .map((id) => users.find((user) => user.id === id))
+      .filter((user): user is AppUser => !!user),
+    [quickRevisionNotifyIds, users],
+  );
+  const quickRevisionHasAttachments = quickRevisionActive && attachedImages.length > 0;
 
   // 댓글 로드 — primary + optional secondary 시간순 병합 (기존 로직)
   const loadComments = useCallback(() => {
@@ -421,6 +504,53 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     commentsRef.current = comments;
   }, [comments]);
 
+  const latestOtherUserCommentAt = useMemo(
+    () => getLatestOtherUserCommentCreatedAt(comments, currentUser?.id ?? ''),
+    [comments, currentUser?.id],
+  );
+
+  const hasUnreadComments = isCommentKeyUnread(latestOtherUserCommentAt, lastReadAt);
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setLastReadAt(null);
+      return;
+    }
+
+    let cancelled = false;
+    const load = () => {
+      void getCommentReadStateForUser(currentUser.id).then((state) => {
+        if (!cancelled) setLastReadAt(state[effectiveSceneThreadKey] ?? null);
+      });
+    };
+
+    load();
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      if (detail?.userId && detail.userId !== currentUser.id) return;
+      load();
+    };
+
+    window.addEventListener(COMMENT_READ_STATE_EVENT, handler);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(COMMENT_READ_STATE_EVENT, handler);
+    };
+  }, [currentUser?.id, effectiveSceneThreadKey]);
+
+  const markUnreadCommentsRead = useCallback(() => {
+    if (!currentUser?.id || !effectiveSceneThreadKey || !latestOtherUserCommentAt) return;
+    if (readMarkedRef.current === latestOtherUserCommentAt) return;
+
+    readMarkedRef.current = latestOtherUserCommentAt;
+    setLastReadAt(latestOtherUserCommentAt);
+    void markSceneThreadReadForUser({
+      userId: currentUser.id,
+      sceneThreadKey: effectiveSceneThreadKey,
+      readAt: latestOtherUserCommentAt,
+    });
+  }, [currentUser?.id, effectiveSceneThreadKey, latestOtherUserCommentAt]);
+
   // 다른 PC 변경 시 자동 리로드 (300ms 디바운스)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -434,12 +564,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
       if (timer) clearTimeout(timer);
     };
   }, [loadComments]);
-
-  // 새 댓글 시 스크롤
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    // Codex R3 P2 (2026-05-03): inlineEvents 도 watch — system 활동만 도착해도 스크롤 따라가게.
-  }, [comments.length, inlineEvents?.length]);
 
   // v1.24.0: focusCommentId prop 변경 시 → 자동 스크롤 + 일시 펄스. 답글이면 부모 자동 펼침.
   // P0 #2 fix: cleanup 누수 + comments 의존성으로 인한 펄스 무한 재시작 회귀 방지.
@@ -695,12 +819,51 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
   // ── 전송 ──
   const hasUploadingImage = attachedImages.some(a => a.uploading);
   const uploadedImageUrls = attachedImages.map(a => a.uploadedUrl).filter((u): u is string => !!u);
-  const canSubmit = !submitting
-    && !hasUploadingImage
-    && (input.trim().length > 0 || uploadedImageUrls.length > 0);
+  const canSubmit = quickRevisionActive
+    ? !submitting
+      && !hasUploadingImage
+      && !quickRevisionHasAttachments
+      && quickRevisionDescription.length > 0
+      && quickRevisionNotifyIds.length > 0
+    : !submitting
+      && !hasUploadingImage
+      && (input.trim().length > 0 || uploadedImageUrls.length > 0);
 
   const handleSubmit = async () => {
     if (!canSubmit || !currentUser) return;
+    if (quickRevisionActive && quickRevision) {
+      setSubmitting(true);
+      try {
+        await createRevision({
+          sceneKey: quickRevision.sceneKey,
+          description: quickRevisionDescription,
+          department: quickRevision.department,
+          lookupDepartment: quickRevision.department,
+          requesterId: currentUser.id,
+          requesterName: currentUser.name,
+          notifyUserIds: quickRevisionNotifyIds,
+        });
+        setInput('');
+        inputValueRef.current = '';
+        setQuickRevisionPickerOpen(false);
+        setShowMentions(false);
+        setReplyTarget(null);
+        const targetNames = quickRevisionSelectedUsers.map((user) => user.name).join(', ');
+        sonnerToast.success('리비전을 등록했습니다', {
+          description: targetNames ? `${targetNames}에게 알림을 보냈습니다.` : undefined,
+          duration: 2200,
+        });
+      } catch (err) {
+        console.error('[리비전 빠른 등록 실패]', err);
+        sonnerToast.error('리비전 등록 실패', {
+          description: err instanceof Error ? err.message : '잠시 후 다시 시도해 주세요.',
+        });
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     setSubmitting(true);
 
     const mentions = extractMentions(input, users.map(u => u.name));
@@ -754,6 +917,9 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     try {
       // v1.24.0: 답글이면 targetSceneKey (부모 sourceKey) 로 저장 → 부모/답글이 같은 sheet 에 모임.
       await addComment(targetSceneKey, comment);
+      if (prevReplyTarget) {
+        markUnreadCommentsRead();
+      }
 
       // 성공 — 이전 미리보기 blob URL revoke (메모리 정리)
       prevAttached.forEach(a => {
@@ -952,6 +1118,72 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
     [topLevelComments, orphanReplies],
   );
 
+  const orderedVisibleComments = useMemo(
+    () => [...visibleComments].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    ),
+    [visibleComments],
+  );
+
+  const firstUnreadCommentId = useMemo(() => {
+    if (!currentUser?.id || !hasUnreadComments) return null;
+    const readMs = lastReadAt ? Date.parse(lastReadAt) : Number.NEGATIVE_INFINITY;
+
+    for (const comment of orderedVisibleComments) {
+      if (comment.userId === currentUser.id) continue;
+      const createdMs = Date.parse(comment.createdAt);
+      if (!Number.isFinite(createdMs)) continue;
+      if (createdMs > readMs) return comment.id;
+    }
+
+    return null;
+  }, [currentUser?.id, hasUnreadComments, lastReadAt, orderedVisibleComments]);
+
+  useEffect(() => {
+    if (!firstUnreadCommentId) return;
+    const target = comments.find((comment) => comment.id === firstUnreadCommentId);
+    if (target?.parentCommentId) {
+      setCollapsedThreads((prev) => {
+        if (!prev.has(target.parentCommentId!)) return prev;
+        const next = new Set(prev);
+        next.delete(target.parentCommentId!);
+        return next;
+      });
+    }
+  }, [firstUnreadCommentId, comments]);
+
+  // 새 댓글 시 스크롤. 읽지 않은 댓글이 있으면 구분선으로 먼저 이동한다.
+  useEffect(() => {
+    if (firstUnreadCommentId) return;
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    // Codex R3 P2 (2026-05-03): inlineEvents 도 watch — system 활동만 도착해도 스크롤 따라가게.
+  }, [comments.length, inlineEvents?.length, firstUnreadCommentId]);
+
+  useEffect(() => {
+    if (!firstUnreadCommentId || !unreadDividerElement) return;
+    const timer = setTimeout(() => {
+      unreadDividerElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [firstUnreadCommentId, unreadDividerElement]);
+
+  useEffect(() => {
+    if (!firstUnreadCommentId || !latestOtherUserCommentAt || !unreadDividerElement) return;
+    const anchor = unreadDividerElement;
+    const root = scrollRef.current;
+    if (!root) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        markUnreadCommentsRead();
+        observer.disconnect();
+      }
+    }, { root, threshold: 0.6 });
+
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [firstUnreadCommentId, latestOtherUserCommentAt, markUnreadCommentsRead, unreadDividerElement]);
+
   const handleMentionClick = (userName: string) => {
     setHighlightUserName(userName);
     setView('team');
@@ -1054,6 +1286,23 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
               if (node.kind === 'event') {
                 // v1.24.0: 시스템 활동이 끼어들면 묶음 끊김 (확정 규칙).
                 prevUserId = null;
+                const isRevisionEvent = node.event.tone?.startsWith('revision_') ?? false;
+                const eventToneClass =
+                  node.event.tone === 'revision_resolve'
+                    ? 'border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-100/85'
+                    : node.event.tone === 'revision_in_progress'
+                      ? 'border-sky-300/20 bg-sky-300/[0.07] text-sky-100/85'
+                      : node.event.tone === 'revision_add'
+                        ? 'border-accent/25 bg-accent/[0.08] text-accent-sub'
+                        : 'text-text-secondary/55';
+                const eventDotClass =
+                  node.event.tone === 'revision_resolve'
+                    ? 'bg-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.45)]'
+                    : node.event.tone === 'revision_in_progress'
+                      ? 'bg-sky-300 shadow-[0_0_8px_rgba(125,211,252,0.45)]'
+                      : node.event.tone === 'revision_add'
+                        ? 'bg-accent-sub shadow-[0_0_8px_rgba(108,92,231,0.5)]'
+                        : 'bg-text-secondary/40';
                 return (
                   <motion.div
                     key={`evt:${node.event.id}`}
@@ -1062,11 +1311,36 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                    className="flex items-center gap-2 text-[10.5px] text-text-secondary/55 py-0.5"
+                    className={cn(
+                      'flex items-center gap-2 text-[10.5px] py-0.5',
+                      isRevisionEvent
+                        ? 'rounded-lg border px-2.5 py-2 shadow-[0_10px_26px_rgba(0,0,0,0.18)]'
+                        : '',
+                      eventToneClass,
+                    )}
                   >
-                    <span className="inline-block w-1 h-1 rounded-full bg-text-secondary/40" aria-hidden />
-                    <span className="flex-1 truncate">{node.event.text}</span>
-                    <span className="tabular-nums shrink-0">{formatTimeShort(node.event.at)}</span>
+                    {isRevisionEvent ? (
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 text-[10px] text-text-secondary/55 tabular-nums">
+                          {formatCommentTime(node.event.at)}
+                        </div>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={cn('inline-block w-1.5 h-1.5 rounded-full shrink-0', eventDotClass)} aria-hidden />
+                          {node.event.label && (
+                            <span className="shrink-0 rounded-md border border-current/15 bg-white/[0.04] px-1.5 py-0.5 text-[9.5px] font-bold">
+                              {node.event.label}
+                            </span>
+                          )}
+                          <span className="min-w-0 flex-1 truncate">{node.event.text}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <span className={cn('inline-block w-1.5 h-1.5 rounded-full shrink-0', eventDotClass)} aria-hidden />
+                        <span className="flex-1 truncate">{node.event.text}</span>
+                        <span className="tabular-nums shrink-0">{formatCommentTime(node.event.at)}</span>
+                      </>
+                    )}
                   </motion.div>
                 );
               }
@@ -1083,10 +1357,28 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
               const replies = repliesByParent.get(comment.id) ?? [];
               const threadCollapsed = collapsedThreads.has(comment.id);
               const isOrphanReply = !!comment.parentCommentId;
+              const showUnreadDivider =
+                firstUnreadCommentId != null
+                && comment.id === firstUnreadCommentId;
               return (
+              <Fragment key={comment.id}>
+                {showUnreadDivider && (
+                  <div
+                    ref={setUnreadDividerNode}
+                    className="flex items-center gap-2 py-1"
+                    aria-label="새 댓글 시작"
+                  >
+                    <span className="h-px flex-1 bg-accent/30" />
+                    <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                      새 댓글
+                    </span>
+                    <span className="h-px flex-1 bg-accent/30" />
+                  </div>
+                )}
               <motion.div
                 key={comment.id}
                 ref={(el) => { commentRefs.current.set(comment.id, el); }}
+                onClick={markUnreadCommentsRead}
                 layout="position"
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1106,7 +1398,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                   {isOwn ? (
                     <>
                       <span className="text-[11px] text-text-secondary/50">
-                        {formatTimeShort(comment.createdAt)}
+                        {formatCommentTime(comment.createdAt)}
                       </span>
                       <span className="text-xs font-semibold text-text-primary">
                         {comment.userName}
@@ -1118,7 +1410,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                         {comment.userName}
                       </span>
                       <span className="text-[11px] text-text-secondary/50">
-                        {formatTimeShort(comment.createdAt)}
+                        {formatCommentTime(comment.createdAt)}
                       </span>
                     </>
                   )}
@@ -1279,12 +1571,29 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                       const replyHasImages = (reply.images?.length ?? 0) > 0;
                       const replyMentionsMe = !!currentUser && (reply.mentions ?? []).includes(currentUser.name);
                       const replyIsFocused = focusedCommentId === reply.id;
+                      const replyShowUnreadDivider =
+                        firstUnreadCommentId != null
+                        && reply.id === firstUnreadCommentId;
                       // 답글 묶음 — 답글 내부에서도 같은 사용자 연속이면 메타 숨김.
                       const replyIsGrouped = ri > 0 && replies[ri - 1].userId === reply.userId;
                       return (
+                        <Fragment key={reply.id}>
+                        {replyShowUnreadDivider && (
+                          <div
+                            ref={setUnreadDividerNode}
+                            className="flex items-center gap-2 py-1"
+                            aria-label="새 댓글 시작"
+                          >
+                            <span className="h-px flex-1 bg-accent/30" />
+                            <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                              새 댓글
+                            </span>
+                            <span className="h-px flex-1 bg-accent/30" />
+                          </div>
+                        )}
                         <div
-                          key={reply.id}
                           ref={(el) => { commentRefs.current.set(reply.id, el); }}
+                          onClick={markUnreadCommentsRead}
                           className={cn(
                             'group/reply relative',
                             replyMentionsMe && 'pl-1.5',
@@ -1296,7 +1605,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                           {!replyIsGrouped && (
                             <div className="flex items-center gap-1.5 mb-0.5">
                               <span className="text-[11px] font-semibold text-text-primary">{reply.userName}</span>
-                              <span className="text-[10px] text-text-secondary/50">{formatTimeShort(reply.createdAt)}</span>
+                              <span className="text-[10px] text-text-secondary/50">{formatCommentTime(reply.createdAt)}</span>
                               {reply.editedAt && (
                                 <span className="text-[10px] text-text-secondary/30 italic">수정됨</span>
                               )}
@@ -1385,11 +1694,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
                             compact
                           />
                         </div>
+                        </Fragment>
                       );
                     })}
                   </div>
                 )}
               </motion.div>
+              </Fragment>
             );
             });
           })()}
@@ -1418,6 +1729,80 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
             ))}
           </div>
         )}
+
+        <AnimatePresence initial={false}>
+          {quickRevisionActive && (
+            <motion.div
+              key="quick-revision-preview"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.18 }}
+              className="mb-2 rounded-xl border border-accent/40 bg-accent/[0.08] shadow-lg overflow-visible"
+              style={{ boxShadow: '0 16px 36px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,255,255,0.03)' }}
+            >
+              <div className="p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-[12px] font-bold text-text-primary">
+                      <span className="w-6 h-6 rounded-lg border border-accent/35 bg-accent/20 text-accent-sub inline-flex items-center justify-center shrink-0">
+                        <MessageSquareWarning size={13} strokeWidth={2.4} />
+                      </span>
+                      리비전 빠른 등록
+                    </div>
+                    <div className="mt-1 text-[12px] text-text-secondary/85 truncate">
+                      {quickRevisionDescription || '내용을 입력하면 리비전으로 등록됩니다'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQuickRevisionPickerOpen((open) => !open)}
+                    className="shrink-0 px-2.5 py-1.5 rounded-lg border border-bg-border/70 bg-bg-primary/35 text-[11.5px] font-bold text-text-primary hover:border-accent/50 hover:bg-accent/[0.10] transition-colors cursor-pointer"
+                  >
+                    담당자 변경
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-text-secondary/80">알람 보낼 담당자</span>
+                  {quickRevisionSelectedUsers.length > 0 ? quickRevisionSelectedUsers.map((user) => (
+                    <span
+                      key={user.id}
+                      className="inline-flex items-center gap-1.5 h-6 rounded-full border border-accent/40 bg-accent/15 pl-1 pr-2 text-[11.5px] text-text-primary"
+                    >
+                      <span className="w-4 h-4 rounded-full bg-accent/80 text-white text-[9px] font-bold inline-flex items-center justify-center">
+                        {user.name.charAt(0)}
+                      </span>
+                      {user.name}
+                    </span>
+                  )) : (
+                    <span className="inline-flex items-center h-6 rounded-full border border-status-none/35 bg-status-none/10 px-2 text-[11.5px] text-status-none">
+                      선택 필요
+                    </span>
+                  )}
+                </div>
+
+                {quickRevisionHasAttachments && (
+                  <div className="rounded-lg border border-status-none/30 bg-status-none/10 px-2.5 py-2 text-[11px] text-status-none">
+                    빠른 리비전은 텍스트만 등록합니다. 이미지는 리비전 탭의 정식 등록 폼에서 첨부해 주세요.
+                  </div>
+                )}
+
+                <div className={cn(
+                  'rounded-lg border border-bg-border/50 bg-bg-primary/35 p-2',
+                  quickRevisionPickerOpen ? 'block' : 'hidden',
+                )}>
+                  <RevisionRecipientPicker
+                    allUsers={users}
+                    defaultCheckedIds={quickRevisionDefaultRecipientIds}
+                    excludeUserId={currentUser?.id || ''}
+                    onChange={setQuickRevisionNotifyIds}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div
           onPaste={handlePaste}
@@ -1534,9 +1919,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
           {/* 하단 toolbar — 좌측 첨부, 우측 전송 (cowork 스타일). v1.23.3 (#1): shrink-0 명시 — 항상 보임 보장 */}
           <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-bg-border/40 shrink-0">
             <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-card hover:text-text-primary transition-colors cursor-pointer"
-              title="이미지 첨부"
+              onClick={() => {
+                if (quickRevisionActive) return;
+                fileInputRef.current?.click();
+              }}
+              disabled={quickRevisionActive}
+              className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-card hover:text-text-primary disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              title={quickRevisionActive ? '빠른 리비전은 텍스트만 지원합니다' : '이미지 첨부'}
             >
               <Paperclip size={14} />
             </button>
@@ -1544,7 +1933,15 @@ export function CommentPanel({ sceneKey, secondarySceneKey, onCountChange, inlin
               onClick={handleSubmit}
               disabled={!canSubmit}
               className="w-7 h-7 rounded-md flex items-center justify-center bg-accent hover:bg-accent-sub text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              title={hasUploadingImage ? '이미지 업로드 중...' : '전송 (Enter)'}
+              title={
+                quickRevisionActive
+                  ? quickRevisionHasAttachments
+                    ? '이미지는 리비전 탭에서 첨부해 주세요'
+                    : quickRevisionNotifyIds.length === 0
+                      ? '알람 보낼 담당자를 선택해 주세요'
+                      : '리비전 등록 (Enter)'
+                  : hasUploadingImage ? '이미지 업로드 중...' : '전송 (Enter)'
+              }
             >
               {submitting ? (
                 <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1693,7 +2090,7 @@ function CommentLightboxPortal({
         <div className="flex-shrink-0 px-6 pt-3 pb-2 max-w-3xl mx-auto w-full">
           <div className="flex items-baseline gap-2 text-[12.5px] mb-1">
             <span className="font-semibold text-white">{current.userName}</span>
-            <span className="text-white/50 text-[11px]">{formatTimeShort(current.createdAt)}</span>
+            <span className="text-white/50 text-[11px]">{formatCommentTime(current.createdAt)}</span>
           </div>
           {current.commentText && (
             <p className="text-[13.5px] text-white/95 leading-relaxed whitespace-pre-wrap break-words max-h-24 overflow-y-auto comment-lightbox-thumb-strip">

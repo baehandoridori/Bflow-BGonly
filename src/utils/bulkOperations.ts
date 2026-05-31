@@ -1,6 +1,6 @@
 import { useBulkOperationsStore, type OpKind } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
-import type { BulkUpdateResult, MergedScene, Part, Scene, ScenePhaseState } from '@/types';
+import type { BulkUpdateResult, MergedScene, Part, Scene, ScenePhaseState, Stage } from '@/types';
 
 // v1.25.12 — 머지드 단위 카운트 헬퍼 재노출 (테스트 격리 위해 별도 파일).
 export { countSelectedScenes } from './bulkSelectionCount';
@@ -107,7 +107,7 @@ export function resolveSelectedScenes(
 type RunBulkOpOptions = {
   targetStage?: 'lo' | 'done' | 'review' | 'png';
   /**
-   * stage-toggle에서 done을 켜서 4단계 완료가 된 씬의 completedBy/completedAt.
+   * stage-toggle에서 4단계 전체 완료/해제 상태가 바뀐 씬의 completedBy/completedAt.
    * 성공 시 store에 반영한다.
    */
   completedMetaByUuid?: Map<string, { completedBy: string; completedAt: string }>;
@@ -116,6 +116,10 @@ type RunBulkOpOptions = {
    * key=sceneUuid, value=새 stage 값.
    */
   stageValueByUuid?: Map<string, boolean>;
+  /**
+   * stage-toggle에서 여러 stage가 함께 바뀌는 경우 성공 시 씬별 patch를 한 번에 반영한다.
+   */
+  stagePatchByUuid?: Map<string, Partial<Record<Stage, boolean>>>;
   /**
    * field-edit에서 적용할 필드. 성공 시 store에 반영한다.
    */
@@ -168,7 +172,10 @@ export async function runBulkOp(
     }
     if (kind === 'stage-toggle') {
       const patch: Partial<Scene> = {};
-      if (opts.stageValueByUuid?.has(sceneUuid) && opts.targetStage) {
+      const stagePatch = opts.stagePatchByUuid?.get(sceneUuid);
+      if (stagePatch) {
+        Object.assign(patch, stagePatch);
+      } else if (opts.stageValueByUuid?.has(sceneUuid) && opts.targetStage) {
         (patch as Record<string, boolean>)[opts.targetStage] =
           opts.stageValueByUuid.get(sceneUuid) as boolean;
       }

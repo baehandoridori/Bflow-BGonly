@@ -38,6 +38,7 @@ import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastS
 import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
+import { DEFAULT_STAR_NEST_SETTINGS, normalizeBackgroundArt, normalizeStarNestSettings } from '@/utils/starNestSettings';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
@@ -377,7 +378,14 @@ export default function App() {
         // Phase 8-3: 플렉서스 설정 로드
         if (savedPrefs?.plexus) {
           const p = savedPrefs.plexus;
+          const legacyBackgroundArt = normalizeBackgroundArt(p.backgroundArt);
+          const legacyStarNest = normalizeStarNestSettings(
+            p.starNest ?? p.dashboardStarNest ?? p.loginStarNest ?? DEFAULT_STAR_NEST_SETTINGS,
+          );
           useAppStore.getState().setPlexusSettings({
+            backgroundArt: legacyBackgroundArt,
+            loginBackgroundArt: normalizeBackgroundArt(p.loginBackgroundArt ?? legacyBackgroundArt),
+            dashboardBackgroundArt: normalizeBackgroundArt(p.dashboardBackgroundArt ?? legacyBackgroundArt),
             loginEnabled: p.loginEnabled ?? true,
             loginGradientEnabled: p.loginGradientEnabled ?? true,
             loginParticleCount: p.loginParticleCount ?? 666,
@@ -390,6 +398,9 @@ export default function App() {
             mouseForce: p.mouseForce ?? 0.06,
             glowIntensity: p.glowIntensity ?? 1.0,
             connectionDist: p.connectionDist ?? 160,
+            starNest: legacyStarNest,
+            loginStarNest: normalizeStarNestSettings(p.loginStarNest ?? legacyStarNest),
+            dashboardStarNest: normalizeStarNestSettings(p.dashboardStarNest ?? legacyStarNest),
           });
         }
 

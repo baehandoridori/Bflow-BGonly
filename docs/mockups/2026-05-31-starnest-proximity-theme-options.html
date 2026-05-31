@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bflow StarNest + Proximity Interaction Options</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080a11;
+      --panel: #11141d;
+      --panel-2: #151926;
+      --line: rgba(152, 163, 255, 0.18);
+      --text: #ececf6;
+      --muted: #8f94aa;
+      --soft: #5e6685;
+      --accent: #7c67ff;
+      --accent-2: #00d9a0;
+      --warn: #fdcb6e;
+      --danger: #ff7675;
+      --radius: 10px;
+      font-family: Inter, Pretendard, "Noto Sans KR", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 15% 10%, rgba(124, 103, 255, 0.18), transparent 30%),
+        radial-gradient(circle at 90% 0%, rgba(0, 217, 160, 0.10), transparent 26%),
+        linear-gradient(180deg, #0d0f18 0%, #06070c 100%);
+      color: var(--text);
+    }
+
+    body { padding: 24px; }
+
+    .page {
+      max-width: 1420px;
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .pill-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .pill {
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      background: rgba(17, 20, 29, 0.8);
+      padding: 0 10px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 14px rgba(124, 103, 255, 0.65);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(420px, 0.95fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(17, 20, 29, 0.94), rgba(9, 11, 17, 0.94));
+      overflow: hidden;
+      box-shadow: 0 20px 80px rgba(0, 0, 0, 0.28);
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 18px;
+      border-bottom: 1px solid rgba(152, 163, 255, 0.12);
+      background: rgba(255, 255, 255, 0.015);
+    }
+
+    .panel-title {
+      display: grid;
+      gap: 4px;
+    }
+
+    .panel-title h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .panel-title p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .seg {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 3px;
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    .seg button {
+      border: 0;
+      color: var(--muted);
+      background: transparent;
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .seg button.active {
+      color: #fff;
+      background: linear-gradient(135deg, rgba(124, 103, 255, 0.95), rgba(90, 72, 220, 0.95));
+      box-shadow: 0 0 18px rgba(124, 103, 255, 0.35);
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      min-height: 430px;
+    }
+
+    .settings-nav {
+      border-right: 1px solid rgba(152, 163, 255, 0.12);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .settings-card {
+      border: 1px solid rgba(152, 163, 255, 0.14);
+      border-radius: 9px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.025);
+      cursor: pointer;
+      transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+    }
+
+    .settings-card:hover {
+      border-color: rgba(124, 103, 255, 0.5);
+      background: rgba(124, 103, 255, 0.08);
+      transform: translateY(-1px);
+    }
+
+    .settings-card.selected {
+      border-color: rgba(124, 103, 255, 0.85);
+      background: rgba(124, 103, 255, 0.12);
+      box-shadow: inset 3px 0 0 rgba(124, 103, 255, 0.95);
+    }
+
+    .settings-card strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .settings-card span {
+      display: block;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .settings-main {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .preview-stage {
+      position: relative;
+      min-height: 260px;
+      border: 1px solid rgba(152, 163, 255, 0.13);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #05070d;
+    }
+
+    .preview-stage canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .preview-overlay {
+      position: absolute;
+      inset: 0;
+      padding: 18px;
+      display: flex;
+      align-items: flex-end;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 70% 36%, rgba(255, 255, 255, 0.06), transparent 26%),
+        linear-gradient(180deg, transparent 35%, rgba(0, 0, 0, 0.55) 100%);
+    }
+
+    .preview-badge {
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(7, 9, 15, 0.58);
+      backdrop-filter: blur(14px);
+      border-radius: 9px;
+      padding: 12px 14px;
+      max-width: 360px;
+    }
+
+    .preview-badge strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .preview-badge span {
+      display: block;
+      margin-top: 5px;
+      color: #b8bed3;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .control {
+      border: 1px solid rgba(152, 163, 255, 0.13);
+      border-radius: 8px;
+      padding: 11px 12px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .control label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+
+    .control input { width: 100%; accent-color: var(--accent); }
+
+    .proximity-wrap {
+      padding: 16px;
+    }
+
+    .proximity-stage {
+      position: relative;
+      min-height: 560px;
+      border: 1px solid rgba(152, 163, 255, 0.12);
+      border-radius: 12px;
+      background:
+        linear-gradient(rgba(124, 103, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(124, 103, 255, 0.025) 1px, transparent 1px),
+        radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(124, 103, 255, 0.14), transparent 26%),
+        rgba(3, 5, 10, 0.72);
+      background-size: 42px 42px, 42px 42px, auto, auto;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+
+    .scene-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(4, 150px);
+      gap: 14px;
+      padding: 34px;
+      justify-content: center;
+    }
+
+    .scene-card {
+      --p: 0;
+      --tx: 0px;
+      --ty: 0px;
+      position: relative;
+      height: 178px;
+      border: 1px solid color-mix(in srgb, var(--status) 34%, rgba(152, 163, 255, 0.12));
+      border-radius: 9px;
+      background:
+        radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--status) calc(12% + var(--p) * 18%), transparent), transparent 58%),
+        linear-gradient(180deg, rgba(22, 26, 38, 0.96), rgba(9, 11, 18, 0.98));
+      transform:
+        translate3d(calc(var(--tx) * var(--p)), calc(var(--ty) * var(--p)), 0)
+        scale(calc(1 + var(--p) * var(--scale, 0.055)));
+      box-shadow:
+        0 10px 24px rgba(0, 0, 0, 0.2),
+        0 0 calc(10px + var(--p) * 28px) color-mix(in srgb, var(--status) calc(var(--p) * 30%), transparent);
+      transition: border-color 80ms linear, background 80ms linear, box-shadow 80ms linear;
+      will-change: transform, box-shadow;
+      overflow: hidden;
+    }
+
+    .scene-card::before {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      border-radius: inherit;
+      opacity: calc(var(--p) * 0.85);
+      background:
+        radial-gradient(circle at var(--local-x, 50%) var(--local-y, 50%), color-mix(in srgb, var(--status) 22%, white 5%), transparent 28%);
+      pointer-events: none;
+    }
+
+    .scene-card::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      opacity: calc(var(--p) * 0.42);
+      border: 1px solid color-mix(in srgb, var(--status) 70%, white 10%);
+      animation: proximityPulse 1.6s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    @keyframes proximityPulse {
+      0%, 100% { transform: scale(1); opacity: calc(var(--p) * 0.22); }
+      50% { transform: scale(1.018); opacity: calc(var(--p) * 0.55); }
+    }
+
+    .card-head {
+      position: relative;
+      z-index: 1;
+      height: 31px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 10px;
+      border-bottom: 1px solid rgba(152, 163, 255, 0.12);
+    }
+
+    .card-id {
+      font-family: "Fira Code", Consolas, monospace;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--status);
+      box-shadow: 0 0 calc(8px + var(--p) * 12px) var(--status);
+      transform: scale(calc(1 + var(--p) * 0.5));
+    }
+
+    .thumbs {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      height: 82px;
+      border-bottom: 1px solid rgba(152, 163, 255, 0.12);
+    }
+
+    .thumb {
+      display: grid;
+      place-items: center;
+      color: rgba(236, 236, 246, 0.36);
+      font-size: 10px;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,0.05), transparent),
+        rgba(0,0,0,0.16);
+    }
+
+    .thumb + .thumb { border-left: 1px solid rgba(152, 163, 255, 0.12); }
+
+    .card-body {
+      position: relative;
+      z-index: 1;
+      padding: 10px;
+      display: grid;
+      gap: 7px;
+    }
+
+    .meta-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .meta-line strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .guide {
+      position: absolute;
+      right: 18px;
+      bottom: 16px;
+      z-index: 2;
+      display: grid;
+      gap: 7px;
+      width: 228px;
+      border: 1px solid rgba(152, 163, 255, 0.14);
+      border-radius: 10px;
+      background: rgba(6, 8, 14, 0.72);
+      backdrop-filter: blur(14px);
+      padding: 12px;
+    }
+
+    .guide strong { font-size: 12px; }
+    .guide span { color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+    .options {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .option {
+      border: 1px solid rgba(152, 163, 255, 0.14);
+      border-radius: 10px;
+      background: rgba(17, 20, 29, 0.82);
+      padding: 14px;
+      cursor: pointer;
+      min-height: 150px;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .option:hover,
+    .option.selected {
+      transform: translateY(-2px);
+      border-color: rgba(124, 103, 255, 0.68);
+      background: rgba(124, 103, 255, 0.10);
+    }
+
+    .option .letter {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      background: rgba(124, 103, 255, 0.18);
+      color: #d9d3ff;
+      font-weight: 900;
+      margin-bottom: 10px;
+    }
+
+    .option h3 {
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .option p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .note {
+      border: 1px solid rgba(253, 203, 110, 0.22);
+      border-radius: 9px;
+      padding: 12px 14px;
+      background: rgba(253, 203, 110, 0.06);
+      color: #d9c58a;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 1180px) {
+      body { padding: 16px; }
+      .layout { grid-template-columns: 1fr; }
+      .settings-grid { grid-template-columns: 1fr; }
+      .settings-nav { border-right: 0; border-bottom: 1px solid rgba(152, 163, 255, 0.12); }
+      .scene-grid { grid-template-columns: repeat(3, 150px); }
+      .options { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <h1>StarNest 테마 + 컴포지팅 proximity 반응 시안</h1>
+        <p class="subtitle">
+          실제 앱 적용 전, 설정 화면의 선택 방식과 컴포지팅 카드의 거리 기반 반응을 함께 보는 초안입니다.
+          아래 컴포지팅 영역에서 마우스를 천천히 움직여 보세요.
+        </p>
+      </div>
+      <div class="pill-row">
+        <span class="pill"><span class="dot"></span> Plexus / StarNest 선택형</span>
+        <span class="pill"><span class="dot" style="background:var(--accent-2)"></span> 거리 기반 카드 반응</span>
+      </div>
+    </header>
+
+    <section class="layout">
+      <article class="panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <h2>설정창 시안: 배경 아트 엔진 선택</h2>
+            <p>현재 플렉서스가 쓰이는 위치에서 StarNest를 같은 자리의 대체 옵션으로 선택합니다.</p>
+          </div>
+          <div class="seg" aria-label="preview mode">
+            <button class="active" data-engine="starnest">StarNest</button>
+            <button data-engine="plexus">Plexus</button>
+            <button data-engine="off">OFF</button>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+          <nav class="settings-nav">
+            <div class="settings-card selected" data-engine="starnest">
+              <strong>StarNest</strong>
+              <span>깊은 우주감, 중심부 회전, 은은한 광량. 로그인과 대시보드에 가장 잘 맞는 후보.</span>
+            </div>
+            <div class="settings-card" data-engine="plexus">
+              <strong>Plexus</strong>
+              <span>기존 점과 선 기반 배경. 현재 톤 유지가 가장 쉽고 성능 예측이 안정적.</span>
+            </div>
+            <div class="settings-card" data-engine="off">
+              <strong>배경 아트 끄기</strong>
+              <span>저사양 PC나 집중 모드에서 조명 배경만 남기는 선택지.</span>
+            </div>
+          </nav>
+
+          <div class="settings-main">
+            <div class="preview-stage">
+              <canvas id="themeCanvas"></canvas>
+              <div class="preview-overlay">
+                <div class="preview-badge">
+                  <strong id="engineTitle">StarNest</strong>
+                  <span id="engineDesc">플렉서스와 같은 자리에 들어가는 우주형 배경 엔진. 테마 색을 받아 은은하게 변형됩니다.</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-row">
+              <div class="control">
+                <label><span>광량</span><strong id="brightnessValue">62</strong></label>
+                <input id="brightness" type="range" min="20" max="100" value="62" />
+              </div>
+              <div class="control">
+                <label><span>속도</span><strong id="speedValue">48</strong></label>
+                <input id="starSpeed" type="range" min="10" max="100" value="48" />
+              </div>
+              <div class="control">
+                <label><span>밀도</span><strong id="densityValue">70</strong></label>
+                <input id="density" type="range" min="20" max="100" value="70" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <h2>컴포지팅 카드: proximity hover</h2>
+            <p>커서와의 거리에 따라 주변 카드가 아주 조금씩 커지고, 상태색 광량이 살아납니다.</p>
+          </div>
+          <div class="seg" aria-label="proximity intensity">
+            <button data-intensity="0.035">약</button>
+            <button class="active" data-intensity="0.055">중</button>
+            <button data-intensity="0.080">강</button>
+          </div>
+        </div>
+
+        <div class="proximity-wrap">
+          <div id="proximityStage" class="proximity-stage">
+            <div class="scene-grid">
+              <article class="scene-card" style="--status:#7c67ff" data-scene="a001">
+                <div class="card-head"><span class="card-id">a001</span><span class="status-dot"></span></div>
+                <div class="thumbs"><div class="thumb">STB</div><div class="thumb">GUIDE</div></div>
+                <div class="card-body"><div class="meta-line"><span>상태</span><strong>배치</strong></div><div class="meta-line"><span>담당</span><strong>서연</strong></div></div>
+              </article>
+              <article class="scene-card" style="--status:#00d9a0" data-scene="a002">
+                <div class="card-head"><span class="card-id">a002</span><span class="status-dot"></span></div>
+                <div class="thumbs"><div class="thumb">STB</div><div class="thumb">GUIDE</div></div>
+                <div class="card-body"><div class="meta-line"><span>상태</span><strong>완료</strong></div><div class="meta-line"><span>담당</span><strong>민지</strong></div></div>
+              </article>
+              <article class="scene-card" style="--status:#fdcb6e" data-scene="a003">
+                <div class="card-head"><span class="card-id">a003</span><span class="status-dot"></span></div>
+                <div class="thumbs"><div class="thumb">STB</div><div class="thumb">GUIDE</div></div>
+                <div class="card-body"><div class="meta-line"><span>상태</span><strong>렌더</strong></div><div class="meta-line"><span>담당</span><strong>배한</strong></div></div>
+              </article>
+              <article class="scene-card" style="--status:#74b9ff" data-scene="a004">
+                <div class="card-head"><span class="card-id">a004</span><span class="status-dot"></span></div>
+                <div class="thumbs"><div class="thumb">STB</div><div class="thumb">GUIDE</div></div>
+                <div class="card-body"><div class="meta-line"><span>상태</span><strong>합성</strong></div><div class="meta-line"><span>담당</span><strong>유진</strong></div></div>
+              </article>
+              <article class="scene-card" style="--status:#ff7675" data-scene="b001">
+                <div class="card-head"><span class="card-id">b001</span><span class="status-dot"></span></div>
+                <div class="thumbs"><div class="thumb">STB</div><div class="thumb">GUIDE</div></div>
+                <div class="card-body"><div class="meta-line"><span>상태</span><strong>오류</strong></div><div class="meta-line"><span>담당</span><strong>한솔</strong></div></div>
+              </article>
+              <article class="scene-card" style="--status:#7c67ff" data-scene="b002">
+                <div class="card-head"><span class="card-id">b002</span><span class="status-dot"></span></div>
+                <div class="thumbs"><div class="thumb">STB</div><div class="thumb">GUIDE</div></div>
+                <div class="card-body"><div class="meta-line"><span>상태</span><strong>배치</strong></div><div class="meta-line"><span>담당</span><strong>지윤</strong></div></div>
+              </article>
+              <article class="scene-card" style="--status:#74b9ff" data-scene="b003">
+                <div class="card-head"><span class="card-id">b003</span><span class="status-dot"></span></div>
+                <div class="thumbs"><div class="thumb">STB</div><div class="thumb">GUIDE</div></div>
+                <div class="card-body"><div class="meta-line"><span>상태</span><strong>합성</strong></div><div class="meta-line"><span>담당</span><strong>도윤</strong></div></div>
+              </article>
+              <article class="scene-card" style="--status:#00d9a0" data-scene="b004">
+                <div class="card-head"><span class="card-id">b004</span><span class="status-dot"></span></div>
+                <div class="thumbs"><div class="thumb">STB</div><div class="thumb">GUIDE</div></div>
+                <div class="card-body"><div class="meta-line"><span>상태</span><strong>완료</strong></div><div class="meta-line"><span>담당</span><strong>서연</strong></div></div>
+              </article>
+            </div>
+            <div class="guide">
+              <strong>반응 방식</strong>
+              <span>가까운 카드만 크게 반응하고, 주변 카드는 거리만큼 작게 반응합니다. 클릭 기능과 선택 상태는 그대로 유지하는 방향입니다.</span>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2>적용 방향 후보</h2>
+          <p>지금 단계에서는 구현이 아니라 방향 선택입니다. 원하는 방향을 골라주면 다음 질문을 이어가겠습니다.</p>
+        </div>
+      </div>
+      <div style="padding:16px; display:grid; gap:14px;">
+        <div class="options" id="choiceOptions">
+          <div class="option selected" data-choice="a">
+            <div class="letter">A</div>
+            <h3>권장: 배경 엔진 선택 + 절제된 proximity</h3>
+            <p>설정의 효과 섹션에서 Plexus / StarNest / OFF를 선택합니다. 컴포지팅 카드는 가까운 카드만 은은하게 반응해 업무 화면의 안정감을 지킵니다.</p>
+          </div>
+          <div class="option" data-choice="b">
+            <div class="letter">B</div>
+            <h3>몰입형: StarNest 중심 테마</h3>
+            <p>StarNest를 하나의 테마 분위기로 키웁니다. 로그인과 대시보드에서 더 강하게 보이고, 컴포지팅 카드도 더 생동감 있게 움직입니다.</p>
+          </div>
+          <div class="option" data-choice="c">
+            <div class="letter">C</div>
+            <h3>보수형: 기존 플렉서스 유지, 카드만 개선</h3>
+            <p>StarNest는 나중으로 미루고 컴포지팅 카드 proximity만 먼저 넣습니다. 변경 범위가 가장 작지만 새 테마의 체감은 약합니다.</p>
+          </div>
+        </div>
+        <div class="note">
+          구현 시에는 움직임 줄이기 설정(prefers-reduced-motion), 저사양 PC용 OFF/약 모드, 설정 저장(preferences.json)을 같이 고려해야 합니다.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const canvas = document.getElementById('themeCanvas');
+    const ctx = canvas.getContext('2d');
+    const engineTitle = document.getElementById('engineTitle');
+    const engineDesc = document.getElementById('engineDesc');
+    const brightness = document.getElementById('brightness');
+    const starSpeed = document.getElementById('starSpeed');
+    const density = document.getElementById('density');
+    const brightnessValue = document.getElementById('brightnessValue');
+    const speedValue = document.getElementById('speedValue');
+    const densityValue = document.getElementById('densityValue');
+    let engine = 'starnest';
+    let stars = [];
+    let t = 0;
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      seedStars();
+    }
+
+    function seedStars() {
+      const rect = canvas.getBoundingClientRect();
+      const count = Math.floor(80 + Number(density.value) * 2.2);
+      stars = Array.from({ length: count }, (_, i) => ({
+        a: Math.random() * Math.PI * 2,
+        r: Math.random() * Math.max(rect.width, rect.height) * 0.75,
+        z: Math.random(),
+        s: 0.4 + Math.random() * 1.8,
+        o: 0.25 + Math.random() * 0.75,
+        drift: (Math.random() - 0.5) * 0.45,
+        i,
+      }));
+    }
+
+    function drawTheme() {
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      t += Number(starSpeed.value) * 0.00018;
+      ctx.clearRect(0, 0, w, h);
+
+      if (engine === 'off') {
+        ctx.fillStyle = '#070910';
+        ctx.fillRect(0, 0, w, h);
+        requestAnimationFrame(drawTheme);
+        return;
+      }
+
+      const bg = ctx.createRadialGradient(w * 0.52, h * 0.46, 0, w * 0.52, h * 0.46, Math.max(w, h) * 0.7);
+      if (engine === 'plexus') {
+        bg.addColorStop(0, 'rgba(124,103,255,0.16)');
+        bg.addColorStop(0.42, 'rgba(9,11,18,0.92)');
+        bg.addColorStop(1, 'rgba(3,5,10,1)');
+      } else {
+        bg.addColorStop(0, 'rgba(255,255,255,0.10)');
+        bg.addColorStop(0.18, 'rgba(124,103,255,0.24)');
+        bg.addColorStop(0.46, 'rgba(0,217,160,0.08)');
+        bg.addColorStop(1, 'rgba(2,4,9,1)');
+      }
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+
+      const cx = w * 0.52;
+      const cy = h * 0.48;
+      const b = Number(brightness.value) / 100;
+
+      if (engine === 'plexus') {
+        for (let i = 0; i < stars.length; i++) {
+          const p = stars[i];
+          p.r += p.drift * 0.18;
+          const x = (p.a / (Math.PI * 2)) * w;
+          const y = ((p.r % h) + h) % h;
+          for (let j = i + 1; j < Math.min(stars.length, i + 10); j++) {
+            const q = stars[j];
+            const x2 = (q.a / (Math.PI * 2)) * w;
+            const y2 = ((q.r % h) + h) % h;
+            const d = Math.hypot(x - x2, y - y2);
+            if (d < 75) {
+              ctx.strokeStyle = `rgba(124,103,255,${(1 - d / 75) * 0.22 * b})`;
+              ctx.lineWidth = 0.8;
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+            }
+          }
+          ctx.fillStyle = `rgba(194,187,255,${p.o * b})`;
+          ctx.beginPath();
+          ctx.arc(x, y, p.s, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        for (const p of stars) {
+          const swirl = p.a + t * (0.4 + p.z * 2.4) + Math.sin(t * 2 + p.i) * 0.02;
+          const radius = p.r * (0.36 + p.z * 0.72);
+          const perspective = 0.52 + p.z * 0.95;
+          const x = cx + Math.cos(swirl) * radius * perspective;
+          const y = cy + Math.sin(swirl * 0.82) * radius * 0.52 * perspective;
+          const alpha = Math.max(0, 1 - Math.hypot(x - cx, y - cy) / (Math.max(w, h) * 0.62)) * p.o * b;
+          const size = p.s * (0.55 + p.z * 1.9);
+          const hueShift = p.i % 3;
+          const color = hueShift === 0 ? '255,255,255' : hueShift === 1 ? '124,103,255' : '0,217,160';
+          ctx.fillStyle = `rgba(${color},${alpha})`;
+          ctx.beginPath();
+          ctx.arc(x, y, size, 0, Math.PI * 2);
+          ctx.fill();
+          if (p.z > 0.72) {
+            ctx.strokeStyle = `rgba(${color},${alpha * 0.22})`;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      requestAnimationFrame(drawTheme);
+    }
+
+    function setEngine(next) {
+      engine = next;
+      document.querySelectorAll('[data-engine]').forEach((el) => {
+        el.classList.toggle('active', el.tagName === 'BUTTON' && el.dataset.engine === next);
+        el.classList.toggle('selected', el.classList.contains('settings-card') && el.dataset.engine === next);
+      });
+      if (next === 'starnest') {
+        engineTitle.textContent = 'StarNest';
+        engineDesc.textContent = '플렉서스와 같은 자리에 들어가는 우주형 배경 엔진. 테마 색을 받아 은은하게 변형됩니다.';
+      } else if (next === 'plexus') {
+        engineTitle.textContent = 'Plexus';
+        engineDesc.textContent = '현재 배플로우의 점과 연결선 기반 배경. 안정적이고 익숙한 느낌을 유지합니다.';
+      } else {
+        engineTitle.textContent = '배경 아트 끄기';
+        engineDesc.textContent = '전역 그라데이션만 남겨 화면을 조용하게 유지합니다. 저사양 PC용 fallback으로도 좋습니다.';
+      }
+    }
+
+    document.querySelectorAll('[data-engine]').forEach((el) => {
+      el.addEventListener('click', () => setEngine(el.dataset.engine));
+    });
+
+    [brightness, starSpeed, density].forEach((input) => {
+      input.addEventListener('input', () => {
+        brightnessValue.textContent = brightness.value;
+        speedValue.textContent = starSpeed.value;
+        densityValue.textContent = density.value;
+        if (input === density) seedStars();
+      });
+    });
+
+    const proximityStage = document.getElementById('proximityStage');
+    const cards = [...document.querySelectorAll('.scene-card')];
+    let pointer = { x: -9999, y: -9999 };
+    let maxDistance = 230;
+    let scaleAmount = 0.055;
+
+    function updateProximity() {
+      const stageRect = proximityStage.getBoundingClientRect();
+      proximityStage.style.setProperty('--mx', `${((pointer.x - stageRect.left) / stageRect.width) * 100}%`);
+      proximityStage.style.setProperty('--my', `${((pointer.y - stageRect.top) / stageRect.height) * 100}%`);
+      for (const card of cards) {
+        const r = card.getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const dx = pointer.x - cx;
+        const dy = pointer.y - cy;
+        const d = Math.hypot(dx, dy);
+        const p = Math.max(0, 1 - d / maxDistance);
+        const eased = p * p * (3 - 2 * p);
+        const n = d > 1 ? { x: dx / d, y: dy / d } : { x: 0, y: 0 };
+        card.style.setProperty('--p', eased.toFixed(3));
+        card.style.setProperty('--tx', `${n.x * 6}px`);
+        card.style.setProperty('--ty', `${n.y * 6}px`);
+        card.style.setProperty('--scale', scaleAmount);
+        card.style.setProperty('--local-x', `${((pointer.x - r.left) / r.width) * 100}%`);
+        card.style.setProperty('--local-y', `${((pointer.y - r.top) / r.height) * 100}%`);
+      }
+      requestAnimationFrame(updateProximity);
+    }
+
+    proximityStage.addEventListener('mousemove', (e) => {
+      pointer = { x: e.clientX, y: e.clientY };
+    });
+    proximityStage.addEventListener('mouseleave', () => {
+      pointer = { x: -9999, y: -9999 };
+    });
+
+    document.querySelectorAll('[data-intensity]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-intensity]').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        scaleAmount = Number(btn.dataset.intensity);
+        maxDistance = btn.dataset.intensity === '0.080' ? 270 : btn.dataset.intensity === '0.035' ? 190 : 230;
+      });
+    });
+
+    document.querySelectorAll('.option').forEach((option) => {
+      option.addEventListener('click', () => {
+        document.querySelectorAll('.option').forEach((o) => o.classList.remove('selected'));
+        option.classList.add('selected');
+      });
+    });
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+    drawTheme();
+    updateProximity();
+  </script>
+</body>
+</html>

@@ -355,10 +355,28 @@ export function UnifiedSceneDetailModal({
       .filter((a) => BIG_EVENT_TYPES.has(a.actionType))
       .map<CommentInlineEvent>((a) => {
         const v = describeActivity(a);
+        const revisionTone =
+          a.actionType === 'revision_add'
+            ? 'revision_add'
+            : a.actionType === 'revision_in_progress'
+              ? 'revision_in_progress'
+              : a.actionType === 'revision_resolve'
+                ? 'revision_resolve'
+                : undefined;
+        const revisionLabel =
+          a.actionType === 'revision_add'
+            ? '등록'
+            : a.actionType === 'revision_in_progress'
+              ? '진행'
+              : a.actionType === 'revision_resolve'
+                ? '완료'
+                : undefined;
         return {
           id: a.id,
           at: a.createdAt,
           text: `${a.userName} ${deptPrefix(a.department)}${v.text}`,
+          tone: revisionTone,
+          label: revisionLabel,
         };
       });
     // 단계 전부 완료 derive — Scene.completedAt + completedBy
@@ -909,6 +927,7 @@ export function UnifiedSceneDetailModal({
             <CommentPanelResizable
               commentCount={commentCount}
               sceneKey={primaryCommentKey}
+              sceneThreadKey={revisionSceneKey}
               secondarySceneKey={secondaryCommentKey || undefined}
               onCountChange={setCommentCount}
               inlineEvents={inlineEvents}
@@ -916,6 +935,13 @@ export function UnifiedSceneDetailModal({
               sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
                 .filter(Boolean)
                 .join(' / ')}
+              quickRevision={{
+                sceneKey: revisionSceneKey,
+                context: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : 'all',
+                department: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : undefined,
+                bgAssignee: bgScene?.assignee ?? null,
+                actingAssignee: actScene?.assignee ?? null,
+              }}
               heightClass="h-[min(900px,92vh)]"
               headerRight={commentCount > 0 ? (
                 <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>

@@ -5,6 +5,7 @@
 
 import type { WidgetLayoutItem } from '@/types';
 import type { ThemeConfig } from '@/themes';
+import type { BackgroundArt, StarNestSettings } from '@/utils/starNestSettings';
 
 const LAYOUT_FILE = 'layout.json';
 const ALL_LAYOUT_FILE = 'layout-all.json';
@@ -107,6 +108,9 @@ export interface UserPreferences {
 
   // Phase 8-3: 플렉서스 애니메이션
   plexus?: {
+    backgroundArt?: BackgroundArt;
+    loginBackgroundArt?: BackgroundArt;
+    dashboardBackgroundArt?: BackgroundArt;
     loginEnabled?: boolean;
     loginGradientEnabled?: boolean;
     loginParticleCount?: number;
@@ -119,6 +123,9 @@ export interface UserPreferences {
     mouseForce?: number;
     glowIntensity?: number;
     connectionDist?: number;
+    starNest?: Partial<StarNestSettings>;
+    loginStarNest?: Partial<StarNestSettings>;
+    dashboardStarNest?: Partial<StarNestSettings>;
   };
 
   // Phase 8-4: 스플래시 건너뛰기

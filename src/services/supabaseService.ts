@@ -7,6 +7,7 @@ import type {
   Episode, Stage, ScenePhaseState, BulkStageUpdate, BulkFieldUpdate, BulkUpdateResult,
   Activity, ActionGroup,
   CompositingState, CompositingStatus, CompositingErrorKind,
+  CommentReadStateRow,
 } from '../types';
 
 // 일괄 작업 타입 재노출 — 다른 렌더러 모듈에서 쉽게 참조 가능
@@ -215,6 +216,20 @@ export async function deleteUserFromSupabase(userId: string): Promise<void> {
 
 export async function readCommentsFromSupabase(partUuid: string): Promise<unknown[]> {
   return window.electronAPI.supabaseReadComments(partUuid);
+}
+
+export async function readCommentReadStatesFromSupabase(userId: string): Promise<CommentReadStateRow[]> {
+  if (!window.electronAPI?.supabaseReadCommentReadStates) return [];
+  return window.electronAPI.supabaseReadCommentReadStates(userId);
+}
+
+export async function upsertCommentReadStateInSupabase(
+  userId: string,
+  sceneThreadKey: string,
+  lastReadAt: string,
+): Promise<void> {
+  if (!window.electronAPI?.supabaseUpsertCommentReadState) return;
+  await window.electronAPI.supabaseUpsertCommentReadState(userId, sceneThreadKey, lastReadAt);
 }
 
 export async function addCommentToSupabase(

@@ -13,10 +13,11 @@
  * - chip 은 <div role="radio"> — RoundCounter 의 +/- <button> 중첩 button 회피 (코덱스 3차 P2)
  */
 
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { CheckCircle2, ChevronDown, ChevronUp, Clock, MessageSquareWarning, PlayCircle } from 'lucide-react';
+import { useCallback, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { Scene, ScenePhaseState } from '@/types';
 import { SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
+import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { cn } from '@/utils/cn';
 
 export interface ScenePhaseToggleProps {
@@ -32,6 +33,13 @@ export interface ScenePhaseToggleProps {
   /** 컴팩트 모드 (시트 셀 안에서 사용 시) */
   compact?: boolean;
 }
+
+const PHASE_ICON_BY_STATE: Record<ScenePhaseState, ReactNode> = {
+  wait: <Clock size={12} strokeWidth={2.4} />,
+  work: <PlayCircle size={12} strokeWidth={2.4} />,
+  feedback: <MessageSquareWarning size={12} strokeWidth={2.4} />,
+  done: <CheckCircle2 size={12} strokeWidth={2.4} />,
+};
 
 export function ScenePhaseToggle({
   scene,
@@ -144,7 +152,7 @@ export function ScenePhaseToggle({
                 }
               }}
               className={cn(
-                'flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-medium select-none whitespace-nowrap',
+                'compact-label-container flex-1 min-w-0 inline-flex items-center justify-center rounded-md font-medium select-none',
                 'transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
                 compact ? 'px-1 py-1 text-[10px]' : 'px-1.5 py-2 text-[11px]',
                 // 비활성 + 진행 전 단계 → 기본 회색 톤 + hover.
@@ -170,7 +178,12 @@ export function ScenePhaseToggle({
                     : undefined
               }
             >
-              <span className="truncate">{SCENE_PHASE_LABELS_SHORT[state]}</span>
+              <CompactIconLabel
+                icon={PHASE_ICON_BY_STATE[state]}
+                label={SCENE_PHASE_LABELS_SHORT[state]}
+                className="w-full"
+                textClassName="truncate"
+              />
             </div>
           );
         })}

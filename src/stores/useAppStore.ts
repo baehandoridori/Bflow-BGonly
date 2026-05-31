@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import type { WidgetLayoutItem, SheetsConfig, Department, ChartType, ScenesDeptFilter, UpdateInfo } from '@/types';
 import type { ThemeColors } from '@/themes';
 import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
+import {
+  DEFAULT_BACKGROUND_ART,
+  DEFAULT_STAR_NEST_SETTINGS,
+  type BackgroundArt,
+  type StarNestSettings,
+} from '@/utils/starNestSettings';
 
 export type ViewMode = 'dashboard' | 'episode' | 'scenes' | 'assignee' | 'team' | 'calendar' | 'schedule' | 'vacation' | 'compositing' | 'compositing-revisions' | 'settings';
 // v1.30.0~ : 'compositing' = 새 컴포지팅 현황 대시보드 (CompositingDashboardView)
@@ -138,6 +144,9 @@ interface AppState {
 
   // 플렉서스 설정
   plexusSettings: {
+    backgroundArt: BackgroundArt;
+    loginBackgroundArt: BackgroundArt;
+    dashboardBackgroundArt: BackgroundArt;
     loginEnabled: boolean;
     loginGradientEnabled: boolean;
     loginParticleCount: number;
@@ -150,6 +159,9 @@ interface AppState {
     mouseForce: number;      // 0.02-0.15, default 0.06
     glowIntensity: number;   // 0.2-2.0, default 1.0
     connectionDist: number;  // 80-250, default 160
+    starNest: StarNestSettings;
+    loginStarNest: StarNestSettings;
+    dashboardStarNest: StarNestSettings;
   };
   setPlexusSettings: (settings: Partial<AppState['plexusSettings']>) => void;
 
@@ -275,6 +287,9 @@ export const useAppStore = create<AppState>((set) => ({
   toggleColorMode: () => set((s) => ({ colorMode: s.colorMode === 'dark' ? 'light' : 'dark' })),
 
   plexusSettings: {
+    backgroundArt: DEFAULT_BACKGROUND_ART,
+    loginBackgroundArt: DEFAULT_BACKGROUND_ART,
+    dashboardBackgroundArt: DEFAULT_BACKGROUND_ART,
     loginEnabled: true,
     loginGradientEnabled: true,
     loginParticleCount: 666,
@@ -287,6 +302,9 @@ export const useAppStore = create<AppState>((set) => ({
     mouseForce: 0.06,
     glowIntensity: 1.0,
     connectionDist: 160,
+    starNest: DEFAULT_STAR_NEST_SETTINGS,
+    loginStarNest: DEFAULT_STAR_NEST_SETTINGS,
+    dashboardStarNest: DEFAULT_STAR_NEST_SETTINGS,
   },
   setPlexusSettings: (partial) => set((s) => ({
     plexusSettings: { ...s.plexusSettings, ...partial },

@@ -1,0 +1,2745 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>B flow Feedback Hub Polish Mockup</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg-deep: #0a0c12;
+      --panel: #151822;
+      --panel-2: #191d29;
+      --line: #2d3041;
+      --line-soft: rgba(141, 145, 170, 0.18);
+      --text: #e8e8ee;
+      --muted: #8b8da3;
+      --muted-2: #666a80;
+      --accent: #6c5ce7;
+      --accent-2: #8f7cff;
+      --blue: #74b9ff;
+      --yellow: #fdcb6e;
+      --green: #00b894;
+      --red: #ff7675;
+      --pink: #ff9f9a;
+      --shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+      font-family: Inter, "Pretendard", "Noto Sans KR", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        linear-gradient(180deg, rgba(108, 92, 231, 0.07), transparent 28%),
+        linear-gradient(180deg, #12151d 0%, var(--bg-deep) 100%);
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 58px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      border-right: 1px solid rgba(45, 48, 65, 0.72);
+      background: linear-gradient(180deg, #191b29 0%, #17192b 52%, #20223d 100%);
+      padding: 14px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .logo {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #c8c2ff;
+      background: linear-gradient(145deg, rgba(108, 92, 231, 0.8), rgba(108, 92, 231, 0.22));
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 8px 22px rgba(108, 92, 231, 0.25);
+      font-weight: 800;
+      font-size: 14px;
+    }
+
+    .nav {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      align-items: center;
+      color: #a0a3b9;
+    }
+
+    .nav button {
+      position: relative;
+      width: 36px;
+      height: 36px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: inherit;
+      display: grid;
+      place-items: center;
+      transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+    }
+
+    .nav button:hover,
+    .nav button.active {
+      background: rgba(108, 92, 231, 0.24);
+      color: #f2f0ff;
+      transform: translateY(-1px);
+    }
+
+    .nav-alert {
+      position: absolute;
+      right: -3px;
+      top: -3px;
+      min-width: 17px;
+      height: 17px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      color: #0f1117;
+      background: var(--yellow);
+      border: 2px solid #191b29;
+      font-size: 10px;
+      font-weight: 850;
+      line-height: 1;
+    }
+
+    .nav-alert[data-count="0"] {
+      display: none;
+    }
+
+    .main {
+      min-width: 0;
+      padding: 34px 32px 42px;
+    }
+
+    .top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 23px;
+      line-height: 1.2;
+      font-weight: 760;
+    }
+
+    .sub {
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      min-height: 36px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid rgba(45, 48, 65, 0.88);
+      border-radius: 8px;
+      padding: 0 12px;
+      color: var(--text);
+      background: rgba(21, 24, 34, 0.72);
+      transition: border 180ms ease, background 180ms ease, transform 180ms ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(108, 92, 231, 0.65);
+      background: rgba(32, 35, 50, 0.92);
+    }
+
+    .btn.primary {
+      color: white;
+      border-color: rgba(108, 92, 231, 0.85);
+      background: linear-gradient(180deg, #7b6af1, #5f50d5);
+      box-shadow: 0 12px 28px rgba(108, 92, 231, 0.26);
+      font-weight: 740;
+    }
+
+    .toolbelt {
+      border: 1px solid rgba(45, 48, 65, 0.82);
+      border-radius: 8px;
+      background: rgba(15, 17, 23, 0.72);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+      padding: 10px;
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto auto auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .search {
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 11px;
+      border-radius: 8px;
+      border: 1px solid rgba(45, 48, 65, 0.82);
+      background: rgba(9, 11, 17, 0.7);
+      color: var(--muted);
+    }
+
+    .search input {
+      width: 100%;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+      font-size: 13px;
+    }
+
+    .selects {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+    }
+
+    select {
+      min-height: 38px;
+      border-radius: 8px;
+      border: 1px solid rgba(45, 48, 65, 0.82);
+      color: var(--text);
+      background: #11141d;
+      padding: 0 32px 0 10px;
+      outline: 0;
+      font-size: 12px;
+    }
+
+    .segmented {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      min-height: 38px;
+      padding: 3px;
+      border-radius: 8px;
+      border: 1px solid rgba(45, 48, 65, 0.82);
+      background: #11141d;
+    }
+
+    .segmented button {
+      border: 0;
+      border-radius: 6px;
+      padding: 0 11px;
+      min-height: 30px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 700;
+      transition: background 180ms ease, color 180ms ease;
+    }
+
+    .segmented button.active {
+      color: white;
+      background: var(--accent);
+      box-shadow: 0 8px 18px rgba(108, 92, 231, 0.25);
+    }
+
+    .personal-toggle {
+      min-height: 38px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      min-width: 156px;
+      padding: 0 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(108, 92, 231, 0.42);
+      color: var(--text);
+      background: linear-gradient(180deg, rgba(108, 92, 231, 0.16), rgba(17, 20, 29, 0.86));
+      transition: border 180ms ease, background 180ms ease, transform 180ms ease;
+    }
+
+    .personal-toggle:hover {
+      transform: translateY(-1px);
+      border-color: rgba(108, 92, 231, 0.72);
+      background: linear-gradient(180deg, rgba(108, 92, 231, 0.22), rgba(25, 29, 41, 0.9));
+    }
+
+    .personal-toggle:not(.active) {
+      border-color: rgba(45, 48, 65, 0.82);
+      background: #11141d;
+    }
+
+    .personal-toggle .copy {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      line-height: 1.1;
+    }
+
+    .personal-toggle strong {
+      color: var(--text);
+      font-size: 11.5px;
+      font-weight: 780;
+    }
+
+    .personal-toggle span {
+      color: var(--muted-2);
+      font-size: 10px;
+      font-weight: 650;
+    }
+
+    .personal-count {
+      min-width: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      color: white;
+      background: rgba(108, 92, 231, 0.78);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .filter-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .chip {
+      min-height: 28px;
+      border: 1px solid rgba(45, 48, 65, 0.82);
+      border-radius: 7px;
+      color: var(--muted);
+      background: rgba(21, 24, 34, 0.72);
+      padding: 0 10px;
+      font-size: 11px;
+      font-weight: 650;
+      transition: color 180ms ease, border 180ms ease, background 180ms ease;
+    }
+
+    .chip.active {
+      color: #dedbff;
+      border-color: rgba(108, 92, 231, 0.65);
+      background: rgba(108, 92, 231, 0.18);
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 310px;
+      gap: 14px;
+    }
+
+    .tree {
+      border: 1px solid rgba(45, 48, 65, 0.72);
+      border-radius: 8px;
+      background: rgba(14, 16, 23, 0.76);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .episode-header {
+      min-height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 16px;
+      background: linear-gradient(180deg, rgba(26, 29, 41, 0.98), rgba(20, 23, 33, 0.92));
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .episode-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .episode-title strong {
+      font-size: 14px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-weight: 760;
+      color: var(--yellow);
+      background: rgba(253, 203, 110, 0.12);
+    }
+
+    .part {
+      display: grid;
+      grid-template-columns: 108px minmax(0, 1fr);
+      border-bottom: 1px solid rgba(45, 48, 65, 0.32);
+    }
+
+    .part-label {
+      padding: 16px 12px 0 16px;
+      border-right: 1px solid rgba(45, 48, 65, 0.34);
+      color: var(--text);
+      background: rgba(17, 20, 29, 0.56);
+    }
+
+    .part-label strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .part-label span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted-2);
+      font-size: 10.5px;
+      line-height: 1.35;
+    }
+
+    .scene-list {
+      position: relative;
+    }
+
+    .scene-list::before {
+      content: "";
+      position: absolute;
+      left: 17px;
+      top: 34px;
+      bottom: 34px;
+      width: 2px;
+      border-radius: 999px;
+      opacity: 0;
+      background: linear-gradient(
+        180deg,
+        rgba(108, 92, 231, 0) 0%,
+        rgba(108, 92, 231, 0.72) 12%,
+        rgba(108, 92, 231, 0.7) 34%,
+        rgba(253, 203, 110, 0.28) 52%,
+        rgba(139, 141, 163, 0.34) 70%,
+        rgba(139, 141, 163, 0) 100%
+      );
+      box-shadow: 0 0 12px rgba(108, 92, 231, 0.22), 0 0 18px rgba(253, 203, 110, 0.08);
+      pointer-events: none;
+      transition: opacity 220ms ease;
+    }
+
+    .scene-list.flow::before {
+      opacity: 1;
+    }
+
+    .scene {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      min-height: 72px;
+      padding: 11px 12px 11px 36px;
+      border-bottom: 1px solid rgba(45, 48, 65, 0.28);
+      background: rgba(15, 17, 23, 0.42);
+      overflow: hidden;
+      transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+
+    .scene:hover {
+      background: rgba(25, 29, 41, 0.7);
+    }
+
+    .scene.selected {
+      background: linear-gradient(90deg, rgba(108, 92, 231, 0.14), rgba(25, 29, 41, 0.62));
+      box-shadow: inset 0 0 0 1px rgba(108, 92, 231, 0.2);
+    }
+
+    .scene.completed {
+      background: rgba(11, 13, 19, 0.36);
+    }
+
+    .scene.completed:hover {
+      background: rgba(18, 20, 28, 0.5);
+    }
+
+    .scene::before {
+      content: "";
+      position: absolute;
+      left: 14px;
+      top: 31px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: 2px solid var(--accent-2);
+      box-shadow: 0 0 0 4px rgba(108, 92, 231, 0.1);
+    }
+
+    .scene.no-comments::before {
+      border-color: rgba(253, 203, 110, 0.48);
+      box-shadow: 0 0 0 4px rgba(253, 203, 110, 0.055);
+    }
+
+    .scene.completed::before {
+      background: #10131b;
+      border-color: rgba(139, 141, 163, 0.38);
+      box-shadow: 0 0 0 4px rgba(139, 141, 163, 0.04);
+    }
+
+    .scene.is-entering {
+      animation: feedback-enter 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+
+    .scene.is-new {
+      background: linear-gradient(90deg, rgba(108, 92, 231, 0.18), rgba(25, 29, 41, 0.58));
+    }
+
+    @keyframes feedback-enter {
+      from {
+        opacity: 0;
+        max-height: 0;
+        min-height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        transform: translateY(-8px);
+        filter: blur(4px);
+      }
+      to {
+        opacity: 1;
+        max-height: 96px;
+        min-height: 72px;
+        padding-top: 11px;
+        padding-bottom: 11px;
+        transform: translateY(0);
+        filter: blur(0);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .scene.is-entering {
+        animation: none;
+      }
+    }
+
+    .scene.completed .scene-id {
+      color: rgba(202, 205, 220, 0.62);
+      background: rgba(139, 141, 163, 0.08);
+      border-color: rgba(139, 141, 163, 0.18);
+    }
+
+    .scene.completed .scene-name {
+      color: rgba(139, 141, 163, 0.72);
+      text-decoration: line-through;
+      text-decoration-color: rgba(139, 141, 163, 0.7);
+      text-decoration-thickness: 1px;
+    }
+
+    .scene.completed .mini:not(.status-resolved) {
+      color: rgba(139, 141, 163, 0.58);
+      background: rgba(255, 255, 255, 0.025);
+      border-color: rgba(255, 255, 255, 0.035);
+      text-decoration: line-through;
+      text-decoration-color: rgba(139, 141, 163, 0.44);
+    }
+
+    .scene.completed .jump {
+      color: rgba(217, 212, 255, 0.62);
+      background: rgba(108, 92, 231, 0.075);
+      border-color: rgba(108, 92, 231, 0.24);
+    }
+
+    .scene-main {
+      min-width: 0;
+    }
+
+    .scene-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .scene-id {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 6px;
+      color: #d9d4ff;
+      background: rgba(108, 92, 231, 0.15);
+      border: 1px solid rgba(108, 92, 231, 0.36);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .scene-name {
+      font-size: 13px;
+      font-weight: 760;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .meta {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+
+    .mini {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 22px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .status {
+      color: var(--yellow);
+      background: rgba(253, 203, 110, 0.1);
+      border-color: rgba(253, 203, 110, 0.18);
+    }
+
+    .status-resolved {
+      color: rgba(0, 184, 148, 0.78);
+      background: rgba(0, 184, 148, 0.07);
+      border-color: rgba(0, 184, 148, 0.16);
+    }
+
+    .scene-side {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .jump {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border-radius: 7px;
+      border: 1px solid rgba(108, 92, 231, 0.5);
+      color: #d9d4ff;
+      background: rgba(108, 92, 231, 0.14);
+      padding: 0 9px;
+      font-size: 11px;
+      font-weight: 760;
+      transition: background 180ms ease, transform 180ms ease;
+    }
+
+    .jump:hover {
+      transform: translateY(-1px);
+      background: rgba(108, 92, 231, 0.25);
+    }
+
+    .detail {
+      border: 1px solid rgba(45, 48, 65, 0.72);
+      border-radius: 8px;
+      background: rgba(20, 23, 33, 0.78);
+      min-height: 320px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .detail h2 {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.3;
+    }
+
+    .detail p {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .activity {
+      margin-top: 16px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .activity-item {
+      padding: 10px;
+      border-radius: 8px;
+      background: rgba(15, 17, 23, 0.72);
+      border: 1px solid rgba(45, 48, 65, 0.62);
+    }
+
+    .activity-item strong {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .toast-region {
+      position: fixed;
+      right: 24px;
+      top: 24px;
+      z-index: 60;
+      display: grid;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .toast {
+      width: min(340px, calc(100vw - 48px));
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(108, 92, 231, 0.42);
+      color: var(--text);
+      background: rgba(20, 23, 33, 0.96);
+      box-shadow: var(--shadow);
+      animation: toast-enter 280ms ease both;
+    }
+
+    .toast strong {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .toast span {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .modal-backdrop[hidden] {
+      display: none;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(5, 7, 12, 0.68);
+      backdrop-filter: blur(10px);
+      animation: modal-fade 180ms ease both;
+    }
+
+    .scene-modal {
+      width: min(1120px, calc(100vw - 48px));
+      max-height: calc(100vh - 48px);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      border-radius: 8px;
+      border: 1px solid rgba(45, 48, 65, 0.9);
+      background: #10131b;
+      box-shadow: 0 28px 80px rgba(0, 0, 0, 0.44);
+      overflow: hidden;
+    }
+
+    .modal-head {
+      min-height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(45, 48, 65, 0.72);
+      background: linear-gradient(180deg, rgba(26, 29, 41, 0.98), rgba(17, 20, 29, 0.96));
+    }
+
+    .modal-title {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+    }
+
+    .modal-title h2 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .modal-title .meta {
+      margin: 0;
+    }
+
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      border: 1px solid rgba(45, 48, 65, 0.82);
+      color: var(--muted);
+      background: rgba(15, 17, 23, 0.72);
+    }
+
+    .modal-body {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 350px minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .scene-inspector {
+      padding: 16px;
+      border-right: 1px solid rgba(45, 48, 65, 0.62);
+      background: rgba(15, 17, 23, 0.62);
+      overflow: auto;
+    }
+
+    .preview-box {
+      aspect-ratio: 16 / 9;
+      border-radius: 8px;
+      border: 1px solid rgba(45, 48, 65, 0.72);
+      background:
+        linear-gradient(135deg, rgba(108, 92, 231, 0.2), rgba(15, 17, 23, 0.2)),
+        repeating-linear-gradient(45deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 12px),
+        #0a0c12;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .inspector-stack {
+      margin-top: 14px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .inspector-card,
+    .composer,
+    .timeline-item {
+      border-radius: 8px;
+      border: 1px solid rgba(45, 48, 65, 0.7);
+      background: rgba(20, 23, 33, 0.76);
+    }
+
+    .inspector-card {
+      padding: 11px;
+    }
+
+    .inspector-card strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 70px minmax(0, 1fr);
+      gap: 7px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .kv b {
+      color: var(--text);
+      font-weight: 720;
+    }
+
+    .modal-main {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .composer {
+      margin: 16px 16px 0;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .composer-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 150px auto;
+      gap: 8px;
+      align-items: end;
+    }
+
+    textarea {
+      min-height: 66px;
+      resize: vertical;
+      border-radius: 8px;
+      border: 1px solid rgba(45, 48, 65, 0.82);
+      color: var(--text);
+      background: rgba(9, 11, 17, 0.78);
+      padding: 10px;
+      outline: 0;
+      font: inherit;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field label {
+      color: var(--muted);
+      font-size: 10.5px;
+      font-weight: 730;
+    }
+
+    .timeline {
+      min-height: 0;
+      overflow: auto;
+      padding: 14px 16px 16px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .timeline-item {
+      position: relative;
+      padding: 11px 12px 11px 14px;
+    }
+
+    .timeline-item.feedback {
+      border-color: rgba(108, 92, 231, 0.5);
+      background: linear-gradient(90deg, rgba(108, 92, 231, 0.16), rgba(20, 23, 33, 0.82));
+    }
+
+    .timeline-item.feedback::before {
+      content: "";
+      position: absolute;
+      inset: 10px auto 10px 0;
+      width: 3px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, var(--accent), rgba(108, 92, 231, 0.12));
+      box-shadow: 0 0 14px rgba(108, 92, 231, 0.28);
+    }
+
+    .timeline-item.system {
+      border-color: rgba(0, 184, 148, 0.22);
+      background: rgba(0, 184, 148, 0.055);
+    }
+
+    .timeline-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 7px;
+    }
+
+    .timeline-head strong {
+      font-size: 12px;
+    }
+
+    .timeline-item p {
+      margin: 0;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.52;
+    }
+
+    .timeline-foot {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .inline-actions {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+
+    .mini-btn {
+      min-height: 28px;
+      border-radius: 7px;
+      border: 1px solid rgba(45, 48, 65, 0.82);
+      color: var(--text);
+      background: rgba(15, 17, 23, 0.72);
+      padding: 0 9px;
+      font-size: 11px;
+      font-weight: 720;
+    }
+
+    .mini-btn.primary {
+      color: #dedbff;
+      border-color: rgba(108, 92, 231, 0.55);
+      background: rgba(108, 92, 231, 0.16);
+    }
+
+    .modal-status.in-progress {
+      color: #d9d4ff;
+      background: rgba(108, 92, 231, 0.16);
+      border-color: rgba(108, 92, 231, 0.42);
+    }
+
+    .modal-status.done {
+      color: rgba(0, 184, 148, 0.86);
+      background: rgba(0, 184, 148, 0.08);
+      border-color: rgba(0, 184, 148, 0.22);
+    }
+
+    .new-timeline-item {
+      animation: feedback-enter 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+
+    @keyframes modal-fade {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes toast-enter {
+      from {
+        opacity: 0;
+        transform: translateY(-8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .actual-modal-wrap {
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      max-width: calc(100vw - 64px);
+      max-height: 90vh;
+      animation: modal-pop 200ms ease both;
+    }
+
+    .actual-main-modal,
+    .actual-comment-panel {
+      border-radius: 16px;
+      border: 1px solid rgba(45, 48, 65, 0.86);
+      background: rgba(21, 24, 34, 0.98);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .actual-main-modal {
+      width: min(760px, calc(100vw - 472px));
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .actual-modal-header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      min-height: 66px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 22px;
+      border-bottom: 1px solid rgba(45, 48, 65, 0.82);
+      background: rgba(21, 24, 34, 0.96);
+      backdrop-filter: blur(12px);
+    }
+
+    .modal-nav {
+      display: flex;
+      gap: 4px;
+      margin-right: 2px;
+    }
+
+    .modal-scene-no {
+      color: #d9d4ff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 18px;
+      font-weight: 850;
+    }
+
+    .modal-scene-title {
+      min-width: 0;
+      flex: 1;
+      margin: 0;
+      color: var(--text);
+      font-size: 18px;
+      font-weight: 760;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .modal-percent {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .dept-switch {
+      display: inline-flex;
+      gap: 2px;
+      padding: 2px;
+      border-radius: 6px;
+      background: rgba(45, 48, 65, 0.48);
+    }
+
+    .dept-switch button {
+      min-height: 24px;
+      border: 0;
+      border-radius: 4px;
+      padding: 0 8px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 10.5px;
+    }
+
+    .dept-switch button.active {
+      color: #d9d4ff;
+      background: rgba(108, 92, 231, 0.24);
+    }
+
+    .actual-modal-scroll {
+      overflow: auto;
+      padding: 20px 24px 18px;
+      display: grid;
+      gap: 30px;
+    }
+
+    .modal-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 20px;
+      border-bottom: 1px solid rgba(45, 48, 65, 0.72);
+      background: rgba(21, 24, 34, 0.94);
+      flex: 0 0 auto;
+    }
+
+    .modal-tab-button {
+      position: relative;
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 0;
+      border-radius: 8px 8px 0 0;
+      padding: 0 13px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 12px;
+      font-weight: 760;
+      transition: color 180ms ease, background 180ms ease;
+    }
+
+    .modal-tab-button:hover,
+    .modal-tab-button.active {
+      color: #f2f0ff;
+      background: rgba(108, 92, 231, 0.12);
+    }
+
+    .modal-tab-button.active::after {
+      content: "";
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: -1px;
+      height: 2px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      box-shadow: 0 0 14px rgba(108, 92, 231, 0.6);
+    }
+
+    .modal-tab-badge {
+      min-width: 18px;
+      height: 18px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 999px;
+      color: #d9d4ff;
+      background: rgba(108, 92, 231, 0.2);
+      font-size: 10px;
+      font-weight: 850;
+    }
+
+    .actual-tab-shell {
+      min-height: 0;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-tab-content {
+      min-height: 0;
+      flex: 1;
+    }
+
+    .modal-tab-content[hidden] {
+      display: none;
+    }
+
+    .detail-image-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .dept-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .dept-card {
+      --dept-color: var(--accent);
+      position: relative;
+      display: grid;
+      gap: 13px;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--dept-color) 28%, rgba(45, 48, 65, 0.78));
+      background: linear-gradient(180deg, color-mix(in srgb, var(--dept-color) 10%, transparent), rgba(15, 17, 23, 0.46));
+      padding: 13px;
+      overflow: hidden;
+    }
+
+    .dept-card::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--dept-color), transparent 82%);
+      opacity: 0.86;
+    }
+
+    .dept-card.bg {
+      --dept-color: var(--blue);
+    }
+
+    .dept-card.act {
+      --dept-color: #a29bfe;
+    }
+
+    .dept-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .dept-card-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .dept-light {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--dept-color);
+      box-shadow: 0 0 14px var(--dept-color);
+      flex: 0 0 auto;
+    }
+
+    .dept-progress {
+      display: grid;
+      gap: 8px;
+    }
+
+    .dept-progress-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 720;
+    }
+
+    .dept-progress-bar {
+      height: 7px;
+      border-radius: 999px;
+      background: rgba(45, 48, 65, 0.58);
+      overflow: hidden;
+    }
+
+    .dept-progress-bar > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--dept-color), color-mix(in srgb, var(--dept-color) 40%, white));
+      box-shadow: 0 0 16px color-mix(in srgb, var(--dept-color) 56%, transparent);
+    }
+
+    .field-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .field-line {
+      display: grid;
+      grid-template-columns: 58px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .field-line span:first-child {
+      color: var(--muted);
+      font-weight: 760;
+    }
+
+    .revisions-tab-layout {
+      min-height: 0;
+      height: 100%;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+    }
+
+    .tab-list {
+      overflow: auto;
+      padding: 16px 20px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .file-history-grid {
+      padding: 18px 20px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .file-history-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(45, 48, 65, 0.62);
+      background: rgba(15, 17, 23, 0.58);
+      padding: 12px;
+    }
+
+    .file-history-card strong {
+      display: block;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .file-history-card span {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .section-title {
+      margin: 0 0 10px 14px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .stage-track {
+      display: flex;
+      gap: 6px;
+      padding: 6px;
+      border-radius: 10px;
+      border: 1px solid rgba(45, 48, 65, 0.55);
+      background: rgba(15, 17, 23, 0.76);
+    }
+
+    .stage-step {
+      flex: 1;
+      min-height: 38px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .stage-step.done {
+      color: #d9d4ff;
+      background: rgba(108, 92, 231, 0.16);
+    }
+
+    .stage-step.current {
+      color: white;
+      background: var(--accent);
+      box-shadow: 0 2px 10px rgba(108, 92, 231, 0.32);
+    }
+
+    .property-panel {
+      border-radius: 12px;
+      border: 1px solid rgba(45, 48, 65, 0.5);
+      background: rgba(15, 17, 23, 0.32);
+      overflow: hidden;
+    }
+
+    .property-row {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 46px;
+      padding: 8px 14px;
+      border-bottom: 1px solid rgba(45, 48, 65, 0.28);
+    }
+
+    .property-row:last-child {
+      border-bottom: 0;
+    }
+
+    .property-row > span:first-child {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .property-value {
+      min-width: 0;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .assignee-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 0 9px 0 4px;
+      border-radius: 999px;
+      border: 1px solid rgba(108, 92, 231, 0.32);
+      background: rgba(108, 92, 231, 0.12);
+    }
+
+    .avatar {
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      color: white;
+      background: var(--accent);
+      font-size: 10px;
+      font-weight: 850;
+    }
+
+    .image-stack {
+      display: grid;
+      gap: 18px;
+      padding: 0 14px;
+    }
+
+    .image-slot-mock {
+      display: grid;
+      gap: 8px;
+    }
+
+    .image-slot-mock > span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+
+    .image-drop {
+      height: 132px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      border: 1px dashed rgba(45, 48, 65, 0.88);
+      color: rgba(139, 141, 163, 0.72);
+      background:
+        linear-gradient(135deg, rgba(108, 92, 231, 0.11), rgba(15, 17, 23, 0.06)),
+        repeating-linear-gradient(45deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 12px),
+        rgba(15, 17, 23, 0.78);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .scene-dots {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding-bottom: 16px;
+    }
+
+    .scene-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(139, 141, 163, 0.32);
+    }
+
+    .scene-dot.active {
+      width: 20px;
+      background: var(--accent);
+    }
+
+    .actual-comment-panel {
+      width: 360px;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      flex: 0 0 auto;
+    }
+
+    .comment-resize-handle {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 8px;
+      cursor: col-resize;
+    }
+
+    .comment-resize-handle::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 12px;
+      bottom: 12px;
+      width: 2px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, transparent, rgba(108, 92, 231, 0.45), transparent);
+      opacity: 0.65;
+    }
+
+    .panel-head {
+      min-height: 47px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 0 16px;
+      border-bottom: 1px solid rgba(45, 48, 65, 0.82);
+    }
+
+    .panel-head h3 {
+      margin: 0;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 730;
+    }
+
+    .comment-feed {
+      min-height: 0;
+      overflow: auto;
+      padding: 14px 16px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .comment-bubble,
+    .comment-event {
+      border-radius: 8px;
+      border: 1px solid rgba(45, 48, 65, 0.55);
+      background: rgba(15, 17, 23, 0.64);
+      padding: 10px;
+    }
+
+    .comment-event.revision-event {
+      --event-color: var(--accent);
+      position: relative;
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      padding: 12px 12px 12px 10px;
+      border-color: color-mix(in srgb, var(--event-color) 46%, rgba(45, 48, 65, 0.72));
+      background:
+        radial-gradient(circle at 18px 18px, color-mix(in srgb, var(--event-color) 24%, transparent), transparent 44px),
+        linear-gradient(180deg, color-mix(in srgb, var(--event-color) 14%, rgba(15, 17, 23, 0.9)), rgba(15, 17, 23, 0.7));
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--event-color) 16%, transparent), 0 10px 24px rgba(0, 0, 0, 0.18);
+      overflow: hidden;
+    }
+
+    .comment-event.revision-event::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 9px;
+      bottom: 9px;
+      width: 3px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, transparent, var(--event-color), transparent);
+      box-shadow: 0 0 15px var(--event-color);
+    }
+
+    .comment-event.revision-event.is-in-progress {
+      --event-color: var(--blue);
+    }
+
+    .comment-event.revision-event.is-resolved {
+      --event-color: var(--green);
+    }
+
+    .revision-event-icon {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: var(--event-color);
+      background: color-mix(in srgb, var(--event-color) 17%, rgba(15, 17, 23, 0.9));
+      border: 1px solid color-mix(in srgb, var(--event-color) 35%, transparent);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 18px color-mix(in srgb, var(--event-color) 22%, transparent);
+    }
+
+    .revision-event-content {
+      min-width: 0;
+    }
+
+    .revision-event-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .revision-state-chip {
+      min-height: 19px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0 7px;
+      color: color-mix(in srgb, var(--event-color) 58%, white);
+      background: color-mix(in srgb, var(--event-color) 16%, transparent);
+      border: 1px solid color-mix(in srgb, var(--event-color) 32%, transparent);
+      font-size: 10px;
+      font-weight: 850;
+    }
+
+    .revision-event-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 8px;
+    }
+
+    .revision-event-meta span {
+      min-height: 20px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 0 7px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      font-size: 10px;
+      font-weight: 760;
+    }
+
+    .comment-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 5px;
+    }
+
+    .comment-head strong {
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .comment-revision-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 18px;
+      margin-right: 4px;
+      padding: 0 6px;
+      border-radius: 999px;
+      color: #d9d4ff;
+      background: rgba(108, 92, 231, 0.18);
+      border: 1px solid rgba(108, 92, 231, 0.34);
+      font-size: 10px;
+      font-weight: 850;
+    }
+
+    .comment-bubble p,
+    .comment-event p {
+      margin: 0;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .comment-composer {
+      margin: auto 14px 14px;
+      padding: 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      background: rgba(31, 34, 47, 0.82);
+      box-shadow: var(--comment-shadow-base);
+    }
+
+    .comment-composer textarea {
+      width: 100%;
+      min-height: 42px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      resize: none;
+    }
+
+    .revision-list {
+      min-height: 0;
+      flex: 1;
+      overflow: auto;
+      padding: 12px 16px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .actual-rev-card {
+      position: relative;
+      border-radius: 12px;
+      border: 1px solid rgba(108, 92, 231, 0.55);
+      background: rgba(26, 29, 41, 0.74);
+      padding: 12px 12px 12px 14px;
+      box-shadow: 0 0 0 1px rgba(108, 92, 231, 0.18), 0 8px 18px rgba(108, 92, 231, 0.12);
+    }
+
+    .actual-rev-card::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      border-radius: 12px 0 0 12px;
+      background: var(--accent);
+    }
+
+    .actual-rev-card[data-status="resolved"] {
+      opacity: 0.7;
+      border-color: rgba(0, 184, 148, 0.4);
+      box-shadow: none;
+    }
+
+    .actual-rev-card[data-status="resolved"]::before {
+      background: #00b894;
+    }
+
+    .actual-rev-card[data-status="resolved"] p {
+      text-decoration: line-through;
+      opacity: 0.62;
+    }
+
+    .revision-form {
+      border-top: 1px solid rgba(45, 48, 65, 0.82);
+      padding: 12px 16px;
+    }
+
+    .revision-form-inner {
+      display: grid;
+      gap: 12px;
+      padding: 13px;
+      border-radius: 12px;
+      border: 1px solid rgba(108, 92, 231, 0.42);
+      background: rgba(15, 17, 23, 0.5);
+    }
+
+    .recipient-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .recipient-chip {
+      min-height: 24px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border-radius: 999px;
+      border: 1px solid rgba(108, 92, 231, 0.32);
+      color: var(--text);
+      background: rgba(108, 92, 231, 0.1);
+      padding: 0 8px 0 4px;
+      font-size: 11px;
+    }
+
+    @keyframes modal-pop {
+      from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.96);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    svg {
+      width: 14px;
+      height: 14px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex: 0 0 auto;
+    }
+
+    @media (max-width: 1180px) {
+      .toolbelt {
+        grid-template-columns: 1fr;
+      }
+
+      .selects,
+      .segmented,
+      .personal-toggle {
+        width: 100%;
+      }
+
+      .selects select,
+      .segmented button {
+        flex: 1;
+      }
+
+      .personal-toggle {
+        justify-self: stretch;
+      }
+
+      .content {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .main {
+        padding: 22px 16px;
+      }
+
+      .top,
+      .filter-row {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .actions {
+        justify-content: flex-start;
+      }
+
+      .part {
+        grid-template-columns: 1fr;
+      }
+
+      .part-label {
+        border-right: 0;
+        border-bottom: 1px solid rgba(45, 48, 65, 0.34);
+        padding: 12px 14px;
+      }
+
+      .scene {
+        grid-template-columns: 1fr;
+      }
+
+      .scene-side {
+        justify-content: flex-start;
+      }
+
+      .modal-backdrop {
+        padding: 12px;
+      }
+
+      .scene-modal {
+        width: calc(100vw - 24px);
+        max-height: calc(100vh - 24px);
+      }
+
+      .modal-body,
+      .composer-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .scene-inspector {
+        border-right: 0;
+        border-bottom: 1px solid rgba(45, 48, 65, 0.62);
+      }
+
+      .actual-modal-wrap {
+        max-width: calc(100vw - 24px);
+        flex-direction: column;
+      }
+
+      .actual-main-modal,
+      .actual-comment-panel {
+        width: calc(100vw - 24px);
+        max-height: none;
+      }
+
+      .actual-modal-header,
+      .property-row,
+      .composer-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .actual-modal-header {
+        flex-wrap: wrap;
+      }
+
+      .dept-grid,
+      .detail-image-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="B flow navigation mockup">
+      <div class="logo">B</div>
+      <nav class="nav">
+        <button aria-label="dashboard">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        </button>
+        <button aria-label="scenes">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 10h18M3 14h18"/></svg>
+        </button>
+        <button class="active" aria-label="feedback">
+          <svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg>
+          <span class="nav-alert" data-count="0" aria-hidden="true"></span>
+        </button>
+        <button aria-label="settings">
+          <svg viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z"/><path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.1 1.66V21a2 2 0 1 1-4 0v-.08a1.8 1.8 0 0 0-1.1-1.66 1.8 1.8 0 0 0-1.98.36l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05A1.8 1.8 0 0 0 4.6 15a1.8 1.8 0 0 0-1.66-1.1H3a2 2 0 1 1 0-4h.08A1.8 1.8 0 0 0 4.74 8.8a1.8 1.8 0 0 0-.36-1.98l-.05-.05A2 2 0 1 1 7.16 3.94l.05.05a1.8 1.8 0 0 0 1.98.36H9.2A1.8 1.8 0 0 0 10.3 2.7V3a2 2 0 1 1 4 0v-.08a1.8 1.8 0 0 0 1.1 1.66 1.8 1.8 0 0 0 1.98-.36l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05a1.8 1.8 0 0 0-.36 1.98v.01a1.8 1.8 0 0 0 1.66 1.1H21a2 2 0 1 1 0 4h-.08A1.8 1.8 0 0 0 19.4 15z"/></svg>
+        </button>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="top">
+        <div>
+          <h1>피드백 허브</h1>
+          <div class="sub">28개 씬 · 41개 피드백 · 담당/상태/댓글 흐름을 한 화면에서 정리합니다.</div>
+        </div>
+        <div class="actions">
+          <button class="btn">
+            <svg viewBox="0 0 24 24"><path d="M3 6h18M8 12h8M10 18h4"/></svg>
+            모두 펼치기
+          </button>
+          <button class="btn primary js-add-feedback" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            새 피드백
+          </button>
+        </div>
+      </header>
+
+      <section class="toolbelt" aria-label="feedback controls">
+        <label class="search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input value="" placeholder="본문, 씬, 등록자, 담당자 검색">
+        </label>
+        <div class="selects">
+          <select aria-label="episode">
+            <option>전체 에피소드</option>
+            <option>EP.05</option>
+            <option>EP.06</option>
+          </select>
+          <select aria-label="part">
+            <option>전체 파트</option>
+            <option>A 파트</option>
+            <option>B 파트</option>
+          </select>
+          <select aria-label="sort">
+            <option>최신순</option>
+            <option>오래된순</option>
+            <option>댓글 많은순</option>
+          </select>
+        </div>
+        <button class="personal-toggle" type="button" aria-pressed="false">
+          <svg viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+          <span class="copy">
+            <strong>내 관련</strong>
+            <span>담당 3 · 요청 2</span>
+          </span>
+          <span class="personal-count">5</span>
+        </button>
+        <div class="segmented" role="tablist" aria-label="view mode">
+          <button class="active" type="button">씬 트리</button>
+          <button type="button">에피소드별</button>
+          <button type="button">상태 보드</button>
+        </div>
+      </section>
+
+      <div class="filter-row">
+        <div class="chips">
+          <button class="chip active">전체</button>
+          <button class="chip">대기</button>
+          <button class="chip">진행중</button>
+          <button class="chip">완료</button>
+          <button class="chip">댓글 있음</button>
+          <button class="chip">오래 멈춤</button>
+        </div>
+        <span>현재 7개 씬 · 12개 미해결 표시</span>
+      </div>
+
+      <section class="content">
+        <div class="tree">
+          <header class="episode-header">
+            <div class="episode-title">
+              <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+              <strong>EP.05</strong>
+              <span class="sub">5씬 · 14개 피드백</span>
+            </div>
+            <span class="badge">7 미해결</span>
+          </header>
+
+          <section class="part">
+            <aside class="part-label">
+              <strong>A 파트</strong>
+              <span>3씬 · 8개 피드백<br>미해결 4</span>
+            </aside>
+            <div class="scene-list flow">
+              <article class="scene selected has-feedback">
+                <div class="scene-main">
+                  <div class="scene-title">
+                    <span class="scene-id">a001</span>
+                    <span class="scene-name">학교 앞 골목 낮 배경</span>
+                  </div>
+                  <div class="meta">
+                    <span class="mini status">대기 · 1 미해결</span>
+                    <span class="mini">담당 배한</span>
+                    <span class="mini">댓글 3</span>
+                    <span class="mini">2시간 전</span>
+                  </div>
+                </div>
+                <div class="scene-side">
+                  <button class="jump">
+                    <svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+                    씬 상세
+                  </button>
+                </div>
+              </article>
+
+              <article class="scene completed">
+                <div class="scene-main">
+                  <div class="scene-title">
+                    <span class="scene-id">a002</span>
+                    <span class="scene-name">교실 창가 오후 톤</span>
+                  </div>
+                  <div class="meta">
+                    <span class="mini status-resolved">완료 · 해결됨</span>
+                    <span class="mini">담당 서연</span>
+                    <span class="mini">댓글 1</span>
+                    <span class="mini">어제 완료</span>
+                  </div>
+                </div>
+                <div class="scene-side">
+                  <button class="jump">
+                    <svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+                    씬 상세
+                  </button>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="part">
+            <aside class="part-label">
+              <strong>B 파트</strong>
+              <span>2씬 · 6개 피드백<br>미해결 3</span>
+            </aside>
+            <div class="scene-list">
+              <article class="scene no-comments">
+                <div class="scene-main">
+                  <div class="scene-title">
+                    <span class="scene-id">b001</span>
+                    <span class="scene-name">복도 전환 컷</span>
+                  </div>
+                  <div class="meta">
+                    <span class="mini status">대기 · 1 미해결</span>
+                    <span class="mini">담당 민지</span>
+                    <span class="mini">댓글 0</span>
+                    <span class="mini">오늘</span>
+                  </div>
+                </div>
+                <div class="scene-side">
+                  <button class="jump">
+                    <svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+                    씬 상세
+                  </button>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <aside class="detail">
+          <h2>선택한 피드백 흐름</h2>
+          <p>리비전을 클릭하면 이 영역에 상태 변경, 댓글, 씬 상세 진입을 모아 보여주는 방향입니다.</p>
+          <div class="activity">
+            <div class="activity-item">
+              <strong>a001 · rel 2</strong>
+              <p>색감 대비를 조금 낮추고, 창가 라인을 정리 요청</p>
+            </div>
+            <div class="activity-item">
+              <strong>댓글 3개</strong>
+              <p>씬 상세 댓글 톤과 같은 강조 색으로 연결감을 유지합니다.</p>
+            </div>
+            <button class="btn primary js-open-selected" style="width: 100%; justify-content: center;" type="button">
+              <svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+              씬 상세 열기
+            </button>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+  <div class="modal-backdrop" hidden>
+    <div class="actual-modal-wrap" role="dialog" aria-modal="true" aria-labelledby="sceneModalTitle">
+      <section class="actual-main-modal">
+        <header class="actual-modal-header">
+          <div class="modal-nav">
+            <button class="icon-btn" type="button" aria-label="이전 씬">
+              <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+            <button class="icon-btn" type="button" aria-label="다음 씬">
+              <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
+          <span class="modal-scene-no js-modal-scene-no">#1</span>
+          <h2 class="modal-scene-title" id="sceneModalTitle">a001</h2>
+          <span class="modal-percent">42%</span>
+          <div class="dept-switch" aria-label="department">
+            <button type="button">전체</button>
+            <button class="active" type="button">BG</button>
+            <button type="button">ACT</button>
+          </div>
+          <button class="icon-btn js-close-modal" type="button" aria-label="닫기">
+            <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </header>
+
+        <nav class="modal-tabs" aria-label="씬 상세 탭">
+          <button class="modal-tab-button active" type="button" data-tab="detail">상세</button>
+          <button class="modal-tab-button" type="button" data-tab="revisions">리비전 <span class="modal-tab-badge">2</span></button>
+          <button class="modal-tab-button" type="button" data-tab="files">파일</button>
+          <button class="modal-tab-button" type="button" data-tab="history">히스토리</button>
+        </nav>
+
+        <div class="actual-tab-shell">
+          <section class="modal-tab-content actual-modal-scroll" data-panel="detail">
+            <section>
+              <h3 class="section-title">이미지</h3>
+              <div class="detail-image-grid">
+                <div class="image-slot-mock">
+                  <span>스토리보드</span>
+                  <div class="image-drop">클릭 또는 붙여넣기로 이미지 교체</div>
+                </div>
+                <div class="image-slot-mock">
+                  <span>가이드</span>
+                  <div class="image-drop">가이드 이미지 없음</div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h3 class="section-title">진행</h3>
+              <div class="dept-grid">
+                <article class="dept-card bg">
+                  <div class="dept-card-head">
+                    <div class="dept-card-title"><span class="dept-light"></span>BG</div>
+                    <span class="mini">42%</span>
+                  </div>
+                  <div class="dept-progress">
+                    <div class="dept-progress-row"><span>LO · 완료 · 검수 · PNG</span><b>2 / 4</b></div>
+                    <div class="dept-progress-bar"><span style="width: 50%"></span></div>
+                  </div>
+                  <div class="field-list">
+                    <div class="field-line"><span>담당</span><b class="js-modal-assignee">배한</b></div>
+                    <div class="field-line"><span>메모</span><b>창가 반사광과 바닥 그림자 확인 필요</b></div>
+                  </div>
+                </article>
+
+                <article class="dept-card act">
+                  <div class="dept-card-head">
+                    <div class="dept-card-title"><span class="dept-light"></span>ACT</div>
+                    <span class="mini">25%</span>
+                  </div>
+                  <div class="dept-progress">
+                    <div class="dept-progress-row"><span>대기 · 진행 · 완료</span><b>1 / 4</b></div>
+                    <div class="dept-progress-bar"><span style="width: 25%"></span></div>
+                  </div>
+                  <div class="field-list">
+                    <div class="field-line"><span>담당</span><b>민지</b></div>
+                    <div class="field-line"><span>요청</span><b>포즈 연결감 확인</b></div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section>
+              <h3 class="section-title">속성</h3>
+              <div class="property-panel">
+                <div class="property-row">
+                  <span>씬번호</span>
+                  <span class="property-value js-modal-scene-id">a001</span>
+                  <button class="icon-btn" type="button" aria-label="편집"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+                </div>
+                <div class="property-row">
+                  <span>담당자</span>
+                  <span class="property-value">
+                    <span class="assignee-pill"><span class="avatar js-modal-avatar">배</span><b class="js-modal-assignee-chip">배한</b></span>
+                  </span>
+                  <button class="icon-btn" type="button" aria-label="담당자 변경"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+                </div>
+                <div class="property-row">
+                  <span>레이아웃</span>
+                  <span class="property-value js-modal-layout-name">학교 앞 골목 낮 배경</span>
+                  <button class="icon-btn" type="button" aria-label="편집"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+                </div>
+                <div class="property-row">
+                  <span>메모</span>
+                  <span class="property-value">창가 반사광과 바닥 그림자 확인 필요</span>
+                  <button class="icon-btn" type="button" aria-label="편집"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+                </div>
+              </div>
+            </section>
+
+            <div class="scene-dots" aria-hidden="true">
+              <span class="scene-dot"></span>
+              <span class="scene-dot active"></span>
+              <span class="scene-dot"></span>
+              <span class="scene-dot"></span>
+              <span class="scene-dot"></span>
+            </div>
+          </section>
+
+          <section class="modal-tab-content revisions-tab-layout" data-panel="revisions" hidden>
+            <div class="revision-list tab-list js-modal-timeline">
+              <article class="timeline-item feedback actual-rev-card" data-status="open">
+                <div class="timeline-head">
+                  <strong>re1</strong>
+                  <span class="mini modal-status">대기</span>
+                </div>
+                <p>색감 대비를 조금 낮추고, 창가 라인을 정리 요청</p>
+                <div class="timeline-foot">
+                  <span class="mini">담당 배한</span>
+                  <div class="inline-actions">
+                    <button class="mini-btn primary js-start-feedback" type="button">진행 시작</button>
+                    <button class="mini-btn js-complete-feedback" type="button">완료 처리</button>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <form class="revision-form js-feedback-form">
+              <div class="revision-form-inner">
+                <div class="inline-actions" style="justify-content: space-between;">
+                  <strong style="font-size:13px;">새 리비전 등록</strong>
+                  <span class="mini">등록 즉시 알림</span>
+                </div>
+                <div class="field">
+                  <label for="feedbackBody">내용</label>
+                  <textarea id="feedbackBody">창가 반사광을 낮추고 바닥 그림자를 한 톤 정리해 주세요.</textarea>
+                </div>
+                <div class="field">
+                  <label>이미지 첨부</label>
+                  <button class="mini-btn" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>파일 선택</button>
+                </div>
+                <div class="field">
+                  <label for="feedbackAssignee">알림 받을 사람</label>
+                  <select id="feedbackAssignee">
+                    <option>배한</option>
+                    <option>서연</option>
+                    <option>민지</option>
+                  </select>
+                  <div class="recipient-list">
+                    <span class="recipient-chip"><span class="avatar">배</span>배한</span>
+                    <span class="recipient-chip"><span class="avatar">서</span>서연</span>
+                  </div>
+                </div>
+                <select id="feedbackScope" aria-label="구분" style="display:none;">
+                  <option>re2</option>
+                </select>
+                <div class="timeline-foot" style="margin-top:0;">
+                  <span class="mini js-modal-notice">최근 배정 알림 없음</span>
+                  <button class="btn primary js-create-modal-feedback" type="submit">리비전 등록</button>
+                </div>
+              </div>
+            </form>
+          </section>
+
+          <section class="modal-tab-content file-history-grid" data-panel="files" hidden>
+            <article class="file-history-card">
+              <div>
+                <strong>a001_storyboard.png</strong>
+                <span>스토리보드 · 2시간 전</span>
+              </div>
+              <button class="mini-btn" type="button"><svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>열기</button>
+            </article>
+            <article class="file-history-card">
+              <div>
+                <strong>a001_revision_ref.jpg</strong>
+                <span>리비전 참고 · 방금</span>
+              </div>
+              <button class="mini-btn" type="button"><svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>열기</button>
+            </article>
+          </section>
+
+          <section class="modal-tab-content file-history-grid" data-panel="history" hidden>
+            <article class="file-history-card">
+              <div>
+                <strong>배한이 리비전을 진행중으로 변경</strong>
+                <span>1시간 전</span>
+              </div>
+              <span class="mini">상태</span>
+            </article>
+            <article class="file-history-card">
+              <div>
+                <strong>서연이 댓글을 추가</strong>
+                <span>2시간 전</span>
+              </div>
+              <span class="mini">댓글</span>
+            </article>
+          </section>
+        </div>
+      </section>
+
+      <aside class="actual-comment-panel">
+        <div class="comment-resize-handle" aria-hidden="true"></div>
+        <div class="panel-head">
+          <h3>댓글 및 활동</h3>
+          <span class="mini">댓글 3</span>
+        </div>
+        <div class="comment-feed js-comment-feed">
+          <article class="comment-event revision-event is-registered">
+            <div class="revision-event-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 5v14M16 5v14M4 10h16M4 15h16"/></svg>
+            </div>
+            <div class="revision-event-content">
+              <div class="comment-head">
+                <strong class="revision-event-title">
+                  <span class="comment-revision-badge">re1</span>
+                  <span>리비전 등록</span>
+                  <span class="revision-state-chip">대기</span>
+                </strong>
+                <span class="mini">2시간 전</span>
+              </div>
+              <p>색감 대비를 조금 낮추고, 창가 라인을 정리 요청</p>
+              <div class="revision-event-meta">
+                <span>담당 배한</span>
+                <span>리비전 탭</span>
+              </div>
+            </div>
+          </article>
+          <article class="comment-bubble">
+            <div class="comment-head">
+              <strong>배한</strong>
+              <span class="mini">1시간 전</span>
+            </div>
+            <p>창가 라인부터 정리하고 있습니다.</p>
+          </article>
+        </div>
+        <div class="comment-composer">
+          <textarea placeholder="댓글 입력..."></textarea>
+          <div class="timeline-foot" style="margin-top:8px;">
+            <span class="mini">Enter 전송</span>
+            <button class="mini-btn primary" type="button"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>전송</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const modeButtons = document.querySelectorAll('.segmented button');
+    modeButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        modeButtons.forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+      });
+    });
+
+    document.querySelectorAll('.chip').forEach((button) => {
+      button.addEventListener('click', () => button.classList.toggle('active'));
+    });
+
+    document.querySelector('.personal-toggle').addEventListener('click', (event) => {
+      const button = event.currentTarget;
+      const nextPressed = button.getAttribute('aria-pressed') !== 'true';
+      button.classList.toggle('active', nextPressed);
+      button.setAttribute('aria-pressed', String(nextPressed));
+    });
+
+    const modalBackdrop = document.querySelector('.modal-backdrop');
+    const modalTitle = document.querySelector('#sceneModalTitle');
+    const modalTimeline = document.querySelector('.js-modal-timeline');
+    const modalCommentFeed = document.querySelector('.js-comment-feed');
+    const modalAssignee = document.querySelector('.js-modal-assignee');
+    const modalAssigneeChip = document.querySelector('.js-modal-assignee-chip');
+    const modalAvatar = document.querySelector('.js-modal-avatar');
+    const modalNotice = document.querySelector('.js-modal-notice');
+    const modalTabButtons = document.querySelectorAll('.modal-tab-button');
+    const modalTabPanels = document.querySelectorAll('.modal-tab-content');
+    const navAlert = document.querySelector('.nav-alert');
+    const toastRegion = document.querySelector('.toast-region');
+    let alertCount = 0;
+
+    const getSceneData = (scene) => {
+      const id = scene?.querySelector('.scene-id')?.textContent.trim() || 'a001';
+      const name = scene?.querySelector('.scene-name')?.textContent.trim() || '학교 앞 골목 낮 배경';
+      const assignee = Array.from(scene?.querySelectorAll('.mini') || [])
+        .map((item) => item.textContent.trim())
+        .find((text) => text.startsWith('담당 '))
+        ?.replace('담당 ', '') || '배한';
+      return { id, name, assignee };
+    };
+
+    const showToast = (title, body) => {
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.innerHTML = `<strong>${title}</strong><span>${body}</span>`;
+      toastRegion.append(toast);
+      window.setTimeout(() => toast.remove(), 3600);
+    };
+
+    const notifyAssignee = (assignee, sceneId) => {
+      alertCount += 1;
+      navAlert.dataset.count = String(alertCount);
+      navAlert.textContent = String(alertCount);
+      navAlert.setAttribute('aria-hidden', 'false');
+      if (modalNotice) modalNotice.textContent = `${assignee}에게 방금 전송`;
+      showToast('담당자 알림 전송', `${assignee}에게 ${sceneId} 피드백 배정 알림을 보냈습니다.`);
+    };
+
+    const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[char]));
+
+    const revisionEventIcon = `
+      <svg viewBox="0 0 24 24">
+        <path d="M4 5h16v14H4z"/>
+        <path d="M8 5v14M16 5v14M4 10h16M4 15h16"/>
+      </svg>
+    `;
+
+    const createRevisionActivityEvent = ({ label, title, body, state = 'registered', statusText = '대기', meta = [] }) => {
+      const item = document.createElement('article');
+      item.className = `comment-event revision-event is-${state} new-timeline-item`;
+      const metaMarkup = meta.map((text) => `<span>${escapeHtml(text)}</span>`).join('');
+      item.innerHTML = `
+        <div class="revision-event-icon" aria-hidden="true">${revisionEventIcon}</div>
+        <div class="revision-event-content">
+          <div class="comment-head">
+            <strong class="revision-event-title">
+              <span class="comment-revision-badge">${escapeHtml(label)}</span>
+              <span>${escapeHtml(title)}</span>
+              <span class="revision-state-chip">${escapeHtml(statusText)}</span>
+            </strong>
+            <span class="mini">방금</span>
+          </div>
+          <p>${escapeHtml(body)}</p>
+          ${metaMarkup ? `<div class="revision-event-meta">${metaMarkup}</div>` : ''}
+        </div>
+      `;
+      return item;
+    };
+
+    const appendRevisionActivityEvent = (eventData) => {
+      const item = createRevisionActivityEvent(eventData);
+      modalCommentFeed.prepend(item);
+    };
+
+    const handleStartFeedback = (card) => {
+      if (!card || card.dataset.status === 'in_progress') return;
+      const status = card.querySelector('.modal-status');
+      const label = card.querySelector('.timeline-head strong')?.textContent.trim() || 're';
+      const assignee = card.querySelector('.timeline-foot .mini')?.textContent.replace('담당 ', '') || '담당자';
+      status.textContent = '진행중';
+      status.classList.remove('done');
+      status.classList.add('in-progress');
+      card.dataset.status = 'in_progress';
+      appendRevisionActivityEvent({
+        label,
+        title: '리비전 진행중',
+        body: `${assignee} 담당자가 피드백 처리를 시작했습니다.`,
+        state: 'in-progress',
+        statusText: '진행중',
+        meta: ['상태 변경', '댓글 흐름 반영'],
+      });
+    };
+
+    const handleCompleteFeedback = (card) => {
+      if (!card || card.dataset.status === 'resolved') return;
+      const status = card.querySelector('.modal-status');
+      const label = card.querySelector('.timeline-head strong')?.textContent.trim() || 're';
+      status.textContent = '완료';
+      status.classList.remove('in-progress');
+      status.classList.add('done');
+      card.dataset.status = 'resolved';
+      appendRevisionActivityEvent({
+        label,
+        title: '리비전 완료',
+        body: '피드백이 완료 처리되어 씬 상세 댓글 흐름에 반영됐습니다.',
+        state: 'resolved',
+        statusText: '완료',
+        meta: ['해결 반영', '히스토리 저장'],
+      });
+    };
+
+    const bindRevisionCardActions = (card) => {
+      if (!card || card.dataset.actionsBound === 'true') return;
+      card.dataset.actionsBound = 'true';
+      card.querySelector('.js-start-feedback')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleStartFeedback(card);
+      });
+      card.querySelector('.js-complete-feedback')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleCompleteFeedback(card);
+      });
+    };
+
+    const setModalTab = (tabName) => {
+      modalTabButtons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.tab === tabName);
+      });
+      modalTabPanels.forEach((panel) => {
+        panel.hidden = panel.dataset.panel !== tabName;
+      });
+    };
+
+    modalTabButtons.forEach((button) => {
+      button.addEventListener('click', () => setModalTab(button.dataset.tab));
+    });
+
+    const openSceneModal = (scene) => {
+      const sceneData = getSceneData(scene);
+      modalTitle.textContent = sceneData.id;
+      document.querySelector('.js-modal-scene-id').textContent = sceneData.id;
+      document.querySelector('.js-modal-layout-name').textContent = sceneData.name;
+      modalAssignee.textContent = sceneData.assignee;
+      modalAssigneeChip.textContent = sceneData.assignee;
+      modalAvatar.textContent = sceneData.assignee.slice(0, 1);
+      modalNotice.textContent = '최근 배정 알림 없음';
+      setModalTab('revisions');
+      modalBackdrop.hidden = false;
+      document.body.style.overflow = 'hidden';
+    };
+
+    const closeSceneModal = () => {
+      modalBackdrop.hidden = true;
+      document.body.style.overflow = '';
+    };
+
+    const createFeedbackCard = ({ sceneId, body, assignee, scope }) => {
+      const card = document.createElement('article');
+      card.className = 'timeline-item feedback actual-rev-card new-timeline-item';
+      card.dataset.status = 'open';
+      card.innerHTML = `
+        <div class="timeline-head">
+          <strong>${scope}</strong>
+          <span class="mini modal-status">대기</span>
+        </div>
+        <p>${body}</p>
+        <div class="timeline-foot">
+          <span class="mini">담당 ${assignee}</span>
+          <div class="inline-actions">
+            <button class="mini-btn primary js-start-feedback" type="button">진행 시작</button>
+            <button class="mini-btn js-complete-feedback" type="button">완료 처리</button>
+          </div>
+        </div>
+      `;
+      bindRevisionCardActions(card);
+      return card;
+    };
+
+    const createCommentEvent = ({ label, body }) => {
+      return createRevisionActivityEvent({
+        label,
+        title: '리비전 등록',
+        body,
+        state: 'registered',
+        statusText: '대기',
+        meta: ['새 피드백', '담당자 알림'],
+      });
+    };
+
+    document.querySelector('.js-close-modal').addEventListener('click', closeSceneModal);
+    document.querySelectorAll('.timeline-item.feedback').forEach(bindRevisionCardActions);
+    window.feedbackHubMockActions = {
+      startFirstRevision: () => handleStartFeedback(document.querySelector('.js-modal-timeline .actual-rev-card')),
+      completeFirstRevision: () => handleCompleteFeedback(document.querySelector('.js-modal-timeline .actual-rev-card')),
+    };
+
+    modalBackdrop.addEventListener('click', (event) => {
+      if (event.target === modalBackdrop) closeSceneModal();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !modalBackdrop.hidden) closeSceneModal();
+    });
+
+    document.querySelector('.js-feedback-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const selectedScene = document.querySelector('.scene.selected');
+      const sceneData = getSceneData(selectedScene);
+      const body = document.querySelector('#feedbackBody').value.trim();
+      const assignee = document.querySelector('#feedbackAssignee').value;
+      const scope = document.querySelector('#feedbackScope').value;
+      if (!body) return;
+      modalTimeline.prepend(createFeedbackCard({ sceneId: sceneData.id, body, assignee, scope }));
+      modalCommentFeed.prepend(createCommentEvent({ label: scope, body }));
+      modalAssignee.textContent = assignee;
+      modalAssigneeChip.textContent = assignee;
+      modalAvatar.textContent = assignee.slice(0, 1);
+      notifyAssignee(assignee, sceneData.id);
+    });
+
+    document.addEventListener('click', (event) => {
+      const jumpButton = event.target.closest('.jump');
+      if (jumpButton) {
+        const scene = jumpButton.closest('.scene') || document.querySelector('.scene.selected');
+        if (scene) selectScene(scene);
+        openSceneModal(scene);
+        return;
+      }
+
+      if (event.target.closest('.js-open-selected')) {
+        openSceneModal(document.querySelector('.scene.selected'));
+        return;
+      }
+
+      const startButton = event.target.closest('.js-start-feedback');
+      if (startButton) {
+        const card = startButton.closest('.timeline-item.feedback');
+        handleStartFeedback(card);
+        return;
+      }
+
+      const completeButton = event.target.closest('.js-complete-feedback');
+      if (completeButton) {
+        const card = completeButton.closest('.timeline-item.feedback');
+        handleCompleteFeedback(card);
+      }
+    });
+
+    const selectScene = (scene) => {
+      document.querySelectorAll('.scene').forEach((item) => item.classList.remove('selected'));
+      scene.classList.add('selected');
+    };
+
+    const bindScene = (scene) => {
+      scene.addEventListener('click', (event) => {
+        if (event.target.closest('button')) return;
+        selectScene(scene);
+      });
+    };
+
+    document.querySelectorAll('.scene').forEach((scene) => {
+      bindScene(scene);
+    });
+
+    let addedFeedbackCount = 0;
+    document.querySelector('.js-add-feedback').addEventListener('click', () => {
+      addedFeedbackCount += 1;
+      const sceneList = document.querySelector('.part:first-of-type .scene-list');
+      const completedScene = sceneList.querySelector('.scene.completed');
+      const newScene = document.createElement('article');
+      newScene.className = 'scene has-feedback is-entering is-new';
+      newScene.innerHTML = `
+        <div class="scene-main">
+          <div class="scene-title">
+            <span class="scene-id">a00${addedFeedbackCount + 2}</span>
+            <span class="scene-name">운동장 롱샷 색감 확인</span>
+          </div>
+          <div class="meta">
+            <span class="mini status">대기 · 1 미해결</span>
+            <span class="mini">담당 배한</span>
+            <span class="mini">댓글 0</span>
+            <span class="mini">방금</span>
+          </div>
+        </div>
+        <div class="scene-side">
+          <button class="jump">
+            <svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+            씬 상세
+          </button>
+        </div>
+      `;
+      sceneList.insertBefore(newScene, completedScene);
+      bindScene(newScene);
+      selectScene(newScene);
+      notifyAssignee('배한', `a00${addedFeedbackCount + 2}`);
+      window.setTimeout(() => newScene.classList.remove('is-entering'), 480);
+    });
+  </script>
+</body>
+</html>
