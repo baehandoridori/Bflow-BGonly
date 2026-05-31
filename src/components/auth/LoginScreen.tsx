@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/useAppStore';
 import { getPreset } from '@/themes';
 import { cn } from '@/utils/cn';
 import { useCapsLockWarning } from '@/hooks/useCapsLockWarning';
+import { StarNestBackground } from '@/components/effects/StarNestBackground';
 
 // ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
@@ -337,6 +338,21 @@ function PlexusBackground() {
 
   if (!loginEnabled) return null;
   return <canvas ref={canvasRef} className="absolute inset-0" style={{ width: '100%', height: '100%' }} />;
+}
+
+function LoginBackgroundArt() {
+  const plexusSettings = useAppStore((s) => s.plexusSettings);
+  const backgroundArt = plexusSettings.loginBackgroundArt ?? plexusSettings.backgroundArt;
+  if (backgroundArt === 'starnest') {
+    return (
+      <StarNestBackground
+        enabled={plexusSettings.loginEnabled}
+        fixed={false}
+        settings={plexusSettings.starNest}
+      />
+    );
+  }
+  return <PlexusBackground />;
 }
 
 // ─── 드라마틱 텍스트 모핑 애니메이션 ───────────────────────────
@@ -797,7 +813,7 @@ export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
       tabIndex={-1}
     >
       {/* 그라데이션 배경은 App.tsx의 전역 GradientBackdrop이 담당 */}
-      <PlexusBackground />
+      <LoginBackgroundArt />
 
       <AnimatePresence mode="wait">
         {(phase === 'landing' || phase === 'ready' || phase === 'transition') && (

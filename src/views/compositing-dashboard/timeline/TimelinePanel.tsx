@@ -12,14 +12,28 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { GripVertical, FileText } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { CompositingState, CompositingStatus } from '@/types';
 import { COMPOSITING_STATUS_LABEL, COMPOSITING_STATUS_ORDER, COMPOSITING_STATUS_TOKEN, isCompletedStatus, partCssColor } from '@/utils/compositingLabels';
+import { getTimelineCarouselSelection } from '@/utils/compositingTimelineCarousel';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
 import { PartBadge } from '@/components/compositing-dashboard/common/PartBadge';
 
 const PART_BOX_H = 96;
+const CAROUSEL_CARD_WIDTH = 112;
+const CAROUSEL_SIDE_CARD_WIDTH = 92;
+const CAROUSEL_SLOT_GAP = 78;
+
+interface TimelineProbe {
+  partId: string;
+  pointerRatio: number;
+  partLeft: number;
+  partWidth: number;
+  partTop: number;
+  partHeight: number;
+}
 
 export interface TimelineScene {
   sceneId: string;
@@ -48,6 +62,8 @@ interface TimelinePanelProps {
 export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, isCompositor = false }: TimelinePanelProps) {
   const hoveredPart = useCompositingDashboardStore((s) => s.hoveredPart);
   const setHoveredPart = useCompositingDashboardStore((s) => s.setHoveredPart);
+  const setPinnedScene = useCompositingDashboardStore((s) => s.setPinnedScene);
+  const setDetailScene = useCompositingDashboardStore((s) => s.setDetailScene);
   const partIds = useMemo(() => partGroups.map((g) => g.partId), [partGroups]);
 
   // 코덱스 4차 P1 (2026-05-22): framer-motion Reorder 제거.
@@ -57,6 +73,7 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
   //   - 인터페이스(onReorder?(partIds)) 는 그대로 유지 — CompositingDashboardView 변경 X.
   const [draggingPartId, setDraggingPartId] = useState<string | null>(null);
   const [dragOverPartId, setDragOverPartId] = useState<string | null>(null);
+  const [timelineProbe, setTimelineProbe] = useState<TimelineProbe | null>(null);
 
   const handleDragStart = (partId: string) => (e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = 'move';
@@ -124,7 +141,29 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
   }, [partGroups, overrideFractions, baseFractions]);
 
   // 컨테이너 ref — 드래그 시 컨테이너 너비 기준으로 deltaPx → deltaFraction 변환
+  const timelineRootRef = useRef<HTMLDivElement>(null);
   const trackContainerRef = useRef<HTMLDivElement>(null);
+  const clearProbeTimerRef = useRef<number | null>(null);
+
+  const cancelProbeClear = () => {
+    if (clearProbeTimerRef.current !== null) {
+      window.clearTimeout(clearProbeTimerRef.current);
+      clearProbeTimerRef.current = null;
+    }
+  };
+
+  const scheduleProbeClear = () => {
+    cancelProbeClear();
+    clearProbeTimerRef.current = window.setTimeout(() => {
+      setHoveredPart(null);
+      setTimelineProbe(null);
+      clearProbeTimerRef.current = null;
+    }, 320);
+  };
+
+  useEffect(() => () => {
+    if (clearProbeTimerRef.current !== null) window.clearTimeout(clearProbeTimerRef.current);
+  }, []);
 
   // 한솔 보고 (2026-05-21): rAF throttle 만으로는 렉 안 풀림 — React reconciliation 자체가 무거움
   //   (70+ 카드 / Reorder.Group 의 layout animation 등).
@@ -234,6 +273,35 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
     return out;
   }, [partGroups, partStarts, partFractions, epStates]);
 
+  const carousel = useMemo(() => {
+    if (!timelineProbe) return null;
+    const group = partGroups.find((g) => g.partId === timelineProbe.partId);
+    if (!group || group.scenes.length === 0) return null;
+
+    const selection = getTimelineCarouselSelection(group.scenes.length, timelineProbe.pointerRatio);
+    if (selection.selectedIndex < 0) return null;
+
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900;
+    const rawAnchorX = timelineProbe.partLeft + (timelineProbe.partWidth * selection.pointerRatio);
+    const safeAnchorX = Math.max(92, Math.min(viewportWidth - 92, rawAnchorX));
+    const preferredTop = timelineProbe.partTop - 126;
+    const fallbackTop = timelineProbe.partTop + timelineProbe.partHeight + 10;
+    const top = preferredTop > 72
+      ? preferredTop
+      : Math.min(viewportHeight - 150, Math.max(72, fallbackTop));
+
+    return { group, selection, anchorX: safeAnchorX, top };
+  }, [partGroups, timelineProbe]);
+
+  const handleProbeMove = (
+    partId: string,
+    payload: { pointerRatio: number; partLeft: number; partWidth: number; partTop: number; partHeight: number },
+  ) => {
+    cancelProbeClear();
+    setTimelineProbe({ partId, ...payload });
+  };
+
   if (episodeNumber === null) {
     return (
       <div
@@ -247,8 +315,11 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
 
   return (
     <div
-      className="bf-wipe-in rounded-lg mt-3 border border-bg-border/45 overflow-hidden"
+      ref={timelineRootRef}
+      className="bf-wipe-in rounded-lg mt-3 border border-bg-border/45 overflow-visible relative"
       style={{ background: 'rgb(var(--color-bg-card) / 0.45)' }}
+      onMouseEnter={cancelProbeClear}
+      onMouseLeave={scheduleProbeClear}
     >
       {/* 한솔 정정: 가로 스크롤 X. 모든 파트 박스가 컨테이너 안에 fit 되어야 함.
           partFractions (0~1 비율) 로 width % 적용 → 전체 100%. */}
@@ -362,6 +433,7 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
               focused={focused}
               onHoverEnter={() => setHoveredPart(g.partId)}
               onHoverLeave={() => setHoveredPart(null)}
+              onProbeMove={handleProbeMove}
               isCompositor={isCompositor}
               isLast={isLast}
               onResizeDown={onResizeDown(g.partId, i)}
@@ -375,6 +447,113 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
           );
         })}
       </div>
+
+      {carousel && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed left-0 pointer-events-none"
+          style={{ top: carousel.top, width: '100vw', height: 150, zIndex: 90 }}
+          aria-hidden={false}
+        >
+          {carousel.selection.visibleIndices.map((sceneIndex) => {
+            const scene = carousel.group.scenes[sceneIndex];
+            const sceneKey = `${scene.episodeNumber}:${scene.sceneId}`;
+            const status = epStates.get(sceneKey)?.status ?? 'batch';
+            const tokenVar = COMPOSITING_STATUS_TOKEN[status];
+            const offset = sceneIndex - carousel.selection.floatingIndex;
+            const distance = Math.abs(offset);
+            const centerAmount = Math.max(0, 1 - Math.min(distance, 1));
+            const visibleAmount = Math.max(0, 1 - Math.min(distance, 2.25) / 2.25);
+            const isCenter = sceneIndex === carousel.selection.selectedIndex;
+            const width = CAROUSEL_SIDE_CARD_WIDTH + ((CAROUSEL_CARD_WIDTH - CAROUSEL_SIDE_CARD_WIDTH) * centerAmount);
+            const x = carousel.anchorX + (offset * CAROUSEL_SLOT_GAP) - (width / 2);
+            const y = 18 - (18 * centerAmount) + Math.min(distance, 2) * 3;
+            const scale = 0.82 + (0.18 * centerAmount);
+            const height = 98 + (22 * centerAmount);
+            const opacity = 0.12 + (0.88 * visibleAmount);
+
+            return (
+              <button
+                key={`${scene.partId}-${scene.sceneId}`}
+                type="button"
+                onMouseEnter={cancelProbeClear}
+                onMouseLeave={scheduleProbeClear}
+                onClick={() => setPinnedScene(sceneKey)}
+                onDoubleClick={() => setDetailScene(sceneKey)}
+                aria-label={`${scene.sceneId} 핀, 더블클릭으로 상세 열기`}
+                className={cn(
+                  'absolute rounded-xl border text-left overflow-hidden backdrop-blur-md',
+                  'transition-all duration-500 ease-out cursor-pointer',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
+                )}
+                style={{
+                  pointerEvents: 'auto',
+                  width,
+                  height,
+                  transform: `translate3d(${x}px, ${y}px, 0) scale(${scale})`,
+                  transformOrigin: 'center top',
+                  opacity,
+                  filter: isCenter ? 'saturate(1) brightness(1)' : `saturate(${0.72 + centerAmount * 0.18}) brightness(${0.82 + centerAmount * 0.12})`,
+                  borderColor: isCenter
+                    ? `color-mix(in srgb, var(${tokenVar}) 62%, rgb(var(--color-bg-border)))`
+                    : 'rgb(var(--color-bg-border) / 0.42)',
+                  background: isCenter
+                    ? `linear-gradient(145deg, color-mix(in srgb, var(${tokenVar}) 14%, rgb(var(--color-bg-card))), rgb(var(--color-bg-card) / 0.94))`
+                    : 'rgb(var(--color-bg-card) / 0.74)',
+                  boxShadow: isCenter
+                    ? `0 14px 28px rgb(0 0 0 / 0.32), 0 0 16px color-mix(in srgb, var(${tokenVar}) 18%, transparent)`
+                    : '0 8px 18px rgb(0 0 0 / 0.22)',
+                }}
+              >
+                <div
+                  className="absolute left-0 right-0 top-0 h-0.5"
+                  style={{ background: `linear-gradient(90deg, transparent, var(${tokenVar}), transparent)` }}
+                />
+                <div className="relative h-[44px] border-b border-bg-border/35 overflow-hidden">
+                  <div
+                    className="absolute inset-0 opacity-42"
+                    style={{
+                      background:
+                        'linear-gradient(90deg, rgb(var(--color-bg-primary) / 0.72) 0 48%, rgb(var(--color-bg-border) / 0.48) 48% 49%, rgb(var(--color-bg-primary) / 0.32) 49%)',
+                    }}
+                  />
+                  <span className="absolute left-3 top-2.5 text-[12px] font-black text-text-primary tracking-normal">
+                    {scene.sceneId}
+                  </span>
+                  <span
+                    className="absolute right-3 top-3 w-2.5 h-2.5 rounded-full"
+                    style={{
+                      background: `var(${tokenVar})`,
+                      boxShadow: `0 0 10px color-mix(in srgb, var(${tokenVar}) 76%, transparent)`,
+                    }}
+                  />
+                </div>
+                <div className="px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9px] font-bold text-text-secondary">
+                      EP.{String(scene.episodeNumber).padStart(2, '0')} · {scene.partId}
+                    </span>
+                    <span className="text-[9px] font-extrabold" style={{ color: `var(${tokenVar})` }}>
+                      {COMPOSITING_STATUS_LABEL[status]}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-[9px] text-text-secondary/70">
+                    <span>위치</span>
+                    <span className="font-mono font-bold text-text-primary/85">
+                      {sceneIndex + 1} / {carousel.group.scenes.length}
+                    </span>
+                  </div>
+                  {isCenter && (
+                    <div className="mt-1 text-[9px] font-semibold text-accent/90 truncate">
+                      클릭 핀 · 더블클릭 상세
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -393,6 +572,7 @@ interface PartBoxProps {
   focused: boolean;
   onHoverEnter: () => void;
   onHoverLeave: () => void;
+  onProbeMove: (partId: string, payload: { pointerRatio: number; partLeft: number; partWidth: number; partTop: number; partHeight: number }) => void;
   isCompositor: boolean;
   /** 마지막 파트 — 우측 인접 파트가 없어 split-pane 핸들 노출 X */
   isLast: boolean;
@@ -409,11 +589,27 @@ interface PartBoxProps {
 function PartBox({
   partId, widthPct, height, color, info, memo, totalScenes, sceneStatuses,
   focused, onHoverEnter, onHoverLeave, isCompositor, isLast, onResizeDown,
-  isDragging, isDropTarget, onDragStart, onDragOver, onDrop, onDragEnd,
+  onProbeMove, isDragging, isDropTarget, onDragStart, onDragOver, onDrop, onDragEnd,
 }: PartBoxProps) {
+  const handleProbeMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    onProbeMove(partId, {
+      pointerRatio: (e.clientX - rect.left) / rect.width,
+      partLeft: rect.left,
+      partWidth: rect.width,
+      partTop: rect.top,
+      partHeight: rect.height,
+    });
+  };
+
   return (
     <div
-      onMouseEnter={onHoverEnter}
+      onMouseEnter={(e) => {
+        onHoverEnter();
+        handleProbeMove(e);
+      }}
+      onMouseMove={handleProbeMove}
       onMouseLeave={onHoverLeave}
       onDragOver={onDragOver}
       onDrop={onDrop}

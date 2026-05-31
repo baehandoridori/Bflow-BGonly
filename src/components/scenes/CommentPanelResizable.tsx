@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { CommentPanel } from './CommentPanel';
+import { CommentPanel, type CommentPanelQuickRevisionContext } from './CommentPanel';
 import { CommentPanelErrorBoundary } from '@/components/common/CommentPanelErrorBoundary';
 import { useCommentPanelWidth, useCommentPanelResizer } from '@/hooks/useCommentPanelWidth';
 import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
@@ -35,6 +35,8 @@ interface CommentPanelResizableProps {
   secondarySceneKey?: string;
   /** UnifiedSceneDetailModal 에서 inlineEvents 도 전달. */
   inlineEvents?: React.ComponentProps<typeof CommentPanel>['inlineEvents'];
+  /** 댓글 입력창 /re 빠른 리비전 등록 문맥. */
+  quickRevision?: CommentPanelQuickRevisionContext;
   /** 패널 헤더 제목 (기본: "댓글 및 활동"). */
   headerTitle?: string;
   /** 헤더 우측 슬롯 (예: 토글, 카운터 등 — 통합 모달에서 사용). */
@@ -55,6 +57,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
     className = '',
     secondarySceneKey: explicitSecondaryKey,
     inlineEvents,
+    quickRevision,
     headerTitle = '댓글 및 활동',
     headerRight,
   } = props;
@@ -142,6 +145,7 @@ export function CommentPanelResizable(props: CommentPanelResizableProps) {
           focusCommentId={focusCommentId ?? null}
           sceneLabel={sceneLabel}
           inlineEvents={inlineEvents}
+          quickRevision={quickRevision}
         />
       </CommentPanelErrorBoundary>
     </motion.div>

@@ -935,6 +935,13 @@ export function UnifiedSceneDetailModal({
               sceneLabel={[episodeLabel, partLabel, unifiedSceneId ? `#${unifiedSceneId}` : null]
                 .filter(Boolean)
                 .join(' / ')}
+              quickRevision={{
+                sceneKey: revisionSceneKey,
+                context: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : 'all',
+                department: selectedDepartment === 'bg' || selectedDepartment === 'acting' ? selectedDepartment : undefined,
+                bgAssignee: bgScene?.assignee ?? null,
+                actingAssignee: actScene?.assignee ?? null,
+              }}
               heightClass="h-[min(900px,92vh)]"
               headerRight={commentCount > 0 ? (
                 <span className="text-xs text-text-secondary/60 tabular-nums">({commentCount})</span>

@@ -1328,11 +1328,13 @@ input[type="range"]::-webkit-slider-thumb {
 /* pinned 카드 — animation: bf-glow-pulse 제거 (해제 시 갑자기 멈춰 깜빡임 발생).
    대신 transition 으로 box-shadow + transform 부드럽게. */
 .scene-card.pinned {
-  transform: translateY(-24px) scale(1.12) !important;
+  transform: translateY(-18px) scale(1.045);
   z-index: 20;
   box-shadow:
-    0 16px 32px rgb(0 0 0 / 0.45),
-    0 0 24px var(--card-glow, rgb(108 92 231 / 0.5));
+    0 16px 34px rgb(0 0 0 / 0.42),
+    0 0 0 1px rgb(var(--color-accent) / 0.18),
+    0 0 24px var(--card-glow, rgb(108 92 231 / 0.5)),
+    0 0 42px rgb(var(--color-accent) / 0.18);
 }
 
 @keyframes bf-status-flash {

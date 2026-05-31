@@ -43,6 +43,17 @@ test('UnifiedSceneDetailModal passes revision scene key as comment read-state th
   assert.match(usage, /sceneThreadKey=\{revisionSceneKey\}/);
 });
 
+test('Scene detail comment panels expose /re quick revision context', () => {
+  assert.match(commentPanel, /parseRevisionSlashCommand/);
+  assert.match(commentPanel, /리비전 빠른 등록/);
+  assert.match(commentPanel, /알람 보낼 담당자/);
+  assert.match(commentPanel, /createRevision\(\{/);
+  assert.match(resizable, /quickRevision\?: CommentPanelQuickRevisionContext/);
+  assert.match(sceneDetailModal, /quickRevision=\{\{/);
+  assert.match(sceneDetailModal, /context: department/);
+  assert.match(unifiedSceneDetailModal, /context: selectedDepartment === 'bg' \|\| selectedDepartment === 'acting' \? selectedDepartment : 'all'/);
+});
+
 test('ScenesView maps legacy comment keys to canonical thread keys for read badges', () => {
   assert.match(scenesView, /buildSceneThreadKeyFromCommentKey/);
   assert.match(scenesView, /setCommentThreadKeyByCommentKey/);

@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bflow StarNest + Timeline Proximity V2</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070910;
+      --panel: #11141d;
+      --line: rgba(150, 160, 235, 0.16);
+      --line-strong: rgba(150, 160, 235, 0.32);
+      --text: #ececf6;
+      --muted: #8f94aa;
+      --faint: #5f657c;
+      --accent: #6c5ce7;
+      --accent-sub: #a29bfe;
+      --green: #00b894;
+      --yellow: #fdcb6e;
+      --blue: #74b9ff;
+      --red: #ff7675;
+      font-family: Inter, Pretendard, "Noto Sans KR", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% 0%, rgba(108, 92, 231, 0.16), transparent 32%),
+        radial-gradient(circle at 82% 4%, rgba(0, 184, 148, 0.10), transparent 28%),
+        linear-gradient(180deg, #0d1018 0%, #05070b 100%);
+    }
+
+    button, input { font: inherit; }
+
+    .page {
+      width: min(1440px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 24px 0 40px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 20px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 25px; letter-spacing: 0; }
+    .sub { color: var(--muted); font-size: 13px; line-height: 1.58; margin-top: 8px; max-width: 820px; }
+
+    .source-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 32px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: rgba(17, 20, 29, 0.78);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .source-pill i {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 14px rgba(0, 184, 148, 0.7);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.96fr) minmax(0, 1.04fr);
+      gap: 18px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(17, 20, 29, 0.95), rgba(8, 10, 16, 0.95));
+      overflow: hidden;
+      box-shadow: 0 22px 90px rgba(0, 0, 0, 0.28);
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 16px 18px;
+      border-bottom: 1px solid rgba(150, 160, 235, 0.12);
+      background: rgba(255, 255, 255, 0.015);
+    }
+
+    .panel-head h2 { font-size: 15px; }
+    .panel-head p { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+
+    .seg {
+      display: inline-flex;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.18);
+    }
+
+    .seg button {
+      height: 26px;
+      border: 0;
+      border-radius: 6px;
+      padding: 0 10px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .seg button.active {
+      color: #fff;
+      background: linear-gradient(135deg, rgb(108, 92, 231), rgb(91, 72, 216));
+      box-shadow: 0 0 16px rgba(108, 92, 231, 0.34);
+    }
+
+    .star-stage {
+      display: grid;
+      grid-template-rows: minmax(360px, 47vh) auto;
+    }
+
+    .shader-wrap {
+      position: relative;
+      min-height: 360px;
+      background: #000;
+      overflow: hidden;
+    }
+
+    #starCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .shader-glass {
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 18px;
+      pointer-events: none;
+    }
+
+    .shader-card {
+      max-width: 420px;
+      border: 1px solid rgba(255,255,255,0.13);
+      border-radius: 10px;
+      background: rgba(5, 7, 12, 0.58);
+      backdrop-filter: blur(16px);
+      padding: 13px 15px;
+    }
+
+    .shader-card strong { display: block; font-size: 15px; }
+    .shader-card span { display: block; color: #b9bed3; font-size: 11px; line-height: 1.55; margin-top: 5px; }
+
+    .quality {
+      display: grid;
+      grid-auto-flow: column;
+      gap: 8px;
+    }
+
+    .quality span {
+      display: inline-flex;
+      align-items: center;
+      height: 26px;
+      padding: 0 9px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 7px;
+      background: rgba(0,0,0,0.24);
+      color: #bfc4d8;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .star-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      padding: 14px;
+      border-top: 1px solid rgba(150, 160, 235, 0.12);
+    }
+
+    .control {
+      border: 1px solid rgba(150, 160, 235, 0.13);
+      border-radius: 9px;
+      background: rgba(255,255,255,0.025);
+      padding: 10px 11px;
+    }
+
+    .control label {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+
+    .control strong { color: var(--text); font-size: 11px; }
+    .control input { width: 100%; accent-color: var(--accent); }
+
+    .timeline-area {
+      position: relative;
+      padding: 18px 18px 20px;
+      min-height: 650px;
+      background:
+        linear-gradient(rgba(108, 92, 231, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(108, 92, 231, 0.025) 1px, transparent 1px),
+        radial-gradient(circle at var(--mx, 50%) var(--my, 68%), rgba(108, 92, 231, 0.13), transparent 27%),
+        rgba(3, 5, 10, 0.44);
+      background-size: 42px 42px, 42px 42px, auto, auto;
+      overflow: hidden;
+    }
+
+    .timeline-help {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+
+    .legend {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .legend i {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--c);
+    }
+
+    .card-fan-layer {
+      position: relative;
+      height: 360px;
+      border: 1px solid rgba(150, 160, 235, 0.10);
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.005));
+      overflow: hidden;
+    }
+
+    .empty-hint {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: rgba(143, 148, 170, 0.55);
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .fan-card {
+      --p: 0;
+      --tx: 0px;
+      --ty: 0px;
+      position: absolute;
+      width: 155px;
+      height: 196px;
+      left: 50%;
+      bottom: 34px;
+      border: 1px solid color-mix(in srgb, var(--status) 42%, rgba(150, 160, 235, 0.18));
+      border-radius: 10px;
+      background:
+        radial-gradient(circle at var(--lx, 50%) var(--ly, 10%), color-mix(in srgb, var(--status) calc(10% + var(--p) * 18%), transparent), transparent 52%),
+        linear-gradient(180deg, rgba(22, 26, 39, 0.98), rgba(8, 10, 16, 0.99));
+      box-shadow:
+        0 18px 32px rgba(0, 0, 0, 0.35),
+        0 0 calc(8px + var(--p) * 34px) color-mix(in srgb, var(--status) calc(var(--p) * 30%), transparent);
+      opacity: 0;
+      transform:
+        translate3d(calc(var(--fan-x) + var(--tx) * var(--p)), calc(42px + var(--ty) * var(--p)), 0)
+        scale(calc(0.92 + var(--p) * 0.075));
+      transition:
+        opacity 180ms ease,
+        transform 240ms cubic-bezier(.2,.9,.2,1),
+        border-color 100ms linear,
+        box-shadow 100ms linear;
+      transition-delay: var(--delay);
+      pointer-events: none;
+      overflow: hidden;
+      will-change: transform, opacity;
+    }
+
+    .timeline-area.showing .fan-card.active {
+      opacity: 1;
+      transform:
+        translate3d(calc(var(--fan-x) + var(--tx) * var(--p)), calc(var(--fan-y) + var(--ty) * var(--p)), 0)
+        scale(calc(1 + var(--p) * 0.075));
+      pointer-events: auto;
+    }
+
+    .fan-card.pinned {
+      border-color: rgb(108, 92, 231);
+      box-shadow:
+        0 22px 46px rgba(0,0,0,0.42),
+        0 0 0 3px rgba(108, 92, 231, 0.22),
+        0 0 42px rgba(108, 92, 231, 0.35);
+      z-index: 20;
+    }
+
+    .fan-card::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      opacity: calc(var(--p) * 0.4);
+      border: 1px solid color-mix(in srgb, var(--status) 70%, white 8%);
+      border-radius: inherit;
+      animation: pulse 1.6s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    @keyframes pulse {
+      50% { opacity: calc(var(--p) * 0.78); transform: scale(1.014); }
+    }
+
+    .fan-head {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 10px;
+      border-bottom: 1px solid rgba(150, 160, 235, 0.12);
+    }
+
+    .scene-id { font-family: Consolas, "Fira Code", monospace; font-size: 11px; font-weight: 900; }
+    .state-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--status); box-shadow: 0 0 12px var(--status); }
+
+    .thumbs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      height: 88px;
+      border-bottom: 1px solid rgba(150, 160, 235, 0.12);
+    }
+
+    .thumb {
+      display: grid;
+      place-items: center;
+      color: rgba(236, 236, 246, 0.33);
+      font-size: 10px;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,0.06), transparent),
+        rgba(0,0,0,0.18);
+    }
+
+    .thumb + .thumb { border-left: 1px solid rgba(150, 160, 235, 0.12); }
+
+    .fan-body {
+      padding: 10px;
+      display: grid;
+      gap: 7px;
+      font-size: 10px;
+    }
+
+    .fan-row {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+    }
+
+    .fan-row strong { color: var(--text); }
+    .pin-note { color: var(--accent-sub); font-size: 10px; margin-top: 2px; }
+
+    .timeline-track-wrap {
+      position: relative;
+      margin-top: 18px;
+      border: 1px solid rgba(150, 160, 235, 0.12);
+      border-radius: 12px;
+      background: rgba(2, 4, 8, 0.68);
+      padding: 16px 16px 26px;
+    }
+
+    .timeline-labels {
+      display: flex;
+      justify-content: space-between;
+      color: var(--faint);
+      font-size: 10px;
+      margin-bottom: 10px;
+    }
+
+    .timeline-track {
+      position: relative;
+      height: 64px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.035);
+      display: flex;
+      overflow: visible;
+    }
+
+    .part-bar {
+      position: relative;
+      min-width: 70px;
+      height: 64px;
+      border-right: 1px solid rgba(0,0,0,0.35);
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--part) 22%, transparent), rgba(255,255,255,0.02));
+      cursor: pointer;
+      transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
+    }
+
+    .part-bar:hover,
+    .part-bar.active {
+      transform: translateY(-2px);
+      filter: brightness(1.18);
+      box-shadow: 0 0 28px color-mix(in srgb, var(--part) 34%, transparent);
+      z-index: 2;
+    }
+
+    .part-bar:first-child { border-radius: 8px 0 0 8px; }
+    .part-bar:last-child { border-radius: 0 8px 8px 0; border-right: 0; }
+
+    .part-name {
+      position: absolute;
+      left: 10px;
+      top: 9px;
+      font-weight: 900;
+      font-size: 13px;
+    }
+
+    .part-meta {
+      position: absolute;
+      left: 10px;
+      bottom: 8px;
+      color: rgba(236, 236, 246, 0.58);
+      font-size: 10px;
+    }
+
+    .status-stripes {
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: -13px;
+      height: 7px;
+      display: flex;
+      gap: 2px;
+    }
+
+    .status-stripes i {
+      flex: 1;
+      border-radius: 3px;
+      background: var(--s);
+      opacity: 0.8;
+      box-shadow: 0 0 10px color-mix(in srgb, var(--s) 30%, transparent);
+    }
+
+    .hover-bridge {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: -380px;
+      height: 440px;
+      pointer-events: none;
+    }
+
+    .timeline-area.showing .hover-bridge { pointer-events: auto; }
+
+    .choices {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      padding: 16px;
+    }
+
+    .choice {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(17, 20, 29, 0.86);
+      padding: 14px;
+      min-height: 144px;
+      cursor: pointer;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .choice:hover,
+    .choice.selected {
+      transform: translateY(-2px);
+      border-color: rgba(108, 92, 231, 0.75);
+      background: rgba(108, 92, 231, 0.10);
+    }
+
+    .letter {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      background: rgba(108, 92, 231, 0.18);
+      color: #ddd8ff;
+      font-weight: 900;
+      margin-bottom: 10px;
+    }
+
+    .choice h3 { font-size: 14px; }
+    .choice p { color: var(--muted); font-size: 12px; line-height: 1.55; margin-top: 7px; }
+
+    .note {
+      margin: 0 16px 16px;
+      border: 1px solid rgba(253, 203, 110, 0.22);
+      border-radius: 9px;
+      background: rgba(253, 203, 110, 0.06);
+      color: #d9c58a;
+      padding: 12px 14px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 1180px) {
+      .page { width: min(100vw - 28px, 900px); }
+      .grid { grid-template-columns: 1fr; }
+      .choices { grid-template-columns: 1fr; }
+      .star-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <h1>v2 시안: 실제 StarNest 톤 + 타임라인에서 씬 카드 펼침</h1>
+        <p class="sub">
+          StarNest는 원본 Star Nest 셰이더 수식을 WebGL로 옮긴 느낌에 가깝게 다시 만들었습니다.
+          컴포지팅은 파트별 타임라인 바를 호버하면 해당 파트 씬 카드가 위로 순차 등장하고, 카드 위로 올라가면 proximity 반응과 핀 동작이 이어지는 흐름입니다.
+        </p>
+      </div>
+      <span class="source-pill"><i></i> StarNest: MIT / Star Nest shader 기반</span>
+    </header>
+
+    <section class="grid">
+      <article class="panel star-stage">
+        <div class="panel-head">
+          <div>
+            <h2>StarNest 배경 시안</h2>
+            <p>이전 입자식 시안보다 실제 원본의 깊은 볼륨/성운/어두운 빈 공간을 우선했습니다.</p>
+          </div>
+          <div class="seg" id="starPreset">
+            <button class="active" data-preset="bflow">Bflow 톤</button>
+            <button data-preset="classic">원본감</button>
+            <button data-preset="quiet">조용하게</button>
+          </div>
+        </div>
+
+        <div class="shader-wrap">
+          <canvas id="starCanvas"></canvas>
+          <div class="shader-glass">
+            <div class="shader-card">
+              <strong id="presetTitle">Bflow 톤 StarNest</strong>
+              <span id="presetDesc">원본 구조는 유지하되 보라/민트 광량을 낮춰 기존 배플로우 테마 뒤에 깔리는 배경으로 조정한 방향입니다.</span>
+            </div>
+            <div class="quality">
+              <span id="qualityLabel">16 x 17</span>
+              <span>단일 전체 배경 권장</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="star-controls">
+          <div class="control"><label><span>속도</span><strong id="speedLabel">0.010</strong></label><input id="speed" type="range" min="0" max="50" value="10" /></div>
+          <div class="control"><label><span>밝기</span><strong id="brightnessLabel">0.0015</strong></label><input id="brightness" type="range" min="2" max="60" value="15" /></div>
+          <div class="control"><label><span>채도</span><strong id="saturationLabel">0.72</strong></label><input id="saturation" type="range" min="0" max="100" value="72" /></div>
+          <div class="control"><label><span>품질</span><strong id="qualityValue">16</strong></label><input id="quality" type="range" min="8" max="20" value="16" /></div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>컴포지팅 타임라인 탐색 시안</h2>
+            <p>파트 바에 마우스를 올리면 그 파트의 시작-끝 구간 위로 씬 카드가 순차적으로 펼쳐집니다.</p>
+          </div>
+          <div class="seg" id="motionMode">
+            <button data-motion="subtle">절제</button>
+            <button class="active" data-motion="reference">레퍼런스감</button>
+            <button data-motion="strong">강하게</button>
+          </div>
+        </div>
+
+        <div class="timeline-area" id="timelineArea">
+          <div class="timeline-help">
+            <span>아래 파트 바 A/B/C/D에 마우스를 올려보세요. 나온 카드 위로 올라가면 유지되고, 클릭하면 핀됩니다.</span>
+            <div class="legend">
+              <span><i style="--c:var(--accent)"></i>배치</span>
+              <span><i style="--c:var(--blue)"></i>합성</span>
+              <span><i style="--c:var(--yellow)"></i>렌더</span>
+              <span><i style="--c:var(--green)"></i>완료</span>
+              <span><i style="--c:var(--red)"></i>오류</span>
+            </div>
+          </div>
+
+          <div class="card-fan-layer" id="fanLayer">
+            <div class="empty-hint">파트 바에 마우스를 올리면 해당 파트의 씬 카드가 이 영역으로 펼쳐집니다.</div>
+            <div class="hover-bridge" id="hoverBridge"></div>
+          </div>
+
+          <div class="timeline-track-wrap">
+            <div class="timeline-labels"><span>EP.05 시작</span><span>파트별 진행 구간</span><span>EP.05 끝</span></div>
+            <div class="timeline-track" id="timelineTrack">
+              <div class="part-bar" data-part="A" style="--part:#6c5ce7; width:30%">
+                <span class="part-name">A</span><span class="part-meta">5씬 · 01:10</span>
+                <span class="status-stripes"><i style="--s:var(--accent)"></i><i style="--s:var(--blue)"></i><i style="--s:var(--yellow)"></i><i style="--s:var(--green)"></i><i style="--s:var(--green)"></i></span>
+              </div>
+              <div class="part-bar" data-part="B" style="--part:#00b894; width:25%">
+                <span class="part-name">B</span><span class="part-meta">4씬 · 00:55</span>
+                <span class="status-stripes"><i style="--s:var(--blue)"></i><i style="--s:var(--yellow)"></i><i style="--s:var(--red)"></i><i style="--s:var(--green)"></i></span>
+              </div>
+              <div class="part-bar" data-part="C" style="--part:#74b9ff; width:27%">
+                <span class="part-name">C</span><span class="part-meta">5씬 · 01:03</span>
+                <span class="status-stripes"><i style="--s:var(--accent)"></i><i style="--s:var(--accent)"></i><i style="--s:var(--blue)"></i><i style="--s:var(--yellow)"></i><i style="--s:var(--green)"></i></span>
+              </div>
+              <div class="part-bar" data-part="D" style="--part:#fdcb6e; width:18%">
+                <span class="part-name">D</span><span class="part-meta">3씬 · 00:39</span>
+                <span class="status-stripes"><i style="--s:var(--blue)"></i><i style="--s:var(--blue)"></i><i style="--s:var(--green)"></i></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>현재 정리된 설계 후보</h2>
+          <p>이제 “타임라인 카드 펼침”을 컴포지팅 탐색의 핵심으로 볼지 결정하면 됩니다.</p>
+        </div>
+      </div>
+      <div class="choices">
+        <div class="choice selected">
+          <div class="letter">A</div>
+          <h3>권장: 타임라인 바 → 카드 팬아웃 + 카드 proximity</h3>
+          <p>파트 바는 전체 위치와 진행 색상을 보여주고, 호버 시 해당 파트 씬 카드를 위로 펼칩니다. 카드 위에서 핀/상세 열기까지 이어집니다.</p>
+        </div>
+        <div class="choice">
+          <div class="letter">B</div>
+          <h3>더 강하게: 바 위에 카드가 크게 떠오름</h3>
+          <p>레퍼런스처럼 더 많이 움직이고 커지는 방식입니다. 생동감은 좋지만 업무 화면에서는 산만할 수 있습니다.</p>
+        </div>
+        <div class="choice">
+          <div class="letter">C</div>
+          <h3>보수형: 카드 그리드만 proximity</h3>
+          <p>기존 카드 뷰의 dock-lift만 개선합니다. 구현 위험은 작지만 사용자가 말한 “타임라인에서 카드 찾기” 경험은 약합니다.</p>
+        </div>
+      </div>
+      <p class="note">
+        실제 구현 시에는 기존 `hoveredPart` 상태와 `TimelinePanel`의 part hover를 재사용할 수 있습니다. 새로 필요한 건 “호버 중인 파트의 씬 카드 팬아웃 레이어”와 “거리 기반 카드 transform”입니다.
+      </p>
+    </section>
+  </main>
+
+  <script>
+    const starCanvas = document.getElementById('starCanvas');
+    const gl = starCanvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: false });
+    const vertexSource = `
+      attribute vec2 p;
+      void main(){ gl_Position = vec4(p,0.0,1.0); }
+    `;
+    const fragmentSource = `
+      precision highp float;
+      uniform vec2 uRes;
+      uniform float uTime;
+      uniform float uSpeed;
+      uniform float uZoom;
+      uniform float uBrightness;
+      uniform float uSaturation;
+      uniform float uDarkmatter;
+      uniform float uDistfading;
+      uniform float uAngleX;
+      uniform float uAngleY;
+      uniform float uVolsteps;
+      uniform float uIterations;
+      uniform float uTintMode;
+
+      vec3 modGlsl(vec3 x, vec3 y){ return x - y * floor(x / y); }
+      mat2 rot(float a){ return mat2(cos(a), sin(a), -sin(a), cos(a)); }
+      float luminance(vec3 c){ return length(c); }
+
+      void main(){
+        const float formuparam = 0.53;
+        const float stepsize = 0.1;
+        const float tile = 0.850;
+        vec2 uv = gl_FragCoord.xy / uRes.xy - 0.5;
+        uv.y *= uRes.y / uRes.x;
+        vec3 dir = vec3(uv * uZoom, 1.0);
+        float t = uTime * uSpeed + 0.25;
+        mat2 rot1 = rot(uAngleX);
+        mat2 rot2 = rot(uAngleY);
+        dir.xz = rot1 * dir.xz;
+        dir.xy = rot2 * dir.xy;
+        vec3 from = vec3(1.0, 0.5, 0.5);
+        from += vec3(t * 2.0, t, -2.0);
+        from.xz = rot1 * from.xz;
+        from.xy = rot2 * from.xy;
+        float s = 0.1;
+        float fade = 1.0;
+        vec3 v = vec3(0.0);
+        for(int r=0; r<24; r++){
+          if(float(r) >= uVolsteps) break;
+          vec3 p = from + s * dir * 0.5;
+          p = abs(vec3(tile) - modGlsl(p, vec3(tile * 2.0)));
+          float pa = 0.0;
+          float a = 0.0;
+          for(int i=0; i<24; i++){
+            if(float(i) >= uIterations) break;
+            p = abs(p) / dot(p,p) - formuparam;
+            a += abs(length(p) - pa);
+            pa = length(p);
+          }
+          float dm = max(0.0, uDarkmatter - a * a * 0.001);
+          a *= a * a;
+          if(r > 6) fade *= 1.0 - dm;
+          v += fade;
+          v += vec3(s, s*s, s*s*s*s) * a * uBrightness * fade;
+          fade *= uDistfading;
+          s += stepsize;
+        }
+        v = mix(vec3(luminance(v)), v, uSaturation);
+        v *= 0.01;
+        vec3 bflowTint = vec3(0.72, 0.62, 1.04);
+        vec3 classicTint = vec3(1.0, 0.96, 0.9);
+        vec3 quietTint = vec3(0.58, 0.62, 0.78);
+        vec3 tint = mix(bflowTint, classicTint, step(0.5, uTintMode));
+        tint = mix(tint, quietTint, step(1.5, uTintMode));
+        v *= tint;
+        v = pow(max(v, 0.0), vec3(0.82));
+        gl_FragColor = vec4(v, 1.0);
+      }
+    `;
+
+    function shader(type, source) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, source);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.warn(gl.getShaderInfoLog(s));
+      return s;
+    }
+
+    let program, locs = {};
+    if (gl) {
+      program = gl.createProgram();
+      gl.attachShader(program, shader(gl.VERTEX_SHADER, vertexSource));
+      gl.attachShader(program, shader(gl.FRAGMENT_SHADER, fragmentSource));
+      gl.linkProgram(program);
+      gl.useProgram(program);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+      const p = gl.getAttribLocation(program, 'p');
+      gl.enableVertexAttribArray(p);
+      gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 0, 0);
+      ['uRes','uTime','uSpeed','uZoom','uBrightness','uSaturation','uDarkmatter','uDistfading','uAngleX','uAngleY','uVolsteps','uIterations','uTintMode'].forEach(k => locs[k] = gl.getUniformLocation(program, k));
+    }
+
+    const speed = document.getElementById('speed');
+    const brightness = document.getElementById('brightness');
+    const saturation = document.getElementById('saturation');
+    const quality = document.getElementById('quality');
+    const speedLabel = document.getElementById('speedLabel');
+    const brightnessLabel = document.getElementById('brightnessLabel');
+    const saturationLabel = document.getElementById('saturationLabel');
+    const qualityValue = document.getElementById('qualityValue');
+    const qualityLabel = document.getElementById('qualityLabel');
+    const presetTitle = document.getElementById('presetTitle');
+    const presetDesc = document.getElementById('presetDesc');
+    let preset = 'bflow';
+
+    function resizeStar() {
+      if (!gl) return;
+      const rect = starCanvas.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.6);
+      starCanvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      starCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      gl.viewport(0, 0, starCanvas.width, starCanvas.height);
+    }
+
+    function presetParams() {
+      if (preset === 'classic') return { zoom: 0.8, dark: 0.3, fade: 0.73, ax: 0.5, ay: 0.8, tint: 1 };
+      if (preset === 'quiet') return { zoom: 0.74, dark: 0.46, fade: 0.68, ax: 0.56, ay: 0.72, tint: 2 };
+      return { zoom: 0.76, dark: 0.38, fade: 0.70, ax: 0.54, ay: 0.74, tint: 0 };
+    }
+
+    function renderStar(now) {
+      if (!gl) return;
+      const p = presetParams();
+      const spd = Number(speed.value) / 1000;
+      const bri = Number(brightness.value) / 10000;
+      const sat = Number(saturation.value) / 100;
+      const q = Number(quality.value);
+      speedLabel.textContent = spd.toFixed(3);
+      brightnessLabel.textContent = bri.toFixed(4);
+      saturationLabel.textContent = sat.toFixed(2);
+      qualityValue.textContent = String(q);
+      qualityLabel.textContent = `${q} x 17`;
+      gl.useProgram(program);
+      gl.uniform2f(locs.uRes, starCanvas.width, starCanvas.height);
+      gl.uniform1f(locs.uTime, now * 0.001);
+      gl.uniform1f(locs.uSpeed, spd);
+      gl.uniform1f(locs.uZoom, p.zoom);
+      gl.uniform1f(locs.uBrightness, bri);
+      gl.uniform1f(locs.uSaturation, sat);
+      gl.uniform1f(locs.uDarkmatter, p.dark);
+      gl.uniform1f(locs.uDistfading, p.fade);
+      gl.uniform1f(locs.uAngleX, p.ax);
+      gl.uniform1f(locs.uAngleY, p.ay);
+      gl.uniform1f(locs.uVolsteps, q);
+      gl.uniform1f(locs.uIterations, 17);
+      gl.uniform1f(locs.uTintMode, p.tint);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      requestAnimationFrame(renderStar);
+    }
+
+    document.querySelectorAll('#starPreset button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#starPreset button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        preset = btn.dataset.preset;
+        if (preset === 'classic') {
+          speed.value = 10; brightness.value = 15; saturation.value = 85; quality.value = 18;
+          presetTitle.textContent = '원본감 StarNest';
+          presetDesc.textContent = '원본 Star Nest의 성운 깊이와 밝은 별 흐름을 더 보존한 방향입니다. 로그인 첫 화면에 가장 강한 인상을 줍니다.';
+        } else if (preset === 'quiet') {
+          speed.value = 6; brightness.value = 10; saturation.value = 48; quality.value = 14;
+          presetTitle.textContent = '조용한 StarNest';
+          presetDesc.textContent = '업무 화면 뒤에 깔아도 산만하지 않도록 광량과 채도를 줄인 방향입니다.';
+        } else {
+          speed.value = 10; brightness.value = 15; saturation.value = 72; quality.value = 16;
+          presetTitle.textContent = 'Bflow 톤 StarNest';
+          presetDesc.textContent = '원본 구조는 유지하되 보라/민트 광량을 낮춰 기존 배플로우 테마 뒤에 깔리는 배경으로 조정한 방향입니다.';
+        }
+      });
+    });
+
+    const partScenes = {
+      A: [
+        ['a001', '배치', '#6c5ce7', '서연'],
+        ['a002', '합성', '#74b9ff', '민지'],
+        ['a003', '렌더', '#fdcb6e', '배한'],
+        ['a004', '완료', '#00b894', '도윤'],
+        ['a005', '완료', '#00b894', '한솔'],
+      ],
+      B: [
+        ['b001', '합성', '#74b9ff', '지윤'],
+        ['b002', '렌더', '#fdcb6e', '민지'],
+        ['b003', '오류', '#ff7675', '한솔'],
+        ['b004', '완료', '#00b894', '서연'],
+      ],
+      C: [
+        ['c001', '배치', '#6c5ce7', '유진'],
+        ['c002', '배치', '#6c5ce7', '배한'],
+        ['c003', '합성', '#74b9ff', '도윤'],
+        ['c004', '렌더', '#fdcb6e', '민지'],
+        ['c005', '완료', '#00b894', '서연'],
+      ],
+      D: [
+        ['d001', '합성', '#74b9ff', '서연'],
+        ['d002', '합성', '#74b9ff', '배한'],
+        ['d003', '완료', '#00b894', '지윤'],
+      ],
+    };
+
+    const timelineArea = document.getElementById('timelineArea');
+    const fanLayer = document.getElementById('fanLayer');
+    const track = document.getElementById('timelineTrack');
+    const bridge = document.getElementById('hoverBridge');
+    let activePart = null;
+    let pinnedScene = null;
+    let pointer = { x: -9999, y: -9999 };
+    let hideTimer = null;
+    let motion = { dist: 260, scale: 0.09, move: 16 };
+
+    function makeCard(scene, i, count, anchorRect, trackRect) {
+      const [id, status, color, assignee] = scene;
+      const card = document.createElement('article');
+      card.className = 'fan-card active';
+      card.style.setProperty('--status', color);
+      card.style.setProperty('--delay', `${i * 42}ms`);
+      const start = anchorRect.left - trackRect.left;
+      const width = anchorRect.width;
+      const spread = Math.min(width + 130, count * 172);
+      const x = start + width / 2 - spread / 2 + i * (spread / Math.max(1, count - 1)) - 77.5;
+      card.style.setProperty('--fan-x', `${x}px`);
+      card.style.setProperty('--fan-y', `${10 + Math.abs((count - 1) / 2 - i) * 10}px`);
+      card.innerHTML = `
+        <div class="fan-head"><span class="scene-id">${id}</span><span class="state-dot"></span></div>
+        <div class="thumbs"><div class="thumb">STB</div><div class="thumb">GUIDE</div></div>
+        <div class="fan-body">
+          <div class="fan-row"><span>상태</span><strong>${status}</strong></div>
+          <div class="fan-row"><span>담당</span><strong>${assignee}</strong></div>
+          <div class="pin-note">클릭: 핀 / 더블클릭: 상세</div>
+        </div>
+      `;
+      card.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pinnedScene = pinnedScene === id ? null : id;
+        document.querySelectorAll('.fan-card').forEach(c => c.classList.toggle('pinned', c.querySelector('.scene-id').textContent === pinnedScene));
+      });
+      card.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        alert(`${id} 씬 상세 모달 열기 흐름`);
+      });
+      return card;
+    }
+
+    function showPart(part, bar) {
+      clearTimeout(hideTimer);
+      if (activePart === part && timelineArea.classList.contains('showing')) return;
+      activePart = part;
+      document.querySelectorAll('.part-bar').forEach(b => b.classList.toggle('active', b.dataset.part === part));
+      fanLayer.querySelectorAll('.fan-card').forEach(c => c.remove());
+      const trackRect = fanLayer.getBoundingClientRect();
+      const barRect = bar.getBoundingClientRect();
+      const scenes = partScenes[part] || [];
+      scenes.forEach((scene, i) => fanLayer.appendChild(makeCard(scene, i, scenes.length, barRect, trackRect)));
+      timelineArea.classList.add('showing');
+    }
+
+    function scheduleHide() {
+      clearTimeout(hideTimer);
+      if (pinnedScene) return;
+      hideTimer = setTimeout(() => {
+        activePart = null;
+        timelineArea.classList.remove('showing');
+        document.querySelectorAll('.part-bar').forEach(b => b.classList.remove('active'));
+        fanLayer.querySelectorAll('.fan-card').forEach(c => c.classList.remove('active'));
+      }, 240);
+    }
+
+    document.querySelectorAll('.part-bar').forEach(bar => {
+      bar.addEventListener('mouseenter', () => showPart(bar.dataset.part, bar));
+      bar.addEventListener('mousemove', () => showPart(bar.dataset.part, bar));
+      bar.addEventListener('mouseleave', scheduleHide);
+    });
+    fanLayer.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+    fanLayer.addEventListener('mouseleave', scheduleHide);
+    bridge.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+
+    function updateCards() {
+      const areaRect = timelineArea.getBoundingClientRect();
+      timelineArea.style.setProperty('--mx', `${((pointer.x - areaRect.left) / areaRect.width) * 100}%`);
+      timelineArea.style.setProperty('--my', `${((pointer.y - areaRect.top) / areaRect.height) * 100}%`);
+      document.querySelectorAll('.fan-card').forEach(card => {
+        const r = card.getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const dx = pointer.x - cx;
+        const dy = pointer.y - cy;
+        const d = Math.hypot(dx, dy);
+        const raw = Math.max(0, 1 - d / motion.dist);
+        const p = raw * raw * (3 - 2 * raw);
+        const nx = d > 1 ? dx / d : 0;
+        const ny = d > 1 ? dy / d : 0;
+        card.style.setProperty('--p', p.toFixed(3));
+        card.style.setProperty('--tx', `${nx * motion.move}px`);
+        card.style.setProperty('--ty', `${ny * motion.move}px`);
+        card.style.setProperty('--lx', `${((pointer.x - r.left) / r.width) * 100}%`);
+        card.style.setProperty('--ly', `${((pointer.y - r.top) / r.height) * 100}%`);
+      });
+      requestAnimationFrame(updateCards);
+    }
+
+    timelineArea.addEventListener('mousemove', e => pointer = { x: e.clientX, y: e.clientY });
+    timelineArea.addEventListener('mouseleave', () => pointer = { x: -9999, y: -9999 });
+
+    document.querySelectorAll('#motionMode button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#motionMode button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        if (btn.dataset.motion === 'subtle') motion = { dist: 220, scale: 0.055, move: 8 };
+        if (btn.dataset.motion === 'reference') motion = { dist: 260, scale: 0.09, move: 16 };
+        if (btn.dataset.motion === 'strong') motion = { dist: 310, scale: 0.12, move: 24 };
+      });
+    });
+
+    document.querySelectorAll('.choice').forEach(choice => {
+      choice.addEventListener('click', () => {
+        document.querySelectorAll('.choice').forEach(c => c.classList.remove('selected'));
+        choice.classList.add('selected');
+      });
+    });
+
+    window.addEventListener('resize', resizeStar);
+    resizeStar();
+    requestAnimationFrame(renderStar);
+    requestAnimationFrame(updateCards);
+  </script>
+</body>
+</html>

@@ -9,8 +9,8 @@
  * spec: 2026-05-21-compositing-dashboard-design.md (8.3~8.8, 13)
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { FileText, MessageCircle, Pin, Check } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { FileText, MessageCircle, Check } from 'lucide-react';
 import { useCommentCount } from '../useCommentCount';
 import { cn } from '@/utils/cn';
 import type { CompositingState } from '@/types';
@@ -38,6 +38,7 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
   const status = state?.status ?? 'batch';
   const errorKind = state?.errorKind ?? null;
   const tokenVar = COMPOSITING_STATUS_TOKEN[status];
+  const cardShellRef = useRef<HTMLDivElement | null>(null);
 
   const pinnedScene = useCompositingDashboardStore((s) => s.pinnedScene);
   const setPinnedScene = useCompositingDashboardStore((s) => s.setPinnedScene);
@@ -58,13 +59,19 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
 
   // 핀 해제 시 transition 끝까지 z-index 유지 — pin 풀리는 동안 다른 카드 뒤로 가는 시각 깜빡임 fix.
   const [unpinning, setUnpinning] = useState(false);
+  const wasPinnedRef = useRef(isPinned);
   useEffect(() => {
+    const wasPinned = wasPinnedRef.current;
+    wasPinnedRef.current = isPinned;
+
     if (isPinned) {
       setUnpinning(false);
       return;
     }
+    if (!wasPinned) return;
+
     setUnpinning(true);
-    const t = window.setTimeout(() => setUnpinning(false), 260);
+    const t = window.setTimeout(() => setUnpinning(false), 360);
     return () => window.clearTimeout(t);
   }, [isPinned]);
 
@@ -98,6 +105,7 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
     //   기존: 일반 클릭 = 핀/모달. 일괄 메뉴는 Ctrl/Shift/drag-box 로만.
     //   새: 일반 클릭 = 그 카드만 단일 선택 → 하단 BulkActionBar 자동 노출.
     //   pin/modal 동작은 그대로 유지.
+    cardShellRef.current?.style.removeProperty('transform');
     if (isPinned) {
       setDetailScene(sceneKey);
     } else {
@@ -111,24 +119,16 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
   const actName = primaryAssignee(card.act?.assignee);
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
+    <div
+      ref={cardShellRef}
       className={cn(
-        'scene-card bf-cascade-item relative flex flex-col rounded-lg overflow-hidden text-left',
-        'border transition-all duration-200',
+        'scene-card bf-cascade-item relative rounded-lg text-left',
+        'transition-all duration-200',
         isPinned ? 'pinned' : '',
         highlight ? 'flashing' : '',
         isPinned ? 'opacity-100' : (dimmed ? 'opacity-35' : (otherPinned ? 'opacity-55' : 'opacity-100')),
       )}
       style={{
-        background: 'rgb(var(--color-bg-card))',
-        borderColor: isMultiSelected
-          ? 'rgb(var(--color-accent))'
-          : isPinned
-            ? 'rgb(var(--color-accent))'
-            : `color-mix(in srgb, var(${tokenVar}) 40%, transparent)`,
-        borderWidth: (isPinned || isMultiSelected) ? 2 : 1,
         outline: isMultiSelected
           ? '3px solid rgb(var(--color-accent) / 0.45)'
           : isPinned ? '3px solid rgb(var(--color-accent) / 0.25)' : 'none',
@@ -145,50 +145,79 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
         // glow pulse 컬러 (PR 4 polish: 토큰 사용 — alpha 0.3 다듬어진 값)
         ['--card-glow' as any]: 'var(--comp-card-glow)',
       }}
-      title={`${card.sceneId} · ${status}`}
     >
-      {/* 상단 sceneId + 상태 라벨 + StatusDot */}
-      <div className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 border-b border-bg-border/30">
-        <span className="font-mono text-[11px] font-semibold text-text-primary">{card.sceneId}</span>
-        <div className="flex items-center gap-1.5">
-          {/* 핀 상태일 때만 단계 라벨을 풀로 표시 (정상 상태는 dot 만, 공간 절약) */}
-          {isPinned && (
-            <span
-              className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
-              style={{
-                color: `var(${tokenVar})`,
-                background: `color-mix(in srgb, var(${tokenVar}) 18%, transparent)`,
-              }}
-            >
-              {COMPOSITING_STATUS_LABEL[status]}
-            </span>
-          )}
-          <StatusDot status={status} size={isPinned ? 10 : 8} />
+      <button
+        type="button"
+        onClick={handleClick}
+        className="relative flex h-full w-full flex-col overflow-hidden rounded-lg border text-left transition-[background-color,border-color] duration-200"
+        style={{
+          background: 'rgb(var(--color-bg-card))',
+          borderColor: isPinned
+            ? 'rgb(var(--color-accent))'
+            : isMultiSelected
+              ? 'rgb(var(--color-accent))'
+              : `color-mix(in srgb, var(${tokenVar}) 40%, transparent)`,
+          borderWidth: (isPinned || isMultiSelected) ? 2 : 1,
+        }}
+        title={`${card.sceneId} · ${status}`}
+      >
+        {/* 상단 sceneId + 상태 라벨 + StatusDot */}
+        <div className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 border-b border-bg-border/30">
+          <span className="font-mono text-[11px] font-semibold text-text-primary">{card.sceneId}</span>
+          <div className="flex items-center gap-1.5">
+            {/* 핀 상태일 때만 단계 라벨을 풀로 표시 (정상 상태는 dot 만, 공간 절약) */}
+            {isPinned && (
+              <span
+                className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                style={{
+                  color: `var(${tokenVar})`,
+                  background: `color-mix(in srgb, var(${tokenVar}) 18%, transparent)`,
+                }}
+              >
+                {COMPOSITING_STATUS_LABEL[status]}
+              </span>
+            )}
+            <StatusDot status={status} size={isPinned ? 10 : 8} />
+          </div>
         </div>
-      </div>
 
-      {/* 중단 이미지 분할 — 코덱스 7차 P2: 라벨 ↔ URL 매핑 정리.
-          전체 코드베이스 convention(ScenesView/UnifiedSceneSheetView/SceneDetailModal) 에 맞춰
-          "스토리보드"=storyboardUrl, "가이드"=guideUrl 로 통일. 헤더 주석 의도(좌 storyboardUrl, 우 guideUrl)도 일치. */}
-      <div className="flex-1 flex border-b border-bg-border/30 bg-bg-primary/40">
-        <ImageSlot label="스토리보드" url={card.storyboardUrl} />
-        <div className="w-px bg-bg-border/40" />
-        <ImageSlot label="가이드" url={card.guideUrl} />
-      </div>
+        {/* 중단 이미지 분할 — 코덱스 7차 P2: 라벨 ↔ URL 매핑 정리.
+            전체 코드베이스 convention(ScenesView/UnifiedSceneSheetView/SceneDetailModal) 에 맞춰
+            "스토리보드"=storyboardUrl, "가이드"=guideUrl 로 통일. 헤더 주석 의도(좌 storyboardUrl, 우 guideUrl)도 일치. */}
+        <div className="flex-1 flex border-b border-bg-border/30 bg-bg-primary/40">
+          <ImageSlot label="스토리보드" url={card.storyboardUrl} />
+          <div className="w-px bg-bg-border/40" />
+          <ImageSlot label="가이드" url={card.guideUrl} />
+        </div>
 
-      {/* 하단 담당자 + 댓글/리비전 아이콘 */}
-      <div className="flex flex-col gap-1 px-2.5 py-1.5 text-[10px]">
-        {bgName && <AssigneeRow tag="BG" name={bgName} />}
-        {actName && <AssigneeRow tag="ACT" name={actName} />}
-        {!bgName && !actName && <span className="text-text-secondary/60">담당자 미지정</span>}
-      </div>
-      {/* 가장 하단 — LD/SD 라벨 + 메모 + 댓글 카운트 (이모지 제거, lucide 아이콘 사용) */}
-      <CardFooter card={card} />
+        {/* 하단 담당자 + 댓글/리비전 아이콘 */}
+        <div className="flex flex-col gap-1 px-2.5 py-1.5 text-[10px]">
+          {bgName && <AssigneeRow tag="BG" name={bgName} />}
+          {actName && <AssigneeRow tag="ACT" name={actName} />}
+          {!bgName && !actName && <span className="text-text-secondary/60">담당자 미지정</span>}
+        </div>
+        {/* 가장 하단 — LD/SD 라벨 + 메모 + 댓글 카운트 (이모지 제거, lucide 아이콘 사용) */}
+        <CardFooter card={card} />
 
-      {/* 일괄 선택 체크 — 좌상단 (선택된 카드만) */}
-      {isMultiSelected && (
+        {/* status='error' 인 경우 오류 사유 라벨 우상단 truncate */}
+        {status === 'error' && errorKind && (
+          <span
+            className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-bold pointer-events-none truncate max-w-[110px]"
+            style={{
+              background: `color-mix(in srgb, var(${COMPOSITING_STATUS_TOKEN.error}) 18%, transparent)`,
+              color: `var(${COMPOSITING_STATUS_TOKEN.error})`,
+              border: `1px solid color-mix(in srgb, var(${COMPOSITING_STATUS_TOKEN.error}) 50%, transparent)`,
+            }}
+          >
+            {COMPOSITING_ERROR_LABEL[errorKind] ?? ''}
+          </span>
+        )}
+      </button>
+
+      {/* 일괄 선택 체크 — 카드 바깥 shell 에 붙여 clipping 없이 보이게 한다. */}
+      {isMultiSelected && !isPinned && (
         <span
-          className="absolute -top-2 -left-2 w-7 h-7 rounded-full flex items-center justify-center shadow-lg"
+          className="scene-card-selection-badge absolute -top-2 -left-2 w-7 h-7 rounded-full flex items-center justify-center shadow-lg"
           style={{
             background: 'rgb(var(--color-accent))',
             color: '#fff',
@@ -200,32 +229,18 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
         </span>
       )}
 
-      {/* 핀 아이콘 — pinned 카드 좌상단 코너 (일괄 선택과 동시 X — isMultiSelected 가 우선) */}
-      {isPinned && !isMultiSelected && (
+      {/* 핀 상태 배지 — 카드 shell 에 붙여 실제 카드 밖에 고정한다. */}
+      {isPinned && (
         <span
-          className="absolute -top-2 -left-2 w-7 h-7 rounded-full flex items-center justify-center shadow-lg"
+          className="scene-card-pin-badge pointer-events-none absolute -top-4 left-2 z-10 w-8 h-8 rounded-full flex items-center justify-center shadow-lg transition-[transform,opacity,box-shadow] duration-300"
           style={{
             background: 'rgb(var(--color-accent))',
             color: '#fff',
-            boxShadow: '0 0 0 2px rgb(var(--color-bg-card)), 0 0 12px rgb(var(--color-accent) / 0.6)',
+            boxShadow: '0 0 0 2px rgb(var(--color-bg-card)), 0 0 16px rgb(var(--color-accent) / 0.7), 0 0 28px rgb(var(--color-accent) / 0.28)',
           }}
           aria-hidden="true"
         >
-          <Pin size={13} strokeWidth={2.5} fill="#fff" />
-        </span>
-      )}
-
-      {/* status='error' 인 경우 오류 사유 라벨 우상단 truncate */}
-      {status === 'error' && errorKind && (
-        <span
-          className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-[9px] font-bold pointer-events-none truncate max-w-[110px]"
-          style={{
-            background: `color-mix(in srgb, var(${COMPOSITING_STATUS_TOKEN.error}) 18%, transparent)`,
-            color: `var(${COMPOSITING_STATUS_TOKEN.error})`,
-            border: `1px solid color-mix(in srgb, var(${COMPOSITING_STATUS_TOKEN.error}) 50%, transparent)`,
-          }}
-        >
-          {COMPOSITING_ERROR_LABEL[errorKind] ?? ''}
+          <Check size={15} strokeWidth={3} />
         </span>
       )}
 
@@ -243,7 +258,7 @@ export function SceneCard({ card, state, staggerIndex, dimmed, partSceneIds }: S
           {nameInitial(byUser.name)}
         </span>
       )}
-    </button>
+    </div>
   );
 }
 

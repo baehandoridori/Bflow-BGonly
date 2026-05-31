@@ -1097,6 +1097,13 @@ export function SceneDetailModal({
             onCountChange={setCommentCount}
             focusCommentId={focusCommentId}
             sceneLabel={`${sheetName.replace(/_/g, ' ').replace(/^EP0?/, 'EP')}${scene.sceneId ? ` #${scene.sceneId}` : ''}`}
+            quickRevision={{
+              sceneKey: revisionSceneKey,
+              context: department,
+              department,
+              bgAssignee: department === 'bg' ? scene.assignee : null,
+              actingAssignee: department === 'acting' ? scene.assignee : null,
+            }}
           />
         </motion.div>
       </motion.div>

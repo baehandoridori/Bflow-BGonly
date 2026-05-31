@@ -1,0 +1,988 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bflow /re 빠른 리비전 인터페이스 비교</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080b12;
+      --panel: #111620;
+      --panel-2: #161b27;
+      --line: #272d3c;
+      --line-soft: rgba(255,255,255,.08);
+      --text: #eef1f7;
+      --muted: #8f96aa;
+      --muted-2: #666d7f;
+      --accent: #6c5ce7;
+      --accent-2: #9b8cff;
+      --cyan: #4fd1c5;
+      --green: #22c55e;
+      --yellow: #f6c65b;
+      --danger: #ff6b6b;
+      --shadow: 0 24px 70px rgba(0,0,0,.46);
+      --radius: 14px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 16% 0%, rgba(108,92,231,.18), transparent 32%),
+        linear-gradient(180deg, #121625 0%, var(--bg) 44%, #05070c 100%);
+      letter-spacing: 0;
+    }
+    button, textarea, input { font: inherit; }
+    button { cursor: pointer; }
+    .shell {
+      min-height: 100vh;
+      padding: 28px;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 20px;
+    }
+    .sidebar {
+      border: 1px solid var(--line-soft);
+      background: rgba(14,18,27,.76);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      align-self: start;
+      position: sticky;
+      top: 28px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .mark {
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, rgba(108,92,231,.95), rgba(79,209,197,.72));
+      box-shadow: 0 0 28px rgba(108,92,231,.28);
+      color: #fff;
+      font-weight: 800;
+    }
+    h1 {
+      margin: 0;
+      font-size: 19px;
+      line-height: 1.25;
+    }
+    .caption {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .choice-list {
+      display: grid;
+      gap: 8px;
+      margin: 16px 0 18px;
+    }
+    .choice {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 11px 12px;
+      text-align: left;
+      transition: border-color .2s ease, background .2s ease, transform .2s ease;
+    }
+    .choice:hover { border-color: rgba(155,140,255,.55); background: rgba(108,92,231,.08); }
+    .choice.active {
+      border-color: rgba(155,140,255,.8);
+      background: rgba(108,92,231,.16);
+      box-shadow: inset 3px 0 0 rgba(155,140,255,.9);
+    }
+    .choice strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .choice span {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .context {
+      display: grid;
+      gap: 8px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line-soft);
+    }
+    .context-title {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .seg {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+    .seg button {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      color: var(--muted);
+      border-radius: 9px;
+      padding: 8px 4px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .seg button.active {
+      border-color: rgba(79,209,197,.7);
+      background: rgba(79,209,197,.12);
+      color: var(--text);
+    }
+    .note {
+      margin-top: 14px;
+      padding: 12px;
+      border: 1px solid rgba(246,198,91,.22);
+      background: rgba(246,198,91,.07);
+      border-radius: 12px;
+      color: #d8c58d;
+      font-size: 11.5px;
+      line-height: 1.55;
+    }
+    .main {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 16px;
+    }
+    .hero {
+      border: 1px solid var(--line-soft);
+      background: rgba(14,18,27,.68);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      box-shadow: var(--shadow);
+    }
+    .hero h2 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .pill strong { color: var(--text); }
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 400px;
+      gap: 16px;
+      min-height: 690px;
+    }
+    .scene {
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: rgba(11,14,22,.62);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    .scene-head {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(18,23,35,.72);
+    }
+    .scene-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .scene-body {
+      padding: 22px;
+      display: grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 18px;
+    }
+    .preview-shot {
+      min-height: 300px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(255,255,255,.035) 1px, transparent 1px),
+        radial-gradient(circle at 70% 28%, rgba(79,209,197,.14), transparent 28%),
+        linear-gradient(135deg, rgba(36,42,57,.9), rgba(13,16,24,.94));
+      background-size: 58px 58px, 58px 58px, auto, auto;
+      position: relative;
+      overflow: hidden;
+    }
+    .preview-shot::after {
+      content: "";
+      position: absolute;
+      inset: auto 24px 24px 24px;
+      height: 86px;
+      border-radius: 16px;
+      background: linear-gradient(90deg, rgba(108,92,231,.32), rgba(79,209,197,.14), rgba(246,198,91,.16));
+      filter: blur(22px);
+      opacity: .7;
+    }
+    .preview-label {
+      position: absolute;
+      left: 18px;
+      top: 16px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .preview-label span {
+      padding: 6px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(4,6,10,.48);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .info-grid {
+      display: grid;
+      align-content: start;
+      gap: 10px;
+    }
+    .info-card {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      border-radius: 12px;
+      padding: 13px;
+    }
+    .info-card label {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 6px;
+    }
+    .info-card div {
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .comment-panel {
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: #121722;
+      box-shadow: var(--shadow);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 690px;
+      overflow: visible;
+      position: relative;
+    }
+    .comment-head {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 15px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .comment-head h3 {
+      margin: 0;
+      font-size: 14px;
+    }
+    .comment-head .count {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .feed {
+      padding: 16px;
+      overflow: hidden;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+    }
+    .feed-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: white;
+      font-size: 11px;
+      font-weight: 800;
+      flex: 0 0 auto;
+      background: #6c5ce7;
+    }
+    .bubble {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      border-radius: 12px;
+      padding: 10px 11px;
+      font-size: 12px;
+      line-height: 1.55;
+      color: #dfe3ef;
+    }
+    .bubble b { color: var(--text); }
+    .time {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted-2);
+      font-size: 10.5px;
+    }
+    .activity {
+      border: 1px solid rgba(108,92,231,.35);
+      background: linear-gradient(90deg, rgba(108,92,231,.18), rgba(108,92,231,.05));
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .activity small {
+      display: block;
+      color: var(--muted-2);
+      margin-bottom: 4px;
+    }
+    .composer-wrap {
+      padding: 12px;
+      border-top: 1px solid var(--line-soft);
+      position: relative;
+      overflow: visible;
+    }
+    .command-preview {
+      display: none;
+      margin-bottom: 8px;
+      border-radius: 13px;
+      border: 1px solid rgba(108,92,231,.42);
+      background: linear-gradient(180deg, rgba(108,92,231,.18), rgba(108,92,231,.075));
+      box-shadow: 0 14px 34px rgba(0,0,0,.2), 0 0 0 1px rgba(255,255,255,.03) inset;
+      overflow: visible;
+      position: relative;
+    }
+    .command-preview.visible { display: block; animation: rise .18s ease-out; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .preview-inner {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .preview-top {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .preview-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .iconbox {
+      width: 23px;
+      height: 23px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: rgba(108,92,231,.24);
+      border: 1px solid rgba(155,140,255,.35);
+      color: var(--accent-2);
+    }
+    .description-preview {
+      color: #dce0ed;
+      font-size: 12px;
+      line-height: 1.45;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .recipient-line {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+    .recipient-label {
+      color: var(--muted);
+      font-size: 11.5px;
+      font-weight: 700;
+    }
+    .person-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 25px;
+      border-radius: 999px;
+      padding: 0 9px 0 4px;
+      border: 1px solid rgba(108,92,231,.42);
+      background: rgba(108,92,231,.18);
+      color: #eef1f7;
+      font-size: 11.5px;
+      transition: opacity .18s ease, filter .18s ease, border-color .18s ease;
+    }
+    .person-chip.off {
+      opacity: .48;
+      filter: grayscale(1);
+      border-color: var(--line);
+      background: rgba(255,255,255,.04);
+      color: var(--muted);
+    }
+    .mini-avatar {
+      width: 17px;
+      height: 17px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 50%;
+      color: white;
+      font-size: 9px;
+      font-weight: 800;
+    }
+    .change-btn {
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.045);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 11.5px;
+      font-weight: 800;
+      transition: border-color .2s ease, background .2s ease;
+    }
+    .change-btn:hover { border-color: rgba(155,140,255,.6); background: rgba(108,92,231,.12); }
+    .composer {
+      border: 1px solid var(--line);
+      background: rgba(7,10,16,.74);
+      border-radius: 13px;
+      overflow: hidden;
+    }
+    textarea {
+      width: 100%;
+      min-height: 78px;
+      resize: none;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+      padding: 12px;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+    .composer-foot {
+      height: 42px;
+      border-top: 1px solid var(--line-soft);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 8px;
+    }
+    .tool {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      display: grid;
+      place-items: center;
+    }
+    .tool:hover { background: rgba(255,255,255,.06); color: var(--text); }
+    .send {
+      width: 29px;
+      height: 29px;
+      border: 0;
+      border-radius: 9px;
+      background: var(--accent);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .send:disabled {
+      opacity: .34;
+      cursor: not-allowed;
+    }
+    .send:not(:disabled):hover { transform: translateY(-1px); }
+    .popover {
+      display: none;
+      position: absolute;
+      right: 10px;
+      bottom: 142px;
+      width: 300px;
+      border: 1px solid rgba(155,140,255,.34);
+      background: rgba(16,21,32,.98);
+      border-radius: 14px;
+      box-shadow: 0 24px 80px rgba(0,0,0,.55);
+      padding: 12px;
+      z-index: 20;
+    }
+    .popover.visible { display: block; animation: rise .18s ease-out; }
+    .popover h4 {
+      margin: 0 0 9px;
+      font-size: 12px;
+    }
+    .search {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: rgba(5,8,13,.75);
+      color: var(--text);
+      outline: 0;
+      border-radius: 9px;
+      padding: 9px 10px;
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .user-row {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 9px;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+    }
+    .user-row:hover { background: rgba(255,255,255,.055); }
+    .check {
+      margin-left: auto;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      color: transparent;
+    }
+    .user-row.on .check {
+      border-color: rgba(108,92,231,.9);
+      background: var(--accent);
+      color: white;
+    }
+    .hint {
+      margin-top: 8px;
+      color: var(--muted-2);
+      font-size: 10.5px;
+      line-height: 1.45;
+    }
+    .mode-b .command-preview {
+      border-color: rgba(79,209,197,.45);
+      background: linear-gradient(180deg, rgba(79,209,197,.13), rgba(79,209,197,.05));
+    }
+    .mode-b .change-btn {
+      color: #b9fff8;
+      border-color: rgba(79,209,197,.35);
+      background: rgba(79,209,197,.11);
+    }
+    .mode-c .command-preview {
+      border-color: rgba(246,198,91,.42);
+      background: linear-gradient(180deg, rgba(246,198,91,.12), rgba(246,198,91,.04));
+    }
+    .mode-c .preview-inner {
+      grid-template-columns: 1fr;
+    }
+    .commandbar {
+      display: none;
+      margin-bottom: 8px;
+      border: 1px solid rgba(246,198,91,.28);
+      background: rgba(246,198,91,.065);
+      border-radius: 12px;
+      padding: 8px;
+      gap: 6px;
+      align-items: center;
+    }
+    .mode-c .commandbar.visible { display: flex; }
+    .command-option {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .command-option.active {
+      border-color: rgba(246,198,91,.65);
+      background: rgba(246,198,91,.14);
+      color: var(--text);
+    }
+    .toast {
+      position: fixed;
+      right: 28px;
+      bottom: 28px;
+      width: 300px;
+      border: 1px solid rgba(34,197,94,.35);
+      background: rgba(12,21,18,.96);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.45);
+      padding: 13px;
+      display: none;
+      z-index: 50;
+    }
+    .toast.visible { display: block; animation: rise .18s ease-out; }
+    .toast strong { display: block; font-size: 13px; margin-bottom: 4px; }
+    .toast span { display: block; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    svg { width: 15px; height: 15px; display: block; }
+    @media (max-width: 1100px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; }
+      .workspace { grid-template-columns: 1fr; }
+      .comment-panel { min-height: 620px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">B</div>
+        <div>
+          <h1>/re 빠른 리비전</h1>
+          <p class="caption">댓글 패널 안에서 슬랙 명령어처럼 리비전을 등록하는 인터페이스 비교.</p>
+        </div>
+      </div>
+
+      <div class="choice-list">
+        <button class="choice active" data-mode="a">
+          <strong>A. 인라인 프리뷰</strong>
+          <span>추천안. 입력 흐름을 거의 끊지 않고 담당자만 확인.</span>
+        </button>
+        <button class="choice" data-mode="b">
+          <strong>B. 담당자 우선 노출</strong>
+          <span>알람 대상을 더 크게 보여주지만 입력창이 조금 무거워짐.</span>
+        </button>
+        <button class="choice" data-mode="c">
+          <strong>C. 커맨드바 느낌</strong>
+          <span>명령어 도구처럼 명확하지만 일반 댓글 흐름과 거리가 생김.</span>
+        </button>
+      </div>
+
+      <div class="context">
+        <div class="context-title">화면 문맥</div>
+        <div class="seg">
+          <button data-context="bg">BG</button>
+          <button data-context="act">ACT</button>
+          <button class="active" data-context="all">전체</button>
+        </div>
+        <p class="caption" id="contextHelp">전체 화면에서는 BG/ACT 담당자 둘 다 기본 체크됩니다.</p>
+      </div>
+
+      <div class="note">
+        실제 적용 시 `/re`는 일반 댓글을 남기지 않고 리비전만 생성합니다. 댓글 및 활동에는 리비전 등록 활동이 별도 카드로 표시됩니다.
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero">
+        <div>
+          <h2>댓글창을 빠른 리비전 등록창으로 겸용</h2>
+          <p>입력창에 `/re 내용`을 쓰면 리비전 프리뷰가 뜨고, 알람 보낼 담당자를 확인하거나 변경한 뒤 바로 등록합니다.</p>
+        </div>
+        <div class="hero-meta">
+          <span class="pill">명령어 <strong>/re</strong></span>
+          <span class="pill">등록 방식 <strong>리비전만</strong></span>
+          <span class="pill">알림 <strong>선택 담당자</strong></span>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="scene">
+          <div class="scene-head">
+            <div class="scene-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 20h8"/></svg>
+              EP.05 / A / a001 씬 상세
+            </div>
+            <span class="pill">상태 <strong>진행중</strong></span>
+          </div>
+          <div class="scene-body">
+            <div class="preview-shot">
+              <div class="preview-label">
+                <span>STB</span>
+                <span>GUIDE</span>
+                <span>BG/ACT 통합 확인</span>
+              </div>
+            </div>
+            <div class="info-grid">
+              <div class="info-card">
+                <label>BG 담당자</label>
+                <div>배한</div>
+              </div>
+              <div class="info-card">
+                <label>ACT 담당자</label>
+                <div>서연</div>
+              </div>
+              <div class="info-card">
+                <label>현재 입력</label>
+                <div id="inputState">/re 그림자 경계 부드럽게 수정 요청</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="comment-panel mode-a" id="panel">
+          <div class="comment-head">
+            <h3>댓글 및 활동</h3>
+            <span class="count">댓글 3 · 활동 6</span>
+          </div>
+          <div class="feed" id="feed">
+            <div class="feed-row">
+              <div class="avatar" style="background:#e17055">한</div>
+              <div class="bubble">
+                <span class="time">오늘 10:18</span>
+                <b>한솔</b> 그림자 경계가 너무 딱 끊겨 보여요.
+              </div>
+            </div>
+            <div class="activity">
+              <small>오늘 10:22</small>
+              리비전 re2가 진행중으로 변경되었습니다.
+            </div>
+            <div class="feed-row">
+              <div class="avatar" style="background:#00b894">서</div>
+              <div class="bubble">
+                <span class="time">오늘 10:35</span>
+                <b>서연</b> 확인했습니다. 경계 부분 먼저 볼게요.
+              </div>
+            </div>
+          </div>
+
+          <div class="composer-wrap">
+            <div class="commandbar visible" id="commandbar">
+              <button class="command-option active">/re 리비전</button>
+              <button class="command-option">담당자 확인</button>
+              <button class="command-option">Enter 등록</button>
+            </div>
+
+            <div class="command-preview visible" id="preview">
+              <div class="preview-inner">
+                <div class="preview-top">
+                  <div>
+                    <div class="preview-title">
+                      <span class="iconbox">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg>
+                      </span>
+                      리비전 빠른 등록
+                    </div>
+                    <div class="description-preview" id="descPreview">그림자 경계 부드럽게 수정 요청</div>
+                  </div>
+                  <button class="change-btn" id="changeBtn">담당자 변경</button>
+                </div>
+                <div class="recipient-line" id="recipientLine">
+                  <span class="recipient-label">알람 보낼 담당자</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="popover" id="popover">
+              <h4>알람 보낼 담당자</h4>
+              <input class="search" placeholder="이름으로 검색..." />
+              <div id="userList"></div>
+              <div class="hint">전체 화면에서는 BG/ACT 담당자가 기본 선택됩니다. 필요하면 클릭해서 빼거나 다른 사람을 추가합니다.</div>
+            </div>
+
+            <div class="composer">
+              <textarea id="commentInput">/re 그림자 경계 부드럽게 수정 요청</textarea>
+              <div class="composer-foot">
+                <button class="tool" title="이미지 첨부">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                </button>
+                <button class="send" id="sendBtn" title="등록">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast">
+    <strong>리비전을 등록했습니다</strong>
+    <span id="toastText">배한, 서연에게 알림을 보냈습니다.</span>
+  </div>
+
+  <script>
+    const users = [
+      { id: 'baehan', name: '배한', role: 'BG 담당자', color: '#e17055', contexts: ['bg', 'all'] },
+      { id: 'seoyeon', name: '서연', role: 'ACT 담당자', color: '#00b894', contexts: ['act', 'all'] },
+      { id: 'hansol', name: '한솔', role: '관리자', color: '#6c5ce7', contexts: [] },
+      { id: 'minji', name: '민지', role: '팀원', color: '#74b9ff', contexts: [] }
+    ];
+    const state = {
+      mode: 'a',
+      context: 'all',
+      selected: new Set(['baehan', 'seoyeon']),
+      popover: false
+    };
+    const panel = document.getElementById('panel');
+    const preview = document.getElementById('preview');
+    const commandbar = document.getElementById('commandbar');
+    const input = document.getElementById('commentInput');
+    const descPreview = document.getElementById('descPreview');
+    const recipientLine = document.getElementById('recipientLine');
+    const userList = document.getElementById('userList');
+    const popover = document.getElementById('popover');
+    const toast = document.getElementById('toast');
+    const toastText = document.getElementById('toastText');
+    const inputState = document.getElementById('inputState');
+    const contextHelp = document.getElementById('contextHelp');
+
+    function defaultsForContext(context) {
+      if (context === 'bg') return ['baehan'];
+      if (context === 'act') return ['seoyeon'];
+      return ['baehan', 'seoyeon'];
+    }
+
+    function parseCommand(value) {
+      const trimmed = value.trim();
+      if (!trimmed.startsWith('/re')) return { active: false, body: '' };
+      const valid = trimmed === '/re' || trimmed.startsWith('/re ');
+      return { active: valid, body: valid ? trimmed.replace(/^\/re\s*/, '') : '' };
+    }
+
+    function renderRecipients() {
+      recipientLine.innerHTML = '<span class="recipient-label">알람 보낼 담당자</span>';
+      users.filter(u => state.selected.has(u.id)).forEach(u => {
+        const chip = document.createElement('span');
+        chip.className = 'person-chip';
+        chip.innerHTML = '<span class="mini-avatar" style="background:' + u.color + '">' + u.name[0] + '</span><span>' + u.name + '</span>';
+        recipientLine.appendChild(chip);
+      });
+      if (state.selected.size === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'person-chip off';
+        empty.textContent = '선택 필요';
+        recipientLine.appendChild(empty);
+      }
+    }
+
+    function renderUserList() {
+      userList.innerHTML = '';
+      users.forEach(u => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'user-row ' + (state.selected.has(u.id) ? 'on' : '');
+        row.innerHTML =
+          '<span class="mini-avatar" style="background:' + u.color + '">' + u.name[0] + '</span>' +
+          '<span><strong style="font-size:12px">' + u.name + '</strong><br><span style="font-size:10.5px;color:var(--muted)">' + u.role + '</span></span>' +
+          '<span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg></span>';
+        row.onclick = () => {
+          if (state.selected.has(u.id)) state.selected.delete(u.id);
+          else state.selected.add(u.id);
+          render();
+        };
+        userList.appendChild(row);
+      });
+    }
+
+    function render() {
+      panel.className = 'comment-panel mode-' + state.mode;
+      document.querySelectorAll('.choice').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === state.mode));
+      document.querySelectorAll('.seg button').forEach(btn => btn.classList.toggle('active', btn.dataset.context === state.context));
+      const parsed = parseCommand(input.value);
+      preview.classList.toggle('visible', parsed.active);
+      commandbar.classList.toggle('visible', parsed.active && state.mode === 'c');
+      descPreview.textContent = parsed.body || '내용을 입력하면 리비전으로 등록됩니다';
+      inputState.textContent = input.value.trim() || '일반 댓글 입력 상태';
+      popover.classList.toggle('visible', state.popover);
+      document.getElementById('sendBtn').disabled = parsed.active && (!parsed.body || state.selected.size === 0);
+      contextHelp.textContent = state.context === 'bg'
+        ? 'BG 화면에서는 BG 담당자가 기본 체크됩니다.'
+        : state.context === 'act'
+          ? 'ACT 화면에서는 ACT 담당자가 기본 체크됩니다.'
+          : '전체 화면에서는 BG/ACT 담당자 둘 다 기본 체크됩니다.';
+      renderRecipients();
+      renderUserList();
+    }
+
+    document.querySelectorAll('.choice').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.mode = btn.dataset.mode;
+        state.popover = state.mode === 'b';
+        render();
+      });
+    });
+    document.querySelectorAll('.seg button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.context = btn.dataset.context;
+        state.selected = new Set(defaultsForContext(state.context));
+        render();
+      });
+    });
+    document.getElementById('changeBtn').addEventListener('click', () => {
+      state.popover = !state.popover;
+      render();
+    });
+    input.addEventListener('input', render);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        submitRevision();
+      }
+    });
+    document.getElementById('sendBtn').addEventListener('click', submitRevision);
+
+    function submitRevision() {
+      const parsed = parseCommand(input.value);
+      if (!parsed.active || !parsed.body || state.selected.size === 0) return;
+      const selectedUsers = users.filter(u => state.selected.has(u.id)).map(u => u.name);
+      const feed = document.getElementById('feed');
+      const item = document.createElement('div');
+      item.className = 'activity';
+      item.innerHTML = '<small>방금 전</small>리비전 re4가 등록되었습니다. <br><span style="color:var(--muted)">알람 보낼 담당자: ' + selectedUsers.join(', ') + '</span>';
+      feed.appendChild(item);
+      input.value = '';
+      state.popover = false;
+      toastText.textContent = selectedUsers.join(', ') + '에게 알림을 보냈습니다.';
+      toast.classList.add('visible');
+      setTimeout(() => toast.classList.remove('visible'), 2400);
+      render();
+    }
+
+    render();
+  </script>
+</body>
+</html>

@@ -1,10 +1,11 @@
 import { Fragment, useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, ChevronDown, ChevronRight, Reply, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
+import { Pencil, Trash2, Paperclip, X, ImagePlus, ArrowUp, CornerDownRight, ChevronDown, ChevronRight, Reply, MessageSquareWarning, ChevronLeft as ChevronLeftIcon, ChevronRight as ChevronRightIcon } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useRevisionStore } from '@/stores/useRevisionStore';
 import {
   getComments,
   addComment,
@@ -16,7 +17,7 @@ import {
   fetchReactionsBulk,
 } from '@/services/commentService';
 import type { SceneComment } from '@/services/commentService';
-import type { CommentReaction } from '@/types';
+import type { AppUser, CommentReaction } from '@/types';
 import { groupReactionsByEmoji } from '@/utils/commentReactionUtils';
 import { ReactionChip } from './ReactionChip';
 import { EmojiPicker } from './EmojiPicker';
@@ -34,6 +35,13 @@ import {
 import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { RevisionCommentBadge } from './RevisionCommentBadge';
+import { RevisionRecipientPicker } from './RevisionRecipientPicker';
+import {
+  getDefaultRevisionSlashRecipientIds,
+  parseRevisionSlashCommand,
+  type RevisionSlashContext,
+} from '@/utils/revisionSlashCommand';
+import { toast as sonnerToast } from 'sonner';
 import '@/styles/comment-panel.css';
 
 // ─── 타입 ───────────────────────────────────
@@ -61,6 +69,19 @@ interface CommentPanelProps {
   focusCommentId?: string | null;
   /** v1.24.0: 댓글 이미지 라이트박스 상단에 표시할 씬 라벨 (예: "EP01 A컷 #03"). */
   sceneLabel?: string;
+  /** 댓글 입력창의 /re 빠른 리비전 등록 문맥. 없으면 /re 는 일반 댓글로 취급된다. */
+  quickRevision?: CommentPanelQuickRevisionContext;
+}
+
+export interface CommentPanelQuickRevisionContext {
+  /** buildSceneKey() 로 만든 리비전 canonical sceneKey */
+  sceneKey: string;
+  /** 현재 화면 문맥. 전체 모드는 BG/ACT 담당자를 모두 기본 체크한다. */
+  context: RevisionSlashContext;
+  /** 리비전에 기록할 부서. 전체 모드에서는 생략 가능. */
+  department?: 'bg' | 'acting';
+  bgAssignee?: string | null;
+  actingAssignee?: string | null;
 }
 
 /**
@@ -172,9 +193,10 @@ function ReactionsArea({
 
 // ─── 메인 컴포넌트 ──────────────────────────
 
-export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel }: CommentPanelProps) {
+export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCountChange, inlineEvents, focusCommentId, sceneLabel, quickRevision }: CommentPanelProps) {
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
+  const { createRevision } = useRevisionStore();
 
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
   const effectiveSceneThreadKey = sceneThreadKey ?? sceneKey;
@@ -194,6 +216,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   const [focused, setFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [quickRevisionPickerOpen, setQuickRevisionPickerOpen] = useState(false);
+  const [quickRevisionNotifyIds, setQuickRevisionNotifyIds] = useState<string[]>([]);
 
   // 멘션 자동완성
   const [showMentions, setShowMentions] = useState(false);
@@ -333,6 +357,45 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     ta.style.height = prev;
     setTaHeight(Math.max(40, Math.min(sh, taMaxPx)));
   }, [input, taMaxPx]);
+
+  const quickRevisionCommand = useMemo(() => parseRevisionSlashCommand(input), [input]);
+  const quickRevisionActive = !!quickRevision && quickRevisionCommand.isRevisionCommand;
+  const quickRevisionDescription = quickRevisionCommand.description;
+  const quickRevisionDefaultRecipientIds = useMemo(() => {
+    if (!quickRevision || !currentUser) return [];
+    return getDefaultRevisionSlashRecipientIds({
+      context: quickRevision.context,
+      bgAssignee: quickRevision.bgAssignee,
+      actingAssignee: quickRevision.actingAssignee,
+      allUsers: users,
+      excludeUserId: currentUser.id,
+    });
+  }, [
+    quickRevision?.context,
+    quickRevision?.bgAssignee,
+    quickRevision?.actingAssignee,
+    currentUser?.id,
+    users,
+    quickRevision,
+  ]);
+  const quickRevisionDefaultRecipientKey = quickRevisionDefaultRecipientIds.join('|');
+
+  useEffect(() => {
+    if (!quickRevisionActive) {
+      setQuickRevisionPickerOpen(false);
+      return;
+    }
+    setQuickRevisionNotifyIds(quickRevisionDefaultRecipientIds);
+    setReplyTarget(null);
+  }, [quickRevisionActive, quickRevisionDefaultRecipientKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const quickRevisionSelectedUsers = useMemo(
+    () => quickRevisionNotifyIds
+      .map((id) => users.find((user) => user.id === id))
+      .filter((user): user is AppUser => !!user),
+    [quickRevisionNotifyIds, users],
+  );
+  const quickRevisionHasAttachments = quickRevisionActive && attachedImages.length > 0;
 
   // 댓글 로드 — primary + optional secondary 시간순 병합 (기존 로직)
   const loadComments = useCallback(() => {
@@ -756,12 +819,51 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   // ── 전송 ──
   const hasUploadingImage = attachedImages.some(a => a.uploading);
   const uploadedImageUrls = attachedImages.map(a => a.uploadedUrl).filter((u): u is string => !!u);
-  const canSubmit = !submitting
-    && !hasUploadingImage
-    && (input.trim().length > 0 || uploadedImageUrls.length > 0);
+  const canSubmit = quickRevisionActive
+    ? !submitting
+      && !hasUploadingImage
+      && !quickRevisionHasAttachments
+      && quickRevisionDescription.length > 0
+      && quickRevisionNotifyIds.length > 0
+    : !submitting
+      && !hasUploadingImage
+      && (input.trim().length > 0 || uploadedImageUrls.length > 0);
 
   const handleSubmit = async () => {
     if (!canSubmit || !currentUser) return;
+    if (quickRevisionActive && quickRevision) {
+      setSubmitting(true);
+      try {
+        await createRevision({
+          sceneKey: quickRevision.sceneKey,
+          description: quickRevisionDescription,
+          department: quickRevision.department,
+          lookupDepartment: quickRevision.department,
+          requesterId: currentUser.id,
+          requesterName: currentUser.name,
+          notifyUserIds: quickRevisionNotifyIds,
+        });
+        setInput('');
+        inputValueRef.current = '';
+        setQuickRevisionPickerOpen(false);
+        setShowMentions(false);
+        setReplyTarget(null);
+        const targetNames = quickRevisionSelectedUsers.map((user) => user.name).join(', ');
+        sonnerToast.success('리비전을 등록했습니다', {
+          description: targetNames ? `${targetNames}에게 알림을 보냈습니다.` : undefined,
+          duration: 2200,
+        });
+      } catch (err) {
+        console.error('[리비전 빠른 등록 실패]', err);
+        sonnerToast.error('리비전 등록 실패', {
+          description: err instanceof Error ? err.message : '잠시 후 다시 시도해 주세요.',
+        });
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     setSubmitting(true);
 
     const mentions = extractMentions(input, users.map(u => u.name));
@@ -1628,6 +1730,80 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
           </div>
         )}
 
+        <AnimatePresence initial={false}>
+          {quickRevisionActive && (
+            <motion.div
+              key="quick-revision-preview"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.18 }}
+              className="mb-2 rounded-xl border border-accent/40 bg-accent/[0.08] shadow-lg overflow-visible"
+              style={{ boxShadow: '0 16px 36px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(255,255,255,0.03)' }}
+            >
+              <div className="p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-[12px] font-bold text-text-primary">
+                      <span className="w-6 h-6 rounded-lg border border-accent/35 bg-accent/20 text-accent-sub inline-flex items-center justify-center shrink-0">
+                        <MessageSquareWarning size={13} strokeWidth={2.4} />
+                      </span>
+                      리비전 빠른 등록
+                    </div>
+                    <div className="mt-1 text-[12px] text-text-secondary/85 truncate">
+                      {quickRevisionDescription || '내용을 입력하면 리비전으로 등록됩니다'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQuickRevisionPickerOpen((open) => !open)}
+                    className="shrink-0 px-2.5 py-1.5 rounded-lg border border-bg-border/70 bg-bg-primary/35 text-[11.5px] font-bold text-text-primary hover:border-accent/50 hover:bg-accent/[0.10] transition-colors cursor-pointer"
+                  >
+                    담당자 변경
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-text-secondary/80">알람 보낼 담당자</span>
+                  {quickRevisionSelectedUsers.length > 0 ? quickRevisionSelectedUsers.map((user) => (
+                    <span
+                      key={user.id}
+                      className="inline-flex items-center gap-1.5 h-6 rounded-full border border-accent/40 bg-accent/15 pl-1 pr-2 text-[11.5px] text-text-primary"
+                    >
+                      <span className="w-4 h-4 rounded-full bg-accent/80 text-white text-[9px] font-bold inline-flex items-center justify-center">
+                        {user.name.charAt(0)}
+                      </span>
+                      {user.name}
+                    </span>
+                  )) : (
+                    <span className="inline-flex items-center h-6 rounded-full border border-status-none/35 bg-status-none/10 px-2 text-[11.5px] text-status-none">
+                      선택 필요
+                    </span>
+                  )}
+                </div>
+
+                {quickRevisionHasAttachments && (
+                  <div className="rounded-lg border border-status-none/30 bg-status-none/10 px-2.5 py-2 text-[11px] text-status-none">
+                    빠른 리비전은 텍스트만 등록합니다. 이미지는 리비전 탭의 정식 등록 폼에서 첨부해 주세요.
+                  </div>
+                )}
+
+                <div className={cn(
+                  'rounded-lg border border-bg-border/50 bg-bg-primary/35 p-2',
+                  quickRevisionPickerOpen ? 'block' : 'hidden',
+                )}>
+                  <RevisionRecipientPicker
+                    allUsers={users}
+                    defaultCheckedIds={quickRevisionDefaultRecipientIds}
+                    excludeUserId={currentUser?.id || ''}
+                    onChange={setQuickRevisionNotifyIds}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div
           onPaste={handlePaste}
           // v1.23.3 (#1 진짜 fix): flex-col + overflow-hidden — footer 항상 보이고 textarea 만 자체 scroll.
@@ -1743,9 +1919,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
           {/* 하단 toolbar — 좌측 첨부, 우측 전송 (cowork 스타일). v1.23.3 (#1): shrink-0 명시 — 항상 보임 보장 */}
           <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-bg-border/40 shrink-0">
             <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-card hover:text-text-primary transition-colors cursor-pointer"
-              title="이미지 첨부"
+              onClick={() => {
+                if (quickRevisionActive) return;
+                fileInputRef.current?.click();
+              }}
+              disabled={quickRevisionActive}
+              className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-card hover:text-text-primary disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              title={quickRevisionActive ? '빠른 리비전은 텍스트만 지원합니다' : '이미지 첨부'}
             >
               <Paperclip size={14} />
             </button>
@@ -1753,7 +1933,15 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
               onClick={handleSubmit}
               disabled={!canSubmit}
               className="w-7 h-7 rounded-md flex items-center justify-center bg-accent hover:bg-accent-sub text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              title={hasUploadingImage ? '이미지 업로드 중...' : '전송 (Enter)'}
+              title={
+                quickRevisionActive
+                  ? quickRevisionHasAttachments
+                    ? '이미지는 리비전 탭에서 첨부해 주세요'
+                    : quickRevisionNotifyIds.length === 0
+                      ? '알람 보낼 담당자를 선택해 주세요'
+                      : '리비전 등록 (Enter)'
+                  : hasUploadingImage ? '이미지 업로드 중...' : '전송 (Enter)'
+              }
             >
               {submitting ? (
                 <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
