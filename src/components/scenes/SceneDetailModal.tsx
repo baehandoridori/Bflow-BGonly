@@ -31,6 +31,7 @@ import { useSceneActivities } from '@/hooks/useSceneActivities';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
+import { updateSceneFieldInSupabase } from '@/services/supabaseService';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { formatStamp, formatTime } from '@/utils/formatTime';
@@ -509,6 +510,7 @@ export function SceneDetailModal({
   // 이미지 즉시 프리뷰용 낙관적 URL (업로드 중 base64 표시)
   const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
   const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
+  const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
 
   useEffect(() => {
     setLatestImageUrls({});
@@ -517,6 +519,33 @@ export function SceneDetailModal({
   useEffect(() => {
     setLatestImageUrls({});
   }, [scene.storyboardUrl, scene.guideUrl]);
+
+  const applyLatestImageUrl = useCallback(
+    (imageType: 'storyboard' | 'guide', url: string) => {
+      if (department !== 'bg') return;
+
+      const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+      const previousUrl = imageType === 'storyboard' ? scene.storyboardUrl : scene.guideUrl;
+
+      setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
+      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+
+      const sceneUuid = scene.id;
+      if (!sceneUuid) return;
+
+      const patch: Partial<Scene> = { [field]: url };
+      updateSceneByUuid(sceneUuid, patch);
+      void updateSceneFieldInSupabase(sceneUuid, field, url).catch((err) => {
+        console.error('[SceneDetailModal] 최신 이미지 URL 저장 실패', err);
+        const rollbackUrl = previousUrl ?? '';
+        const rollbackPatch: Partial<Scene> = { [field]: rollbackUrl };
+        updateSceneByUuid(sceneUuid, rollbackPatch);
+        setLatestImageUrls((prev) => ({ ...prev, [imageType]: rollbackUrl }));
+        sonnerToast.error('이미지 최신화 저장에 실패했습니다. 새로고침 후 다시 확인해 주세요.');
+      });
+    },
+    [department, scene.id, scene.storyboardUrl, scene.guideUrl, updateSceneByUuid],
+  );
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
@@ -1195,11 +1224,7 @@ export function SceneDetailModal({
             const base64 = await rb(file);
             return si(base64, sheetName, scene.sceneId || String(scene.no), imageType);
           }}
-          onLatestImageUrlChange={(imageType, url) => {
-            if (department !== 'bg') return;
-            setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-          }}
+          onLatestImageUrlChange={applyLatestImageUrl}
         />
       )}
     </AnimatePresence>
