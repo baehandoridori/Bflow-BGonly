@@ -402,13 +402,18 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
     useEffect(() => {
       const handler = (e: KeyboardEvent) => {
         if (getEditableElementFromTarget(e.target)) return;
-        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
           e.preventDefault();
+          e.stopPropagation();
+          drawingRef.current = false;
+          startPosRef.current = null;
+          prevPointRef.current = null;
+          snapshotRef.current = null;
           handleUndo();
         }
       };
-      document.addEventListener('keydown', handler);
-      return () => document.removeEventListener('keydown', handler);
+      document.addEventListener('keydown', handler, true);
+      return () => document.removeEventListener('keydown', handler, true);
     }, [handleUndo]);
 
     const commitText = useCallback(() => {

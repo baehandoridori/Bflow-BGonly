@@ -1184,6 +1184,12 @@ export function SceneDetailModal({
             const base64 = await rb(file);
             return si(base64, sheetName, scene.sceneId || String(scene.no), imageType);
           }}
+          onLatestImageUrlChange={(imageType, url) => {
+            if (department !== 'bg') return;
+            const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+            onFieldUpdate(sceneIndex, field, url);
+            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+          }}
         />
       )}
     </AnimatePresence>

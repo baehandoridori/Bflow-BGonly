@@ -49,6 +49,7 @@ interface ImageModalProps {
   isAdmin?: boolean;
   /** 새 버전을 업로드할 함수 — Storage 업로드 + 반환 URL (기존 saveImage 로직 활용) */
   onUploadImage?: (file: File, imageType: 'storyboard' | 'guide') => Promise<string>;
+  onLatestImageUrlChange?: (imageType: 'storyboard' | 'guide', url: string) => void;
 }
 
 /* ────────────────────────────────────────────────────────────── */
@@ -71,6 +72,7 @@ export function ImageModal({
   currentUserId: currentUserIdProp,
   isAdmin: isAdminProp,
   onUploadImage,
+  onLatestImageUrlChange,
 }: ImageModalProps) {
   // v1.26.0: props 미전달 시 store 에서 자동 (호출자 단순화)
   const storeUser = useAuthStore((s) => s.currentUser);
@@ -155,6 +157,7 @@ export function ImageModal({
           setStoryboardVersions(refreshed);
           setCurrentStoryboardId(newVer.id);
         }
+        onLatestImageUrlChange?.(imageType, newVer.url);
         toast.success(`v${newVer.versionNo} 추가됨`);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -162,7 +165,7 @@ export function ImageModal({
       }
     };
     input.click();
-  }, [sceneUuid, currentUserId, onUploadImage]);
+  }, [sceneUuid, currentUserId, onUploadImage, onLatestImageUrlChange]);
 
   // v1.26.0: 주석 모드 state
   const [annotateMode, setAnnotateMode] = useState<{ imageType: 'storyboard' | 'guide' } | null>(null);
@@ -262,6 +265,7 @@ export function ImageModal({
         setStoryboardVersions(refreshed);
         setCurrentStoryboardId(newVer.id);
       }
+      onLatestImageUrlChange?.(type, newVer.url);
       toast.success(`주석 v${newVer.versionNo} 저장됨`);
       annotationRef.current?.clear();
       setAnnotateMode(null);
@@ -273,28 +277,28 @@ export function ImageModal({
     // 코덱스 3차 P2 (2026-05-24): legacy 폴백이 guideUrl/storyboardUrl props 를 읽으므로
     //   deps 에도 포함. 모달 열려있는 동안 씬 데이터가 라이브 업데이트되면 자동 v1 시드가
     //   stale URL 로 생성될 위험 차단.
-  }, [annotateMode, sceneUuid, currentUserId, guideVersions, storyboardVersions, currentGuideId, currentStoryboardId, guideUrl, storyboardUrl, onUploadImage, annotationDescription]);
+  }, [annotateMode, sceneUuid, currentUserId, guideVersions, storyboardVersions, currentGuideId, currentStoryboardId, guideUrl, storyboardUrl, onUploadImage, onLatestImageUrlChange, annotationDescription]);
 
   const handleVersionDelete = useCallback(async (imageType: 'storyboard' | 'guide', versionId: string) => {
     if (!sceneUuid) return;
     try {
       await removeImageVersion(versionId);
       const refreshed = await fetchImageVersions(sceneUuid, imageType);
+      const latest = pickLatestVersion(refreshed);
       if (imageType === 'guide') {
         setGuideVersions(refreshed);
-        const latest = pickLatestVersion(refreshed);
         setCurrentGuideId(latest?.id ?? null);
       } else {
         setStoryboardVersions(refreshed);
-        const latest = pickLatestVersion(refreshed);
         setCurrentStoryboardId(latest?.id ?? null);
       }
+      onLatestImageUrlChange?.(imageType, latest?.url ?? '');
       toast.success('버전 삭제됨');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(msg);
     }
-  }, [sceneUuid]);
+  }, [sceneUuid, onLatestImageUrlChange]);
 
   /** 현재 마우스 위치 기준 이미지 종류 추정 (side-by-side / overlay 분기). */
   const inferImageType = useCallback((clientX: number): 'storyboard' | 'guide' => {

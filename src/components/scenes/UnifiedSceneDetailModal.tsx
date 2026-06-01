@@ -978,6 +978,12 @@ export function UnifiedSceneDetailModal({
             const base64 = await rb(file);
             return si(base64, bgSheetName, bgScene.sceneId || String(bgScene.no), imageType);
           }}
+          onLatestImageUrlChange={(imageType, url) => {
+            if (!bgSheetName) return;
+            const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+            onFieldUpdate(bgSheetName, bgSceneIndex, field, url);
+            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+          }}
         />
       )}
 
