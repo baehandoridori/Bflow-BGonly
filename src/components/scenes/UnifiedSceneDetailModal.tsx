@@ -33,6 +33,7 @@ import { describeActivity, deptPrefix } from './activityLabels';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { updateSceneFieldInSupabase } from '@/services/supabaseService';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
@@ -306,6 +307,7 @@ export function UnifiedSceneDetailModal({
   const [deleteConfirm, setDeleteConfirm] = useState<null | 'storyboard' | 'guide' | 'bg' | 'act' | 'both'>(null);
   const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
   const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
+  const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
   const addingRef = useRef<{ bg: boolean; acting: boolean }>({ bg: false, acting: false });
 
   useEffect(() => {
@@ -315,6 +317,31 @@ export function UnifiedSceneDetailModal({
   useEffect(() => {
     setLatestImageUrls({});
   }, [bgScene?.storyboardUrl, bgScene?.guideUrl]);
+
+  const applyLatestImageUrl = useCallback(
+    (imageType: 'storyboard' | 'guide', url: string) => {
+      const sceneUuid = bgScene?.id;
+      const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
+      const previousUrl = imageType === 'storyboard' ? bgScene?.storyboardUrl : bgScene?.guideUrl;
+
+      setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
+      setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
+
+      if (!sceneUuid) return;
+
+      const patch: Partial<Scene> = { [field]: url };
+      updateSceneByUuid(sceneUuid, patch);
+      void updateSceneFieldInSupabase(sceneUuid, field, url).catch((err) => {
+        console.error('[UnifiedSceneDetailModal] 최신 이미지 URL 저장 실패', err);
+        const rollbackUrl = previousUrl ?? '';
+        const rollbackPatch: Partial<Scene> = { [field]: rollbackUrl };
+        updateSceneByUuid(sceneUuid, rollbackPatch);
+        setLatestImageUrls((prev) => ({ ...prev, [imageType]: rollbackUrl }));
+        sonnerToast.error('이미지 최신화 저장에 실패했습니다. 새로고침 후 다시 확인해 주세요.');
+      });
+    },
+    [bgScene?.id, bgScene?.storyboardUrl, bgScene?.guideUrl, updateSceneByUuid],
+  );
 
   // 좌우 이동 슬라이드 방향 (1=다음, -1=이전). 키보드/버튼/도트 모두 handleNavigate 경유.
   const [navDirection, setNavDirection] = useState<1 | -1>(1);
@@ -989,10 +1016,7 @@ export function UnifiedSceneDetailModal({
             const base64 = await rb(file);
             return si(base64, bgSheetName, bgScene.sceneId || String(bgScene.no), imageType);
           }}
-          onLatestImageUrlChange={(imageType, url) => {
-            setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
-            setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
-          }}
+          onLatestImageUrlChange={applyLatestImageUrl}
         />
       )}
 
