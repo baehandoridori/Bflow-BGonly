@@ -154,13 +154,13 @@ test('compositing and shared dropdown controls use compact or bounded labels', (
   assert.match(dashboardBulkBar, /CompactIconLabel/);
 });
 
-test('Bflow cursor uses a custom app cursor while preserving precision cursors', () => {
+test('Bflow does not install a custom app cursor', () => {
   const css = read('src/index.css');
+  const main = read('src/main.tsx');
 
-  assert.match(css, /--bflow-cursor-default/);
-  assert.match(css, /--bflow-cursor-pointer/);
-  assert.match(css, /html,\s*body,\s*#root\s*\{[\s\S]*cursor:\s*var\(--bflow-cursor-default\)/);
-  assert.match(css, /button:not\(:disabled\)[\s\S]*cursor:\s*var\(--bflow-cursor-pointer\) !important/);
-  assert.match(css, /input,\s*textarea,[\s\S]*\.cursor-text\s*\{[\s\S]*cursor:\s*text !important/);
-  assert.match(css, /\.sheet-column-resizer,[\s\S]*\.is-sheet-column-resizing \*[\s\S]*cursor:\s*col-resize !important/);
+  assert.ok(!existsSync('src/components/common/BflowCursorLayer.tsx'));
+  assert.doesNotMatch(css, /--bflow-cursor-/);
+  assert.doesNotMatch(css, /bflow-custom-cursor-enabled/);
+  assert.doesNotMatch(css, /bflow-cursor-layer/);
+  assert.doesNotMatch(main, /BflowCursorLayer/);
 });
