@@ -28,6 +28,8 @@ test('ImageModal notifies parent detail surfaces when the latest image URL chang
   assert.doesNotMatch(unifiedSceneDetailCallback, /onFieldUpdate\(bgSheetName, bgSceneIndex, field, url\)/);
   assert.match(sceneDetailModal, /setLatestImageUrls\(\(prev\) => \(\{ \.\.\.prev, \[deleteConfirm\]: '' \}\)\)/);
   assert.match(unifiedSceneDetailModal, /setLatestImageUrls\(\(prev\) => \(\{ \.\.\.prev, \[imageType\]: '' \}\)\)/);
+  assert.match(sceneDetailModal, /\[scene\.storyboardUrl, scene\.guideUrl\]/);
+  assert.match(unifiedSceneDetailModal, /\[bgScene\?\.storyboardUrl, bgScene\?\.guideUrl\]/);
 });
 
 test('AnnotationCanvas handles Ctrl+Z before outer modal shortcuts when not editing text', () => {

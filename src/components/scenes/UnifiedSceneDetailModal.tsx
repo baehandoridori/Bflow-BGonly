@@ -312,6 +312,10 @@ export function UnifiedSceneDetailModal({
     setLatestImageUrls({});
   }, [bgScene?.id, bgScene?.sceneId, bgSheetName]);
 
+  useEffect(() => {
+    setLatestImageUrls({});
+  }, [bgScene?.storyboardUrl, bgScene?.guideUrl]);
+
   // 좌우 이동 슬라이드 방향 (1=다음, -1=이전). 키보드/버튼/도트 모두 handleNavigate 경유.
   const [navDirection, setNavDirection] = useState<1 | -1>(1);
   const handleNavigate = useCallback((dir: 'prev' | 'next') => {

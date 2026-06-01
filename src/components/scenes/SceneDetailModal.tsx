@@ -514,6 +514,10 @@ export function SceneDetailModal({
     setLatestImageUrls({});
   }, [scene.id, scene.sceneId, sheetName]);
 
+  useEffect(() => {
+    setLatestImageUrls({});
+  }, [scene.storyboardUrl, scene.guideUrl]);
+
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
   const sceneKey = `${sheetName}:${scene.no}`;
