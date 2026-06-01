@@ -92,7 +92,7 @@ test('sheet headers support full and short labels', () => {
   assert.match(singleSheet, /shortLabel="씬"/);
   assert.match(singleSheet, /columnKey="alerts"/);
   assert.match(singleSheet, /SINGLE_SHEET_FILL_COLUMNS/);
-  assert.match(singleSheet, /overflow-y-auto overflow-x-hidden/);
+  assert.match(singleSheet, /sheetOverflowsViewport \? 'overflow-x-auto' : 'overflow-x-hidden'/);
   assert.match(singleSheet, /shortLabel="담"/);
   assert.match(singleSheet, /STAGE_SHORT_LABELS[\s\S]*lo:\s*'LO'/);
   assert.match(singleSheet, /STAGE_SHORT_LABELS[\s\S]*done:\s*'완'/);
@@ -102,7 +102,7 @@ test('sheet headers support full and short labels', () => {
   assert.match(unifiedSheet, /shortLabel="ACT"/);
   assert.match(unifiedSheet, /columnKey="alerts"/);
   assert.match(unifiedSheet, /UNIFIED_SHEET_FILL_COLUMNS/);
-  assert.match(unifiedSheet, /overflow-y-auto overflow-x-hidden/);
+  assert.match(unifiedSheet, /sheetOverflowsViewport \? 'overflow-x-auto' : 'overflow-x-hidden'/);
   assert.match(unifiedSheet, /BG_STAGE_SHORT_LABELS[\s\S]*lo:\s*'LO'/);
   assert.match(unifiedSheet, /BG_STAGE_SHORT_LABELS[\s\S]*review:\s*'검'/);
   assert.match(unifiedSheet, /ACT_STAGE_SHORT_LABELS[\s\S]*done:\s*'작'/);

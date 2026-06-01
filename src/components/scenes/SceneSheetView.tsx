@@ -410,6 +410,7 @@ export function SceneSheetView({
     SINGLE_SHEET_FILL_COLUMNS,
   );
   const sheetWidth = fittedSheet.totalWidth;
+  const sheetOverflowsViewport = tableViewportWidth > 0 && sheetWidth > tableViewportWidth + 1;
   const displayWidthOf = useCallback(
     (key: SingleSheetColumnKey) => fittedSheet.widths[key],
     [fittedSheet],
@@ -660,7 +661,10 @@ export function SceneSheetView({
       <div
         ref={tableRef}
         tabIndex={0}
-        className="overflow-y-auto overflow-x-hidden rounded-lg border border-bg-border focus:outline-none"
+        className={cn(
+          'overflow-y-auto rounded-lg border border-bg-border focus:outline-none',
+          sheetOverflowsViewport ? 'overflow-x-auto' : 'overflow-x-hidden',
+        )}
         onKeyDown={handleTableKeyDown}
         onMouseUp={() => setIsDragging(false)}
         style={{ userSelect: isDragging ? 'none' : undefined }}
