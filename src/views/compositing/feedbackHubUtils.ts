@@ -3,6 +3,10 @@ import type { SceneGroup } from './utils';
 
 const STALLED_HOURS = 48;
 
+export function buildFeedbackHubPartCollapseKey(episodeNumber: number, partId: string): string {
+  return `${episodeNumber}::${partId}`;
+}
+
 export interface FeedbackHubPartTree {
   partId: string;
   scenes: SceneGroup[];

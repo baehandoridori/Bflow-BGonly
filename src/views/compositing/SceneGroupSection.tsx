@@ -10,7 +10,7 @@ import { RevisionItem } from './RevisionItem';
 import { AddRevisionForm } from './AddRevisionForm';
 import { SceneJumpButton } from './SceneJumpButton';
 import type { SceneGroup } from './utils';
-import type { FeedbackHubEpisodeTree } from './feedbackHubUtils';
+import { buildFeedbackHubPartCollapseKey, type FeedbackHubEpisodeTree } from './feedbackHubUtils';
 import { RevisionCommentMarker, summarizeRevisionComments } from './RevisionCommentMarker';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 
@@ -291,19 +291,27 @@ export function SceneRow({
 
 export function FeedbackTreeSection({
   episodeTrees,
+  expandedEpisodes,
+  expandedParts,
   expandedScenes,
   selectedRevisionId,
   commentCountByRev,
   commentSeenByRev,
+  onToggleEpisode,
+  onTogglePart,
   onToggleScene,
   onSelectRevision,
   onStatusChange,
 }: {
   episodeTrees: FeedbackHubEpisodeTree[];
+  expandedEpisodes: Set<number>;
+  expandedParts: Set<string>;
   expandedScenes: Set<string>;
   selectedRevisionId: string | null;
   commentCountByRev?: Map<string, number>;
   commentSeenByRev?: Map<string, boolean>;
+  onToggleEpisode: (episodeNumber: number) => void;
+  onTogglePart: (episodeNumber: number, partId: string) => void;
   onToggleScene: (sceneKey: string) => void;
   onSelectRevision: (rev: CompRevision) => void;
   onStatusChange: (revId: string, sceneKey: string, status: RevisionStatus, note?: string) => void;
@@ -311,6 +319,7 @@ export function FeedbackTreeSection({
   return (
     <div className="px-5 py-4 space-y-4">
       {episodeTrees.map((episodeTree) => {
+        const isEpisodeExpanded = expandedEpisodes.has(episodeTree.episodeNumber);
         const episodeCommentSummary = summarizeRevisionComments(
           episodeTree.parts.flatMap((partTree) =>
             partTree.scenes.flatMap((group) => group.revisions),
@@ -324,7 +333,22 @@ export function FeedbackTreeSection({
             key={episodeTree.episodeNumber}
             className="overflow-hidden rounded-xl border border-bg-border/55 bg-bg-card/55"
           >
-            <header className="px-4 py-3 flex items-center gap-3 border-b border-bg-border/35 bg-bg-primary/20">
+            <header
+              role="button"
+              tabIndex={0}
+              aria-expanded={isEpisodeExpanded}
+              onClick={() => onToggleEpisode(episodeTree.episodeNumber)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onToggleEpisode(episodeTree.episodeNumber);
+                }
+              }}
+              className="px-4 py-3 flex items-center gap-3 border-b border-bg-border/35 bg-bg-primary/20 hover:bg-bg-primary/35 transition-colors cursor-pointer"
+            >
+              <span className="shrink-0 text-text-secondary/60">
+                {isEpisodeExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-text-primary">{episodeTree.episodeLabel}</span>
@@ -348,73 +372,112 @@ export function FeedbackTreeSection({
               )}
             </header>
 
-            <div className="divide-y divide-bg-border/30">
-            {episodeTree.parts.map((partTree) => {
-              const isPartResolved = partTree.totalRevisions > 0 && partTree.totalOpen === 0;
-              const partCommentSummary = summarizeRevisionComments(
-                partTree.scenes.flatMap((group) => group.revisions),
-                commentCountByRev,
-                commentSeenByRev,
-              );
+            <AnimatePresence initial={false}>
+              {isEpisodeExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="divide-y divide-bg-border/30">
+                  {episodeTree.parts.map((partTree) => {
+                    const partKey = buildFeedbackHubPartCollapseKey(episodeTree.episodeNumber, partTree.partId);
+                    const isPartExpanded = expandedParts.has(partKey);
+                    const isPartResolved = partTree.totalRevisions > 0 && partTree.totalOpen === 0;
+                    const partCommentSummary = summarizeRevisionComments(
+                      partTree.scenes.flatMap((group) => group.revisions),
+                      commentCountByRev,
+                      commentSeenByRev,
+                    );
 
-              return (
-                <section key={partTree.partId}>
-                  <div
-                    data-part-complete={isPartResolved ? 'true' : 'false'}
-                    className={`px-4 py-2.5 flex items-center gap-2 transition-colors ${
-                      isPartResolved ? 'bg-bg-primary/5' : 'bg-bg-primary/10'
-                    }`}
-                  >
-                    <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
-                      isPartResolved ? 'bg-text-secondary/25' : 'bg-accent-sub'
-                    }`} />
-                    <span className={`text-[12px] font-bold ${
-                      isPartResolved ? 'text-text-secondary/45' : 'text-text-primary'
-                    }`}>{partTree.partId} 파트</span>
-                    <span className={`text-[10px] ${
-                      isPartResolved ? 'text-text-secondary/35' : 'text-text-secondary/60'
-                    }`}>
-                      {partTree.scenes.length}씬 · {partTree.totalRevisions}개
-                    </span>
-                    <RevisionCommentMarker
-                      count={partCommentSummary.count}
-                      seen={partCommentSummary.seen}
-                      size="compact"
-                      className={isPartResolved ? 'opacity-60' : ''}
-                    />
-                    {isPartResolved ? (
-                      <span className="compact-label-container ml-auto inline-flex min-w-0 shrink text-[10px] font-bold rounded-full px-2 py-0.5 text-text-secondary/45 bg-bg-primary/35 border border-bg-border/25">
-                        <CompactIconLabel icon={<CheckCircle2 size={10} />} label="완료" />
-                      </span>
-                    ) : partTree.totalOpen > 0 ? (
-                      <span className="compact-label-container ml-auto inline-flex min-w-0 shrink text-[10px] font-bold text-accent-sub">
-                        <CompactIconLabel icon={<AlertTriangle size={10} />} label={`${partTree.totalOpen} 미해결`} />
-                      </span>
-                    ) : null}
-                  </div>
+                    return (
+                      <section key={partTree.partId}>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={isPartExpanded}
+                          data-part-complete={isPartResolved ? 'true' : 'false'}
+                          onClick={() => onTogglePart(episodeTree.episodeNumber, partTree.partId)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              onTogglePart(episodeTree.episodeNumber, partTree.partId);
+                            }
+                          }}
+                          className={`px-4 py-2.5 flex items-center gap-2 transition-colors cursor-pointer ${
+                            isPartResolved
+                              ? 'bg-bg-primary/5 hover:bg-bg-border/5'
+                              : 'bg-bg-primary/10 hover:bg-bg-border/10'
+                          }`}
+                        >
+                          <span className="shrink-0 text-text-secondary/55">
+                            {isPartExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                          </span>
+                          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                            isPartResolved ? 'bg-text-secondary/25' : 'bg-accent-sub'
+                          }`} />
+                          <span className={`text-[12px] font-bold ${
+                            isPartResolved ? 'text-text-secondary/45' : 'text-text-primary'
+                          }`}>{partTree.partId} 파트</span>
+                          <span className={`text-[10px] ${
+                            isPartResolved ? 'text-text-secondary/35' : 'text-text-secondary/60'
+                          }`}>
+                            {partTree.scenes.length}씬 · {partTree.totalRevisions}개
+                          </span>
+                          <RevisionCommentMarker
+                            count={partCommentSummary.count}
+                            seen={partCommentSummary.seen}
+                            size="compact"
+                            className={isPartResolved ? 'opacity-60' : ''}
+                          />
+                          {isPartResolved ? (
+                            <span className="compact-label-container ml-auto inline-flex min-w-0 shrink text-[10px] font-bold rounded-full px-2 py-0.5 text-text-secondary/45 bg-bg-primary/35 border border-bg-border/25">
+                              <CompactIconLabel icon={<CheckCircle2 size={10} />} label="완료" />
+                            </span>
+                          ) : partTree.totalOpen > 0 ? (
+                            <span className="compact-label-container ml-auto inline-flex min-w-0 shrink text-[10px] font-bold text-accent-sub">
+                              <CompactIconLabel icon={<AlertTriangle size={10} />} label={`${partTree.totalOpen} 미해결`} />
+                            </span>
+                          ) : null}
+                        </div>
 
-                  <div className={`ml-5 border-l ${
-                    isPartResolved ? 'border-bg-border/25' : 'border-bg-border/40'
-                  }`}>
-                    {partTree.scenes.map((group) => (
-                      <SceneRow
-                        key={group.sceneKey}
-                        group={group}
-                        expanded={expandedScenes.has(group.sceneKey)}
-                        selectedRevisionId={selectedRevisionId}
-                        commentCountByRev={commentCountByRev}
-                        commentSeenByRev={commentSeenByRev}
-                        pathMode="sceneOnly"
-                        onToggle={() => onToggleScene(group.sceneKey)}
-                        onSelectRevision={onSelectRevision}
-                        onStatusChange={onStatusChange}
-                      />
-                    ))}
+                        <AnimatePresence initial={false}>
+                          {isPartExpanded && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.18, ease: 'easeInOut' }}
+                              className={`ml-5 overflow-hidden border-l ${
+                                isPartResolved ? 'border-bg-border/25' : 'border-bg-border/40'
+                              }`}
+                            >
+                              {partTree.scenes.map((group) => (
+                                <SceneRow
+                                  key={group.sceneKey}
+                                  group={group}
+                                  expanded={expandedScenes.has(group.sceneKey)}
+                                  selectedRevisionId={selectedRevisionId}
+                                  commentCountByRev={commentCountByRev}
+                                  commentSeenByRev={commentSeenByRev}
+                                  pathMode="sceneOnly"
+                                  onToggle={() => onToggleScene(group.sceneKey)}
+                                  onSelectRevision={onSelectRevision}
+                                  onStatusChange={onStatusChange}
+                                />
+                              ))}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </section>
+                    );
+                  })}
                   </div>
-                </section>
-              );
-            })}
-            </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </section>
         );
       })}

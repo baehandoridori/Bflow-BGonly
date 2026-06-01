@@ -88,11 +88,7 @@ export function EpisodeGroupSection({
     [sceneGroups, episodes],
   );
 
-  const [expandedEps, setExpandedEps] = useState<Set<number>>(() => {
-    // 첫 EP 자동 펼침
-    const first = episodeGroups[0]?.episodeNumber;
-    return first !== undefined ? new Set([first]) : new Set();
-  });
+  const [expandedEps, setExpandedEps] = useState<Set<number>>(() => new Set());
 
   const toggleEp = (epNum: number) => {
     setExpandedEps((prev) => {
