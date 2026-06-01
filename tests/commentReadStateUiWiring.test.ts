@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf8');
+const revisionCommentThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
 const resizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
 const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
@@ -56,6 +57,24 @@ test('Scene detail comment panels expose /re quick revision context', () => {
   assert.match(sceneDetailModal, /quickRevision=\{\{/);
   assert.match(sceneDetailModal, /context: department/);
   assert.match(unifiedSceneDetailModal, /context: selectedDepartment === 'bg' \|\| selectedDepartment === 'acting' \? selectedDepartment : 'all'/);
+});
+
+test('quick revision can register a pasted attachment as the revision image', () => {
+  assert.match(commentPanel, /imageUrl:\s*revisionImageUrl/);
+  assert.match(commentPanel, /첨부 이미지가 리비전 이미지로 함께 등록됩니다/);
+  assert.match(commentPanel, /quickRevisionActive \? files\.slice\(0, 1\) : files/);
+  assert.doesNotMatch(commentPanel, /빠른 리비전은 텍스트만 등록합니다/);
+  assert.doesNotMatch(commentPanel, /disabled=\{quickRevisionActive\}/);
+  assert.doesNotMatch(commentPanel, /&& !quickRevisionHasAttachments/);
+});
+
+test('revision comment thread supports image paste and file attachments', () => {
+  assert.match(revisionCommentThread, /attachedImages/);
+  assert.match(revisionCommentThread, /storageService\.uploadImage/);
+  assert.match(revisionCommentThread, /resizeBlob/);
+  assert.match(revisionCommentThread, /onPaste=\{handlePaste\}/);
+  assert.match(revisionCommentThread, /images:\s*uploadedImageUrls/);
+  assert.match(revisionCommentThread, /comment\.images/);
 });
 
 test('single scene detail comment panel exposes the same activity inline events as unified detail', () => {

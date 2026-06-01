@@ -13,8 +13,9 @@
  *   - 입력 placeholder: "re# 댓글 남기기..." (italic 금지 — placeholder 자체는 브라우저 기본 처리)
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { ArrowUp } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, ClipboardEvent } from 'react';
+import { ArrowUp, Paperclip, X } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import {
@@ -24,6 +25,8 @@ import {
 } from '@/services/commentService';
 import { revisionNoToLabel } from '@/constants/revision';
 import { formatCommentTime } from '@/utils/formatTime';
+import * as storageService from '@/services/storageService';
+import { resizeBlob } from '@/utils/imageUtils';
 
 interface Props {
   revisionId: string;
@@ -37,6 +40,19 @@ interface Props {
    * (이슈: 2026-05-04, RevisionPanel 의 buildSceneKey 결과를 그대로 전달하던 v1.18.0 버그).
    */
   sceneKey: string;
+}
+
+interface AttachedImage {
+  id: string;
+  previewUrl: string;
+  uploadedUrl?: string;
+  uploading: boolean;
+  error?: string;
+}
+
+function parseSceneKey(sceneKey: string): { sheetName: string; sceneId: string } {
+  const idx = sceneKey.lastIndexOf(':');
+  return { sheetName: sceneKey.substring(0, idx), sceneId: sceneKey.substring(idx + 1) };
 }
 
 // 사용자 ID 해시 → 일관된 아바타 색 (RevisionRecipientPicker 와 동일 팔레트)
@@ -58,11 +74,34 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   const { currentUser } = useAuthStore();
   const revision = useRevisionStore(s => s.revisions.find(r => r.id === revisionId));
   const revisionLabel = revision ? revisionNoToLabel(revision.revisionNo) : 're?';
+  const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
 
   const [allComments, setAllComments] = useState<SceneComment[]>([]);
   const [draft, setDraft] = useState('');
   const [expanded, setExpanded] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachedImagesRef = useRef<AttachedImage[]>([]);
+  const draftRef = useRef('');
+  const mountedRef = useRef(true);
+
+  useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
+  useEffect(() => { draftRef.current = draft; }, [draft]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      attachedImagesRef.current.forEach((item) => {
+        try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+        if (item.uploadedUrl) {
+          storageService.deleteImage(item.uploadedUrl).catch(err => {
+            console.warn('[리비전 댓글 첨부 unmount] draft Storage 정리 실패:', err);
+          });
+        }
+      });
+    };
+  }, []);
 
   // 이 리비전 맥락 댓글만 필터 (시간순)
   const comments = allComments
@@ -102,8 +141,91 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     return () => window.removeEventListener('bflow:expand-revision', onExpand);
   }, [revisionId]);
 
+  const uploadAttachedImage = useCallback(async (id: string, file: File | Blob) => {
+    try {
+      const base64 = await resizeBlob(file, 800, 0.8);
+      const result = await storageService.uploadImage(sheetName, sceneId, 'comment', base64);
+      if (!result.ok || !result.url) throw new Error(result.error || '업로드 실패');
+
+      const url = result.url;
+      if (!mountedRef.current) {
+        storageService.deleteImage(url).catch(err => {
+          console.warn('[리비전 댓글 첨부 unmount race] 정리 실패:', err);
+        });
+        return;
+      }
+
+      setAttachedImages(prev => {
+        const exists = prev.some(item => item.id === id);
+        if (!exists) {
+          storageService.deleteImage(url).catch(err => {
+            console.warn('[리비전 댓글 첨부 race] 제거 후 도착한 업로드 객체 정리 실패:', err);
+          });
+          return prev;
+        }
+        return prev.map(item =>
+          item.id === id ? { ...item, uploadedUrl: url, uploading: false } : item
+        );
+      });
+    } catch (err) {
+      console.error('[리비전 댓글 이미지 업로드 실패]', err);
+      if (!mountedRef.current) return;
+      const message = err instanceof Error ? err.message : String(err);
+      setAttachedImages(prev => prev.map(item =>
+        item.id === id ? { ...item, uploading: false, error: message } : item
+      ));
+    }
+  }, [sceneId, sheetName]);
+
+  const addAttachedImageFromBlob = useCallback((file: File | Blob) => {
+    const id = crypto.randomUUID();
+    const previewUrl = URL.createObjectURL(file);
+    setAttachedImages(prev => [...prev, { id, previewUrl, uploading: true }]);
+    void uploadAttachedImage(id, file);
+  }, [uploadAttachedImage]);
+
+  const removeAttachedImage = useCallback((id: string) => {
+    setAttachedImages(prev => {
+      const target = prev.find(item => item.id === id);
+      if (target?.previewUrl) {
+        try { URL.revokeObjectURL(target.previewUrl); } catch { /* ignore */ }
+      }
+      if (target?.uploadedUrl) {
+        storageService.deleteImage(target.uploadedUrl).catch(err => {
+          console.warn('[리비전 댓글 첨부 제거] Storage 삭제 실패:', err);
+        });
+      }
+      return prev.filter(item => item.id !== id);
+    });
+  }, []);
+
+  const handlePaste = useCallback((e: ClipboardEvent<HTMLElement>) => {
+    const imageItems = Array.from(e.clipboardData?.items || [])
+      .filter(item => item.type.startsWith('image/'));
+    if (imageItems.length === 0) return;
+
+    e.preventDefault();
+    imageItems.forEach((item) => {
+      const file = item.getAsFile();
+      if (file) addAttachedImageFromBlob(file);
+    });
+  }, [addAttachedImageFromBlob]);
+
+  const handleFileChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).filter(file => file.type.startsWith('image/'));
+    files.forEach(addAttachedImageFromBlob);
+    e.target.value = '';
+  }, [addAttachedImageFromBlob]);
+
+  const hasUploadingImage = attachedImages.some(item => item.uploading);
+  const uploadedImageUrls = attachedImages.map(item => item.uploadedUrl).filter((url): url is string => !!url);
+  const canSend = Boolean(currentUser)
+    && !submitting
+    && !hasUploadingImage
+    && (draft.trim().length > 0 || uploadedImageUrls.length > 0);
+
   async function send() {
-    if (!draft.trim() || !currentUser || submitting) return;
+    if (!canSend || !currentUser) return;
     setSubmitting(true);
 
     const newComment: SceneComment = {
@@ -112,7 +234,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
       userName: currentUser.name,
       text: draft.trim(),
       mentions: [],
-      images: [],
+      images: uploadedImageUrls,
       createdAt: new Date().toISOString(),
       // v1.18.0 핵심: 이 댓글은 해당 리비전 맥락에 속함.
       // commentService.addComment → supabase:add-comment IPC → addComment(... revisionId)
@@ -123,15 +245,50 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     // 낙관적 UI
     setAllComments(prev => [...prev, newComment]);
     const prevDraft = draft;
+    const prevAttached = attachedImages;
     setDraft('');
+    draftRef.current = '';
+    setAttachedImages([]);
+    attachedImagesRef.current = [];
 
     try {
       await addComment(sceneKey, newComment);
+      prevAttached.forEach((item) => {
+        try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+      });
     } catch (err) {
       console.error('[리비전 댓글 스레드] 전송 실패:', err);
+
+      if (!mountedRef.current) {
+        prevAttached.forEach((item) => {
+          try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+          if (item.uploadedUrl) {
+            storageService.deleteImage(item.uploadedUrl).catch(err2 => {
+              console.warn('[리비전 댓글 전송 실패 + unmount] storage 정리 실패:', err2);
+            });
+          }
+        });
+        return;
+      }
+
       // 롤백
       setAllComments(prev => prev.filter(c => c.id !== newComment.id));
-      setDraft(prevDraft);
+      const userStartedNewDraft = draftRef.current.length > 0 || attachedImagesRef.current.length > 0;
+      if (userStartedNewDraft) {
+        prevAttached.forEach((item) => {
+          try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+          if (item.uploadedUrl) {
+            storageService.deleteImage(item.uploadedUrl).catch(err2 => {
+              console.warn('[리비전 댓글 전송 실패 롤백] 버려진 업로드 객체 정리 실패:', err2);
+            });
+          }
+        });
+      } else {
+        setDraft(prevDraft);
+        draftRef.current = prevDraft;
+        setAttachedImages(prevAttached);
+        attachedImagesRef.current = prevAttached;
+      }
     } finally {
       setSubmitting(false);
     }
@@ -170,30 +327,83 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
           >
             {currentUser.name.charAt(0)}
           </span>
-          <div className="flex-1 flex gap-2">
-            <input
-              type="text"
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              placeholder={`${revisionLabel} 댓글 남기기...`}
-              className="flex-1 px-3 py-1.5 bg-bg-primary/80 border border-bg-border/60 rounded text-[12px] text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/60"
-            />
-            <button
-              type="button"
-              onClick={send}
-              disabled={!draft.trim() || submitting}
-              className="px-3 py-1.5 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity inline-flex items-center gap-1"
-              title="댓글 전송 (Enter)"
-            >
-              <ArrowUp size={11} strokeWidth={3} />
-              전송
-            </button>
+          <div className="flex-1 min-w-0 space-y-2" onPaste={handlePaste}>
+            {attachedImages.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-0.5">
+                {attachedImages.map((image) => (
+                  <div key={image.id} className="relative flex-shrink-0">
+                    <img
+                      src={image.previewUrl}
+                      alt=""
+                      className="w-14 h-14 rounded-md object-cover border border-bg-border/60"
+                    />
+                    {image.uploading && (
+                      <div className="absolute inset-0 rounded-md bg-black/45 flex items-center justify-center">
+                        <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      </div>
+                    )}
+                    {image.error && (
+                      <div
+                        className="absolute inset-0 rounded-md bg-red-500/45 flex items-center justify-center"
+                        title={`업로드 실패: ${image.error}`}
+                      >
+                        <X size={16} className="text-white" />
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeAttachedImage(image.id)}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:scale-105 transition-transform cursor-pointer"
+                      style={{ border: '2px solid rgb(var(--color-bg-card))' }}
+                      title="첨부 제거"
+                    >
+                      <X size={11} strokeWidth={3} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={handleFileChange}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-8 h-8 rounded-md border border-bg-border/60 bg-bg-primary/70 text-text-secondary hover:text-text-primary hover:border-accent/50 hover:bg-bg-primary transition-colors inline-flex items-center justify-center cursor-pointer"
+                title="이미지 첨부"
+              >
+                <Paperclip size={13} />
+              </button>
+              <input
+                type="text"
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+                placeholder={`${revisionLabel} 댓글 남기기... (Ctrl+V)`}
+                className="flex-1 min-w-0 px-3 py-1.5 bg-bg-primary/80 border border-bg-border/60 rounded text-[12px] text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent/60"
+              />
+              <button
+                type="button"
+                onClick={send}
+                disabled={!canSend}
+                className="px-3 py-1.5 text-[11px] font-bold rounded-md bg-accent text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-opacity inline-flex items-center gap-1"
+                title={hasUploadingImage ? '이미지 업로드 중...' : '댓글 전송 (Enter)'}
+              >
+                <ArrowUp size={11} strokeWidth={3} />
+                전송
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -229,9 +439,32 @@ function CommentBubble({ comment, isMe }: { comment: SceneComment; isMe: boolean
           {formatCommentTime(comment.createdAt)}
         </span>
       </div>
-      <div className="text-[12px] text-text-primary whitespace-pre-wrap leading-relaxed">
-        {comment.text}
-      </div>
+      {comment.text && (
+        <div className="text-[12px] text-text-primary whitespace-pre-wrap leading-relaxed">
+          {comment.text}
+        </div>
+      )}
+      {(comment.images?.length ?? 0) > 0 && (
+        <div className={`mt-2 grid gap-1.5 ${comment.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          {comment.images!.map((url, index) => (
+            <a
+              key={`${url}-${index}`}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="block rounded-md overflow-hidden border border-bg-border/60 bg-bg-secondary/40"
+              title="이미지 열기"
+            >
+              <img
+                src={url}
+                alt=""
+                className="w-full max-h-32 object-cover"
+                loading="lazy"
+              />
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

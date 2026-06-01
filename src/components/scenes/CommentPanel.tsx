@@ -755,9 +755,21 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   const addAttachedImageFromBlob = useCallback((file: File | Blob) => {
     const id = crypto.randomUUID();
     const previewUrl = URL.createObjectURL(file);
-    setAttachedImages(prev => [...prev, { id, previewUrl, uploading: true }]);
+    setAttachedImages(prev => {
+      if (!quickRevisionActive) return [...prev, { id, previewUrl, uploading: true }];
+
+      prev.forEach((item) => {
+        try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+        if (item.uploadedUrl) {
+          storageService.deleteImage(item.uploadedUrl).catch(err => {
+            console.warn('[빠른 리비전 첨부 교체] 이전 업로드 객체 정리 실패:', err);
+          });
+        }
+      });
+      return [{ id, previewUrl, uploading: true }];
+    });
     void uploadAttachedImage(id, file);
-  }, [uploadAttachedImage]);
+  }, [quickRevisionActive, uploadAttachedImage]);
 
   const removeAttachedImage = (id: string) => {
     setAttachedImages(prev => {
@@ -782,7 +794,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     const imageItems = items.filter(it => it.type.startsWith('image/'));
     if (imageItems.length === 0) return;
     e.preventDefault();
-    imageItems.forEach(it => {
+    (quickRevisionActive ? imageItems.slice(0, 1) : imageItems).forEach(it => {
       const f = it.getAsFile();
       if (f) addAttachedImageFromBlob(f);
     });
@@ -807,12 +819,12 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     dragCounter.current = 0;
     setDraggingOver(false);
     const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
-    files.forEach(addAttachedImageFromBlob);
+    (quickRevisionActive ? files.slice(0, 1) : files).forEach(addAttachedImageFromBlob);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
-    files.forEach(addAttachedImageFromBlob);
+    (quickRevisionActive ? files.slice(0, 1) : files).forEach(addAttachedImageFromBlob);
     e.target.value = '';
   };
 
@@ -822,7 +834,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   const canSubmit = quickRevisionActive
     ? !submitting
       && !hasUploadingImage
-      && !quickRevisionHasAttachments
       && quickRevisionDescription.length > 0
       && quickRevisionNotifyIds.length > 0
     : !submitting
@@ -833,10 +844,14 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     if (!canSubmit || !currentUser) return;
     if (quickRevisionActive && quickRevision) {
       setSubmitting(true);
+      const prevAttached = attachedImages;
+      const revisionImageUrl = uploadedImageUrls[0];
+      const unusedUploadedImageUrls = uploadedImageUrls.slice(1);
       try {
         await createRevision({
           sceneKey: quickRevision.sceneKey,
           description: quickRevisionDescription,
+          imageUrl: revisionImageUrl,
           department: quickRevision.department,
           lookupDepartment: quickRevision.department,
           requesterId: currentUser.id,
@@ -845,9 +860,19 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
         });
         setInput('');
         inputValueRef.current = '';
+        setAttachedImages([]);
+        attachedImagesRef.current = [];
         setQuickRevisionPickerOpen(false);
         setShowMentions(false);
         setReplyTarget(null);
+        prevAttached.forEach((item) => {
+          try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+        });
+        unusedUploadedImageUrls.forEach((url) => {
+          storageService.deleteImage(url).catch(err => {
+            console.warn('[빠른 리비전 등록] 미사용 업로드 객체 정리 실패:', err);
+          });
+        });
         const targetNames = quickRevisionSelectedUsers.map((user) => user.name).join(', ');
         sonnerToast.success('리비전을 등록했습니다', {
           description: targetNames ? `${targetNames}에게 알림을 보냈습니다.` : undefined,
@@ -1783,8 +1808,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                 </div>
 
                 {quickRevisionHasAttachments && (
-                  <div className="rounded-lg border border-status-none/30 bg-status-none/10 px-2.5 py-2 text-[11px] text-status-none">
-                    빠른 리비전은 텍스트만 등록합니다. 이미지는 리비전 탭의 정식 등록 폼에서 첨부해 주세요.
+                  <div className="rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-2 text-[11px] text-accent-sub">
+                    첨부 이미지가 리비전 이미지로 함께 등록됩니다.
                   </div>
                 )}
 
@@ -1920,12 +1945,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
           <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-bg-border/40 shrink-0">
             <button
               onClick={() => {
-                if (quickRevisionActive) return;
                 fileInputRef.current?.click();
               }}
-              disabled={quickRevisionActive}
-              className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-card hover:text-text-primary disabled:opacity-35 disabled:cursor-not-allowed transition-colors cursor-pointer"
-              title={quickRevisionActive ? '빠른 리비전은 텍스트만 지원합니다' : '이미지 첨부'}
+              className="w-7 h-7 rounded-md flex items-center justify-center text-text-secondary hover:bg-bg-card hover:text-text-primary transition-colors cursor-pointer"
+              title="이미지 첨부"
             >
               <Paperclip size={14} />
             </button>
@@ -1935,9 +1958,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
               className="w-7 h-7 rounded-md flex items-center justify-center bg-accent hover:bg-accent-sub text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
               title={
                 quickRevisionActive
-                  ? quickRevisionHasAttachments
-                    ? '이미지는 리비전 탭에서 첨부해 주세요'
-                    : quickRevisionNotifyIds.length === 0
+                  ? quickRevisionNotifyIds.length === 0
                       ? '알람 보낼 담당자를 선택해 주세요'
                       : '리비전 등록 (Enter)'
                   : hasUploadingImage ? '이미지 업로드 중...' : '전송 (Enter)'
@@ -1964,7 +1985,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
               이미지를 여기에 놓으세요
             </div>
             <div className="text-[11px] text-text-secondary">
-              여러 장을 한 번에 첨부할 수 있어요
+              {quickRevisionActive ? '빠른 리비전 이미지로 첨부됩니다' : '여러 장을 한 번에 첨부할 수 있어요'}
             </div>
           </div>
         </div>
