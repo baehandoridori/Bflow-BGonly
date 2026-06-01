@@ -305,7 +305,12 @@ export function UnifiedSceneDetailModal({
   const [imageLoading, setImageLoading] = useState<null | 'storyboard' | 'guide'>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<null | 'storyboard' | 'guide' | 'bg' | 'act' | 'both'>(null);
   const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
+  const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
   const addingRef = useRef<{ bg: boolean; acting: boolean }>({ bg: false, acting: false });
+
+  useEffect(() => {
+    setLatestImageUrls({});
+  }, [bgScene?.id, bgScene?.sceneId, bgSheetName]);
 
   // 좌우 이동 슬라이드 방향 (1=다음, -1=이전). 키보드/버튼/도트 모두 handleNavigate 경유.
   const [navDirection, setNavDirection] = useState<1 | -1>(1);
@@ -786,7 +791,7 @@ export function UnifiedSceneDetailModal({
                               <UnifiedImageSlot
                                 label="스토리보드"
                                 continuityTarget="storyboard"
-                                url={previewUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
+                                url={previewUrls.storyboard ?? latestImageUrls.storyboard ?? bgScene?.storyboardUrl ?? ''}
                                 loading={imageLoading === 'storyboard'}
                                 canEdit={!!bgScene && !!bgSheetName}
                                 onPick={() => pickFile('storyboard')}
@@ -802,7 +807,7 @@ export function UnifiedSceneDetailModal({
                               <UnifiedImageSlot
                                 label="가이드"
                                 continuityTarget="guide"
-                                url={previewUrls.guide ?? bgScene?.guideUrl ?? ''}
+                                url={previewUrls.guide ?? latestImageUrls.guide ?? bgScene?.guideUrl ?? ''}
                                 loading={imageLoading === 'guide'}
                                 canEdit={!!bgScene && !!bgSheetName}
                                 onPick={() => pickFile('guide')}
@@ -965,8 +970,8 @@ export function UnifiedSceneDetailModal({
       {showImageModal && bgScene && (
         <ImageModal
           key="unified-image-modal"
-          storyboardUrl={bgScene.storyboardUrl ?? ''}
-          guideUrl={bgScene.guideUrl ?? ''}
+          storyboardUrl={latestImageUrls.storyboard ?? bgScene.storyboardUrl ?? ''}
+          guideUrl={latestImageUrls.guide ?? bgScene.guideUrl ?? ''}
           sceneId={bgScene.sceneId || String(bgScene.no)}
           onClose={() => setShowImageModal(null)}
           // v1.26.0: 버전 관리 + 우클릭 메뉴 메타
@@ -979,9 +984,7 @@ export function UnifiedSceneDetailModal({
             return si(base64, bgSheetName, bgScene.sceneId || String(bgScene.no), imageType);
           }}
           onLatestImageUrlChange={(imageType, url) => {
-            if (!bgSheetName) return;
-            const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-            onFieldUpdate(bgSheetName, bgSceneIndex, field, url);
+            setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
             setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
           }}
         />

@@ -508,6 +508,11 @@ export function SceneDetailModal({
 
   // 이미지 즉시 프리뷰용 낙관적 URL (업로드 중 base64 표시)
   const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
+  const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
+
+  useEffect(() => {
+    setLatestImageUrls({});
+  }, [scene.id, scene.sceneId, sheetName]);
 
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const pct = sceneProgress(scene);
@@ -931,7 +936,7 @@ export function SceneDetailModal({
                     <div className="flex flex-col gap-5 px-4">
                       <ImageSlot
                         label="스토리보드"
-                        url={previewUrls.storyboard || scene.storyboardUrl}
+                        url={previewUrls.storyboard ?? latestImageUrls.storyboard ?? scene.storyboardUrl}
                         loading={imageLoading === 'storyboard' && !previewUrls.storyboard}
                         uploading={!!previewUrls.storyboard}
                         onPickFile={() => pickFile('storyboard')}
@@ -943,7 +948,7 @@ export function SceneDetailModal({
                       />
                       <ImageSlot
                         label="가이드"
-                        url={previewUrls.guide || scene.guideUrl}
+                        url={previewUrls.guide ?? latestImageUrls.guide ?? scene.guideUrl}
                         loading={imageLoading === 'guide' && !previewUrls.guide}
                         uploading={!!previewUrls.guide}
                         onPickFile={() => pickFile('guide')}
@@ -1166,8 +1171,8 @@ export function SceneDetailModal({
       {showImageModal && (
         <ImageModal
           key="detail-image-modal"
-          storyboardUrl={department === 'bg' ? scene.storyboardUrl : (readOnlyStoryboardUrl ?? '')}
-          guideUrl={department === 'bg' ? scene.guideUrl : (readOnlyGuideUrl ?? '')}
+          storyboardUrl={department === 'bg' ? (latestImageUrls.storyboard ?? scene.storyboardUrl) : (readOnlyStoryboardUrl ?? '')}
+          guideUrl={department === 'bg' ? (latestImageUrls.guide ?? scene.guideUrl) : (readOnlyGuideUrl ?? '')}
           sceneId={scene.sceneId}
           onClose={() => setShowImageModal(false)}
           // 씬 네비게이션 props
@@ -1186,8 +1191,7 @@ export function SceneDetailModal({
           }}
           onLatestImageUrlChange={(imageType, url) => {
             if (department !== 'bg') return;
-            const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
-            onFieldUpdate(sceneIndex, field, url);
+            setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
             setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
           }}
         />
