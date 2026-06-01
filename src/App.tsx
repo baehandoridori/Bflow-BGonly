@@ -258,6 +258,71 @@ export default function App() {
     return true; // 처리 가능
   }, []);
 
+  const dispatchRevisionCommentNotification = useCallback((newComment: {
+    id?: string | null;
+    scene_id?: string | null;
+    scene_uuid?: string | null;
+    part_id?: string | null;
+    user_name?: string | null;
+    user_id?: string | null;
+    text?: string | null;
+    mentions?: string[] | null;
+    revision_id?: string | null;
+  }): boolean => {
+    if (!newComment.revision_id) return false;
+
+    const me = useAuthStore.getState().currentUser;
+    if (!me || newComment.user_id === me.id) return true;
+
+    const notiSettings = notiSettingsRef.current;
+    if (notiSettings.commentNotify === false) return true;
+
+    import('@/stores/useRevisionStore').then(async ({ useRevisionStore }) => {
+      let rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
+      // 리비전 store 가 비어있으면 fresh 세션에서도 알림이 빠지지 않게 lazy load 후 재시도.
+      if (!rev) {
+        await useRevisionStore.getState().loadRevisions();
+        rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
+        if (!rev) return;
+      }
+
+      const revisionNotifyIds = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
+      const mentionedNames = Array.isArray(newComment.mentions) ? newComment.mentions : [];
+      const mentionedUserIds = useAuthStore.getState().users
+        .filter((user) => mentionedNames.includes(user.name))
+        .map((user) => user.id);
+      const targets = new Set([...revisionNotifyIds, ...mentionedUserIds]);
+      const isMentioned = mentionedNames.includes(me.name);
+      if (!targets.has(me.id)) return;
+
+      const dedupeKey = `revcomment:${newComment.id ?? ''}:${newComment.revision_id}`;
+      if (!dedupeNotification(dedupeKey)) return;
+
+      const sceneByUuid = newComment.scene_uuid
+        ? useDataStore.getState().findSceneByUuid(newComment.scene_uuid)
+        : null;
+      const body = newComment.text
+        ? (newComment.text.length > 60 ? newComment.text.slice(0, 60) + '...' : newComment.text)
+        : `${newComment.user_name || '누군가'}님 댓글`;
+
+      dispatchNotification({
+        type: 'revision',
+        title: `${isMentioned ? '리비전 댓글 멘션' : '리비전 댓글'} — ${sceneByUuid?.sceneId || newComment.scene_id || ''}`,
+        body,
+        metadata: {
+          sceneId: sceneByUuid?.id ?? newComment.scene_uuid ?? undefined,
+          sceneName: sceneByUuid?.sceneId,
+          commentSceneId: newComment.scene_id ?? undefined,
+          commentPartId: newComment.part_id ?? undefined,
+          revisionId: newComment.revision_id,
+          revisionAction: 'comment',
+        } as Record<string, unknown>,
+      }, notiSettings);
+    }).catch(() => { /* 무시 */ });
+
+    return true;
+  }, [dedupeNotification]);
+
   // 테마 초기화 완료 가드 (init에서 로드 전까지 저장 방지)
   const themeInitRef = useRef(false);
 
@@ -1228,55 +1293,7 @@ export default function App() {
           // v1.18.0: 리비전 맥락 댓글 → 'revision' 알림 (revisionAction='comment').
           // 일반 댓글 알림 경로(isMentioned/isAssignee) 와 *분리* 해 중복 알림 방지.
           // 조건: revision_id 있음 + 그 리비전 notifyUserIds 에 나 포함 + 내가 작성자 아님.
-          if (me && newComment.revision_id && newComment.user_id !== me.id) {
-            const notiSettings = notiSettingsRef.current;
-            if (notiSettings.commentNotify !== false) {
-              import('@/stores/useRevisionStore').then(async ({ useRevisionStore }) => {
-                let rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
-                // 코덱스 P1 fix (3차, 2026-05-05): 리비전 store 가 비어있으면 (예: 다른 뷰에서
-                // 시작한 fresh 세션) 댓글 알림이 silent drop 되던 문제. lazy load 후 재시도.
-                if (!rev) {
-                  await useRevisionStore.getState().loadRevisions();
-                  rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
-                  if (!rev) return;
-                }
-                const revisionNotifyIds = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
-                const mentionedNames = Array.isArray(newComment.mentions) ? newComment.mentions : [];
-                const mentionedUserIds = useAuthStore.getState().users
-                  .filter((user) => mentionedNames.includes(user.name))
-                  .map((user) => user.id);
-                const targets = new Set([...revisionNotifyIds, ...mentionedUserIds]);
-                const isMentioned = mentionedNames.includes(me.name);
-                if (!targets.has(me.id)) return;
-                // dedupe — 같은 댓글이 broadcast/realtime 두 경로로 들어와도 한 번만.
-                // 코덱스 P1 fix (2026-05-05): commentId 포함. 같은 사용자가 같은 리비전에
-                // 짧은 시간 내 여러 댓글 작성 시 두 번째부터 dedupe 충돌로 알림 손실되던 문제.
-                const dedupeKey = `revcomment:${newComment.id ?? ''}:${newComment.revision_id}`;
-                if (!dedupeNotification(dedupeKey)) return;
-                // 씬 매칭 — comment_panel.css 카드 라우팅 위해 sceneId/sceneName 도 같이 채움.
-                const sceneByUuid = newComment.scene_uuid
-                  ? useDataStore.getState().findSceneByUuid(newComment.scene_uuid)
-                  : null;
-                const body = newComment.text
-                  ? (newComment.text.length > 60 ? newComment.text.slice(0, 60) + '...' : newComment.text)
-                  : `${newComment.user_name || '누군가'}님 댓글`;
-                dispatchNotification({
-                  type: 'revision',
-                  title: `${isMentioned ? '리비전 댓글 멘션' : '리비전 댓글'} — ${sceneByUuid?.sceneId || newComment.scene_id || ''}`,
-                  body,
-                  metadata: {
-                    // 코덱스 P2 fix (8차, 2026-05-05): sceneByUuid 가 stale 캐시 등으로 null 일 때
-                    // newComment.scene_uuid 폴백 — 라우팅이 sceneId/sceneName 의존이라 누락 시 알림 클릭이 동작 안 함.
-                    sceneId: sceneByUuid?.id ?? newComment.scene_uuid,
-                    sceneName: sceneByUuid?.sceneId,
-                    commentSceneId: newComment.scene_id,
-                    commentPartId: newComment.part_id,
-                    revisionId: newComment.revision_id,
-                    revisionAction: 'comment',
-                  } as Record<string, unknown>,
-                }, notiSettings);
-              }).catch(() => { /* 무시 */ });
-            }
+          if (dispatchRevisionCommentNotification(newComment)) {
             // 리비전 맥락 댓글은 일반 댓글 알림 경로 스킵.
             // 코덱스 P2 fix (2026-05-10): early return *전* 캐시 무효화. 안 그러면 리비전 댓글이
             //   캐시에 stale 한 상태로 남아 일반 댓글 뷰에서 누락됨 (broadcast 가 늦거나 끊긴 케이스).
@@ -1902,6 +1919,7 @@ export default function App() {
           commentId: commentCid,
           parentCommentId: commentParent,
           partId: commentPartId,
+          revisionId: commentRevisionId,
         } = data.payload as {
           sceneId?: string;
           userName?: string;
@@ -1911,8 +1929,24 @@ export default function App() {
           commentId?: string | null;
           parentCommentId?: string | null;
           partId?: string | null;
+          revisionId?: string | null;
         };
         const me = useAuthStore.getState().currentUser;
+        if (commentRevisionId) {
+          dispatchRevisionCommentNotification({
+            id: commentCid,
+            scene_id: commentSceneNumber,
+            part_id: commentPartId,
+            user_name: commentUserName,
+            user_id: commentUserId,
+            text: commentText,
+            mentions: commentMentions,
+            revision_id: commentRevisionId,
+          });
+          invalidatePartCache();
+          window.dispatchEvent(new Event('bflow:comments-invalidated'));
+          return;
+        }
         if (me && commentUserId && commentUserId !== me.id && commentSceneNumber) {
           const dedupeKey = `comment:${commentUserId}:${commentSceneNumber}:${commentCid ?? ''}`;
           if (!dedupeNotification(dedupeKey)) { /* 이미 Realtime으로 처리됨 */ }

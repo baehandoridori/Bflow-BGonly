@@ -12,6 +12,8 @@ const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
 const compositingView = readFileSync('src/views/CompositingView.tsx', 'utf8');
 const feedbackHubPreviewApp = readFileSync('src/views/FeedbackHubPreviewApp.tsx', 'utf8');
 const indexCss = readFileSync('src/index.css', 'utf8');
+const electronBroadcast = readFileSync('electron/broadcast.ts', 'utf8');
+const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
 
 function getCommentPanelResizableUsage(source: string): string {
   const usage = source.match(/<CommentPanelResizable\b[\s\S]*?\/>/);
@@ -93,6 +95,16 @@ test('revision comment notifications include explicitly mentioned users', () => 
   assert.match(app, /const mentionedUserIds = useAuthStore\.getState\(\)\.users/);
   assert.match(app, /const targets = new Set\(\[\.\.\.revisionNotifyIds, \.\.\.mentionedUserIds\]\)/);
   assert.match(app, /리비전 댓글 멘션/);
+});
+
+test('revision comment broadcasts keep revision context and avoid general comment notification fallback', () => {
+  assert.match(electronBroadcast, /revisionId\?: string \| null/);
+  assert.match(electronBroadcast, /revisionId: revisionId \?\? null/);
+  assert.match(electronSupabase, /broadcastCommentAdded\(sceneId, userName, userId, text, mentions, commentId, safeParent, partUuid, revisionId\)/);
+  assert.match(app, /const dispatchRevisionCommentNotification = useCallback/);
+  assert.match(app, /revisionId: commentRevisionId/);
+  assert.match(app, /if \(commentRevisionId\) \{/);
+  assert.match(app, /window\.dispatchEvent\(new Event\('bflow:comments-invalidated'\)\)/);
 });
 
 test('single scene detail comment panel exposes the same activity inline events as unified detail', () => {
