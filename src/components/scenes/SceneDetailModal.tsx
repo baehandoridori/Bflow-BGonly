@@ -15,8 +15,8 @@ import {
   Film,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
-import type { Scene, Stage, Department } from '@/types';
+import { DEPARTMENT_CONFIGS } from '@/types';
+import type { Scene, Stage, Department, ScenePhaseState } from '@/types';
 import { sceneProgress } from '@/utils/calcStats';
 import * as storageService from '@/services/storageService';
 import { AssigneeSelect, getUserColor } from '@/components/common/AssigneeSelect';
@@ -24,7 +24,10 @@ import { AssigneeMultiSelect } from '@/components/common/AssigneeMultiSelect';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 import { resizeBlob, pasteImageFromClipboard } from '@/utils/imageUtils';
 import { ImageModal } from './ImageModal';
+import { ScenePhaseToggle } from './ScenePhaseToggle';
+import { StageSegmentToggle } from './StageSegmentToggle';
 import { CommentPanelResizable } from './CommentPanelResizable';
+import type { CommentInlineEvent } from './CommentPanel';
 import { RevisionPanel } from './RevisionPanel';
 import { getComments } from '@/services/commentService';
 import { useSceneActivities } from '@/hooks/useSceneActivities';
@@ -36,6 +39,7 @@ import { buildSceneKey } from '@/services/revisionService';
 import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { formatStamp, formatTime } from '@/utils/formatTime';
 import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
+import { describeActivity, deptPrefix } from './activityLabels';
 
 // ─── 타입 ──────────────────────────────────────────
 
@@ -53,6 +57,9 @@ interface SceneDetailModalProps {
   readOnlyGuideUrl?: string | null;
   onFieldUpdate: (sceneIndex: number, field: string, value: string) => void;
   onToggle: (sceneId: string, stage: Stage) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
+  onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
   onClose: () => void;
   onNavigate?: (direction: 'prev' | 'next') => void;
   hasPrev?: boolean;
@@ -426,6 +433,9 @@ export function SceneDetailModal({
   readOnlyGuideUrl,
   onFieldUpdate,
   onToggle,
+  onActPhaseStateClick,
+  onActFeedbackRequest,
+  onActRoundBump,
   onClose,
   onNavigate,
   hasPrev = false,
@@ -438,11 +448,60 @@ export function SceneDetailModal({
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
-  const sceneActivities = useSceneActivities([scene.id], 50);
+  const sceneActivities = useSceneActivities([scene.id], 200);
   const memoAuthorMeta = useMemo(
     () => findLatestMemoActivity(sceneActivities, scene.id),
     [sceneActivities, scene.id],
   );
+  const inlineEvents: CommentInlineEvent[] = useMemo(() => {
+    const BIG_EVENT_TYPES = new Set([
+      'memo_update',
+      'image_upload_storyboard', 'image_upload_guide',
+      'image_annotate_storyboard', 'image_annotate_guide',
+      'scene_add',
+      'revision_add', 'revision_in_progress', 'revision_resolve', 'revision_delete',
+    ]);
+
+    const events: CommentInlineEvent[] = sceneActivities
+      .filter((a) => BIG_EVENT_TYPES.has(a.actionType))
+      .map<CommentInlineEvent>((a) => {
+        const visual = describeActivity(a);
+        const revisionTone =
+          a.actionType === 'revision_add'
+            ? 'revision_add'
+            : a.actionType === 'revision_in_progress'
+              ? 'revision_in_progress'
+              : a.actionType === 'revision_resolve'
+                ? 'revision_resolve'
+                : undefined;
+        const revisionLabel =
+          a.actionType === 'revision_add'
+            ? '등록'
+            : a.actionType === 'revision_in_progress'
+              ? '진행'
+              : a.actionType === 'revision_resolve'
+                ? '완료'
+                : undefined;
+
+        return {
+          id: a.id,
+          at: a.createdAt,
+          text: `${a.userName} ${deptPrefix(a.department)}${visual.text}`,
+          tone: revisionTone,
+          label: revisionLabel,
+        };
+      });
+
+    if (scene.completedAt && scene.completedBy) {
+      events.push({
+        id: `completed:${department}:${scene.id ?? 'na'}`,
+        at: scene.completedAt,
+        text: `${scene.completedBy} ${deptPrefix(department)}모든 단계 완료`,
+      });
+    }
+
+    return events;
+  }, [department, scene.completedAt, scene.completedBy, scene.id, sceneActivities]);
   // 코덱스 P2 fix (5차, 2026-05-05): 알림 라우팅 시 initialTab='revisions' 면 리비전 패널 자동 펼침.
   const [showRevisions, setShowRevisions] = useState(initialTab === 'revisions');
   // 코덱스 P2 fix (6차, 2026-05-05): 모달 인스턴스가 재사용되어 initialTab prop 이 나중에 바뀌면
@@ -894,31 +953,25 @@ export function SceneDetailModal({
                   <h3 className="text-xs font-semibold text-text-secondary mb-3 px-4">
                     진행 단계
                   </h3>
-                  <div className="flex rounded-lg bg-bg-primary/75 p-1.5 gap-1.5 mx-4 border border-bg-border/50">
-                    {STAGES.map((stage, i) => {
-                      const isDone = scene[stage];
-                      const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
-
-                      return (
-                        <button
-                          key={stage}
-                          onClick={() => onToggle(scene.sceneId, stage)}
-                          className={cn(
-                            'flex-1 py-2.5 rounded-md text-sm font-medium transition-all cursor-pointer',
-                            !isDone && 'text-text-secondary hover:text-text-primary hover:bg-bg-border/25',
-                          )}
-                          style={
-                            isDone
-                              ? isCurrent
-                                ? { backgroundColor: deptConfig.color, color: '#fff', fontWeight: 600, boxShadow: `0 2px 8px ${deptConfig.color}4D` }
-                                : { backgroundColor: `${deptConfig.color}18`, color: deptConfig.color }
-                              : undefined
-                          }
-                        >
-                          {deptConfig.stageLabels[stage]}
-                        </button>
-                      );
-                    })}
+                  <div className="mx-4">
+                    {department === 'acting' && onActPhaseStateClick && onActFeedbackRequest && onActRoundBump ? (
+                      <ScenePhaseToggle
+                        scene={scene}
+                        iconDisplay="always"
+                        onStateClick={(next) => onActPhaseStateClick(sheetName, scene.sceneId, next)}
+                        onRequestFeedback={() => onActFeedbackRequest(sheetName, scene.sceneId)}
+                        onRoundBump={(kind, delta) => onActRoundBump(sheetName, scene.sceneId, kind, delta)}
+                      />
+                    ) : (
+                      <StageSegmentToggle
+                        scene={scene}
+                        department={department}
+                        iconDisplay="always"
+                        className="bg-bg-primary/75 p-1.5 gap-1.5 border-bg-border/50"
+                        segmentClassName="py-2.5 text-sm"
+                        onToggle={(stage) => onToggle(scene.sceneId, stage)}
+                      />
+                    )}
                   </div>
                 </section>
 
@@ -1137,6 +1190,7 @@ export function SceneDetailModal({
             counterpartSheetName={counterpartSheetName}
             counterpartSceneNo={counterpartSceneNo}
             onCountChange={setCommentCount}
+            inlineEvents={inlineEvents}
             focusCommentId={focusCommentId}
             sceneLabel={`${sheetName.replace(/_/g, ' ').replace(/^EP0?/, 'EP')}${scene.sceneId ? ` #${scene.sceneId}` : ''}`}
             quickRevision={{

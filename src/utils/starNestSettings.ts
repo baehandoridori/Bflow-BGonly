@@ -22,6 +22,8 @@ export interface StarNestSettings {
 }
 
 export const DEFAULT_BACKGROUND_ART: BackgroundArt = 'plexus';
+export const DEFAULT_DASHBOARD_STAR_NEST_OPACITY = 1;
+export const DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX = 0;
 
 export const DEFAULT_STAR_NEST_SETTINGS: StarNestSettings = {
   directionMode: 'mouse',
@@ -142,6 +144,14 @@ export function normalizeStarNestSettings(settings?: Partial<StarNestSettings> |
     iterations: Math.round(clamp(settings?.iterations, 10, 22, DEFAULT_STAR_NEST_SETTINGS.iterations)),
     quality: Math.round(clamp(settings?.quality, 8, 20, DEFAULT_STAR_NEST_SETTINGS.quality)),
   };
+}
+
+export function normalizeDashboardStarNestOpacity(value: unknown): number {
+  return clamp(value, 0.2, 1, DEFAULT_DASHBOARD_STAR_NEST_OPACITY);
+}
+
+export function normalizeDashboardStarNestBlurPx(value: unknown): number {
+  return clamp(value, 0, 20, DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX);
 }
 
 export function applyStarNestTonePreset(

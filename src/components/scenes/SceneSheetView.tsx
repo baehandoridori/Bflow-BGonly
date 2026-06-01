@@ -1,23 +1,28 @@
 import { useState, useRef, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { MessageCircle, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
 import type { Scene, Stage, Department, ScenePhaseState } from '@/types';
 import type { SceneGroupMode } from '@/stores/useAppStore';
 import { useAppStore } from '@/stores/useAppStore';
+import { useDataStore } from '@/stores/useDataStore';
+import { useRevisionStore } from '@/stores/useRevisionStore';
+import { buildSceneKey } from '@/services/revisionService';
 import { isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
 import { HighlightText } from '@/components/common/HighlightText';
-import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import {
   ResizableHeaderCell,
+  useFittedSheetColumnWidths,
   useResizableSheetColumns,
   type SheetColumnDefinition,
 } from './SheetColumnResize';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
+import { StageSegmentToggle } from './StageSegmentToggle';
+import { SheetAlertBadges } from './SheetAlertBadges';
 
 // ─── Props ───────────────────────────────────────────────────
 
@@ -52,6 +57,7 @@ function cellKey(row: number, col: number) { return `${row}:${col}`; }
 
 type SingleSheetColumnKey =
   | 'scene'
+  | 'alerts'
   | 'memo'
   | 'storyboard'
   | 'guide'
@@ -64,7 +70,8 @@ type SingleSheetColumnKey =
 
 const SINGLE_SHEET_COLUMNS: Array<SheetColumnDefinition<SingleSheetColumnKey>> = [
   { key: 'scene', defaultWidth: 96, minWidth: 76, maxWidth: 180 },
-  { key: 'memo', defaultWidth: 300, minWidth: 80, maxWidth: 620 },
+  { key: 'alerts', defaultWidth: 58, minWidth: 44, maxWidth: 84 },
+  { key: 'memo', defaultWidth: 300, minWidth: 80, maxWidth: 1200 },
   { key: 'storyboard', defaultWidth: 82, minWidth: 52, maxWidth: 150 },
   { key: 'guide', defaultWidth: 82, minWidth: 52, maxWidth: 150 },
   { key: 'assignee', defaultWidth: 120, minWidth: 76, maxWidth: 240 },
@@ -74,6 +81,7 @@ const SINGLE_SHEET_COLUMNS: Array<SheetColumnDefinition<SingleSheetColumnKey>> =
   { key: 'png', defaultWidth: 58, minWidth: 36, maxWidth: 112 },
   { key: 'actions', defaultWidth: 40, minWidth: 32, maxWidth: 72 },
 ];
+const SINGLE_SHEET_FILL_COLUMNS: SingleSheetColumnKey[] = ['memo'];
 
 const STAGE_SHORT_LABELS: Record<Stage, string> = {
   lo: 'LO',
@@ -321,11 +329,9 @@ export function SceneSheetView({
 }: SceneSheetViewProps) {
   const deptConfig = DEPARTMENT_CONFIGS[department];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
-  const stagePointerHandledRef = useRef(false);
   const useActingPhaseControls = department === 'acting' && !!onActPhaseStateClick && !!onActFeedbackRequest && !!onActRoundBump;
   const {
     widthOf,
-    totalWidth,
     startResize,
   } = useResizableSheetColumns(`bflow_scene_sheet_columns_${department}_v1`, SINGLE_SHEET_COLUMNS);
 
@@ -377,6 +383,61 @@ export function SceneSheetView({
   const [initialEditChar, setInitialEditChar] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const tableRef = useRef<HTMLDivElement>(null);
+  const [tableViewportWidth, setTableViewportWidth] = useState(0);
+
+  useEffect(() => {
+    const node = tableRef.current;
+    if (!node) return;
+
+    const updateWidth = () => {
+      setTableViewportWidth(Math.floor(node.clientWidth));
+    };
+    updateWidth();
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(node);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, []);
+
+  const fittedSheet = useFittedSheetColumnWidths(
+    SINGLE_SHEET_COLUMNS,
+    widthOf,
+    tableViewportWidth,
+    SINGLE_SHEET_FILL_COLUMNS,
+  );
+  const sheetWidth = fittedSheet.totalWidth;
+  const displayWidthOf = useCallback(
+    (key: SingleSheetColumnKey) => fittedSheet.widths[key],
+    [fittedSheet],
+  );
+
+  const revisions = useRevisionStore((s) => s.revisions);
+  const getOpenCount = useRevisionStore((s) => s.getOpenCount);
+  const episodes = useDataStore((s) => s.episodes);
+  const revisionCountBySceneId = useMemo(() => {
+    if (!sheetName) return new Map<string, number>();
+    let siblings: string[] = [];
+    for (const ep of episodes) {
+      const part = ep.parts.find((p) => p.sheetName === sheetName);
+      if (part) {
+        siblings = part.scenes.map((s) => s.sceneId);
+        break;
+      }
+    }
+    const map = new Map<string, number>();
+    for (const scene of displayScenes) {
+      const sceneId = scene.sceneId || '';
+      if (!sceneId) continue;
+      const sceneKey = buildSceneKey(sheetName, sceneId, { siblingSceneIds: siblings });
+      const openCount = getOpenCount(sceneKey);
+      if (openCount > 0) map.set(sceneId, openCount);
+    }
+    return map;
+  }, [displayScenes, episodes, getOpenCount, revisions, sheetName]);
 
   const maxRow = Math.max(0, displayScenes.length - 1);
   const maxCol = EDITABLE_FIELDS.length - 1;
@@ -599,18 +660,18 @@ export function SceneSheetView({
       <div
         ref={tableRef}
         tabIndex={0}
-        className="overflow-auto rounded-lg border border-bg-border focus:outline-none"
+        className="overflow-y-auto overflow-x-hidden rounded-lg border border-bg-border focus:outline-none"
         onKeyDown={handleTableKeyDown}
         onMouseUp={() => setIsDragging(false)}
         style={{ userSelect: isDragging ? 'none' : undefined }}
       >
         <table
           className="text-sm border-collapse"
-          style={{ tableLayout: 'fixed', width: totalWidth }}
+          style={{ tableLayout: 'fixed', width: sheetWidth }}
         >
           <colgroup>
             {SINGLE_SHEET_COLUMNS.map((column) => (
-              <col key={column.key} style={{ width: widthOf(column.key) }} />
+              <col key={column.key} style={{ width: displayWidthOf(column.key) }} />
             ))}
           </colgroup>
           {/* ── 헤더 ── */}
@@ -618,11 +679,12 @@ export function SceneSheetView({
             <tr className="bg-bg-card border-b border-bg-border">
               {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 별도 컬럼 대신 행 위에 그룹 헤더 행을 삽입.
                   컬럼 수가 일반 모드와 동일하게 유지된다. */}
-              <ResizableHeaderCell columnKey="scene" width={widthOf('scene')} onResizeStart={startResize} shortLabel="씬">씬번호</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="memo" width={widthOf('memo')} onResizeStart={startResize} shortLabel="메모">메모</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="storyboard" width={widthOf('storyboard')} onResizeStart={startResize} align="center" shortLabel="SB">스토리보드</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="guide" width={widthOf('guide')} onResizeStart={startResize} align="center" shortLabel="Guide">가이드</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="assignee" width={widthOf('assignee')} onResizeStart={startResize} shortLabel="담">담당자</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="scene" width={displayWidthOf('scene')} onResizeStart={startResize} shortLabel="씬">씬번호</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="alerts" width={displayWidthOf('alerts')} onResizeStart={startResize} align="center" className="px-1" />
+              <ResizableHeaderCell columnKey="memo" width={displayWidthOf('memo')} onResizeStart={startResize} shortLabel="메모">메모</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="storyboard" width={displayWidthOf('storyboard')} onResizeStart={startResize} align="center" shortLabel="SB">스토리보드</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="guide" width={displayWidthOf('guide')} onResizeStart={startResize} align="center" shortLabel="Guide">가이드</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="assignee" width={displayWidthOf('assignee')} onResizeStart={startResize} shortLabel="담">담당자</ResizableHeaderCell>
               {useActingPhaseControls ? (
                 <th
                   colSpan={4}
@@ -636,7 +698,7 @@ export function SceneSheetView({
                   <ResizableHeaderCell
                     key={s}
                     columnKey={s}
-                    width={widthOf(s)}
+                    width={displayWidthOf(s)}
                     onResizeStart={startResize}
                     align="center"
                     className="px-1 text-[11px]"
@@ -647,7 +709,7 @@ export function SceneSheetView({
                   </ResizableHeaderCell>
                 ))
               )}
-              <ResizableHeaderCell columnKey="actions" width={widthOf('actions')} onResizeStart={startResize} align="center" className="px-1" />
+              <ResizableHeaderCell columnKey="actions" width={displayWidthOf('actions')} onResizeStart={startResize} align="center" className="px-1" />
             </tr>
           </thead>
 
@@ -662,6 +724,10 @@ export function SceneSheetView({
               const groupSize = meta?.groupSize ?? 1;
               const layoutKey = meta?.layoutKey ?? '';
               const isLayoutMode = sceneGroupMode === 'layout';
+              const commentKey = `${sheetName}:${scene.no}`;
+              const commentCount = commentCounts[commentKey] ?? 0;
+              const isUnreadComment = commentUnreadByKey?.[commentKey] ?? false;
+              const openRevCount = revisionCountBySceneId.get(scene.sceneId) ?? 0;
 
               return (
                 <Fragment key={`${scene.sceneId}-${idx}`}>
@@ -693,6 +759,7 @@ export function SceneSheetView({
                       searchQuery && 'bg-accent/5 border-l-2 border-l-accent/60',
                       highlightSceneId && scene.sceneId === highlightSceneId && 'scene-row-highlighted',
                       completionTintEnabled && isFullyDone(scene) && 'scene-completion-tint-row',
+                      openRevCount > 0 && 'sheet-row-revision-open',
                       isLayoutMode && !isLastInGroup && 'scene-row-group-mid',
                       isLayoutMode && isLastInGroup && 'scene-row-group-last',
                     )}
@@ -703,11 +770,10 @@ export function SceneSheetView({
                     }}
                     onDoubleClick={() => onOpenDetail(idx)}
                   >
-                  {/* 씬번호 + 레이아웃 뱃지 + 댓글 뱃지.
-                      한솔 결정 (5번): 1+3 합본 효과 — 텍스트 네온 펄스 + wrap 회전 보더. */}
+                  {/* 씬번호 */}
                   <td className="px-2 py-1.5 font-mono text-xs">
-                    <span className="flex items-center gap-2">
-                      <span className="scene-num-glow-wrap">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="scene-num-glow-wrap min-w-0">
                         <span className="scene-num-glow-text">
                           <HighlightText text={scene.sceneId || '-'} query={searchQuery} />
                         </span>
@@ -717,29 +783,14 @@ export function SceneSheetView({
                           L#{scene.layoutId}
                         </span>
                       )}
-                      {(() => {
-                        const commentKey = `${sheetName}:${scene.no}`;
-                        const cc = commentCounts[commentKey];
-                        const isUnread = commentUnreadByKey?.[commentKey] ?? false;
-                        return cc > 0 ? (
-                          <span
-                            className={cn(
-                              'compact-label-container inline-flex min-w-0 shrink items-center gap-0.5 rounded-full border px-1 py-px transition-colors',
-                              isUnread
-                                ? 'comment-unread-badge border-accent/25 bg-accent/20 text-accent'
-                                : 'border-bg-border/40 bg-text-secondary/10 text-text-secondary/55',
-                            )}
-                            title={`${isUnread ? '새 댓글' : '확인한 댓글'} ${cc}개`}
-                          >
-                            <CompactIconLabel
-                              icon={<MessageCircle size={9} fill="currentColor" />}
-                              label={`${cc}개`}
-                              textClassName="text-[10px] font-bold"
-                            />
-                          </span>
-                        ) : null;
-                      })()}
-                    </span>
+                    </div>
+                  </td>
+                  <td className="px-1 py-1.5">
+                    <SheetAlertBadges
+                      revisionCount={openRevCount}
+                      commentCount={commentCount}
+                      hasUnreadComments={isUnreadComment}
+                    />
                   </td>
 
                   {/* 메모 (인라인 편집) */}
@@ -781,7 +832,7 @@ export function SceneSheetView({
                     onStopEditing={handleStopEditing}
                   />
 
-                  {/* 진행상황: ACT 단독은 새 액팅 단계, 그 외는 기존 BG 스테이지 체크박스 */}
+                  {/* 진행상황: ACT/BG 모두 같은 segmented track 구조로 표시 */}
                   {useActingPhaseControls ? (
                     <td colSpan={4} className="px-1 py-1.5">
                       <div onClick={(e) => e.stopPropagation()}>
@@ -795,40 +846,15 @@ export function SceneSheetView({
                       </div>
                     </td>
                   ) : (
-                    STAGES.map((stage) => (
-                      <td key={stage} className="px-1 py-1.5 text-center">
-                        <button
-                          type="button"
-                          onPointerDown={(e) => {
-                            if (e.button !== 0) return;
-                            e.preventDefault();
-                            e.stopPropagation();
-                            stagePointerHandledRef.current = true;
-                            onToggle(scene.sceneId, stage);
-                            window.setTimeout(() => {
-                              stagePointerHandledRef.current = false;
-                            }, 600);
-                          }}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (stagePointerHandledRef.current) {
-                              stagePointerHandledRef.current = false;
-                              return;
-                            }
-                            onToggle(scene.sceneId, stage);
-                          }}
-                          className="w-5 h-5 rounded flex items-center justify-center text-xs transition-all mx-auto"
-                          style={
-                            scene[stage]
-                              ? { backgroundColor: deptConfig.stageColors[stage], color: 'rgb(var(--color-bg-primary))' }
-                              : { border: '1px solid #2D3041' }
-                          }
-                        >
-                          {scene[stage] ? '✓' : ''}
-                        </button>
-                      </td>
-                    ))
+                    <td colSpan={4} className="px-1 py-1.5">
+                      <StageSegmentToggle
+                        scene={scene}
+                        department={department}
+                        compact
+                        iconDisplay="never"
+                        onToggle={(stage) => onToggle(scene.sceneId, stage)}
+                      />
+                    </td>
                   )}
 
                   {/* 삭제 */}

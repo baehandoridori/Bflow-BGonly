@@ -19,6 +19,7 @@ import type { Scene, ScenePhaseState } from '@/types';
 import { SCENE_PHASES, SCENE_PHASE_LABELS_SHORT, SCENE_PHASE_COLORS } from '@/types';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 import { cn } from '@/utils/cn';
+import { useStageLabelDisplayMode } from './useStageLabelDisplayMode';
 
 export interface ScenePhaseToggleProps {
   scene: Scene;
@@ -32,6 +33,8 @@ export interface ScenePhaseToggleProps {
   disabled?: boolean;
   /** 컴팩트 모드 (시트 셀 안에서 사용 시) */
   compact?: boolean;
+  /** 아이콘 노출 방식. 좁은 카드/시트는 텍스트를 우선한다. */
+  iconDisplay?: 'always' | 'wide' | 'never' | 'auto';
 }
 
 const PHASE_ICON_BY_STATE: Record<ScenePhaseState, ReactNode> = {
@@ -48,6 +51,7 @@ export function ScenePhaseToggle({
   onRoundBump,
   disabled = false,
   compact = false,
+  iconDisplay = 'auto',
 }: ScenePhaseToggleProps) {
   const activeState: ScenePhaseState = scene.sceneState ?? 'wait';
   // v1.25.7: 작업중일 때만 차수 헤더 노출. 피드백/대기/완료는 차수 숨김.
@@ -57,6 +61,13 @@ export function ScenePhaseToggle({
   // 자기 색의 알파(0x20 ≈ 0.125) 로 살짝 채워 시각 진행도 표현.
   const activeIndex = SCENE_PHASES.indexOf(activeState);
   const pointerHandledRef = useRef(false);
+  const { modeOf, setNode } = useStageLabelDisplayMode(SCENE_PHASE_LABELS_SHORT, compact, iconDisplay === 'auto');
+  const phaseIconClassName =
+    (compact && iconDisplay !== 'auto') || iconDisplay === 'never'
+      ? 'hidden'
+      : iconDisplay === 'wide'
+        ? 'hidden 2xl:inline-flex'
+        : undefined;
 
   const handleChipClick = useCallback(
     (target: ScenePhaseState) => {
@@ -113,7 +124,7 @@ export function ScenePhaseToggle({
         </div>
       )}
 
-      {/* 칩 4개 — 라벨만, 균등 분할 */}
+      {/* 칩 4개 — 텍스트 우선, 아이콘은 뒤쪽에 배치해 좁은 칸에서 라벨을 먼저 보존한다. */}
       <div
         className={cn(
           'flex w-full rounded-lg bg-bg-primary/70 border border-bg-border/40',
@@ -129,6 +140,7 @@ export function ScenePhaseToggle({
           return (
             <div
               key={state}
+              ref={setNode(state)}
               data-continuity-stage-segment
               role="radio"
               aria-checked={isActive}
@@ -182,7 +194,16 @@ export function ScenePhaseToggle({
                 icon={PHASE_ICON_BY_STATE[state]}
                 label={SCENE_PHASE_LABELS_SHORT[state]}
                 className="w-full"
-                textClassName="truncate"
+                textClassName="leading-none"
+                iconClassName={phaseIconClassName}
+                iconPosition="after"
+                displayMode={
+                  iconDisplay === 'auto'
+                    ? modeOf(state)
+                    : iconDisplay === 'never'
+                      ? 'text'
+                      : 'both'
+                }
               />
             </div>
           );

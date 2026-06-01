@@ -33,6 +33,8 @@ import { UnifiedSceneSheetView } from '@/components/scenes/UnifiedSceneSheetView
 import { ScenePhaseToggle } from '@/components/scenes/ScenePhaseToggle';
 import { LengthIcon } from '@/components/scenes/LengthIcon';
 import { UnifiedSceneDetailModal } from '@/components/scenes/UnifiedSceneDetailModal';
+import { StageSegmentToggle, stageIcon } from '@/components/scenes/StageSegmentToggle';
+import { RevisionCornerFlag } from '@/components/scenes/RevisionCornerFlag';
 import { BulkOperationStatus } from '@/components/scenes/BulkOperationStatus';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { setCommentsSheetsMode, getCommentStoreForPart, invalidatePartCache } from '@/services/commentService';
@@ -50,13 +52,6 @@ import type { PartContextMenuTarget } from '@/utils/partMemoHelpers';
 import { usePartMemos } from '@/hooks/usePartMemos';
 import { useUnifiedScenes } from '@/hooks/useUnifiedScenes';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/services/settingsService';
-
-function stageIcon(stage: Stage, size = 12) {
-  if (stage === 'lo') return <Clock size={size} strokeWidth={2.4} />;
-  if (stage === 'done') return <PlayCircle size={size} strokeWidth={2.4} />;
-  if (stage === 'review') return <CheckSquare size={size} strokeWidth={2.4} />;
-  return <CheckCircle2 size={size} strokeWidth={2.4} />;
-}
 
 function phaseIcon(phase: ScenePhaseState, size = 12) {
   if (phase === 'wait') return <Clock size={size} strokeWidth={2.4} />;
@@ -761,7 +756,6 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
   const storyboardUrl = scene.storyboardUrl || fallbackStoryboardUrl || '';
   const guideUrl = scene.guideUrl || fallbackGuideUrl || '';
   const hasImages = !!(storyboardUrl || guideUrl);
-  const stagePointerHandledRef = useRef(false);
   const useActingPhaseControls = department === 'acting' && !!sheetName && !!onActPhaseStateClick && !!onActFeedbackRequest && !!onActRoundBump;
 
   const borderColor = pct >= 100 ? '#6C5CE7' : pct >= 50 ? '#A599F5' : pct > 0 ? '#E17055' : 'rgb(var(--color-bg-border))';
@@ -807,9 +801,14 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
       {/* 하이라이트 배경 오버레이 */}
       {isHighlighted && <div className="scene-highlight-bg" />}
 
+      <RevisionCornerFlag count={revisionCount} />
+
       {/* 선택 체크마크 */}
       {isSelected && (
-        <div className="absolute top-1.5 right-1.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30">
+        <div className={cn(
+          'absolute right-1.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30',
+          revisionCount > 0 ? 'top-9' : 'top-1.5',
+        )}>
           <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </div>
       )}
@@ -838,20 +837,11 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
                   ? 'comment-unread-badge border-accent/25 bg-accent/15 text-accent shadow-[0_0_10px_rgba(108,92,231,0.16)]'
                   : 'border-bg-border/45 bg-text-secondary/10 text-text-secondary/60',
               )}
-              title={`${hasUnreadComments ? '새 댓글' : '확인한 댓글'} ${commentCount}개`}
+              title={`${hasUnreadComments ? '새 댓글' : '확인한 댓글'} ${commentCount}`}
             >
               <CompactIconLabel
                 icon={<MessageCircle size={10} fill="currentColor" />}
-                label={`${commentCount}개`}
-                textClassName="text-[10px] font-bold leading-none"
-              />
-            </span>
-          )}
-          {revisionCount > 0 && (
-            <span className="compact-label-container flex min-w-0 shrink items-center gap-0.5 px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(108, 92, 231, 0.15)', color: '#A599F5' }} title={`리비전 ${revisionCount}건`}>
-              <CompactIconLabel
-                icon={<Film size={10} />}
-                label={`${revisionCount}건`}
+                label={`${commentCount}`}
                 textClassName="text-[10px] font-bold leading-none"
               />
             </span>
@@ -938,51 +928,11 @@ function SceneCard({ scene, sceneIndex, celebrating, department, isHighlighted, 
             />
           </div>
         ) : (
-          <div className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5">
-            {STAGES.map((stage, i) => {
-              const isDone = scene[stage];
-              const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
-
-              return (
-                <button
-                  type="button"
-                  key={stage}
-                  onPointerDown={(e) => {
-                    if (e.button !== 0) return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    stagePointerHandledRef.current = true;
-                    onToggle(scene.sceneId, stage);
-                    window.setTimeout(() => {
-                      stagePointerHandledRef.current = false;
-                    }, 600);
-                  }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (stagePointerHandledRef.current) {
-                      stagePointerHandledRef.current = false;
-                      return;
-                    }
-                    onToggle(scene.sceneId, stage);
-                  }}
-                  className={cn(
-                    'compact-label-container flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
-                    !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
-                  )}
-                  style={
-                    isDone
-                      ? isCurrent
-                        ? { backgroundColor: deptConfig.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${deptConfig.color}40` }
-                        : { backgroundColor: `${deptConfig.color}20`, color: deptConfig.color }
-                      : undefined
-                  }
-                >
-                  <CompactIconLabel icon={stageIcon(stage, 12)} label={deptConfig.stageLabels[stage]} className="w-full" />
-                </button>
-              );
-            })}
-          </div>
+          <StageSegmentToggle
+            scene={scene}
+            department={department}
+            onToggle={(stage) => onToggle(scene.sceneId, stage)}
+          />
         )}
         <Confetti active={celebrating} onComplete={onCelebrationEnd} />
       </div>
@@ -5090,7 +5040,13 @@ export function ScenesView() {
                         border: `1px solid ${DEPARTMENT_CONFIGS.bg.stageColors[stage]}40`,
                       }}
                     >
-                      <CompactIconLabel icon={stageIcon(stage, 12)} label={DEPARTMENT_CONFIGS.bg.stageLabels[stage]} className="w-full" />
+                      <CompactIconLabel
+                        icon={stageIcon(stage, 12)}
+                        label={DEPARTMENT_CONFIGS.bg.stageLabels[stage]}
+                        className="w-full"
+                        iconClassName="hidden 2xl:inline-flex"
+                        iconPosition="after"
+                      />
                     </button>
                   ))}
                 </div>
@@ -5112,7 +5068,13 @@ export function ScenesView() {
                         border: `1px solid ${SCENE_PHASE_COLORS[phase]}40`,
                       }}
                     >
-                      <CompactIconLabel icon={phaseIcon(phase, 12)} label={SCENE_PHASE_LABELS_SHORT[phase]} className="w-full" />
+                      <CompactIconLabel
+                        icon={phaseIcon(phase, 12)}
+                        label={SCENE_PHASE_LABELS_SHORT[phase]}
+                        className="w-full"
+                        iconClassName="hidden 2xl:inline-flex"
+                        iconPosition="after"
+                      />
                     </button>
                   ))}
                 </div>
@@ -5130,7 +5092,13 @@ export function ScenesView() {
                     border: `1px solid ${deptConfig.stageColors[stage]}40`,
                   }}
                 >
-                  <CompactIconLabel icon={stageIcon(stage, 12)} label={deptConfig.stageLabels[stage]} className="w-full" />
+                  <CompactIconLabel
+                    icon={stageIcon(stage, 12)}
+                    label={deptConfig.stageLabels[stage]}
+                    className="w-full"
+                    iconClassName="hidden 2xl:inline-flex"
+                    iconPosition="after"
+                  />
                 </button>
               ))
             )}
@@ -5402,6 +5370,9 @@ export function ScenesView() {
             readOnlyGuideUrl={bgImageForAct?.guide ?? null}
             onFieldUpdate={(idx, field, value) => handleFieldUpdateForSheet(detailSheetName, idx, field, value)}
             onToggle={(id, stage) => handleToggleForSheet(detailSheetName, id, stage)}
+            onActPhaseStateClick={handleActPhaseStateClick}
+            onActFeedbackRequest={handleActFeedbackRequest}
+            onActRoundBump={handleActRoundBump}
             onClose={() => { setDetailSceneIndex(null); setDetailContext(null); setModalRouting(null); }}
             initialTab={modalRouting?.initialTab}
             focusRevisionId={modalRouting?.focusRevisionId}

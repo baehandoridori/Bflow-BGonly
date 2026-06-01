@@ -38,7 +38,13 @@ import { setFeedbackLastSeenAt, setAssignmentLastSeenAt, getCommentReactionLastS
 import { buildReactionNotificationTitle } from '@/utils/commentReactionEmojiFormat';
 import { applyTheme, getPreset, getLightColors, deriveThemeFromAccent, sanitizeCustomHex, hexToRgb, DEFAULT_THEME_ID } from '@/themes';
 import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/utils/typography';
-import { DEFAULT_STAR_NEST_SETTINGS, normalizeBackgroundArt, normalizeStarNestSettings } from '@/utils/starNestSettings';
+import {
+  DEFAULT_STAR_NEST_SETTINGS,
+  normalizeBackgroundArt,
+  normalizeDashboardStarNestBlurPx,
+  normalizeDashboardStarNestOpacity,
+  normalizeStarNestSettings,
+} from '@/utils/starNestSettings';
 import { WelcomeToast } from '@/components/WelcomeToast';
 import { UpdateCenterModal } from '@/components/update/UpdateCenterModal';
 import { getGreeting, isFirstLogin, markFirstLoginShown } from '@/utils/greetings';
@@ -401,6 +407,8 @@ export default function App() {
             starNest: legacyStarNest,
             loginStarNest: normalizeStarNestSettings(p.loginStarNest ?? legacyStarNest),
             dashboardStarNest: normalizeStarNestSettings(p.dashboardStarNest ?? legacyStarNest),
+            dashboardStarNestOpacity: normalizeDashboardStarNestOpacity(p.dashboardStarNestOpacity),
+            dashboardStarNestBlurPx: normalizeDashboardStarNestBlurPx(p.dashboardStarNestBlurPx),
           });
         }
 

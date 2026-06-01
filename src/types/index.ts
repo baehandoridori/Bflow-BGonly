@@ -27,7 +27,7 @@ export const DEPARTMENT_CONFIGS: Record<Department, DepartmentConfig> = {
     id: 'acting',
     label: '액팅',
     shortLabel: 'ACT',
-    stageLabels: { lo: '1원화', done: '2원화', review: '동화', png: '최종' },
+    stageLabels: { lo: '대기', done: '작업중', review: '피드백', png: '완료' },
     stageColors: { lo: '#F5BEB3', done: '#EDA293', review: '#E58A76', png: '#E17055' },
     color: '#E17055',
   },

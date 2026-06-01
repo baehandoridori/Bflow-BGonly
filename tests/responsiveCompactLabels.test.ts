@@ -12,7 +12,10 @@ test('CompactIconLabel exposes accessible icon and label hooks', () => {
   assert.match(source, /aria-label=\{label\}/);
   assert.match(source, /title=\{label\}/);
   assert.match(source, /data-compact-icon-label/);
+  assert.match(source, /data-compact-label-icon/);
   assert.match(source, /data-compact-label-text/);
+  assert.match(source, /data-icon-position=\{iconPosition\}/);
+  assert.match(source, /data-display-mode=\{displayMode\}/);
   assert.match(source, /aria-hidden="true"/);
 });
 
@@ -24,7 +27,8 @@ test('compact labels collapse at narrow viewport without self-sizing container t
   assert.doesNotMatch(css, /\[data-compact-icon-label\]\s*\{[^}]*container-type/);
   assert.doesNotMatch(component, /container-type/);
   assert.match(css, /@media\s*\(max-width:\s*1040px\)/);
-  assert.match(css, /@media\s*\(max-width:\s*1040px\)\s*\{[\s\S]*\.compact-label-container\s+\[data-compact-label-text\][\s\S]*max-width:\s*0/);
+  assert.match(css, /@media\s*\(max-width:\s*1040px\)\s*\{[\s\S]*\[data-compact-icon-label\]:not\(\[data-display-mode="icon"\]\)\s+\[data-compact-label-icon\][\s\S]*max-width:\s*0/);
+  assert.doesNotMatch(css, /@media\s*\(max-width:\s*1040px\)\s*\{[\s\S]*\.compact-label-container\s+\[data-compact-label-text\][\s\S]*max-width:\s*0/);
   assert.match(css, /data-sheet-header-short-label/);
   assert.match(css, /data-sheet-header-full-label/);
   assert.doesNotMatch(css, /writing-mode/);
@@ -41,9 +45,8 @@ test('target dense surfaces import and use CompactIconLabel', () => {
     'src/views/compositing/SceneJumpButton.tsx',
     'src/views/ScenesView.tsx',
     'src/components/scenes/ScenePhaseToggle.tsx',
-    'src/components/scenes/SceneSheetView.tsx',
+    'src/components/scenes/StageSegmentToggle.tsx',
     'src/components/scenes/UnifiedSceneCard.tsx',
-    'src/components/scenes/UnifiedSceneSheetView.tsx',
   ];
 
   for (const file of surfaces) {
@@ -63,6 +66,12 @@ test('ScenePhaseToggle maps every phase to a lucide icon label', () => {
   assert.match(source, /className="w-full"/);
 });
 
+test('acting department labels no longer expose deprecated animation stages', () => {
+  const source = read('src/types/index.ts');
+
+  assert.match(source, /stageLabels:\s*\{\s*lo:\s*'대기',\s*done:\s*'작업중',\s*review:\s*'피드백',\s*png:\s*'완료'\s*\}/);
+});
+
 test('sheet headers support full and short labels', () => {
   const resize = read('src/components/scenes/SheetColumnResize.tsx');
   const singleSheet = read('src/components/scenes/SceneSheetView.tsx');
@@ -72,10 +81,18 @@ test('sheet headers support full and short labels', () => {
   assert.match(resize, /data-sheet-header-full-label/);
   assert.match(resize, /data-sheet-header-short-label/);
   assert.match(resize, /title=\{fullLabel\}/);
+  assert.match(resize, /startBoundaryResize/);
+  assert.match(resize, /leftBoundaryColumnKey/);
+  assert.match(resize, /rightBoundaryColumnKey/);
+  assert.match(resize, /fitSheetColumnWidths/);
+  assert.match(resize, /useFittedSheetColumnWidths/);
 
   assert.match(singleSheet, /shortLabel="SB"/);
   assert.match(singleSheet, /shortLabel="Guide"/);
   assert.match(singleSheet, /shortLabel="씬"/);
+  assert.match(singleSheet, /columnKey="alerts"/);
+  assert.match(singleSheet, /SINGLE_SHEET_FILL_COLUMNS/);
+  assert.match(singleSheet, /overflow-y-auto overflow-x-hidden/);
   assert.match(singleSheet, /shortLabel="담"/);
   assert.match(singleSheet, /STAGE_SHORT_LABELS[\s\S]*lo:\s*'LO'/);
   assert.match(singleSheet, /STAGE_SHORT_LABELS[\s\S]*done:\s*'완'/);
@@ -83,22 +100,38 @@ test('sheet headers support full and short labels', () => {
   assert.match(singleSheet, /STAGE_SHORT_LABELS[\s\S]*png:\s*'PNG'/);
   assert.match(unifiedSheet, /shortLabel="BG"/);
   assert.match(unifiedSheet, /shortLabel="ACT"/);
+  assert.match(unifiedSheet, /columnKey="alerts"/);
+  assert.match(unifiedSheet, /UNIFIED_SHEET_FILL_COLUMNS/);
+  assert.match(unifiedSheet, /overflow-y-auto overflow-x-hidden/);
   assert.match(unifiedSheet, /BG_STAGE_SHORT_LABELS[\s\S]*lo:\s*'LO'/);
   assert.match(unifiedSheet, /BG_STAGE_SHORT_LABELS[\s\S]*review:\s*'검'/);
   assert.match(unifiedSheet, /ACT_STAGE_SHORT_LABELS[\s\S]*done:\s*'작'/);
   assert.match(unifiedSheet, /ACT_STAGE_SHORT_LABELS[\s\S]*review:\s*'피'/);
+  assert.match(unifiedSheet, /rightBoundaryColumnKey="actMemo"/);
+  assert.match(unifiedSheet, /leftBoundaryColumnKey="bgMemo"/);
 });
 
 test('bulk and card stage controls avoid forced ellipsis overflow', () => {
   const scenesView = read('src/views/ScenesView.tsx');
   const unifiedCard = read('src/components/scenes/UnifiedSceneCard.tsx');
+  const phaseToggle = read('src/components/scenes/ScenePhaseToggle.tsx');
+  const stageToggle = read('src/components/scenes/StageSegmentToggle.tsx');
+  const labelModeHook = read('src/components/scenes/useStageLabelDisplayMode.ts');
+  const revisionFlag = read('src/components/scenes/RevisionCornerFlag.tsx');
 
   assert.match(scenesView, /bflow-bulk-bar-pulse[\s\S]*max-w-\[calc\(100vw-2rem\)\][\s\S]*flex-wrap/);
   assert.match(scenesView, /compact-label-container[\s\S]*inline-flex[\s\S]*min-w-0[\s\S]*shrink/);
   assert.match(scenesView, /compact-label-container[\s\S]*flex[\s\S]*min-w-0[\s\S]*shrink/);
   assert.doesNotMatch(scenesView, /bflow-bulk-bar-pulse[\s\S]{0,3000}whitespace-nowrap disabled:opacity-50/);
-  assert.match(scenesView, /<CompactIconLabel icon=\{stageIcon\(stage, 12\)\}/);
-  assert.match(scenesView, /<CompactIconLabel icon=\{phaseIcon\(phase, 12\)\}/);
+  assert.match(scenesView, /StageSegmentToggle/);
+  assert.match(scenesView, /icon=\{stageIcon\(stage, 12\)\}[\s\S]*iconPosition="after"/);
+  assert.match(scenesView, /icon=\{phaseIcon\(phase, 12\)\}[\s\S]*iconPosition="after"/);
+  assert.match(phaseToggle, /iconDisplay = 'auto'/);
+  assert.match(stageToggle, /iconDisplay = 'auto'/);
+  assert.match(phaseToggle, /displayMode=\{[\s\S]*modeOf\(state\)/);
+  assert.match(stageToggle, /displayMode=\{[\s\S]*modeOf\(stage\)/);
+  assert.match(labelModeHook, /ResizeObserver/);
+  assert.match(revisionFlag, /revision-corner-flag/);
   assert.doesNotMatch(unifiedCard, /text-ellipsis/);
 });
 
@@ -119,4 +152,15 @@ test('compositing and shared dropdown controls use compact or bounded labels', (
   assert.match(dashboardBulkBar, /max-w-\[calc\(100vw-2rem\)\]/);
   assert.match(dashboardBulkBar, /overflow-x-auto/);
   assert.match(dashboardBulkBar, /CompactIconLabel/);
+});
+
+test('Bflow cursor uses a custom app cursor while preserving precision cursors', () => {
+  const css = read('src/index.css');
+
+  assert.match(css, /--bflow-cursor-default/);
+  assert.match(css, /--bflow-cursor-pointer/);
+  assert.match(css, /html,\s*body,\s*#root\s*\{[\s\S]*cursor:\s*var\(--bflow-cursor-default\)/);
+  assert.match(css, /button:not\(:disabled\)[\s\S]*cursor:\s*var\(--bflow-cursor-pointer\) !important/);
+  assert.match(css, /input,\s*textarea,[\s\S]*\.cursor-text\s*\{[\s\S]*cursor:\s*text !important/);
+  assert.match(css, /\.sheet-column-resizer,[\s\S]*\.is-sheet-column-resizing \*[\s\S]*cursor:\s*col-resize !important/);
 });

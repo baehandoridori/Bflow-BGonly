@@ -31,6 +31,10 @@ import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
 import { getPreset } from '@/themes';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
+import {
+  normalizeDashboardStarNestBlurPx,
+  normalizeDashboardStarNestOpacity,
+} from '@/utils/starNestSettings';
 
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -206,11 +210,19 @@ function DashboardBackgroundArt() {
   const plexusSettings = useAppStore((s) => s.plexusSettings);
   const backgroundArt = plexusSettings.dashboardBackgroundArt ?? plexusSettings.backgroundArt;
   if (backgroundArt === 'starnest') {
+    const opacity = normalizeDashboardStarNestOpacity(plexusSettings.dashboardStarNestOpacity);
+    const blurPx = normalizeDashboardStarNestBlurPx(plexusSettings.dashboardStarNestBlurPx);
     return (
       <StarNestBackground
         enabled={plexusSettings.dashboardEnabled}
         className="z-0"
-        settings={plexusSettings.starNest}
+        settings={plexusSettings.dashboardStarNest ?? plexusSettings.starNest}
+        style={{
+          opacity,
+          filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+          transform: blurPx > 0 ? 'scale(1.03)' : undefined,
+          willChange: 'opacity, filter',
+        }}
       />
     );
   }

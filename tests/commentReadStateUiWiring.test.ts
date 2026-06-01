@@ -58,6 +58,17 @@ test('Scene detail comment panels expose /re quick revision context', () => {
   assert.match(unifiedSceneDetailModal, /context: selectedDepartment === 'bg' \|\| selectedDepartment === 'acting' \? selectedDepartment : 'all'/);
 });
 
+test('single scene detail comment panel exposes the same activity inline events as unified detail', () => {
+  const usage = getCommentPanelResizableUsage(sceneDetailModal);
+
+  assert.match(sceneDetailModal, /import type \{ CommentInlineEvent \}/);
+  assert.match(sceneDetailModal, /const inlineEvents: CommentInlineEvent\[\]/);
+  assert.match(sceneDetailModal, /describeActivity\(a\)/);
+  assert.match(sceneDetailModal, /'revision_add', 'revision_in_progress', 'revision_resolve', 'revision_delete'/);
+  assert.match(usage, /inlineEvents=\{inlineEvents\}/);
+  assert.match(unifiedSceneDetailModal, /const inlineEvents: CommentInlineEvent\[\]/);
+});
+
 test('ScenesView maps legacy comment keys to canonical thread keys for read badges', () => {
   assert.match(scenesView, /buildSceneThreadKeyFromCommentKey/);
   assert.match(scenesView, /setCommentThreadKeyByCommentKey/);

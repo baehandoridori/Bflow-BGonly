@@ -7,11 +7,15 @@ import { cn } from '@/utils/cn';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
 import {
   DEFAULT_BACKGROUND_ART,
+  DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX,
+  DEFAULT_DASHBOARD_STAR_NEST_OPACITY,
   DEFAULT_STAR_NEST_SETTINGS,
   STAR_NEST_TONE_PRESETS,
   applyStarNestTonePreset,
   getThemeSyncedStarNestSettings,
   normalizeBackgroundArt,
+  normalizeDashboardStarNestBlurPx,
+  normalizeDashboardStarNestOpacity,
   normalizeStarNestSettings,
   type BackgroundArt,
   type StarNestSettings,
@@ -38,6 +42,8 @@ const DEFAULTS = {
   starNest: DEFAULT_STAR_NEST_SETTINGS,
   loginStarNest: DEFAULT_STAR_NEST_SETTINGS,
   dashboardStarNest: DEFAULT_STAR_NEST_SETTINGS,
+  dashboardStarNestOpacity: DEFAULT_DASHBOARD_STAR_NEST_OPACITY,
+  dashboardStarNestBlurPx: DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX,
 };
 
 /* ── 미니 플렉서스 프리뷰 (마우스 반응 + 부드러운 파티클 증감) ── */
@@ -261,14 +267,34 @@ function MiniPlexusPreview({ particleCount, enabled, speed, mouseRadius, mouseFo
   );
 }
 
-function MiniStarNestPreview({ enabled, settings }: { enabled: boolean; settings: StarNestSettings }) {
+function MiniStarNestPreview({
+  enabled,
+  settings,
+  opacity = 1,
+  blurPx = 0,
+}: {
+  enabled: boolean;
+  settings: StarNestSettings;
+  opacity?: number;
+  blurPx?: number;
+}) {
   return (
     <div
       className="relative rounded-lg overflow-hidden border border-bg-border/30 my-2.5"
       style={{ width: '100%', aspectRatio: `${PREVIEW_W}/${PREVIEW_H}`, background: 'rgb(var(--color-bg-primary) / 0.6)' }}
     >
       {enabled ? (
-        <StarNestBackground enabled fixed={false} settings={settings} />
+        <StarNestBackground
+          enabled
+          fixed={false}
+          settings={settings}
+          style={{
+            opacity,
+            filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+            transform: blurPx > 0 ? 'scale(1.03)' : undefined,
+            willChange: 'opacity, filter',
+          }}
+        />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center bg-bg-border/20">
           <span className="text-xs text-text-secondary/40 font-medium">OFF</span>
@@ -493,6 +519,10 @@ export function EffectsSection() {
   const usesStarNest = loginBackgroundArt === 'starnest' || dashboardBackgroundArt === 'starnest';
   const usesPlexus = loginBackgroundArt !== 'starnest' || dashboardBackgroundArt !== 'starnest';
   const starNest = normalizeStarNestSettings(plexusSettings.starNest);
+  const loginStarNest = normalizeStarNestSettings(plexusSettings.loginStarNest ?? starNest);
+  const dashboardStarNest = normalizeStarNestSettings(plexusSettings.dashboardStarNest ?? starNest);
+  const dashboardStarNestOpacity = normalizeDashboardStarNestOpacity(plexusSettings.dashboardStarNestOpacity);
+  const dashboardStarNestBlurPx = normalizeDashboardStarNestBlurPx(plexusSettings.dashboardStarNestBlurPx);
 
   const update = useCallback((partial: Partial<typeof DEFAULTS>) => {
     const legacy = normalizeStarNestSettings(partial.starNest ?? plexusSettings.starNest);
@@ -505,6 +535,8 @@ export function EffectsSection() {
       starNest: legacy,
       loginStarNest: normalizeStarNestSettings(partial.loginStarNest ?? plexusSettings.loginStarNest ?? legacy),
       dashboardStarNest: normalizeStarNestSettings(partial.dashboardStarNest ?? plexusSettings.dashboardStarNest ?? legacy),
+      dashboardStarNestOpacity: normalizeDashboardStarNestOpacity(partial.dashboardStarNestOpacity ?? plexusSettings.dashboardStarNestOpacity),
+      dashboardStarNestBlurPx: normalizeDashboardStarNestBlurPx(partial.dashboardStarNestBlurPx ?? plexusSettings.dashboardStarNestBlurPx),
     };
     setPlexusSettings(next);
     persistPlexus(next);
@@ -677,7 +709,7 @@ export function EffectsSection() {
         </div>
 
         {loginBackgroundArt === 'starnest' ? (
-          <MiniStarNestPreview enabled={plexusSettings.loginEnabled} settings={starNest} />
+          <MiniStarNestPreview enabled={plexusSettings.loginEnabled} settings={loginStarNest} />
         ) : (
           <MiniPlexusPreview
             particleCount={plexusSettings.loginParticleCount}
@@ -722,7 +754,12 @@ export function EffectsSection() {
         </div>
 
         {dashboardBackgroundArt === 'starnest' ? (
-          <MiniStarNestPreview enabled={plexusSettings.dashboardEnabled} settings={starNest} />
+          <MiniStarNestPreview
+            enabled={plexusSettings.dashboardEnabled}
+            settings={dashboardStarNest}
+            opacity={dashboardStarNestOpacity}
+            blurPx={dashboardStarNestBlurPx}
+          />
         ) : (
           <MiniPlexusPreview
             particleCount={plexusSettings.dashboardParticleCount}
@@ -733,6 +770,22 @@ export function EffectsSection() {
             glowIntensity={plexusSettings.glowIntensity}
             connectionDist={plexusSettings.connectionDist}
           />
+        )}
+
+        {plexusSettings.dashboardEnabled && dashboardBackgroundArt === 'starnest' && (
+          <div className="flex flex-col gap-2.5 pl-1">
+            <Slider
+              label="불투명도" value={dashboardStarNestOpacity}
+              min={0.2} max={1} step={0.05} defaultVal={DEFAULTS.dashboardStarNestOpacity}
+              precision={2}
+              onChange={(v) => update({ dashboardStarNestOpacity: v })}
+            />
+            <Slider
+              label="블러" value={dashboardStarNestBlurPx}
+              min={0} max={20} step={1} defaultVal={DEFAULTS.dashboardStarNestBlurPx}
+              onChange={(v) => update({ dashboardStarNestBlurPx: v })}
+            />
+          </div>
         )}
 
         {plexusSettings.dashboardEnabled && dashboardBackgroundArt !== 'starnest' && (

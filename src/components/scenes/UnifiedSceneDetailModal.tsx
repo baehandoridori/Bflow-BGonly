@@ -15,9 +15,10 @@ import {
   Pin,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
+import { DEPARTMENT_CONFIGS } from '@/types';
 import type { MergedScene, Scene, Stage, Department, ScenePhaseState } from '@/types';
 import { ScenePhaseToggle } from './ScenePhaseToggle';
+import { StageSegmentToggle } from './StageSegmentToggle';
 import { sceneProgress } from '@/utils/calcStats';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
@@ -1242,41 +1243,22 @@ function DeptSection({
           <div data-continuity-target="act-stage">
             <ScenePhaseToggle
               scene={scene}
+              iconDisplay="always"
               onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
               onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
               onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
             />
           </div>
         ) : (
-          <div
-            className="flex rounded-lg bg-black/[0.06] dark:bg-white/[0.04] p-1 gap-1"
-            data-continuity-target={dept === 'bg' ? 'bg-stage' : 'act-stage'}
-          >
-            {STAGES.map((stage, i) => {
-              const done = scene[stage];
-              const isCurrent = done && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
-              return (
-                <button
-                  key={stage}
-                  data-continuity-stage-segment
-                  onClick={() => onToggle(sheetName, sceneId, stage)}
-                  className={cn(
-                    'flex-1 text-center py-2 text-xs font-medium rounded-md transition-all cursor-pointer',
-                    !done && 'text-text-secondary/60 hover:text-text-primary hover:bg-black/5 dark:hover:bg-white/5',
-                  )}
-                  style={
-                    done
-                      ? isCurrent
-                        ? { backgroundColor: cfg.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${cfg.color}40` }
-                        : { backgroundColor: `${cfg.color}20`, color: cfg.color }
-                      : undefined
-                  }
-                >
-                  {cfg.stageLabels[stage]}
-                </button>
-              );
-            })}
-          </div>
+          <StageSegmentToggle
+            scene={scene}
+            department={dept}
+            iconDisplay="always"
+            className="bg-black/[0.06] dark:bg-white/[0.04] border-transparent"
+            segmentClassName="py-2 text-xs"
+            dataContinuityTarget={dept === 'bg' ? 'bg-stage' : 'act-stage'}
+            onToggle={(stage) => onToggle(sheetName, sceneId, stage)}
+          />
         )}
       </div>
 
