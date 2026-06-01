@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const commentPanel = readFileSync('src/components/scenes/CommentPanel.tsx', 'utf8');
 const revisionCommentThread = readFileSync('src/components/scenes/RevisionCommentThread.tsx', 'utf8');
+const app = readFileSync('src/App.tsx', 'utf8');
 const resizable = readFileSync('src/components/scenes/CommentPanelResizable.tsx', 'utf8');
 const sceneDetailModal = readFileSync('src/components/scenes/SceneDetailModal.tsx', 'utf8');
 const unifiedSceneDetailModal = readFileSync('src/components/scenes/UnifiedSceneDetailModal.tsx', 'utf8');
@@ -75,6 +76,23 @@ test('revision comment thread supports image paste and file attachments', () => 
   assert.match(revisionCommentThread, /onPaste=\{handlePaste\}/);
   assert.match(revisionCommentThread, /images:\s*uploadedImageUrls/);
   assert.match(revisionCommentThread, /comment\.images/);
+});
+
+test('revision comment thread supports user mentions like the main comment panel', () => {
+  assert.match(revisionCommentThread, /extractMentions/);
+  assert.match(revisionCommentThread, /mentions:\s*extractMentions\(draft,\s*users\.map/);
+  assert.match(revisionCommentThread, /showMentions/);
+  assert.match(revisionCommentThread, /mentionFilter/);
+  assert.match(revisionCommentThread, /insertMention/);
+  assert.match(revisionCommentThread, /PathLinkifiedText/);
+  assert.match(revisionCommentThread, /sendMentionWebhook/);
+});
+
+test('revision comment notifications include explicitly mentioned users', () => {
+  assert.match(app, /const mentionedNames = Array\.isArray\(newComment\.mentions\) \? newComment\.mentions : \[\]/);
+  assert.match(app, /const mentionedUserIds = useAuthStore\.getState\(\)\.users/);
+  assert.match(app, /const targets = new Set\(\[\.\.\.revisionNotifyIds, \.\.\.mentionedUserIds\]\)/);
+  assert.match(app, /리비전 댓글 멘션/);
 });
 
 test('single scene detail comment panel exposes the same activity inline events as unified detail', () => {

@@ -1240,8 +1240,14 @@ export default function App() {
                   rev = useRevisionStore.getState().revisions.find((r) => r.id === newComment.revision_id);
                   if (!rev) return;
                 }
-                const targets = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
-                if (!targets.includes(me.id)) return;
+                const revisionNotifyIds = Array.isArray(rev.notifyUserIds) ? rev.notifyUserIds : [];
+                const mentionedNames = Array.isArray(newComment.mentions) ? newComment.mentions : [];
+                const mentionedUserIds = useAuthStore.getState().users
+                  .filter((user) => mentionedNames.includes(user.name))
+                  .map((user) => user.id);
+                const targets = new Set([...revisionNotifyIds, ...mentionedUserIds]);
+                const isMentioned = mentionedNames.includes(me.name);
+                if (!targets.has(me.id)) return;
                 // dedupe — 같은 댓글이 broadcast/realtime 두 경로로 들어와도 한 번만.
                 // 코덱스 P1 fix (2026-05-05): commentId 포함. 같은 사용자가 같은 리비전에
                 // 짧은 시간 내 여러 댓글 작성 시 두 번째부터 dedupe 충돌로 알림 손실되던 문제.
@@ -1256,7 +1262,7 @@ export default function App() {
                   : `${newComment.user_name || '누군가'}님 댓글`;
                 dispatchNotification({
                   type: 'revision',
-                  title: `리비전 댓글 — ${sceneByUuid?.sceneId || newComment.scene_id || ''}`,
+                  title: `${isMentioned ? '리비전 댓글 멘션' : '리비전 댓글'} — ${sceneByUuid?.sceneId || newComment.scene_id || ''}`,
                   body,
                   metadata: {
                     // 코덱스 P2 fix (8차, 2026-05-05): sceneByUuid 가 stale 캐시 등으로 null 일 때

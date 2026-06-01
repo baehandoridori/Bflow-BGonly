@@ -17,9 +17,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent } from 'react';
 import { ArrowUp, Paperclip, X } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useAppStore } from '@/stores/useAppStore';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import {
   addComment,
+  extractMentions,
   getComments,
   type SceneComment,
 } from '@/services/commentService';
@@ -27,6 +29,8 @@ import { revisionNoToLabel } from '@/constants/revision';
 import { formatCommentTime } from '@/utils/formatTime';
 import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
+import { sendMentionWebhook } from '@/services/slackWebhookService';
+import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 
 interface Props {
   revisionId: string;
@@ -71,7 +75,8 @@ function avatarColor(id: string): string {
 // ─── 메인 컴포넌트 ──────────────────────────────────────────────────────
 
 export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
-  const { currentUser } = useAuthStore();
+  const { currentUser, users } = useAuthStore();
+  const { setView, setHighlightUserName } = useAppStore();
   const revision = useRevisionStore(s => s.revisions.find(r => r.id === revisionId));
   const revisionLabel = revision ? revisionNoToLabel(revision.revisionNo) : 're?';
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
@@ -81,13 +86,25 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   const [expanded, setExpanded] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState('');
+  const [mentionIndex, setMentionIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const mentionDropdownRef = useRef<HTMLDivElement>(null);
   const attachedImagesRef = useRef<AttachedImage[]>([]);
   const draftRef = useRef('');
   const mountedRef = useRef(true);
 
   useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
   useEffect(() => { draftRef.current = draft; }, [draft]);
+  useEffect(() => {
+    if (!showMentions) return;
+    const container = mentionDropdownRef.current;
+    if (!container) return;
+    const items = container.querySelectorAll('button');
+    items[mentionIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [mentionIndex, showMentions]);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -217,6 +234,36 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     e.target.value = '';
   }, [addAttachedImageFromBlob]);
 
+  const handleDraftChange = useCallback((text: string) => {
+    setDraft(text);
+    const lastAt = text.lastIndexOf('@');
+    if (lastAt >= 0) {
+      const afterAt = text.slice(lastAt + 1);
+      if (!afterAt.includes(' ') && afterAt.length < 20) {
+        setShowMentions(true);
+        setMentionFilter(afterAt.toLowerCase());
+        setMentionIndex(0);
+        return;
+      }
+    }
+    setShowMentions(false);
+  }, []);
+
+  const filteredUsers = useMemo(
+    () => users.filter(user => user.name.toLowerCase().includes(mentionFilter)),
+    [mentionFilter, users],
+  );
+
+  const insertMention = useCallback((userName: string) => {
+    const lastAt = draft.lastIndexOf('@');
+    const before = lastAt >= 0 ? draft.slice(0, lastAt) : `${draft} `;
+    const nextDraft = `${before}@${userName} `;
+    setDraft(nextDraft);
+    draftRef.current = nextDraft;
+    setShowMentions(false);
+    inputRef.current?.focus();
+  }, [draft]);
+
   const hasUploadingImage = attachedImages.some(item => item.uploading);
   const uploadedImageUrls = attachedImages.map(item => item.uploadedUrl).filter((url): url is string => !!url);
   const canSend = Boolean(currentUser)
@@ -233,7 +280,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
       userId: currentUser.id,
       userName: currentUser.name,
       text: draft.trim(),
-      mentions: [],
+      mentions: extractMentions(draft, users.map(user => user.name)),
       images: uploadedImageUrls,
       createdAt: new Date().toISOString(),
       // v1.18.0 핵심: 이 댓글은 해당 리비전 맥락에 속함.
@@ -248,6 +295,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
     const prevAttached = attachedImages;
     setDraft('');
     draftRef.current = '';
+    setShowMentions(false);
     setAttachedImages([]);
     attachedImagesRef.current = [];
 
@@ -256,6 +304,26 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
       prevAttached.forEach((item) => {
         try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
       });
+
+      if (newComment.mentions.length > 0 && currentUser.slackId) {
+        const parts = sheetName.match(/^EP(\d+)_([A-Z])_/);
+        const epLabel = parts ? `EP.${parts[1].padStart(2, '0')}` : sheetName;
+        const partLabel = parts ? `${parts[2]}파트` : '';
+        for (const mentionedName of newComment.mentions) {
+          const target = users.find(user => user.name === mentionedName);
+          if (target?.slackId && target.slackId !== currentUser.slackId) {
+            sendMentionWebhook({
+              commentText: newComment.text,
+              episodeLabel: epLabel,
+              sceneId,
+              partLabel,
+              sheetName,
+              authorSlackId: currentUser.slackId,
+              targetSlackId: target.slackId,
+            });
+          }
+        }
+      }
     } catch (err) {
       console.error('[리비전 댓글 스레드] 전송 실패:', err);
 
@@ -314,6 +382,11 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
           key={c.id}
           comment={c}
           isMe={c.userId === currentUser?.id}
+          users={users}
+          onMentionClick={(userName) => {
+            setHighlightUserName(userName);
+            setView('team');
+          }}
         />
       ))}
 
@@ -363,7 +436,27 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
                 ))}
               </div>
             )}
-            <div className="flex gap-2">
+            <div className="relative flex gap-2">
+              {showMentions && filteredUsers.length > 0 && (
+                <div
+                  ref={mentionDropdownRef}
+                  className="absolute bottom-full left-10 right-24 mb-1 max-h-32 overflow-y-auto rounded-lg border border-bg-border bg-bg-card shadow-lg z-20"
+                >
+                  {filteredUsers.map((user, index) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      onClick={() => insertMention(user.name)}
+                      className={`w-full text-left px-3 py-1.5 text-xs text-text-primary transition-colors flex items-center gap-2 cursor-pointer ${
+                        index === mentionIndex ? 'bg-accent/15' : 'hover:bg-accent/10'
+                      }`}
+                    >
+                      <span className="text-accent text-[11px]">@</span>
+                      <span>{user.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -381,10 +474,33 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
                 <Paperclip size={13} />
               </button>
               <input
+                ref={inputRef}
                 type="text"
                 value={draft}
-                onChange={e => setDraft(e.target.value)}
+                onChange={e => handleDraftChange(e.target.value)}
                 onKeyDown={e => {
+                  if (showMentions && filteredUsers.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setMentionIndex((prev) => (prev + 1) % filteredUsers.length);
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setMentionIndex((prev) => (prev - 1 + filteredUsers.length) % filteredUsers.length);
+                      return;
+                    }
+                    if (e.key === 'Enter' || e.key === 'Tab') {
+                      e.preventDefault();
+                      insertMention(filteredUsers[mentionIndex].name);
+                      return;
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setShowMentions(false);
+                      return;
+                    }
+                  }
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     send();
@@ -413,7 +529,40 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
 
 // ─── 댓글 버블 ──────────────────────────────────────────────────────────
 
-function CommentBubble({ comment, isMe }: { comment: SceneComment; isMe: boolean }) {
+function CommentBubble({
+  comment,
+  isMe,
+  users,
+  onMentionClick,
+}: {
+  comment: SceneComment;
+  isMe: boolean;
+  users: { name: string }[];
+  onMentionClick: (userName: string) => void;
+}) {
+  const renderMentionInSegment = (segment: string, baseIdx: number) => {
+    const parts = segment.split(/(@\S+)/g);
+    return parts.map((part, index) => {
+      const key = `${baseIdx}-${index}`;
+      if (part.startsWith('@')) {
+        const name = part.slice(1);
+        if (users.some(user => user.name === name)) {
+          return (
+            <span
+              key={key}
+              className="text-accent font-bold bg-accent/10 rounded px-0.5 cursor-pointer hover:bg-accent/20 transition-colors"
+              onClick={() => onMentionClick(name)}
+              title={`${name} 팀원 보기`}
+            >
+              {part}
+            </span>
+          );
+        }
+      }
+      return <span key={key}>{part}</span>;
+    });
+  };
+
   return (
     <div
       className={`border rounded-lg px-3 py-2 ${
@@ -441,7 +590,7 @@ function CommentBubble({ comment, isMe }: { comment: SceneComment; isMe: boolean
       </div>
       {comment.text && (
         <div className="text-[12px] text-text-primary whitespace-pre-wrap leading-relaxed">
-          {comment.text}
+          <PathLinkifiedText text={comment.text} renderTextSegment={renderMentionInSegment} />
         </div>
       )}
       {(comment.images?.length ?? 0) > 0 && (
