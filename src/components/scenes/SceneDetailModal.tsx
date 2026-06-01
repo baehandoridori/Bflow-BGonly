@@ -756,6 +756,8 @@ export function SceneDetailModal({
       if (oldUrl) storageService.deleteImage(oldUrl).catch(() => {/* best-effort */});
       // 3) DB 필드 비우기
       onFieldUpdate(sceneIndex, field, '');
+      setLatestImageUrls((prev) => ({ ...prev, [deleteConfirm]: '' }));
+      setPreviewUrls((prev) => ({ ...prev, [deleteConfirm]: undefined }));
       setDeleteConfirm(null);
     },
     [sceneIndex, onFieldUpdate, deleteConfirm, scene.storyboardUrl, scene.guideUrl],

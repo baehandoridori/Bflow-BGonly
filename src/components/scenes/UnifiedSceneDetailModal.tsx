@@ -550,6 +550,8 @@ export function UnifiedSceneDetailModal({
     if (!bgScene || !bgSheetName) return;
     const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
     onFieldUpdate(bgSheetName, bgSceneIndex, field, '');
+    setLatestImageUrls((prev) => ({ ...prev, [imageType]: '' }));
+    setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
     setDeleteConfirm(null);
   }, [bgScene, bgSheetName, bgSceneIndex, onFieldUpdate]);
 
