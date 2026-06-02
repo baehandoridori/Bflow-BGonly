@@ -21,6 +21,10 @@ import { parsePathsFromText, parseSceneKey } from './utils';
 import type { SceneInfo } from './utils';
 import { SceneJumpButton } from './SceneJumpButton';
 import { RevisionCommentThread } from '@/components/scenes/RevisionCommentThread';
+import {
+  AttachmentImageLightbox,
+  type AttachmentImageLightboxState,
+} from '@/components/scenes/AttachmentImageLightbox';
 
 export function DetailPanel({
   revision,
@@ -35,6 +39,7 @@ export function DetailPanel({
 }) {
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
+  const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { description: descText, paths: detailPaths } = parsePathsFromText(revision.description);
   const allUsers = useAuthStore((s) => s.users);
   // v1.19.4: notifyUserIds 를 사용자 객체로 변환 (이름 + 컴포지터 라벨 표시)
@@ -57,6 +62,26 @@ export function DetailPanel({
   };
 
   const { sceneId } = parseSceneKey(revision.sceneKey);
+  const revisionLabel = revisionNoToLabel(revision.revisionNo);
+  const openRevisionImage = () => {
+    if (!revision.imageUrl) return;
+    setLightbox({
+      entries: [{
+        url: revision.imageUrl,
+        userName: revision.requesterName,
+        commentText: revision.description,
+        createdAt: revision.createdAt,
+        commentId: revision.id,
+      }],
+      index: 0,
+    });
+  };
+  const lightboxStep = (dir: 1 | -1) => {
+    setLightbox((prev) => {
+      if (!prev || prev.entries.length <= 1) return prev;
+      return { ...prev, index: (prev.index + dir + prev.entries.length) % prev.entries.length };
+    });
+  };
 
   return (
     <motion.div
@@ -87,7 +112,7 @@ export function DetailPanel({
           {/* re# 라벨 + 상태 뱃지 + 씬 점프 */}
           <div className="flex items-center gap-2 mb-5 flex-wrap">
             <span className="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded bg-accent/15 text-accent-sub font-mono font-bold border border-accent/30">
-              {revisionNoToLabel(revision.revisionNo)}
+              {revisionLabel}
             </span>
             <span
               className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5"
@@ -155,12 +180,30 @@ export function DetailPanel({
           {/* 이미지 */}
           {revision.imageUrl && (
             <div className="mb-5">
-              <img
-                src={revision.imageUrl}
-                alt="첨부"
-                className="rounded-xl max-h-48 w-full object-contain border border-bg-border/40"
-              />
+              <button
+                type="button"
+                onClick={openRevisionImage}
+                className="block w-full rounded-xl border border-bg-border/40 overflow-hidden cursor-zoom-in hover:opacity-85 transition-opacity"
+                title="이미지 확대"
+              >
+                <img
+                  src={revision.imageUrl}
+                  alt="첨부"
+                  className="max-h-48 w-full object-contain"
+                />
+              </button>
             </div>
+          )}
+          {lightbox && (
+            <AttachmentImageLightbox
+              lightbox={lightbox}
+              setLightbox={setLightbox}
+              closeLightbox={() => setLightbox(null)}
+              lightboxStep={lightboxStep}
+              sceneLabel={revisionLabel}
+              ariaLabel="리비전 이미지 확대 보기"
+              fileNamePrefix={`${revisionLabel}-revision`}
+            />
           )}
 
           {/* 알림 받는 사람 — v1.19.4 신규 */}

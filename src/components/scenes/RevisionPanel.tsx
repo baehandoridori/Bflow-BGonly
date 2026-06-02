@@ -14,6 +14,7 @@ import { STATUS_CONFIG, revisionNoToLabel } from '@/constants/revision';
 import { elevatedGlassStyle, floatingGlassStyle } from '@/utils/glassStyles';
 import { RevisionRecipientPicker } from './RevisionRecipientPicker';
 import { RevisionCommentThread } from './RevisionCommentThread';
+import { AttachmentImageLightbox, type AttachmentImageLightboxState } from './AttachmentImageLightbox';
 import { calcDefaultRecipients } from '@/utils/revisionRecipients';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
 
@@ -120,6 +121,7 @@ function RevisionCard({
 }) {
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
+  const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const { currentUser, users: allUsers } = useAuthStore();
   const canDelete = !!(
     currentUser && onDelete &&
@@ -147,6 +149,27 @@ function RevisionCard({
     onStatusChange('resolved', resolveNote);
     setShowResolveNote(false);
     setResolveNote('');
+  };
+
+  const openRevisionImage = () => {
+    if (!revision.imageUrl) return;
+    setLightbox({
+      entries: [{
+        url: revision.imageUrl,
+        userName: revision.requesterName,
+        commentText: revision.description,
+        createdAt: revision.createdAt,
+        commentId: revision.id,
+      }],
+      index: 0,
+    });
+  };
+
+  const lightboxStep = (dir: 1 | -1) => {
+    setLightbox((prev) => {
+      if (!prev || prev.entries.length <= 1) return prev;
+      return { ...prev, index: (prev.index + dir + prev.entries.length) % prev.entries.length };
+    });
   };
 
   return (
@@ -203,12 +226,30 @@ function RevisionCard({
       {/* 이미지 썸네일 */}
       {revision.imageUrl && (
         <div className="mb-2">
-          <img
-            src={revision.imageUrl}
-            alt="첨부"
-            className="rounded-lg max-h-32 object-cover border border-bg-border/40 cursor-pointer hover:opacity-80 transition-opacity"
-          />
+          <button
+            type="button"
+            onClick={openRevisionImage}
+            className="block w-fit rounded-lg border border-bg-border/40 overflow-hidden cursor-zoom-in hover:opacity-85 transition-opacity"
+            title="이미지 확대"
+          >
+            <img
+              src={revision.imageUrl}
+              alt="첨부"
+              className="max-h-32 object-cover"
+            />
+          </button>
         </div>
+      )}
+      {lightbox && (
+        <AttachmentImageLightbox
+          lightbox={lightbox}
+          setLightbox={setLightbox}
+          closeLightbox={() => setLightbox(null)}
+          lightboxStep={lightboxStep}
+          sceneLabel={revisionNoToLabel(revision.revisionNo)}
+          ariaLabel="리비전 이미지 확대 보기"
+          fileNamePrefix={`${revisionNoToLabel(revision.revisionNo)}-revision`}
+        />
       )}
 
       {/* 해결 메모 입력 */}

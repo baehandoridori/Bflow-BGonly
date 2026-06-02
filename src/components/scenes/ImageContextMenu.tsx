@@ -17,12 +17,14 @@ interface ImageContextMenuProps {
   y: number;
   containerWidth: number;
   containerHeight: number;
+  actions?: ContextAction[];
   onAction: (action: ContextAction) => void;
   onClose: () => void;
 }
 
 const MENU_W = 220;
-const MENU_H = 200;
+const MENU_ITEM_H = 40;
+const MENU_PADDING_H = 12;
 
 export function ImageContextMenu({
   open,
@@ -30,10 +32,13 @@ export function ImageContextMenu({
   y,
   containerWidth,
   containerHeight,
+  actions,
   onAction,
   onClose,
 }: ImageContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const enabledActions = actions ?? ['download', 'copy', 'copy-url', 'annotate'];
+  const showAnnotate = enabledActions.includes('annotate');
 
   useEffect(() => {
     if (!open) return;
@@ -66,8 +71,9 @@ export function ImageContextMenu({
   if (!open) return null;
 
   // 경계 보정 — 메뉴가 컨테이너 밖으로 벗어나지 않게
+  const menuHeight = enabledActions.length * MENU_ITEM_H + MENU_PADDING_H + (showAnnotate ? 5 : 0);
   const left = Math.max(4, Math.min(x, containerWidth - MENU_W - 4));
-  const top = Math.max(4, Math.min(y, containerHeight - MENU_H - 4));
+  const top = Math.max(4, Math.min(y, containerHeight - menuHeight - 4));
 
   const Item = ({
     icon: Icon,
@@ -106,11 +112,21 @@ export function ImageContextMenu({
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <Item icon={Download} label="다운로드" action="download" shortcut="Ctrl+S" />
-      <Item icon={Copy} label="이미지 복사" action="copy" shortcut="Ctrl+C" />
-      <Item icon={LinkIcon} label="이미지 URL 복사" action="copy-url" />
-      <div className="h-px bg-bg-border/50 my-1" />
-      <Item icon={Edit3} label="주석 새 버전으로 그리기" action="annotate" />
+      {enabledActions.includes('download') && (
+        <Item icon={Download} label="다운로드" action="download" shortcut="Ctrl+S" />
+      )}
+      {enabledActions.includes('copy') && (
+        <Item icon={Copy} label="이미지 복사" action="copy" shortcut="Ctrl+C" />
+      )}
+      {enabledActions.includes('copy-url') && (
+        <Item icon={LinkIcon} label="이미지 URL 복사" action="copy-url" />
+      )}
+      {showAnnotate && (
+        <>
+          <div className="h-px bg-bg-border/50 my-1" />
+          <Item icon={Edit3} label="주석 새 버전으로 그리기" action="annotate" />
+        </>
+      )}
     </div>
   );
 }

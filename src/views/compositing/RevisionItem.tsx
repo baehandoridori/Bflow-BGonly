@@ -1,6 +1,6 @@
 // ─── 리비전 아이템 (확장된 씬 내부) ──────────
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type MouseEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell, MessageSquarePlus, Undo2, UserRound } from 'lucide-react';
 import type { CompRevision, RevisionStatus } from '@/types';
@@ -11,6 +11,10 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { StatusDropdown } from './sharedComponents';
 import { parsePathsFromText } from './utils';
 import { RevisionCommentMarker } from './RevisionCommentMarker';
+import {
+  AttachmentImageLightbox,
+  type AttachmentImageLightboxState,
+} from '@/components/scenes/AttachmentImageLightbox';
 
 const STATUS_TINT: Record<RevisionStatus, { background: string; halo: string }> = {
   open: {
@@ -46,10 +50,12 @@ export function RevisionItem({
 }) {
   const [showResolveNote, setShowResolveNote] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
+  const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const isResolved = revision.status === 'resolved';
   const isInProgress = revision.status === 'in_progress';
   const statusCfg = STATUS_CONFIG[revision.status];
   const statusTint = STATUS_TINT[revision.status];
+  const revisionLabel = revisionNoToLabel(revision.revisionNo);
   const { description: descText, paths } = parsePathsFromText(revision.description);
   const allUsers = useAuthStore((s) => s.users);
   // v1.19.4: notifyUserIds → 사용자 이름 배열 (AvatarStack 용)
@@ -75,19 +81,42 @@ export function RevisionItem({
     setResolveNote('');
   };
 
+  const openRevisionImage = (e: MouseEvent) => {
+    e.stopPropagation();
+    if (!revision.imageUrl) return;
+    setLightbox({
+      entries: [{
+        url: revision.imageUrl,
+        userName: revision.requesterName,
+        commentText: revision.description,
+        createdAt: revision.createdAt,
+        commentId: revision.id,
+      }],
+      index: 0,
+    });
+  };
+
+  const lightboxStep = (dir: 1 | -1) => {
+    setLightbox((prev) => {
+      if (!prev || prev.entries.length <= 1) return prev;
+      return { ...prev, index: (prev.index + dir + prev.entries.length) % prev.entries.length };
+    });
+  };
+
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, x: -8 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -8 }}
-      transition={{ duration: 0.2 }}
-      onClick={onSelect}
-      data-revision-status={revision.status}
-      className={`relative flex items-start gap-3 pl-10 pr-4 py-2.5 rounded-lg border border-bg-border/35 bg-bg-primary/20 transition-all duration-200 group cursor-pointer overflow-hidden ${
-        isSelected ? 'ring-1 ring-accent/25 bg-bg-border/10' : 'hover:bg-bg-border/10'
-      }`}
-    >
+    <>
+      <motion.div
+        layout
+        initial={{ opacity: 0, x: -8 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: -8 }}
+        transition={{ duration: 0.2 }}
+        onClick={onSelect}
+        data-revision-status={revision.status}
+        className={`relative flex items-start gap-3 pl-10 pr-4 py-2.5 rounded-lg border border-bg-border/35 bg-bg-primary/20 transition-all duration-200 group cursor-pointer overflow-hidden ${
+          isSelected ? 'ring-1 ring-accent/25 bg-bg-border/10' : 'hover:bg-bg-border/10'
+        }`}
+      >
       <div
         className="pointer-events-none absolute inset-[1px] rounded-[7px]"
         style={{
@@ -114,13 +143,18 @@ export function RevisionItem({
 
       {/* 썸네일 영역 (이미지 있으면 표시, 없으면 placeholder) */}
       {revision.imageUrl ? (
-        <div className="relative z-[1] shrink-0 w-20 h-14 rounded overflow-hidden">
+        <button
+          type="button"
+          onClick={openRevisionImage}
+          className="relative z-[1] shrink-0 w-20 h-14 rounded overflow-hidden cursor-zoom-in hover:opacity-85 transition-opacity"
+          title="이미지 확대"
+        >
           <img
             src={revision.imageUrl}
             className={`w-full h-full object-cover ${isResolved ? 'opacity-60' : ''}`}
             alt=""
           />
-        </div>
+        </button>
       ) : (
         <div className="relative z-[1] shrink-0 w-20 h-14 rounded border border-dashed border-bg-border/40 flex items-center justify-center text-text-secondary/40">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
@@ -140,7 +174,7 @@ export function RevisionItem({
               isResolved ? 'text-text-secondary/50' : 'text-accent-sub'
             }`}
           >
-            {revisionNoToLabel(revision.revisionNo)}
+            {revisionLabel}
           </span>
           <p
             className={`text-sm leading-relaxed ${
@@ -260,6 +294,18 @@ export function RevisionItem({
           <CompactIconLabel icon={<Undo2 size={11} />} label="되돌리기" />
         </button>
       )}
-    </motion.div>
+      </motion.div>
+      {lightbox && (
+        <AttachmentImageLightbox
+          lightbox={lightbox}
+          setLightbox={setLightbox}
+          closeLightbox={() => setLightbox(null)}
+          lightboxStep={lightboxStep}
+          sceneLabel={revisionLabel}
+          ariaLabel="리비전 이미지 확대 보기"
+          fileNamePrefix={`${revisionLabel}-revision`}
+        />
+      )}
+    </>
   );
 }

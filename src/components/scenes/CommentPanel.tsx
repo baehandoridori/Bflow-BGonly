@@ -41,6 +41,7 @@ import {
   parseRevisionSlashCommand,
   type RevisionSlashContext,
 } from '@/utils/revisionSlashCommand';
+import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { toast as sonnerToast } from 'sonner';
 import '@/styles/comment-panel.css';
 
@@ -1993,12 +1994,14 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
 
       {/* v1.24.1: 라이트박스를 portal 로 body 직속 렌더 → 사이드바/모달 위에 항상 노출 */}
       {lightbox && (
-        <CommentLightboxPortal
+        <AttachmentImageLightbox
           lightbox={lightbox}
           setLightbox={setLightbox}
           closeLightbox={closeLightbox}
           lightboxStep={lightboxStep}
           sceneLabel={sceneLabel}
+          ariaLabel="댓글 이미지 확대 보기"
+          manageKeyboard={false}
         />
       )}
     </div>

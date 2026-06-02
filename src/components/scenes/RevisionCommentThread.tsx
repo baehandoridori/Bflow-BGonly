@@ -31,6 +31,11 @@ import * as storageService from '@/services/storageService';
 import { resizeBlob } from '@/utils/imageUtils';
 import { sendMentionWebhook } from '@/services/slackWebhookService';
 import { PathLinkifiedText } from '@/components/common/PathLinkifiedText';
+import {
+  AttachmentImageLightbox,
+  type AttachmentImageLightboxEntry,
+  type AttachmentImageLightboxState,
+} from './AttachmentImageLightbox';
 
 interface Props {
   revisionId: string;
@@ -89,6 +94,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState('');
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [lightbox, setLightbox] = useState<AttachmentImageLightboxState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
@@ -124,6 +130,38 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   const comments = allComments
     .filter(c => c.revisionId === revisionId)
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  const openLightbox = useCallback((clickedUrl: string, clickedComment: SceneComment) => {
+    const entries: AttachmentImageLightboxEntry[] = [];
+    for (const c of comments) {
+      if (!c.images || c.images.length === 0) continue;
+      for (const url of c.images) {
+        entries.push({
+          url,
+          userName: c.userName,
+          commentText: c.text,
+          createdAt: c.createdAt,
+          commentId: c.id,
+        });
+      }
+    }
+    if (entries.length === 0) return;
+    let clickIdx = entries.findIndex(
+      (entry) => entry.commentId === clickedComment.id && entry.url === clickedUrl,
+    );
+    if (clickIdx < 0) clickIdx = entries.findIndex((entry) => entry.url === clickedUrl);
+    setLightbox({ entries, index: clickIdx < 0 ? 0 : clickIdx });
+  }, [comments]);
+
+  const closeLightbox = useCallback(() => setLightbox(null), []);
+  const lightboxStep = useCallback((dir: 1 | -1) => {
+    setLightbox((prev) => {
+      if (!prev) return prev;
+      const len = prev.entries.length;
+      if (len <= 1) return prev;
+      return { ...prev, index: (prev.index + dir + len) % len };
+    });
+  }, []);
 
   // 댓글 로드 — sceneKey 의 모든 댓글을 가져와서 revisionId 로 필터링
   const loadComments = useCallback(() => {
@@ -383,6 +421,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
           comment={c}
           isMe={c.userId === currentUser?.id}
           users={users}
+          onImageClick={openLightbox}
           onMentionClick={(userName) => {
             setHighlightUserName(userName);
             setView('team');
@@ -523,6 +562,17 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
           </div>
         </div>
       )}
+      {lightbox && (
+        <AttachmentImageLightbox
+          lightbox={lightbox}
+          setLightbox={setLightbox}
+          closeLightbox={closeLightbox}
+          lightboxStep={lightboxStep}
+          sceneLabel={`${revisionLabel} 댓글`}
+          ariaLabel="리비전 댓글 이미지 확대 보기"
+          fileNamePrefix={`${revisionLabel}-comment`}
+        />
+      )}
     </div>
   );
 }
@@ -533,11 +583,13 @@ function CommentBubble({
   comment,
   isMe,
   users,
+  onImageClick,
   onMentionClick,
 }: {
   comment: SceneComment;
   isMe: boolean;
   users: { name: string }[];
+  onImageClick: (url: string, comment: SceneComment) => void;
   onMentionClick: (userName: string) => void;
 }) {
   const renderMentionInSegment = (segment: string, baseIdx: number) => {
@@ -596,13 +648,12 @@ function CommentBubble({
       {(comment.images?.length ?? 0) > 0 && (
         <div className={`mt-2 grid gap-1.5 ${comment.images!.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
           {comment.images!.map((url, index) => (
-            <a
+            <button
+              type="button"
               key={`${url}-${index}`}
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              className="block rounded-md overflow-hidden border border-bg-border/60 bg-bg-secondary/40"
-              title="이미지 열기"
+              onClick={() => onImageClick(url, comment)}
+              className="block rounded-md overflow-hidden border border-bg-border/60 bg-bg-secondary/40 cursor-zoom-in hover:opacity-90 transition-opacity"
+              title="이미지 확대"
             >
               <img
                 src={url}
@@ -610,7 +661,7 @@ function CommentBubble({
                 className="w-full max-h-32 object-cover"
                 loading="lazy"
               />
-            </a>
+            </button>
           ))}
         </div>
       )}

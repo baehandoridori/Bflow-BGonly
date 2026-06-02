@@ -14,6 +14,11 @@ const feedbackHubPreviewApp = readFileSync('src/views/FeedbackHubPreviewApp.tsx'
 const indexCss = readFileSync('src/index.css', 'utf8');
 const electronBroadcast = readFileSync('electron/broadcast.ts', 'utf8');
 const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
+const attachmentImageLightbox = readFileSync('src/components/scenes/AttachmentImageLightbox.tsx', 'utf8');
+const imageContextMenu = readFileSync('src/components/scenes/ImageContextMenu.tsx', 'utf8');
+const revisionPanel = readFileSync('src/components/scenes/RevisionPanel.tsx', 'utf8');
+const revisionDetailPanel = readFileSync('src/views/compositing/RevisionDetailPanel.tsx', 'utf8');
+const revisionItem = readFileSync('src/views/compositing/RevisionItem.tsx', 'utf8');
 
 function getCommentPanelResizableUsage(source: string): string {
   const usage = source.match(/<CommentPanelResizable\b[\s\S]*?\/>/);
@@ -88,6 +93,22 @@ test('revision comment thread supports user mentions like the main comment panel
   assert.match(revisionCommentThread, /insertMention/);
   assert.match(revisionCommentThread, /PathLinkifiedText/);
   assert.match(revisionCommentThread, /sendMentionWebhook/);
+});
+
+test('comment and revision images share enlarge, copy, and download actions', () => {
+  assert.match(attachmentImageLightbox, /ImageContextMenu/);
+  assert.match(attachmentImageLightbox, /downloadImage/);
+  assert.match(attachmentImageLightbox, /copyImageToClipboard/);
+  assert.match(attachmentImageLightbox, /copyImageUrl/);
+  assert.match(attachmentImageLightbox, /actions=\{\['download', 'copy', 'copy-url'\]\}/);
+  assert.match(imageContextMenu, /actions\?: ContextAction\[\]/);
+  assert.match(commentPanel, /AttachmentImageLightbox/);
+  assert.match(revisionCommentThread, /AttachmentImageLightbox/);
+  assert.match(revisionCommentThread, /onImageClick/);
+  assert.doesNotMatch(revisionCommentThread, /href=\{url\}/);
+  assert.match(revisionPanel, /openRevisionImage/);
+  assert.match(revisionDetailPanel, /openRevisionImage/);
+  assert.match(revisionItem, /openRevisionImage/);
 });
 
 test('revision comment notifications include explicitly mentioned users', () => {
