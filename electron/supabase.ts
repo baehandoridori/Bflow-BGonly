@@ -194,6 +194,29 @@ function throwIfError(error: { message: string } | null) {
   if (error) throw new Error(error.message);
 }
 
+type SupabaseErrorLike = {
+  code?: string | null;
+  message?: string | null;
+};
+
+function isMissingCommentReadStateRpcError(error: SupabaseErrorLike | null): boolean {
+  if (!error) return false;
+
+  const message = String(error.message ?? '').toLowerCase();
+  return error.code === 'PGRST202'
+    || (
+      message.includes('upsert_comment_read_state')
+      && message.includes('could not find the function')
+      && message.includes('schema cache')
+    );
+}
+
+function isDuplicateKeyError(error: SupabaseErrorLike | null): boolean {
+  if (!error) return false;
+  const message = String(error.message ?? '').toLowerCase();
+  return error.code === '23505' || message.includes('duplicate key');
+}
+
 const SCENE_COMPLETION_META_TYPE = 'scene-completion';
 
 function parseSceneCompletionMeta(value: string | null | undefined): { completedBy: string; completedAt: string } | null {
@@ -1337,13 +1360,54 @@ export async function upsertCommentReadState(
     throw new Error('invalid comment read state input');
   }
 
+  const normalizedLastReadAt = new Date(readMs).toISOString();
   const { error } = await supabase.rpc('upsert_comment_read_state', {
     p_user_id: safeUserId,
     p_scene_thread_key: safeSceneThreadKey,
-    p_last_read_at: new Date(readMs).toISOString(),
+    p_last_read_at: normalizedLastReadAt,
   });
 
-  throwIfError(error);
+  if (!error) return;
+  if (!isMissingCommentReadStateRpcError(error)) {
+    throwIfError(error);
+    return;
+  }
+
+  await upsertCommentReadStateViaTable(safeUserId, safeSceneThreadKey, normalizedLastReadAt);
+}
+
+async function upsertCommentReadStateViaTable(
+  userId: string,
+  sceneThreadKey: string,
+  lastReadAt: string,
+): Promise<void> {
+  const updatedAt = new Date().toISOString();
+  const { error: insertError } = await supabase
+    .from('comment_read_states')
+    .insert({
+      user_id: userId,
+      scene_thread_key: sceneThreadKey,
+      last_read_at: lastReadAt,
+      updated_at: updatedAt,
+    });
+
+  if (!insertError) return;
+  if (!isDuplicateKeyError(insertError)) {
+    throwIfError(insertError);
+    return;
+  }
+
+  const { error: updateError } = await supabase
+    .from('comment_read_states')
+    .update({
+      last_read_at: lastReadAt,
+      updated_at: updatedAt,
+    })
+    .eq('user_id', userId)
+    .eq('scene_thread_key', sceneThreadKey)
+    .lt('last_read_at', lastReadAt);
+
+  throwIfError(updateError);
 }
 
 /** 댓글 추가 */

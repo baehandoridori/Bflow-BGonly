@@ -6,6 +6,7 @@ import {
   __flushPendingCommentReadStateForTests,
   __getPendingCommentReadStateForTests,
   __hasCommentReadStatePersistenceOverrideForTests,
+  __isCommentReadStatePersistenceDisabledForTests,
   __resetCommentReadStateServiceForTests,
   __setCommentReadStatePersistenceForTests,
   getCommentReadStateForUser,
@@ -145,6 +146,39 @@ test('save failure keeps optimistic cache and queues pending write', async () =>
     assert.equal(state['EP05:A:a001'], '2026-05-29T10:00:00.000Z');
     assert.equal(pending?.readAt, '2026-05-29T10:00:00.000Z');
     assert.equal(pending?.hasTimer, true);
+  });
+});
+
+test('missing Supabase read-state schema keeps local cache without retry spam', async () => {
+  let upsertCalls = 0;
+  await withMutedWarnings(async () => {
+    installFakePersistence({
+      upsert: async () => {
+        upsertCalls += 1;
+        throw new Error(
+          "Error invoking remote method 'supabase:upsert-comment-read-state': Error: Could not find the function public.upsert_comment_read_state(p_last_read_at, p_scene_thread_key, p_user_id) in the schema cache",
+        );
+      },
+    });
+
+    await markSceneThreadReadForUser({
+      userId: 'me',
+      sceneThreadKey: 'EP05:A:a001',
+      readAt: '2026-05-29T10:00:00.000Z',
+    });
+
+    await markSceneThreadReadForUser({
+      userId: 'me',
+      sceneThreadKey: 'EP05:A:a001',
+      readAt: '2026-05-29T10:01:00.000Z',
+    });
+
+    const state = await getCommentReadStateForUser('me');
+
+    assert.equal(state['EP05:A:a001'], '2026-05-29T10:01:00.000Z');
+    assert.equal(upsertCalls, 1);
+    assert.equal(__isCommentReadStatePersistenceDisabledForTests(), true);
+    assert.equal(__getPendingCommentReadStateForTests('me', 'EP05:A:a001'), null);
   });
 });
 

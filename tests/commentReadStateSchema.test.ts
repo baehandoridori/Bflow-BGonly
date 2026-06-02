@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const migration = readFileSync('DEVLOG/migrations/2026-05-30-comment-read-states.sql', 'utf8');
 const initSql = readFileSync('DEVLOG/supabase-init.sql', 'utf8');
+const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
 
 for (const [label, sql] of [
   ['migration', migration],
@@ -29,3 +30,11 @@ for (const [label, sql] of [
     assert.match(sql, /GRANT EXECUTE ON FUNCTION upsert_comment_read_state\s*\(\s*TEXT\s*,\s*TEXT\s*,\s*TIMESTAMPTZ\s*\)\s+TO anon,\s*authenticated/i);
   });
 }
+
+test('Electron falls back to table writes when the comment read-state RPC is missing', () => {
+  assert.match(electronSupabase, /isMissingCommentReadStateRpcError/);
+  assert.match(electronSupabase, /upsertCommentReadStateViaTable/);
+  assert.match(electronSupabase, /\.from\('comment_read_states'\)[\s\S]*\.insert/);
+  assert.match(electronSupabase, /\.from\('comment_read_states'\)[\s\S]*\.update/);
+  assert.match(electronSupabase, /\.lt\('last_read_at',\s*lastReadAt\)/);
+});
