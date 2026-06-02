@@ -87,18 +87,23 @@ export function AttachmentImageLightbox({
   useEffect(() => {
     if (!manageKeyboard) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      const claimKey = () => {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      };
+      if (e.key === 'Escape') {
+        claimKey();
         closeLightbox();
         return;
       }
       if (e.key === 'ArrowLeft') {
-        e.preventDefault();
+        claimKey();
         lightboxStep(-1);
         return;
       }
       if (e.key === 'ArrowRight') {
-        e.preventDefault();
+        claimKey();
         lightboxStep(1);
       }
     };
