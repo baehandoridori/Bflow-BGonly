@@ -69,6 +69,9 @@ test('Scene detail comment panels expose /re quick revision context', () => {
 
 test('quick revision can register a pasted attachment as the revision image', () => {
   assert.match(commentPanel, /imageUrl:\s*revisionImageUrl/);
+  assert.match(commentPanel, /const prevAttached = attachedImages;[\s\S]*setAttachedImages\(\[\]\);[\s\S]*attachedImagesRef\.current = \[\];[\s\S]*await createRevision\(\{/);
+  assert.match(commentPanel, /\[리비전 빠른 등록 실패 \+ unmount\]/);
+  assert.match(commentPanel, /setAttachedImages\(prevAttached\);[\s\S]*attachedImagesRef\.current = prevAttached/);
   assert.match(commentPanel, /첨부 이미지가 리비전 이미지로 함께 등록됩니다/);
   assert.match(commentPanel, /quickRevisionActive \? files\.slice\(0, 1\) : files/);
   assert.doesNotMatch(commentPanel, /빠른 리비전은 텍스트만 등록합니다/);

@@ -848,6 +848,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       const prevAttached = attachedImages;
       const revisionImageUrl = uploadedImageUrls[0];
       const unusedUploadedImageUrls = uploadedImageUrls.slice(1);
+      setAttachedImages([]);
+      attachedImagesRef.current = [];
       try {
         await createRevision({
           sceneKey: quickRevision.sceneKey,
@@ -861,8 +863,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
         });
         setInput('');
         inputValueRef.current = '';
-        setAttachedImages([]);
-        attachedImagesRef.current = [];
         setQuickRevisionPickerOpen(false);
         setShowMentions(false);
         setReplyTarget(null);
@@ -881,6 +881,32 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
         });
       } catch (err) {
         console.error('[리비전 빠른 등록 실패]', err);
+        if (!mountedRef.current) {
+          prevAttached.forEach((item) => {
+            try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+            if (item.uploadedUrl) {
+              storageService.deleteImage(item.uploadedUrl).catch(err2 => {
+                console.warn('[리비전 빠른 등록 실패 + unmount] storage 정리 실패:', err2);
+              });
+            }
+          });
+          return;
+        }
+
+        const userStartedNew = attachedImagesRef.current.length > 0;
+        if (userStartedNew) {
+          prevAttached.forEach((item) => {
+            try { URL.revokeObjectURL(item.previewUrl); } catch { /* ignore */ }
+            if (item.uploadedUrl) {
+              storageService.deleteImage(item.uploadedUrl).catch(err2 => {
+                console.warn('[리비전 빠른 등록 실패 롤백] 버려진 업로드 객체 정리 실패:', err2);
+              });
+            }
+          });
+        } else {
+          setAttachedImages(prevAttached);
+          attachedImagesRef.current = prevAttached;
+        }
         sonnerToast.error('리비전 등록 실패', {
           description: err instanceof Error ? err.message : '잠시 후 다시 시도해 주세요.',
         });
