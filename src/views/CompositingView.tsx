@@ -21,7 +21,11 @@ import {
   filterRevisionsBySearch,
   sortRevisions,
 } from './compositing/utils';
-import { buildFeedbackHubStats, buildFeedbackHubTree } from './compositing/feedbackHubUtils';
+import {
+  buildFeedbackHubPartCollapseKey,
+  buildFeedbackHubStats,
+  buildFeedbackHubTree,
+} from './compositing/feedbackHubUtils';
 import type { SceneInfo, SceneGroup, SortMode } from './compositing/utils';
 import { FeedbackTreeSection, EpisodeFilter } from './compositing/SceneGroupSection';
 import { DetailPanel } from './compositing/RevisionDetailPanel';
@@ -58,7 +62,8 @@ export default function CompositingView({
   const [statusFilter, setStatusFilter] = useState<'all' | RevisionStatus>('all');
   const [myTasksOnly, setMyTasksOnly] = useState(false);
   const [expandedScenes, setExpandedScenes] = useState<Set<string>>(new Set());
-  const [autoExpandedOnce, setAutoExpandedOnce] = useState(false);
+  const [expandedFeedbackEpisodes, setExpandedFeedbackEpisodes] = useState<Set<number>>(new Set());
+  const [expandedFeedbackParts, setExpandedFeedbackParts] = useState<Set<string>>(new Set());
   const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
@@ -377,14 +382,6 @@ export default function CompositingView({
   }, [sceneGroups.length, visibleRevisions, effectiveCommentCountByRev, currentUser?.name]);
 
   useEffect(() => {
-    if (autoExpandedOnce || sceneGroups.length === 0) return;
-    const openGroups = sceneGroups.filter((group) => group.openCount > 0);
-    const groupsToOpen = openGroups.length > 0 ? openGroups : sceneGroups.slice(0, 8);
-    setExpandedScenes(new Set(groupsToOpen.map((group) => group.sceneKey)));
-    setAutoExpandedOnce(true);
-  }, [autoExpandedOnce, sceneGroups]);
-
-  useEffect(() => {
     if (!selectedRevisionId) return;
     if (visibleRevisions.some((revision) => revision.id === selectedRevisionId)) return;
     setSelectedRevisionId(null);
@@ -468,16 +465,55 @@ export default function CompositingView({
     });
   }, []);
 
+  const toggleFeedbackEpisode = useCallback((episodeNumber: number) => {
+    setExpandedFeedbackEpisodes(prev => {
+      const next = new Set(prev);
+      if (next.has(episodeNumber)) next.delete(episodeNumber);
+      else next.add(episodeNumber);
+      return next;
+    });
+  }, []);
+
+  const toggleFeedbackPart = useCallback((episodeNumber: number, partId: string) => {
+    const partKey = buildFeedbackHubPartCollapseKey(episodeNumber, partId);
+    setExpandedFeedbackParts(prev => {
+      const next = new Set(prev);
+      if (next.has(partKey)) next.delete(partKey);
+      else next.add(partKey);
+      return next;
+    });
+  }, []);
+
+  const hasFeedbackTreeExpansion = useMemo(
+    () =>
+      feedbackTree.some((episodeTree) =>
+        expandedFeedbackEpisodes.has(episodeTree.episodeNumber)
+        || episodeTree.parts.some((partTree) =>
+          expandedFeedbackParts.has(buildFeedbackHubPartCollapseKey(episodeTree.episodeNumber, partTree.partId)),
+        ),
+      )
+      || sceneGroups.some((group) => expandedScenes.has(group.sceneKey)),
+    [expandedFeedbackEpisodes, expandedFeedbackParts, expandedScenes, feedbackTree, sceneGroups],
+  );
+
   // 모두 펼치기/접기
   const toggleAll = useCallback(() => {
-    if (expandedScenes.size > 0) {
+    if (hasFeedbackTreeExpansion) {
       setExpandedScenes(new Set());
+      setExpandedFeedbackEpisodes(new Set());
+      setExpandedFeedbackParts(new Set());
     } else {
-      const openGroups = sceneGroups.filter(g => g.openCount > 0);
-      const groupsToOpen = openGroups.length > 0 ? openGroups : sceneGroups;
-      setExpandedScenes(new Set(groupsToOpen.map(g => g.sceneKey)));
+      setExpandedFeedbackEpisodes(new Set(feedbackTree.map((episodeTree) => episodeTree.episodeNumber)));
+      setExpandedFeedbackParts(new Set(
+        feedbackTree.flatMap((episodeTree) =>
+          episodeTree.parts.map((partTree) =>
+            buildFeedbackHubPartCollapseKey(episodeTree.episodeNumber, partTree.partId),
+          ),
+        ),
+      ));
+      setExpandedScenes(new Set(sceneGroups.map(g => g.sceneKey)));
     }
-  }, [expandedScenes.size, sceneGroups]);
+  }, [feedbackTree, hasFeedbackTreeExpansion, sceneGroups]);
 
   // 리비전 선택
   const handleSelectRevision = useCallback((rev: CompRevision) => {
@@ -518,7 +554,7 @@ export default function CompositingView({
                 >
                   <CompactIconLabel
                     icon={<ListFilter size={12} strokeWidth={2.4} />}
-                    label={expandedScenes.size > 0 ? '모두 접기' : '모두 펼치기'}
+                    label={hasFeedbackTreeExpansion ? '모두 접기' : '모두 펼치기'}
                   />
                 </button>
               )}
@@ -645,10 +681,14 @@ export default function CompositingView({
           ) : groupMode === 'scene' ? (
             <FeedbackTreeSection
               episodeTrees={feedbackTree}
+              expandedEpisodes={expandedFeedbackEpisodes}
+              expandedParts={expandedFeedbackParts}
               expandedScenes={expandedScenes}
               selectedRevisionId={selectedRevisionId}
               commentCountByRev={effectiveCommentCountByRev}
               commentSeenByRev={effectiveCommentSeenByRev}
+              onToggleEpisode={toggleFeedbackEpisode}
+              onTogglePart={toggleFeedbackPart}
               onToggleScene={toggleScene}
               onSelectRevision={handleSelectRevision}
               onStatusChange={handleStatusChange}

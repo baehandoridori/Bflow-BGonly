@@ -50,6 +50,8 @@ const pendingWrites = new Map<string, PendingWrite>();
 
 let persistenceOverride: CommentReadStatePersistence | null = null;
 let pendingVersionSequence = 0;
+let persistenceDisabledForSession = false;
+let schemaUnavailableWarningLogged = false;
 
 async function getDefaultPersistence(): Promise<CommentReadStatePersistence> {
   if (typeof window === 'undefined') {
@@ -110,6 +112,38 @@ function clearPendingTimer(pending: PendingWrite): void {
   if (!pending.timer) return;
   clearTimeout(pending.timer);
   pending.timer = null;
+}
+
+function clearAllPendingWrites(): void {
+  for (const pending of pendingWrites.values()) {
+    clearPendingTimer(pending);
+  }
+  pendingWrites.clear();
+}
+
+function isCommentReadStateSchemaUnavailableError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  const lower = message.toLowerCase();
+
+  const missingReadStateFunction = lower.includes('upsert_comment_read_state')
+    && lower.includes('could not find the function');
+  const missingReadStateTable = lower.includes('comment_read_states')
+    && (
+      lower.includes('could not find the table')
+      || lower.includes('relation "comment_read_states" does not exist')
+      || lower.includes("relation 'comment_read_states' does not exist")
+    );
+
+  return missingReadStateFunction || missingReadStateTable;
+}
+
+function disablePersistenceForSession(err: unknown): void {
+  persistenceDisabledForSession = true;
+  clearAllPendingWrites();
+
+  if (schemaUnavailableWarningLogged) return;
+  schemaUnavailableWarningLogged = true;
+  console.warn('[댓글 읽음] Supabase 읽음 상태 스키마가 아직 준비되지 않아 이번 실행에서는 로컬 캐시만 사용합니다:', err);
 }
 
 function scheduleRetry(pending: PendingWrite): void {
@@ -183,6 +217,8 @@ function queuePendingWrite(input: MarkSceneThreadReadInput): void {
 }
 
 async function saveReadState(input: MarkSceneThreadReadInput): Promise<void> {
+  if (persistenceDisabledForSession) return;
+
   const persistence = await getPersistence();
   await persistence.upsert(input.userId, input.sceneThreadKey, input.readAt);
 }
@@ -198,6 +234,11 @@ async function flushPendingWrite(
     await saveReadState(attempted);
     completePendingWriteAfterSuccessfulSave(attempted);
   } catch (err) {
+    if (isCommentReadStateSchemaUnavailableError(err)) {
+      disablePersistenceForSession(err);
+      return;
+    }
+
     console.warn('[댓글 읽음] Supabase 저장 실패:', err);
 
     const current = pendingWrites.get(key);
@@ -294,20 +335,32 @@ export function primeCommentReadStateForUser(userId: string, state: Record<strin
 export async function getCommentReadStateForUser(userId: string): Promise<Record<string, string>> {
   if (!userId) return {};
 
-  try {
-    await flushPendingWritesForUser(userId);
-  } catch (err) {
-    console.warn('[댓글 읽음] 대기 중인 저장 반영 실패:', err);
+  if (!persistenceDisabledForSession) {
+    try {
+      await flushPendingWritesForUser(userId);
+    } catch (err) {
+      if (isCommentReadStateSchemaUnavailableError(err)) {
+        disablePersistenceForSession(err);
+      } else {
+        console.warn('[댓글 읽음] 대기 중인 저장 반영 실패:', err);
+      }
+    }
   }
 
-  try {
-    const persistence = await getPersistence();
-    const rows = await persistence.read(userId);
-    for (const row of rows) {
-      applyReadStateToCache(userId, row.sceneThreadKey, row.lastReadAt);
+  if (!persistenceDisabledForSession) {
+    try {
+      const persistence = await getPersistence();
+      const rows = await persistence.read(userId);
+      for (const row of rows) {
+        applyReadStateToCache(userId, row.sceneThreadKey, row.lastReadAt);
+      }
+    } catch (err) {
+      if (isCommentReadStateSchemaUnavailableError(err)) {
+        disablePersistenceForSession(err);
+      } else {
+        console.warn('[댓글 읽음] Supabase 상태 로드 실패, 캐시를 사용합니다:', err);
+      }
     }
-  } catch (err) {
-    console.warn('[댓글 읽음] Supabase 상태 로드 실패, 캐시를 사용합니다:', err);
   }
 
   return { ...(cacheByUser.get(userId) ?? {}) };
@@ -336,6 +389,11 @@ export async function markSceneThreadReadForUser(input: MarkSceneThreadReadInput
     await saveReadState(normalizedInput);
     completePendingWriteAfterSuccessfulSave(normalizedInput);
   } catch (err) {
+    if (isCommentReadStateSchemaUnavailableError(err)) {
+      disablePersistenceForSession(err);
+      return;
+    }
+
     console.warn('[댓글 읽음] Supabase 저장 실패, 재시도 예약:', err);
     queuePendingWrite(normalizedInput);
   }
@@ -384,13 +442,15 @@ export function __hasCommentReadStatePersistenceOverrideForTests(): boolean {
   return !!persistenceOverride;
 }
 
+export function __isCommentReadStatePersistenceDisabledForTests(): boolean {
+  return persistenceDisabledForSession;
+}
+
 export function __resetCommentReadStateServiceForTests(): void {
   cacheByUser.clear();
   persistenceOverride = null;
   pendingVersionSequence = 0;
-
-  for (const pending of pendingWrites.values()) {
-    clearPendingTimer(pending);
-  }
-  pendingWrites.clear();
+  persistenceDisabledForSession = false;
+  schemaUnavailableWarningLogged = false;
+  clearAllPendingWrites();
 }

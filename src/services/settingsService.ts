@@ -126,6 +126,8 @@ export interface UserPreferences {
     starNest?: Partial<StarNestSettings>;
     loginStarNest?: Partial<StarNestSettings>;
     dashboardStarNest?: Partial<StarNestSettings>;
+    dashboardStarNestOpacity?: number;
+    dashboardStarNestBlurPx?: number;
   };
 
   // Phase 8-4: 스플래시 건너뛰기

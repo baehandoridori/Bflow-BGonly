@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>B flow 시트/카드 폴리싱 시안</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #171a24;
+      --panel-2: #1d2130;
+      --line: #2d3041;
+      --line-soft: rgba(141, 146, 178, 0.22);
+      --text: #e8e8ee;
+      --muted: #8b8da3;
+      --accent: #6c5ce7;
+      --act: #e17055;
+      --bgdept: #6c5ce7;
+      --yellow: #fdcb6e;
+      --green: #00b894;
+      --blue: #74b9ff;
+      color-scheme: dark;
+      font-family: Inter, "IBM Plex Sans KR", "Noto Sans KR", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 20% 0%, rgba(108,92,231,0.16), transparent 24rem), var(--bg);
+      color: var(--text);
+    }
+    button, input { font: inherit; }
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      background: rgba(15,17,23,0.94);
+    }
+    .rail {
+      border-right: 1px solid var(--line);
+      background: #121520;
+      padding: 16px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      align-items: center;
+    }
+    .logo {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #6c5ce7, #2d3041);
+      display: grid;
+      place-items: center;
+      color: #c9c5ff;
+      font-weight: 800;
+      box-shadow: 0 10px 28px rgba(108,92,231,0.26);
+    }
+    .rail-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+    }
+    .rail-icon.active {
+      background: rgba(108,92,231,0.22);
+      color: #a599f5;
+    }
+    main {
+      min-width: 0;
+      padding: 22px 24px 44px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(18,21,32,0.72);
+    }
+    .tab {
+      border: 0;
+      border-radius: 9px;
+      padding: 8px 12px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+    }
+    .tab.active {
+      color: var(--text);
+      background: rgba(108,92,231,0.24);
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: 18px;
+    }
+    .episode {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(26,29,39,0.74);
+      padding: 16px;
+      height: fit-content;
+    }
+    .episode-title {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 14px;
+    }
+    .ep-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-radius: 10px;
+      color: var(--text);
+    }
+    .ep-row.active {
+      background: rgba(108,92,231,0.2);
+      color: #ddd9ff;
+    }
+    .content {
+      min-width: 0;
+      display: grid;
+      gap: 18px;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(26,29,39,0.78);
+      overflow: hidden;
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(22,25,36,0.82);
+    }
+    .panel-title {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px rgba(108,92,231,0.5);
+    }
+    .selector {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .choice {
+      border: 1px solid var(--line);
+      background: rgba(15,17,23,0.6);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .choice.active {
+      color: var(--text);
+      border-color: rgba(108,92,231,0.6);
+      background: rgba(108,92,231,0.2);
+    }
+    .mock-body {
+      padding: 16px;
+    }
+    .table-wrap {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #11141d;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 12px;
+    }
+    th, td {
+      border-right: 1px solid rgba(45,48,65,0.85);
+      border-bottom: 1px solid rgba(45,48,65,0.74);
+      height: 52px;
+      padding: 8px 10px;
+      vertical-align: middle;
+      color: var(--muted);
+      position: relative;
+    }
+    th {
+      height: 44px;
+      color: #a8abc4;
+      background: #181b27;
+      text-align: left;
+      font-weight: 700;
+      user-select: none;
+    }
+    .resize-handle {
+      position: absolute;
+      top: 0;
+      right: -4px;
+      width: 8px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 4;
+    }
+    .resize-handle::after {
+      content: "";
+      position: absolute;
+      top: 8px;
+      bottom: 8px;
+      left: 3px;
+      width: 2px;
+      border-radius: 2px;
+      background: transparent;
+    }
+    th:hover .resize-handle::after,
+    .resize-handle.dragging::after {
+      background: #a599f5;
+      box-shadow: 0 0 14px rgba(108,92,231,0.65);
+    }
+    .scene-id {
+      display: inline-flex;
+      align-items: center;
+      min-width: 64px;
+      border: 1px solid rgba(108,92,231,0.58);
+      color: #9e91ff;
+      border-radius: 8px;
+      padding: 5px 9px;
+      font-family: "Fira Code", ui-monospace, monospace;
+      font-weight: 700;
+    }
+    .memo {
+      color: #b6b8cc;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .alert-cell {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      height: 22px;
+      min-width: 22px;
+      padding: 0 7px;
+      border-radius: 999px;
+      border: 1px solid var(--line-soft);
+      background: rgba(139,141,163,0.1);
+      color: #b9bad0;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .badge.revision {
+      border-color: rgba(108,92,231,0.36);
+      background: rgba(108,92,231,0.16);
+      color: #aaa0ff;
+    }
+    .badge.comment {
+      border-color: rgba(253,203,110,0.32);
+      background: rgba(253,203,110,0.12);
+      color: #f4cf86;
+    }
+    .row-pin {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      gap: 6px;
+      pointer-events: none;
+    }
+    .sheet-option-b .scene-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .sheet-option-c td:first-child {
+      overflow: visible;
+    }
+    .sheet-option-c .scene-id {
+      border-color: rgba(108,92,231,0.42);
+    }
+    .cards {
+      display: flex;
+      gap: 18px;
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+    .card {
+      position: relative;
+      width: var(--card-w, 282px);
+      min-height: 230px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #171a24;
+      padding: 14px;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.22);
+      overflow: hidden;
+      transition: width 180ms ease, border-color 160ms ease;
+    }
+    .card.active {
+      border-color: rgba(108,92,231,0.72);
+    }
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .card-id {
+      font-family: "Fira Code", ui-monospace, monospace;
+      font-weight: 800;
+      color: var(--text);
+    }
+    .percent {
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(15,17,23,0.66);
+      color: #d8d8e4;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .dept {
+      margin-top: 12px;
+    }
+    .dept-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .dept-name {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 800;
+    }
+    .dept-name.bg { color: #8f81ff; }
+    .dept-name.act { color: #ff8c70; }
+    .stage-track {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 4px;
+      padding: 5px;
+      border-radius: 10px;
+      border: 1px solid rgba(45,48,65,0.7);
+      background: rgba(15,17,23,0.7);
+      min-width: 0;
+    }
+    .seg {
+      height: 38px;
+      min-width: 0;
+      border: 0;
+      border-radius: 8px;
+      color: #8b8da3;
+      background: transparent;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      cursor: pointer;
+      position: relative;
+    }
+    .seg.active {
+      color: #0f1117;
+      background: #848ba1;
+      box-shadow: 0 2px 10px rgba(132,139,161,0.34);
+      font-weight: 800;
+    }
+    .seg .label,
+    .seg .ico {
+      grid-area: 1 / 1;
+      transition: opacity 120ms ease;
+    }
+    .ico {
+      width: 16px;
+      height: 16px;
+      opacity: 0;
+    }
+    .stage-mode-text .ico,
+    .stage-mode-current .ico { opacity: 0; }
+    .stage-mode-text .label { opacity: 1; }
+    .stage-mode-icon .label { opacity: 0; }
+    .stage-mode-icon .ico { opacity: 1; }
+    .stage-mode-current .seg:not(.active) .label { opacity: 0; }
+    .stage-mode-current .seg:not(.active) .ico { opacity: 1; }
+    .stage-mode-current .seg.active .label { opacity: 1; }
+    .card.narrow .stage-mode-auto .label {
+      opacity: 0;
+    }
+    .card.narrow .stage-mode-auto .ico {
+      opacity: 1;
+    }
+    .card:not(.narrow) .stage-mode-auto .label {
+      opacity: 1;
+    }
+    .card:not(.narrow) .stage-mode-auto .ico {
+      opacity: 0;
+    }
+    .revision-a::before {
+      content: "";
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      top: 0;
+      height: 2px;
+      border-radius: 999px;
+      background: #8f81ff;
+      box-shadow: 0 0 14px rgba(108,92,231,0.45);
+    }
+    .revision-b::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: 0;
+      border-style: solid;
+      border-width: 0 36px 36px 0;
+      border-color: transparent #6c5ce7 transparent transparent;
+      opacity: 0.82;
+    }
+    .revision-c {
+      box-shadow: inset 0 0 0 1px rgba(108,92,231,0.44), 0 12px 28px rgba(0,0,0,0.22);
+    }
+    .card-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-width: 24px;
+      height: 24px;
+      padding: 0 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(108,92,231,0.38);
+      background: rgba(108,92,231,0.16);
+      color: #b4a9ff;
+      font-weight: 900;
+      font-size: 11px;
+    }
+    .revision-strip {
+      margin: -2px 0 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #aaa0ff;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .range-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      min-width: 240px;
+    }
+    .range-row input { accent-color: var(--accent); }
+    .hidden { display: none !important; }
+    svg {
+      width: 14px;
+      height: 14px;
+      stroke: currentColor;
+      stroke-width: 2.2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <div class="logo">B</div>
+      <div class="rail-icon"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
+      <div class="rail-icon active"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M6 7h12M6 12h12M6 17h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+      <div class="rail-icon"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
+      <div class="rail-icon"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M5 8h14M5 16h14M9 5v6M15 13v6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+    </aside>
+    <main>
+      <div class="topbar">
+        <h1>씬 목록 폴리싱 시안</h1>
+        <div class="tabs">
+          <button class="tab active" data-tab="sheet">시트</button>
+          <button class="tab" data-tab="card">카드</button>
+          <button class="tab" data-tab="stage">단계</button>
+        </div>
+      </div>
+      <div class="layout">
+        <aside class="episode">
+          <div class="episode-title">에피소드</div>
+          <div class="ep-row active"><span>EP.05</span><span>24</span></div>
+          <div class="ep-row"><span>a파트</span><span>6</span></div>
+          <div class="ep-row"><span>b파트</span><span>6</span></div>
+          <div class="ep-row"><span>c파트</span><span>6</span></div>
+        </aside>
+        <section class="content">
+          <div class="panel view" data-view="sheet">
+            <div class="panel-head">
+              <div class="panel-title"><span class="dot"></span>시트 배지/컬럼 리사이즈</div>
+              <div class="selector" data-group="sheet">
+                <button class="choice active" data-option="a">A 씬번호 우측 칸</button>
+                <button class="choice" data-option="b">B 씬번호 우측 포켓</button>
+                <button class="choice" data-option="c">C 빈 공간 고정</button>
+              </div>
+            </div>
+            <div class="mock-body">
+              <div id="sheetMock" class="table-wrap sheet-option-a">
+                <table>
+                  <colgroup id="mockCols">
+                    <col data-col="scene" />
+                    <col data-col="alerts" />
+                    <col data-col="bgMemo" />
+                    <col data-col="actMemo" />
+                    <col data-col="assignee" />
+                    <col data-col="stage" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th data-col="scene">씬번호<span class="resize-handle" data-boundary="scene:alerts"></span></th>
+                      <th data-col="alerts"><span class="resize-handle" data-boundary="alerts:bgMemo"></span></th>
+                      <th data-col="bgMemo">BG 메모<span class="resize-handle" data-boundary="bgMemo:actMemo"></span></th>
+                      <th data-col="actMemo">ACT 메모<span class="resize-handle" data-boundary="actMemo:assignee"></span></th>
+                      <th data-col="assignee">ACT담당<span class="resize-handle" data-boundary="assignee:stage"></span></th>
+                      <th data-col="stage">액팅 단계</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sheetRows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel view hidden" data-view="card">
+            <div class="panel-head">
+              <div class="panel-title"><span class="dot"></span>카드 리비전 표기</div>
+              <div class="selector" data-group="revision">
+                <button class="choice" data-option="a">A 상단 라인</button>
+                <button class="choice active" data-option="b">B 코너 플래그</button>
+                <button class="choice" data-option="c">C 내부 스트립</button>
+              </div>
+            </div>
+            <div class="mock-body">
+              <div class="cards" id="revisionCards"></div>
+            </div>
+          </div>
+
+          <div class="panel view hidden" data-view="stage">
+            <div class="panel-head">
+              <div class="panel-title"><span class="dot"></span>카드 단계 전환</div>
+              <div class="range-row">
+                카드 폭
+                <input id="cardWidth" type="range" min="172" max="330" value="250" />
+                <span id="cardWidthText">250</span>
+              </div>
+              <div class="selector" data-group="stage">
+                <button class="choice active" data-option="auto">A 텍스트에서 아이콘</button>
+                <button class="choice" data-option="current">B 현재만 텍스트</button>
+                <button class="choice" data-option="text">C 텍스트 고정</button>
+              </div>
+            </div>
+            <div class="mock-body">
+              <div class="cards" id="stageCards"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <template id="stageTrack">
+    <div class="stage-track">
+      <button class="seg active" type="button" aria-label="대기">
+        <span class="label">대기</span>
+        <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6l4 2"></path></svg>
+      </button>
+      <button class="seg" type="button" aria-label="작업중">
+        <span class="label">작업중</span>
+        <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M10 8l6 4-6 4z"></path></svg>
+      </button>
+      <button class="seg" type="button" aria-label="피드백">
+        <span class="label">피드백</span>
+        <svg class="ico" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path><path d="M12 7v5"></path><path d="M12 15h.01"></path></svg>
+      </button>
+      <button class="seg" type="button" aria-label="완료">
+        <span class="label">완료</span>
+        <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M8 12l3 3 5-6"></path></svg>
+      </button>
+    </div>
+  </template>
+
+  <script>
+    const rows = [
+      { id: "a001", bg: "-", act: "레이아웃 기준 동선 확인", assignee: "원동우", rev: 0, comment: 0 },
+      { id: "a002", bg: "-", act: "입 모양 타이밍 재확인", assignee: "이혜민", rev: 1, comment: 2 },
+      { id: "a003", bg: "창밖 빛 방향 체크", act: "-", assignee: "김가은", rev: 0, comment: 1 },
+      { id: "a004", bg: "-", act: "손 포즈 리테이크 반영", assignee: "박소율", rev: 2, comment: 0 },
+      { id: "a005", bg: "비 소스 최신화", act: "-", assignee: "한솔", rev: 0, comment: 0 }
+    ];
+    const icons = {
+      rev: '<svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H7l-4 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path><path d="M12 7v5"></path><path d="M12 15h.01"></path></svg>',
+      comment: '<svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path></svg>'
+    };
+    const colWidths = { scene: 130, alerts: 58, bgMemo: 230, actMemo: 230, assignee: 126, stage: 250 };
+    const minWidths = { scene: 92, bgMemo: 120, actMemo: 120, assignee: 96, stage: 180, alerts: 80 };
+    let sheetOption = "a";
+    let revisionOption = "b";
+    let stageOption = "auto";
+
+    function setCols() {
+      document.querySelectorAll("#mockCols col").forEach((col) => {
+        const key = col.dataset.col;
+        col.style.width = colWidths[key] + "px";
+      });
+    }
+
+    function badge(kind, n) {
+      if (!n) return "";
+      return `<span class="badge ${kind}">${icons[kind]}<span>${n}</span></span>`;
+    }
+
+    function renderSheet() {
+      const body = document.getElementById("sheetRows");
+      body.innerHTML = rows.map((row) => {
+        const badges = `${badge("revision", row.rev)}${badge("comment", row.comment)}`;
+        if (sheetOption === "a") {
+          return `<tr>
+            <td><span class="scene-id">${row.id}</span></td>
+            <td><div class="alert-cell">${badges}</div></td>
+            <td class="memo">${row.bg}</td>
+            <td class="memo">${row.act}</td>
+            <td>${row.assignee}</td>
+            <td>${trackHtml("stage-mode-text")}</td>
+          </tr>`;
+        }
+        if (sheetOption === "b") {
+          return `<tr>
+            <td><div class="scene-line"><span class="scene-id">${row.id}</span><span class="alert-cell">${badges}</span></div></td>
+            <td></td>
+            <td class="memo">${row.bg}</td>
+            <td class="memo">${row.act}</td>
+            <td>${row.assignee}</td>
+            <td>${trackHtml("stage-mode-text")}</td>
+          </tr>`;
+        }
+        return `<tr>
+          <td><span class="scene-id">${row.id}</span><span class="row-pin">${badges}</span></td>
+          <td></td>
+          <td class="memo">${row.bg}</td>
+          <td class="memo">${row.act}</td>
+          <td>${row.assignee}</td>
+          <td>${trackHtml("stage-mode-text")}</td>
+        </tr>`;
+      }).join("");
+      const wrap = document.getElementById("sheetMock");
+      wrap.className = `table-wrap sheet-option-${sheetOption}`;
+    }
+
+    function trackHtml(mode) {
+      const template = document.getElementById("stageTrack");
+      const node = template.content.firstElementChild.cloneNode(true);
+      node.classList.add(mode);
+      return node.outerHTML;
+    }
+
+    function renderRevisionCards() {
+      const host = document.getElementById("revisionCards");
+      host.innerHTML = [1, 2, 3].map((n) => {
+        const cls = revisionOption === "a" ? "revision-a" : revisionOption === "b" ? "revision-b" : "revision-c";
+        const strip = revisionOption === "c" ? `<div class="revision-strip">${icons.rev}<span>${n}</span></div>` : "";
+        return `<article class="card active ${cls}">
+          <div class="card-head">
+            <span class="card-id">a00${n + 1}</span>
+            <span class="card-badge">${icons.rev}<span>${n}</span></span>
+          </div>
+          ${strip}
+          <div class="memo">입 모양 타이밍과 손 포즈 리비전 반영 필요</div>
+          <div class="dept">
+            <div class="dept-row"><span class="dept-name bg"><span class="dot"></span>BG</span><span>원동우</span></div>
+            ${trackHtml("stage-mode-text")}
+          </div>
+          <div class="dept">
+            <div class="dept-row"><span class="dept-name act"><span class="dot" style="background: var(--act)"></span>ACT</span><span>이혜민</span></div>
+            ${trackHtml("stage-mode-text")}
+          </div>
+        </article>`;
+      }).join("");
+    }
+
+    function renderStageCards() {
+      const host = document.getElementById("stageCards");
+      const width = Number(document.getElementById("cardWidth").value);
+      document.documentElement.style.setProperty("--card-w", width + "px");
+      document.getElementById("cardWidthText").textContent = width;
+      const narrow = width < 224 ? "narrow" : "";
+      const mode = stageOption === "auto" ? "stage-mode-auto" : stageOption === "current" ? "stage-mode-current" : "stage-mode-text";
+      host.innerHTML = [1, 2, 3].map((n) => `<article class="card ${n === 1 ? "active" : ""} ${narrow}">
+        <div class="card-head">
+          <span class="card-id">a00${n}</span>
+          <span class="percent">${n === 1 ? 25 : n === 2 ? 50 : 75}%</span>
+        </div>
+        <div class="memo">카드 폭에 따라 텍스트와 SVG 아이콘이 겹치지 않게 전환</div>
+        <div class="dept">
+          <div class="dept-row"><span class="dept-name act"><span class="dot" style="background: var(--act)"></span>ACT</span><span>이혜민</span></div>
+          ${trackHtml(mode)}
+        </div>
+      </article>`).join("");
+    }
+
+    function bindChoices() {
+      document.querySelectorAll(".choice").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const group = btn.closest(".selector").dataset.group;
+          btn.closest(".selector").querySelectorAll(".choice").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          if (group === "sheet") { sheetOption = btn.dataset.option; renderSheet(); }
+          if (group === "revision") { revisionOption = btn.dataset.option; renderRevisionCards(); }
+          if (group === "stage") { stageOption = btn.dataset.option; renderStageCards(); }
+        });
+      });
+      document.querySelectorAll(".tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+          tab.classList.add("active");
+          const id = tab.dataset.tab;
+          document.querySelectorAll(".view").forEach((view) => view.classList.toggle("hidden", view.dataset.view !== id));
+        });
+      });
+      document.getElementById("cardWidth").addEventListener("input", renderStageCards);
+    }
+
+    function bindResize() {
+      let active = null;
+      document.querySelectorAll(".resize-handle").forEach((handle) => {
+        handle.addEventListener("pointerdown", (event) => {
+          const [left, right] = handle.dataset.boundary.split(":");
+          active = {
+            handle,
+            left,
+            right,
+            x: event.clientX,
+            leftW: colWidths[left],
+            rightW: colWidths[right]
+          };
+          handle.classList.add("dragging");
+          handle.setPointerCapture(event.pointerId);
+        });
+        handle.addEventListener("pointermove", (event) => {
+          if (!active || active.handle !== handle) return;
+          const delta = event.clientX - active.x;
+          const total = active.leftW + active.rightW;
+          const nextLeft = Math.max(minWidths[active.left], Math.min(total - minWidths[active.right], active.leftW + delta));
+          colWidths[active.left] = nextLeft;
+          colWidths[active.right] = total - nextLeft;
+          setCols();
+        });
+        handle.addEventListener("pointerup", () => {
+          if (!active) return;
+          active.handle.classList.remove("dragging");
+          active = null;
+        });
+      });
+    }
+
+    setCols();
+    renderSheet();
+    renderRevisionCards();
+    renderStageCards();
+    bindChoices();
+    bindResize();
+  </script>
+</body>
+</html>

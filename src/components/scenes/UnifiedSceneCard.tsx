@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { Check, CheckCircle2, Clock, MessageCircle, MessageSquareWarning, PlayCircle, Trash2 } from 'lucide-react';
+import { MessageCircle, Trash2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { isFullyDone, sceneProgress } from '@/utils/calcStats';
 import { STAGES, DEPARTMENT_CONFIGS } from '@/types';
@@ -18,13 +18,8 @@ import { useAppStore } from '@/stores/useAppStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
-
-function stageIcon(stage: Stage, size = 12) {
-  if (stage === 'lo') return <Clock size={size} strokeWidth={2.4} />;
-  if (stage === 'done') return <PlayCircle size={size} strokeWidth={2.4} />;
-  if (stage === 'review') return <MessageSquareWarning size={size} strokeWidth={2.4} />;
-  return <CheckCircle2 size={size} strokeWidth={2.4} />;
-}
+import { StageSegmentToggle, stageIcon } from './StageSegmentToggle';
+import { RevisionCornerFlag } from './RevisionCornerFlag';
 
 // 씬 UUID에 대한 현재 일괄 작업 상태(pending / failed)를 조회
 function getPendingState(
@@ -276,16 +271,16 @@ export function UnifiedSceneCard({
     >
         {isHighlighted && <div className="scene-highlight-bg" />}
 
-        {/* v1.18.0: 좌측 액센트 막대 — 미해결 리비전 있는 카드 표시 (mockup 시안 1) */}
-        {openRevCount > 0 && (
-          <span
-            aria-hidden
-            className="absolute left-0 top-0 bottom-0 w-1 bg-accent rounded-l-xl pointer-events-none"
-          />
-        )}
+        <RevisionCornerFlag
+          count={openRevCount > 0 ? openRevCount : resolvedRevCount}
+          resolved={openRevCount <= 0 && resolvedRevCount > 0}
+        />
 
         {isSelected && (
-          <div className="absolute top-2.5 right-2.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30">
+          <div className={cn(
+            'absolute right-2.5 z-20 w-5 h-5 rounded-full bg-accent flex items-center justify-center shadow-sm shadow-accent/30',
+            openRevCount > 0 || resolvedRevCount > 0 ? 'top-9' : 'top-2.5',
+          )}>
             <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </div>
         )}
@@ -306,26 +301,6 @@ export function UnifiedSceneCard({
             )}
           </div>
           <div className="flex items-center gap-1.5">
-            {/* v1.18.0: 리비전 시각 표시 — 미해결 우선, 없으면 완료 카운트.
-                isSelected 시 우측 상단의 체크 아이콘과 겹치지 않도록 헤더 인라인 배치 (좌측 막대도 함께 노출). */}
-            {openRevCount > 0 ? (
-              <span
-                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-accent text-white"
-                style={{ boxShadow: '0 0 14px rgb(var(--color-accent) / 0.55)' }}
-                title={`미해결 리비전 ${openRevCount}건`}
-              >
-                <MessageSquareWarning className="w-2.5 h-2.5" strokeWidth={2.4} />
-                {openRevCount}
-              </span>
-            ) : resolvedRevCount > 0 ? (
-              <span
-                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-bg-card border border-bg-border/40 text-text-secondary/70"
-                title={`완료된 리비전 ${resolvedRevCount}건`}
-              >
-                <Check className="w-2.5 h-2.5" strokeWidth={2.5} />
-                {resolvedRevCount}
-              </span>
-            ) : null}
             {/* Codex P2 6차(2026-04-23): 정확한 total 은 ScenesView 가 commentIdsByKey 로 계산해
                 `totalCommentCount` 로 전달. 없으면 Math.max 로 fallback (대부분 BG·ACT 동일값). */}
             {(() => {
@@ -339,11 +314,11 @@ export function UnifiedSceneCard({
                       ? 'comment-unread-badge border-accent/25 bg-accent/15 text-accent shadow-[0_0_10px_rgba(108,92,231,0.16)]'
                       : 'border-bg-border/45 bg-text-secondary/10 text-text-secondary/60',
                   )}
-                  title={`${hasUnreadComments ? '새 댓글' : '확인한 댓글'} ${displayCount}개`}
+                  title={`${hasUnreadComments ? '새 댓글' : '확인한 댓글'} ${displayCount}`}
                 >
                   <CompactIconLabel
                     icon={<MessageCircle size={10} fill="currentColor" />}
-                    label={`${displayCount}개`}
+                    label={`${displayCount}`}
                     textClassName="text-[10px] font-bold"
                   />
                 </span>
@@ -484,7 +459,6 @@ function DeptSection({
   const cfg = DEPARTMENT_CONFIGS[dept];
   const completionTintEnabled = useAppStore((s) => s.completionTintEnabled);
   const isDeptDone = !!scene && isFullyDone(scene);
-  const stagePointerHandledRef = useRef(false);
 
   // stage-toggle 작업에서 이 씬의 targetStage 셀에만 pending/failed 스타일 적용
   const stageCellPendingClass = (stage: Stage): string => {
@@ -512,7 +486,13 @@ function DeptSection({
               data-continuity-stage-segment
               className="compact-label-container flex-1 min-w-0 text-center py-1.5 text-[11px] font-medium text-text-secondary/30 rounded-md"
             >
-              <CompactIconLabel icon={stageIcon(stage, 12)} label={cfg.stageLabels[stage]} className="w-full" />
+              <CompactIconLabel
+                icon={stageIcon(stage, 12)}
+                label={cfg.stageLabels[stage]}
+                className="w-full"
+                iconClassName="hidden 2xl:inline-flex"
+                iconPosition="after"
+              />
             </div>
           ))}
         </div>
@@ -561,57 +541,13 @@ function DeptSection({
           />
         </div>
       ) : (
-        <div
-          className="flex rounded-lg bg-bg-primary/70 border border-bg-border/40 p-1 gap-0.5"
-          data-continuity-source={dept === 'bg' ? 'bg-stage' : 'act-stage'}
-        >
-          {STAGES.map((stage, i) => {
-            const isDone = scene[stage];
-            const isCurrent = isDone && (i === STAGES.length - 1 || !scene[STAGES[i + 1]]);
-
-            return (
-              <button
-                type="button"
-                key={stage}
-                data-continuity-stage-segment
-                onPointerDown={(e) => {
-                  if (e.button !== 0) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  stagePointerHandledRef.current = true;
-                  onToggle(sheetName, sceneId, stage);
-                  window.setTimeout(() => {
-                    stagePointerHandledRef.current = false;
-                  }, 600);
-                }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (stagePointerHandledRef.current) {
-                    stagePointerHandledRef.current = false;
-                    return;
-                  }
-                  onToggle(sheetName, sceneId, stage);
-                }}
-                className={cn(
-                  'compact-label-container flex-1 min-w-0 text-center py-2 text-[11px] font-medium rounded-md transition-all cursor-pointer',
-                  !isDone && 'text-text-secondary/60 hover:text-text-primary hover:bg-bg-border/25',
-                  stageCellPendingClass(stage),
-                )}
-                style={
-                  isDone
-                    ? isCurrent
-                      ? { backgroundColor: cfg.color, color: '#fff', fontWeight: 700, boxShadow: `0 2px 8px ${cfg.color}40` }
-                      : { backgroundColor: `${cfg.color}20`, color: cfg.color }
-                    : undefined
-                }
-                title={cfg.stageLabels[stage]}
-              >
-                <CompactIconLabel icon={stageIcon(stage, 12)} label={cfg.stageLabels[stage]} className="w-full" />
-              </button>
-            );
-          })}
-        </div>
+        <StageSegmentToggle
+          scene={scene}
+          department={dept}
+          onToggle={(stage) => onToggle(sheetName, sceneId, stage)}
+          segmentClassName={stageCellPendingClass}
+          dataContinuityTarget={dept === 'bg' ? 'bg-stage' : 'act-stage'}
+        />
       )}
     </div>
   );

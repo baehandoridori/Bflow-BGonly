@@ -4,6 +4,8 @@ import type { ThemeColors } from '@/themes';
 import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
 import {
   DEFAULT_BACKGROUND_ART,
+  DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX,
+  DEFAULT_DASHBOARD_STAR_NEST_OPACITY,
   DEFAULT_STAR_NEST_SETTINGS,
   type BackgroundArt,
   type StarNestSettings,
@@ -162,6 +164,8 @@ interface AppState {
     starNest: StarNestSettings;
     loginStarNest: StarNestSettings;
     dashboardStarNest: StarNestSettings;
+    dashboardStarNestOpacity: number;
+    dashboardStarNestBlurPx: number;
   };
   setPlexusSettings: (settings: Partial<AppState['plexusSettings']>) => void;
 
@@ -305,6 +309,8 @@ export const useAppStore = create<AppState>((set) => ({
     starNest: DEFAULT_STAR_NEST_SETTINGS,
     loginStarNest: DEFAULT_STAR_NEST_SETTINGS,
     dashboardStarNest: DEFAULT_STAR_NEST_SETTINGS,
+    dashboardStarNestOpacity: DEFAULT_DASHBOARD_STAR_NEST_OPACITY,
+    dashboardStarNestBlurPx: DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX,
   },
   setPlexusSettings: (partial) => set((s) => ({
     plexusSettings: { ...s.plexusSettings, ...partial },

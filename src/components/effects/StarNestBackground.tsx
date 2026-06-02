@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { type CSSProperties, useEffect, useRef } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
 import { DEFAULT_STAR_NEST_SETTINGS, normalizeStarNestSettings, type StarNestSettings } from '@/utils/starNestSettings';
 import { cn } from '@/utils/cn';
@@ -140,11 +140,13 @@ export function StarNestBackground({
   className,
   fixed = true,
   settings: settingsOverride,
+  style,
 }: {
   enabled?: boolean;
   className?: string;
   fixed?: boolean;
   settings?: Partial<StarNestSettings> | null;
+  style?: CSSProperties;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
@@ -275,7 +277,7 @@ export function StarNestBackground({
     <canvas
       ref={canvasRef}
       className={cn(fixed ? 'fixed inset-0 pointer-events-none' : 'absolute inset-0 pointer-events-none', className)}
-      style={{ width: '100%', height: '100%' }}
+      style={{ width: '100%', height: '100%', ...style }}
       aria-hidden="true"
     />
   );

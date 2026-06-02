@@ -72,14 +72,20 @@ test('sheet percentage columns are removed and main columns are resizable', asyn
   assert.match(resize, /onPointerDown/);
 });
 
-test('sheet resize uses an exact table width so one column does not redistribute others', async () => {
+test('sheet resize fits the table but restores horizontal access below minimum width', async () => {
   const singleSheet = await readRepoFile('src', 'components', 'scenes', 'SceneSheetView.tsx');
   const unifiedSheet = await readRepoFile('src', 'components', 'scenes', 'UnifiedSceneSheetView.tsx');
 
   for (const source of [singleSheet, unifiedSheet]) {
-    assert.match(source, /style=\{\{\s*tableLayout:\s*'fixed',\s*width:\s*totalWidth\s*\}\}/);
+    assert.match(source, /useFittedSheetColumnWidths/);
+    assert.match(source, /style=\{\{\s*tableLayout:\s*'fixed',\s*width:\s*sheetWidth\s*\}\}/);
+    assert.match(source, /const sheetOverflowsViewport = tableViewportWidth > 0 && sheetWidth > tableViewportWidth \+ 1;/);
+    assert.match(source, /sheetOverflowsViewport \? 'overflow-x-auto' : 'overflow-x-hidden'/);
+    assert.match(source, /'overflow-y-auto rounded-lg border border-bg-border focus:outline-none'/);
     assert.doesNotMatch(source, /className="w-full text-sm border-collapse"/);
-    assert.doesNotMatch(source, /minWidth:\s*totalWidth/);
+    assert.doesNotMatch(source, /className="overflow-auto rounded-lg/);
+    assert.doesNotMatch(source, /overflow-y-auto overflow-x-hidden rounded-lg/);
+    assert.doesNotMatch(source, /minWidth:\s*sheetWidth/);
   }
 });
 
@@ -99,25 +105,26 @@ test('stage and phase controls commit on pointer down in card and sheet views', 
   const singleCard = await readRepoFile('src', 'views', 'ScenesView.tsx');
   const singleSheet = await readRepoFile('src', 'components', 'scenes', 'SceneSheetView.tsx');
   const unifiedSheet = await readRepoFile('src', 'components', 'scenes', 'UnifiedSceneSheetView.tsx');
+  const stageToggle = await readRepoFile('src', 'components', 'scenes', 'StageSegmentToggle.tsx');
 
   assert.match(phaseToggle, /handleChipPointerDown/);
   assert.match(phaseToggle, /pointerHandledRef/);
   assert.match(phaseToggle, /onPointerDown=\{\(e\) => handleChipPointerDown\(e, state\)\}/);
 
-  assert.match(unifiedCard, /onPointerDown=\{\(e\) => \{/);
-  assert.match(unifiedCard, /stagePointerHandledRef/);
+  assert.match(stageToggle, /onPointerDown=\{\(e\) => \{/);
+  assert.match(stageToggle, /pointerHandledRef/);
+  assert.match(stageToggle, /onToggle\(stage\)/);
+
+  assert.match(unifiedCard, /StageSegmentToggle/);
   assert.match(unifiedCard, /onToggle\(sheetName, sceneId, stage\)/);
 
-  assert.match(singleCard, /onPointerDown=\{\(e\) => \{/);
-  assert.match(singleCard, /stagePointerHandledRef/);
+  assert.match(singleCard, /StageSegmentToggle/);
   assert.match(singleCard, /onToggle\(scene\.sceneId, stage\)/);
 
-  assert.match(singleSheet, /onPointerDown=\{\(e\) => \{/);
-  assert.match(singleSheet, /stagePointerHandledRef/);
+  assert.match(singleSheet, /StageSegmentToggle/);
   assert.match(singleSheet, /onToggle\(scene\.sceneId, stage\)/);
 
-  assert.match(unifiedSheet, /onPointerDown=\{\(e\) => \{/);
-  assert.match(unifiedSheet, /stagePointerHandledRef/);
+  assert.match(unifiedSheet, /StageSegmentToggle/);
   assert.match(unifiedSheet, /onToggle\(bgSheetName, bgScene\.sceneId, stage\)/);
   assert.match(unifiedSheet, /onToggle\(actSheetName, actScene\.sceneId, stage\)/);
 });

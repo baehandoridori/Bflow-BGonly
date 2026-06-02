@@ -348,7 +348,7 @@ function LoginBackgroundArt() {
       <StarNestBackground
         enabled={plexusSettings.loginEnabled}
         fixed={false}
-        settings={plexusSettings.starNest}
+        settings={plexusSettings.loginStarNest ?? plexusSettings.starNest}
       />
     );
   }

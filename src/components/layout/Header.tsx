@@ -36,7 +36,7 @@ export function Header({ onRefresh }: HeaderProps) {
     : '동기화 대기 중';
 
   return (
-    <header className="h-14 bg-bg-card border-b border-bg-border flex items-center justify-between px-6">
+    <header className="relative z-30 h-14 shrink-0 bg-bg-card border-b border-bg-border flex items-center justify-between px-6">
       {/* 왼쪽: 현재 뷰 제목 */}
       <h1 className="text-lg font-semibold">{headerTitle}</h1>
 

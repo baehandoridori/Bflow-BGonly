@@ -333,19 +333,35 @@ body.theme-ready *::after {
   max-width: 100%;
 }
 
+[data-compact-label-icon] {
+  max-width: 1.25rem;
+  overflow: hidden;
+  opacity: 1;
+  transition: max-width 160ms ease, opacity 120ms ease, margin-inline 160ms ease;
+}
+
+[data-compact-label-icon]:not(.hidden) {
+  display: inline-flex;
+}
+
 [data-compact-label-text] {
   display: inline-block;
   max-width: 12rem;
   overflow: hidden;
   opacity: 1;
-  transition: max-width 160ms ease, opacity 120ms ease, margin-inline-start 160ms ease;
+  transition: max-width 160ms ease, opacity 120ms ease, margin-inline 160ms ease;
 }
 
 @media (max-width: 1040px) {
-  .compact-label-container [data-compact-label-text] {
+  .compact-label-container [data-compact-icon-label]:not([data-display-mode="icon"]) [data-compact-label-icon] {
     max-width: 0;
     opacity: 0;
+    margin-inline-end: -0.375rem;
+  }
+
+  .compact-label-container [data-compact-icon-label]:not([data-display-mode="icon"])[data-icon-position="after"] [data-compact-label-icon] {
     margin-inline-start: -0.375rem;
+    margin-inline-end: 0;
   }
 
   [data-episode-filter-label] {
@@ -358,6 +374,7 @@ body.theme-ready *::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  [data-compact-label-icon],
   [data-compact-label-text] {
     transition: none;
   }
@@ -429,6 +446,11 @@ body.theme-ready *::after {
   border-radius: 999px;
 }
 
+.sheet-column-resizer-left {
+  right: auto;
+  left: -4px;
+}
+
 .sheet-column-resizer::after {
   content: "";
   position: absolute;
@@ -448,6 +470,49 @@ body.theme-ready *::after {
 
 .is-sheet-column-resizing {
   cursor: col-resize;
+}
+
+.revision-corner-flag {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  z-index: 18;
+  width: 42px;
+  height: 42px;
+  pointer-events: none;
+  color: #fff;
+}
+
+.revision-corner-flag::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-style: solid;
+  border-width: 0 42px 42px 0;
+  border-color: transparent rgb(var(--color-accent) / 0.9) transparent transparent;
+  filter: drop-shadow(0 0 10px rgb(var(--color-accent) / 0.42));
+}
+
+.revision-corner-flag-resolved::before {
+  border-color: transparent rgb(var(--color-text-secondary) / 0.56) transparent transparent;
+  filter: none;
+}
+
+.revision-corner-flag-content {
+  position: absolute;
+  top: 5px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.revision-corner-flag-count {
+  min-width: 8px;
+  text-align: center;
 }
 
 /* ─── 스크롤바 (테마 반응형, 다크 UI 통일) ─── */
