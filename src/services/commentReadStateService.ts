@@ -125,10 +125,16 @@ function isCommentReadStateSchemaUnavailableError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err ?? '');
   const lower = message.toLowerCase();
 
-  return lower.includes('upsert_comment_read_state')
-    || lower.includes('comment_read_states')
-    || lower.includes('schema cache')
-    || lower.includes('could not find the function');
+  const missingReadStateFunction = lower.includes('upsert_comment_read_state')
+    && lower.includes('could not find the function');
+  const missingReadStateTable = lower.includes('comment_read_states')
+    && (
+      lower.includes('could not find the table')
+      || lower.includes('relation "comment_read_states" does not exist')
+      || lower.includes("relation 'comment_read_states' does not exist")
+    );
+
+  return missingReadStateFunction || missingReadStateTable;
 }
 
 function disablePersistenceForSession(err: unknown): void {

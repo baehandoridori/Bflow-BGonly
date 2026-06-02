@@ -182,6 +182,32 @@ test('missing Supabase read-state schema keeps local cache without retry spam', 
   });
 });
 
+test('non-schema read-state failures keep retrying instead of disabling persistence', async () => {
+  let upsertCalls = 0;
+  await withMutedWarnings(async () => {
+    installFakePersistence({
+      upsert: async () => {
+        upsertCalls += 1;
+        throw new Error('permission denied for table comment_read_states');
+      },
+    });
+
+    await markSceneThreadReadForUser({
+      userId: 'me',
+      sceneThreadKey: 'EP05:A:a001',
+      readAt: '2026-05-29T10:00:00.000Z',
+    });
+
+    const state = await getCommentReadStateForUser('me');
+    const pending = __getPendingCommentReadStateForTests('me', 'EP05:A:a001');
+
+    assert.equal(state['EP05:A:a001'], '2026-05-29T10:00:00.000Z');
+    assert.equal(upsertCalls, 2);
+    assert.equal(__isCommentReadStatePersistenceDisabledForTests(), false);
+    assert.equal(pending?.readAt, '2026-05-29T10:00:00.000Z');
+  });
+});
+
 test('next get flushes pending write and deletes it on success', async () => {
   let shouldFail = true;
   const { upserts } = installFakePersistence({
