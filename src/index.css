@@ -334,11 +334,14 @@ body.theme-ready *::after {
 }
 
 [data-compact-label-icon] {
-  display: inline-flex;
   max-width: 1.25rem;
   overflow: hidden;
   opacity: 1;
   transition: max-width 160ms ease, opacity 120ms ease, margin-inline 160ms ease;
+}
+
+[data-compact-label-icon]:not(.hidden) {
+  display: inline-flex;
 }
 
 [data-compact-label-text] {

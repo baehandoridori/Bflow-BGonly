@@ -34,6 +34,17 @@ test('compact labels collapse at narrow viewport without self-sizing container t
   assert.doesNotMatch(css, /writing-mode/);
 });
 
+test('compact label icon display rule preserves Tailwind hidden utilities', () => {
+  const css = read('src/index.css');
+  const scenesView = read('src/views/ScenesView.tsx');
+  const unifiedCard = read('src/components/scenes/UnifiedSceneCard.tsx');
+
+  assert.match(scenesView, /iconClassName="hidden 2xl:inline-flex"/);
+  assert.match(unifiedCard, /iconClassName="hidden 2xl:inline-flex"/);
+  assert.doesNotMatch(css, /\[data-compact-label-icon\]\s*\{[^}]*display:\s*inline-flex/);
+  assert.match(css, /\[data-compact-label-icon\]:not\(\.hidden\)\s*\{[\s\S]*display:\s*inline-flex/);
+});
+
 test('target dense surfaces import and use CompactIconLabel', () => {
   const surfaces = [
     'src/views/CompositingView.tsx',
