@@ -5,6 +5,7 @@
 
 import type { ElectronAPI, AppUser } from '@/types';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
+import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 
 const MOCK_USERS: AppUser[] = [
   { id: '1', name: '배한솔', slackId: 'U05DFV9UAN5', password: '1234', isInitialPassword: false, createdAt: '2025-01-01T00:00:00Z', role: 'admin' },
@@ -25,6 +26,148 @@ const MOCK_USERS: AppUser[] = [
 const localStore: Record<string, unknown> = {};
 
 const noop = () => () => {};
+
+interface MockActivityRow {
+  id: string;
+  user_id: string;
+  user_name: string;
+  action_type: string;
+  action_group: 'progress' | 'memo' | 'scene' | 'etc';
+  scene_id: string | null;
+  scene_label: string | null;
+  episode_number: number | null;
+  department: 'bg' | 'acting' | null;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+}
+
+const activityRealtimeCallbacks = new Set<(row: MockActivityRow) => void>();
+
+function getMockActivityRows(): MockActivityRow[] {
+  return (localStore.__activityRows as MockActivityRow[] | undefined)
+    ?? (localStore.__activityRows = []) as MockActivityRow[];
+}
+
+function emitMockActivityRealtime(row: MockActivityRow): void {
+  activityRealtimeCallbacks.forEach((callback) => callback(row));
+}
+
+function decodeRawRevisionSceneId(sceneId: string): string {
+  const normalized = sceneId.trim().toLowerCase();
+  if (!normalized.startsWith('raw-')) return normalized;
+  try {
+    return decodeURIComponent(normalized.slice(4));
+  } catch {
+    return normalized.slice(4);
+  }
+}
+
+function findMockSceneContext(sceneKey: string, preferredDepartment?: string) {
+  const [episodeToken = '', partToken = '', sceneToken = ''] = sceneKey.split(':');
+  const episodeNumber = Number(episodeToken.replace(/\D/g, ''));
+  const partKey = partToken.trim().toUpperCase();
+  const hasRawSceneToken = sceneToken.trim().toLowerCase().startsWith('raw-');
+  const sceneId = decodeRawRevisionSceneId(sceneToken);
+  const normalizedSceneId = normalizeSceneIdKey(sceneId, partKey);
+  let fallback: {
+    episode: (typeof MOCK_EPISODES)[number];
+    part: (typeof MOCK_EPISODES)[number]['parts'][number];
+    scene: (typeof MOCK_EPISODES)[number]['parts'][number]['scenes'][number];
+  } | null = null;
+
+  for (const episode of MOCK_EPISODES) {
+    if (episodeNumber && episode.episodeNumber !== episodeNumber) continue;
+    for (const part of episode.parts) {
+      if (part.partId.trim().toUpperCase() !== partKey) continue;
+      for (const scene of part.scenes) {
+        const rawSceneId = scene.sceneId.trim().toLowerCase();
+        const canonicalSceneId = normalizeSceneIdKey(scene.sceneId, part.partId);
+        if (hasRawSceneToken) {
+          if (rawSceneId !== sceneId) continue;
+        } else if (rawSceneId !== sceneId && canonicalSceneId !== normalizedSceneId) {
+          continue;
+        }
+        const match = { episode, part, scene };
+        if (!fallback) fallback = match;
+        if (!preferredDepartment || part.department === preferredDepartment) return match;
+      }
+    }
+  }
+
+  return fallback;
+}
+
+function createMockRevisionActivityRow(params: {
+  id: string;
+  sceneKey: string;
+  revisionNo: number;
+  description: string;
+  department: string;
+  requesterId: string;
+  requesterName: string;
+  createdAt: string;
+}): MockActivityRow {
+  const { id, sceneKey, revisionNo, description, requesterId, requesterName, createdAt } = params;
+  const context = findMockSceneContext(sceneKey, params.department);
+  const department = params.department === 'bg' || params.department === 'acting'
+    ? params.department
+    : context?.part.department ?? null;
+  const sceneLabel = context
+    ? `${context.episode.title} ${context.part.partId.toUpperCase()} ${context.scene.sceneId} 리비전 #${revisionNo}`
+    : `씬 ${sceneKey} 리비전 #${revisionNo}`;
+
+  return {
+    id: `mock-activity-revision_add-${id}`,
+    user_id: requesterId,
+    user_name: requesterName,
+    action_type: 'revision_add',
+    action_group: 'memo',
+    scene_id: context?.scene.id ?? null,
+    scene_label: sceneLabel,
+    episode_number: context?.episode.episodeNumber ?? null,
+    department,
+    detail: {
+      revisionId: id,
+      revisionNumber: revisionNo,
+      descriptionPreview: description.slice(0, 60),
+    },
+    created_at: createdAt,
+  };
+}
+
+function filterMockActivities(opts: {
+  before?: string;
+  limit?: number;
+  groups?: ('progress' | 'memo' | 'scene' | 'etc')[];
+  department?: 'bg' | 'acting' | null;
+  sceneIds?: string[];
+  rangeStart?: string;
+  rangeEnd?: string;
+} = {}): MockActivityRow[] {
+  let rows = [...getMockActivityRows()];
+  if (opts.sceneIds && opts.sceneIds.length > 0) {
+    const sceneSet = new Set(opts.sceneIds);
+    rows = rows.filter((row) => row.scene_id && sceneSet.has(row.scene_id));
+  }
+  if (opts.department) {
+    rows = rows.filter((row) => row.department === opts.department);
+  }
+  if (opts.groups && opts.groups.length > 0) {
+    const groupSet = new Set(opts.groups);
+    rows = rows.filter((row) => groupSet.has(row.action_group));
+  }
+  if (opts.before) {
+    rows = rows.filter((row) => row.created_at < opts.before!);
+  }
+  if (opts.rangeStart) {
+    rows = rows.filter((row) => row.created_at >= opts.rangeStart!);
+  }
+  if (opts.rangeEnd) {
+    rows = rows.filter((row) => row.created_at <= opts.rangeEnd!);
+  }
+  rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return rows.slice(0, opts.limit ?? rows.length);
+}
 
 export function installDevElectronAPI(): void {
   if (window.electronAPI) return; // 이미 Electron 환경이면 무시
@@ -209,7 +352,36 @@ export function installDevElectronAPI(): void {
     supabaseUpdatePrivateEvent: async () => {},
     supabaseDeletePrivateEvent: async () => {},
     supabaseReadRevisions: async () => [],
-    supabaseAddRevision: async (..._args: unknown[]) => {},
+    supabaseAddRevision: async (
+      id: string,
+      _partUuid: string,
+      sceneKey: string,
+      revisionNo: number,
+      _status: string,
+      _priority: string,
+      description: string,
+      _frameNo: string,
+      _imageUrl: string,
+      department: string,
+      lookupDepartment: string,
+      requesterId: string,
+      requesterName: string,
+      _assignee: string,
+      createdAt: string,
+    ) => {
+      const activity = createMockRevisionActivityRow({
+        id,
+        sceneKey,
+        revisionNo,
+        description,
+        department: department || lookupDepartment,
+        requesterId,
+        requesterName,
+        createdAt,
+      });
+      getMockActivityRows().unshift(activity);
+      emitMockActivityRealtime(activity);
+    },
     supabaseUpdateRevision: async () => {},
     supabaseDeleteRevision: async (_id: string) => {},
     supabaseReadAllMetadata: async () => [],
@@ -277,7 +449,7 @@ export function installDevElectronAPI(): void {
 
     // ─── 활동 기록 (mock 은 빈 결과) ─────────────
     authSetCurrentUser: async () => {},
-    activityList: async () => [],
+    activityList: async (opts) => filterMockActivities(opts),
     activityStats: async () => [],
     activityStatsV2: async () => [],
     activityInsights: async () => ({
@@ -292,7 +464,10 @@ export function installDevElectronAPI(): void {
     }),
     activityBackfill: async () => [],
     activityStorageInfo: async () => ({ count: 0, sizeMB: 0 }),
-    onActivityRealtimeInsert: noop,
+    onActivityRealtimeInsert: (callback) => {
+      activityRealtimeCallbacks.add(callback);
+      return () => activityRealtimeCallbacks.delete(callback);
+    },
 
     // v1.30.0: 컴포지팅 단계 상태 — preview 모드에서 시각 검증용으로 in-memory 시드 + 변경 추적.
     supabaseLoadCompositingStates: async (episodeNumber: number) => {

@@ -165,7 +165,11 @@ export function DetailPanel({
                     className="flex items-center gap-1.5 text-xs font-mono rounded-lg px-2.5 py-1.5 text-left cursor-pointer transition-all hover:brightness-125"
                     style={revision.status === 'resolved'
                       ? { color: '#6B7280', backgroundColor: 'rgba(107, 114, 128, 0.08)', border: '1px solid rgba(107, 114, 128, 0.15)' }
-                      : { color: '#74B9FF', backgroundColor: 'rgba(116, 185, 255, 0.08)', border: '1px solid rgba(116, 185, 255, 0.15)' }
+                      : {
+                        color: 'var(--status-combine)',
+                        backgroundColor: 'color-mix(in srgb, var(--status-combine) 8%, transparent)',
+                        border: '1px solid color-mix(in srgb, var(--status-combine) 15%, transparent)',
+                      }
                     }
                     title={`${p}\n(클릭하면 파일탐색기에서 열기)`}
                   >
@@ -247,7 +251,10 @@ export function DetailPanel({
           {revision.status === 'resolved' && (
             <div
               className="rounded-xl p-4 mb-5 border"
-              style={{ borderColor: STATUS_CONFIG.resolved.color + '40', backgroundColor: STATUS_CONFIG.resolved.bg }}
+              style={{
+                borderColor: 'color-mix(in srgb, var(--status-done) 25%, transparent)',
+                backgroundColor: STATUS_CONFIG.resolved.bg,
+              }}
             >
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-2">
@@ -318,7 +325,10 @@ export function DetailPanel({
             <button
               onClick={() => handleStatusSelect('in_progress')}
               className="compact-label-container w-full flex min-w-0 items-center justify-center gap-2 py-2.5 text-xs font-medium rounded-xl border transition-all cursor-pointer"
-              style={{ borderColor: STATUS_CONFIG.in_progress.color + '40', color: STATUS_CONFIG.in_progress.color }}
+              style={{
+                borderColor: 'color-mix(in srgb, var(--status-combine) 25%, transparent)',
+                color: STATUS_CONFIG.in_progress.color,
+              }}
             >
               <CompactIconLabel icon={<Clock size={14} />} label="진행 시작" />
             </button>

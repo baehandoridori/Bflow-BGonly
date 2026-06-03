@@ -166,7 +166,7 @@ function KanbanCard({
     >
       <span
         className="absolute left-0 top-0 bottom-0 w-[3px]"
-        style={{ backgroundColor: isResolved ? '#00B894' : 'rgb(var(--color-accent, 108 92 231))' }}
+        style={{ backgroundColor: isResolved ? STATUS_CONFIG.resolved.color : 'rgb(var(--color-accent, 108 92 231))' }}
       />
       <div className="ml-1 p-2.5 flex gap-2">
         {/* 썸네일 영역 */}

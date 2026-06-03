@@ -70,7 +70,7 @@ export function StatusDots({ revisions }: { revisions: CompRevision[] }) {
         <div
           key={r.id}
           className="w-2 h-2 rounded-full"
-          style={{ backgroundColor: PRIORITY_CONFIG[r.priority]?.color ?? '#74B9FF' }}
+          style={{ backgroundColor: PRIORITY_CONFIG[r.priority]?.color ?? PRIORITY_CONFIG.normal.color }}
           title={`${PRIORITY_CONFIG[r.priority]?.label ?? '보통'}: ${r.description.slice(0, 30)}`}
         />
       ))}
