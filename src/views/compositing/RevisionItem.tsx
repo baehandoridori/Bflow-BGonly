@@ -18,16 +18,16 @@ import {
 
 const STATUS_TINT: Record<RevisionStatus, { background: string; halo: string }> = {
   open: {
-    background: 'linear-gradient(90deg, rgba(253, 203, 110, 0.13) 0%, rgba(253, 203, 110, 0.045) 42%, rgba(253, 203, 110, 0) 88%)',
-    halo: 'rgba(253, 203, 110, 0.18)',
+    background: 'linear-gradient(90deg, color-mix(in srgb, var(--status-adjust) 13%, transparent) 0%, color-mix(in srgb, var(--status-adjust) 4.5%, transparent) 42%, transparent 88%)',
+    halo: 'color-mix(in srgb, var(--status-adjust) 18%, transparent)',
   },
   in_progress: {
-    background: 'linear-gradient(90deg, rgba(116, 185, 255, 0.13) 0%, rgba(116, 185, 255, 0.045) 42%, rgba(116, 185, 255, 0) 88%)',
-    halo: 'rgba(116, 185, 255, 0.18)',
+    background: 'linear-gradient(90deg, color-mix(in srgb, var(--status-combine) 13%, transparent) 0%, color-mix(in srgb, var(--status-combine) 4.5%, transparent) 42%, transparent 88%)',
+    halo: 'color-mix(in srgb, var(--status-combine) 18%, transparent)',
   },
   resolved: {
-    background: 'linear-gradient(90deg, rgba(0, 184, 148, 0.075) 0%, rgba(0, 184, 148, 0.028) 42%, rgba(0, 184, 148, 0) 88%)',
-    halo: 'rgba(0, 184, 148, 0.12)',
+    background: 'linear-gradient(90deg, color-mix(in srgb, var(--status-done) 7.5%, transparent) 0%, color-mix(in srgb, var(--status-done) 2.8%, transparent) 42%, transparent 88%)',
+    halo: 'color-mix(in srgb, var(--status-done) 12%, transparent)',
   },
 };
 

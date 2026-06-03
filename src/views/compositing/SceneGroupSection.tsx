@@ -14,13 +14,10 @@ import { buildFeedbackHubPartCollapseKey, type FeedbackHubEpisodeTree } from './
 import { RevisionCommentMarker, summarizeRevisionComments } from './RevisionCommentMarker';
 import { CompactIconLabel } from '@/components/common/CompactIconLabel';
 
-function statusRgba(status: RevisionStatus, alpha: number): string {
-  const hex = STATUS_CONFIG[status]?.color ?? STATUS_CONFIG.open.color;
-  const normalized = hex.replace('#', '');
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+function statusColorMix(status: RevisionStatus, alpha: number): string {
+  const color = STATUS_CONFIG[status]?.color ?? STATUS_CONFIG.open.color;
+  const percent = Math.max(0, Math.min(100, alpha * 100));
+  return `color-mix(in srgb, ${color} ${percent}%, transparent)`;
 }
 
 function buildAmbientLineStyle(statuses: RevisionStatus[]): CSSProperties | undefined {
@@ -28,7 +25,7 @@ function buildAmbientLineStyle(statuses: RevisionStatus[]): CSSProperties | unde
 
   const lastIndex = statuses.length - 1;
   const feather = Math.max(5, Math.min(11, 30 / statuses.length));
-  const stops: string[] = [`${statusRgba(statuses[0], 0.08)} 0%`];
+  const stops: string[] = [`${statusColorMix(statuses[0], 0.08)} 0%`];
 
   statuses.forEach((status, index) => {
     const position = Math.round((index / lastIndex) * 100);
@@ -36,19 +33,19 @@ function buildAmbientLineStyle(statuses: RevisionStatus[]): CSSProperties | unde
     const tail = Math.min(100, position + feather);
     const coreAlpha = status === 'resolved' ? 0.58 : 0.86;
 
-    stops.push(`${statusRgba(status, 0.36)} ${lead}%`);
-    stops.push(`${statusRgba(status, coreAlpha)} ${position}%`);
-    stops.push(`${statusRgba(status, 0.38)} ${tail}%`);
+    stops.push(`${statusColorMix(status, 0.36)} ${lead}%`);
+    stops.push(`${statusColorMix(status, coreAlpha)} ${position}%`);
+    stops.push(`${statusColorMix(status, 0.38)} ${tail}%`);
   });
 
-  stops.push(`${statusRgba(statuses[lastIndex], 0.06)} 100%`);
+  stops.push(`${statusColorMix(statuses[lastIndex], 0.06)} 100%`);
 
   const activeStatus = statuses.find((status) => status !== 'resolved') ?? statuses[0];
   const tailStatus = statuses[statuses.length - 1];
 
   return {
     background: `linear-gradient(180deg, ${stops.join(', ')})`,
-    boxShadow: `0 0 14px ${statusRgba(activeStatus, 0.28)}, 0 0 18px ${statusRgba(tailStatus, 0.14)}`,
+    boxShadow: `0 0 14px ${statusColorMix(activeStatus, 0.28)}, 0 0 18px ${statusColorMix(tailStatus, 0.14)}`,
   };
 }
 
@@ -192,7 +189,7 @@ export function SceneRow({
           {openCount > 0 && (
             <span
               className="compact-label-container flex min-w-0 shrink items-center gap-1 text-[11px] font-medium rounded-full px-2 py-0.5"
-              style={{ color: '#FDCB6E', backgroundColor: 'rgba(253, 203, 110, 0.12)' }}
+              style={{ color: STATUS_CONFIG.open.color, backgroundColor: STATUS_CONFIG.open.bg }}
             >
               <CompactIconLabel icon={<AlertTriangle size={10} />} label={`${openCount} 미해결`} />
             </span>
@@ -365,7 +362,7 @@ export function FeedbackTreeSection({
               {episodeTree.totalOpen > 0 && (
                 <span
                   className="compact-label-container inline-flex min-w-0 shrink items-center gap-1 text-[11px] font-bold rounded-full px-2 py-0.5"
-                  style={{ color: '#FDCB6E', backgroundColor: 'rgba(253, 203, 110, 0.12)' }}
+                  style={{ color: STATUS_CONFIG.open.color, backgroundColor: STATUS_CONFIG.open.bg }}
                 >
                   <CompactIconLabel icon={<AlertTriangle size={10} />} label={`${episodeTree.totalOpen} 미해결`} />
                 </span>
