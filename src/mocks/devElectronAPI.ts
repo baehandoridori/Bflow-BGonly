@@ -66,6 +66,7 @@ function findMockSceneContext(sceneKey: string, preferredDepartment?: string) {
   const [episodeToken = '', partToken = '', sceneToken = ''] = sceneKey.split(':');
   const episodeNumber = Number(episodeToken.replace(/\D/g, ''));
   const partKey = partToken.trim().toUpperCase();
+  const hasRawSceneToken = sceneToken.trim().toLowerCase().startsWith('raw-');
   const sceneId = decodeRawRevisionSceneId(sceneToken);
   const normalizedSceneId = normalizeSceneIdKey(sceneId, partKey);
   let fallback: {
@@ -81,7 +82,11 @@ function findMockSceneContext(sceneKey: string, preferredDepartment?: string) {
       for (const scene of part.scenes) {
         const rawSceneId = scene.sceneId.trim().toLowerCase();
         const canonicalSceneId = normalizeSceneIdKey(scene.sceneId, part.partId);
-        if (rawSceneId !== sceneId && canonicalSceneId !== normalizedSceneId) continue;
+        if (hasRawSceneToken) {
+          if (rawSceneId !== sceneId) continue;
+        } else if (rawSceneId !== sceneId && canonicalSceneId !== normalizedSceneId) {
+          continue;
+        }
         const match = { episode, part, scene };
         if (!fallback) fallback = match;
         if (!preferredDepartment || part.department === preferredDepartment) return match;
