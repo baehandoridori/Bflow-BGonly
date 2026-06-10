@@ -2779,6 +2779,9 @@ export function ScenesView() {
         setPendingReq(null);
         return;
       }
+      if (allMergedScenes.length === 0) {
+        return;
+      }
       if (!matchedPendingSceneRequest) {
         console.warn('[ScenesView] pending scene modal request target not found:', detail);
         setPendingReq(null);
@@ -2803,6 +2806,9 @@ export function ScenesView() {
         setPendingReq(null);
         return;
       }
+    }
+    if (!currentPart || currentPart.scenes.length === 0) {
+      return;
     }
     if (!matchedPendingSceneRequest) {
       console.warn('[ScenesView] pending scene modal request target not found:', detail);

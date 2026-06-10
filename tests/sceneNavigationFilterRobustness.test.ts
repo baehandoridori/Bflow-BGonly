@@ -59,11 +59,13 @@ test('all-view status filter is applied after BG and ACT are merged', async () =
   assert.match(scenesView, /filterAndSortScenes\(bgPart\.scenes, \{ applyStatusFilter: selectedDepartment !== 'all' \}\)/);
 });
 
-test('pending scene modal requests are cleared when no scene can be matched', async () => {
+test('pending scene modal requests wait for scene data before clearing an unmatched request', async () => {
   const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
 
   assert.match(scenesView, /let matchedPendingSceneRequest = false;/);
   assert.match(scenesView, /matchedPendingSceneRequest = true;[\s\S]*?setPendingReq\(null\);/);
+  assert.match(scenesView, /if \(allMergedScenes\.length === 0\) \{\s*return;\s*\}/);
+  assert.match(scenesView, /if \(!currentPart \|\| currentPart\.scenes\.length === 0\) \{\s*return;\s*\}/);
   assert.match(scenesView, /if \(!matchedPendingSceneRequest\) \{[\s\S]*?setPendingReq\(null\);/);
 });
 
