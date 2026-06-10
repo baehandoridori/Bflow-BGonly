@@ -237,8 +237,8 @@ test('revision comment shortcuts request the revisions tab with a nested comment
   );
 });
 
-test('scene shortcuts preserve department filter except comment modal jumps', () => {
-  const target = resolveNotificationSceneTarget(
+test('scene shortcuts preserve revision filter, use sheet department for non-modal scene jumps, and use all for comment modal jumps', () => {
+  const actingTarget = resolveNotificationSceneTarget(
     {
       sceneId: 'scene-act-uuid',
       revisionId: 'revision-1',
@@ -246,17 +246,24 @@ test('scene shortcuts preserve department filter except comment modal jumps', ()
     },
     episodes,
   );
-  assert.ok(target);
-  const modalRequest = buildNotificationSceneModalRequest('revision', { revisionId: 'revision-1' }, target);
+  const bgTarget = resolveNotificationSceneTarget(
+    {
+      sceneId: 'scene-bg-uuid',
+    },
+    episodes,
+  );
+  assert.ok(actingTarget);
+  assert.ok(bgTarget);
+  const modalRequest = buildNotificationSceneModalRequest('revision', { revisionId: 'revision-1' }, actingTarget);
 
-  assert.equal(resolveNotificationSceneDepartmentFilter('revision', modalRequest, target), undefined);
-  assert.equal(resolveNotificationSceneDepartmentFilter('acting_feedback', null, target), undefined);
-  assert.equal(resolveNotificationSceneDepartmentFilter('scene_assignment', null, target), undefined);
+  assert.equal(resolveNotificationSceneDepartmentFilter('revision', modalRequest, actingTarget), undefined);
+  assert.equal(resolveNotificationSceneDepartmentFilter('acting_feedback', null, actingTarget), 'acting');
+  assert.equal(resolveNotificationSceneDepartmentFilter('scene_assignment', null, bgTarget), 'bg');
   assert.equal(
     resolveNotificationSceneDepartmentFilter(
       'mention',
-      buildNotificationSceneModalRequest('mention', { commentId: 'comment-1' }, target),
-      target,
+      buildNotificationSceneModalRequest('mention', { commentId: 'comment-1' }, actingTarget),
+      actingTarget,
     ),
     'all',
   );

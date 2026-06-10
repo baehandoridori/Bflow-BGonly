@@ -53,8 +53,6 @@ const SCENE_SHORTCUT_TYPES = new Set<string>([
 
 const PRESERVE_CURRENT_DEPT_FILTER_TYPES = new Set<string>([
   'revision',
-  'acting_feedback',
-  'scene_assignment',
 ]);
 
 function asString(value: unknown): string | undefined {
