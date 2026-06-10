@@ -57,6 +57,7 @@ export function RevisionRecipientPicker({
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const defaultCheckedKey = useMemo(() => defaultCheckedIds.join('|'), [defaultCheckedIds]);
 
   // defaultCheckedIds 가 바뀌면 (예: scene/dept 변경) 모든 사용자 선택 상태 리셋.
   // — Picker 의 "기본값" 자체가 바뀐 것이므로 깨끗한 상태로 시작하는 게 자연스럽다.
@@ -69,7 +70,7 @@ export function RevisionRecipientPicker({
     setExtraIds([]);
     emitChange([], []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultCheckedIds]);
+  }, [defaultCheckedKey]);
 
   // 화면에 표시할 칩 목록: defaultCheckedIds + extraIds (등록자 제외, 중복 제거)
   const visibleIds = useMemo(() => {

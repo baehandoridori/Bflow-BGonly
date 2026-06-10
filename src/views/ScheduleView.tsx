@@ -32,6 +32,7 @@ import DayScrollView from '@/components/calendar/DayScrollView';
 import DaySidebar from '@/components/calendar/DaySidebar';
 import { useCalendarDragCreate } from '@/hooks/useCalendarDragCreate';
 import { floatingGlassStyle, tooltipGlassStyle } from '@/utils/glassStyles';
+import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 
 /* ═══════════════════════════════════════════════════
    유틸리티
@@ -1272,7 +1273,9 @@ async function unlinkTodoFromCalendar(todoId: string) {
 export function ScheduleView() {
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId, setToast } = useAppStore();
+  const {
+    setView,
+  } = useAppStore();
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [vacationEvents, setVacationEvents] = useState<CalendarEvent[]>([]);
@@ -1545,26 +1548,21 @@ export function ScheduleView() {
       setPanelEvent(null);
       return;
     }
-    if (ev.linkedEpisode != null) {
-      setSelectedEpisode(ev.linkedEpisode);
-    }
+    let linkedPart: string | null | undefined = undefined;
     if (ev.linkedSheetName) {
       // 파트 ID 추출 (sheetName 형식: EP01_A_BG)
       const match = ev.linkedSheetName.match(/_([A-Z])_/);
-      if (match) setSelectedPart(match[1]);
+      if (match) linkedPart = match[1];
     }
-    if (ev.linkedDepartment) {
-      setSelectedDepartment(ev.linkedDepartment);
-    }
-    // 링크된 씬이 있으면 하이라이트 (자동 스크롤 + 글로우)
-    if (ev.linkedSceneId) {
-      setHighlightSceneId(ev.linkedSceneId);
-    }
-    // 씬 뷰로 이동
-    setView('scenes');
+    navigateToSceneView({
+      episodeNumber: ev.linkedEpisode,
+      partId: linkedPart,
+      department: ev.linkedDepartment,
+      highlightSceneId: ev.linkedSceneId,
+      toastMessage: `${ev.title} → 씬 뷰로 이동합니다`,
+    });
     setDetailEvent(null);
-    setToast(`${ev.title} → 씬 뷰로 이동합니다`);
-  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId, setToast]);
+  }, [setView]);
 
   // 드래그&드롭
   const handleEventDragDone = useCallback(async (eventId: string, newStart: string, newEnd: string) => {

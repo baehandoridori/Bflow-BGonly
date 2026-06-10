@@ -214,16 +214,26 @@ input, textarea, select, [contenteditable="true"] {
   user-select: text;
 }
 
-/* ─── 라이트↔다크 전환 트랜지션 ─── */
-body.theme-ready *,
-body.theme-ready *::before,
-body.theme-ready *::after {
+/* ─── 라이트↔다크 전환 트랜지션 ───
+   전역 * 트랜지션은 씬 시트/댓글 패널처럼 노드가 많은 화면에서 스타일 재계산을 크게 만든다.
+   테마 변경 때 체감상 필요한 큰 표면과 컨트롤만 부드럽게 전환한다. */
+body.theme-ready,
+body.theme-ready #root,
+body.theme-ready header,
+body.theme-ready aside,
+body.theme-ready main,
+body.theme-ready [role="dialog"],
+body.theme-ready button,
+body.theme-ready input,
+body.theme-ready textarea,
+body.theme-ready select,
+body.theme-ready svg {
   transition:
-    background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-    border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-    color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-    fill 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-    box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    fill 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    stroke 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ─── 씬 카드 → 상세 모달 continuity transition ─── */

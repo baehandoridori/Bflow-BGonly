@@ -8,6 +8,7 @@ import { getPreset } from '@/themes';
 import { cn } from '@/utils/cn';
 import { useCapsLockWarning } from '@/hooks/useCapsLockWarning';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
+import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
 
 // ─── 플렉서스 배경 (Canvas 2D, Z축 깊이감, 마우스 인터랙션) ─────
 
@@ -349,6 +350,15 @@ function LoginBackgroundArt() {
         enabled={plexusSettings.loginEnabled}
         fixed={false}
         settings={plexusSettings.loginStarNest ?? plexusSettings.starNest}
+      />
+    );
+  }
+  if (backgroundArt === 'bflow-starnest') {
+    return (
+      <BflowStarNestBackground
+        enabled={plexusSettings.loginEnabled}
+        fixed={false}
+        settings={plexusSettings.loginBflowStarNest ?? plexusSettings.bflowStarNest}
       />
     );
   }
@@ -756,9 +766,29 @@ interface LoginScreenProps {
 
 type Phase = 'landing' | 'ready' | 'transition' | 'login' | 'done';
 
+function isLocalBrowserPreview(): boolean {
+  return document.documentElement.dataset.devElectronApi === 'installed';
+}
+
+function isCodexBrowserPreview(): boolean {
+  return isLocalBrowserPreview() && new URLSearchParams(window.location.search).has('codex');
+}
+
 export function LoginScreen({ mode = 'login', onComplete }: LoginScreenProps) {
   const { setCurrentUser } = useAuthStore();
-  const [phase, setPhase] = useState<Phase>('landing');
+  const [phase, setPhase] = useState<Phase>(() => (
+    mode === 'login' && isLocalBrowserPreview() ? 'login' : 'landing'
+  ));
+
+  useEffect(() => {
+    if (mode !== 'login' || !isCodexBrowserPreview()) return;
+    let cancelled = false;
+    void login('배한솔', '1234', true).then((result) => {
+      if (cancelled || !result.ok || !result.user) return;
+      setCurrentUser(result.user);
+    });
+    return () => { cancelled = true; };
+  }, [mode, setCurrentUser]);
 
   // 텍스트 애니메이션 완료 콜백
   const handleAnimationDone = useCallback(() => {

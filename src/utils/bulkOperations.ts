@@ -1,6 +1,11 @@
 import { useBulkOperationsStore, type OpKind } from '@/stores/useBulkOperationsStore';
 import { useDataStore } from '@/stores/useDataStore';
 import type { BulkUpdateResult, MergedScene, Part, Scene, ScenePhaseState, Stage } from '@/types';
+import {
+  parseSingleSceneSelectionId,
+  resolveSingleSceneSelection,
+  type SingleSceneSelectionTarget,
+} from './sceneSelectionId';
 
 // v1.25.12 — 머지드 단위 카운트 헬퍼 재노출 (테스트 격리 위해 별도 파일).
 export { countSelectedScenes } from './bulkSelectionCount';
@@ -12,15 +17,41 @@ function findSceneInPart(part: Part | null | undefined, sceneId: string): Scene 
   return part.scenes.find((s) => s.sceneId === sceneId);
 }
 
+function findPartForSingleSceneSelection(
+  target: SingleSceneSelectionTarget,
+  fallbackPart?: Part | null,
+): Part | undefined {
+  if (fallbackPart && (!target.sheetName || fallbackPart.sheetName === target.sheetName)) {
+    return fallbackPart;
+  }
+
+  return useDataStore
+    .getState()
+    .episodes
+    .flatMap((episode) => episode.parts)
+    .find((part) => part.sheetName === target.sheetName);
+}
+
+function findSingleSelectedScene(selectionId: string, fallbackPart?: Part | null): Scene | undefined {
+  const target = parseSingleSceneSelectionId(selectionId);
+  if (!target) return undefined;
+
+  return resolveSingleSceneSelection(
+    findPartForSingleSceneSelection(target, fallbackPart),
+    selectionId,
+  );
+}
+
 /**
  * 선택된 씬 ID 집합을 Supabase 씬 UUID 배열로 변환한다.
  *
  * 선택 ID 형식:
  * - `bg:${mergedKey}` — 통합 모드에서 BG 씬 선택
  * - `act:${mergedKey}` — 통합 모드에서 액팅 씬 선택
- * - `${sceneId}` (plain) — 개별 모드, human sceneId ("a001" 등)
+ * - `scene:${sheetName}:uuid:${sceneUuid}` — 개별 모드, 실제 row 단위 선택
+ * - `${sceneId}` (plain) — 예전 개별 모드 선택 ID 호환
  *
- * 개별 모드에서는 `fallbackPart`가 있으면 해당 파트 내에서만 검색하고,
+ * 예전 plain 선택 ID는 `fallbackPart`가 있으면 해당 파트 내에서만 검색하고,
  * 없으면 스토어 전체에서 첫 번째로 매치되는 씬을 반환한다.
  */
 export function resolveSelectedUuids(
@@ -47,6 +78,8 @@ export function resolveSelectedUuids(
       const mergedKey = id.slice(MERGED_KEY_PREFIX.act.length);
       const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
       pushUuid(merged?.actScene?.id);
+    } else if (parseSingleSceneSelectionId(id)) {
+      pushUuid(findSingleSelectedScene(id, fallbackPart)?.id);
     } else {
       const scene = fallbackPart
         ? findSceneInPart(fallbackPart, id)
@@ -63,8 +96,9 @@ export function resolveSelectedUuids(
  * stage 토글처럼 현재 값(lo/done/review/png)이 필요한 경우 사용한다.
  *
  * `onlyDept`가 주어지면 통합 모드(bg:/act: 접두사)에서 해당 부서만 필터한다.
- * 개별 모드(plain sceneId)에서는 onlyDept를 무시한다 (현재 부서 하나만 존재).
- * `fallbackPart`가 주어지면 개별 모드에서는 해당 파트 내에서만 검색한다.
+ * 개별 모드(`scene:` 선택 ID 또는 legacy plain sceneId)에서는 onlyDept를 무시한다
+ * (현재 부서 하나만 존재). `fallbackPart`가 주어지면 개별 모드에서는 해당 파트 내에서
+ * 먼저 검색한다.
  */
 export function resolveSelectedScenes(
   selectedIds: Set<string> | Iterable<string>,
@@ -93,6 +127,8 @@ export function resolveSelectedScenes(
       const mergedKey = id.slice(MERGED_KEY_PREFIX.act.length);
       const merged = allMergedScenes.find((m) => m.mergedKey === mergedKey);
       pushScene(merged?.actScene);
+    } else if (parseSingleSceneSelectionId(id)) {
+      pushScene(findSingleSelectedScene(id, fallbackPart));
     } else {
       const scene = fallbackPart
         ? findSceneInPart(fallbackPart, id)
@@ -146,6 +182,8 @@ export interface ActPhasePatch {
   done: boolean;
   review: boolean;
   png: boolean;
+  completedBy?: string;
+  completedAt?: string;
 }
 
 /**

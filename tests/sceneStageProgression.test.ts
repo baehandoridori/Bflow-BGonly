@@ -10,13 +10,13 @@ import {
   isSequentialStageComplete,
 } from '../src/utils/sceneStageProgression.ts';
 
-test('stage progression turns on all previous stages when advancing', () => {
+test('stage toggle changes only the clicked stage when advancing', () => {
   assert.deepEqual(
     buildSequentialStagePatch(
       { lo: false, done: false, review: false, png: false },
       'review',
     ),
-    { lo: true, done: true, review: true, png: false },
+    { lo: false, done: false, review: true, png: false },
   );
 
   assert.deepEqual(
@@ -24,17 +24,17 @@ test('stage progression turns on all previous stages when advancing', () => {
       { lo: false, done: false, review: false, png: false },
       'png',
     ),
-    { lo: true, done: true, review: true, png: true },
+    { lo: false, done: false, review: false, png: true },
   );
 });
 
-test('stage progression rolls back from the clicked completed stage', () => {
+test('stage toggle turns off only the clicked completed stage', () => {
   assert.deepEqual(
     buildSequentialStagePatch(
       { lo: true, done: true, review: true, png: true },
       'review',
     ),
-    { lo: true, done: true, review: false, png: false },
+    { lo: true, done: true, review: false, png: true },
   );
 
   assert.deepEqual(
@@ -50,9 +50,22 @@ test('stage progression exposes changed fields and full completion', () => {
   const current = { lo: false, done: true, review: false, png: false };
   const patch = buildSequentialStagePatch(current, 'review');
 
-  assert.deepEqual(getChangedSequentialStages(current, patch), ['lo', 'review']);
+  assert.deepEqual(getChangedSequentialStages(current, patch), ['review']);
   assert.equal(isSequentialStageComplete(patch), false);
-  assert.equal(isSequentialStageComplete(buildSequentialStagePatch(current, 'png')), true);
+  assert.equal(
+    isSequentialStageComplete(
+      buildSequentialStagePatch({ lo: true, done: true, review: true, png: false }, 'png'),
+    ),
+    true,
+  );
+});
+
+test('acting phase toggle does not render previous phases as completed steps', async () => {
+  const phaseToggle = await readFile(path.join(process.cwd(), 'src', 'components', 'scenes', 'ScenePhaseToggle.tsx'), 'utf-8');
+
+  assert.doesNotMatch(phaseToggle, /isPrevious/);
+  assert.doesNotMatch(phaseToggle, /i < activeIndex/);
+  assert.doesNotMatch(phaseToggle, /SCENE_PHASE_COLORS\[state\]\}20/);
 });
 
 test('inline confirmation mockup is not kept as an active design artifact', () => {
@@ -78,4 +91,25 @@ test('scene view uses sequential stage patches for single and bulk toggles', asy
   assert.match(scenesView, /coalesceBulkStageResults/);
   assert.match(bulkOperations, /stagePatchByUuid\?: Map<string, Partial<Record<Stage, boolean>>>/);
   assert.match(bulkOperations, /Object\.assign\(patch, stagePatch\)/);
+});
+
+test('bulk acting phase set keeps completion metadata aligned with single clicks', async () => {
+  const scenesView = await readFile(path.join(process.cwd(), 'src', 'views', 'ScenesView.tsx'), 'utf-8');
+  const bulkOperations = await readFile(path.join(process.cwd(), 'src', 'utils', 'bulkOperations.ts'), 'utf-8');
+
+  assert.match(scenesView, /const phaseCompletionMetaByUuid = new Map<string, \{ completedBy: string; completedAt: string \}>\(\)/);
+  assert.match(scenesView, /const phaseCompletionLocationByUuid = new Map<string, \{ sheetName: string; sceneIndex: number \}>\(\)/);
+  assert.match(scenesView, /phaseCompletionMetaByUuid\.set\(s\.id, \{ completedBy: nextCompletedBy, completedAt: nextCompletedAt \}\)/);
+  assert.match(scenesView, /await updateSceneCompletionMeta\(\s*location\.sheetName,\s*location\.sceneIndex,/);
+  assert.match(bulkOperations, /completedBy\?: string/);
+  assert.match(bulkOperations, /completedAt\?: string/);
+});
+
+test('bulk edit modal uses visible scene count and disables all-department edits outside all view', async () => {
+  const scenesView = await readFile(path.join(process.cwd(), 'src', 'views', 'ScenesView.tsx'), 'utf-8');
+
+  assert.match(scenesView, /const selectedSceneCount = countSelectedScenes\(selectedSceneIds, allMergedScenes, currentPart\);/);
+  assert.match(scenesView, /일괄 편집 \(\{selectedSceneCount\}개 씬\)/);
+  assert.match(scenesView, /const disabled = !isUnifiedView && dept !== selectedDepartment;/);
+  assert.doesNotMatch(scenesView, /일괄 편집 \(\{selectedSceneIds\.size\}개 씬\)/);
 });

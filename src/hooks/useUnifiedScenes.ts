@@ -68,8 +68,8 @@ export function useUnifiedScenes({
   const [detailMerged, setDetailMerged] = useState<MergedScene | null>(null);
 
   useEffect(() => {
-    setDetailMerged((prev) => getSyncedMergedDetail(prev, mergedScenes));
-  }, [mergedScenes]);
+    setDetailMerged((prev) => getSyncedMergedDetail(prev, allMergedScenes));
+  }, [allMergedScenes]);
 
   return {
     allMergedScenes,

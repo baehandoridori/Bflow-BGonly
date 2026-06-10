@@ -453,6 +453,10 @@ export function ImageModal({
     if (e.target === e.currentTarget) onClose();
   };
 
+  const handleImageAreaClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && !annotateMode) onClose();
+  };
+
   /* ── 나란히 이미지 클릭 → 단일 ── */
   const handleImageClick = (which: 'storyboard' | 'guide') => {
     if (view !== 'side-by-side') return;
@@ -768,6 +772,7 @@ export function ImageModal({
           ref={imageAreaRef}
           className="relative w-full h-full flex items-center justify-center pt-20 pb-16 overflow-hidden"
           onContextMenu={handleImageContextMenu}
+          onClick={handleImageAreaClick}
         >
           {view === 'overlay' ? (
             /* 오버레이 모드 — 스와이프 없음 */

@@ -5,6 +5,14 @@
 
 import type { ElectronAPI, AppUser } from '@/types';
 import { MOCK_EPISODES, MOCK_COMPOSITING_STATES, type MockCompositingRow } from './compositingMockSeed';
+import {
+  buildDevPreviewCommentReadStates,
+  buildDevPreviewCommentRows,
+  buildDevPreviewLocalCommentStore,
+  buildDevPreviewRevisionRows,
+  type DevPreviewCommentRow,
+  type DevPreviewRevisionRow,
+} from './devPreviewComments';
 import { normalizeSceneIdKey } from '@/utils/sceneIdKey';
 
 const MOCK_USERS: AppUser[] = [
@@ -24,8 +32,53 @@ const MOCK_USERS: AppUser[] = [
 
 // 로컬 스토리지 기반 간이 저장소
 const localStore: Record<string, unknown> = {};
+const COMMENTS_FILE = 'comments.json';
 
 const noop = () => () => {};
+
+interface MockMetadataRow {
+  type: string;
+  key: string;
+  value: string;
+  updatedAt: string;
+}
+
+function getMockMetadataRows(): MockMetadataRow[] {
+  return (localStore.__metadataRows as MockMetadataRow[] | undefined)
+    ?? (localStore.__metadataRows = [
+      {
+        type: 'episode-title',
+        key: '5',
+        value: '쾅 뉴럴링크',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+      },
+      {
+        type: 'episode-memo',
+        key: '5',
+        value: '컴포지팅 목업',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+      },
+      { type: 'part-reel-worker', key: 'EP05_A_BG', value: '배한솔', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-reel-worker', key: 'EP05_A_ACT', value: '배한솔', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-reel-worker', key: 'EP05_B_BG', value: '장삐쭈', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-reel-worker', key: 'EP05_B_ACT', value: '장삐쭈', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-reel-worker', key: 'EP05_C_BG', value: '강선영', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-reel-worker', key: 'EP05_C_ACT', value: '강선영', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-reel-worker', key: 'EP05_D_BG', value: '박정인', updatedAt: '2026-06-05T00:00:00.000Z' },
+      { type: 'part-reel-worker', key: 'EP05_D_ACT', value: '박정인', updatedAt: '2026-06-05T00:00:00.000Z' },
+    ]) as MockMetadataRow[];
+}
+
+function upsertMockMetadata(type: string, key: string, value: string): void {
+  const rows = getMockMetadataRows();
+  const existing = rows.find((row) => row.type === type && row.key === key);
+  if (existing) {
+    existing.value = value;
+    existing.updatedAt = new Date().toISOString();
+    return;
+  }
+  rows.push({ type, key, value, updatedAt: new Date().toISOString() });
+}
 
 interface MockActivityRow {
   id: string;
@@ -43,9 +96,44 @@ interface MockActivityRow {
 
 const activityRealtimeCallbacks = new Set<(row: MockActivityRow) => void>();
 
+export function hasUsableElectronAPI(api: Partial<ElectronAPI> | undefined): boolean {
+  return typeof api?.usersRead === 'function'
+    && typeof api?.usersWrite === 'function'
+    && typeof api?.readSettings === 'function'
+    && typeof api?.writeSettings === 'function'
+    && typeof api?.supabaseTestConnection === 'function'
+    && typeof api?.supabaseReadAll === 'function';
+}
+
 function getMockActivityRows(): MockActivityRow[] {
   return (localStore.__activityRows as MockActivityRow[] | undefined)
-    ?? (localStore.__activityRows = []) as MockActivityRow[];
+    ?? (localStore.__activityRows = buildInitialMockActivityRows()) as MockActivityRow[];
+}
+
+function getMockCommentRows(): DevPreviewCommentRow[] {
+  return (localStore.__commentRows as DevPreviewCommentRow[] | undefined)
+    ?? (localStore.__commentRows = buildDevPreviewCommentRows(MOCK_EPISODES)) as DevPreviewCommentRow[];
+}
+
+function getMockCommentReadStates(userId: string) {
+  const stateRows = (localStore.__commentReadStateRows as ReturnType<typeof buildDevPreviewCommentReadStates> | undefined)
+    ?? (localStore.__commentReadStateRows = buildDevPreviewCommentReadStates(userId, MOCK_EPISODES)) as ReturnType<typeof buildDevPreviewCommentReadStates>;
+  return stateRows.filter((row) => row.userId === userId);
+}
+
+function getMockRevisionRows(): DevPreviewRevisionRow[] {
+  return (localStore.__revisionRows as DevPreviewRevisionRow[] | undefined)
+    ?? (localStore.__revisionRows = buildDevPreviewRevisionRows(MOCK_EPISODES)) as DevPreviewRevisionRow[];
+}
+
+function parseJsonStringArray(value?: string): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 function emitMockActivityRealtime(row: MockActivityRow): void {
@@ -135,6 +223,79 @@ function createMockRevisionActivityRow(params: {
   };
 }
 
+function createMockRevisionStatusActivityRow(params: {
+  revision: DevPreviewRevisionRow;
+  actionType: 'revision_in_progress' | 'revision_resolve';
+  userId: string;
+  userName: string;
+  createdAt: string;
+  resolvedNote?: string;
+}): MockActivityRow {
+  const { revision, actionType, userId, userName, createdAt, resolvedNote } = params;
+  const context = findMockSceneContext(revision.sceneKey, revision.department);
+  const department = revision.department === 'bg' || revision.department === 'acting'
+    ? revision.department
+    : context?.part.department ?? null;
+  const sceneLabel = context
+    ? `${context.episode.title} ${context.part.partId.toUpperCase()} ${context.scene.sceneId} 리비전 #${revision.revisionNo}`
+    : `씬 ${revision.sceneKey} 리비전 #${revision.revisionNo}`;
+
+  return {
+    id: `mock-activity-${actionType}-${revision.id}`,
+    user_id: userId,
+    user_name: userName,
+    action_type: actionType,
+    action_group: 'memo',
+    scene_id: context?.scene.id ?? null,
+    scene_label: sceneLabel,
+    episode_number: context?.episode.episodeNumber ?? null,
+    department,
+    detail: {
+      revisionId: revision.id,
+      revisionNumber: revision.revisionNo,
+      descriptionPreview: revision.description.slice(0, 60),
+      ...(resolvedNote ? { resolvedNote } : {}),
+    },
+    created_at: createdAt,
+  };
+}
+
+function buildInitialMockActivityRows(): MockActivityRow[] {
+  const rows: MockActivityRow[] = [];
+  for (const revision of getMockRevisionRows()) {
+    rows.push(createMockRevisionActivityRow({
+      id: revision.id,
+      sceneKey: revision.sceneKey,
+      revisionNo: revision.revisionNo,
+      description: revision.description,
+      department: revision.department,
+      requesterId: revision.requesterId,
+      requesterName: revision.requesterName,
+      createdAt: revision.createdAt,
+    }));
+    if (revision.status === 'in_progress') {
+      rows.push(createMockRevisionStatusActivityRow({
+        revision,
+        actionType: 'revision_in_progress',
+        userId: '1',
+        userName: '배한솔',
+        createdAt: revision.updatedAt || revision.createdAt,
+      }));
+    }
+    if (revision.status === 'resolved') {
+      rows.push(createMockRevisionStatusActivityRow({
+        revision,
+        actionType: 'revision_resolve',
+        userId: '1',
+        userName: revision.resolvedBy || '배한솔',
+        createdAt: revision.resolvedAt || revision.updatedAt || revision.createdAt,
+        resolvedNote: revision.resolvedNote,
+      }));
+    }
+  }
+  return rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
 function filterMockActivities(opts: {
   before?: string;
   limit?: number;
@@ -170,8 +331,9 @@ function filterMockActivities(opts: {
 }
 
 export function installDevElectronAPI(): void {
-  if (window.electronAPI) return; // 이미 Electron 환경이면 무시
+  if (hasUsableElectronAPI(window.electronAPI)) return; // 이미 Electron 환경이면 무시
 
+  localStore[COMMENTS_FILE] ??= buildDevPreviewLocalCommentStore(MOCK_EPISODES);
   console.log('[DEV] 브라우저 mock electronAPI 설치됨');
 
   const mockAPI: ElectronAPI = {
@@ -264,13 +426,13 @@ export function installDevElectronAPI(): void {
     storageUploadImage: async () => ({ ok: true, url: 'mock://image' }),
     storageDeleteImage: async () => {},
     sheetsReadComments: async () => ({ ok: true, data: [] }),
-    sheetsReadRevisions: async () => ({ ok: true, data: [] }),
+    sheetsReadRevisions: async () => ({ ok: true, data: getMockRevisionRows() }),
 
     dataNotifyChange: async () => ({ ok: true }),
     sheetsNotifyChange: async () => ({ ok: true }),
     onSnapshotRelay: noop,
     sheetsRelaySnapshot: async () => ({ ok: true }),
-    sheetsReadAllMetadata: async () => ({ ok: true, data: [] }),
+    sheetsReadAllMetadata: async () => ({ ok: true, data: getMockMetadataRows() }),
 
     vacationConnect: async () => ({ ok: false, error: 'DEV mock' }),
     vacationIsConnected: async () => false,
@@ -315,11 +477,55 @@ export function installDevElectronAPI(): void {
     supabaseAddUser: async () => {},
     supabaseUpdateUser: async () => {},
     supabaseDeleteUser: async () => {},
-    supabaseReadComments: async () => [],
+    supabaseReadComments: async (partUuid) => getMockCommentRows().filter((comment) => comment.partId === partUuid),
+    supabaseReadCommentReadStates: async (userId) => getMockCommentReadStates(userId),
+    supabaseUpsertCommentReadState: async (userId, sceneThreadKey, lastReadAt) => {
+      const stateRows = getMockCommentReadStates(userId);
+      const existing = stateRows.find((row) => row.sceneThreadKey === sceneThreadKey);
+      const updatedAt = new Date().toISOString();
+      if (existing) {
+        existing.lastReadAt = lastReadAt;
+        existing.updatedAt = updatedAt;
+      } else {
+        stateRows.push({ userId, sceneThreadKey, lastReadAt, updatedAt });
+      }
+      localStore.__commentReadStateRows = stateRows;
+    },
     supabaseFetchMissedMentions: async () => [],
-    supabaseAddComment: async () => {},
-    supabaseEditComment: async () => {},
-    supabaseDeleteComment: async () => {},
+    supabaseAddComment: async (commentId, partUuid, sceneId, userId, userName, text, mentions, createdAt, images, revisionId, parentCommentId) => {
+      const comments = getMockCommentRows();
+      comments.push({
+        id: commentId,
+        partId: partUuid,
+        sceneId,
+        userId,
+        userName,
+        text,
+        mentions,
+        images,
+        createdAt,
+        editedAt: null,
+        revisionId: revisionId ?? null,
+        parentCommentId: parentCommentId ?? null,
+      });
+      localStore.__commentRows = comments;
+    },
+    supabaseEditComment: async (commentId, text, mentions, images) => {
+      const comments = getMockCommentRows();
+      const target = comments.find((comment) => comment.id === commentId);
+      if (!target) return;
+      target.text = text;
+      target.mentions = mentions;
+      if (images !== undefined) target.images = images;
+      target.editedAt = new Date().toISOString();
+      localStore.__commentRows = comments;
+    },
+    supabaseDeleteComment: async (commentId) => {
+      const comments = getMockCommentRows()
+        .filter((comment) => comment.id !== commentId)
+        .map((comment) => comment.parentCommentId === commentId ? { ...comment, parentCommentId: null } : comment);
+      localStore.__commentRows = comments;
+    },
     // v1.26.0 mocks
     supabaseAddCommentReaction: async () => {},
     supabaseRemoveCommentReaction: async () => {},
@@ -351,24 +557,49 @@ export function installDevElectronAPI(): void {
     supabaseAddPrivateEvent: async () => ({ id: 'mock-private' }),
     supabaseUpdatePrivateEvent: async () => {},
     supabaseDeletePrivateEvent: async () => {},
-    supabaseReadRevisions: async () => [],
+    supabaseReadRevisions: async () => getMockRevisionRows(),
     supabaseAddRevision: async (
       id: string,
       _partUuid: string,
       sceneKey: string,
       revisionNo: number,
-      _status: string,
-      _priority: string,
+      status: string,
+      priority: string,
       description: string,
-      _frameNo: string,
-      _imageUrl: string,
+      frameNo: string,
+      imageUrl: string,
       department: string,
       lookupDepartment: string,
       requesterId: string,
       requesterName: string,
-      _assignee: string,
+      assignee: string,
       createdAt: string,
+      notifyUserIdsJson?: string,
     ) => {
+      const revisions = getMockRevisionRows();
+      revisions.push({
+        id,
+        sceneKey,
+        revisionNo,
+        status: status || 'open',
+        priority: priority || 'normal',
+        description,
+        frameNo,
+        imageUrl,
+        department: department || lookupDepartment,
+        requesterId,
+        requesterName,
+        assignee,
+        resolvedBy: '',
+        resolvedNote: '',
+        createdAt,
+        updatedAt: createdAt,
+        resolvedAt: '',
+        notifyUserIds: parseJsonStringArray(notifyUserIdsJson),
+      });
+      localStore.__revisionRows = revisions;
+      window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
+
       const activity = createMockRevisionActivityRow({
         id,
         sceneKey,
@@ -382,11 +613,46 @@ export function installDevElectronAPI(): void {
       getMockActivityRows().unshift(activity);
       emitMockActivityRealtime(activity);
     },
-    supabaseUpdateRevision: async () => {},
-    supabaseDeleteRevision: async (_id: string) => {},
-    supabaseReadAllMetadata: async () => [],
-    supabaseReadMetadata: async () => null,
-    supabaseWriteMetadata: async () => {},
+    supabaseUpdateRevision: async (id: string, updates: Record<string, string>) => {
+      const revisions = getMockRevisionRows();
+      const target = revisions.find((revision) => revision.id === id);
+      if (!target) return;
+      const previousStatus = target.status;
+      Object.assign(target, {
+        ...updates,
+        updatedAt: updates.updatedAt ?? updates.updated_at ?? new Date().toISOString(),
+      });
+      localStore.__revisionRows = revisions;
+      window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
+
+      if (updates.status && updates.status !== previousStatus) {
+        const actionType = updates.status === 'resolved'
+          ? 'revision_resolve'
+          : updates.status === 'in_progress'
+            ? 'revision_in_progress'
+            : null;
+        if (actionType) {
+          const activity = createMockRevisionStatusActivityRow({
+            revision: target,
+            actionType,
+            userId: '1',
+            userName: updates.resolvedBy || '배한솔',
+            createdAt: target.resolvedAt || target.updatedAt || new Date().toISOString(),
+            resolvedNote: updates.resolvedNote,
+          });
+          getMockActivityRows().unshift(activity);
+          emitMockActivityRealtime(activity);
+        }
+      }
+    },
+    supabaseDeleteRevision: async (id: string) => {
+      localStore.__revisionRows = getMockRevisionRows().filter((revision) => revision.id !== id);
+      window.dispatchEvent(new CustomEvent('bflow:revisions-invalidated'));
+    },
+    supabaseReadAllMetadata: async () => getMockMetadataRows(),
+    supabaseReadMetadata: async (type, key) =>
+      getMockMetadataRows().find((row) => row.type === type && row.key === key) ?? null,
+    supabaseWriteMetadata: async (type, key, value) => upsertMockMetadata(type, key, value),
     supabaseGetActivity: async () => [],
     supabaseGetRealtimeStatus: async () => 'CONNECTING',
     onSupabaseRealtime: noop,
@@ -505,4 +771,5 @@ export function installDevElectronAPI(): void {
   };
 
   (window as Window & typeof globalThis).electronAPI = mockAPI;
+  document.documentElement.dataset.devElectronApi = 'installed';
 }

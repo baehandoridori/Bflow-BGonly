@@ -1,4 +1,9 @@
 import { create } from 'zustand';
+import {
+  dedupeNotificationsByIdentity,
+  getNotificationIdentity,
+  prependNotificationDeduped,
+} from '../utils/notificationIdentity';
 
 // ─── 알림 타입 정의 ─────────────────────────────────
 /**
@@ -149,7 +154,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       isRead: false,
       createdAt: new Date().toISOString(),
     };
-    const next = [notification, ...get().notifications].slice(0, MAX_NOTIFICATIONS);
+    const next = prependNotificationDeduped(get().notifications, notification, MAX_NOTIFICATIONS);
     setNotifications(set, next);
     persistToDisk(next);
   },
@@ -186,7 +191,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     try {
       const data = await window.electronAPI?.readSettings?.(NOTIFICATIONS_FILE);
       if (Array.isArray(data)) {
-        const notifications = data.slice(0, MAX_NOTIFICATIONS) as AppNotification[];
+        const notifications = dedupeNotificationsByIdentity(data as AppNotification[], MAX_NOTIFICATIONS);
         setNotifications(set, notifications);
       }
     } catch {
@@ -200,7 +205,11 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   //   사용자가 놓치는 문제.) 없으면 그대로 prepend.
   upsertCommentReaction: (n) => {
     const list = get().notifications;
-    const next = [{ ...n }, ...list.filter((x) => x.id !== n.id)].slice(0, MAX_NOTIFICATIONS);
+    const identity = getNotificationIdentity(n);
+    const next = [
+      { ...n },
+      ...list.filter((x) => x.id !== n.id && (!identity || getNotificationIdentity(x) !== identity)),
+    ].slice(0, MAX_NOTIFICATIONS);
     setNotifications(set, next);
     persistToDisk(next);
   },

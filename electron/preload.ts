@@ -69,7 +69,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update:ready', handler);
     return () => { ipcRenderer.removeListener('update:ready', handler); };
   },
-  // 사용자가 토스트의 "지금 재시작" 클릭 시 — main이 swap 후 자동 재실행
+  // 사용자가 토스트의 "지금 업데이트" 클릭 시 — main이 installer 적용 후 최신 버전으로 열기
   applyUpdateNow: () => ipcRenderer.invoke('update:apply-now') as Promise<void>,
 
   // 네이티브 알림 (OS 데스크톱 알림)

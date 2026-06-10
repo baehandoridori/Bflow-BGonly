@@ -5,7 +5,7 @@
 
 import type { WidgetLayoutItem } from '@/types';
 import type { ThemeConfig } from '@/themes';
-import type { BackgroundArt, StarNestSettings } from '@/utils/starNestSettings';
+import type { BackgroundArt, BflowStarNestSettings, StarNestSettings } from '@/utils/starNestSettings';
 
 const LAYOUT_FILE = 'layout.json';
 const ALL_LAYOUT_FILE = 'layout-all.json';
@@ -111,6 +111,7 @@ export interface UserPreferences {
     backgroundArt?: BackgroundArt;
     loginBackgroundArt?: BackgroundArt;
     dashboardBackgroundArt?: BackgroundArt;
+    shareBackgroundEffectPresets?: boolean;
     loginEnabled?: boolean;
     loginGradientEnabled?: boolean;
     loginParticleCount?: number;
@@ -128,6 +129,9 @@ export interface UserPreferences {
     dashboardStarNest?: Partial<StarNestSettings>;
     dashboardStarNestOpacity?: number;
     dashboardStarNestBlurPx?: number;
+    bflowStarNest?: Partial<BflowStarNestSettings>;
+    loginBflowStarNest?: Partial<BflowStarNestSettings>;
+    dashboardBflowStarNest?: Partial<BflowStarNestSettings>;
   };
 
   // Phase 8-4: 스플래시 건너뛰기

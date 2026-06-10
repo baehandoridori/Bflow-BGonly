@@ -34,12 +34,12 @@ import { useSceneActivities } from '@/hooks/useSceneActivities';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useAppStore } from '@/stores/useAppStore';
 import { useDataStore } from '@/stores/useDataStore';
-import { updateSceneFieldInSupabase } from '@/services/supabaseService';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { formatStamp, formatTime } from '@/utils/formatTime';
 import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
 import { describeActivity, deptPrefix } from './activityLabels';
+import { useOptimisticSceneImageUrl } from '@/hooks/useOptimisticSceneImageUrl';
 
 // ─── 타입 ──────────────────────────────────────────
 
@@ -74,6 +74,8 @@ interface SceneDetailModalProps {
   focusRevisionId?: string;
   /** v1.24.0: 댓글 점프용 — 모달 진입 시 자동 스크롤 + 펄스. */
   focusCommentId?: string;
+  /** 리비전 카드 내부 댓글 스레드에서 강조할 댓글 id. */
+  focusRevisionCommentId?: string;
 }
 
 // ─── 속성 행 컴포넌트 ──────────────────────────────
@@ -445,6 +447,7 @@ export function SceneDetailModal({
   initialTab,
   focusRevisionId,
   focusCommentId,
+  focusRevisionCommentId,
 }: SceneDetailModalProps) {
   const [imageLoading, setImageLoading] = useState<string | null>(null);
   const [showImageModal, setShowImageModal] = useState(false);
@@ -549,6 +552,9 @@ export function SceneDetailModal({
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('rev-pulse');
+        window.dispatchEvent(new CustomEvent('bflow:expand-revision', {
+          detail: { revisionId: focusRevisionId, commentId: focusRevisionCommentId },
+        }));
         removeTimer = setTimeout(() => { el.classList.remove('rev-pulse'); }, 2600);
       } else if (retries > 0) {
         setTimeout(() => requestAnimationFrame(() => attempt(retries - 1)), 100);
@@ -559,7 +565,7 @@ export function SceneDetailModal({
       cancelled = true;
       if (removeTimer) clearTimeout(removeTimer);
     };
-  }, [focusRevisionId, showRevisions]);
+  }, [focusRevisionId, focusRevisionCommentId, showRevisions]);
   const [commentCount, setCommentCount] = useState(0);
   const [revisionCount, setRevisionCount] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState<'storyboard' | 'guide' | null>(null);
@@ -569,7 +575,7 @@ export function SceneDetailModal({
   // 이미지 즉시 프리뷰용 낙관적 URL (업로드 중 base64 표시)
   const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
   const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
-  const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
+  const { persistLatestImageUrl } = useOptimisticSceneImageUrl('SceneDetailModal');
 
   useEffect(() => {
     setLatestImageUrls({});
@@ -583,27 +589,22 @@ export function SceneDetailModal({
     (imageType: 'storyboard' | 'guide', url: string) => {
       if (department !== 'bg') return;
 
-      const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
       const previousUrl = imageType === 'storyboard' ? scene.storyboardUrl : scene.guideUrl;
 
       setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
       setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
 
-      const sceneUuid = scene.id;
-      if (!sceneUuid) return;
-
-      const patch: Partial<Scene> = { [field]: url };
-      updateSceneByUuid(sceneUuid, patch);
-      void updateSceneFieldInSupabase(sceneUuid, field, url).catch((err) => {
-        console.error('[SceneDetailModal] 최신 이미지 URL 저장 실패', err);
-        const rollbackUrl = previousUrl ?? '';
-        const rollbackPatch: Partial<Scene> = { [field]: rollbackUrl };
-        updateSceneByUuid(sceneUuid, rollbackPatch);
-        setLatestImageUrls((prev) => ({ ...prev, [imageType]: rollbackUrl }));
-        sonnerToast.error('이미지 최신화 저장에 실패했습니다. 새로고침 후 다시 확인해 주세요.');
+      persistLatestImageUrl({
+        sceneUuid: scene.id,
+        imageType,
+        url,
+        previousUrl,
+        onRollback: (rollbackUrl) => {
+          setLatestImageUrls((prev) => ({ ...prev, [imageType]: rollbackUrl }));
+        },
       });
     },
-    [department, scene.id, scene.storyboardUrl, scene.guideUrl, updateSceneByUuid],
+    [department, scene.id, scene.storyboardUrl, scene.guideUrl, persistLatestImageUrl],
   );
 
   const deptConfig = DEPARTMENT_CONFIGS[department];

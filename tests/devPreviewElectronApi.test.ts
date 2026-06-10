@@ -1,0 +1,48 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const readRepoFile = (...segments: string[]) =>
+  readFile(path.join(process.cwd(), ...segments), 'utf-8');
+
+test('local browser preview installs the Electron API mock outside Electron', async () => {
+  const main = await readRepoFile('src', 'main.tsx');
+
+  assert.match(main, /function shouldInstallBrowserElectronMock/);
+  assert.match(main, /hasUsableElectronAPI\(window\.electronAPI\)/);
+  assert.match(main, /if \(import\.meta\.env\.DEV\) return true;/);
+  assert.match(main, /'localhost'/);
+  assert.match(main, /'127\.0\.0\.1'/);
+  assert.match(main, /'::1'/);
+  assert.match(main, /import \{ hasUsableElectronAPI, installDevElectronAPI \} from '\.\/mocks\/devElectronAPI';/);
+  assert.doesNotMatch(main, /await import\('\.\/mocks\/devElectronAPI'\)/);
+});
+
+test('browser preview Electron API mock supports preview login writes', async () => {
+  const mockApi = await readRepoFile('src', 'mocks', 'devElectronAPI.ts');
+
+  assert.match(mockApi, /function hasUsableElectronAPI/);
+  assert.match(mockApi, /usersRead/);
+  assert.match(mockApi, /usersWrite:\s*async \(\) => true/);
+  assert.match(mockApi, /readSettings:\s*async/);
+  assert.match(mockApi, /supabaseTestConnection:\s*async/);
+  assert.match(mockApi, /dataset\.devElectronApi = 'installed'/);
+});
+
+test('browser preview starts directly at the login form after the mock is installed', async () => {
+  const loginScreen = await readRepoFile('src', 'components', 'auth', 'LoginScreen.tsx');
+
+  assert.match(loginScreen, /function isLocalBrowserPreview/);
+  assert.match(loginScreen, /dataset\.devElectronApi === 'installed'/);
+  assert.match(loginScreen, /mode === 'login' && isLocalBrowserPreview\(\) \? 'login' : 'landing'/);
+});
+
+test('Codex browser preview auto logs in with the stable preview account', async () => {
+  const loginScreen = await readRepoFile('src', 'components', 'auth', 'LoginScreen.tsx');
+
+  assert.match(loginScreen, /function isCodexBrowserPreview/);
+  assert.match(loginScreen, /new URLSearchParams\(window\.location\.search\)\.has\('codex'\)/);
+  assert.match(loginScreen, /login\('배한솔', '1234', true\)/);
+  assert.match(loginScreen, /setCurrentUser\(result\.user\)/);
+});

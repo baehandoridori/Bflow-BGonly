@@ -53,11 +53,19 @@ import './index.css';
 import './styles/path-link.css';
 import './styles/activity-widget.css';
 import './styles/scene-effects.css';
+import { hasUsableElectronAPI, installDevElectronAPI } from './mocks/devElectronAPI';
+
+function shouldInstallBrowserElectronMock(): boolean {
+  if (hasUsableElectronAPI(window.electronAPI)) return false;
+  if (import.meta.env.DEV) return true;
+
+  const localPreviewHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+  return localPreviewHosts.has(window.location.hostname);
+}
 
 async function bootstrap() {
-  // 브라우저 개발 환경: electronAPI가 없으면 mock 설치
-  if (!window.electronAPI && import.meta.env.DEV) {
-    const { installDevElectronAPI } = await import('./mocks/devElectronAPI');
+  // 로컬 브라우저 프리뷰: electronAPI가 없으면 mock 설치
+  if (shouldInstallBrowserElectronMock()) {
     installDevElectronAPI();
   }
 

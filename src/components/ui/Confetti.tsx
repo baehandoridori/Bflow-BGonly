@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const COLORS = ['#C4BCFA', '#A599F5', '#8677EF', '#6C5CE7', '#F5BEB3', '#E17055'];
@@ -21,11 +21,17 @@ interface ConfettiProps {
 
 export function Confetti({ active, onComplete }: ConfettiProps) {
   const [particles, setParticles] = useState<Particle[]>([]);
-
-  const stableComplete = useCallback(() => onComplete?.(), [onComplete]);
+  const completeRef = useRef(onComplete);
 
   useEffect(() => {
-    if (!active) return;
+    completeRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    if (!active) {
+      setParticles([]);
+      return;
+    }
 
     setParticles(
       Array.from({ length: COUNT }, (_, i) => ({
@@ -41,10 +47,10 @@ export function Confetti({ active, onComplete }: ConfettiProps) {
 
     const t = setTimeout(() => {
       setParticles([]);
-      stableComplete();
+      completeRef.current?.();
     }, 1400);
     return () => clearTimeout(t);
-  }, [active, stableComplete]);
+  }, [active]);
 
   return (
     <AnimatePresence>

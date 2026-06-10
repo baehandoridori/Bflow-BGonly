@@ -11,7 +11,7 @@
  * mock: docs/mockups/compositing-dashboard/interactive.html (VariantHybrid)
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { GripVertical, FileText } from 'lucide-react';
 import { cn } from '@/utils/cn';
@@ -19,6 +19,7 @@ import type { CompositingState, CompositingStatus } from '@/types';
 import { COMPOSITING_STATUS_LABEL, COMPOSITING_STATUS_ORDER, COMPOSITING_STATUS_TOKEN, isCompletedStatus, partCssColor } from '@/utils/compositingLabels';
 import { getTimelineCarouselSelection } from '@/utils/compositingTimelineCarousel';
 import { useCompositingDashboardStore } from '@/stores/useCompositingDashboardStore';
+import { useDataStore } from '@/stores/useDataStore';
 import { PartBadge } from '@/components/compositing-dashboard/common/PartBadge';
 
 const PART_BOX_H = 96;
@@ -33,6 +34,18 @@ interface TimelineProbe {
   partWidth: number;
   partTop: number;
   partHeight: number;
+}
+
+type TimelineProbeGeometry = Omit<TimelineProbe, 'partId'>;
+
+function buildTimelineProbeGeometry(clientX: number, rect: DOMRect): TimelineProbeGeometry {
+  return {
+    pointerRatio: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
+    partLeft: rect.left,
+    partWidth: rect.width,
+    partTop: rect.top,
+    partHeight: rect.height,
+  };
 }
 
 export interface TimelineScene {
@@ -64,7 +77,17 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
   const setHoveredPart = useCompositingDashboardStore((s) => s.setHoveredPart);
   const setPinnedScene = useCompositingDashboardStore((s) => s.setPinnedScene);
   const setDetailScene = useCompositingDashboardStore((s) => s.setDetailScene);
+  const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const partIds = useMemo(() => partGroups.map((g) => g.partId), [partGroups]);
+  const episodeLabelByNumber = useMemo(() => {
+    const labels = new Map<number, string>();
+    for (const episode of episodes) {
+      labels.set(episode.episodeNumber, getEpisodeDisplayName(episode));
+    }
+    return labels;
+  }, [episodes, getEpisodeDisplayName, episodeTitles]);
 
   // 코덱스 4차 P1 (2026-05-22): framer-motion Reorder 제거.
   //   - 이 컴포넌트는 부모(CompositingDashboardView) 의 `overflow-y-auto` 컨테이너 안에서 렌더링됨.
@@ -74,6 +97,15 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
   const [draggingPartId, setDraggingPartId] = useState<string | null>(null);
   const [dragOverPartId, setDragOverPartId] = useState<string | null>(null);
   const [timelineProbe, setTimelineProbe] = useState<TimelineProbe | null>(null);
+  const timelineProbeRef = useRef<TimelineProbe | null>(null);
+  const pendingHoverPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  const hoverFrameRef = useRef<number | null>(null);
+  const lastHoverKeyRef = useRef<string | null>(null);
+  const actionClearTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    timelineProbeRef.current = timelineProbe;
+  }, [timelineProbe]);
 
   const handleDragStart = (partId: string) => (e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = 'move';
@@ -145,24 +177,50 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
   const trackContainerRef = useRef<HTMLDivElement>(null);
   const clearProbeTimerRef = useRef<number | null>(null);
 
-  const cancelProbeClear = () => {
+  const cancelProbeClear = useCallback(() => {
     if (clearProbeTimerRef.current !== null) {
       window.clearTimeout(clearProbeTimerRef.current);
       clearProbeTimerRef.current = null;
     }
-  };
+  }, []);
 
-  const scheduleProbeClear = () => {
+  const scheduleProbeClear = useCallback(() => {
     cancelProbeClear();
     clearProbeTimerRef.current = window.setTimeout(() => {
+      lastHoverKeyRef.current = null;
+      timelineProbeRef.current = null;
       setHoveredPart(null);
       setTimelineProbe(null);
       clearProbeTimerRef.current = null;
     }, 320);
-  };
+  }, [cancelProbeClear, setHoveredPart]);
+
+  const clearProbeNow = useCallback(() => {
+    cancelProbeClear();
+    if (actionClearTimerRef.current !== null) {
+      window.clearTimeout(actionClearTimerRef.current);
+      actionClearTimerRef.current = null;
+    }
+    lastHoverKeyRef.current = null;
+    timelineProbeRef.current = null;
+    setHoveredPart(null);
+    setTimelineProbe(null);
+  }, [cancelProbeClear, setHoveredPart]);
+
+  const scheduleProbeClearAfterAction = useCallback(() => {
+    if (actionClearTimerRef.current !== null) {
+      window.clearTimeout(actionClearTimerRef.current);
+    }
+    actionClearTimerRef.current = window.setTimeout(() => {
+      actionClearTimerRef.current = null;
+      clearProbeNow();
+    }, 360);
+  }, [clearProbeNow]);
 
   useEffect(() => () => {
     if (clearProbeTimerRef.current !== null) window.clearTimeout(clearProbeTimerRef.current);
+    if (actionClearTimerRef.current !== null) window.clearTimeout(actionClearTimerRef.current);
+    if (hoverFrameRef.current !== null) window.cancelAnimationFrame(hoverFrameRef.current);
   }, []);
 
   // 한솔 보고 (2026-05-21): rAF throttle 만으로는 렉 안 풀림 — React reconciliation 자체가 무거움
@@ -294,13 +352,133 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
     return { group, selection, anchorX: safeAnchorX, top };
   }, [partGroups, timelineProbe]);
 
-  const handleProbeMove = (
+  const handleProbeMove = useCallback((
     partId: string,
-    payload: { pointerRatio: number; partLeft: number; partWidth: number; partTop: number; partHeight: number },
+    payload: TimelineProbeGeometry,
   ) => {
+    const previous = timelineProbeRef.current;
+    if (
+      previous?.partId === partId &&
+      Math.abs(previous.pointerRatio - payload.pointerRatio) < 0.006 &&
+      Math.abs(previous.partLeft - payload.partLeft) < 0.5 &&
+      Math.abs(previous.partTop - payload.partTop) < 0.5
+    ) {
+      return;
+    }
+
     cancelProbeClear();
-    setTimelineProbe({ partId, ...payload });
-  };
+    const nextProbe = { partId, ...payload };
+    timelineProbeRef.current = nextProbe;
+    setHoveredPart(partId);
+    setTimelineProbe(nextProbe);
+  }, [cancelProbeClear, setHoveredPart]);
+
+  const handleCarouselCardHover = useCallback((partId: string, sceneIndex: number) => {
+    cancelProbeClear();
+    const group = partGroups.find((g) => g.partId === partId);
+    if (!group || group.scenes.length === 0) return;
+
+    const pointerRatio = group.scenes.length <= 1 ? 0 : sceneIndex / (group.scenes.length - 1);
+    const currentProbe = timelineProbeRef.current;
+    const previous = currentProbe?.partId === partId ? currentProbe : null;
+    const progressBar = trackContainerRef.current
+      ?.querySelector<HTMLElement>(`[data-part-id="${partId}"] [data-compositing-part-progress-bar="true"]`);
+    const rect = progressBar?.getBoundingClientRect();
+    if (!previous && !rect) return;
+
+    const nextProbe = {
+      partId,
+      pointerRatio,
+      partLeft: previous?.partLeft ?? rect!.left,
+      partWidth: previous?.partWidth ?? rect!.width,
+      partTop: previous?.partTop ?? rect!.top,
+      partHeight: previous?.partHeight ?? rect!.height,
+    };
+    if (
+      currentProbe?.partId === nextProbe.partId &&
+      Math.abs(currentProbe.pointerRatio - nextProbe.pointerRatio) < 0.0001 &&
+      Math.abs(currentProbe.partLeft - nextProbe.partLeft) < 0.5 &&
+      Math.abs(currentProbe.partTop - nextProbe.partTop) < 0.5
+    ) {
+      return;
+    }
+
+    timelineProbeRef.current = nextProbe;
+    setHoveredPart(partId);
+    setTimelineProbe(nextProbe);
+  }, [cancelProbeClear, partGroups, setHoveredPart]);
+
+  const flushDocumentHoverPointerMove = useCallback(() => {
+    hoverFrameRef.current = null;
+    const pointer = pendingHoverPointerRef.current;
+    if (!pointer) return;
+
+    const { clientX, clientY } = pointer;
+    const cards = document.querySelectorAll<HTMLElement>('[data-compositing-carousel-card="true"]');
+    for (const card of cards) {
+      const rect = card.getBoundingClientRect();
+      const insideCard =
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom;
+
+      if (!insideCard) continue;
+      const partId = card.dataset.compositingCarouselPartId;
+      const sceneIndex = Number(card.dataset.compositingCarouselSceneIndex);
+      if (!partId || !Number.isInteger(sceneIndex)) return;
+
+      const hoverKey = `card:${partId}:${sceneIndex}`;
+      if (lastHoverKeyRef.current === hoverKey) return;
+      lastHoverKeyRef.current = hoverKey;
+      handleCarouselCardHover(partId, sceneIndex);
+      return;
+    }
+
+    const track = trackContainerRef.current;
+    if (!track) return;
+
+    const progressBars = track.querySelectorAll<HTMLElement>('[data-compositing-part-progress-bar="true"]');
+    for (const progressBar of progressBars) {
+      const rect = progressBar.getBoundingClientRect();
+      const insideBar =
+        rect.width > 0 &&
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom;
+
+      if (!insideBar) continue;
+      const partId = progressBar.closest<HTMLElement>('[data-part-id]')?.dataset.partId;
+      if (!partId) return;
+
+      const payload = buildTimelineProbeGeometry(clientX, rect);
+      const hoverKey = `bar:${partId}:${Math.round(payload.pointerRatio * 160)}`;
+      if (lastHoverKeyRef.current === hoverKey) return;
+      lastHoverKeyRef.current = hoverKey;
+      handleProbeMove(partId, payload);
+      return;
+    }
+
+    lastHoverKeyRef.current = null;
+  }, [handleCarouselCardHover, handleProbeMove]);
+
+  useEffect(() => {
+    const handleDocumentHoverPointerMove = (event: PointerEvent) => {
+      pendingHoverPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
+      if (hoverFrameRef.current !== null) return;
+      hoverFrameRef.current = window.requestAnimationFrame(flushDocumentHoverPointerMove);
+    };
+
+    window.addEventListener('pointermove', handleDocumentHoverPointerMove, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', handleDocumentHoverPointerMove);
+      if (hoverFrameRef.current !== null) {
+        window.cancelAnimationFrame(hoverFrameRef.current);
+        hoverFrameRef.current = null;
+      }
+    };
+  }, [flushDocumentHoverPointerMove]);
 
   if (episodeNumber === null) {
     return (
@@ -459,6 +637,8 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
             const sceneKey = `${scene.episodeNumber}:${scene.sceneId}`;
             const status = epStates.get(sceneKey)?.status ?? 'batch';
             const tokenVar = COMPOSITING_STATUS_TOKEN[status];
+            const episodeLabel = episodeLabelByNumber.get(scene.episodeNumber)
+              ?? `EP.${String(scene.episodeNumber).padStart(2, '0')}`;
             const offset = sceneIndex - carousel.selection.floatingIndex;
             const distance = Math.abs(offset);
             const centerAmount = Math.max(0, 1 - Math.min(distance, 1));
@@ -474,15 +654,25 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
             return (
               <button
                 key={`${scene.partId}-${scene.sceneId}`}
+                data-compositing-carousel-card="true"
+                data-compositing-carousel-part-id={carousel.group.partId}
+                data-compositing-carousel-scene-index={sceneIndex}
                 type="button"
-                onMouseEnter={cancelProbeClear}
+                onPointerEnter={() => handleCarouselCardHover(carousel.group.partId, sceneIndex)}
+                onMouseEnter={() => handleCarouselCardHover(carousel.group.partId, sceneIndex)}
                 onMouseLeave={scheduleProbeClear}
-                onClick={() => setPinnedScene(sceneKey)}
-                onDoubleClick={() => setDetailScene(sceneKey)}
+                onClick={() => {
+                  setPinnedScene(sceneKey);
+                  scheduleProbeClearAfterAction();
+                }}
+                onDoubleClick={() => {
+                  clearProbeNow();
+                  setDetailScene(sceneKey);
+                }}
                 aria-label={`${scene.sceneId} 핀, 더블클릭으로 상세 열기`}
                 className={cn(
                   'absolute rounded-xl border text-left overflow-hidden backdrop-blur-md',
-                  'transition-all duration-500 ease-out cursor-pointer',
+                  'transition-[transform,width,height,opacity,filter,background,border-color,box-shadow] duration-150 ease-out cursor-pointer',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/70',
                 )}
                 style={{
@@ -529,8 +719,8 @@ export function TimelinePanel({ episodeNumber, partGroups, epStates, onReorder, 
                 </div>
                 <div className="px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[9px] font-bold text-text-secondary">
-                      EP.{String(scene.episodeNumber).padStart(2, '0')} · {scene.partId}
+                    <span className="min-w-0 truncate text-[9px] font-bold text-text-secondary" title={`${episodeLabel} · ${scene.partId}`}>
+                      {episodeLabel} · {scene.partId}
                     </span>
                     <span className="text-[9px] font-extrabold" style={{ color: `var(${tokenVar})` }}>
                       {COMPOSITING_STATUS_LABEL[status]}
@@ -572,7 +762,7 @@ interface PartBoxProps {
   focused: boolean;
   onHoverEnter: () => void;
   onHoverLeave: () => void;
-  onProbeMove: (partId: string, payload: { pointerRatio: number; partLeft: number; partWidth: number; partTop: number; partHeight: number }) => void;
+  onProbeMove: (partId: string, payload: TimelineProbeGeometry) => void;
   isCompositor: boolean;
   /** 마지막 파트 — 우측 인접 파트가 없어 split-pane 핸들 노출 X */
   isLast: boolean;
@@ -591,25 +781,15 @@ function PartBox({
   focused, onHoverEnter, onHoverLeave, isCompositor, isLast, onResizeDown,
   onProbeMove, isDragging, isDropTarget, onDragStart, onDragOver, onDrop, onDragEnd,
 }: PartBoxProps) {
-  const handleProbeMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleProbeMove = (e: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     if (rect.width <= 0) return;
-    onProbeMove(partId, {
-      pointerRatio: (e.clientX - rect.left) / rect.width,
-      partLeft: rect.left,
-      partWidth: rect.width,
-      partTop: rect.top,
-      partHeight: rect.height,
-    });
+    onProbeMove(partId, buildTimelineProbeGeometry(e.clientX, rect));
   };
 
   return (
     <div
-      onMouseEnter={(e) => {
-        onHoverEnter();
-        handleProbeMove(e);
-      }}
-      onMouseMove={handleProbeMove}
+      onMouseEnter={onHoverEnter}
       onMouseLeave={onHoverLeave}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -664,7 +844,21 @@ function PartBox({
 
         {/* 진행률 + 메모 */}
         <div className="flex items-center gap-1.5 mt-2 text-[10px] font-mono">
-          <div className="flex-1 h-1 rounded-full bg-bg-border/45 overflow-hidden">
+          <div
+            data-compositing-part-progress-bar="true"
+            className="flex-1 h-2 rounded-full bg-bg-border/45 overflow-hidden cursor-ew-resize"
+            title={`${partId}파트 진행률 기준으로 씬 카드 미리보기`}
+            onPointerEnter={(e) => {
+              onHoverEnter();
+              handleProbeMove(e);
+            }}
+            onPointerMove={handleProbeMove}
+            onMouseEnter={(e) => {
+              onHoverEnter();
+              handleProbeMove(e);
+            }}
+            onMouseMove={handleProbeMove}
+          >
             <div
               className="h-full transition-all duration-300"
               style={{

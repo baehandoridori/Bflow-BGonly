@@ -3,7 +3,7 @@ import { ChevronRight, Plus, FolderOpen, Folder, MoreVertical, Archive, RotateCc
 import { cn } from '@/utils/cn';
 import type { Episode, Department, ScenesDeptFilter } from '@/types';
 import { DEPARTMENT_CONFIGS } from '@/types';
-import { getCombinedPartMemo, type PartContextMenuTarget } from '@/utils/partMemoHelpers';
+import { getCombinedPartMemo, getCombinedPartReelWorker, type PartContextMenuTarget } from '@/utils/partMemoHelpers';
 import { normalizePartIdKey, partIdMatches } from '@/utils/partId';
 
 export interface ArchivedEpisodeInfo {
@@ -21,6 +21,7 @@ interface EpisodeTreeNavProps {
   selectedEpisode: number | null;
   selectedPart: string | null;
   partMemos: Record<string, string>;
+  partReelWorkers: Record<string, string>;
   episodeTitles: Record<number, string>;   // episodeNumber → custom title
   episodeMemos: Record<number, string>;    // episodeNumber → memo
   archivedEpisodes: ArchivedEpisodeInfo[];
@@ -110,6 +111,7 @@ export function EpisodeTreeNav({
   selectedEpisode,
   selectedPart,
   partMemos,
+  partReelWorkers,
   episodeTitles,
   episodeMemos,
   archivedEpisodes,
@@ -332,6 +334,7 @@ export function EpisodeTreeNav({
                         const isPartActive = isEpSelected && partIdMatches(selectedPart ?? defaultPartId, group.partId);
                         const partProgress = calcPartProgress(group.scenes);
                         const memo = getCombinedPartMemo(partMemos, group.sheetNames);
+                        const reelWorker = getCombinedPartReelWorker(partReelWorkers, group.sheetNames);
 
                         return (
                           <div
@@ -356,6 +359,11 @@ export function EpisodeTreeNav({
                               <span className="text-sm font-medium truncate leading-tight">
                                 {group.partId}파트
                               </span>
+                              {reelWorker && (
+                                <span className="text-xs text-accent-sub/80 truncate leading-tight" title={`릴 담당 ${reelWorker}`}>
+                                  릴 담당 {reelWorker}
+                                </span>
+                              )}
                               {memo && (
                                 <span className="text-xs text-amber-400/60 italic truncate leading-tight" title={memo}>
                                   {memo}
@@ -388,6 +396,7 @@ export function EpisodeTreeNav({
                         const isPartActive = isEpSelected && partIdMatches(selectedPart ?? defaultKey, part.partId);
                         const partProgress = calcPartProgress(part.scenes);
                         const memo = partMemos[part.sheetName];
+                        const reelWorker = partReelWorkers[part.sheetName];
 
                         return (
                           <div
@@ -412,6 +421,11 @@ export function EpisodeTreeNav({
                               <span className="text-sm font-medium truncate leading-tight">
                                 {part.partId}파트
                               </span>
+                              {reelWorker && (
+                                <span className="text-xs text-accent-sub/80 truncate leading-tight" title={`릴 담당 ${reelWorker}`}>
+                                  릴 담당 {reelWorker}
+                                </span>
+                              )}
                               {memo && (
                                 <span className="text-xs text-amber-400/60 italic truncate leading-tight" title={memo}>
                                   {memo}

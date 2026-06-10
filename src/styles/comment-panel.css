@@ -123,6 +123,72 @@
   100% { box-shadow: 0 0 0 0 rgba(108, 92, 231, 0); }
 }
 
+/* 리비전 활동 줄 — Tailwind 색상만 쓰면 라이트 모드에서 "해결" 텍스트가 흰 민트로 떠서 안 보인다.
+ * 여기서는 테마 토큰 기준으로 카드/텍스트/배지 대비를 고정한다. */
+.comment-inline-event {
+  color: rgb(var(--color-text-primary));
+  background: color-mix(in srgb, rgb(var(--color-bg-card)) 82%, transparent);
+  border-color: rgb(var(--color-bg-border) / 0.62);
+}
+.comment-inline-event-add {
+  color: rgb(var(--color-accent-sub));
+  background: color-mix(in srgb, rgb(var(--color-accent)) 12%, rgb(var(--color-bg-card)) 88%);
+  border-color: rgb(var(--color-accent) / 0.34);
+}
+.comment-inline-event-in-progress {
+  color: color-mix(in srgb, var(--status-combine) 76%, rgb(var(--color-text-primary)) 24%);
+  background: color-mix(in srgb, var(--status-combine) 12%, rgb(var(--color-bg-card)) 88%);
+  border-color: color-mix(in srgb, var(--status-combine) 38%, transparent);
+}
+.comment-inline-event-resolve {
+  color: color-mix(in srgb, var(--status-done) 76%, rgb(var(--color-text-primary)) 24%);
+  background: color-mix(in srgb, var(--status-done) 12%, rgb(var(--color-bg-card)) 88%);
+  border-color: color-mix(in srgb, var(--status-done) 38%, transparent);
+}
+.comment-inline-event-time {
+  color: rgb(var(--color-text-secondary) / 0.72);
+}
+.comment-inline-event-label {
+  color: inherit;
+  border-color: color-mix(in srgb, currentColor 24%, transparent);
+  background: rgb(var(--color-bg-primary) / 0.34);
+}
+.comment-inline-event-dot {
+  background: currentColor;
+  box-shadow: 0 0 8px color-mix(in srgb, currentColor 42%, transparent);
+}
+.comment-inline-event-dot-add { color: rgb(var(--color-accent-sub)); }
+.comment-inline-event-dot-in-progress { color: var(--status-combine); }
+.comment-inline-event-dot-resolve { color: var(--status-done); }
+
+[data-color-mode="light"] .comment-inline-event {
+  background: rgb(255 255 255 / 0.82);
+  border-color: rgb(var(--color-bg-border) / 0.58);
+  box-shadow: 0 8px 18px rgb(30 42 68 / 0.08);
+}
+[data-color-mode="light"] .comment-inline-event-add {
+  color: #4d3fc7;
+  background: color-mix(in srgb, rgb(var(--color-accent)) 10%, white 90%);
+  border-color: rgb(var(--color-accent) / 0.32);
+}
+[data-color-mode="light"] .comment-inline-event-in-progress {
+  color: #155e9f;
+  background: color-mix(in srgb, var(--status-combine) 12%, white 88%);
+  border-color: color-mix(in srgb, var(--status-combine) 36%, transparent);
+}
+[data-color-mode="light"] .comment-inline-event-resolve {
+  color: #096657;
+  background: color-mix(in srgb, var(--status-done) 13%, white 87%);
+  border-color: color-mix(in srgb, var(--status-done) 40%, transparent);
+}
+[data-color-mode="light"] .comment-inline-event-time {
+  color: rgb(75 85 99 / 0.78);
+}
+[data-color-mode="light"] .comment-inline-event-label {
+  background: rgb(255 255 255 / 0.68);
+  border-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+
 /* v1.24.0 → v1.24.1 fix — Slack 스타일 묶음. 한솔 보고: 답글 영역 내 본인 답글(우측 정렬)이
  *   음수 마진(-8px)으로 위쪽 답글 말풍선과 겹쳐 보이던 회귀. 음수 마진 제거 + 부드러운 그룹화는
  *   부모 컨테이너의 space-y 가 좁히는 방식으로 충분 (motion.div 의 layout 도 자동 처리).

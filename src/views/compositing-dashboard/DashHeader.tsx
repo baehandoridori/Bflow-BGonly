@@ -2,8 +2,8 @@
  * 컴포지팅 현황 대시보드 — 헤더.
  *
  * 구조 (좌 → 우):
- *   타이틀(컴포지팅 현황 · EPxx) + 진행률
- *   ◀ EP 칩 토글 (EP1·EP2·...) ▶
+ *   타이틀(컴포지팅 현황 · 에피소드 이름) + 진행률
+ *   ◀ 에피소드 칩 토글 ▶
  *   담당 컴포지터 칩
  *   보는 사람 칩
  *   ↻ (cascade 재생 — 시연/디버그)
@@ -39,12 +39,17 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
     [episodes],
   );
 
-  // v1.30.0+ (한솔 정정): EP 코드 대신 에피소드 제목 + 메모 표시.
+  // v1.30.0+ (한솔 정정): EP 코드 대신 에피소드 표시명 + 메모 표시.
   const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const episodeMemos = useDataStore((s) => s.episodeMemos);
   const currentEp = episodes.find((e) => e.episodeNumber === episodeNumber);
-  const customTitle = episodeNumber !== null ? episodeTitles?.[episodeNumber] : undefined;
-  const episodeDisplayTitle = customTitle || currentEp?.title || (episodeNumber !== null ? `EP${String(episodeNumber).padStart(2, '0')}` : '');
+  const episodeDisplayTitle = useMemo(
+    () => currentEp
+      ? getEpisodeDisplayName(currentEp)
+      : (episodeNumber !== null ? `EP${String(episodeNumber).padStart(2, '0')}` : ''),
+    [currentEp, episodeNumber, getEpisodeDisplayName, episodeTitles],
+  );
   const episodeMemo = episodeNumber !== null ? (episodeMemos?.[episodeNumber] ?? '') : '';
 
   // 현재 EP 의 진행률 — 한솔 정의 (2026-05-22): "완료된 부분 = done + aggregated".
@@ -90,7 +95,7 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
     if (idx >= 0 && idx < activeEpisodes.length - 1) setEpisode(activeEpisodes[idx + 1].episodeNumber);
   };
 
-  const titleEp = episodeNumber !== null ? `EP${String(episodeNumber).padStart(2, '0')}` : '—';
+  const episodeSubLabel = episodeDisplayTitle || '—';
 
   return (
     <header className="flex items-center justify-between gap-6 px-6 py-4 border-b border-bg-border/60">
@@ -129,7 +134,7 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
                 <span className="truncate">{episodeMemo}</span>
               </span>
             ) : (
-              <span className="font-mono tabular-nums shrink-0 text-text-secondary/70">{titleEp}</span>
+              <span className="truncate min-w-0 text-text-secondary/70" title={episodeSubLabel}>{episodeSubLabel}</span>
             )}
             <button
               type="button"
@@ -148,19 +153,21 @@ export function DashHeader({ episodeNumber, onCascadeReplay }: DashHeaderProps) 
       <div className="flex items-center gap-1.5 flex-1 justify-center flex-wrap min-w-0">
         {activeEpisodes.map((ep) => {
           const active = ep.episodeNumber === episodeNumber;
+          const episodeLabel = getEpisodeDisplayName(ep);
           return (
             <button
               key={ep.episodeNumber}
               type="button"
               onClick={() => setEpisode(ep.episodeNumber)}
+              title={episodeLabel}
               className={cn(
-                'min-w-[44px] px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all duration-200 border tabular-nums',
+                'min-w-[56px] max-w-[9.5rem] px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all duration-200 border',
                 active
                   ? 'bg-accent/16 border-accent/55 text-accent shadow-[0_0_10px_rgb(var(--color-accent)/0.18)]'
                   : 'bg-bg-card border-bg-border/55 text-text-secondary hover:text-text-primary hover:border-bg-border',
               )}
             >
-              EP{String(ep.episodeNumber).padStart(2, '0')}
+              <span className="block truncate">{episodeLabel}</span>
             </button>
           );
         })}

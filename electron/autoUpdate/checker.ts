@@ -200,7 +200,7 @@ export async function readPendingUpdateInfo(currentVersion = getOwnVersion()): P
   }
 
   return buildUpdateInfo('ready', currentVersion, parsed, true, {
-    message: '업데이트 설치 파일이 준비되었습니다. 적용하면 앱이 잠시 닫힌 뒤 다시 열립니다.',
+    message: '업데이트 설치 파일이 준비되었습니다. 적용하면 앱이 잠시 닫힌 뒤 최신 버전으로 열립니다.',
     downloadedBytes: localSize ?? expectedSize,
     totalBytes: expectedSize ?? localSize,
   });

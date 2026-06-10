@@ -44,6 +44,9 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   const setDetailScene = useCompositingDashboardStore((s) => s.setDetailScene);
   const compositingStates = useDataStore((s) => s.compositingStates);
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const episodeMemos = useDataStore((s) => s.episodeMemos);
+  const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const currentUser = useAuthStore((s) => s.currentUser);
 
   const sceneId = sceneKey.split(':').slice(1).join(':');
@@ -238,9 +241,11 @@ export function CompositingSceneModal({ sceneKey, episodeNumber, isCompositor }:
   };
 
   // 헤더 라벨 (한솔 정정): EP 코드 → 에피소드 제목 + 메모
-  const episodeTitle = ep?.title || `EP${String(episodeNumber).padStart(2, '0')}`;
-  const episodeMemoMap = useDataStore.getState().episodeMemos;
-  const episodeMemo = episodeMemoMap?.[episodeNumber] || '';
+  const episodeTitle = useMemo(
+    () => ep ? getEpisodeDisplayName(ep) : `EP${String(episodeNumber).padStart(2, '0')}`,
+    [ep, episodeNumber, getEpisodeDisplayName, episodeTitles],
+  );
+  const episodeMemo = episodeMemos?.[episodeNumber] || '';
 
   const compositingSection = (
     <CompositingStageSection

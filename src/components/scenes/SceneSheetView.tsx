@@ -11,6 +11,7 @@ import { useRevisionStore } from '@/stores/useRevisionStore';
 import { buildSceneKey } from '@/services/revisionService';
 import { isFullyDone } from '@/utils/calcStats';
 import { cn } from '@/utils/cn';
+import { buildSingleSceneSelectionId } from '@/utils/sceneSelectionId';
 import { HighlightText } from '@/components/common/HighlightText';
 import { AssigneeSelect } from '@/components/common/AssigneeSelect';
 import { AssigneeMultiSelect, AssigneeChipList } from '@/components/common/AssigneeMultiSelect';
@@ -38,8 +39,8 @@ interface SceneSheetViewProps {
   sceneGroupMode: SceneGroupMode;
   /** 한솔 결정 (8번): 토스트 클릭 후 진입 시 강조할 sceneId */
   highlightSceneId?: string | null;
-  onToggle: (sceneId: string, stage: Stage) => void;
-  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onToggle: (sceneId: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
   onDelete: (sceneIndex: number) => void;
@@ -332,7 +333,9 @@ export function SceneSheetView({
   const useActingPhaseControls = department === 'acting' && !!onActPhaseStateClick && !!onActFeedbackRequest && !!onActRoundBump;
   const {
     widthOf,
+    hasCustomWidths,
     startResize,
+    startBoundaryResize,
   } = useResizableSheetColumns(`bflow_scene_sheet_columns_${department}_v1`, SINGLE_SHEET_COLUMNS);
 
   // ── 레이아웃 그룹핑 ──
@@ -415,6 +418,22 @@ export function SceneSheetView({
     (key: SingleSheetColumnKey) => fittedSheet.widths[key],
     [fittedSheet],
   );
+  const handleResizeStart = useCallback((
+    key: SingleSheetColumnKey,
+    event: React.PointerEvent,
+    visualStartWidth?: number,
+  ) => {
+    startResize(key, event, visualStartWidth, fittedSheet.widths);
+  }, [fittedSheet.widths, startResize]);
+  const handleBoundaryResizeStart = useCallback((
+    leftKey: SingleSheetColumnKey,
+    rightKey: SingleSheetColumnKey,
+    event: React.PointerEvent,
+    leftVisualStartWidth?: number,
+    rightVisualStartWidth?: number,
+  ) => {
+    startBoundaryResize(leftKey, rightKey, event, leftVisualStartWidth, rightVisualStartWidth, fittedSheet.widths);
+  }, [fittedSheet.widths, startBoundaryResize]);
 
   const revisions = useRevisionStore((s) => s.revisions);
   const getOpenCount = useRevisionStore((s) => s.getOpenCount);
@@ -683,12 +702,12 @@ export function SceneSheetView({
             <tr className="bg-bg-card border-b border-bg-border">
               {/* 한솔 결정 (1-B): 레이아웃 별 보기 시 별도 컬럼 대신 행 위에 그룹 헤더 행을 삽입.
                   컬럼 수가 일반 모드와 동일하게 유지된다. */}
-              <ResizableHeaderCell columnKey="scene" width={displayWidthOf('scene')} onResizeStart={startResize} shortLabel="씬">씬번호</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="alerts" width={displayWidthOf('alerts')} onResizeStart={startResize} align="center" className="px-1" />
-              <ResizableHeaderCell columnKey="memo" width={displayWidthOf('memo')} onResizeStart={startResize} shortLabel="메모">메모</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="storyboard" width={displayWidthOf('storyboard')} onResizeStart={startResize} align="center" shortLabel="SB">스토리보드</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="guide" width={displayWidthOf('guide')} onResizeStart={startResize} align="center" shortLabel="Guide">가이드</ResizableHeaderCell>
-              <ResizableHeaderCell columnKey="assignee" width={displayWidthOf('assignee')} onResizeStart={startResize} shortLabel="담">담당자</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="scene" width={displayWidthOf('scene')} onResizeStart={handleResizeStart} shortLabel="씬">씬번호</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="alerts" width={displayWidthOf('alerts')} onResizeStart={handleResizeStart} align="center" className="px-1" />
+              <ResizableHeaderCell columnKey="memo" width={displayWidthOf('memo')} onResizeStart={handleResizeStart} shortLabel="메모">메모</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="storyboard" width={displayWidthOf('storyboard')} onResizeStart={handleResizeStart} align="center" shortLabel="SB">스토리보드</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="guide" width={displayWidthOf('guide')} onResizeStart={handleResizeStart} align="center" shortLabel="Guide">가이드</ResizableHeaderCell>
+              <ResizableHeaderCell columnKey="assignee" width={displayWidthOf('assignee')} onResizeStart={handleResizeStart} shortLabel="담">담당자</ResizableHeaderCell>
               {useActingPhaseControls ? (
                 <th
                   colSpan={4}
@@ -698,22 +717,28 @@ export function SceneSheetView({
                   액팅 단계
                 </th>
               ) : (
-                STAGES.map((s) => (
-                  <ResizableHeaderCell
-                    key={s}
-                    columnKey={s}
-                    width={displayWidthOf(s)}
-                    onResizeStart={startResize}
-                    align="center"
-                    className="px-1 text-[11px]"
-                    style={{ color: deptConfig.stageColors[s] }}
-                    shortLabel={STAGE_SHORT_LABELS[s]}
-                  >
-                    {deptConfig.stageLabels[s]}
-                  </ResizableHeaderCell>
-                ))
+                STAGES.map((s, index) => {
+                  const nextStage = STAGES[index + 1];
+                  return (
+                    <ResizableHeaderCell
+                      key={s}
+                      columnKey={s}
+                      width={displayWidthOf(s)}
+                      rightBoundaryColumnKey={nextStage}
+                      rightBoundaryWidth={nextStage ? displayWidthOf(nextStage) : undefined}
+                      onResizeStart={handleResizeStart}
+                      onBoundaryResizeStart={nextStage ? handleBoundaryResizeStart : undefined}
+                      align="center"
+                      className="px-1 text-[11px]"
+                      style={{ color: deptConfig.stageColors[s] }}
+                      shortLabel={STAGE_SHORT_LABELS[s]}
+                    >
+                      {deptConfig.stageLabels[s]}
+                    </ResizableHeaderCell>
+                  );
+                })
               )}
-              <ResizableHeaderCell columnKey="actions" width={displayWidthOf('actions')} onResizeStart={startResize} align="center" className="px-1" />
+              <ResizableHeaderCell columnKey="actions" width={displayWidthOf('actions')} onResizeStart={handleResizeStart} align="center" className="px-1" />
             </tr>
           </thead>
 
@@ -722,7 +747,8 @@ export function SceneSheetView({
             {displayScenes.map((scene, rowIndex) => {
               const idx = allScenes.indexOf(scene);
               const meta = layoutMeta.get(scene);
-              const isRowSelected = selectedSceneIds?.has(scene.sceneId);
+              const selectionId = buildSingleSceneSelectionId(sheetName, scene, idx);
+              const isRowSelected = selectedSceneIds?.has(selectionId);
               const isFirstInGroup = meta?.isFirst ?? false;
               const isLastInGroup = meta?.isLast ?? false;
               const groupSize = meta?.groupSize ?? 1;
@@ -734,7 +760,7 @@ export function SceneSheetView({
               const openRevCount = revisionCountBySceneId.get(scene.sceneId) ?? 0;
 
               return (
-                <Fragment key={`${scene.sceneId}-${idx}`}>
+                <Fragment key={selectionId}>
                   {/* 한솔 결정 (1-B 시안 2 + 굵은 보더): 카드 박스 헤더 + 그룹 사이 빈 간격 */}
                   {isLayoutMode && isFirstInGroup && rowIndex > 0 && (
                     <tr className="scene-row-group-gap"><td colSpan={100}></td></tr>
@@ -769,7 +795,7 @@ export function SceneSheetView({
                     )}
                     onClick={(e) => {
                       if ((e.ctrlKey || e.metaKey) && onCtrlClick) {
-                        onCtrlClick(scene.sceneId);
+                        onCtrlClick(selectionId);
                       }
                     }}
                     onDoubleClick={() => onOpenDetail(idx)}
@@ -843,7 +869,7 @@ export function SceneSheetView({
                         <ScenePhaseToggle
                           scene={scene}
                           compact
-                          onStateClick={(next) => onActPhaseStateClick(sheetName, scene.sceneId, next)}
+                          onStateClick={(next) => onActPhaseStateClick(sheetName, scene.sceneId, next, scene.id ?? null, idx)}
                           onRequestFeedback={() => onActFeedbackRequest(sheetName, scene.sceneId)}
                           onRoundBump={(kind, delta) => onActRoundBump(sheetName, scene.sceneId, kind, delta)}
                         />
@@ -856,7 +882,7 @@ export function SceneSheetView({
                         department={department}
                         compact
                         iconDisplay="never"
-                        onToggle={(stage) => onToggle(scene.sceneId, stage)}
+                        onToggle={(stage) => onToggle(scene.sceneId, stage, scene.id ?? null, idx)}
                       />
                     </td>
                   )}

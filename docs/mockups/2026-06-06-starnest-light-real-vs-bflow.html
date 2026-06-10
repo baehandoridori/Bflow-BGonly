@@ -1,0 +1,1613 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bflow StarNest Mode Candidates</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page-bg: #eef3fa;
+      --ink: #171d2a;
+      --muted: #5c687d;
+      --line: rgba(112, 124, 154, 0.24);
+      --accent: #6c5ce7;
+      --accent-sub: #4f8df7;
+      --green: #0d9276;
+      --yellow: #c47a13;
+      --shadow: rgba(25, 35, 55, 0.14);
+      --bflow-intensity: 0.72;
+      font-family: Inter, Pretendard, "Noto Sans KR", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 7% -8%, rgba(108, 92, 231, 0.12), transparent 34%),
+        radial-gradient(circle at 90% -4%, rgba(79, 141, 247, 0.10), transparent 34%),
+        var(--page-bg);
+    }
+
+    button, input { font: inherit; }
+
+    .page {
+      width: min(1500px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 24px 0 36px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    h1 {
+      font-size: 24px;
+      line-height: 1.16;
+      letter-spacing: 0;
+    }
+
+    .intro {
+      margin-top: 7px;
+      max-width: 960px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.76);
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      box-shadow: 0 10px 26px var(--shadow);
+    }
+
+    .badge i {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(13, 146, 118, 0.12);
+    }
+
+    .control-panel,
+    .option,
+    .todo-panel {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.76);
+      box-shadow: 0 18px 52px var(--shadow);
+      overflow: hidden;
+    }
+
+    .control-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(520px, 640px);
+      gap: 14px;
+      padding: 12px;
+      align-items: start;
+    }
+
+    .candidate-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .candidate-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 31px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.66);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .candidate-pill strong {
+      color: var(--ink);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .dot.light { background: var(--accent-sub); }
+    .dot.new { background: var(--green); }
+
+    .slider {
+      display: grid;
+      gap: 4px;
+    }
+
+    .slider label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .slider b {
+      color: var(--ink);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .intensity-buttons {
+      display: inline-flex;
+      width: fit-content;
+      gap: 4px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.58);
+    }
+
+    .intensity-buttons button {
+      min-height: 28px;
+      border: 0;
+      border-radius: 6px;
+      padding: 0 9px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .intensity-buttons button.active {
+      color: #fff;
+      background: var(--accent);
+    }
+
+    .bflow-options {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 10px;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .motion-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 28px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.62);
+      cursor: pointer;
+    }
+
+    .motion-toggle input {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--accent-sub);
+    }
+
+    .bflow-options small {
+      color: var(--muted);
+      font-size: 10.5px;
+      font-weight: 800;
+    }
+
+    .tone-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      margin-top: 5px;
+    }
+
+    .tone-row span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .tone-row button {
+      min-height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.62);
+      color: var(--muted);
+      padding: 0 9px;
+      font-size: 11px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .tone-row button.active {
+      color: #fff;
+      border-color: transparent;
+      background: var(--accent-sub);
+    }
+
+    .tone-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px 12px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+    }
+
+    .tone-control {
+      display: grid;
+      gap: 4px;
+    }
+
+    .tone-control label {
+      color: var(--muted);
+      font-size: 10.5px;
+      font-weight: 900;
+    }
+
+    .tone-control b {
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .section {
+      display: grid;
+      gap: 10px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 2px;
+    }
+
+    .section-head h2 {
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .section-head p {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .grid.dark {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid.light {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .option-head {
+      min-height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 15px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.68);
+    }
+
+    .option[data-scheme="dark"] .option-head {
+      background: rgba(18, 22, 32, 0.84);
+    }
+
+    .option[data-scheme="dark"] {
+      --card-surface: rgba(18, 22, 32, 0.78);
+      --card-surface-strong: rgba(18, 22, 32, 0.92);
+      --card-line: rgba(164, 171, 216, 0.18);
+      --card-text: #edf0f8;
+      --card-muted: #a2aabd;
+      --card-faint: #707991;
+      color: var(--card-text);
+      background: rgba(10, 13, 22, 0.9);
+    }
+
+    .option[data-scheme="light"] {
+      --card-surface: rgba(255, 255, 255, 0.82);
+      --card-surface-strong: rgba(255, 255, 255, 0.94);
+      --card-line: rgba(112, 124, 154, 0.24);
+      --card-text: #171d2a;
+      --card-muted: #5c687d;
+      --card-faint: #8792a7;
+      color: var(--card-text);
+    }
+
+    .option-title {
+      min-width: 0;
+    }
+
+    .option-title h3 {
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .option-title p {
+      margin-top: 5px;
+      color: var(--card-muted, var(--muted));
+      font-size: 11px;
+      line-height: 1.42;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 25px;
+      padding: 0 8px;
+      border-radius: 7px;
+      color: #fff;
+      background: var(--accent);
+      font-size: 10px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .tag.new { background: var(--green); }
+    .tag.light { background: var(--accent-sub); }
+    .tag.neutral {
+      color: var(--card-muted, var(--muted));
+      border: 1px solid var(--card-line, var(--line));
+      background: var(--card-surface);
+    }
+
+    .stage {
+      position: relative;
+      height: 360px;
+      min-height: 360px;
+      background: #05070b;
+      overflow: hidden;
+    }
+
+    .stage.bflow {
+      background: #e8eef8;
+    }
+
+    .option[data-scheme="dark"] .stage.bflow {
+      background: #080a12;
+    }
+
+    .stage.light-transform {
+      background: #ecf3fb;
+    }
+
+    .stage canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .stage.light-transform canvas {
+      filter: blur(var(--light-transform-blur, 0px));
+      transform: scale(var(--light-transform-scale, 1));
+    }
+
+    .stage.bflow canvas {
+      z-index: 1;
+    }
+
+    .bflow-wash {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.035)),
+        radial-gradient(ellipse at 22% 0%, rgba(88,132,210,0.028), transparent 38%);
+    }
+
+    .option[data-scheme="dark"] .bflow-wash {
+      background:
+        linear-gradient(180deg, rgba(5,7,12,0.025), rgba(5,7,12,0.105)),
+        radial-gradient(ellipse at 20% 0%, rgba(108,92,231,0.085), transparent 38%);
+    }
+
+    .stage.bflow::after {
+      content: "Bflow식 StarNest";
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      z-index: 4;
+      border: 1px solid rgba(79, 141, 247, 0.28);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.66);
+      color: #24527c;
+      padding: 5px 9px;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0;
+      backdrop-filter: blur(10px);
+    }
+
+    .option[data-scheme="dark"] .stage.bflow::after {
+      background: rgba(12, 16, 28, 0.68);
+      color: #d8e9ff;
+      border-color: rgba(116, 185, 255, 0.26);
+    }
+
+    .mock-app {
+      position: relative;
+      z-index: 3;
+      min-height: 360px;
+      height: 360px;
+      display: grid;
+      grid-template-columns: 46px minmax(0, 1fr);
+    }
+
+    .stage.bflow .rail,
+    .stage.bflow .user,
+    .stage.bflow .tabs,
+    .stage.bflow .metric,
+    .stage.bflow .panel,
+    .stage.bflow .row:first-child,
+    .stage.bflow .nav {
+      background: color-mix(in srgb, var(--card-surface) 42%, transparent);
+      backdrop-filter: blur(7px);
+    }
+
+    .option[data-scheme="light"] .stage.bflow .rail,
+    .option[data-scheme="light"] .stage.bflow .user,
+    .option[data-scheme="light"] .stage.bflow .tabs,
+    .option[data-scheme="light"] .stage.bflow .metric,
+    .option[data-scheme="light"] .stage.bflow .panel,
+    .option[data-scheme="light"] .stage.bflow .row:first-child,
+    .option[data-scheme="light"] .stage.bflow .nav {
+      background: rgba(255, 255, 255, 0.34);
+    }
+
+    .stage.bflow .topbar,
+    .stage.bflow .workspace,
+    .stage.bflow .rows,
+    .stage.bflow .row {
+      background: transparent;
+    }
+
+    .stage.bflow .metric,
+    .stage.bflow .panel {
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    .option[data-scheme="light"] .stage.bflow .metric,
+    .option[data-scheme="light"] .stage.bflow .panel {
+      border-color: rgba(77, 119, 166, 0.2);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.72),
+        0 8px 24px rgba(95, 133, 184, 0.08);
+    }
+
+    .rail {
+      border-right: 1px solid var(--card-line);
+      background: color-mix(in srgb, var(--card-surface) 82%, transparent);
+      padding: 12px 7px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 9px;
+      backdrop-filter: blur(15px);
+    }
+
+    .logo,
+    .nav {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .logo {
+      color: #fff;
+      background: #171d2a;
+      box-shadow: 0 10px 20px rgba(23,29,42,0.18);
+    }
+
+    .nav {
+      color: var(--card-muted);
+      background: color-mix(in srgb, var(--card-surface) 74%, transparent);
+    }
+
+    .nav.active {
+      color: #fff;
+      background: var(--accent);
+      box-shadow: 0 10px 22px rgba(108,92,231,0.24);
+    }
+
+    .app-content {
+      padding: 11px;
+      display: grid;
+      grid-template-rows: auto auto auto 1fr;
+      gap: 8px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 10px;
+    }
+
+    .topbar strong {
+      display: block;
+      font-size: 17px;
+    }
+
+    .topbar span {
+      display: block;
+      margin-top: 4px;
+      color: var(--card-muted);
+      font-size: 11px;
+    }
+
+    .user {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 32px;
+      padding: 0 8px;
+      border: 1px solid var(--card-line);
+      border-radius: 8px;
+      background: var(--card-surface);
+      color: var(--card-muted);
+      font-size: 11px;
+      font-weight: 800;
+      backdrop-filter: blur(14px);
+      white-space: nowrap;
+    }
+
+    .avatar {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent-sub));
+      font-size: 10px;
+    }
+
+    .tabs {
+      display: inline-flex;
+      width: fit-content;
+      border: 1px solid var(--card-line);
+      border-radius: 9px;
+      padding: 4px;
+      background: var(--card-surface);
+      gap: 3px;
+      backdrop-filter: blur(14px);
+    }
+
+    .tabs span {
+      min-width: 50px;
+      padding: 6px 8px;
+      border-radius: 7px;
+      text-align: center;
+      color: var(--card-muted);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .tabs .active {
+      color: #fff;
+      background: var(--accent);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .metric,
+    .panel,
+    .side-card,
+    .card-todo {
+      border: 1px solid var(--card-line, var(--line));
+      border-radius: 9px;
+      background: var(--card-surface);
+      box-shadow: 0 13px 32px rgba(25,35,55,0.08);
+      backdrop-filter: blur(14px);
+    }
+
+    .metric {
+      min-height: 74px;
+      padding: 8px;
+    }
+
+    .metric span {
+      color: var(--card-muted);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 20px;
+    }
+
+    .bar {
+      height: 7px;
+      margin-top: 9px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(112, 124, 154, 0.16);
+    }
+
+    .bar i {
+      display: block;
+      height: 100%;
+      width: var(--w);
+      background: linear-gradient(90deg, var(--accent), var(--accent-sub));
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 9px;
+    }
+
+    .panel-head {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-bottom: 1px solid var(--card-line);
+      padding: 0 10px;
+    }
+
+    .panel-head h3 {
+      font-size: 12px;
+    }
+
+    .panel-head small {
+      color: var(--card-faint);
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .rows {
+      display: grid;
+    }
+
+    .row {
+      min-height: 32px;
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr) 52px 52px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px;
+      border-bottom: 1px solid rgba(112, 124, 154, 0.11);
+      font-size: 11px;
+    }
+
+    .row:first-child {
+      min-height: 32px;
+      color: var(--card-faint);
+      background: color-mix(in srgb, var(--card-surface-strong) 54%, transparent);
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .scene {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 800;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 21px;
+      padding: 0 6px;
+      border-radius: 7px;
+      color: #fff;
+      background: var(--accent);
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .chip.good { background: var(--green); }
+    .chip.warn { background: var(--yellow); }
+
+    .todo-panel {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 0;
+    }
+
+    .todo-copy {
+      padding: 16px;
+      border-right: 1px solid var(--line);
+    }
+
+    .todo-copy h2 {
+      font-size: 16px;
+    }
+
+    .todo-copy p {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.52;
+    }
+
+    .todo-list {
+      display: grid;
+      gap: 9px;
+      padding: 16px;
+    }
+
+    .card-todo {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 11px;
+      background: rgba(255,255,255,0.72);
+    }
+
+    .check {
+      width: 22px;
+      height: 22px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: var(--accent);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .card-todo strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .card-todo span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 1260px) {
+      .grid.light,
+      .grid.dark {
+        grid-template-columns: 1fr;
+      }
+
+      .control-panel,
+      .todo-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .todo-copy {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page {
+        width: min(100% - 24px, 1500px);
+        padding-top: 16px;
+      }
+
+      .header,
+      .section-head {
+        flex-direction: column;
+        align-items: start;
+      }
+
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .mock-app {
+        grid-template-columns: 42px minmax(0, 1fr);
+      }
+
+      .stage,
+      .mock-app {
+        height: auto;
+        min-height: 520px;
+      }
+
+      .row {
+        grid-template-columns: 48px minmax(0, 1fr) 48px;
+      }
+
+      .row > :nth-child(4) {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div>
+        <h1>StarNest 후보 시안 목록</h1>
+        <p class="intro">
+          요청한 구조대로 다크모드 2개, 라이트모드 3개를 한 화면에 펼쳤습니다.
+          실제 StarNest 원본은 마우스 흐름까지 포함한 기존 셰이더이고, Bflow식 StarNest는 점들이 움직이는 별도 후보입니다.
+        </p>
+      </div>
+      <div class="badge"><i></i><span>다크 2개 · 라이트 3개</span></div>
+    </header>
+
+    <section class="control-panel">
+      <div class="candidate-list" aria-label="후보 목록">
+        <span class="candidate-pill"><span class="dot"></span><strong>다크</strong> 기본 StarNest 원본</span>
+        <span class="candidate-pill"><span class="dot new"></span><strong>다크</strong> Bflow식 StarNest</span>
+        <span class="candidate-pill"><span class="dot light"></span><strong>라이트</strong> 기본 StarNest 원본</span>
+        <span class="candidate-pill"><span class="dot light"></span><strong>라이트</strong> StarNest 라이트 변형</span>
+        <span class="candidate-pill"><span class="dot new"></span><strong>라이트</strong> Bflow식 StarNest</span>
+      </div>
+      <div class="slider">
+        <label for="bflowIntensity">Bflow식 강도 <b id="bflowIntensityValue">72%</b></label>
+        <input id="bflowIntensity" type="range" min="0" max="100" value="72" />
+        <div class="intensity-buttons" aria-label="Bflow식 강도 프리셋">
+          <button type="button" data-bflow-strength="0">0</button>
+          <button type="button" data-bflow-strength="72" class="active">72</button>
+          <button type="button" data-bflow-strength="100">100</button>
+        </div>
+        <div class="bflow-options" aria-label="Bflow식 StarNest 움직임 옵션">
+          <label class="motion-toggle" for="bflowMotionTrail">
+            <input id="bflowMotionTrail" type="checkbox" checked />
+            <span>움직임 잔상</span>
+          </label>
+          <small>입자가 방향과 속도에 맞춰 살짝 길어집니다.</small>
+        </div>
+        <div class="tone-row" aria-label="StarNest 라이트 변형 톤">
+          <span>라이트 변형 프리셋</span>
+          <button type="button" data-light-preset="soft">부드럽게</button>
+          <button type="button" data-light-preset="balanced" class="active">기본</button>
+          <button type="button" data-light-preset="cool">푸른빛</button>
+          <button type="button" data-light-preset="crisp">선명</button>
+        </div>
+        <div class="tone-controls" aria-label="StarNest 라이트 변형 세부 조절">
+          <div class="tone-control">
+            <label for="lightHue">색조 <b id="lightHueValue">218°</b></label>
+            <input id="lightHue" type="range" min="0" max="360" value="218" data-light-control="hue" />
+          </div>
+          <div class="tone-control">
+            <label for="lightChroma">채도 <b id="lightChromaValue">38%</b></label>
+            <input id="lightChroma" type="range" min="0" max="100" value="38" data-light-control="chroma" />
+          </div>
+          <div class="tone-control">
+            <label for="lightClarity">선명도 <b id="lightClarityValue">52</b></label>
+            <input id="lightClarity" type="range" min="0" max="100" value="52" data-light-control="clarity" />
+          </div>
+          <div class="tone-control">
+            <label for="lightBlur">블러 <b id="lightBlurValue">12</b></label>
+            <input id="lightBlur" type="range" min="0" max="100" value="12" data-light-control="blur" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>다크모드</h2>
+          <p>기존 다크 화면에서는 원본 StarNest와 Bflow식 StarNest 둘 중 하나를 선택하는 구조입니다.</p>
+        </div>
+      </div>
+      <div class="grid dark">
+        <article class="option" data-scheme="dark">
+          <div class="option-head">
+            <div class="option-title">
+              <h3>기본 StarNest 원본</h3>
+              <p>현재 앱의 StarNest 셰이더를 그대로 사용합니다. 마우스 방향 이동 포함.</p>
+            </div>
+            <span class="tag neutral">기존</span>
+          </div>
+          <div class="stage">
+            <canvas data-starnest="original" aria-hidden="true"></canvas>
+            <div class="mock-app">
+              <aside class="rail"><div class="logo">B</div><div class="nav active">대</div><div class="nav">씬</div><div class="nav">팀</div><div class="nav">컴</div></aside>
+              <section class="app-content" data-content></section>
+            </div>
+          </div>
+        </article>
+
+        <article class="option" data-scheme="dark">
+          <div class="option-head">
+            <div class="option-title">
+              <h3>Bflow식 StarNest</h3>
+              <p>점/성운형 배경 후보입니다. 다크에서도 더 부드럽고 덜 우주 배경처럼 보입니다.</p>
+            </div>
+            <span class="tag new">신규 후보</span>
+          </div>
+          <div class="stage bflow">
+            <canvas data-bflow-star aria-hidden="true"></canvas>
+            <div class="bflow-wash" aria-hidden="true"></div>
+            <div class="mock-app">
+              <aside class="rail"><div class="logo">B</div><div class="nav active">대</div><div class="nav">씬</div><div class="nav">팀</div><div class="nav">컴</div></aside>
+              <section class="app-content" data-content></section>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>라이트모드</h2>
+          <p>라이트 화면에서는 원본 그대로, 원본을 라이트용으로 변형한 버전, Bflow식 StarNest를 비교합니다.</p>
+        </div>
+      </div>
+      <div class="grid light">
+        <article class="option" data-scheme="light">
+          <div class="option-head">
+            <div class="option-title">
+              <h3>기본 StarNest 원본</h3>
+              <p>라이트 UI 위에도 실제 StarNest 원본을 그대로 둔 상태입니다. 어두운 우주 질감이 그대로 남습니다.</p>
+            </div>
+            <span class="tag neutral">원본</span>
+          </div>
+          <div class="stage">
+            <canvas data-starnest="original" aria-hidden="true"></canvas>
+            <div class="mock-app">
+              <aside class="rail"><div class="logo">B</div><div class="nav active">대</div><div class="nav">씬</div><div class="nav">팀</div><div class="nav">컴</div></aside>
+              <section class="app-content" data-content></section>
+            </div>
+          </div>
+        </article>
+
+        <article class="option" data-scheme="light">
+          <div class="option-head">
+            <div class="option-title">
+              <h3>StarNest 라이트 변형</h3>
+              <p>원본 StarNest의 움직임과 밀도는 유지하되, 검은 바탕을 밝은 톤으로 변환한 후보입니다.</p>
+            </div>
+            <span class="tag light">라이트 변형</span>
+          </div>
+          <div class="stage light-transform">
+            <canvas data-starnest="light" aria-hidden="true"></canvas>
+            <div class="mock-app">
+              <aside class="rail"><div class="logo">B</div><div class="nav active">대</div><div class="nav">씬</div><div class="nav">팀</div><div class="nav">컴</div></aside>
+              <section class="app-content" data-content></section>
+            </div>
+          </div>
+        </article>
+
+        <article class="option" data-scheme="light">
+          <div class="option-head">
+            <div class="option-title">
+              <h3>Bflow식 StarNest</h3>
+              <p>점들이 움직이는 Bflow식 후보입니다. 강도 100에서 라이트 화면에서도 충분히 보이도록 보강했습니다.</p>
+            </div>
+            <span class="tag new">신규 후보</span>
+          </div>
+          <div class="stage bflow">
+            <canvas data-bflow-star aria-hidden="true"></canvas>
+            <div class="bflow-wash" aria-hidden="true"></div>
+            <div class="mock-app">
+              <aside class="rail"><div class="logo">B</div><div class="nav active">대</div><div class="nav">씬</div><div class="nav">팀</div><div class="nav">컴</div></aside>
+              <section class="app-content" data-content></section>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="todo-panel">
+      <div class="todo-copy">
+        <h2>나중 구현 투두</h2>
+        <p>카드 사이즈 조절은 이번 StarNest 선택 시안에서는 제외하고, 별도 작업으로 남겨둡니다.</p>
+      </div>
+      <div class="todo-list">
+        <div class="card-todo">
+          <div class="check">1</div>
+          <div><strong>배경 아트 선택지 분리</strong><span>기본 StarNest / StarNest 라이트 변형 / Bflow식 StarNest를 설정에서 구분</span></div>
+          <div class="status">이번 논의</div>
+        </div>
+        <div class="card-todo">
+          <div class="check">2</div>
+          <div><strong>카드 뷰 카드 사이즈 조절</strong><span>씬 카드 뷰 밀도 조절은 나중에 별도 구현</span></div>
+          <div class="status">나중</div>
+        </div>
+        <div class="card-todo">
+          <div class="check">3</div>
+          <div><strong>리비전 빠른입력 알람 수신자 고정</strong><span>배경담당/액팅담당 기본 선택 후 사용자가 액팅담당을 해제하고 타이핑해도 자동 재체크되지 않게 수정</span></div>
+          <div class="status">버그 투두</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const appTemplate = `
+      <div class="topbar">
+        <div><strong>대시보드</strong><span>쾅 뉴럴링크 · 전체 진행 현황</span></div>
+        <div class="user"><span class="avatar">배</span>배한솔</div>
+      </div>
+      <div class="tabs"><span class="active">전체</span><span>BG</span><span>ACT</span></div>
+      <div class="metrics">
+        <div class="metric"><span>전체 진행률</span><strong>68%</strong><div class="bar"><i style="--w:68%"></i></div></div>
+        <div class="metric"><span>오늘 완료</span><strong>12</strong><div class="bar"><i style="--w:46%"></i></div></div>
+        <div class="metric"><span>릴 담당 파트</span><strong>4</strong><div class="bar"><i style="--w:78%"></i></div></div>
+      </div>
+      <div class="workspace">
+        <section class="panel">
+          <div class="panel-head"><h3>최근 씬</h3><small>배경 비교</small></div>
+          <div class="rows">
+            <div class="row"><span>씬</span><span>내용</span><span>BG</span><span>ACT</span></div>
+            <div class="row"><b>a001</b><span class="scene">도시 야경 와이드 샷</span><span class="chip good">PNG</span><span class="chip">완료</span></div>
+            <div class="row"><b>a002</b><span class="scene">옥상 대화 클로즈업</span><span class="chip">검수</span><span class="chip warn">LO</span></div>
+            <div class="row"><b>a003</b><span class="scene">엘리베이터 내부 전환</span><span class="chip good">완료</span><span class="chip good">완료</span></div>
+            <div class="row"><b>a004</b><span class="scene">골목 추격 배경</span><span class="chip">LO</span><span class="chip">작업</span></div>
+          </div>
+        </section>
+      </div>
+    `;
+    document.querySelectorAll('[data-content]').forEach((el) => { el.innerHTML = appTemplate; });
+
+    const root = document.documentElement;
+    const bflowIntensity = document.getElementById('bflowIntensity');
+    const bflowIntensityValue = document.getElementById('bflowIntensityValue');
+    const bflowMotionTrail = document.getElementById('bflowMotionTrail');
+    const lightControlInputs = {
+      hue: document.getElementById('lightHue'),
+      chroma: document.getElementById('lightChroma'),
+      clarity: document.getElementById('lightClarity'),
+      blur: document.getElementById('lightBlur'),
+    };
+    const lightControlValues = {
+      hue: document.getElementById('lightHueValue'),
+      chroma: document.getElementById('lightChromaValue'),
+      clarity: document.getElementById('lightClarityValue'),
+      blur: document.getElementById('lightBlurValue'),
+    };
+    const lightPresets = {
+      soft: { hue: 286, chroma: 24, clarity: 28, blur: 34 },
+      balanced: { hue: 218, chroma: 38, clarity: 52, blur: 12 },
+      cool: { hue: 184, chroma: 48, clarity: 48, blur: 16 },
+      crisp: { hue: 236, chroma: 56, clarity: 78, blur: 4 },
+    };
+    let lightHue = 218 / 360;
+    let lightChroma = 0.38;
+    let lightClarity = 0.52;
+    let lightBlur = 0.12;
+    let bflowTrailEnabled = true;
+
+    function setBflowIntensity(value) {
+      const normalized = Number(value) / 100;
+      root.style.setProperty('--bflow-intensity', normalized.toFixed(2));
+      bflowIntensityValue.textContent = `${value}%`;
+      bflowIntensity.value = String(value);
+      document.querySelectorAll('[data-bflow-strength]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.bflowStrength === String(value));
+      });
+    }
+
+    bflowIntensity.addEventListener('input', () => setBflowIntensity(bflowIntensity.value));
+    document.querySelectorAll('[data-bflow-strength]').forEach((button) => {
+      button.addEventListener('click', () => setBflowIntensity(button.dataset.bflowStrength));
+    });
+    bflowMotionTrail.addEventListener('change', () => {
+      bflowTrailEnabled = bflowMotionTrail.checked;
+    });
+
+    function syncLightControls(activePreset) {
+      lightHue = Number(lightControlInputs.hue.value) / 360;
+      lightChroma = Number(lightControlInputs.chroma.value) / 100;
+      lightClarity = Number(lightControlInputs.clarity.value) / 100;
+      lightBlur = Number(lightControlInputs.blur.value) / 100;
+      Object.entries(lightControlInputs).forEach(([key, input]) => {
+        const suffix = key === 'hue' ? '°' : key === 'chroma' ? '%' : '';
+        lightControlValues[key].textContent = `${input.value}${suffix}`;
+      });
+      root.style.setProperty('--light-transform-blur', `${(lightBlur * 2.8).toFixed(2)}px`);
+      root.style.setProperty('--light-transform-scale', (1 + lightBlur * 0.012).toFixed(4));
+      document.querySelectorAll('[data-light-preset]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.lightPreset === activePreset);
+      });
+    }
+
+    Object.entries(lightControlInputs).forEach(([key, input]) => {
+      input.addEventListener('input', () => syncLightControls(null));
+    });
+    document.querySelectorAll('[data-light-preset]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const preset = lightPresets[button.dataset.lightPreset];
+        Object.entries(preset).forEach(([key, value]) => {
+          lightControlInputs[key].value = String(value);
+        });
+        syncLightControls(button.dataset.lightPreset);
+      });
+    });
+    syncLightControls('balanced');
+
+    const VERTEX_SOURCE = `
+      attribute vec2 p;
+      void main(){ gl_Position = vec4(p,0.0,1.0); }
+    `;
+
+    const STAR_BODY = `
+      precision highp float;
+      uniform vec2 uRes;
+      uniform float uTime;
+      uniform float uSpeed;
+      uniform float uZoom;
+      uniform float uBrightness;
+      uniform float uSaturation;
+      uniform float uDarkmatter;
+      uniform float uDistfading;
+      uniform float uAngleX;
+      uniform float uAngleY;
+      uniform float uVolsteps;
+      uniform float uIterations;
+      uniform float uColorShift;
+      uniform float uSparkle;
+      uniform float uSparkleSpeed;
+      uniform float uLightHue;
+      uniform float uLightChroma;
+      uniform float uLightClarity;
+      uniform float uLightBlur;
+      uniform vec3 uOffset;
+
+      vec3 modGlsl(vec3 x, vec3 y){ return x - y * floor(x / y); }
+      mat2 rot(float a){ return mat2(cos(a), sin(a), -sin(a), cos(a)); }
+      float luminance(vec3 c){ return length(c); }
+      vec3 hslToRgb(vec3 hsl) {
+        vec3 rgb = clamp(abs(mod(hsl.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+        return hsl.z + hsl.y * (rgb - 0.5) * (1.0 - abs(2.0 * hsl.z - 1.0));
+      }
+
+      void main(){
+        const float formuparam = 0.53;
+        const float stepsize = 0.1;
+        const float tile = 0.850;
+        vec2 uv = gl_FragCoord.xy / uRes.xy - 0.5;
+        uv.y *= uRes.y / uRes.x;
+        vec3 dir = vec3(uv * uZoom, 1.0);
+        mat2 rot1 = rot(uAngleX);
+        mat2 rot2 = rot(uAngleY);
+        dir.xz = rot1 * dir.xz;
+        dir.xy = rot2 * dir.xy;
+        vec3 from = vec3(1.0, 0.5, 0.5);
+        from += vec3(uOffset.xy, -2.0 + uOffset.z);
+        from.xz = rot1 * from.xz;
+        from.xy = rot2 * from.xy;
+        float s = 0.1;
+        float fade = 1.0;
+        vec3 v = vec3(0.0);
+        for(int r=0; r<24; r++){
+          if(float(r) >= uVolsteps) break;
+          vec3 p = from + s * dir * 0.5;
+          p = abs(vec3(tile) - modGlsl(p, vec3(tile * 2.0)));
+          float pa = 0.0;
+          float a = 0.0;
+          for(int i=0; i<24; i++){
+            if(float(i) >= uIterations) break;
+            p = abs(p) / dot(p,p) - formuparam;
+            a += abs(length(p) - pa);
+            pa = length(p);
+          }
+          float dm = max(0.0, uDarkmatter - a * a * 0.001);
+          a *= a * a;
+          if(r > 6) fade *= 1.0 - dm;
+          v += fade;
+          v += vec3(s, s*s, s*s*s*s) * a * uBrightness * fade;
+          fade *= uDistfading;
+          s += stepsize;
+        }
+        v = mix(vec3(luminance(v)), v, uSaturation);
+        v *= 0.01;
+        vec3 bflowTint = vec3(0.72, 0.62, 1.04);
+        vec3 purpleBias = vec3(1.12, 0.88, 1.26);
+        vec3 mintBias = vec3(0.74, 1.22, 1.04);
+        vec3 tint = bflowTint * mix(purpleBias, mintBias, uColorShift * 0.5 + 0.5);
+        v *= tint;
+        v = pow(max(v, 0.0), vec3(0.82));
+        float sparkleSeed = sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233)) + uTime * 1.7 * uSparkleSpeed);
+        float sparkleMask = pow(clamp(luminance(v) * 34.0, 0.0, 1.0), 3.0);
+        v += sparkleMask * (0.64 + 0.36 * sparkleSeed) * uSparkle * vec3(0.18, 0.22, 0.32);
+    `;
+
+    const FRAGMENT_ORIGINAL = `${STAR_BODY}
+        gl_FragColor = vec4(v, 1.0);
+      }
+    `;
+
+    const FRAGMENT_LIGHT = `${STAR_BODY}
+        float rawSignal = luminance(v);
+        float detail = clamp(pow(rawSignal * mix(30.0, 58.0, uLightClarity), mix(0.72, 0.42, uLightClarity)), 0.0, 1.0);
+        float signal = mix(detail, smoothstep(0.05, 0.82, detail) * 0.82, uLightBlur);
+        vec3 paper = vec3(0.925, 0.955, 0.995);
+        float hue = fract(uLightHue);
+        float saturation = clamp(uLightChroma, 0.0, 1.0);
+        vec3 hueDust = hslToRgb(vec3(hue, saturation, 0.58));
+        vec3 hueSpark = hslToRgb(vec3(fract(hue + 0.08), min(1.0, saturation * 0.86 + 0.14), 0.72));
+        hueDust = mix(hueDust, hueSpark, signal * 0.18);
+        float colorAmount = mix(0.04, 0.2, saturation) + signal * mix(0.18, 0.66, saturation);
+        colorAmount = clamp(colorAmount, 0.0, 0.78);
+        vec3 color = mix(paper, hueDust, colorAmount);
+        color += v * mix(0.55, 2.2, uLightClarity) * mix(0.55, 1.24, saturation);
+        color = mix(color, paper, uLightBlur * 0.22);
+        color = min(color, vec3(1.0));
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    function compile(gl, type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        throw new Error(gl.getShaderInfoLog(shader) || 'shader compile failed');
+      }
+      return shader;
+    }
+
+    function startStarNest(canvas, variant) {
+      const gl = canvas.getContext('webgl', { antialias: false, alpha: true, preserveDrawingBuffer: false });
+      if (!gl) return;
+      const program = gl.createProgram();
+      gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERTEX_SOURCE));
+      gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, variant === 'light' ? FRAGMENT_LIGHT : FRAGMENT_ORIGINAL));
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return;
+      gl.useProgram(program);
+      const locs = Object.fromEntries(
+        ['uRes', 'uTime', 'uSpeed', 'uZoom', 'uBrightness', 'uSaturation', 'uDarkmatter', 'uDistfading', 'uAngleX', 'uAngleY', 'uVolsteps', 'uIterations', 'uColorShift', 'uSparkle', 'uSparkleSpeed', 'uLightHue', 'uLightChroma', 'uLightClarity', 'uLightBlur', 'uOffset']
+          .map((key) => [key, gl.getUniformLocation(program, key)]),
+      );
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+      const pos = gl.getAttribLocation(program, 'p');
+      gl.enableVertexAttribArray(pos);
+      gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+      const mouseFlow = { x: 0, y: 0, edge: 0 };
+      const smoothFlow = { x: 0.18, y: 0.08, edge: Math.hypot(0.18, 0.08) };
+      const offset = { x: 0, y: 0, z: 0 };
+      let lastNow = 0;
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 1.6);
+        canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+        canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+        gl.viewport(0, 0, canvas.width, canvas.height);
+      }
+
+      function onMouseMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const nx = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+        const ny = -(((e.clientY - rect.top) / rect.height - 0.5) * 2);
+        const dist = Math.min(1, Math.hypot(nx, ny));
+        const deadzone = 0.16;
+        const edge = Math.max(0, (dist - deadzone) / (1 - deadzone));
+        const eased = edge * edge * (3 - 2 * edge);
+        mouseFlow.x = dist > 0.001 ? (nx / dist) * eased : 0;
+        mouseFlow.y = dist > 0.001 ? (ny / dist) * eased : 0;
+        mouseFlow.edge = eased;
+      }
+
+      function render(now) {
+        const dt = lastNow ? Math.min(0.05, Math.max(0.001, (now - lastNow) / 1000)) : 0.016;
+        lastNow = now;
+        const follow = 1 - Math.exp(-dt * 4.2);
+        smoothFlow.x += (mouseFlow.x - smoothFlow.x) * follow;
+        smoothFlow.y += (mouseFlow.y - smoothFlow.y) * follow;
+        smoothFlow.edge += (mouseFlow.edge - smoothFlow.edge) * follow;
+        const maxSpeed = 0.002;
+        const speed = maxSpeed * Math.max(0, smoothFlow.edge);
+        const magnitude = Math.hypot(smoothFlow.x, smoothFlow.y);
+        const nx = magnitude > 0.001 ? smoothFlow.x / magnitude : 0;
+        const ny = magnitude > 0.001 ? smoothFlow.y / magnitude : 0;
+        offset.x += nx * speed * dt * 4.8;
+        offset.y += ny * speed * dt * 3.1;
+        offset.z += speed * dt * (1 + smoothFlow.edge * 0.7) * 4.2;
+
+        gl.useProgram(program);
+        gl.uniform2f(locs.uRes, canvas.width, canvas.height);
+        gl.uniform1f(locs.uTime, now * 0.001);
+        gl.uniform1f(locs.uSpeed, speed);
+        gl.uniform1f(locs.uZoom, 0.76);
+        gl.uniform1f(locs.uBrightness, variant === 'light' ? 0.0019 : 0.0015);
+        gl.uniform1f(locs.uSaturation, variant === 'light' ? 0.78 : 0.72);
+        gl.uniform1f(locs.uDarkmatter, 0.38);
+        gl.uniform1f(locs.uDistfading, 0.70);
+        gl.uniform1f(locs.uAngleX, 0.54);
+        gl.uniform1f(locs.uAngleY, 0.74);
+        gl.uniform1f(locs.uVolsteps, 16);
+        gl.uniform1f(locs.uIterations, 17);
+        gl.uniform1f(locs.uColorShift, 0);
+        gl.uniform1f(locs.uSparkle, 0.45);
+        gl.uniform1f(locs.uSparkleSpeed, 1);
+        if (locs.uLightHue) gl.uniform1f(locs.uLightHue, lightHue);
+        if (locs.uLightChroma) gl.uniform1f(locs.uLightChroma, lightChroma);
+        if (locs.uLightClarity) gl.uniform1f(locs.uLightClarity, lightClarity);
+        if (locs.uLightBlur) gl.uniform1f(locs.uLightBlur, lightBlur);
+        gl.uniform3f(locs.uOffset, offset.x, offset.y, offset.z);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        window.setTimeout(() => requestAnimationFrame(render), 33);
+      }
+
+      resize();
+      window.addEventListener('resize', resize);
+      window.addEventListener('mousemove', onMouseMove, { passive: true });
+      requestAnimationFrame(render);
+    }
+
+    function startBflowStar(canvas) {
+      const ctx = canvas.getContext('2d');
+      const stars = [];
+      let pointer = { x: 0.5, y: 0.5 };
+      const flow = { x: 0, y: 0, edge: 0, speed: 0 };
+      const smoothFlow = { x: 0.12, y: 0.06, edge: Math.hypot(0.12, 0.06), speed: 0 };
+      const driftTarget = { x: 0, y: 0, edge: 0 };
+      const smoothDrift = { x: 0, y: 0, edge: 0 };
+      const offset = { x: 0, y: 0 };
+      let lastPointerEvent = null;
+      let lastNow = 0;
+      const isDark = canvas.closest('.option')?.dataset.scheme === 'dark';
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 1.8);
+        canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+        canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        stars.length = 0;
+        const count = Math.max(420, Math.floor((rect.width * rect.height) / 620));
+        for (let i = 0; i < count; i++) {
+          stars.push({
+            x: Math.random() * rect.width,
+            y: Math.random() * rect.height,
+            z: Math.random(),
+            r: 0.78 + Math.random() * 1.95,
+            drift: 0.14 + Math.random() * 0.58,
+            sparkle: Math.random(),
+            phase: Math.random() * Math.PI * 2,
+            tint: i % 3,
+          });
+        }
+      }
+
+      function draw(now) {
+        const rect = canvas.getBoundingClientRect();
+        const rawIntensity = Number(getComputedStyle(document.documentElement).getPropertyValue('--bflow-intensity')) || 0;
+        const intensity = Math.pow(Math.max(0, Math.min(1, rawIntensity)), 0.72);
+        const dt = lastNow ? Math.min(0.05, Math.max(0.001, (now - lastNow) / 1000)) : 0.016;
+        lastNow = now;
+        const follow = 1 - Math.exp(-dt * 4.2);
+        smoothFlow.x += (flow.x - smoothFlow.x) * follow;
+        smoothFlow.y += (flow.y - smoothFlow.y) * follow;
+        smoothFlow.edge += (flow.edge - smoothFlow.edge) * follow;
+        smoothFlow.speed += (flow.speed - smoothFlow.speed) * follow;
+        flow.speed *= Math.exp(-dt * 2.8);
+        flow.edge *= Math.exp(-dt * 2.2);
+        const driftFollow = 1 - Math.exp(-dt * 2.2);
+        smoothDrift.x += (driftTarget.x - smoothDrift.x) * driftFollow;
+        smoothDrift.y += (driftTarget.y - smoothDrift.y) * driftFollow;
+        smoothDrift.edge += (driftTarget.edge - smoothDrift.edge) * driftFollow;
+        const driftMagnitude = Math.hypot(smoothDrift.x, smoothDrift.y);
+        const driftNx = driftMagnitude > 0.001 ? smoothDrift.x / driftMagnitude : 0;
+        const driftNy = driftMagnitude > 0.001 ? smoothDrift.y / driftMagnitude : 0;
+        const trailMagnitude = Math.hypot(smoothFlow.x, smoothFlow.y);
+        const trailNx = trailMagnitude > 0.001 ? smoothFlow.x / trailMagnitude : driftNx;
+        const trailNy = trailMagnitude > 0.001 ? smoothFlow.y / trailMagnitude : driftNy;
+        const movement = Math.max(smoothFlow.edge, smoothFlow.speed);
+        const driftForce = Math.max(0, smoothDrift.edge);
+        const driftSpeed = (isDark ? 30 : 34) * intensity * (driftForce * 1.08 + movement * 0.35);
+        offset.x += driftNx * driftSpeed * dt;
+        offset.y += driftNy * driftSpeed * dt;
+
+          const bg = ctx.createLinearGradient(0, 0, rect.width, rect.height);
+          if (isDark) {
+            bg.addColorStop(0, '#080b15');
+            bg.addColorStop(1, '#11192b');
+          } else {
+            bg.addColorStop(0, '#dcefff');
+            bg.addColorStop(0.58, '#f6fbff');
+            bg.addColorStop(1, '#cfe7ff');
+          }
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, rect.width, rect.height);
+        ctx.globalCompositeOperation = isDark ? 'lighter' : 'source-over';
+
+        if (intensity > 0) {
+          const hazeStrength = isDark ? 0.18 : 0.12;
+          const haze1 = ctx.createRadialGradient(rect.width * 0.18, rect.height * 0.04, 0, rect.width * 0.18, rect.height * 0.04, rect.width * 0.76);
+          haze1.addColorStop(0, isDark ? `rgba(108,92,231,${hazeStrength * intensity})` : `rgba(106,154,255,${hazeStrength * intensity})`);
+          haze1.addColorStop(1, 'rgba(108,92,231,0)');
+          ctx.fillStyle = haze1;
+          ctx.fillRect(0, 0, rect.width, rect.height);
+
+          const haze2 = ctx.createRadialGradient(rect.width * 0.82, rect.height * 0.18, 0, rect.width * 0.82, rect.height * 0.18, rect.width * 0.6);
+          haze2.addColorStop(0, isDark ? `rgba(79,141,247,${hazeStrength * 0.82 * intensity})` : `rgba(70,214,200,${hazeStrength * 0.68 * intensity})`);
+          haze2.addColorStop(1, 'rgba(79,141,247,0)');
+          ctx.fillStyle = haze2;
+          ctx.fillRect(0, 0, rect.width, rect.height);
+        }
+
+        const px = (pointer.x - 0.5) * 22;
+        const py = (pointer.y - 0.5) * 16;
+        const activeX = movement > 0.06 ? trailNx : driftNx;
+        const activeY = movement > 0.06 ? trailNy : driftNy;
+        const visualFlowX = -activeX;
+        const visualFlowY = -activeY;
+        const flowAngle = Math.atan2(-visualFlowY, visualFlowX);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (const star of stars) {
+          if (intensity <= 0) break;
+          const depth = 0.35 + star.z * 0.95;
+          const rawX = star.x - offset.x * depth - px * star.z + Math.sin(now * 0.0009 + star.phase) * star.drift;
+          const rawY = star.y + offset.y * depth - py * star.z + Math.cos(now * 0.0007 + star.phase) * star.drift;
+          const x = ((rawX % rect.width) + rect.width) % rect.width;
+          const y = ((rawY % rect.height) + rect.height) % rect.height;
+          const twinkle = 0.74 + Math.sin(now * 0.0024 + star.phase) * 0.18;
+          const sparklePulse = star.sparkle > 0.82 ? Math.max(0, Math.sin(now * 0.0048 + star.phase * 1.7)) : 0;
+          const alphaBase = isDark ? 0.78 : 0.84;
+          const alpha = Math.max(0, Math.min(1, alphaBase * intensity * (0.24 + star.z * 0.72) * twinkle + sparklePulse * 0.18));
+          const radius = star.r * (isDark ? 1.08 : 1.18);
+          const stretch = bflowTrailEnabled ? movement * intensity * (0.18 + star.z * 1.18) : 0;
+          const longRadius = radius * (1 + stretch * 1.48);
+          const shortRadius = radius * Math.max(0.78, 1 - stretch * 0.13);
+          const colors = [
+            isDark ? `rgba(158,178,255,${alpha * 0.82})` : `rgba(58,146,226,${alpha * 0.56})`,
+            isDark ? `rgba(84,202,225,${alpha * 0.74})` : `rgba(0,172,164,${alpha * 0.48})`,
+            isDark ? `rgba(199,158,255,${alpha * 0.62})` : `rgba(126,102,224,${alpha * 0.42})`,
+          ];
+          const haloColors = [
+            isDark ? `rgba(120,150,255,${alpha * 0.1})` : `rgba(86,170,255,${alpha * 0.16})`,
+            isDark ? `rgba(80,220,220,${alpha * 0.08})` : `rgba(44,214,202,${alpha * 0.14})`,
+            isDark ? `rgba(220,160,255,${alpha * 0.08})` : `rgba(154,130,255,${alpha * 0.13})`,
+          ];
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(flowAngle + Math.sin(star.phase + now * 0.00036) * 0.1 * movement);
+          if (!isDark && alpha > 0.12) {
+            ctx.fillStyle = haloColors[star.tint];
+            ctx.beginPath();
+            ctx.ellipse(0, 0, longRadius * 2.55, shortRadius * 2.1, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.fillStyle = colors[star.tint];
+          ctx.strokeStyle = colors[star.tint];
+          ctx.beginPath();
+          ctx.ellipse(0, 0, longRadius, shortRadius, 0, 0, Math.PI * 2);
+          ctx.fill();
+          if (alpha > 0.32 || sparklePulse > 0.4) {
+            ctx.fillStyle = isDark ? `rgba(245,249,255,${alpha * 0.22 + sparklePulse * 0.26})` : `rgba(255,255,255,${alpha * 0.34 + sparklePulse * 0.36})`;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, Math.max(0.55, longRadius * 0.32), Math.max(0.45, shortRadius * 0.36), 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        window.setTimeout(() => requestAnimationFrame(draw), 33);
+      }
+
+      window.addEventListener('pointermove', (event) => {
+        pointer = {
+          x: event.clientX / Math.max(1, window.innerWidth),
+          y: event.clientY / Math.max(1, window.innerHeight),
+        };
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const localX = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
+        const localY = -(((event.clientY - rect.top) / rect.height - 0.5) * 2);
+        const localDistance = Math.min(1, Math.hypot(localX, localY));
+        const deadzone = 0.16;
+        const edge = Math.max(0, (localDistance - deadzone) / (1 - deadzone));
+        const easedEdge = edge * edge * (3 - 2 * edge);
+        driftTarget.x = localDistance > 0.001 ? (localX / localDistance) * easedEdge : 0;
+        driftTarget.y = localDistance > 0.001 ? (localY / localDistance) * easedEdge : 0;
+        driftTarget.edge = easedEdge;
+        const now = event.timeStamp || performance.now();
+        if (lastPointerEvent) {
+          const dt = Math.max(12, now - lastPointerEvent.time);
+          const dx = event.clientX - lastPointerEvent.x;
+          const dy = event.clientY - lastPointerEvent.y;
+          const distance = Math.hypot(dx, dy);
+          const speed = Math.min(1, distance / dt / 1.2);
+          if (distance > 0.2) {
+            const eased = speed * speed * (3 - 2 * speed);
+            flow.x = dx / distance;
+            flow.y = -dy / distance;
+            flow.edge = eased;
+            flow.speed = eased;
+          }
+        }
+        lastPointerEvent = { x: event.clientX, y: event.clientY, time: now };
+      }, { passive: true });
+      window.addEventListener('mouseleave', () => {
+        driftTarget.x = 0;
+        driftTarget.y = 0;
+        driftTarget.edge = 0;
+        flow.x = 0;
+        flow.y = 0;
+        flow.edge = 0;
+        flow.speed = 0;
+        lastPointerEvent = null;
+      });
+      window.addEventListener('resize', resize);
+      resize();
+      requestAnimationFrame(draw);
+    }
+
+    setBflowIntensity(bflowIntensity.value);
+    document.querySelectorAll('[data-starnest]').forEach((canvas) => startStarNest(canvas, canvas.dataset.starnest));
+    document.querySelectorAll('[data-bflow-star]').forEach((canvas) => startBflowStar(canvas));
+  </script>
+</body>
+</html>

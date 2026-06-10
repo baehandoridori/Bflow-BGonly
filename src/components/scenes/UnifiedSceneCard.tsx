@@ -20,6 +20,11 @@ import { LengthIcon } from './LengthIcon';
 import { SceneContextMenu } from './SceneContextMenu';
 import { StageSegmentToggle, stageIcon } from './StageSegmentToggle';
 import { RevisionCornerFlag } from './RevisionCornerFlag';
+import {
+  persistLengthChangeAtomic,
+  saveLengthChangeField,
+  type LengthChangeTarget,
+} from '@/utils/lengthChangePersistence';
 
 // 씬 UUID에 대한 현재 일괄 작업 상태(pending / failed)를 조회
 function getPendingState(
@@ -46,7 +51,7 @@ interface UnifiedSceneCardProps {
   /** Codex P2 6차(2026-04-23): 양쪽 sheet 댓글 id 유니온 크기. 제공되면 Math.max fallback 대신 사용. */
   totalCommentCount?: number;
   hasUnreadComments?: boolean;
-  onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
+  onToggle: (sheetName: string, sceneId: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number) => void;
   onDelete: (sheetName: string, sceneIndex: number) => void;
   onOpenDetail: (sheetName: string, sceneIndex: number) => void;
   onOpenMerged?: (merged: MergedScene, sourceElement?: HTMLElement | null) => void;
@@ -55,7 +60,7 @@ interface UnifiedSceneCardProps {
   onCtrlSelect?: () => void;
   onShiftSelect?: () => void;
   // v1.25.0~ 액팅 단계 토글 핸들러 (전달되면 액팅 씬에서 ScenePhaseToggle 렌더)
-  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
 }
@@ -106,39 +111,17 @@ export function UnifiedSceneCard({
   const handleSetLengthChange = async (value: 'LD' | 'SD' | null) => {
     if (lengthChangeInFlightRef.current) return;
     lengthChangeInFlightRef.current = true;
-    const valueStr = value ?? '';
     // 변경 전 값 캐싱 (BG/ACT 별도)
     const prevBg = bgScene?.lengthChange ?? null;
     const prevAct = actScene?.lengthChange ?? null;
-    // 낙관적
-    if (bgScene?.id) useDataStore.getState().updateSceneByUuid(bgScene.id, { lengthChange: value });
-    if (actScene?.id) useDataStore.getState().updateSceneByUuid(actScene.id, { lengthChange: value });
     try {
-      const targets: Array<{ uuid: string; prev: 'LD' | 'SD' | null }> = [];
+      const targets: LengthChangeTarget[] = [];
       if (bgScene?.id) targets.push({ uuid: bgScene.id, prev: prevBg });
       if (actScene?.id) targets.push({ uuid: actScene.id, prev: prevAct });
-      const results = await Promise.allSettled(
-        targets.map((t) =>
-          window.electronAPI?.supabaseUpdateSceneField?.(t.uuid, 'lengthChange', valueStr) ?? Promise.resolve(),
-        ),
-      );
-      const anyFailed = results.some((r) => r.status === 'rejected');
-      if (!anyFailed) return;
-
-      // BG/ACT sync 보존: 둘 다 prev 로 롤백 (UI 차원에서 mergedKey invariant 유지)
-      for (const t of targets) {
-        useDataStore.getState().updateSceneByUuid(t.uuid, { lengthChange: t.prev });
-      }
-      // 성공한 DB 호출은 best-effort reverse — DB 도 최대한 sync 되게
-      results.forEach((result, i) => {
-        if (result.status === 'fulfilled') {
-          const t = targets[i];
-          const prevStr = t.prev ?? '';
-          window.electronAPI?.supabaseUpdateSceneField?.(t.uuid, 'lengthChange', prevStr)
-            .catch((err) => console.error(`[lengthChange] reverse 실패 ${t.uuid}`, err));
-        } else {
-          console.error(`[lengthChange] ${targets[i].uuid} 저장 실패`, result.reason);
-        }
+      await persistLengthChangeAtomic(targets, value, {
+        updateScene: (uuid, lengthChange) => useDataStore.getState().updateSceneByUuid(uuid, { lengthChange }),
+        saveSceneField: saveLengthChangeField,
+        logPrefix: 'lengthChange card',
       });
     } finally {
       lengthChangeInFlightRef.current = false;
@@ -449,10 +432,10 @@ function DeptSection({
   sheetName: string | null;
   sceneIndex: number;
   searchQuery?: string;
-  onToggle: (sheetName: string, sceneId: string, stage: Stage) => void;
+  onToggle: (sheetName: string, sceneId: string, stage: Stage, sceneUuid?: string | null, sceneIndex?: number) => void;
   onDelete: (sheetName: string, sceneIndex: number) => void;
   activeOp: PendingOp | null;
-  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
+  onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState, sceneUuid?: string | null, sceneIndex?: number) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
   onActRoundBump?: (sheetName: string, sceneId: string, kind: 'work' | 'feedback', delta: 1 | -1) => void;
 }) {
@@ -535,7 +518,7 @@ function DeptSection({
         >
           <ScenePhaseToggle
             scene={scene}
-            onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next)}
+            onStateClick={(next) => onActPhaseStateClick(sheetName, sceneId, next, scene.id ?? null, sceneIndex)}
             onRequestFeedback={() => onActFeedbackRequest(sheetName, sceneId)}
             onRoundBump={(kind, delta) => onActRoundBump(sheetName, sceneId, kind, delta)}
           />
@@ -544,7 +527,7 @@ function DeptSection({
         <StageSegmentToggle
           scene={scene}
           department={dept}
-          onToggle={(stage) => onToggle(sheetName, sceneId, stage)}
+          onToggle={(stage) => onToggle(sheetName, sceneId, stage, scene.id ?? null, sceneIndex)}
           segmentClassName={stageCellPendingClass}
           dataContinuityTarget={dept === 'bg' ? 'bg-stage' : 'act-stage'}
         />

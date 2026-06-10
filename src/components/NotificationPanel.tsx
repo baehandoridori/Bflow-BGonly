@@ -1,22 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bell, Check, Trash2, MessageSquare, MessageSquareWarning, RefreshCw, Award, ExternalLink, AtSign, UserPlus } from 'lucide-react';
 import { useNotificationStore, type AppNotification, type NotificationType } from '@/stores/useNotificationStore';
-import { useAppStore } from '@/stores/useAppStore';
-import { useDataStore } from '@/stores/useDataStore';
 import { cn } from '@/utils/cn';
 import { floatingGlassStyle, glassTopHighlight } from '@/utils/glassStyles';
 import { useNotificationPanelSize, useNotificationPanelResizer } from '@/hooks/useNotificationPanelSize';
 import { ResizeEdgeGlow } from '@/components/common/ResizeEdgeGlow';
 import { ResizeHandleParticles } from '@/components/common/ResizeHandleParticles';
 import {
-  buildNotificationSceneModalRequest,
-  departmentFromNotificationSheetName,
   getSceneShortcutVisibilityClass,
-  resolveNotificationSceneTarget,
   shouldShowSceneShortcut,
 } from '@/utils/notificationSceneNavigation';
+import {
+  getNotificationSceneActionLabel,
+  navigateNotificationToScene,
+} from '@/utils/notificationSceneAction';
 import '@/styles/notification-bell.css';
 import { lastReactionEmoji } from '@/utils/commentReactionEmojiFormat';
+import {
+  addDevPreviewNotifications,
+  isDevPreviewNotificationToolsEnabled,
+} from '@/utils/devPreviewNotifications';
 
 // ─── 상대 시간 포맷 ─────────────────────────────────
 function timeAgo(iso: string): string {
@@ -58,9 +61,10 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
   const removeNotification = useNotificationStore((s) => s.removeNotification);
   const cfg = typeConfig(n.type);
   const Icon = cfg.icon;
-  // 멘션·댓글 알림은 metadata 가 부족해도 "씬 보기" 버튼을 만든다.
+  // 멘션·댓글 알림은 metadata 가 부족해도 이동 버튼을 만든다.
   // 노출 방식은 기존 알림 액션과 동일하게 hover/focus 때만 보여준다.
   const hasNavigateTarget = shouldShowSceneShortcut(n.type, n.metadata);
+  const actionLabel = getNotificationSceneActionLabel(n.type, n.metadata);
   // v1.24.0: 멘션 알림 — 더 강한 시각 신호 (액센트 좌측 바 + @ 배지 + 카드 배경 진한 alpha).
   // v1.25.5: acting_feedback 도 멘션과 동일한 강한 톤 (검수 요청은 즉시 인지 필요).
   // v1.25.8: scene_assignment 도 동일 — 담당자 배정은 즉시 인지 필요.
@@ -142,12 +146,12 @@ function NotificationItem({ n, onNavigate }: { n: AppNotification; onNavigate: (
         {hasNavigateTarget && (
           <button
             type="button"
-            title="씬 보기"
+            title={actionLabel}
             onClick={(e) => { e.stopPropagation(); handleItemClick(); }}
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-medium bg-accent/15 text-accent-sub border border-accent/30 hover:bg-accent/25"
           >
             <ExternalLink size={10} />
-            <span>씬 보기</span>
+            <span>{actionLabel}</span>
           </button>
         )}
         {!n.isRead && (
@@ -228,8 +232,8 @@ export function NotificationBell() {
 // ─── 드롭다운 패널 ───────────────────────────────────
 function NotificationDropdown() {
   const { notifications, markAllAsRead, clearAll, setPanelOpen, unreadCount } = useNotificationStore();
-  const { setView, setSelectedEpisode, setHighlightSceneId } = useAppStore();
   const ref = useRef<HTMLDivElement>(null);
+  const showDevTools = isDevPreviewNotificationToolsEnabled();
 
   // v1.27.0: 패널 너비/높이 사용자 조절 + preferences 저장.
   const { width, height, commit, isUserOverride } = useNotificationPanelSize();
@@ -273,64 +277,7 @@ function NotificationDropdown() {
   }, [setPanelOpen, dragAxis]);
 
   const handleNavigate = (n: AppNotification) => {
-    const target = resolveNotificationSceneTarget(n.metadata, useDataStore.getState().episodes);
-    // v1.29.0: comment_reaction 도 댓글 패널 자동 펼침 시맨틱은 comment / mention 과 동일.
-    const isCommentLikeNotif = n.type === 'comment' || n.type === 'mention' || n.type === 'comment_reaction';
-    const isActingFeedbackNotif = n.type === 'acting_feedback';
-    // v1.29.0: 이모지 반응 알림 — 점프 시 read_at 갱신 (catch-up 재출현 방지).
-    const isReactionNotif = n.type === 'comment_reaction';
-    const reactionNotificationId = n.metadata?.reactionNotificationId;
-    if (isReactionNotif && typeof reactionNotificationId === 'string') {
-      import('@/services/supabaseService')
-        .then(({ markCommentReactionRead }) => markCommentReactionRead(reactionNotificationId))
-        .catch((err) => console.warn('[NotificationPanel] markCommentReactionRead 실패:', err));
-    }
-    const feedbackNotificationId = n.metadata?.feedbackNotificationId;
-    if (isActingFeedbackNotif && feedbackNotificationId) {
-      // fire-and-forget — read_at 업데이트 실패는 점프 흐름에 영향 없음
-      import('@/services/supabaseService')
-        .then(({ markFeedbackNotificationRead }) => markFeedbackNotificationRead(feedbackNotificationId))
-        .catch((err) => console.warn('[NotificationPanel] markFeedbackNotificationRead 실패:', err));
-    }
-    // v1.25.8: 씬 담당자 배정 알림 — 점프 시 DB read_at 처리 (catch-up 중복 알림 방지)
-    const isAssignmentNotif = n.type === 'scene_assignment';
-    const assignmentNotificationId = n.metadata?.assignmentNotificationId;
-    if (isAssignmentNotif && assignmentNotificationId) {
-      import('@/services/supabaseService')
-        .then(({ markAssignmentNotificationRead }) => markAssignmentNotificationRead(assignmentNotificationId))
-        .catch((err) => console.warn('[NotificationPanel] markAssignmentNotificationRead 실패:', err));
-    }
-    if (target) {
-      const targetDept = departmentFromNotificationSheetName(target.sheetName);
-      const modalRequest = buildNotificationSceneModalRequest(n.type, n.metadata, target);
-      setSelectedEpisode(target.episodeNumber);
-      const app = useAppStore.getState();
-      app.setSelectedPart(target.partId);
-      if (!isCommentLikeNotif && targetDept && app.selectedDepartment !== targetDept) {
-        app.setSelectedDepartment(targetDept);
-        app.setDashboardDeptFilter(targetDept);
-      }
-      setHighlightSceneId(target.sceneName);
-      setView('scenes');
-      setPanelOpen(false);
-
-      if (modalRequest) {
-        useAppStore.getState().setPendingSceneModalRequest(modalRequest);
-      }
-      return;
-    }
-
-    if (shouldShowSceneShortcut(n.type, n.metadata)) {
-      console.warn('[NotificationPanel] 씬 매칭 실패', {
-        metadata: n.metadata,
-        episodeCount: useDataStore.getState().episodes.length,
-      });
-      setView('scenes');
-      useAppStore.getState().setToast?.({
-        type: 'warning',
-        message: '씬을 자동으로 찾지 못했어요. 씬 뷰에서 직접 확인해주세요.',
-      });
-    }
+    navigateNotificationToScene(n.type, n.metadata);
     setPanelOpen(false);
   };
 
@@ -370,6 +317,16 @@ function NotificationDropdown() {
             )}
           </span>
           <div className="flex items-center gap-2">
+            {showDevTools && (
+              <button
+                onClick={() => { void addDevPreviewNotifications(); }}
+                className="text-[10px] text-text-secondary/70 hover:text-accent flex items-center gap-1 cursor-pointer"
+                title="프리뷰에서 씬 이동 알림을 테스트합니다"
+              >
+                <Bell size={11} />
+                테스트 알림
+              </button>
+            )}
             {unreadCount > 0 && (
               <button
                 onClick={() => {

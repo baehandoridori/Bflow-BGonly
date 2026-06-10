@@ -12,6 +12,7 @@ import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_COLORS } from '@/types/calendar';
 import { VACATION_COLOR } from '@/types/vacation';
 import { cn } from '@/utils/cn';
+import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 
 /* ────────────────────────────────────────────────
    프로그레스 색상
@@ -411,25 +412,18 @@ function EventGanttChart() {
   }, [dayLabels]);
 
   const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const setView = useAppStore((s) => s.setView);
-  const setSelectedEpisode = useAppStore((s) => s.setSelectedEpisode);
-  const setSelectedPart = useAppStore((s) => s.setSelectedPart);
-  const setSelectedDepartment = useAppStore((s) => s.setSelectedDepartment);
-  const setHighlightSceneId = useAppStore((s) => s.setHighlightSceneId);
 
   // 연결된 에피소드/씬으로 이동 (Spotlight 검색과 동일하게 하이라이트)
   const handleNavigate = useCallback((ev: CalendarEvent) => {
     if (ev.linkedEpisode != null) {
-      setSelectedEpisode(ev.linkedEpisode);
-      if (ev.linkedPart) setSelectedPart(ev.linkedPart);
-      if (ev.type === 'scene' || ev.type === 'part') {
-        const dept = ev.linkedDepartment as Department | undefined;
-        if (dept) setSelectedDepartment(dept);
-      }
-      if (ev.linkedSceneId) setHighlightSceneId(ev.linkedSceneId);
-      setView('scenes');
+      navigateToSceneView({
+        episodeNumber: ev.linkedEpisode,
+        partId: ev.linkedPart,
+        department: ev.type === 'scene' || ev.type === 'part' ? (ev.linkedDepartment as Department | undefined) : undefined,
+        highlightSceneId: ev.linkedSceneId,
+      });
     }
-  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId]);
+  }, []);
 
   // D-day 계산
   const calcDday = useCallback((endDate: string) => {

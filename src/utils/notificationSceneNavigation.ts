@@ -9,6 +9,7 @@ export interface NotificationSceneMetadata {
   commentSceneId?: string;
   commentPartId?: string;
   revisionId?: string;
+  revisionAction?: string;
 }
 
 export interface NotificationSceneTarget {
@@ -27,6 +28,7 @@ export interface NotificationSceneModalRequest {
   initialTab: 'detail' | 'revisions';
   focusRevisionId?: string;
   focusCommentId?: string;
+  focusRevisionCommentId?: string;
   forceDeptFilter?: 'all' | 'bg' | 'acting';
 }
 
@@ -47,6 +49,12 @@ const SCENE_SHORTCUT_TYPES = new Set<string>([
   'acting_feedback',
   'scene_assignment',
   'comment_reaction',
+]);
+
+const PRESERVE_CURRENT_DEPT_FILTER_TYPES = new Set<string>([
+  'revision',
+  'acting_feedback',
+  'scene_assignment',
 ]);
 
 function asString(value: unknown): string | undefined {
@@ -217,14 +225,25 @@ export function buildNotificationSceneModalRequest(
   }
 
   if (type === 'revision') {
+    const isRevisionComment = asString(metadata?.revisionAction) === 'comment';
     return {
       ...base,
       initialTab: 'revisions',
       focusRevisionId: asString(metadata?.revisionId),
+      focusRevisionCommentId: isRevisionComment ? asString(metadata?.commentId) : undefined,
     };
   }
 
   return null;
+}
+
+export function resolveNotificationSceneDepartmentFilter(
+  type: NotificationShortcutType | string,
+  modalRequest: NotificationSceneModalRequest | null,
+  target: NotificationSceneTarget,
+): ScenesDeptFilter | undefined {
+  if (PRESERVE_CURRENT_DEPT_FILTER_TYPES.has(type) || modalRequest?.initialTab === 'revisions') return undefined;
+  return modalRequest?.forceDeptFilter ?? departmentFromNotificationSheetName(target.sheetName) ?? undefined;
 }
 
 export function resolveNotificationSceneTarget(

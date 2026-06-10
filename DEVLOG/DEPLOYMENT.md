@@ -93,9 +93,9 @@ robocopy <local dist> <G드라이브 dist> /MIR /R:1 /W:1          # G드라이�
 ### 컨셉
 - **G드라이브** = 한솔의 "배포 창고"
 - **팀원 PC 로컬 폴더** = 실행 환경
-- 앱 시작 시: 스플래시에서 업데이트 상태 안내 → 최대 10초 동안 최신 installer 준비 → 준비 완료 시 installer helper 실행 후 최신 버전으로 재실행
+- 앱 시작 시: 스플래시에서 빠르게 버전 확인 → 최신 installer 준비 → 준비 완료 시 installer helper 실행 후 최신 버전으로 열림
 - 10초 초과/실패 시: 현재 버전으로 먼저 진입 → 앱 안 좌하단 버전 버튼/업데이트 모달에서 계속 상태 표시
-- 앱 사용 중: 5분 주기로 manifest 재확인 → 백그라운드로 `BFLOW-Setup.exe`를 로컬 캐시에 다운로드 → `지금 업데이트` 또는 앱 종료 시 installer helper 실행
+- 앱 사용 중: 5분 주기로 manifest 재확인 → 백그라운드로 `BFLOW-Setup.exe`를 로컬 캐시에 다운로드 → `지금 업데이트`는 즉시 적용, 일반 종료는 다음 실행 시 자동 적용
 
 ### 한솔 워크플로우
 ```powershell
@@ -114,9 +114,9 @@ Copy-Item "C:\Bflow-BGonly\dist\manifest.json" "G:\공유 드라이브\JBBJ 자�
 ### 팀원 일상 사용
 1. **바탕화면/시작 메뉴 `B flow` 바로가기** (로컬 설치본 가리킴) 더블클릭 → 빠른 시작
 2. 시작 직후 스플래시에서 manifest.json 읽기 → 자기 버전과 비교 → 새 버전이면 최대 10초 동안 로컬 installer 캐시 준비
-3. 10초 안에 준비 완료: helper가 로컬 `installer-pending\BFLOW-Setup.exe`를 실행하고 설치 진행 창을 표시한 뒤 새 BFLOW.exe 재실행. 단, helper 시작 확인 마커(`.installer-attempted`)가 생기지 않으면 현재 버전으로 먼저 열고 사용자가 버전 모달에서 다시 확인한다.
+3. 10초 안에 준비 완료: helper가 로컬 `installer-pending\BFLOW-Setup.exe`를 실행하고 설치 진행 창을 표시한 뒤 최신 BFLOW.exe가 열린다. 단, helper 시작 확인 마커(`.installer-attempted`)가 생기지 않으면 현재 버전으로 먼저 열고 사용자가 버전 모달에서 다시 확인한다.
 4. 10초 초과/실패: 현재 버전으로 먼저 열고, installer 다운로드가 끝나면 좌하단 버전 버튼/토스트/업데이트 모달로 표시
-5. `지금 업데이트` 클릭 또는 앱 종료: 저장 대기 후 installer helper 실행. 다음 실행 또는 재실행 = 새 버전
+5. `지금 업데이트` 클릭: 저장 대기 후 installer helper 실행 및 최신 버전 열기. 일반 종료: 준비된 installer를 유지하고 다음 실행 스플래시에서 자동 적용
 6. 앱을 계속 켜둔 상태에서 한솔이 새 버전을 올리면, 앱이 5분 주기로 manifest를 다시 확인해 같은 알림 흐름으로 진입
 
 ### 옛 바로가기 (한솔이 사전에 만든 G드라이브 가리키는 .lnk)

@@ -89,6 +89,7 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   const [allComments, setAllComments] = useState<SceneComment[]>([]);
   const [draft, setDraft] = useState('');
   const [expanded, setExpanded] = useState(true);
+  const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [showMentions, setShowMentions] = useState(false);
@@ -101,6 +102,11 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   const attachedImagesRef = useRef<AttachedImage[]>([]);
   const draftRef = useRef('');
   const mountedRef = useRef(true);
+  const commentRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const setCommentNode = useCallback((commentId: string, node: HTMLDivElement | null) => {
+    if (node) commentRefs.current.set(commentId, node);
+    else commentRefs.current.delete(commentId);
+  }, []);
 
   useEffect(() => { attachedImagesRef.current = attachedImages; }, [attachedImages]);
   useEffect(() => { draftRef.current = draft; }, [draft]);
@@ -189,12 +195,44 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   // 외부 트리거(알림 클릭 → 모달 → 펼침 요청) 수신
   useEffect(() => {
     function onExpand(e: Event) {
-      const detail = (e as CustomEvent<{ revisionId?: string }>).detail;
-      if (detail?.revisionId === revisionId) setExpanded(true);
+      const detail = (e as CustomEvent<{ revisionId?: string; commentId?: string }>).detail;
+      if (detail?.revisionId === revisionId) {
+        setExpanded(true);
+        if (detail.commentId) setFocusedCommentId(detail.commentId);
+      }
     }
     window.addEventListener('bflow:expand-revision', onExpand);
     return () => window.removeEventListener('bflow:expand-revision', onExpand);
   }, [revisionId]);
+
+  useEffect(() => {
+    if (!focusedCommentId || !expanded) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let clearTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const tryScroll = () => {
+      if (cancelled) return;
+      const el = commentRefs.current.get(focusedCommentId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        clearTimer = setTimeout(() => setFocusedCommentId(null), 1700);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 10) retryTimer = setTimeout(tryScroll, 200);
+      else clearTimer = setTimeout(() => setFocusedCommentId(null), 200);
+    };
+
+    retryTimer = setTimeout(tryScroll, 100);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (clearTimer) clearTimeout(clearTimer);
+    };
+  }, [focusedCommentId, expanded, comments.length]);
 
   const uploadAttachedImage = useCallback(async (id: string, file: File | Blob) => {
     try {
@@ -416,17 +454,22 @@ export function RevisionCommentThread({ revisionId, sceneKey }: Props) {
   return (
     <div className="mt-3 border-t border-bg-border/40 pt-3 space-y-2.5">
       {comments.map(c => (
-        <CommentBubble
+        <div
           key={c.id}
-          comment={c}
-          isMe={c.userId === currentUser?.id}
-          users={users}
-          onImageClick={openLightbox}
-          onMentionClick={(userName) => {
-            setHighlightUserName(userName);
-            setView('team');
-          }}
-        />
+          ref={(node) => setCommentNode(c.id, node)}
+          className={focusedCommentId === c.id ? 'comment-target-pulse rounded-lg' : undefined}
+        >
+          <CommentBubble
+            comment={c}
+            isMe={c.userId === currentUser?.id}
+            users={users}
+            onImageClick={openLightbox}
+            onMentionClick={(userName) => {
+              setHighlightUserName(userName);
+              setView('team');
+            }}
+          />
+        </div>
       ))}
 
       {/* 입력란 */}

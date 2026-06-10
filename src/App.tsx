@@ -41,6 +41,7 @@ import { applyPreferencesToDOM, FONT_COLOR_PRESETS, applyTextColors } from '@/ut
 import {
   DEFAULT_STAR_NEST_SETTINGS,
   normalizeBackgroundArt,
+  normalizeBflowStarNestSettings,
   normalizeDashboardStarNestBlurPx,
   normalizeDashboardStarNestOpacity,
   normalizeStarNestSettings,
@@ -57,6 +58,13 @@ import { SvgIconDefs } from '@/components/SvgIconDefs';
 import { useNotificationStore, type AppNotification } from '@/stores/useNotificationStore';
 import { useVacationPendingStore } from '@/stores/useVacationPendingStore';
 import { dispatchNotification, type NotificationSettings } from '@/utils/notificationHelper';
+import { navigateNotificationToScene } from '@/utils/notificationSceneAction';
+import {
+  beginCatchupRun,
+  fetchCatchupPages,
+  releaseCatchupRunOnError,
+  resetCatchupRun,
+} from '@/utils/notificationCatchupRunner';
 import {
   parseAssigneeList,
   collectCounterpartAssigneeNames,
@@ -145,7 +153,7 @@ export default function App() {
 
   // 자동 업데이트 다운로드 완료 알림 → "지금 업데이트" 버튼 토스트.
   // 사용자가 클릭 시 main이 applying 상태를 기록하고 app.quit → before-quit hook이
-  // installer helper를 띄움 → 설치 후 BFLOW.exe 재실행.
+  // installer helper를 띄움 → 설치 후 최신 BFLOW.exe 열림. 일반 종료는 다음 실행에서 자동 적용.
   useEffect(() => {
     const cleanup = window.electronAPI?.onUpdateReady?.((version, state) => {
       const updateState: UpdateInfo = state ?? {
@@ -312,6 +320,7 @@ export default function App() {
         metadata: {
           sceneId: sceneByUuid?.id ?? newComment.scene_uuid ?? undefined,
           sceneName: sceneByUuid?.sceneId,
+          commentId: newComment.id ?? undefined,
           commentSceneId: newComment.scene_id ?? undefined,
           commentPartId: newComment.part_id ?? undefined,
           revisionId: newComment.revision_id,
@@ -449,14 +458,27 @@ export default function App() {
         // Phase 8-3: 플렉서스 설정 로드
         if (savedPrefs?.plexus) {
           const p = savedPrefs.plexus;
-          const legacyBackgroundArt = normalizeBackgroundArt(p.backgroundArt);
-          const legacyStarNest = normalizeStarNestSettings(
-            p.starNest ?? p.dashboardStarNest ?? p.loginStarNest ?? DEFAULT_STAR_NEST_SETTINGS,
+          const shareBackgroundEffectPresets = p.shareBackgroundEffectPresets ?? true;
+          const legacyBackgroundArt = normalizeBackgroundArt(
+            p.dashboardBackgroundArt ?? p.backgroundArt ?? p.loginBackgroundArt,
           );
+          const loadedLoginBackgroundArt = normalizeBackgroundArt(p.loginBackgroundArt ?? legacyBackgroundArt);
+          const loadedDashboardBackgroundArt = normalizeBackgroundArt(p.dashboardBackgroundArt ?? legacyBackgroundArt);
+          const legacyStarNest = normalizeStarNestSettings(
+            p.dashboardStarNest ?? p.starNest ?? p.loginStarNest ?? DEFAULT_STAR_NEST_SETTINGS,
+          );
+          const loadedLoginStarNest = normalizeStarNestSettings(p.loginStarNest ?? legacyStarNest);
+          const loadedDashboardStarNest = normalizeStarNestSettings(p.dashboardStarNest ?? legacyStarNest);
+          const legacyBflowStarNest = normalizeBflowStarNestSettings(
+            p.dashboardBflowStarNest ?? p.bflowStarNest ?? p.loginBflowStarNest,
+          );
+          const loadedLoginBflowStarNest = normalizeBflowStarNestSettings(p.loginBflowStarNest ?? legacyBflowStarNest);
+          const loadedDashboardBflowStarNest = normalizeBflowStarNestSettings(p.dashboardBflowStarNest ?? legacyBflowStarNest);
           useAppStore.getState().setPlexusSettings({
             backgroundArt: legacyBackgroundArt,
-            loginBackgroundArt: normalizeBackgroundArt(p.loginBackgroundArt ?? legacyBackgroundArt),
-            dashboardBackgroundArt: normalizeBackgroundArt(p.dashboardBackgroundArt ?? legacyBackgroundArt),
+            loginBackgroundArt: shareBackgroundEffectPresets ? legacyBackgroundArt : loadedLoginBackgroundArt,
+            dashboardBackgroundArt: shareBackgroundEffectPresets ? legacyBackgroundArt : loadedDashboardBackgroundArt,
+            shareBackgroundEffectPresets,
             loginEnabled: p.loginEnabled ?? true,
             loginGradientEnabled: p.loginGradientEnabled ?? true,
             loginParticleCount: p.loginParticleCount ?? 666,
@@ -470,10 +492,13 @@ export default function App() {
             glowIntensity: p.glowIntensity ?? 1.0,
             connectionDist: p.connectionDist ?? 160,
             starNest: legacyStarNest,
-            loginStarNest: normalizeStarNestSettings(p.loginStarNest ?? legacyStarNest),
-            dashboardStarNest: normalizeStarNestSettings(p.dashboardStarNest ?? legacyStarNest),
+            loginStarNest: shareBackgroundEffectPresets ? legacyStarNest : loadedLoginStarNest,
+            dashboardStarNest: shareBackgroundEffectPresets ? legacyStarNest : loadedDashboardStarNest,
             dashboardStarNestOpacity: normalizeDashboardStarNestOpacity(p.dashboardStarNestOpacity),
             dashboardStarNestBlurPx: normalizeDashboardStarNestBlurPx(p.dashboardStarNestBlurPx),
+            bflowStarNest: legacyBflowStarNest,
+            loginBflowStarNest: shareBackgroundEffectPresets ? legacyBflowStarNest : loadedLoginBflowStarNest,
+            dashboardBflowStarNest: shareBackgroundEffectPresets ? legacyBflowStarNest : loadedDashboardBflowStarNest,
           });
         }
 
@@ -757,14 +782,17 @@ export default function App() {
   const catchupDoneUserIdRef = useRef<string | null>(null);
   useEffect(() => {
     console.log('[catchup] effect 진입', { currentUser: currentUser?.id, authReady, doneRef: catchupDoneUserIdRef.current });
-    if (!currentUser) { console.log('[catchup] currentUser 없음 — skip'); return; }
+    if (!currentUser) {
+      resetCatchupRun(catchupDoneUserIdRef);
+      console.log('[catchup] currentUser 없음 — skip');
+      return;
+    }
     if (!authReady) { console.log('[catchup] authReady false — skip'); return; }
-    if (catchupDoneUserIdRef.current === currentUser.id) {
+    if (!beginCatchupRun(catchupDoneUserIdRef, currentUser.id)) {
       console.log('[catchup] 이미 처리된 사용자 — skip', currentUser.id);
       return;
     }
 
-    catchupDoneUserIdRef.current = currentUser.id;
     const me = currentUser;
     console.log('[catchup] 처리 시작', { id: me.id, name: me.name });
 
@@ -835,6 +863,7 @@ export default function App() {
         console.log('[catchup] 완료', { added: missed.length });
       } catch (err) {
         console.warn('[catchup] 멘션 catch-up 실패:', err);
+        releaseCatchupRunOnError(catchupDoneUserIdRef, me.id);
       }
     })();
   }, [currentUser, authReady]);
@@ -848,13 +877,12 @@ export default function App() {
   const feedbackCatchupDoneRef = useRef<string | null>(null);
   useEffect(() => {
     if (!currentUser) {
-      feedbackCatchupDoneRef.current = null;  // P1 #1: logout 시 reset
+      resetCatchupRun(feedbackCatchupDoneRef);  // P1 #1: logout 시 reset
       return;
     }
     if (!authReady) return;
-    if (feedbackCatchupDoneRef.current === currentUser.id) return;
+    if (!beginCatchupRun(feedbackCatchupDoneRef, currentUser.id)) return;
 
-    feedbackCatchupDoneRef.current = currentUser.id;
     const me = currentUser;
 
     (async () => {
@@ -872,21 +900,13 @@ export default function App() {
         const PAGE_SIZE = 100;
         const SAFE_CAP = 1000;
         type MissedRow = Awaited<ReturnType<typeof fetchMissedFeedbackNotifications>>[number];
-        const all: MissedRow[] = [];
-        let before: string | undefined = undefined;
-        let cappedOut = false;
-        while (true) {
-          const batch = await fetchMissedFeedbackNotifications(me.id, lastSeen, PAGE_SIZE, before);
-          if (!batch || batch.length === 0) break;
-          all.push(...batch);
-          if (batch.length < PAGE_SIZE) break;
-          before = batch[batch.length - 1].createdAt; // 다음 페이지: 가장 오래된 fetched 보다 이전
-          if (all.length >= SAFE_CAP) {
-            console.warn('[feedback-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
-            cappedOut = true;
-            break;
-          }
-        }
+        const { rows: all, cappedOut } = await fetchCatchupPages<MissedRow>({
+          pageSize: PAGE_SIZE,
+          safeCap: SAFE_CAP,
+          fetchPage: ({ before, limit }) => fetchMissedFeedbackNotifications(me.id, lastSeen, limit, before),
+          getCursor: (row) => row.createdAt,
+        });
+        if (cappedOut) console.warn('[feedback-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
         console.log('[feedback-catchup] 조회 결과', { count: all.length, cappedOut });
         if (all.length === 0) {
           setFeedbackLastSeenAt(me.id, new Date().toISOString());
@@ -925,6 +945,7 @@ export default function App() {
         }
       } catch (err) {
         console.warn('[feedback-catchup] 실패:', err);
+        releaseCatchupRunOnError(feedbackCatchupDoneRef, me.id);
       }
     })();
   }, [currentUser, authReady]);
@@ -934,13 +955,12 @@ export default function App() {
   const assignmentCatchupDoneRef = useRef<string | null>(null);
   useEffect(() => {
     if (!currentUser) {
-      assignmentCatchupDoneRef.current = null;
+      resetCatchupRun(assignmentCatchupDoneRef);
       return;
     }
     if (!authReady) return;
-    if (assignmentCatchupDoneRef.current === currentUser.id) return;
+    if (!beginCatchupRun(assignmentCatchupDoneRef, currentUser.id)) return;
 
-    assignmentCatchupDoneRef.current = currentUser.id;
     const me = currentUser;
 
     (async () => {
@@ -957,21 +977,13 @@ export default function App() {
         const PAGE_SIZE = 100;
         const SAFE_CAP = 1000;
         type MissedRow = Awaited<ReturnType<typeof fetchMissedAssignmentNotifications>>[number];
-        const all: MissedRow[] = [];
-        let before: string | undefined = undefined;
-        let cappedOut = false;
-        while (true) {
-          const batch = await fetchMissedAssignmentNotifications(me.id, lastSeen, PAGE_SIZE, before);
-          if (!batch || batch.length === 0) break;
-          all.push(...batch);
-          if (batch.length < PAGE_SIZE) break;
-          before = batch[batch.length - 1].createdAt;
-          if (all.length >= SAFE_CAP) {
-            console.warn('[assignment-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
-            cappedOut = true;
-            break;
-          }
-        }
+        const { rows: all, cappedOut } = await fetchCatchupPages<MissedRow>({
+          pageSize: PAGE_SIZE,
+          safeCap: SAFE_CAP,
+          fetchPage: ({ before, limit }) => fetchMissedAssignmentNotifications(me.id, lastSeen, limit, before),
+          getCursor: (row) => row.createdAt,
+        });
+        if (cappedOut) console.warn('[assignment-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
         console.log('[assignment-catchup] 조회 결과', { count: all.length, cappedOut });
         if (all.length === 0) {
           setAssignmentLastSeenAt(me.id, new Date().toISOString());
@@ -1008,6 +1020,7 @@ export default function App() {
         }
       } catch (err) {
         console.warn('[assignment-catchup] 실패:', err);
+        releaseCatchupRunOnError(assignmentCatchupDoneRef, me.id);
       }
     })();
   }, [currentUser, authReady]);
@@ -1017,13 +1030,12 @@ export default function App() {
   const reactionCatchupDoneRef = useRef<string | null>(null);
   useEffect(() => {
     if (!currentUser) {
-      reactionCatchupDoneRef.current = null;
+      resetCatchupRun(reactionCatchupDoneRef);
       return;
     }
     if (!authReady) return;
-    if (reactionCatchupDoneRef.current === currentUser.id) return;
+    if (!beginCatchupRun(reactionCatchupDoneRef, currentUser.id)) return;
 
-    reactionCatchupDoneRef.current = currentUser.id;
     const me = currentUser;
 
     (async () => {
@@ -1042,36 +1054,28 @@ export default function App() {
         const { fetchCommentReactionNotifications } = await import('@/services/supabaseService');
         const PAGE_SIZE = 100;
         const SAFE_CAP = 1000;
-        const all: AppNotification[] = [];
-        let before: string | undefined = undefined;
-        let cappedOut = false;
         // 코덱스 12차 P1: fetch 진입 직전 시각을 기록 → catch-up 진행 중 realtime 으로
         //   들어온 신규 알림을 stale 로 오판하지 않게 purge 의 상한선으로 사용.
         const fetchStartedAt = new Date().toISOString();
         // 코덱스 8차 P1: offset 페이지네이션 대신 cursor (before=last_action_at) seek.
         //   페이지 사이 row 추가/삭제로 인한 누락·중복 차단. feedback/assignment catch-up 과 동일.
-        while (true) {
-          const batch = await fetchCommentReactionNotifications({
-            recipientId: me.id,
-            since: lastSeen,
-            before,
-            limit: PAGE_SIZE,
-          });
-          const rows = batch?.data ?? [];
-          if (rows.length === 0) break;
-          all.push(...rows as AppNotification[]);
-          if (rows.length < PAGE_SIZE) break;
+        const { rows: all, cappedOut } = await fetchCatchupPages<AppNotification>({
+          pageSize: PAGE_SIZE,
+          safeCap: SAFE_CAP,
+          fetchPage: async ({ before, limit }) => {
+            const batch = await fetchCommentReactionNotifications({
+              recipientId: me.id,
+              since: lastSeen,
+              before,
+              limit,
+            });
+            return (batch?.data ?? []) as AppNotification[];
+          },
           // 코덱스 14차 P2: 단일 timestamp cursor 가 아니라 (last_action_at, id) composite 사용.
           //   같은 last_action_at 행이 page 경계에 걸쳐 영구 누락되는 문제 차단.
-          //   serializeReactionNotification 에서 createdAt = last_action_at.
-          const lastRow = rows[rows.length - 1];
-          before = `${lastRow.createdAt}|${lastRow.id}`;
-          if (all.length >= SAFE_CAP) {
-            console.warn('[reaction-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
-            cappedOut = true;
-            break;
-          }
-        }
+          getCursor: (row) => `${row.createdAt}|${row.id}`,
+        });
+        if (cappedOut) console.warn('[reaction-catchup] SAFE_CAP 도달 — 페이지네이션 break', { fetched: all.length });
         console.log('[reaction-catchup] 조회 결과', { count: all.length, cappedOut });
         // 코덱스 13차 P1: fetch 가 throw 하면 아래 catch 로 빠져 lastSeen 갱신 안 함 (재시도 시 같은 since 유지).
         if (all.length === 0) {
@@ -1091,7 +1095,7 @@ export default function App() {
         console.warn('[reaction-catchup] 실패:', err);
         // 코덱스 14차 P2: 실패 시 done flag 클리어 → 같은 세션 안에서 다음 effect run 또는 currentUser
         //   재마운트 시 재시도 가능. 그대로 두면 startup 네트워크 hiccup 한 번에 세션 내내 catch-up 영구 차단.
-        reactionCatchupDoneRef.current = null;
+        releaseCatchupRunOnError(reactionCatchupDoneRef, me.id);
       }
     })();
   }, [currentUser, authReady]);
@@ -1631,30 +1635,6 @@ export default function App() {
   useEffect(() => {
     if (!window.electronAPI?.onSupabaseBroadcast) return;
 
-    // 코덱스 5차 P1 #10 / 6차 P1 #12 fix: 점프 시 selectedEpisode/selectedPart 도 set + BG-only
-    //   필터면 'all' 로 전환. ScenesView 가 현재 선택된 ep/part/department 로 필터링하므로,
-    //   액팅 씬이 BG 필터에서는 안 보임.
-    const jumpToFeedbackScene = (sheetName: string, sceneId: string) => {
-      const eps = useDataStore.getState().episodes;
-      let foundEp: number | null = null;
-      let foundPart: string | null = null;
-      for (const ep of eps) {
-        const part = ep.parts.find((p) => p.sheetName === sheetName);
-        if (part) {
-          foundEp = ep.episodeNumber;
-          foundPart = part.partId;
-          break;
-        }
-      }
-      const app = useAppStore.getState();
-      app.setView('scenes');
-      if (foundEp !== null) app.setSelectedEpisode(foundEp);
-      if (foundPart !== null) app.setSelectedPart(foundPart);
-      // 액팅 알림이므로 BG-only 필터면 'all' 로 풀어 액팅 씬도 보이게 함.
-      if (app.selectedDepartment === 'bg') app.setSelectedDepartment('all');
-      app.setHighlightSceneId(sceneId);
-    };
-
     const offBroadcast = window.electronAPI.onSupabaseBroadcast((event: unknown) => {
       const e = event as { event?: string; payload?: Record<string, unknown> };
 
@@ -1773,20 +1753,13 @@ export default function App() {
     });
 
     const offJump = window.electronAPI.onFeedbackJumpToScene?.((payload) => {
-      jumpToFeedbackScene(payload.sheetName, payload.sceneId);
-      // 코덱스 3차 P2 fix: OS 토스트 → 점프 시에도 DB read_at 처리.
-      //   notificationId/kind 가 있으면 해당 도메인 markRead 호출 (fire-and-forget).
-      //   인앱 종 클릭 path 는 NotificationPanel 에서 처리하고, OS 토스트 path 는 여기서 처리.
-      if (payload.notificationId && payload.kind) {
-        const kind = payload.kind;
-        const id = payload.notificationId;
-        import('@/services/supabaseService')
-          .then((m) => {
-            if (kind === 'assignment') return m.markAssignmentNotificationRead(id);
-            return m.markFeedbackNotificationRead(id);
-          })
-          .catch((err) => console.warn('[toast-jump-markRead] 실패:', err));
-      }
+      navigateNotificationToScene(payload.kind === 'assignment' ? 'scene_assignment' : 'acting_feedback', {
+        sceneId: payload.sceneUuid,
+        sceneName: payload.sceneId,
+        sheetName: payload.sheetName,
+        feedbackNotificationId: payload.kind === 'feedback' ? payload.notificationId : undefined,
+        assignmentNotificationId: payload.kind === 'assignment' ? payload.notificationId : undefined,
+      });
     });
 
     return () => {

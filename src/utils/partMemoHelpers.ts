@@ -8,6 +8,10 @@ type EpisodeLike = {
   parts: PartLike[];
 };
 
+function normalizePartId(partId: string | null | undefined): string {
+  return (partId ?? '').trim().toLowerCase();
+}
+
 export interface PartContextMenuTarget {
   episodeNumber: number;
   partId: string;
@@ -18,11 +22,25 @@ export function getCombinedPartMemo(
   partMemos: Record<string, string>,
   sheetNames: string[],
 ): string {
+  return getCombinedPartMetadata(partMemos, sheetNames);
+}
+
+export function getCombinedPartReelWorker(
+  partReelWorkers: Record<string, string>,
+  sheetNames: string[],
+): string {
+  return getCombinedPartMetadata(partReelWorkers, sheetNames);
+}
+
+function getCombinedPartMetadata(
+  metadataBySheetName: Record<string, string>,
+  sheetNames: string[],
+): string {
   const values = Array.from(
     new Set(
       sheetNames
-        .map((sheetName) => partMemos[sheetName]?.trim())
-        .filter((memo): memo is string => Boolean(memo)),
+        .map((sheetName) => metadataBySheetName[sheetName]?.trim())
+        .filter((value): value is string => Boolean(value)),
     ),
   );
 
@@ -51,9 +69,10 @@ export function buildPartContextMenuTarget(
     return null;
   }
 
+  const targetPartId = normalizePartId(partId);
   const sheetNames = Array.from(new Set(
     parts
-      .filter((part) => part.partId === partId)
+      .filter((part) => normalizePartId(part.partId) === targetPartId)
       .map((part) => part.sheetName),
   ));
 
@@ -73,12 +92,28 @@ export function applyPartMemoToSheets(
   sheetNames: string[],
   memo: string,
 ): Record<string, string> {
-  const next = { ...partMemos };
-  const normalizedMemo = memo.trim();
+  return applyPartMetadataToSheets(partMemos, sheetNames, memo);
+}
+
+export function applyPartReelWorkerToSheets(
+  partReelWorkers: Record<string, string>,
+  sheetNames: string[],
+  worker: string,
+): Record<string, string> {
+  return applyPartMetadataToSheets(partReelWorkers, sheetNames, worker);
+}
+
+function applyPartMetadataToSheets(
+  metadataBySheetName: Record<string, string>,
+  sheetNames: string[],
+  value: string,
+): Record<string, string> {
+  const next = { ...metadataBySheetName };
+  const normalizedValue = value.trim();
 
   sheetNames.forEach((sheetName) => {
-    if (normalizedMemo) {
-      next[sheetName] = normalizedMemo;
+    if (normalizedValue) {
+      next[sheetName] = normalizedValue;
     } else {
       delete next[sheetName];
     }
@@ -93,20 +128,43 @@ export function rollbackFailedPartMemoSheets(
   failedSheetNames: string[],
   attemptedMemo: string,
 ): Record<string, string> {
-  const next = { ...currentPartMemos };
-  const normalizedAttempt = attemptedMemo.trim();
+  return rollbackFailedPartMetadataSheets(currentPartMemos, previousPartMemos, failedSheetNames, attemptedMemo);
+}
+
+export function rollbackFailedPartReelWorkerSheets(
+  currentPartReelWorkers: Record<string, string>,
+  previousPartReelWorkers: Record<string, string>,
+  failedSheetNames: string[],
+  attemptedWorker: string,
+): Record<string, string> {
+  return rollbackFailedPartMetadataSheets(
+    currentPartReelWorkers,
+    previousPartReelWorkers,
+    failedSheetNames,
+    attemptedWorker,
+  );
+}
+
+function rollbackFailedPartMetadataSheets(
+  currentMetadata: Record<string, string>,
+  previousMetadata: Record<string, string>,
+  failedSheetNames: string[],
+  attemptedValue: string,
+): Record<string, string> {
+  const next = { ...currentMetadata };
+  const normalizedAttempt = attemptedValue.trim();
 
   failedSheetNames.forEach((sheetName) => {
-    const currentMemo = currentPartMemos[sheetName]?.trim() ?? '';
+    const currentValue = currentMetadata[sheetName]?.trim() ?? '';
     const stillShowingAttempt = normalizedAttempt
-      ? currentMemo === normalizedAttempt
-      : currentMemo === '';
+      ? currentValue === normalizedAttempt
+      : currentValue === '';
 
     if (!stillShowingAttempt) return;
 
-    const previousMemo = previousPartMemos[sheetName]?.trim() ?? '';
-    if (previousMemo) {
-      next[sheetName] = previousMemo;
+    const previousValue = previousMetadata[sheetName]?.trim() ?? '';
+    if (previousValue) {
+      next[sheetName] = previousValue;
     } else {
       delete next[sheetName];
     }
