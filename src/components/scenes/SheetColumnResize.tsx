@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 
 export interface SheetColumnDefinition<K extends string> {
@@ -14,6 +14,106 @@ function clampWidth(width: number, min: number, max?: number) {
 
 function sumWidths<K extends string>(columns: Array<SheetColumnDefinition<K>>, widths: Record<K, number>) {
   return columns.reduce((sum, column) => sum + widths[column.key], 0);
+}
+
+function buildVisualWidthBaseline<K extends string>(
+  columns: Array<SheetColumnDefinition<K>>,
+  visualStartWidths?: Partial<Record<K, number>>,
+) {
+  if (!visualStartWidths) return null;
+
+  const baseline = {} as Partial<Record<K, number>>;
+  let hasBaseline = false;
+  for (const column of columns) {
+    const value = visualStartWidths[column.key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      baseline[column.key] = Math.max(column.minWidth, value);
+      hasBaseline = true;
+    }
+  }
+
+  return hasBaseline ? baseline : null;
+}
+
+function buildResizeStartWidths<K extends string>(
+  columns: Array<SheetColumnDefinition<K>>,
+  widthOf: (key: K) => number,
+  visualStartWidths?: Partial<Record<K, number>>,
+) {
+  const baseline = buildVisualWidthBaseline(columns, visualStartWidths);
+  return Object.fromEntries(
+    columns.map((column) => {
+      const width = baseline?.[column.key] ?? widthOf(column.key);
+      return [column.key, clampWidth(width, column.minWidth, column.maxWidth)];
+    }),
+  ) as Record<K, number>;
+}
+
+function getColumnMax<K extends string>(column: SheetColumnDefinition<K>) {
+  return column.maxWidth ?? 720;
+}
+
+function getResizeCompensationKeys<K extends string>(
+  columns: Array<SheetColumnDefinition<K>>,
+  key: K,
+) {
+  const index = columns.findIndex((column) => column.key === key);
+  if (index < 0) return [];
+
+  const rightKeys = columns.slice(index + 1).map((column) => column.key);
+  const leftKeys = columns.slice(0, index).reverse().map((column) => column.key);
+  return [...rightKeys, ...leftKeys];
+}
+
+function buildContainedResizeWidths<K extends string>(
+  columns: Array<SheetColumnDefinition<K>>,
+  startWidths: Record<K, number>,
+  key: K,
+  rawDelta: number,
+) {
+  const columnByKey = new Map(columns.map((column) => [column.key, column]));
+  const column = columnByKey.get(key);
+  if (!column) return startWidths;
+
+  const next = { ...startWidths };
+  const startWidth = startWidths[key];
+  const minDelta = column.minWidth - startWidth;
+  const maxDelta = getColumnMax(column) - startWidth;
+  let delta = Math.max(minDelta, Math.min(maxDelta, rawDelta));
+
+  const compensationKeys = getResizeCompensationKeys(columns, key);
+  if (delta > 0) {
+    let remaining = delta;
+    let consumed = 0;
+    for (const compensationKey of compensationKeys) {
+      const compensationColumn = columnByKey.get(compensationKey);
+      if (!compensationColumn) continue;
+      const capacity = Math.max(0, next[compensationKey] - compensationColumn.minWidth);
+      const amount = Math.min(remaining, capacity);
+      next[compensationKey] -= amount;
+      consumed += amount;
+      remaining -= amount;
+      if (remaining <= 0.01) break;
+    }
+    delta = consumed;
+  } else if (delta < 0) {
+    let remaining = Math.abs(delta);
+    let consumed = 0;
+    for (const compensationKey of compensationKeys) {
+      const compensationColumn = columnByKey.get(compensationKey);
+      if (!compensationColumn) continue;
+      const capacity = Math.max(0, getColumnMax(compensationColumn) - next[compensationKey]);
+      const amount = Math.min(remaining, capacity);
+      next[compensationKey] += amount;
+      consumed += amount;
+      remaining -= amount;
+      if (remaining <= 0.01) break;
+    }
+    delta = -consumed;
+  }
+
+  next[key] = clampWidth(startWidth + delta, column.minWidth, column.maxWidth);
+  return next;
 }
 
 function shrinkColumns<K extends string>(
@@ -55,8 +155,16 @@ export function fitSheetColumnWidths<K extends string>(
   widths: Record<K, number>,
   viewportWidth: number,
   fillColumnKeys: K[],
+  enabled = true,
 ) {
   const next = { ...widths };
+  if (!enabled) {
+    return {
+      widths: next,
+      totalWidth: sumWidths(columns, next),
+    };
+  }
+
   const columnsByKey = new Map(columns.map((column) => [column.key, column]));
   const baseTotal = sumWidths(columns, next);
   const minTotal = columns.reduce((sum, column) => sum + column.minWidth, 0);
@@ -90,35 +198,38 @@ export function useFittedSheetColumnWidths<K extends string>(
   widthOf: (key: K) => number,
   viewportWidth: number,
   fillColumnKeys: K[],
+  enabled = true,
 ) {
   return useMemo(() => {
     const baseWidths = Object.fromEntries(
       columns.map((column) => [column.key, widthOf(column.key)]),
     ) as Record<K, number>;
 
-    return fitSheetColumnWidths(columns, baseWidths, viewportWidth, fillColumnKeys);
-  }, [columns, fillColumnKeys, viewportWidth, widthOf]);
+    return fitSheetColumnWidths(columns, baseWidths, viewportWidth, fillColumnKeys, enabled);
+  }, [columns, enabled, fillColumnKeys, viewportWidth, widthOf]);
 }
 
 function readStoredWidths<K extends string>(
   storageKey: string,
   columns: Array<SheetColumnDefinition<K>>,
-): Record<K, number> {
+): { widths: Record<K, number>; hasStoredWidths: boolean } {
   const defaults = Object.fromEntries(columns.map((column) => [column.key, column.defaultWidth])) as Record<K, number>;
   try {
     const raw = localStorage.getItem(storageKey);
-    if (!raw) return defaults;
+    if (!raw) return { widths: defaults, hasStoredWidths: false };
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const next = { ...defaults };
+    let hasStoredWidths = false;
     for (const column of columns) {
       const value = parsed[column.key];
       if (typeof value === 'number' && Number.isFinite(value)) {
         next[column.key] = clampWidth(value, column.minWidth, column.maxWidth);
+        hasStoredWidths = true;
       }
     }
-    return next;
+    return { widths: next, hasStoredWidths };
   } catch {
-    return defaults;
+    return { widths: defaults, hasStoredWidths: false };
   }
 }
 
@@ -126,8 +237,16 @@ export function useResizableSheetColumns<K extends string>(
   storageKey: string,
   columns: Array<SheetColumnDefinition<K>>,
 ) {
-  const [widths, setWidths] = useState<Record<K, number>>(() => readStoredWidths(storageKey, columns));
+  const [initialStoredWidths] = useState(() => readStoredWidths(storageKey, columns));
+  const [widths, setWidths] = useState<Record<K, number>>(initialStoredWidths.widths);
+  const [hasCustomWidths, setHasCustomWidths] = useState(initialStoredWidths.hasStoredWidths);
   const columnByKey = useMemo(() => new Map(columns.map((column) => [column.key, column])), [columns]);
+
+  useEffect(() => {
+    const next = readStoredWidths(storageKey, columns);
+    setWidths(next.widths);
+    setHasCustomWidths(next.hasStoredWidths);
+  }, [columns, storageKey]);
 
   const widthOf = useCallback((key: K) => {
     const column = columnByKey.get(key);
@@ -147,38 +266,45 @@ export function useResizableSheetColumns<K extends string>(
     }
   }, [storageKey]);
 
-  const startResize = useCallback((key: K, event: ReactPointerEvent, visualStartWidth?: number) => {
+  const startResize = useCallback((
+    key: K,
+    event: ReactPointerEvent,
+    visualStartWidth?: number,
+    visualStartWidths?: Partial<Record<K, number>>,
+  ) => {
     const column = columnByKey.get(key);
     if (!column) return;
 
     event.preventDefault();
     event.stopPropagation();
     const startX = event.clientX;
-    const startWidth = visualStartWidth ?? widthOf(key);
-    let latest = startWidth;
+    const startWidths = buildResizeStartWidths(columns, widthOf, visualStartWidths);
+    const columnStartWidth = visualStartWidth ?? startWidths[key];
+    startWidths[key] = clampWidth(columnStartWidth, column.minWidth, column.maxWidth);
+    let latestWidths = startWidths;
+    let moved = false;
 
     document.documentElement.classList.add('is-resizing', 'is-sheet-column-resizing');
 
     const onMove = (moveEvent: PointerEvent) => {
-      const nextWidth = clampWidth(startWidth + moveEvent.clientX - startX, column.minWidth, column.maxWidth);
-      latest = nextWidth;
-      setWidths((prev) => ({ ...prev, [key]: nextWidth }));
+      latestWidths = buildContainedResizeWidths(columns, startWidths, key, moveEvent.clientX - startX);
+      moved = true;
+      setHasCustomWidths(true);
+      setWidths(latestWidths);
     };
 
     const onUp = () => {
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
       document.documentElement.classList.remove('is-resizing', 'is-sheet-column-resizing');
-      setWidths((prev) => {
-        const next = { ...prev, [key]: latest };
-        persist(next);
-        return next;
-      });
+      if (!moved) return;
+      setWidths(latestWidths);
+      persist(latestWidths);
     };
 
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp, { once: true });
-  }, [columnByKey, persist, widthOf]);
+  }, [columnByKey, columns, persist, widthOf]);
 
   const startBoundaryResize = useCallback((
     leftKey: K,
@@ -186,6 +312,7 @@ export function useResizableSheetColumns<K extends string>(
     event: ReactPointerEvent,
     leftVisualStartWidth?: number,
     rightVisualStartWidth?: number,
+    visualStartWidths?: Partial<Record<K, number>>,
   ) => {
     const leftColumn = columnByKey.get(leftKey);
     const rightColumn = columnByKey.get(rightKey);
@@ -194,8 +321,11 @@ export function useResizableSheetColumns<K extends string>(
     event.preventDefault();
     event.stopPropagation();
     const startX = event.clientX;
-    const leftStartWidth = leftVisualStartWidth ?? widthOf(leftKey);
-    const rightStartWidth = rightVisualStartWidth ?? widthOf(rightKey);
+    const startWidths = buildResizeStartWidths(columns, widthOf, visualStartWidths);
+    const leftStartWidth = clampWidth(leftVisualStartWidth ?? startWidths[leftKey], leftColumn.minWidth, leftColumn.maxWidth);
+    const rightStartWidth = clampWidth(rightVisualStartWidth ?? startWidths[rightKey], rightColumn.minWidth, rightColumn.maxWidth);
+    startWidths[leftKey] = leftStartWidth;
+    startWidths[rightKey] = rightStartWidth;
     const pairWidth = leftStartWidth + rightStartWidth;
     const leftMax = leftColumn.maxWidth ?? 720;
     const rightMax = rightColumn.maxWidth ?? 720;
@@ -205,6 +335,8 @@ export function useResizableSheetColumns<K extends string>(
     const max = Math.max(minLeft, maxLeft);
     let latestLeft = leftStartWidth;
     let latestRight = rightStartWidth;
+    let latestWidths = startWidths;
+    let moved = false;
 
     document.documentElement.classList.add('is-resizing', 'is-sheet-column-resizing');
 
@@ -213,25 +345,27 @@ export function useResizableSheetColumns<K extends string>(
       const nextRight = pairWidth - nextLeft;
       latestLeft = nextLeft;
       latestRight = nextRight;
-      setWidths((prev) => ({ ...prev, [leftKey]: nextLeft, [rightKey]: nextRight }));
+      latestWidths = { ...startWidths, [leftKey]: nextLeft, [rightKey]: nextRight };
+      moved = true;
+      setHasCustomWidths(true);
+      setWidths(latestWidths);
     };
 
     const onUp = () => {
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
       document.documentElement.classList.remove('is-resizing', 'is-sheet-column-resizing');
-      setWidths((prev) => {
-        const next = { ...prev, [leftKey]: latestLeft, [rightKey]: latestRight };
-        persist(next);
-        return next;
-      });
+      if (!moved) return;
+      latestWidths = { ...latestWidths, [leftKey]: latestLeft, [rightKey]: latestRight };
+      setWidths(latestWidths);
+      persist(latestWidths);
     };
 
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp, { once: true });
-  }, [columnByKey, persist, widthOf]);
+  }, [columnByKey, columns, persist, widthOf]);
 
-  return { widthOf, totalWidth, startResize, startBoundaryResize };
+  return { widthOf, totalWidth, hasCustomWidths, startResize, startBoundaryResize };
 }
 
 export function ResizableHeaderCell<K extends string>({
@@ -259,13 +393,19 @@ export function ResizableHeaderCell<K extends string>({
   className?: string;
   style?: CSSProperties;
   align?: 'left' | 'center';
-  onResizeStart: (key: K, event: ReactPointerEvent, visualStartWidth?: number) => void;
+  onResizeStart: (
+    key: K,
+    event: ReactPointerEvent,
+    visualStartWidth?: number,
+    visualStartWidths?: Partial<Record<K, number>>,
+  ) => void;
   onBoundaryResizeStart?: (
     leftKey: K,
     rightKey: K,
     event: ReactPointerEvent,
     leftVisualStartWidth?: number,
     rightVisualStartWidth?: number,
+    visualStartWidths?: Partial<Record<K, number>>,
   ) => void;
   children?: ReactNode;
 }) {

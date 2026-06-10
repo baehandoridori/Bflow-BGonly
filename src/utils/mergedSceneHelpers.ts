@@ -273,22 +273,28 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
   sortKey: SortKeyLike;
   sortDir: SortDirLike;
 }): MergedSceneLike<TScene>[] {
-  const map = new Map<string, MergedSceneLike<TScene>>();
+  const mergedList: MergedSceneLike<TScene>[] = [];
+  const bgByRawSceneId = new Map<string, MergedSceneLike<TScene>[]>();
 
   bgScenes.forEach((scene) => {
-    map.set(scene.sceneId, {
+    const merged: MergedSceneLike<TScene> = {
       sceneId: scene.sceneId,
       mergedKey: '',
       bgScene: scene,
       actScene: null,
       bgSceneIndex: bgPartScenes.indexOf(scene),
       actSceneIndex: -1,
-    });
+    };
+    mergedList.push(merged);
+    const rawKey = rawSceneIdKey(scene.sceneId);
+    const bucket = bgByRawSceneId.get(rawKey) ?? [];
+    bucket.push(merged);
+    bgByRawSceneId.set(rawKey, bucket);
   });
 
   const actUnmatched: TScene[] = [];
   actScenes.forEach((scene) => {
-    const existing = map.get(scene.sceneId);
+    const existing = bgByRawSceneId.get(rawSceneIdKey(scene.sceneId))?.find((merged) => !merged.actScene);
     if (existing) {
       existing.actScene = scene;
       existing.actSceneIndex = actPartScenes.indexOf(scene);
@@ -297,25 +303,28 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
     }
   });
 
-  const bgLonelyByKey = new Map<string, MergedSceneLike<TScene>>();
-  for (const merged of map.values()) {
+  const bgLonelyByKey = new Map<string, MergedSceneLike<TScene>[]>();
+  for (const merged of mergedList) {
     if (merged.actScene) continue;
     const normalizedKey = normalizeSceneIdKey(merged.sceneId, mergedScenePartId);
     if (!normalizedKey) continue;
-    if (!bgLonelyByKey.has(normalizedKey)) bgLonelyByKey.set(normalizedKey, merged);
+    const bucket = bgLonelyByKey.get(normalizedKey) ?? [];
+    bucket.push(merged);
+    bgLonelyByKey.set(normalizedKey, bucket);
   }
 
   actUnmatched.forEach((scene) => {
     const key = normalizeSceneIdKey(scene.sceneId, mergedScenePartId);
-    const partner = key ? bgLonelyByKey.get(key) : undefined;
+    const partners = key ? bgLonelyByKey.get(key) : undefined;
+    const partner = partners?.shift();
     if (partner) {
       partner.actScene = scene;
       partner.actSceneIndex = actPartScenes.indexOf(scene);
-      bgLonelyByKey.delete(key);
+      if (key && partners && partners.length === 0) bgLonelyByKey.delete(key);
       return;
     }
 
-    map.set(scene.sceneId, {
+    mergedList.push({
       sceneId: scene.sceneId,
       mergedKey: '',
       bgScene: null,
@@ -325,7 +334,7 @@ export function buildMergedScenes<TScene extends SortableSceneLike>({
     });
   });
 
-  const mergedList = Array.from(map.values()).sort((a, b) => {
+  mergedList.sort((a, b) => {
     const aScene = a.bgScene ?? a.actScene;
     const bScene = b.bgScene ?? b.actScene;
     if (!aScene || !bScene) return 0;
@@ -463,8 +472,8 @@ export function getMergedCommentBadgeCounts(
     if (actKey) for (const id of commentIdsByKey[actKey] ?? []) ids.add(id);
     total = ids.size;
   } else {
-    // 후방 호환 경로 — id map 없으면 Math.max fallback (대부분 케이스에선 동일 값)
-    total = Math.max(bg, act);
+    // 후방 호환 경로 — id map 없으면 BG/ACT sheet 의 독립 댓글 수를 합산한다.
+    total = bg + act;
   }
 
   return { bg, act, total };

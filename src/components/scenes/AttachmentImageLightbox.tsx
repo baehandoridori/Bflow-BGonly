@@ -142,9 +142,12 @@ export function AttachmentImageLightbox({
     >
       <div
         className="relative w-full h-full flex flex-col cursor-default"
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('[data-lightbox-keep-open="true"]')) e.stopPropagation();
+        }}
       >
-        <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 pt-4 pb-2">
+        <div data-lightbox-keep-open="true" className="flex-shrink-0 flex items-center justify-between gap-3 px-6 pt-4 pb-2">
           <div className="flex items-center gap-2 text-[12px] text-white/80 flex-wrap min-w-0">
             {sceneLabel && (
               <>
@@ -168,6 +171,7 @@ export function AttachmentImageLightbox({
         <div ref={stageRef} className="flex-1 relative flex items-center justify-center px-6 min-h-0">
           {showNav && (
             <button
+              data-lightbox-keep-open="true"
               type="button"
               onClick={() => lightboxStep(-1)}
               className="absolute left-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer"
@@ -179,6 +183,7 @@ export function AttachmentImageLightbox({
           )}
 
           <img
+            data-lightbox-keep-open="true"
             src={current.url}
             alt={`${current.userName}의 이미지 ${lightbox.index + 1}/${totalCount}`}
             className="comment-lightbox-image"
@@ -188,6 +193,7 @@ export function AttachmentImageLightbox({
 
           {showNav && (
             <button
+              data-lightbox-keep-open="true"
               type="button"
               onClick={() => lightboxStep(1)}
               className="absolute right-4 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-white/10 hover:bg-white/25 text-white flex items-center justify-center transition-colors cursor-pointer"
@@ -212,7 +218,7 @@ export function AttachmentImageLightbox({
           )}
         </div>
 
-        <div className="flex-shrink-0 px-6 pt-3 pb-2 max-w-3xl mx-auto w-full">
+        <div data-lightbox-keep-open="true" className="flex-shrink-0 px-6 pt-3 pb-2 max-w-3xl mx-auto w-full">
           <div className="flex items-baseline gap-2 text-[12.5px] mb-1">
             <span className="font-semibold text-white">{current.userName}</span>
             <span className="text-white/50 text-[11px]">{formatCommentTime(current.createdAt)}</span>
@@ -226,6 +232,7 @@ export function AttachmentImageLightbox({
 
         {showNav && (
           <div
+            data-lightbox-keep-open="true"
             className="flex-shrink-0 px-6 py-3"
             style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7), rgba(0,0,0,0.2))' }}
           >

@@ -45,13 +45,14 @@ test('unified scene detail modal exposes measured continuity targets', async () 
   assert.match(modal, /data-continuity-target-box/);
   assert.match(modal, /continuityTarget="storyboard"/);
   assert.match(modal, /continuityTarget="guide"/);
-  assert.match(modal, /data-continuity-target=\{dept === 'bg' \? 'bg-stage' : 'act-stage'\}/);
-  assert.match(modal, /data-continuity-stage-segment/);
+  assert.match(modal, /dataContinuityTarget=\{dept === 'bg' \? 'bg-stage' : 'act-stage'\}/);
   assert.match(modal, /continuityTarget=\{dept === 'bg' \? 'bg-memo' : 'act-memo'\}/);
 });
 
 test('acting phase toggle exposes continuity stage segments', async () => {
   const phaseToggle = await readRepoFile('src', 'components', 'scenes', 'ScenePhaseToggle.tsx');
+  const stageToggle = await readRepoFile('src', 'components', 'scenes', 'StageSegmentToggle.tsx');
 
   assert.match(phaseToggle, /data-continuity-stage-segment/);
+  assert.match(stageToggle, /data-continuity-stage-segment/);
 });

@@ -5,6 +5,7 @@ import {
   buildNotificationSceneModalRequest,
   departmentFromNotificationSheetName,
   getSceneShortcutVisibilityClass,
+  resolveNotificationSceneDepartmentFilter,
   resolveNotificationSceneTarget,
   shouldShowSceneShortcut,
 } from '../src/utils/notificationSceneNavigation.ts';
@@ -200,5 +201,63 @@ test('legacy comment shortcuts still open the detail modal when comment id is mi
       focusCommentId: undefined,
       forceDeptFilter: 'all',
     },
+  );
+});
+
+test('revision comment shortcuts request the revisions tab with a nested comment focus target', () => {
+  const target = resolveNotificationSceneTarget(
+    {
+      sceneId: 'scene-bg-uuid',
+      revisionId: 'revision-1',
+      revisionAction: 'comment',
+      commentId: 'revision-comment-1',
+    },
+    episodes,
+  );
+  assert.ok(target);
+  assert.deepEqual(
+    buildNotificationSceneModalRequest(
+      'revision',
+      {
+        revisionId: 'revision-1',
+        revisionAction: 'comment',
+        commentId: 'revision-comment-1',
+      },
+      target,
+    ),
+    {
+      sceneUuid: 'scene-bg-uuid',
+      sceneName: 'b018',
+      episodeNumber: 2,
+      partId: 'B',
+      initialTab: 'revisions',
+      focusRevisionId: 'revision-1',
+      focusRevisionCommentId: 'revision-comment-1',
+    },
+  );
+});
+
+test('scene shortcuts preserve department filter except comment modal jumps', () => {
+  const target = resolveNotificationSceneTarget(
+    {
+      sceneId: 'scene-act-uuid',
+      revisionId: 'revision-1',
+      revisionAction: 'comment',
+    },
+    episodes,
+  );
+  assert.ok(target);
+  const modalRequest = buildNotificationSceneModalRequest('revision', { revisionId: 'revision-1' }, target);
+
+  assert.equal(resolveNotificationSceneDepartmentFilter('revision', modalRequest, target), undefined);
+  assert.equal(resolveNotificationSceneDepartmentFilter('acting_feedback', null, target), undefined);
+  assert.equal(resolveNotificationSceneDepartmentFilter('scene_assignment', null, target), undefined);
+  assert.equal(
+    resolveNotificationSceneDepartmentFilter(
+      'mention',
+      buildNotificationSceneModalRequest('mention', { commentId: 'comment-1' }, target),
+      target,
+    ),
+    'all',
   );
 });

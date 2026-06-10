@@ -12,6 +12,7 @@ const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
 const compositingView = readFileSync('src/views/CompositingView.tsx', 'utf8');
 const feedbackHubPreviewApp = readFileSync('src/views/FeedbackHubPreviewApp.tsx', 'utf8');
 const indexCss = readFileSync('src/index.css', 'utf8');
+const commentPanelCss = readFileSync('src/styles/comment-panel.css', 'utf8');
 const electronBroadcast = readFileSync('electron/broadcast.ts', 'utf8');
 const electronSupabase = readFileSync('electron/supabase.ts', 'utf8');
 const attachmentImageLightbox = readFileSync('src/components/scenes/AttachmentImageLightbox.tsx', 'utf8');
@@ -19,6 +20,7 @@ const imageContextMenu = readFileSync('src/components/scenes/ImageContextMenu.ts
 const revisionPanel = readFileSync('src/components/scenes/RevisionPanel.tsx', 'utf8');
 const revisionDetailPanel = readFileSync('src/views/compositing/RevisionDetailPanel.tsx', 'utf8');
 const revisionItem = readFileSync('src/views/compositing/RevisionItem.tsx', 'utf8');
+const revisionRecipientPicker = readFileSync('src/components/scenes/RevisionRecipientPicker.tsx', 'utf8');
 
 function getCommentPanelResizableUsage(source: string): string {
   const usage = source.match(/<CommentPanelResizable\b[\s\S]*?\/>/);
@@ -65,6 +67,22 @@ test('Scene detail comment panels expose /re quick revision context', () => {
   assert.match(sceneDetailModal, /quickRevision=\{\{/);
   assert.match(sceneDetailModal, /context: department/);
   assert.match(unifiedSceneDetailModal, /context: selectedDepartment === 'bg' \|\| selectedDepartment === 'acting' \? selectedDepartment : 'all'/);
+});
+
+test('quick revision recipient picker preserves manual unchecked users while typing', () => {
+  assert.match(commentPanel, /const quickRevisionDefaultRecipientIds = useMemo/);
+  assert.doesNotMatch(commentPanel, /users,\s*\n\s*quickRevision,\s*\n\s*\]/);
+  assert.match(revisionRecipientPicker, /const defaultCheckedKey = useMemo\(\(\) => defaultCheckedIds\.join\('\|'\), \[defaultCheckedIds\]\)/);
+  assert.match(revisionRecipientPicker, /\}, \[defaultCheckedKey\]\);/);
+});
+
+test('revision activity rows use theme-aware contrast in light mode', () => {
+  assert.match(commentPanel, /comment-inline-event-resolve/);
+  assert.match(commentPanel, /comment-inline-event-label/);
+  assert.doesNotMatch(commentPanel, /text-emerald-100/);
+  assert.doesNotMatch(commentPanel, /text-sky-100/);
+  assert.match(commentPanelCss, /\[data-color-mode="light"\] \.comment-inline-event-resolve/);
+  assert.match(commentPanelCss, /\.comment-inline-event-label/);
 });
 
 test('quick revision can register a pasted attachment as the revision image', () => {
@@ -175,7 +193,19 @@ test('CommentPanel can place the unread divider before a nested unread reply', (
   assert.match(commentPanel, /orderedVisibleComments/);
   assert.match(commentPanel, /replyShowUnreadDivider/);
   assert.match(commentPanel, /reply\.id === firstUnreadCommentId/);
-  assert.match(commentPanel, /next\.delete\(target\.parentCommentId!\)/);
+  assert.match(commentPanel, /buildCommentReplyTarget\(comments,\s*target\)/);
+  assert.match(commentPanel, /next\.delete\(threadRootId\)/);
+});
+
+test('CommentPanel uses a Slack-style flat thread for reply-to-reply flows', () => {
+  assert.match(commentPanel, /buildCommentReplyTarget\(comments,\s*replyTarget\)/);
+  assert.match(commentPanel, /parentCommentId:\s*replyThreadTarget\.parentCommentId/);
+  assert.match(commentPanel, /setReplyTarget\(reply\)/);
+  assert.match(commentPanel, /replyInputThreadTarget\.isReplyToReply/);
+  assert.match(commentPanel, /스레드에 댓글 추가/);
+  assert.match(commentPanel, /선택한 메시지/);
+  assert.doesNotMatch(commentPanel, /getReplyMentionDisplay\(reply\.text,\s*userNames\)/);
+  assert.doesNotMatch(commentPanel, /<span className="text-accent">@\{replyMentionDisplay\.mentionName\}<\/span>에게/);
 });
 
 test('CommentPanel reruns scroll and observer setup after the unread divider mounts', () => {

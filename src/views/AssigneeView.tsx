@@ -2,12 +2,12 @@ import { useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Users, ChevronDown, ChevronUp } from 'lucide-react';
 import { useDataStore } from '@/stores/useDataStore';
-import { useAppStore } from '@/stores/useAppStore';
 import { sceneProgress, isFullyDone, isNotStarted } from '@/utils/calcStats';
 import { getSeniorityIndex } from '@/utils/seniorityOrder';
 import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Episode, Department, Stage } from '@/types';
 import { cn } from '@/utils/cn';
+import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 
 /* ────────────────────────────────────────────────
    담당자별 통계
@@ -261,7 +261,6 @@ type SortOption = 'name' | 'scenes' | 'progress' | 'seniority';
 export function AssigneeView() {
   const episodes = useDataStore((s) => s.episodes);
   const episodeTitles = useDataStore((s) => s.episodeTitles);
-  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setSelectedAssignee, setHighlightSceneId } = useAppStore();
   const [sortBy, setSortBy] = useState<SortOption>('seniority');
   const [sortAsc, setSortAsc] = useState(false);
 
@@ -289,12 +288,13 @@ export function AssigneeView() {
   }, [assignees]);
 
   const handleClickScene = useCallback((ref: SceneRef) => {
-    setSelectedEpisode(ref.episodeNumber);
-    setSelectedPart(ref.partId);
-    setSelectedDepartment(ref.department);
-    setHighlightSceneId(ref.scene.sceneId);
-    setView('scenes');
-  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId]);
+    navigateToSceneView({
+      episodeNumber: ref.episodeNumber,
+      partId: ref.partId,
+      department: ref.department,
+      highlightSceneId: ref.scene.sceneId,
+    });
+  }, []);
 
   const handleSort = useCallback((option: SortOption) => {
     if (sortBy === option) {

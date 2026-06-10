@@ -83,6 +83,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 4. **완료 전 검증**: 작동 증명 없이 완료 표시 금지. tsc + 빌드 + 동작 확인.
 5. **자율 버그 수정**: 버그 리포트 받으면 지시 없이 바로 수정. 로그/오류 직접 추적.
 6. **단순함 우선**: 최소한의 코드 영향. 과잉 설계 금지. 근본 원인 해결.
+7. **프리뷰 로그인 필수**: 로컬 preview/mockup/브라우저 검증에서 로그인 화면이 보이면 이름 `배한솔`, 비밀번호 `1234`로 반드시 로그인한 뒤 화면을 확인한다. 로그인 전 화면만 보고 검증 완료로 판단하지 말 것. 이 값은 preview 확인용 테스트 데이터로만 사용한다.
 
 ---
 
@@ -91,7 +92,7 @@ Electron + React 18 + TypeScript + Tailwind CSS + Zustand + react-grid-layout + 
 - 팀원은 로컬 PC에 설치된 BFLOW 본체를 실행한다. G드라이브는 배포 파일을 받아오는 창고 역할만 한다.
 - 앱 시작 시 스플래시에서 업데이트 상태를 안내하고, 최신 버전 준비는 최대 10초까지만 기다린다. 준비 완료 시 installer helper가 로컬 `BFLOW-Setup.exe`를 실행해 최신 버전으로 갱신하고, 10초 초과/실패 시 현재 버전으로 먼저 연다.
 - 앱 사용 중에는 5분 주기로 manifest를 다시 확인해 새 버전을 백그라운드로 받아두고, 토스트 + 좌하단 버전 버튼 + 업데이트 모달로 계속 표시한다. 모달에는 현재 버전과 최신 버전을 명확히 강조한다.
-- 실제 적용은 `지금 업데이트` 클릭 또는 앱 종료 시 installer helper로 수행된다. 앱 폴더를 직접 rename/copy하지 말 것. 토스트가 떴다는 것만으로 성공 판단 금지. 다음 실행 버전과 `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[installer-main]`/`[installer]` 로그를 확인한다.
+- 실제 적용은 `지금 업데이트` 클릭 시 즉시 수행하거나, 일반 종료 후 다음 앱 실행의 startup gate에서 자동 수행된다. 앱 폴더를 직접 rename/copy하지 말 것. 토스트가 떴다는 것만으로 성공 판단 금지. 다음 실행 버전과 `%LOCALAPPDATA%\Bflow-BGonly\swap.log`의 `[installer-main]`/`[installer]` 로그를 확인한다.
 - installer helper는 현재 BFLOW 프로세스가 완전히 종료된 뒤 `BFLOW-Setup.exe /S`를 실행해야 한다. 앱이 살아있는 동안 installer를 시작하면 Windows 파일 잠금으로 실패할 수 있다.
 - 앱 시작 자동 적용은 `.installer-attempted` 시작 확인 마커가 생긴 뒤에만 종료해야 한다. helper 시작 확인 없이 앱을 닫으면 사용자가 바로가기를 눌러도 앱이 계속 안 뜨는 루프가 생긴다.
 - 좌하단 버전 버튼은 업데이트 유무와 무관하게 항상 업데이트 내역 모달을 열어야 한다. 모달은 열자마자 자동 확인하지 않고, 사용자가 `새로고침`을 눌렀을 때만 `update:check-now`로 배포 상태를 다시 확인한다. 새로고침 중에는 기존 표시 내용을 유지해 중간 상태 때문에 레이아웃이 흔들리지 않게 한다.

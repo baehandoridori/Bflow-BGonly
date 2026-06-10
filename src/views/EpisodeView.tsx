@@ -294,7 +294,7 @@ export function EpisodeView() {
   const deleteEpisodeOptimistic = useDataStore((s) => s.deleteEpisodeOptimistic);
   const setEpisodes = useDataStore((s) => s.setEpisodes);
   const currentUser = useAuthStore((s) => s.currentUser);
-  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment } = useAppStore();
+  const { setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setDashboardDeptFilter } = useAppStore();
   const [viewMode, setViewMode] = useState<EpViewMode>('card');
 
   // 아카이빙 관련 상태
@@ -349,8 +349,11 @@ export function EpisodeView() {
 
   const handleNavigate = useCallback((ep: Episode) => {
     setSelectedEpisode(ep.episodeNumber);
+    setSelectedPart(null);
+    setSelectedDepartment('all');
+    setDashboardDeptFilter('all');
     setView('scenes');
-  }, [setSelectedEpisode, setView]);
+  }, [setSelectedEpisode, setSelectedPart, setSelectedDepartment, setDashboardDeptFilter, setView]);
 
   // 에피소드 우클릭 컨텍스트 메뉴
   const handleEpContextMenu = useCallback((e: React.MouseEvent, ep: Episode) => {
@@ -595,6 +598,9 @@ export function EpisodeView() {
                 const epNum = contextMenu.epNum;
                 setContextMenu(null);
                 setSelectedEpisode(epNum);
+                setSelectedPart(null);
+                setSelectedDepartment('all');
+                setDashboardDeptFilter('all');
                 setView('scenes');
               }}
               className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-secondary hover:bg-bg-primary hover:text-text-primary transition-colors cursor-pointer"

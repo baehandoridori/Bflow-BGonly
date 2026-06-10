@@ -10,6 +10,7 @@ import { DEPARTMENT_CONFIGS, STAGES } from '@/types';
 import type { Scene, Department, Stage, AppUser } from '@/types';
 import { cn } from '@/utils/cn';
 import { getUserColor } from '@/components/common/AssigneeSelect';
+import { navigateToSceneView } from '@/utils/sceneNavigationAction';
 
 /* ────────────────────────────────────────────────
    팀원별 작업 통계
@@ -329,7 +330,6 @@ export function TeamView() {
   const episodeTitles = useDataStore((s) => s.episodeTitles);
   const users = useAuthStore((s) => s.users);
   const {
-    setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId,
     highlightUserName, setHighlightUserName,
   } = useAppStore();
 
@@ -376,12 +376,13 @@ export function TeamView() {
   }, [users, teamData]);
 
   const handleClickScene = useCallback((ref: SceneRef) => {
-    setSelectedEpisode(ref.episodeNumber);
-    setSelectedPart(ref.partId);
-    setSelectedDepartment(ref.department);
-    setHighlightSceneId(ref.scene.sceneId);
-    setView('scenes');
-  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedDepartment, setHighlightSceneId]);
+    navigateToSceneView({
+      episodeNumber: ref.episodeNumber,
+      partId: ref.partId,
+      department: ref.department,
+      highlightSceneId: ref.scene.sceneId,
+    });
+  }, []);
 
   const handleSort = useCallback((option: SortOption) => {
     if (sortBy === option) {

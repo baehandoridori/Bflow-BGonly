@@ -1,4 +1,4 @@
-export type BackgroundArt = 'plexus' | 'starnest';
+export type BackgroundArt = 'plexus' | 'starnest' | 'bflow-starnest';
 export type StarNestDirectionMode = 'fixed' | 'manual' | 'mouse';
 export type StarNestTonePreset = 'bflow' | 'classic' | 'quiet';
 
@@ -21,27 +21,67 @@ export interface StarNestSettings {
   quality: number;
 }
 
+export interface BflowStarNestSettings {
+  intensity: number;
+  particleSpeed: number;
+  motionTrail: boolean;
+  cursorReactionEnabled: boolean;
+  cursorReactionRadius: number;
+  cursorGlowStrength: number;
+  cursorScaleStrength: number;
+  cursorLinksEnabled: boolean;
+  cursorLinkRadius: number;
+  cursorLinkOpacity: number;
+  cursorTrailParticlesEnabled: boolean;
+  cursorTrailIntensity: number;
+  cursorTrailLifetime: number;
+  colorHue: number;
+  colorSaturation: number;
+  colorBrightness: number;
+  hazeStrength: number;
+}
+
 export const DEFAULT_BACKGROUND_ART: BackgroundArt = 'plexus';
 export const DEFAULT_DASHBOARD_STAR_NEST_OPACITY = 1;
 export const DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX = 0;
+
+export const DEFAULT_BFLOW_STAR_NEST_SETTINGS: BflowStarNestSettings = {
+  intensity: 1,
+  particleSpeed: 1.95,
+  motionTrail: true,
+  cursorReactionEnabled: true,
+  cursorReactionRadius: 170,
+  cursorGlowStrength: 0.52,
+  cursorScaleStrength: 0.52,
+  cursorLinksEnabled: true,
+  cursorLinkRadius: 150,
+  cursorLinkOpacity: 0.34,
+  cursorTrailParticlesEnabled: true,
+  cursorTrailIntensity: 1,
+  cursorTrailLifetime: 1.04,
+  colorHue: 219,
+  colorSaturation: 1.27,
+  colorBrightness: 0.97,
+  hazeStrength: 1.32,
+};
 
 export const DEFAULT_STAR_NEST_SETTINGS: StarNestSettings = {
   directionMode: 'mouse',
   directionX: 0.18,
   directionY: 0.08,
-  maxSpeed: 0.002,
-  brightness: 0.0015,
-  saturation: 0.72,
-  colorShift: 0,
-  sparkle: 0.45,
-  sparkleSpeed: 1,
-  zoom: 0.76,
-  darkmatter: 0.38,
-  distfade: 0.7,
+  maxSpeed: 0.0014,
+  brightness: 0.006,
+  saturation: 0.98,
+  colorShift: 0.59,
+  sparkle: 0.18,
+  sparkleSpeed: 0.1,
+  zoom: 0.95,
+  darkmatter: 0.26,
+  distfade: 0.75,
   angleX: 0.54,
   angleY: 0.74,
-  iterations: 17,
-  quality: 16,
+  iterations: 13,
+  quality: 17,
 };
 
 export const STAR_NEST_TONE_PRESETS: Record<StarNestTonePreset, {
@@ -51,14 +91,14 @@ export const STAR_NEST_TONE_PRESETS: Record<StarNestTonePreset, {
   bflow: {
     label: 'Bflow 톤',
     settings: {
-      brightness: 0.0015,
-      saturation: 0.72,
-      colorShift: 0,
-      sparkle: 0.45,
-      sparkleSpeed: 1,
-      zoom: 0.76,
-      darkmatter: 0.38,
-      distfade: 0.7,
+      brightness: DEFAULT_STAR_NEST_SETTINGS.brightness,
+      saturation: DEFAULT_STAR_NEST_SETTINGS.saturation,
+      colorShift: DEFAULT_STAR_NEST_SETTINGS.colorShift,
+      sparkle: DEFAULT_STAR_NEST_SETTINGS.sparkle,
+      sparkleSpeed: DEFAULT_STAR_NEST_SETTINGS.sparkleSpeed,
+      zoom: DEFAULT_STAR_NEST_SETTINGS.zoom,
+      darkmatter: DEFAULT_STAR_NEST_SETTINGS.darkmatter,
+      distfade: DEFAULT_STAR_NEST_SETTINGS.distfade,
     },
   },
   classic: {
@@ -95,6 +135,8 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
   return Math.max(min, Math.min(max, parsed));
 }
 
+const MAX_STAR_NEST_SPEED = 0.002;
+
 function parseRgbTuple(rgb: unknown): [number, number, number] | null {
   if (Array.isArray(rgb) && rgb.length >= 3) {
     const parsed = rgb.slice(0, 3).map(Number);
@@ -130,7 +172,7 @@ export function normalizeStarNestSettings(settings?: Partial<StarNestSettings> |
         : DEFAULT_STAR_NEST_SETTINGS.directionMode,
     directionX: clamp(settings?.directionX, -1, 1, DEFAULT_STAR_NEST_SETTINGS.directionX),
     directionY: clamp(settings?.directionY, -1, 1, DEFAULT_STAR_NEST_SETTINGS.directionY),
-    maxSpeed: clamp(settings?.maxSpeed, 0, DEFAULT_STAR_NEST_SETTINGS.maxSpeed, DEFAULT_STAR_NEST_SETTINGS.maxSpeed),
+    maxSpeed: clamp(settings?.maxSpeed, 0, MAX_STAR_NEST_SPEED, DEFAULT_STAR_NEST_SETTINGS.maxSpeed),
     brightness: clamp(settings?.brightness, 0.0002, 0.006, DEFAULT_STAR_NEST_SETTINGS.brightness),
     saturation: clamp(settings?.saturation, 0, 1, DEFAULT_STAR_NEST_SETTINGS.saturation),
     colorShift: clamp(settings?.colorShift, -1, 1, DEFAULT_STAR_NEST_SETTINGS.colorShift),
@@ -152,6 +194,36 @@ export function normalizeDashboardStarNestOpacity(value: unknown): number {
 
 export function normalizeDashboardStarNestBlurPx(value: unknown): number {
   return clamp(value, 0, 20, DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX);
+}
+
+export function normalizeBflowStarNestSettings(settings?: Partial<BflowStarNestSettings> | null): BflowStarNestSettings {
+  return {
+    intensity: clamp(settings?.intensity, 0, 1, DEFAULT_BFLOW_STAR_NEST_SETTINGS.intensity),
+    particleSpeed: clamp(settings?.particleSpeed, 0.25, 2.5, DEFAULT_BFLOW_STAR_NEST_SETTINGS.particleSpeed),
+    motionTrail: typeof settings?.motionTrail === 'boolean'
+      ? settings.motionTrail
+      : DEFAULT_BFLOW_STAR_NEST_SETTINGS.motionTrail,
+    cursorReactionEnabled: typeof settings?.cursorReactionEnabled === 'boolean'
+      ? settings.cursorReactionEnabled
+      : DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorReactionEnabled,
+    cursorReactionRadius: clamp(settings?.cursorReactionRadius, 60, 360, DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorReactionRadius),
+    cursorGlowStrength: clamp(settings?.cursorGlowStrength, 0, 1, DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorGlowStrength),
+    cursorScaleStrength: clamp(settings?.cursorScaleStrength, 0, 1.8, DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorScaleStrength),
+    cursorLinksEnabled: typeof settings?.cursorLinksEnabled === 'boolean'
+      ? settings.cursorLinksEnabled
+      : DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorLinksEnabled,
+    cursorLinkRadius: clamp(settings?.cursorLinkRadius, 60, 320, DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorLinkRadius),
+    cursorLinkOpacity: clamp(settings?.cursorLinkOpacity, 0, 1, DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorLinkOpacity),
+    cursorTrailParticlesEnabled: typeof settings?.cursorTrailParticlesEnabled === 'boolean'
+      ? settings.cursorTrailParticlesEnabled
+      : DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorTrailParticlesEnabled,
+    cursorTrailIntensity: clamp(settings?.cursorTrailIntensity, 0, 1, DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorTrailIntensity),
+    cursorTrailLifetime: clamp(settings?.cursorTrailLifetime, 0.18, 1.4, DEFAULT_BFLOW_STAR_NEST_SETTINGS.cursorTrailLifetime),
+    colorHue: clamp(settings?.colorHue, 0, 360, DEFAULT_BFLOW_STAR_NEST_SETTINGS.colorHue),
+    colorSaturation: clamp(settings?.colorSaturation, 0, 1.6, DEFAULT_BFLOW_STAR_NEST_SETTINGS.colorSaturation),
+    colorBrightness: clamp(settings?.colorBrightness, 0.45, 1.6, DEFAULT_BFLOW_STAR_NEST_SETTINGS.colorBrightness),
+    hazeStrength: clamp(settings?.hazeStrength, 0, 1.6, DEFAULT_BFLOW_STAR_NEST_SETTINGS.hazeStrength),
+  };
 }
 
 export function applyStarNestTonePreset(
@@ -193,5 +265,6 @@ export function getThemeSyncedStarNestSettings(
 }
 
 export function normalizeBackgroundArt(art: unknown): BackgroundArt {
-  return art === 'starnest' ? 'starnest' : DEFAULT_BACKGROUND_ART;
+  if (art === 'starnest' || art === 'bflow-starnest') return art;
+  return DEFAULT_BACKGROUND_ART;
 }

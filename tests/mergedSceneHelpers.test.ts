@@ -217,6 +217,33 @@ test('all-view comment badges use each department scene number independently', (
   assert.deepEqual(counts, { bg: 2, act: 4, total: 6 });
 });
 
+test('buildMergedScenes keeps exact duplicate raw scene ids as separate rows', () => {
+  const bgA = { id: 'bg-a', no: 1, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+  const bgB = { id: 'bg-b', no: 2, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+  const actA = { id: 'act-a', no: 1, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+  const actB = { id: 'act-b', no: 2, sceneId: 'a001', assignee: '', memo: '', layoutId: '', storyboardUrl: '', guideUrl: '', lo: false, done: false, review: false, png: false };
+
+  const mergedScenes = buildMergedScenes({
+    bgScenes: [bgA, bgB],
+    actScenes: [actA, actB],
+    bgPartScenes: [bgA, bgB],
+    actPartScenes: [actA, actB],
+    mergedScenePartId: 'A',
+    sortKey: 'no',
+    sortDir: 'asc',
+  });
+
+  assert.equal(mergedScenes.length, 2);
+  assert.deepEqual(
+    mergedScenes.map((merged) => [merged.bgScene?.id, merged.actScene?.id]),
+    [
+      ['bg-a', 'act-a'],
+      ['bg-b', 'act-b'],
+    ],
+  );
+  assert.equal(new Set(mergedScenes.map((merged) => merged.mergedKey)).size, 2);
+});
+
 test('buildMergedScenes merges matching BG and ACT scenes into one canonical scene id', () => {
   const mergedScenes = buildMergedScenes({
     bgScenes: [

@@ -234,7 +234,7 @@ export function UpdateCenterModal() {
     : !hasCheckedUpdate
       ? '새로고침을 누를 때만 G드라이브 배포 정보를 확인합니다.'
       : canApply
-        ? '설치 파일이 로컬에 준비되었습니다. 적용하면 별도 진행 창이 뜬 뒤 새 버전으로 다시 열립니다.'
+        ? '설치 파일이 로컬에 준비되었습니다. 적용하면 별도 진행 창이 뜬 뒤 최신 버전으로 열립니다.'
         : isApplying
           ? '업데이트 설치 창을 여는 중입니다. 앱이 잠시 닫혀도 정상 진행 중입니다.'
           : displayInfo.message

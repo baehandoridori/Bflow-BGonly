@@ -396,7 +396,7 @@ async function runStartupUpdateGate(): Promise<boolean> {
     const applyingInfo: UpdateInfo = {
       ...result,
       status: 'applying',
-      message: '업데이트 설치 창을 열고 있습니다. 설치가 끝나면 앱이 다시 열립니다.',
+      message: '업데이트 설치 창을 열고 있습니다. 설치가 끝나면 최신 버전으로 열립니다.',
     };
     publishUpdateInfo(applyingInfo);
     const text = splashTextForUpdate(applyingInfo);
@@ -846,7 +846,7 @@ function createWindow(): void {
     if (app.isPackaged) {
       const handleUpdateReady = (info: UpdateInfo) => {
         // installer 다운로드 + .ready 마커 작성 완료 → renderer에 토스트 띄우기 신호.
-        // 사용자가 "지금 업데이트" 클릭 시 update:apply-now → installer helper + relaunch.
+        // 사용자가 "지금 업데이트" 클릭 시 update:apply-now → installer helper → 최신 버전으로 열림.
         notifyUpdateReady(info);
       };
       const handleUpdateState = (info: UpdateInfo) => {
@@ -942,7 +942,7 @@ function migrateLegacyUsersFileIfNeeded(): void {
 //
 // v1.22.14: directory swap 대신 로컬에 받아둔 NSIS installer를 앱 종료 후 실행한다.
 // renderer에는 먼저 applying 상태를 보내고, before-quit hook이 installer helper를 띄운다.
-// updateRelaunchScheduled 플래그로 helper에게 "설치 후 재시작 의도"를 전달한다.
+// 일반 종료는 설치 파일을 pending 상태로 남겨 다음 앱 실행 시 startup gate가 자동 적용한다.
 //
 // Codex 1차 P2 (v1.22.1): one-shot guard. relaunch 예약은 한 종료 사이클당 한 번만.
 let updateRelaunchScheduled = false;
@@ -3659,7 +3659,7 @@ app.whenReady().then(async () => {
 
   // ★ v1.22.10 startup update gate:
   //   스플래시를 먼저 띄운 뒤 원격 최신 버전을 최대 10초까지만 준비한다.
-  //   준비 완료 시 installer helper로 최신 버전을 다시 열고, 시간 초과/실패 시 현재 버전으로 진입.
+  //   준비 완료 시 installer helper로 최신 버전을 먼저 적용하고, 시간 초과/실패 시 현재 버전으로 진입.
   // ★ v1.26.x dev 가드: dev 모드(app.isPackaged === false)에선 G드라이브 manifest 가
   //   더 최신이면 installer 가 spawn되어 dev 앱이 prod 빌드로 교체되는 사고가 난다.
   //   dev 에선 update gate 자체를 건너뛴다.
@@ -3869,12 +3869,14 @@ app.on('before-quit', (e) => {
         await watchWithTimeout.catch(() => { /* noop */ });
       }
 
-      // ★ v1.22.14 자동 업데이트 적용 (마지막 step)
-      // 실행 중 앱 폴더를 직접 rename/copy하지 않고, 로컬에 받아둔 NSIS installer를 앱
-      // 종료 후 helper가 실행한다. helper는 별도 진행 창을 띄우고 완료 후 필요 시 재실행.
-      if (await hasPendingInstallerUpdate()) {
-        spawnInstallerUpdateHelper({ relaunch: updateRelaunchScheduled });
-        console.log(`[autoUpdate] installer helper spawned (relaunch=${updateRelaunchScheduled})`);
+      // ★ 자동 업데이트 적용 (마지막 step)
+      // "지금 업데이트"는 즉시 installer helper를 띄워 최신 버전으로 연다.
+      // 일반 종료는 installer-pending을 그대로 두고, 다음 앱 실행의 startup gate가 자동 적용한다.
+      if (updateRelaunchScheduled && await hasPendingInstallerUpdate()) {
+        spawnInstallerUpdateHelper({ relaunch: true });
+        console.log('[autoUpdate] installer helper spawned (relaunch=true)');
+      } else if (await hasPendingInstallerUpdate()) {
+        console.log('[autoUpdate] pending installer kept for next launch auto apply');
       }
     } catch (err) {
       console.warn('[종료] 정리/installer 적용 예외:', err);

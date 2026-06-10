@@ -343,6 +343,13 @@ export async function updateCell(
   await window.electronAPI.supabaseUpdateSceneStage(uuid, stage, value, updatedBy);
 }
 
+/** 체크박스 셀 업데이트 (이미 알고 있는 UUID를 직접 사용) */
+export async function updateCellByUuid(
+  sceneUuid: string, stage: string, value: boolean, updatedBy?: string,
+): Promise<void> {
+  await window.electronAPI.supabaseUpdateSceneStage(sceneUuid, stage, value, updatedBy);
+}
+
 /** 에피소드 추가 */
 export async function addEpisode(episodeNumber: number, department?: string): Promise<void> {
   await window.electronAPI.supabaseAddEpisode(episodeNumber, department);

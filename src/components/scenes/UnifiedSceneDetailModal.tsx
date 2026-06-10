@@ -34,12 +34,12 @@ import { describeActivity, deptPrefix } from './activityLabels';
 import { useRevisionStore } from '@/stores/useRevisionStore';
 import { useDataStore } from '@/stores/useDataStore';
 import { useAppStore } from '@/stores/useAppStore';
-import { updateSceneFieldInSupabase } from '@/services/supabaseService';
 import { buildSceneKey } from '@/services/revisionService';
 import { buildSceneThreadKeyFromRevisionKey } from '@/utils/commentThreadKey';
 import { buildMergedRevisionSceneId } from '@/utils/mergedSceneHelpers';
 import { findLatestMemoActivity, type MemoAuthorMeta } from './memoAuthorMeta';
 import { SceneContinuityTransition } from './SceneContinuityTransition';
+import { useOptimisticSceneImageUrl } from '@/hooks/useOptimisticSceneImageUrl';
 
 /**
  * 전체 뷰(BG+ACT 통합) 전용 상세 모달.
@@ -105,6 +105,8 @@ export interface UnifiedSceneDetailModalProps {
   focusRevisionId?: string;
   /** v1.24.0: 댓글 패널에서 강조할 댓글 id — 자동 스크롤 + comment-target-pulse. */
   focusCommentId?: string;
+  /** 리비전 카드 내부 댓글 스레드에서 강조할 댓글 id. */
+  focusRevisionCommentId?: string;
   /** v1.25.0~: 액팅 단계 토글 핸들러 (전달되면 ACT DeptSection 에서 ScenePhaseToggle 사용) */
   onActPhaseStateClick?: (sheetName: string, sceneId: string, newState: ScenePhaseState) => void;
   onActFeedbackRequest?: (sheetName: string, sceneId: string) => void;
@@ -143,6 +145,7 @@ export function UnifiedSceneDetailModal({
   initialTab,
   focusRevisionId,
   focusCommentId,
+  focusRevisionCommentId,
   onActPhaseStateClick,
   onActFeedbackRequest,
   onActRoundBump,
@@ -288,6 +291,9 @@ export function UnifiedSceneDetailModal({
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('rev-pulse');
+        window.dispatchEvent(new CustomEvent('bflow:expand-revision', {
+          detail: { revisionId: focusRevisionId, commentId: focusRevisionCommentId },
+        }));
         // animation 길이 (1.2s × 2회) 보다 약간 길게 → 자동 제거
         removeTimer = setTimeout(() => {
           el.classList.remove('rev-pulse');
@@ -302,13 +308,13 @@ export function UnifiedSceneDetailModal({
       cancelled = true;
       if (removeTimer) clearTimeout(removeTimer);
     };
-  }, [focusRevisionId, tab]);
+  }, [focusRevisionId, focusRevisionCommentId, tab]);
   const [showImageModal, setShowImageModal] = useState<null | 'storyboard' | 'guide'>(null);
   const [imageLoading, setImageLoading] = useState<null | 'storyboard' | 'guide'>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<null | 'storyboard' | 'guide' | 'bg' | 'act' | 'both'>(null);
   const [previewUrls, setPreviewUrls] = useState<{ storyboard?: string; guide?: string }>({});
   const [latestImageUrls, setLatestImageUrls] = useState<{ storyboard?: string; guide?: string }>({});
-  const updateSceneByUuid = useDataStore((s) => s.updateSceneByUuid);
+  const { persistLatestImageUrl } = useOptimisticSceneImageUrl('UnifiedSceneDetailModal');
   const addingRef = useRef<{ bg: boolean; acting: boolean }>({ bg: false, acting: false });
 
   useEffect(() => {
@@ -322,26 +328,22 @@ export function UnifiedSceneDetailModal({
   const applyLatestImageUrl = useCallback(
     (imageType: 'storyboard' | 'guide', url: string) => {
       const sceneUuid = bgScene?.id;
-      const field = imageType === 'storyboard' ? 'storyboardUrl' : 'guideUrl';
       const previousUrl = imageType === 'storyboard' ? bgScene?.storyboardUrl : bgScene?.guideUrl;
 
       setLatestImageUrls((prev) => ({ ...prev, [imageType]: url }));
       setPreviewUrls((prev) => ({ ...prev, [imageType]: undefined }));
 
-      if (!sceneUuid) return;
-
-      const patch: Partial<Scene> = { [field]: url };
-      updateSceneByUuid(sceneUuid, patch);
-      void updateSceneFieldInSupabase(sceneUuid, field, url).catch((err) => {
-        console.error('[UnifiedSceneDetailModal] 최신 이미지 URL 저장 실패', err);
-        const rollbackUrl = previousUrl ?? '';
-        const rollbackPatch: Partial<Scene> = { [field]: rollbackUrl };
-        updateSceneByUuid(sceneUuid, rollbackPatch);
-        setLatestImageUrls((prev) => ({ ...prev, [imageType]: rollbackUrl }));
-        sonnerToast.error('이미지 최신화 저장에 실패했습니다. 새로고침 후 다시 확인해 주세요.');
+      persistLatestImageUrl({
+        sceneUuid,
+        imageType,
+        url,
+        previousUrl,
+        onRollback: (rollbackUrl) => {
+          setLatestImageUrls((prev) => ({ ...prev, [imageType]: rollbackUrl }));
+        },
       });
     },
-    [bgScene?.id, bgScene?.storyboardUrl, bgScene?.guideUrl, updateSceneByUuid],
+    [bgScene?.id, bgScene?.storyboardUrl, bgScene?.guideUrl, persistLatestImageUrl],
   );
 
   // 좌우 이동 슬라이드 방향 (1=다음, -1=이전). 키보드/버튼/도트 모두 handleNavigate 경유.

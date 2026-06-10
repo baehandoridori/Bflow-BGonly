@@ -111,19 +111,26 @@ export function SpotlightSearch() {
   useEffect(() => { getEvents().then(setCalEvents); }, []);
   const episodeMemos = useDataStore((s) => s.episodeMemos);
   const [partMemos, setPartMemos] = useState<Record<string, string>>({});
-  // 파트 메모 로드
+  const [partReelWorkers, setPartReelWorkers] = useState<Record<string, string>>({});
+  // 파트 메모/릴 담당 로드
   useEffect(() => {
     (async () => {
       const memos: Record<string, string> = {};
+      const reelWorkers: Record<string, string> = {};
       for (const ep of episodes) {
         for (const part of ep.parts) {
           try {
             const data = await readMetadata('part-memo', part.sheetName);
             if (data?.value) memos[part.sheetName] = data.value;
           } catch { /* 무시 */ }
+          try {
+            const data = await readMetadata('part-reel-worker', part.sheetName);
+            if (data?.value) reelWorkers[part.sheetName] = data.value;
+          } catch { /* 무시 */ }
         }
       }
-      if (Object.keys(memos).length > 0) setPartMemos(memos);
+      setPartMemos(memos);
+      setPartReelWorkers(reelWorkers);
     })();
   }, [episodes]);
   const {
@@ -132,6 +139,7 @@ export function SpotlightSearch() {
     setSelectedPart,
     setSelectedAssignee,
     setSelectedDepartment,
+    setDashboardDeptFilter,
     setHighlightSceneId,
     setSearchQuery,
     setStatusFilter,
@@ -198,11 +206,14 @@ export function SpotlightSearch() {
     setView('scenes');
     if (opts.episode !== undefined) setSelectedEpisode(opts.episode);
     if (opts.part !== undefined) setSelectedPart(opts.part);
-    if (opts.department !== undefined) setSelectedDepartment(opts.department);
+    if (opts.department !== undefined) {
+      setSelectedDepartment(opts.department);
+      setDashboardDeptFilter(opts.department);
+    }
     if (opts.assignee) setSelectedAssignee(opts.assignee);
     if (opts.sceneId) setHighlightSceneId(opts.sceneId);
     if (opts.toastMsg) setToast(opts.toastMsg);
-  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSelectedDepartment, setHighlightSceneId, setSearchQuery, setStatusFilter, setSceneViewMode, setSceneGroupMode, setToast]);
+  }, [setView, setSelectedEpisode, setSelectedPart, setSelectedAssignee, setSelectedDepartment, setDashboardDeptFilter, setHighlightSceneId, setSearchQuery, setStatusFilter, setSceneViewMode, setSceneGroupMode, setToast]);
 
   /* ── 검색 결과 빌드 ── */
   const results = useMemo<SearchResult[]>(() => {
@@ -264,10 +275,13 @@ export function SpotlightSearch() {
         const deptLabel = DEPARTMENT_CONFIGS[part.department].shortLabel;
         const partLabel = `${part.partId}파트`;
         const partFullLabel = `${epName(ep)} ${partLabel} (${deptLabel})`;
+        const partReelWorkerText = partReelWorkers[part.sheetName] ?? '';
         const partScore = Math.max(
           fuzzyScore(q, partLabel),
           fuzzyScore(q, `${part.partId}`),
           fuzzyScore(q, partFullLabel),
+          fuzzyScore(q, partReelWorkerText),
+          fuzzyScore(q, partReelWorkerText ? `릴 담당 ${partReelWorkerText}` : ''),
         );
         if (partScore > 0) {
           const totalScenes = part.scenes.length;
@@ -277,7 +291,7 @@ export function SpotlightSearch() {
             id: `part-${part.sheetName}`,
             category: 'part',
             title: `${partLabel} (${deptLabel})`,
-            subtitle: `${epName(ep)} · ${totalScenes}개 씬`,
+            subtitle: `${epName(ep)} · ${totalScenes}개 씬${partReelWorkerText ? ` · 릴 담당 ${partReelWorkerText}` : ''}`,
             meta: `${avgPct}%`,
             pct: avgPct,
             icon: <Layers size={16} />,
@@ -292,6 +306,28 @@ export function SpotlightSearch() {
               close();
             },
           });
+        }
+        if (partReelWorkerText) {
+          const workerScore = fuzzyScore(q, partReelWorkerText);
+          if (workerScore > 0) {
+            items.push({
+              id: `part-reel-worker-${part.sheetName}`,
+              category: 'part',
+              title: `릴 담당 ${partReelWorkerText}`,
+              subtitle: `${epName(ep)} ${part.partId}파트 (${deptLabel})`,
+              icon: <User size={16} />,
+              score: workerScore + 5,
+              action: () => {
+                resetAndNavigate({
+                  episode: ep.episodeNumber,
+                  part: part.partId,
+                  department: part.department,
+                  toastMsg: `${epName(ep)} ${part.partId}파트 릴 담당 ${partReelWorkerText}`,
+                });
+                close();
+              },
+            });
+          }
         }
 
         for (const scene of part.scenes) {
@@ -490,7 +526,7 @@ export function SpotlightSearch() {
     // 점수 내림차순 정렬, 상위 20개
     items.sort((a, b) => b.score - a.score);
     return items.slice(0, 20);
-  }, [query, episodes, calEvents, episodeMemos, partMemos, resetAndNavigate, setView, setToast]);
+  }, [query, episodes, calEvents, episodeMemos, partMemos, partReelWorkers, resetAndNavigate, setView, setToast]);
 
   /* ── 카테고리별 그룹핑 ── */
   const grouped = useMemo(() => {

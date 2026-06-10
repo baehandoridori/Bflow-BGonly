@@ -53,8 +53,8 @@ function makePartPair(
   const actScenes = sceneIds.map((sid, i) => makeScene(i + 1, sid, actAssignee, 4 + (i % 4), `EP05-${partId}-ACT-${sid}`));
   const lower = partId.toLowerCase();
   return [
-    { partId, department: 'bg', sheetName: `EP05_${partId}_BG`, scenes: bgScenes },
-    { partId: lower as string, department: 'acting', sheetName: `EP05_${partId}_ACT`, scenes: actScenes },
+    { id: `mock-part-EP05-${partId}-BG`, partId, department: 'bg', sheetName: `EP05_${partId}_BG`, scenes: bgScenes },
+    { id: `mock-part-EP05-${partId}-ACT`, partId: lower as string, department: 'acting', sheetName: `EP05_${partId}_ACT`, scenes: actScenes },
   ];
 }
 

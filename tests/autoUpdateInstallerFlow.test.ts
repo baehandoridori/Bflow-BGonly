@@ -55,6 +55,39 @@ test('startup update gate waits for installer helper start before exiting', asyn
   );
 });
 
+test('auto-update user-facing copy describes first-launch update without restart wording', async () => {
+  const main = await readRepoFile('electron', 'main.ts');
+  const checker = await readRepoFile('electron', 'autoUpdate', 'checker.ts');
+  const helper = await readRepoFile('electron', 'autoUpdate', 'installerApply.ts');
+  const modal = await readRepoFile('src', 'components', 'update', 'UpdateCenterModal.tsx');
+
+  assert.match(main, /설치가 끝나면 최신 버전으로 열립니다/);
+  assert.match(checker, /최신 버전으로 열립니다/);
+  assert.match(helper, /최신 버전 앱이 자동으로 열립니다/);
+  assert.match(modal, /최신 버전으로 열립니다/);
+
+  assert.doesNotMatch(main, /설치가 끝나면 앱이 다시 열립니다/);
+  assert.doesNotMatch(checker, /앱이 잠시 닫힌 뒤 다시 열립니다/);
+  assert.doesNotMatch(helper, /앱이 자동으로 다시 열립니다/);
+  assert.doesNotMatch(modal, /새 버전으로 다시 열립니다/);
+});
+
+test('pending installer is applied on the next app launch while normal quit keeps it pending', async () => {
+  const main = await readRepoFile('electron', 'main.ts');
+  const startupGate = main.slice(
+    main.indexOf('async function runStartupUpdateGate'),
+    main.indexOf('function startRuntimeUpdateChecks'),
+  );
+  const beforeQuit = main.slice(main.indexOf("app.on('before-quit'"), main.indexOf("process.on('exit'"));
+
+  assert.match(startupGate, /const result = await Promise\.race\(\[updatePromise, timeout\]\)/);
+  assert.match(startupGate, /if \(result\?\.ready\)[\s\S]*spawnInstallerUpdateHelper\(\{ relaunch: true \}\)/);
+  assert.match(startupGate, /await waitForInstallerHelperStart\(\)[\s\S]*app\.exit\(0\)/);
+  assert.match(beforeQuit, /if \(updateRelaunchScheduled && await hasPendingInstallerUpdate\(\)\)[\s\S]*spawnInstallerUpdateHelper\(\{ relaunch: true \}\)/);
+  assert.match(beforeQuit, /pending installer kept for next launch auto apply/);
+  assert.doesNotMatch(beforeQuit, /spawnInstallerUpdateHelper\(\{ relaunch: updateRelaunchScheduled \}\)/);
+});
+
 test('startup failure handling includes installer pending markers', async () => {
   const main = await readRepoFile('electron', 'main.ts');
 

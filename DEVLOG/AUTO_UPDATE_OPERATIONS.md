@@ -13,7 +13,7 @@
 이 구조로 바꾼 이유:
 
 - G드라이브의 실행 파일을 직접 열면 Google Drive 동기화와 Windows Defender 검사 때문에 매번 시작이 느려졌다.
-- 로컬 설치본은 Defender 캐시가 유지되어 재실행 속도가 훨씬 안정적이다.
+- 로컬 설치본은 Defender 캐시가 유지되어 앱을 다시 여는 속도가 훨씬 안정적이다.
 - 한솔은 계속 `C:\Bflow-BGonly`에서 작업하고, PR/머지 후 G드라이브 `dist`에 배포하면 팀원 앱이 업데이트를 감지한다.
 - 팀원은 앱 사용 중에는 토스트/좌하단 버전 버튼/업데이트 모달로 새 버전을 보고, 새로 앱을 켤 때는 스플래시에서 최신 버전 준비 상태를 본다.
 
@@ -59,7 +59,7 @@
 4. 새 버전이 있으면 최대 10초 동안 `BFLOW-Setup.exe`를 `%LOCALAPPDATA%\Bflow-BGonly\installer-pending`에 준비.
 5. 10초 안에 준비되면 installer helper를 띄우고 앱을 닫는다.
 6. helper는 BFLOW 프로세스가 완전히 종료된 뒤 `BFLOW-Setup.exe /S`를 실행한다.
-7. 설치가 끝나면 새 `BFLOW.exe`를 다시 연다.
+7. 설치가 끝나면 최신 `BFLOW.exe`가 열린다.
 8. 10초를 넘기거나 준비 실패 시 현재 버전으로 먼저 진입하고, 앱 안에서 계속 상태를 표시한다.
 
 ### 앱 사용 중
@@ -68,7 +68,8 @@
 2. 5분 주기로 G드라이브 manifest를 다시 확인한다.
 3. 새 버전이 있으면 installer를 백그라운드로 준비한다.
 4. 준비 완료 시 지속 토스트, 좌하단 버전 버튼 배지, 업데이트 모달에 표시한다.
-5. 사용자가 `지금 업데이트`를 누르거나 앱을 종료하면 installer helper가 적용한다.
+5. 사용자가 `지금 업데이트`를 누르면 installer helper가 즉시 적용한다.
+6. 사용자가 일반 종료만 하면 준비된 installer를 유지하고, 다음 앱 실행의 startup gate가 자동 적용한다.
 
 ### 버전 모달 UX
 
@@ -166,10 +167,10 @@ Get-Content -LiteralPath $log -Tail 40
 |---|---|
 | `electron/autoUpdate/paths.ts` | G드라이브 dist 탐색, 로컬 marker/cache 경로 |
 | `electron/autoUpdate/checker.ts` | manifest 비교, installer 다운로드, `UpdateInfo` 생성 |
-| `electron/autoUpdate/installerApply.ts` | 앱 종료 후 installer helper 실행, 진행 창, 재실행 |
+| `electron/autoUpdate/installerApply.ts` | installer helper 실행, 진행 창, 최신 버전 열기 |
 | `electron/autoUpdate/installer.ts` | G드라이브 직접 실행/레거시 self-installer fallback |
 | `electron/autoUpdate/manifest.ts` | manifest 파싱, 버전 비교, release note 정규화 |
-| `electron/main.ts` | 시작 10초 gate, IPC, 종료 시 installer 적용 |
+| `electron/main.ts` | 시작 10초 gate, IPC, 즉시 적용/다음 실행 적용 분기 |
 | `src/components/update/UpdateCenterModal.tsx` | 버전 모달, 수동 새로고침, 이전 내역 펼치기 |
 | `src/components/layout/Sidebar.tsx` | 좌하단 버전 버튼/배지 |
 | `src/App.tsx` | 업데이트 상태 구독, 지속 토스트, 즉시 업데이트 버튼 |
@@ -190,7 +191,7 @@ Get-Content -LiteralPath $log -Tail 40
 | 증상 | 확인할 것 | 판단 |
 |---|---|---|
 | 토스트는 떴지만 버전이 안 바뀜 | `swap.log`, 설치 버전, `installer-pending` | 토스트는 준비 완료 신호일 뿐이다 |
-| 앱만 꺼지고 다시 안 켜짐 | `swap.log`의 `[installer-main]`, `[installer]`, `.installer-attempted` | helper 시작 실패 또는 installer 재실행 실패 |
+| 앱만 꺼지고 최신 버전으로 열리지 않음 | `swap.log`의 `[installer-main]`, `[installer]`, `.installer-attempted` | helper 시작 실패 또는 installer 후 앱 열기 실패 |
 | 설치가 오래 걸림 | `BFLOW-Setup.exe` 프로세스, Defender, `swap.log`의 `installer started` 이후 시간 | installer 실행 중이면 기다리고, 2분 이상 정지면 로그 분석 |
 | 모달이 계속 새로고침됨 | `UpdateCenterModal.tsx`에 open 시 자동 `handleRefresh()`가 있는지 확인 | 현재 정책은 버튼 클릭 때만 확인 |
 | 이전 업데이트 내역이 안 보임 | `manifest.json.releaseNotes` 길이 확인 | `generate-manifest.js`가 내역을 자르지 않아야 함 |
@@ -208,4 +209,4 @@ Get-Content -LiteralPath $log -Tail 40
 - [ ] `manifest.json` 마지막 배포 규칙을 지켰다.
 - [ ] `DEVLOG/update-notes.json`에 새 버전 항목을 추가했고 과거 항목을 삭제하지 않았다.
 - [ ] `npm run test:auto-update`를 통과했다.
-- [ ] 실제 업데이트 테스트에서 설치 버전, 재실행, `installer-pending` 정리, `swap.log`를 확인했다.
+- [ ] 실제 업데이트 테스트에서 설치 버전, 최신 버전 열림, `installer-pending` 정리, `swap.log`를 확인했다.

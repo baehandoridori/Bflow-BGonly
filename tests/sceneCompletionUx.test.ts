@@ -19,6 +19,48 @@ test('complete overlay can undo the exact last completion action', async () => {
   assert.match(scenesView, /updateSceneCompletionMeta\(/);
 });
 
+test('complete overlay stays in the visible scene scroll area', async () => {
+  const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
+
+  assert.match(scenesView, /completionOverlayFrameStyle/);
+  assert.match(scenesView, /className="sticky top-0 z-20 pointer-events-none overflow-hidden rounded-\[28px\]"/);
+  assert.match(scenesView, /items-start justify-center/);
+  assert.doesNotMatch(scenesView, /className="absolute bottom-4 left-4 right-4"/);
+});
+
+test('completion overlay uses the whole current part instead of the filtered visible list', async () => {
+  const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
+
+  assert.match(scenesView, /const partCompletionState = useMemo/);
+  assert.match(scenesView, /getAllViewCompletionState\(allMergedScenes\)/);
+  assert.match(scenesView, /getSingleViewCompletionState\(currentPart\?\.scenes \?\? \[\]\)/);
+  assert.doesNotMatch(scenesView, /getAllViewCompletionState\(mergedScenes\)/);
+  assert.doesNotMatch(scenesView, /getSingleViewCompletionState\(scenes\)/);
+});
+
+test('completion celebration targets the exact sheet scene instead of every matching scene id', async () => {
+  const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
+  const confetti = await readRepoFile('src', 'components', 'ui', 'Confetti.tsx');
+
+  assert.match(scenesView, /type CompletionCelebrationTarget/);
+  assert.match(scenesView, /sceneUuid\?: string \| null/);
+  assert.match(scenesView, /setCelebratingTarget\(buildCompletionTarget\(sheetName, scene, sceneIndex\)\)/);
+  assert.match(scenesView, /function matchesMergedSceneCelebration/);
+  assert.match(scenesView, /target\.sheetName === bgSheetName/);
+  assert.match(scenesView, /target\.sheetName === actSheetName/);
+  assert.match(confetti, /completeRef/);
+  assert.match(confetti, /\}, \[active\]\);/);
+});
+
+test('completion celebration clears independently of card confetti remounts', async () => {
+  const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
+
+  assert.match(scenesView, /window\.setTimeout\(\(\) => setCelebratingTarget\(null\), 1600\)/);
+  assert.match(scenesView, /\[selectedEpisode, selectedPart, selectedDepartment, sceneViewMode, statusFilter, searchQuery, selectedAssignee\]/);
+  assert.match(scenesView, /buildSceneCardKey/);
+  assert.doesNotMatch(scenesView, /\$\{scene\.sceneId\}-\$\{idx\}/);
+});
+
 test('completion tint is a default-on setting persisted in scene UI preferences', async () => {
   const appStore = await readRepoFile('src', 'stores', 'useAppStore.ts');
   const settingsService = await readRepoFile('src', 'services', 'settingsService.ts');
@@ -89,6 +131,47 @@ test('sheet resize fits the table but restores horizontal access below minimum w
   }
 });
 
+test('sheet resize preserves direct drag widths after a user customizes columns', async () => {
+  const singleSheet = await readRepoFile('src', 'components', 'scenes', 'SceneSheetView.tsx');
+  const unifiedSheet = await readRepoFile('src', 'components', 'scenes', 'UnifiedSceneSheetView.tsx');
+  const resize = await readRepoFile('src', 'components', 'scenes', 'SheetColumnResize.tsx');
+
+  assert.match(resize, /enabled\s*=\s*true/);
+  assert.match(resize, /hasCustomWidths/);
+  assert.match(resize, /setHasCustomWidths\(true\)/);
+  assert.match(resize, /visualStartWidths\?: Partial<Record<K, number>>/);
+  assert.match(resize, /buildContainedResizeWidths/);
+  assert.match(resize, /getResizeCompensationKeys/);
+  assert.match(resize, /latestWidths/);
+  assert.match(resize, /fitSheetColumnWidths\(columns, baseWidths, viewportWidth, fillColumnKeys, enabled\)/);
+
+  for (const source of [singleSheet, unifiedSheet]) {
+    assert.match(source, /hasCustomWidths/);
+    assert.match(source, /handleResizeStart/);
+    assert.match(source, /fittedSheet\.widths/);
+    assert.doesNotMatch(source, /!hasCustomWidths/);
+  }
+});
+
+test('sheet stage resize handles adjust only adjacent stage columns', async () => {
+  const singleSheet = await readRepoFile('src', 'components', 'scenes', 'SceneSheetView.tsx');
+  const unifiedSheet = await readRepoFile('src', 'components', 'scenes', 'UnifiedSceneSheetView.tsx');
+
+  assert.match(singleSheet, /startBoundaryResize/);
+  assert.match(singleSheet, /const nextStage = STAGES\[index \+ 1\];/);
+  assert.match(singleSheet, /rightBoundaryColumnKey=\{nextStage\}/);
+  assert.match(singleSheet, /rightBoundaryWidth=\{nextStage \? displayWidthOf\(nextStage\) : undefined\}/);
+  assert.match(singleSheet, /onBoundaryResizeStart=\{nextStage \? handleBoundaryResizeStart : undefined\}/);
+
+  assert.match(unifiedSheet, /function getBgStageColumnKey\(stage: Stage\): UnifiedSheetColumnKey/);
+  assert.match(unifiedSheet, /function getActStageColumnKey\(stage: Stage\): UnifiedSheetColumnKey/);
+  assert.match(unifiedSheet, /const nextKey = nextStage \? getBgStageColumnKey\(nextStage\) : undefined;/);
+  assert.match(unifiedSheet, /const nextKey = nextStage \? getActStageColumnKey\(nextStage\) : undefined;/);
+  assert.match(unifiedSheet, /rightBoundaryColumnKey=\{nextKey\}/);
+  assert.match(unifiedSheet, /rightBoundaryWidth=\{nextKey \? displayWidthOf\(nextKey\) : undefined\}/);
+  assert.match(unifiedSheet, /onBoundaryResizeStart=\{nextKey \? handleBoundaryResizeStart : undefined\}/);
+});
+
 test('scene top progress bar uses the polished progress track styles', async () => {
   const scenesView = await readRepoFile('src', 'views', 'ScenesView.tsx');
   const css = await readRepoFile('src', 'index.css');
@@ -116,17 +199,17 @@ test('stage and phase controls commit on pointer down in card and sheet views', 
   assert.match(stageToggle, /onToggle\(stage\)/);
 
   assert.match(unifiedCard, /StageSegmentToggle/);
-  assert.match(unifiedCard, /onToggle\(sheetName, sceneId, stage\)/);
+  assert.match(unifiedCard, /onToggle\(sheetName, sceneId, stage, scene\.id \?\? null, sceneIndex\)/);
 
   assert.match(singleCard, /StageSegmentToggle/);
-  assert.match(singleCard, /onToggle\(scene\.sceneId, stage\)/);
+  assert.match(singleCard, /onToggle\(scene\.sceneId, stage, scene\.id \?\? null, sceneIndex\)/);
 
   assert.match(singleSheet, /StageSegmentToggle/);
-  assert.match(singleSheet, /onToggle\(scene\.sceneId, stage\)/);
+  assert.match(singleSheet, /onToggle\(scene\.sceneId, stage, scene\.id \?\? null, idx\)/);
 
   assert.match(unifiedSheet, /StageSegmentToggle/);
-  assert.match(unifiedSheet, /onToggle\(bgSheetName, bgScene\.sceneId, stage\)/);
-  assert.match(unifiedSheet, /onToggle\(actSheetName, actScene\.sceneId, stage\)/);
+  assert.match(unifiedSheet, /onToggle\(bgSheetName, bgScene\.sceneId, stage, bgScene\.id \?\? null, bgSceneIndex\)/);
+  assert.match(unifiedSheet, /onToggle\(actSheetName, actScene\.sceneId, stage, actScene\.id \?\? null, actSceneIndex\)/);
 });
 
 test('dev preview mock scenes include stable UUIDs for real toggle flow', async () => {

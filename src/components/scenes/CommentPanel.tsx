@@ -41,6 +41,7 @@ import {
   parseRevisionSlashCommand,
   type RevisionSlashContext,
 } from '@/utils/revisionSlashCommand';
+import { buildCommentReplyTarget } from '@/utils/commentThreading';
 import { AttachmentImageLightbox } from './AttachmentImageLightbox';
 import { toast as sonnerToast } from 'sonner';
 import '@/styles/comment-panel.css';
@@ -198,6 +199,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   const { currentUser, users } = useAuthStore();
   const { setView, setHighlightUserName } = useAppStore();
   const { createRevision } = useRevisionStore();
+  const userNames = useMemo(() => users.map((u) => u.name), [users]);
 
   const { sheetName, sceneId } = useMemo(() => parseSceneKey(sceneKey), [sceneKey]);
   const effectiveSceneThreadKey = sceneThreadKey ?? sceneKey;
@@ -242,6 +244,10 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       return next;
     });
   }, []);
+  const replyDraftTarget = useMemo(
+    () => buildCommentReplyTarget(comments, replyTarget),
+    [comments, replyTarget],
+  );
   // v1.24.0: 외부 점프 시 강조할 댓글 id. focusCommentId prop 변경 또는 jump 이벤트로 set.
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(focusCommentId ?? null);
   const commentRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -377,7 +383,6 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     quickRevision?.actingAssignee,
     currentUser?.id,
     users,
-    quickRevision,
   ]);
   const quickRevisionDefaultRecipientKey = quickRevisionDefaultRecipientIds.join('|');
 
@@ -613,10 +618,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     if (!focusCommentId) return;
     const target = comments.find((c) => c.id === focusCommentId);
     if (target?.parentCommentId) {
+      const replyFocusThread = buildCommentReplyTarget(comments, target);
+      const threadRootId = replyFocusThread.parentCommentId;
+      if (!threadRootId) return;
       setCollapsedThreads((prev) => {
-        if (!prev.has(target.parentCommentId!)) return prev;
+        if (!prev.has(threadRootId)) return prev;
         const next = new Set(prev);
-        next.delete(target.parentCommentId!);
+        next.delete(threadRootId);
         return next;
       });
     }
@@ -627,6 +635,12 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
   //   이전 코드는 사용자가 답글 버튼 누른 직후 다른 답글 버튼 누르면 첫 prefix 가 stale 하게 남았음.
   useEffect(() => {
     if (!replyTarget) return;
+    const replyInputThreadTarget = buildCommentReplyTarget(comments, replyTarget);
+    if (replyInputThreadTarget.isReplyToReply) {
+      setInput((prev) => (/^@\S+\s*$/.test(prev.trimStart()) ? '' : prev));
+      inputRef.current?.focus();
+      return;
+    }
     if (currentUser && replyTarget.userName === currentUser.name) return;
     const newPrefix = `@${replyTarget.userName} `;
     setInput((prev) => {
@@ -642,7 +656,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       return prev;
     });
     inputRef.current?.focus();
-  }, [replyTarget]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [replyTarget, comments]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 멘션 드롭다운 활성 항목 스크롤
   useEffect(() => {
@@ -918,20 +932,28 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
 
     setSubmitting(true);
 
-    const mentions = extractMentions(input, users.map(u => u.name));
+    const replyThreadTarget = buildCommentReplyTarget(comments, replyTarget);
+    const replyParent = replyThreadTarget.rootComment;
+
+    const mentions = extractMentions(input, userNames);
     // v1.24.0: 답글이면 부모 작성자도 mentions 에 포함 (자동 멘션 — 슬랙 알림/멘션 알림 트리거).
     if (
-      replyTarget &&
-      replyTarget.userName !== currentUser.name &&
-      !mentions.includes(replyTarget.userName)
+      replyThreadTarget.replyToComment &&
+      replyThreadTarget.replyToComment.userName !== currentUser.name &&
+      !mentions.includes(replyThreadTarget.replyToComment.userName)
     ) {
-      mentions.push(replyTarget.userName);
+      mentions.push(replyThreadTarget.replyToComment.userName);
     }
     // v1.24.0 코덱스 P1 fix (2026-05-10 round 2): 답글은 부모 댓글의 *진짜 storage sheet* 에 저장.
     //   _sourceKey 는 UI dedup 의 첫 발견 sceneKey 라 unified 뷰에서 *secondary 댓글이 primary key 로 stamp* 되는
     //   케이스가 있어 신뢰 불가. raw row 기반 storageKey (partId → sheetName + scene.no) 를 우선 사용.
     //   둘 다 없으면 (Sheets fallback 으로 partId 비어있음) primary sceneKey 로 fallback.
-    const targetSceneKey = replyTarget?.storageKey ?? replyTarget?._sourceKey ?? sceneKey;
+    const targetSceneKey =
+      replyParent?.storageKey
+      ?? replyParent?._sourceKey
+      ?? replyTarget?.storageKey
+      ?? replyTarget?._sourceKey
+      ?? sceneKey;
     const comment: SceneCommentWithSource = {
       id: crypto.randomUUID(),
       userId: currentUser.id,
@@ -940,8 +962,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       mentions,
       images: uploadedImageUrls,
       createdAt: new Date().toISOString(),
-      // v1.24.0: 답글이면 부모 댓글 id, 아니면 null.
-      parentCommentId: replyTarget?.id ?? null,
+      // Slack-style: 답글의 답글도 최상위 댓글 스레드 아래에 저장한다.
+      parentCommentId: replyThreadTarget.parentCommentId,
       _sourceKey: targetSceneKey,
     };
 
@@ -949,6 +971,14 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     const next = [...comments, comment];
     setComments(next);
     onCountChange?.(next.length);
+    if (replyThreadTarget.parentCommentId) {
+      setCollapsedThreads((prev) => {
+        if (!prev.has(replyThreadTarget.parentCommentId!)) return prev;
+        const opened = new Set(prev);
+        opened.delete(replyThreadTarget.parentCommentId!);
+        return opened;
+      });
+    }
 
     // Codex P2(2026-04-29): blob URL revoke 와 attachedImages 초기화는 전송 성공 *후* 에 수행.
     // 실패 시 사용자가 같은 페이로드(텍스트 + 첨부)로 재시도할 수 있어야 새 이미지 첨부 흐름의 신뢰성이 보장된다.
@@ -1054,7 +1084,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     if (!editText.trim()) return;
     const target = comments.find((c) => c.id === commentId);
     const targetKey = target?._sourceKey ?? sceneKey;
-    const mentions = extractMentions(editText, users.map(u => u.name));
+    const mentions = extractMentions(editText, userNames);
     const existingImages = target?.images;
     const prevComments = [...comments];
 
@@ -1195,10 +1225,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
     if (!firstUnreadCommentId) return;
     const target = comments.find((comment) => comment.id === firstUnreadCommentId);
     if (target?.parentCommentId) {
+      const unreadThread = buildCommentReplyTarget(comments, target);
+      const threadRootId = unreadThread.parentCommentId;
+      if (!threadRootId) return;
       setCollapsedThreads((prev) => {
-        if (!prev.has(target.parentCommentId!)) return prev;
+        if (!prev.has(threadRootId)) return prev;
         const next = new Set(prev);
-        next.delete(target.parentCommentId!);
+        next.delete(threadRootId);
         return next;
       });
     }
@@ -1247,7 +1280,7 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
       const key = `${baseIdx}-${i}`;
       if (part.startsWith('@')) {
         const name = part.slice(1);
-        const isUser = users.some(u => u.name === name);
+        const isUser = userNames.includes(name);
         if (isUser) {
           return (
             <span
@@ -1341,19 +1374,19 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                 const isRevisionEvent = node.event.tone?.startsWith('revision_') ?? false;
                 const eventToneClass =
                   node.event.tone === 'revision_resolve'
-                    ? 'border-emerald-400/20 bg-emerald-400/[0.07] text-emerald-100/85'
+                    ? 'comment-inline-event comment-inline-event-resolve'
                     : node.event.tone === 'revision_in_progress'
-                      ? 'border-sky-300/20 bg-sky-300/[0.07] text-sky-100/85'
+                      ? 'comment-inline-event comment-inline-event-in-progress'
                       : node.event.tone === 'revision_add'
-                        ? 'border-accent/25 bg-accent/[0.08] text-accent-sub'
+                        ? 'comment-inline-event comment-inline-event-add'
                         : 'text-text-secondary/55';
                 const eventDotClass =
                   node.event.tone === 'revision_resolve'
-                    ? 'bg-emerald-300 shadow-[0_0_8px_rgba(52,211,153,0.45)]'
+                    ? 'comment-inline-event-dot comment-inline-event-dot-resolve'
                     : node.event.tone === 'revision_in_progress'
-                      ? 'bg-sky-300 shadow-[0_0_8px_rgba(125,211,252,0.45)]'
+                      ? 'comment-inline-event-dot comment-inline-event-dot-in-progress'
                       : node.event.tone === 'revision_add'
-                        ? 'bg-accent-sub shadow-[0_0_8px_rgba(108,92,231,0.5)]'
+                        ? 'comment-inline-event-dot comment-inline-event-dot-add'
                         : 'bg-text-secondary/40';
                 return (
                   <motion.div
@@ -1373,13 +1406,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                   >
                     {isRevisionEvent ? (
                       <div className="min-w-0 flex-1">
-                        <div className="mb-1 text-[10px] text-text-secondary/55 tabular-nums">
+                        <div className="comment-inline-event-time mb-1 text-[10px] tabular-nums">
                           {formatCommentTime(node.event.at)}
                         </div>
                         <div className="flex items-center gap-2 min-w-0">
                           <span className={cn('inline-block w-1.5 h-1.5 rounded-full shrink-0', eventDotClass)} aria-hidden />
                           {node.event.label && (
-                            <span className="shrink-0 rounded-md border border-current/15 bg-white/[0.04] px-1.5 py-0.5 text-[9.5px] font-bold">
+                            <span className="comment-inline-event-label shrink-0 rounded-md border px-1.5 py-0.5 text-[9.5px] font-bold">
                               {node.event.label}
                             </span>
                           )}
@@ -1558,16 +1591,13 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                           isOwn ? '-left-20' : '-right-8',
                         )}
                       >
-                        {/* v1.24.0: 답글 버튼 — 부모 댓글에만 노출 (1단계 한정). 답글에는 답글 비허용. */}
-                        {!isOrphanReply && (
-                          <button
-                            onClick={() => setReplyTarget(comment)}
-                            className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-accent transition-colors cursor-pointer"
-                            title="답글"
-                          >
-                            <Reply size={12} />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => setReplyTarget(comment)}
+                          className="p-1 rounded hover:bg-bg-border/50 text-text-secondary hover:text-accent transition-colors cursor-pointer"
+                          title="답글"
+                        >
+                          <Reply size={12} />
+                        </button>
                         {isOwn && (
                           <>
                             <button
@@ -1715,8 +1745,20 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                                 )}
                               </div>
                             )}
-                            {replyIsOwn && !replyIsEditing && (
-                              <div className="absolute top-0 -right-7 flex gap-0.5 opacity-0 group-hover/replybubble:opacity-100 transition-opacity">
+                            {!replyIsEditing && (
+                              <div className={cn(
+                                'absolute top-0 flex gap-0.5 opacity-0 group-hover/replybubble:opacity-100 transition-opacity',
+                                replyIsOwn ? '-right-16' : '-right-7',
+                              )}>
+                                <button
+                                  onClick={() => setReplyTarget(reply)}
+                                  className="p-0.5 rounded hover:bg-bg-border/50 text-text-secondary hover:text-accent cursor-pointer"
+                                  title="답글"
+                                >
+                                  <Reply size={11} />
+                                </button>
+                                {replyIsOwn && (
+                                  <>
                                 <button
                                   onClick={() => { setEditingId(reply.id); setEditText(reply.text); }}
                                   className="p-0.5 rounded hover:bg-bg-border/50 text-text-secondary hover:text-text-primary cursor-pointer"
@@ -1731,6 +1773,8 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
                                 >
                                   <Trash2 size={11} />
                                 </button>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1876,8 +1920,17 @@ export function CommentPanel({ sceneKey, secondarySceneKey, sceneThreadKey, onCo
             <div className="flex items-start gap-2 mb-2 px-2 py-1.5 -mx-2.5 -mt-2 border-b border-accent/30 bg-accent/[0.06] rounded-t-xl">
               <CornerDownRight size={12} className="text-accent mt-0.5 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="text-[10.5px] text-accent font-medium">{replyTarget.userName}에게 답글</div>
-                <div className="text-[11px] text-text-secondary/70 truncate mt-0.5">{replyTarget.text || '(이미지 첨부)'}</div>
+                <div className="text-[10.5px] text-accent font-medium">
+                  {(replyDraftTarget.rootComment ?? replyTarget).userName}의 스레드에 댓글 추가
+                </div>
+                {replyDraftTarget.isReplyToReply && (
+                  <div className="text-[10.5px] text-text-secondary/60 truncate mt-0.5">
+                    선택한 메시지 · {replyTarget.userName}: {replyTarget.text || '(이미지 첨부)'}
+                  </div>
+                )}
+                {!replyDraftTarget.isReplyToReply && (
+                  <div className="text-[11px] text-text-secondary/70 truncate mt-0.5">{replyTarget.text || '(이미지 첨부)'}</div>
+                )}
               </div>
               <button
                 onClick={() => setReplyTarget(null)}

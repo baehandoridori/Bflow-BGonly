@@ -31,6 +31,7 @@ import { DEPARTMENTS, DEPARTMENT_CONFIGS } from '@/types';
 import { cn } from '@/utils/cn';
 import { getPreset } from '@/themes';
 import { StarNestBackground } from '@/components/effects/StarNestBackground';
+import { BflowStarNestBackground } from '@/components/effects/BflowStarNestBackground';
 import {
   normalizeDashboardStarNestBlurPx,
   normalizeDashboardStarNestOpacity,
@@ -217,6 +218,23 @@ function DashboardBackgroundArt() {
         enabled={plexusSettings.dashboardEnabled}
         className="z-0"
         settings={plexusSettings.dashboardStarNest ?? plexusSettings.starNest}
+        style={{
+          opacity,
+          filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+          transform: blurPx > 0 ? 'scale(1.03)' : undefined,
+          willChange: 'opacity, filter',
+        }}
+      />
+    );
+  }
+  if (backgroundArt === 'bflow-starnest') {
+    const opacity = normalizeDashboardStarNestOpacity(plexusSettings.dashboardStarNestOpacity);
+    const blurPx = normalizeDashboardStarNestBlurPx(plexusSettings.dashboardStarNestBlurPx);
+    return (
+      <BflowStarNestBackground
+        enabled={plexusSettings.dashboardEnabled}
+        className="z-0"
+        settings={plexusSettings.dashboardBflowStarNest ?? plexusSettings.bflowStarNest}
         style={{
           opacity,
           filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
@@ -730,24 +748,24 @@ export function Dashboard() {
 
   const handleDeptSelect = useCallback((filter: typeof dashboardFilter) => {
     setDashboardFilter(filter);
-    if (filter !== 'all') {
-      setSelectedDepartment(filter);
-    }
+    setSelectedDepartment(filter);
   }, [setDashboardFilter, setSelectedDepartment]);
 
   // 에피소드 드롭다운에서 EP 선택
   const handleEpSelect = useCallback((epNum: number) => {
     setEpisodeDashboardEp(epNum);
     setDashboardFilter('all');
+    setSelectedDepartment('all');
     setShowEpDropdown(false);
     setShowEpSwitcher(false);
-  }, [setEpisodeDashboardEp, setDashboardFilter]);
+  }, [setEpisodeDashboardEp, setDashboardFilter, setSelectedDepartment]);
 
   // 에피소드 대시보드 → 전체 대시보드 복귀
   const handleBackToMain = useCallback(() => {
     setEpisodeDashboardEp(null);
     setDashboardFilter('all');
-  }, [setEpisodeDashboardEp, setDashboardFilter]);
+    setSelectedDepartment('all');
+  }, [setEpisodeDashboardEp, setDashboardFilter, setSelectedDepartment]);
 
   // 에피소드 대시보드 제목
   const epDisplayName = isEpMode

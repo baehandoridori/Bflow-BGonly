@@ -206,7 +206,7 @@ function Wait-ForBflowExit {
 function Show-ProgressWindowUntilExit($proc) {
   try {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
-    $detailText = if ($relaunch) { '설치가 끝나면 앱이 자동으로 다시 열립니다.' } else { '설치가 끝나면 다음 실행부터 새 버전으로 열립니다.' }
+    $detailText = if ($relaunch) { '설치가 끝나면 최신 버전 앱이 자동으로 열립니다.' } else { '설치가 끝나면 다음 실행부터 새 버전으로 열립니다.' }
     [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         Title="B flow 업데이트"

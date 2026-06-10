@@ -4,10 +4,13 @@ import { readMetadata, writeMetadata } from '@/services/supabaseService';
 import type { Episode, Part, ScenesDeptFilter } from '@/types';
 import {
   applyPartMemoToSheets,
+  applyPartReelWorkerToSheets,
   buildPartContextMenuTarget,
   getCombinedPartMemo,
+  getCombinedPartReelWorker,
   listVisiblePartMemoSheetNames,
   rollbackFailedPartMemoSheets,
+  rollbackFailedPartReelWorkerSheets,
   type PartContextMenuTarget,
 } from '@/utils/partMemoHelpers';
 import { partIdMatches } from '@/utils/partId';
@@ -28,6 +31,7 @@ export function usePartMemos({
   parts,
 }: UsePartMemosArgs) {
   const [partMemos, setPartMemos] = useState<Record<string, string>>({});
+  const [partReelWorkers, setPartReelWorkers] = useState<Record<string, string>>({});
 
   const visibleSheetNames = useMemo(
     () => listVisiblePartMemoSheetNames(episodes, selectedDepartment),
@@ -40,8 +44,9 @@ export function usePartMemos({
     let cancelled = false;
     const sheetNamesToLoad = visibleSheetNamesKey ? visibleSheetNamesKey.split('|') : [];
 
-    const loadPartMemos = async () => {
+    const loadPartMetadata = async () => {
       const memos: Record<string, string> = {};
+      const reelWorkers: Record<string, string> = {};
       for (const sheetName of sheetNamesToLoad) {
         try {
           const data = await readMetadata('part-memo', sheetName);
@@ -51,14 +56,23 @@ export function usePartMemos({
         } catch {
           // Ignore memo read failures and keep other part memos available.
         }
+        try {
+          const data = await readMetadata('part-reel-worker', sheetName);
+          if (data?.value) {
+            reelWorkers[sheetName] = data.value;
+          }
+        } catch {
+          // Ignore worker read failures and keep other part metadata available.
+        }
       }
 
       if (!cancelled) {
         setPartMemos(memos);
+        setPartReelWorkers(reelWorkers);
       }
     };
 
-    loadPartMemos();
+    loadPartMetadata();
     return () => {
       cancelled = true;
     };
@@ -67,6 +81,9 @@ export function usePartMemos({
   const getPartMemoText = useCallback((sheetNames: string[]) => {
     return getCombinedPartMemo(partMemos, sheetNames);
   }, [partMemos]);
+  const getPartReelWorkerText = useCallback((sheetNames: string[]) => {
+    return getCombinedPartReelWorker(partReelWorkers, sheetNames);
+  }, [partReelWorkers]);
 
   const buildMenuTarget = useCallback((partId: string): PartContextMenuTarget | null => {
     const visibleParts = (selectedDepartment === 'all' ? allParts : parts)
@@ -97,10 +114,31 @@ export function usePartMemos({
     }
   }, [partMemos]);
 
+  const savePartReelWorker = useCallback(async (target: PartContextMenuTarget, worker: string) => {
+    const previousPartReelWorkers = partReelWorkers;
+    const normalizedWorker = worker.trim();
+    setPartReelWorkers((prev) => applyPartReelWorkerToSheets(prev, target.sheetNames, worker));
+
+    const results = await Promise.allSettled(
+      target.sheetNames.map((sheetName) => writeMetadata('part-reel-worker', sheetName, normalizedWorker)),
+    );
+    const failedSheetNames = target.sheetNames.filter((_, index) => results[index].status === 'rejected');
+
+    if (failedSheetNames.length > 0) {
+      console.warn('[파트 릴 담당] 일부 시트 저장 실패', failedSheetNames);
+      setPartReelWorkers((current) =>
+        rollbackFailedPartReelWorkerSheets(current, previousPartReelWorkers, failedSheetNames, normalizedWorker),
+      );
+    }
+  }, [partReelWorkers]);
+
   return {
     partMemos,
+    partReelWorkers,
     getPartMemoText,
+    getPartReelWorkerText,
     buildPartContextMenuTarget: buildMenuTarget,
     savePartMemo,
+    savePartReelWorker,
   };
 }

@@ -4,10 +4,12 @@ import type { ThemeColors } from '@/themes';
 import type { VacationConfig, VacationStatus, VacationLogEntry } from '@/types/vacation';
 import {
   DEFAULT_BACKGROUND_ART,
+  DEFAULT_BFLOW_STAR_NEST_SETTINGS,
   DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX,
   DEFAULT_DASHBOARD_STAR_NEST_OPACITY,
   DEFAULT_STAR_NEST_SETTINGS,
   type BackgroundArt,
+  type BflowStarNestSettings,
   type StarNestSettings,
 } from '@/utils/starNestSettings';
 
@@ -56,6 +58,8 @@ interface AppState {
     focusRevisionId?: string;
     /** v1.24.0: 모달 진입 시 자동 스크롤 + 펄스 강조할 댓글 id (알림/활동 점프용). */
     focusCommentId?: string;
+    /** 리비전 카드 내부 댓글 스레드에서 자동 스크롤 + 펄스 강조할 댓글 id. */
+    focusRevisionCommentId?: string;
     /** v1.24.0: 모달 진입 시 부서 토글을 강제할 모드 (최근 작업 위젯 → 'all' 자동). */
     forceDeptFilter?: 'all' | 'bg' | 'acting';
   } | null;
@@ -149,6 +153,7 @@ interface AppState {
     backgroundArt: BackgroundArt;
     loginBackgroundArt: BackgroundArt;
     dashboardBackgroundArt: BackgroundArt;
+    shareBackgroundEffectPresets: boolean;
     loginEnabled: boolean;
     loginGradientEnabled: boolean;
     loginParticleCount: number;
@@ -166,6 +171,9 @@ interface AppState {
     dashboardStarNest: StarNestSettings;
     dashboardStarNestOpacity: number;
     dashboardStarNestBlurPx: number;
+    bflowStarNest: BflowStarNestSettings;
+    loginBflowStarNest: BflowStarNestSettings;
+    dashboardBflowStarNest: BflowStarNestSettings;
   };
   setPlexusSettings: (settings: Partial<AppState['plexusSettings']>) => void;
 
@@ -294,6 +302,7 @@ export const useAppStore = create<AppState>((set) => ({
     backgroundArt: DEFAULT_BACKGROUND_ART,
     loginBackgroundArt: DEFAULT_BACKGROUND_ART,
     dashboardBackgroundArt: DEFAULT_BACKGROUND_ART,
+    shareBackgroundEffectPresets: true,
     loginEnabled: true,
     loginGradientEnabled: true,
     loginParticleCount: 666,
@@ -311,6 +320,9 @@ export const useAppStore = create<AppState>((set) => ({
     dashboardStarNest: DEFAULT_STAR_NEST_SETTINGS,
     dashboardStarNestOpacity: DEFAULT_DASHBOARD_STAR_NEST_OPACITY,
     dashboardStarNestBlurPx: DEFAULT_DASHBOARD_STAR_NEST_BLUR_PX,
+    bflowStarNest: DEFAULT_BFLOW_STAR_NEST_SETTINGS,
+    loginBflowStarNest: DEFAULT_BFLOW_STAR_NEST_SETTINGS,
+    dashboardBflowStarNest: DEFAULT_BFLOW_STAR_NEST_SETTINGS,
   },
   setPlexusSettings: (partial) => set((s) => ({
     plexusSettings: { ...s.plexusSettings, ...partial },

@@ -22,12 +22,14 @@ test('ImageModal notifies parent detail surfaces when the latest image URL chang
   const unifiedSceneDetailCallback = getLatestImageCallback(unifiedSceneDetailModal);
   assert.match(sceneDetailModal, /onLatestImageUrlChange=\{applyLatestImageUrl\}/);
   assert.match(sceneDetailCallback, /setLatestImageUrls\(\(prev\) => \(\{ \.\.\.prev, \[imageType\]: url \}\)\)/);
-  assert.match(sceneDetailCallback, /updateSceneByUuid\(sceneUuid, patch\)/);
-  assert.match(sceneDetailCallback, /updateSceneFieldInSupabase\(sceneUuid, field, url\)/);
+  assert.match(sceneDetailModal, /useOptimisticSceneImageUrl/);
+  assert.match(sceneDetailCallback, /persistLatestImageUrl\(\{/);
+  assert.doesNotMatch(sceneDetailCallback, /updateSceneFieldInSupabase\(sceneUuid, field, url\)/);
   assert.match(unifiedSceneDetailModal, /onLatestImageUrlChange=\{applyLatestImageUrl\}/);
   assert.match(unifiedSceneDetailCallback, /setLatestImageUrls\(\(prev\) => \(\{ \.\.\.prev, \[imageType\]: url \}\)\)/);
-  assert.match(unifiedSceneDetailCallback, /updateSceneByUuid\(sceneUuid, patch\)/);
-  assert.match(unifiedSceneDetailCallback, /updateSceneFieldInSupabase\(sceneUuid, field, url\)/);
+  assert.match(unifiedSceneDetailModal, /useOptimisticSceneImageUrl/);
+  assert.match(unifiedSceneDetailCallback, /persistLatestImageUrl\(\{/);
+  assert.doesNotMatch(unifiedSceneDetailCallback, /updateSceneFieldInSupabase\(sceneUuid, field, url\)/);
   assert.doesNotMatch(sceneDetailCallback, /onFieldUpdate\(sceneIndex, field, url\)/);
   assert.doesNotMatch(unifiedSceneDetailCallback, /onFieldUpdate\(bgSheetName, bgSceneIndex, field, url\)/);
   assert.match(sceneDetailModal, /setLatestImageUrls\(\(prev\) => \(\{ \.\.\.prev, \[deleteConfirm\]: '' \}\)\)/);

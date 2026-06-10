@@ -38,6 +38,8 @@ import { buildCardScenes } from './compositing-dashboard/cardSceneHelpers';
 
 export function CompositingDashboardView() {
   const episodes = useDataStore((s) => s.episodes);
+  const episodeTitles = useDataStore((s) => s.episodeTitles);
+  const getEpisodeDisplayName = useDataStore((s) => s.getEpisodeDisplayName);
   const compositingStates = useDataStore((s) => s.compositingStates);
   const loadCompositingForEpisode = useDataStore((s) => s.loadCompositingForEpisode);
   const setCompositingStateInStore = useDataStore((s) => s.setCompositingState);
@@ -189,6 +191,12 @@ export function CompositingDashboardView() {
     }
     return m;
   }, [compositingStates, episodeNumber]);
+
+  const currentEpisodeDisplayName = useMemo(() => {
+    if (episodeNumber === null) return '';
+    const episode = episodes.find((e) => e.episodeNumber === episodeNumber);
+    return episode ? getEpisodeDisplayName(episode) : `EP${String(episodeNumber).padStart(2, '0')}`;
+  }, [episodeNumber, episodes, getEpisodeDisplayName, episodeTitles]);
 
   // ── Esc 로 pinnedScene / detailScene / 일괄 선택 해제 ──
   useEffect(() => {
@@ -360,7 +368,7 @@ export function CompositingDashboardView() {
 
             {partGroups.length === 0 && episodeNumber !== null && (
               <div className="text-center py-12 text-text-secondary/70 text-sm">
-                EP{String(episodeNumber).padStart(2, '0')} 에 등록된 씬이 없습니다.
+                {currentEpisodeDisplayName}에 등록된 씬이 없습니다.
               </div>
             )}
           </div>
