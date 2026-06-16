@@ -1037,6 +1037,14 @@ function getFirstAvailableSceneSuffix(baseSceneId: string, existingSceneIds: str
   return ADDITIONAL_SCENE_SUFFIXES.find((suffix) => !existing.has(`${baseSceneId}${suffix}`.toLowerCase())) ?? 'A';
 }
 
+function getAdditionalSceneSuffixOptions(currentSuffix: string): string[] {
+  const defaultOptions = ADDITIONAL_SCENE_SUFFIXES.slice(0, 24);
+  const normalized = sanitizeSceneSuffix(currentSuffix);
+  return normalized && !defaultOptions.includes(normalized)
+    ? [...defaultOptions, normalized]
+    : defaultOptions;
+}
+
 type CompletionUndoAction =
   | {
       kind: 'stage';
@@ -1520,7 +1528,7 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
                   }}
                   className="appearance-none bg-bg-primary border border-bg-border rounded-lg px-3 py-2 text-sm text-text-primary font-mono cursor-pointer hover:border-accent/50 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
                 >
-                  {ADDITIONAL_SCENE_SUFFIXES.slice(0, 8).map((suffix) => (
+                  {getAdditionalSceneSuffixOptions(presetSuffix).map((suffix) => (
                     <option key={suffix} value={suffix}>{suffix}</option>
                   ))}
                   <option value="custom">직접</option>
@@ -1678,7 +1686,7 @@ function AddSceneForm({ existingSceneIds, onSubmit, onBulkSubmit, onCancel }: Ad
                   }}
                   className="appearance-none bg-bg-primary border border-bg-border rounded-lg px-3 py-1.5 text-sm text-text-primary font-mono cursor-pointer hover:border-accent/50 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
                 >
-                  {ADDITIONAL_SCENE_SUFFIXES.slice(0, 8).map((suffix) => (
+                  {getAdditionalSceneSuffixOptions(presetSuffix).map((suffix) => (
                     <option key={suffix} value={suffix}>{suffix}</option>
                   ))}
                   <option value="custom">직접</option>

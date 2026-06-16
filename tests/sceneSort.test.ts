@@ -37,3 +37,12 @@ test('scene views use suffix-aware sorting for number order', () => {
   assert.doesNotMatch(scenesView, /sceneId\?\.match\(\/\\d\+\$\/\)/);
   assert.doesNotMatch(mergedHelpers, /sceneId\?\.match\(\/\\d\+\$\/\)/);
 });
+
+test('additional scene suffix dropdown includes the current suggested suffix', () => {
+  const scenesView = readFileSync('src/views/ScenesView.tsx', 'utf8');
+
+  assert.match(scenesView, /function getAdditionalSceneSuffixOptions\(currentSuffix: string\): string\[]/);
+  assert.match(scenesView, /ADDITIONAL_SCENE_SUFFIXES\.slice\(0, 24\)/);
+  assert.match(scenesView, /\?\s*\[\.\.\.defaultOptions, normalized\]/);
+  assert.doesNotMatch(scenesView, /ADDITIONAL_SCENE_SUFFIXES\.slice\(0, 8\)/);
+});
